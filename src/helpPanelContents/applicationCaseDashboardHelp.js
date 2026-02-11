@@ -1,13 +1,37 @@
 import React from 'react';
 import TutorialPanel from '@cloudscape-design/components/tutorial-panel';
+import { Button, SpaceBetween } from '@cloudscape-design/components';
 import { useTutorials } from '../context/TutorialsContext';
 import { tutorialPanelI18nStrings } from '../tutorials/tutorialI18n';
 
-const ApplicationCaseDashboardHelp = () => {
+const ApplicationCaseDashboardHelp = ({ onRestartTutorial, onEndTutorial }) => {
   const { tutorials } = useTutorials();
   const workspaceTutorials = (tutorials || []).filter(
     tutorial => tutorial.category === 'application-workspace'
   );
+  const workspaceTutorial = workspaceTutorials[0] || null;
+
+  const handleRestart = () => {
+    if (typeof onRestartTutorial === 'function') {
+      onRestartTutorial();
+      return;
+    }
+    const tutorialId = workspaceTutorial?.tutorialId;
+    if (!tutorialId) return;
+    window.dispatchEvent(
+      new CustomEvent('tutorials:start', {
+        detail: { tutorialId }
+      })
+    );
+  };
+
+  const handleEnd = () => {
+    if (typeof onEndTutorial === 'function') {
+      onEndTutorial();
+      return;
+    }
+    window.dispatchEvent(new CustomEvent('tutorials:end'));
+  };
 
   return (
     <div>
@@ -16,6 +40,10 @@ const ApplicationCaseDashboardHelp = () => {
         This board is the main workspace for a single application. It brings together intake data, the assessment
         workflow, documents, messaging, reminders, and the audit trail. Layout changes are saved per browser.
       </p>
+      <SpaceBetween direction="horizontal" size="xs">
+        <Button onClick={handleRestart}>Restart tour</Button>
+        <Button onClick={handleEnd}>End</Button>
+      </SpaceBetween>
 
       <h3>Current widgets</h3>
       <ul>

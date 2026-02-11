@@ -27,12 +27,14 @@ Last Updated: 2026-01-19
 - Program Admin "Unassigned Applications" must use `/api/applications`, not `/api/cases`, or applicant names will be missing.
 - Avoid layering workarounds on top of known problems. Fix the root cause.
 - When changes require new files in a deployment package, update `scripts/deploy-admin-test.ps1` and/or `../ISET-intake/scripts/deploy-portal-test.ps1` to stage the additional files.
+- For tutorial changes, verify full step progression end-to-end (including `Next` on every step) against the target page layout; do not ship if any step can dead-end due to missing hotspots.
 
 ## Documentation maintenance
 
 - Update `docs/meta/changelog.md` for user-visible or operational changes.
 - Record structural reorganizations in `docs/meta/project-map.md`.
 - Keep credentials and environment-specific secrets out of this library.
+- When refactoring dashboards or widgets, update the matching dashboard-level and widget-level help panel content (`src/helpPanelContents/*`) and `aiContext` strings in the same change so guidance stays in sync with runtime behavior.
 
 ## Database documentation
 

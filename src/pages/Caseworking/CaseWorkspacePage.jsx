@@ -33,6 +33,7 @@ import { CaseWorkspaceProvider } from "./caseWorkspace/CaseWorkspaceContext.jsx"
 import { PaymentsDataProvider } from "../finance/widgets/PaymentsDataContext.jsx";
 
 const STORAGE_KEY = "iset-case-workspace-layout-v13";
+const TUTORIAL_CASE_LAYOUT_RESET_FLAG = "iset.tutorial.resetCaseWorkspaceLayout";
 
 const widgetRegistry = {
   "supporting-documents": {
@@ -451,6 +452,21 @@ const CaseWorkspacePage = ({
       // ignore
     }
   }, [setAvailableItems]);
+
+  useEffect(() => {
+    let shouldReset = false;
+    try {
+      shouldReset = window.sessionStorage?.getItem(TUTORIAL_CASE_LAYOUT_RESET_FLAG) === "1";
+      if (shouldReset) {
+        window.sessionStorage?.removeItem(TUTORIAL_CASE_LAYOUT_RESET_FLAG);
+      }
+    } catch {
+      shouldReset = false;
+    }
+    if (shouldReset) {
+      resetLayout();
+    }
+  }, [caseId, resetLayout]);
 
   const openPalette = useCallback(() => {
     if (typeof setAvailableItems === "function") {

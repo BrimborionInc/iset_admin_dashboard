@@ -106,7 +106,7 @@ const MyWatchlistWidget = ({ actions, toggleHelpPanel }) => {
       .catch(() => {
         if (cancelled) return;
         setRawItems([]);
-        setError('Failed to load your flagged applications. Please try again.');
+        setError('Failed to load your tagged applications. Please try again.');
       })
       .finally(() => {
         if (!cancelled) {
@@ -139,7 +139,7 @@ const MyWatchlistWidget = ({ actions, toggleHelpPanel }) => {
     const numeric = Number(caseId);
     if (!Number.isFinite(numeric) || numeric <= 0) {
       setInfoMessage(null);
-      setError('Cannot clear flag for this record. It may not have a case ID yet.');
+      setError('Cannot remove a tag for this record. It may not have a case ID yet.');
       return;
     }
 
@@ -155,10 +155,10 @@ const MyWatchlistWidget = ({ actions, toggleHelpPanel }) => {
 
       setRawItems(prev => prev.filter(watch => Number(watch?.caseId) !== numeric));
       setSelectedItems([]);
-      setInfoMessage('Flag removed. The case is no longer flagged.');
+      setInfoMessage('Tag removed. The case is no longer tagged.');
     } catch (err) {
       console.error('[watchlist] clear flag failed', err);
-      setError('Unable to remove this flag. Please try again.');
+      setError('Unable to remove this tag. Please try again.');
     } finally {
       setClearLoading(false);
     }
@@ -323,13 +323,13 @@ const MyWatchlistWidget = ({ actions, toggleHelpPanel }) => {
             loading={clearLoading}
             disabled={!selectedItems.length || clearLoading || loading}
           >
-            Clear flag
+            Remove tag
           </Button>
           <Button
             iconName="refresh"
             variant="icon"
             onClick={handleRefresh}
-            ariaLabel="Refresh flagged applications"
+            ariaLabel="Refresh tagged applications"
             disabled={loading}
           />
         </SpaceBetween>
@@ -388,7 +388,7 @@ const MyWatchlistWidget = ({ actions, toggleHelpPanel }) => {
           stripedRows
           wrapLines
           loading={loading}
-          loadingText="Loading flagged applications"
+          loadingText="Loading tagged applications"
           renderAriaLive={({ firstIndex, lastIndex }) =>
             `Displaying items ${firstIndex} to ${lastIndex} of ${filteredItems.length}`
           }
@@ -399,12 +399,12 @@ const MyWatchlistWidget = ({ actions, toggleHelpPanel }) => {
           }}
           empty={
             <Box margin={{ vertical: 'xs' }} textAlign="center" color="inherit">
-              <b>No flagged applications</b>
+              <b>No tagged applications</b>
             </Box>
           }
           filter={
             <TextFilter
-              filteringPlaceholder="Filter flagged applications"
+              filteringPlaceholder="Filter tagged applications"
               filteringText={filteringText}
               onChange={({ detail }) => {
                 setFilteringText(detail.filteringText);

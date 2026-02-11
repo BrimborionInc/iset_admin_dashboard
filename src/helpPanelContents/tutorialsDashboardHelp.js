@@ -8,10 +8,10 @@ const TutorialsDashboardHelp = () => {
         Tutorials auto-prompt the first time you visit a page that supports a tour.
       </Box>
       <Box variant="p">
-        This page is for resetting your tutorial progress so tours may prompt again.
+        This page lets you manage tutorial status per tutorial using completion toggles.
       </Box>
       <Box variant="p">
-        Resetting clears both completion and dismissal state.
+        Use Reset all to clear both completion and dismissal state across all tutorials.
       </Box>
     </SpaceBetween>
   );
@@ -20,7 +20,7 @@ const TutorialsDashboardHelp = () => {
 TutorialsDashboardHelp.aiContext = `
 Tutorials dashboard help:
 - Tutorials are prompted on first visit to supported pages.
-- This page resets per-user tutorial completion/dismissal state (DB-backed).
+- This page supports per-tutorial completion toggles and a Reset all action (DB-backed).
 `.trim();
 
 export default TutorialsDashboardHelp;

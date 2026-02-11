@@ -29,6 +29,18 @@ Purpose: Living reference of structure, core modules, and cross-cutting concerns
 - Editor (`src/pages/modifyWorkflow.js`) wires IntakeStepLibrary, WorkflowCanvas, StepProperties, WorkflowPropertiesEditor; canvas draft persists in `sessionStorage` (`mw:steps-v1`); save/load via `/api/workflows`.
 - Templates live in `src/component-lib/` (+ schemas); server syncs them on startup; `StepPropertiesWidget` forms are driven by `prop_schema`. See `docs/guides/workflow-studio.md` for details.
 
+### Tutorial Platform (hands-on tours)
+- Canonical tutorial catalog + shared helpers: `src/tutorials/tutorialPlatform.js`.
+- Category wrappers only:
+  - `src/tutorials/isetCoordinatorIntroTutorials.js`
+  - `src/tutorials/applicationWorkspaceTutorials.js`
+  - `src/tutorials/nwacAssessmentTutorials.js`
+- Runtime orchestration (start/exit/finish/prompt/reset handling): `src/AppContent.js` via Cloudscape `AnnotationContext`.
+- Home route hotspot anchors for tutorial steps: `src/routes/AppRoutes.js`.
+- Home tutorial panel role filtering: `src/helpPanelContents/homeDashboardHelp.js`.
+- Tutorial progress reset entry point: `src/pages/support/TutorialsDashboardPage.jsx` (emits `tutorials:refresh`).
+- Canonical tutorial runbook: `docs/features/tutorial-platform.md`.
+
 ## Auth & Role Simulation
 - Session detection via Cognito tokens; simulated roles stored in `sessionStorage.currentRole` with event `auth:session-changed` for reactive updates.
 - IAM toggle disables role selection to avoid contradictory contexts; resetting simulated session state when enabled.

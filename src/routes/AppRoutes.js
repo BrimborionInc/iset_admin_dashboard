@@ -9,13 +9,13 @@ import {
   ContentLayout,
   Header,
   BreadcrumbGroup,
+  Hotspot,
   Link,
   SpaceBetween,
   Button,
   Box // Import Box component
 } from '@cloudscape-design/components';
 import AdminDashboard from '../pages/home/HomeDashboardPage.jsx';
-import AdminDashboardHelp from '../helpPanelContents/adminDashboardHelp.js'; // Default export
 // Remove the old manageAppointments import
 
 import UserManagementDashboard from '../pages/manageUsers.js';
@@ -93,6 +93,7 @@ import TutorialsDashboardHelp from '../helpPanelContents/tutorialsDashboardHelp.
 
 const AppRoutes = ({
   toggleHelpPanel,
+  currentRole,
   updateBreadcrumbs,
   setSplitPanelOpen,
   splitPanelOpen,
@@ -111,17 +112,35 @@ const AppRoutes = ({
     // Add more logic as needed
   };
 
-  const renderContent = (Component, breadcrumbs, headerText, helpKey, actions = null, context = "", headerDescription = "") => (
+  const renderContent = (
+    Component,
+    breadcrumbs,
+    headerText,
+    helpKey,
+    actions = null,
+    context = "",
+    headerDescription = "",
+    headerHotspotId = null
+  ) => (
     <ContentLayout
       header={
-        <Header
-          variant="h1"
-          description={headerDescription || undefined}
-          info={<Link variant="info" onClick={() => toggleHelpPanel(helpKey, headerText, context)}>Info</Link>}
-          actions={actions} // Attach actions here
-        >
-          {headerText}
-        </Header>
+        <div style={{ position: 'relative' }}>
+          <Header
+            variant="h1"
+            description={headerDescription || undefined}
+            info={<Link variant="info" onClick={() => toggleHelpPanel(helpKey, headerText, context)}>Info</Link>}
+            actions={actions} // Attach actions here
+          >
+            {headerText}
+          </Header>
+          {headerHotspotId ? (
+            <div style={{ position: 'absolute', left: '-12px', top: '22px' }}>
+              <Hotspot hotspotId={headerHotspotId} direction="bottom">
+                <span style={{ display: 'inline-block', width: '1px', height: '1px' }} />
+              </Hotspot>
+            </div>
+          ) : null}
+        </div>
       }
     >
       <BreadcrumbGroup items={breadcrumbs} />
@@ -1249,18 +1268,22 @@ const AppRoutes = ({
           AdminDashboard,
           [{ text: 'Home', href: '/' }],
           'NWAC ISET Homepage',
-          <HomeDashboardHelp />,
+          <HomeDashboardHelp currentRole={currentRole} />,
           (
-            <SpaceBetween size="xs" direction="horizontal">
-              <Button iconName="add-plus" onClick={() => window.dispatchEvent(new CustomEvent('home:openPalette'))}>
-                Add widget
-              </Button>
-              <Button iconName="refresh" onClick={() => window.dispatchEvent(new CustomEvent('home:resetLayout'))}>
-                Reset layout
-              </Button>
-            </SpaceBetween>
+            <Hotspot hotspotId="home-layout-controls" direction="bottom">
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button iconName="add-plus" onClick={() => window.dispatchEvent(new CustomEvent('home:openPalette'))}>
+                  Add widget
+                </Button>
+                <Button iconName="refresh" onClick={() => window.dispatchEvent(new CustomEvent('home:resetLayout'))}>
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            </Hotspot>
           ),
-          HomeDashboardHelp.aiContext
+          HomeDashboardHelp.aiContext,
+          '',
+          'home-overview'
         )}
       </Route>
     </Switch>

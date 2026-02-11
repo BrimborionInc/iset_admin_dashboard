@@ -2,6 +2,23 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-02-11
+- Feature: Added a new `Case workspace overview` hands-on tutorial in the centralized platform, with first-run prompt on `/cases/:id`, help-panel start/restart controls, and role-consistent tutorial lifecycle handling.
+- Fix: Case workspace tutorial startup now resets case workspace layout before launch so required hotspot widgets are present and step progression remains stable.
+- Fix: Application workspace and NWAC tutorials now force-reset the application dashboard layout before starting, preventing `Next` dead-ends when required hotspot widgets were removed from a customized board layout.
+- UX: Rewrote all `Application workspace overview` tutorial steps to reflect real widget behavior and first-run workflow guidance (orientation, quick layouts/actions, assessment progression, documents/messaging interplay, notes/tasks, calendar, and audit trail).
+- Fix: Application workspace tutorial first-run prompt now recognizes role aliases (`ISET Coordinator`, `Program Admin`, `Regional Manager`, etc.) and no longer relies on only `Application Assessor`.
+- UX: On application-case pages, NWAC tutorial prompt is now evaluated first for NWAC reviewers on `pending_approval`; otherwise the workspace overview prompt can still appear.
+- UX: ISET Application Assessment help panel now includes a direct tutorial start/restart card (aligned with the homepage help-panel tutorial pattern).
+- Docs: Updated `docs/AGENTS.md` with a standing rule to keep dashboard/widget help panel content in sync with refactors in the same change.
+- UX: Refreshed homepage Work Queue help content (`Work Queue`, `Work Queue (ISET Coordinator)`, `Work Queue Items`, and tagged-items guidance) to match current widget behavior, bucket preferences, and terminology.
+- Refactor: Replaced ad-hoc tutorial definitions with a centralized tutorial platform (`src/tutorials/tutorialPlatform.js`) and converted legacy tutorial files into thin category wrappers.
+- UX: Home intro hotspots now anchor to stable homepage controls (`home-overview`, `home-layout-controls`, `home-info-link`) to reduce blocked `Next` transitions.
+- UX: Added tutorial help-panel actions (`Restart tour`, `End`) for homepage/workspace/NWAC tutorial contexts.
+- Fix: Resetting tutorial progress from Tutorials dashboard now clears in-memory prompt guards so auto-prompts can reappear in the same session.
+- UX: Homepage tutorial/help copy now uses `Tag/Tagged` terminology for personal follow-up items (separate from Watchlist Hits).
+- Docs: Added `docs/features/tutorial-platform.md` as the canonical tutorial architecture/runbook and updated `docs/data/tutorial-progress.md`.
+
 ## 2026-02-10
 - Feature: Added an ISET Coordinator "Take a tour" intro hands-on tutorial with a one-time sign-in prompt (Start tour / Not now).
 - Data: Tutorial completion/dismissal is now persisted per staff in MySQL (`staff_tutorial_progress`) instead of browser-only localStorage.
@@ -368,3 +385,10 @@ Format: YYYY-MM-DD - Category: Short description
 ## 2026-02-10
 - Feature: Implemented Tutorials dashboard (`/tutorials-dashboard`) under Support to run hands-on tutorials and view per-staff completion state.
 - Feature: Added self-service reset endpoint to clear tutorial completion/dismissal state (`POST /api/me/tutorial-progress/reset`), used by the Tutorials dashboard Actions widget.
+
+## 2026-02-11
+- Fix: Versioned case workspace tutorial to `case-workspace-overview-v2` so updated hotspot mappings (including final step return-to-header) are applied cleanly after prior persisted state.
+- Fix: Home intro tour restart now always re-enters through the canonical `tutorials:start` event path, avoiding stale in-memory tutorial state.
+- Fix: Home intro role mapping now tolerates underscore/hyphen role keys (for example `ISET_Coordinator`, `Program_Administrator`, `Regional_Manager`).
+- Fix: Tutorials now start from a fresh runtime clone (`completed: false`, cloned tasks/steps) so Restart works reliably even after completion state is saved.
+- UX copy: Replaced user-facing “bucket(s)” language with “queue(s)” across home intro tutorials, home/work-queue help content, and work-queue widget preferences/empty states.

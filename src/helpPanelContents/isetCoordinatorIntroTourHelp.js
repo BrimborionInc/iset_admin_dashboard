@@ -1,28 +1,24 @@
 import React from 'react';
-import TutorialPanel from '@cloudscape-design/components/tutorial-panel';
-import { useTutorials } from '../context/TutorialsContext';
-import { tutorialPanelI18nStrings } from '../tutorials/tutorialI18n';
-import { ISET_COORDINATOR_INTRO_TUTORIAL_ID } from '../tutorials/isetCoordinatorIntroTutorials';
+import { Button, SpaceBetween } from '@cloudscape-design/components';
 
-const IsetCoordinatorIntroTourHelp = () => {
-  const { tutorials } = useTutorials();
-  const introTutorials = (tutorials || []).filter(
-    tutorial => tutorial?.tutorialId === ISET_COORDINATOR_INTRO_TUTORIAL_ID
-  );
+const IsetCoordinatorIntroTourHelp = ({ tutorial, onRestartTutorial, onEndTutorial }) => {
+  const tutorialTitle = tutorial?.title || 'Home intro tour';
 
   return (
     <div>
       <h2>Take a tour</h2>
-      <p>This intro walkthrough highlights your home page, key widgets, and where to find help.</p>
-
-      {introTutorials.length ? (
-        <TutorialPanel tutorials={introTutorials} i18nStrings={tutorialPanelI18nStrings} />
-      ) : (
-        <p>No hands-on tutorials are available yet.</p>
-      )}
+      <p><strong>{tutorialTitle}</strong></p>
+      <p>This walkthrough highlights your home page, key widgets, and where to find help.</p>
+      <SpaceBetween direction="horizontal" size="xs">
+        <Button onClick={() => onRestartTutorial?.()}>Restart tour</Button>
+        <Button onClick={() => onEndTutorial?.()}>End</Button>
+      </SpaceBetween>
+      <p>
+        Use the on-screen hotspot prompts to move step by step. You can exit at any time and re-run tutorials later
+        from the Tutorials page under Support.
+      </p>
     </div>
   );
 };
 
 export default IsetCoordinatorIntroTourHelp;
-

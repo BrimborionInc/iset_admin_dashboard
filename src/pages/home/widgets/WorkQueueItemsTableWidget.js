@@ -1125,7 +1125,7 @@ const WorkQueueItemsTableWidget = ({
             variant="icon"
             iconSvg={icon}
             disabled={!isWatchable || pending}
-            ariaLabel={isWatched ? 'Unflag case' : 'Tag case'}
+            ariaLabel={isWatched ? 'Untag case' : 'Tag case'}
             onClick={() => handleToggleWatch(item)}
             title={!isWatchable ? 'Case record not yet created' : (isWatched ? 'Remove tag' : 'Tag this case')}
           />

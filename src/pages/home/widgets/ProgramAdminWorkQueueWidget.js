@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
 import {
   Badge,
@@ -6,9 +6,11 @@ import {
   Button,
   ButtonDropdown,
   Cards,
+  CollectionPreferences,
   ColumnLayout,
   Container,
   Header,
+  Hotspot,
   Link,
   SpaceBetween,
   Table
@@ -210,6 +212,73 @@ const DISABLED_BUCKET_IDS = new Set([
   'payments-issues'
 ]);
 
+const BUCKET_PREFERENCES_STORAGE_KEY_PREFIX = 'home-work-queue-preferences-v1';
+
+const normalizeRoleKey = role => {
+  const raw = String(role || '').trim().toLowerCase();
+  if (!raw) return 'unknown';
+  if (raw === 'regional manager') return 'regional coordinator';
+  if (raw === 'program admin') return 'program administrator';
+  return raw;
+};
+
+const buildBucketStorageKey = role => (
+  `${BUCKET_PREFERENCES_STORAGE_KEY_PREFIX}.${normalizeRoleKey(role)}`
+);
+
+const sanitizeVisibleContent = (candidate, allowedIds) => {
+  const asArray = Array.isArray(candidate) ? candidate : [];
+  const allowed = new Set(Array.isArray(allowedIds) ? allowedIds : []);
+  const deduped = [];
+  const seen = new Set();
+  asArray.forEach(value => {
+    const id = typeof value === 'string' ? value : null;
+    if (!id || !allowed.has(id) || seen.has(id)) return;
+    seen.add(id);
+    deduped.push(id);
+  });
+  return deduped;
+};
+
+const loadStoredBucketPreferences = ({ storageKey, defaultVisibleIds }) => {
+  const fallback = { visibleContent: defaultVisibleIds };
+  if (typeof window === 'undefined') {
+    return fallback;
+  }
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    const candidate = Array.isArray(parsed?.visibleContent)
+      ? parsed.visibleContent
+      : Array.isArray(parsed?.visibleBucketIds)
+        ? parsed.visibleBucketIds
+        : Array.isArray(parsed)
+          ? parsed
+          : null;
+    const visibleContent = sanitizeVisibleContent(candidate, defaultVisibleIds);
+    return { visibleContent: visibleContent.length ? visibleContent : defaultVisibleIds };
+  } catch {
+    return fallback;
+  }
+};
+
+const storeBucketPreferences = ({ storageKey, visibleContent }) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        visibleContent: Array.isArray(visibleContent) ? visibleContent : []
+      })
+    );
+  } catch {
+    // ignore storage errors
+  }
+};
+
 const getWorkspacePath = item => {
   if (item?.workspacePath) return item.workspacePath;
   const caseId = item?.case_id || item?.caseId || null;
@@ -248,10 +317,32 @@ const ProgramAdminWorkQueueWidget = ({
   onSelectBucket,
   items = PROGRAM_ADMIN_SAMPLE_ITEMS,
   countsByBucket = {},
+  role,
   actions,
-  onRefresh,
   toggleHelpPanel
 }) => {
+  const defaultVisibleBucketIds = useMemo(
+    () => bucketDefinitions.map(bucket => bucket.id),
+    [bucketDefinitions]
+  );
+  const storageKey = useMemo(() => buildBucketStorageKey(role), [role]);
+  const [bucketPreferences, setBucketPreferences] = useState(() =>
+    loadStoredBucketPreferences({
+      storageKey,
+      defaultVisibleIds: defaultVisibleBucketIds
+    })
+  );
+  const visibleBucketIds = bucketPreferences?.visibleContent || defaultVisibleBucketIds;
+  const visibleBucketIdSet = useMemo(() => new Set(visibleBucketIds), [visibleBucketIds]);
+
+  useEffect(() => {
+    const loaded = loadStoredBucketPreferences({
+      storageKey,
+      defaultVisibleIds: defaultVisibleBucketIds
+    });
+    setBucketPreferences(loaded);
+  }, [storageKey, defaultVisibleBucketIds]);
+
   const bucketCounts = useMemo(() => {
     return bucketDefinitions.map(bucket => {
       const derivedCount = items.filter(item => item.bucketId === bucket.id).length;
@@ -264,8 +355,27 @@ const ProgramAdminWorkQueueWidget = ({
     });
   }, [bucketDefinitions, countsByBucket, items]);
 
+  const visibleBucketCounts = useMemo(
+    () => bucketCounts.filter(bucket => visibleBucketIdSet.has(bucket.id)),
+    [bucketCounts, visibleBucketIdSet]
+  );
+
+  const firstSelectableBucketId = useMemo(() => {
+    const first = visibleBucketCounts.find(bucket => !DISABLED_BUCKET_IDS.has(bucket.id));
+    return first?.id || null;
+  }, [visibleBucketCounts]);
+
+  useEffect(() => {
+    if (typeof onSelectBucket !== 'function') return;
+    if (!firstSelectableBucketId) return;
+    if (selectedBucketId && visibleBucketIdSet.has(selectedBucketId) && !DISABLED_BUCKET_IDS.has(selectedBucketId)) {
+      return;
+    }
+    onSelectBucket(firstSelectableBucketId);
+  }, [firstSelectableBucketId, onSelectBucket, selectedBucketId, visibleBucketIdSet]);
+
   const selectedBucket =
-    bucketCounts.find(bucket => bucket.id === selectedBucketId) || bucketCounts[0] || null;
+    visibleBucketCounts.find(bucket => bucket.id === selectedBucketId) || visibleBucketCounts[0] || null;
   const infoLink = toggleHelpPanel ? (
     <Link
       variant="info"
@@ -286,18 +396,41 @@ const ProgramAdminWorkQueueWidget = ({
           info={infoLink}
           description="Select a work queue to show items in that queue."
           actions={
-            typeof onRefresh === 'function'
-              ? (
-                <Button
-                  iconName="refresh"
-                  variant="icon"
-                  ariaLabel="Refresh work queue"
-                  onClick={() => onRefresh()}
-                />
-              )
-              : undefined
+            <SpaceBetween direction="horizontal" size="xs">
+              <CollectionPreferences
+                title="Work queue preferences"
+                confirmLabel="Confirm"
+                cancelLabel="Cancel"
+                preferences={bucketPreferences}
+                contentBefore={
+                  <Box variant="p" margin={{ bottom: 's' }}>
+                    Choose which queues appear in this widget. Preferences are saved in this browser.
+                  </Box>
+                }
+                onConfirm={({ detail }) => {
+                  const nextVisible = sanitizeVisibleContent(detail?.visibleContent, defaultVisibleBucketIds);
+                  const visibleContent = nextVisible.length ? nextVisible : defaultVisibleBucketIds;
+                  const nextPreferences = { visibleContent };
+                  setBucketPreferences(nextPreferences);
+                  storeBucketPreferences({ storageKey, visibleContent });
+                }}
+                visibleContentPreference={{
+                  title: 'Select visible queues',
+                  options: [
+                    {
+                      label: 'Buckets',
+                      options: bucketDefinitions.map(bucket => ({
+                        id: bucket.id,
+                        label: bucket.label
+                      }))
+                    }
+                  ]
+                }}
+              />
+            </SpaceBetween>
           }
         >
+          <Hotspot hotspotId="home-program-work-queue" direction="right" />
           Work Queue
         </Header>
       }
@@ -335,7 +468,7 @@ const ProgramAdminWorkQueueWidget = ({
             { minWidth: 920, cards: 4 },
             { minWidth: 1200, cards: 5 }
           ]}
-          items={bucketCounts}
+          items={visibleBucketCounts}
           selectionType="single"
           trackBy="id"
           selectedItems={selectedBucket ? [selectedBucket] : []}
@@ -448,7 +581,7 @@ export const ProgramAdminWorkItemsWidget = ({
             empty={
               <Box variant="p">
                 {selectedBucket
-                  ? 'No items are available for this bucket yet.'
+                  ? 'No items are available for this queue yet.'
                   : 'Select a queue to see its items.'}
               </Box>
             }

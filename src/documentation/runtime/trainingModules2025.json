@@ -1,9 +1,9 @@
 {
-  "id": "training-modules-2025",
-  "title": "ISET Orientation Guidance Modules (2025-2026)",
+  "id": "iset-guidance-reference-2025",
+  "title": "ISET Operational Guidance Reference (2025-2026)",
   "version": "2025-12-13-enhanced-noARMS-fixed-v3",
   "source": {
-    "deckId": "TRAINING MODULES - September 2025",
+    "deckId": "ISET Guidance Reference - September 2025",
     "slideCount": 94
   },
   "audience": {
@@ -13,8 +13,8 @@
   "tone": "Operational job aid (new-staff friendly, still usable for quick lookup)",
   "chunks": [
     {
-      "id": "module-1-program-overview-eligibility",
-      "title": "Module 1 \u2014 Program overview, mandate, and eligibility",
+      "id": "section-1-program-overview-eligibility",
+      "title": "Section 1 \u2014 Program overview, mandate, and eligibility",
       "isOptional": false,
       "tags": [
         "overview",
@@ -32,14 +32,14 @@
       "slides": [
         {
           "id": "s1-indigenous-skills-and-employment-training-iset-orientation-t",
-          "title": "Indigenous Skills and Employment Training (ISET) Orientation Guidance Modules 2025-2026",
+          "title": "Indigenous Skills and Employment Training (ISET) Operational Guidance Reference 2025-2026",
           "source": {
             "slideNumber": 1
           },
           "content": [
             {
               "type": "p",
-              "text": "Indigenous Skills and Employment Training (ISET) Orientation Guidance Modules 2025-2026"
+              "text": "Indigenous Skills and Employment Training (ISET) Operational Guidance Reference 2025-2026"
             },
             {
               "type": "p",
@@ -62,15 +62,15 @@
           ]
         },
         {
-          "id": "s2-module-1",
-          "title": "MODULE 1:",
+          "id": "s2-section-1",
+          "title": "SECTION 1:",
           "source": {
             "slideNumber": 2
           },
           "content": [
             {
               "type": "p",
-              "text": "MODULE 1:"
+              "text": "SECTION 1:"
             },
             {
               "type": "p",
@@ -79,7 +79,7 @@
             {
               "type": "bullets",
               "items": [
-                "Module 1 sets the foundation: who delivers ISET under NWAC, what the program is for, and the eligibility/identity rules that must be satisfied before a file can move forward."
+                "Section 1 sets the foundation: who delivers ISET under NWAC, what the program is for, and the eligibility/identity rules that must be satisfied before a file can move forward."
               ]
             }
           ],
@@ -355,8 +355,8 @@
       ]
     },
     {
-      "id": "module-2-interventions-funding-streams",
-      "title": "Module 2 \u2014 Interventions and funding streams",
+      "id": "section-2-interventions-funding-streams",
+      "title": "Section 2 \u2014 Interventions and funding streams",
       "isOptional": true,
       "tags": [
         "interventions",
@@ -373,15 +373,15 @@
       "estimatedMinutes": 15,
       "slides": [
         {
-          "id": "s10-module-2",
-          "title": "MODULE 2:",
+          "id": "s10-section-2",
+          "title": "SECTION 2:",
           "source": {
             "slideNumber": 10
           },
           "content": [
             {
               "type": "p",
-              "text": "MODULE 2:"
+              "text": "SECTION 2:"
             },
             {
               "type": "p",
@@ -390,7 +390,7 @@
             {
               "type": "bullets",
               "items": [
-                "Module 2 is about choosing and justifying interventions and funding streams\u2014your recommendation should always connect the intervention to an employability outcome."
+                "Section 2 is about choosing and justifying interventions and funding streams\u2014your recommendation should always connect the intervention to an employability outcome."
               ]
             }
           ],
@@ -858,8 +858,8 @@
       ]
     },
     {
-      "id": "module-3-role-case-management-outreach",
-      "title": "Module 3 \u2014 Your role: delivery, case management, planning, outreach",
+      "id": "section-3-role-case-management-outreach",
+      "title": "Section 3 \u2014 Your role: delivery, case management, planning, outreach",
       "isOptional": true,
       "tags": [
         "case-management",
@@ -875,15 +875,15 @@
       "estimatedMinutes": 15,
       "slides": [
         {
-          "id": "s23-module-3",
-          "title": "MODULE 3:",
+          "id": "s23-section-3",
+          "title": "SECTION 3:",
           "source": {
             "slideNumber": 23
           },
           "content": [
             {
               "type": "p",
-              "text": "MODULE 3:"
+              "text": "SECTION 3:"
             },
             {
               "type": "p",
@@ -892,7 +892,7 @@
             {
               "type": "bullets",
               "items": [
-                "Module 3 covers your role beyond approvals: case management cadence, relationship-based delivery, outreach, and partnerships."
+                "Section 3 covers your role beyond approvals: case management cadence, relationship-based delivery, outreach, and partnerships."
               ]
             }
           ],
@@ -1352,8 +1352,8 @@
       ]
     },
     {
-      "id": "module-4-intake-ei-processing",
-      "title": "Module 4 \u2014 Intake and processing: EI verification and program records",
+      "id": "section-4-intake-ei-processing",
+      "title": "Section 4 \u2014 Intake and processing: EI verification and program records",
       "isOptional": true,
       "tags": [
         "intake",
@@ -1368,15 +1368,15 @@
       "estimatedMinutes": 15,
       "slides": [
         {
-          "id": "s36-module-4",
-          "title": "MODULE 4:",
+          "id": "s36-section-4",
+          "title": "SECTION 4:",
           "source": {
             "slideNumber": 36
           },
           "content": [
             {
               "type": "p",
-              "text": "MODULE 4:"
+              "text": "SECTION 4:"
             },
             {
               "type": "p",
@@ -1385,7 +1385,7 @@
             {
               "type": "bullets",
               "items": [
-                "Module 4 is the operational core: intake sources, EI verification, the program system setup, and processing timelines."
+                "Section 4 is the operational core: intake sources, EI verification, the program system setup, and processing timelines."
               ]
             }
           ],
@@ -1741,8 +1741,8 @@
       ]
     },
     {
-      "id": "module-5-pending-id-consents-tax",
-      "title": "Module 5 \u2014 Before approval: pending status, ID, consents, and tax reminders",
+      "id": "section-5-pending-id-consents-tax",
+      "title": "Section 5 \u2014 Before approval: pending status, ID, consents, and tax reminders",
       "isOptional": true,
       "tags": [
         "pending",
@@ -1756,15 +1756,15 @@
       "estimatedMinutes": 10,
       "slides": [
         {
-          "id": "s47-module-5",
-          "title": "MODULE 5:",
+          "id": "s47-section-5",
+          "title": "SECTION 5:",
           "source": {
             "slideNumber": 47
           },
           "content": [
             {
               "type": "p",
-              "text": "MODULE 5:"
+              "text": "SECTION 5:"
             },
             {
               "type": "p",
@@ -1773,7 +1773,7 @@
             {
               "type": "bullets",
               "items": [
-                "Module 5 focuses on what must be in place before funding is considered approved: pending status, identity requirements, client consents, and tax reminders."
+                "Section 5 focuses on what must be in place before funding is considered approved: pending status, identity requirements, client consents, and tax reminders."
               ]
             }
           ],
@@ -1961,8 +1961,8 @@
       ]
     },
     {
-      "id": "module-6-financial-overview-verification",
-      "title": "Module 6 \u2014 Financial overview and verification",
+      "id": "section-6-financial-overview-verification",
+      "title": "Section 6 \u2014 Financial overview and verification",
       "isOptional": true,
       "tags": [
         "financial",
@@ -1976,15 +1976,15 @@
       "estimatedMinutes": 15,
       "slides": [
         {
-          "id": "s53-module-6",
-          "title": "MODULE 6:",
+          "id": "s53-section-6",
+          "title": "SECTION 6:",
           "source": {
             "slideNumber": 53
           },
           "content": [
             {
               "type": "p",
-              "text": "MODULE 6:"
+              "text": "SECTION 6:"
             },
             {
               "type": "p",
@@ -1993,7 +1993,7 @@
             {
               "type": "bullets",
               "items": [
-                "Module 6 covers financial disclosure and verification\u2014this is where many files become delayed if documents are incomplete."
+                "Section 6 covers financial disclosure and verification\u2014this is where many files become delayed if documents are incomplete."
               ]
             }
           ],
@@ -2265,8 +2265,8 @@
       ]
     },
     {
-      "id": "module-7-living-allowance",
-      "title": "Module 7 \u2014 Living allowance (needs-based support during training)",
+      "id": "section-7-living-allowance",
+      "title": "Section 7 \u2014 Living allowance (needs-based support during training)",
       "isOptional": true,
       "tags": [
         "living-allowance",
@@ -2279,15 +2279,15 @@
       "estimatedMinutes": 15,
       "slides": [
         {
-          "id": "s61-module-7",
-          "title": "MODULE 7:",
+          "id": "s61-section-7",
+          "title": "SECTION 7:",
           "source": {
             "slideNumber": 61
           },
           "content": [
             {
               "type": "p",
-              "text": "MODULE 7:"
+              "text": "SECTION 7:"
             },
             {
               "type": "p",
@@ -2296,7 +2296,7 @@
             {
               "type": "bullets",
               "items": [
-                "Module 7 explains living allowance. The goal is fair, needs-based support during training while avoiding overpayments and repayment risk."
+                "Section 7 explains living allowance. The goal is fair, needs-based support during training while avoiding overpayments and repayment risk."
               ]
             }
           ],
@@ -2498,8 +2498,8 @@
       ]
     },
     {
-      "id": "module-8-eligible-expenses-documentation",
-      "title": "Module 8 \u2014 Eligible expenses and documentation standards",
+      "id": "section-8-eligible-expenses-documentation",
+      "title": "Section 8 \u2014 Eligible expenses and documentation standards",
       "isOptional": true,
       "tags": [
         "expenses",
@@ -2515,15 +2515,15 @@
       "estimatedMinutes": 20,
       "slides": [
         {
-          "id": "s67-module-8",
-          "title": "MODULE 8:",
+          "id": "s67-section-8",
+          "title": "SECTION 8:",
           "source": {
             "slideNumber": 67
           },
           "content": [
             {
               "type": "p",
-              "text": "MODULE 8:"
+              "text": "SECTION 8:"
             },
             {
               "type": "p",
@@ -2532,7 +2532,7 @@
             {
               "type": "bullets",
               "items": [
-                "Module 8 covers what expenses are eligible and what documentation is required to support payments."
+                "Section 8 covers what expenses are eligible and what documentation is required to support payments."
               ]
             }
           ],
@@ -2841,8 +2841,8 @@
       ]
     },
     {
-      "id": "module-9-assessment-approval-funding-agreement",
-      "title": "Module 9 \u2014 Assessment, approval, and funding agreements",
+      "id": "section-9-assessment-approval-funding-agreement",
+      "title": "Section 9 \u2014 Assessment, approval, and funding agreements",
       "isOptional": true,
       "tags": [
         "assessment",
@@ -2856,15 +2856,15 @@
       "estimatedMinutes": 15,
       "slides": [
         {
-          "id": "s76-module-9",
-          "title": "MODULE 9:",
+          "id": "s76-section-9",
+          "title": "SECTION 9:",
           "source": {
             "slideNumber": 76
           },
           "content": [
             {
               "type": "p",
-              "text": "MODULE 9:"
+              "text": "SECTION 9:"
             },
             {
               "type": "p",
@@ -2873,7 +2873,7 @@
             {
               "type": "bullets",
               "items": [
-                "Module 9 covers how to write assessments and recommendations that are clear, consistent, and approvable."
+                "Section 9 covers how to write assessments and recommendations that are clear, consistent, and approvable."
               ]
             }
           ],
@@ -2926,7 +2926,7 @@
               "type": "bullets",
               "items": [
                 "The Case Manager shall provide their recommendation for funding based on the application, documentation, research and conversations with the Client.",
-                "Recommendation must align with eligibility and funding criteria as established by ESDC and/or these guidance modules.",
+                "Recommendation must align with eligibility and funding criteria as established by ESDC and/or this guidance reference.",
                 "Recommendation must include 'justification' for the decision; not just, \u201cI recommend we fund this client.\u201d It should include such justification as, \u201cI spoke with the Client and understand their goals, career path; I researched x, y, z; etc.\u201d",
                 "The Case Manager does not have to recommend to fund every application or to provide a living allowance.",
                 "The Case Manager may recommend an alternate intervention:",
@@ -3080,8 +3080,8 @@
       ]
     },
     {
-      "id": "module-10-reporting-section25-records",
-      "title": "Module 10 \u2014 Reporting, EI Section 25/ATQ, hardship, program records, contacts",
+      "id": "section-10-reporting-section25-records",
+      "title": "Section 10 \u2014 Reporting, EI Section 25/ATQ, hardship, program records, contacts",
       "isOptional": true,
       "tags": [
         "reporting",
@@ -3097,15 +3097,15 @@
       "estimatedMinutes": 20,
       "slides": [
         {
-          "id": "s83-module-10",
-          "title": "MODULE 10:",
+          "id": "s83-section-10",
+          "title": "SECTION 10:",
           "source": {
             "slideNumber": 83
           },
           "content": [
             {
               "type": "p",
-              "text": "MODULE 10:"
+              "text": "SECTION 10:"
             },
             {
               "type": "p",
@@ -3114,7 +3114,7 @@
             {
               "type": "bullets",
               "items": [
-                "Module 10 covers reporting, minimum service tracking, EI Section 25/ATQ concepts, hardship/repayment, and system compliance."
+                "Section 10 covers reporting, minimum service tracking, EI Section 25/ATQ concepts, hardship/repayment, and system compliance."
               ]
             }
           ],
@@ -3535,7 +3535,7 @@
             {
               "type": "bullets",
               "items": [
-                "End of module set. Use your tool\u2019s search to find topics quickly (e.g., \u201cliving allowance\u201d, \u201cEI verification\u201d, \u201cBand letter\u201d, \u201cTWS\u201d).",
+                "End of this reference. Use your tool\u2019s search to find topics quickly (e.g., \u201cliving allowance\u201d, \u201cEI verification\u201d, \u201cBand letter\u201d, \u201cTWS\u201d).",
                 "If you still have questions, escalate using the contacts provided and document the guidance you receive in the client file (program system) for future reference."
               ]
             }

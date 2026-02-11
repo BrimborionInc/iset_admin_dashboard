@@ -37,3 +37,20 @@ Server routes (for the current signed-in staff member):
 Migration runner:
 - The admin server auto-runs `admin-dashboard/sql/*.sql` once per checksum (tracked in `iset_migration`). See `docs/ops/migration-runner.md`.
 
+## Platform source of truth
+
+- Canonical tutorial catalog + role/category helpers: `src/tutorials/tutorialPlatform.js`
+- Category wrapper modules (thin adapters):
+  - `src/tutorials/isetCoordinatorIntroTutorials.js`
+  - `src/tutorials/applicationWorkspaceTutorials.js`
+  - `src/tutorials/nwacAssessmentTutorials.js`
+
+Current IDs:
+- `iset-coordinator-intro-v1`
+- `regional-manager-intro-v1`
+- `program-admin-intro-v1`
+- `application-workspace-overview`
+- `nwac-assessment-decision`
+
+Operational note:
+- Cloudscape step progression depends on the *next* step hotspot existing. If a next hotspot is missing, `Next` may be disabled on the current step.

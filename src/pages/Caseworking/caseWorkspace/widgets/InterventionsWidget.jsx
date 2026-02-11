@@ -8,6 +8,7 @@ import {
   ButtonDropdown,
   CollectionPreferences,
   Header,
+  Hotspot,
   Link,
   Modal,
   Pagination,
@@ -1228,6 +1229,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             </SpaceBetween>
           }
         >
+          <Hotspot hotspotId="case-workspace-interventions" direction="right" />
           {`${metadata.title ?? "Interventions"}${activePlanLabel ? ` - ${activePlanLabel}` : ""}`}
         </Header>
       }

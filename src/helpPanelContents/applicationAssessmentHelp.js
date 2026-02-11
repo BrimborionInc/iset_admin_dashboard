@@ -1,10 +1,27 @@
 import React from 'react';
 import TutorialPanel from '@cloudscape-design/components/tutorial-panel';
+import { Button, SpaceBetween } from '@cloudscape-design/components';
 import { useTutorials } from '../context/TutorialsContext';
 import { tutorialPanelI18nStrings } from '../tutorials/tutorialI18n';
 
-const ApplicationAssessmentHelp = () => (
-  <div>
+const ApplicationAssessmentHelp = () => {
+  const { tutorials } = useTutorials();
+  const workspaceTutorial = (tutorials || []).find(
+    tutorial => tutorial.category === 'application-workspace'
+  ) || null;
+
+  const handleStartWorkspaceTutorial = () => {
+    const tutorialId = workspaceTutorial?.tutorialId;
+    if (!tutorialId) return;
+    window.dispatchEvent(
+      new CustomEvent('tutorials:start', {
+        detail: { tutorialId }
+      })
+    );
+  };
+
+  return (
+    <div>
     <h2>Application assessment workflow</h2>
     <p>
       Use this form to document the assessment, confirm eligibility, and capture the funding recommendation. Required
@@ -46,8 +63,33 @@ const ApplicationAssessmentHelp = () => (
       required). Save or re-submit to persist changes; edits are blocked once a final decision exists unless reopening
       is permitted.
     </p>
+
+    {workspaceTutorial ? (
+      <div
+        style={{
+          border: '1px solid var(--color-border-container-default, #d5dbdb)',
+          borderRadius: '12px',
+          padding: '16px',
+          marginTop: '20px'
+        }}
+      >
+        <p style={{ marginTop: 0, marginBottom: '8px', fontSize: '1.4rem', fontWeight: 700 }}>
+          {workspaceTutorial.title}
+        </p>
+        <div style={{ marginBottom: '12px' }}>{workspaceTutorial.description}</div>
+        {workspaceTutorial.completed ? (
+          <p style={{ marginTop: 0, marginBottom: '12px', color: 'var(--color-text-status-success, #037f0c)' }}>
+            Tutorial completed
+          </p>
+        ) : null}
+        <Button variant="primary" onClick={handleStartWorkspaceTutorial}>
+          {workspaceTutorial.completed ? 'Restart tutorial' : 'Start tutorial'}
+        </Button>
+      </div>
+    ) : null}
   </div>
-);
+  );
+};
 
 ApplicationAssessmentHelp.aiContext = `
 You are assisting a coordinator filling out the Application Assessment widget. Key behaviors and constraints:
@@ -57,11 +99,34 @@ You are assisting a coordinator filling out the Application Assessment widget. K
 - Use related widgets for context: Application Overview (status/owner), ISET Application Form (applicant data/version history), Supporting Documents (evidence/checklist), Notes and Tasks (audit trail), Secure Messaging (doc requests).
 `;
 
-export const NwacAssessmentHelp = () => {
+export const NwacAssessmentHelp = ({ onRestartTutorial, onEndTutorial }) => {
   const { tutorials } = useTutorials();
   const nwacTutorials = (tutorials || []).filter(
     tutorial => tutorial.category === 'nwac-assessment'
   );
+  const nwacTutorial = nwacTutorials[0] || null;
+
+  const handleRestart = () => {
+    if (typeof onRestartTutorial === 'function') {
+      onRestartTutorial();
+      return;
+    }
+    const tutorialId = nwacTutorial?.tutorialId;
+    if (!tutorialId) return;
+    window.dispatchEvent(
+      new CustomEvent('tutorials:start', {
+        detail: { tutorialId }
+      })
+    );
+  };
+
+  const handleEnd = () => {
+    if (typeof onEndTutorial === 'function') {
+      onEndTutorial();
+      return;
+    }
+    window.dispatchEvent(new CustomEvent('tutorials:end'));
+  };
 
   return (
     <div>
@@ -70,6 +135,10 @@ export const NwacAssessmentHelp = () => {
         This panel appears once the assessment is submitted. Use it to record the NWAC decision and assurance outcome
         before moving to communication.
       </p>
+      <SpaceBetween direction="horizontal" size="xs">
+        <Button onClick={handleRestart}>Restart tour</Button>
+        <Button onClick={handleEnd}>End</Button>
+      </SpaceBetween>
       <ol>
         <li>Select <strong>Approved</strong>, <strong>Not Approved</strong>, or <strong>Push back to coordinator</strong>.</li>
         <li>Choose the <strong>Assessment Assurance</strong> outcome when approving or not approving.</li>

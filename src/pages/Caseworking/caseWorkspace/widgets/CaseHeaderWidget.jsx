@@ -6,6 +6,7 @@ import {
   ButtonDropdown,
   ColumnLayout,
   Header,
+  Hotspot,
   Link,
   Modal,
   Alert,
@@ -957,15 +958,18 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
           info={infoLink}
           description={metadata.description}
           actions={
-            <ButtonDropdown
-              ariaLabel="Case actions"
-              items={quickActions}
-              onItemClick={handleQuickAction}
-            >
-              Quick actions
-            </ButtonDropdown>
+            <Hotspot hotspotId="case-workspace-quick-actions" direction="left">
+              <ButtonDropdown
+                ariaLabel="Case actions"
+                items={quickActions}
+                onItemClick={handleQuickAction}
+              >
+                Quick actions
+              </ButtonDropdown>
+            </Hotspot>
           }
         >
+          <Hotspot hotspotId="case-workspace-header" direction="right" />
           {metadata.title ?? "Case header"}
         </Header>
       }

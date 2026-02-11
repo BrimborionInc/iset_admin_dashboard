@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
 import {
   Box,
-  Button,
   ButtonDropdown,
   Cards,
   CollectionPreferences,
@@ -306,7 +305,6 @@ const IsetCoordinatorWorkQueueWidget = ({
   countsByBucket = {},
   items = [],
   actions,
-  onRefresh,
   toggleHelpPanel
 }) => {
   const [bucketPreferences, setBucketPreferences] = useState(() => loadStoredBucketPreferences());
@@ -379,7 +377,7 @@ const IsetCoordinatorWorkQueueWidget = ({
                 preferences={bucketPreferences}
                 contentBefore={
                   <Box variant="p" margin={{ bottom: 's' }}>
-                    Choose which queue buckets appear in this widget. Preferences are saved in this browser.
+                    Choose which queues appear in this widget. Preferences are saved in this browser.
                   </Box>
                 }
                 onConfirm={({ detail }) => {
@@ -399,7 +397,7 @@ const IsetCoordinatorWorkQueueWidget = ({
                   storeBucketPreferences(nextVisible);
                 }}
                 visibleContentPreference={{
-                  title: 'Select visible queue buckets',
+                  title: 'Select visible queues',
                   options: [
                     {
                       label: 'Buckets',
@@ -411,14 +409,6 @@ const IsetCoordinatorWorkQueueWidget = ({
                   ]
                 }}
               />
-              {typeof onRefresh === 'function' ? (
-                <Button
-                  iconName="refresh"
-                  variant="icon"
-                  ariaLabel="Refresh work queue"
-                  onClick={() => onRefresh()}
-                />
-              ) : null}
             </SpaceBetween>
           }
         >

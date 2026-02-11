@@ -13,6 +13,7 @@ import ApplicationEvents from '../widgets/applicationEvents';
 import CaseCalendarWidget from '../widgets/CaseCalendarWidget';
 
 const STORAGE_KEY = 'application-assessment-dashboard-layout.v2';
+const TUTORIAL_APP_LAYOUT_RESET_FLAG = 'iset.tutorial.resetApplicationLayout';
 
 const widgetRegistry = {
   'application-overview': {
@@ -288,6 +289,21 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
       window.localStorage.removeItem(STORAGE_KEY);
     } catch (_) {}
   }, [setAvailableItems]);
+
+  useEffect(() => {
+    let shouldReset = false;
+    try {
+      shouldReset = window.sessionStorage?.getItem(TUTORIAL_APP_LAYOUT_RESET_FLAG) === '1';
+      if (shouldReset) {
+        window.sessionStorage?.removeItem(TUTORIAL_APP_LAYOUT_RESET_FLAG);
+      }
+    } catch (_) {
+      shouldReset = false;
+    }
+    if (shouldReset) {
+      resetLayout();
+    }
+  }, [id, resetLayout]);
 
   const applyLayout = useCallback(
     nextLayout => {

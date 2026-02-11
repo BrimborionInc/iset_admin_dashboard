@@ -1,17 +1,94 @@
-import React, { useCallback, useState } from 'react';
-import { Alert, Box, Button, Container, Header, Modal, SpaceBetween } from '@cloudscape-design/components';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Alert, Box, Button, Container, Header, Modal, SpaceBetween, StatusIndicator, Table, Toggle } from '@cloudscape-design/components';
 import { apiFetch } from '../../auth/apiClient';
+import { useTutorials } from '../../context/TutorialsContext';
+import { getIdTokenClaims, getRoleFromClaims, hasValidSession, isIamOn } from '../../auth/cognito';
+import { isTutorialRelevantForRole } from '../../tutorials/tutorialPlatform';
 
 const TutorialsDashboardPage = () => {
+  const { tutorials } = useTutorials();
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [savingByTutorialId, setSavingByTutorialId] = useState({});
   const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
   const [lastResetAt, setLastResetAt] = useState(null);
+
+  const effectiveRole = useMemo(() => {
+    let fallbackRole = null;
+    try {
+      const raw = window.sessionStorage?.getItem('currentRole');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        fallbackRole = parsed?.value || parsed?.label || null;
+      }
+    } catch (_) {
+      fallbackRole = null;
+    }
+    const claimsRole = (isIamOn() && hasValidSession()) ? getRoleFromClaims(getIdTokenClaims()) : null;
+    return claimsRole || fallbackRole;
+  }, []);
+
+  const visibleTutorials = useMemo(() => (
+    (tutorials || []).filter(tutorial => isTutorialRelevantForRole(tutorial, effectiveRole))
+  ), [tutorials, effectiveRole]);
+
+  const tutorialRows = useMemo(
+    () => visibleTutorials.map(tutorial => ({
+      tutorialId: tutorial?.tutorialId || '',
+      title: tutorial?.title || tutorial?.tutorialId || 'Tutorial',
+      completed: Boolean(tutorial?.completed),
+    })),
+    [visibleTutorials]
+  );
+
+  const setSaving = useCallback((tutorialId, value) => {
+    setSavingByTutorialId(prev => ({ ...(prev || {}), [tutorialId]: Boolean(value) }));
+  }, []);
+
+  const updateTutorialCompletion = useCallback(async (tutorialId, markComplete) => {
+    const id = typeof tutorialId === 'string' ? tutorialId.trim() : '';
+    if (!id) return;
+    setError(null);
+    setSuccess(null);
+    setSaving(id, true);
+    try {
+      if (markComplete) {
+        const resp = await apiFetch('/api/me/tutorial-progress', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tutorialId: id, status: 'completed' }),
+        });
+        const data = await resp.json().catch(() => null);
+        if (!resp.ok) {
+          throw new Error(data?.error || `Update failed: ${resp.status}`);
+        }
+      } else {
+        const resp = await apiFetch('/api/me/tutorial-progress/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tutorialId: id }),
+        });
+        const data = await resp.json().catch(() => null);
+        if (!resp.ok) {
+          throw new Error(data?.error || `Reset failed: ${resp.status}`);
+        }
+      }
+
+      window.dispatchEvent(new CustomEvent('tutorials:refresh'));
+      setSuccess(`Updated "${id}" to ${markComplete ? 'complete' : 'incomplete'}.`);
+    } catch (err) {
+      setError(err?.message || 'Failed to update tutorial status.');
+    } finally {
+      setSaving(id, false);
+    }
+  }, [setSaving]);
 
   const resetAllTutorialProgress = useCallback(async () => {
     setConfirmVisible(false);
     setResetting(true);
     setError(null);
+    setSuccess(null);
     try {
       const resp = await apiFetch('/api/me/tutorial-progress/reset', {
         method: 'POST',
@@ -26,6 +103,7 @@ const TutorialsDashboardPage = () => {
       // Ask AppContent to reload DB-backed progress and rebuild TutorialsContext.
       window.dispatchEvent(new CustomEvent('tutorials:refresh'));
       setLastResetAt(new Date().toISOString());
+      setSuccess('All tutorial progress has been reset.');
     } catch (err) {
       setError(err?.message || 'Failed to reset tutorial progress.');
     } finally {
@@ -39,7 +117,17 @@ const TutorialsDashboardPage = () => {
         header={
           <Header
             variant="h2"
-            description="Tutorials auto-prompt the first time you visit a page that supports a tour. Use this page to reset your tutorial progress."
+            description="Tutorials auto-prompt the first time you visit a page that supports a tour. Use toggles to mark tutorials complete/incomplete."
+            actions={
+              <Button
+                variant="primary"
+                loading={resetting}
+                disabled={resetting}
+                onClick={() => setConfirmVisible(true)}
+              >
+                Reset all tutorial progress
+              </Button>
+            }
           >
             Tutorials
           </Header>
@@ -47,6 +135,7 @@ const TutorialsDashboardPage = () => {
       >
         <SpaceBetween size="m">
           {error ? <Alert type="error">{error}</Alert> : null}
+          {success ? <Alert type="success">{success}</Alert> : null}
           {lastResetAt ? (
             <Alert type="success">
               Tutorial progress reset ({new Date(lastResetAt).toLocaleString()}).
@@ -54,17 +143,52 @@ const TutorialsDashboardPage = () => {
           ) : null}
 
           <Box variant="p">
-            Resetting progress clears your completion and dismissal state so tutorials may prompt again when you revisit supported pages.
+            Toggle each tutorial to set completion state. Turning a tutorial off marks it incomplete and allows first-run prompts again.
           </Box>
 
-          <Button
-            variant="primary"
-            loading={resetting}
-            disabled={resetting}
-            onClick={() => setConfirmVisible(true)}
-          >
-            Reset tutorial progress
-          </Button>
+          {tutorialRows.length ? (
+            <Table
+              trackBy="tutorialId"
+              items={tutorialRows}
+              variant="embedded"
+              columnDefinitions={[
+                {
+                  id: 'title',
+                  header: 'Tutorial',
+                  cell: item => item.title,
+                },
+                {
+                  id: 'status',
+                  header: 'Status',
+                  cell: item => (
+                    <StatusIndicator type={item.completed ? 'success' : 'stopped'}>
+                      {item.completed ? 'Completed' : 'Incomplete'}
+                    </StatusIndicator>
+                  ),
+                },
+                {
+                  id: 'complete',
+                  header: 'Complete',
+                  cell: item => {
+                    const saving = Boolean(savingByTutorialId[item.tutorialId]);
+                    return (
+                      <Toggle
+                        checked={item.completed}
+                        disabled={saving}
+                        onChange={({ detail }) => {
+                          updateTutorialCompletion(item.tutorialId, Boolean(detail?.checked));
+                        }}
+                      >
+                        {item.completed ? 'On' : 'Off'}
+                      </Toggle>
+                    );
+                  },
+                },
+              ]}
+            />
+          ) : (
+            <Alert type="info">No tutorials are available for your role.</Alert>
+          )}
         </SpaceBetween>
       </Container>
 
@@ -92,4 +216,3 @@ const TutorialsDashboardPage = () => {
 };
 
 export default TutorialsDashboardPage;
-

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Button, Hotspot, SpaceBetween } from '@cloudscape-design/components';
+import { Box, Button, SpaceBetween } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims, buildLoginUrl } from '../../auth/cognito';
 import { apiFetch } from '../../auth/apiClient';
@@ -27,7 +27,7 @@ const WIDGET_REGISTRY = {
         id: 'iset-coordinator-work-queue',
         component: IsetCoordinatorWorkQueueWidget,
         title: 'Work Queue (ISET Coordinator)',
-        description: 'Scaffolded queue buckets for ISET Coordinators.',
+        description: 'Scaffolded queues for ISET Coordinators.',
         defaultRowSpan: 16,
         defaultColumnSpan: 1
     },
@@ -51,7 +51,7 @@ const WIDGET_REGISTRY = {
         id: 'my-watchlist',
         component: MyWatchlistWidget,
         title: 'My Tagged Applications',
-        description: 'Applicants you flag appear here, and you will receive notifications as if you were the assigned Case Manager.',
+        description: 'Applicants you tag appear here, and you will receive notifications as if you were the assigned Case Manager.',
         defaultRowSpan: 5,
         defaultColumnSpan: 3
     },
@@ -2450,7 +2450,6 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
 
     return (
         <SpaceBetween size="l">
-            <Hotspot hotspotId="home-overview" direction="bottom" />
             <Board
                 renderItem={renderBoardItem}
                 items={boardItems}

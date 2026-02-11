@@ -11,6 +11,7 @@ import {
   DatePicker,
   FormField,
   Header,
+  Hotspot,
   ExpandableSection,
   Input,
   Link,
@@ -1364,6 +1365,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
             )
           }
         >
+          <Hotspot hotspotId="case-workspace-participant-details" direction="right" />
           {metadata.title ?? "Participant details"}
         </Header>
       }

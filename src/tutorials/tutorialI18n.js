@@ -26,7 +26,7 @@ const annotationContextI18nStrings = {
   nextButtonText: 'Next',
   previousButtonText: 'Previous',
   finishButtonText: 'Finish',
-  labelDismissAnnotation: 'Dismiss tutorial step',
+  labelDismissAnnotation: 'Close tutorial',
   labelHotspot: (openState, stepIndex, totalStepCount) =>
     `${openState ? 'Close' : 'Open'} tutorial step ${stepIndex + 1} of ${totalStepCount}`,
   stepCounterText: (stepIndex, totalStepCount) => `Step ${stepIndex + 1} of ${totalStepCount}`,

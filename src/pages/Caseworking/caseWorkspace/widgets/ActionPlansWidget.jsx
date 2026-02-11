@@ -8,6 +8,7 @@ import {
   ButtonDropdown,
   CollectionPreferences,
   Header,
+  Hotspot,
   Link,
   Pagination,
   SpaceBetween,
@@ -829,6 +830,7 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
             </Button>
           }
         >
+          <Hotspot hotspotId="case-workspace-action-plans" direction="right" />
           {metadata.title ?? "Action plans"}
         </Header>
       }
