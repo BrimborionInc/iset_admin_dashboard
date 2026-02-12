@@ -392,3 +392,7 @@ Format: YYYY-MM-DD - Category: Short description
 - Fix: Home intro role mapping now tolerates underscore/hyphen role keys (for example `ISET_Coordinator`, `Program_Administrator`, `Regional_Manager`).
 - Fix: Tutorials now start from a fresh runtime clone (`completed: false`, cloned tasks/steps) so Restart works reliably even after completion state is saved.
 - UX copy: Replaced user-facing “bucket(s)” language with “queue(s)” across home intro tutorials, home/work-queue help content, and work-queue widget preferences/empty states.
+- Feature: Tutorials dashboard now shows role-relevant tutorials in a table (one row per tutorial) with per-row completion toggles.
+- Feature: Tutorial toggle OFF now resets that tutorial progress via single-tutorial reset, while toggle ON marks it completed.
+- UX: Refactored tutorials reset action to a dedicated `Reset all tutorial progress` control.
+- Docs: Added initial non-System-Administrator workflow inventory tranche (Application Assessment, Case Management, ILMP Reporting, Payments AP Integrations) with workflow docs and widget-level documentation index/files.

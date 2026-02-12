@@ -34,11 +34,12 @@ Purpose: Living reference of structure, core modules, and cross-cutting concerns
 - Category wrappers only:
   - `src/tutorials/isetCoordinatorIntroTutorials.js`
   - `src/tutorials/applicationWorkspaceTutorials.js`
+  - `src/tutorials/caseWorkspaceTutorials.js`
   - `src/tutorials/nwacAssessmentTutorials.js`
 - Runtime orchestration (start/exit/finish/prompt/reset handling): `src/AppContent.js` via Cloudscape `AnnotationContext`.
 - Home route hotspot anchors for tutorial steps: `src/routes/AppRoutes.js`.
 - Home tutorial panel role filtering: `src/helpPanelContents/homeDashboardHelp.js`.
-- Tutorial progress reset entry point: `src/pages/support/TutorialsDashboardPage.jsx` (emits `tutorials:refresh`).
+- Tutorial status management entry point: `src/pages/support/TutorialsDashboardPage.jsx` (role-filtered tutorial table, per-row completion toggle, and `Reset all`; emits `tutorials:refresh`).
 - Canonical tutorial runbook: `docs/features/tutorial-platform.md`.
 
 ## Auth & Role Simulation

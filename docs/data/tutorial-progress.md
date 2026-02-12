@@ -33,6 +33,7 @@ Server routes (for the current signed-in staff member):
 - `GET /api/me/tutorial-progress`
 - `POST /api/me/tutorial-progress` (upsert `{ tutorialId, status }`)
 - `POST /api/me/tutorial-progress/bulk-complete` (migration helper)
+- `POST /api/me/tutorial-progress/reset` (reset all, or reset one when `{ tutorialId }` is provided)
 
 Migration runner:
 - The admin server auto-runs `admin-dashboard/sql/*.sql` once per checksum (tracked in `iset_migration`). See `docs/ops/migration-runner.md`.
@@ -43,13 +44,15 @@ Migration runner:
 - Category wrapper modules (thin adapters):
   - `src/tutorials/isetCoordinatorIntroTutorials.js`
   - `src/tutorials/applicationWorkspaceTutorials.js`
+  - `src/tutorials/caseWorkspaceTutorials.js`
   - `src/tutorials/nwacAssessmentTutorials.js`
 
 Current IDs:
 - `iset-coordinator-intro-v1`
 - `regional-manager-intro-v1`
 - `program-admin-intro-v1`
-- `application-workspace-overview`
+- `application-workspace-overview-v2`
+- `case-workspace-overview-v2`
 - `nwac-assessment-decision`
 
 Operational note:

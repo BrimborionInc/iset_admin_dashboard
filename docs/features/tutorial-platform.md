@@ -15,6 +15,7 @@ Status: Active (refactored to centralized platform on 2026-02-11).
 - App runtime wiring (prompting/start/end/routing/status) is in `src/AppContent.js`.
 - Home header hotspots are wired in `src/routes/AppRoutes.js`.
 - Role-filtered home tutorial listing in help panel is in `src/helpPanelContents/homeDashboardHelp.js`.
+- Tutorials dashboard status management UI is in `src/pages/support/TutorialsDashboardPage.jsx`.
 
 ## Tutorial IDs (current)
 
@@ -63,6 +64,11 @@ These IDs must exist for the case workspace walkthrough:
 - `Not now` and `End` persist `dismissed`.
 - `Finish` persists `completed`.
 - Tutorials dashboard reset emits `tutorials:refresh`; app resets in-memory prompt guards and reloads DB progress.
+- Tutorials dashboard lists role-relevant tutorials only, one row per tutorial.
+- Tutorials dashboard per-row toggle:
+  - `On` -> `POST /api/me/tutorial-progress` with `status: completed`
+  - `Off` -> `POST /api/me/tutorial-progress/reset` with `{ tutorialId }` (marks tutorial incomplete by removing completion/dismissal row)
+- Tutorials dashboard `Reset all` uses `POST /api/me/tutorial-progress/reset` with empty body.
 - Workspace tutorials force a layout reset before start so required hotspot widgets are present and `Next` cannot dead-end due to customized layouts.
 
 ## Content-edit safety rules
