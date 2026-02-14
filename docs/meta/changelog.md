@@ -2,6 +2,9 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-02-13
+- UX: Moved the assessment "Deny Funding" shortcut into the Proposed Interventions table header actions (next to Add intervention) and renamed the section to "Propose Intervention(s)".
+
 ## 2026-02-11
 - Feature: Added a new `Case workspace overview` hands-on tutorial in the centralized platform, with first-run prompt on `/cases/:id`, help-panel start/restart controls, and role-consistent tutorial lifecycle handling.
 - Fix: Case workspace tutorial startup now resets case workspace layout before launch so required hotspot widgets are present and step progression remains stable.

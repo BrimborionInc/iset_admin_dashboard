@@ -44,88 +44,60 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - v0.5.1 (12 Jan 2026)',
-      description: 'Release 0.5.1 focuses on fixes identified for the application assessment functionality.',
+      sectionTitle: 'Release Notes - v0.5.2 (13th Feb 2026)',
+      description: 'Release 0.5.2 highlights major admin-console enhancements delivered since 12 Jan 2026.',
       features: {
         heading: 'What’s New',
         sections: [
           {
-            title: 'Application assessment fixes',
+            title: 'Tutorial platform and guided onboarding',
             paragraphs: [
-              'Multiple interventions can now be proposed in a single assessment.',
-              'Each proposed intervention can be costed with individual line items.',
-              'SIN watchlists now flag matches during assessment workflows.',
-              'Approval and denial letter handling is more reliable.',
-              'Client Application Form population is more accurate and consistent.',
-              'Application submissions are blocked until the file upload list is complete.'
+              'Added a centralized tutorials platform with role-aware tours for homepage, application workspace, and case workspace.',
+              'Introduced the Tutorials dashboard under Support so staff can run tours and manage progress directly.',
+              'Tutorial completion and dismissal now persist per staff member in MySQL and can be reset from the UI.'
             ]
           },
           {
-            title: 'Homepage monitoring refresh',
+            title: 'Payments and finance workflow upgrades',
             paragraphs: [
-              'The homepage now centers on role-based work queues, a queue items list, a watchlist, and recent activity.',
-              'Legacy queue widgets have been removed to reduce clutter and focus on current workflows.',
-              'Queue items now show province codes and support quick flagging.',
-              'Flagging or unflagging an item refreshes the watchlist automatically.'
+              'Case workspace approvals now auto-create draft payment packets from proposed intervention cost lines.',
+              'Packet validation and queue/detail views now reflect Sage Intacct submission outcomes and resubmission handling.',
+              'Finance settings now include Sage Intacct integration controls and improved XML draft preview behavior.'
             ]
           },
           {
-            title: 'New Metrics widget',
+            title: 'Assessment and intervention management improvements',
             paragraphs: [
-              'Added a Metrics widget with week, month, quarter, and year views.',
-              'Metrics include new applications, decisions made, active cases, funds committed, and funds spent.',
-              'Totals are scoped to the signed-in role and region, formatted consistently in CAD.'
+              'Proposed Interventions and coordinator assessment workflows now support robust multi-intervention costing with line-item persistence.',
+              'Decision, validation, and save behavior were hardened to reduce dead ends and improve reliability in assessment progression.',
+              'Approved interventions now enforce budget-pot linkage so downstream finance transactions are generated consistently.'
             ]
           },
           {
-            title: 'Administrative user management updates',
+            title: 'Configuration and admin tooling',
             paragraphs: [
-              'Administrative Users now display region codes instead of numeric IDs.',
-              'The region selector uses two-letter codes when inviting staff.',
-              'The user table is embedded directly inside the tab panels for faster scanning.'
+              'Added a Query Editor dashboard for System Administrators with SQL execution controls and multi-view results.',
+              'Added a Document Checklists configuration widget to manage required documents by status gate for applications and interventions.',
+              'Regional Manager scope now supports multi-region behavior in development workflows.'
             ]
           },
           {
-            title: 'Assessment workflow refinements',
+            title: 'Workspace and role-based UX updates',
             paragraphs: [
-              'Assessment cost scheduling now supports recurring periods with automatic total calculations.',
-              'Checklist-driven uploads are enforced before submission so required items are complete.',
-              'Approval fields reveal budget pots only when an approval and non-zero cost are set.'
+              'Homepage and workspace guidance, labels, and help content were aligned with current queue-based operations.',
+              'Case and application workspace layouts now reset appropriately for tutorial and hotspot-dependent flows.',
+              'Role handling and prompt logic were updated so onboarding behaviors remain consistent across role aliases.'
             ]
           },
         ]
       },
       knownBugs: {
         heading: 'Known Bugs',
-        sections: [
-          {
-            title: 'Public Portal Login and Registrations',
-            paragraphs: [
-              'Email addresses are case sensitive. Entering your email with a different case than you registered will reject your login.'
-            ]
-          },
-          {
-            title: 'Public Portal Runtime Error',
-            paragraphs: [
-              'Inactivity sometimes causes the public portal to throw a runtime error. This may be related to in-progress development changes, but the cause is still unknown.'
-            ]
-          },
-          { title: 'Workflow Studio', paragraphs: ['The "flowchart" views do not pan or zoom consistently, making drag interactions unreliable.'] },
-          { title: 'AI Support', paragraphs: ['The support assistant is not yet fully trained on the solution and can drift off topic.'] }
-        ]
+        sections: []
       },
       comingNext: {
         heading: 'Coming Soon',
-        sections: [
-          {
-            title: 'Up Next',
-            paragraphs: [
-              'Expanding the digital forms library beyond the initial three examples.',
-              'Case Manager prefill for forms (e.g., EI Funding Agreement) so some fields arrive pre-populated before applicant signature.',
-              'Cover the payments module and financial report generation.'
-            ]
-          }
-        ]
+        sections: []
       }
     },
     resources: {
@@ -178,85 +150,60 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Notes de version - v0.5.1 (12 janvier 2026)',
-      description: 'La version 0.5.1 se concentre sur des correctifs liés à la fonctionnalité d’évaluation des demandes.',
+      sectionTitle: 'Notes de version - v0.5.2 (13 février 2026)',
+      description: 'La version 0.5.2 met en évidence les principales améliorations de la console admin livrées depuis le 12 janvier 2026.',
       features: {
         heading: 'Quoi de neuf',
         sections: [
           {
-            title: 'Correctifs pour l’évaluation des demandes',
+            title: 'Plateforme de tutoriels et intégration guidée',
             paragraphs: [
-              'Plusieurs interventions peuvent désormais être proposées dans une seule évaluation.',
-              'Chaque intervention peut être budgétée avec des lignes de coûts distinctes.',
-              'Les listes de surveillance NAS (SIN) signalent maintenant les correspondances.',
-              'Le traitement des lettres d’approbation et de refus est plus fiable.',
-              'Le préremplissage du formulaire de demande client est amélioré.',
-              'La soumission des demandes est bloquée tant que la liste des téléversements n’est pas complète.'
+              'Ajout d’une plateforme de tutoriels centralisée avec des parcours par rôle pour l’accueil, l’espace demande et l’espace dossier.',
+              'Ajout du tableau de bord des tutoriels dans Soutien pour lancer les parcours et gérer l’état de progression.',
+              'La complétion et la mise en sourdine des tutoriels sont maintenant enregistrées par membre du personnel dans MySQL avec réinitialisation en libre-service.'
             ]
           },
           {
-            title: 'Actualisation de l’accueil et des files de travail',
+            title: 'Améliorations des flux paiements et finances',
             paragraphs: [
-              'La page d’accueil met maintenant l’accent sur les files de travail par rôle, la liste des éléments, la liste de suivi et l’activité récente.',
-              'Les anciens widgets de file ont été retirés pour alléger l’interface.',
-              'Les éléments de file affichent les codes de province et permettent le marquage rapide.',
-              'Le marquage ou le dé-marquage actualise automatiquement la liste de suivi.'
+              'Les approbations dans l’espace dossier créent maintenant automatiquement des paquets de paiement brouillon à partir des lignes de coûts proposées.',
+              'La validation des paquets et les vues file/détail reflètent maintenant les résultats de soumission Sage Intacct et la reprise des soumissions.',
+              'Les paramètres Finance incluent désormais la configuration d’intégration Sage Intacct et un aperçu XML brouillon amélioré.'
             ]
           },
           {
-            title: 'Nouveau widget Indicateurs',
+            title: 'Améliorations évaluation et interventions',
             paragraphs: [
-              'Ajout d’un widget Indicateurs avec vues semaine, mois, trimestre et année.',
-              'Les indicateurs couvrent les nouvelles demandes, les décisions, les dossiers actifs, les fonds engagés et les fonds dépensés.',
-              'Les totaux sont limités au rôle et à la région de l’utilisateur, avec format CAD cohérent.'
+              'Les flux Interventions proposées et évaluation coordonnateur prennent mieux en charge le multi-intervention avec persistance détaillée des coûts.',
+              'Les comportements de décision, validation et sauvegarde ont été renforcés pour réduire les blocages dans la progression.',
+              'Les interventions approuvées imposent maintenant la liaison au budget d’un plan d’action pour assurer une génération cohérente des transactions financières.'
             ]
           },
           {
-            title: 'Mises à jour de la gestion des utilisateurs administratifs',
+            title: 'Configuration et outils administratifs',
             paragraphs: [
-              'Les utilisateurs administratifs affichent maintenant les codes de région au lieu des identifiants numériques.',
-              'Le sélecteur de région utilise les codes à deux lettres lors des invitations.',
-              'La table est intégrée directement dans les onglets pour une lecture plus rapide.'
+              'Ajout d’un tableau de bord Éditeur de requêtes pour les administrateurs système avec exécution SQL contrôlée et plusieurs vues de résultats.',
+              'Ajout d’un widget de configuration des listes de contrôle de documents par porte de statut pour les demandes et interventions.',
+              'La portée des gestionnaires régionaux prend maintenant en charge le multi-région dans les flux de développement.'
             ]
           },
           {
-            title: 'Ajustements du flux d’évaluation',
+            title: 'Mises à jour UX des espaces de travail et rôles',
             paragraphs: [
-              'L’étape des coûts prend en charge les récurrences avec calcul automatique des totaux.',
-              'Les téléversements requis sont bloqués tant que la liste de contrôle n’est pas complète.',
-              'Les champs d’approbation affichent les budgets uniquement quand l’approbation et un coût non nul sont sélectionnés.'
+              'Le contenu d’aide, les libellés et les indications d’accueil/espaces de travail ont été alignés avec les opérations actuelles basées sur les files.',
+              'Les dispositions d’écran des espaces demande et dossier se réinitialisent correctement pour les parcours tutoriels et points d’ancrage.',
+              'La gestion des rôles et des invites a été renforcée pour garder des comportements d’intégration cohérents malgré les alias de rôles.'
             ]
           }
         ]
       },
       knownBugs: {
         heading: 'Bugs connus',
-        sections: [
-          {
-            title: 'Erreur d’exécution du portail public',
-            paragraphs: [
-              'Une période d’inactivité peut parfois provoquer une erreur d’exécution sur le portail public. Cela pourrait être lié à des changements en cours de développement, la cause reste inconnue.'
-            ]
-          },
-          { title: 'Verrouillage des dossiers', paragraphs: ['Le verrouillage des enregistrements empêche encore parfois la progression.'] },
-          { title: 'Studio des parcours', paragraphs: ['Les vues « organigramme » ne gèrent pas correctement le déplacement ou le zoom, ce qui rend le glisser-déposer instable.'] },
-          { title: 'Éditeur d’étapes', paragraphs: ['Le déplacement des composants dans l’aire de travail provoque un scintillement et le point d’insertion demeure flou.'] },
-          { title: 'Chaînes françaises par défaut', paragraphs: ['Certains composants d’accueil contiennent un texte français par défaut qui perturbe la traduction pilotée par l’IA.'] },
-          { title: 'Assistant IA', paragraphs: ['L’assistant IA n’est pas encore formé sur l’ensemble de la solution et peut sortir du sujet.'] }
-        ]
+        sections: []
       },
       comingNext: {
         heading: 'À venir bientôt',
-        sections: [
-          {
-            title: 'Prochaines étapes',
-            paragraphs: [
-              'Expansion de la bibliothèque de formulaires numériques au-delà des trois exemples initiaux.',
-              'Préremplissage par le gestionnaire de cas des formulaires (p. ex., Entente de financement EI) afin que certains champs soient préremplis avant la signature du demandeur.',
-              'Couverture du module de paiements et de la génération de rapports financiers.'
-            ]
-          }
-        ]
+        sections: []
       }
     },
     resources: {

@@ -12978,11 +12978,21 @@ const generateGUID = () => {
 };
 
 // Use dynamic path based on the environment
-const dotenvPath = process.env.NODE_ENV === 'production'
-  ? '/home/ec2-user/admin-dashboard/.env'  // Path for production
-  : path.resolve(__dirname, '.env'); // Development/local path
-require('dotenv').config({ path: dotenvPath });
-
+// Prefer the repo/deploy-local `.env` next to this script when present.
+// This avoids confusing "production path" resolution in dev environments where NODE_ENV may be set externally.
+const localDotenvPath = path.resolve(__dirname, '.env');
+const legacyProdDotenvPath = '/home/ec2-user/admin-dashboard/.env'; // legacy deploy location (still supported)
+let dotenvPath = localDotenvPath;
+try {
+  if (!fs.existsSync(localDotenvPath) && process.env.NODE_ENV === 'production') {
+    dotenvPath = legacyProdDotenvPath;
+  }
+} catch (_) {
+  // ignore fs errors; fall back to local path
+  dotenvPath = localDotenvPath;
+}
+// Use `.env` as source of truth for this app; override any inherited process env values.
+require('dotenv').config({ path: dotenvPath, override: true });
 
 console.log("Loaded .env from:", dotenvPath);  // Debugging log
 console.log("CORS Allowed Origin:", process.env.ALLOWED_ORIGIN);
@@ -13360,6 +13370,14 @@ try {
   app.use('/api/admin', adminUsersRouter);
 } catch (e) {
   console.warn('Admin users router mount failed:', e?.message);
+}
+
+// Mount admin applicant lookup router (Cognito applicant pool + DB join)
+try {
+  const adminApplicantsRouter = require('./src/routes/admin/applicants');
+  app.use('/api/admin', adminApplicantsRouter);
+} catch (e) {
+  console.warn('Admin applicants router mount failed:', e?.message);
 }
 
 // Simple auth probe for smoke testing
@@ -18954,6 +18972,44 @@ function coerceSignatureField(value, name) {
   return { name: finalName, signed: true };
 }
 
+function parseFirstLastFromUserName(rawName) {
+  const cleaned = String(rawName || '').trim().replace(/\s+/g, ' ');
+  if (!cleaned) return null;
+
+  // Handle "Last, First ..." format.
+  if (cleaned.includes(',')) {
+    const [lastPart, firstPart] = cleaned.split(',', 2);
+    const lastName = String(lastPart || '').trim();
+    const firstName = String(firstPart || '').trim().split(' ').filter(Boolean)[0] || '';
+    const fullName = [firstName, lastName].filter(Boolean).join(' ').trim() || cleaned;
+    return { firstName, lastName, fullName };
+  }
+
+  const parts = cleaned.split(' ').filter(Boolean);
+  if (parts.length === 1) {
+    return { firstName: parts[0], lastName: '', fullName: parts[0] };
+  }
+  const firstName = parts[0];
+  const lastName = parts[parts.length - 1];
+  return { firstName, lastName, fullName: `${firstName} ${lastName}`.trim() };
+}
+
+async function fetchUserIdentityById(userId, connection = pool) {
+  const normalized = Number(userId);
+  if (!Number.isFinite(normalized) || normalized <= 0) return null;
+  if (!connection || typeof connection.query !== 'function') return null;
+  try {
+    const [[row]] = await connection.query('SELECT name, email FROM user WHERE id = ? LIMIT 1', [normalized]);
+    if (!row) return null;
+    return {
+      name: row?.name ? String(row.name) : null,
+      email: row?.email ? String(row.email) : null,
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
 function extractJsonObject(text) {
   if (!text) return null;
   try { return JSON.parse(text); } catch (_) {}
@@ -19165,6 +19221,19 @@ Vary applicant names across drafts; avoid repeating similar first/last initials.
       if (!payloadData['preferred-name']) payloadData['preferred-name'] = fn;
       identityFullName = `${fn || ''} ${ln || ''}`.trim() || null;
     }
+  }
+
+  // Override identity fields with the DB display name for the selected applicant (if present).
+  const userIdentity = await fetchUserIdentityById(userId);
+  const nameParts = parseFirstLastFromUserName(userIdentity?.name);
+  if (nameParts) {
+    if (nameParts.firstName) payloadData['first-name'] = nameParts.firstName;
+    if (nameParts.lastName) payloadData['last-name'] = nameParts.lastName;
+    if (nameParts.firstName) payloadData['preferred-name'] = nameParts.firstName;
+    identityFullName = nameParts.fullName || identityFullName;
+  }
+  if (userIdentity?.email) {
+    payloadData['contact-email-address'] = userIdentity.email;
   }
 
   const firstName = (payloadData && payloadData['first-name']) || 'Sky';
@@ -20036,7 +20105,27 @@ app.post('/api/create-dummy-draft', async (req, res) => {
     const workflowId = String(body.workflowId || 'iset-v1');
     const stepCursor = String(body.stepCursor || 'summary-page');
 
-    const { draftPayload, history, summary } = buildDummyDraft(stepCursor);
+    let { draftPayload, history, summary } = buildDummyDraft(stepCursor);
+    const userIdentity = await fetchUserIdentityById(userId);
+    const nameParts = parseFirstLastFromUserName(userIdentity?.name);
+    if (nameParts && nameParts.firstName) {
+      draftPayload['first-name'] = nameParts.firstName;
+      if (nameParts.lastName) {
+        draftPayload['last-name'] = nameParts.lastName;
+      }
+      draftPayload['preferred-name'] = nameParts.firstName;
+      const fullName = nameParts.fullName || [nameParts.firstName, nameParts.lastName].filter(Boolean).join(' ').trim();
+      // Keep signature fields aligned with the overridden applicant name.
+      ['consent', 'indigenous_declaration', 'conflict_applicant_signature', 'legal_submission_sig'].forEach((key) => {
+        if (key in draftPayload) {
+          draftPayload[key] = coerceSignatureField(draftPayload[key], fullName);
+        }
+      });
+      summary = { ...(summary || {}), applicantName: fullName || summary?.applicantName };
+    }
+    if (userIdentity?.email) {
+      draftPayload['contact-email-address'] = userIdentity.email;
+    }
 
     // Check existing row
     const [existingRows] = await pool.query(
@@ -24593,6 +24682,8 @@ try {
   if (authProvider === 'cognito') {
     const adminUsers = require('./src/routes/admin/users');
     app.use('/api/admin', adminUsers);
+    const adminApplicants = require('./src/routes/admin/applicants');
+    app.use('/api/admin', adminApplicants);
   }
 } catch (e) {
   console.warn('Admin routes init failed:', e?.message);

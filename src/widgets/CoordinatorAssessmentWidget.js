@@ -6022,29 +6022,6 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   const framingStepContent = (
     <SpaceBetween size="l">
-      {showDenyFundingShortcut && (
-        <Box>
-          <SpaceBetween size="xs">
-            <Box variant="small" color="text-body-secondary">
-              Need to deny funding without completing the assessment? Skip the remaining steps and go straight to the decision.
-            </Box>
-            <SpaceBetween direction="horizontal" size="xs">
-              <Button
-                variant="normal"
-                onClick={() => setDenyFundingModalVisible(true)}
-                disabled={!canUseDenyFundingShortcut}
-              >
-                Deny Funding
-              </Button>
-              {denyFundingBlockedReason ? (
-                <Box variant="small" color="text-body-secondary">
-                  {denyFundingBlockedReason}
-                </Box>
-              ) : null}
-            </SpaceBetween>
-          </SpaceBetween>
-        </Box>
-      )}
       {showFramingErrors && interventionFieldErrors._global && (
         <Alert type="error" statusIconAriaLabel="Error">
           {interventionFieldErrors._global}
@@ -6103,13 +6080,38 @@ const CoordinatorAssessmentWidget = forwardRef(
         header={
           <Header
             variant="h3"
+            description={
+              showDenyFundingShortcut ? (
+                <SpaceBetween size="xs">
+                  <Box variant="small" color="text-body-secondary">
+                    Need to deny funding without completing the assessment? Skip the remaining steps and go straight to the decision.
+                  </Box>
+                  {denyFundingBlockedReason ? (
+                    <Box variant="small" color="text-body-secondary">
+                      {denyFundingBlockedReason}
+                    </Box>
+                  ) : null}
+                </SpaceBetween>
+              ) : null
+            }
             actions={
-              <Button onClick={openAddInterventionModal} disabled={isAssessmentDisabled}>
-                Add intervention
-              </Button>
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button onClick={openAddInterventionModal} disabled={isAssessmentDisabled}>
+                  Add intervention
+                </Button>
+                {showDenyFundingShortcut ? (
+                  <Button
+                    variant="normal"
+                    onClick={() => setDenyFundingModalVisible(true)}
+                    disabled={!canUseDenyFundingShortcut}
+                  >
+                    Deny Funding
+                  </Button>
+                ) : null}
+              </SpaceBetween>
             }
           >
-            Proposed interventions
+            Propose Intervention(s)
           </Header>
         }
         empty={<Box textAlign="center">No proposed interventions.</Box>}

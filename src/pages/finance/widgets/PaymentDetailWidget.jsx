@@ -19,10 +19,12 @@ import {
   Input,
   DatePicker,
   FileUpload,
-  Textarea,
   RadioGroup,
   Select,
 } from "@cloudscape-design/components";
+import CopyToClipboard from "@cloudscape-design/components/copy-to-clipboard";
+import CodeView from "@cloudscape-design/code-view/code-view";
+import xmlHighlight from "@cloudscape-design/code-view/highlight/xml";
 import { apiFetch } from "../../../auth/apiClient";
 import { boardItemI18nStrings } from "./common";
 import { usePaymentsData } from "./PaymentsDataContext.jsx";
@@ -1781,28 +1783,6 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       cell: item => item.potName,
     },
   ];
-  const handleCopyXml = useCallback(async () => {
-    if (!intacctXml) return;
-    try {
-      if (navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(intacctXml);
-      } else {
-        const textarea = document.createElement("textarea");
-        textarea.value = intacctXml;
-        textarea.setAttribute("readonly", "");
-        textarea.style.position = "absolute";
-        textarea.style.left = "-9999px";
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-      }
-      setXmlActionStatus({ type: "success", message: "XML copied to clipboard." });
-    } catch (err) {
-      setXmlActionStatus({ type: "error", message: "Failed to copy XML." });
-    }
-  }, [intacctXml]);
-
   const handleDownloadXml = useCallback(() => {
     if (!intacctXml) return;
     try {
@@ -2120,20 +2100,30 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                       </Alert>
                     ) : null}
                     <SpaceBetween direction="horizontal" size="xs">
-                      <Button
-                        variant="primary"
-                        onClick={handleCopyXml}
-                        disabled={!intacctXml}
-                      >
-                        Copy XML
-                      </Button>
                       <Button onClick={handleDownloadXml} disabled={!intacctXml}>
                         Download .xml
                       </Button>
                     </SpaceBetween>
-                    <FormField label="XML preview">
-                      <Textarea readOnly value={intacctXml || ""} rows={20} />
-                    </FormField>
+                    <div style={{ width: "100%", minHeight: 420, display: "flex", flexDirection: "column" }}>
+                      <CodeView
+                        content={intacctXml || ""}
+                        language="xml"
+                        wrapLines
+                        lineNumbers
+                        highlight={xmlHighlight}
+                        ariaLabel="Intacct XML preview"
+                        style={{ flex: 1, minHeight: 0 }}
+                        actions={(
+                          <CopyToClipboard
+                            copyButtonAriaLabel="Copy XML"
+                            copyErrorText="Copy failed"
+                            copySuccessText="XML copied"
+                            textToCopy={intacctXml || ""}
+                            disabled={!intacctXml}
+                          />
+                        )}
+                      />
+                    </div>
                   </SpaceBetween>
                   <Container
                     header={<Header variant="h3">Sage Intacct API integration overview</Header>}

@@ -11,7 +11,7 @@ Last Updated: 2026-01-19
 - Interview rules: ask one short question at a time, wait for the answer, and only ask about requirements or desired behavior. Do not ask questions about your approach to coding. You own the code and data.
 - If anything is unclear (requirements, data, ownership, API payloads), stop and ask before coding.
 - Prefer evidence over guesses. Inspect payloads, schemas, and renderer code before claiming behavior exists.
-- Inspect the docbase and keep it updated; do not assume it is current without verifying against the codebase.
+- Keep the document base at `X:\ISET\admin-dashboard\docs` (WSL: `/mnt/x/ISET/admin-dashboard/docs`) updated whenever code or behavior changes. Do not assume docs are current without verifying against the codebase.
 - Own the code and technical approach; avoid unnecessary technical questions when requirements are sufficient.
 - If blocked (tooling, permissions, platform limits), state that clearly before proceeding.
 - Confirm prerequisite account access (e.g., org management vs. member accounts) before directing users to identity/SSO setup.

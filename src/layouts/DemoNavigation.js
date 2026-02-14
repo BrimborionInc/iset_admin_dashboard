@@ -177,6 +177,10 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
   const [provinceOptions, setProvinceOptions] = useState([]);
   const [selectedProvince, setSelectedProvince] = useState(null);
   const [isLoadingProvinces, setIsLoadingProvinces] = useState(false);
+  const [applicantOptions, setApplicantOptions] = useState([]);
+  const [selectedApplicant, setSelectedApplicant] = useState(null);
+  const [isLoadingApplicants, setIsLoadingApplicants] = useState(false);
+  const [applicantLoadError, setApplicantLoadError] = useState(null);
   const [showAiDummyModal, setShowAiDummyModal] = useState(false);
   const [progressEvents, setProgressEvents] = useState([]);
   const [contentDensity, setContentDensity] = useState(() => {
@@ -413,10 +417,47 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
     }
   };
 
+  const loadApplicantOptions = async () => {
+    setIsLoadingApplicants(true);
+    setApplicantLoadError(null);
+    try {
+      const resp = await apiFetch('/api/admin/applicants');
+      const data = await resp.json().catch(() => null);
+      if (!resp.ok) {
+        setApplicantLoadError(data?.message || 'Failed to load applicant accounts');
+        setApplicantOptions([]);
+        setSelectedApplicant(null);
+        return;
+      }
+      const users = Array.isArray(data?.users) ? data.users : [];
+      const opts = users.map((u) => {
+        const email = u?.email || u?.username || '(unknown)';
+        const username = u?.username || '';
+        const label = username && username !== email ? `${email} (${username})` : email;
+        return {
+          label,
+          value: String(u.userId),
+          description: `DB user #${u.userId}`,
+        };
+      }).filter((o) => o.value);
+      setApplicantOptions(opts);
+      if (!selectedApplicant && opts.length) setSelectedApplicant(opts[0]);
+    } catch (err) {
+      setApplicantLoadError(err?.message || 'Failed to load applicant accounts');
+      setApplicantOptions([]);
+      setSelectedApplicant(null);
+    } finally {
+      setIsLoadingApplicants(false);
+    }
+  };
+
   const handleOpenAiDummyModal = () => {
     setShowAiDummyModal(true);
     if (!provinceOptions.length) {
       loadProvinceOptions();
+    }
+    if (!applicantOptions.length) {
+      loadApplicantOptions();
     }
   };
 
@@ -424,12 +465,13 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
     setIsCreatingDummy(true);
     setDummyResult(null);
     const provinceValue = selectedProvince?.value || selectedProvince?.code || selectedProvince?.label;
+    const userId = selectedApplicant?.value ? Number(selectedApplicant.value) : null;
     setProgressEvents([]);
     try {
       const resp = await apiFetch('/api/ai/create-dummy-draft?stream=1', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ province: provinceValue, stepCursor: 'summary-page' }),
+        body: JSON.stringify({ province: provinceValue, userId, stepCursor: 'summary-page' }),
       });
       if (!resp.ok || !resp.body) {
         const json = await resp.json().catch(() => null);
@@ -551,7 +593,7 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
               <Button
                 variant="primary"
                 loading={isCreatingDummy}
-                disabled={isCreatingDummy || isLoadingProvinces || !selectedProvince}
+                disabled={isCreatingDummy || isLoadingApplicants || isLoadingProvinces || !selectedApplicant || !selectedProvince}
                 onClick={handleCreateDummyDraft}
               >
                 Generate draft
@@ -561,6 +603,20 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
         >
           <SpaceBetween size="m">
             <Box>Select the province or territory for the simulated applicant's address. The AI will auto-generate the rest of the draft.</Box>
+            <FormField
+              label="Applicant account"
+              description="Draft will be inserted/updated for this applicant (must exist in Cognito applicant pool and DB user table)."
+              errorText={applicantLoadError || undefined}
+            >
+              <Select
+                loadingText="Loading applicants..."
+                statusType={isLoadingApplicants ? 'loading' : 'finished'}
+                selectedOption={selectedApplicant}
+                onChange={({ detail }) => setSelectedApplicant(detail.selectedOption)}
+                options={applicantOptions}
+                placeholder="Select applicant"
+              />
+            </FormField>
             <FormField label="Province / Territory" description="Used for address fields">
               <Select
                 loadingText="Loading provinces..."
