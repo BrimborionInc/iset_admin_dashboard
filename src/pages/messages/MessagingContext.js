@@ -8,6 +8,7 @@ const MessagingContext = createContext({
   startNewMessage: () => {},
   startReply: () => {},
   startReplyAll: () => {},
+  startForward: () => {},
   cancelCompose: () => {},
 });
 
@@ -41,6 +42,11 @@ export const MessagingProvider = ({ children }) => {
     setComposeMode('replyAll');
   }, [pinnedMessage]);
 
+  const startForward = useCallback(() => {
+    if (!pinnedMessage) return;
+    setComposeMode('forward');
+  }, [pinnedMessage]);
+
   const cancelCompose = useCallback(() => {
     setComposeMode(null);
   }, []);
@@ -53,8 +59,9 @@ export const MessagingProvider = ({ children }) => {
     startNewMessage,
     startReply,
     startReplyAll,
+    startForward,
     cancelCompose,
-  }), [pinnedMessage, composeMode, pinMessage, unpinMessage, startNewMessage, startReply, startReplyAll, cancelCompose]);
+  }), [pinnedMessage, composeMode, pinMessage, unpinMessage, startNewMessage, startReply, startReplyAll, startForward, cancelCompose]);
 
   return (
     <MessagingContext.Provider value={value}>

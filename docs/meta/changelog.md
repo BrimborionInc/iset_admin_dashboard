@@ -2,6 +2,16 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-02-20
+- Messaging: Internal `/messages` now supports explicit `Forward` compose mode with `Fwd:` subject handling and forwarded body prefill.
+- Messaging: Reply delivery semantics now honor explicitly selected recipients instead of auto-notifying all historical thread participants.
+- Messaging: Message list recipient/participant metadata is now derived per-message (mailbox-item based), enabling correct `Reply all` defaults.
+- Messaging: Compose now allows empty subjects for new messages (display fallback remains `(No subject)`).
+- Messaging: Added `Mark unread` action and backend endpoint (`PATCH /api/me/staff-messages/:itemId/unread`).
+- Messaging: Read/delete/restore/permanent-delete flows now emit refresh events so side-nav unread counts stay synchronized.
+- API: Removed staff-messaging missing-table compatibility fallbacks in dev to keep internal messaging code path clean.
+- API: Existing-thread sends now require sender membership in the thread (`thread_access_denied` when not a participant).
+
 ## 2026-02-16
 - API: `/api/admin/upload-config` now uses admin-local runtime config storage (`iset_runtime_config`) by default, removing the implicit intake proxy dependency; legacy proxy behavior is opt-in via `UPLOAD_CONFIG_PROXY=true`.
 

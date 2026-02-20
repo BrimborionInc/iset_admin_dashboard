@@ -71,19 +71,25 @@ const MessagesDashboardPage = () => {
     return () => window.removeEventListener('staff-messages:refresh', onRefresh);
   }, [fetchMessages]);
 
-  const softDeleteMessage = useCallback((message, fromFolder) => {
+  const emitRefreshEvent = useCallback(() => {
+    try {
+      window.dispatchEvent(new CustomEvent('staff-messages:refresh'));
+    } catch {}
+  }, []);
+
+  const softDeleteMessage = useCallback((message) => {
     if (!message) return;
     apiFetch(`/api/me/staff-messages/${message.id}/delete`, { method: 'PUT' })
-      .then(() => fetchMessages())
+      .then(() => emitRefreshEvent())
       .catch((err) => console.error('Delete failed', err));
-  }, [fetchMessages]);
+  }, [emitRefreshEvent]);
 
   const restoreMessage = useCallback((message) => {
     if (!message) return;
     apiFetch(`/api/me/staff-messages/${message.id}/restore`, { method: 'PUT' })
-      .then(() => fetchMessages())
+      .then(() => emitRefreshEvent())
       .catch((err) => console.error('Restore failed', err));
-  }, [fetchMessages]);
+  }, [emitRefreshEvent]);
 
   const permanentlyDeleteMessage = useCallback((message) => {
     if (!message) return;
@@ -93,13 +99,15 @@ const MessagesDashboardPage = () => {
           unpinMessage();
         }
       })
-      .then(() => fetchMessages())
+      .then(() => emitRefreshEvent())
       .catch((err) => console.error('Purge failed', err));
-  }, [fetchMessages, pinnedMessage?.id, unpinMessage]);
+  }, [emitRefreshEvent, pinnedMessage?.id, unpinMessage]);
 
   const markAsRead = useCallback((message) => {
     if (!message?.id || !message.unread) return;
-    apiFetch(`/api/me/staff-messages/${message.id}/read`, { method: 'PATCH' }).catch(() => {});
+    apiFetch(`/api/me/staff-messages/${message.id}/read`, { method: 'PATCH' })
+      .then(() => emitRefreshEvent())
+      .catch(() => {});
     setMessagesByFolder(prev => {
       const next = { ...prev };
       ['inbox', 'sent', 'deleted'].forEach(folder => {
@@ -109,7 +117,23 @@ const MessagesDashboardPage = () => {
       });
       return next;
     });
-  }, []);
+  }, [emitRefreshEvent]);
+
+  const markAsUnread = useCallback((message) => {
+    if (!message?.id || message.unread) return;
+    apiFetch(`/api/me/staff-messages/${message.id}/unread`, { method: 'PATCH' })
+      .then(() => emitRefreshEvent())
+      .catch(() => {});
+    setMessagesByFolder(prev => {
+      const next = { ...prev };
+      ['inbox', 'sent', 'deleted'].forEach(folder => {
+        next[folder] = (next[folder] || []).map(item => (
+          item.id === message.id ? { ...item, unread: true, readAt: null } : item
+        ));
+      });
+      return next;
+    });
+  }, [emitRefreshEvent]);
 
   const resolveCounterparty = useCallback((item, mode) => {
     if (!item) return { profile: null, extra: 0 };
@@ -256,8 +280,8 @@ const MessagesDashboardPage = () => {
     {
       id: 'actions',
       header: '',
-      minWidth: 110,
-      width: 110,
+      minWidth: 180,
+      width: 180,
       cell: item => (
         <SpaceBetween size="xs" direction="horizontal">
           {activeTabId === 'deleted' ? (
@@ -271,22 +295,32 @@ const MessagesDashboardPage = () => {
               <Button
                 iconName="remove"
                 variant="inline-icon"
-                ariaLabel="Permanently delete message"
+                ariaLabel="Delete message permanently"
                 onClick={() => permanentlyDeleteMessage(item)}
               />
             </>
           ) : (
-            <Button
-              iconName="remove"
-              variant="inline-icon"
-              ariaLabel="Delete message"
-              onClick={() => softDeleteMessage(item, activeTabId)}
-            />
+            <>
+              {activeTabId === 'inbox' && !item.unread && (
+                <Button
+                  variant="inline-link"
+                  onClick={() => markAsUnread(item)}
+                >
+                  Mark unread
+                </Button>
+              )}
+              <Button
+                iconName="remove"
+                variant="inline-icon"
+                ariaLabel="Move message to deleted"
+                onClick={() => softDeleteMessage(item)}
+              />
+            </>
           )}
         </SpaceBetween>
       ),
     },
-  ]), [activeTabId, comparatorById, markAsRead, permanentlyDeleteMessage, pinMessage, pinnedMessage?.id, renderPersonCell, resolveCounterparty, restoreMessage, softDeleteMessage, unpinMessage]);
+  ]), [activeTabId, comparatorById, markAsRead, markAsUnread, permanentlyDeleteMessage, pinMessage, pinnedMessage?.id, renderPersonCell, resolveCounterparty, restoreMessage, softDeleteMessage, unpinMessage]);
 
   const table = (
     <Table
@@ -330,7 +364,7 @@ const MessagesDashboardPage = () => {
           tabs={[
             { id: 'inbox', label: `Inbox (${tabCounts.inbox})`, content: table },
             { id: 'sent', label: `Sent (${tabCounts.sent})`, content: table },
-            { id: 'deleted', label: `Deleted (${tabCounts.deleted})`, content: table },
+            { id: 'deleted', label: `Deleted Items (${tabCounts.deleted})`, content: table },
           ]}
         />
       </Container>

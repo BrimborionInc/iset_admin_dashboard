@@ -829,7 +829,7 @@ const AppRoutes = ({
               { text: 'Messages', href: '/messages' },
             ],
             'Messages',
-            <Box variant="p">Internal secure messaging scaffold.</Box>
+            <Box variant="p">Internal secure messaging for staff.</Box>
           )}
         </Guard>
       </Route>

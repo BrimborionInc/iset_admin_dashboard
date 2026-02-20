@@ -10,8 +10,23 @@ const formatDateTime = value => {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 };
 
+const withPrefix = (subject, prefix) => {
+  const base = String(subject || '').trim();
+  if (!base) return `${prefix} (No subject)`;
+  return base.toLowerCase().startsWith(`${prefix.toLowerCase()} `) ? base : `${prefix} ${base}`;
+};
+
 const PinnedMessagePanel = () => {
-  const { pinnedMessage, composeMode, startNewMessage, startReply, startReplyAll, cancelCompose, unpinMessage } = useMessaging();
+  const {
+    pinnedMessage,
+    composeMode,
+    startNewMessage,
+    startReply,
+    startReplyAll,
+    startForward,
+    cancelCompose,
+    unpinMessage,
+  } = useMessaging();
 
   const [subjectValue, setSubjectValue] = useState('');
   const [bodyValue, setBodyValue] = useState('');
@@ -22,7 +37,8 @@ const PinnedMessagePanel = () => {
   const [sendError, setSendError] = useState(null);
 
   const isComposing = !!composeMode;
-  const isReply = composeMode === 'reply';
+  const isReplyMode = composeMode === 'reply' || composeMode === 'replyAll';
+  const isForwardMode = composeMode === 'forward';
 
   const pinnedMeta = useMemo(() => {
     if (!pinnedMessage) return null;
@@ -103,11 +119,13 @@ const PinnedMessagePanel = () => {
       return;
     }
     if ((composeMode === 'reply' || composeMode === 'replyAll') && pinnedMeta) {
-      const baseSubject = pinnedMeta.subject || '';
-      setSubjectValue(baseSubject.toLowerCase().startsWith('re:') ? baseSubject : `Re: ${baseSubject}`);
+      setSubjectValue(withPrefix(pinnedMeta.subject || '', 'Re:'));
       setBodyValue('');
 
-      const fromProfile = pinnedMeta.sender || null;
+      const folderHint = pinnedMeta.folder === 'deleted' ? pinnedMeta.deletedFrom : pinnedMeta.folder;
+      const fromProfile = folderHint === 'sent'
+        ? (pinnedMeta.recipients?.[0] || pinnedMeta.sender || null)
+        : (pinnedMeta.sender || null);
       const participants = pinnedMeta.participants || [];
       const ownerId = Number(pinnedMeta.ownerId);
 
@@ -126,6 +144,20 @@ const PinnedMessagePanel = () => {
       }
       return;
     }
+    if (composeMode === 'forward' && pinnedMeta) {
+      setSelectedRecipients([]);
+      setSubjectValue(withPrefix(pinnedMeta.subject || '', 'Fwd:'));
+      const senderName = pinnedMeta.sender?.displayName || pinnedMeta.sender?.email || 'Unknown sender';
+      const forwardedParts = [
+        '---------- Forwarded message ----------',
+        `From: ${senderName}`,
+        pinnedMeta.receivedAt ? `Date: ${formatDateTime(pinnedMeta.receivedAt)}` : null,
+        `Subject: ${pinnedMeta.subject || '(No subject)'}`,
+        '',
+        pinnedMeta.body || '',
+      ].filter(Boolean);
+      setBodyValue(forwardedParts.join('\n'));
+    }
   }, [composeMode, isComposing, pinnedMeta, profileToOption]);
 
   const handleSend = useCallback(async () => {
@@ -133,11 +165,7 @@ const PinnedMessagePanel = () => {
       setSendError('Message body is required.');
       return;
     }
-    if (composeMode === 'new' && !subjectValue.trim()) {
-      setSendError('Subject is required.');
-      return;
-    }
-    if (composeMode === 'new' && !selectedRecipients.length) {
+    if (!selectedRecipients.length) {
       setSendError('Choose at least one recipient.');
       return;
     }
@@ -149,7 +177,7 @@ const PinnedMessagePanel = () => {
         body: bodyValue,
         toStaffProfileIds: selectedRecipients.map(opt => Number(opt.value)),
       };
-      if (composeMode !== 'new' && pinnedMessage?.threadId) {
+      if ((composeMode === 'reply' || composeMode === 'replyAll') && pinnedMessage?.threadId) {
         payload.threadId = pinnedMessage.threadId;
       }
       const resp = await apiFetch('/api/me/staff-messages', {
@@ -174,12 +202,16 @@ const PinnedMessagePanel = () => {
   if (isComposing) {
     return (
       <SpaceBetween size="s">
-        <Box variant="p">{isReply ? 'Reply to the selected message.' : 'Compose a new secure message.'}</Box>
+        <Box variant="p">
+          {isReplyMode
+            ? 'Reply to the selected message.'
+            : (isForwardMode ? 'Forward the selected message.' : 'Compose a new secure message.')}
+        </Box>
         <form>
           <SpaceBetween size="s">
             <FormField
               label="To"
-              errorText={sendError && !selectedRecipients.length && composeMode === 'new' ? sendError : undefined}
+              errorText={sendError && !selectedRecipients.length ? sendError : undefined}
               description="Select one or more staff recipients."
             >
               <Multiselect
@@ -243,6 +275,7 @@ const PinnedMessagePanel = () => {
       <SpaceBetween size="xs" direction="horizontal">
         <Button variant="primary" onClick={startReply}>Reply</Button>
         <Button onClick={startReplyAll}>Reply all</Button>
+        <Button onClick={startForward}>Forward</Button>
         <Button onClick={unpinMessage}>Unpin</Button>
       </SpaceBetween>
     </SpaceBetween>

@@ -35431,9 +35431,6 @@ app.get('/api/me/staff-profiles', async (req, res) => {
 
     return res.json({ items });
   } catch (err) {
-    if (isMissingTableErrorLocal(err)) {
-      return res.json({ items: [] });
-    }
     console.error('[staff-messages] GET /api/me/staff-profiles failed:', err.message);
     return res.status(500).json({ error: 'failed_to_list_staff_profiles' });
   }
@@ -35503,35 +35500,37 @@ app.get('/api/me/staff-messages', async (req, res) => {
       params
     );
 
-    const threadIds = (rows || [])
-      .map((row) => Number(row.thread_id))
+    const messageIds = (rows || [])
+      .map((row) => Number(row.message_id))
       .filter((id) => Number.isFinite(id) && id > 0);
-    const uniqueThreadIds = Array.from(new Set(threadIds));
+    const uniqueMessageIds = Array.from(new Set(messageIds));
 
-    let participantsByThread = new Map();
-    if (uniqueThreadIds.length) {
-      const placeholders = uniqueThreadIds.map(() => '?').join(',');
-      const [participantRows] = await pool.query(
+    let recipientsByMessage = new Map();
+    if (uniqueMessageIds.length) {
+      const placeholders = uniqueMessageIds.map(() => '?').join(',');
+      const [recipientRows] = await pool.query(
         `SELECT
-            smtp.thread_id,
+            smi.message_id,
             sp.id,
             sp.display_name,
             sp.name,
             sp.email,
             sp.primary_role
-          FROM staff_message_thread_participant smtp
-          JOIN staff_profiles sp ON sp.id = smtp.staff_profile_id
-         WHERE smtp.thread_id IN (${placeholders})
-         ORDER BY smtp.thread_id ASC, COALESCE(sp.display_name, sp.name, sp.email, CAST(sp.id AS CHAR)) ASC`,
-        uniqueThreadIds
+          FROM staff_message_item smi
+          JOIN staff_profiles sp ON sp.id = smi.owner_staff_profile_id
+          JOIN staff_message sm ON sm.id = smi.message_id
+         WHERE smi.message_id IN (${placeholders})
+           AND smi.owner_staff_profile_id <> sm.sender_staff_profile_id
+         ORDER BY smi.message_id ASC, COALESCE(sp.display_name, sp.name, sp.email, CAST(sp.id AS CHAR)) ASC`,
+        uniqueMessageIds
       );
-      participantsByThread = (participantRows || []).reduce((map, row) => {
-        const threadId = Number(row.thread_id);
-        if (!Number.isFinite(threadId)) return map;
-        if (!map.has(threadId)) map.set(threadId, []);
+      recipientsByMessage = (recipientRows || []).reduce((map, row) => {
+        const messageId = Number(row.message_id);
+        if (!Number.isFinite(messageId)) return map;
+        if (!map.has(messageId)) map.set(messageId, []);
         const summary = normaliseStaffProfileSummaryRow(row);
         if (summary) {
-          map.get(threadId).push({
+          map.get(messageId).push({
             staffProfileId: summary.staff_profile_id,
             displayName: summary.display_name,
             primaryRole: summary.primary_role,
@@ -35550,10 +35549,26 @@ app.get('/api/me/staff-messages', async (req, res) => {
         email: row.sender_email || null,
         primary_role: row.sender_primary_role || null,
       });
+      const sender = senderProfile
+        ? {
+          staffProfileId: senderProfile.staff_profile_id,
+          displayName: senderProfile.display_name,
+          primaryRole: senderProfile.primary_role,
+          email: senderProfile.email,
+        }
+        : null;
       const threadId = Number(row.thread_id);
-      const senderId = Number(row.sender_staff_profile_id);
-      const participants = participantsByThread.get(threadId) || [];
-      const recipients = participants.filter((p) => Number(p.staffProfileId) !== senderId);
+      const messageId = Number(row.message_id);
+      const recipients = recipientsByMessage.get(messageId) || [];
+      const participantById = new Map();
+      if (sender?.staffProfileId) {
+        participantById.set(String(sender.staffProfileId), sender);
+      }
+      for (const recipient of recipients) {
+        if (!recipient?.staffProfileId) continue;
+        participantById.set(String(recipient.staffProfileId), recipient);
+      }
+      const participants = Array.from(participantById.values());
       const createdAt = row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at ? String(row.created_at) : null);
       const readAt = row.read_at instanceof Date ? row.read_at.toISOString() : (row.read_at ? String(row.read_at) : null);
       return {
@@ -35569,14 +35584,7 @@ app.get('/api/me/staff-messages', async (req, res) => {
         subject: row.subject || '(No subject)',
         body: row.body || '',
         preview: truncatePreview(row.body || ''),
-        sender: senderProfile
-          ? {
-            staffProfileId: senderProfile.staff_profile_id,
-            displayName: senderProfile.display_name,
-            primaryRole: senderProfile.primary_role,
-            email: senderProfile.email,
-          }
-          : null,
+        sender,
         recipients,
         participants,
       };
@@ -35588,9 +35596,6 @@ app.get('/api/me/staff-messages', async (req, res) => {
       viewer: { staffProfileId },
     });
   } catch (err) {
-    if (isMissingTableErrorLocal(err)) {
-      return res.json({ folder: req.query.folder || 'inbox', items: [], viewer: { staffProfileId: null } });
-    }
     console.error('[staff-messages] GET /api/me/staff-messages failed:', err.message);
     return res.status(500).json({ error: 'failed_to_list_staff_messages' });
   }
@@ -35620,9 +35625,6 @@ app.get('/api/me/staff-messages/counts', async (req, res) => {
     }
     return res.json(counts);
   } catch (err) {
-    if (isMissingTableErrorLocal(err)) {
-      return res.json({ inbox: { total: 0, unread: 0 }, sent: { total: 0, unread: 0 }, deleted: { total: 0, unread: 0 } });
-    }
     console.error('[staff-messages] GET /api/me/staff-messages/counts failed:', err.message);
     return res.status(500).json({ error: 'failed_to_fetch_counts' });
   }
@@ -35635,6 +35637,7 @@ app.post('/api/me/staff-messages', async (req, res) => {
     if (!staffProfileId) {
       return res.status(401).json({ error: 'staff_profile_required' });
     }
+    const senderStaffProfileId = Number(staffProfileId);
 
     const body = req.body || {};
     const threadIdRaw = body.threadId ?? body.thread_id ?? null;
@@ -35653,15 +35656,18 @@ app.post('/api/me/staff-messages', async (req, res) => {
     const recipientIds = Array.from(new Set(
       (Array.isArray(rawRecipients) ? rawRecipients : [rawRecipients])
         .map((value) => Number(value))
-        .filter((value) => Number.isFinite(value) && value > 0 && value !== Number(staffProfileId))
+        .filter((value) => Number.isFinite(value) && value > 0 && value !== senderStaffProfileId)
     ));
+    if (!recipientIds.length) {
+      return res.status(400).json({ error: 'recipients_required' });
+    }
 
     connection = await pool.getConnection();
     await connection.beginTransaction();
 
     let effectiveThreadId = threadId;
     let threadSubject = null;
-    let participantIds = [];
+    const threadParticipantIds = Array.from(new Set([senderStaffProfileId, ...recipientIds]));
 
     if (effectiveThreadId) {
       const [[threadRow]] = await connection.query(
@@ -35674,51 +35680,38 @@ app.post('/api/me/staff-messages', async (req, res) => {
       }
       threadSubject = threadRow.subject || null;
 
-      const [existingParticipants] = await connection.query(
-        'SELECT staff_profile_id FROM staff_message_thread_participant WHERE thread_id = ?',
-        [effectiveThreadId]
+      const [[membershipRow]] = await connection.query(
+        `SELECT 1 AS is_participant
+           FROM staff_message_thread_participant
+          WHERE thread_id = ? AND staff_profile_id = ?
+          LIMIT 1`,
+        [effectiveThreadId, senderStaffProfileId]
       );
-      const existingIds = (existingParticipants || [])
-        .map((row) => Number(row.staff_profile_id))
-        .filter((value) => Number.isFinite(value) && value > 0);
-
-      const nextIds = Array.from(new Set([staffProfileId, ...existingIds, ...recipientIds]));
-      const existingSet = new Set(existingIds);
-      const toInsert = nextIds.filter((id) => !existingSet.has(id));
-
-      if (toInsert.length) {
-        const valuesSql = toInsert.map(() => '(?, ?)').join(',');
-        const values = toInsert.flatMap((id) => [effectiveThreadId, id]);
-        await connection.query(
-          `INSERT INTO staff_message_thread_participant (thread_id, staff_profile_id) VALUES ${valuesSql}`,
-          values
-        );
+      if (!membershipRow) {
+        await connection.rollback();
+        return res.status(403).json({ error: 'thread_access_denied' });
       }
 
-      participantIds = nextIds;
+      const valuesSql = threadParticipantIds.map(() => '(?, ?)').join(',');
+      const values = threadParticipantIds.flatMap((id) => [effectiveThreadId, id]);
+      await connection.query(
+        `INSERT IGNORE INTO staff_message_thread_participant (thread_id, staff_profile_id) VALUES ${valuesSql}`,
+        values
+      );
 
       if (!threadSubject && subjectValue) {
         await connection.query('UPDATE staff_message_thread SET subject = ? WHERE id = ?', [subjectValue, effectiveThreadId]);
         threadSubject = subjectValue;
       }
     } else {
-      if (!subjectValue) {
-        await connection.rollback();
-        return res.status(400).json({ error: 'subject_required' });
-      }
-      if (!recipientIds.length) {
-        await connection.rollback();
-        return res.status(400).json({ error: 'recipients_required' });
-      }
       const [result] = await connection.query(
         'INSERT INTO staff_message_thread (subject, created_by_staff_profile_id) VALUES (?, ?)',
-        [subjectValue, staffProfileId]
+        [subjectValue || null, senderStaffProfileId]
       );
       effectiveThreadId = result.insertId;
-      threadSubject = subjectValue;
-      participantIds = Array.from(new Set([staffProfileId, ...recipientIds]));
-      const valuesSql = participantIds.map(() => '(?, ?)').join(',');
-      const values = participantIds.flatMap((id) => [effectiveThreadId, id]);
+      threadSubject = subjectValue || null;
+      const valuesSql = threadParticipantIds.map(() => '(?, ?)').join(',');
+      const values = threadParticipantIds.flatMap((id) => [effectiveThreadId, id]);
       await connection.query(
         `INSERT INTO staff_message_thread_participant (thread_id, staff_profile_id) VALUES ${valuesSql}`,
         values
@@ -35727,19 +35720,20 @@ app.post('/api/me/staff-messages', async (req, res) => {
 
     const [msgResult] = await connection.query(
       'INSERT INTO staff_message (thread_id, sender_staff_profile_id, body, metadata_json) VALUES (?, ?, ?, NULL)',
-      [effectiveThreadId, staffProfileId, bodyValue]
+      [effectiveThreadId, senderStaffProfileId, bodyValue]
     );
     const messageId = msgResult.insertId;
 
     await connection.query('UPDATE staff_message_thread SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', [effectiveThreadId]);
 
     const now = new Date();
-    const itemValuesSql = participantIds.map(() => '(?, ?, ?, ?, NULL, NULL)').join(',');
-    const itemValues = participantIds.flatMap((participantId) => ([
+    const deliveryIds = Array.from(new Set([senderStaffProfileId, ...recipientIds]));
+    const itemValuesSql = deliveryIds.map(() => '(?, ?, ?, ?, NULL, NULL)').join(',');
+    const itemValues = deliveryIds.flatMap((participantId) => ([
       messageId,
       participantId,
-      participantId === staffProfileId ? 'sent' : 'inbox',
-      participantId === staffProfileId ? now : null,
+      participantId === senderStaffProfileId ? 'sent' : 'inbox',
+      participantId === senderStaffProfileId ? now : null,
     ]));
     await connection.query(
       `INSERT INTO staff_message_item (message_id, owner_staff_profile_id, folder, read_at, deleted_at, purged_at)
@@ -35755,21 +35749,18 @@ app.post('/api/me/staff-messages', async (req, res) => {
          FROM staff_message_item smi
         WHERE smi.message_id = ? AND smi.owner_staff_profile_id = ?
         LIMIT 1`,
-      [messageId, staffProfileId]
+      [messageId, senderStaffProfileId]
     );
     return res.status(201).json({
       ok: true,
       threadId: effectiveThreadId,
       messageId,
       itemId: senderItem?.item_id ? Number(senderItem.item_id) : null,
-      subject: threadSubject || '(No subject)',
+      subject: threadSubject || subjectValue || '(No subject)',
     });
   } catch (err) {
     if (connection) {
       try { await connection.rollback(); } catch {}
-    }
-    if (isMissingTableErrorLocal(err)) {
-      return res.status(503).json({ error: 'staff_messaging_unavailable' });
     }
     console.error('[staff-messages] POST /api/me/staff-messages failed:', err.message);
     return res.status(500).json({ error: 'failed_to_send_staff_message' });
@@ -35796,11 +35787,31 @@ app.patch('/api/me/staff-messages/:itemId/read', async (req, res) => {
     );
     return res.status(204).send();
   } catch (err) {
-    if (isMissingTableErrorLocal(err)) {
-      return res.status(204).send();
-    }
     console.error('[staff-messages] PATCH read failed:', err.message);
     return res.status(500).json({ error: 'failed_to_mark_read' });
+  }
+});
+
+app.patch('/api/me/staff-messages/:itemId/unread', async (req, res) => {
+  try {
+    const staffProfileId = resolveActiveStaffProfileId(req);
+    if (!staffProfileId) {
+      return res.status(401).json({ error: 'staff_profile_required' });
+    }
+    const itemId = Number(req.params.itemId);
+    if (!Number.isFinite(itemId) || itemId <= 0) {
+      return res.status(400).json({ error: 'invalid_item_id' });
+    }
+    await pool.query(
+      `UPDATE staff_message_item
+          SET read_at = NULL
+        WHERE id = ? AND owner_staff_profile_id = ? AND folder <> 'sent' AND purged_at IS NULL`,
+      [itemId, staffProfileId]
+    );
+    return res.status(204).send();
+  } catch (err) {
+    console.error('[staff-messages] PATCH unread failed:', err.message);
+    return res.status(500).json({ error: 'failed_to_mark_unread' });
   }
 });
 
@@ -35827,9 +35838,6 @@ app.put('/api/me/staff-messages/:itemId/delete', async (req, res) => {
     );
     return res.status(204).send();
   } catch (err) {
-    if (isMissingTableErrorLocal(err)) {
-      return res.status(204).send();
-    }
     console.error('[staff-messages] PUT delete failed:', err.message);
     return res.status(500).json({ error: 'failed_to_delete_message' });
   }
@@ -35855,9 +35863,6 @@ app.put('/api/me/staff-messages/:itemId/restore', async (req, res) => {
     );
     return res.status(204).send();
   } catch (err) {
-    if (isMissingTableErrorLocal(err)) {
-      return res.status(204).send();
-    }
     console.error('[staff-messages] PUT restore failed:', err.message);
     return res.status(500).json({ error: 'failed_to_restore_message' });
   }
@@ -35881,9 +35886,6 @@ app.delete('/api/me/staff-messages/:itemId', async (req, res) => {
     );
     return res.status(204).send();
   } catch (err) {
-    if (isMissingTableErrorLocal(err)) {
-      return res.status(204).send();
-    }
     console.error('[staff-messages] DELETE purge failed:', err.message);
     return res.status(500).json({ error: 'failed_to_purge_message' });
   }

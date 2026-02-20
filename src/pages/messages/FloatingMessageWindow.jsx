@@ -10,6 +10,8 @@ const FloatingMessageWindow = ({ chatVisible = false }) => {
 
   const title = useMemo(() => {
     if (composeMode === 'reply') return 'Reply';
+    if (composeMode === 'replyAll') return 'Reply all';
+    if (composeMode === 'forward') return 'Forward';
     if (composeMode === 'new') return 'New message';
     if (pinnedMessage) return 'Pinned message';
     return 'Messages';
@@ -86,4 +88,3 @@ const FloatingMessageWindow = ({ chatVisible = false }) => {
 };
 
 export default FloatingMessageWindow;
-
