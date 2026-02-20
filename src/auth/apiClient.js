@@ -72,6 +72,7 @@ export async function apiFetch(path, options = {}) {
     let sess = existingAuth ? null : loadSession();
     if (sess && sess.idToken) {
       headers.set('Authorization', 'Bearer ' + sess.idToken);
+      if (sess.accessToken) headers.set('X-Access-Token', sess.accessToken);
     }
   } else {
     let sess = loadSession();
@@ -101,6 +102,7 @@ export async function apiFetch(path, options = {}) {
       return new Response(null, { status: 0, statusText: 'redirecting-to-login' });
     }
     headers.set('Authorization', 'Bearer ' + sess.idToken);
+    if (sess.accessToken) headers.set('X-Access-Token', sess.accessToken);
   }
 
   const resp = await fetch(url, { ...options, headers });

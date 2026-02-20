@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ILMPSubmission xmlns="urn:awentech:path:ilmp:iset-spf:2023">
+  <Clients>
+    <Client>
+      <SocialInsuranceNumber>123456782</SocialInsuranceNumber>
+      <LastName>Doe</LastName>
+      <FirstName>Jane</FirstName>
+      <DateOfBirth>1990-01-15</DateOfBirth>
+      <Gender>Female</Gender>
+      <PostalAddress>
+        <PostalAddressStreet>123 Main St</PostalAddressStreet>
+        <PostalAddressCity>Montreal</PostalAddressCity>
+        <PostalAddressProvince>Quebec</PostalAddressProvince>
+        <PostalCode>H1A 2B3</PostalCode>
+      </PostalAddress>
+      <ActionPlans>
+        <ActionPlan>
+          <AgreementNumber>ABC-123</AgreementNumber>
+          <ClientStatusAtIntake>Unemployed</ClientStatusAtIntake>
+          <EducationLevel>Secondary School Diploma or GED</EducationLevel>
+          <ActionPlanStartDate>2024-04-01</ActionPlanStartDate>
+          <Interventions>
+            <Intervention>
+              <InterventionCode>Employment Counselling</InterventionCode>
+              <InterventionStartDate>2024-04-10</InterventionStartDate>
+              <InterventionOutcome>In progress</InterventionOutcome>
+            </Intervention>
+          </Interventions>
+        </ActionPlan>
+      </ActionPlans>
+    </Client>
+  </Clients>
+</ILMPSubmission>

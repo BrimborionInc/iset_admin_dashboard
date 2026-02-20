@@ -566,6 +566,13 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
   const [workflowLoading, setWorkflowLoading] = useState(false);
   const [fieldsLoading, setFieldsLoading] = useState(false);
   const [availableFields, setAvailableFields] = useState([]); // { key, labelEn, labelFr, stepName }
+  const summarySourceInputTypes = useMemo(() => new Set([
+    // Canonical template/component types in src/component-lib
+    'input', 'textarea', 'radio', 'radios', 'checkbox', 'checkboxes',
+    'select', 'date-input', 'file-upload', 'character-count', 'signature-ack',
+    // Legacy / normalized aliases seen in some payloads
+    'text', 'email', 'number', 'phone', 'password', 'password-input', 'date'
+  ]), []);
 
   useEffect(() => {
     if (!isSummaryList) return;
@@ -641,8 +648,7 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
             if (!key) continue;
             const t = (c.template_key || c.templateKey || c.type || '').toLowerCase();
             if (!t || t === 'summary-list') continue;
-            const allowed = ['input','textarea','radio','radios','checkbox','checkboxes','select','date-input','file-upload'];
-            if (!allowed.includes(t)) continue;
+            if (!summarySourceInputTypes.has(t)) continue;
             let labelObj = props?.fieldset?.legend?.text || props?.label?.text || props?.titleText || props?.text || '';
             const labEn = typeof labelObj === 'object' ? (labelObj.en || labelObj.fr || '') : (labelObj || '');
             const labFr = typeof labelObj === 'object' ? (labelObj.fr || labelObj.en || '') : (labelObj || '');
@@ -665,7 +671,7 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
     const workflowId = selectedComponent?.props?.workflowId || null;
     loadWorkflowFields(workflowId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSummaryList, selectedComponent?.props?.workflowId]);
+  }, [isSummaryList, selectedComponent?.props?.workflowId, summarySourceInputTypes]);
 
   const summaryListConfig = useMemo(() => {
     if (!isSummaryList) return null;

@@ -2,6 +2,15 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-02-16
+- API: `/api/admin/upload-config` now uses admin-local runtime config storage (`iset_runtime_config`) by default, removing the implicit intake proxy dependency; legacy proxy behavior is opt-in via `UPLOAD_CONFIG_PROXY=true`.
+
+## 2026-02-18
+- UX: Summary List "Summary Source" field picker in Modify Intake Step now includes `character-count` and `signature-ack` inputs (plus legacy input aliases), fixing missing data keys like `long-term-goal`.
+
+## 2026-02-15
+- UX: Notifications in the Case and Application workspaces now show only notifications tied to the current case/application (matching notification metadata), instead of the user's full notification list.
+
 ## 2026-02-13
 - UX: Moved the assessment "Deny Funding" shortcut into the Proposed Interventions table header actions (next to Add intervention) and renamed the section to "Propose Intervention(s)".
 

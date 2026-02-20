@@ -1,0 +1,365 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PATH reference schema (DRAFT)
+  Derived from: ILMP Standard Data File for ISET and SPF 2023.docx
+
+  IMPORTANT:
+  - This is NOT the official ESDC ILMP submission XSD.
+  - It is a pragmatic, code-friendly data model that captures the *elements*,
+    their allowed values, and many field-level constraints.
+  - Cross-field / conditional rules are better expressed in Schematron; see
+    ilmp-iset-spf-2023-path-reference.sch
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:tns="urn:awentech:path:ilmp:iset-spf:2023"
+           targetNamespace="urn:awentech:path:ilmp:iset-spf:2023"
+           elementFormDefault="qualified"
+           attributeFormDefault="unqualified">
+
+  <!-- ===== Simple types ===== -->
+  <xs:simpleType name="SinType">
+    <xs:annotation>
+      <xs:documentation>Social Insurance Number (SIN). XSD can enforce 9 digits; check-digit (Luhn) must be enforced in application code.</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[0-9]{9}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="NameType">
+    <xs:annotation>
+      <xs:documentation>Name-like field. Ensures at least one Unicode letter (so value is not purely numeric).</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:minLength value="1"/>
+      <xs:maxLength value="200"/>
+      <xs:pattern value=".*\p{L}.*"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="InitialsType">
+    <xs:restriction base="xs:string">
+      <xs:maxLength value="10"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="PostalCodeType">
+    <xs:annotation>
+      <xs:documentation>Postal/ZIP code. May be outside Canada. For homeless clients, document indicates literal "No Postal Code" must be used.</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:minLength value="1"/>
+      <xs:maxLength value="32"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="NocType">
+    <xs:annotation>
+      <xs:documentation>National Occupational Classification (NOC). This schema allows 4–5 digits; validate against the official NOC list in application code.</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[0-9]{4,5}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="AgreementNumberType">
+    <xs:restriction base="xs:string">
+      <xs:minLength value="1"/>
+      <xs:maxLength value="50"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- ===== Enumerations (code lists) ===== -->
+  <xs:simpleType name="GenderCodeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="Male"/>
+      <xs:enumeration value="Female"/>
+      <xs:enumeration value="Unspecified"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="AboriginalGroupCodeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="Registered Indian"/>
+      <xs:enumeration value="Non-status Indian"/>
+      <xs:enumeration value="Métis"/>
+      <xs:enumeration value="Inuit"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="MaritalStatusCodeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="Married or equivalent"/>
+      <xs:enumeration value="Single"/>
+      <xs:enumeration value="Divorced"/>
+      <xs:enumeration value="Widowed"/>
+      <xs:enumeration value="Separated"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="LanguageSpokenCodeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="Aboriginal language(s) only"/>
+      <xs:enumeration value="English only"/>
+      <xs:enumeration value="French only"/>
+      <xs:enumeration value="Aboriginal language(s) and English"/>
+      <xs:enumeration value="Aboriginal language(s) and French"/>
+      <xs:enumeration value="English and French"/>
+      <xs:enumeration value="Aboriginal language(s), English and French"/>
+      <xs:enumeration value="None of the above"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="DisabilityCodeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="No"/>
+      <xs:enumeration value="Yes"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="PostalAddressProvinceCodeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="Newfoundland / Labrador"/>
+      <xs:enumeration value="Nova Scotia"/>
+      <xs:enumeration value="New Brunswick"/>
+      <xs:enumeration value="Prince Edward Island"/>
+      <xs:enumeration value="Quebec"/>
+      <xs:enumeration value="Ontario"/>
+      <xs:enumeration value="Manitoba"/>
+      <xs:enumeration value="Saskatchewan"/>
+      <xs:enumeration value="Alberta"/>
+      <xs:enumeration value="British Columbia"/>
+      <xs:enumeration value="Northwest Territories"/>
+      <xs:enumeration value="Yukon"/>
+      <xs:enumeration value="Nunavut"/>
+      <xs:enumeration value="United States"/>
+      <xs:enumeration value="Other country"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="ClientStatusAtIntakeCodeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="Employed"/>
+      <xs:enumeration value="Unemployed"/>
+      <xs:enumeration value="Student"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="EmployedClientDetailsAtIntakeStatusCodeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="Full-time"/>
+      <xs:enumeration value="Part-time"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="EducationLevelCodeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="No formal education"/>
+      <xs:enumeration value="Up to Grade 7-8 (Secondaire I-II)"/>
+      <xs:enumeration value="Grade 9-10 (Secondaire III)"/>
+      <xs:enumeration value="Grade 11-12 (Secondaire IV-V)"/>
+      <xs:enumeration value="Secondary School Diploma or GED"/>
+      <xs:enumeration value="Some post-secondary training"/>
+      <xs:enumeration value="Apprenticeship or trades certificate or diploma"/>
+      <xs:enumeration value="College, CEGEP, or other non-university certificate or diploma"/>
+      <xs:enumeration value="University certificate or diploma"/>
+      <xs:enumeration value="University - Bachelor Degree"/>
+      <xs:enumeration value="University - Master’s Degree"/>
+      <xs:enumeration value="University - Doctorate"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="SocialAssistanceRecipientCodeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="No"/>
+      <xs:enumeration value="Yes"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="EmploymentInsuranceClaimantCodeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="Employment insurance claimant"/>
+      <xs:enumeration value="Reach-back client/former claimant"/>
+      <xs:enumeration value="Non-insured client"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="BarriersToEmploymentChooseAllThatApplyCodeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="None"/>
+      <xs:enumeration value="Lack of labour force attachment"/>
+      <xs:enumeration value="Lack of work experience"/>
+      <xs:enumeration value="Lack of transportation"/>
+      <xs:enumeration value="Remoteness"/>
+      <xs:enumeration value="Language"/>
+      <xs:enumeration value="Education"/>
+      <xs:enumeration value="Economic"/>
+      <xs:enumeration value="Dependent care"/>
+      <xs:enumeration value="Lack of marketable skills"/>
+      <xs:enumeration value="Physical or mental health"/>
+      <xs:enumeration value="Other barrier not listed above"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="ActionPlanResultCodeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="Unemployed but available for work"/>
+      <xs:enumeration value="Employed"/>
+      <xs:enumeration value="Self-Employed"/>
+      <xs:enumeration value="Returned to School"/>
+      <xs:enumeration value="Unspecified – client could not be reached"/>
+      <xs:enumeration value="No longer in labour force"/>
+      <xs:enumeration value="Stay in School"/>
+      <xs:enumeration value="Ready for Work"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="DetailsOnTheReturnToSchoolResultCodeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="Secondary school diploma or GED"/>
+      <xs:enumeration value="College, CEGEP, or other non-university certificate or diploma"/>
+      <xs:enumeration value="University certificate or diploma"/>
+      <xs:enumeration value="University - Bachelor degree"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="HighestLevelOfEducationOnExitCodeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="No formal education"/>
+      <xs:enumeration value="Up to Grade 7-8 (Secondaire I-II)"/>
+      <xs:enumeration value="Grade 9-10 (Secondaire III)"/>
+      <xs:enumeration value="Grade 11-12 (Secondaire IV-V)"/>
+      <xs:enumeration value="Secondary School Diploma or GED"/>
+      <xs:enumeration value="Some post-secondary training"/>
+      <xs:enumeration value="Apprenticeship or trades certificate or diploma"/>
+      <xs:enumeration value="College, CEGEP, or other non-university certificate or diploma"/>
+      <xs:enumeration value="University certificate or diploma"/>
+      <xs:enumeration value="University - Bachelor Degree"/>
+      <xs:enumeration value="University - Master’s Degree"/>
+      <xs:enumeration value="University – Doctorate"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="InterventionCodeCodeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="Career Research and Exploration"/>
+      <xs:enumeration value="Diagnostic Assessment"/>
+      <xs:enumeration value="Employment Counselling"/>
+      <xs:enumeration value="Skills Development - Essential Skills"/>
+      <xs:enumeration value="Skills Development - Academic Upgrading"/>
+      <xs:enumeration value="Work Experience - Job Creation Partnerships"/>
+      <xs:enumeration value="Work Experience - Wage Subsidy"/>
+      <xs:enumeration value="Work Experience - Student Employment"/>
+      <xs:enumeration value="Occupational Skills Training - Certificate"/>
+      <xs:enumeration value="Occupational Skills Training - Diploma"/>
+      <xs:enumeration value="Occupational Skills Training - Degree"/>
+      <xs:enumeration value="Occupational Skills Training - Apprenticeship"/>
+      <xs:enumeration value="Occupational Skills Training - Vocational / Industry Recognized"/>
+      <xs:enumeration value="Self-employment"/>
+      <xs:enumeration value="Job Search Preparation Strategies"/>
+      <xs:enumeration value="Job Starts Supports"/>
+      <xs:enumeration value="Employer Referral"/>
+      <xs:enumeration value="Employment Retention Supports"/>
+      <xs:enumeration value="Referral to Agencies"/>
+      <xs:enumeration value="Pre-Career Development"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="InterventionOutcomeCodeType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="Completed"/>
+      <xs:enumeration value="In progress"/>
+      <xs:enumeration value="Incomplete"/>
+      <xs:enumeration value="Failed to report"/>
+      <xs:enumeration value="Cancelled"/>
+      <xs:enumeration value="Rescheduled"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- ===== Complex types ===== -->
+  <xs:complexType name="PostalAddressType">
+    <xs:sequence>
+      <xs:element name="PostalAddressStreet" type="xs:string" minOccurs="0"/>
+      <xs:element name="PostalAddressCity" type="xs:string" minOccurs="0"/>
+      <xs:element name="PostalAddressProvince" type="tns:PostalAddressProvinceCodeType" minOccurs="0"/>
+      <xs:element name="PostalCode" type="tns:PostalCodeType" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="BarriersToEmploymentType">
+    <xs:sequence>
+      <xs:element name="Barrier" type="tns:BarriersToEmploymentChooseAllThatApplyCodeType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="EmployedClientDetailsAtIntakeType">
+    <xs:sequence>
+      <xs:element name="NationalOccupationalCodeNOC" type="tns:NocType" minOccurs="0"/>
+      <xs:element name="Status" type="tns:EmployedClientDetailsAtIntakeStatusCodeType" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ActionPlanResultDetailsType">
+    <xs:sequence>
+      <xs:element name="EmployedResultNOC" type="tns:NocType" minOccurs="0"/>
+      <xs:element name="ReturnToSchoolResult" type="tns:DetailsOnTheReturnToSchoolResultCodeType" minOccurs="0"/>
+      <xs:element name="HighestLevelOfEducationOnExit" type="tns:HighestLevelOfEducationOnExitCodeType" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="InterventionType">
+    <xs:sequence>
+      <xs:element name="InterventionCode" type="tns:InterventionCodeCodeType"/>
+      <xs:element name="InterventionStartDate" type="xs:date"/>
+      <xs:element name="InterventionEndDate" type="xs:date" minOccurs="0"/>
+      <xs:element name="InterventionOutcome" type="tns:InterventionOutcomeCodeType" minOccurs="0"/>
+      <xs:element name="InterventionRelatedNationalOccupationCode" type="tns:NocType" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="InterventionsType">
+    <xs:sequence>
+      <xs:element name="Intervention" type="tns:InterventionType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ActionPlanType">
+    <xs:sequence>
+      <xs:element name="AgreementNumber" type="tns:AgreementNumberType"/>
+      <xs:element name="ClientStatusAtIntake" type="tns:ClientStatusAtIntakeCodeType" minOccurs="0"/>
+      <xs:element name="EmployedClientDetailsAtIntake" type="tns:EmployedClientDetailsAtIntakeType" minOccurs="0"/>
+      <xs:element name="EducationLevel" type="tns:EducationLevelCodeType" minOccurs="0"/>
+      <xs:element name="SocialAssistanceRecipient" type="tns:SocialAssistanceRecipientCodeType" minOccurs="0"/>
+      <xs:element name="EmploymentInsuranceClaimant" type="tns:EmploymentInsuranceClaimantCodeType" minOccurs="0"/>
+      <xs:element name="BarriersToEmployment" type="tns:BarriersToEmploymentType" minOccurs="0"/>
+      <xs:element name="ActionPlanStartDate" type="xs:date"/>
+      <xs:element name="ActionPlanResultDate" type="xs:date" minOccurs="0"/>
+      <xs:element name="ActionPlanResult" type="tns:ActionPlanResultCodeType" minOccurs="0"/>
+      <xs:element name="ActionPlanResultDetails" type="tns:ActionPlanResultDetailsType" minOccurs="0"/>
+      <xs:element name="Interventions" type="tns:InterventionsType" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ActionPlansType">
+    <xs:sequence>
+      <xs:element name="ActionPlan" type="tns:ActionPlanType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ClientType">
+    <xs:sequence>
+      <xs:element name="SocialInsuranceNumber" type="tns:SinType"/>
+      <xs:element name="LastName" type="tns:NameType"/>
+      <xs:element name="Initials" type="tns:InitialsType" minOccurs="0"/>
+      <xs:element name="FirstName" type="tns:NameType"/>
+      <xs:element name="DateOfBirth" type="xs:date"/>
+      <xs:element name="Gender" type="tns:GenderCodeType" minOccurs="0"/>
+      <xs:element name="AboriginalGroup" type="tns:AboriginalGroupCodeType" minOccurs="0"/>
+      <xs:element name="MaritalStatus" type="tns:MaritalStatusCodeType" minOccurs="0"/>
+      <xs:element name="NumberOfDependentChildren" type="xs:nonNegativeInteger" minOccurs="0"/>
+      <xs:element name="LanguageSpoken" type="tns:LanguageSpokenCodeType" minOccurs="0"/>
+      <xs:element name="Disability" type="tns:DisabilityCodeType" minOccurs="0"/>
+      <xs:element name="PostalAddress" type="tns:PostalAddressType" minOccurs="0"/>
+      <xs:element name="ActionPlans" type="tns:ActionPlansType" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ClientsType">
+    <xs:sequence>
+      <xs:element name="Client" type="tns:ClientType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:element name="ILMPSubmission">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Clients" type="tns:ClientsType"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>

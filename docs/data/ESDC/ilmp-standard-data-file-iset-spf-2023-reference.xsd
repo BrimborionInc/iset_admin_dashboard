@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Reference schema for: ilmp-standard-data-file-iset-spf-2023-reference.xml
+
+  IMPORTANT:
+  - This XSD models the *reference catalog* extracted from the Word document,
+    NOT the official ESDC ILMP submission schema.
+  - It is intended to be machine-readable input for tooling (e.g., CODEX) to
+    generate forms, validators, and mapping layers.
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           elementFormDefault="qualified"
+           attributeFormDefault="unqualified">
+
+  <xs:element name="IlmpStandardDataFile">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Meta" type="MetaType"/>
+        <xs:element name="Elements" type="ElementsType"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:complexType name="MetaType">
+    <xs:sequence>
+      <xs:element name="Source" type="xs:string"/>
+      <xs:element name="Programs" type="xs:string" minOccurs="0"/>
+      <xs:element name="Year" type="xs:gYear" minOccurs="0"/>
+      <xs:element name="ExtractedOn" type="xs:date" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ElementsType">
+    <xs:sequence>
+      <xs:element name="Element" type="ElementType" minOccurs="1" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ElementType">
+    <xs:sequence>
+      <xs:element name="DisplayName" type="xs:string"/>
+      <xs:element name="Description" type="xs:string" minOccurs="0"/>
+      <xs:element name="ValidationRule" type="xs:string" minOccurs="0"/>
+      <xs:element name="Rationale" type="xs:string" minOccurs="0"/>
+      <xs:element name="AllowedValues" type="AllowedValuesType" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:NCName" use="required"/>
+    <xs:attribute name="xmlTag" type="xs:NCName" use="required"/>
+    <xs:attribute name="type" type="xs:string" use="required"/>
+    <xs:attribute name="multiSelect" type="xs:boolean" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="AllowedValuesType">
+    <xs:sequence>
+      <xs:element name="Value" type="xs:string" minOccurs="1" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+</xs:schema>

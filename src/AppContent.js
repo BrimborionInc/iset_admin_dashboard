@@ -853,6 +853,56 @@ const AppContent = ({ currentRole }) => {
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const flashbarRef = useRef(null);
 
+  const notificationScope = useMemo(() => {
+    const path = location?.pathname || '/';
+    const caseMatch = path.match(/^\/cases\/(\d+)(?:\/|$)/);
+    if (caseMatch) {
+      return { type: 'case', id: caseMatch[1] };
+    }
+    const appMatch = path.match(/^\/application-case\/([^/]+)(?:\/|$)/);
+    if (appMatch) {
+      return { type: 'application', id: appMatch[1] };
+    }
+    return { type: 'all', id: null };
+  }, [location?.pathname]);
+
+  const scopedNotifications = useMemo(() => {
+    if (!Array.isArray(notifications) || notifications.length === 0) return [];
+    if (!notificationScope || notificationScope.type === 'all' || !notificationScope.id) return notifications;
+
+    const id = String(notificationScope.id);
+    const isNumericId = /^\d+$/.test(id);
+
+    const parseMetadata = (value) => {
+      try {
+        if (!value) return {};
+        if (typeof value === 'string') return JSON.parse(value) || {};
+        if (typeof value === 'object') return value || {};
+      } catch (_) {}
+      return {};
+    };
+
+    return notifications.filter((n) => {
+      if (!n) return false;
+      const metadata = parseMetadata(n.metadata);
+      const metaCaseId = metadata.caseId != null ? String(metadata.caseId) : null;
+      const metaTrackingId = metadata.trackingId != null ? String(metadata.trackingId) : null;
+      const metaAppRef = metadata.applicationReference != null ? String(metadata.applicationReference) : null;
+
+      if (notificationScope.type === 'case') {
+        // Only notifications tied to this case.
+        return metaCaseId === id;
+      }
+
+      // Application workspace: route parameter is typically iset_case.id (numeric),
+      // but we also support tracking-id routes if they exist.
+      if (isNumericId) {
+        return metaCaseId === id;
+      }
+      return metaTrackingId === id || metaAppRef === id;
+    });
+  }, [notifications, notificationScope]);
+
   const loadNotifications = useCallback(async ({ scrollIntoView = false } = {}) => {
     setNotificationsLoading(true);
     try {
@@ -957,7 +1007,7 @@ const AppContent = ({ currentRole }) => {
   }, []);
 
   const notificationFlashbarItems = useMemo(() =>
-    notifications
+    scopedNotifications
       .filter(n => n && n.dismissible !== false)
       .map(n => {
         let metadata = {};
@@ -987,7 +1037,7 @@ const AppContent = ({ currentRole }) => {
               : trackingId
                 ? `/application-case/${trackingId}`
                 : null;
-        const linkColor = flashType === 'info' ? 'inverted' : 'normal';
+        const linkColor = (flashType === 'info' || flashType === 'success') ? 'inverted' : 'normal';
         const linkLabel = caseId
           ? (caseNumber ? `View case ${caseNumber}` : 'View case')
           : appReference
@@ -1011,7 +1061,7 @@ const AppContent = ({ currentRole }) => {
           id: `notification-${n.id}`,
         };
       }),
-  [notifications, handleDismissNotification, mapSeverityToType, daysSinceUtc]);
+  [scopedNotifications, handleDismissNotification, mapSeverityToType, daysSinceUtc]);
 
   const refreshNotifications = useCallback(() => loadNotifications({ scrollIntoView: true }), [loadNotifications]);
 
@@ -1479,7 +1529,7 @@ const AppContent = ({ currentRole }) => {
 	                <SideNavigation
                   currentRole={currentRole}
                   showTutorialHotspots={isHomeIntroTutorial(currentTutorial)}
-                  notificationCount={notifications.length}
+                  notificationCount={scopedNotifications.length}
                   refreshNotifications={refreshNotifications}
                   notificationsLoading={notificationsLoading}
                 />

@@ -1,0 +1,401 @@
+<?xml version="1.0" encoding="utf-8"?>
+<IlmpStandardDataFile>
+  <Meta>
+    <Source>ILMP Standard Data File for ISET and SPF 2023.docx</Source>
+    <Programs>ISET, SPF</Programs>
+    <Year>2023</Year>
+    <ExtractedOn>2026-02-19</ExtractedOn>
+  </Meta>
+  <Elements>
+    <Element id="socialInsuranceNumber" xmlTag="SocialInsuranceNumber" type="integer" multiSelect="false">
+      <DisplayName>Social Insurance Number</DisplayName>
+      <Description>Must be a valid Social Insurance Number</Description>
+      <ValidationRule>The Social Insurance Number (SIN) is not valid</ValidationRule>
+    </Element>
+    <Element id="lastName" xmlTag="LastName" type="string" multiSelect="false">
+      <DisplayName>Last Name</DisplayName>
+      <Description>Use last name based on valid identification.</Description>
+      <ValidationRule>The Last Name must not only contain numbers</ValidationRule>
+    </Element>
+    <Element id="initials" xmlTag="Initials" type="string" multiSelect="false">
+      <DisplayName>Initials</DisplayName>
+      <Description>Initials of client’s middle name. If a client does not have an initial(s), leave this field blank.</Description>
+    </Element>
+    <Element id="firstName" xmlTag="FirstName" type="string" multiSelect="false">
+      <DisplayName>First Name</DisplayName>
+      <Description>Use first name based on valid identification.</Description>
+      <ValidationRule>The First Name must not only contain numbers</ValidationRule>
+    </Element>
+    <Element id="dateOfBirth" xmlTag="DateOfBirth" type="date" multiSelect="false">
+      <DisplayName>Date of Birth</DisplayName>
+      <Description>Must be within one (1) and one hundred (100) years old.</Description>
+      <ValidationRule>The Date of Birth must not be a date in the future
+The Date of Birth must be between 1 and 100 years inclusively</ValidationRule>
+    </Element>
+    <Element id="gender" xmlTag="Gender" type="enum" multiSelect="false">
+      <DisplayName>Gender</DisplayName>
+      <Description>Unspecified should be used when a client is unable or does not want to identify with either male or female.</Description>
+      <AllowedValues>
+        <Value>Male</Value>
+        <Value>Female</Value>
+        <Value>Unspecified</Value>
+      </AllowedValues>
+    </Element>
+    <Element id="aboriginalGroup" xmlTag="AboriginalGroup" type="enum" multiSelect="false">
+      <DisplayName>Aboriginal Group</DisplayName>
+      <Description>Based on self-identification or as established the contribution agreement.</Description>
+      <AllowedValues>
+        <Value>Registered Indian</Value>
+        <Value>Non-status Indian</Value>
+        <Value>Métis</Value>
+        <Value>Inuit</Value>
+      </AllowedValues>
+    </Element>
+    <Element id="maritalStatus" xmlTag="MaritalStatus" type="enum" multiSelect="false">
+      <DisplayName>Marital Status</DisplayName>
+      <Description>Specifies the client’s marital status.</Description>
+      <AllowedValues>
+        <Value>Married or equivalent</Value>
+        <Value>Single</Value>
+        <Value>Divorced</Value>
+        <Value>Widowed</Value>
+        <Value>Separated</Value>
+      </AllowedValues>
+    </Element>
+    <Element id="numberOfDependentChildren" xmlTag="NumberOfDependentChildren" type="integer" multiSelect="false">
+      <DisplayName>Number of Dependent Children</DisplayName>
+      <Description>Number of dependent children at home aged eighteen (18) or less.</Description>
+      <ValidationRule>Number of dependent children at home aged eighteen (18) or less.</ValidationRule>
+    </Element>
+    <Element id="languageSpoken" xmlTag="LanguageSpoken" type="enum" multiSelect="false">
+      <DisplayName>Language Spoken</DisplayName>
+      <Description>Language(s) spoken by the client.</Description>
+      <AllowedValues>
+        <Value>Aboriginal language(s) only</Value>
+        <Value>English only</Value>
+        <Value>French only</Value>
+        <Value>Aboriginal language(s) and English</Value>
+        <Value>Aboriginal language(s) and French</Value>
+        <Value>English and French</Value>
+        <Value>Aboriginal language(s), English and French</Value>
+        <Value>None of the above</Value>
+      </AllowedValues>
+    </Element>
+    <Element id="disability" xmlTag="Disability" type="enum" multiSelect="false">
+      <DisplayName>Disability</DisplayName>
+      <Description>Based on self-identification.</Description>
+      <AllowedValues>
+        <Value>No</Value>
+        <Value>Yes</Value>
+      </AllowedValues>
+    </Element>
+    <Element id="postalAddressStreet" xmlTag="PostalAddressStreet" type="string" multiSelect="false">
+      <DisplayName>Postal Address – Street</DisplayName>
+      <Description>Specifies a unique location on a street, roadway, or artery within a municipality, based on identification information provided by municipal and/or officially recognized authorities. May also be a postal office box (i.e. PO Box or postal box).
+If the client does not have an address, “No Address” must be used instead. Please do not input your organization’s address.</Description>
+    </Element>
+    <Element id="postalAddressCity" xmlTag="PostalAddressCity" type="string" multiSelect="false">
+      <DisplayName>Postal Address – City</DisplayName>
+      <Description>An area commonly recognized as constituting a town, village, city, an official municipality, or a local area that is generally deemed locally to have the status of an official municipality or reserve.
+
+If the client does not have a city, the city of the organization may be used.</Description>
+    </Element>
+    <Element id="postalAddressProvince" xmlTag="PostalAddressProvince" type="enum" multiSelect="false">
+      <DisplayName>Postal Address – Province</DisplayName>
+      <Description>The province or country of residence at the time of opening of an Action Plan.
+
+If client does not have an address, use organization’s province.</Description>
+      <AllowedValues>
+        <Value>Newfoundland / Labrador</Value>
+        <Value>Nova Scotia</Value>
+        <Value>New Brunswick</Value>
+        <Value>Prince Edward Island</Value>
+        <Value>Quebec</Value>
+        <Value>Ontario</Value>
+        <Value>Manitoba</Value>
+        <Value>Saskatchewan</Value>
+        <Value>Alberta</Value>
+        <Value>British Columbia</Value>
+        <Value>Northwest Territories</Value>
+        <Value>Yukon</Value>
+        <Value>Nunavut</Value>
+        <Value>United States</Value>
+        <Value>Other country</Value>
+      </AllowedValues>
+    </Element>
+    <Element id="postalCode" xmlTag="PostalCode" type="postalCode" multiSelect="false">
+      <DisplayName>Postal Code</DisplayName>
+      <Description>Specifies the client’s postal code (may be outside Canada). A code used by various postal authorities in the world (zip code in the USA) to identify a relatively small (10-1,000 people) delivery location. 
+
+Where the client is homeless (i.e. client has no address and postal code), “No Postal Code” must be used.</Description>
+      <ValidationRule>The first letter of the Postal Code does not match the Province selected</ValidationRule>
+    </Element>
+    <Element id="agreementNumber" xmlTag="AgreementNumber" type="integer" multiSelect="false">
+      <DisplayName>Agreement Number</DisplayName>
+      <Description>Must be a valid CRF or EI agreement number.</Description>
+      <ValidationRule>The “Agreement Number” is not valid</ValidationRule>
+    </Element>
+    <Element id="clientStatusAtIntake" xmlTag="ClientStatusAtIntake" type="enum" multiSelect="false">
+      <DisplayName>Client Status at Intake</DisplayName>
+      <Rationale>Previously the definition of an eligible client was a person who was unemployed and not in full time school. 
+
+Changes to client eligibility in ISETS and with EI Part II funds, expands that definition to include clients who are in full time school and employed. 
+
+Reporting on the types of clients being served will be necessary to understand how the program impacts the variety of participants.</Rationale>
+      <AllowedValues>
+        <Value>Employed</Value>
+        <Value>Unemployed</Value>
+        <Value>Student</Value>
+      </AllowedValues>
+    </Element>
+    <Element id="employedClientDetailsAtIntakeNationalOccupationalCodeNOC" xmlTag="EmployedClientDetailsAtIntakeNationalOccupationalCodeNOC" type="noc" multiSelect="false">
+      <DisplayName>Employed Client Details at Intake – National Occupational Code (NOC)</DisplayName>
+      <ValidationRule>When the Client Status at the intake is “employed”, the National Occupation Code of the current employment needs to be provided.</ValidationRule>
+      <Rationale>ISETS aims to close the skills gap between Indigenous and non-Indigenous populations. Upskilling to higher level jobs can be analysed with the NOC.</Rationale>
+    </Element>
+    <Element id="employedClientDetailsAtIntakeStatus" xmlTag="EmployedClientDetailsAtIntakeStatus" type="enum" multiSelect="false">
+      <DisplayName>Employed Client Details at Intake – Status</DisplayName>
+      <ValidationRule>When the Client Status at the intake is “employed”, the status of the current employment needs to be provided.</ValidationRule>
+      <AllowedValues>
+        <Value>Full-time</Value>
+        <Value>Part-time</Value>
+      </AllowedValues>
+    </Element>
+    <Element id="educationLevel" xmlTag="EducationLevel" type="enum" multiSelect="false">
+      <DisplayName>Education Level</DisplayName>
+      <Description>Highest level of education attained at the time of creation of Action Plan.
+No formal education: did not attend school 
+Up to Grade 7-8: includes primary level grades 1-6,      7 and 8 (Grade 7-8 = Sec I-II)
+Grades 9-10 (Sec III)
+Grade 11-12 (Sec IV-V credits, but not enough to graduate). 
+High school (Sec V) diploma or equivalent (includes those recognized by the Ministère d’éducation du Québec (MEQ) and First Nation secondary school diploma (as these are often recognized by CEGEPS for enrolment, but not by the MEQ).
+Some post-secondary training: client attended post-secondary training but did not complete a program.
+Apprenticeship and journeyman cards (trades certificate) or vocational training diploma (DEP- diplômes d’études professionnelles) work related safety cards and other trade certifications.
+College, CEGEP, or other non-university certificate or diploma
+College refers to a technical, applied arts, or applied science school. These are post-secondary institutions granting certificates, diplomas and associate's degree.
+CEGEP includes: 
+A 2 year Diploma of College Studies (DCS) that are pre-university diploma programs that may not be used to secure employment
+A 3 year Diploma of College Studies (DCS) that are technical training certificates that can secure employment; 
+Attestation of College Studies (ACS) is similar to a DCS, but more technical with a duration of 6 months to one year or a specific number of training hours for each program
+other non-university certificate or diploma 
+University certificate or diploma below bachelor level (includes credited and non-credited geared to support/compliment/validate current employment)</Description>
+      <AllowedValues>
+        <Value>No formal education</Value>
+        <Value>Up to Grade 7-8 (Secondaire I-II)</Value>
+        <Value>Grade 9-10 (Secondaire III)</Value>
+        <Value>Grade 11-12 (Secondaire IV-V)</Value>
+        <Value>Secondary School Diploma or GED</Value>
+        <Value>Some post-secondary training</Value>
+        <Value>Apprenticeship or trades certificate or diploma</Value>
+        <Value>College, CEGEP, or other non-university certificate or diploma</Value>
+        <Value>University certificate or diploma</Value>
+        <Value>University - Bachelor Degree</Value>
+        <Value>University - Master’s Degree</Value>
+        <Value>University - Doctorate</Value>
+      </AllowedValues>
+    </Element>
+    <Element id="socialAssistanceRecipient" xmlTag="SocialAssistanceRecipient" type="enum" multiSelect="false">
+      <DisplayName>Social Assistance Recipient</DisplayName>
+      <Description>Is the client a Social Assistance Recipient at the time of the creation of the Action Plan?</Description>
+      <AllowedValues>
+        <Value>No</Value>
+        <Value>Yes</Value>
+      </AllowedValues>
+    </Element>
+    <Element id="employmentInsuranceClaimant" xmlTag="EmploymentInsuranceClaimant" type="enum" multiSelect="false">
+      <DisplayName>Employment Insurance Claimant</DisplayName>
+      <Description>Type of Employment Insurance Claimant when starting the Action Plan.</Description>
+      <AllowedValues>
+        <Value>Employment insurance claimant</Value>
+        <Value>Reach-back client/former claimant</Value>
+        <Value>Non-insured client</Value>
+      </AllowedValues>
+    </Element>
+    <Element id="barriersToEmploymentChooseAllThatApply" xmlTag="BarriersToEmploymentChooseAllThatApply" type="enum[]" multiSelect="true">
+      <DisplayName>Barriers to employment – choose all that apply</DisplayName>
+      <Description>A barrier to employment can be lack of work experience or transportation, physical or mental health issues, no access to care for children or family member, etc.
+
+None: Client does not have barrier to employment.
+Lack of labour force attachment: a client who has been out of the job market for more than 3 years.
+Lack of work experience: Client has little or no work experience
+Lack of transportation: Client who does not have access to any type of transportation to get to their place of employment or to a counsellor.
+Remoteness: Client lives in a remote area that has little or no access to job opportunities or no suitable jobs locally.
+Language: Client lacks fluency in the language required for the local job market.
+Education: Client who has insufficient education (i.e. less than high school).
+Economic: Client does not have financial resources to purchase required equipment (boots, uniforms); costs for relocation, etc., needed to obtain employment.
+Dependent care: Client does not have access to care for children or family member.
+Lack of marketable skills: As a result of a shift in labour market demand, the client does not have the required marketable skills (i.e. IT innovation).
+Client has a physical or mental health barrier
+Other barrier not listed above: Client who identifies a barrier not provided in the list.</Description>
+      <ValidationRule>If “Barriers to Employment” is &quot;None&quot; then no other barriers must be selected</ValidationRule>
+      <AllowedValues>
+        <Value>None</Value>
+        <Value>Lack of labour force attachment</Value>
+        <Value>Lack of work experience</Value>
+        <Value>Lack of transportation</Value>
+        <Value>Remoteness</Value>
+        <Value>Language</Value>
+        <Value>Education</Value>
+        <Value>Economic</Value>
+        <Value>Dependent care</Value>
+        <Value>Lack of marketable skills</Value>
+        <Value>Physical or mental health</Value>
+        <Value>Other barrier not listed above</Value>
+      </AllowedValues>
+    </Element>
+    <Element id="actionPlanStartDate" xmlTag="ActionPlanStartDate" type="date" multiSelect="false">
+      <DisplayName>Action Plan Start Date</DisplayName>
+      <Description>Start date of Action Plan.
+
+A client shall not have more than one active Action Plan at a time. In order to have a new Action Plan, an Action Plan Result Date of the previous Action Plan must be provided. 
+
+Please do not change the Action Plan Start Date on a client Action Plan after an upload has been completed at the Data Gateway.  HRSDC uses the client SIN, Action Plan Start Date, and Agreement Number to validate program results.  By changing the Action Plan Start Date, the client file will be rejected.</Description>
+      <ValidationRule>The “Action Plan Start Date” must not be a date in the future
+The “Action Plan Start Date” must not be before year 2000
+The “Action Plan Start Date” must be before the “Action Plan Result Date”
+The “Action Plan Start Date” must be before the “Intervention Start Date”</ValidationRule>
+    </Element>
+    <Element id="actionPlanResultDate" xmlTag="ActionPlanResultDate" type="date" multiSelect="false">
+      <DisplayName>Action Plan Result Date</DisplayName>
+      <Description>End date of Action Plan. Date when the final outcome of the Action Plan was reached. Current Action Plan Result Date must have a value in order to start another Action Plan.</Description>
+      <ValidationRule>The “Action Plan Result Date” must not be a date in the future
+The “Action Plan Result Date” must not be before the “Action Plan Start Date”
+An “Action Plan Result Date” is required when the “Action Plan Result Code” is provided</ValidationRule>
+    </Element>
+    <Element id="actionPlanResult" xmlTag="ActionPlanResult" type="enum" multiSelect="false">
+      <DisplayName>Action Plan Result</DisplayName>
+      <Description>Final result of the Action Plan. The result is the final outcome of the Action Plan.
+Unemployed but available for work: clients who may not have completed interventions and need more interventions before ready to fully participate in the labour market in their chosen career path, some skills and work experience. 
+Employed
+Self-Employed
+Return to School: geared towards those that did not complete secondary/post-secondary education – activities that encourage to pursue longer-term education certificates, diplomas, degrees.
+Unspecified – unable to reach client: Client cannot be reached by telephone or by other means.
+No longer in labour force: Client may be deceased, incarcerated, no longer actively searching for work.
+Stay in School: geared towards youth enrolled in secondary education – allows activities/incentives for youth to keep enrolled in education, continue along the employment continuum without breaks/periods where no engaged in education/employment.
+Ready for work: Client has completed all of the interventions and he/she ready to go on the labour market, but did not found a job at the end of the action plan.</Description>
+      <Rationale>Expanded Action Plan Results speaks to successful interventions that result in youth staying in school or others may successfully complete their training but not find work. Skills gained are still a success.</Rationale>
+      <AllowedValues>
+        <Value>Unemployed but available for work</Value>
+        <Value>Employed</Value>
+        <Value>Self-Employed</Value>
+        <Value>Returned to School</Value>
+        <Value>Unspecified – client could not be reached</Value>
+        <Value>No longer in labour force</Value>
+        <Value>Stay in School</Value>
+        <Value>Ready for Work</Value>
+      </AllowedValues>
+    </Element>
+    <Element id="detailsOnTheEmployedResultNationalOccupationCodeNOC" xmlTag="DetailsOnTheEmployedResultNationalOccupationCodeNOC" type="noc" multiSelect="false">
+      <DisplayName>Details on the Employed Result - National Occupation Code (NOC)</DisplayName>
+      <ValidationRule>When a client finds a job at the end of the action plan, the National Occupation Code of the employment needs to be provided.</ValidationRule>
+      <Rationale>Knowing this closes a gap in understanding what sorts of jobs people find.</Rationale>
+    </Element>
+    <Element id="detailsOnTheReturnToSchoolResult" xmlTag="DetailsOnTheReturnToSchoolResult" type="enum" multiSelect="false">
+      <DisplayName>Details on the Return to School Result</DisplayName>
+      <ValidationRule>When a client returns to school at the end of the action plan, the type of school that the client is going back to needs to be provided.</ValidationRule>
+      <Rationale>Knowing this closes a gap in understanding what type of school participant move on to. Key to this is that the client goes for further studies without the financial support of the ISETS.</Rationale>
+      <AllowedValues>
+        <Value>Secondary school diploma or GED</Value>
+        <Value>College, CEGEP, or other non-university certificate or diploma</Value>
+        <Value>University certificate or diploma</Value>
+        <Value>University - Bachelor degree</Value>
+      </AllowedValues>
+    </Element>
+    <Element id="highestLevelOfEducationOnExit" xmlTag="HighestLevelOfEducationOnExit" type="enum" multiSelect="false">
+      <DisplayName>Highest Level of Education on Exit</DisplayName>
+      <Description>Provide the highest level of education of the client after completing the action plan.</Description>
+      <Rationale>Success for ISETS extends beyond the client finding a job or returning to school. Up grading of education levels will be supported in ISETS and changes in education credentials is also seen as a measure of success.</Rationale>
+      <AllowedValues>
+        <Value>No formal education</Value>
+        <Value>Up to Grade 7-8 (Secondaire I-II)</Value>
+        <Value>Grade 9-10 (Secondaire III)</Value>
+        <Value>Grade 11-12 (Secondaire IV-V)</Value>
+        <Value>Secondary School Diploma or GED</Value>
+        <Value>Some post-secondary training</Value>
+        <Value>Apprenticeship or trades certificate or diploma</Value>
+        <Value>College, CEGEP, or other non-university certificate or diploma</Value>
+        <Value>University certificate or diploma</Value>
+        <Value>University - Bachelor Degree</Value>
+        <Value>University - Master’s Degree</Value>
+        <Value>University – Doctorate</Value>
+      </AllowedValues>
+    </Element>
+    <Element id="interventionCode" xmlTag="InterventionCode" type="enum" multiSelect="false">
+      <DisplayName>Intervention Code</DisplayName>
+      <Description>See Attached
+
+20. Pre-Career Development 
+
+Developmental activity or activities engaged by a client that moves the client along towards being ready, willing and able to work. Activities under this intervention include, but are not limited to: language, life skills, cultural awareness etc.</Description>
+      <Rationale>A 20th intervention expands the range of services and supports that give credit to the agreement holder that have been missing from the reporting in the past.</Rationale>
+      <AllowedValues>
+        <Value>Career Research and Exploration</Value>
+        <Value>Diagnostic Assessment</Value>
+        <Value>Employment Counselling</Value>
+        <Value>Skills Development - Essential Skills</Value>
+        <Value>Skills Development - Academic Upgrading</Value>
+        <Value>Work Experience - Job Creation Partnerships</Value>
+        <Value>Work Experience - Wage Subsidy</Value>
+        <Value>Work Experience - Student Employment</Value>
+        <Value>Occupational Skills Training - Certificate</Value>
+        <Value>Occupational Skills Training - Diploma</Value>
+        <Value>Occupational Skills Training - Degree</Value>
+        <Value>Occupational Skills Training - Apprenticeship</Value>
+        <Value>Occupational Skills Training - Vocational / Industry Recognized</Value>
+        <Value>Self-employment</Value>
+        <Value>Job Search Preparation Strategies</Value>
+        <Value>Job Starts Supports</Value>
+        <Value>Employer Referral</Value>
+        <Value>Employment Retention Supports</Value>
+        <Value>Referral to Agencies</Value>
+        <Value>Pre-Career Development</Value>
+      </AllowedValues>
+    </Element>
+    <Element id="interventionStartDate" xmlTag="InterventionStartDate" type="date" multiSelect="false">
+      <DisplayName>Intervention Start Date</DisplayName>
+      <Description>Start date of the intervention. An Action Plan must have at least one (1) intervention.</Description>
+      <ValidationRule>The “Intervention Start Date” must not be before year 2000
+The “Intervention Start Date” must not be before the “Action Plan Start Date”
+The “Intervention Start Date” must not be after the “Intervention End Date”</ValidationRule>
+    </Element>
+    <Element id="interventionEndDate" xmlTag="InterventionEndDate" type="date" multiSelect="false">
+      <DisplayName>Intervention End Date</DisplayName>
+      <Description>End date of the intervention. An Action Plan must have at least one (1) Intervention. It may contain many interventions.</Description>
+      <ValidationRule>The “Intervention End Date” must not be later than the &quot;Action Plan Result Date”</ValidationRule>
+    </Element>
+    <Element id="interventionOutcome" xmlTag="InterventionOutcome" type="enum" multiSelect="false">
+      <DisplayName>Intervention Outcome</DisplayName>
+      <Description>Outcome of Intervention.</Description>
+      <ValidationRule>When the “Action Plan Result Date” is provided the “Intervention Outcome” is required</ValidationRule>
+      <AllowedValues>
+        <Value>Completed</Value>
+        <Value>In progress</Value>
+        <Value>Incomplete</Value>
+        <Value>Failed to report</Value>
+        <Value>Cancelled</Value>
+        <Value>Rescheduled</Value>
+      </AllowedValues>
+    </Element>
+    <Element id="interventionRelatedNationalOccupationCode" xmlTag="InterventionRelatedNationalOccupationCode" type="noc" multiSelect="false">
+      <DisplayName>Intervention Related National Occupation Code</DisplayName>
+      <Description>National Occupation Code related to training or work experience based interventions.
+
+Applicable to:
+6 - Work Experience - Job Creation Partnerships 
+7 - Work Experience - Wage Subsidy
+8 - Work Experience - Student Employment
+9 - Occupational Skills Training - Certificate
+10 - Occupational Skills Training - Diploma
+11 - Occupational Skills Training - Degree
+12 - Occupational Skills Training - Apprenticeship
+13 - Occupational Skills Training - Vocational</Description>
+      <ValidationRule>When the “Intervention Code” is 6 to 13 the “Intervention Related NOC” is required
+The “Intervention Related NOC” must be a valid NOC</ValidationRule>
+      <Rationale>The following intervention was removed from the list. 
+
+4 – Skills Development – Essential Skills
+
+As mentioned at the National Data Workshop, the NOC should not be required for the Essential skills intervention. Most of these interventions are not related to a specific occupation.</Rationale>
+    </Element>
+  </Elements>
+</IlmpStandardDataFile>

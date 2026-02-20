@@ -13204,12 +13204,190 @@ app.get('/api/admin/linkage-stats', async (req, res) => {
   }
 });
 
-// --- Upload Config Proxy (for standalone dashboard hitting admin port) ---
-// Forwards to intake service which hosts canonical implementation.
-// GET  /api/admin/upload-config  -> proxy to {INTAKE_BASE_URL}/api/admin/upload-config
-// PATCH /api/admin/upload-config -> proxy body and return result
+// --- Upload Config (admin-local by default; optional legacy proxy mode) ---
+// GET  /api/admin/upload-config  -> returns { policy, infra, loadedAt, audit }
+// PATCH /api/admin/upload-config -> updates runtime policy in iset_runtime_config
 app.all(['/api/admin/upload-config'], async (req, res) => {
   try {
+    const UPLOAD_SCOPE = 'admin';
+    const UPLOAD_POLICY_KEY = 'upload.config.policy';
+    const UPLOAD_AUDIT_KEY = 'upload.config.audit';
+    const LOCAL_DEFAULT_POLICY = {
+      enabled: true,
+      maxSizeMB: 25,
+      multipartThresholdMB: 8,
+      retentionDays: 30,
+      allowedMime: ['application/pdf', 'image/jpeg', 'image/png'],
+      scanRequired: false
+    };
+    const boolFrom = (v, fallback = false) => {
+      if (typeof v === 'boolean') return v;
+      if (typeof v === 'number') return v !== 0;
+      if (typeof v === 'string') {
+        const s = v.trim().toLowerCase();
+        if (['1', 'true', 'yes', 'on'].includes(s)) return true;
+        if (['0', 'false', 'no', 'off'].includes(s)) return false;
+      }
+      return fallback;
+    };
+    const toPosInt = (v, fallback) => {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return fallback;
+      const i = Math.floor(n);
+      return i > 0 ? i : fallback;
+    };
+    const uniqStrings = (arr = []) => {
+      const out = [];
+      const seen = new Set();
+      for (const item of Array.isArray(arr) ? arr : []) {
+        if (typeof item !== 'string') continue;
+        const s = item.trim();
+        if (!s || seen.has(s)) continue;
+        seen.add(s);
+        out.push(s);
+      }
+      return out;
+    };
+    const normalizeUploadPolicy = (raw = {}) => {
+      const merged = { ...LOCAL_DEFAULT_POLICY, ...(raw && typeof raw === 'object' ? raw : {}) };
+      const maxSizeMB = Math.min(2048, toPosInt(merged.maxSizeMB, LOCAL_DEFAULT_POLICY.maxSizeMB));
+      let multipartThresholdMB = Math.min(1024, toPosInt(merged.multipartThresholdMB, LOCAL_DEFAULT_POLICY.multipartThresholdMB));
+      if (multipartThresholdMB >= maxSizeMB) multipartThresholdMB = Math.max(1, maxSizeMB - 1);
+      const retentionDays = Math.min(3650, toPosInt(merged.retentionDays, LOCAL_DEFAULT_POLICY.retentionDays));
+      const allowedMime = uniqStrings(merged.allowedMime);
+      return {
+        enabled: boolFrom(merged.enabled, LOCAL_DEFAULT_POLICY.enabled),
+        maxSizeMB,
+        multipartThresholdMB,
+        retentionDays,
+        allowedMime: allowedMime.length ? allowedMime : [...LOCAL_DEFAULT_POLICY.allowedMime],
+        scanRequired: boolFrom(merged.scanRequired, LOCAL_DEFAULT_POLICY.scanRequired)
+      };
+    };
+    const parseJsonColumn = (value) => {
+      if (!value) return null;
+      if (typeof value === 'string') {
+        try { return JSON.parse(value); } catch { return null; }
+      }
+      if (typeof value === 'object') return value;
+      return null;
+    };
+    const readUploadRows = async () => {
+      await ensureRuntimeConfigTable();
+      const [rows] = await pool.query(
+        'SELECT k, v, updated_at FROM iset_runtime_config WHERE scope = ? AND k IN (?, ?)',
+        [UPLOAD_SCOPE, UPLOAD_POLICY_KEY, UPLOAD_AUDIT_KEY]
+      );
+      const byKey = new Map();
+      (Array.isArray(rows) ? rows : []).forEach(row => byKey.set(row.k, row));
+      const policyRow = byKey.get(UPLOAD_POLICY_KEY) || null;
+      const auditRow = byKey.get(UPLOAD_AUDIT_KEY) || null;
+      return {
+        policy: normalizeUploadPolicy(parseJsonColumn(policyRow?.v) || {}),
+        audit: (() => {
+          const parsed = parseJsonColumn(auditRow?.v);
+          return Array.isArray(parsed) ? parsed.filter(item => item && typeof item === 'object') : [];
+        })(),
+        updatedAt: policyRow?.updated_at ? new Date(policyRow.updated_at).toISOString() : null
+      };
+    };
+    const buildInfra = () => {
+      const capRaw = Number(process.env.MAX_UPLOAD_MB || process.env.UPLOAD_MAX_MB || 0);
+      return {
+        mode: process.env.UPLOAD_MODE || process.env.UPLOAD_DRIVER || 's3',
+        driver: process.env.UPLOAD_DRIVER || process.env.UPLOAD_MODE || 's3',
+        bucket: process.env.OBJECT_BUCKET || null,
+        region: process.env.OBJECT_REGION || process.env.AWS_REGION || null,
+        endpoint: process.env.OBJECT_ENDPOINT || null,
+        forcePathStyle: boolFrom(process.env.OBJECT_FORCE_PATH_STYLE, false),
+        keyPrefix: process.env.OBJECT_KEY_PREFIX || '',
+        maxUploadEnvCapMB: Number.isFinite(capRaw) && capRaw > 0 ? capRaw : null
+      };
+    };
+    const canManageUploadConfig = (request) => {
+      const role = canonicaliseAccessRole(inferUserRole(request));
+      return role === 'System Administrator' || role === 'Program Administrator';
+    };
+    const requestMethod = req.method.toUpperCase();
+    const useLegacyProxy = String(process.env.UPLOAD_CONFIG_PROXY || 'false').toLowerCase() === 'true';
+    if (!useLegacyProxy) {
+      if (requestMethod === 'GET') {
+        const snap = await readUploadRows();
+        return res.json({
+          policy: snap.policy,
+          infra: buildInfra(),
+          loadedAt: snap.updatedAt || new Date().toISOString(),
+          audit: snap.audit.slice(0, 10)
+        });
+      }
+      if (requestMethod === 'PATCH') {
+        if (!canManageUploadConfig(req)) return res.status(403).json({ error: 'forbidden' });
+        if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+          return res.status(400).json({ error: 'invalid_payload', message: 'Expected JSON object payload.' });
+        }
+        const snap = await readUploadRows();
+        const allowed = ['enabled', 'maxSizeMB', 'multipartThresholdMB', 'retentionDays', 'allowedMime', 'scanRequired'];
+        const patch = {};
+        for (const key of allowed) {
+          if (Object.prototype.hasOwnProperty.call(req.body, key)) patch[key] = req.body[key];
+        }
+        const nextPolicy = normalizeUploadPolicy({ ...snap.policy, ...patch });
+        const changed = allowed.filter(key => JSON.stringify(snap.policy[key]) !== JSON.stringify(nextPolicy[key]));
+        const actor = resolveActorLabel(req);
+        const entry = {
+          created_at: new Date().toISOString(),
+          actor: actor || 'admin-dashboard',
+          diff_summary: changed.length ? changed.join(', ') : 'no_changes'
+        };
+        const nextAudit = [entry, ...(Array.isArray(snap.audit) ? snap.audit : [])].slice(0, 50);
+        await ensureRuntimeConfigTable();
+        await pool.query(
+          'INSERT INTO iset_runtime_config (scope,k,v) VALUES (?,?,CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP',
+          [UPLOAD_SCOPE, UPLOAD_POLICY_KEY, JSON.stringify(nextPolicy)]
+        );
+        await pool.query(
+          'INSERT INTO iset_runtime_config (scope,k,v) VALUES (?,?,CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP',
+          [UPLOAD_SCOPE, UPLOAD_AUDIT_KEY, JSON.stringify(nextAudit)]
+        );
+        return res.json({
+          policy: nextPolicy,
+          infra: buildInfra(),
+          loadedAt: new Date().toISOString(),
+          audit: nextAudit.slice(0, 10)
+        });
+      }
+      return res.status(405).json({ error: 'method_not_allowed' });
+    }
+
+    // Legacy path: optional proxy to intake service when explicitly enabled by env.
+    const authDebug = String(process.env.AUTH_DEBUG || '0').toLowerCase() === '1' || String(process.env.AUTH_DEBUG || '0').toLowerCase() === 'true';
+    const decodeJwtPayloadUnsafe = (token) => {
+      try {
+        if (!token || typeof token !== 'string') return null;
+        const parts = token.split('.');
+        if (parts.length < 2) return null;
+        const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+        return JSON.parse(Buffer.from(b64 + pad, 'base64').toString('utf8'));
+      } catch {
+        return null;
+      }
+    };
+    const summarizeToken = (token) => {
+      const claims = decodeJwtPayloadUnsafe(token);
+      const now = Math.floor(Date.now() / 1000);
+      if (!claims) return null;
+      return {
+        token_use: claims.token_use || null,
+        iss: claims.iss || null,
+        aud: claims.aud || null,
+        client_id: claims.client_id || null,
+        sub: claims.sub || null,
+        exp: claims.exp || null,
+        now,
+        expired: Number.isFinite(claims.exp) ? claims.exp <= now : null
+      };
+    };
     const baseRaw = process.env.INTAKE_BASE_URL || 'http://localhost:5000';
     const base = /^https?:\/\//i.test(baseRaw) ? baseRaw : `http://${baseRaw}`;
     const targetUrl = base.replace(/\/$/, '') + '/api/admin/upload-config';
@@ -13230,9 +13408,33 @@ app.all(['/api/admin/upload-config'], async (req, res) => {
       }
     }
     // Always forward bearer/cookie tokens so real Cognito sessions work even if dev bypass headers are present.
-    // The intake service will ignore them when bypass headers are used.
-    if (req.headers['authorization']) {
+    // For this proxy, upstream intake expects an access token while this admin API validates ID tokens.
+    // Prefer explicit access token header if provided by frontend, otherwise fall back to inbound Authorization.
+    const forwardedAccessToken = req.headers['x-access-token'];
+    let outboundAuthorizationToken = null;
+    if (forwardedAccessToken && typeof forwardedAccessToken === 'string') {
+      const trimmed = forwardedAccessToken.trim();
+      headers['authorization'] = /^Bearer\s+/i.test(trimmed) ? trimmed : `Bearer ${trimmed}`;
+      outboundAuthorizationToken = headers['authorization'].replace(/^Bearer\s+/i, '');
+    } else if (req.headers['authorization']) {
       headers['authorization'] = req.headers['authorization'];
+      outboundAuthorizationToken = String(req.headers['authorization']).replace(/^Bearer\s+/i, '');
+    }
+    if (authDebug) {
+      const inboundAuth = String(req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
+      const inboundAccess = typeof forwardedAccessToken === 'string'
+        ? forwardedAccessToken.replace(/^Bearer\s+/i, '').trim()
+        : '';
+      console.log('[upload-config:proxy] inbound', JSON.stringify({
+        method,
+        path: req.path,
+        targetUrl,
+        hasAuthorization: Boolean(req.headers['authorization']),
+        hasAccessTokenHeader: Boolean(forwardedAccessToken),
+        inboundAuthorizationSummary: summarizeToken(inboundAuth),
+        inboundAccessTokenSummary: summarizeToken(inboundAccess),
+        outboundAuthorizationSummary: summarizeToken(outboundAuthorizationToken)
+      }));
     }
     if (req.headers['cookie']) {
       headers['cookie'] = req.headers['cookie'];
@@ -13251,6 +13453,30 @@ app.all(['/api/admin/upload-config'], async (req, res) => {
     let json;
     try { json = JSON.parse(text); } catch {
       return res.status(502).json({ error: 'upstream_invalid_json', snippet: text.slice(0,200) });
+    }
+    if (upstream.status === 401) {
+      const payload = (json && typeof json === 'object') ? json : { message: String(text || 'Unauthorized').slice(0, 300) };
+      if (authDebug) {
+        console.warn('[upload-config:proxy] upstream 401', JSON.stringify({
+          status: upstream.status,
+          targetUrl,
+          body: payload
+        }));
+      }
+      const showDiag = authDebug || process.env.NODE_ENV !== 'production';
+      if (showDiag) {
+        return res.status(401).json({
+          ...payload,
+          _proxy: {
+            source: 'admin-upload-config-proxy',
+            targetUrl,
+            hasInboundAuthorization: Boolean(req.headers['authorization']),
+            hasInboundAccessToken: Boolean(forwardedAccessToken),
+            outboundAuthorizationSummary: summarizeToken(outboundAuthorizationToken)
+          }
+        });
+      }
+      return res.status(401).json(payload);
     }
     res.status(upstream.status).json(json);
   } catch (e) {
