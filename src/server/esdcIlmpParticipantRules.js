@@ -86,6 +86,44 @@ const ILMP_PARTICIPANT_RULES = {
         }
       ]
     },
+    lastName: {
+      label: 'Last Name',
+      required: true,
+      tests: [
+        {
+          id: 'last-name-not-numeric-only',
+          description: 'Last Name must not only contain numbers (ILMP Standard Data File, row 64).',
+          severity: 'blocking',
+          validate: value => {
+            if (typeof value !== 'string') return false;
+            const trimmed = value.trim();
+            if (!trimmed) return false;
+            const withoutDigits = trimmed.replace(/\d/g, '').trim();
+            return withoutDigits.length > 0;
+          }
+        }
+      ],
+      normalise: value => (typeof value === 'string' ? value.trim() : value)
+    },
+    firstName: {
+      label: 'First Name',
+      required: true,
+      tests: [
+        {
+          id: 'first-name-not-numeric-only',
+          description: 'First Name must not only contain numbers (ILMP Standard Data File, row 79).',
+          severity: 'blocking',
+          validate: value => {
+            if (typeof value !== 'string') return false;
+            const trimmed = value.trim();
+            if (!trimmed) return false;
+            const withoutDigits = trimmed.replace(/\d/g, '').trim();
+            return withoutDigits.length > 0;
+          }
+        }
+      ],
+      normalise: value => (typeof value === 'string' ? value.trim() : value)
+    },
     dateOfBirth: {
       label: 'Date of Birth',
       required: true,

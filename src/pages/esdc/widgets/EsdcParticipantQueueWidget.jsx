@@ -121,7 +121,7 @@ const EsdcParticipantQueueWidget = ({
           limit: String(preferences.pageSize),
           offset: String((currentPageIndex - 1) * preferences.pageSize)
         });
-        params.set('groupByClient', 'false');
+        params.set('groupByClient', 'true');
         const resp = await apiFetch(`/api/esdc/participants?${params}`, {
           signal: controller.signal
         });

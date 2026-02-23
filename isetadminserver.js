@@ -2975,6 +2975,9 @@ async function generateFundingAgreementPdfBuffer({ tokens }) {
 const buildPaymentPacketPdfHtml = packet => {
   const lines = Array.isArray(packet?.lines) ? packet.lines : [];
   const baseline = Array.isArray(packet?.baselineEvidence) ? packet.baselineEvidence : [];
+  const payeeIdentityRows = buildPaymentPayeeIdentityRows(
+    packet?.payeeIdentity || null
+  );
   const evidenceRows = [];
   baseline.forEach(item => {
     evidenceRows.push({
@@ -3057,6 +3060,27 @@ const buildPaymentPacketPdfHtml = packet => {
         <div class="meta">Case: ${escapeHtml(packet?.caseNumber || packet?.caseId || '-')}</div>
         <div class="meta">Reporting unit: ${escapeHtml(packet?.reportingUnit || '-')}</div>
         <div class="meta">Requester: ${escapeHtml(packet?.requester || '-')}</div>
+
+        ${payeeIdentityRows.length ? `
+          <h2>Payee Identity (for Sage vendor matching)</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${payeeIdentityRows
+                .map(row => `
+                  <tr>
+                    <td>${escapeHtml(row.label)}</td>
+                    <td>${escapeHtml(row.value)}</td>
+                  </tr>`)
+                .join('')}
+            </tbody>
+          </table>
+        ` : ''}
 
         <h2>Payment Lines</h2>
         <table>
@@ -3575,6 +3599,13 @@ function cleanSin(raw) {
   return digits.length === 0 ? null : digits;
 }
 
+function maskSinForDisplay(raw) {
+  const digits = cleanSin(raw);
+  if (!digits) return null;
+  const tail = digits.slice(-3).padStart(3, '*');
+  return `*** *** ${tail}`;
+}
+
 function isValidSin(digits) {
   if (!/^\d{9}$/.test(digits)) return false;
   let sum = 0;
@@ -3619,6 +3650,39 @@ function parseDate(value) {
     if (!Number.isNaN(fallback.getTime())) return fallback;
   }
   return null;
+}
+
+function normalizeNocDigits(value) {
+  if (value === null || typeof value === 'undefined') return '';
+  return String(value).replace(/\D/g, '');
+}
+
+async function isValidNocCodeForVersion(connection, nocCode, nocVersion) {
+  const version = nocVersion === null || typeof nocVersion === 'undefined'
+    ? ''
+    : String(nocVersion).trim();
+  const code = normalizeNocDigits(nocCode);
+  if (!version || !code) return false;
+  if (version !== '2016' && version !== '2021') return false;
+  const queryable = connection || pool;
+  try {
+    const [[row]] = await queryable.query(
+      `SELECT id
+         FROM noc_code
+        WHERE is_active = 1
+          AND version_code = ?
+          AND code = ?
+        LIMIT 1`,
+      [version, code]
+    );
+    return Boolean(row);
+  } catch (err) {
+    if (err?.code === 'ER_NO_SUCH_TABLE') {
+      console.warn('[esdc] noc_code table not found; skipping strict NOC validity check');
+      return true;
+    }
+    throw err;
+  }
 }
 
 function calculateAge(date) {
@@ -3739,9 +3803,25 @@ function extractGender(context) {
 }
 
 function extractFirstName(context) {
-  const { payload = {}, answers = {} } = context;
+  const { payload = {}, answers = {}, caseContext = {} } = context;
   const personal = payload.personal || {};
+  const ctx = caseContext || {};
+  const casePersonal = ctx.applicationPersonal || {};
+  const caseAnswers = ctx.applicationAnswers || {};
   const candidates = [
+    ctx.firstName,
+    casePersonal.first_name,
+    casePersonal.firstName,
+    casePersonal.given_name,
+    casePersonal.givenName,
+    caseAnswers['first-name'],
+    caseAnswers['first_name'],
+    caseAnswers['given-name'],
+    caseAnswers['given_name'],
+    caseAnswers['personal-first-name'],
+    caseAnswers['personal_first_name'],
+    caseAnswers['personal-given-name'],
+    caseAnswers['personal_given_name'],
     personal.first_name,
     personal.firstName,
     personal.given_name,
@@ -3763,9 +3843,25 @@ function extractFirstName(context) {
 }
 
 function extractLastName(context) {
-  const { payload = {}, answers = {} } = context;
+  const { payload = {}, answers = {}, caseContext = {} } = context;
   const personal = payload.personal || {};
+  const ctx = caseContext || {};
+  const casePersonal = ctx.applicationPersonal || {};
+  const caseAnswers = ctx.applicationAnswers || {};
   const candidates = [
+    ctx.lastName,
+    casePersonal.last_name,
+    casePersonal.lastName,
+    casePersonal.family_name,
+    casePersonal.familyName,
+    caseAnswers['last-name'],
+    caseAnswers['last_name'],
+    caseAnswers['family-name'],
+    caseAnswers['family_name'],
+    caseAnswers['personal-last-name'],
+    caseAnswers['personal_last_name'],
+    caseAnswers['personal-family-name'],
+    caseAnswers['personal_family_name'],
     personal.last_name,
     personal.lastName,
     personal.family_name,
@@ -5165,7 +5261,7 @@ function runIlmpValidation(context) {
     interventionOutcome: new Set(['1','2','3','4','5','6']),
     resultCode: new Set(['1','2','3','4','5','6','7','9']),
     prevEmployment: new Set(['1','2','9']),
-    nocVersion: new Set(['2006','2011','2016','2021'])
+    nocVersion: new Set(['2016','2021'])
   };
   const CODE_LOOKUP = {
     barrier: {
@@ -5230,7 +5326,7 @@ function runIlmpValidation(context) {
       '7': '7',
       '9': '9'
     },
-    nocVersion: { '2006': '2006', '2011': '2011', '2016': '2016', '2021': '2021' }
+    nocVersion: { '2016': '2016', '2021': '2021' }
   };
   const provinceCodeMap = {
     NL: '1', NS: '2', NB: '3', PE: '4', QC: '5', ON: '6', MB: '7', SK: '8', AB: '9',
@@ -5245,6 +5341,17 @@ function runIlmpValidation(context) {
     }
     return map[key] || null;
   };
+  const isKnownNocCode = (codeValue, versionValue) => {
+    const version = versionValue === null || typeof versionValue === 'undefined'
+      ? ''
+      : String(versionValue).trim();
+    const code = normalizeNocDigits(codeValue);
+    if (!version || !code) return true;
+    if (version !== '2016' && version !== '2021') return true;
+    const lookupSet = context?.validNocPairs;
+    if (!(lookupSet instanceof Set)) return true;
+    return lookupSet.has(`${version}:${code}`);
+  };
 
   const ruleResults = [];
   const warnings = [];
@@ -5252,6 +5359,8 @@ function runIlmpValidation(context) {
 
   const extracted = {
     socialInsuranceNumber: extractSin(context),
+    lastName: extractLastName(context),
+    firstName: extractFirstName(context),
     dateOfBirth: (() => {
       const dob = extractDob(context);
       return dob ? dob.toISOString().slice(0, 10) : null;
@@ -5769,6 +5878,19 @@ function runIlmpValidation(context) {
           detail: prevNocVersion
         });
       }
+      if (prevNocStr && prevNocVersionStr && !isKnownNocCode(prevNocStr, prevNocVersionStr)) {
+        const msg = 'Previous employment NOC must be a valid NOC for the selected version.';
+        blockingIssues.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-prev-noc-validity`,
+          label: 'Previous employment NOC',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: prevNocStr
+        });
+      }
       if (!prevSchedule) {
         const msg = 'Previous employment schedule type is required when client was employed at intake.';
         blockingIssues.push(`${planPrefix} ${msg}`);
@@ -5856,6 +5978,8 @@ function runIlmpValidation(context) {
       if (planResultCode === '2') {
         const resultNoc = plan.resultNoc || plan.actionPlanResultRelatedNOC || null;
         const resultNocVersion = plan.resultNocVersion || plan.actionPlanResultRelatedNOCVersion || null;
+        const resultNocDigits = resultNoc ? String(resultNoc).replace(/\D/g, '') : '';
+        const resultNocVersionStr = resultNocVersion ? String(resultNocVersion).trim() : '';
         if (!resultNoc || !/^\d{4,5}$/.test(String(resultNoc))) {
           const msg = 'Result NOC is required when employment is the outcome.';
           blockingIssues.push(`${planPrefix} ${msg}`);
@@ -5880,6 +6004,19 @@ function runIlmpValidation(context) {
             passed: false,
             message: msg,
             detail: resultNocVersion
+          });
+        }
+        if (resultNocDigits && resultNocVersionStr && !isKnownNocCode(resultNocDigits, resultNocVersionStr)) {
+          const msg = 'Result NOC must be a valid NOC for the selected version.';
+          blockingIssues.push(`${planPrefix} ${msg}`);
+          ruleResults.push({
+            id: `${planPrefix}-result-noc-validity`,
+            label: 'Action plan result NOC',
+            category: 'mandatory',
+            severity: 'blocking',
+            passed: false,
+            message: msg,
+            detail: resultNocDigits
           });
         }
       }
@@ -6088,8 +6225,10 @@ function runIlmpValidation(context) {
         blockingIssues.push(`${prefix} ${msg}`);
       }
 
-      if (endStr && !intv.outcome) {
-        const msg = 'Intervention outcome code is required when end date is set.';
+      if ((planResultDate || endStr) && !intv.outcome) {
+        const msg = planResultDate
+          ? 'Intervention outcome code is required when action plan result date is set.'
+          : 'Intervention outcome code is required when end date is set.';
         blockingIssues.push(`${prefix} ${msg}`);
         ruleResults.push({
           id: `${prefix}-outcome-required`,
@@ -6150,6 +6289,20 @@ function runIlmpValidation(context) {
               passed: false,
               message: msg,
               detail: intv.relatedNocVersion
+            });
+          }
+          const relatedNocDigits = String(intv.relatedNoc || '').replace(/\D/g, '');
+          if (relatedNocDigits && !isKnownNocCode(relatedNocDigits, relatedVersion)) {
+            const msg = 'Intervention related NOC must be a valid NOC for the selected version.';
+            blockingIssues.push(`${prefix} ${msg}`);
+            ruleResults.push({
+              id: `${prefix}-related-noc-validity`,
+              label: 'Intervention related NOC',
+              category: 'mandatory',
+              severity: 'blocking',
+              passed: false,
+              message: msg,
+              detail: relatedNocDigits
             });
           }
         }
@@ -6283,6 +6436,7 @@ function runIlmpValidation(context) {
       const nocVersionIndex = block.indexOf('<actionPlanResultRelatedNOCVersion>');
       const educationIndex = block.indexOf('<actionPlanResultEducationLevel>');
       const resultDateIndex = block.indexOf('<actionPlanResultDate>');
+      const futureEducationIndex = block.indexOf('<actionPlanFutureEducationLevel>');
 
       if (nocIndex !== -1 && nocVersionIndex !== -1 && nocVersionIndex < nocIndex) {
         pushFileBlocking(
@@ -6303,6 +6457,13 @@ function runIlmpValidation(context) {
           `file-actionplan-order-date-${planIndex}`,
           'Action plan XML order',
           `Action plan ${planIndex} has action plan result fields out of order: actionPlanResultDate must come after actionPlanResultEducationLevel.`
+        );
+      }
+      if (resultDateIndex !== -1 && futureEducationIndex !== -1 && futureEducationIndex < resultDateIndex) {
+        pushFileBlocking(
+          `file-actionplan-order-future-education-${planIndex}`,
+          'Action plan XML order',
+          `Action plan ${planIndex} has action plan result fields out of order: actionPlanFutureEducationLevel must come after actionPlanResultDate.`
         );
       }
     });
@@ -9801,7 +9962,7 @@ function buildIlmpParticipantPayload(context) {
       canceled: '5',
       rescheduled: '6'
     },
-    nocVersion: { '2006': '2006', '2011': '2011', '2016': '2016', '2021': '2021' }
+    nocVersion: { '2016': '2016', '2021': '2021' }
   };
   const firstName = extractFirstName(context);
   const lastName = extractLastName(context);
@@ -10003,6 +10164,8 @@ function buildIlmpParticipantPayload(context) {
           startDate,
           resultDate,
           resultCode,
+          resultEducationLevel,
+          futureEducationLevel,
           resultNoc,
           resultNocVersion,
           eiClaimant,
@@ -10061,6 +10224,10 @@ function buildIlmpParticipantPayload(context) {
           ActionPlanStartDate: startDate || null,
           ActionPlanResultDate: resultDate || null,
           ActionPlanResultCode: resultCode || null,
+          actionPlanResultEducationLevel: resultEducationLevel || null,
+          actionPlanFutureEducationLevel: futureEducationLevel || null,
+          resultEducationLevel: resultEducationLevel || null,
+          futureEducationLevel: futureEducationLevel || null,
           ActionPlanResultRelatedNOC: resultNoc || null,
           ActionPlanResultRelatedNOCVersion: resultNocVersion || null,
           EIClaimant: actionPlanEiClaimantCode || null,
@@ -10282,6 +10449,16 @@ function buildIlmpParticipantPayload(context) {
       toCode(plan.actionPlanResultEducationLevel, CODE_MAPS.educationLevel) ||
       (plan.resultEducationLevel ? String(plan.resultEducationLevel).trim() : null) ||
       null;
+    const planFutureEducationCode = (() => {
+      const raw =
+        plan.futureEducationLevel ||
+        plan.actionPlanFutureEducationLevel ||
+        plan.ActionPlanFutureEducationLevel ||
+        null;
+      if (raw === null || typeof raw === 'undefined') return null;
+      const value = String(raw).trim();
+      return ['5', '8', '9', '10'].includes(value) ? value : null;
+    })();
     const resolvedPlanResultEducationCode = planResultEducationCode || planEducationLevelCode || null;
     const planResultNoc = plan.resultNoc || plan.actionPlanResultRelatedNOC || plan.ActionPlanResultRelatedNOC || null;
     const planResultNocVersion =
@@ -10299,6 +10476,9 @@ function buildIlmpParticipantPayload(context) {
       add(indent + 1, 'actionPlanResultEducationLevel', resolvedPlanResultEducationCode);
     }
     add(indent + 1, 'actionPlanResultDate', planResultDate);
+    if (planResultCode === '4') {
+      add(indent + 1, 'actionPlanFutureEducationLevel', planFutureEducationCode);
+    }
     add(indent + 1, 'actionPlanChildCareNeed', toCode(plan.childcareNeed, CODE_MAPS.childcareNeed) || null);
     add(indent + 1, 'actionPlanChildCareFundedCode', toCode(plan.childcareFunding, CODE_MAPS.childcareFunding) || null);
     const planInterventions = plan.interventions || plan.Interventions?.Intervention || [];
@@ -10459,6 +10639,8 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
         closedAt: planRow.closed_at,
         resultCode: planRow.result_code || esdc.actionPlanResultCode || null,
         resultDate: planRow.result_date || esdc.actionPlanResultDate || null,
+        resultEducationLevel: esdc.actionPlanResultEducationLevel || null,
+        futureEducationLevel: esdc.actionPlanFutureEducationLevel || null,
         resultNoc: esdc.actionPlanResultRelatedNOC || null,
         resultNocVersion: esdc.actionPlanResultRelatedNOCVersion || null,
         outcomeSummary: planRow.outcome_summary || null,
@@ -10513,6 +10695,57 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
       );
     }
 
+    let validNocPairs = null;
+    try {
+      const candidatePairs = new Set();
+      const addNocPair = (codeRaw, versionRaw) => {
+        const version = versionRaw === null || typeof versionRaw === 'undefined'
+          ? ''
+          : String(versionRaw).trim();
+        const code = normalizeNocDigits(codeRaw);
+        if (!version || !code) return;
+        if (version !== '2016' && version !== '2021') return;
+        candidatePairs.add(`${version}:${code}`);
+      };
+
+      (Array.isArray(caseActionPlans) ? caseActionPlans : []).forEach(plan => {
+        if (!plan || typeof plan !== 'object') return;
+        addNocPair(plan.prevEmploymentNoc, plan.prevEmploymentNocVersion);
+        addNocPair(plan.resultNoc, plan.resultNocVersion);
+        (Array.isArray(plan.interventions) ? plan.interventions : []).forEach(intv => {
+          if (!intv || typeof intv !== 'object') return;
+          addNocPair(intv.relatedNoc, intv.relatedNocVersion);
+        });
+      });
+
+      const parsedPairs = Array.from(candidatePairs).map(value => {
+        const [version, code] = String(value).split(':');
+        return { version, code };
+      });
+      const versions = Array.from(new Set(parsedPairs.map(entry => entry.version).filter(Boolean)));
+      const codes = Array.from(new Set(parsedPairs.map(entry => entry.code).filter(Boolean)));
+      if (versions.length && codes.length) {
+        const versionPlaceholders = versions.map(() => '?').join(', ');
+        const codePlaceholders = codes.map(() => '?').join(', ');
+        const [nocRows] = await conn.query(
+          `SELECT version_code, code
+             FROM noc_code
+            WHERE is_active = 1
+              AND version_code IN (${versionPlaceholders})
+              AND code IN (${codePlaceholders})`,
+          [...versions, ...codes]
+        );
+        validNocPairs = new Set(
+          (Array.isArray(nocRows) ? nocRows : [])
+            .map(row => `${String(row.version_code || '').trim()}:${normalizeNocDigits(row.code)}`)
+            .filter(value => value !== ':')
+        );
+      }
+    } catch (err) {
+      console.warn('[esdc] failed to load NOC code lookup set', err?.message || err);
+      validNocPairs = null;
+    }
+
     return {
       connection: conn,
       releaseConnection,
@@ -10525,7 +10758,8 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
       applicationId,
       applicationRow: applicationPayload?.row || null,
       payload: applicationPayload?.payload || {},
-      answers: applicationPayload?.payload?.answers || {}
+      answers: applicationPayload?.payload?.answers || {},
+      validNocPairs
     };
   } catch (error) {
     if (releaseConnection) {
@@ -16856,7 +17090,24 @@ async function buildGroupedIlmpClientPayload(clientRows, { ignoreWarnings = fals
       });
       contexts.push(ctx);
     }
-    const combinedPlans = contexts.flatMap(ctx => ctx.caseActionPlans || []);
+    const combinedPlansRaw = contexts.flatMap(ctx => ctx.caseActionPlans || []);
+    const planKey = plan => {
+      if (!plan || typeof plan !== 'object') return null;
+      if (plan.id !== null && typeof plan.id !== 'undefined') return `id:${plan.id}`;
+      const agreement = normaliseString(plan.agreementNumber || plan.agreement_number || '') || '';
+      const startDate = normaliseString(plan.startDate || plan.effectiveDate || plan.actionPlanStartDate || '') || '';
+      const status = normalisePlanStatus(plan.status || '');
+      return `fallback:${agreement}|${startDate}|${status}`;
+    };
+    const seenPlanKeys = new Set();
+    const combinedPlans = [];
+    combinedPlansRaw.forEach(plan => {
+      const key = planKey(plan);
+      if (!key || seenPlanKeys.has(key)) return;
+      seenPlanKeys.add(key);
+      combinedPlans.push(plan);
+    });
+
     const activePlans = combinedPlans.filter(plan => normalisePlanStatusShort(plan.status) === 'active');
     const baseContext = [...contexts].sort((a, b) => {
       const aTs = a?.caseRow?.updated_at ? new Date(a.caseRow.updated_at).getTime() : 0;
@@ -19181,7 +19432,7 @@ app.post('/api/admin/query-editor', async (req, res) => {
   }
 });
 
-const DUMMY_STEP_ORDER = Object.freeze([
+const DUMMY_STEP_ORDER_FALLBACK = Object.freeze([
   'consent',
   'indigenous-declaration',
   'conflict-of-interest',
@@ -19199,7 +19450,7 @@ const DUMMY_STEP_ORDER = Object.freeze([
   'labour-force-and-education-history',
   'employment-goals-and-barriers',
   'financial-supports-requested',
-  'employment-insurance-status',
+  'student-loans-and-grants',
   'household-income',
   'household-expenses',
   'summary-page',
@@ -19207,12 +19458,52 @@ const DUMMY_STEP_ORDER = Object.freeze([
   'legal-and-submission'
 ]);
 
-const buildHistoryForStep = (stepCursor) => {
-  const index = DUMMY_STEP_ORDER.indexOf(stepCursor);
+const SUMMARY_STEP_IDS = Object.freeze(['summary-page', 'iset-summary']);
+
+function extractStepOrder(schemaSteps) {
+  const seen = new Set();
+  const order = [];
+  (schemaSteps || []).forEach((step) => {
+    const raw = step?.stepId || step?.step_id || step?.id || step?.name || step?.key;
+    const stepId = typeof raw === 'string' ? raw.trim() : '';
+    if (!stepId || seen.has(stepId)) return;
+    seen.add(stepId);
+    order.push(stepId);
+  });
+  return order;
+}
+
+function resolveStepOrder(schemaSteps) {
+  const fromSchema = extractStepOrder(schemaSteps);
+  if (fromSchema.length) return fromSchema;
+  return [...DUMMY_STEP_ORDER_FALLBACK];
+}
+
+function normalizeStepCursor(stepCursor, stepOrder) {
+  const order = Array.isArray(stepOrder)
+    ? stepOrder.filter((id) => typeof id === 'string' && id.trim().length > 0)
+    : [];
+  if (!order.length) return null;
+  const requested = typeof stepCursor === 'string' ? stepCursor.trim() : '';
+  if (requested && order.includes(requested)) return requested;
+  if (requested === 'summary-page' && order.includes('iset-summary')) return 'iset-summary';
+  if (requested === 'iset-summary' && order.includes('summary-page')) return 'summary-page';
+  const summaryId = order.find((id) => SUMMARY_STEP_IDS.includes(id));
+  if (summaryId) return summaryId;
+  return requested || order[order.length - 1];
+}
+
+const buildHistoryForStep = (stepCursor, stepOrder = DUMMY_STEP_ORDER_FALLBACK) => {
+  const order = Array.isArray(stepOrder)
+    ? stepOrder.filter((id) => typeof id === 'string' && id.trim().length > 0)
+    : [];
+  const canonicalOrder = order.length ? order : [...DUMMY_STEP_ORDER_FALLBACK];
+  const canonicalStepCursor = normalizeStepCursor(stepCursor, canonicalOrder);
+  const index = canonicalOrder.indexOf(canonicalStepCursor);
   if (index >= 0) {
-    return DUMMY_STEP_ORDER.slice(0, index + 1);
+    return canonicalOrder.slice(0, index + 1);
   }
-  return [...DUMMY_STEP_ORDER];
+  return [...canonicalOrder];
 };
 
 // --- AI-generated dummy draft helpers --------------------------------------
@@ -19363,9 +19654,10 @@ async function generateAiDummyDraft({ provinceCode, stepCursor = 'summary-page',
     }
   };
 
-function buildStepChunks(schemaSteps) {
+function buildStepChunks(schemaSteps, stepOrder = DUMMY_STEP_ORDER_FALLBACK) {
   const chunks = [];
-  const orderMap = new Map(DUMMY_STEP_ORDER.map((id, idx) => [id, idx]));
+  const sourceOrder = Array.isArray(stepOrder) && stepOrder.length ? stepOrder : DUMMY_STEP_ORDER_FALLBACK;
+  const orderMap = new Map(sourceOrder.map((id, idx) => [id, idx]));
   const grouped = new Map();
   (schemaSteps || []).forEach(step => {
     const stepId = step?.stepId || step?.step_id || step?.id || step?.name || step?.key || 'step';
@@ -19398,8 +19690,10 @@ function buildStepChunks(schemaSteps) {
 
   const schemaPayload = await fetchPublishedWorkflowSchema();
   const schemaSteps = schemaPayload?.schema || schemaPayload?.schemaEnvelope?.steps || [];
+  const stepOrder = resolveStepOrder(schemaSteps);
+  const canonicalStepCursor = normalizeStepCursor(stepCursor, stepOrder);
   const fieldSummary = summarizeSchemaForAi(schemaSteps);
-  const stepChunks = buildStepChunks(schemaSteps);
+  const stepChunks = buildStepChunks(schemaSteps, stepOrder);
   const regionSet = await fetchValidRegionCodeSet().catch(() => new Set());
   const province = (() => {
     const normalized = (provinceCode || '').trim().toUpperCase();
@@ -19726,7 +20020,7 @@ Vary applicant names across drafts; avoid repeating similar first/last initials.
   payloadData['indigenous_declaration'] = coerceSignatureField(payloadData['indigenous_declaration'], sigName);
   payloadData['conflict_applicant_signature'] = coerceSignatureField(payloadData['conflict_applicant_signature'], sigName);
   payloadData['legal_submission_sig'] = coerceSignatureField(payloadData['legal_submission_sig'], sigName);
-  const history = buildHistoryForStep(stepCursor);
+  const history = buildHistoryForStep(canonicalStepCursor, stepOrder);
   const draftPayload = { ...payloadData, history };
   const summary = {
     applicantName: `${payloadData['first-name']} ${payloadData['last-name']}`.trim(),
@@ -19738,7 +20032,7 @@ Vary applicant names across drafts; avoid repeating similar first/last initials.
     draftPayload,
     history,
     summary,
-    stepCursor,
+    stepCursor: canonicalStepCursor,
     workflowId,
     validation: { errors, warnings, province, chunks: chunkLogs, calls: callDiagnostics }
   };
@@ -20275,9 +20569,16 @@ const DUMMY_DRAFTS = [
   }
 ];
 
-function buildDummyDraft(stepCursor = 'summary-page') {
+async function buildDummyDraft(stepCursor = 'summary-page') {
   const choice = DUMMY_DRAFTS[Math.floor(Math.random() * DUMMY_DRAFTS.length)];
-  const history = buildHistoryForStep(stepCursor);
+  let stepOrder = [...DUMMY_STEP_ORDER_FALLBACK];
+  try {
+    const schemaPayload = await fetchPublishedWorkflowSchema();
+    const schemaSteps = schemaPayload?.schema || schemaPayload?.schemaEnvelope?.steps || [];
+    stepOrder = resolveStepOrder(schemaSteps);
+  } catch (_) {}
+  const canonicalStepCursor = normalizeStepCursor(stepCursor, stepOrder);
+  const history = buildHistoryForStep(canonicalStepCursor, stepOrder);
   const draftPayload = { ...choice.payload, history: [...history] };
   const summary = {
     applicantName: `${choice.payload['first-name']} ${choice.payload['last-name']}`.trim(),
@@ -20285,7 +20586,7 @@ function buildDummyDraft(stepCursor = 'summary-page') {
     homeCommunity: draftPayload['home-comminuty'] || null,
     targetProgram: draftPayload['target-program'] || null
   };
-  return { draftPayload, history, summary };
+  return { draftPayload, history, summary, stepCursor: canonicalStepCursor };
 }
 
 // GET /api/regions/canada -> province/territory list for dummy generation UI
@@ -20312,7 +20613,7 @@ app.post('/api/ai/create-dummy-draft', async (req, res) => {
   const body = req.body || {};
   const userId = Number(body.userId) || 48; // enforce single test user by default
   const workflowId = String(body.workflowId || 'iset-v1');
-  const stepCursor = String(body.stepCursor || 'summary-page');
+  const requestedStepCursor = String(body.stepCursor || 'summary-page');
   const province = body.province || body.provinceCode || body.regionCode;
 
   const sendEvent = (obj) => {
@@ -20333,12 +20634,12 @@ app.post('/api/ai/create-dummy-draft', async (req, res) => {
 
     const generated = await generateAiDummyDraft({
       provinceCode: province,
-      stepCursor,
+      stepCursor: requestedStepCursor,
       workflowId,
       userId,
       onProgress: (event) => sendEvent(event)
     });
-    const { draftPayload, history, summary, validation } = generated;
+    const { draftPayload, history, summary, validation, stepCursor } = generated;
 
     const [existingRows] = await pool.query(
       'SELECT id, version FROM iset_intake.iset_application_draft_dynamic WHERE user_id = ? LIMIT 1',
@@ -20401,9 +20702,9 @@ app.post('/api/create-dummy-draft', async (req, res) => {
     const body = req.body || {};
     const userId = Number(body.userId) || 48;               // default test applicant
     const workflowId = String(body.workflowId || 'iset-v1');
-    const stepCursor = String(body.stepCursor || 'summary-page');
+    const requestedStepCursor = String(body.stepCursor || 'summary-page');
 
-    let { draftPayload, history, summary } = buildDummyDraft(stepCursor);
+    let { draftPayload, history, summary, stepCursor } = await buildDummyDraft(requestedStepCursor);
     const userIdentity = await fetchUserIdentityById(userId);
     const nameParts = parseFirstLastFromUserName(userIdentity?.name);
     if (nameParts && nameParts.firstName) {
@@ -32040,7 +32341,7 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
       childcareFunding: new Set(['1','2','3','4','5','6','7']),
       prevEmploymentSchedule: new Set(['1','2']),
       barrier: new Set(['1','2','3','4','5','6','7','8','9','10','11','12']),
-      nocVersion: new Set(['2006','2011','2016','2021']),
+      nocVersion: new Set(['2016','2021']),
     };
     const normaliseCode = (value, set) => {
       if (value === null || typeof value === 'undefined') return null;
@@ -32120,6 +32421,18 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
         res.status(422).json({
           error: 'invalid_previous_employment_noc',
           message: `NOC code must be ${prevEmploymentNocLength} digits for version ${prevEmploymentNocVersion}.`
+        });
+        return;
+      }
+      const knownPrevEmploymentNoc = await isValidNocCodeForVersion(
+        connection,
+        prevEmploymentNocDigits,
+        prevEmploymentNocVersion
+      );
+      if (!knownPrevEmploymentNoc) {
+        res.status(422).json({
+          error: 'invalid_previous_employment_noc',
+          message: `NOC code ${prevEmploymentNocDigits} is not valid for version ${prevEmploymentNocVersion}.`
         });
         return;
       }
@@ -32721,6 +33034,13 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       if (!/^\d+$/.test(trimmedNoc) || trimmedNoc.length !== expectedLength) {
         return res.status(422).json({ error: 'invalid_noc', message: `NOC code must be a ${expectedLength}-digit number for version ${trimmedNocVersion}.` });
       }
+      const knownNoc = await isValidNocCodeForVersion(pool, trimmedNoc, trimmedNocVersion);
+      if (!knownNoc) {
+        return res.status(422).json({
+          error: 'invalid_noc',
+          message: `NOC code ${trimmedNoc} is not valid for version ${trimmedNocVersion}.`
+        });
+      }
     }
     if (endDateValue && !trimmedOutcomeCreate) {
       return res.status(422).json({
@@ -33234,6 +33554,13 @@ app.patch('/api/interventions/:id', async (req, res) => {
         return res.status(422).json({
           error: 'invalid_noc',
           message: `NOC code must be a ${expectedLength}-digit number for version ${nextNocVersionRaw}.`
+        });
+      }
+      const knownNoc = await isValidNocCodeForVersion(pool, nextNocRaw, nextNocVersionRaw);
+      if (!knownNoc) {
+        return res.status(422).json({
+          error: 'invalid_noc',
+          message: `NOC code ${nextNocRaw} is not valid for version ${nextNocVersionRaw}.`
         });
       }
     }
@@ -34166,6 +34493,28 @@ app.post('/api/action-plans/:id/close', async (req, res) => {
       });
     }
 
+    const missingOutcomeInterventions = mappedInterventions
+      .filter(item => {
+        const status = String(item.status || '').toLowerCase();
+        if (status === 'draft') return false;
+        const outcome = typeof item.outcome === 'string' ? item.outcome.trim() : '';
+        return !outcome;
+      })
+      .map(item => ({
+        id: item.id,
+        code: item.code,
+        title: item.title,
+        status: item.status,
+      }));
+
+    if (missingOutcomeInterventions.length > 0) {
+      return res.status(422).json({
+        error: 'intervention_outcome_required',
+        message: 'Each intervention requires an outcome when closing an action plan.',
+        interventions: missingOutcomeInterventions,
+      });
+    }
+
     const [[maxIntervention]] = await pool.query(
       "SELECT MAX(end_date) AS latest_end FROM iset_case_intervention WHERE action_plan_id = ? AND status NOT IN ('draft','submitted')",
       [planId]
@@ -34205,12 +34554,19 @@ app.post('/api/action-plans/:id/close', async (req, res) => {
       if (!nocStr) {
         return res.status(422).json({ error: 'result_noc_required', message: 'NOC code is required for Employed result.' });
       }
-      const digits = nocStr.replace(/\\D/g, '');
+      const digits = nocStr.replace(/\D/g, '');
       const requiredLength = resultNocVersionCode === '2021' ? 5 : 4;
       if (digits.length !== requiredLength) {
         return res.status(422).json({ error: 'result_noc_invalid', message: `NOC code must be ${requiredLength} digits for version ${resultNocVersionCode}.` });
       }
       resultNocCode = digits;
+      const knownResultNoc = await isValidNocCodeForVersion(pool, resultNocCode, resultNocVersionCode);
+      if (!knownResultNoc) {
+        return res.status(422).json({
+          error: 'result_noc_invalid',
+          message: `NOC code ${resultNocCode} is not valid for version ${resultNocVersionCode}.`
+        });
+      }
     }
 
     const summaryValue =
@@ -34421,6 +34777,31 @@ app.patch('/api/action-plans/:id', async (req, res) => {
       return res.status(409).json({ error: 'invalid_status', detail: 'closed_plan_read_only' });
     }
 
+    const existingStartDate = planRow.effective_date ? toDateOnly(planRow.effective_date) : null;
+    const [[planSubmissionRow]] = await pool.query(
+      `SELECT submission_status, submitted_at
+         FROM esdc_participant_submission
+        WHERE action_plan_id = ?
+        LIMIT 1`,
+      [planId]
+    );
+    const submissionStatus = String(planSubmissionRow?.submission_status || '').trim().toLowerCase();
+    const hasGatewaySubmission = Boolean(
+      planSubmissionRow &&
+      (
+        planSubmissionRow.submitted_at ||
+        submissionStatus === 'submitted' ||
+        submissionStatus === 'accepted' ||
+        submissionStatus === 'rejected'
+      )
+    );
+    if (hasGatewaySubmission && startDateOnly && existingStartDate && startDateOnly !== existingStartDate) {
+      return res.status(409).json({
+        error: 'start_date_locked_after_submission',
+        message: 'Action plan start date cannot be changed after ESDC submission.'
+      });
+    }
+
     const metadata = safeJsonParse(planRow.metadata_json, null) || {};
     if (summary !== null && typeof summary !== 'undefined') {
       metadata.summary = summary || null;
@@ -34463,7 +34844,7 @@ app.patch('/api/action-plans/:id', async (req, res) => {
       prevEmployment: new Set(['1','2','9']),
       childcareFunding: new Set(['1','2','3','4','5','6','7']),
       barrier: new Set(['1','2','3','4','5','6','7','8','9','10','11','12']),
-      nocVersion: new Set(['2006','2011','2016','2021']),
+      nocVersion: new Set(['2016','2021']),
       resultCode: new Set(['1','2','3','4','5','6','7','9']),
       resultEducation: new Set(['1','2','3','4','5','6','7','8','9','10','11','12']),
       futureEducation: new Set(['5','8','9','10']),
@@ -34507,6 +34888,28 @@ app.patch('/api/action-plans/:id', async (req, res) => {
       return res.status(422).json({ error: 'funding_stream_required', message: 'Funding stream is required for action plans.' });
     }
     const agreementNumber = deriveAgreementNumberFromFundingStream(fundingStream);
+    const existingAgreementNumber = (() => {
+      const raw = planRow.agreement_number || esdcExisting.agreementNumber || null;
+      if (raw === null || typeof raw === 'undefined') return null;
+      const digits = String(raw).replace(/\D/g, '');
+      return digits || String(raw).trim() || null;
+    })();
+    const nextAgreementNumber = (() => {
+      if (agreementNumber === null || typeof agreementNumber === 'undefined') return null;
+      const digits = String(agreementNumber).replace(/\D/g, '');
+      return digits || String(agreementNumber).trim() || null;
+    })();
+    if (
+      hasGatewaySubmission &&
+      existingAgreementNumber &&
+      nextAgreementNumber &&
+      existingAgreementNumber !== nextAgreementNumber
+    ) {
+      return res.status(409).json({
+        error: 'agreement_number_locked_after_submission',
+        message: 'Agreement number cannot be changed after ESDC submission.'
+      });
+    }
 
     const educationLevel = typeof req.body.educationLevel !== 'undefined'
       ? normaliseCode(req.body.educationLevel, CODE_SETS.educationLevel)
@@ -34546,6 +34949,17 @@ app.patch('/api/action-plans/:id', async (req, res) => {
         return res.status(422).json({
           error: 'invalid_previous_employment_noc',
           message: `NOC code must be ${prevEmploymentNocLength} digits for version ${prevEmploymentNocVersion}.`
+        });
+      }
+      const knownPrevEmploymentNoc = await isValidNocCodeForVersion(
+        pool,
+        prevEmploymentNocDigits,
+        prevEmploymentNocVersion
+      );
+      if (!knownPrevEmploymentNoc) {
+        return res.status(422).json({
+          error: 'invalid_previous_employment_noc',
+          message: `NOC code ${prevEmploymentNocDigits} is not valid for version ${prevEmploymentNocVersion}.`
         });
       }
       prevEmploymentNoc = prevEmploymentNocDigits;
@@ -44588,13 +45002,232 @@ const buildPacketAttachmentSummary = packet => {
     .filter(entry => entry.documentId || entry.name || entry.type);
 };
 
+const formatPaymentPayeeAddress = (address = {}) => {
+  if (!address || typeof address !== 'object') return null;
+  const parts = [
+    normaliseString(address.street || address.line1 || null),
+    normaliseString(address.city || null),
+    normaliseString(address.province || null),
+    normaliseString(address.postalCode || address.postal_code || null),
+  ].filter(Boolean);
+  return parts.length ? parts.join(', ') : null;
+};
+
+const sanitizePaymentPayeeIdentity = (raw) => {
+  if (!raw || typeof raw !== 'object') return null;
+  const addressRaw =
+    raw.currentAddress && typeof raw.currentAddress === 'object'
+      ? raw.currentAddress
+      : {};
+  const streetPrimary = normaliseString(
+    addressRaw.street ||
+      addressRaw.line1 ||
+      raw.street ||
+      raw.line1 ||
+      raw.addressLine1 ||
+      raw.address_line_1 ||
+      null
+  );
+  const streetSecondary = normaliseString(
+    addressRaw.line2 ||
+      raw.line2 ||
+      raw.addressLine2 ||
+      raw.address_line_2 ||
+      null
+  );
+  const street = [streetPrimary, streetSecondary].filter(Boolean).join(', ') || null;
+  const city = normaliseString(addressRaw.city || raw.city || null);
+  const provinceInput = addressRaw.province || raw.province || null;
+  const province =
+    normalizeRegionCode(provinceInput) ||
+    (normaliseString(provinceInput) ? normaliseString(provinceInput).toUpperCase() : null);
+  const postalRaw = normaliseString(addressRaw.postalCode || raw.postalCode || null);
+  const postalCompact = postalRaw ? postalRaw.replace(/\s+/g, '').toUpperCase() : null;
+  const postalCode =
+    postalCompact && postalCompact.length === 6
+      ? `${postalCompact.slice(0, 3)} ${postalCompact.slice(3)}`
+      : postalCompact || null;
+  const currentAddress = {
+    street,
+    city,
+    province,
+    postalCode,
+    formatted: formatPaymentPayeeAddress({ street, city, province, postalCode }),
+  };
+  const identity = {
+    legalFirstName: normaliseString(raw.legalFirstName || raw.firstName || null),
+    legalLastName: normaliseString(raw.legalLastName || raw.lastName || null),
+    dateOfBirth: toDateOnlyString(raw.dateOfBirth || raw.dob || null),
+    sinMasked: maskSinForDisplay(
+      raw.sinMasked ||
+      raw.sin ||
+      raw.sinDigits ||
+      raw.socialInsuranceNumber ||
+      null
+    ),
+    currentAddress,
+    email: normaliseString(raw.email || raw.emailAddress || null),
+    phone: normaliseString(raw.phone || raw.phoneNumber || null),
+  };
+  const hasAddress = !!(
+    identity.currentAddress.street ||
+    identity.currentAddress.city ||
+    identity.currentAddress.province ||
+    identity.currentAddress.postalCode
+  );
+  if (
+    !identity.legalFirstName &&
+    !identity.legalLastName &&
+    !identity.dateOfBirth &&
+    !identity.sinMasked &&
+    !hasAddress &&
+    !identity.email &&
+    !identity.phone
+  ) {
+    return null;
+  }
+  return identity;
+};
+
+const buildPaymentPayeeIdentityRows = (payeeIdentity) => {
+  const identity = sanitizePaymentPayeeIdentity(payeeIdentity);
+  if (!identity) return [];
+  return [
+    { label: 'Legal First Name', value: identity.legalFirstName || '-' },
+    { label: 'Legal Last Name', value: identity.legalLastName || '-' },
+    { label: 'Date of Birth', value: identity.dateOfBirth || '-' },
+    { label: 'SIN (masked)', value: identity.sinMasked || '-' },
+    { label: 'Current Address', value: identity.currentAddress?.formatted || '-' },
+    { label: 'Email Address', value: identity.email || '-' },
+    { label: 'Phone Number', value: identity.phone || '-' },
+  ];
+};
+
+async function resolvePaymentPacketPayeeIdentity({ packetId, packet = null, connection = null }) {
+  const runner = connection || pool;
+  const packetValue = parsePaymentPacketId(packetId || packet?.id);
+  const packetIdentity = sanitizePaymentPayeeIdentity(packet?.payeeIdentity || null);
+  if (!runner || !packetValue) return packetIdentity;
+  try {
+    const [[row]] = await runner.query(
+      `SELECT pp.id,
+              pp.case_id,
+              pp.client_id,
+              c.case_context_json,
+              a.payload_json AS application_payload_json,
+              cl.first_name AS client_first_name,
+              cl.last_name AS client_last_name,
+              cl.address_json AS client_address_json
+         FROM payment_packet pp
+         LEFT JOIN iset_case c ON c.id = pp.case_id
+         LEFT JOIN iset_application a ON a.id = c.application_id
+         LEFT JOIN client cl ON cl.id = pp.client_id
+        WHERE pp.id = ?
+        LIMIT 1`,
+      [packetValue]
+    );
+    if (!row) return packetIdentity;
+    const caseContext = safeJsonParse(row.case_context_json, null) || {};
+    const parsedPayload = safeJsonParse(row.application_payload_json, null);
+    const payload =
+      parsedPayload && typeof parsedPayload === 'object'
+        ? parsedPayload
+        : {};
+    const answers =
+      payload?.answers && typeof payload.answers === 'object'
+        ? payload.answers
+        : {};
+    const context = { payload, answers, caseContext };
+    const contact = extractContactDetails(context) || {};
+    let currentAddress = extractAddress(context);
+    if (!currentAddress) {
+      const parsedClientAddress = safeJsonParse(row.client_address_json, null);
+      if (parsedClientAddress && typeof parsedClientAddress === 'object') {
+        const candidateAddress =
+          parsedClientAddress.address && typeof parsedClientAddress.address === 'object'
+            ? parsedClientAddress.address
+            : parsedClientAddress;
+        currentAddress = extractAddressFromStructuredObject(candidateAddress);
+      }
+    }
+    const resolvedIdentity = sanitizePaymentPayeeIdentity({
+      legalFirstName:
+        caseContext?.firstName ||
+        caseContext?.first_name ||
+        extractFirstName(context) ||
+        row.client_first_name ||
+        null,
+      legalLastName:
+        caseContext?.lastName ||
+        caseContext?.last_name ||
+        extractLastName(context) ||
+        row.client_last_name ||
+        null,
+      dateOfBirth:
+        caseContext?.dateOfBirth ||
+        caseContext?.date_of_birth ||
+        toDateOnlyString(extractDob(context)) ||
+        null,
+      sinMasked:
+        caseContext?.sin ||
+        caseContext?.socialInsuranceNumber ||
+        extractSin(context) ||
+        null,
+      currentAddress: {
+        street: currentAddress?.line1 || null,
+        line2: currentAddress?.line2 || null,
+        city: currentAddress?.city || null,
+        province: currentAddress?.province || null,
+        postalCode: currentAddress?.postalCode || null,
+      },
+      email:
+        caseContext?.emailPrimary ||
+        contact.email ||
+        null,
+      phone:
+        caseContext?.phonePrimary ||
+        contact.phone ||
+        caseContext?.phoneAlt ||
+        contact.alternatePhone ||
+        null,
+    });
+    if (!packetIdentity) return resolvedIdentity;
+    if (!resolvedIdentity) return packetIdentity;
+    return sanitizePaymentPayeeIdentity({
+      legalFirstName: resolvedIdentity.legalFirstName || packetIdentity.legalFirstName,
+      legalLastName: resolvedIdentity.legalLastName || packetIdentity.legalLastName,
+      dateOfBirth: resolvedIdentity.dateOfBirth || packetIdentity.dateOfBirth,
+      sinMasked: resolvedIdentity.sinMasked || packetIdentity.sinMasked,
+      currentAddress: {
+        street: resolvedIdentity.currentAddress?.street || packetIdentity.currentAddress?.street,
+        city: resolvedIdentity.currentAddress?.city || packetIdentity.currentAddress?.city,
+        province: resolvedIdentity.currentAddress?.province || packetIdentity.currentAddress?.province,
+        postalCode: resolvedIdentity.currentAddress?.postalCode || packetIdentity.currentAddress?.postalCode,
+      },
+      email: resolvedIdentity.email || packetIdentity.email,
+      phone: resolvedIdentity.phone || packetIdentity.phone,
+    });
+  } catch (err) {
+    console.warn('[payments] failed to resolve payee identity', err?.message || err);
+    return packetIdentity;
+  }
+}
+
 const buildPaymentPacketBundleDocument = async ({ packetId, packet, actorUserId, connection }) => {
   const runner = connection || pool;
   if (!packetId || !runner) return null;
   const resolvedPacket = packet || await fetchPaymentPacketById(packetId, runner);
   if (!resolvedPacket) return null;
+  const payeeIdentity = await resolvePaymentPacketPayeeIdentity({
+    packetId,
+    packet: resolvedPacket,
+    connection: runner,
+  });
+  const packetForBundle = payeeIdentity
+    ? { ...resolvedPacket, payeeIdentity }
+    : resolvedPacket;
   const evidenceRows = await fetchPaymentEvidenceDocumentRows({ packetId, connection: runner });
-  const pdfBuffer = await generatePaymentPacketPdfBuffer({ packet: resolvedPacket });
+  const pdfBuffer = await generatePaymentPacketPdfBuffer({ packet: packetForBundle });
   const entries = [
     { name: 'packet-summary.pdf', buffer: pdfBuffer },
   ];
@@ -44602,7 +45235,8 @@ const buildPaymentPacketBundleDocument = async ({ packetId, packet, actorUserId,
   const manifest = {
     packetId: String(packetId),
     generatedAt,
-    approvals: resolvedPacket?.approvals || [],
+    approvals: packetForBundle?.approvals || [],
+    payeeIdentity: payeeIdentity || null,
     evidence: evidenceRows.map(row => ({
       documentId: row.document_id ? String(row.document_id) : null,
       fileName: row.file_name || null,
@@ -44614,6 +45248,10 @@ const buildPaymentPacketBundleDocument = async ({ packetId, packet, actorUserId,
   entries.push({
     name: 'manifest.json',
     buffer: Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'),
+  });
+  entries.push({
+    name: 'payee-identity.json',
+    buffer: Buffer.from(JSON.stringify(payeeIdentity || {}, null, 2), 'utf8'),
   });
 
   for (const doc of evidenceRows) {
@@ -44675,6 +45313,7 @@ const buildPaymentPacketEmail = ({
   bundleLink = null,
   bundleExpiresAt = null,
   bundleExpiresInDays = null,
+  payeeIdentity = null,
 }) => {
   const lines = Array.isArray(packet?.lines) ? packet.lines : [];
   const totalAmount = lines.reduce((sum, line) => sum + (Number(line.amount) || 0), 0);
@@ -44706,6 +45345,12 @@ const buildPaymentPacketEmail = ({
       : '-';
     return `${lineId} ${type} | ${payee} | ${amount} | ${stream} | Pot ${pot} | ${period}`.trim();
   });
+  const payeeIdentityRows = buildPaymentPayeeIdentityRows(
+    payeeIdentity || packet?.payeeIdentity || null
+  );
+  const payeeIdentityTextRows = payeeIdentityRows.map(
+    row => `${row.label}: ${row.value}`
+  );
 
   const attachments = buildPacketAttachmentSummary(packet);
   const attachmentRows = attachments.map(entry => {
@@ -44729,6 +45374,9 @@ const buildPaymentPacketEmail = ({
     '',
     ...headerRows,
     ...(note ? ['', 'Requester note:', note] : []),
+    ...(payeeIdentityTextRows.length
+      ? ['', 'Payee identity (for Sage vendor matching):', ...payeeIdentityTextRows.map(row => `- ${row}`)]
+      : []),
     ...(bundleTextRows.length ? ['', 'Packet bundle:', ...bundleTextRows.map(row => `- ${row}`)] : []),
     '',
     'Payment lines:',
@@ -44744,6 +45392,12 @@ const buildPaymentPacketEmail = ({
       ${headerRows.map(row => `<li>${row}</li>`).join('')}
     </ul>
     ${note ? `<p><strong>Requester note:</strong> ${note}</p>` : ''}
+    ${payeeIdentityRows.length ? `
+      <p><strong>Payee identity (for Sage vendor matching)</strong></p>
+      <ul>
+        ${payeeIdentityRows.map(row => `<li>${escapeHtml(row.label)}: ${escapeHtml(row.value)}</li>`).join('')}
+      </ul>
+    ` : ''}
     ${bundleLink ? `
       <p><strong>Packet bundle</strong></p>
       <ul>
@@ -45526,6 +46180,14 @@ async function sendFinanceEmailForPacket({ packetId, packetRow = null, note = nu
     return { error: 'payment_packet_not_found' };
   }
   const packet = await fetchPaymentPacketById(packetId, runner);
+  const payeeIdentity = await resolvePaymentPacketPayeeIdentity({
+    packetId,
+    packet,
+    connection: runner,
+  });
+  const packetWithPayeeIdentity = payeeIdentity
+    ? { ...packet, payeeIdentity }
+    : packet;
   const { regionCode, email } = await resolveFinanceEmailForPacket(row, runner);
   if (!email) {
     return {
@@ -45540,7 +46202,7 @@ async function sendFinanceEmailForPacket({ packetId, packetRow = null, note = nu
   try {
     const bundle = await buildPaymentPacketBundleLink({
       packetId,
-      packet,
+      packet: packetWithPayeeIdentity,
       actorUserId: senderUserId,
       connection: runner,
       expiresInSeconds: PAYMENT_PACKET_BUNDLE_EXPIRY_SECONDS,
@@ -45551,13 +46213,14 @@ async function sendFinanceEmailForPacket({ packetId, packetRow = null, note = nu
     console.warn('[payments] failed to build packet bundle link', err?.message || err);
   }
   const { subject, bodyText, bodyHtml, attachments } = buildPaymentPacketEmail({
-    packet,
+    packet: packetWithPayeeIdentity,
     regionCode,
     note,
     statusOverride: 'submitted',
     bundleLink,
     bundleExpiresAt,
     bundleExpiresInDays: PAYMENT_PACKET_BUNDLE_EXPIRY_DAYS,
+    payeeIdentity,
   });
   const recipients = { to: [email] };
   const senderLabel =
@@ -45567,6 +46230,17 @@ async function sendFinanceEmailForPacket({ packetId, packetRow = null, note = nu
     req?.auth?.email ||
     req?.staffProfile?.email ||
     null;
+  const sendAttemptId = `pkt-${packetId}-${Date.now()}`;
+  const sendStartedAt = Date.now();
+  console.info('[payments][finance-email] sending via SES', {
+    attemptId: sendAttemptId,
+    packetId: String(packetId),
+    regionCode: regionCode || null,
+    to: recipients.to,
+    subject,
+    attachmentCount: Array.isArray(attachments) ? attachments.length : 0,
+    hasBundleLink: Boolean(bundleLink),
+  });
   let status = 'sent';
   let messageId = null;
   let errorMessage = null;
@@ -45578,9 +46252,21 @@ async function sendFinanceEmailForPacket({ packetId, packetRow = null, note = nu
       bodyText,
     });
     messageId = result?.MessageId || result?.messageId || null;
+    console.info('[payments][finance-email] SES accepted send', {
+      attemptId: sendAttemptId,
+      packetId: String(packetId),
+      messageId,
+      elapsedMs: Date.now() - sendStartedAt,
+    });
   } catch (err) {
     status = 'failed';
     errorMessage = err?.message || 'SES send failed';
+    console.error('[payments][finance-email] SES send failed', {
+      attemptId: sendAttemptId,
+      packetId: String(packetId),
+      error: errorMessage,
+      elapsedMs: Date.now() - sendStartedAt,
+    });
   }
   const communication = await createPaymentCommunication({
     packetId,
@@ -45597,6 +46283,13 @@ async function sendFinanceEmailForPacket({ packetId, packetRow = null, note = nu
     errorMessage,
     sentAt: status === 'sent' ? new Date() : null,
     connection: runner,
+  });
+  console.info('[payments][finance-email] communication recorded', {
+    attemptId: sendAttemptId,
+    packetId: String(packetId),
+    communicationId: communication?.id || null,
+    status,
+    messageId: messageId || null,
   });
 
   if (status !== 'sent') {
@@ -48218,7 +48911,15 @@ app.get('/api/finance/payment-packets/:id/pdf', async (req, res) => {
     if (!packet) {
       return res.status(404).json({ error: 'payment_packet_not_found' });
     }
-    const pdfBuffer = await generatePaymentPacketPdfBuffer({ packet });
+    const payeeIdentity = await resolvePaymentPacketPayeeIdentity({
+      packetId,
+      packet,
+      connection: pool,
+    });
+    const packetForPdf = payeeIdentity
+      ? { ...packet, payeeIdentity }
+      : packet;
+    const pdfBuffer = await generatePaymentPacketPdfBuffer({ packet: packetForPdf });
     const filename = `payment-packet-${packetId}-${Date.now()}.pdf`;
     await storeGeneratedDocument({
       buffer: pdfBuffer,
@@ -48255,15 +48956,24 @@ app.post('/api/finance/payment-packets/:id/audit-bundle', async (req, res) => {
     if (!packet) {
       return res.status(404).json({ error: 'payment_packet_not_found' });
     }
+    const payeeIdentity = await resolvePaymentPacketPayeeIdentity({
+      packetId,
+      packet,
+      connection: pool,
+    });
+    const packetForBundle = payeeIdentity
+      ? { ...packet, payeeIdentity }
+      : packet;
     const evidenceRows = await fetchPaymentEvidenceDocumentRows({ packetId, connection: pool });
-    const pdfBuffer = await generatePaymentPacketPdfBuffer({ packet });
+    const pdfBuffer = await generatePaymentPacketPdfBuffer({ packet: packetForBundle });
     const entries = [
       { name: 'packet-summary.pdf', buffer: pdfBuffer },
     ];
     const manifest = {
       packetId: String(packetId),
       generatedAt: new Date().toISOString(),
-      approvals: packet?.approvals || [],
+      approvals: packetForBundle?.approvals || [],
+      payeeIdentity: payeeIdentity || null,
       evidence: evidenceRows.map(row => ({
         documentId: row.document_id ? String(row.document_id) : null,
         fileName: row.file_name || null,
@@ -48275,6 +48985,10 @@ app.post('/api/finance/payment-packets/:id/audit-bundle', async (req, res) => {
     entries.push({
       name: 'manifest.json',
       buffer: Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'),
+    });
+    entries.push({
+      name: 'payee-identity.json',
+      buffer: Buffer.from(JSON.stringify(payeeIdentity || {}, null, 2), 'utf8'),
     });
 
     for (const doc of evidenceRows) {

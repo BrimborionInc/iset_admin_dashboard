@@ -2,6 +2,14 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-02-23
+- ILMP: Added backend validation that first/last names cannot be numeric-only, matching ESDC ILMP guide rules.
+- ILMP: Tightened intervention outcome enforcement so outcome is required when an action plan result date is present (queue validation + action-plan close endpoint).
+- ILMP: Added strict NOC validity checks (2016/2021) against `noc_code` during action-plan/intervention save and close flows, with queue validation parity and aligned NOC-version allow-lists.
+- ILMP: Locked action plan identity fields after ESDC submission by blocking post-submission changes to action plan start date and agreement number.
+- ILMP: Fixed grouped batch XML duplication by deduplicating action plans when a client has multiple participant-submission rows.
+- ESDC Dashboard: Participant queue now requests grouped-by-client rows so each client appears once with child rows for related submissions/plans.
+
 ## 2026-02-20
 - Messaging: Internal `/messages` now supports explicit `Forward` compose mode with `Fwd:` subject handling and forwarded body prefill.
 - Messaging: Reply delivery semantics now honor explicitly selected recipients instead of auto-notifying all historical thread participants.
