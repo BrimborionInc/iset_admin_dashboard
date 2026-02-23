@@ -847,6 +847,14 @@ const InterventionModal = ({
         errors.endDate = "End date must be within 60 months of start date.";
       }
     }
+    if (
+      form.endDate &&
+      !errors.endDate &&
+      !["completed", "cancelled"].includes(statusNormalized)
+    ) {
+      errors.endDate =
+        'Use "Close intervention" to set completion date and final outcome.';
+    }
 
     const durationValue =
       form.durationDays === "" ? null : Number(form.durationDays.replace(/\s+/g, ""));
@@ -855,9 +863,6 @@ const InterventionModal = ({
     }
     if (Number.isFinite(durationValue) && durationValue < 0) {
       errors.durationDays = "Duration (days) cannot be negative.";
-    }
-    if (form.endDate && durationValue === null) {
-      errors.durationDays = "Duration (days) is required when an end date is provided.";
     }
     if (form.startDate && form.endDate && Number.isFinite(durationValue)) {
       const rangeDays = calculateDurationDays(form.startDate, form.endDate);

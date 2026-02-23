@@ -5,7 +5,7 @@ const archiver = require('archiver');
 const multer = require('multer');
 const puppeteer = require('puppeteer');
 const { PassThrough } = require('stream');
-const { XMLValidator } = require('fast-xml-parser');
+const { XMLValidator, XMLParser } = require('fast-xml-parser');
 const { maskName } = require('./src/utils/utils');
 const { getInternalNotifications, dismissInternalNotification } = require('./src/internalNotifications');
 const {
@@ -4844,8 +4844,34 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
         agreementNumber: planAgreementNumber,
         resultDate: planResultDate,
         resultCode: planResultCode,
-        resultNoc: plan.resultNoc || metadata.resultNoc || null,
-        resultNocVersion: plan.resultNocVersion || metadata.resultNocVersion || null,
+        resultEducationLevel:
+          plan.resultEducationLevel ||
+          plan.actionPlanResultEducationLevel ||
+          plan.ActionPlanResultEducationLevel ||
+          metadata.resultEducationLevel ||
+          metadata.actionPlanResultEducationLevel ||
+          null,
+        futureEducationLevel:
+          plan.futureEducationLevel ||
+          plan.actionPlanFutureEducationLevel ||
+          plan.ActionPlanFutureEducationLevel ||
+          metadata.futureEducationLevel ||
+          metadata.actionPlanFutureEducationLevel ||
+          null,
+        resultNoc:
+          plan.resultNoc ||
+          plan.actionPlanResultRelatedNOC ||
+          plan.ActionPlanResultRelatedNOC ||
+          metadata.resultNoc ||
+          metadata.actionPlanResultRelatedNOC ||
+          null,
+        resultNocVersion:
+          plan.resultNocVersion ||
+          plan.actionPlanResultRelatedNOCVersion ||
+          plan.ActionPlanResultRelatedNOCVersion ||
+          metadata.resultNocVersion ||
+          metadata.actionPlanResultRelatedNOCVersion ||
+          null,
         childcareNeed: planChildcareNeed,
         childcareFunding: planChildcareFunding,
         goalDescription: planGoalDescription || normaliseString(answers['long-term-goal'] || answers['long_term_goal']) || null,
@@ -5256,7 +5282,6 @@ function runIlmpValidation(context) {
   })();
 
   const clientStatus = extractClientStatusDetails(context);
-  const educationDetails = extractEducationDetails(context);
   const requestedSupports = extractRequestedSupports(context);
   const derivedPlans = extractActionPlanDetails(context, clientStatus, requestedSupports) || [];
   const barriersRaw = extractEmploymentBarriers(context) || [];
@@ -5501,6 +5526,22 @@ function runIlmpValidation(context) {
     const planResultCodeRaw = plan.resultCode || plan.ActionPlanResultCode || null;
     const planResultCode = planResultCodeRaw
       ? toCode(planResultCodeRaw, CODE_LOOKUP.resultCode) || (CODE_MAPS.resultCode.has(String(planResultCodeRaw)) ? String(planResultCodeRaw) : null)
+      : null;
+    const planResultEducationRaw =
+      plan.resultEducationLevel ||
+      plan.actionPlanResultEducationLevel ||
+      plan.ActionPlanResultEducationLevel ||
+      null;
+    const planResultEducationCode = planResultEducationRaw
+      ? toCode(planResultEducationRaw, CODE_MAPS.educationLevel) || (CODE_MAPS.educationLevel.has(String(planResultEducationRaw)) ? String(planResultEducationRaw) : null)
+      : null;
+    const planFutureEducationRaw =
+      plan.futureEducationLevel ||
+      plan.actionPlanFutureEducationLevel ||
+      plan.ActionPlanFutureEducationLevel ||
+      null;
+    const planFutureEducationCode = planFutureEducationRaw
+      ? (['5', '8', '9', '10'].includes(String(planFutureEducationRaw).trim()) ? String(planFutureEducationRaw).trim() : null)
       : null;
     const interventions = Array.isArray(plan.interventions)
       ? plan.interventions.filter(intv => normaliseInterventionStatus(intv?.status) !== 'planned')
@@ -5798,7 +5839,7 @@ function runIlmpValidation(context) {
         }
       }
 
-      if (!educationDetails?.level) {
+      if (!planResultEducationCode) {
         const msg = 'Result education level is required when closing an action plan.';
         blockingIssues.push(`${planPrefix} ${msg}`);
         ruleResults.push({
@@ -5812,7 +5853,7 @@ function runIlmpValidation(context) {
         });
       }
 
-      if (['2', '3'].includes(planResultCode)) {
+      if (planResultCode === '2') {
         const resultNoc = plan.resultNoc || plan.actionPlanResultRelatedNOC || null;
         const resultNocVersion = plan.resultNocVersion || plan.actionPlanResultRelatedNOCVersion || null;
         if (!resultNoc || !/^\d{4,5}$/.test(String(resultNoc))) {
@@ -5842,12 +5883,12 @@ function runIlmpValidation(context) {
           });
         }
       }
-      if (planResultCode === '4' && !educationDetails?.level) {
-        const msg = 'Future education level must be present when result is Returned to School.';
+      if (planResultCode === '4' && !planFutureEducationCode) {
+        const msg = 'Future education level must be present (codes 5/8/9/10) when result is Returned to School.';
         blockingIssues.push(`${planPrefix} ${msg}`);
         ruleResults.push({
           id: `${planPrefix}-result-education`,
-          label: 'Action plan result education level',
+          label: 'Action plan future education level',
           category: 'mandatory',
           severity: 'blocking',
           passed: false,
@@ -5899,17 +5940,10 @@ function runIlmpValidation(context) {
     interventions.forEach(intv => {
       const intId = intv.id || 'intervention';
       const prefix = `[intervention-${intId}]`;
-      const intStatus = normaliseInterventionStatus(intv.status);
       const startStr = intv.startDate || null;
       const endStr = intv.endDate || null;
       const startDate = startStr ? parseDate(startStr) : null;
       const endDate = endStr ? parseDate(endStr) : null;
-      const durationRaw = intv.duration || intv.durationDays || null;
-      const durationVal = durationRaw === 0 ? 0 : (durationRaw ? Number.parseInt(String(durationRaw), 10) : null);
-      const costRaw = typeof intv.cost === 'string' || typeof intv.cost === 'number' ? intv.cost : null;
-      const costParsed = costRaw !== null && typeof costRaw !== 'undefined'
-        ? Number.parseInt(String(costRaw).replace(/[^\d-]/g, ''), 10)
-        : null;
 
       if (!startStr) {
         const msg = 'Intervention start date is required.';
@@ -6054,74 +6088,6 @@ function runIlmpValidation(context) {
         blockingIssues.push(`${prefix} ${msg}`);
       }
 
-      if ((planResultDate || endStr) && !Number.isFinite(durationVal)) {
-        const msg = 'Intervention duration (days) is required when end date or close-out exists.';
-        blockingIssues.push(`${prefix} ${msg}`);
-      }
-      if (Number.isFinite(durationVal) && durationVal >= 0) {
-        if (startDate && endDate) {
-          const expected = calculateDurationDaysFromDates(startDate, endDate);
-          if (expected !== null && Math.abs(durationVal - expected) > 2) {
-            const msg = 'Intervention duration must align with start and end dates.';
-            blockingIssues.push(`${prefix} ${msg}`);
-            ruleResults.push({
-              id: `${prefix}-duration-mismatch`,
-              label: 'Intervention duration',
-              category: 'mandatory',
-              severity: 'blocking',
-              passed: false,
-              message: msg,
-              detail: { duration: durationVal, expected }
-            });
-          }
-        }
-        if (durationVal > 1500) {
-          const msg = 'Intervention duration is unusually long; review.';
-          warnings.push(`${prefix} ${msg}`);
-        }
-      }
-
-      if ((planResultDate || endStr) && (costParsed === null || Number.isNaN(costParsed))) {
-        const msg = 'Intervention cost is required when end date or close-out exists.';
-        blockingIssues.push(`${prefix} ${msg}`);
-        ruleResults.push({
-          id: `${prefix}-cost-required`,
-          label: 'Intervention cost',
-          category: 'mandatory',
-          severity: 'blocking',
-          passed: false,
-          message: msg,
-          detail: null
-        });
-      } else if (costParsed !== null && !Number.isNaN(costParsed)) {
-        if (costParsed < 0 || costParsed > 999999) {
-          const msg = 'Intervention cost must be between 0 and 999999.';
-          blockingIssues.push(`${prefix} ${msg}`);
-          ruleResults.push({
-            id: `${prefix}-cost-range`,
-            label: 'Intervention cost',
-            category: 'mandatory',
-            severity: 'blocking',
-            passed: false,
-            message: msg,
-            detail: costParsed
-          });
-        }
-        if (intStatus === 'in_progress' && !endStr) {
-          const msg = 'Intervention cost on an in-progress intervention is treated as estimated.';
-          warnings.push(`${prefix} ${msg}`);
-          ruleResults.push({
-            id: `${prefix}-cost-estimated`,
-            label: 'Intervention cost',
-            category: 'optional',
-            severity: 'warning',
-            passed: false,
-            message: msg,
-            detail: costParsed
-          });
-        }
-      }
-
       if (endStr && !intv.outcome) {
         const msg = 'Intervention outcome code is required when end date is set.';
         blockingIssues.push(`${prefix} ${msg}`);
@@ -6191,19 +6157,27 @@ function runIlmpValidation(context) {
     });
   });
 
-  // File-level validations (schema version, namespaces, well-formed XML)
-  if (ILMP_SCHEMA_VERSION !== '1.4') {
-    const msg = 'SchemaVersion must equal 1.4.';
-    blockingIssues.push(`[file] ${msg}`);
+  const pushFileBlocking = (id, label, message, detail = null) => {
+    blockingIssues.push(`[file] ${message}`);
     ruleResults.push({
-      id: 'file-schema-version',
-      label: 'Schema version',
+      id,
+      label,
       category: 'mandatory',
       severity: 'blocking',
       passed: false,
-      message: msg,
-      detail: ILMP_SCHEMA_VERSION
+      message,
+      detail
     });
+  };
+
+  // File-level validations (schema version, namespaces, well-formed XML)
+  if (ILMP_SCHEMA_VERSION !== '1.4') {
+    pushFileBlocking(
+      'file-schema-version',
+      'Schema version',
+      'SchemaVersion must equal 1.4.',
+      ILMP_SCHEMA_VERSION
+    );
   }
   try {
     const payload = buildIlmpParticipantPayload(context);
@@ -6212,23 +6186,132 @@ function runIlmpValidation(context) {
     }
     const xmlCheck = XMLValidator.validate(payload.xml, { allowBooleanAttributes: true });
     if (xmlCheck !== true) {
-      const msg = `XML is not well-formed: ${xmlCheck?.err?.msg || 'validation error'}`;
-      blockingIssues.push(`[file] ${msg}`);
+      pushFileBlocking(
+        'file-well-formed',
+        'XML well-formedness',
+        `XML is not well-formed: ${xmlCheck?.err?.msg || 'validation error'}`,
+        xmlCheck?.err || null
+      );
     }
     const hasNamespaces =
       payload.xml.includes('xmlns:ALMP="http://servicecanada.gc.ca/ALMP/contentExchange"') &&
       payload.xml.includes('xmlns:p="http://servicecanada.gc.ca/ALMP/contentTypes"');
     if (!hasNamespaces) {
-      const msg = 'Required XML namespaces are missing.';
-      blockingIssues.push(`[file] ${msg}`);
+      pushFileBlocking(
+        'file-namespaces',
+        'XML namespaces',
+        'Required XML namespaces are missing.'
+      );
     }
     if (!payload.xml.includes('<SchemaVersion>1.4</SchemaVersion>')) {
-      const msg = 'SchemaVersion element missing or incorrect.';
-      blockingIssues.push(`[file] ${msg}`);
+      pushFileBlocking(
+        'file-schema-element',
+        'SchemaVersion element',
+        'SchemaVersion element missing or incorrect.'
+      );
     }
+
+    try {
+      const parser = new XMLParser({ ignoreAttributes: false, trimValues: true });
+      const parsedXml = parser.parse(payload.xml);
+      const dynamicRootKey =
+        parsedXml && typeof parsedXml === 'object'
+          ? Object.keys(parsedXml).find(key => String(key).toLowerCase().includes('contentalmp')) || null
+          : null;
+      const root =
+        parsedXml?.['ALMP:contentALMP'] ||
+        parsedXml?.contentALMP ||
+        (dynamicRootKey ? parsedXml?.[dynamicRootKey] : null) ||
+        null;
+      const asList = value => (Array.isArray(value) ? value : value ? [value] : []);
+      const clients = asList(root?.client);
+
+      clients.forEach((clientNode, clientIndex) => {
+        if (
+          clientNode &&
+          typeof clientNode === 'object' &&
+          Object.prototype.hasOwnProperty.call(clientNode, 'sysComment')
+        ) {
+          pushFileBlocking(
+            `file-client-syscomment-${clientIndex + 1}`,
+            'Client XML structure',
+            `Client ${clientIndex + 1} contains a disallowed sysComment element under <client>.`
+          );
+        }
+
+        const plans = asList(clientNode?.actionPlan);
+        plans.forEach((planNode, planIndex) => {
+          const interventions = asList(planNode?.intervention);
+          interventions.forEach((interventionNode, interventionIndex) => {
+            if (
+              interventionNode &&
+              typeof interventionNode === 'object' &&
+              Object.prototype.hasOwnProperty.call(interventionNode, 'interventionDuration')
+            ) {
+              pushFileBlocking(
+                `file-intervention-duration-${clientIndex + 1}-${planIndex + 1}-${interventionIndex + 1}`,
+                'Intervention XML structure',
+                `Intervention ${interventionIndex + 1} in plan ${planIndex + 1} contains disallowed <interventionDuration>.`
+              );
+            }
+            if (
+              interventionNode &&
+              typeof interventionNode === 'object' &&
+              Object.prototype.hasOwnProperty.call(interventionNode, 'interventionCost')
+            ) {
+              pushFileBlocking(
+                `file-intervention-cost-${clientIndex + 1}-${planIndex + 1}-${interventionIndex + 1}`,
+                'Intervention XML structure',
+                `Intervention ${interventionIndex + 1} in plan ${planIndex + 1} contains disallowed <interventionCost>.`
+              );
+            }
+          });
+        });
+      });
+    } catch (parseErr) {
+      pushFileBlocking(
+        'file-xml-parse',
+        'XML structure',
+        `Unable to parse generated XML for structural checks: ${parseErr?.message || parseErr}`
+      );
+    }
+
+    const actionPlanBlocks = payload.xml.match(/<actionPlan>[\s\S]*?<\/actionPlan>/g) || [];
+    actionPlanBlocks.forEach((block, index) => {
+      const planIndex = index + 1;
+      const nocIndex = block.indexOf('<actionPlanResultRelatedNOC>');
+      const nocVersionIndex = block.indexOf('<actionPlanResultRelatedNOCVersion>');
+      const educationIndex = block.indexOf('<actionPlanResultEducationLevel>');
+      const resultDateIndex = block.indexOf('<actionPlanResultDate>');
+
+      if (nocIndex !== -1 && nocVersionIndex !== -1 && nocVersionIndex < nocIndex) {
+        pushFileBlocking(
+          `file-actionplan-order-noc-version-${planIndex}`,
+          'Action plan XML order',
+          `Action plan ${planIndex} has action plan result fields out of order: actionPlanResultRelatedNOCVersion must come after actionPlanResultRelatedNOC.`
+        );
+      }
+      if (nocVersionIndex !== -1 && educationIndex !== -1 && educationIndex < nocVersionIndex) {
+        pushFileBlocking(
+          `file-actionplan-order-education-${planIndex}`,
+          'Action plan XML order',
+          `Action plan ${planIndex} has action plan result fields out of order: actionPlanResultEducationLevel must come after actionPlanResultRelatedNOCVersion.`
+        );
+      }
+      if (educationIndex !== -1 && resultDateIndex !== -1 && resultDateIndex < educationIndex) {
+        pushFileBlocking(
+          `file-actionplan-order-date-${planIndex}`,
+          'Action plan XML order',
+          `Action plan ${planIndex} has action plan result fields out of order: actionPlanResultDate must come after actionPlanResultEducationLevel.`
+        );
+      }
+    });
   } catch (err) {
-    const msg = `XML generation/schema validation failed: ${err?.message || err}`;
-    blockingIssues.push(`[file] ${msg}`);
+    pushFileBlocking(
+      'file-generation',
+      'XML generation',
+      `XML generation/schema validation failed: ${err?.message || err}`
+    );
   }
 
   const mandatoryResults = ruleResults.filter(rule => rule.category === 'mandatory');
@@ -10091,10 +10174,8 @@ function buildIlmpParticipantPayload(context) {
     add(indent + 1, 'interventionStartDate', intervention.startDate || null);
     add(indent + 1, 'interventionEndDate', intervention.endDate || null);
     add(indent + 1, 'interventionOutcome', intervention.outcome || null);
-    add(indent + 1, 'interventionDuration', intervention.duration || null);
     add(indent + 1, 'interventionRelatedNOC', intervention.relatedNoc || null);
     add(indent + 1, 'interventionRelatedNOCVersion', intervention.relatedNocVersion || null);
-    add(indent + 1, 'interventionCost', intervention.cost || null);
     const intStatus = normaliseStatusShort(intervention.status || intervention.Status || '');
     const intSysComment = (() => {
       const idPart = intervention.id ? `id:${intervention.id}` : null;
@@ -10201,6 +10282,7 @@ function buildIlmpParticipantPayload(context) {
       toCode(plan.actionPlanResultEducationLevel, CODE_MAPS.educationLevel) ||
       (plan.resultEducationLevel ? String(plan.resultEducationLevel).trim() : null) ||
       null;
+    const resolvedPlanResultEducationCode = planResultEducationCode || planEducationLevelCode || null;
     const planResultNoc = plan.resultNoc || plan.actionPlanResultRelatedNOC || plan.ActionPlanResultRelatedNOC || null;
     const planResultNocVersion =
       plan.resultNocVersion ||
@@ -10209,14 +10291,14 @@ function buildIlmpParticipantPayload(context) {
       null;
     add(indent + 1, 'actionPlanStartDate', planStart);
     add(indent + 1, 'actionPlanResultCode', planResultCode);
-    add(indent + 1, 'actionPlanResultDate', planResultDate);
     if (planResultCode === '2') {
       add(indent + 1, 'actionPlanResultRelatedNOC', planResultNoc || plan.interventions?.[0]?.relatedNoc || null);
       add(indent + 1, 'actionPlanResultRelatedNOCVersion', planResultNocVersion || plan.interventions?.[0]?.relatedNocVersion || null);
     }
-    if (planResultCode && planResultDate) {
-      add(indent + 1, 'actionPlanResultEducationLevel', planResultEducationCode || null);
+    if (planResultCode || planResultDate) {
+      add(indent + 1, 'actionPlanResultEducationLevel', resolvedPlanResultEducationCode);
     }
+    add(indent + 1, 'actionPlanResultDate', planResultDate);
     add(indent + 1, 'actionPlanChildCareNeed', toCode(plan.childcareNeed, CODE_MAPS.childcareNeed) || null);
     add(indent + 1, 'actionPlanChildCareFundedCode', toCode(plan.childcareFunding, CODE_MAPS.childcareFunding) || null);
     const planInterventions = plan.interventions || plan.Interventions?.Intervention || [];
@@ -10255,16 +10337,6 @@ function buildIlmpParticipantPayload(context) {
   add(2, 'numberOfDependantChildren', dependentInfo?.count ?? null);
   add(2, 'languageSpoken', languageCode || null);
   add(2, 'disability', disabilityCode || null);
-  const clientSysComment = (() => {
-    const idPart = caseIdValue ? `client id:${caseIdValue}` : null;
-    const datePart = formatSysDate();
-    const parts = [idPart, datePart].filter(Boolean);
-    const joined = parts.join(' ').slice(0, 30);
-    return joined || null;
-  })();
-  if (clientSysComment) {
-    add(2, 'sysComment', clientSysComment);
-  }
   if (addressNode) {
     lines.push('    <address>');
     add(3, 'streetAddress', address.line1 || null);
@@ -15256,7 +15328,7 @@ async function markCaseReadyToClose({ caseId, connection = null }) {
       `SELECT readiness_status, readiness_summary, warnings, blocking_issues, last_validated_at
          FROM esdc_participant_submission
         WHERE id = ?`,
-      [submissionRow.id]
+      [submissionIdForCase]
     );
     const compliance = { ilmp: mapIlmpComplianceFromSubmission(updatedSubmission), finance: { status: 'pending', messages: [] } };
     const ilmpBlockingIssues = Array.isArray(compliance.ilmp.blockingIssues) ? compliance.ilmp.blockingIssues : [];
@@ -32042,6 +32114,16 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
         res.status(422).json({ error: 'previous_employment_noc_required', message: 'NOC code and version are required when employment status is Employed.' });
         return;
       }
+      const prevEmploymentNocDigits = String(prevEmploymentNoc).replace(/\D/g, '');
+      const prevEmploymentNocLength = prevEmploymentNocVersion === '2021' ? 5 : 4;
+      if (prevEmploymentNocDigits.length !== prevEmploymentNocLength) {
+        res.status(422).json({
+          error: 'invalid_previous_employment_noc',
+          message: `NOC code must be ${prevEmploymentNocLength} digits for version ${prevEmploymentNocVersion}.`
+        });
+        return;
+      }
+      prevEmploymentNoc = prevEmploymentNocDigits;
       if (!prevEmploymentScheduleType) {
         res.status(422).json({ error: 'previous_employment_schedule_required', message: 'Schedule type is required when employment status is Employed.' });
         return;
@@ -32157,6 +32239,7 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
 
     await connection.commit();
     await recomputeCaseStatus(caseId, connection, { allowReopenFinal: true });
+    await markIlmpNeedsReviewForCase(caseId);
 
     const planRow = await fetchActionPlanWithCase(result.insertId);
     const payload =
@@ -32553,6 +32636,15 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         : typeof outcomeCode === 'string'
         ? outcomeCode.trim()
         : '';
+    if (trimmedOutcomeCreate) {
+      const validInterventionOutcomes = new Set(['1', '2', '3', '4', '5', '6']);
+      if (!validInterventionOutcomes.has(trimmedOutcomeCreate)) {
+        return res.status(422).json({
+          error: 'invalid_outcome',
+          message: 'Outcome must be one of 1-6.'
+        });
+      }
+    }
     let trimmedPotId = (() => {
       if (typeof potId === 'string') return potId.trim();
       if (Number.isFinite(potId)) return String(potId);
@@ -32630,6 +32722,18 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         return res.status(422).json({ error: 'invalid_noc', message: `NOC code must be a ${expectedLength}-digit number for version ${trimmedNocVersion}.` });
       }
     }
+    if (endDateValue && !trimmedOutcomeCreate) {
+      return res.status(422).json({
+        error: 'outcome_required',
+        message: 'Intervention outcome code is required when an end date is provided.'
+      });
+    }
+    if (endDateValue && !['completed', 'cancelled'].includes(statusValue)) {
+      return res.status(422).json({
+        error: 'status_end_date_mismatch',
+        message: 'Intervention with an end date must be marked completed or cancelled.'
+      });
+    }
 
     // Derive durationDays
     let durationDaysValue = null;
@@ -32657,19 +32761,13 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       }
     }
 
-    // Cost validation per ESDC (integer 0-999999) when end date present
+    // Cost validation (integer 0-999999) when provided.
     let plannedCostInt = null;
     if (plannedCostValue !== null) {
       plannedCostInt = Math.round(plannedCostValue);
       if (!Number.isFinite(plannedCostInt) || plannedCostInt < 0 || plannedCostInt > 999999) {
         return res.status(422).json({ error: 'invalid_cost_range', message: 'Cost must be between 0 and 999999.' });
       }
-    }
-    if (endDateValue && plannedCostInt === null) {
-      return res.status(422).json({ error: 'cost_required', message: 'Intervention cost is required when an end date is provided.' });
-    }
-    if (endDateValue && durationDaysValue === null) {
-      return res.status(422).json({ error: 'duration_required', message: 'Duration (days) is required when an end date is provided.' });
     }
 
     const metadataSource =
@@ -33052,10 +33150,98 @@ app.patch('/api/interventions/:id', async (req, res) => {
       : null;
     const wasIncludedInCfa = shouldIncludeInterventionForCfa(previousStatus);
 
+    const parsedInterventionMetadata = safeJsonParse(interventionRow.metadata_json, {}) || {};
+
+    const nextCodeRaw = Object.prototype.hasOwnProperty.call(body, 'code')
+      ? (typeof body.code === 'string' ? body.code.trim() : '')
+      : (interventionRow.intervention_code ? String(interventionRow.intervention_code).trim() : '');
+    const nextNocRaw = Object.prototype.hasOwnProperty.call(body, 'noc')
+      ? (typeof body.noc === 'string' ? body.noc.trim() : '')
+      : (
+          interventionRow.related_noc
+            ? String(interventionRow.related_noc).trim()
+            : (
+                parsedInterventionMetadata?.noc
+                  ? String(parsedInterventionMetadata.noc).trim()
+                  : ''
+              )
+        );
+    const nextNocVersionRaw = Object.prototype.hasOwnProperty.call(body, 'nocVersion')
+      ? (typeof body.nocVersion === 'string' ? body.nocVersion.trim() : '')
+      : (
+          interventionRow.related_noc_version
+            ? String(interventionRow.related_noc_version).trim()
+            : (
+                parsedInterventionMetadata?.nocVersion
+                  ? String(parsedInterventionMetadata.nocVersion).trim()
+                  : ''
+              )
+        );
+    const nextStartDate = typeof startDateValue !== 'undefined'
+      ? (startDateValue || null)
+      : toDateOnly(interventionRow.start_date);
+    const nextEndDate = typeof endDateValue !== 'undefined'
+      ? (endDateValue || null)
+      : toDateOnly(interventionRow.end_date);
+    const nextOutcome = Object.prototype.hasOwnProperty.call(body, 'outcome')
+      ? (typeof body.outcome === 'string' ? body.outcome.trim() : '')
+      : (interventionRow.outcome_code ? String(interventionRow.outcome_code).trim() : '');
+    const nextStatusForValidation = statusProvided ? statusValue : previousStatus;
+
+    if (nextOutcome) {
+      const validInterventionOutcomes = new Set(['1', '2', '3', '4', '5', '6']);
+      if (!validInterventionOutcomes.has(nextOutcome)) {
+        return res.status(422).json({
+          error: 'invalid_outcome',
+          message: 'Outcome must be one of 1-6.'
+        });
+      }
+    }
+    if (nextEndDate && !nextOutcome) {
+      return res.status(422).json({
+        error: 'outcome_required',
+        message: 'Intervention outcome code is required when an end date is set.'
+      });
+    }
+    if (nextEndDate && !['completed', 'cancelled'].includes(nextStatusForValidation)) {
+      return res.status(422).json({
+        error: 'status_end_date_mismatch',
+        message: 'Intervention with an end date must be marked completed or cancelled. Use the close endpoint for completion.'
+      });
+    }
+    if (nextStartDate && nextEndDate && nextEndDate < nextStartDate) {
+      return res.status(422).json({
+        error: 'end_before_start',
+        message: 'End date cannot be before start date.'
+      });
+    }
+    const requiresNoc = Number(nextCodeRaw) >= 6 && Number(nextCodeRaw) <= 13;
+    if (requiresNoc) {
+      if (!nextNocVersionRaw) {
+        return res.status(422).json({
+          error: 'noc_version_required',
+          message: 'NOC version is required for this intervention code.'
+        });
+      }
+      if (!nextNocRaw) {
+        return res.status(422).json({
+          error: 'noc_required',
+          message: 'NOC code is required for this intervention code.'
+        });
+      }
+      const expectedLength = nextNocVersionRaw === '2021' ? 5 : 4;
+      if (!/^\d+$/.test(nextNocRaw) || nextNocRaw.length !== expectedLength) {
+        return res.status(422).json({
+          error: 'invalid_noc',
+          message: `NOC code must be a ${expectedLength}-digit number for version ${nextNocVersionRaw}.`
+        });
+      }
+    }
+
     const updates = [];
     const params = [];
     let metadataChanged = false;
-    const metadata = safeJsonParse(interventionRow.metadata_json, null) || {};
+    const metadata = { ...parsedInterventionMetadata };
     const metadataPayload =
       body.metadata && typeof body.metadata === 'object' ? body.metadata : null;
     if (metadataPayload) {
@@ -33595,9 +33781,6 @@ app.post('/api/interventions/:id/close', async (req, res) => {
   if (!completionDateValue) {
     return res.status(422).json({ error: 'completion_date_required', message: 'Completion date is required to close an intervention.' });
   }
-  if (!completionDateValue) {
-    return res.status(422).json({ error: 'completion_date_required', message: 'Completion date is required to close an intervention.' });
-  }
 
   try {
     const interventionRow = await fetchInterventionWithCase(interventionId);
@@ -33892,6 +34075,7 @@ app.post('/api/action-plans/:id/activate', async (req, res) => {
     }
 
     const updatedRow = await fetchActionPlanWithCase(planId);
+    await markIlmpNeedsReviewForCase(planRow.case_id);
     await recomputeCaseStatus(planRow.case_id, null, { allowReopenFinal: true });
     res.status(200).json(mapActionPlanRow(updatedRow));
   } catch (error) {
@@ -34066,6 +34250,7 @@ app.post('/api/action-plans/:id/close', async (req, res) => {
     );
 
     const updatedRow = await fetchActionPlanWithCase(planId);
+    await markIlmpNeedsReviewForCase(planRow.case_id);
     await recomputeCaseStatus(planRow.case_id);
     res.status(200).json(mapActionPlanRow(updatedRow));
   } catch (error) {
@@ -34114,6 +34299,7 @@ app.post('/api/action-plans/:id/archive', async (req, res) => {
     );
 
     const updatedRow = await fetchActionPlanWithCase(planId);
+    await markIlmpNeedsReviewForCase(planRow.case_id);
     await recomputeCaseStatus(planRow.case_id);
     res.status(200).json(mapActionPlanRow(updatedRow));
   } catch (error) {
@@ -34176,6 +34362,7 @@ app.post('/api/action-plans/:id/delete', async (req, res) => {
     }
 
     await pool.query('DELETE FROM iset_case_action_plan WHERE id = ? LIMIT 1', [planId]);
+    await markIlmpNeedsReviewForCase(planRow.case_id);
     await recomputeCaseStatus(planRow.case_id, null, { allowReopenFinal: true });
     res.status(200).json({ success: true, deleted: true, id: planId });
   } catch (error) {
@@ -34353,6 +34540,15 @@ app.patch('/api/action-plans/:id', async (req, res) => {
       if (!prevEmploymentNoc || !prevEmploymentNocVersion) {
         return res.status(422).json({ error: 'previous_employment_noc_required', message: 'NOC code and version are required when employment status is Employed.' });
       }
+      const prevEmploymentNocDigits = String(prevEmploymentNoc).replace(/\D/g, '');
+      const prevEmploymentNocLength = prevEmploymentNocVersion === '2021' ? 5 : 4;
+      if (prevEmploymentNocDigits.length !== prevEmploymentNocLength) {
+        return res.status(422).json({
+          error: 'invalid_previous_employment_noc',
+          message: `NOC code must be ${prevEmploymentNocLength} digits for version ${prevEmploymentNocVersion}.`
+        });
+      }
+      prevEmploymentNoc = prevEmploymentNocDigits;
       if (!prevEmploymentScheduleType) {
         return res.status(422).json({ error: 'previous_employment_schedule_required', message: 'Schedule type is required when employment status is Employed.' });
       }
@@ -53988,6 +54184,7 @@ app.put('/api/cases/:id', async (req, res) => {
         jsonValue = JSON.stringify(parsedContext);
       }
       await conn.query('UPDATE iset_case SET case_context_json = ? WHERE id = ?', [jsonValue, caseId]);
+      shouldMarkSubmissionNeedsReview = true;
     }
 
     if (conflictSignatureRequested) {
