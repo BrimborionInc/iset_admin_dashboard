@@ -531,7 +531,25 @@ export default function UserManagementDashboard() {
           <BoardItem
             key={item.id}
             {...item}
-            header={<Header variant="h2">{item.data.title}</Header>}
+            header={
+              <Header
+                variant="h2"
+                actions={
+                  item.id === 'admin-users-table' ? (
+                    <SpaceBetween direction="horizontal" size="xs">
+                      <Button onClick={() => setShowCreate(true)} variant="primary" disabled={actionBusy}>Create user</Button>
+                      <Button disabled={!selected.length || actionBusy} onClick={bulkDisable}>{actionBusy ? 'Working…' : 'Disable'}</Button>
+                      <Button disabled={!selected.length || actionBusy} onClick={bulkEnable}>{actionBusy ? 'Working…' : 'Enable'}</Button>
+                      <Button disabled={!selected.length || actionBusy} onClick={bulkForceReset}>{actionBusy ? 'Working…' : 'Force reset'}</Button>
+                      <Button disabled={!selected.length || actionBusy} onClick={bulkRemoveRole}>Remove role</Button>
+                      <Button disabled={!selected.length || actionBusy} onClick={bulkResendInvite}>Resend invite</Button>
+                    </SpaceBetween>
+                  ) : undefined
+                }
+              >
+                {item.data.title}
+              </Header>
+            }
             i18nStrings={itemI18n}
             dragHandleAriaLabel={itemI18n.dragHandleAriaLabel}
             resizeHandleAriaLabel={itemI18n.resizeHandleAriaLabel}
@@ -559,16 +577,6 @@ export default function UserManagementDashboard() {
                         variant="embedded"
                         filter={<TextFilter filteringText={filteringText} onChange={e => setFilteringText(e.detail.filteringText)} filteringPlaceholder="Search users" />}
                         header={<Header
-                          actions={
-                            <SpaceBetween direction="horizontal" size="xs">
-                              <Button onClick={() => setShowCreate(true)} variant="primary" disabled={actionBusy}>Create user</Button>
-                              <Button disabled={!selected.length || actionBusy} onClick={bulkDisable}>{actionBusy ? 'Working…' : 'Disable'}</Button>
-                              <Button disabled={!selected.length || actionBusy} onClick={bulkEnable}>{actionBusy ? 'Working…' : 'Enable'}</Button>
-                              <Button disabled={!selected.length || actionBusy} onClick={bulkForceReset}>{actionBusy ? 'Working…' : 'Force reset'}</Button>
-                              <Button disabled={!selected.length || actionBusy} onClick={bulkRemoveRole}>Remove role</Button>
-                              <Button disabled={!selected.length || actionBusy} onClick={bulkResendInvite}>Resend invite</Button>
-                            </SpaceBetween>
-                          }
                           counter={`(${filtered.length})${selected.length ? ` — ${selected.length} selected` : ''}`}
                         >Administrative Users</Header>}
                         empty={<Box textAlign="center" color="inherit"><SpaceBetween size="m"><b>No users</b><Button onClick={() => setShowCreate(true)} variant="primary">Create user</Button></SpaceBetween></Box>}
