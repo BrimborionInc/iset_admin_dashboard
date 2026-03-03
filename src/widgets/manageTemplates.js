@@ -1232,7 +1232,7 @@ const TemplateEditorWidget = ({ actions, dragHandleAriaLabel, i18nStrings }) => 
             </div>
           </div>
           <div style={{ border: '1px solid var(--color-border-divider-default)', borderRadius: '8px', padding: '16px', backgroundColor: 'var(--color-background-container-content)', minHeight: 280 }}>
-            <Header variant="h4">Preview (sample data)</Header>
+            <Header variant="h4">Preview</Header>
             <Box padding="m" style={{ backgroundColor: 'var(--color-background-layout-panel, #f8f8f8)', minHeight: 220 }}>
               <div
                 style={{ fontFamily: 'inherit', whiteSpace: 'normal' }}

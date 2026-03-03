@@ -974,9 +974,9 @@ const AppRoutes = ({
             [
               { text: 'Home', href: '/' },
               { text: 'Financial Management', href: '/finance/overview' },
-              { text: 'Payments', href: '/finance/payments' }
+              { text: 'Batch Payments', href: '/finance/payments' }
             ],
-            'Payments',
+            'Batch Payments',
             <FinancePaymentsHelp />,
             (
               <SpaceBetween size="xs" direction="horizontal">

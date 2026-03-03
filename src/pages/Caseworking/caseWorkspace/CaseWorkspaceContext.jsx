@@ -1,7 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../../../auth/apiClient.js";
 
-const LIVE_CASES_STORAGE_KEY = "iset-demo-use-live-cases";
 const interventionWizardStepStore = new Map();
 const interventionWizardDraftStore = new Map();
 const interventionWizardLastKeyByCase = new Map();
@@ -74,6 +73,13 @@ const isOpenInterventionStatus = status => {
 };
 
 const toNumberOrNull = value => {
+  if (value === null || typeof value === "undefined") return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const numeric = Number(trimmed.replace(/,/g, ""));
+    return Number.isFinite(numeric) ? numeric : null;
+  }
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 };
@@ -101,7 +107,6 @@ const buildInterventionFromApi = (planId, payload = {}) => {
     toNumberOrNull(payload.cost) ??
     toNumberOrNull(payload.budgetAmount) ??
     toNumberOrNull(payload.approvedAmount) ??
-    toNumberOrNull(payload.metadata?.costSettings?.calculatedTotal) ??
     toNumberOrNull(payload.metadata?.cost);
   const resolvedNoc =
     payload.noc ||
@@ -166,41 +171,6 @@ const recomputeInterventionCounts = plans => {
   return { open, total };
 };
 
-const mergeRecurrenceMetadata = (intervention, sourcePayload) => {
-  if (!intervention || !sourcePayload) {
-    return intervention;
-  }
-  const existingCostSettings = intervention.metadata?.costSettings;
-  const payloadCostSettings =
-    sourcePayload.metadata?.costSettings || sourcePayload.costSettings || null;
-  if (!payloadCostSettings || existingCostSettings) {
-    const existingCostType = intervention.metadata?.costType;
-    const payloadCostType = sourcePayload.metadata?.costType || sourcePayload.costType || null;
-    if (!existingCostType && payloadCostType) {
-      return {
-        ...intervention,
-        metadata: { ...(intervention.metadata || {}), costType: payloadCostType },
-      };
-    }
-    return intervention;
-  }
-  const metadata = { ...(intervention.metadata || {}) };
-  metadata.costSettings = {
-    type: payloadCostSettings.type || sourcePayload.costType || "one_time",
-    period: payloadCostSettings.period ?? "",
-    amountPerPeriod: payloadCostSettings.amountPerPeriod ?? null,
-    occurrences: payloadCostSettings.occurrences ?? null,
-    calculatedTotal: payloadCostSettings.calculatedTotal ?? intervention.cost ?? null,
-  };
-  if (sourcePayload.metadata?.costType || sourcePayload.costType) {
-    metadata.costType = sourcePayload.metadata?.costType || sourcePayload.costType;
-  }
-  if (sourcePayload.metadata?.recurrence) {
-    metadata.recurrence = sourcePayload.metadata.recurrence;
-  }
-  return { ...intervention, metadata };
-};
-
 const toTimestamp = value => {
   if (!value) return null;
   const date = new Date(value);
@@ -229,93 +199,9 @@ const sortActionPlansByRecency = plans => {
   });
 };
 
-const buildDummyCase = caseId => ({
-  id: caseId,
-  eligibility: "CRF",
-  client: {
-    name: "Mary Cardinal",
-    dateOfBirth: "1996-08-14",
-    region: "Prairies",
-  },
-  agreementNumber: "CRF-1234567",
-  owner: { id: "user-83", name: "Shelley Stacey" },
-  status: "ready-to-close",
-  updatedAt: "2025-10-25T12:34:00Z",
-  actionPlans: [
-    {
-      id: "plan-001",
-      title: "Skills Development 2025",
-      startDate: "2025-04-12",
-      endDate: "2026-03-31",
-      status: "open",
-      interventions: [
-        {
-          id: "int-001",
-          code: "01",
-          title: "Vocational training",
-          startDate: "2025-05-01",
-          endDate: "2025-08-30",
-          outcome: "In progress",
-          durationWeeks: 16,
-          cost: 42000,
-          potId: "pot-training",
-          noc: "7241",
-          nocVersion: "2016",
-          notes: "Participant enrolled at local college.",
-          compliance: { finance: "ok", ilmp: "pending" },
-        },
-      ],
-    },
-  ],
-  documents: [
-    {
-      id: "doc-001",
-      name: "Training provider invoice.pdf",
-      uploadedBy: "Shelley Stacey",
-      uploadedAt: "2025-06-15T09:12:00Z",
-    },
-  ],
-  notes: [
-    {
-      id: "note-001",
-      author: "Avery Martin",
-      createdAt: "2025-10-02T14:05:00Z",
-      body: "Follow-up required with training provider to confirm attendance.",
-    },
-  ],
-  finance: {
-    allocated: 160000,
-    committed: 14250,
-    actuals: 128400,
-    variance: 31600,
-    pots: [
-      { id: "pot-training", name: "Skills training", allocated: 90000, committed: 5000, actual: 48000 },
-      { id: "pot-supports", name: "Participant supports", allocated: 70000, committed: 9250, actual: 80400 },
-    ],
-  },
-  compliance: {
-    ilmp: { status: "clean", messages: [] },
-    finance: { status: "warning", messages: ["Mapping missing for childcare support", "Overspend in supports pot"] },
-  },
-  exportPreview: {
-    ilmp: {
-      xml: "<ILMP>Dummy payload for preview</ILMP>",
-      generatedAt: "2025-10-25T12:34:00Z",
-      storageKey: "dummy/ilmp.xml",
-      checksum: "dummy-checksum",
-    },
-  },
-  counts: {
-    openTasks: 2,
-    overdueTasks: 1,
-    openInterventions: 1,
-    totalInterventions: 3,
-  },
-});
-
 const buildCaseFromWorkspaceApi = (caseId, payload) => {
   if (!payload || typeof payload !== "object") {
-    return buildDummyCase(caseId);
+    throw new Error("Invalid case payload.");
   }
 
   const client = payload.client || {};
@@ -481,8 +367,6 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
   };
 };
 
-const getStoredLivePreference = () => true;
-
 const CaseWorkspaceContext = createContext({
   caseId: null,
   caseData: null,
@@ -536,7 +420,6 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
   });
   const [selectedActionPlanId, setSelectedActionPlanId] = useState(null);
   const [selectedInterventionId, setSelectedInterventionId] = useState(null);
-  const [useLiveData, setUseLiveData] = useState(() => getStoredLivePreference());
   const [interventionCodes, setInterventionCodes] = useState([]);
   const [interventionCodesLoaded, setInterventionCodesLoaded] = useState(false);
   const [interventionCodesLoading, setInterventionCodesLoading] = useState(false);
@@ -647,14 +530,6 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     }
     setState(prev => ({ ...prev, isLoading: true, error: null }));
     try {
-      if (!useLiveData) {
-        await new Promise(resolve => setTimeout(resolve, 50));
-        const data = buildDummyCase(caseId);
-        setState({ caseData: data, isLoading: false, error: null });
-        setSelectedActionPlanId(prev => prev ?? data.actionPlans?.[0]?.id ?? null);
-        return data;
-      }
-
       const fetchOnce = async () => {
         const resp = await apiFetch(`/api/cases/${caseId}/workspace`, { method: "GET" });
         if (!resp.ok) {
@@ -690,27 +565,11 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
       setState(prev => ({ ...prev, isLoading: false, error: error?.message || "Failed to load case." }));
       throw error;
     }
-  }, [caseId, useLiveData]);
+  }, [caseId]);
 
   useEffect(() => {
     loadCase().catch(() => {});
   }, [loadCase]);
-
-  useEffect(() => {
-    const handler = event => {
-      if (event?.detail && typeof event.detail.useLiveCases === "boolean") {
-        setUseLiveData(event.detail.useLiveCases);
-      }
-    };
-    if (typeof window !== "undefined") {
-      window.addEventListener("iset-portfolio:cases-data-mode", handler);
-    }
-    return () => {
-      if (typeof window !== "undefined") {
-        window.removeEventListener("iset-portfolio:cases-data-mode", handler);
-      }
-    };
-  }, []);
 
   const loadInterventionCodes = useCallback(async () => {
     if (interventionCodesLoaded && interventionCodes.length > 0) {
@@ -992,7 +851,6 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
       if (!intervention.metadata && payload?.metadata) {
         intervention = { ...intervention, metadata: payload.metadata };
       }
-      intervention = mergeRecurrenceMetadata(intervention, payload);
       if (!intervention) {
         return null;
       }
@@ -1053,7 +911,6 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
       if (!intervention.metadata && payload?.metadata) {
         intervention = { ...intervention, metadata: payload.metadata };
       }
-      intervention = mergeRecurrenceMetadata(intervention, payload);
       if (!intervention) {
         return null;
       }

@@ -12,6 +12,7 @@ import {
   Input,
   Link,
   Multiselect,
+  Select,
   SpaceBetween,
   Spinner,
   Tabs,
@@ -21,18 +22,101 @@ import { apiFetch } from "../../../auth/apiClient";
 import { boardItemI18nStrings } from "./common";
 import { PAYMENT_TYPE_OPTIONS } from "./paymentOptions";
 
-const EMPTY_PAYMENT_TYPE = { code: "", label: "", notes: "" };
+const RECURRENCE_MODE_REQUIRED = "required";
+const RECURRENCE_MODE_OPTIONAL = "optional";
+const RECURRENCE_MODE_NOT_ALLOWED = "not_allowed";
+const SUBMISSION_TIMING_INTERVENTION_START = "intervention_start";
+const SUBMISSION_TIMING_INTERVENTION_END = "intervention_end";
+const SUBMISSION_TIMING_RECURRENCE_SCHEDULE = "recurrence_schedule";
+const SUBMISSION_TIMING_MANUAL_TRIGGER = "manual_trigger";
+const DEFAULT_RECURRENCE_MODE_BY_TYPE = {
+  LivingAllowance: RECURRENCE_MODE_REQUIRED,
+  WageSubsidyEmployer: RECURRENCE_MODE_OPTIONAL,
+  OtherEligibleCost: RECURRENCE_MODE_OPTIONAL,
+};
+const DEFAULT_SUBMISSION_TIMING_BY_TYPE = {
+  LivingAllowance: SUBMISSION_TIMING_RECURRENCE_SCHEDULE,
+  TuitionFeesDirect: SUBMISSION_TIMING_INTERVENTION_START,
+  TuitionFeesReimbursement: SUBMISSION_TIMING_INTERVENTION_END,
+  SpecializedEquipmentAdvance: SUBMISSION_TIMING_INTERVENTION_START,
+  SpecializedEquipmentReimbursement: SUBMISSION_TIMING_INTERVENTION_END,
+  WageSubsidyEmployer: SUBMISSION_TIMING_RECURRENCE_SCHEDULE,
+  Childcare: SUBMISSION_TIMING_RECURRENCE_SCHEDULE,
+  Transportation: SUBMISSION_TIMING_RECURRENCE_SCHEDULE,
+  BooksMaterialsDirect: SUBMISSION_TIMING_INTERVENTION_START,
+  BooksMaterialsReimbursement: SUBMISSION_TIMING_INTERVENTION_END,
+  JCPProjectCost: SUBMISSION_TIMING_MANUAL_TRIGGER,
+  SEBSupport: SUBMISSION_TIMING_RECURRENCE_SCHEDULE,
+  OtherEligibleCost: SUBMISSION_TIMING_MANUAL_TRIGGER,
+};
+const RECURRENCE_POLICY_OPTIONS = [
+  { value: RECURRENCE_MODE_NOT_ALLOWED, label: "Not allowed" },
+  { value: RECURRENCE_MODE_OPTIONAL, label: "Allowed (optional)" },
+  { value: RECURRENCE_MODE_REQUIRED, label: "Required" },
+];
+const SUBMISSION_TIMING_OPTIONS = [
+  { value: SUBMISSION_TIMING_INTERVENTION_START, label: "Intervention start date" },
+  { value: SUBMISSION_TIMING_INTERVENTION_END, label: "Intervention end date" },
+  { value: SUBMISSION_TIMING_RECURRENCE_SCHEDULE, label: "Recurrence schedule" },
+  { value: SUBMISSION_TIMING_MANUAL_TRIGGER, label: "Manual trigger" },
+];
+const EMPTY_PAYMENT_TYPE = {
+  code: "",
+  label: "",
+  notes: "",
+  requiredEvidence: [],
+  recurrenceMode: RECURRENCE_MODE_NOT_ALLOWED,
+  submissionTiming: SUBMISSION_TIMING_MANUAL_TRIGGER,
+};
+const EMPTY_PAYMENT_EVIDENCE_RULE_SET = {
+  required: [],
+  optional: [],
+  postPayRequired: [],
+};
 
 const buildDefaultPaymentTypes = () =>
   PAYMENT_TYPE_OPTIONS.map(option => ({
     code: option.value,
     label: option.label || option.value,
     notes: "",
+    requiredEvidence: [],
+    recurrenceMode: DEFAULT_RECURRENCE_MODE_BY_TYPE[option.value] || RECURRENCE_MODE_NOT_ALLOWED,
+    submissionTiming:
+      DEFAULT_SUBMISSION_TIMING_BY_TYPE[option.value] || SUBMISSION_TIMING_MANUAL_TRIGGER,
   }));
 
 const normalizeString = value => (typeof value === "string" ? value.trim() : "");
 
 const normalizePaymentTypeKey = value => normalizeString(value).toLowerCase();
+
+const normalizeRecurrenceMode = value => {
+  if (typeof value !== "string") return RECURRENCE_MODE_NOT_ALLOWED;
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === RECURRENCE_MODE_REQUIRED) return RECURRENCE_MODE_REQUIRED;
+  if (normalized === RECURRENCE_MODE_OPTIONAL) return RECURRENCE_MODE_OPTIONAL;
+  if (normalized === RECURRENCE_MODE_NOT_ALLOWED || normalized === "disabled") {
+    return RECURRENCE_MODE_NOT_ALLOWED;
+  }
+  return RECURRENCE_MODE_NOT_ALLOWED;
+};
+
+const normalizeSubmissionTiming = value => {
+  if (typeof value !== "string") return SUBMISSION_TIMING_MANUAL_TRIGGER;
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === SUBMISSION_TIMING_INTERVENTION_START) {
+    return SUBMISSION_TIMING_INTERVENTION_START;
+  }
+  if (normalized === SUBMISSION_TIMING_INTERVENTION_END) {
+    return SUBMISSION_TIMING_INTERVENTION_END;
+  }
+  if (normalized === SUBMISSION_TIMING_RECURRENCE_SCHEDULE) {
+    return SUBMISSION_TIMING_RECURRENCE_SCHEDULE;
+  }
+  if (normalized === SUBMISSION_TIMING_MANUAL_TRIGGER) {
+    return SUBMISSION_TIMING_MANUAL_TRIGGER;
+  }
+  return SUBMISSION_TIMING_MANUAL_TRIGGER;
+};
 
 const normalizeInterventionCode = value => {
   if (value === null || typeof value === "undefined") return "";
@@ -61,6 +145,127 @@ const normalizeNotes = raw => {
   return [];
 };
 
+const normalizeEvidenceTypeList = raw => {
+  if (!Array.isArray(raw)) return [];
+  return Array.from(new Set(raw.map(value => normalizeString(value)).filter(Boolean)));
+};
+
+const readExplicitRequiredEvidence = entry => {
+  if (!entry || typeof entry !== "object") return undefined;
+  const keys = [
+    "requiredEvidence",
+    "required_evidence",
+    "required",
+    "requiredEvidenceTypes",
+    "required_evidence_types",
+  ];
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(entry, key)) {
+      return normalizeEvidenceTypeList(entry[key]);
+    }
+  }
+  return undefined;
+};
+
+const cloneEvidenceRuleSet = rule => {
+  const base = rule && typeof rule === "object" ? rule : {};
+  const next = {
+    required: normalizeEvidenceTypeList(base.required),
+    optional: normalizeEvidenceTypeList(base.optional),
+    postPayRequired: normalizeEvidenceTypeList(base.postPayRequired || base.post_pay_required),
+  };
+  const payeeTypesRaw = base.payeeTypes || base.payee_types;
+  if (payeeTypesRaw && typeof payeeTypesRaw === "object") {
+    const payeeTypes = {};
+    Object.entries(payeeTypesRaw).forEach(([key, value]) => {
+      const payeeKey = normalizeString(key).toLowerCase();
+      if (!payeeKey) return;
+      payeeTypes[payeeKey] = cloneEvidenceRuleSet(value);
+    });
+    if (Object.keys(payeeTypes).length) {
+      next.payeeTypes = payeeTypes;
+    }
+  }
+  return next;
+};
+
+const normalizePaymentEvidenceRules = raw => {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const baseline = cloneEvidenceRuleSet(
+    source.baseline || source.baselineEvidence || source.baseline_evidence || EMPTY_PAYMENT_EVIDENCE_RULE_SET,
+  );
+  const paymentTypes = {};
+  const paymentTypesRaw = source.paymentTypes || source.payment_types;
+  if (paymentTypesRaw && typeof paymentTypesRaw === "object") {
+    Object.entries(paymentTypesRaw).forEach(([key, value]) => {
+      const code = normalizeString(key);
+      if (!code) return;
+      paymentTypes[code] = cloneEvidenceRuleSet(value);
+    });
+  }
+  return { baseline, paymentTypes };
+};
+
+const normalizeEvidenceOptions = raw => {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  return raw
+    .map(option => {
+      const value = normalizeString(option?.value || option?.code || option?.id || "");
+      if (!value || seen.has(value.toLowerCase())) return null;
+      seen.add(value.toLowerCase());
+      const label = normalizeString(option?.label || option?.name || value) || value;
+      return { value, label };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.label.localeCompare(b.label));
+};
+
+const applyRequiredEvidenceToPaymentTypes = (paymentTypes, evidenceRules) => {
+  const rulesMap = evidenceRules?.paymentTypes && typeof evidenceRules.paymentTypes === "object"
+    ? evidenceRules.paymentTypes
+    : {};
+  return (paymentTypes || []).map(entry => {
+    const code = normalizeString(entry?.code);
+    const direct = code ? rulesMap[code] : null;
+    const fallback = code
+      ? Object.entries(rulesMap).find(([key]) => normalizePaymentTypeKey(key) === normalizePaymentTypeKey(code))
+      : null;
+    const resolved = direct || (fallback ? fallback[1] : null);
+    const explicitRequired = readExplicitRequiredEvidence(entry);
+    return {
+      ...entry,
+      requiredEvidence:
+        explicitRequired !== undefined
+          ? explicitRequired
+          : normalizeEvidenceTypeList(resolved?.required || []),
+    };
+  });
+};
+
+const buildPaymentEvidencePayload = (paymentTypes, existingEvidenceRules) => {
+  const baseRules = normalizePaymentEvidenceRules(existingEvidenceRules);
+  const existingPaymentTypes = baseRules.paymentTypes || {};
+  const nextPaymentTypes = {};
+  normalizePaymentTypes(paymentTypes).forEach(entry => {
+    const code = normalizeString(entry?.code);
+    if (!code) return;
+    const existingRule = existingPaymentTypes[code] || {};
+    nextPaymentTypes[code] = {
+      required: normalizeEvidenceTypeList(entry?.requiredEvidence),
+      optional: normalizeEvidenceTypeList(existingRule.optional),
+      postPayRequired: normalizeEvidenceTypeList(existingRule.postPayRequired),
+      ...(existingRule.payeeTypes && Object.keys(existingRule.payeeTypes).length
+        ? { payeeTypes: existingRule.payeeTypes }
+        : {}),
+    };
+  });
+  return {
+    baseline: cloneEvidenceRuleSet(baseRules.baseline),
+    paymentTypes: nextPaymentTypes,
+  };
+};
+
 const normalizePaymentTypes = list => {
   if (!Array.isArray(list)) return [];
   const map = new Map();
@@ -72,7 +277,28 @@ const normalizePaymentTypes = list => {
     if (!code) return;
     const label = normalizeString(entry.label || entry.name) || code;
     const notes = normalizeString(entry.notes || entry.note || "");
-    map.set(code.toLowerCase(), { code, label, notes });
+    const recurrenceMode = normalizeRecurrenceMode(
+      entry.recurrenceMode ||
+        entry.recurrence_mode ||
+        entry?.recurrence?.mode ||
+        entry?.recurrence?.rule ||
+        DEFAULT_RECURRENCE_MODE_BY_TYPE[code] ||
+        RECURRENCE_MODE_NOT_ALLOWED,
+    );
+    const requiredEvidence = readExplicitRequiredEvidence(entry);
+    const normalized = { code, label, notes, recurrenceMode };
+    normalized.submissionTiming = normalizeSubmissionTiming(
+      entry.submissionTiming ||
+        entry.submission_timing ||
+        entry.schedulePolicy ||
+        entry.schedule_policy ||
+        DEFAULT_SUBMISSION_TIMING_BY_TYPE[code] ||
+        SUBMISSION_TIMING_MANUAL_TRIGGER,
+    );
+    if (requiredEvidence !== undefined) {
+      normalized.requiredEvidence = requiredEvidence;
+    }
+    map.set(code.toLowerCase(), normalized);
   });
   return Array.from(map.values());
 };
@@ -217,7 +443,14 @@ const normalizeCostingDefaults = payload => {
       return {
         code,
         recurrence: {
-          mode: recurrence.mode || recurrence.rule || entry.recurrenceMode || entry.recurrence_mode || "optional",
+          mode: normalizeRecurrenceMode(
+            recurrence.mode ||
+              recurrence.rule ||
+              entry.recurrenceMode ||
+              entry.recurrence_mode ||
+              DEFAULT_RECURRENCE_MODE_BY_TYPE[code] ||
+              RECURRENCE_MODE_NOT_ALLOWED,
+          ),
         },
       };
     })
@@ -229,6 +462,42 @@ const normalizeCostingDefaults = payload => {
     paymentTypes,
   };
 };
+
+const buildRecurrenceModeLookup = config => {
+  const lookup = new Map();
+  (config?.paymentTypes || []).forEach(entry => {
+    const code = normalizeString(entry?.code || entry?.type || entry?.paymentType || entry?.payment_type || "");
+    if (!code) return;
+    const mode = normalizeRecurrenceMode(
+      entry?.recurrence?.mode ||
+        entry?.recurrence?.rule ||
+        entry?.recurrenceMode ||
+        entry?.recurrence_mode ||
+        DEFAULT_RECURRENCE_MODE_BY_TYPE[code] ||
+        RECURRENCE_MODE_NOT_ALLOWED,
+    );
+    lookup.set(code, mode);
+  });
+  return lookup;
+};
+
+const applyRecurrenceModesToPaymentTypes = (paymentTypes, recurrenceLookup) =>
+  normalizePaymentTypes(paymentTypes).map(entry => {
+    const mode =
+      (recurrenceLookup instanceof Map && recurrenceLookup.get(entry.code)) ||
+      DEFAULT_RECURRENCE_MODE_BY_TYPE[entry.code] ||
+      RECURRENCE_MODE_NOT_ALLOWED;
+    return {
+      ...entry,
+      recurrenceMode: normalizeRecurrenceMode(mode),
+    };
+  });
+
+const buildCostingPaymentTypesPayload = paymentTypes =>
+  normalizePaymentTypes(paymentTypes).map(entry => ({
+    code: entry.code,
+    recurrence: { mode: normalizeRecurrenceMode(entry.recurrenceMode) },
+  }));
 
 const cloneCostingDefaults = config => {
   if (!config) return config;
@@ -304,8 +573,12 @@ const normalizeCostingDefaultsForSignature = config => {
         entry?.code || entry?.type || entry?.paymentType || entry?.payment_type || "",
       );
       if (!code) return null;
-      const mode = normalizeString(
-        entry?.recurrence?.mode || entry?.recurrenceMode || entry?.recurrence_mode || "",
+      const mode = normalizeRecurrenceMode(
+        entry?.recurrence?.mode ||
+          entry?.recurrenceMode ||
+          entry?.recurrence_mode ||
+          DEFAULT_RECURRENCE_MODE_BY_TYPE[code] ||
+          RECURRENCE_MODE_NOT_ALLOWED,
       );
       return { code, mode };
     })
@@ -342,14 +615,32 @@ const normalizeMapping = (raw, { useDefaults = false } = {}) => {
 const normalizePaymentTypesForSignature = list => {
   if (!Array.isArray(list)) return [];
   return list
-    .map(entry => ({
-      code: normalizeString(
-        entry?.code || entry?.value || entry?.paymentType || entry?.payment_type || "",
-      ),
-      label: normalizeString(entry?.label || entry?.name || ""),
-      notes: normalizeString(entry?.notes || entry?.note || ""),
-    }))
-    .filter(entry => entry.code || entry.label || entry.notes);
+    .map(entry => {
+      const requiredEvidence = normalizeEvidenceTypeList(entry?.requiredEvidence).sort((a, b) =>
+        a.localeCompare(b),
+      );
+      return {
+        code: normalizeString(
+          entry?.code || entry?.value || entry?.paymentType || entry?.payment_type || "",
+        ),
+        label: normalizeString(entry?.label || entry?.name || ""),
+        notes: normalizeString(entry?.notes || entry?.note || ""),
+        recurrenceMode: normalizeRecurrenceMode(entry?.recurrenceMode),
+        submissionTiming: normalizeSubmissionTiming(
+          entry?.submissionTiming || entry?.submission_timing,
+        ),
+        requiredEvidence,
+      };
+    })
+    .filter(
+      entry =>
+        entry.code ||
+        entry.label ||
+        entry.notes ||
+        entry.submissionTiming !== SUBMISSION_TIMING_MANUAL_TRIGGER ||
+        (entry.requiredEvidence || []).length > 0 ||
+        entry.recurrenceMode !== RECURRENCE_MODE_NOT_ALLOWED,
+    );
 };
 
 const normalizeInterventionsForSignature = list => {
@@ -417,6 +708,11 @@ const FinancePaymentTypeMappingWidget = ({ actions = {}, metadata = {}, toggleHe
   const [interventionCodes, setInterventionCodes] = useState([]);
   const [costingConfig, setCostingConfig] = useState(null);
   const [costingDraft, setCostingDraft] = useState(null);
+  const [paymentEvidenceConfig, setPaymentEvidenceConfig] = useState(
+    normalizePaymentEvidenceRules(null),
+  );
+  const [paymentEvidenceUpdatedAt, setPaymentEvidenceUpdatedAt] = useState(null);
+  const [evidenceTypeOptions, setEvidenceTypeOptions] = useState([]);
   const [dismissedAlerts, setDismissedAlerts] = useState({
     noPaymentTypes: false,
     unknownPaymentTypes: false,
@@ -466,10 +762,45 @@ const FinancePaymentTypeMappingWidget = ({ actions = {}, metadata = {}, toggleHe
         setError(current => current || err?.message || "Failed to load payment type mapping.");
         mappingPayload = null;
       }
+      const hasEvidencePayload =
+        mappingPayload &&
+        (Object.prototype.hasOwnProperty.call(mappingPayload, "paymentEvidence") ||
+          Object.prototype.hasOwnProperty.call(mappingPayload, "payment_evidence"));
+      if (mappingPayload && !hasEvidencePayload) {
+        setError(
+          current =>
+            current ||
+            "Payment evidence rules were not returned by the API. Restart the admin backend with the latest code.",
+        );
+      }
+
+      const evidenceRules = normalizePaymentEvidenceRules(
+        mappingPayload?.paymentEvidence || mappingPayload?.payment_evidence || null,
+      );
+      const evidenceOptions = normalizeEvidenceOptions(
+        mappingPayload?.evidenceTypes || mappingPayload?.evidence_types || [],
+      );
+      setPaymentEvidenceConfig(evidenceRules);
+      setPaymentEvidenceUpdatedAt(
+        mappingPayload?.paymentEvidenceUpdatedAt ||
+          mappingPayload?.payment_evidence_updated_at ||
+          null,
+      );
+      setEvidenceTypeOptions(evidenceOptions);
 
       const normalized = normalizeMapping(mappingPayload, { useDefaults: true });
       const mergedInterventions = mergeInterventionsWithCodes(normalized.interventions, codes);
-      const merged = { ...normalized, interventions: mergedInterventions };
+      const merged = {
+        ...normalized,
+        interventions: mergedInterventions,
+        paymentTypes: applyRecurrenceModesToPaymentTypes(
+          applyRequiredEvidenceToPaymentTypes(
+            normalized.paymentTypes,
+            evidenceRules,
+          ),
+          new Map(),
+        ),
+      };
       setConfig(merged);
       setDraft({
         ...merged,
@@ -506,6 +837,17 @@ const FinancePaymentTypeMappingWidget = ({ actions = {}, metadata = {}, toggleHe
         : null;
       setCostingConfig(mergedCosting);
       setCostingDraft(mergedCosting ? cloneCostingDefaults(mergedCosting) : null);
+      const recurrenceLookup = buildRecurrenceModeLookup(mergedCosting);
+      const withRecurrence = {
+        ...merged,
+        paymentTypes: applyRecurrenceModesToPaymentTypes(merged.paymentTypes, recurrenceLookup),
+      };
+      setConfig(withRecurrence);
+      setDraft({
+        ...withRecurrence,
+        paymentTypes: ensureNonEmpty(withRecurrence.paymentTypes, EMPTY_PAYMENT_TYPE),
+        interventions: withRecurrence.interventions,
+      });
     } finally {
       setLoading(false);
     }
@@ -527,6 +869,14 @@ const FinancePaymentTypeMappingWidget = ({ actions = {}, metadata = {}, toggleHe
     });
     return map;
   }, [paymentTypeOptions]);
+
+  const evidenceTypeOptionMap = useMemo(() => {
+    const map = new Map();
+    evidenceTypeOptions.forEach(option => {
+      if (option?.value) map.set(option.value, option);
+    });
+    return map;
+  }, [evidenceTypeOptions]);
 
   const costingDefaultsLookup = useMemo(() => {
     const map = new Map();
@@ -738,6 +1088,20 @@ const FinancePaymentTypeMappingWidget = ({ actions = {}, metadata = {}, toggleHe
       const mappedInterventions = (payload.interventions || []).filter(
         entry => entry?.code && (entry.availablePaymentTypes || []).length > 0,
       );
+      const paymentTypesPayload = normalizePaymentTypes(payload.paymentTypes).map(entry => ({
+        code: entry.code,
+        label: entry.label,
+        notes: entry.notes || "",
+        submissionTiming: normalizeSubmissionTiming(entry.submissionTiming),
+      }));
+      const costingPaymentTypesPayload = buildCostingPaymentTypesPayload(payload.paymentTypes);
+      const recurrenceLookupFromDraft = buildRecurrenceModeLookup({
+        paymentTypes: costingPaymentTypesPayload,
+      });
+      const paymentEvidencePayload = buildPaymentEvidencePayload(
+        payload.paymentTypes,
+        paymentEvidenceConfig,
+      );
       const response = await apiFetch("/api/config/runtime/payment-type-mapping", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -745,20 +1109,37 @@ const FinancePaymentTypeMappingWidget = ({ actions = {}, metadata = {}, toggleHe
           version: payload.version || null,
           generatedOn: payload.generatedOn || null,
           notes: normalizeNotes(payload.notes),
-          paymentTypes: payload.paymentTypes,
+          paymentTypes: paymentTypesPayload,
           interventions: mappedInterventions,
+          paymentEvidence: paymentEvidencePayload,
         }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(data?.message || data?.error || `Save failed (${response.status})`);
       }
+      const nextEvidenceRules = normalizePaymentEvidenceRules(
+        data?.paymentEvidence || data?.payment_evidence || null,
+      );
+      const nextEvidenceOptions = normalizeEvidenceOptions(
+        data?.evidenceTypes || data?.evidence_types || [],
+      );
       const normalized = normalizeMapping(data, { useDefaults: true });
       const mergedInterventions = mergeInterventionsWithCodes(
         normalized.interventions,
         interventionCodes,
       );
-      const merged = { ...normalized, interventions: mergedInterventions };
+      const merged = {
+        ...normalized,
+        interventions: mergedInterventions,
+        paymentTypes: applyRecurrenceModesToPaymentTypes(
+          applyRequiredEvidenceToPaymentTypes(
+            normalized.paymentTypes,
+            nextEvidenceRules,
+          ),
+          recurrenceLookupFromDraft,
+        ),
+      };
       setConfig(merged);
       setDraft({
         ...merged,
@@ -766,8 +1147,13 @@ const FinancePaymentTypeMappingWidget = ({ actions = {}, metadata = {}, toggleHe
         interventions: merged.interventions,
       });
       setUpdatedAt(data?.updatedAt || null);
+      setPaymentEvidenceConfig(nextEvidenceRules);
+      setPaymentEvidenceUpdatedAt(
+        data?.paymentEvidenceUpdatedAt || data?.payment_evidence_updated_at || null,
+      );
+      setEvidenceTypeOptions(nextEvidenceOptions);
 
-      if (costingDraft && costingDirty) {
+      if (costingDraft) {
         const costingInterventions = (costingDraft.interventions || [])
           .map(entry => {
             const code = normalizeInterventionCode(entry?.code);
@@ -798,9 +1184,7 @@ const FinancePaymentTypeMappingWidget = ({ actions = {}, metadata = {}, toggleHe
         const costingPayload = {
           enabled: costingDraft.enabled !== false,
           strategy: normalizeString(costingDraft.strategy) || "allowed",
-          paymentTypes: Array.isArray(costingDraft.paymentTypes)
-            ? costingDraft.paymentTypes
-            : [],
+          paymentTypes: costingPaymentTypesPayload,
           interventions: costingInterventions,
         };
         const costingResponse = await apiFetch("/api/config/runtime/assessment-costing", {
@@ -826,9 +1210,20 @@ const FinancePaymentTypeMappingWidget = ({ actions = {}, metadata = {}, toggleHe
         );
         setCostingConfig(mergedCosting);
         setCostingDraft(cloneCostingDefaults(mergedCosting));
+        const recurrenceLookup = buildRecurrenceModeLookup(mergedCosting);
+        const withRecurrence = {
+          ...merged,
+          paymentTypes: applyRecurrenceModesToPaymentTypes(merged.paymentTypes, recurrenceLookup),
+        };
+        setConfig(withRecurrence);
+        setDraft({
+          ...withRecurrence,
+          paymentTypes: ensureNonEmpty(withRecurrence.paymentTypes, EMPTY_PAYMENT_TYPE),
+          interventions: withRecurrence.interventions,
+        });
       }
 
-      setSuccess("Payment type mapping saved.");
+      setSuccess("Payment type mapping, recurrence policy, submission timing, and evidence rules saved.");
     } catch (err) {
       setError(err?.message || "Failed to save payment type mapping.");
     } finally {
@@ -942,10 +1337,73 @@ const FinancePaymentTypeMappingWidget = ({ actions = {}, metadata = {}, toggleHe
               />
             ),
           },
+          {
+            label: "Recurrence policy",
+            control: (item, index) => (
+              <Select
+                selectedOption={
+                  RECURRENCE_POLICY_OPTIONS.find(
+                    option => option.value === normalizeRecurrenceMode(item.recurrenceMode),
+                  ) || RECURRENCE_POLICY_OPTIONS[0]
+                }
+                onChange={({ detail }) =>
+                  updatePaymentType(index, {
+                    recurrenceMode:
+                      detail.selectedOption?.value || RECURRENCE_MODE_NOT_ALLOWED,
+                  })
+                }
+                options={RECURRENCE_POLICY_OPTIONS}
+              />
+            ),
+          },
+          {
+            label: "Submission timing",
+            control: (item, index) => (
+              <Select
+                selectedOption={
+                  SUBMISSION_TIMING_OPTIONS.find(
+                    option =>
+                      option.value ===
+                      normalizeSubmissionTiming(item.submissionTiming),
+                  ) || SUBMISSION_TIMING_OPTIONS[3]
+                }
+                onChange={({ detail }) =>
+                  updatePaymentType(index, {
+                    submissionTiming:
+                      detail.selectedOption?.value || SUBMISSION_TIMING_MANUAL_TRIGGER,
+                  })
+                }
+                options={SUBMISSION_TIMING_OPTIONS}
+              />
+            ),
+          },
+          {
+            label: "Required evidence",
+            control: (item, index) => (
+              <Multiselect
+                selectedOptions={normalizeEvidenceTypeList(item.requiredEvidence).map(
+                  value => evidenceTypeOptionMap.get(value) || { value, label: value },
+                )}
+                options={evidenceTypeOptions}
+                onChange={({ detail }) =>
+                  updatePaymentType(index, {
+                    requiredEvidence: detail.selectedOptions.map(option => option.value),
+                  })
+                }
+                placeholder={
+                  evidenceTypeOptions.length
+                    ? "Select required evidence"
+                    : "No evidence types available"
+                }
+                expandToViewport
+              />
+            ),
+          },
         ]}
       />
       <Box color="text-body-secondary">
         These codes should align with the payment type options used in Finance and Casework.
+        Recurrence policy, submission timing, and required evidence selections are enforced per payment type.
       </Box>
     </SpaceBetween>
   );
@@ -1060,6 +1518,9 @@ const FinancePaymentTypeMappingWidget = ({ actions = {}, metadata = {}, toggleHe
       {updatedAt && (
         <Box color="text-body-secondary">Last updated: {updatedAt}</Box>
       )}
+      {paymentEvidenceUpdatedAt && paymentEvidenceUpdatedAt !== updatedAt && (
+        <Box color="text-body-secondary">Evidence rules updated: {paymentEvidenceUpdatedAt}</Box>
+      )}
     </SpaceBetween>
   );
 
@@ -1075,7 +1536,7 @@ const FinancePaymentTypeMappingWidget = ({ actions = {}, metadata = {}, toggleHe
         <Header
           variant="h2"
           info={infoLink}
-          description="Control which payment types are allowed for each intervention code in assessments and payments."
+          description="Control allowed payment types by intervention, recurrence policy, submission timing, and required evidence by payment type."
           actions={
             <SpaceBetween direction="horizontal" size="xs">
               <Button

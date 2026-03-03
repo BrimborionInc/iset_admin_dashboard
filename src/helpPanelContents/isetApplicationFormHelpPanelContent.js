@@ -53,7 +53,7 @@ IsetApplicationFormHelpPanelContent.aiContext = `
 You are assisting an ISET coordinator using the ISET Application Form widget. Key behaviors:
 - Edit flow: press Edit, confirm, acquire an edit lock, then Save or Cancel to release; editing is blocked after a final decision or when another user holds the lock.
 - Versioning: every save creates a new version; **View versions** shows history and allows restore. Original submission remains available.
-- Scope: sections include identity/contact, eligibility answers, supports/barriers, income/expense tables, document placeholders, and submission signatures. Income and expense amounts can be corrected inline during edit mode.
+- Scope: sections include identity/contact, eligibility answers, supports/barriers, income/expense tables, and submission signatures. Income and expense amounts can be corrected inline during edit mode.
 - Declarations: use the Indigenous declaration or conflict-of-interest modals to review and download signed PDFs.
 - Related widgets: log coordinator-made edits in Notes and Tasks; request missing docs via Secure Messaging (attachments appear in Supporting Documents); align with the Application Assessment widget before final decisions.
 `;

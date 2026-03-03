@@ -2,6 +2,39 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-03-03
+- UX: Removed the `Supporting documents` section from the ISET Application Form widget; document review/management remains in the dedicated Supporting Documents widget.
+- UX: Moved the Application Assessment `Deny Funding` shortcut from Step 2 (`What is being proposed?`) to Step 1 (`EI Eligibility Check`) as a step-header action.
+- UX: Application Assessment Step 2 (`What is being proposed?`) now promotes `Add intervention` as the only primary action until at least one intervention exists; once present, wizard `Next` returns as the primary action.
+- API: Conflict-of-interest declaration updates in `PUT /api/cases/:id` now consistently resolve the active `staff_profile_id` from request context for both write and response readback, preventing stale conflict state when auth identity fields differ.
+
+## 2026-03-02
+- Payments: Auto-generated intervention payment packets are now schedule-driven and grouped by intervention + scheduled date; recurring occurrences create separate dated packets, manual-trigger groups are created as `awaiting_trigger`, packet queue ordering now prioritizes scheduled dates (`due_by`), and queue rows now show due/overdue/upcoming schedule indicators.
+- UX: Batch payments queue now defaults to visible columns ordered as Packet, Client, Schedule, Status, Amount, and Blocking (others hidden by default), with sorting enabled on key operational columns (including Packet, Client, Intervention, Schedule, Status, Amount, Reporting unit, Submitted, and Age).
+- Docs: Added `docs/planning/thread-handoff-2026-03-02.md` as a self-contained conversation handoff capturing locked payment scheduling decisions, related intervention-widget decisions, deferred scope, and execution order for continuation in a fresh thread.
+- Docs: Added and expanded `docs/planning/payment-packet-scheduling-design.md` to capture full payment packet scheduling decisions, including canonical packet status model and transition rules for implementation handoff.
+- Fix: Case workspace `Propose new intervention` wizard now deletes interventions reliably from the framing-step table even when hydrated draft IDs differ in type (string vs number).
+- UX/Validation: Intervention NOC requirements now apply to codes `6–13` (and existing employer-type `17`) in both case workspace and coordinator assessment intervention flows, with matching NOC field visibility and required-field enforcement.
+- API/Validation: Intervention create/update no longer treats proposal-stage end dates as closure; outcome-required closeout validation now applies only when status is `completed` or `cancelled`.
+- UX/API: Finance Settings Payment Type Mapping now supports per-payment-type submission timing (`intervention start`, `intervention end`, `recurrence schedule`, `manual trigger`) with recommended defaults persisted in runtime config.
+- UX/API: Finance Settings `Payment type mapping` widget now includes a required-evidence multiselect per payment type and saves those rules via runtime config (`finance:payment.evidence.rules`) through `/api/config/runtime/payment-type-mapping`.
+- API: Payment type mapping runtime payload now returns `paymentEvidence`, `paymentEvidenceUpdatedAt`, and `evidenceTypes` so the widget can manage line-level evidence rules without hardcoded UI lists.
+- UX/API: Payment recurrence is now configured per payment type (required/optional/not allowed) in Finance Settings and persisted in assessment costing runtime config (`assessment:coordinator.costing.line_item_defaults`).
+- API: Payment validation, recurring-line creation, and auto-generated payment lines now apply recurrence policy from runtime config instead of hardcoded payment-type rules.
+
+## 2026-02-27
+- UX: Added a second Demo Controls action, `Create Case + Payments Data`, with a modal for client count, interventions per client, intervention-type selection, and optional prompt guidance.
+- API: Added `POST /api/ai/create-dummy-case-payments` (with optional `?stream=1`) to generate coherent client/case/assessment/action-plan/intervention records plus draft payment packets and lines for finance workflow testing.
+
+## 2026-02-26
+- UX: Renamed Finance Payments user-facing labels to Batch Payments (route title/breadcrumbs, queue/detail/comms widget titles, and help panel wording) to reflect the batch-submission workflow.
+- UX: Removed draft delete actions from the Finance Payments submission queue to keep the dashboard focused on batch submission.
+- UX: Removed Export ledger from the Finance Payments submission queue header so the widget stays focused on due-for-submission packet actions.
+- UX: Finance Payments queue now scopes to packets due for submission only (draft stage), excluding already submitted/cancelled packets from this widget.
+- UX: Simplified Finance Payments queue header controls by replacing the Ready filter button with a true toggle and keeping selection/submission actions focused on due-for-submission work.
+- API: Hardened AI dummy-draft generation to enforce published intake schema conformance before save (drop unknown keys and coerce values to expected scalar/multi/signature/file shapes).
+- API: Added defensive coercion for identity spillover objects (e.g., `{ first_nations_band, registration_number }`) so text fields never persist raw objects that can crash workspace rendering.
+
 ## 2026-02-23
 - ILMP: Added backend validation that first/last names cannot be numeric-only, matching ESDC ILMP guide rules.
 - ILMP: Tightened intervention outcome enforcement so outcome is required when an action plan result date is present (queue validation + action-plan close endpoint).

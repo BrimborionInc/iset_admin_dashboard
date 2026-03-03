@@ -11,7 +11,6 @@ import {
   Button,
   Tabs,
   Table,
-  ExpandableSection,
   Alert,
   Container,
   Modal,
@@ -33,13 +32,45 @@ import { PAYMENT_TYPE_OPTIONS, PAYEE_TYPE_OPTIONS, findOptionByValue } from "./p
 const formatCurrency = value =>
   new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(value);
 
-const requiresServicePeriod = paymentType =>
-  ["LivingAllowance", "WageSubsidyEmployer"].includes(paymentType);
+const RECURRENCE_MODE_REQUIRED = "required";
+const RECURRENCE_MODE_OPTIONAL = "optional";
+const RECURRENCE_MODE_NOT_ALLOWED = "not_allowed";
+
+const normalizeRecurrenceMode = value => {
+  if (typeof value !== "string") return RECURRENCE_MODE_NOT_ALLOWED;
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === RECURRENCE_MODE_REQUIRED) return RECURRENCE_MODE_REQUIRED;
+  if (normalized === RECURRENCE_MODE_OPTIONAL) return RECURRENCE_MODE_OPTIONAL;
+  if (normalized === RECURRENCE_MODE_NOT_ALLOWED || normalized === "disabled") {
+    return RECURRENCE_MODE_NOT_ALLOWED;
+  }
+  return RECURRENCE_MODE_NOT_ALLOWED;
+};
+
+const resolveRecurrenceModeForType = (paymentType, recurrencePolicyLookup) => {
+  if (!paymentType || !(recurrencePolicyLookup instanceof Map)) {
+    return RECURRENCE_MODE_NOT_ALLOWED;
+  }
+  return normalizeRecurrenceMode(recurrencePolicyLookup.get(paymentType));
+};
+
+const requiresServicePeriod = (paymentType, recurrencePolicyLookup) =>
+  resolveRecurrenceModeForType(paymentType, recurrencePolicyLookup) === RECURRENCE_MODE_REQUIRED;
+
+const allowsRecurrence = (paymentType, recurrencePolicyLookup) =>
+  resolveRecurrenceModeForType(paymentType, recurrencePolicyLookup) !== RECURRENCE_MODE_NOT_ALLOWED;
 
 const normalizePacketStatusKey = status => {
   if (!status) return "draft";
   const normalized = String(status).trim().toLowerCase();
-  if (normalized === "draft" || normalized === "returned") return "draft";
+  if (
+    normalized === "draft" ||
+    normalized === "returned" ||
+    normalized === "awaiting_trigger" ||
+    normalized === "released"
+  ) {
+    return "draft";
+  }
   if (normalized === "cancelled") return "cancelled";
   return "submitted";
 };
@@ -99,6 +130,8 @@ const resolveIntacctOutcome = attempt => {
 
 const packetStatusMeta = {
   draft: { label: "Draft", indicator: "pending" },
+  awaiting_trigger: { label: "Awaiting trigger", indicator: "warning" },
+  released: { label: "Ready to send", indicator: "success" },
   submitted: { label: "Submitted to finance", indicator: "info" },
   cancelled: { label: "Cancelled", indicator: "error" },
 };
@@ -559,6 +592,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     createRecurringLines,
     reloadRequests,
     paymentTypeMappingLookup,
+    paymentTypeRecurrencePolicyLookup,
     paymentTypeMappingLoading,
   } = usePaymentsData();
   const [selectedLineId, setSelectedLineId] = useState(null);
@@ -625,7 +659,10 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const [reopenSubmitting, setReopenSubmitting] = useState(false);
   const [linePotOptions, setLinePotOptions] = useState([]);
   const [linePotLoading, setLinePotLoading] = useState(false);
-  const requiresLinePeriod = requiresServicePeriod(lineForm.paymentType);
+  const requiresLinePeriod = requiresServicePeriod(
+    lineForm.paymentType,
+    paymentTypeRecurrencePolicyLookup,
+  );
   const selectedInterventionCode = useMemo(() => {
     const raw =
       selectedRequest?.interventionCode ??
@@ -813,15 +850,12 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     { value: "monthly", label: "Monthly" },
     { value: "quarterly", label: "Quarterly" },
   ];
-  const normalizeTypeKey = value =>
-    String(value || "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "");
   const recurringEligible =
     selectedLine &&
-    ["livingallowance", "childcare"].includes(normalizeTypeKey(selectedLine.paymentType)) &&
+    allowsRecurrence(selectedLine.paymentType, paymentTypeRecurrencePolicyLookup) &&
     selectedLine.status !== "cancelled" &&
     packetStatusKey === "draft";
+  const showRecurringLinesButton = false;
   const canEditPacketLines = selectedRequest && packetStatusKey === "draft";
   const canUploadEvidence = packetStatusKey === "draft";
   const intacctPreview = useMemo(
@@ -1421,7 +1455,11 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     }
     try {
       await updatePacketStatus(selectedRequest.id, status, options);
-      const label = packetStatusMeta[normalizePacketStatusKey(status)]?.label || status;
+      const statusValue = String(status || "").trim().toLowerCase();
+      const label =
+        packetStatusMeta[statusValue]?.label ||
+        packetStatusMeta[normalizePacketStatusKey(status)]?.label ||
+        status;
       setActionStatus({ type: "success", message: `Packet updated: ${label}.` });
     } catch (err) {
       const details = err?.details || err?.payload?.details;
@@ -1659,7 +1697,10 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       setLineError("Select a budget pot for the payment line.");
       return;
     }
-    const requiresPeriod = requiresServicePeriod(paymentType);
+    const requiresPeriod = requiresServicePeriod(
+      paymentType,
+      paymentTypeRecurrencePolicyLookup,
+    );
     if (requiresPeriod && (!lineForm.servicePeriodStart || !lineForm.servicePeriodEnd)) {
       setLineError("Service period start and end are required for this payment type.");
       return;
@@ -1871,9 +1912,65 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       },
     },
   ];
+  const evidenceRequiredCount = useMemo(
+    () => evidenceDocumentRows.filter(row => row.required).length,
+    [evidenceDocumentRows]
+  );
+  const evidenceLinkedCount = useMemo(
+    () =>
+      evidenceDocumentRows.filter(
+        row =>
+          row.required &&
+          ((row.documentLinks?.length || 0) > 0 || row.status?.indicator === "success")
+      ).length,
+    [evidenceDocumentRows]
+  );
+  const evidenceIsComplete = evidenceRequiredCount > 0 && evidenceLinkedCount >= evidenceRequiredCount;
+  const evidenceHasExceptions = evidenceRequiredCount > 0 && evidenceLinkedCount < evidenceRequiredCount;
+  const evidenceCounterLabel =
+    evidenceRequiredCount > 0 ? `${evidenceLinkedCount}/${evidenceRequiredCount}` : "0/0";
+  const evidenceCounterColor = evidenceHasExceptions
+    ? "var(--color-text-status-error)"
+    : evidenceIsComplete
+      ? "var(--color-text-status-success)"
+      : "var(--color-text-body-secondary)";
+  const evidenceStatusIconLabel = evidenceHasExceptions
+    ? "Evidence exceptions"
+    : evidenceIsComplete
+      ? "Evidence complete"
+      : "Evidence status";
+  const evidenceTabLabel = (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "4px",
+        font: "inherit",
+        lineHeight: "inherit",
+      }}
+    >
+      <span>Evidence</span>
+      <StatusIndicator type={evidenceHasExceptions ? "error" : "success"}>
+        <span aria-label={evidenceStatusIconLabel} />
+      </StatusIndicator>
+      <span
+        style={{
+          color: evidenceCounterColor,
+          font: "inherit",
+          lineHeight: "inherit",
+          whiteSpace: "nowrap",
+        }}
+      >
+        ({evidenceCounterLabel})
+      </span>
+    </span>
+  );
 
-  const canValidatePacket = packetStatusKey === "draft" && !isValidated;
-  const canSubmitPacket = packetStatusKey === "draft" && isValidated;
+  const packetStatusValue = String(selectedRequest?.status || "").trim().toLowerCase();
+  const canValidatePacket = packetStatusKey === "draft";
+  const canReleasePacket = packetStatusValue === "awaiting_trigger" && isValidated;
+  const canSubmitPacket =
+    packetStatusValue !== "awaiting_trigger" && packetStatusKey === "draft" && isValidated;
   const latestIntacctAttempt = useMemo(
     () => resolveLatestIntacctAttempt(selectedRequest),
     [selectedRequest]
@@ -1892,8 +1989,10 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     : "No supporting documents found for this applicant.";
   const headerActions = selectedRequest ? (
     <SpaceBetween direction="horizontal" size="xs">
-      <StatusIndicator type={packetStatusMeta[packetStatusKey].indicator}>
-        {packetStatusMeta[packetStatusKey].label}
+      <StatusIndicator
+        type={(packetStatusMeta[packetStatusValue] || packetStatusMeta[packetStatusKey]).indicator}
+      >
+        {(packetStatusMeta[packetStatusValue] || packetStatusMeta[packetStatusKey]).label}
       </StatusIndicator>
       {canValidatePacket ? (
         <Button
@@ -1903,6 +2002,16 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           loading={validationSubmitting}
         >
           {validationSubmitting ? "Validating" : "Validate"}
+        </Button>
+      ) : null}
+      {canReleasePacket ? (
+        <Button
+          variant="primary"
+          onClick={() => handlePacketStatusChange("released")}
+          disabled={!selectedRequest?.id || submitSubmitting}
+          loading={submitSubmitting}
+        >
+          {submitSubmitting ? "Releasing" : "Release for submission"}
         </Button>
       ) : null}
       {canSubmitPacket ? (
@@ -1953,21 +2062,22 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       i18nStrings={boardItemI18nStrings}
     >
       {selectedRequest ? (
-        <Tabs
-          activeTabId={activeTabId}
-          onChange={({ detail }) => setActiveTabId(detail.activeTabId)}
-          ariaLabel="Payment packet detail tabs"
-          tabs={[
+        <SpaceBetween size="m">
+          {actionStatus && (
+            <Alert type={actionStatus.type} dismissible onDismiss={() => setActionStatus(null)}>
+              {actionStatus.message}
+            </Alert>
+          )}
+          <Tabs
+            activeTabId={activeTabId}
+            onChange={({ detail }) => setActiveTabId(detail.activeTabId)}
+            ariaLabel="Payment packet detail tabs"
+            tabs={[
             {
               id: "packet-details",
               label: "Packet details",
               content: (
                 <SpaceBetween size="l">
-                  {actionStatus && (
-                    <Alert type={actionStatus.type} dismissible onDismiss={() => setActionStatus(null)}>
-                      {actionStatus.message}
-                    </Alert>
-                  )}
                   <Table
                     trackBy="id"
                     items={packetLines}
@@ -2013,27 +2123,17 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
 
                   {selectedLine ? (
                     <SpaceBetween size="m">
-                      <SpaceBetween direction="horizontal" size="xs">
-                        <Button onClick={openRecurringModal} disabled={!recurringEligible}>
-                          Generate recurring lines
-                        </Button>
-                      </SpaceBetween>
+                      {showRecurringLinesButton && recurringEligible ? (
+                        <SpaceBetween direction="horizontal" size="xs">
+                          <Button onClick={openRecurringModal}>
+                            Generate recurring lines
+                          </Button>
+                        </SpaceBetween>
+                      ) : null}
                     </SpaceBetween>
                   ) : (
                     <Box variant="p">Select a payment line to view details.</Box>
                   )}
-
-                  <ExpandableSection headerText="Evidence and documents">
-                    <SpaceBetween size="m">
-                      <Table
-                        items={evidenceDocumentRows}
-                        columnDefinitions={evidenceDocumentColumns}
-                        trackBy="id"
-                        variant="embedded"
-                        empty={<Box padding="m">No evidence or documents attached.</Box>}
-                      />
-                    </SpaceBetween>
-                  </ExpandableSection>
 
                   {(selectedRequest.duplicateWarnings ?? []).length ? (
                     <SpaceBetween size="xs">
@@ -2047,6 +2147,20 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                   ) : null}
 
                 </SpaceBetween>
+              ),
+            },
+            {
+              id: "evidence",
+              label: evidenceTabLabel,
+              content: (
+                <Table
+                  items={evidenceDocumentRows}
+                  columnDefinitions={evidenceDocumentColumns}
+                  trackBy="id"
+                  variant="embedded"
+                  resizableColumns
+                  empty={<Box padding="m">No evidence or documents attached.</Box>}
+                />
               ),
             },
             {
@@ -2176,8 +2290,9 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                 </ColumnLayout>
               ),
             },
-          ]}
-        />
+            ]}
+          />
+        </SpaceBetween>
       ) : (
         <Box variant="p">Select a payment packet from the queue to view its detail.</Box>
       )}

@@ -2,7 +2,7 @@
 
 Purpose: Provide a plain-language guide for using the Payments module dashboards from draft through submission to Finance (email).  
 Audience: Program staff and admin operators; Finance receives email submissions (no sign-in).  
-Last Updated: 2026-01-30
+Last Updated: 2026-03-02
 
 ## 1) Introduction (for new users)
 The Payments module is where payment requests are created and submitted to Finance by email. A request starts as a **payment packet** with one or more payment lines; evidence must be attached before submission. The goal is to ensure submissions are compliant, auditable, and easy to report.
@@ -72,7 +72,7 @@ What you should do:
    - Payee type + payee name
    - Amount
    - Budget pot
-   - Service period (required for Living Allowance and Wage Subsidy)
+   - Service period (required only when the payment type recurrence policy is set to **Required**)
 7. Click **Create packet**.
 
 ### B) Add or edit lines (Draft only)
@@ -151,6 +151,9 @@ Routing uses:
 
 ### Evidence and payment type rules
 Evidence rules, payment type mappings, and policy caps are configured by admins (runtime config).
+- In **Finance Settings -> Payment type mapping**, each payment type now has a **Required evidence** multi-select.
+- The same screen also sets each payment type **Recurrence policy**: `Not allowed`, `Allowed (optional)`, or `Required`.
+- Changes save to runtime config and are enforced on payment-line evidence checks.
 
 ## 14) Reporting export (Annual Report ledger extract)
 Staff can export the ledger extract required for Annual Reporting (if enabled):

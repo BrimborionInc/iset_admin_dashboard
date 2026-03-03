@@ -164,7 +164,10 @@ const FinanceIntacctIntegrationWidget = ({ actions = {}, metadata = {}, toggleHe
         throw new Error(`Token request failed (${tokenResp.status})`);
       }
       const tokenPayload = await tokenResp.json().catch(() => ({}));
-      const token = tokenPayload.access_token || "mock-access-token";
+      const token = tokenPayload.access_token;
+      if (!token) {
+        throw new Error("Token response missing access token");
+      }
       const vendorResp = await fetch(`${INTACCT_REST_BASE_URL}/ia/api/v1/objects/vendors`, {
         headers: {
           Authorization: `Bearer ${token}`,

@@ -26,7 +26,7 @@ const widgetRegistry = {
     defaultColumnSpan: 4,
     component: FinancePaymentTypeMappingWidget,
     title: "Payment type mapping",
-    description: "Configure allowed payment types by intervention code.",
+    description: "Configure allowed payment types, recurrence, submission timing, and evidence rules.",
     helpComponent: null,
     helpTitle: "Payment type mapping",
     aiContext: null,

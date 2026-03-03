@@ -180,17 +180,6 @@ const normaliseYesNo = (value) => {
   return null;
 };
 
-const DOCUMENT_FIELDS = [
-  { key: 'status-card', label: 'Status / Treaty Card (or equivalent)' },
-  { key: 'govt-id', label: 'Government-issued ID' },
-  { key: 'acceptance-letter', label: 'Letter of Acceptance' },
-  { key: 'applicant-pay-stubs', label: 'Pay stubs (applicant)' },
-  { key: 'spouse-pay-stubs', label: 'Pay stubs (spouse)' },
-  { key: 'band-funding-letter', label: 'Band funding letter' },
-  { key: 'band-denial-letter', label: 'Band denial letter' },
-  { key: 'medical-documents', label: 'Medical documentation' }
-];
-
 const INCOME_FIELDS = [
   { key: 'income-employment', label: 'Employment income' },
   { key: 'income-spousal', label: 'Spousal income' },
@@ -325,36 +314,6 @@ const renderTextBlock = (value) => {
 };
 
 const renderMailingAddress = (value) => renderTextBlock(value);
-
-const normaliseFilePath = (filePath) => {
-  if (!filePath) return null;
-  const normalised = String(filePath).replace(/\\/g, '/').replace(/\/{2,}/g, '/');
-  return normalised.startsWith('/') ? normalised : `/${normalised}`;
-};
-
-const renderDocumentLinks = (value) => {
-  if (!value) return NOT_PROVIDED;
-  const files = Array.isArray(value) ? value : [value];
-  const valid = files.filter(Boolean);
-  if (!valid.length) return NOT_PROVIDED;
-  return (
-    <SpaceBetween size="xs">
-      {valid.map((file, index) => {
-        const name = file?.name || 'Uploaded document';
-        const size = file?.size ? `(${Math.round(file.size / 1024)} KB)` : '';
-        const href = normaliseFilePath(file?.filePath);
-        const label = [name, size].filter(Boolean).join(' ');
-        return href ? (
-          <Link key={index} href={href} external>
-            {label || name}
-          </Link>
-        ) : (
-          <span key={index}>{label || name}</span>
-        );
-      })}
-    </SpaceBetween>
-  );
-};
 
 const signatureStatus = (value) => {
   if (!value || typeof value !== 'object') {
@@ -913,17 +872,6 @@ const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, on
         renderValue: answers => renderTextBlock(answers['loan-grant-details'])
       }
     ]
-  },
-  {
-    id: 'documents',
-    title: 'Supporting documents',
-    description: "These are the files the applicant uploaded in support of this application. For all files associated with this applicant's email address, and to manage files, see the Supporting Documents widget.",
-    columns: 2,
-    editable: false,
-    items: DOCUMENT_FIELDS.map(({ key, label }) => ({
-      label,
-      renderValue: answers => renderDocumentLinks(answers[key])
-    }))
   },
   {
     id: 'submission',

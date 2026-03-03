@@ -35,8 +35,6 @@ const DEFAULT_STATUS_FILTERS = [
   "closed",
   "archived",
 ];
-const normaliseStatusValue = value =>
-  typeof value === "string" ? value.trim().toLowerCase() : "";
 
 const formatDate = value => {
   if (!value) return "-";
@@ -278,12 +276,10 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const isApplicationAssessor = currentRole === "Application Assessor";
   const canManageAssignments = !isApplicationAssessor;
   const {
-    filteredCases,
     searchText,
     setSearchText,
     selectedAgreements,
     clearAgreementFilters,
-    useLiveCases,
   } = usePortfolioCases();
 
   const [columnWidths, setColumnWidths] = useState(() => loadColumnWidths());
@@ -318,7 +314,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     error: liveError,
     refresh: refreshLiveCases,
   } = useCasesData({
-    enabled: useLiveCases,
+    enabled: true,
     searchText,
     statusFilters: DEFAULT_STATUS_FILTERS,
     ownerFilters: undefined,
@@ -384,7 +380,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     }
     const numericId = Number.parseInt(assignTargetCase.id, 10);
     if (!Number.isFinite(numericId)) {
-      setAssignError("Assignment is available only in live mode.");
+      setAssignError("Invalid case identifier.");
       return;
     }
     const assigneeValue = selectedAssignee?.value;
@@ -428,7 +424,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
           : `Case ${caseLabel} assigned to ${assigneeLabel}.`
       );
       closeAssignModal();
-      if (useLiveCases && typeof refreshLiveCases === "function") {
+      if (typeof refreshLiveCases === "function") {
         refreshLiveCases({ page: currentPageIndex });
       }
     } catch (err) {
@@ -440,7 +436,6 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     assignTargetCase,
     selectedAssignee,
     assignModalMode,
-    useLiveCases,
     refreshLiveCases,
     currentPageIndex,
     closeAssignModal,
@@ -449,9 +444,6 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
 
   const handleCaseAction = useCallback(
     (caseItem, actionType) => {
-      if (!useLiveCases) {
-        return;
-      }
       if (!caseItem?.id) return;
       const numericId = Number.parseInt(caseItem.id, 10);
       if (!Number.isFinite(numericId)) {
@@ -464,43 +456,14 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       setSelectedAssignee(null);
       fetchAssignableStaff(caseItem);
     },
-    [useLiveCases, fetchAssignableStaff]
+    [fetchAssignableStaff]
   );
 
-  const offlineStatusFilteredCases = useMemo(() => {
-    if (useLiveCases) return [];
-    return filteredCases.filter(item =>
-      DEFAULT_STATUS_FILTERS.includes(normaliseStatusValue(item?.status))
-    );
-  }, [useLiveCases, filteredCases]);
-
-  const pagesCount = Math.max(
-    1,
-    Math.ceil(offlineStatusFilteredCases.length / pageSize)
-  );
-  const pagedItems = useMemo(() => {
-    if (useLiveCases) return [];
-    const start = (currentPageIndex - 1) * pageSize;
-    return offlineStatusFilteredCases.slice(start, start + pageSize);
-  }, [useLiveCases, offlineStatusFilteredCases, currentPageIndex, pageSize]);
-
   useEffect(() => {
-    if (useLiveCases) return;
-    setCurrentPageIndex(previous => {
-      const maxPage = Math.max(
-        1,
-        Math.ceil(offlineStatusFilteredCases.length / pageSize)
-      );
-      return previous > maxPage ? maxPage : previous;
-    });
-  }, [useLiveCases, offlineStatusFilteredCases, pageSize]);
-
-  useEffect(() => {
-    if (!useLiveCases) return;
     const liveTotal = Number.isFinite(liveTotalCount) ? liveTotalCount : 0;
     const maxPage = Math.max(1, Math.ceil(Math.max(liveTotal, 1) / pageSize));
     setCurrentPageIndex(previous => (previous > maxPage ? maxPage : previous));
-  }, [useLiveCases, liveTotalCount, pageSize]);
+  }, [liveTotalCount, pageSize]);
 
   const infoLink = metadata.helpComponent && toggleHelpPanel ? (
     <Link
@@ -608,13 +571,9 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     />
   );
 
-  const itemsToRender = useLiveCases ? liveItems : pagedItems;
-  const totalCount = useLiveCases
-    ? (Number.isFinite(liveTotalCount) ? liveTotalCount : liveItems.length)
-    : offlineStatusFilteredCases.length;
-  const pagesCountEffective = useLiveCases
-    ? Math.max(1, Math.ceil(Math.max(totalCount, 1) / pageSize))
-    : pagesCount;
+  const itemsToRender = liveItems;
+  const totalCount = Number.isFinite(liveTotalCount) ? liveTotalCount : liveItems.length;
+  const pagesCountEffective = Math.max(1, Math.ceil(Math.max(totalCount, 1) / pageSize));
   const pagination = (
     <Pagination
       currentPageIndex={currentPageIndex}
@@ -623,11 +582,9 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       disabled={pagesCountEffective <= 1}
     />
   );
-  const totalMatchesText = useLiveCases
-    ? liveLoading
-      ? "Loading…"
-      : `${totalCount} client${totalCount === 1 ? "" : "s"}`
-    : `${offlineStatusFilteredCases.length} match${offlineStatusFilteredCases.length === 1 ? "" : "es"}`;
+  const totalMatchesText = liveLoading
+    ? "Loading…"
+    : `${totalCount} client${totalCount === 1 ? "" : "s"}`;
   const emptyState = liveError ? (
     <Box padding="m">
       <StatusIndicator type="error">
@@ -651,7 +608,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
           <SpaceBetween size="xs" direction="horizontal">
             <Button
               variant="inline-link"
-              disabled={!useLiveCases || !canManageAssignments || hasOwner}
+              disabled={!canManageAssignments || hasOwner}
               onClick={event => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -662,7 +619,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
             </Button>
             <Button
               variant="inline-link"
-              disabled={!useLiveCases || !canManageAssignments || !hasOwner}
+              disabled={!canManageAssignments || !hasOwner}
               onClick={event => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -675,7 +632,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         );
       },
     }),
-    [handleCaseAction, canManageAssignments, useLiveCases]
+    [handleCaseAction, canManageAssignments]
   );
 
   const columnsToRender = useMemo(() => {
@@ -745,7 +702,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
           items={itemsToRender}
           resizableColumns
           variant="embedded"
-          loading={useLiveCases && liveLoading}
+          loading={liveLoading}
           header={<Header variant="h3" counter={`(${totalCount})`}>ISET Clients</Header>}
           empty={emptyState}
           filter={

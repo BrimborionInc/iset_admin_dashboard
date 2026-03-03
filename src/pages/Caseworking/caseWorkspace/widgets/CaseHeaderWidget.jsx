@@ -25,7 +25,12 @@ import { toCanonicalRole } from "../../../../context/RoleMatrixContext.js";
 import { usePaymentsData } from "../../../finance/widgets/PaymentsDataContext.jsx";
 import { buildApplicantWatchlistIdentity, formatSinDisplay } from "../../../../utils/applicantWatchlist.js";
 
-const AWAITING_SUBMISSION_STATUSES = new Set(["draft", "returned"]);
+const AWAITING_SUBMISSION_STATUSES = new Set([
+  "draft",
+  "returned",
+  "awaiting_trigger",
+  "released",
+]);
 
 const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const {
@@ -187,6 +192,13 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const interventionCostTotals = useMemo(() => {
     const plans = caseData?.actionPlans || [];
     const toNumberOrNull = value => {
+      if (value === null || typeof value === "undefined") return null;
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        const numeric = Number(trimmed.replace(/,/g, ""));
+        return Number.isFinite(numeric) ? numeric : null;
+      }
       const numeric = Number(value);
       return Number.isFinite(numeric) ? numeric : null;
     };
@@ -251,7 +263,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       Number.isFinite(overallCommitted) ||
       Number.isFinite(overallActual) ||
       interventionCostTotals.overall.count > 0;
-    let planLine = "Plan: —";
+    let planLine = "Selected Action Plan: —";
     if (selectedPlan) {
       const planTotals = interventionCostTotals.byPlan.get(String(selectedPlan.id)) || {
         committed: 0,
@@ -259,7 +271,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         count: 0,
       };
       const planRemaining = planTotals.committed - planTotals.actual;
-      planLine = `Plan: ${formatCurrency(planTotals.committed)} committed · ${formatCurrency(
+      planLine = `Selected Action Plan: ${formatCurrency(planTotals.committed)} committed · ${formatCurrency(
         planTotals.actual
       )} actual · ${formatCurrency(planRemaining)} remaining`;
     }

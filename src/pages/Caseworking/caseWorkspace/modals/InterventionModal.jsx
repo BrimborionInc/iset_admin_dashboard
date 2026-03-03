@@ -10,9 +10,9 @@ import {
   Header,
   Input,
   Modal,
-  RadioGroup,
   Select,
   SpaceBetween,
+  Table,
   Textarea,
 } from "@cloudscape-design/components";
 import { apiFetch } from "../../../../auth/apiClient.js";
@@ -28,13 +28,6 @@ const BASE_STATUS_OPTIONS = [
 const CLOSE_STATUS_OPTIONS = [
   { value: "completed", label: "Completed" },
   { value: "cancelled", label: "Cancelled" },
-];
-
-const RECURRING_PERIOD_OPTIONS = [
-  { value: "weekly", label: "Weekly" },
-  { value: "bi_weekly", label: "Bi-weekly" },
-  { value: "monthly", label: "Monthly" },
-  { value: "quarterly", label: "Quarterly" },
 ];
 
 const OPEN_INTERVENTION_STATUSES = new Set([
@@ -81,10 +74,6 @@ const defaultForm = {
   notes: "",
   noc: "",
   nocVersion: "",
-  costType: "one_time",
-  recurringPeriod: "",
-  recurringAmount: "",
-  recurringOccurrences: "",
   postingContext: "external",
 };
 
@@ -129,7 +118,6 @@ const normaliseFormNumbers = value =>
 
 const buildInitialForm = (mode, intervention) => {
   if (mode === "edit" && intervention) {
-    const costSettings = intervention.metadata?.costSettings || {};
     return {
       code: intervention.code ? String(intervention.code) : "",
       status: normaliseStatus(intervention.status || "planned"),
@@ -142,10 +130,6 @@ const buildInitialForm = (mode, intervention) => {
       notes: intervention.notes || "",
       noc: intervention.noc || "",
       nocVersion: intervention.nocVersion || "",
-      costType: costSettings.type || "one_time",
-      recurringPeriod: costSettings.period || "",
-      recurringAmount: normaliseFormNumbers(costSettings.amountPerPeriod),
-      recurringOccurrences: normaliseFormNumbers(costSettings.occurrences),
       postingContext: intervention.postingContext || intervention.metadata?.postingContext || "external",
     };
   }
@@ -191,10 +175,19 @@ const buildCloseForm = intervention => {
   const actualCandidates = [
     intervention?.actualAmount,
     intervention?.metadata?.actualAmount,
+    intervention?.plannedCost,
+    intervention?.cost,
+    intervention?.budgetAmount,
+    intervention?.approvedAmount,
+    intervention?.interventionCost,
+    intervention?.intervention_cost,
+    intervention?.metadata?.plannedCost,
+    intervention?.metadata?.cost,
   ];
   let actualAmount = "";
   for (const candidate of actualCandidates) {
     if (candidate === null || typeof candidate === "undefined") continue;
+    if (typeof candidate === "string" && !candidate.trim()) continue;
     const numeric = Number(candidate);
     if (Number.isFinite(numeric)) {
       actualAmount = String(numeric);
@@ -514,107 +507,60 @@ const InterventionModal = ({
     [form.postingContext]
   );
 
-  const isRecurringCost = form.costType === "recurring";
-
-  const selectedRecurrencePeriodOption = useMemo(
-    () => RECURRING_PERIOD_OPTIONS.find(option => option.value === form.recurringPeriod) || null,
-    [form.recurringPeriod]
-  );
-
-  const recurringAmountNumber = Number(form.recurringAmount);
-  const recurringOccurrencesNumber = Number(form.recurringOccurrences);
-  const recurringTotal = useMemo(() => {
-    if (!isRecurringCost) return null;
-    if (!Number.isFinite(recurringAmountNumber) || !Number.isFinite(recurringOccurrencesNumber)) {
-      return null;
-    }
-    const total = recurringAmountNumber * recurringOccurrencesNumber;
-    if (!Number.isFinite(total)) return null;
-    return total;
-  }, [isRecurringCost, recurringAmountNumber, recurringOccurrencesNumber]);
-
-  const autoOccurrencesFromDates = useCallback((startDate, endDate, period) => {
-    if (!startDate || !endDate || !period) return null;
-    const parseIsoParts = (value) => {
-      const raw = String(value || "").trim();
-      const parts = raw.split("-");
-      if (parts.length !== 3) return null;
-      const [year, month, day] = parts.map(part => Number.parseInt(part, 10));
-      if (![year, month, day].every(Number.isFinite)) return null;
-      return { year, month, day };
-    };
-    const startParts = parseIsoParts(startDate);
-    const endParts = parseIsoParts(endDate);
-    if (!startParts || !endParts) return null;
-    const startUtc = Date.UTC(startParts.year, startParts.month - 1, startParts.day);
-    const endUtc = Date.UTC(endParts.year, endParts.month - 1, endParts.day);
-    if (!Number.isFinite(startUtc) || !Number.isFinite(endUtc)) return null;
-    if (endUtc < startUtc) return null;
-    const monthCount =
-      (endParts.year - startParts.year) * 12 +
-      (endParts.month - startParts.month) +
-      1;
-    if (period === "monthly") return Math.max(1, monthCount);
-    if (period === "quarterly") return Math.max(1, Math.ceil(monthCount / 3));
-    const diffDays = Math.floor((endUtc - startUtc) / (1000 * 60 * 60 * 24)) + 1;
-    if (!Number.isFinite(diffDays) || diffDays < 1) return null;
-    const periodDays = period === "bi_weekly" ? 14 : period === "weekly" ? 7 : null;
-    if (!periodDays) return null;
-    return Math.max(1, Math.ceil(diffDays / periodDays));
-  }, []);
-
-  useEffect(() => {
-    if (!isRecurringCost) return;
-    if (recurringTotal === null) return;
-    const formatted = recurringTotal.toFixed(2);
-
-    setForm(current => {
-      const currentCost = current.cost ?? "";
-      const initialCost = initialFormRef.current.cost ?? "";
-      const hasOtherDifferences = FORM_KEYS.some(key => {
-        if (key === "cost") return false;
-        return (current[key] ?? "") !== (initialFormRef.current[key] ?? "");
-      });
-
-      if (currentCost === formatted) {
-        if (!hasOtherDifferences && initialCost !== formatted) {
-          initialFormRef.current = { ...initialFormRef.current, cost: formatted };
-        }
-        return current;
-      }
-
-      const next = { ...current, cost: formatted };
-      if (!hasOtherDifferences) {
-        initialFormRef.current = { ...initialFormRef.current, cost: formatted };
-      }
-      return next;
-    });
-  }, [isRecurringCost, recurringTotal]);
-  useEffect(() => {
-    if (!isRecurringCost) return;
-    if (!form.startDate || !form.endDate || !form.recurringPeriod) return;
-    const nextOccurrences = autoOccurrencesFromDates(form.startDate, form.endDate, form.recurringPeriod);
-    if (nextOccurrences === null) return;
-    if (String(nextOccurrences) === String(form.recurringOccurrences || "")) return;
-    setForm(current => ({ ...current, recurringOccurrences: String(nextOccurrences) }));
-  }, [isRecurringCost, form.startDate, form.endDate, form.recurringPeriod, form.recurringOccurrences, autoOccurrencesFromDates]);
-
-  const costInputValue = useMemo(() => {
-    if (isRecurringCost) {
-      return recurringTotal !== null ? recurringTotal.toFixed(2) : "";
-    }
-    return form.cost;
-  }, [isRecurringCost, recurringTotal, form.cost]);
+  const costInputValue = useMemo(() => form.cost, [form.cost]);
   const formattedCostDisplay = useMemo(() => {
     return formatCurrencyDisplay(costInputValue);
   }, [costInputValue]);
   const [isCostFocused, setIsCostFocused] = useState(false);
-  const [isRecurringAmountFocused, setIsRecurringAmountFocused] = useState(false);
-
-  const formattedRecurringAmount = useMemo(() => {
-    return formatCurrencyDisplay(form.recurringAmount);
-  }, [form.recurringAmount]);
   const [isActualCostFocused, setIsActualCostFocused] = useState(false);
+  const [packetLineItems, setPacketLineItems] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPacketLines = async () => {
+      if (!visible || !intervention?.id) {
+        setPacketLineItems([]);
+        return;
+      }
+      setPacketLineItems([]);
+      try {
+        const response = await apiFetch(`/api/interventions/${intervention.id}/payment-lines`, {
+          method: "GET",
+        });
+        if (!response.ok) {
+          if (!cancelled) setPacketLineItems([]);
+          return;
+        }
+        const data = await response.json().catch(() => ({}));
+        const lines = Array.isArray(data?.lines) ? data.lines : [];
+        if (cancelled) return;
+        setPacketLineItems(lines);
+      } catch (_) {
+        if (!cancelled) setPacketLineItems([]);
+      }
+    };
+
+    loadPacketLines();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiFetch, visible, intervention?.id]);
+
+  const costLineItems = useMemo(() => {
+    return (Array.isArray(packetLineItems) ? packetLineItems : []).map((line, index) => ({
+      id: line.lineId || `${index + 1}`,
+      paymentType: line.paymentType || "—",
+      payeeName: line.payeeName || "—",
+      amount:
+        typeof line.amount === "number" && Number.isFinite(line.amount)
+          ? formatCurrencyDisplay(String(line.amount))
+          : "Not set",
+      recurrence: line.recurrence || "—",
+    }));
+  }, [
+    packetLineItems,
+  ]);
 
   const applyFieldSideEffects = (draft, field, value) => {
     const next = { ...draft, [field]: value };
@@ -635,35 +581,11 @@ const InterventionModal = ({
       next.noc = "";
     }
 
-    if (field === "costType") {
-      if (value === "one_time") {
-        next.recurringPeriod = "";
-        next.recurringAmount = "";
-        next.recurringOccurrences = "";
-      } else if (value === "recurring") {
-        if (!next.recurringPeriod) {
-          next.recurringPeriod = "weekly";
-        }
-      }
-    }
-
     if (field === "startDate" || field === "endDate") {
       const start = field === "startDate" ? value : next.startDate;
       const end = field === "endDate" ? value : next.endDate;
       const duration = calculateDurationDays(start, end);
       next.durationDays = duration !== null ? String(duration) : "";
-      if (next.costType === "recurring") {
-        const occurrences = autoOccurrencesFromDates(start, end, next.recurringPeriod);
-        if (occurrences !== null) {
-          next.recurringOccurrences = String(occurrences);
-        }
-      }
-    }
-
-    if (next.costType !== "recurring") {
-      next.recurringPeriod = "";
-      next.recurringAmount = "";
-      next.recurringOccurrences = "";
     }
 
     next.status = normaliseStatus(next.status);
@@ -887,27 +809,6 @@ const InterventionModal = ({
       return;
     }
 
-    const isRecurringCost = form.costType === "recurring";
-    const cleanedRecurringAmount =
-      form.recurringAmount.trim() === "" ? null : Number(form.recurringAmount.trim());
-    const cleanedRecurringOccurrences =
-      form.recurringOccurrences.trim() === "" ? null : Number(form.recurringOccurrences.trim());
-    const costSettingsPayload = {
-      type: form.costType,
-      period: isRecurringCost ? form.recurringPeriod || "" : "",
-      amountPerPeriod: isRecurringCost ? cleanedRecurringAmount : null,
-      occurrences: isRecurringCost ? cleanedRecurringOccurrences : null,
-      calculatedTotal: costValue,
-    };
-    const recurrencePayload = isRecurringCost
-      ? {
-          period: costSettingsPayload.period,
-          amountPerPeriod: costSettingsPayload.amountPerPeriod,
-          occurrences: costSettingsPayload.occurrences,
-          calculatedTotal: costValue,
-        }
-      : null;
-
     const payload = {
       code: trimmedCode,
       status: statusNormalized,
@@ -923,15 +824,6 @@ const InterventionModal = ({
       noc: form.noc.trim() || null,
       nocVersion: form.nocVersion.trim() || null,
     };
-
-    if (intervention?.metadata || isRecurringCost || form.costType !== "one_time") {
-      payload.metadata = {
-        ...(intervention?.metadata || {}),
-        costType: form.costType,
-        costSettings: costSettingsPayload,
-        recurrence: recurrencePayload,
-      };
-    }
 
     setLoading(true);
     try {
@@ -1317,77 +1209,46 @@ const InterventionModal = ({
                   />
                 )}
               </FormField>
-              <FormField label="Cost type">
-                <RadioGroup
-                  onChange={({ detail }) => handleChange("costType", detail.value)}
-                  value={form.costType}
-                  items={[
-                    { value: "one_time", label: "One-time total" },
-                    { value: "recurring", label: "Recurring schedule" },
-                  ]}
+              <FormField label="Planned cost" errorText={fieldErrors.cost}>
+                <Input
+                  value={getCurrencyInputDisplayValue(costInputValue, isCostFocused)}
+                  onChange={({ detail }) => handleChange("cost", detail.value)}
+                  onFocus={() => setIsCostFocused(true)}
+                  onBlur={() => setIsCostFocused(false)}
+                  placeholder="e.g. 42000"
                   readOnly={isFormReadOnly}
                 />
               </FormField>
-              {isRecurringCost && (
-                <>
-                  <FormField label="Recurrence period">
-                    <Select
-                      selectedOption={selectedRecurrencePeriodOption}
-                      onChange={({ detail }) =>
-                        handleChange("recurringPeriod", detail.selectedOption?.value || "")
-                      }
-                      options={RECURRING_PERIOD_OPTIONS}
-                      placeholder="Select recurrence period"
-                      readOnly={isFormReadOnly}
-                    />
-                  </FormField>
-                  <FormField label="Amount per period">
-                    <Input
-                      value={getCurrencyInputDisplayValue(form.recurringAmount, isRecurringAmountFocused)}
-                      onChange={({ detail }) => handleChange("recurringAmount", detail.value)}
-                      onFocus={() => setIsRecurringAmountFocused(true)}
-                      onBlur={() => setIsRecurringAmountFocused(false)}
-                      inputMode="decimal"
-                      placeholder="e.g. 150.00"
-                      readOnly={isFormReadOnly}
-                    />
-                  </FormField>
-                  <FormField
-                    label="Number of occurrences"
-                    description="Auto-calculated from dates and recurrence."
-                  >
-                    <Input
-                      value={form.recurringOccurrences}
-                      readOnly
-                    />
-                  </FormField>
-                  <FormField
-                    label="Planned cost"
-                    description="Calculated total based on recurring schedule."
-                    errorText={fieldErrors.cost}
-                  >
-                    <Input
-                      value={formattedCostDisplay}
-                      onChange={({ detail }) => handleChange("cost", detail.value)}
-                      placeholder="e.g. 42000"
-                      readOnly
-                    />
-                  </FormField>
-                </>
-              )}
-              {!isRecurringCost && (
-                <FormField label="Planned cost" errorText={fieldErrors.cost}>
-                  <Input
-                    value={getCurrencyInputDisplayValue(costInputValue, isCostFocused)}
-                    onChange={({ detail }) => handleChange("cost", detail.value)}
-                    onFocus={() => setIsCostFocused(true)}
-                    onBlur={() => setIsCostFocused(false)}
-                    placeholder="e.g. 42000"
-                    readOnly={isFormReadOnly}
-                  />
-                </FormField>
-              )}
             </ColumnLayout>
+            <Table
+              items={costLineItems}
+              trackBy="id"
+              variant="embedded"
+              columnDefinitions={[
+                {
+                  id: "paymentType",
+                  header: "Payment type",
+                  cell: item => item.paymentType,
+                },
+                {
+                  id: "payeeName",
+                  header: "Payee name",
+                  cell: item => item.payeeName,
+                },
+                {
+                  id: "amount",
+                  header: "Amount",
+                  cell: item => item.amount,
+                },
+                {
+                  id: "recurrence",
+                  header: "Recurrence",
+                  cell: item => item.recurrence,
+                },
+              ]}
+              header={<Header variant="h3">Cost line items</Header>}
+              empty={<Box padding="s">No cost line items recorded for this intervention.</Box>}
+            />
           </SpaceBetween>
           <SpaceBetween size="s">
             <FormField label="Notes">

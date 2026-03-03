@@ -260,6 +260,18 @@ const buildUuid = () => {
   return `tmp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 };
 
+const normalizeId = value => {
+  if (value === null || typeof value === "undefined") return "";
+  return String(value);
+};
+
+const idsMatch = (left, right) => {
+  const leftId = normalizeId(left);
+  const rightId = normalizeId(right);
+  if (!leftId || !rightId) return false;
+  return leftId === rightId;
+};
+
 const parseCurrencyInput = value => {
   if (value === null || typeof value === "undefined") return null;
   const cleaned = String(value).replace(/[^0-9.]/g, "");
@@ -321,6 +333,7 @@ const recalcRecurringAmounts = ({ amount, amountPerPeriod, occurrences, adjustMo
 const EDUCATION_CODES = new Set([4, 5, 9, 10, 11, 12, 13]);
 const EMPLOYER_CODES = new Set([6, 7, 8, 17]);
 const WAGE_SUBSIDY_CODES = new Set([7, 8]);
+const NOC_REQUIRED_CODES = new Set([6, 7, 8, 9, 10, 11, 12, 13, 17]);
 
 const isEducationCode = value => {
   if (!value) return false;
@@ -341,12 +354,31 @@ const isWageSubsidyCode = value => {
 };
 
 const requiresExternalPartnerForCode = value => isEducationCode(value) || isEmployerCode(value);
-const requiresNocForCode = value => isEmployerCode(value);
+const requiresNocForCode = value => {
+  if (!value) return false;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && NOC_REQUIRED_CODES.has(numeric);
+};
 
 const normalizeInterventionCodeValue = value => {
   if (value === null || value === undefined) return null;
   const trimmed = String(value).trim();
   return trimmed ? trimmed : null;
+};
+
+const RECURRENCE_MODE_REQUIRED = "required";
+const RECURRENCE_MODE_OPTIONAL = "optional";
+const RECURRENCE_MODE_NOT_ALLOWED = "not_allowed";
+
+const normalizeRecurrenceMode = value => {
+  if (typeof value !== "string") return RECURRENCE_MODE_NOT_ALLOWED;
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === RECURRENCE_MODE_REQUIRED) return RECURRENCE_MODE_REQUIRED;
+  if (normalized === RECURRENCE_MODE_OPTIONAL) return RECURRENCE_MODE_OPTIONAL;
+  if (normalized === RECURRENCE_MODE_NOT_ALLOWED || normalized === "disabled") {
+    return RECURRENCE_MODE_NOT_ALLOWED;
+  }
+  return RECURRENCE_MODE_NOT_ALLOWED;
 };
 
 const buildPaymentTypeMappingLookup = mapping => {
@@ -403,7 +435,9 @@ const normalizeCostingDefaults = payload => {
       return {
         code,
         recurrence: {
-          mode: recurrence.mode || "optional",
+          mode: normalizeRecurrenceMode(
+            recurrence.mode || recurrence.rule || entry.recurrenceMode || entry.recurrence_mode,
+          ),
         },
       };
     })
@@ -567,6 +601,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   });
   const [interventionModalErrors, setInterventionModalErrors] = useState({});
   const [interventionDeleteId, setInterventionDeleteId] = useState(null);
+  const [proposedInterventionsTableVersion, setProposedInterventionsTableVersion] = useState(0);
   const [costLineModal, setCostLineModal] = useState({
     visible: false,
     mode: "view",
@@ -1032,8 +1067,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       effectiveCostingDefaults.paymentTypes.forEach(entry => {
         const code = entry?.code ? String(entry.code).trim() : "";
         if (!code) return;
-        const mode = entry?.recurrence?.mode ? String(entry.recurrence.mode).trim() : "optional";
-        map.set(code, mode || "optional");
+        const mode = normalizeRecurrenceMode(entry?.recurrence?.mode);
+        map.set(code, mode);
       });
     }
     return map;
@@ -1041,9 +1076,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
 
   const getRecurrenceModeForType = useCallback(
     type => {
-      if (!type) return "optional";
+      if (!type) return RECURRENCE_MODE_NOT_ALLOWED;
       const normalized = String(type).trim();
-      return recurrenceModeByType.get(normalized) || "optional";
+      return recurrenceModeByType.get(normalized) || RECURRENCE_MODE_NOT_ALLOWED;
     },
     [recurrenceModeByType]
   );
@@ -1105,7 +1140,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
           const recurrenceEnabled =
             typeof item?.recurrenceEnabled === "boolean"
               ? item.recurrenceEnabled
-              : recurrenceMode === "required";
+              : recurrenceMode === RECURRENCE_MODE_REQUIRED;
           return buildEmptyCostLine({
             type,
             notes: item?.notes || "",
@@ -1195,7 +1230,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     (interventionId, updates) => {
       updateProposedInterventions(current =>
         current.map(item =>
-          item.id === interventionId ? { ...item, ...updates } : item
+          idsMatch(item.id, interventionId) ? { ...item, ...updates } : item
         )
       );
     },
@@ -1209,12 +1244,32 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     [updateProposedInterventions]
   );
 
-  const removeIntervention = useCallback(
-    interventionId => {
-      updateProposedInterventions(current => current.filter(item => item.id !== interventionId));
-    },
-    [updateProposedInterventions]
-  );
+  const confirmInterventionDelete = useCallback(() => {
+    const deleteId = interventionDeleteId;
+    if (deleteId !== null && typeof deleteId !== "undefined") {
+      const nextProposedInterventions = proposedInterventions.filter(
+        item => !idsMatch(item.id, deleteId)
+      );
+      const nextForm = { ...form, proposedInterventions: nextProposedInterventions };
+      setForm(nextForm);
+      if (wizardStepKey && typeof setInterventionWizardDraft === "function") {
+        if (hasMeaningfulDraft(nextForm)) {
+          setInterventionWizardDraft(wizardStepKey, nextForm);
+        } else {
+          setInterventionWizardDraft(wizardStepKey, null);
+        }
+      }
+    }
+    setInterventionDeleteId(null);
+    setProposedInterventionsTableVersion(current => current + 1);
+  }, [
+    interventionDeleteId,
+    proposedInterventions,
+    form,
+    wizardStepKey,
+    setInterventionWizardDraft,
+    hasMeaningfulDraft,
+  ]);
 
   const openAddInterventionModal = useCallback(() => {
     setInterventionModal({
@@ -1229,7 +1284,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
 
   const openViewInterventionModal = useCallback(
     interventionId => {
-      const intervention = proposedInterventions.find(item => item.id === interventionId);
+      const intervention = proposedInterventions.find(item => idsMatch(item.id, interventionId));
       if (!intervention) return;
       setInterventionModal({
         visible: true,
@@ -1350,7 +1405,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
 
   const openAddCostLineModal = useCallback(
     interventionId => {
-      const intervention = proposedInterventions.find(item => item.id === interventionId);
+      const intervention = proposedInterventions.find(item => idsMatch(item.id, interventionId));
       if (!intervention) return;
       setCostLineModal({
         visible: true,
@@ -1367,8 +1422,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
 
   const openCostLineModal = useCallback(
     (interventionId, lineId) => {
-      const intervention = proposedInterventions.find(item => item.id === interventionId);
-      const line = intervention?.costLines?.find(item => item.id === lineId);
+      const intervention = proposedInterventions.find(item => idsMatch(item.id, interventionId));
+      const line = intervention?.costLines?.find(item => idsMatch(item.id, lineId));
       if (!intervention || !line) return;
       setCostLineModal({
         visible: true,
@@ -1438,13 +1493,13 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     nextType => {
       setCostLineModal(prev => {
         if (!prev.draft) return prev;
-        const intervention = proposedInterventions.find(item => item.id === prev.interventionId);
+        const intervention = proposedInterventions.find(item => idsMatch(item.id, prev.interventionId));
         if (!intervention) return prev;
         const recurrenceMode = getRecurrenceModeForType(nextType);
         const recurrenceEnabled =
-          recurrenceMode === "required"
+          recurrenceMode === RECURRENCE_MODE_REQUIRED
             ? true
-            : recurrenceMode === "disabled"
+            : recurrenceMode === RECURRENCE_MODE_NOT_ALLOWED
               ? false
               : Boolean(prev.draft.recurrence?.enabled);
         const baseRecurrence = buildRecurrenceFromIntervention(intervention, recurrenceEnabled);
@@ -1470,13 +1525,13 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     enabled => {
       setCostLineModal(prev => {
         if (!prev.draft) return prev;
-        const intervention = proposedInterventions.find(item => item.id === prev.interventionId);
+        const intervention = proposedInterventions.find(item => idsMatch(item.id, prev.interventionId));
         if (!intervention) return prev;
         const recurrenceMode = getRecurrenceModeForType(prev.draft.type);
         const resolvedEnabled =
-          recurrenceMode === "required"
+          recurrenceMode === RECURRENCE_MODE_REQUIRED
             ? true
-            : recurrenceMode === "disabled"
+            : recurrenceMode === RECURRENCE_MODE_NOT_ALLOWED
               ? false
               : enabled;
         const baseRecurrence = buildRecurrenceFromIntervention(intervention, resolvedEnabled);
@@ -1628,7 +1683,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       errors.amount = "Enter a valid amount in dollars.";
     }
     const recurrenceMode = getRecurrenceModeForType(draft?.type);
-    const recurrenceRequired = recurrenceMode === "required";
+    const recurrenceRequired = recurrenceMode === RECURRENCE_MODE_REQUIRED;
     const recurrenceEnabled = Boolean(draft?.recurrence?.enabled);
     if ((recurrenceRequired || recurrenceEnabled) && !isRecurrenceScheduleComplete(draft)) {
       errors.recurrence = "Complete the installments schedule.";
@@ -1645,7 +1700,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     }
     updateProposedInterventions(current =>
       current.map(intervention => {
-        if (intervention.id !== costLineModal.interventionId) return intervention;
+        if (!idsMatch(intervention.id, costLineModal.interventionId)) return intervention;
         const lines = Array.isArray(intervention.costLines) ? intervention.costLines : [];
         if (costLineModal.mode === "add") {
           return { ...intervention, costLines: [...lines, draft] };
@@ -1653,7 +1708,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         if (costLineModal.mode === "edit") {
           return {
             ...intervention,
-            costLines: lines.map(line => (line.id === costLineModal.lineId ? draft : line)),
+            costLines: lines.map(line => (idsMatch(line.id, costLineModal.lineId) ? draft : line)),
           };
         }
         return intervention;
@@ -1666,9 +1721,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     (interventionId, lineId) => {
       updateProposedInterventions(current =>
         current.map(intervention => {
-          if (intervention.id !== interventionId) return intervention;
+          if (!idsMatch(intervention.id, interventionId)) return intervention;
           const lines = Array.isArray(intervention.costLines) ? intervention.costLines : [];
-          return { ...intervention, costLines: lines.filter(line => line.id !== lineId) };
+          return { ...intervention, costLines: lines.filter(line => !idsMatch(line.id, lineId)) };
         })
       );
     },
@@ -1679,11 +1734,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     const cleaned = sanitizeCurrencyInput(value);
     updateProposedInterventions(current =>
       current.map(intervention => {
-        if (intervention.id !== interventionId) return intervention;
+        if (!idsMatch(intervention.id, interventionId)) return intervention;
         const lines = Array.isArray(intervention.costLines) ? intervention.costLines : [];
         return {
           ...intervention,
-          costLines: lines.map(line => (line.id === lineId ? { ...line, amount: cleaned } : line)),
+          costLines: lines.map(line => (idsMatch(line.id, lineId) ? { ...line, amount: cleaned } : line)),
         };
       })
     );
@@ -2043,7 +2098,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
             detailErrors.amount = "Enter a valid amount in dollars.";
           }
           const recurrenceMode = getRecurrenceModeForType(line.type);
-          const recurrenceRequired = recurrenceMode === "required";
+          const recurrenceRequired = recurrenceMode === RECURRENCE_MODE_REQUIRED;
           const recurrenceEnabled = Boolean(line.recurrence?.enabled);
           if ((recurrenceRequired || recurrenceEnabled) && !isRecurrenceScheduleComplete(line)) {
             detailErrors.recurrence = "Complete the installments schedule.";
@@ -2704,6 +2759,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const framingStepContent = (
     <SpaceBetween size="l">
       <Table
+        key={`proposed-interventions-${proposedInterventionsTableVersion}`}
         stripedRows
         variant="embedded"
         trackBy="id"
@@ -3214,6 +3270,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const interventionModalWageSubsidyCode = interventionModalDraft
     ? isWageSubsidyCode(interventionModalDraft.code)
     : false;
+  const interventionModalNeedsNoc = interventionModalDraft
+    ? requiresNocForCode(interventionModalDraft.code)
+    : false;
   const interventionModalRequiresExternal = interventionModalDraft
     ? requiresExternalPartnerForCode(interventionModalDraft.code)
     : false;
@@ -3446,7 +3505,30 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
                   />
                 </FormField>
               </ColumnLayout>
-              <ColumnLayout columns={2} variant="text-grid">
+              {interventionModalWageSubsidyCode && (
+                <FormField
+                  label="Wage subsidy details"
+                  errorText={interventionModalErrors.wageSubsidyDetails}
+                >
+                  <Textarea
+                    value={interventionModalDraft.wageSubsidyDetails || ""}
+                    rows={3}
+                    onChange={({ detail }) => {
+                      updateInterventionModalDraft({ wageSubsidyDetails: detail.value });
+                      setInterventionModalErrors(prev => {
+                        const next = { ...prev };
+                        delete next.wageSubsidyDetails;
+                        return next;
+                      });
+                    }}
+                    readOnly={!interventionModalEditable || isFormLocked}
+                  />
+                </FormField>
+              )}
+            </SpaceBetween>
+          )}
+          {interventionModalNeedsNoc && (
+            <ColumnLayout columns={2} variant="text-grid">
                 <FormField
                   label="NOC version"
                   description="Select the NOC version used for this job/placement."
@@ -3521,28 +3603,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
                     enteredTextLabel={value => `Use "${value}"`}
                   />
                 </FormField>
-              </ColumnLayout>
-              {interventionModalWageSubsidyCode && (
-                <FormField
-                  label="Wage subsidy details"
-                  errorText={interventionModalErrors.wageSubsidyDetails}
-                >
-                  <Textarea
-                    value={interventionModalDraft.wageSubsidyDetails || ""}
-                    rows={3}
-                    onChange={({ detail }) => {
-                      updateInterventionModalDraft({ wageSubsidyDetails: detail.value });
-                      setInterventionModalErrors(prev => {
-                        const next = { ...prev };
-                        delete next.wageSubsidyDetails;
-                        return next;
-                      });
-                    }}
-                    readOnly={!interventionModalEditable || isFormLocked}
-                  />
-                </FormField>
-              )}
-            </SpaceBetween>
+            </ColumnLayout>
           )}
         </SpaceBetween>
       )}
@@ -3550,7 +3611,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   );
 
   const interventionToDelete = interventionDeleteId
-    ? proposedInterventions.find(item => item.id === interventionDeleteId)
+    ? proposedInterventions.find(item => idsMatch(item.id, interventionDeleteId))
     : null;
   const interventionDeleteModal = (
     <Modal
@@ -3561,10 +3622,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         <SpaceBetween direction="horizontal" size="xs">
           <Button
             variant="primary"
-            onClick={() => {
-              if (interventionDeleteId) removeIntervention(interventionDeleteId);
-              setInterventionDeleteId(null);
-            }}
+            onClick={confirmInterventionDelete}
             disabled={isFormLocked}
           >
             Delete intervention
@@ -3590,15 +3648,15 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const costLineMode = costLineModal.mode;
   const isCostLineEditable = costLineMode === "add" || costLineMode === "edit";
   const costLineIntervention = costLineModal.interventionId
-    ? proposedInterventions.find(item => item.id === costLineModal.interventionId)
+    ? proposedInterventions.find(item => idsMatch(item.id, costLineModal.interventionId))
     : null;
   const costLineTypeOptions = costLineIntervention ? buildCostItemOptions(costLineIntervention) : [];
   const costLineTypeLabel = costLineDraft
     ? paymentTypeLabelLookup.get(costLineDraft.type) || costLineDraft.type || ""
     : "";
   const costLineRecurrenceMode = getRecurrenceModeForType(costLineDraft?.type);
-  const costLineRecurrenceRequired = costLineRecurrenceMode === "required";
-  const costLineRecurrenceDisabled = costLineRecurrenceMode === "disabled";
+  const costLineRecurrenceRequired = costLineRecurrenceMode === RECURRENCE_MODE_REQUIRED;
+  const costLineRecurrenceDisabled = costLineRecurrenceMode === RECURRENCE_MODE_NOT_ALLOWED;
   const costLineRecurrenceEnabled = costLineRecurrenceDisabled
     ? false
     : costLineRecurrenceRequired || Boolean(costLineDraft?.recurrence?.enabled);

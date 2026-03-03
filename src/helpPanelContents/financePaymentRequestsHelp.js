@@ -6,14 +6,15 @@ const FinancePaymentRequestsHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Manage draft and submitted payment packets. The queue highlights evidence completeness, risk flags,
-        reporting units, and ageing so submissions stay audit-ready.
+        Process payment packets that are due for submission. This queue focuses on draft-stage work only
+        and helps you submit ready packets to finance quickly.
       </p>
     </Box>
     <Box>
       <strong>What the columns mean</strong>
       <ul>
         <li>Evidence: received vs required evidence for the packet and its lines.</li>
+        <li>Blocking reason: why a packet cannot be submitted yet (or Ready to send).</li>
         <li>Stream: CRF and EI totals; used for funding stream rollups.</li>
         <li>Reporting unit: regional/partner attribution for routing and reporting.</li>
         <li>Age (days): time since submission; use to spot stale items.</li>
@@ -24,21 +25,23 @@ const FinancePaymentRequestsHelp = () => (
       <strong>How to use</strong>
       <ul>
         <li>Select a packet to load lines and evidence in the detail widget.</li>
-        <li>Filter by queue state (draft vs submitted).</li>
-        <li>Search by packet ID, client, intervention, reporting unit, or risk flags.</li>
+        <li>Use the Ready only toggle to focus packets that can be sent now.</li>
+        <li>Use table checkboxes to select packets, then Submit selected to open a preflight summary and submit ready packets in bulk.</li>
+        <li>Search by packet ID, client, intervention, reporting unit, risk flags, or blocking reason.</li>
         <li>Customise table columns, widths, and pagination via the settings cogwheel.</li>
       </ul>
     </Box>
     <Box>
       <strong>Next steps</strong>
       <p>
-        When a packet status changes, the detail widget and SLA snapshot update to reflect the new queue mix.
+        After bulk submission, review the result banner for any failed packet IDs, fix blockers in packet detail,
+        and retry from the queue.
       </p>
     </Box>
   </SpaceBetween>
 );
 
 FinancePaymentRequestsHelp.aiContext =
-  "Explain the payment packet queue: columns (evidence, stream totals, reporting unit, age, risk flags), draft/submitted filters, and how selecting a row drives the detail widget.";
+  "Explain the due-for-submission batch payments queue: draft-only scope, blocking reason, Ready only toggle, checkbox multi-select with Submit selected preflight flow, row-to-detail behavior, and that blockers include evidence and payment-type recurrence policy checks.";
 
 export default FinancePaymentRequestsHelp;

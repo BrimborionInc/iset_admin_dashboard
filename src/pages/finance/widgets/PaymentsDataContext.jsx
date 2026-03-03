@@ -2,6 +2,9 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { apiFetch } from "../../../auth/apiClient";
 
 const PaymentsDataContext = createContext(undefined);
+const RECURRENCE_MODE_REQUIRED = "required";
+const RECURRENCE_MODE_OPTIONAL = "optional";
+const RECURRENCE_MODE_NOT_ALLOWED = "not_allowed";
 
 const summarizeEvidence = items => {
   const requiredItems = items.filter(item => item.required);
@@ -169,6 +172,52 @@ const normalizeInterventionCodeValue = value => {
   return Number.isFinite(parsed) ? String(parsed) : null;
 };
 
+const normalizePaymentTypeCode = value => {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim();
+  return trimmed || null;
+};
+
+const normalizeRecurrenceMode = value => {
+  if (typeof value !== "string") return RECURRENCE_MODE_NOT_ALLOWED;
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === RECURRENCE_MODE_REQUIRED) return RECURRENCE_MODE_REQUIRED;
+  if (normalized === RECURRENCE_MODE_OPTIONAL) return RECURRENCE_MODE_OPTIONAL;
+  if (normalized === RECURRENCE_MODE_NOT_ALLOWED || normalized === "disabled") {
+    return RECURRENCE_MODE_NOT_ALLOWED;
+  }
+  return RECURRENCE_MODE_NOT_ALLOWED;
+};
+
+const normalizeRecurrencePolicies = raw => {
+  const map = new Map();
+  const add = (codeRaw, modeRaw) => {
+    const code = normalizePaymentTypeCode(codeRaw);
+    if (!code) return;
+    map.set(code, normalizeRecurrenceMode(modeRaw));
+  };
+  if (Array.isArray(raw)) {
+    raw.forEach(entry => {
+      if (!entry || typeof entry !== "object") return;
+      add(
+        entry.code ?? entry.type ?? entry.paymentType ?? entry.payment_type ?? null,
+        entry.mode ?? entry.recurrenceMode ?? entry.recurrence_mode ?? entry.recurrence?.mode ?? null,
+      );
+    });
+  } else if (raw && typeof raw === "object") {
+    Object.entries(raw).forEach(([key, value]) => {
+      if (value && typeof value === "object") {
+        add(key, value.mode ?? value.recurrenceMode ?? value.recurrence_mode ?? value.recurrence?.mode);
+        return;
+      }
+      add(key, value);
+    });
+  }
+  return Array.from(map.entries())
+    .map(([code, mode]) => ({ code, mode }))
+    .sort((a, b) => String(a.code).localeCompare(String(b.code)));
+};
+
 const buildLine = line => {
   const amount = Number(line.amount || 0);
   const evidenceSummary = summarizeEvidence(line.evidenceChecklist ?? []);
@@ -284,7 +333,7 @@ const normalizePacket = packet => {
 };
 
 const normalizePaymentTypeMappingPayload = payload => {
-  if (!payload || payload.enabled === false) return null;
+  if (!payload || typeof payload !== "object") return null;
   const interventionsRaw = Array.isArray(payload.interventions) ? payload.interventions : [];
   const interventions = interventionsRaw
     .map(entry => {
@@ -314,10 +363,14 @@ const normalizePaymentTypeMappingPayload = payload => {
       };
     })
     .filter(Boolean);
-  if (!interventions.length) return null;
+  const recurrencePolicies = normalizeRecurrencePolicies(
+    payload.recurrencePolicies || payload.recurrence_policies || payload.paymentTypeRecurrence,
+  );
   return {
     ...payload,
+    enabled: payload.enabled !== false,
     interventions,
+    recurrencePolicies,
   };
 };
 
@@ -335,6 +388,17 @@ const buildPaymentTypeMappingLookup = mapping => {
   return lookup;
 };
 
+const buildRecurrencePolicyLookup = mapping => {
+  const lookup = new Map();
+  const list = Array.isArray(mapping?.recurrencePolicies) ? mapping.recurrencePolicies : [];
+  list.forEach(entry => {
+    const code = normalizePaymentTypeCode(entry?.code);
+    if (!code) return;
+    lookup.set(code, normalizeRecurrenceMode(entry?.mode));
+  });
+  return lookup;
+};
+
 const computeSlaSnapshot = requests => {
   const snapshot = {
     draftsNeedingEvidence: 0,
@@ -345,10 +409,14 @@ const computeSlaSnapshot = requests => {
   const submissionAges = [];
 
   requests.forEach(packet => {
+    const statusValue = String(packet.status || "").trim().toLowerCase();
     const statusKey =
-      packet.status === "draft" || packet.status === "returned"
+      statusValue === "draft" ||
+      statusValue === "returned" ||
+      statusValue === "awaiting_trigger" ||
+      statusValue === "released"
         ? "draft"
-        : packet.status === "cancelled"
+        : statusValue === "cancelled"
           ? "cancelled"
           : "submitted";
     if (statusKey === "draft") {
@@ -1044,6 +1112,10 @@ export const PaymentsDataProvider = ({ children, filters = {} }) => {
     () => buildPaymentTypeMappingLookup(paymentTypeMapping),
     [paymentTypeMapping],
   );
+  const paymentTypeRecurrencePolicyLookup = useMemo(
+    () => buildRecurrencePolicyLookup(paymentTypeMapping),
+    [paymentTypeMapping],
+  );
 
   const slaSnapshot = useMemo(() => computeSlaSnapshot(requests), [requests]);
 
@@ -1071,6 +1143,7 @@ export const PaymentsDataProvider = ({ children, filters = {} }) => {
       slaSnapshot,
       paymentTypeMapping,
       paymentTypeMappingLookup,
+      paymentTypeRecurrencePolicyLookup,
       paymentTypeMappingLoading,
       loading,
       error,
@@ -1101,6 +1174,7 @@ export const PaymentsDataProvider = ({ children, filters = {} }) => {
       slaSnapshot,
       paymentTypeMapping,
       paymentTypeMappingLookup,
+      paymentTypeRecurrencePolicyLookup,
       paymentTypeMappingLoading,
       loading,
       error,

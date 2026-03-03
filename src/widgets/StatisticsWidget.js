@@ -65,44 +65,6 @@ const DEFAULT_SECTIONS = [
   }
 ];
 
-const MOCK_RESPONSE = role => ({
-  generatedAt: new Date().toISOString(),
-  sections: [
-    {
-      id: 'intake-flow',
-      items: [
-        { id: 'submissions-24h', value: 14, trend: { direction: 'up', label: '+5 vs prev. day' } },
-        { id: 'submissions-7d', value: 83, trend: { direction: 'up', label: '+12% vs prior week' } },
-        { id: 'decisions-7d', value: 65, trend: { direction: 'flat', label: 'On par with last week' } }
-      ]
-    },
-    {
-      id: 'pipeline-health',
-      items: [
-        { id: 'active-cases', value: 248 },
-        { id: 'unassigned-backlog', value: role === 'Program Administrator' ? 19 : 7, status: 'warning', trend: { direction: 'down', label: '-6 this week' } },
-        { id: 'sla-risk', value: 0.12, format: 'percentage', status: 'error', trend: { direction: 'up', label: '+2 pts' }, target: '≤ 8%' }
-      ]
-    },
-    {
-      id: 'staffing',
-      items: [
-        { id: 'program-admins', value: 6 },
-        { id: 'regional-coordinators', value: 14 },
-        { id: 'assessors-active', value: 38, hint: 'Logged in within 7 days' }
-      ]
-    },
-    {
-      id: 'compliance',
-      items: [
-        { id: 'documents-received', value: 112, trend: { direction: 'up', label: '+18% vs avg' } },
-        { id: 'cases-missing-docs', value: 9, status: 'warning', trend: { direction: 'down', label: '-4 vs last week' } },
-        { id: 'reviews-pending', value: 21, status: 'info', trend: { direction: 'flat', label: 'Stable' } }
-      ]
-    }
-  ]
-});
-
 const deriveInitialSections = role => DEFAULT_SECTIONS.map(section => ({
   ...section,
   items: section.items.map(item => ({ ...item }))
@@ -267,8 +229,10 @@ const StatisticsWidget = ({ actions, role = 'Guest', refreshKey = 0 }) => {
       }
       payload = await response.json();
     } catch (err) {
-      setError('Showing representative sample data – live statistics are not available.');
-      payload = MOCK_RESPONSE(role);
+      setSections(deriveInitialSections(role));
+      setLastUpdated(null);
+      setError(err?.message || 'Failed to load live statistics.');
+      return;
     } finally {
       setLoading(false);
     }

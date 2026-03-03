@@ -19,10 +19,10 @@ const widgetRegistry = {
   requests: {
     id: "requests",
     component: PaymentRequestsWidget,
-    title: "Payment packet queue",
-    description: "Draft and submitted packets ready to email finance.",
+    title: "Batch payments queue",
+    description: "Draft packets due for submission to finance.",
     helpComponent: FinancePaymentRequestsHelp,
-    helpTitle: "Payment request queue",
+    helpTitle: "Batch payments queue",
     aiContext: FinancePaymentRequestsHelp.aiContext,
     defaultRowSpan: 4,
     defaultColumnSpan: 4,
@@ -30,7 +30,7 @@ const widgetRegistry = {
   detail: {
     id: "detail",
     component: PaymentDetailWidget,
-    title: "Payment packet detail",
+    title: "Batch payment detail",
     description: "Payment lines and evidence checklist for the selected packet.",
     helpComponent: FinancePaymentDetailHelp,
     helpTitle: "Payment detail",
@@ -41,7 +41,7 @@ const widgetRegistry = {
   comms: {
     id: "comms",
     component: PaymentCommunicationWidget,
-    title: "Payment communications",
+    title: "Batch payment communications",
     description: "Email log for submitted payment packets.",
     helpComponent: FinancePaymentCommsHelp,
     helpTitle: "Payment communications",
@@ -170,8 +170,8 @@ const boardI18nStrings = {
   liveAnnouncementDndCommitted: operation => `${operation} committed`,
   liveAnnouncementDndDiscarded: operation => `${operation} discarded`,
   liveAnnouncementItemRemoved: op => `Removed item ${op.item.data.title}.`,
-  navigationAriaLabel: "Payments dashboard navigation",
-  navigationAriaDescription: "Use arrow keys to move between widgets on the Payments dashboard.",
+  navigationAriaLabel: "Batch Payments dashboard navigation",
+  navigationAriaDescription: "Use arrow keys to move between widgets on the Batch Payments dashboard.",
   navigationItemAriaLabel: item => (item ? item.data.title : "Empty"),
 };
 
@@ -193,7 +193,7 @@ const FinancePaymentsPage = ({
       updateBreadcrumbs([
         { text: "Home", href: "/" },
         { text: "Financial Management", href: "/finance/overview" },
-        { text: "Payments", href: "/finance/payments" },
+        { text: "Batch Payments", href: "/finance/payments" },
       ]);
     }
   }, [updateBreadcrumbs]);
@@ -298,17 +298,17 @@ const FinancePaymentsPage = ({
           items={boardItems}
           onItemsChange={handleItemsChange}
           renderItem={renderBoardItem}
-          empty={<Box padding="m">No widgets on the Payments dashboard.</Box>}
+          empty={<Box padding="m">No widgets on the Batch Payments dashboard.</Box>}
         />
         <Box variant="awsui-key-label">
-          Need to revisit the Payments workflow description?{" "}
+          Need to revisit the Batch Payments workflow description?{" "}
           <Link
             href="#"
             onFollow={event => {
               event.preventDefault();
               if (typeof toggleHelpPanel === "function") {
                 const helpContent = React.createElement(FinancePaymentsHelp);
-                toggleHelpPanel(helpContent, "Payments", FinancePaymentsHelp.aiContext);
+                toggleHelpPanel(helpContent, "Batch Payments", FinancePaymentsHelp.aiContext);
               }
             }}
           >

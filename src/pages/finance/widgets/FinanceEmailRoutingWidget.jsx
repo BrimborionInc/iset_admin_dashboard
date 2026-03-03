@@ -11,6 +11,7 @@ import {
   SpaceBetween,
   Spinner,
   Table,
+  Toggle,
 } from "@cloudscape-design/components";
 import { apiFetch } from "../../../auth/apiClient";
 import { boardItemI18nStrings } from "./common";
@@ -32,6 +33,8 @@ const FinanceEmailRoutingWidget = ({ actions = {}, metadata = {}, toggleHelpPane
   const [regions, setRegions] = useState([]);
   const [savedRouting, setSavedRouting] = useState({});
   const [draftRouting, setDraftRouting] = useState({});
+  const [savedEnabled, setSavedEnabled] = useState(true);
+  const [draftEnabled, setDraftEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -65,13 +68,18 @@ const FinanceEmailRoutingWidget = ({ actions = {}, metadata = {}, toggleHelpPane
       }
       const routingPayload = await routingResponse.json();
       const routingMap = normalizeRoutingMap(routingPayload?.regions || {});
+      const enabled = routingPayload?.enabled !== false;
       setSavedRouting(routingMap);
       setDraftRouting(routingMap);
+      setSavedEnabled(enabled);
+      setDraftEnabled(enabled);
     } catch (err) {
       setError(err?.message || "Failed to load finance email routing.");
       setRegions([]);
       setSavedRouting({});
       setDraftRouting({});
+      setSavedEnabled(true);
+      setDraftEnabled(true);
     } finally {
       setLoading(false);
     }
@@ -93,15 +101,18 @@ const FinanceEmailRoutingWidget = ({ actions = {}, metadata = {}, toggleHelpPane
   const dirty = useMemo(() => {
     const saved = JSON.stringify(normalizeRoutingMap(savedRouting));
     const draft = JSON.stringify(normalizeRoutingMap(draftRouting));
-    return saved !== draft;
-  }, [savedRouting, draftRouting]);
+    return saved !== draft || savedEnabled !== draftEnabled;
+  }, [savedRouting, draftRouting, savedEnabled, draftEnabled]);
 
   const handleSave = async () => {
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
-      const payload = { regions: normalizeRoutingMap(draftRouting) };
+      const payload = {
+        enabled: draftEnabled,
+        regions: normalizeRoutingMap(draftRouting),
+      };
       const resp = await apiFetch("/api/config/runtime/finance-email-routing", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -113,8 +124,11 @@ const FinanceEmailRoutingWidget = ({ actions = {}, metadata = {}, toggleHelpPane
       }
       const saved = await resp.json();
       const normalized = normalizeRoutingMap(saved?.regions || {});
+      const enabled = saved?.enabled !== false;
       setSavedRouting(normalized);
       setDraftRouting(normalized);
+      setSavedEnabled(enabled);
+      setDraftEnabled(enabled);
       setSuccess("Finance email routing saved.");
     } catch (err) {
       setError(err?.message || "Failed to save finance email routing.");
@@ -125,6 +139,7 @@ const FinanceEmailRoutingWidget = ({ actions = {}, metadata = {}, toggleHelpPane
 
   const handleReset = () => {
     setDraftRouting(savedRouting);
+    setDraftEnabled(savedEnabled);
     setSuccess(null);
     setError(null);
   };
@@ -161,6 +176,13 @@ const FinanceEmailRoutingWidget = ({ actions = {}, metadata = {}, toggleHelpPane
           description="Configure one finance recipient per province or territory for outbound payment packets."
           actions={
             <SpaceBetween direction="horizontal" size="xs">
+              <Toggle
+                checked={draftEnabled}
+                onChange={({ detail }) => setDraftEnabled(detail.checked)}
+                disabled={loading || saving}
+              >
+                Auto email
+              </Toggle>
               <Button variant="link" onClick={handleReset} disabled={!dirty || loading || saving}>
                 Reset
               </Button>
@@ -201,6 +223,10 @@ const FinanceEmailRoutingWidget = ({ actions = {}, metadata = {}, toggleHelpPane
               {success}
             </Alert>
           )}
+          <Box color="text-body-secondary" fontSize="body-s">
+            Automatic finance email sending (SES) is currently {draftEnabled ? "enabled" : "disabled"}.
+            When disabled, packet submission continues but finance emails are suppressed and logged as skipped.
+          </Box>
           <Table
             items={rows}
             columnDefinitions={[

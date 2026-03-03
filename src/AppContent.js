@@ -45,7 +45,6 @@ import AdminDashboardHelp from './helpPanelContents/adminDashboardHelp.js';
 const MAX_HISTORY_MESSAGES = 10;
 const MAX_STORED_MESSAGES = 24;
 const MAX_PROMPT_CHARS = 1000;
-const CONTENT_DENSITY_STORAGE_KEY = "iset-demo-content-density";
 const TUTORIAL_COMPLETION_STORAGE_KEY = 'iset-tutorials.completed.v1';
 const TUTORIAL_APP_LAYOUT_RESET_FLAG = 'iset.tutorial.resetApplicationLayout';
 const TUTORIAL_CASE_LAYOUT_RESET_FLAG = 'iset.tutorial.resetCaseWorkspaceLayout';
@@ -569,11 +568,6 @@ const AppContent = ({ currentRole }) => {
   const [splitPanelSize, setSplitPanelSize] = useState(360); // State for SplitPanel size
   const [splitPanelPreferences, setSplitPanelPreferences] = useState({ position: 'side' }); // State for SplitPanel preferences
 	const [availableItems, setAvailableItems] = useState([]); // State for available items (palette)
-  const [contentDensity, setContentDensity] = useState(() => {
-    if (typeof window === "undefined") return "comfortable";
-    const stored = window.localStorage?.getItem(CONTENT_DENSITY_STORAGE_KEY);
-    return stored === "compact" ? "compact" : "comfortable";
-  });
 	const location = useLocation();
 	const history = useHistory();
 	const [tutorialStatusMap, setTutorialStatusMap] = useState({});
@@ -949,28 +943,6 @@ const AppContent = ({ currentRole }) => {
     };
   }, [loadNotifications]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-    const handler = (event) => {
-      const mode = event?.detail?.mode;
-      if (mode === "compact" || mode === "comfortable") {
-        setContentDensity(mode);
-      }
-    };
-    window.addEventListener("app:content-density", handler);
-    return () => window.removeEventListener("app:content-density", handler);
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-    try {
-      window.localStorage?.setItem(CONTENT_DENSITY_STORAGE_KEY, contentDensity);
-    } catch (_) {
-      // ignore persistence failures
-    }
-    return undefined;
-  }, [contentDensity]);
-
   const handleDismissNotification = useCallback(async (notificationId) => {
     try {
       const response = await apiFetch(`/api/me/notifications/${notificationId}/dismiss`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
@@ -1038,11 +1010,14 @@ const AppContent = ({ currentRole }) => {
                 ? `/application-case/${trackingId}`
                 : null;
         const linkColor = (flashType === 'info' || flashType === 'success') ? 'inverted' : 'normal';
-        const linkLabel = caseId
-          ? (caseNumber ? `View case ${caseNumber}` : 'View case')
-          : appReference
-            ? `View application ${appReference}`
-            : 'View application';
+        const openApplicationTarget = caseNumber || appReference || trackingId || null;
+        const linkLabel = eventKey === 'document_signed'
+          ? (openApplicationTarget ? `Open application ${openApplicationTarget}` : 'Open application')
+          : caseId
+            ? (caseNumber ? `View case ${caseNumber}` : 'View case')
+            : appReference
+              ? `View application ${appReference}`
+              : 'View application';
         const overdueSuffix = eventKey === 'reminder_overdue' && daysOverdue
           ? ` • ${daysOverdue} day${daysOverdue === 1 ? '' : 's'} overdue`
           : '';
@@ -1595,7 +1570,6 @@ const AppContent = ({ currentRole }) => {
 
                 </SpaceBetween>
               }
-              contentDensity={contentDensity}
             />
           </AnnotationContext>
         </TutorialsContext.Provider>

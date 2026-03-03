@@ -68,14 +68,9 @@ const CHECKLIST_FALLBACK_PATH = path.join(__dirname, 'src', 'server', 'config', 
 const CHECKLIST_INTERVENTION_FALLBACK_PATH = path.join(__dirname, 'src', 'server', 'config', 'checklists', 'iset-intervention.json');
 const ASSESSMENT_COSTING_SCOPE = 'assessment';
 const ASSESSMENT_COSTING_KEY = 'coordinator.costing.line_item_defaults';
-const DEFAULT_ASSESSMENT_COSTING_DEFAULTS = {
-  enabled: true,
-  strategy: 'allowed',
-  paymentTypes: [
-    { code: 'LivingAllowance', recurrence: { mode: 'required' } }
-  ],
-  interventions: []
-};
+const RECURRENCE_MODE_REQUIRED = 'required';
+const RECURRENCE_MODE_OPTIONAL = 'optional';
+const RECURRENCE_MODE_NOT_ALLOWED = 'not_allowed';
 const PAYMENT_TYPE_LABELS = {
   LivingAllowance: 'Living allowance',
   TuitionFeesDirect: 'Tuition fees (direct)',
@@ -90,6 +85,24 @@ const PAYMENT_TYPE_LABELS = {
   JCPProjectCost: 'JCP project cost',
   SEBSupport: 'SEB support',
   OtherEligibleCost: 'Other eligible cost'
+};
+const PAYMENT_TYPE_RECURRENCE_DEFAULTS = {
+  LivingAllowance: RECURRENCE_MODE_REQUIRED,
+  WageSubsidyEmployer: RECURRENCE_MODE_OPTIONAL,
+  OtherEligibleCost: RECURRENCE_MODE_OPTIONAL,
+};
+const buildDefaultAssessmentCostingPaymentTypes = () =>
+  Object.keys(PAYMENT_TYPE_LABELS).map(code => ({
+    code,
+    recurrence: {
+      mode: PAYMENT_TYPE_RECURRENCE_DEFAULTS[code] || RECURRENCE_MODE_NOT_ALLOWED,
+    },
+  }));
+const DEFAULT_ASSESSMENT_COSTING_DEFAULTS = {
+  enabled: true,
+  strategy: 'allowed',
+  paymentTypes: buildDefaultAssessmentCostingPaymentTypes(),
+  interventions: []
 };
 
 const CHECKLIST_CACHE_TTL_MS = 30 * 1000;
@@ -3192,6 +3205,9 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'iset_event_entry',
   'message_signing_request',
   'signing_request',
+  'cfa_version_documents',
+  'cfa_version',
+  'cfa_series',
   'iset_intake.message_attachment',
   'iset_intake.iset_case_reminder',
   'iset_intake.messages',
@@ -4696,32 +4712,6 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
     }
 
     const normaliseCost = value => normaliseNumericString(value, { min: 0, max: 999999 });
-    const metadataCostSettings = metadata && typeof metadata === "object" && metadata.costSettings && typeof metadata.costSettings === "object"
-      ? metadata.costSettings
-      : null;
-    const metadataRecurrence = metadata && typeof metadata === "object" && metadata.recurrence && typeof metadata.recurrence === "object"
-      ? metadata.recurrence
-      : null;
-    const multiplyIfNumeric = (left, right) => {
-      const a = Number(left);
-      const b = Number(right);
-      return Number.isFinite(a) && Number.isFinite(b) ? a * b : null;
-    };
-    const metadataCostCandidates = [];
-    if (metadataCostSettings) {
-      metadataCostCandidates.push(
-        metadataCostSettings.calculatedTotal,
-        metadataCostSettings.total,
-        multiplyIfNumeric(metadataCostSettings.amountPerPeriod, metadataCostSettings.occurrences)
-      );
-    }
-    if (metadataRecurrence) {
-      metadataCostCandidates.push(
-        metadataRecurrence.calculatedTotal,
-        metadataRecurrence.total,
-        multiplyIfNumeric(metadataRecurrence.amountPerPeriod, metadataRecurrence.occurrences)
-      );
-    }
     const costCandidates = [
       intervention.actualAmount,
       intervention.approvedAmount,
@@ -4729,7 +4719,6 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
       intervention.intervention_cost,
       metadata.cost,
       esdc.interventionCost,
-      ...metadataCostCandidates,
       intervention.cost
     ];
     let cost = null;
@@ -6797,14 +6786,12 @@ function buildMonthLabels(startDate, endDate) {
   return labels;
 }
 
-function resolveFundingOccurrences({ startDate, endDate, interventionMetadata, interventionEsdc, assessmentRow }) {
+function resolveFundingOccurrences({ startDate, endDate, interventionEsdc, assessmentRow }) {
   const toNumber = value => {
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric : null;
   };
   const directCandidates = [
-    toNumber(interventionMetadata?.costSettings?.occurrences),
-    toNumber(interventionMetadata?.recurrence?.occurrences),
     toNumber(interventionEsdc?.interventionDurationMonths),
     toNumber(interventionEsdc?.durationMonths),
   ];
@@ -7099,7 +7086,6 @@ function resolveFundingAgreementTokens({
   const occurrences = resolveFundingOccurrences({
     startDate,
     endDate,
-    interventionMetadata,
     interventionEsdc,
     assessmentRow
   });
@@ -7576,31 +7562,31 @@ function applyConditionalTemplateBlocks(value, tokens) {
   });
 }
 
-function replaceTemplateTokens(value, tokens) {
+function replaceTemplateTokens(value, tokens, { preserveMissingTokens = false } = {}) {
   if (!value || typeof value !== 'string') return value;
   const conditioned = applyConditionalTemplateBlocks(value, tokens);
   const withRaw = conditioned.replace(/\{\{\{\s*([a-zA-Z0-9_]+)\s*\}\}\}/g, (match, key) => {
-    if (!Object.prototype.hasOwnProperty.call(tokens, key)) return '';
+    if (!Object.prototype.hasOwnProperty.call(tokens, key)) return preserveMissingTokens ? match : '';
     const tokenValue = tokens[key];
     if (tokenValue === null || typeof tokenValue === 'undefined') return '';
     return String(tokenValue);
   });
   return withRaw.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, key) => {
-    if (!Object.prototype.hasOwnProperty.call(tokens, key)) return '';
+    if (!Object.prototype.hasOwnProperty.call(tokens, key)) return preserveMissingTokens ? match : '';
     const tokenValue = tokens[key];
     if (tokenValue === null || typeof tokenValue === 'undefined') return '';
     return escapeHtml(String(tokenValue));
   });
 }
 
-function replaceTokensInI18n(value, tokens) {
+function replaceTokensInI18n(value, tokens, options = {}) {
   if (!value) return value;
-  if (typeof value === 'string') return replaceTemplateTokens(value, tokens);
+  if (typeof value === 'string') return replaceTemplateTokens(value, tokens, options);
   if (typeof value === 'object') {
     const next = { ...value };
     ['en', 'fr'].forEach(lang => {
       if (typeof next[lang] === 'string') {
-        next[lang] = replaceTemplateTokens(next[lang], tokens);
+        next[lang] = replaceTemplateTokens(next[lang], tokens, options);
       }
     });
     return next;
@@ -7608,15 +7594,15 @@ function replaceTokensInI18n(value, tokens) {
   return value;
 }
 
-function applyPrefillTokensToSchema(schema, tokens) {
+function applyPrefillTokensToSchema(schema, tokens, options = {}) {
   if (!schema || !Array.isArray(schema.steps)) return schema;
   const steps = schema.steps.map(step => {
     if (!step || !Array.isArray(step.components)) return step;
     const components = step.components.map(comp => {
       if (!comp || comp.type !== 'paragraph') return comp;
       const next = { ...comp };
-      if (next.html) next.html = replaceTokensInI18n(next.html, tokens);
-      if (next.text) next.text = replaceTokensInI18n(next.text, tokens);
+      if (next.html) next.html = replaceTokensInI18n(next.html, tokens, options);
+      if (next.text) next.text = replaceTokensInI18n(next.text, tokens, options);
       return next;
     });
     return { ...step, components };
@@ -8949,15 +8935,6 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     if (raw && typeof raw === 'object') return raw;
     return safeJsonParse(raw, null);
   })() || {};
-  const assessmentCostSettings = (() => {
-    const raw =
-      caseContext?.assessmentCostSettings ||
-      caseContext?.assessment_cost_settings ||
-      null;
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-    return raw;
-  })();
-
   const noc = assessmentRow.intervention_related_noc
     ? String(assessmentRow.intervention_related_noc).trim()
     : null;
@@ -9654,16 +9631,6 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
       proposedInterventionId: proposed.id || null,
       proposedInterventionIndex: index + 1,
     }) || {};
-    if (assessmentCostSettings && (!Array.isArray(proposed.costLines) || proposed.costLines.length === 0)) {
-      mergeRecurringCostMetadata(
-        baseInterventionMetadata,
-        {
-          costSettings: assessmentCostSettings,
-          costType: assessmentCostSettings.type || null,
-        },
-        Number.isFinite(budgetAmount) ? budgetAmount : null
-      );
-    }
     const interventionMetadata = Object.keys(baseInterventionMetadata).length
       ? baseInterventionMetadata
       : null;
@@ -11109,7 +11076,7 @@ const ASSIGN_FORBIDDEN_ROLES = new Set([
 
 function getRequesterIdentity(req) {
   const role = inferUserRole(req);
-  const userIdRaw = req?.staffProfile?.id ?? req?.auth?.userId ?? req?.auth?.sub ?? null;
+  const userIdRaw = req?.staffProfile?.id ?? req?.auth?.staffProfileId ?? req?.auth?.userId ?? req?.auth?.sub ?? null;
   const regionRaw = req?.staffProfile?.region_id ?? req?.auth?.regionId ?? null;
   const userId = Number.parseInt(userIdRaw, 10);
   const regionId = Number.parseInt(regionRaw, 10);
@@ -11966,167 +11933,26 @@ function isInterventionClosedStatus(status) {
   return value === 'completed' || value === 'cancelled';
 }
 
-function normaliseRecurringCostType(value) {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim().toLowerCase();
-  if (trimmed === 'recurring') return 'recurring';
-  if (['one_time', 'one-time', 'one time', 'single', 'fixed'].includes(trimmed)) return 'one_time';
-  return null;
-}
-
 function normaliseRecurringNumber(value) {
   if (value === null || typeof value === 'undefined' || value === '') return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-function mergeRecurringCostMetadata(target, source, fallbackTotal) {
-  if (!target || typeof target !== 'object' || !source || typeof source !== 'object') {
-    return false;
-  }
-
-  const before = JSON.stringify(target);
-  const costTypeProvided = Object.prototype.hasOwnProperty.call(source, 'costType');
-  const costSettingsProvided = Object.prototype.hasOwnProperty.call(source, 'costSettings');
-  const recurrenceProvided = Object.prototype.hasOwnProperty.call(source, 'recurrence');
-
-  let resolvedCostType = costTypeProvided ? normaliseRecurringCostType(source.costType) : null;
-
-  const existingCostSettings =
-    target.costSettings && typeof target.costSettings === 'object' ? target.costSettings : null;
-  const existingRecurrence =
-    target.recurrence && typeof target.recurrence === 'object' ? target.recurrence : null;
-
-  if (costSettingsProvided) {
-    const rawSettings = source.costSettings;
-    if (rawSettings && typeof rawSettings === 'object') {
-      const settingsType = normaliseRecurringCostType(rawSettings.type);
-      if (!resolvedCostType && settingsType) {
-        resolvedCostType = settingsType;
-      }
-      const period = typeof rawSettings.period === 'string' ? rawSettings.period.trim() : '';
-      const amount = normaliseRecurringNumber(rawSettings.amountPerPeriod);
-      const occurrences = normaliseRecurringNumber(rawSettings.occurrences);
-      let total = normaliseRecurringNumber(
-        Object.prototype.hasOwnProperty.call(rawSettings, 'calculatedTotal')
-          ? rawSettings.calculatedTotal
-          : null
-      );
-      if (total === null && Number.isFinite(fallbackTotal)) {
-        total = fallbackTotal;
-      }
-      const shouldPersist =
-        resolvedCostType === 'recurring' ||
-        settingsType === 'recurring' ||
-        period.length > 0 ||
-        amount !== null ||
-        occurrences !== null;
-      if (shouldPersist) {
-        const nextSettings = {
-          type: 'recurring',
-          period: period || '',
-          amountPerPeriod: amount,
-          occurrences,
-          calculatedTotal: total,
-        };
-        const sameSettings =
-          existingCostSettings &&
-          existingCostSettings.type === 'recurring' &&
-          (existingCostSettings.period || '') === nextSettings.period &&
-          normaliseRecurringNumber(existingCostSettings.amountPerPeriod) === nextSettings.amountPerPeriod &&
-          normaliseRecurringNumber(existingCostSettings.occurrences) === nextSettings.occurrences &&
-          normaliseRecurringNumber(existingCostSettings.calculatedTotal) === nextSettings.calculatedTotal;
-        if (!sameSettings) {
-          target.costSettings = nextSettings;
-        }
-        resolvedCostType = 'recurring';
-      } else if (existingCostSettings) {
-        delete target.costSettings;
-      }
-    } else if (existingCostSettings) {
-      delete target.costSettings;
-    }
-  }
-
-  if (costTypeProvided) {
-    if (resolvedCostType === 'recurring') {
-      if (target.costType !== 'recurring') {
-        target.costType = 'recurring';
-      }
-    } else if (resolvedCostType === 'one_time') {
-      if (target.costType !== 'one_time') {
-        target.costType = 'one_time';
-      }
-      if (target.costSettings) {
-        delete target.costSettings;
-      }
-    } else if (Object.prototype.hasOwnProperty.call(target, 'costType')) {
-      delete target.costType;
-    }
-  } else if (target.costSettings && resolvedCostType === 'recurring') {
-    if (target.costType !== 'recurring') {
-      target.costType = 'recurring';
-    }
-  }
-
-  if (recurrenceProvided) {
-    const rawRecurrence = source.recurrence;
-    if (target.costType === 'recurring' && rawRecurrence && typeof rawRecurrence === 'object') {
-      const period = typeof rawRecurrence.period === 'string' ? rawRecurrence.period.trim() : '';
-      const amount = normaliseRecurringNumber(rawRecurrence.amountPerPeriod);
-      const occurrences = normaliseRecurringNumber(rawRecurrence.occurrences);
-      let total = normaliseRecurringNumber(
-        Object.prototype.hasOwnProperty.call(rawRecurrence, 'calculatedTotal')
-          ? rawRecurrence.calculatedTotal
-          : null
-      );
-      if (total === null && Number.isFinite(fallbackTotal)) {
-        total = fallbackTotal;
-      }
-      const nextRecurrence = {
-        period: period || '',
-        amountPerPeriod: amount,
-        occurrences,
-        calculatedTotal: total,
-      };
-      const sameRecurrence =
-        existingRecurrence &&
-        (existingRecurrence.period || '') === nextRecurrence.period &&
-        normaliseRecurringNumber(existingRecurrence.amountPerPeriod) === nextRecurrence.amountPerPeriod &&
-        normaliseRecurringNumber(existingRecurrence.occurrences) === nextRecurrence.occurrences &&
-        normaliseRecurringNumber(existingRecurrence.calculatedTotal) === nextRecurrence.calculatedTotal;
-      if (!sameRecurrence) {
-        target.recurrence = nextRecurrence;
-      }
-      if (target.costType !== 'recurring') {
-        target.costType = 'recurring';
-      }
-    } else if (existingRecurrence) {
-      delete target.recurrence;
-    }
-  } else if (
-    (costTypeProvided && resolvedCostType !== 'recurring') ||
-    (costSettingsProvided && !target.costSettings)
-  ) {
-    if (existingRecurrence) {
-      delete target.recurrence;
-    }
-  }
-
-  if (target.costType === 'recurring' && !target.costSettings) {
-    delete target.costType;
-  }
-  if (target.costType && target.costType !== 'recurring') {
-    target.costType = 'one_time';
-  }
-
-  const after = JSON.stringify(target);
-  return before !== after;
+function stripInterventionRecurringMetadata(meta) {
+  if (!meta || typeof meta !== 'object') return meta;
+  const next = { ...meta };
+  delete next.costType;
+  delete next.cost_type;
+  delete next.costSettings;
+  delete next.cost_settings;
+  delete next.recurrence;
+  return next;
 }
 
 function mapInterventionRow(row) {
   if (!row) return null;
-  const metadata = safeJsonParse(row.metadata_json, null) || {};
+  const metadata = stripInterventionRecurringMetadata(safeJsonParse(row.metadata_json, null) || {});
   const planFundingStream = row.plan_funding_stream || row.planFundingStream || null;
   const esdcRaw =
     row.esdc_intervention_json ??
@@ -12150,30 +11976,11 @@ function mapInterventionRow(row) {
   const budgetAmount = toNumber(row.budget_amount);
   const actualAmount = toNumber(row.actual_amount);
   const interventionCost = toNumber(row.intervention_cost);
-  const computeRecurringTotal = meta => {
-    if (!meta || typeof meta !== 'object') return null;
-    const calc =
-      toNumber(meta?.costSettings?.calculatedTotal) ??
-      toNumber(meta?.recurrence?.calculatedTotal);
-    if (calc !== null) return calc;
-    const amountPerPeriod =
-      toNumber(meta?.costSettings?.amountPerPeriod) ??
-      toNumber(meta?.recurrence?.amountPerPeriod);
-    const occurrences =
-      toNumber(meta?.costSettings?.occurrences) ??
-      toNumber(meta?.recurrence?.occurrences);
-    if (Number.isFinite(amountPerPeriod) && Number.isFinite(occurrences)) {
-      return amountPerPeriod * occurrences;
-    }
-    return null;
-  };
   const costFromMeta = toNumber(metadata.cost);
-  const recurringTotal = computeRecurringTotal(metadata);
   const resolvedCost =
     interventionCost ??
     budgetAmount ??
     approvedAmount ??
-    recurringTotal ??
     costFromMeta ??
     toNumber(esdc.interventionCost);
   const startDate = toDateOnly(row.start_date);
@@ -13409,8 +13216,7 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
       return res.status(500).json({ error: 'normalization_failed', message: eInner.message });
     }
     if (!schema) return res.status(500).json({ error: 'schema_null' });
-    // Full normalized schema object retained for new portal; legacy portal expects array of step objects only.
-    const fullJson = JSON.stringify(schema, null, 2);
+    // Legacy portal schema file expects an array of step objects.
     const legacyJson = Array.isArray(schema) ? JSON.stringify(schema, null, 2) : JSON.stringify(schema.steps || [], null, 2);
     const publishedAt = new Date().toISOString();
     const schemaMeta = schema && typeof schema === 'object' && schema.meta && typeof schema.meta === 'object' ? schema.meta : null;
@@ -13418,8 +13224,6 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
     if (schemaMeta) meta.schemaMeta = schemaMeta;
     const legacyPath = path.resolve(__dirname, '../ISET-intake/src/intakeFormSchema.json');
     const legacyMeta = path.resolve(__dirname, '../ISET-intake/src/intakeFormSchema.meta.json');
-    const newPortalPath = path.resolve(__dirname, '../iset-public-portal/apps/api/src/data/intakeFormSchema.json');
-    const newPortalMeta = path.resolve(__dirname, '../iset-public-portal/apps/api/src/data/intakeFormSchema.meta.json');
     const actor = resolveRequestActor(req);
     const publishedBy = {
       id: actor?.actorId || null,
@@ -13448,7 +13252,6 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
     const metaJson = JSON.stringify(meta, null, 2);
     const results = [];
     try { const changed = writeIfChanged(legacyPath, legacyJson); const metaChanged = writeIfChanged(legacyMeta, metaJson); results.push({ target: 'legacy', file: legacyPath, changed, metaChanged, shape: 'steps[]' }); } catch (eL) { results.push({ target: 'legacy', error: eL.message }); }
-    try { const changed = writeIfChanged(newPortalPath, fullJson); const metaChanged = writeIfChanged(newPortalMeta, metaJson); results.push({ target: 'new', file: newPortalPath, changed, metaChanged, shape: 'full-schema' }); } catch (eN) { results.push({ target: 'new', error: eN.message }); }
     try {
       await pool.query(
         "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('publish', 'workflow.schema.intake', CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP",
@@ -18175,6 +17978,7 @@ app.post('/api/clear-iset-test-data', async (_req, res) => {
         throw err;
       }
     }
+    await refreshFinancePotSums(connection);
     await connection.query('SET FOREIGN_KEY_CHECKS = 1');
     await connection.commit();
     res.json({ ok: true, cleared: report, durationMs: Date.now() - startedAt });
@@ -18685,21 +18489,47 @@ async function writeChecklistConfigSnapshot(key, config) {
 }
 
 const normaliseAssessmentCostingDefaults = (payload) => {
-  if (!payload || typeof payload !== 'object') {
-    return { ...DEFAULT_ASSESSMENT_COSTING_DEFAULTS };
-  }
+  const source = payload && typeof payload === 'object' ? payload : {};
+  const paymentTypesRaw = Array.isArray(source.paymentTypes) ? source.paymentTypes : [];
+  const paymentTypesByCode = new Map();
+  paymentTypesRaw.forEach(entry => {
+    const code = normalizePaymentTypeCode(
+      entry?.code ?? entry?.type ?? entry?.paymentType ?? entry?.payment_type ?? null
+    );
+    if (!code) return;
+    const mode = normalizeRecurrenceMode(
+      entry?.recurrence?.mode ?? entry?.recurrenceMode ?? entry?.recurrence_mode ?? null
+    );
+    paymentTypesByCode.set(code, {
+      code,
+      recurrence: { mode },
+    });
+  });
+  const defaults = buildDefaultAssessmentCostingPaymentTypes();
+  const paymentTypes = defaults.map(entry =>
+    paymentTypesByCode.get(entry.code) || entry
+  );
+  paymentTypesByCode.forEach((value, key) => {
+    if (!paymentTypes.some(entry => entry.code === key)) {
+      paymentTypes.push(value);
+    }
+  });
   return {
-    enabled: payload.enabled !== false,
-    strategy: typeof payload.strategy === 'string' && payload.strategy.trim() ? payload.strategy.trim() : 'allowed',
-    paymentTypes: Array.isArray(payload.paymentTypes) ? payload.paymentTypes : [],
-    interventions: Array.isArray(payload.interventions) ? payload.interventions : []
+    enabled: source.enabled !== false,
+    strategy: typeof source.strategy === 'string' && source.strategy.trim() ? source.strategy.trim() : 'allowed',
+    paymentTypes,
+    interventions: Array.isArray(source.interventions) ? source.interventions : []
   };
 };
 
-async function readAssessmentCostingDefaults() {
+async function readAssessmentCostingDefaults(connection = null) {
+  const runner = connection || pool;
+  if (!runner || typeof runner.query !== 'function') {
+    return { ...DEFAULT_ASSESSMENT_COSTING_DEFAULTS, source: 'default' };
+  }
   try {
     await ensureRuntimeConfigTable();
-    const [[row]] = await pool.query(
+    const [[row]] = await runner.query(
       'SELECT v, updated_at FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
       [ASSESSMENT_COSTING_SCOPE, ASSESSMENT_COSTING_KEY]
     );
@@ -18718,14 +18548,23 @@ async function readAssessmentCostingDefaults() {
   }
 }
 
-async function writeAssessmentCostingDefaults(payload) {
+async function writeAssessmentCostingDefaults(payload, connection = null) {
   const normalised = normaliseAssessmentCostingDefaults(payload);
+  const runner = connection || pool;
+  if (!runner || typeof runner.query !== 'function') {
+    return normalised;
+  }
   await ensureRuntimeConfigTable();
-  await pool.query(
+  await runner.query(
     'INSERT INTO iset_runtime_config (scope,k,v) VALUES (?,?,CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP',
     [ASSESSMENT_COSTING_SCOPE, ASSESSMENT_COSTING_KEY, JSON.stringify(normalised)]
   );
   return normalised;
+}
+
+async function readPaymentRecurrencePolicyByType(connection = null) {
+  const config = await readAssessmentCostingDefaults(connection);
+  return buildRecurrencePolicyByPaymentType(config);
 }
 
 app.get('/api/config/runtime/checklists', async (_req, res) => {
@@ -18842,8 +18681,10 @@ app.patch('/api/config/runtime/finance-email-routing', async (req, res) => {
   try {
     if (requireFinanceRole(req, res)) return;
     const body = req.body || {};
-    const payload = body.regions && typeof body.regions === 'object' ? { regions: body.regions } : body;
-    const source = payload.regions && typeof payload.regions === 'object' ? payload.regions : {};
+    const payload = body.regions && typeof body.regions === 'object' ? { ...body, regions: body.regions } : body;
+    const source = payload.regions && typeof payload.regions === 'object'
+      ? payload.regions
+      : (payload.enabled !== undefined ? {} : payload);
     const invalid = [];
     Object.entries(source).forEach(([code, email]) => {
       if (!email) return;
@@ -18866,6 +18707,8 @@ app.patch('/api/config/runtime/finance-email-routing', async (req, res) => {
 app.get('/api/config/runtime/payment-type-mapping', async (req, res) => {
   try {
     if (requireFinanceRole(req, res)) return;
+    const { rules: paymentEvidence, updatedAt: paymentEvidenceUpdatedAt } = await readPaymentEvidenceRulesSnapshot();
+    const evidenceTypes = buildPaymentEvidenceTypeOptions(paymentEvidence);
     const { mapping, updatedAt } = await readPaymentInterventionMappingSnapshot();
     if (!mapping) {
       return res.json({
@@ -18876,12 +18719,18 @@ app.get('/api/config/runtime/payment-type-mapping', async (req, res) => {
         version: null,
         generatedOn: null,
         updatedAt: null,
+        paymentEvidence,
+        paymentEvidenceUpdatedAt: paymentEvidenceUpdatedAt || null,
+        evidenceTypes,
       });
     }
     return res.json({
       enabled: true,
       ...serializePaymentInterventionMapping(mapping),
       updatedAt: updatedAt || null,
+      paymentEvidence,
+      paymentEvidenceUpdatedAt: paymentEvidenceUpdatedAt || null,
+      evidenceTypes,
     });
   } catch (err) {
     console.error('[payment-intervention-map] fetch failed', err);
@@ -18893,7 +18742,21 @@ app.patch('/api/config/runtime/payment-type-mapping', async (req, res) => {
   try {
     if (requireFinanceRole(req, res)) return;
     const body = req.body || {};
+    const hasPaymentEvidencePayload =
+      Object.prototype.hasOwnProperty.call(body, 'paymentEvidence') ||
+      Object.prototype.hasOwnProperty.call(body, 'payment_evidence');
     const { mapping, updatedAt } = await writePaymentInterventionMapping(body);
+    let paymentEvidenceSnapshot;
+    if (hasPaymentEvidencePayload) {
+      paymentEvidenceSnapshot = await writePaymentEvidenceRules(
+        body.paymentEvidence ?? body.payment_evidence ?? null
+      );
+    } else {
+      paymentEvidenceSnapshot = await readPaymentEvidenceRulesSnapshot();
+    }
+    const paymentEvidence = paymentEvidenceSnapshot?.rules || mergePaymentEvidenceRules(DEFAULT_PAYMENT_EVIDENCE_RULES, null);
+    const paymentEvidenceUpdatedAt = paymentEvidenceSnapshot?.updatedAt || null;
+    const evidenceTypes = buildPaymentEvidenceTypeOptions(paymentEvidence);
     if (!mapping) {
       return res.json({
         enabled: false,
@@ -18903,12 +18766,18 @@ app.patch('/api/config/runtime/payment-type-mapping', async (req, res) => {
         version: null,
         generatedOn: null,
         updatedAt: updatedAt || null,
+        paymentEvidence,
+        paymentEvidenceUpdatedAt,
+        evidenceTypes,
       });
     }
     return res.json({
       enabled: true,
       ...serializePaymentInterventionMapping(mapping),
       updatedAt: updatedAt || null,
+      paymentEvidence,
+      paymentEvidenceUpdatedAt,
+      evidenceTypes,
     });
   } catch (err) {
     console.error('[payment-intervention-map] update failed', err);
@@ -19556,6 +19425,101 @@ function summarizeSchemaForAi(schemaSteps) {
   return summary.slice(0, 140); // keep prompt compact
 }
 
+function getComponentStorageType(component) {
+  const rawType = String(component?.type || component?.template_key || '').trim().toLowerCase();
+  if (!rawType) return 'scalar';
+  if (rawType === 'signature-ack') return 'signature';
+  if (rawType === 'checkbox' || rawType === 'checkboxes') return 'multi';
+  if (rawType === 'file-upload') return 'files';
+  if (rawType === 'summary-list' || rawType === 'paragraph' || rawType === 'text-block') return 'non_input';
+  return 'scalar';
+}
+
+function buildSchemaFieldSpecs(schemaSteps) {
+  const specs = new Map();
+  (schemaSteps || []).forEach(step => {
+    const components = Array.isArray(step?.components) ? step.components : [];
+    components.forEach(comp => {
+      const key = comp?.storageKey || comp?.props?.name;
+      if (!key || specs.has(key)) return;
+      const storageType = getComponentStorageType(comp);
+      if (storageType === 'non_input') return;
+      specs.set(key, { key, storageType });
+    });
+  });
+  return specs;
+}
+
+function extractPrimitiveFromObject(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const priorityKeys = ['value', 'label', 'text', 'name', 'title', 'registration_number', 'first_nations_band', 'id'];
+  for (const k of priorityKeys) {
+    const v = input[k];
+    if (v === null || typeof v === 'undefined') continue;
+    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;
+  }
+  for (const v of Object.values(input)) {
+    if (v === null || typeof v === 'undefined') continue;
+    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;
+  }
+  try {
+    return JSON.stringify(input);
+  } catch (_) {
+    return null;
+  }
+}
+
+function coerceScalarValue(value) {
+  if (value === null || typeof value === 'undefined') return null;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (Array.isArray(value)) {
+    const first = value.find(v => v !== null && typeof v !== 'undefined');
+    return coerceScalarValue(first);
+  }
+  if (typeof value === 'object') {
+    const extracted = extractPrimitiveFromObject(value);
+    return extracted === null || typeof extracted === 'undefined' ? null : extracted;
+  }
+  return String(value);
+}
+
+function normalizePayloadToPublishedSchema(payloadData, fieldSpecs, { signatureName } = {}) {
+  const normalized = {};
+  const droppedKeys = [];
+  const coercedKeys = [];
+  if (!payloadData || typeof payloadData !== 'object') {
+    return { normalized, droppedKeys, coercedKeys };
+  }
+  const fallbackSigName = String(signatureName || '').trim();
+  Object.entries(payloadData).forEach(([key, value]) => {
+    const spec = fieldSpecs.get(key);
+    if (!spec) {
+      droppedKeys.push(key);
+      return;
+    }
+    let nextValue = value;
+    if (spec.storageType === 'signature') {
+      nextValue = coerceSignatureField(value, fallbackSigName || (value && value.name) || '');
+    } else if (spec.storageType === 'multi') {
+      if (Array.isArray(value)) {
+        nextValue = value
+          .map(v => coerceScalarValue(v))
+          .filter(v => v !== null && typeof v !== 'undefined' && String(v).trim() !== '');
+      } else {
+        const scalar = coerceScalarValue(value);
+        nextValue = (scalar === null || typeof scalar === 'undefined' || String(scalar).trim() === '') ? [] : [scalar];
+      }
+    } else if (spec.storageType === 'files') {
+      nextValue = Array.isArray(value) ? value : [];
+    } else {
+      nextValue = coerceScalarValue(value);
+    }
+    if (nextValue !== value) coercedKeys.push(key);
+    normalized[key] = nextValue;
+  });
+  return { normalized, droppedKeys, coercedKeys };
+}
+
 function coerceSignatureField(value, name) {
   const finalName = name || (value && value.name) || '';
   return { name: finalName, signed: true };
@@ -19609,7 +19573,7 @@ function extractJsonObject(text) {
   return null;
 }
 
-async function generateAiDummyDraft({ provinceCode, stepCursor = 'summary-page', workflowId = 'iset-v1', userId = 48, onProgress = null }) {
+async function generateAiDummyDraft({ provinceCode, stepCursor = 'summary-page', workflowId = 'iset-v1', userId = 48, additionalRequestDetails = '', onProgress = null }) {
   if (!AI_KEY) {
     const err = new Error('ai_disabled');
     err.status = 501;
@@ -19690,6 +19654,7 @@ function buildStepChunks(schemaSteps, stepOrder = DUMMY_STEP_ORDER_FALLBACK) {
 
   const schemaPayload = await fetchPublishedWorkflowSchema();
   const schemaSteps = schemaPayload?.schema || schemaPayload?.schemaEnvelope?.steps || [];
+  const schemaFieldSpecs = buildSchemaFieldSpecs(schemaSteps);
   const stepOrder = resolveStepOrder(schemaSteps);
   const canonicalStepCursor = normalizeStepCursor(stepCursor, stepOrder);
   const fieldSummary = summarizeSchemaForAi(schemaSteps);
@@ -19701,6 +19666,7 @@ function buildStepChunks(schemaSteps, stepOrder = DUMMY_STEP_ORDER_FALLBACK) {
     if (regionSet.size) return Array.from(regionSet)[0];
     return 'ON';
   })();
+  const userRequestDetails = String(additionalRequestDetails || '').trim().slice(0, 4000);
   const payloadData = {};
   const errors = [];
   const warnings = [];
@@ -19748,6 +19714,7 @@ Return ONLY JSON for the requested keys as: { "payload": { <keys...> } } with no
 - Keep sentences concise (max ~120 characters). Avoid newlines unless list explicitly allows.
 - For Canadian addresses: postal code format A1A 1A1 (uppercase), phone format (###) ###-####.
 - Long-term goal or descriptions: keep under 90 characters, plain sentences.
+${userRequestDetails ? `- Additional requester constraints must be followed when relevant fields are included: ${userRequestDetails}` : ''}
 ${exampleSnippet}
 ${conditionalSnippet}
 Vary applicant names across drafts; avoid repeating similar first/last initials.
@@ -19759,7 +19726,8 @@ Vary applicant names across drafts; avoid repeating similar first/last initials.
       schemaHints: fieldSummary.filter(f => keyList.includes(f.key)),
       alreadyFilled: Object.keys(payloadData),
       concise: !!chunk.concise,
-      fullName: payloadData['first-name'] ? `${payloadData['first-name']} ${payloadData['last-name']}`.trim() : null
+      fullName: payloadData['first-name'] ? `${payloadData['first-name']} ${payloadData['last-name']}`.trim() : null,
+      additionalRequestDetails: userRequestDetails || null
     };
     const messages = [
       { role: 'system', content: systemPrompt },
@@ -20020,13 +19988,34 @@ Vary applicant names across drafts; avoid repeating similar first/last initials.
   payloadData['indigenous_declaration'] = coerceSignatureField(payloadData['indigenous_declaration'], sigName);
   payloadData['conflict_applicant_signature'] = coerceSignatureField(payloadData['conflict_applicant_signature'], sigName);
   payloadData['legal_submission_sig'] = coerceSignatureField(payloadData['legal_submission_sig'], sigName);
+  // Defensive schema conformance: keep only published input fields and coerce to expected value shapes.
+  const schemaNormalized = normalizePayloadToPublishedSchema(payloadData, schemaFieldSpecs, { signatureName: sigName });
+  const finalPayloadData = schemaNormalized.normalized;
+  if (schemaNormalized.droppedKeys.length) {
+    warnings.push(`schema_dropped_keys:${schemaNormalized.droppedKeys.join(',')}`);
+  }
+  if (schemaNormalized.coercedKeys.length) {
+    warnings.push(`schema_coerced_keys:${schemaNormalized.coercedKeys.join(',')}`);
+  }
+
+  // Field-specific safety for identity object spillover.
+  const affiliationRaw = finalPayloadData['indigenous-affiliation-declaration'];
+  if (affiliationRaw && typeof affiliationRaw === 'object' && !Array.isArray(affiliationRaw)) {
+    const affiliationFromObject = affiliationRaw.first_nations_band || affiliationRaw.name || extractPrimitiveFromObject(affiliationRaw);
+    finalPayloadData['indigenous-affiliation-declaration'] = affiliationFromObject ? String(affiliationFromObject) : null;
+  }
+  const regRaw = finalPayloadData['registration-number'];
+  if (regRaw && typeof regRaw === 'object' && !Array.isArray(regRaw)) {
+    const regFromObject = regRaw.registration_number || regRaw.value || extractPrimitiveFromObject(regRaw);
+    finalPayloadData['registration-number'] = regFromObject ? String(regFromObject) : null;
+  }
   const history = buildHistoryForStep(canonicalStepCursor, stepOrder);
-  const draftPayload = { ...payloadData, history };
+  const draftPayload = { ...finalPayloadData, history };
   const summary = {
-    applicantName: `${payloadData['first-name']} ${payloadData['last-name']}`.trim(),
-    profileId: payloadData['registration-number'] || payloadData['indigenous-affiliation-declaration'] || 'ai-generated',
-    homeCommunity: payloadData['home-comminuty'] || payloadData['address-city'] || null,
-    targetProgram: payloadData['target-program'] || null
+    applicantName: `${finalPayloadData['first-name']} ${finalPayloadData['last-name']}`.trim(),
+    profileId: finalPayloadData['registration-number'] || finalPayloadData['indigenous-affiliation-declaration'] || 'ai-generated',
+    homeCommunity: finalPayloadData['home-comminuty'] || finalPayloadData['address-city'] || null,
+    targetProgram: finalPayloadData['target-program'] || null
   };
   return {
     draftPayload,
@@ -20606,7 +20595,7 @@ app.get('/api/regions/canada', async (_req, res) => {
 });
 
 // POST /api/ai/create-dummy-draft
-// Body: { province?: string, userId?: number, stepCursor?: string, workflowId?: string }
+// Body: { province?: string, userId?: number, stepCursor?: string, workflowId?: string, additionalRequestDetails?: string }
 // Query: ?stream=1 to receive NDJSON progress events per chunk and final result.
 app.post('/api/ai/create-dummy-draft', async (req, res) => {
   const stream = req.query.stream === '1';
@@ -20615,6 +20604,7 @@ app.post('/api/ai/create-dummy-draft', async (req, res) => {
   const workflowId = String(body.workflowId || 'iset-v1');
   const requestedStepCursor = String(body.stepCursor || 'summary-page');
   const province = body.province || body.provinceCode || body.regionCode;
+  const additionalRequestDetails = typeof body.additionalRequestDetails === 'string' ? body.additionalRequestDetails : '';
 
   const sendEvent = (obj) => {
     if (!stream) return;
@@ -20637,6 +20627,7 @@ app.post('/api/ai/create-dummy-draft', async (req, res) => {
       stepCursor: requestedStepCursor,
       workflowId,
       userId,
+      additionalRequestDetails,
       onProgress: (event) => sendEvent(event)
     });
     const { draftPayload, history, summary, validation, stepCursor } = generated;
@@ -20772,6 +20763,1050 @@ app.post('/api/create-dummy-draft', async (req, res) => {
   } catch (err) {
     console.error('[dummy-draft] error:', err.message);
     res.status(500).json({ error: 'dummy_draft_failed', message: err.message });
+  }
+});
+
+const DUMMY_CASE_PAYMENTS_DEFAULT_CLIENTS = 3;
+const DUMMY_CASE_PAYMENTS_DEFAULT_INTERVENTIONS_PER_CLIENT = 2;
+const DUMMY_CASE_PAYMENTS_MAX_CLIENTS = 20;
+const DUMMY_CASE_PAYMENTS_MAX_INTERVENTIONS_PER_CLIENT = 10;
+
+const DUMMY_CASE_FIRST_NAMES = Object.freeze([
+  'Aiyana', 'Noella', 'Sophia', 'Danika', 'Raven', 'Mika', 'Talia', 'Nia', 'Skye', 'Cora'
+]);
+const DUMMY_CASE_LAST_NAMES = Object.freeze([
+  'Bear', 'Whitecloud', 'Rain', 'Cardinal', 'Bird', 'Redsky', 'Stone', 'Fox', 'Moran', 'Rivers'
+]);
+const DUMMY_CASE_CITIES = Object.freeze([
+  'Winnipeg', 'Regina', 'Saskatoon', 'Thunder Bay', 'Whitehorse', 'Yellowknife', 'Calgary', 'Edmonton'
+]);
+const DUMMY_CASE_GROUPS = Object.freeze([
+  'first_nations', 'metis', 'inuit'
+]);
+const DUMMY_VENDOR_NAMES = Object.freeze([
+  'Northern Skills Institute',
+  'Cedar Path Training',
+  'Red River Learning Services',
+  'Prairie Career College',
+  'Summit Community Training'
+]);
+
+const clampIntegerRange = (value, min, max, fallback) => {
+  const numeric = Number.parseInt(value, 10);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(min, Math.min(max, numeric));
+};
+
+const randomFrom = (arr, seed = 0) => {
+  if (!Array.isArray(arr) || !arr.length) return null;
+  const idx = Math.abs(Number(seed) || 0) % arr.length;
+  return arr[idx];
+};
+
+const toDateOnlySql = (value) => {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return null;
+  return value.toISOString().slice(0, 10);
+};
+
+const makeSubmissionReference = (index = 0) => {
+  const base = `${Date.now().toString(36).toUpperCase()}${crypto.randomBytes(3).toString('hex').toUpperCase()}${String(index).padStart(2, '0')}`;
+  return `TD${base}`.slice(0, 32);
+};
+
+const normalizeGeneratedProfile = (raw, index = 0, fallbackPrompt = '') => {
+  const profile = raw && typeof raw === 'object' ? raw : {};
+  const firstName = String(profile.firstName || profile.first_name || randomFrom(DUMMY_CASE_FIRST_NAMES, index) || 'Test').trim();
+  const lastName = String(profile.lastName || profile.last_name || randomFrom(DUMMY_CASE_LAST_NAMES, index + 1) || 'Client').trim();
+  const city = String(profile.city || randomFrom(DUMMY_CASE_CITIES, index + 2) || 'Winnipeg').trim();
+  const group = String(profile.aboriginalGroup || profile.aboriginal_group || randomFrom(DUMMY_CASE_GROUPS, index + 3) || 'first_nations').trim();
+  const interventionNotesRaw = Array.isArray(profile.interventionNotes || profile.intervention_notes)
+    ? profile.interventionNotes || profile.intervention_notes
+    : [];
+  const interventionNotes = interventionNotesRaw
+    .map(item => String(item || '').trim())
+    .filter(Boolean)
+    .slice(0, DUMMY_CASE_PAYMENTS_MAX_INTERVENTIONS_PER_CLIENT);
+  const vendorNamesRaw = Array.isArray(profile.vendorNames || profile.vendor_names)
+    ? profile.vendorNames || profile.vendor_names
+    : [];
+  const vendorNames = vendorNamesRaw
+    .map(item => String(item || '').trim())
+    .filter(Boolean)
+    .slice(0, DUMMY_CASE_PAYMENTS_MAX_INTERVENTIONS_PER_CLIENT);
+  const assessmentJustification = String(
+    profile.assessmentJustification ||
+    profile.assessment_justification ||
+    `Assessment completed for payment feature test data generation.${fallbackPrompt ? ` ${fallbackPrompt.slice(0, 120)}` : ''}`
+  ).trim();
+  const programName = String(profile.programName || profile.program_name || 'Skills Development Program').trim();
+  return {
+    firstName: firstName || 'Test',
+    lastName: lastName || 'Client',
+    city: city || 'Winnipeg',
+    aboriginalGroup: group || 'first_nations',
+    assessmentJustification: assessmentJustification || 'Assessment approved for test data.',
+    interventionNotes,
+    vendorNames,
+    programName: programName || 'Skills Development Program',
+  };
+};
+
+const DUMMY_PAYMENT_TYPE_HINTS = [
+  { pattern: /\bliving(\s+allowance)?\b/i, type: 'LivingAllowance' },
+  { pattern: /\btuition\b/i, type: 'TuitionFeesDirect' },
+  { pattern: /\bbooks?\b|\bmaterials?\b/i, type: 'BooksMaterialsReimbursement' },
+  { pattern: /\btransport(ation)?\b/i, type: 'Transportation' },
+  { pattern: /\bchild\s*care\b/i, type: 'Childcare' },
+  { pattern: /\bequipment\b/i, type: 'SpecializedEquipmentReimbursement' },
+  { pattern: /\bwage\b|\bemployer\b/i, type: 'WageSubsidyEmployer' },
+  { pattern: /\bother eligible\b/i, type: 'OtherEligibleCost' },
+];
+
+const DUMMY_PAYMENT_TYPE_WEIGHTS = {
+  LivingAllowance: 5.5,
+  TuitionFeesDirect: 4.8,
+  TuitionFeesReimbursement: 4.2,
+  BooksMaterialsDirect: 2.4,
+  BooksMaterialsReimbursement: 2.2,
+  SpecializedEquipmentAdvance: 2.6,
+  SpecializedEquipmentReimbursement: 2.2,
+  Transportation: 1.1,
+  Childcare: 1.3,
+  WageSubsidyEmployer: 8.5,
+  JCPProjectCost: 8.0,
+  SEBSupport: 2.8,
+  OtherEligibleCost: 1.5,
+};
+
+const DUMMY_CLIENT_PAYEE_PAYMENT_TYPES = new Set([
+  'LivingAllowance',
+  'Transportation',
+  'Childcare',
+  'OtherEligibleCost',
+  'TuitionFeesReimbursement',
+  'BooksMaterialsReimbursement',
+  'SpecializedEquipmentReimbursement',
+  'SEBSupport',
+]);
+
+const DUMMY_INSTITUTION_PAYEE_PAYMENT_TYPES = new Set([
+  'TuitionFeesDirect',
+]);
+
+const DUMMY_EMPLOYER_PAYEE_PAYMENT_TYPES = new Set([
+  'WageSubsidyEmployer',
+  'JCPProjectCost',
+]);
+
+const extractDummyPromptPaymentTypeHints = (prompt = '') => {
+  const text = String(prompt || '').trim();
+  if (!text) return [];
+  const hints = [];
+  DUMMY_PAYMENT_TYPE_HINTS.forEach(entry => {
+    if (!entry?.pattern || !entry?.type) return;
+    if (entry.pattern.test(text)) {
+      const normalized = normalizePaymentTypeCode(entry.type);
+      if (normalized) hints.push(normalized);
+    }
+  });
+  return Array.from(new Set(hints));
+};
+
+const buildAssessmentCostingSuggestedLookup = (config = null) => {
+  const map = new Map();
+  const interventions = Array.isArray(config?.interventions) ? config.interventions : [];
+  interventions.forEach(entry => {
+    const code = normalizeInterventionCodeValue(
+      entry?.code ?? entry?.interventionCode ?? entry?.intervention_code ?? null
+    );
+    if (!code) return;
+    const suggestedRaw = Array.isArray(entry?.suggested) ? entry.suggested : [];
+    const suggested = [];
+    suggestedRaw.forEach(item => {
+      const type = normalizePaymentTypeCode(
+        typeof item === 'string' ? item : item?.type ?? item?.paymentType ?? item?.payment_type ?? null
+      );
+      if (!type) return;
+      const recurrenceEnabled =
+        typeof item === 'object' && item !== null && typeof item.recurrenceEnabled === 'boolean'
+          ? item.recurrenceEnabled
+          : typeof item === 'object' && item !== null && typeof item.recurrence_enabled === 'boolean'
+            ? item.recurrence_enabled
+            : null;
+      suggested.push({ type, recurrenceEnabled });
+    });
+    map.set(code, suggested);
+  });
+  return map;
+};
+
+const buildAssessmentCostingPaymentTypeLookup = (config = null) => {
+  const map = new Map();
+  const paymentTypes = Array.isArray(config?.paymentTypes) ? config.paymentTypes : [];
+  paymentTypes.forEach(entry => {
+    const code = normalizePaymentTypeCode(entry?.code ?? entry?.type ?? entry?.paymentType ?? entry?.payment_type ?? null);
+    if (!code) return;
+    const recurrenceMode = normalizeRecurrenceMode(
+      entry?.recurrence?.mode ??
+      entry?.recurrence?.rule ??
+      entry?.recurrenceMode ??
+      entry?.recurrence_mode ??
+      null
+    );
+    map.set(code, {
+      recurrenceMode,
+    });
+  });
+  if (!map.size) {
+    buildDefaultAssessmentCostingPaymentTypes().forEach(entry => {
+      const code = normalizePaymentTypeCode(entry?.code);
+      if (!code) return;
+      map.set(code, {
+        recurrenceMode: normalizeRecurrenceMode(entry?.recurrence?.mode),
+      });
+    });
+  }
+  return map;
+};
+
+const resolveDummyLinePayeeType = paymentType => {
+  const key = normalizePaymentTypeKey(paymentType) || paymentType;
+  if (!key) return 'Vendor';
+  if (DUMMY_CLIENT_PAYEE_PAYMENT_TYPES.has(key)) return 'Client';
+  if (DUMMY_INSTITUTION_PAYEE_PAYMENT_TYPES.has(key)) return 'Institution';
+  if (DUMMY_EMPLOYER_PAYEE_PAYMENT_TYPES.has(key)) return 'Employer';
+  return 'Vendor';
+};
+
+const splitDummyLineAmounts = (totalAmount, paymentTypes = []) => {
+  const normalizedTypes = Array.isArray(paymentTypes) ? paymentTypes.filter(Boolean) : [];
+  if (!normalizedTypes.length) return [];
+  const totalCentsRaw = Math.round(Number(totalAmount || 0) * 100);
+  const minTotalCents = normalizedTypes.length;
+  let remaining = Math.max(minTotalCents, Number.isFinite(totalCentsRaw) ? totalCentsRaw : minTotalCents);
+  const weights = normalizedTypes.map(type => {
+    const key = normalizePaymentTypeKey(type) || type;
+    return DUMMY_PAYMENT_TYPE_WEIGHTS[key] || 1;
+  });
+  const weightTotal = weights.reduce((sum, value) => sum + value, 0) || normalizedTypes.length;
+  const allocations = [];
+  for (let idx = 0; idx < normalizedTypes.length; idx += 1) {
+    const linesRemaining = normalizedTypes.length - idx;
+    const minReserve = linesRemaining - 1;
+    let cents;
+    if (idx === normalizedTypes.length - 1) {
+      cents = remaining;
+    } else {
+      const proportional = Math.floor((Math.max(0, remaining) * weights[idx]) / Math.max(1, weightTotal));
+      cents = Math.max(1, proportional);
+      cents = Math.min(cents, Math.max(1, remaining - minReserve));
+    }
+    allocations.push({
+      paymentType: normalizedTypes[idx],
+      amount: Number((cents / 100).toFixed(2)),
+    });
+    remaining -= cents;
+  }
+  if (remaining !== 0 && allocations.length) {
+    const last = allocations[allocations.length - 1];
+    last.amount = Number((last.amount + remaining / 100).toFixed(2));
+  }
+  return allocations;
+};
+
+const buildDummyInterventionPaymentLines = ({
+  allowedPaymentTypes = [],
+  suggestedDefaults = [],
+  paymentTypeDefaults = new Map(),
+  promptHints = [],
+  seed = 0,
+  totalAmount = 0,
+  fallbackPaymentType = 'OtherEligibleCost',
+}) => {
+  const normalizedAllowed = Array.from(
+    new Set((allowedPaymentTypes || []).map(normalizePaymentTypeCode).filter(Boolean))
+  );
+  const allowedSet = new Set(normalizedAllowed);
+  const selected = new Map();
+  const addSelected = (type, recurrenceEnabled = null) => {
+    const normalized = normalizePaymentTypeCode(type);
+    if (!normalized) return;
+    if (allowedSet.size && !allowedSet.has(normalized)) return;
+    if (selected.has(normalized)) return;
+    selected.set(normalized, { paymentType: normalized, recurrenceEnabled });
+  };
+
+  (suggestedDefaults || []).forEach(item => {
+    const type = normalizePaymentTypeCode(item?.type);
+    if (!type) return;
+    addSelected(type, typeof item?.recurrenceEnabled === 'boolean' ? item.recurrenceEnabled : null);
+  });
+
+  (promptHints || []).forEach(type => {
+    addSelected(type, null);
+  });
+
+  if (!selected.size) {
+    const fallbackPool = normalizedAllowed.length
+      ? normalizedAllowed
+      : [normalizePaymentTypeCode(fallbackPaymentType) || 'OtherEligibleCost'];
+    const primary = fallbackPool[Math.abs(Number(seed) || 0) % fallbackPool.length];
+    addSelected(primary, null);
+  }
+
+  if (selected.size < 2 && normalizedAllowed.length > 1) {
+    const targetCount = Math.min(3, Math.max(2, normalizedAllowed.length));
+    for (let idx = 0; idx < normalizedAllowed.length && selected.size < targetCount; idx += 1) {
+      const candidate = normalizedAllowed[(Math.abs(Number(seed) || 0) + idx) % normalizedAllowed.length];
+      addSelected(candidate, null);
+    }
+  }
+
+  const selectedEntries = Array.from(selected.values()).slice(0, 4);
+  const amounts = splitDummyLineAmounts(
+    totalAmount,
+    selectedEntries.map(entry => entry.paymentType)
+  );
+
+  return amounts.map(amountEntry => {
+    const selectedEntry = selected.get(amountEntry.paymentType) || { recurrenceEnabled: null };
+    const defaults = paymentTypeDefaults.get(amountEntry.paymentType) || null;
+    const recurrenceMode = normalizeRecurrenceMode(defaults?.recurrenceMode);
+    const recurrenceEnabled =
+      recurrenceMode === RECURRENCE_MODE_REQUIRED
+        ? true
+        : recurrenceMode === RECURRENCE_MODE_NOT_ALLOWED
+          ? false
+          : typeof selectedEntry.recurrenceEnabled === 'boolean'
+            ? selectedEntry.recurrenceEnabled
+            : false;
+    return {
+      paymentType: amountEntry.paymentType,
+      amount: amountEntry.amount,
+      payeeType: resolveDummyLinePayeeType(amountEntry.paymentType),
+      recurrenceEnabled,
+    };
+  });
+};
+
+async function tryGenerateCasePaymentProfilesViaAi({
+  count,
+  interventionsPerClient,
+  interventionTypes = [],
+  additionalRequestDetails = '',
+}) {
+  if (!AI_KEY) return null;
+  const cleanCount = clampIntegerRange(count, 1, DUMMY_CASE_PAYMENTS_MAX_CLIENTS, DUMMY_CASE_PAYMENTS_DEFAULT_CLIENTS);
+  const cleanInterventions = clampIntegerRange(
+    interventionsPerClient,
+    1,
+    DUMMY_CASE_PAYMENTS_MAX_INTERVENTIONS_PER_CLIENT,
+    DUMMY_CASE_PAYMENTS_DEFAULT_INTERVENTIONS_PER_CLIENT
+  );
+  const types = Array.isArray(interventionTypes) ? interventionTypes.map(v => Number(v)).filter(Number.isFinite) : [];
+  const userPrompt = String(additionalRequestDetails || '').trim().slice(0, 2000);
+  const payload = {
+    count: cleanCount,
+    interventionsPerClient: cleanInterventions,
+    interventionTypes: types,
+    guidance: userPrompt || null,
+  };
+  const headers = {
+    Authorization: `Bearer ${AI_KEY}`,
+    'Content-Type': 'application/json',
+    'HTTP-Referer': process.env.ALLOWED_ORIGIN || 'http://localhost:3001',
+    'X-Title': 'Admin Dummy Case Payment Generator',
+  };
+  const systemPrompt = [
+    'Generate realistic synthetic profiles for internal testing only.',
+    'Return JSON only with shape: { "profiles": [ ... ] }.',
+    'Each profile must include: firstName, lastName, city, aboriginalGroup, programName, assessmentJustification, interventionNotes[], vendorNames[].',
+    `Exactly ${cleanCount} profiles.`,
+    `Each interventionNotes and vendorNames should have at least ${cleanInterventions} entries.`,
+    'Do not include markdown or code fences.',
+  ].join(' ');
+  try {
+    const response = await axios.post(
+      'https://openrouter.ai/api/v1/chat/completions',
+      {
+        model: AI_DUMMY_DEFAULT_MODEL,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: JSON.stringify(payload) },
+        ],
+        temperature: AI_DUMMY_TEMP,
+        top_p: AI_DUMMY_TOP_P,
+        max_tokens: Math.max(500, Math.min(2200, 350 + cleanCount * cleanInterventions * 50)),
+      },
+      { headers, timeout: 25000 }
+    );
+    const content = response?.data?.choices?.[0]?.message?.content || '';
+    const parsed = extractJsonObject(content);
+    const profiles = Array.isArray(parsed?.profiles) ? parsed.profiles : [];
+    return profiles.slice(0, cleanCount);
+  } catch (err) {
+    console.warn('[ai-case-payments] profile generation failed:', err?.message || err);
+    return null;
+  }
+}
+
+// POST /api/ai/create-dummy-case-payments
+// Body: { clients?: number, interventionsPerClient?: number, interventionTypes?: number[], additionalRequestDetails?: string }
+// Query: ?stream=1 to receive NDJSON progress events.
+app.post('/api/ai/create-dummy-case-payments', async (req, res) => {
+  const stream = req.query.stream === '1';
+  const body = req.body || {};
+  const clients = clampIntegerRange(
+    body.clients,
+    1,
+    DUMMY_CASE_PAYMENTS_MAX_CLIENTS,
+    DUMMY_CASE_PAYMENTS_DEFAULT_CLIENTS
+  );
+  const interventionsPerClient = clampIntegerRange(
+    body.interventionsPerClient,
+    1,
+    DUMMY_CASE_PAYMENTS_MAX_INTERVENTIONS_PER_CLIENT,
+    DUMMY_CASE_PAYMENTS_DEFAULT_INTERVENTIONS_PER_CLIENT
+  );
+  const additionalRequestDetails = typeof body.additionalRequestDetails === 'string' ? body.additionalRequestDetails.trim() : '';
+  const requestedInterventionTypesRaw = Array.isArray(body.interventionTypes)
+    ? body.interventionTypes
+    : Array.isArray(body.intervention_codes)
+      ? body.intervention_codes
+      : [];
+  const requestedInterventionTypes = Array.from(
+    new Set(
+      requestedInterventionTypesRaw
+        .map(value => Number.parseInt(value, 10))
+        .filter(Number.isFinite)
+        .filter(value => value > 0 && value <= 255)
+    )
+  );
+  const evidenceTypeToDocumentCategory = new Map();
+  Object.entries(PAYMENT_EVIDENCE_DOCUMENT_TYPE_MAP || {}).forEach(([documentCategory, evidenceTypes]) => {
+    if (!Array.isArray(evidenceTypes)) return;
+    evidenceTypes.forEach(type => {
+      const key = normalizeEvidenceTypeKey(type);
+      if (!key || evidenceTypeToDocumentCategory.has(key)) return;
+      evidenceTypeToDocumentCategory.set(key, documentCategory);
+    });
+  });
+
+  const sendEvent = (payload) => {
+    if (!stream) return;
+    try {
+      res.write(`${JSON.stringify(payload)}\n`);
+    } catch (_) {}
+  };
+
+  try {
+    if (stream) {
+      res.setHeader('Content-Type', 'application/x-ndjson');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.flushHeaders?.();
+    }
+
+    const [regionRows] = await pool.query(
+      'SELECT region_id, code, name_en FROM canada_region ORDER BY region_id ASC'
+    );
+    if (!regionRows.length) {
+      throw new Error('missing_region_reference_data');
+    }
+    const [activeInterventionRows] = await pool.query(
+      `SELECT code, label
+         FROM esdc_intervention_code
+        WHERE is_active = 1
+        ORDER BY display_order ASC, code ASC`
+    );
+    if (!activeInterventionRows.length) {
+      throw new Error('missing_intervention_reference_data');
+    }
+    const activeInterventionCodes = activeInterventionRows
+      .map(row => Number(row.code))
+      .filter(Number.isFinite);
+    const activeInterventionCodeSet = new Set(activeInterventionCodes);
+    const selectedInterventionCodes = requestedInterventionTypes
+      .filter(code => activeInterventionCodeSet.has(code));
+    const interventionCodes = selectedInterventionCodes.length
+      ? selectedInterventionCodes
+      : activeInterventionCodes.slice(0, Math.max(1, Math.min(4, activeInterventionCodes.length)));
+
+    const [potRows] = await pool.query(
+      `SELECT id, code, name, funding_source, pot_type, gl_project_code_external
+         FROM budget_pot
+        WHERE is_active = 1
+        ORDER BY id ASC`
+    );
+    if (!potRows.length) {
+      throw new Error('missing_budget_pot_data');
+    }
+    const chargeablePotRows = potRows.filter(row => {
+      const fundingSource = normalizeFundingSource(row?.funding_source || null);
+      const potTypeNorm = String(row?.pot_type || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[_\s]+/g, ' ');
+      const externalGl = String(row?.gl_project_code_external || '').trim();
+      return Boolean(fundingSource) && potTypeNorm === 'funding stream' && Boolean(externalGl);
+    });
+    if (!chargeablePotRows.length) {
+      throw new Error('missing_chargeable_budget_pot_data');
+    }
+
+    const [userRows] = await pool.query(
+      `SELECT id, name, email
+         FROM user
+        ORDER BY id ASC`
+    );
+    if (!userRows.length) {
+      throw new Error('missing_user_data');
+    }
+
+    const [staffRows] = await pool.query(
+      `SELECT id, region_id
+         FROM staff_profiles
+        ORDER BY id ASC`
+    );
+    const ownerStaffProfileId = Number(staffRows?.[0]?.id) || null;
+    const ownerRegionId = Number(staffRows?.[0]?.region_id) || null;
+    const actorUserId = Number(userRows?.[0]?.id) || null;
+
+    const paymentMapping = await readPaymentInterventionMapping(pool).catch(() => null);
+    const assessmentCostingDefaults = await readAssessmentCostingDefaults().catch(() => DEFAULT_ASSESSMENT_COSTING_DEFAULTS);
+    const fallbackPaymentType = paymentMapping?.paymentTypes?.[0]?.code || 'OtherEligibleCost';
+    const costingSuggestedDefaultsByIntervention = buildAssessmentCostingSuggestedLookup(assessmentCostingDefaults);
+    const costingPaymentTypeDefaults = buildAssessmentCostingPaymentTypeLookup(assessmentCostingDefaults);
+    const promptPaymentTypeHints = extractDummyPromptPaymentTypeHints(additionalRequestDetails);
+
+    sendEvent({ type: 'plan', steps: Array.from({ length: clients }, (_, idx) => `client-${idx + 1}`) });
+    const aiProfiles = await tryGenerateCasePaymentProfilesViaAi({
+      count: clients,
+      interventionsPerClient,
+      interventionTypes: interventionCodes,
+      additionalRequestDetails,
+    });
+    const profiles = Array.from({ length: clients }, (_, index) =>
+      normalizeGeneratedProfile(aiProfiles?.[index], index, additionalRequestDetails)
+    );
+
+    const summary = {
+      requestedClients: clients,
+      createdClients: 0,
+      createdCases: 0,
+      createdInterventions: 0,
+      createdPaymentPackets: 0,
+      createdPaymentLines: 0,
+      createdEvidenceDocuments: 0,
+      createdEvidenceLinks: 0,
+      failedClients: 0,
+      usedInterventionCodes: interventionCodes,
+      usedAiProfiles: Array.isArray(aiProfiles) && aiProfiles.length > 0,
+    };
+    const results = [];
+    const failures = [];
+
+    for (let clientIndex = 0; clientIndex < clients; clientIndex += 1) {
+      const chunkLabel = `client-${clientIndex + 1}`;
+      const conn = await pool.getConnection();
+      try {
+        await conn.beginTransaction();
+        const applicantUser = userRows[clientIndex % userRows.length];
+        const profile = profiles[clientIndex];
+
+        const userNameParts = parseFirstLastFromUserName(applicantUser?.name);
+        const firstName = (profile.firstName || userNameParts?.firstName || randomFrom(DUMMY_CASE_FIRST_NAMES, clientIndex) || 'Test').trim();
+        const lastName = (profile.lastName || userNameParts?.lastName || randomFrom(DUMMY_CASE_LAST_NAMES, clientIndex + 1) || 'Client').trim();
+        const resolvedName = `${firstName} ${lastName}`.trim();
+
+        const regionRow = ownerRegionId
+          ? regionRows.find(row => Number(row.region_id) === ownerRegionId) || regionRows[clientIndex % regionRows.length]
+          : regionRows[clientIndex % regionRows.length];
+        const regionCode = String(regionRow?.code || 'ON').trim().toUpperCase();
+        const regionName = regionRow?.name_en || regionCode;
+        const regionId = Number(regionRow?.region_id) || null;
+        const regionalPotPool = chargeablePotRows.filter(row => {
+          const code = String(row?.code || '').trim().toUpperCase();
+          return code.startsWith(`${regionCode}-`);
+        });
+        const potPool = regionalPotPool.length ? regionalPotPool : chargeablePotRows;
+        const potRow = potPool[clientIndex % potPool.length];
+        const budgetPotId = Number(potRow.id);
+        const fundingStream = normalizeFundingSource(potRow?.funding_source || null) || null;
+        const baseDate = new Date();
+        const nowDate = toDateOnlySql(baseDate);
+
+        const submissionPayload = {
+          generatedFor: 'case-payment-mvp',
+          applicant: {
+            firstName,
+            lastName,
+            email: applicantUser?.email || null,
+            city: profile.city,
+            province: regionCode,
+          },
+          guidance: additionalRequestDetails || null,
+          createdAt: new Date().toISOString(),
+        };
+        const [submissionResult] = await conn.query(
+          `INSERT INTO iset_application_submission
+            (user_id, workflow_id, reference_number, status, intake_payload, schema_snapshot, history, doc_refs, locale, source_ip, user_agent, checksum_sha256)
+           VALUES (?, 'iset-v1', ?, 'submitted', CAST(? AS JSON), NULL, CAST(? AS JSON), NULL, 'en-CA', '127.0.0.1', 'demo-navigation-generator', NULL)`,
+          [applicantUser.id, makeSubmissionReference(clientIndex + 1), JSON.stringify(submissionPayload), JSON.stringify(['consent', 'summary-page'])]
+        );
+        const submissionId = Number(submissionResult.insertId);
+
+        const applicationPayload = {
+          source: 'dummy_case_payment_generator',
+          ingested_at: new Date().toISOString(),
+          submission_snapshot: submissionPayload,
+        };
+        const [applicationResult] = await conn.query(
+          `INSERT INTO iset_application
+            (submission_id, payload_json, status, version, created_at, updated_at)
+           VALUES (?, CAST(? AS JSON), 'active', 1, NOW(), NOW())`,
+          [submissionId, JSON.stringify(applicationPayload)]
+        );
+        const applicationId = Number(applicationResult.insertId);
+
+        const addressPayload = {
+          address: {
+            street: `${100 + clientIndex} Demo Street`,
+            city: profile.city || randomFrom(DUMMY_CASE_CITIES, clientIndex) || 'Winnipeg',
+            province: regionCode,
+            postcode: 'K1A 0B1',
+          },
+          region: {
+            code: regionCode,
+            name: regionName,
+          },
+        };
+        const [clientResult] = await conn.query(
+          `INSERT INTO client
+            (dob, gender, aboriginal_group, last_name, first_name, initials, address_json, created_at, updated_at)
+           VALUES (?, 'female', ?, ?, ?, ?, CAST(? AS JSON), NOW(), NOW())`,
+          [
+            `199${clientIndex % 10}-0${(clientIndex % 8) + 1}-1${clientIndex % 9}`,
+            profile.aboriginalGroup || 'first_nations',
+            lastName,
+            firstName,
+            `${firstName[0] || ''}${lastName[0] || ''}`.toUpperCase(),
+            JSON.stringify(addressPayload),
+          ]
+        );
+        const clientId = Number(clientResult.insertId);
+
+        const [caseResult] = await conn.query(
+          `INSERT INTO iset_case
+            (application_id, client_id, assigned_to_user_id, status, stage, sub_stage, priority, opened_at, risk_rating, portfolio_region_id, created_by_staff_profile_id, updated_by_staff_profile_id, created_at, updated_at)
+           VALUES (?, ?, ?, 'active', 'service_delivery', 'payment_draft', 'normal', NOW(), 'low', ?, ?, ?, NOW(), NOW())`,
+          [applicationId, clientId, ownerStaffProfileId, regionId, ownerStaffProfileId, ownerStaffProfileId]
+        );
+        const caseId = Number(caseResult.insertId);
+        const caseNumber = `CASE-${new Date().getFullYear()}-${String(caseId).padStart(7, '0')}`;
+        await conn.query('UPDATE iset_case SET case_number = ? WHERE id = ?', [caseNumber, caseId]);
+
+        const [planResult] = await conn.query(
+          `INSERT INTO iset_case_action_plan
+            (case_id, name, status, agreement_number, budget_pot, funding_stream, version, owner_staff_profile_id, owner_user_id, effective_date, review_date, activated_at, result_code, EIClaimant, prev_employment, result_date, outcome_summary, notes, metadata_json, esdc_action_plan_json, created_at, updated_at)
+           VALUES (?, ?, 'active', ?, ?, ?, 1, ?, ?, ?, ?, NOW(), 'approved', 0, 1, ?, ?, ?, CAST(? AS JSON), CAST(? AS JSON), NOW(), NOW())`,
+          [
+            caseId,
+            `Action Plan - ${resolvedName}`,
+            `AGR-${String(caseId).padStart(8, '0')}`,
+            String(budgetPotId),
+            fundingStream,
+            ownerStaffProfileId,
+            actorUserId,
+            nowDate,
+            nowDate,
+            nowDate,
+            'Auto-generated action plan for finance testing.',
+            `Guidance: ${additionalRequestDetails || 'none'}`,
+            JSON.stringify({ generatedBy: 'ai-create-dummy-case-payments', prompt: additionalRequestDetails || null }),
+            JSON.stringify({ version: '1.0', notes: 'Dummy data for payment draft testing.' }),
+          ]
+        );
+        const actionPlanId = Number(planResult.insertId);
+
+        const createdInterventionIds = [];
+        const createdPacketIds = [];
+        const createdLineRows = [];
+        let totalInterventionApproved = 0;
+        const interventionRollup = [];
+        for (let interventionIndex = 0; interventionIndex < interventionsPerClient; interventionIndex += 1) {
+          const interventionCode = interventionCodes[(clientIndex + interventionIndex) % interventionCodes.length];
+          const startDate = new Date(baseDate);
+          startDate.setDate(startDate.getDate() - (14 + interventionIndex * 7));
+          const endDate = new Date(baseDate);
+          endDate.setDate(endDate.getDate() + (45 + interventionIndex * 14));
+          const durationDays = Math.max(14, Math.round((endDate - startDate) / (1000 * 60 * 60 * 24)));
+          const approvedAmount = Number((1200 + ((clientIndex + 1) * (interventionIndex + 2) * 175)).toFixed(2));
+          totalInterventionApproved += approvedAmount;
+          const interventionNote = profile.interventionNotes[interventionIndex] || `Intervention ${interventionCode} configured for payment workflow test coverage.`;
+          const [interventionResult] = await conn.query(
+            `INSERT INTO iset_case_intervention
+              (case_id, action_plan_id, intervention_code, related_noc_version, related_noc, status, start_date, end_date, duration_days, intervention_cost, budget_amount, approved_amount, actual_amount, outcome_code, notes, metadata_json, esdc_intervention_json, created_by_staff_profile_id, reviewed_by_staff_profile_id, reviewed_at, review_notes, eligibility_result, funding_stream_decision, required_docs_flags, created_at, updated_at)
+             VALUES (?, ?, ?, '2021', '41405', 'active', ?, ?, ?, ?, ?, ?, 0, 1, ?, CAST(? AS JSON), CAST(? AS JSON), ?, ?, NOW(), ?, 'eligible', ?, CAST(? AS JSON), NOW(), NOW())`,
+            [
+              caseId,
+              actionPlanId,
+              interventionCode,
+              toDateOnlySql(startDate),
+              toDateOnlySql(endDate),
+              durationDays,
+              approvedAmount,
+              approvedAmount,
+              approvedAmount,
+              interventionNote,
+              JSON.stringify({
+                title: `Intervention ${interventionCode}`,
+                prompt: additionalRequestDetails || null,
+                city: profile.city,
+              }),
+              JSON.stringify({
+                interventionCode,
+                startDate: toDateOnlySql(startDate),
+                endDate: toDateOnlySql(endDate),
+                approvedAmount,
+              }),
+              ownerStaffProfileId,
+              ownerStaffProfileId,
+              'Auto-reviewed test intervention.',
+              fundingStream,
+              JSON.stringify({ evidenceRequired: true }),
+            ]
+          );
+          const interventionId = Number(interventionResult.insertId);
+          createdInterventionIds.push(interventionId);
+          interventionRollup.push({ interventionId, interventionCode, approvedAmount });
+
+          const mappingAllowed =
+            paymentMapping?.allowedByIntervention?.get(String(interventionCode)) ||
+            paymentMapping?.allowedByIntervention?.get(Number(interventionCode));
+          const mappedAllowedTypes = mappingAllowed && mappingAllowed.size
+            ? Array.from(mappingAllowed).map(normalizePaymentTypeCode).filter(Boolean)
+            : [];
+          const globalAllowedTypes = Array.isArray(paymentMapping?.paymentTypes)
+            ? paymentMapping.paymentTypes
+                .map(entry => normalizePaymentTypeCode(entry?.code))
+                .filter(Boolean)
+            : [];
+          const allowedPaymentTypes = mappedAllowedTypes.length
+            ? mappedAllowedTypes
+            : globalAllowedTypes.length
+              ? globalAllowedTypes
+              : [normalizePaymentTypeCode(fallbackPaymentType) || 'OtherEligibleCost'];
+          const suggestedDefaults = costingSuggestedDefaultsByIntervention.get(String(interventionCode)) || [];
+          const linePlans = buildDummyInterventionPaymentLines({
+            allowedPaymentTypes,
+            suggestedDefaults,
+            paymentTypeDefaults: costingPaymentTypeDefaults,
+            promptHints: promptPaymentTypeHints,
+            seed: clientIndex * 97 + interventionIndex * 31,
+            totalAmount: approvedAmount,
+            fallbackPaymentType,
+          });
+          const recurringLinePlan =
+            linePlans.find(line => (normalizePaymentTypeKey(line.paymentType) || line.paymentType) === 'LivingAllowance') ||
+            linePlans.find(line => line.recurrenceEnabled) ||
+            null;
+          const recurringSchedule = (() => {
+            if (!recurringLinePlan) return null;
+            const safeDuration = Number.isFinite(durationDays) && durationDays > 0 ? durationDays : 1;
+            const occurrences = Math.max(1, Math.ceil(safeDuration / 7));
+            const recurringAmount = Number(recurringLinePlan.amount || 0);
+            const amountPerPeriod = Number((recurringAmount / occurrences).toFixed(2));
+            return {
+              enabled: true,
+              period: 'weekly',
+              occurrences,
+              amountPerPeriod,
+              calculatedTotal: recurringAmount,
+              startDate: toDateOnlySql(startDate),
+              endDate: toDateOnlySql(endDate),
+            };
+          })();
+
+          const vendorName = profile.vendorNames[interventionIndex] || randomFrom(DUMMY_VENDOR_NAMES, clientIndex + interventionIndex) || 'Training Provider';
+          const [packetResult] = await conn.query(
+            `INSERT INTO payment_packet
+              (case_id, client_id, intervention_id, reporting_unit, status, requester_user_id, submitted_at, due_by, notes_internal, risk_flags, metadata, created_at, updated_at)
+             VALUES (?, ?, ?, ?, 'draft', ?, NULL, NULL, ?, CAST(? AS JSON), CAST(? AS JSON), NOW(), NOW())`,
+            [
+              caseId,
+              clientId,
+              interventionId,
+              regionCode,
+              actorUserId,
+              'Auto-generated draft packet for finance queue testing.',
+              JSON.stringify(['auto_generated', 'draft_state']),
+              JSON.stringify({
+                generatedBy: 'ai-create-dummy-case-payments',
+                prompt: additionalRequestDetails || null,
+                clientIndex: clientIndex + 1,
+              }),
+            ]
+          );
+          const packetId = Number(packetResult.insertId);
+          createdPacketIds.push(packetId);
+
+          const insertedLineIds = [];
+          for (let lineIndex = 0; lineIndex < linePlans.length; lineIndex += 1) {
+            const linePlan = linePlans[lineIndex];
+            const paymentType = linePlan.paymentType;
+            const payeeType = linePlan.payeeType || 'Vendor';
+            const payeeName = payeeType === 'Client'
+              ? resolvedName
+              : payeeType === 'Employer'
+                ? `${vendorName} Employer`
+                : vendorName;
+            const isRecurringLine = Boolean(
+              recurringSchedule && recurringLinePlan && paymentType === recurringLinePlan.paymentType
+            );
+            const [lineResult] = await conn.query(
+              `INSERT INTO payment_packet_line
+                (payment_packet_id, intervention_id, payment_type, payee_type, payee_name, payee_profile_id, payee_reference, amount, currency, service_period_start, service_period_end, invoice_reference_number, requested_payment_date, budget_pot_id, funding_stream, status, hold_reason, metadata)
+               VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, 'CAD', ?, ?, ?, ?, ?, ?, 'needs_evidence', NULL, CAST(? AS JSON))`,
+              [
+                packetId,
+                interventionId,
+                paymentType,
+                payeeType,
+                payeeName,
+                Number(linePlan.amount || 0),
+                toDateOnlySql(startDate),
+                toDateOnlySql(endDate),
+                `INV-${caseId}-${interventionIndex + 1}-${lineIndex + 1}`,
+                toDateOnlySql(baseDate),
+                budgetPotId,
+                fundingStream,
+                JSON.stringify({
+                  source: 'dummy-case-payments-generator',
+                  interventionCode,
+                  recurrence: isRecurringLine ? recurringSchedule : null,
+                  generatedFromDefaultLines: true,
+                }),
+              ]
+            );
+            const paymentLineId = Number(lineResult.insertId);
+            insertedLineIds.push(paymentLineId);
+            createdLineRows.push({
+              id: paymentLineId,
+              packetId,
+              interventionId,
+              paymentType,
+              payeeType,
+            });
+          }
+
+          await conn.query(
+            `INSERT INTO payment_status_event
+              (payment_packet_id, payment_packet_line_id, from_status, to_status, actor_user_id, notes, metadata, created_at)
+             VALUES (?, NULL, NULL, 'draft', ?, 'Auto-generated draft packet', CAST(? AS JSON), NOW())`,
+            [packetId, actorUserId, JSON.stringify({ paymentLineIds: insertedLineIds })]
+          );
+        }
+
+        let createdEvidenceForClient = 0;
+        let createdEvidenceLinksForClient = 0;
+        if (createdLineRows.length) {
+          const evidenceRules = await readPaymentEvidenceRules(conn);
+          const baselineRequired = shouldApplyBaselineEvidence({ case_id: caseId, client_id: clientId })
+            ? (Array.isArray(evidenceRules?.baseline?.required) ? evidenceRules.baseline.required : [])
+            : [];
+          const baselineRequiredKeys = new Set(baselineRequired.map(normalizeEvidenceTypeKey).filter(Boolean));
+          const requiredByLineId = new Map();
+
+          createdLineRows.forEach(line => {
+            const lineRules = resolveLineEvidenceRules({
+              line: { payment_type: line.paymentType, payee_type: line.payeeType },
+              rules: evidenceRules,
+              baselineRequiredKeys,
+            });
+            const lineRequired = Array.isArray(lineRules?.required) ? lineRules.required : [];
+            requiredByLineId.set(
+              String(line.id),
+              lineRequired.map(type => String(type || '').trim()).filter(Boolean)
+            );
+          });
+
+          const createEvidenceDocument = async ({ packetId, lineId = null, interventionId = null, evidenceType }) => {
+            const cleanEvidenceType = String(evidenceType || '').trim();
+            if (!cleanEvidenceType) return;
+            const evidenceKey = normalizeEvidenceTypeKey(cleanEvidenceType);
+            const documentCategory = evidenceKey
+              ? evidenceTypeToDocumentCategory.get(evidenceKey) || 'financial_evidence'
+              : 'financial_evidence';
+            const stamp = `${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+            const checksum = crypto
+              .createHash('sha256')
+              .update(`${caseId}|${packetId}|${lineId || 'packet'}|${cleanEvidenceType}|${stamp}`)
+              .digest('hex');
+            const safeEvidenceKey = evidenceKey || 'evidence';
+            const fileName = `${safeEvidenceKey}-${packetId}-${lineId || 'packet'}.txt`;
+            const filePath = `generated/evidence/${new Date().getFullYear()}/${caseId}/${packetId}/${checksum.slice(0, 16)}-${fileName}`;
+            const metadata = JSON.stringify({
+              generatedBy: 'ai-create-dummy-case-payments',
+              synthetic: true,
+              evidenceType: cleanEvidenceType,
+              paymentPacketId: packetId,
+              paymentPacketLineId: lineId || null,
+            });
+            const [docResult] = await conn.query(
+              `INSERT INTO iset_document
+                (user_id, applicant_user_id, client_id, application_id, case_id, action_plan_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category, visibility, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, 'system_generated', ?, ?, 'text/plain', ?, CAST(? AS JSON), 0, ?, 'active', ?, 'internal', NOW(), NOW())`,
+              [
+                actorUserId,
+                applicantUser.id,
+                clientId,
+                applicationId,
+                caseId,
+                actionPlanId,
+                fileName,
+                filePath,
+                `Auto-generated evidence: ${cleanEvidenceType}`,
+                metadata,
+                checksum,
+                documentCategory,
+              ]
+            );
+            const documentId = Number(docResult.insertId);
+            if (Number.isFinite(documentId) && Number.isFinite(interventionId)) {
+              await conn.query(
+                `INSERT IGNORE INTO iset_document_intervention
+                  (document_id, intervention_id, created_at)
+                 VALUES (?, ?, NOW())`,
+                [documentId, interventionId]
+              );
+            }
+            await conn.query(
+              `INSERT INTO payment_packet_document
+                (payment_packet_id, payment_packet_line_id, document_id, evidence_type, required, received_at, created_at)
+               VALUES (?, ?, ?, ?, 1, NOW(), NOW())`,
+              [packetId, lineId, documentId, cleanEvidenceType]
+            );
+            createdEvidenceForClient += 1;
+            createdEvidenceLinksForClient += 1;
+          };
+
+          const baselineSeededPackets = new Set();
+          for (const line of createdLineRows) {
+            if (!baselineSeededPackets.has(String(line.packetId))) {
+              baselineSeededPackets.add(String(line.packetId));
+              for (const evidenceType of baselineRequired) {
+                await createEvidenceDocument({
+                  packetId: line.packetId,
+                  lineId: null,
+                  interventionId: line.interventionId,
+                  evidenceType,
+                });
+              }
+            }
+            const lineRequired = requiredByLineId.get(String(line.id)) || [];
+            for (const evidenceType of lineRequired) {
+              await createEvidenceDocument({
+                packetId: line.packetId,
+                lineId: line.id,
+                interventionId: line.interventionId,
+                evidenceType,
+              });
+            }
+          }
+        }
+
+        const primaryIntervention = interventionRollup[0] || null;
+        await conn.query(
+          `INSERT INTO iset_case_assessment
+            (case_id, date_of_assessment, overview, employment_goals, previous_iset, employment_barriers, local_area_priorities, esdc_eligibility, intervention_start_date, intervention_end_date, intervention_budget_pot_id, posting_context, intervention_code, intervention_duration_days, intervention_cost_total, institution, program_name, recommendation, justification, nwac_review, nwac_reason, proposed_interventions)
+           VALUES (?, ?, ?, ?, 0, CAST(? AS JSON), CAST(? AS JSON), 'eligible', ?, ?, ?, 'external', ?, ?, ?, ?, ?, 'approved', ?, 'approved', 'Auto-approved for payment draft testing', CAST(? AS JSON))`,
+          [
+            caseId,
+            nowDate,
+            'Assessment completed as part of automated finance/payment test data generation.',
+            'Client is prepared for intervention delivery and related payment disbursement workflow.',
+            JSON.stringify(['funding', 'skills']),
+            JSON.stringify(['community_employment']),
+            nowDate,
+            nowDate,
+            budgetPotId,
+            primaryIntervention?.interventionCode || null,
+            90,
+            Math.round(totalInterventionApproved),
+            'ISET Training Partner',
+            profile.programName || 'Skills Development Program',
+            profile.assessmentJustification,
+            JSON.stringify(interventionRollup),
+          ]
+        );
+
+        await conn.query(
+          `UPDATE iset_case
+              SET open_intervention_count = ?,
+                  total_intervention_count = ?,
+                  updated_at = NOW()
+            WHERE id = ?`,
+          [createdInterventionIds.length, createdInterventionIds.length, caseId]
+        );
+
+        await conn.commit();
+        summary.createdClients += 1;
+        summary.createdCases += 1;
+        summary.createdInterventions += createdInterventionIds.length;
+        summary.createdPaymentPackets += createdPacketIds.length;
+        summary.createdPaymentLines += createdLineRows.length;
+        summary.createdEvidenceDocuments += createdEvidenceForClient;
+        summary.createdEvidenceLinks += createdEvidenceLinksForClient;
+        const resultEntry = {
+          clientIndex: clientIndex + 1,
+          userId: Number(applicantUser.id),
+          clientId,
+          caseId,
+          caseNumber,
+          submissionId,
+          applicationId,
+          actionPlanId,
+          interventionIds: createdInterventionIds,
+          paymentPacketIds: createdPacketIds,
+        };
+        results.push(resultEntry);
+        sendEvent({ type: 'chunk', chunk: chunkLabel, ok: true, details: resultEntry });
+      } catch (err) {
+        await conn.rollback();
+        summary.failedClients += 1;
+        const failure = {
+          clientIndex: clientIndex + 1,
+          message: err?.message || 'client_generation_failed',
+        };
+        failures.push(failure);
+        sendEvent({ type: 'chunk', chunk: chunkLabel, ok: false, error: failure.message });
+      } finally {
+        conn.release();
+      }
+    }
+
+    const responsePayload = {
+      ok: true,
+      summary,
+      results,
+      failures,
+    };
+    if (stream) {
+      sendEvent({ type: 'done', result: responsePayload });
+      return res.end();
+    }
+    return res.json(responsePayload);
+  } catch (err) {
+    console.error('[ai-case-payments] generation failed:', err.message);
+    if (stream) {
+      sendEvent({ type: 'error', error: 'ai_case_payments_failed', message: err.message, details: err.details || null });
+      return res.end();
+    }
+    return res.status(500).json({
+      error: 'ai_case_payments_failed',
+      message: err.message,
+      details: err.details || null,
+    });
   }
 });
 
@@ -33042,16 +34077,11 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         });
       }
     }
-    if (endDateValue && !trimmedOutcomeCreate) {
+    const isClosedStatusCreate = ['completed', 'cancelled'].includes(statusValue);
+    if (isClosedStatusCreate && !trimmedOutcomeCreate) {
       return res.status(422).json({
         error: 'outcome_required',
-        message: 'Intervention outcome code is required when an end date is provided.'
-      });
-    }
-    if (endDateValue && !['completed', 'cancelled'].includes(statusValue)) {
-      return res.status(422).json({
-        error: 'status_end_date_mismatch',
-        message: 'Intervention with an end date must be marked completed or cancelled.'
+        message: 'Intervention outcome code is required when closing an intervention.'
       });
     }
 
@@ -33114,10 +34144,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       metadata.compliance = { ilmp: 'pending', finance: 'pending' };
     }
 
-    const recurringFallbackTotal = Number.isFinite(plannedCostInt)
-      ? plannedCostInt
-      : normaliseRecurringNumber(metadata.cost);
-    mergeRecurringCostMetadata(metadata, metadata, recurringFallbackTotal);
+    const metadataClean = stripInterventionRecurringMetadata(metadata);
 
     const esdcPayload = pruneNullish({
       interventionCode: trimmedCode,
@@ -33168,7 +34195,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         trimmedNocVersion || null,
         trimmedOutcomeCreate || null,
         trimmedNotes || null,
-        Object.keys(metadata).length ? JSON.stringify(metadata) : null,
+        Object.keys(metadataClean).length ? JSON.stringify(metadataClean) : null,
         Object.keys(esdcPayload).length ? JSON.stringify(esdcPayload) : null,
         createdBy,
       ]
@@ -33193,7 +34220,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         interventionId,
         potId: trimmedPotId,
         amount: amountForFinance,
-        costLines: metadata.costLines,
+        costLines: metadataClean.costLines,
         interventionTitle: trimmedTitle,
         status: 'submitted',
         transactionDate: startDateValue || null,
@@ -33241,6 +34268,98 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
   } catch (error) {
     console.error('POST /api/action-plans/:id/interventions failed:', error);
     res.status(500).json({ error: 'create_intervention_failed', detail: error?.message || String(error) });
+  }
+});
+
+app.get('/api/interventions/:id/payment-lines', async (req, res) => {
+  const interventionId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(interventionId) || interventionId <= 0) {
+    return res.status(400).json({ error: 'invalid_intervention_id' });
+  }
+
+  try {
+    const interventionRow = await fetchInterventionWithCase(interventionId);
+    if (!interventionRow) {
+      return res.status(404).json({ error: 'intervention_not_found' });
+    }
+
+    const accessError = validateCaseAccessForIntervention(req, interventionRow);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
+    }
+
+    const [rows] = await pool.query(
+      `SELECT
+         pp.id AS payment_packet_id,
+         pp.status AS payment_packet_status,
+         pp.updated_at AS payment_packet_updated_at,
+         ppl.id AS payment_packet_line_id,
+         ppl.payment_type,
+         ppl.payee_type,
+         ppl.payee_name,
+         ppl.amount,
+         ppl.currency,
+         ppl.metadata,
+         ppl.service_period_start,
+         ppl.service_period_end,
+         ppl.status AS payment_packet_line_status
+       FROM payment_packet pp
+       JOIN payment_packet_line ppl ON ppl.payment_packet_id = pp.id
+       WHERE pp.intervention_id = ?
+         AND ppl.status <> 'cancelled'
+       ORDER BY pp.updated_at DESC, pp.id DESC, ppl.id ASC`,
+      [interventionId]
+    );
+
+    if (!rows.length) {
+      return res.status(200).json({ interventionId, packetId: null, lines: [] });
+    }
+
+    const latestPacketId = Number(rows[0].payment_packet_id);
+    const latestPacketStatus = rows[0].payment_packet_status || null;
+    const lines = rows
+      .filter(row => Number(row.payment_packet_id) === latestPacketId)
+      .map(row => {
+        const meta = safeJsonParse(row.metadata, null) || {};
+        const recurrenceMeta = meta?.recurrence && typeof meta.recurrence === 'object' ? meta.recurrence : null;
+        const hasRecurringSchedule = Boolean(
+          recurrenceMeta &&
+          (recurrenceMeta.enabled === true ||
+            recurrenceMeta.startDate ||
+            recurrenceMeta.endDate ||
+            recurrenceMeta.scheduleStart ||
+            recurrenceMeta.scheduleEnd ||
+            recurrenceMeta.period ||
+            recurrenceMeta.index ||
+            recurrenceMeta.total ||
+            recurrenceMeta.amountPerPeriod ||
+            recurrenceMeta.occurrences)
+        );
+        return {
+          packetId: row.payment_packet_id ? String(row.payment_packet_id) : null,
+          packetStatus: row.payment_packet_status || null,
+          lineId: row.payment_packet_line_id ? String(row.payment_packet_line_id) : null,
+          paymentType: row.payment_type || null,
+          payeeType: row.payee_type || null,
+          payeeName: row.payee_name || null,
+          amount: Number.isFinite(Number(row.amount)) ? Number(row.amount) : null,
+          currency: row.currency || 'CAD',
+          servicePeriodStart: toDateOnly(row.service_period_start),
+          servicePeriodEnd: toDateOnly(row.service_period_end),
+          status: row.payment_packet_line_status || null,
+          recurrence: hasRecurringSchedule ? 'Recurring' : 'One-time',
+        };
+      });
+
+    return res.status(200).json({
+      interventionId,
+      packetId: String(latestPacketId),
+      packetStatus: latestPacketStatus,
+      lines,
+    });
+  } catch (error) {
+    console.error('GET /api/interventions/:id/payment-lines failed:', error);
+    return res.status(500).json({ error: 'fetch_intervention_payment_lines_failed', detail: error?.message || String(error) });
   }
 });
 
@@ -33517,16 +34636,11 @@ app.patch('/api/interventions/:id', async (req, res) => {
         });
       }
     }
-    if (nextEndDate && !nextOutcome) {
+    const isClosedStatusUpdate = ['completed', 'cancelled'].includes(nextStatusForValidation);
+    if (isClosedStatusUpdate && !nextOutcome) {
       return res.status(422).json({
         error: 'outcome_required',
-        message: 'Intervention outcome code is required when an end date is set.'
-      });
-    }
-    if (nextEndDate && !['completed', 'cancelled'].includes(nextStatusForValidation)) {
-      return res.status(422).json({
-        error: 'status_end_date_mismatch',
-        message: 'Intervention with an end date must be marked completed or cancelled. Use the close endpoint for completion.'
+        message: 'Intervention outcome code is required when closing an intervention.'
       });
     }
     if (nextStartDate && nextEndDate && nextEndDate < nextStartDate) {
@@ -33794,33 +34908,13 @@ app.patch('/api/interventions/:id', async (req, res) => {
       metadataChanged = true;
     }
 
-    const recurringPayload = (() => {
-      if (metadataPayload) {
-        return metadataPayload;
-      }
-      let hasFields = false;
-      const payload = {};
-      if (Object.prototype.hasOwnProperty.call(body, 'costSettings')) {
-        payload.costSettings = body.costSettings;
-        hasFields = true;
-      }
-      if (Object.prototype.hasOwnProperty.call(body, 'costType')) {
-        payload.costType = body.costType;
-        hasFields = true;
-      }
-      if (Object.prototype.hasOwnProperty.call(body, 'recurrence')) {
-        payload.recurrence = body.recurrence;
-        hasFields = true;
-      }
-      return hasFields ? payload : null;
-    })();
-    if (recurringPayload) {
-      const fallbackTotal = Number.isFinite(plannedCostValue)
-        ? plannedCostValue
-        : normaliseRecurringNumber(metadata.cost);
-      if (mergeRecurringCostMetadata(metadata, recurringPayload, fallbackTotal)) {
-        metadataChanged = true;
-      }
+    const metadataWithoutRecurring = stripInterventionRecurringMetadata(metadata);
+    if (JSON.stringify(metadataWithoutRecurring) !== JSON.stringify(metadata)) {
+      Object.keys(metadata).forEach(key => {
+        delete metadata[key];
+      });
+      Object.assign(metadata, metadataWithoutRecurring);
+      metadataChanged = true;
     }
 
     if (!updates.length && !metadataChanged) {
@@ -34264,7 +35358,7 @@ app.post('/api/interventions/:id/delete', async (req, res) => {
     }
 
     const [draftPacketRows] = await pool.query(
-      "SELECT id FROM payment_packet WHERE intervention_id = ? AND status = 'draft'",
+      "SELECT id FROM payment_packet WHERE intervention_id = ? AND status IN ('draft','awaiting_trigger','released')",
       [interventionId]
     );
     const draftPacketIds = draftPacketRows.map(row => row.id).filter(Boolean);
@@ -35124,6 +36218,7 @@ app.get('/api/cases/:id', async (req, res) => {
         c.application_id,
         c.client_id,
         c.assigned_to_user_id,
+        sp.display_name AS assigned_user_display_name,
         sp.email AS assigned_user_email,
         c.status,
         a.status AS application_status,
@@ -35244,6 +36339,7 @@ app.get('/api/cases/:id', async (req, res) => {
         const hasAppUserId = appCols.includes('user_id');
         const hasSubmissionUser = appCols.includes('submission_id') && subCols.includes('user_id');
         const hasStaffEmail = hasStaffProfiles && staffCols.includes('email');
+        const hasStaffDisplayName = hasStaffProfiles && staffCols.includes('display_name');
         let applicantJoin = ''; let applicantSelect = 'NULL AS applicant_name, NULL AS applicant_email, NULL AS applicant_user_id';
         if (hasSubmissionUser) {
           applicantJoin = 'JOIN iset_application_submission s ON a.submission_id = s.id JOIN user applicant ON s.user_id = applicant.id';
@@ -35274,7 +36370,8 @@ app.get('/api/cases/:id', async (req, res) => {
           ? 'LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id'
           : '';
 
-        caseSelectParts.push(staffJoin ? 'sp.email AS assigned_user_email' : 'NULL AS assigned_user_email');
+        caseSelectParts.push(staffJoin && hasStaffDisplayName ? 'sp.display_name AS assigned_user_display_name' : 'NULL AS assigned_user_display_name');
+        caseSelectParts.push(staffJoin && hasStaffEmail ? 'sp.email AS assigned_user_email' : 'NULL AS assigned_user_email');
         caseSelectParts.push(hasApp && appCols.includes('status') ? 'a.status AS application_status' : 'NULL AS application_status');
         const caseSelect = caseSelectParts.join(', ');
 
@@ -38164,6 +39261,11 @@ app.post('/api/cases/:id/messages', async (req, res) => {
           ...snapshotTokens
         };
       }
+      if (fundingAgreementTokens && typeof fundingAgreementTokens === 'object') {
+        // Keep case manager signature/date placeholders unresolved for applicant view.
+        delete fundingAgreementTokens.case_manager_signature;
+        delete fundingAgreementTokens.case_manager_signed_date;
+      }
     }
 
     const requestedApplicationId = normalisePositiveInteger(req.body?.applicationId);
@@ -38215,7 +39317,7 @@ app.post('/api/cases/:id/messages', async (req, res) => {
           wf.workflow_type === 'consent-cm-prefill' &&
           wf.document_type === 'funding_agreement'
         ) {
-          resolvedSchema = applyPrefillTokensToSchema(resolvedSchema, fundingAgreementTokens);
+          resolvedSchema = applyPrefillTokensToSchema(resolvedSchema, fundingAgreementTokens, { preserveMissingTokens: true });
         }
         if (resolvedSchema && cfaDraft && wf.document_type === 'funding_agreement') {
           resolvedSchema = {
@@ -39346,10 +40448,18 @@ const isFinancePaymentsRole = role => {
 };
 
 const SIMPLE_PAYMENT_WORKFLOW = true;
-const SIMPLE_PAYMENT_PACKET_STATUSES = new Set(['draft', 'submitted', 'cancelled']);
+const SIMPLE_PAYMENT_PACKET_STATUSES = new Set([
+  'draft',
+  'awaiting_trigger',
+  'released',
+  'submitted',
+  'cancelled',
+]);
 
 const PAYMENT_PACKET_STATUSES = new Set([
   'draft',
+  'awaiting_trigger',
+  'released',
   'submitted',
   'program_review',
   'returned',
@@ -39379,6 +40489,8 @@ const PAYMENT_BATCH_STATUSES = new Set(['draft', 'approved', 'exported', 'closed
 
 const PACKET_STATUS_TO_LINE_STATUS = {
   draft: 'needs_evidence',
+  awaiting_trigger: 'needs_evidence',
+  released: 'needs_evidence',
   submitted: 'ready_for_program',
   cancelled: 'cancelled',
 };
@@ -39408,7 +40520,9 @@ const RECURRING_PERIOD_OPTIONS = new Set(['weekly', 'bi_weekly', 'monthly', 'qua
 
 const normalizePacketWorkflowStage = status => {
   if (!status) return 'draft';
-  if (status === 'draft' || status === 'returned') return 'draft';
+  if (status === 'draft' || status === 'returned' || status === 'awaiting_trigger' || status === 'released') {
+    return 'draft';
+  }
   if (status === 'cancelled') return 'cancelled';
   return 'submitted';
 };
@@ -39477,8 +40591,17 @@ const normalizeRecipientsObject = (raw) => {
 };
 
 const sanitizeFinanceEmailRouting = (raw) => {
-  if (!raw || typeof raw !== 'object') return { regions: {} };
+  if (!raw || typeof raw !== 'object') return { enabled: true, regions: {} };
   const source = raw.regions && typeof raw.regions === 'object' ? raw.regions : raw;
+  const enabledRaw =
+    raw.enabled ??
+    raw.emailEnabled ??
+    raw.email_enabled ??
+    raw.financeEmailEnabled ??
+    raw.finance_email_enabled ??
+    null;
+  const enabledNormalized = normalizeBooleanLike(enabledRaw);
+  const enabled = enabledNormalized === null ? true : enabledNormalized;
   const regions = {};
   Object.entries(source).forEach(([code, email]) => {
     const normalizedCode = String(code || '').trim().toUpperCase();
@@ -39486,7 +40609,7 @@ const sanitizeFinanceEmailRouting = (raw) => {
     if (!normalizedCode || !normalizedEmail) return;
     regions[normalizedCode] = normalizedEmail;
   });
-  return { regions };
+  return { enabled, regions };
 };
 
 const normalizeIntacctString = (value) => {
@@ -39634,14 +40757,14 @@ const normalizeRegionCode = (value) => {
 
 async function readFinanceEmailRouting(connection = null) {
   const runner = connection || pool;
-  if (!runner) return { regions: {}, updatedAt: null };
+  if (!runner) return { enabled: true, regions: {}, updatedAt: null };
   try {
     await ensureRuntimeConfigTable();
     const [rows] = await runner.query(
       'SELECT v, updated_at FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
       [FINANCE_EMAIL_ROUTING_SCOPE, FINANCE_EMAIL_ROUTING_KEY]
     );
-    if (!rows || rows.length === 0) return { regions: {}, updatedAt: null };
+    if (!rows || rows.length === 0) return { enabled: true, regions: {}, updatedAt: null };
     let payload = rows[0].v;
     if (payload && typeof payload === 'string') {
       try {
@@ -39656,13 +40779,13 @@ async function readFinanceEmailRouting(connection = null) {
     if (!isMissingTableErrorLocal(err)) {
       console.warn('[finance-email-routing] failed to read config:', err.message);
     }
-    return { regions: {}, updatedAt: null };
+    return { enabled: true, regions: {}, updatedAt: null };
   }
 }
 
 async function writeFinanceEmailRouting(next, connection = null) {
   const runner = connection || pool;
-  if (!runner) return { regions: {}, updatedAt: null };
+  if (!runner) return { enabled: true, regions: {}, updatedAt: null };
   const sanitized = sanitizeFinanceEmailRouting(next);
   await ensureRuntimeConfigTable();
   await runner.query(
@@ -39759,7 +40882,8 @@ async function resolvePacketRegionCode(packetRow, connection = null) {
 async function resolveFinanceEmailForPacket(packetRow, connection = null) {
   const routing = await readFinanceEmailRouting(connection);
   const regionCode = await resolvePacketRegionCode(packetRow, connection);
-  const email = regionCode ? normalizeEmailAddress(routing.regions?.[regionCode]) : null;
+  const emailEnabled = routing?.enabled !== false;
+  const email = emailEnabled && regionCode ? normalizeEmailAddress(routing.regions?.[regionCode]) : null;
   return { regionCode, email, routing };
 }
 
@@ -39801,64 +40925,15 @@ const normalizeInterventionCodeValue = value => {
   return null;
 };
 
+const EMPTY_EVIDENCE_RULE_SET = {
+  required: [],
+  optional: [],
+  postPayRequired: [],
+};
+
 const DEFAULT_PAYMENT_EVIDENCE_RULES = {
-  baseline: {
-    required: [
-      'ClientApplicationSigned',
-      'FundingAgreement',
-      'CaseManagerAssessment',
-      'IndigenousIdentity',
-      'BandFundingConfirmationOrDenial',
-    ],
-    optional: [
-      'EIConsent',
-      'EIVerification',
-      'AcceptanceLetter',
-      'StatementOfAccount',
-    ],
-    postPayRequired: [],
-  },
-  paymentTypes: {
-    LivingAllowance: {
-      required: [
-        'AttendanceReport',
-        'FinancialOverview',
-        'IncomeVerification',
-        'ExpenseVerification',
-        'FundingAgreement',
-      ],
-      optional: ['EIVerification'],
-      postPayRequired: [],
-    },
-    TuitionFeesDirect: {
-      required: [
-        'TuitionStatementOrInvoice',
-        'AcceptanceLetter',
-        'FundingAgreement',
-      ],
-      optional: ['AlternatePayeeLetter'],
-      postPayRequired: [],
-    },
-    TuitionFeesReimbursement: {
-      required: ['PaidReceipt', 'FundingAgreement'],
-      optional: [],
-      postPayRequired: [],
-    },
-    SpecializedEquipmentAdvance: {
-      required: ['InstitutionLetter', 'Quote', 'FundingAgreement'],
-      optional: [],
-      postPayRequired: ['EquipmentReceipt'],
-    },
-    WageSubsidyEmployer: {
-      required: [
-        'EmployerDutiesLetter',
-        'EmployerOfferLetterAfterSubsidy',
-        'FundingAgreement',
-      ],
-      optional: ['WagePlan'],
-      postPayRequired: [],
-    },
-  },
+  baseline: { ...EMPTY_EVIDENCE_RULE_SET },
+  paymentTypes: {},
 };
 
 const PAYMENT_EVIDENCE_DOCUMENT_TYPE_MAP = {
@@ -39886,6 +40961,43 @@ const PAYMENT_EVIDENCE_DOCUMENT_TYPE_MAP = {
   employer_duties_letter: ['EmployerDutiesLetter'],
   employer_offer_letter_after_subsidy: ['EmployerOfferLetterAfterSubsidy'],
   wage_plan: ['WagePlan'],
+};
+
+const PAYMENT_EVIDENCE_LABEL_OVERRIDES = {
+  ClientApplicationSigned: 'Client application signed',
+  EIConsent: 'EI consent',
+  EIVerification: 'EI verification',
+  IndigenousIdentity: 'Indigenous identity',
+  BandFundingConfirmationOrDenial: 'Band funding confirmation or denial',
+  AcceptanceLetter: 'Acceptance letter',
+  StatementOfAccount: 'Statement of account',
+  TuitionStatementOrInvoice: 'Tuition statement or invoice',
+  FundingAgreement: 'Funding agreement',
+  CaseManagerAssessment: 'Case manager assessment',
+  AttendanceReport: 'Attendance report',
+  FinancialOverview: 'Financial overview',
+  IncomeVerification: 'Income verification',
+  ExpenseVerification: 'Expense verification',
+  PaidReceipt: 'Paid receipt',
+  EquipmentReceipt: 'Equipment receipt',
+  AlternatePayeeLetter: 'Alternate payee letter',
+  InstitutionLetter: 'Institution letter',
+  Quote: 'Quote',
+  EmployerDutiesLetter: 'Employer duties letter',
+  EmployerOfferLetterAfterSubsidy: 'Employer offer letter after subsidy',
+  WagePlan: 'Wage plan',
+};
+
+const humanizeEvidenceTypeLabel = type => {
+  const raw = typeof type === 'string' ? type.trim() : '';
+  if (!raw) return '';
+  const spaced = raw
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!spaced) return raw;
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 };
 
 const normalizeDocumentTypeCode = value => {
@@ -39968,6 +41080,47 @@ const normalizePaymentTypeCode = value => {
   if (normalized) return normalized;
   const raw = String(value).trim();
   return raw ? raw : null;
+};
+
+const normalizeRecurrenceMode = value => {
+  if (typeof value !== 'string') return RECURRENCE_MODE_NOT_ALLOWED;
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (normalized === RECURRENCE_MODE_REQUIRED) return RECURRENCE_MODE_REQUIRED;
+  if (normalized === RECURRENCE_MODE_OPTIONAL) return RECURRENCE_MODE_OPTIONAL;
+  if (normalized === RECURRENCE_MODE_NOT_ALLOWED || normalized === 'disabled') {
+    return RECURRENCE_MODE_NOT_ALLOWED;
+  }
+  return RECURRENCE_MODE_NOT_ALLOWED;
+};
+
+const buildRecurrencePolicyByPaymentType = config => {
+  const policy = new Map();
+  const paymentTypes = Array.isArray(config?.paymentTypes) ? config.paymentTypes : [];
+  paymentTypes.forEach(entry => {
+    const code = normalizePaymentTypeCode(
+      entry?.code ?? entry?.type ?? entry?.paymentType ?? entry?.payment_type ?? null
+    );
+    if (!code) return;
+    const mode = normalizeRecurrenceMode(
+      entry?.recurrence?.mode ?? entry?.recurrenceMode ?? entry?.recurrence_mode ?? null
+    );
+    policy.set(code, mode);
+  });
+  if (policy.size === 0) {
+    buildDefaultAssessmentCostingPaymentTypes().forEach(entry => {
+      policy.set(entry.code, normalizeRecurrenceMode(entry?.recurrence?.mode));
+    });
+  }
+  return policy;
+};
+
+const resolveRecurrenceModeForPaymentType = (paymentType, recurrencePolicyByType = null) => {
+  const code = normalizePaymentTypeCode(paymentType);
+  if (!code) return RECURRENCE_MODE_NOT_ALLOWED;
+  if (recurrencePolicyByType instanceof Map && recurrencePolicyByType.has(code)) {
+    return normalizeRecurrenceMode(recurrencePolicyByType.get(code));
+  }
+  return PAYMENT_TYPE_RECURRENCE_DEFAULTS[code] || RECURRENCE_MODE_NOT_ALLOWED;
 };
 
 const normalizePayeeTypeKey = value => {
@@ -40205,7 +41358,7 @@ const normalizePaymentEvidenceRulesOverride = raw => {
   const paymentTypes = {};
   if (paymentTypesRaw && typeof paymentTypesRaw === 'object') {
     Object.entries(paymentTypesRaw).forEach(([key, rule]) => {
-      const normalizedKey = normalizePaymentTypeKey(key) || String(key || '').trim();
+      const normalizedKey = normalizePaymentTypeCode(key) || String(key || '').trim();
       if (!normalizedKey || !rule || typeof rule !== 'object') return;
       const normalizedRule = normalizeEvidenceRuleSet(rule);
       if (normalizedRule) {
@@ -40275,19 +41428,68 @@ const mergePaymentEvidenceRules = (defaults, overrides) => {
   return merged;
 };
 
-async function readPaymentEvidenceRules(connection = null) {
+const serializePaymentEvidenceRules = rules => {
+  const baseline = cloneEvidenceRuleSet(rules?.baseline || EMPTY_EVIDENCE_RULE_SET);
+  const paymentTypes = {};
+  Object.entries(rules?.paymentTypes || {}).forEach(([key, rule]) => {
+    const normalizedKey = normalizePaymentTypeCode(key) || String(key || '').trim();
+    if (!normalizedKey) return;
+    paymentTypes[normalizedKey] = cloneEvidenceRuleSet(rule || EMPTY_EVIDENCE_RULE_SET);
+  });
+  return { baseline, paymentTypes };
+};
+
+const collectEvidenceTypesFromRuleSet = (rule, target) => {
+  if (!rule || typeof rule !== 'object' || !(target instanceof Set)) return;
+  ['required', 'optional', 'postPayRequired'].forEach(field => {
+    const list = Array.isArray(rule[field]) ? rule[field] : [];
+    list.forEach(type => {
+      if (typeof type === 'string' && type.trim()) {
+        target.add(type.trim());
+      }
+    });
+  });
+  if (rule.payeeTypes && typeof rule.payeeTypes === 'object') {
+    Object.values(rule.payeeTypes).forEach(value => collectEvidenceTypesFromRuleSet(value, target));
+  }
+};
+
+const buildPaymentEvidenceTypeOptions = rules => {
+  const evidenceTypes = new Set();
+  Object.values(PAYMENT_EVIDENCE_DOCUMENT_TYPE_MAP || {}).forEach(list => {
+    if (!Array.isArray(list)) return;
+    list.forEach(type => {
+      if (typeof type === 'string' && type.trim()) {
+        evidenceTypes.add(type.trim());
+      }
+    });
+  });
+  collectEvidenceTypesFromRuleSet(rules?.baseline, evidenceTypes);
+  Object.values(rules?.paymentTypes || {}).forEach(rule => {
+    collectEvidenceTypesFromRuleSet(rule, evidenceTypes);
+  });
+  return Array.from(evidenceTypes)
+    .sort((a, b) => a.localeCompare(b))
+    .map(value => ({
+      value,
+      label: PAYMENT_EVIDENCE_LABEL_OVERRIDES[value] || humanizeEvidenceTypeLabel(value),
+    }));
+};
+
+async function readPaymentEvidenceRulesSnapshot(connection = null) {
+  const fallbackRules = mergePaymentEvidenceRules(DEFAULT_PAYMENT_EVIDENCE_RULES, null);
   const runner = connection || pool;
   if (!runner) {
-    return mergePaymentEvidenceRules(DEFAULT_PAYMENT_EVIDENCE_RULES, null);
+    return { rules: fallbackRules, updatedAt: null };
   }
   try {
     await ensureRuntimeConfigTable();
     const [rows] = await runner.query(
-      'SELECT v FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
+      'SELECT v, updated_at FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
       [PAYMENT_EVIDENCE_RULES_SCOPE, PAYMENT_EVIDENCE_RULES_KEY]
     );
     if (!rows || rows.length === 0) {
-      return mergePaymentEvidenceRules(DEFAULT_PAYMENT_EVIDENCE_RULES, null);
+      return { rules: fallbackRules, updatedAt: null };
     }
     let payload = rows[0].v;
     if (payload && typeof payload === 'string') {
@@ -40298,13 +41500,44 @@ async function readPaymentEvidenceRules(connection = null) {
       }
     }
     const overrides = normalizePaymentEvidenceRulesOverride(payload);
-    return mergePaymentEvidenceRules(DEFAULT_PAYMENT_EVIDENCE_RULES, overrides);
+    return {
+      rules: mergePaymentEvidenceRules(DEFAULT_PAYMENT_EVIDENCE_RULES, overrides),
+      updatedAt: rows[0].updated_at || null,
+    };
   } catch (err) {
     if (!isMissingTableErrorLocal(err)) {
       console.warn('[payment-evidence] failed to read runtime rules:', err.message);
     }
-    return mergePaymentEvidenceRules(DEFAULT_PAYMENT_EVIDENCE_RULES, null);
+    return { rules: fallbackRules, updatedAt: null };
   }
+}
+
+async function readPaymentEvidenceRules(connection = null) {
+  const { rules } = await readPaymentEvidenceRulesSnapshot(connection);
+  return rules;
+}
+
+async function writePaymentEvidenceRules(payload, connection = null) {
+  const runner = connection || pool;
+  const cleaned = mergePaymentEvidenceRules(
+    DEFAULT_PAYMENT_EVIDENCE_RULES,
+    normalizePaymentEvidenceRulesOverride(payload)
+  );
+  if (!runner) return { rules: cleaned, updatedAt: null };
+  await ensureRuntimeConfigTable();
+  await runner.query(
+    'INSERT INTO iset_runtime_config (scope,k,v) VALUES (?,?,CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP',
+    [
+      PAYMENT_EVIDENCE_RULES_SCOPE,
+      PAYMENT_EVIDENCE_RULES_KEY,
+      JSON.stringify(serializePaymentEvidenceRules(cleaned)),
+    ]
+  );
+  const [[row]] = await runner.query(
+    'SELECT updated_at FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
+    [PAYMENT_EVIDENCE_RULES_SCOPE, PAYMENT_EVIDENCE_RULES_KEY]
+  );
+  return { rules: cleaned, updatedAt: row?.updated_at || null };
 }
 
 const normalizeApprovalRoles = roles => {
@@ -40464,6 +41697,32 @@ async function readPaymentPolicyRules(connection = null) {
   }
 }
 
+const PAYMENT_SUBMISSION_TIMING_DEFAULTS = {
+  LivingAllowance: 'recurrence_schedule',
+  TuitionFeesDirect: 'intervention_start',
+  TuitionFeesReimbursement: 'intervention_end',
+  SpecializedEquipmentAdvance: 'intervention_start',
+  SpecializedEquipmentReimbursement: 'intervention_end',
+  WageSubsidyEmployer: 'recurrence_schedule',
+  Childcare: 'recurrence_schedule',
+  Transportation: 'recurrence_schedule',
+  BooksMaterialsDirect: 'intervention_start',
+  BooksMaterialsReimbursement: 'intervention_end',
+  JCPProjectCost: 'manual_trigger',
+  SEBSupport: 'recurrence_schedule',
+  OtherEligibleCost: 'manual_trigger',
+};
+
+const normalizePaymentSubmissionTiming = value => {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'intervention_start') return 'intervention_start';
+  if (normalized === 'intervention_end') return 'intervention_end';
+  if (normalized === 'recurrence_schedule') return 'recurrence_schedule';
+  if (normalized === 'manual_trigger') return 'manual_trigger';
+  return null;
+};
+
 const normalizePaymentTypeMappingEntry = entry => {
   if (!entry || typeof entry !== 'object') return null;
   const code = normalizePaymentTypeCode(
@@ -40474,7 +41733,17 @@ const normalizePaymentTypeMappingEntry = entry => {
   const label = typeof labelRaw === 'string' && labelRaw.trim() ? labelRaw.trim() : code;
   const notesRaw = entry.notes ?? entry.note ?? null;
   const notes = typeof notesRaw === 'string' && notesRaw.trim() ? notesRaw.trim() : '';
-  return { code, label, notes };
+  const submissionTiming =
+    normalizePaymentSubmissionTiming(
+      entry.submissionTiming ??
+        entry.submission_timing ??
+        entry.schedulePolicy ??
+        entry.schedule_policy ??
+        null
+    ) ||
+    PAYMENT_SUBMISSION_TIMING_DEFAULTS[code] ||
+    'manual_trigger';
+  return { code, label, notes, submissionTiming };
 };
 
 const normalizePaymentInterventionMappingEntry = entry => {
@@ -40635,7 +41904,7 @@ async function readPaymentInterventionMappingSnapshot(connection = null) {
   try {
     await ensureRuntimeConfigTable();
     const [rows] = await runner.query(
-      'SELECT v FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
+      'SELECT v, updated_at FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
       [PAYMENT_INTERVENTION_MAPPING_SCOPE, PAYMENT_INTERVENTION_MAPPING_KEY]
     );
     if (!rows || rows.length === 0) {
@@ -42247,11 +43516,16 @@ const validatePaymentLinePolicy = ({
   evidenceTypeKeys,
   policyRules,
   interventionPaymentTypeMap,
+  recurrencePolicyByType,
 }) => {
   const errors = [];
   const paymentTypeRaw = line?.payment_type || line?.paymentType;
   const paymentTypeKey = normalizePaymentTypeKey(paymentTypeRaw);
   const paymentTypeCode = normalizePaymentTypeCode(paymentTypeRaw);
+  const recurrenceMode = resolveRecurrenceModeForPaymentType(
+    paymentTypeCode || paymentTypeKey,
+    recurrencePolicyByType
+  );
   const amount = Number(line?.amount || 0);
   const cap = paymentTypeKey ? policyRules?.amountCaps?.[paymentTypeKey] : null;
   if (cap && Number.isFinite(cap) && Number.isFinite(amount) && amount > cap) {
@@ -42287,14 +43561,51 @@ const validatePaymentLinePolicy = ({
     }
   }
 
-  if (paymentTypeKey === 'LivingAllowance') {
-    const start = parseDateOnly(line?.service_period_start || line?.servicePeriodStart);
-    const end = parseDateOnly(line?.service_period_end || line?.servicePeriodEnd);
-    if (!start || !end) {
+  const lineMeta = safeJsonParse(line?.metadata, line?.metadata || {}) || {};
+  const recurrenceMeta =
+    lineMeta?.recurrence && typeof lineMeta.recurrence === 'object' ? lineMeta.recurrence : null;
+  const recurrencePayload =
+    line?.recurrence && typeof line.recurrence === 'object' ? line.recurrence : null;
+  const recurrenceEnabled = Boolean(
+    recurrenceMeta?.enabled === true ||
+      recurrenceMeta?.period ||
+      recurrenceMeta?.scheduleStart ||
+      recurrenceMeta?.scheduleEnd ||
+      recurrenceMeta?.index ||
+      recurrenceMeta?.total ||
+      recurrenceMeta?.occurrences ||
+      recurrenceMeta?.amountPerPeriod ||
+      recurrencePayload?.enabled === true ||
+      recurrencePayload?.period ||
+      recurrencePayload?.startDate ||
+      recurrencePayload?.endDate ||
+      recurrencePayload?.occurrences
+  );
+  const start = parseDateOnly(line?.service_period_start || line?.servicePeriodStart);
+  const end = parseDateOnly(line?.service_period_end || line?.servicePeriodEnd);
+  const hasAnyServicePeriod = Boolean(start || end);
+  if (recurrenceMode === RECURRENCE_MODE_NOT_ALLOWED) {
+    if (hasAnyServicePeriod || recurrenceEnabled) {
+      errors.push({
+        field: 'recurrence',
+        code: 'recurrence_not_allowed',
+        message: 'Recurrence is not allowed for this payment type.',
+      });
+    }
+  } else {
+    if (!start && !end) {
+      if (recurrenceMode === RECURRENCE_MODE_REQUIRED) {
+        errors.push({
+          field: 'servicePeriod',
+          code: 'service_period_required',
+          message: 'Service period start/end are required for this recurring payment type.',
+        });
+      }
+    } else if (!start || !end) {
       errors.push({
         field: 'servicePeriod',
-        code: 'service_period_required',
-        message: 'Service period start/end are required for living allowance.',
+        code: 'service_period_invalid',
+        message: 'Service period start/end must both be provided.',
       });
     } else if (end < start) {
       errors.push({
@@ -42303,6 +43614,16 @@ const validatePaymentLinePolicy = ({
         message: 'Service period end must be on or after start.',
       });
     }
+    if (recurrenceMode === RECURRENCE_MODE_REQUIRED && !recurrenceEnabled) {
+      errors.push({
+        field: 'recurrence',
+        code: 'recurrence_required',
+        message: 'A recurring schedule is required for this payment type.',
+      });
+    }
+  }
+
+  if (paymentTypeKey === 'LivingAllowance') {
     const interventionStart = parseDateOnly(intervention?.start_date || intervention?.startDate);
     if (end && interventionStart && end < interventionStart) {
       errors.push({
@@ -42317,24 +43638,6 @@ const validatePaymentLinePolicy = ({
         field: 'servicePeriodEnd',
         code: 'backdating_not_allowed',
         message: 'Living allowance backdating exceeds policy.',
-      });
-    }
-  }
-
-  if (paymentTypeKey === 'WageSubsidyEmployer') {
-    const start = parseDateOnly(line?.service_period_start || line?.servicePeriodStart);
-    const end = parseDateOnly(line?.service_period_end || line?.servicePeriodEnd);
-    if (!start || !end) {
-      errors.push({
-        field: 'servicePeriod',
-        code: 'service_period_required',
-        message: 'Service period start/end are required for wage subsidy.',
-      });
-    } else if (end < start) {
-      errors.push({
-        field: 'servicePeriod',
-        code: 'service_period_invalid',
-        message: 'Service period end must be on or after start.',
       });
     }
   }
@@ -42532,75 +43835,9 @@ const buildFundingCapsFromAssessment = assessmentRow => {
 };
 
 const scaleFundingCapsForRecurring = ({ caps, totalAuthorized, interventionRow, assessmentRow }) => {
-  if (!caps || !interventionRow) return { caps, totalAuthorized, scaled: false };
-  const meta = safeJsonParse(interventionRow?.metadata_json, {}) || {};
-  const esdc = safeJsonParse(interventionRow?.esdc_intervention_json, {}) || {};
-  const costType = normaliseRecurringCostType(
-    meta.costType || meta.cost_type || meta?.costSettings?.type || meta?.recurrence?.type || null
-  );
-  if (costType && costType !== 'recurring') {
-    return { caps, totalAuthorized, scaled: false };
-  }
-  const toNumber = value => {
-    if (value === null || typeof value === 'undefined' || value === '') return null;
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric : null;
-  };
-  const occurrences =
-    toNumber(meta?.costSettings?.occurrences) ??
-    toNumber(meta?.recurrence?.occurrences) ??
-    toNumber(
-      resolveFundingOccurrences({
-        startDate: interventionRow?.start_date,
-        endDate: interventionRow?.end_date,
-        interventionMetadata: meta,
-        interventionEsdc: esdc,
-        assessmentRow,
-      })
-    );
-  if (!occurrences || occurrences <= 1) return { caps, totalAuthorized, scaled: false };
-  const capsTotal = computeFundingTotalFromCaps(caps);
-  if (!Number.isFinite(capsTotal) || capsTotal <= 0) return { caps, totalAuthorized, scaled: false };
-  const amountPerPeriod =
-    toNumber(meta?.costSettings?.amountPerPeriod) ??
-    toNumber(meta?.recurrence?.amountPerPeriod);
-  const calculatedTotal =
-    toNumber(meta?.costSettings?.calculatedTotal) ??
-    toNumber(meta?.recurrence?.calculatedTotal);
-  const assessmentTotal = toNumber(assessmentRow?.intervention_cost_total);
-  const interventionTotal =
-    toNumber(interventionRow?.approved_amount) ??
-    toNumber(interventionRow?.budget_amount) ??
-    toNumber(interventionRow?.intervention_cost);
-  const targetTotal =
-    calculatedTotal ?? assessmentTotal ?? interventionTotal ?? null;
-  const closeEnough = (a, b) =>
-    Number.isFinite(a) && Number.isFinite(b) ? Math.abs(a - b) <= 1 : false;
-  const projectedTotal = capsTotal * occurrences;
-
-  let shouldScale = false;
-  if (Number.isFinite(targetTotal)) {
-    const diffRecurring = Math.abs(targetTotal - projectedTotal);
-    const diffSingle = Math.abs(targetTotal - capsTotal);
-    shouldScale = diffRecurring <= diffSingle;
-  } else if (Number.isFinite(amountPerPeriod) && closeEnough(capsTotal, amountPerPeriod)) {
-    shouldScale = true;
-  }
-
-  if (!shouldScale) return { caps, totalAuthorized, scaled: false };
-
-  const scaledCaps = {};
-  Object.entries(caps).forEach(([key, value]) => {
-    if (!Number.isFinite(value)) return;
-    scaledCaps[key] = Math.round(value * occurrences * 100) / 100;
-  });
-  const normalizedCaps = finalizeFundingCaps(scaledCaps);
-  const scaledTotal = computeFundingTotalFromCaps(normalizedCaps);
-  let nextTotalAuthorized = totalAuthorized;
-  if (!Number.isFinite(nextTotalAuthorized) || closeEnough(nextTotalAuthorized, capsTotal)) {
-    nextTotalAuthorized = Number.isFinite(scaledTotal) ? scaledTotal : nextTotalAuthorized;
-  }
-  return { caps: normalizedCaps, totalAuthorized: nextTotalAuthorized, scaled: true };
+  void interventionRow;
+  void assessmentRow;
+  return { caps, totalAuthorized, scaled: false };
 };
 
 const fetchActionPlanMetadata = async (actionPlanId, connection) => {
@@ -43061,7 +44298,7 @@ const deletePaymentPacket = async ({ packetId, connection }) => {
     return { deleted: false, missing: true };
   }
   const status = packetRow.status || null;
-  if (status !== 'draft') {
+  if (!['draft', 'awaiting_trigger', 'released'].includes(status)) {
     return { deleted: false, notDraft: true, status };
   }
 
@@ -43687,6 +44924,7 @@ const runPaymentPacketValidation = async ({ packetRow, lineRows, connection }) =
   const details = [];
 
   const policyRules = await readPaymentPolicyRules(connection);
+  const recurrencePolicyByType = await readPaymentRecurrencePolicyByType(connection);
   const paymentTypeMap = await readPaymentInterventionMapping(connection);
   const interventionIds = activeLines.map(line => line.intervention_id).filter(Boolean);
   if (packetRow.intervention_id) {
@@ -43717,6 +44955,7 @@ const runPaymentPacketValidation = async ({ packetRow, lineRows, connection }) =
       evidenceTypeKeys: lineEvidence,
       policyRules,
       interventionPaymentTypeMap: paymentTypeMap,
+      recurrencePolicyByType,
     });
     validationErrors.forEach(err => {
       details.push({
@@ -43952,6 +45191,7 @@ const buildAutoPaymentLinesFromCostLines = ({
   fallbackPayeeType,
   fallbackPayeeName,
   allowedPaymentTypes,
+  recurrencePolicyByType,
 }) => {
   const lines = [];
   const isAllowed = paymentType =>
@@ -43982,7 +45222,13 @@ const buildAutoPaymentLinesFromCostLines = ({
     const amount = Number(entry.amount);
     if (!Number.isFinite(amount) || amount <= 0) return;
     const recurrence = entry.recurrence && typeof entry.recurrence === 'object' ? entry.recurrence : null;
-    const recurrenceEnabled = Boolean(recurrence?.enabled);
+    const recurrenceMode = resolveRecurrenceModeForPaymentType(paymentType, recurrencePolicyByType);
+    const recurrenceEnabled =
+      recurrenceMode === RECURRENCE_MODE_REQUIRED
+        ? true
+        : recurrenceMode === RECURRENCE_MODE_NOT_ALLOWED
+          ? false
+          : Boolean(recurrence?.enabled);
     const occurrences = normaliseRecurringNumber(recurrence?.occurrences);
     const amountPerPeriod = normaliseRecurringNumber(recurrence?.amountPerPeriod);
     const recurrenceStart = toDateOnly(recurrence?.startDate || interventionStart || null);
@@ -44048,9 +45294,7 @@ const buildAutoPaymentLinesFromCostLines = ({
       }
     }
 
-    const requiresPeriod =
-      normalizePaymentTypeKey(paymentType) === 'LivingAllowance' ||
-      normalizePaymentTypeKey(paymentType) === 'WageSubsidyEmployer';
+    const requiresPeriod = recurrenceMode !== RECURRENCE_MODE_NOT_ALLOWED;
     pushLine({
       paymentType,
       payeeType: payee.payeeType,
@@ -44079,6 +45323,7 @@ const buildAutoPaymentLinesFromAssessment = ({
   fallbackPayeeType,
   fallbackPayeeName,
   allowedPaymentTypes,
+  recurrencePolicyByType,
 }) => {
   const lines = [];
   const isAllowed = paymentType =>
@@ -44129,8 +45374,24 @@ const buildAutoPaymentLinesFromAssessment = ({
     addEntry({ key: 'tuition', amount: itp.tuition, paymentType: 'TuitionFeesDirect', fundingCategory: 'tuition' });
     addEntry({ key: 'books', amount: itp.books, paymentType: 'BooksMaterialsDirect', fundingCategory: 'books' });
     addEntry({ key: 'materials', amount: itp.materials, paymentType: 'BooksMaterialsDirect', fundingCategory: 'materials' });
-    addEntry({ key: 'living', amount: itp.living, paymentType: 'LivingAllowance', fundingCategory: 'living', recurring: true });
-    addEntry({ key: 'childcare', amount: itp.childcare, paymentType: 'Childcare', fundingCategory: 'childcare', recurring: true });
+    addEntry({
+      key: 'living',
+      amount: itp.living,
+      paymentType: 'LivingAllowance',
+      fundingCategory: 'living',
+      recurring:
+        resolveRecurrenceModeForPaymentType('LivingAllowance', recurrencePolicyByType) ===
+        RECURRENCE_MODE_REQUIRED,
+    });
+    addEntry({
+      key: 'childcare',
+      amount: itp.childcare,
+      paymentType: 'Childcare',
+      fundingCategory: 'childcare',
+      recurring:
+        resolveRecurrenceModeForPaymentType('Childcare', recurrencePolicyByType) ===
+        RECURRENCE_MODE_REQUIRED,
+    });
     addEntry({
       key: 'other',
       amount: itp.otherAmount,
@@ -44179,7 +45440,9 @@ const buildAutoPaymentLinesFromAssessment = ({
           amount,
           paymentType,
           fundingCategory: category,
-          recurring: category === 'living' || category === 'childcare',
+          recurring:
+            resolveRecurrenceModeForPaymentType(paymentType, recurrencePolicyByType) ===
+            RECURRENCE_MODE_REQUIRED,
         });
         return;
       }
@@ -44200,47 +45463,17 @@ const buildAutoPaymentLinesFromAssessment = ({
     toDateOnly(interventionRow?.start_date || assessmentRow?.intervention_start_date) || null;
   const endDate =
     toDateOnly(interventionRow?.end_date || assessmentRow?.intervention_end_date) || null;
-  const assessmentCostTotal = normalizeAutoPacketAmount(assessmentRow?.intervention_cost_total);
-
-  const costSettings =
-    (interventionMetadata?.costSettings && typeof interventionMetadata.costSettings === 'object'
-      ? interventionMetadata.costSettings
-      : null) ||
-    (interventionMetadata?.recurrence && typeof interventionMetadata.recurrence === 'object'
-      ? interventionMetadata.recurrence
-      : null);
-  const costType = normaliseRecurringCostType(
-    interventionMetadata?.costType ||
-      interventionMetadata?.cost_type ||
-      costSettings?.type ||
-      null
-  );
-  const period = normalizeRecurringPeriod(costSettings?.period || '');
-  const occurrences = normaliseRecurringNumber(costSettings?.occurrences);
-  const amountPerPeriod = normaliseRecurringNumber(costSettings?.amountPerPeriod);
-  const calculatedTotal = normaliseRecurringNumber(costSettings?.calculatedTotal);
-
-  const isRecurring = costType === 'recurring' && period && startDate;
-  const { periods } = isRecurring
-    ? buildRecurringServicePeriods({
-        startDate,
-        endDate,
-        period,
-        occurrences,
-      })
-    : { periods: [] };
-  const scheduleCount = periods.length || (Number.isFinite(occurrences) ? Math.round(occurrences) : null);
-  const tableTotal = entries.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
-  const amountMode = isRecurring
-    ? resolveAutoPacketAmountMode({
-        tableTotal,
-        amountPerPeriod,
-        calculatedTotal,
-        interventionCostTotal: assessmentCostTotal,
-      })
-    : 'total';
+  const canBuildRecurringPeriods = Boolean(startDate && endDate);
 
   entries.forEach(entry => {
+    const recurrenceMode = resolveRecurrenceModeForPaymentType(
+      entry.paymentType,
+      recurrencePolicyByType
+    );
+    const recurrenceRequired = recurrenceMode === RECURRENCE_MODE_REQUIRED;
+    const recurrenceAllowed = recurrenceMode !== RECURRENCE_MODE_NOT_ALLOWED;
+    const recurringRequested = Boolean(entry.recurring);
+    const shouldGenerateRecurring = recurrenceAllowed && (recurringRequested || recurrenceRequired);
     const baseMeta = pruneNullish({
       autoGenerated: true,
       source: 'assessment_breakdown',
@@ -44255,16 +45488,19 @@ const buildAutoPaymentLinesFromAssessment = ({
       fallbackName: fallbackPayeeName,
     });
 
-    if (entry.recurring && isRecurring && periods.length) {
-      const splitAmounts =
-        amountMode === 'per_period'
-          ? periods.map(() => entry.amount)
-          : splitRecurringAmount(entry.amount, periods.length);
+    if (shouldGenerateRecurring && canBuildRecurringPeriods) {
+      const { periods } = buildRecurringServicePeriods({
+        startDate,
+        endDate,
+        period: 'monthly',
+      });
+      if (!periods.length) return;
+      const splitAmounts = splitRecurringAmount(entry.amount, periods.length);
       splitAmounts.forEach((amount, index) => {
         const periodItem = periods[index];
         if (!periodItem) return;
         const recurrenceMeta = {
-          period,
+          period: 'monthly',
           index: index + 1,
           total: periods.length,
           scheduleStart: periods[0]?.start || null,
@@ -44291,21 +45527,15 @@ const buildAutoPaymentLinesFromAssessment = ({
       return;
     }
 
-    let amount = entry.amount;
-    if (isRecurring && amountMode === 'per_period' && scheduleCount && scheduleCount > 1 && !entry.recurring) {
-      amount = Math.round(amount * scheduleCount * 100) / 100;
-    }
-    const requiresPeriod =
-      normalizePaymentTypeKey(entry.paymentType) === 'LivingAllowance' ||
-      normalizePaymentTypeKey(entry.paymentType) === 'WageSubsidyEmployer';
+    const needsServicePeriod = recurrenceAllowed && (recurringRequested || recurrenceRequired);
     pushLine({
       paymentType: entry.paymentType,
       payeeType: payee.payeeType,
       payeeName: payee.payeeName,
-      amount,
+      amount: entry.amount,
       currency: 'CAD',
-      servicePeriodStart: requiresPeriod ? startDate : null,
-      servicePeriodEnd: requiresPeriod ? endDate : null,
+      servicePeriodStart: needsServicePeriod ? startDate : null,
+      servicePeriodEnd: needsServicePeriod ? endDate : null,
       requestedPaymentDate: null,
       status: 'needs_evidence',
       holdReason: null,
@@ -44332,12 +45562,16 @@ async function createAutoPaymentPacketFromIntervention({
     resolvedActorUserId = await ensureUserExists(runner, resolvedActorUserId);
   }
 
-  const [[existing]] = await runner.query(
-    'SELECT id FROM payment_packet WHERE intervention_id = ? ORDER BY id DESC LIMIT 1',
+  const [existingPackets] = await runner.query(
+    `SELECT id
+       FROM payment_packet
+      WHERE intervention_id = ?
+        AND (status IS NULL OR status <> 'cancelled')
+      LIMIT 1`,
     [interventionId]
   );
-  if (existing?.id) {
-    return { packetId: String(existing.id), created: false };
+  if (existingPackets?.length) {
+    return { packetId: String(existingPackets[0].id), created: false };
   }
 
   const caseId = Number(interventionRow.case_id) || null;
@@ -44444,6 +45678,17 @@ async function createAutoPaymentPacketFromIntervention({
   const paymentType =
     resolveAutoPacketPaymentType(metadata.paymentType || metadata.payment_type) || 'OtherEligibleCost';
   const paymentTypeMapping = await readPaymentInterventionMapping(runner);
+  const submissionTimingByType = new Map();
+  (paymentTypeMapping?.paymentTypes || []).forEach(entry => {
+    const code = normalizePaymentTypeCode(entry?.code);
+    if (!code) return;
+    const timing =
+      normalizePaymentSubmissionTiming(entry?.submissionTiming) ||
+      PAYMENT_SUBMISSION_TIMING_DEFAULTS[code] ||
+      'manual_trigger';
+    submissionTimingByType.set(code, timing);
+  });
+  const recurrencePolicyByType = await readPaymentRecurrencePolicyByType(runner);
   const allowedPaymentTypes = paymentTypeMapping
     ? resolveAllowedPaymentTypesForIntervention(paymentTypeMapping, interventionRow)
     : null;
@@ -44456,6 +45701,7 @@ async function createAutoPaymentPacketFromIntervention({
     fallbackPayeeType,
     fallbackPayeeName,
     allowedPaymentTypes,
+    recurrencePolicyByType,
   });
   if (requireCostLines && !costLineInputs.length) {
     return { packetId: null, created: false, reason: 'missing_cost_lines' };
@@ -44477,109 +45723,181 @@ async function createAutoPaymentPacketFromIntervention({
     metadata.requester_role ||
     (actorRole ? String(actorRole) : null);
 
-  const packetMeta = {
-    autoGeneratedFromInterventionId: String(interventionId),
-    autoGeneratedAt: new Date().toISOString(),
+  const interventionStartDate = toDateOnly(interventionRow.start_date || null);
+  const interventionEndDate = toDateOnly(interventionRow.end_date || null);
+  const resolveSubmissionTimingForPaymentType = paymentTypeCode => {
+    const code = normalizePaymentTypeCode(paymentTypeCode);
+    if (!code) return 'manual_trigger';
+    return (
+      submissionTimingByType.get(code) ||
+      PAYMENT_SUBMISSION_TIMING_DEFAULTS[code] ||
+      'manual_trigger'
+    );
   };
-  if (requesterName) packetMeta.requesterName = requesterName;
-  if (requesterRole) packetMeta.requesterRole = requesterRole;
-
-  const [packetResult] = await runner.query(
-    `INSERT INTO payment_packet
-      (case_id, client_id, intervention_id, reporting_unit, status, requester_user_id,
-       submitted_at, due_by, notes_internal, risk_flags, metadata, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'draft', ?, NULL, NULL, ?, ?, ?, NOW(), NOW())`,
-    [
-      caseId || null,
-      clientId || null,
-      interventionId,
-      reportingUnit || null,
-      resolvedActorUserId || null,
-      'Auto-generated from intervention.',
-      JSON.stringify(riskFlags),
-      JSON.stringify(packetMeta),
-    ]
-  );
-  const packetId = packetResult.insertId;
-
-  if (packetId && potId) {
-    const fundingStream = potRow?.funding_source
-      ? normalizeFundingSource(potRow.funding_source)
-      : null;
-    const autoLineInputs = costLineInputs.length
-      ? costLineInputs
-      : buildAutoPaymentLinesFromAssessment({
-          assessmentRow,
-          interventionRow,
-          interventionMetadata: metadata,
-          planMetadata,
-          clientPayeeName,
-          partnerName,
-          fallbackPayeeType,
-          fallbackPayeeName,
-          allowedPaymentTypes,
-        });
-    const fallbackPayee = resolveAutoPacketPayee({
-      paymentType,
-      partnerName,
-      clientName: clientPayeeName,
-      fallbackType: fallbackPayeeType,
-      fallbackName: fallbackPayeeName,
-    });
-    const fallbackLines =
-      !autoLineInputs.length &&
-      paymentAmount &&
-      (!allowedPaymentTypes || allowedPaymentTypes.size === 0 || allowedPaymentTypes.has(paymentType))
-        ? [
-            {
-              paymentType,
-              payeeType: fallbackPayee.payeeType,
-              payeeName: fallbackPayee.payeeName,
-              amount: paymentAmount,
-              currency: 'CAD',
-              servicePeriodStart: interventionRow.start_date ? toDateOnly(interventionRow.start_date) : null,
-              servicePeriodEnd: interventionRow.end_date ? toDateOnly(interventionRow.end_date) : null,
-              requestedPaymentDate: null,
-              status: 'needs_evidence',
-              holdReason: null,
-              metadata: { autoGenerated: true },
-            },
-          ]
-        : [];
-    const lineInputs = autoLineInputs.length ? autoLineInputs : fallbackLines;
-    if (lineInputs.length) {
-      const lineValues = lineInputs.map(line => [
-        packetId,
-        interventionId,
-        line.paymentType,
-        line.payeeType,
-        line.payeeName,
-        null,
-        null,
-        line.amount,
-        line.currency || 'CAD',
-        line.servicePeriodStart || null,
-        line.servicePeriodEnd || null,
-        line.invoiceReferenceNumber || null,
-        line.requestedPaymentDate || null,
-        potId,
-        fundingStream,
-        line.status || 'needs_evidence',
-        line.holdReason || null,
-        JSON.stringify(line.metadata || {}),
-      ]);
-      await runner.query(
-        `INSERT INTO payment_packet_line
-          (payment_packet_id, intervention_id, payment_type, payee_type, payee_name, payee_profile_id, payee_reference,
-           amount, currency, service_period_start, service_period_end, invoice_reference_number, requested_payment_date,
-           budget_pot_id, funding_stream, status, hold_reason, metadata)
-         VALUES ?`,
-        [lineValues]
-      );
+  const resolveLineScheduledDate = (lineInput, submissionTiming) => {
+    const requestedDate = toDateOnly(lineInput?.requestedPaymentDate || null);
+    const serviceStart = toDateOnly(lineInput?.servicePeriodStart || null);
+    const serviceEnd = toDateOnly(lineInput?.servicePeriodEnd || null);
+    if (submissionTiming === 'intervention_start') {
+      return interventionStartDate || serviceStart || requestedDate || null;
     }
+    if (submissionTiming === 'intervention_end') {
+      return interventionEndDate || serviceEnd || requestedDate || interventionStartDate || null;
+    }
+    if (submissionTiming === 'recurrence_schedule') {
+      return requestedDate || serviceStart || interventionStartDate || null;
+    }
+    return requestedDate || serviceStart || interventionStartDate || null;
+  };
+
+  const autoLineInputs = costLineInputs.length
+    ? costLineInputs
+    : buildAutoPaymentLinesFromAssessment({
+        assessmentRow,
+        interventionRow,
+        interventionMetadata: metadata,
+        planMetadata,
+        clientPayeeName,
+        partnerName,
+        fallbackPayeeType,
+        fallbackPayeeName,
+        allowedPaymentTypes,
+        recurrencePolicyByType,
+      });
+  const fallbackPayee = resolveAutoPacketPayee({
+    paymentType,
+    partnerName,
+    clientName: clientPayeeName,
+    fallbackType: fallbackPayeeType,
+    fallbackName: fallbackPayeeName,
+  });
+  const fallbackLines =
+    !autoLineInputs.length &&
+    paymentAmount &&
+    (!allowedPaymentTypes || allowedPaymentTypes.size === 0 || allowedPaymentTypes.has(paymentType))
+      ? [
+          {
+            paymentType,
+            payeeType: fallbackPayee.payeeType,
+            payeeName: fallbackPayee.payeeName,
+            amount: paymentAmount,
+            currency: 'CAD',
+            servicePeriodStart: interventionStartDate,
+            servicePeriodEnd: interventionEndDate,
+            requestedPaymentDate: null,
+            status: 'needs_evidence',
+            holdReason: null,
+            metadata: { autoGenerated: true },
+          },
+        ]
+      : [];
+  const lineInputs = autoLineInputs.length ? autoLineInputs : fallbackLines;
+  if (!lineInputs.length) {
+    return { packetId: null, created: false, reason: 'missing_payment_lines' };
+  }
+  if (!potId) {
+    return { packetId: null, created: false, reason: 'missing_budget_pot' };
   }
 
-  if (packetId) {
+  const fundingStream = potRow?.funding_source ? normalizeFundingSource(potRow.funding_source) : null;
+  const grouped = new Map();
+  lineInputs.forEach(line => {
+    const submissionTiming = resolveSubmissionTimingForPaymentType(line.paymentType);
+    const scheduledPaymentDate = resolveLineScheduledDate(line, submissionTiming);
+    const manualTrigger = submissionTiming === 'manual_trigger';
+    const groupKey = `${scheduledPaymentDate || 'none'}::${manualTrigger ? 'manual' : 'auto'}`;
+    if (!grouped.has(groupKey)) {
+      grouped.set(groupKey, {
+        scheduledPaymentDate,
+        submissionTiming,
+        manualTrigger,
+        lines: [],
+      });
+    }
+    grouped.get(groupKey).lines.push({
+      ...line,
+      metadata: {
+        ...(line.metadata || {}),
+        scheduling: pruneNullish({
+          submissionTiming,
+          scheduledPaymentDate,
+          manualTrigger,
+        }),
+      },
+    });
+  });
+  const groups = Array.from(grouped.values()).sort((a, b) => {
+    if (!a.scheduledPaymentDate && !b.scheduledPaymentDate) return 0;
+    if (!a.scheduledPaymentDate) return 1;
+    if (!b.scheduledPaymentDate) return -1;
+    return String(a.scheduledPaymentDate).localeCompare(String(b.scheduledPaymentDate));
+  });
+
+  const createdPacketIds = [];
+  for (const group of groups) {
+    const packetStatus = group.manualTrigger ? 'awaiting_trigger' : 'draft';
+    const packetMeta = {
+      autoGeneratedFromInterventionId: String(interventionId),
+      autoGeneratedAt: new Date().toISOString(),
+      scheduling: pruneNullish({
+        scheduledPaymentDate: group.scheduledPaymentDate || null,
+        submissionTiming: group.submissionTiming || null,
+        manualTrigger: group.manualTrigger || false,
+      }),
+    };
+    if (requesterName) packetMeta.requesterName = requesterName;
+    if (requesterRole) packetMeta.requesterRole = requesterRole;
+
+    const [packetResult] = await runner.query(
+      `INSERT INTO payment_packet
+        (case_id, client_id, intervention_id, reporting_unit, status, requester_user_id,
+         submitted_at, due_by, notes_internal, risk_flags, metadata, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        caseId || null,
+        clientId || null,
+        interventionId,
+        reportingUnit || null,
+        packetStatus,
+        resolvedActorUserId || null,
+        group.scheduledPaymentDate || null,
+        'Auto-generated from intervention.',
+        JSON.stringify(riskFlags),
+        JSON.stringify(packetMeta),
+      ]
+    );
+    const packetId = packetResult.insertId;
+    createdPacketIds.push(packetId);
+
+    const lineValues = group.lines.map(line => [
+      packetId,
+      interventionId,
+      line.paymentType,
+      line.payeeType,
+      line.payeeName,
+      null,
+      null,
+      line.amount,
+      line.currency || 'CAD',
+      line.servicePeriodStart || null,
+      line.servicePeriodEnd || null,
+      line.invoiceReferenceNumber || null,
+      line.requestedPaymentDate || null,
+      potId,
+      fundingStream,
+      line.status || 'needs_evidence',
+      line.holdReason || null,
+      JSON.stringify(line.metadata || {}),
+    ]);
+    await runner.query(
+      `INSERT INTO payment_packet_line
+        (payment_packet_id, intervention_id, payment_type, payee_type, payee_name, payee_profile_id, payee_reference,
+         amount, currency, service_period_start, service_period_end, invoice_reference_number, requested_payment_date,
+         budget_pot_id, funding_stream, status, hold_reason, metadata)
+       VALUES ?`,
+      [lineValues]
+    );
+
     try {
       await attachSupportingDocumentsToPaymentPacket({
         packetId,
@@ -44592,16 +45910,20 @@ async function createAutoPaymentPacketFromIntervention({
     } catch (err) {
       console.warn('[payments] failed to attach evidence for auto packet', err?.message || err);
     }
+
+    await runner.query(
+      `INSERT INTO payment_status_event
+        (payment_packet_id, payment_packet_line_id, from_status, to_status, actor_user_id, notes, metadata, created_at)
+       VALUES (?, NULL, NULL, ?, ?, 'Auto-generated from intervention', NULL, NOW())`,
+      [packetId, packetStatus, resolvedActorUserId || null]
+    );
   }
 
-  await runner.query(
-    `INSERT INTO payment_status_event
-      (payment_packet_id, payment_packet_line_id, from_status, to_status, actor_user_id, notes, metadata, created_at)
-     VALUES (?, NULL, NULL, 'draft', ?, 'Auto-generated from intervention', NULL, NOW())`,
-    [packetId, resolvedActorUserId || null]
-  );
-
-  return { packetId: String(packetId), created: true };
+  return {
+    packetId: createdPacketIds.length ? String(createdPacketIds[0]) : null,
+    packetIds: createdPacketIds.map(id => String(id)),
+    created: createdPacketIds.length > 0,
+  };
 }
 
 async function createFinanceTransactionForLine({ lineRow, packetRow, connection = null, status = 'posted', transactionDate = null }) {
@@ -46188,7 +47510,51 @@ async function sendFinanceEmailForPacket({ packetId, packetRow = null, note = nu
   const packetWithPayeeIdentity = payeeIdentity
     ? { ...packet, payeeIdentity }
     : packet;
-  const { regionCode, email } = await resolveFinanceEmailForPacket(row, runner);
+  const { regionCode, email, routing } = await resolveFinanceEmailForPacket(row, runner);
+  if (routing?.enabled === false) {
+    const senderUserId = await resolveOrCreateUserIdFromAuth(req);
+    const senderLabel =
+      req?.auth?.name ||
+      req?.staffProfile?.display_name ||
+      req?.staffProfile?.name ||
+      req?.auth?.email ||
+      req?.staffProfile?.email ||
+      null;
+    const packetIdLabel = formatPacketIdLabel(packet?.id || packetId);
+    const subject = packetIdLabel
+      ? `${packetIdLabel} finance email suppressed`
+      : 'Finance email suppressed';
+    const communication = await createPaymentCommunication({
+      packetId,
+      direction: 'outbound',
+      channel: 'email',
+      senderUserId,
+      senderLabel,
+      recipients: { to: [] },
+      subject,
+      body: 'Finance email dispatch is disabled in Finance settings (runtime config).',
+      templateKey: FINANCE_EMAIL_TEMPLATE_KEY,
+      attachments: [],
+      status: 'logged',
+      providerMessageId: null,
+      errorMessage: null,
+      sentAt: null,
+      connection: runner,
+    });
+    console.info('[payments][finance-email] dispatch skipped (disabled by runtime config)', {
+      packetId: String(packetId),
+      regionCode: regionCode || null,
+      communicationId: communication?.id || null,
+    });
+    return {
+      ok: true,
+      regionCode,
+      recipients: { to: [] },
+      communication,
+      suppressed: true,
+      suppressionReason: 'disabled_by_runtime_config',
+    };
+  }
   if (!email) {
     return {
       error: 'finance_email_missing',
@@ -48764,11 +50130,16 @@ app.get('/api/finance/payment-intervention-type-map', async (req, res) => {
   if (requirePaymentsRole(req, res)) return;
   try {
     const mapping = await readPaymentInterventionMapping(pool);
+    const recurrencePolicyByType = await readPaymentRecurrencePolicyByType(pool);
+    const recurrencePolicies = Array.from(recurrencePolicyByType.entries())
+      .map(([code, mode]) => ({ code, mode }))
+      .sort((a, b) => String(a.code).localeCompare(String(b.code)));
     if (!mapping) {
-      return res.status(200).json({ enabled: false });
+      return res.status(200).json({ enabled: false, recurrencePolicies });
     }
     return res.status(200).json({
       enabled: true,
+      recurrencePolicies,
       ...serializePaymentInterventionMapping(mapping),
     });
   } catch (err) {
@@ -48863,7 +50234,11 @@ app.get('/api/finance/payment-packets', async (req, res) => {
          LEFT JOIN user prog ON prog.id = pp.program_approved_by_user_id
          LEFT JOIN user fin ON fin.id = pp.finance_approved_by_user_id
         ${whereClause}
-        ORDER BY pp.updated_at DESC, pp.id DESC
+        ORDER BY
+          (pp.due_by IS NULL) ASC,
+          pp.due_by ASC,
+          pp.updated_at DESC,
+          pp.id DESC
         LIMIT ?`,
       [...params, cappedLimit]
     );
@@ -49030,7 +50405,27 @@ app.post('/api/finance/payment-packets/:id/send-email', async (req, res) => {
   const note = typeof req.body?.note === 'string' ? req.body.note.trim() : null;
   const conn = await pool.getConnection();
   try {
+    await conn.beginTransaction();
+    const [[packetRow]] = await conn.query(
+      'SELECT id, status FROM payment_packet WHERE id = ? LIMIT 1 FOR UPDATE',
+      [packetId]
+    );
+    if (!packetRow) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'payment_packet_not_found' });
+    }
+    const packetStage = normalizePacketWorkflowStage(packetRow.status);
+    if (packetStage !== 'draft') {
+      await conn.rollback();
+      return res.status(409).json({
+        error: 'payment_packet_already_submitted',
+        status: packetRow.status || null,
+        message: 'This packet has already been submitted.',
+      });
+    }
+
     const result = await submitPaymentPacketExternally({ packetId, note, req, connection: conn });
+    await conn.commit();
     if (result?.error === 'payment_packet_not_found') {
       return res.status(404).json({ error: result.error });
     }
@@ -49059,6 +50454,7 @@ app.post('/api/finance/payment-packets/:id/send-email', async (req, res) => {
       communication: result.communication,
     });
   } catch (err) {
+    try { await conn.rollback(); } catch {}
     console.error('[payments] failed to send finance email', err);
     res.status(500).json({ error: 'finance_email_send_failed', message: err.message });
   } finally {
@@ -49368,6 +50764,7 @@ app.post('/api/finance/payment-packets', async (req, res) => {
       }
 
       const policyRules = await readPaymentPolicyRules(conn);
+      const recurrencePolicyByType = await readPaymentRecurrencePolicyByType(conn);
       const paymentTypeMap = await readPaymentInterventionMapping(conn);
       const interventionIds = Array.from(
         new Set(lineInputs.map(line => line.interventionId).filter(Boolean))
@@ -49400,6 +50797,7 @@ app.post('/api/finance/payment-packets', async (req, res) => {
           evidenceTypeKeys: new Set(),
           policyRules,
           interventionPaymentTypeMap: paymentTypeMap,
+          recurrencePolicyByType,
         });
         if (validationErrors.length) {
           validationErrors.forEach(err => {
@@ -49727,7 +51125,7 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
   try {
     await conn.beginTransaction();
     const [[packetRow]] = await conn.query(
-      'SELECT * FROM payment_packet WHERE id = ? LIMIT 1',
+      'SELECT * FROM payment_packet WHERE id = ? LIMIT 1 FOR UPDATE',
       [packetId]
     );
     if (!packetRow) {
@@ -49743,6 +51141,15 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
       const fromStage = normalizePacketWorkflowStage(fromStatus);
       const nextStage = normalizePacketWorkflowStage(nextStatus);
       const allowReopen = nextStatus === 'draft' && fromStage !== 'draft' && canReopenForIntacct;
+      const duplicateSubmitRequest = nextStatus === 'submitted' && fromStage === 'submitted';
+      if (duplicateSubmitRequest && !allowReopen) {
+        await conn.rollback();
+        return res.status(409).json({
+          error: 'payment_packet_already_submitted',
+          status: fromStatus,
+          message: 'This packet has already been submitted.',
+        });
+      }
       if (fromStage !== 'draft' && nextStage !== fromStage && !allowReopen) {
         await conn.rollback();
         return res.status(409).json({ error: 'payment_packet_locked', status: fromStatus });
@@ -49779,6 +51186,7 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
         });
       }
       const policyRules = await readPaymentPolicyRules(conn);
+      const recurrencePolicyByType = await readPaymentRecurrencePolicyByType(conn);
       const paymentTypeMap = await readPaymentInterventionMapping(conn);
       const interventionIds = activeLines.map(line => line.intervention_id).filter(Boolean);
       if (packetRow.intervention_id) {
@@ -49809,6 +51217,7 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
           evidenceTypeKeys: lineEvidence,
           policyRules,
           interventionPaymentTypeMap: paymentTypeMap,
+          recurrencePolicyByType,
         });
         validationErrors.forEach(err => {
           policyErrors.push({
@@ -50385,6 +51794,7 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
     }
 
     const policyRules = await readPaymentPolicyRules(conn);
+    const recurrencePolicyByType = await readPaymentRecurrencePolicyByType(conn);
     const paymentTypeMap = await readPaymentInterventionMapping(conn);
     const interventionIds = Array.from(
       new Set(lineInputs.map(line => line.interventionId).filter(Boolean))
@@ -50417,6 +51827,7 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
         evidenceTypeKeys: new Set(),
         policyRules,
         interventionPaymentTypeMap: paymentTypeMap,
+        recurrencePolicyByType,
       });
       if (validationErrors.length) {
         validationErrors.forEach(err => {
@@ -50621,6 +52032,8 @@ app.post('/api/finance/payment-packets/:id/lines/recurring', async (req, res) =>
       templateLine?.payee_reference ||
       null;
     const baseMetadata = safeJsonParse(body.metadata, {}) || {};
+    const recurrencePolicyByType = await readPaymentRecurrencePolicyByType(conn);
+    const recurrenceMode = resolveRecurrenceModeForPaymentType(paymentType, recurrencePolicyByType);
 
     const lineErrors = [];
     if (!paymentType) lineErrors.push({ field: 'paymentType', error: 'required' });
@@ -50634,6 +52047,13 @@ app.post('/api/finance/payment-packets/:id/lines/recurring', async (req, res) =>
     if (!startDate) lineErrors.push({ field: 'startDate', error: 'required' });
     if (!endDate && !occurrences) {
       lineErrors.push({ field: 'endDate', error: 'required' });
+    }
+    if (paymentType && recurrenceMode === RECURRENCE_MODE_NOT_ALLOWED) {
+      lineErrors.push({
+        field: 'paymentType',
+        error: 'recurrence_not_allowed',
+        message: 'Recurring lines are not allowed for this payment type.',
+      });
     }
     if (lineErrors.length) {
       await conn.rollback();
@@ -50777,6 +52197,7 @@ app.post('/api/finance/payment-packets/:id/lines/recurring', async (req, res) =>
         evidenceTypeKeys: new Set(),
         policyRules,
         interventionPaymentTypeMap: paymentTypeMap,
+        recurrencePolicyByType,
       });
       if (errors.length) {
         errors.forEach(err => {
@@ -51058,6 +52479,7 @@ app.put('/api/finance/payment-lines/:id', async (req, res) => {
       [nextLine.payment_packet_id]
     );
     const policyRules = await readPaymentPolicyRules(pool);
+    const recurrencePolicyByType = await readPaymentRecurrencePolicyByType(pool);
     const paymentTypeMap = await readPaymentInterventionMapping(pool);
     const primaryInterventionId = nextLine.intervention_id || packetRow?.intervention_id || null;
     const interventionMap = await fetchInterventionsById({
@@ -51078,6 +52500,7 @@ app.put('/api/finance/payment-lines/:id', async (req, res) => {
       evidenceTypeKeys,
       policyRules,
       interventionPaymentTypeMap: paymentTypeMap,
+      recurrencePolicyByType,
     });
     if (validationErrors.length) {
       return res.status(400).json({
@@ -51270,6 +52693,7 @@ app.post('/api/finance/payment-lines/:id/status', async (req, res) => {
     }
     if (nextStatus === 'paid') {
       const policyRules = await readPaymentPolicyRules(conn);
+      const recurrencePolicyByType = await readPaymentRecurrencePolicyByType(conn);
       const paymentTypeMap = await readPaymentInterventionMapping(conn);
       const interventionMap = await fetchInterventionsById({
         ids: [lineRow.intervention_id || lineRow.interventionId],
@@ -51289,6 +52713,7 @@ app.post('/api/finance/payment-lines/:id/status', async (req, res) => {
         evidenceTypeKeys,
         policyRules,
         interventionPaymentTypeMap: paymentTypeMap,
+        recurrencePolicyByType,
       });
       if (validationErrors.length) {
         await conn.rollback();
@@ -54904,7 +56329,7 @@ app.put('/api/cases/:id', async (req, res) => {
     if (conflictSignatureRequested) {
       const conflictSigned = toTinyInt(body.assessment_conflict_declaration_signed);
       if (typeof conflictSigned !== 'undefined' && conflictSigned !== null) {
-        const signingStaffProfileId = identity.userId || null;
+        const signingStaffProfileId = resolveActiveStaffProfileId(req) || identity.userId || null;
         if (!signingStaffProfileId) {
           await conn.rollback();
           return res.status(400).json({
@@ -55131,7 +56556,10 @@ app.put('/api/cases/:id', async (req, res) => {
   }
 
   try {
-    const conflictSummaryStaffId = Number.isFinite(identity.userId) ? Number(identity.userId) : 0;
+    const resolvedConflictSummaryStaffId = resolveActiveStaffProfileId(req);
+    const conflictSummaryStaffId = Number.isFinite(resolvedConflictSummaryStaffId)
+      ? Number(resolvedConflictSummaryStaffId)
+      : (Number.isFinite(identity.userId) ? Number(identity.userId) : 0);
     if (autoPlanSuggestion?.createdIntervention && autoPlanSuggestion?.planId) {
       try {
         const actorUserId = autoPlanApprovalUserId || (await resolveOrCreateUserIdFromAuth(req));

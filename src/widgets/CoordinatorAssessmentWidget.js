@@ -63,6 +63,7 @@ const POSTING_OPTIONS = [
 const EDUCATION_CODES = new Set([4, 5, 9, 10, 11, 12, 13]);
 const EMPLOYER_CODES = new Set([6, 7, 8, 17]);
 const WAGE_SUBSIDY_CODES = new Set([7, 8]);
+const NOC_REQUIRED_CODES = new Set([6, 7, 8, 9, 10, 11, 12, 13, 17]);
 
 const isEducationCode = (value) => {
   if (!value) return false;
@@ -80,7 +81,11 @@ const isWageSubsidyCode = (value) => {
   return Number.isFinite(numeric) && WAGE_SUBSIDY_CODES.has(numeric);
 };
 const requiresExternalPartnerForCode = (value) => isEducationCode(value) || isEmployerCode(value);
-const requiresNocForCode = (value) => isEmployerCode(value);
+const requiresNocForCode = (value) => {
+  if (!value) return false;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && NOC_REQUIRED_CODES.has(numeric);
+};
 
 const DECISION_READY_STATUS = 'decision_ready';
 const APPLICATION_FINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived']);
@@ -643,7 +648,7 @@ const normalizeCostingDefaults = (payload) => {
       return {
         code,
         recurrence: {
-          mode: recurrence.mode || recurrence.rule || entry.recurrenceMode || entry.recurrence_mode || 'optional'
+          mode: recurrence.mode || recurrence.rule || entry.recurrenceMode || entry.recurrence_mode || 'not_allowed'
         }
       };
     })
@@ -1260,7 +1265,21 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [occurrenceConfirmModal, setOccurrenceConfirmModal] = useState(null);
   const [conflictDeclarationSigned, setConflictDeclarationSigned] = useState(Boolean(caseData?.assessment_conflict_declaration_signed));
   const [conflictDeclarationSignedAt, setConflictDeclarationSignedAt] = useState(caseData?.assessment_conflict_declaration_signed_at || null);
-  const [conflictDeclarationChoice, setConflictDeclarationChoice] = useState(caseData?.assessment_conflict_declaration_choice || '');
+  const [persistedConflictDeclarationChoice, setPersistedConflictDeclarationChoice] = useState(
+    normalizeConflictDeclarationChoice(
+      caseData?.assessment_conflict_declaration_choice ||
+      (caseData?.assessment_conflict_declaration_signed ? 'no_conflict' : '')
+    )
+  );
+  const [persistedConflictDeclarationDetails, setPersistedConflictDeclarationDetails] = useState(
+    caseData?.assessment_conflict_declaration_details || ''
+  );
+  const [conflictDeclarationChoice, setConflictDeclarationChoice] = useState(
+    normalizeConflictDeclarationChoice(
+      caseData?.assessment_conflict_declaration_choice ||
+      (caseData?.assessment_conflict_declaration_signed ? 'no_conflict' : '')
+    )
+  );
   const [conflictDeclarationDetails, setConflictDeclarationDetails] = useState(caseData?.assessment_conflict_declaration_details || '');
   const [isSigningDeclaration, setIsSigningDeclaration] = useState(false);
   const [declarationError, setDeclarationError] = useState(null);
@@ -1529,17 +1548,17 @@ const CoordinatorAssessmentWidget = forwardRef(
       effectiveCostingDefaults.paymentTypes.forEach(entry => {
         const code = entry?.code ? String(entry.code).trim() : '';
         if (!code) return;
-        const mode = entry?.recurrence?.mode ? String(entry.recurrence.mode).trim() : 'optional';
-        map.set(code, mode || 'optional');
+        const mode = entry?.recurrence?.mode ? String(entry.recurrence.mode).trim() : 'not_allowed';
+        map.set(code, mode || 'not_allowed');
       });
     }
     return map;
   }, [effectiveCostingDefaults]);
   const getRecurrenceModeForType = useCallback(
     (type) => {
-      if (!type) return 'optional';
+      if (!type) return 'not_allowed';
       const normalized = String(type).trim();
-      return recurrenceModeByType.get(normalized) || 'optional';
+      return recurrenceModeByType.get(normalized) || 'not_allowed';
     },
     [recurrenceModeByType]
   );
@@ -1672,12 +1691,17 @@ const CoordinatorAssessmentWidget = forwardRef(
       hasLivingAllowanceRequest
     ]
   );
-  const normalizedConflictChoice = useMemo(
+  const normalizedDraftConflictChoice = useMemo(
     () => normalizeConflictDeclarationChoice(conflictDeclarationChoice),
     [conflictDeclarationChoice]
   );
-  const hasDeclaredConflict = normalizedConflictChoice === 'conflict';
-  const isDeclarationGateActive = !conflictDeclarationSigned || hasDeclaredConflict;
+  const normalizedPersistedConflictChoice = useMemo(
+    () => normalizeConflictDeclarationChoice(persistedConflictDeclarationChoice),
+    [persistedConflictDeclarationChoice]
+  );
+  const hasDraftDeclaredConflict = normalizedDraftConflictChoice === 'conflict';
+  const hasPersistedDeclaredConflict = normalizedPersistedConflictChoice === 'conflict';
+  const isDeclarationGateActive = !conflictDeclarationSigned || hasPersistedDeclaredConflict;
   const eligibilitySet = Boolean(assessment.esdcEligibility);
   const isEligibilityGateActive = isDeclarationGateActive || !eligibilitySet;
   const showCommunicationStep = isDecisionReadyStatus || isCompletedStatus;
@@ -1761,7 +1785,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   }, [showCommunicationStep]);
   useEffect(() => {
     setShowConflictAlert(true);
-  }, [conflictDeclarationSigned, hasDeclaredConflict]);
+  }, [conflictDeclarationSigned, hasPersistedDeclaredConflict]);
   const conflictDeclarationSignedDisplayDate = conflictDeclarationSignedAt
     ? formatDate(conflictDeclarationSignedAt)
     : null;
@@ -2199,7 +2223,8 @@ const CoordinatorAssessmentWidget = forwardRef(
   const lockOwnerId = activeLock?.ownerUserId ? String(activeLock.ownerUserId) : null;
   const lockHeldByCurrentUser = Boolean(isLockedByMe || (currentUserId && lockOwnerId && String(currentUserId) === lockOwnerId));
   const lockedByAnotherUser = Boolean(lockOwnerId && !lockHeldByCurrentUser);
-  const hasDeclarationChoice = normalizedConflictChoice === 'no_conflict' || normalizedConflictChoice === 'conflict';
+  const hasDeclarationChoice =
+    normalizedDraftConflictChoice === 'no_conflict' || normalizedDraftConflictChoice === 'conflict';
   const conflictDetailsNormalized = useMemo(
     () => (typeof conflictDeclarationDetails === 'string' ? conflictDeclarationDetails.trim() : ''),
     [conflictDeclarationDetails]
@@ -2219,7 +2244,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   );
   const isDeclarationSubmissionDisabled =
     !hasDeclarationChoice ||
-    (hasDeclaredConflict && !conflictDetailsNormalized) ||
+    (hasDraftDeclaredConflict && !conflictDetailsNormalized) ||
     lockedByAnotherUser ||
     isSigningDeclaration;
 
@@ -2489,8 +2514,11 @@ const CoordinatorAssessmentWidget = forwardRef(
       caseData?.assessment_conflict_declaration_choice ||
       (caseData?.assessment_conflict_declaration_signed ? 'no_conflict' : '')
     );
+    const incomingConflictDetails = caseData?.assessment_conflict_declaration_details || '';
+    setPersistedConflictDeclarationChoice(incomingConflictChoice);
+    setPersistedConflictDeclarationDetails(incomingConflictDetails);
     setConflictDeclarationChoice(incomingConflictChoice);
-    setConflictDeclarationDetails(caseData?.assessment_conflict_declaration_details || '');
+    setConflictDeclarationDetails(incomingConflictDetails);
     setDeclarationError(null);
 
     const contextDrafts =
@@ -2574,9 +2602,9 @@ const CoordinatorAssessmentWidget = forwardRef(
   const denyFundingBlockedReason = (() => {
     if (!showDenyFundingShortcut) return '';
     if (!caseId) return 'Save progress to create a case before denying funding.';
-    if (!isOutcomeReviewerRole) return 'You do not have permission to record funding decisions.';
+
     if (lockedByAnotherUser) return 'This case is currently locked by another user.';
-    if (isEligibilityGateActive) return 'Set ESDC eligibility before denying funding.';
+
     if (isLockedStatus) return 'This application is locked and cannot be updated.';
     return '';
   })();
@@ -3614,7 +3642,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         const recurrenceEnabled =
           recurrenceMode === 'required'
             ? true
-            : recurrenceMode === 'disabled'
+            : recurrenceMode === 'not_allowed'
               ? false
               : Boolean(prev.draft.recurrence?.enabled);
         const baseRecurrence = buildRecurrenceFromIntervention(intervention, recurrenceEnabled);
@@ -3645,7 +3673,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         const resolvedEnabled =
           recurrenceMode === 'required'
             ? true
-            : recurrenceMode === 'disabled'
+            : recurrenceMode === 'not_allowed'
               ? false
               : enabled;
         const baseRecurrence = buildRecurrenceFromIntervention(intervention, resolvedEnabled);
@@ -3981,14 +4009,25 @@ const CoordinatorAssessmentWidget = forwardRef(
     showLockAlert
   ]);
   const handleSignDeclaration = useCallback(async () => {
-    if (conflictDeclarationSigned || isSigningDeclaration) {
-      if (conflictDeclarationSigned && normalizeConflictDeclarationChoice(conflictDeclarationChoice) === 'conflict') {
-        setConflictHoldModalVisible(true);
-      }
+    if (isSigningDeclaration) {
       return;
     }
     const choice = normalizeConflictDeclarationChoice(conflictDeclarationChoice);
     const detailsValue = typeof conflictDeclarationDetails === 'string' ? conflictDeclarationDetails.trim() : '';
+    if (conflictDeclarationSigned) {
+      const persistedChoice = normalizedPersistedConflictChoice;
+      const persistedDetails = typeof persistedConflictDeclarationDetails === 'string'
+        ? persistedConflictDeclarationDetails.trim()
+        : '';
+      const unchangedChoice = choice && choice === persistedChoice;
+      const unchangedDetails = choice !== 'conflict' || detailsValue === persistedDetails;
+      if (unchangedChoice && unchangedDetails) {
+        if (choice === 'conflict') {
+          setConflictHoldModalVisible(true);
+        }
+        return;
+      }
+    }
     if (!choice) {
       setDeclarationError('Select whether you have a conflict of interest for this case.');
       return;
@@ -4056,6 +4095,8 @@ const CoordinatorAssessmentWidget = forwardRef(
       const signedAtIso = new Date().toISOString();
       setConflictDeclarationSigned(true);
       setConflictDeclarationSignedAt(signedAtIso);
+      setPersistedConflictDeclarationChoice(choice);
+      setPersistedConflictDeclarationDetails(choice === 'conflict' ? detailsValue : '');
       setConflictDeclarationChoice(choice);
       setConflictDeclarationDetails(choice === 'conflict' ? detailsValue : '');
       if (typeof actions?.refreshCaseData === 'function') {
@@ -4107,6 +4148,8 @@ const CoordinatorAssessmentWidget = forwardRef(
     conflictDeclarationSigned,
     conflictDeclarationChoice,
     conflictDeclarationDetails,
+    persistedConflictDeclarationDetails,
+    normalizedPersistedConflictChoice,
     isSigningDeclaration,
     canonicalApplicationStatus,
     ensureLockForOperation,
@@ -5792,7 +5835,16 @@ const CoordinatorAssessmentWidget = forwardRef(
     });
   };
   const handleWizardNavigate = async ({ detail }) => {
-    const { requestedStepIndex } = detail || {};
+    const { requestedStepIndex, reason } = detail || {};
+    if (
+      reason === 'next' &&
+      currentStep === 'framing' &&
+      proposedInterventions.length === 0 &&
+      !isAssessmentDisabled
+    ) {
+      openAddInterventionModal();
+      return;
+    }
     if (requestedStepIndex < 0 || requestedStepIndex >= activeStepIds.length) return;
     const requestedStepId = activeStepIds[requestedStepIndex];
     const currentIdx = activeStepIds.indexOf(currentStep);
@@ -5830,6 +5882,11 @@ const CoordinatorAssessmentWidget = forwardRef(
           dispatchSupportingDocsRefresh();
         }
       }
+    }
+    if (requestedStepId !== currentStep) {
+      // Reset submit-attempt state when moving between steps so stale review errors
+      // are not shown immediately on step entry.
+      setHasSubmitted(false);
     }
     setCurrentStep(requestedStepId);
   };
@@ -5939,6 +5996,34 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   const eligibilityStepContent = (
     <SpaceBetween size="l">
+      {showDenyFundingShortcut ? (
+        <Header
+          variant="h3"
+          description={
+            <SpaceBetween size="xs">
+              <Box variant="small" color="text-body-secondary">
+                Need to deny funding without completing the assessment? Skip the remaining steps and go straight to the decision.
+              </Box>
+              {denyFundingBlockedReason ? (
+                <Box variant="small" color="text-body-secondary">
+                  {denyFundingBlockedReason}
+                </Box>
+              ) : null}
+            </SpaceBetween>
+          }
+          actions={
+            <Button
+              variant="normal"
+              onClick={() => setDenyFundingModalVisible(true)}
+              disabled={!canUseDenyFundingShortcut}
+            >
+              Deny Funding
+            </Button>
+          }
+        >
+          EI Eligibility Check
+        </Header>
+      ) : null}
       {canUploadEiVerification && (
         <input
           type="file"
@@ -6080,34 +6165,15 @@ const CoordinatorAssessmentWidget = forwardRef(
         header={
           <Header
             variant="h3"
-            description={
-              showDenyFundingShortcut ? (
-                <SpaceBetween size="xs">
-                  <Box variant="small" color="text-body-secondary">
-                    Need to deny funding without completing the assessment? Skip the remaining steps and go straight to the decision.
-                  </Box>
-                  {denyFundingBlockedReason ? (
-                    <Box variant="small" color="text-body-secondary">
-                      {denyFundingBlockedReason}
-                    </Box>
-                  ) : null}
-                </SpaceBetween>
-              ) : null
-            }
             actions={
               <SpaceBetween direction="horizontal" size="xs">
-                <Button onClick={openAddInterventionModal} disabled={isAssessmentDisabled}>
+                <Button
+                  variant="normal"
+                  onClick={openAddInterventionModal}
+                  disabled={isAssessmentDisabled}
+                >
                   Add intervention
                 </Button>
-                {showDenyFundingShortcut ? (
-                  <Button
-                    variant="normal"
-                    onClick={() => setDenyFundingModalVisible(true)}
-                    disabled={!canUseDenyFundingShortcut}
-                  >
-                    Deny Funding
-                  </Button>
-                ) : null}
               </SpaceBetween>
             }
           >
@@ -6181,6 +6247,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       {proposedInterventions.map(intervention => {
         const educationCode = isEducationCode(intervention.code);
         const employerCode = isEmployerCode(intervention.code);
+        const needsNoc = requiresNocForCode(intervention.code);
         const wageSubsidyCode = isWageSubsidyCode(intervention.code);
         const requiresExternal = requiresExternalPartnerForCode(intervention.code);
         const deliveryMode = intervention.deliveryMode === 'in_house' ? 'in_house' : 'partner';
@@ -6300,70 +6367,6 @@ const CoordinatorAssessmentWidget = forwardRef(
                     />
                   </FormField>
                 </ColumnLayout>
-                <ColumnLayout columns={2} variant="text-grid">
-                  <FormField
-                    label="NOC version"
-                    description="Select the NOC version used for this job/placement."
-                    errorText={showTypeErrors ? interventionFieldErrors[intervention.id]?.interventionNocVersion : undefined}
-                  >
-                    <Select
-                      selectedOption={
-                        nocVersions.find(option => option.value === intervention.interventionNocVersion) || null
-                      }
-                      onChange={({ detail }) => {
-                        updateIntervention(intervention.id, {
-                          interventionNocVersion: detail.selectedOption?.value || '',
-                          interventionNoc: ''
-                        });
-                        setNocSuggestions([]);
-                      }}
-                      options={nocVersions}
-                      placeholder={nocVersionsLoading ? 'Loading NOC versions...' : 'Select NOC version'}
-                      statusType={nocVersionsLoading ? 'loading' : 'finished'}
-                      filteringType="auto"
-                      data-error-focus={showTypeErrors && interventionFieldErrors[intervention.id]?.interventionNocVersion ? 'true' : undefined}
-                      readOnly={isAssessmentDisabled}
-                      disabled={nocVersionsLoading}
-                    />
-                  </FormField>
-                  <FormField
-                    label="NOC code"
-                    description="Search by code or title; aligns to the job/placement."
-                    errorText={showTypeErrors ? interventionFieldErrors[intervention.id]?.interventionNoc : undefined}
-                  >
-                    <Autosuggest
-                      value={intervention.interventionNoc || ''}
-                      onChange={({ detail }) => {
-                        const inputValue = detail.value || '';
-                        updateIntervention(intervention.id, { interventionNoc: inputValue });
-                        if (inputValue.length >= 2 && intervention.interventionNocVersion) {
-                          fetchNocSuggestions(inputValue, intervention.interventionNocVersion);
-                        } else {
-                          setNocSuggestions([]);
-                        }
-                      }}
-                      onSelect={({ detail }) => updateIntervention(intervention.id, { interventionNoc: detail.value || '' })}
-                      onLoadItems={({ detail }) => {
-                        if (detail.filteringText && intervention.interventionNocVersion) {
-                          fetchNocSuggestions(detail.filteringText, intervention.interventionNocVersion);
-                        }
-                      }}
-                      options={nocSuggestions}
-                      statusType={nocSuggestionsLoading ? 'loading' : 'finished'}
-                      expandToViewport
-                      placeholder={
-                        intervention.interventionNocVersion
-                          ? 'Type to search NOC code'
-                          : 'Select a NOC version first'
-                      }
-                      empty="No NOC codes found."
-                      readOnly={isAssessmentDisabled}
-                      disabled={!intervention.interventionNocVersion}
-                      enteredTextLabel={value => `Use "${value}"`}
-                      data-error-focus={showTypeErrors && interventionFieldErrors[intervention.id]?.interventionNoc ? 'true' : undefined}
-                    />
-                  </FormField>
-                </ColumnLayout>
                 {wageSubsidyCode && (
                   <FormField
                     label="Wage subsidy details"
@@ -6380,6 +6383,72 @@ const CoordinatorAssessmentWidget = forwardRef(
                   </FormField>
                 )}
               </SpaceBetween>
+            )}
+            {needsNoc && (
+              <ColumnLayout columns={2} variant="text-grid">
+                <FormField
+                  label="NOC version"
+                  description="Select the NOC version used for this job/placement."
+                  errorText={showTypeErrors ? interventionFieldErrors[intervention.id]?.interventionNocVersion : undefined}
+                >
+                  <Select
+                    selectedOption={
+                      nocVersions.find(option => option.value === intervention.interventionNocVersion) || null
+                    }
+                    onChange={({ detail }) => {
+                      updateIntervention(intervention.id, {
+                        interventionNocVersion: detail.selectedOption?.value || '',
+                        interventionNoc: ''
+                      });
+                      setNocSuggestions([]);
+                    }}
+                    options={nocVersions}
+                    placeholder={nocVersionsLoading ? 'Loading NOC versions...' : 'Select NOC version'}
+                    statusType={nocVersionsLoading ? 'loading' : 'finished'}
+                    filteringType="auto"
+                    data-error-focus={showTypeErrors && interventionFieldErrors[intervention.id]?.interventionNocVersion ? 'true' : undefined}
+                    readOnly={isAssessmentDisabled}
+                    disabled={nocVersionsLoading}
+                  />
+                </FormField>
+                <FormField
+                  label="NOC code"
+                  description="Search by code or title; aligns to the job/placement."
+                  errorText={showTypeErrors ? interventionFieldErrors[intervention.id]?.interventionNoc : undefined}
+                >
+                  <Autosuggest
+                    value={intervention.interventionNoc || ''}
+                    onChange={({ detail }) => {
+                      const inputValue = detail.value || '';
+                      updateIntervention(intervention.id, { interventionNoc: inputValue });
+                      if (inputValue.length >= 2 && intervention.interventionNocVersion) {
+                        fetchNocSuggestions(inputValue, intervention.interventionNocVersion);
+                      } else {
+                        setNocSuggestions([]);
+                      }
+                    }}
+                    onSelect={({ detail }) => updateIntervention(intervention.id, { interventionNoc: detail.value || '' })}
+                    onLoadItems={({ detail }) => {
+                      if (detail.filteringText && intervention.interventionNocVersion) {
+                        fetchNocSuggestions(detail.filteringText, intervention.interventionNocVersion);
+                      }
+                    }}
+                    options={nocSuggestions}
+                    statusType={nocSuggestionsLoading ? 'loading' : 'finished'}
+                    expandToViewport
+                    placeholder={
+                      intervention.interventionNocVersion
+                        ? 'Type to search NOC code'
+                        : 'Select a NOC version first'
+                    }
+                    empty="No NOC codes found."
+                    readOnly={isAssessmentDisabled}
+                    disabled={!intervention.interventionNocVersion}
+                    enteredTextLabel={value => `Use "${value}"`}
+                    data-error-focus={showTypeErrors && interventionFieldErrors[intervention.id]?.interventionNoc ? 'true' : undefined}
+                  />
+                </FormField>
+              </ColumnLayout>
             )}
 
           </SpaceBetween>
@@ -7111,7 +7180,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       </ColumnLayout>
       {renderRecommendationSection({
         readOnly: isAssessmentDisabled || (assessmentSubmitted && !isEditingAssessment),
-        showErrors: !assessmentSubmitted
+        showErrors: shouldShowStepErrors('review')
       })}
     </SpaceBetween>
   );
@@ -7325,7 +7394,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     : '';
   const costLineRecurrenceMode = getRecurrenceModeForType(costLineDraft?.type);
   const costLineRecurrenceRequired = costLineRecurrenceMode === 'required';
-  const costLineRecurrenceDisabled = costLineRecurrenceMode === 'disabled';
+  const costLineRecurrenceDisabled = costLineRecurrenceMode === 'not_allowed';
   const costLineRecurrenceEnabled = costLineRecurrenceDisabled
     ? false
     : costLineRecurrenceRequired || Boolean(costLineDraft?.recurrence?.enabled);
@@ -7865,6 +7934,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   );
 
   const interventionCount = Array.isArray(proposedInterventions) ? proposedInterventions.length : 0;
+  const wizardNextButtonLabel = currentStep === 'framing' && interventionCount === 0 ? 'Add intervention' : 'Next';
   const hasMultipleInterventions = interventionCount > 1;
   const interventionRationaleTitle = hasMultipleInterventions
     ? 'Why are these interventions needed?'
@@ -7984,7 +8054,7 @@ const CoordinatorAssessmentWidget = forwardRef(
           <div ref={alertAnchorRef} />
           <Box variant="small" margin={{ bottom: 's' }}>
             This form is used by the ISET admin team to assess the applicant's needs, eligibility, and funding recommendation.
-            {hasDeclaredConflict
+            {hasPersistedDeclaredConflict
               ? ' A conflict of interest was declared; assessment is locked until the conflict is resolved or the case is reassigned.'
               : ' Complete the conflict of interest declaration below to unlock the assessment.'}
           </Box>
@@ -8027,7 +8097,7 @@ const CoordinatorAssessmentWidget = forwardRef(
                 errorText={!hasDeclarationChoice && declarationError ? declarationError : undefined}
               >
                 <RadioGroup
-                  value={hasDeclarationChoice ? normalizedConflictChoice : null}
+                  value={hasDeclarationChoice ? normalizedDraftConflictChoice : null}
                   items={[
                     {
                       value: 'no_conflict',
@@ -8046,11 +8116,11 @@ const CoordinatorAssessmentWidget = forwardRef(
                   disabled={lockedByAnotherUser || isSigningDeclaration}
                 />
               </FormField>
-              {hasDeclaredConflict && (
+              {hasDraftDeclaredConflict && (
                 <FormField
                   label="Conflict details"
                   description="Provide the relationship, organization, or circumstance that may create a conflict of interest."
-                  errorText={hasDeclaredConflict && !conflictDetailsNormalized && declarationError ? declarationError : undefined}
+                  errorText={hasDraftDeclaredConflict && !conflictDetailsNormalized && declarationError ? declarationError : undefined}
                 >
                   <Textarea
                     value={conflictDeclarationDetails}
@@ -8147,6 +8217,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         <div style={{ visibility: wizardNavPriming ? 'hidden' : 'visible' }} aria-hidden={wizardNavPriming ? 'true' : undefined}>
           <Wizard
             activeStepIndex={activeStepIndex}
+            i18nStrings={{ nextButton: wizardNextButtonLabel }}
             isLoadingNextStep={
               lockingAssessment ||
               checkingChecklist ||
@@ -8170,7 +8241,6 @@ const CoordinatorAssessmentWidget = forwardRef(
             }))}
             submitButtonText={wizardSubmitText}
             cancelButtonText={hideWizardActions ? undefined : (canSubmitAssessment ? 'Cancel' : undefined)}
-            nextButtonText={hideWizardActions ? undefined : 'Next'}
             previousButtonText={hideWizardActions ? undefined : 'Previous'}
             secondaryActions={null}
           />

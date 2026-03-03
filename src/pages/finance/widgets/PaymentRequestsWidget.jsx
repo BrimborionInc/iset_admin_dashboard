@@ -31,8 +31,8 @@ import { PAYMENT_TYPE_OPTIONS, PAYEE_TYPE_OPTIONS, findOptionByValue } from "./p
 import useCurrentUser from "../../../hooks/useCurrentUser";
 import { toCanonicalRole } from "../../../context/RoleMatrixContext";
 
-const COLUMN_WIDTHS_STORAGE_KEY = "finance-payments-requests-widths-v3";
-const PREFERENCES_STORAGE_KEY = "finance-payments-requests-preferences-v3";
+const COLUMN_WIDTHS_STORAGE_KEY = "finance-payments-requests-widths-v4";
+const PREFERENCES_STORAGE_KEY = "finance-payments-requests-preferences-v4";
 const DEFAULT_PAGE_SIZE = 10;
 const CASE_SEARCH_MIN_CHARS = 2;
 const BLOCKED_INTERVENTION_STATUSES = new Set([
@@ -43,7 +43,29 @@ const BLOCKED_INTERVENTION_STATUSES = new Set([
   "rejected",
   "cancelled",
 ]);
-const AWAITING_SUBMISSION_STATUSES = new Set(["draft", "returned"]);
+const AWAITING_SUBMISSION_STATUSES = new Set(["draft", "returned", "awaiting_trigger", "released"]);
+const INTERVENTION_LABELS_BY_CODE = {
+  "1": "Career research and exploration",
+  "2": "Diagnostic assessment",
+  "3": "Employment counselling",
+  "4": "Skills development - Essential skills",
+  "5": "Skills development - Academic upgrading",
+  "6": "Work experience - Job creation partnerships",
+  "7": "Work experience - Wage subsidy",
+  "8": "Work experience - Student employment",
+  "9": "Occupational skills training - Certificate",
+  "10": "Occupational skills training - Diploma",
+  "11": "Occupational skills training - Degree",
+  "12": "Occupational skills training - Apprenticeship",
+  "13": "Occupational skills training - Vocational",
+  "14": "Self-employment",
+  "15": "Job search preparation strategies",
+  "16": "Job starts supports",
+  "17": "Employer referral",
+  "18": "Employment retention supports",
+  "19": "Referral to agencies",
+  "20": "Pre-career development",
+};
 
 const normalizeInterventionCodeValue = value => {
   if (value === null || value === undefined || value === "") return null;
@@ -106,8 +128,41 @@ const normalizeInterventionStatusValue = status => {
 const isBlockedInterventionStatus = status =>
   BLOCKED_INTERVENTION_STATUSES.has(normalizeInterventionStatusValue(status));
 
-const requiresServicePeriod = paymentType =>
-  ["LivingAllowance", "WageSubsidyEmployer"].includes(paymentType);
+const formatInterventionDisplay = item => {
+  if (!item) return "-";
+  const code = normalizeInterventionCodeValue(item.interventionCode);
+  const codeLabel = code ? INTERVENTION_LABELS_BY_CODE[code] || null : null;
+  if (code && codeLabel) {
+    const padded = code.length === 1 ? `0${code}` : code;
+    return `${padded} - ${codeLabel}`;
+  }
+  return "Missing intervention label";
+};
+
+const RECURRENCE_MODE_REQUIRED = "required";
+const RECURRENCE_MODE_OPTIONAL = "optional";
+const RECURRENCE_MODE_NOT_ALLOWED = "not_allowed";
+
+const normalizeRecurrenceMode = value => {
+  if (typeof value !== "string") return RECURRENCE_MODE_NOT_ALLOWED;
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === RECURRENCE_MODE_REQUIRED) return RECURRENCE_MODE_REQUIRED;
+  if (normalized === RECURRENCE_MODE_OPTIONAL) return RECURRENCE_MODE_OPTIONAL;
+  if (normalized === RECURRENCE_MODE_NOT_ALLOWED || normalized === "disabled") {
+    return RECURRENCE_MODE_NOT_ALLOWED;
+  }
+  return RECURRENCE_MODE_NOT_ALLOWED;
+};
+
+const resolveRecurrenceModeForType = (paymentType, recurrencePolicyLookup) => {
+  if (!paymentType || !(recurrencePolicyLookup instanceof Map)) {
+    return RECURRENCE_MODE_NOT_ALLOWED;
+  }
+  return normalizeRecurrenceMode(recurrencePolicyLookup.get(paymentType));
+};
+
+const requiresServicePeriod = (paymentType, recurrencePolicyLookup) =>
+  resolveRecurrenceModeForType(paymentType, recurrencePolicyLookup) === RECURRENCE_MODE_REQUIRED;
 
 const toNumberOrNull = value => {
   if (value === null || typeof value === "undefined" || value === "") return null;
@@ -118,13 +173,22 @@ const toNumberOrNull = value => {
 const normalizePacketStatusKey = status => {
   if (!status) return "draft";
   const normalized = String(status).trim().toLowerCase();
-  if (normalized === "draft" || normalized === "returned") return "draft";
+  if (
+    normalized === "draft" ||
+    normalized === "returned" ||
+    normalized === "awaiting_trigger" ||
+    normalized === "released"
+  ) {
+    return "draft";
+  }
   if (normalized === "cancelled") return "cancelled";
   return "submitted";
 };
 
 const statusMeta = {
   draft: { label: "Draft", indicator: "pending" },
+  awaiting_trigger: { label: "Awaiting trigger", indicator: "warning" },
+  released: { label: "Ready to send", indicator: "success" },
   submitted: { label: "Submitted to finance", indicator: "info" },
   cancelled: { label: "Cancelled", indicator: "error" },
 };
@@ -183,6 +247,13 @@ const resolveIntacctOutcome = attempt => {
 };
 
 const resolvePacketStatusMeta = packet => {
+  const statusValue = String(packet?.status || "").trim().toLowerCase();
+  if (statusValue === "awaiting_trigger") {
+    return statusMeta.awaiting_trigger;
+  }
+  if (statusValue === "released") {
+    return statusMeta.released;
+  }
   const statusKey = normalizePacketStatusKey(packet?.status);
   if (statusKey !== "submitted") {
     return statusMeta[statusKey] ?? { label: statusKey, indicator: "info" };
@@ -203,7 +274,11 @@ const resolvePacketStatusMeta = packet => {
 
 const simpleStatusOptions = [
   { value: "all", label: "All packets" },
-  { value: "draft", label: "Drafts", statuses: ["draft", "returned"] },
+  {
+    value: "draft",
+    label: "Drafts",
+    statuses: ["draft", "returned", "awaiting_trigger", "released"],
+  },
   {
     value: "submitted",
     label: "Submitted to finance",
@@ -223,8 +298,131 @@ const simpleStatusOptions = [
   { value: "cancelled", label: "Cancelled", statuses: ["cancelled"] },
 ];
 
+const FINANCE_QUEUE_FILTER_OPTIONS = [
+  { value: "all_due", label: "All due-for-submission" },
+  { value: "ready_to_send", label: "Ready to send" },
+  { value: "blocked", label: "Blocked" },
+  { value: "overdue", label: "Overdue" },
+  { value: "due_today", label: "Due today" },
+  { value: "due_this_week", label: "Due this week" },
+  { value: "no_due_date", label: "No due date" },
+];
+
 const formatCurrency = value =>
   new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(value);
+
+const TERMINAL_PACKET_STATUSES = new Set([
+  "sent",
+  "posted",
+  "reconciled",
+  "confirmed",
+  "closed",
+  "cancelled",
+]);
+
+const toDateOnlyValue = value => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+};
+
+const formatDateLabel = value => {
+  const date = toDateOnlyValue(value);
+  if (!date) return "—";
+  return date.toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" });
+};
+
+const resolveScheduleMeta = packet => {
+  const dueDate = toDateOnlyValue(packet?.dueBy);
+  if (!dueDate) {
+    return { label: "No scheduled date", indicator: "info" };
+  }
+  const statusValue = String(packet?.status || "").trim().toLowerCase();
+  if (TERMINAL_PACKET_STATUSES.has(statusValue)) {
+    return { label: formatDateLabel(dueDate), indicator: "info" };
+  }
+  const today = toDateOnlyValue(new Date());
+  if (!today) {
+    return { label: formatDateLabel(dueDate), indicator: "info" };
+  }
+  if (dueDate.getTime() < today.getTime()) {
+    return { label: `Overdue · ${formatDateLabel(dueDate)}`, indicator: "error" };
+  }
+  if (dueDate.getTime() === today.getTime()) {
+    return { label: `Due today · ${formatDateLabel(dueDate)}`, indicator: "warning" };
+  }
+  return { label: `Upcoming · ${formatDateLabel(dueDate)}`, indicator: "success" };
+};
+
+const STATUS_SORT_PRIORITY = {
+  awaiting_trigger: 1,
+  released: 2,
+  draft: 3,
+  returned: 4,
+  submitted: 5,
+  program_review: 6,
+  program_approved: 7,
+  finance_review: 8,
+  finance_approved: 9,
+  on_hold: 10,
+  batched: 11,
+  sent: 12,
+  confirmed: 13,
+  closed: 14,
+  cancelled: 15,
+};
+
+const compareNullableStrings = (left, right) =>
+  String(left || "").localeCompare(String(right || ""), "en", { sensitivity: "base" });
+
+const compareNullableNumbers = (left, right) => {
+  const a = Number(left);
+  const b = Number(right);
+  const hasA = Number.isFinite(a);
+  const hasB = Number.isFinite(b);
+  if (!hasA && !hasB) return 0;
+  if (!hasA) return 1;
+  if (!hasB) return -1;
+  return a - b;
+};
+
+const compareNullableDates = (left, right) => {
+  const a = toDateOnlyValue(left);
+  const b = toDateOnlyValue(right);
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  return a.getTime() - b.getTime();
+};
+
+const comparePacketsByColumn = (left, right, columnId) => {
+  switch (columnId) {
+    case "schedule":
+      return compareNullableDates(left?.dueBy, right?.dueBy);
+    case "status": {
+      const a = STATUS_SORT_PRIORITY[String(left?.status || "").trim().toLowerCase()] ?? 999;
+      const b = STATUS_SORT_PRIORITY[String(right?.status || "").trim().toLowerCase()] ?? 999;
+      return a - b;
+    }
+    case "id":
+      return compareNullableStrings(formatPacketLabel(left), formatPacketLabel(right));
+    case "clientName":
+      return compareNullableStrings(left?.clientName, right?.clientName);
+    case "interventionName":
+      return compareNullableStrings(formatInterventionDisplay(left), formatInterventionDisplay(right));
+    case "amount":
+      return compareNullableNumbers(left?.totalAmount, right?.totalAmount);
+    case "reportingUnit":
+      return compareNullableStrings(left?.reportingUnit, right?.reportingUnit);
+    case "submittedOn":
+      return compareNullableDates(left?.submittedOn, right?.submittedOn);
+    case "ageDays":
+      return compareNullableNumbers(left?.ageDays, right?.ageDays);
+    default:
+      return 0;
+  }
+};
 
 const formatEvidenceSummary = summary => {
   if (!summary) return { label: "-", indicator: "info" };
@@ -236,6 +434,35 @@ const formatEvidenceSummary = summary => {
   }
   return { label: `${summary.received}/${summary.required} missing`, indicator: "warning" };
 };
+
+const resolveValidationStatus = packet => {
+  const validation = packet?.validation || parsePacketMetadata(packet)?.paymentValidation || null;
+  const status = String(validation?.status || "").trim().toLowerCase();
+  return status || null;
+};
+
+const getPacketBlockingReason = packet => {
+  const statusValue = String(packet?.status || "").trim().toLowerCase();
+  if (statusValue === "awaiting_trigger") {
+    return "Awaiting manual trigger";
+  }
+  const statusKey = normalizePacketStatusKey(packet?.status);
+  if (statusKey !== "draft") {
+    if (statusKey === "cancelled") return "Cancelled packet";
+    return "Already submitted";
+  }
+  const missingEvidence = Number(packet?.evidenceSummary?.missing || 0);
+  if (missingEvidence > 0) {
+    return `Missing required evidence (${missingEvidence})`;
+  }
+  const validationStatus = resolveValidationStatus(packet);
+  if (validationStatus && validationStatus !== "passed") {
+    return "Validation not passed";
+  }
+  return null;
+};
+
+const isPacketReadyForSubmission = packet => !getPacketBlockingReason(packet);
 
 const formatCaseClientName = row => {
   const first =
@@ -312,8 +539,17 @@ const columnDefinitions = [
   {
     id: "id",
     header: "Packet",
+    sortingComparator: (a, b) => comparePacketsByColumn(a, b, "id"),
     cell: item => (
-      <Link href="#" onFollow={event => event.preventDefault()}>
+      <Link
+        href="#"
+        onFollow={event => {
+          event.preventDefault();
+          if (typeof item.onOpen === "function") {
+            item.onOpen();
+          }
+        }}
+      >
         {formatPacketLabel(item)}
       </Link>
     ),
@@ -321,16 +557,19 @@ const columnDefinitions = [
   {
     id: "clientName",
     header: "Client",
+    sortingComparator: (a, b) => comparePacketsByColumn(a, b, "clientName"),
     cell: item => item.clientName ?? "-",
   },
   {
     id: "interventionName",
     header: "Intervention",
-    cell: item => item.interventionName ?? "-",
+    sortingComparator: (a, b) => comparePacketsByColumn(a, b, "interventionName"),
+    cell: item => formatInterventionDisplay(item),
   },
   {
     id: "amount",
     header: "Amount",
+    sortingComparator: (a, b) => comparePacketsByColumn(a, b, "amount"),
     cell: item => {
       const totals = item.streamTotals || {};
       return (
@@ -353,6 +592,7 @@ const columnDefinitions = [
   {
     id: "reportingUnit",
     header: "Reporting unit",
+    sortingComparator: (a, b) => comparePacketsByColumn(a, b, "reportingUnit"),
     cell: item => item.reportingUnit ?? "-",
   },
   {
@@ -368,7 +608,17 @@ const columnDefinitions = [
   {
     id: "ageDays",
     header: "Age (days)",
+    sortingComparator: (a, b) => comparePacketsByColumn(a, b, "ageDays"),
     cell: item => item.ageDays ?? "-",
+  },
+  {
+    id: "schedule",
+    header: "Schedule",
+    sortingComparator: (a, b) => comparePacketsByColumn(a, b, "schedule"),
+    cell: item => {
+      const meta = resolveScheduleMeta(item);
+      return <StatusIndicator type={meta.indicator}>{meta.label}</StatusIndicator>;
+    },
   },
   {
     id: "evidence",
@@ -379,8 +629,20 @@ const columnDefinitions = [
     },
   },
   {
+    id: "blockingReason",
+    header: "Blocking",
+    cell: item => {
+      const reason = item.blockingReason || getPacketBlockingReason(item);
+      if (!reason) {
+        return <StatusIndicator type="success">Ready to send</StatusIndicator>;
+      }
+      return <StatusIndicator type="warning">{reason}</StatusIndicator>;
+    },
+  },
+  {
     id: "status",
     header: "Status",
+    sortingComparator: (a, b) => comparePacketsByColumn(a, b, "status"),
     cell: item => {
       const meta = resolvePacketStatusMeta(item);
       return <StatusIndicator type={meta.indicator}>{meta.label}</StatusIndicator>;
@@ -405,12 +667,8 @@ const columnDefinitions = [
   {
     id: "submittedOn",
     header: "Submitted",
+    sortingComparator: (a, b) => comparePacketsByColumn(a, b, "submittedOn"),
     cell: item => item.submittedOn,
-  },
-  {
-    id: "actions",
-    header: "Actions",
-    cell: item => item.actions ?? "-",
   },
 ];
 
@@ -419,12 +677,10 @@ const defaultPreferences = {
   visibleColumns: [
     "id",
     "clientName",
-    "amount",
+    "schedule",
     "status",
-    "reportingUnit",
-    "evidence",
-    "ageDays",
-    "actions",
+    "amount",
+    "blockingReason",
   ],
 };
 
@@ -474,9 +730,10 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     requests,
     selectedRequestId,
     selectRequest,
+    updatePacketStatus,
     createPacket,
-    deletePacket,
     paymentTypeMappingLookup,
+    paymentTypeRecurrencePolicyLookup,
     paymentTypeMappingLoading,
     loading,
     error,
@@ -490,6 +747,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     metadata?.caseLabel || (lockedCaseId ? `Case ${lockedCaseId}` : "");
   const isCaseLocked = Boolean(lockedCaseId);
   const isProgramView = metadata?.mode === "program";
+  const showCreatePacketAction = isProgramView && metadata?.hideCreatePacketAction !== true;
   const caseRegionCode = metadata?.caseRegionCode
     ? String(metadata.caseRegionCode).trim().toUpperCase()
     : null;
@@ -508,6 +766,8 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
   const [columnWidths, setColumnWidths] = useState(() => loadColumnWidths());
   const [preferences, setPreferences] = useState(() => loadPreferences());
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
+  const [sortingColumnId, setSortingColumnId] = useState("schedule");
+  const [sortingDescending, setSortingDescending] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const defaultCreateForm = useMemo(
     () => ({
@@ -520,12 +780,14 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
   const [createForm, setCreateForm] = useState(() => ({ ...defaultCreateForm }));
   const [createError, setCreateError] = useState(null);
   const [createSubmitting, setCreateSubmitting] = useState(false);
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState(null);
-  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
-  const [deleteError, setDeleteError] = useState(null);
-  const [ledgerExporting, setLedgerExporting] = useState(false);
-  const [exportStatus, setExportStatus] = useState(null);
+  const [financeQueueFilter, setFinanceQueueFilter] = useState(
+    () => FINANCE_QUEUE_FILTER_OPTIONS[0]
+  );
+  const [queueSelectedIds, setQueueSelectedIds] = useState([]);
+  const [bulkSubmitModalOpen, setBulkSubmitModalOpen] = useState(false);
+  const [bulkSubmitError, setBulkSubmitError] = useState(null);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [bulkResult, setBulkResult] = useState(null);
   const [caseOptions, setCaseOptions] = useState([]);
   const [caseOptionsLoading, setCaseOptionsLoading] = useState(false);
   const [caseDetailsLoading, setCaseDetailsLoading] = useState(false);
@@ -556,6 +818,12 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     },
     [caseRegionCode, potOptions]
   );
+  useEffect(() => {
+    if (isProgramView) {
+      setQueueSelectedIds([]);
+    }
+  }, [isProgramView]);
+
   useEffect(() => {
     if (!statusOptions.length) return;
     if (!statusFilter || !statusOptions.some(option => option.value === statusFilter.value)) {
@@ -613,6 +881,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
   };
 
   const handleOpenCreateModal = () => {
+    if (!showCreatePacketAction) return;
     resetCreateForm();
     setCreateModalOpen(true);
   };
@@ -762,7 +1031,10 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     setCreateForm(current => ({ ...current, paymentType: "" }));
   }, [allowedPaymentTypes, createForm.paymentType, createModalOpen]);
 
-  const requiresPeriodFields = requiresServicePeriod(createForm.paymentType);
+  const requiresPeriodFields = requiresServicePeriod(
+    createForm.paymentType,
+    paymentTypeRecurrencePolicyLookup,
+  );
   useEffect(() => {
     if (!createModalOpen) return;
     if (requiresPeriodFields) return;
@@ -987,7 +1259,10 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
       setCreateError("Reporting unit is required.");
       return;
     }
-    const requiresPeriod = requiresServicePeriod(paymentType);
+    const requiresPeriod = requiresServicePeriod(
+      paymentType,
+      paymentTypeRecurrencePolicyLookup,
+    );
     if (requiresPeriod && (!createForm.servicePeriodStart || !createForm.servicePeriodEnd)) {
       setCreateError("Service period start and end are required for this payment type.");
       return;
@@ -1030,69 +1305,124 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     }
   };
 
-  const handleExportLedger = async () => {
-    setLedgerExporting(true);
-    setExportStatus(null);
-    try {
-      const resp = await apiFetch("/api/finance/payment-ledger-export");
-      if (!resp.ok) {
-        const payload = await resp.json().catch(() => ({}));
-        throw new Error(payload?.message || payload?.error || `Export failed (${resp.status})`);
-      }
-      const blob = await resp.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `payment-ledger-extract-${new Date().toISOString().slice(0, 10)}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-      setExportStatus({ type: "success", message: "Ledger extract downloaded." });
-    } catch (err) {
-      setExportStatus({
-        type: "error",
-        message: err?.message || "Failed to export payment ledger.",
-      });
-    } finally {
-      setLedgerExporting(false);
-    }
-  };
-
   const visibleColumns = useMemo(() => {
-    const set = new Set(preferences.visibleColumns ?? columnDefinitions.map(column => column.id));
-    return columnDefinitions.filter(column => set.has(column.id));
+    const allById = new Map(columnDefinitions.map(column => [column.id, column]));
+    const preferredIds = Array.isArray(preferences.visibleColumns)
+      ? preferences.visibleColumns
+      : defaultPreferences.visibleColumns;
+    return preferredIds
+      .map(id => allById.get(id))
+      .filter(Boolean);
   }, [preferences.visibleColumns]);
 
+  const requestsWithWorkflowMeta = useMemo(
+    () =>
+      requests.map(item => ({
+        ...item,
+        blockingReason: getPacketBlockingReason(item),
+        readyToSubmit: isPacketReadyForSubmission(item),
+      })),
+    [requests]
+  );
+
+  const dueSubmissionItems = useMemo(
+    () => requestsWithWorkflowMeta.filter(item => normalizePacketStatusKey(item.status) === "draft"),
+    [requestsWithWorkflowMeta]
+  );
+
   const filteredItems = useMemo(() => {
-    return requests.filter(item => {
-      if (statusFilter.value !== "all" && !statusFilter.statuses?.includes(item.status)) {
+    const sourceItems = isProgramView ? requestsWithWorkflowMeta : dueSubmissionItems;
+    const today = toDateOnlyValue(new Date());
+    const todayTs = today ? today.getTime() : null;
+    const dueWeekEndTs =
+      todayTs === null ? null : todayTs + (6 * 24 * 60 * 60 * 1000);
+    return sourceItems.filter(item => {
+      if (
+        isProgramView &&
+        statusFilter.value !== "all" &&
+        !statusFilter.statuses?.includes(item.status)
+      ) {
         return false;
+      }
+      if (!isProgramView) {
+        const queueFilterValue = financeQueueFilter?.value || "all_due";
+        if (queueFilterValue === "ready_to_send" && !item.readyToSubmit) {
+          return false;
+        }
+        if (queueFilterValue === "blocked" && item.readyToSubmit) {
+          return false;
+        }
+        if (
+          queueFilterValue === "overdue" ||
+          queueFilterValue === "due_today" ||
+          queueFilterValue === "due_this_week" ||
+          queueFilterValue === "no_due_date"
+        ) {
+          const dueDate = toDateOnlyValue(item?.dueBy);
+          const dueTs = dueDate ? dueDate.getTime() : null;
+          if (queueFilterValue === "no_due_date") {
+            return dueTs === null;
+          }
+          if (dueTs === null || todayTs === null) {
+            return false;
+          }
+          if (queueFilterValue === "overdue") {
+            return dueTs < todayTs;
+          }
+          if (queueFilterValue === "due_today") {
+            return dueTs === todayTs;
+          }
+          if (queueFilterValue === "due_this_week") {
+            return dueTs >= todayTs && dueWeekEndTs !== null && dueTs <= dueWeekEndTs;
+          }
+        }
       }
       if (filteringText) {
         const lower = filteringText.toLowerCase();
+        const interventionDisplay = formatInterventionDisplay(item).toLowerCase();
         return (
           item.id.toLowerCase().includes(lower) ||
           (item.caseNumber ?? "").toLowerCase().includes(lower) ||
           (item.clientName ?? "").toLowerCase().includes(lower) ||
-          (item.interventionName ?? "").toLowerCase().includes(lower) ||
+          interventionDisplay.includes(lower) ||
           (item.paymentTypes ?? []).some(type => type.toLowerCase().includes(lower)) ||
           (item.reportingUnit ?? "").toLowerCase().includes(lower) ||
           (item.potName ?? "").toLowerCase().includes(lower) ||
           (item.requester ?? "").toLowerCase().includes(lower) ||
+          (item.blockingReason ?? "").toLowerCase().includes(lower) ||
           (item.riskFlags ?? []).some(flag => flag.toLowerCase().includes(lower))
         );
       }
       return true;
     });
-  }, [requests, statusFilter, filteringText]);
+  }, [
+    isProgramView,
+    requestsWithWorkflowMeta,
+    dueSubmissionItems,
+    statusFilter,
+    financeQueueFilter,
+    filteringText,
+  ]);
+
+  const sortedItems = useMemo(() => {
+    const next = [...filteredItems];
+    if (!sortingColumnId) return next;
+    next.sort((left, right) => {
+      const base = comparePacketsByColumn(left, right, sortingColumnId);
+      if (base === 0) {
+        return comparePacketsByColumn(left, right, "id");
+      }
+      return sortingDescending ? -base : base;
+    });
+    return next;
+  }, [filteredItems, sortingColumnId, sortingDescending]);
 
   const pageSize = preferences.pageSize ?? DEFAULT_PAGE_SIZE;
-  const pagesCount = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+  const pagesCount = Math.max(1, Math.ceil(sortedItems.length / pageSize));
   const pagedItems = useMemo(() => {
     const start = (currentPageIndex - 1) * pageSize;
-    return filteredItems.slice(start, start + pageSize);
-  }, [filteredItems, currentPageIndex, pageSize]);
+    return sortedItems.slice(start, start + pageSize);
+  }, [sortedItems, currentPageIndex, pageSize]);
 
 
   const selectedPaymentType = useMemo(
@@ -1162,71 +1492,118 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
   };
 
   const handleSelectionChange = ({ detail }) => {
-    const id = detail.selectedItems?.[0]?.id ?? null;
-    if (id !== selectedRequestId) {
-      selectRequest(id);
+    const ids = Array.isArray(detail.selectedItems)
+      ? detail.selectedItems.map(item => item?.id).filter(Boolean)
+      : [];
+    if (isProgramView) {
+      const id = ids[0] ?? null;
+      if (id !== selectedRequestId) {
+        selectRequest(id);
+      }
+      return;
+    }
+    setQueueSelectedIds(ids);
+    const firstId = ids[0] ?? null;
+    if (firstId !== selectedRequestId) {
+      selectRequest(firstId);
     }
   };
 
-  const openDeleteModal = useCallback(item => {
-    if (!item) return;
-    setDeleteTarget({
-      id: item.id,
-      clientName: item.clientName ?? null,
-      interventionName: item.interventionName ?? null,
-    });
-    setDeleteError(null);
-    setDeleteModalOpen(true);
-  }, []);
-
-  const handleDeleteDismiss = useCallback(() => {
-    if (deleteSubmitting) return;
-    setDeleteModalOpen(false);
-    setDeleteTarget(null);
-    setDeleteError(null);
-  }, [deleteSubmitting]);
-
-  const handleDeleteConfirm = useCallback(async () => {
-    if (!deleteTarget?.id || deleteSubmitting) return;
-    setDeleteSubmitting(true);
-    setDeleteError(null);
-    try {
-      await deletePacket(deleteTarget.id);
-      setDeleteModalOpen(false);
-      setDeleteTarget(null);
-    } catch (err) {
-      setDeleteError(err?.message || "Failed to delete draft packet.");
-    } finally {
-      setDeleteSubmitting(false);
-    }
-  }, [deletePacket, deleteSubmitting, deleteTarget]);
-
   const tableItems = useMemo(() => {
     return pagedItems.map(item => {
-      const canDelete = item.status === "draft";
-      const actions = canDelete ? (
-        <Link
-          href="#"
-          onFollow={event => {
-            event.preventDefault();
-            openDeleteModal(item);
-          }}
-        >
-          Delete draft
-        </Link>
-      ) : (
-        "-"
-      );
-      return { ...item, actions };
+      const onOpen = () => {
+        selectRequest(item.id);
+        if (!isProgramView) {
+          setQueueSelectedIds([item.id]);
+        }
+      };
+      return { ...item, onOpen };
     });
-  }, [openDeleteModal, pagedItems]);
+  }, [isProgramView, pagedItems, selectRequest]);
 
   const selectedItems = useMemo(() => {
-    if (!selectedRequestId) {
+    const selectedIds = isProgramView
+      ? selectedRequestId
+        ? [selectedRequestId]
+        : []
+      : queueSelectedIds;
+    if (!selectedIds.length) {
       return [];
     }
-    return tableItems.filter(item => item.id === selectedRequestId);
-  }, [selectedRequestId, tableItems]);
+    const selectedSet = new Set(selectedIds);
+    return tableItems.filter(item => selectedSet.has(item.id));
+  }, [isProgramView, queueSelectedIds, selectedRequestId, tableItems]);
+
+  const sortingColumn = useMemo(
+    () => columnDefinitions.find(column => column.id === sortingColumnId) || null,
+    [sortingColumnId]
+  );
+
+  useEffect(() => {
+    if (isProgramView) return;
+    setQueueSelectedIds(current => {
+      if (!current.length) return current;
+      const validIds = new Set(requestsWithWorkflowMeta.map(item => item.id));
+      const next = current.filter(id => validIds.has(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [isProgramView, requestsWithWorkflowMeta]);
+
+  const selectedPackets = useMemo(() => {
+    if (isProgramView || !queueSelectedIds.length) return [];
+    const selectedSet = new Set(queueSelectedIds);
+    return requestsWithWorkflowMeta.filter(item => selectedSet.has(item.id));
+  }, [isProgramView, queueSelectedIds, requestsWithWorkflowMeta]);
+
+  const bulkReadyPackets = useMemo(
+    () => selectedPackets.filter(item => item.readyToSubmit),
+    [selectedPackets]
+  );
+  const bulkBlockedPackets = useMemo(
+    () => selectedPackets.filter(item => !item.readyToSubmit),
+    [selectedPackets]
+  );
+  const bulkSelectedAmount = useMemo(
+    () => selectedPackets.reduce((sum, item) => sum + Number(item.totalAmount || 0), 0),
+    [selectedPackets]
+  );
+
+  const handleBulkSubmit = async () => {
+    if (bulkSubmitting) return;
+    if (!bulkReadyPackets.length) {
+      setBulkSubmitError("No selected packets are ready for submission.");
+      return;
+    }
+    setBulkSubmitError(null);
+    setBulkSubmitting(true);
+    const failed = [];
+    let submitted = 0;
+    try {
+      for (const packet of bulkReadyPackets) {
+        try {
+          await updatePacketStatus(packet.id, "submitted");
+          submitted += 1;
+        } catch (err) {
+          failed.push({
+            id: packet.id,
+            reason: err?.message || "Submission failed.",
+          });
+        }
+      }
+      const failedIds = new Set(failed.map(item => item.id));
+      setQueueSelectedIds(current => current.filter(id => failedIds.has(id)));
+      setBulkSubmitModalOpen(false);
+      const message =
+        failed.length === 0
+          ? `Submitted ${submitted} packet${submitted === 1 ? "" : "s"} to finance.`
+          : `Submitted ${submitted}. ${failed.length} failed.`;
+      setBulkResult({ type: failed.length ? "warning" : "success", message, failures: failed });
+    } catch (err) {
+      setBulkSubmitError(err?.message || "Bulk submission failed.");
+    } finally {
+      setBulkSubmitting(false);
+    }
+  };
 
   useEffect(() => {
     if (!isProgramView || typeof window === "undefined") return;
@@ -1334,39 +1711,54 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
           info={infoLink}
           actions={
             <SpaceBetween direction="horizontal" size="xs">
-              {isProgramView ? (
+              {showCreatePacketAction ? (
                 <Button iconName="add-plus" onClick={handleOpenCreateModal}>
                   Create packet
                 </Button>
               ) : null}
               {!isProgramView ? (
+                <Select
+                  selectedOption={financeQueueFilter}
+                  options={FINANCE_QUEUE_FILTER_OPTIONS}
+                  ariaLabel="Queue filter"
+                  onChange={({ detail }) => {
+                    setFinanceQueueFilter(detail.selectedOption || FINANCE_QUEUE_FILTER_OPTIONS[0]);
+                    setCurrentPageIndex(1);
+                  }}
+                />
+              ) : null}
+              {!isProgramView ? (
                 <Button
-                  iconName="download"
-                  onClick={handleExportLedger}
-                  disabled={ledgerExporting}
-                  loading={ledgerExporting}
+                  variant="primary"
+                  disabled={!queueSelectedIds.length}
+                  onClick={() => {
+                    setBulkSubmitError(null);
+                    setBulkSubmitModalOpen(true);
+                  }}
                 >
-                  Export ledger
+                  Submit selected ({queueSelectedIds.length})
                 </Button>
               ) : null}
-              <Select
-                selectedOption={statusFilter}
-                options={statusOptions}
-                onChange={({ detail }) => {
-                  setStatusFilter(detail.selectedOption);
-                  setCurrentPageIndex(1);
-                }}
-              />
+              {isProgramView ? (
+                <Select
+                  selectedOption={statusFilter}
+                  options={statusOptions}
+                  onChange={({ detail }) => {
+                    setStatusFilter(detail.selectedOption);
+                    setCurrentPageIndex(1);
+                  }}
+                />
+              ) : null}
             </SpaceBetween>
           }
         >
-          Payment packet queue
+          Batch payments queue
         </Header>
       }
       settings={
         typeof actions.removeItem === "function" ? (
           <ButtonDropdown
-            ariaLabel="Payment packet queue settings"
+            ariaLabel="Batch payments queue settings"
             variant="icon"
             items={[{ id: "remove", text: "Remove widget" }]}
             onItemClick={handleSettingsClick}
@@ -1376,17 +1768,34 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
       i18nStrings={boardItemI18nStrings}
     >
       <SpaceBetween size="m">
-        {exportStatus ? (
-          <Alert type={exportStatus.type} onDismiss={() => setExportStatus(null)}>
-            {exportStatus.message}
+        {bulkResult ? (
+          <Alert type={bulkResult.type} onDismiss={() => setBulkResult(null)}>
+            <SpaceBetween size="xs">
+              <Box>{bulkResult.message}</Box>
+              {bulkResult.failures?.length ? (
+                <Box variant="p">
+                  Failed packets:{" "}
+                  {bulkResult.failures
+                    .map(item => `${item.id} (${item.reason})`)
+                    .join(", ")}
+                </Box>
+              ) : null}
+            </SpaceBetween>
           </Alert>
         ) : null}
         <Table
           trackBy="id"
           items={tableItems}
-          selectionType="single"
+          selectionType={isProgramView ? "single" : "multi"}
           selectedItems={selectedItems}
           onSelectionChange={handleSelectionChange}
+          sortingColumn={sortingColumn}
+          sortingDescending={sortingDescending}
+          onSortingChange={({ detail }) => {
+            setSortingColumnId(detail?.sortingColumn?.id || null);
+            setSortingDescending(Boolean(detail?.isDescending));
+            setCurrentPageIndex(1);
+          }}
           columnDefinitions={visibleColumns.map(column => {
             const width = columnWidths.find(entry => entry.id === column.id)?.width;
             return width ? { ...column, width } : column;
@@ -1402,7 +1811,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
           filter={
             <TextFilter
               filteringText={filteringText}
-              filteringPlaceholder="Find by packet ID, case number, client, intervention, or risk flag"
+              filteringPlaceholder="Find by packet ID, case number, client, intervention, risk flag, or blocking reason"
               onChange={({ detail }) => {
                 setFilteringText(detail.filteringText);
                 setCurrentPageIndex(1);
@@ -1416,10 +1825,74 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
           loadingText="Loading payment packets"
           empty={
             <Box padding="m">
-              {error ? `Unable to load payment packets: ${error}` : "No payment packets match the current filters."}
+              {error
+                ? `Unable to load payment packets: ${error}`
+                : isProgramView
+                  ? "No payment packets match the current filters."
+                  : "No payment packets are currently due for submission."}
             </Box>
           }
         />
+        <Modal
+          visible={bulkSubmitModalOpen}
+          onDismiss={() => {
+            if (bulkSubmitting) return;
+            setBulkSubmitModalOpen(false);
+            setBulkSubmitError(null);
+          }}
+          header="Submit selected packets"
+          footer={
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button
+                variant="link"
+                onClick={() => {
+                  if (bulkSubmitting) return;
+                  setBulkSubmitModalOpen(false);
+                  setBulkSubmitError(null);
+                }}
+                disabled={bulkSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleBulkSubmit}
+                disabled={!bulkReadyPackets.length || bulkSubmitting}
+                loading={bulkSubmitting}
+              >
+                Submit ready packets ({bulkReadyPackets.length})
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="m">
+            {bulkSubmitError ? <Alert type="error">{bulkSubmitError}</Alert> : null}
+            <ColumnLayout columns={3} variant="text-grid">
+              <Box>
+                <Box variant="awsui-key-label">Selected packets</Box>
+                <Box>{selectedPackets.length}</Box>
+              </Box>
+              <Box>
+                <Box variant="awsui-key-label">Ready now</Box>
+                <Box>{bulkReadyPackets.length}</Box>
+              </Box>
+              <Box>
+                <Box variant="awsui-key-label">Total amount</Box>
+                <Box>{formatCurrency(bulkSelectedAmount)}</Box>
+              </Box>
+            </ColumnLayout>
+            {bulkBlockedPackets.length ? (
+              <Box variant="p">
+                Blocked packets:{" "}
+                {bulkBlockedPackets
+                  .map(item => `${item.id} (${item.blockingReason || "Blocked"})`)
+                  .join(", ")}
+              </Box>
+            ) : (
+              <Box variant="p">All selected packets are ready.</Box>
+            )}
+          </SpaceBetween>
+        </Modal>
         <Modal
           visible={createModalOpen}
           onDismiss={handleCloseCreateModal}
@@ -1466,7 +1939,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
                         ? "Type at least 2 characters to search."
                         : "No cases found."
                     }
-                    enteredTextLabel={value => `Use \"${value}\"`}
+                    enteredTextLabel={value => `Use "${value}"`}
                   />
                 )}
               </FormField>
@@ -1634,35 +2107,6 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
                 />
               </FormField>
             </ColumnLayout>
-          </SpaceBetween>
-        </Modal>
-        <Modal
-          visible={deleteModalOpen}
-          onDismiss={handleDeleteDismiss}
-          closeAriaLabel="Close dialog"
-          header="Delete draft packet"
-          footer={
-            <SpaceBetween direction="horizontal" size="xs">
-              <Button variant="link" onClick={handleDeleteDismiss} disabled={deleteSubmitting}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                onClick={handleDeleteConfirm}
-                loading={deleteSubmitting}
-                disabled={!deleteTarget?.id || deleteSubmitting}
-              >
-                Delete
-              </Button>
-            </SpaceBetween>
-          }
-        >
-          <SpaceBetween size="s">
-            {deleteError ? <Alert type="error">{deleteError}</Alert> : null}
-            <Box>
-              This will permanently delete the draft packet
-              {deleteTarget?.id ? ` ${deleteTarget.id}` : ""} and any lines attached to it.
-            </Box>
           </SpaceBetween>
         </Modal>
       </SpaceBetween>

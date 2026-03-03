@@ -742,7 +742,6 @@ const AllocationTransferWizardWidget = ({
             ]}
             items={evidenceItems}
             empty={<Box variant="p">No evidence references added yet.</Box>}
-            contentDensity="compact"
             trackBy="id"
           />
           {errors.evidence ? (

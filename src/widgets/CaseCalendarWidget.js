@@ -18,51 +18,6 @@ import CaseCalendarHelp from '../helpPanelContents/caseCalendarHelp';
 import { useCaseWorkspace } from '../pages/Caseworking/caseWorkspace/CaseWorkspaceContext.jsx';
 import { apiFetch } from '../auth/apiClient';
 
-const LIVE_CASES_STORAGE_KEY = 'iset-demo-use-live-cases';
-
-const SAMPLE_EVENTS = [
-  {
-    offset: 2,
-    title: 'Follow-up call',
-    category: 'Reminder',
-    description: 'Touch base with the applicant about supporting documents.',
-    severity: 'success',
-    source: 'Demo reminder'
-  },
-  {
-    offset: 7,
-    title: 'Finance review due',
-    category: 'Deadline',
-    description: 'Prepare figures for the upcoming finance approval walkthrough.',
-    severity: 'warning',
-    source: 'Demo deadline'
-  },
-  {
-    offset: 12,
-    title: 'Case inactivity check',
-    category: 'Alert',
-    description: '14 days without updates; review action plan progress.',
-    severity: 'error',
-    source: 'Demo alert'
-  },
-  {
-    offset: 19,
-    title: 'Schedule NWAC sync',
-    category: 'Reminder',
-    description: 'Book time with the NWAC reviewer to discuss the latest plan.',
-    severity: 'success',
-    source: 'Demo reminder'
-  },
-  {
-    offset: 23,
-    title: 'Program milestone',
-    category: 'Milestone',
-    description: 'Kick-off planning for next quarter reporting cycle.',
-    severity: 'info',
-    source: 'Demo milestone'
-  }
-];
-
 const EVENT_STYLE = {
   success: {
     dot: 'var(--color-background-status-success, #1d8102)',
@@ -161,20 +116,11 @@ const buildMonthGrid = anchorDate => {
   });
 };
 
-const readLivePreference = () => {
-  if (typeof window === 'undefined') return true;
-  const stored = window.localStorage?.getItem(LIVE_CASES_STORAGE_KEY);
-  if (stored === 'false') return false;
-  if (stored === 'true') return true;
-  return true;
-};
-
 const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData: propCaseData }) => {
   const workspace = useCaseWorkspace();
   const workspaceCaseData = workspace && typeof workspace === 'object' ? workspace.caseData || null : null;
   const caseData = propCaseData || workspaceCaseData || (metadata && metadata.caseData) || null;
 
-  const [useLiveData, setUseLiveData] = useState(() => readLivePreference());
   const [monthAnchor, setMonthAnchor] = useState(() => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
@@ -194,32 +140,8 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
     null;
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const handler = event => {
-      const toggle = event?.detail?.useLiveCases;
-      if (typeof toggle === 'boolean') {
-        setUseLiveData(toggle);
-      }
-    };
-    window.addEventListener('iset-portfolio:cases-data-mode', handler);
-    return () => {
-      window.removeEventListener('iset-portfolio:cases-data-mode', handler);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const stored = window.localStorage?.getItem(LIVE_CASES_STORAGE_KEY);
-    if (stored === 'false') {
-      setUseLiveData(false);
-    } else if (stored === 'true') {
-      setUseLiveData(true);
-    }
-  }, []);
-
-  useEffect(() => {
     let cancelled = false;
-    if (!useLiveData || !caseId) {
+    if (!caseId) {
       setRemindersState({ items: [], isLoading: false, error: null });
       return () => {
         cancelled = true;
@@ -262,12 +184,12 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
     return () => {
       cancelled = true;
     };
-  }, [useLiveData, caseId]);
+  }, [caseId]);
 
   useEffect(() => {
     const handler = event => {
       const targetCaseId = event?.detail?.caseId;
-      if (!useLiveData || !caseId || (targetCaseId && Number(targetCaseId) !== Number(caseId))) {
+      if (!caseId || (targetCaseId && Number(targetCaseId) !== Number(caseId))) {
         return;
       }
       // Re-trigger by toggling the state to refetch
@@ -298,7 +220,7 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
         window.removeEventListener('case-reminders-refresh', handler);
       }
     };
-  }, [caseId, useLiveData]);
+  }, [caseId]);
 
   const monthLabel = useMemo(
     () =>
@@ -311,29 +233,6 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
 
   const weekdayLabels = useMemo(() => getWeekdayLabels(), []);
 
-  const offlineEventsMap = useMemo(() => {
-    if (useLiveData) return new Map();
-    const firstOfMonth = new Date(monthAnchor.getFullYear(), monthAnchor.getMonth(), 1);
-    const daysInMonth = new Date(firstOfMonth.getFullYear(), firstOfMonth.getMonth() + 1, 0).getDate();
-    return SAMPLE_EVENTS.reduce((map, sample, index) => {
-      const dayNumber = Math.min(daysInMonth, Math.max(1, sample.offset));
-      const eventDate = new Date(firstOfMonth.getFullYear(), firstOfMonth.getMonth(), dayNumber);
-      const event = {
-        id: `offline-${index}`,
-        title: sample.title,
-        category: sample.category,
-        description: sample.description,
-        date: eventDate,
-        severity: sample.severity || 'info',
-        source: sample.source || 'Demo data'
-      };
-      const key = normalizeDateKey(eventDate);
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(event);
-      return map;
-    }, new Map());
-  }, [useLiveData, monthAnchor]);
-
   const todayMidnight = useMemo(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -341,7 +240,6 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
   }, []);
 
   const liveEventsMap = useMemo(() => {
-    if (!useLiveData) return new Map();
     const map = new Map();
 
     const addEvent = (dateValue, event) => {
@@ -453,34 +351,24 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
     });
 
     return map;
-  }, [useLiveData, caseData, todayMidnight, remindersState.items]);
+  }, [caseData, todayMidnight, remindersState.items]);
 
   const days = useMemo(() => {
-    const eventsMap = useLiveData ? liveEventsMap : offlineEventsMap;
     return buildMonthGrid(monthAnchor).map(day => ({
       ...day,
-      events: eventsMap.get(day.dateKey) || []
+      events: liveEventsMap.get(day.dateKey) || []
     }));
-  }, [monthAnchor, useLiveData, liveEventsMap, offlineEventsMap]);
+  }, [monthAnchor, liveEventsMap]);
 
   useEffect(() => {
-    if (useLiveData) {
-      setSelectedDayKey(prev => (prev && days.some(day => day.key === prev) ? prev : null));
-      return;
-    }
-    const selectedHasEvents =
-      selectedDayKey && days.some(day => day.key === selectedDayKey && day.events.length > 0);
-    if (!selectedHasEvents) {
-      const firstWithEvents = days.find(day => day.events.length > 0);
-      setSelectedDayKey(firstWithEvents ? firstWithEvents.key : null);
-    }
-  }, [useLiveData, days, selectedDayKey]);
+    setSelectedDayKey(prev => (prev && days.some(day => day.key === prev) ? prev : null));
+  }, [days]);
 
   const selectedDay = selectedDayKey ? days.find(day => day.key === selectedDayKey) : null;
 
   const acknowledgeReminder = useCallback(
     async (reminderId, noteId = null) => {
-    if (!reminderId || !useLiveData) return;
+    if (!reminderId) return;
     if (acknowledgingId) return;
     setAcknowledgingId(reminderId);
     try {
@@ -519,7 +407,7 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
         setAcknowledgingId(null);
       }
     },
-    [acknowledgingId, apiFetch, caseId, useLiveData]
+    [acknowledgingId, apiFetch, caseId]
   );
 
   const adjustMonth = useCallback(delta => {
@@ -532,7 +420,6 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
 
   const canAdjustMonth = useCallback(
     delta => {
-      if (!useLiveData) return true;
       const today = new Date();
       const limitStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
       const limitEnd = new Date(today.getFullYear(), today.getMonth() + 2, 1);
@@ -540,13 +427,12 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
       candidate.setMonth(candidate.getMonth() + delta);
       return candidate >= limitStart && candidate < limitEnd;
     },
-    [monthAnchor, useLiveData]
+    [monthAnchor]
   );
 
   const allEvents = useMemo(() => {
-    const eventsMap = useLiveData ? liveEventsMap : offlineEventsMap;
     const items = [];
-    eventsMap.forEach(eventList => {
+    liveEventsMap.forEach(eventList => {
       eventList.forEach(event => {
         const dateObj = event.date instanceof Date ? new Date(event.date) : new Date(event.date);
         if (Number.isNaN(dateObj.getTime())) return;
@@ -556,12 +442,12 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
           date: dateObj,
           severity,
           severityLabel: SEVERITY_LABEL[severity] || 'Info',
-          source: event.source || (useLiveData ? 'Case data' : 'Demo data')
+          source: event.source || 'Case data'
         });
       });
     });
     return items;
-  }, [useLiveData, liveEventsMap, offlineEventsMap]);
+  }, [liveEventsMap]);
 
   const filteredEvents = useMemo(() => {
     const term = tableFilteringText.trim().toLowerCase();
@@ -668,11 +554,11 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
             marginBottom: '12px'
           }}
         >
-          <Button iconName='angle-left' variant='icon' onClick={() => adjustMonth(-1)} ariaLabel='Previous month' disabled={useLiveData && !canAdjustMonth(-1)} />
+          <Button iconName='angle-left' variant='icon' onClick={() => adjustMonth(-1)} ariaLabel='Previous month' disabled={!canAdjustMonth(-1)} />
           <Box fontSize='heading-m' fontWeight='bold'>
             {monthLabel}
           </Box>
-          <Button iconName='angle-right' variant='icon' onClick={() => adjustMonth(1)} ariaLabel='Next month' disabled={useLiveData && !canAdjustMonth(1)} />
+          <Button iconName='angle-right' variant='icon' onClick={() => adjustMonth(1)} ariaLabel='Next month' disabled={!canAdjustMonth(1)} />
         </div>
         <div
           style={{
@@ -820,11 +706,9 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
             </SpaceBetween>
           ) : (
             <Box color='text-body-secondary' fontSize='body-s'>
-              {useLiveData
-                ? 'Live data mode enabled. Events will appear once reminders are available.'
-                : selectedDay
-                  ? `No events recorded for ${selectedDay.date.toLocaleDateString()}.`
-                  : 'Select a day to view details.'}
+              {selectedDay
+                ? `No events recorded for ${selectedDay.date.toLocaleDateString()}.`
+                : 'Select a day to view details.'}
             </Box>
           )}
         </Container>
@@ -903,9 +787,9 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
     >
       <SpaceBetween size='m'>
         <Box variant='small' color='text-body-secondary'>
-          Review upcoming reminders and deadlines for this case. Switch calendar/list views, and use demo mode to see sample reminders when live data is unavailable.
+          Review upcoming reminders and deadlines for this case. Switch between calendar and list views to inspect upcoming items.
         </Box>
-        {useLiveData && remindersState.error ? (
+        {remindersState.error ? (
           <Box color='text-status-warning' fontSize='body-s'>
             Reminders unavailable: {remindersState.error}
           </Box>

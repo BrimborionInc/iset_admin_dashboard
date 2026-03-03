@@ -1,4 +1,4 @@
-// New Admin User Management Dashboard (mocked Cognito-based admin roles)
+// New Admin User Management Dashboard (Cognito-based admin roles)
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Box,
@@ -32,7 +32,7 @@ const ROLE_OPTIONS = [
   { value: 'ISET_Coordinator', label: getRoleDisplayName('ISET_Coordinator') }
 ];
 
-// Users loaded from backend (mock fallback server-side if provider disabled)
+// Users loaded from backend (server fallback if provider disabled)
 
 export default function UserManagementDashboard() {
   const [items, setItems] = useState([
@@ -364,7 +364,7 @@ export default function UserManagementDashboard() {
       body: JSON.stringify(payload)
     }).then(async resp => {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      // Optimistically add user (mock or real) for immediate feedback
+      // Optimistically add user for immediate feedback
       const primaryRegionId = regionIds.length ? regionIds[0] : (Number.isFinite(regionId) ? regionId : null);
       setUsers(cur => ([...cur, { username: email, email, role: form.role, status: 'FORCE_CHANGE_PASSWORD', regionId: primaryRegionId, regionIds: regionIds.length ? regionIds : null, mfa: false, lastSignIn: null }]));
       recordAudit({ action: 'create', actor: 'you', detail: `Created user as ${form.role}`, target: email });
@@ -646,9 +646,9 @@ export default function UserManagementDashboard() {
                 />
               </FormField>
             )}
-            {/* Invitation help text: show mock notice only when Cognito not configured */}
+            {/* Invitation help text: show notice only when Cognito not configured */}
             {((process.env.REACT_APP_COGNITO_CLIENT_ID || '').startsWith('REPLACE_') || (process.env.REACT_APP_AWS_REGION ? false : true)) ? (
-              <Box variant="small" color="inherit">A temporary password will be generated (mock mode – no real email sent).</Box>
+              <Box variant="small" color="inherit">A temporary password will be generated. Configure Cognito email delivery to send invitation emails automatically.</Box>
             ) : (
               <Box variant="small" color="inherit">Cognito will email the user a temporary password they must change on first sign-in.</Box>
             )}

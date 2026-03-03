@@ -1268,7 +1268,7 @@ const ModifyComponent = () => {
     if (!seeded.name || existingKeys.has(seeded.name)) seeded.name = unique;
     if (!seeded.id || existingKeys.has(seeded.id)) seeded.id = seeded.name;
     // ----------------------------------------------------------------------
-    // Summary-list: start with placeholder dummy content (until workflow selected in properties panel)
+    // Summary-list: start with placeholder content (until workflow selected in properties panel)
     if ((template.template_key || template.type) === 'summary-list') {
       if (!Array.isArray(seeded.rows) || !seeded.rows.length) {
         seeded.rows = [

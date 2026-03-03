@@ -482,10 +482,16 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
         try {
           const body = resErr && resErr.json ? await resErr.json() : null;
           const statusSuffix = resErr?.status ? ` (${resErr.status})` : '';
-          setLoadError((body?.error || body?.message || 'Failed to load case') + statusSuffix);
+          const fallbackMessage =
+            'Failed to load application. Probably a glitch. Please refresh the page to try again. If the problem persists please contact support.';
+          const rawMessage = body?.error || body?.message || fallbackMessage;
+          const userMessage = rawMessage === 'Failed to load case' ? fallbackMessage : rawMessage;
+          setLoadError(`${userMessage}${statusSuffix}`);
         } catch (_) {
           const statusSuffix = resErr?.status ? ` (${resErr.status})` : '';
-          setLoadError(`Failed to load case${statusSuffix}`);
+          setLoadError(
+            `Failed to load application. Probably a glitch. Please refresh the page to try again. If the problem persists please contact support.${statusSuffix}`
+          );
         }
       } finally {
         inflightRef.current.delete(key);

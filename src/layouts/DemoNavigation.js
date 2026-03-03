@@ -6,6 +6,7 @@ import Modal from "@cloudscape-design/components/modal";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import FormField from "@cloudscape-design/components/form-field";
 import Input from "@cloudscape-design/components/input";
+import Textarea from "@cloudscape-design/components/textarea";
 import Box from "@cloudscape-design/components/box";
 import styles from './DemoNavigation.module.css';
 import { apiFetch } from '../auth/apiClient';
@@ -19,8 +20,6 @@ const roleOptions = [
   { label: getRoleDisplayName('Regional Coordinator'), value: 'Regional Coordinator' },
   { label: getRoleDisplayName('Application Assessor'), value: 'Application Assessor' },
 ];
-
-const CONTENT_DENSITY_STORAGE_KEY = 'iset-demo-content-density';
 
 const CLEAR_TABLES = [
   'iset_internal_notification_dismissal',
@@ -77,8 +76,6 @@ const CLEAR_TABLES = [
   'client',
   'iset_application',
 ];
-
-const LIVE_CASES_STORAGE_KEY = 'iset-demo-use-live-cases';
 
 const renderResultDetails = (details) => {
   if (!details) {
@@ -183,42 +180,15 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
   const [applicantLoadError, setApplicantLoadError] = useState(null);
   const [showAiDummyModal, setShowAiDummyModal] = useState(false);
   const [progressEvents, setProgressEvents] = useState([]);
-  const [contentDensity, setContentDensity] = useState(() => {
-    if (typeof window === 'undefined') return 'comfortable';
-    const stored = window.localStorage?.getItem(CONTENT_DENSITY_STORAGE_KEY);
-    return stored === 'compact' ? 'compact' : 'comfortable';
-  });
-  const [useLiveCases, setUseLiveCases] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    try {
-      const stored = window.localStorage?.getItem(LIVE_CASES_STORAGE_KEY);
-      if (stored === null || typeof stored === 'undefined') {
-        return false;
-      }
-      return stored === 'true';
-    } catch {
-      return false;
-    }
-  });
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return undefined;
-    try {
-      window.localStorage?.setItem(LIVE_CASES_STORAGE_KEY, useLiveCases ? 'true' : 'false');
-    } catch (_) {
-      // ignore persistence errors in demo mode
-    }
-    try {
-      window.dispatchEvent(
-        new CustomEvent('iset-portfolio:cases-data-mode', {
-          detail: { useLiveCases },
-        })
-      );
-    } catch (_) {
-      // silently ignore
-    }
-    return undefined;
-  }, [useLiveCases]);
+  const [dummyAdditionalDetails, setDummyAdditionalDetails] = useState('');
+  const [showCasePaymentsModal, setShowCasePaymentsModal] = useState(false);
+  const [isCreatingCasePayments, setIsCreatingCasePayments] = useState(false);
+  const [casePaymentsResult, setCasePaymentsResult] = useState(null);
+  const [casePaymentsProgressEvents, setCasePaymentsProgressEvents] = useState([]);
+  const [casePaymentsClients, setCasePaymentsClients] = useState('3');
+  const [casePaymentsInterventionsPerClient, setCasePaymentsInterventionsPerClient] = useState('2');
+  const [casePaymentsInterventionTypes, setCasePaymentsInterventionTypes] = useState('');
+  const [casePaymentsAdditionalDetails, setCasePaymentsAdditionalDetails] = useState('');
 
   const applySimulatedStaff = (roleValue) => {
     try {
@@ -296,23 +266,6 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
       window.dispatchEvent(new CustomEvent('auth:session-changed', { detail: { session: null, action: 'simulate' } }));
     } catch {}
   }, [currentRole]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return undefined;
-    try {
-      window.localStorage?.setItem(CONTENT_DENSITY_STORAGE_KEY, contentDensity);
-    } catch (_) {
-      // ignore persistence errors
-    }
-    try {
-      window.dispatchEvent(
-        new CustomEvent('app:content-density', { detail: { mode: contentDensity } })
-      );
-    } catch (_) {
-      // ignore dispatch errors in demo mode
-    }
-    return undefined;
-  }, [contentDensity]);
 
   const handleOpenClearModal = () => {
     setConfirmVisible(true);
@@ -466,12 +419,17 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
     setDummyResult(null);
     const provinceValue = selectedProvince?.value || selectedProvince?.code || selectedProvince?.label;
     const userId = selectedApplicant?.value ? Number(selectedApplicant.value) : null;
+    const additionalRequestDetails = dummyAdditionalDetails.trim();
     setProgressEvents([]);
     try {
+      const payload = { province: provinceValue, userId, stepCursor: 'summary-page' };
+      if (additionalRequestDetails) {
+        payload.additionalRequestDetails = additionalRequestDetails;
+      }
       const resp = await apiFetch('/api/ai/create-dummy-draft?stream=1', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ province: provinceValue, userId, stepCursor: 'summary-page' }),
+        body: JSON.stringify(payload),
       });
       if (!resp.ok || !resp.body) {
         const json = await resp.json().catch(() => null);
@@ -537,6 +495,115 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
     }
   };
 
+  const handleOpenCasePaymentsModal = () => {
+    setShowCasePaymentsModal(true);
+    setCasePaymentsProgressEvents([]);
+  };
+
+  const parseCasePaymentsInterventionTypes = () => {
+    if (!casePaymentsInterventionTypes.trim()) {
+      return [];
+    }
+    return Array.from(
+      new Set(
+        casePaymentsInterventionTypes
+          .split(',')
+          .map(token => Number.parseInt(token.trim(), 10))
+          .filter(Number.isFinite)
+          .filter(code => code > 0)
+      )
+    );
+  };
+
+  const handleCreateDummyCasePayments = async () => {
+    setIsCreatingCasePayments(true);
+    setCasePaymentsResult(null);
+    setCasePaymentsProgressEvents([]);
+
+    const clients = Number.parseInt(casePaymentsClients, 10);
+    const interventionsPerClient = Number.parseInt(casePaymentsInterventionsPerClient, 10);
+    const payload = {
+      clients: Number.isFinite(clients) ? clients : 3,
+      interventionsPerClient: Number.isFinite(interventionsPerClient) ? interventionsPerClient : 2,
+    };
+    const interventionTypes = parseCasePaymentsInterventionTypes();
+    if (interventionTypes.length) {
+      payload.interventionTypes = interventionTypes;
+    }
+    if (casePaymentsAdditionalDetails.trim()) {
+      payload.additionalRequestDetails = casePaymentsAdditionalDetails.trim();
+    }
+
+    try {
+      const resp = await apiFetch('/api/ai/create-dummy-case-payments?stream=1', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok || !resp.body) {
+        const json = await resp.json().catch(() => null);
+        setCasePaymentsResult({
+          type: 'error',
+          message: json?.message || 'Failed to create dummy case/payment data',
+          details: json,
+        });
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let evt = null;
+          try { evt = JSON.parse(line); } catch { continue; }
+          if (evt.type === 'plan') {
+            const planned = Array.isArray(evt.steps) ? evt.steps : [];
+            setCasePaymentsProgressEvents(planned.map(step => ({ chunk: step, ok: false, pending: true })));
+          } else if (evt.type === 'chunk') {
+            setCasePaymentsProgressEvents(prev => {
+              const existingIdx = prev.findIndex(p => p.chunk === evt.chunk);
+              if (existingIdx >= 0) {
+                const next = [...prev];
+                next[existingIdx] = evt;
+                return next;
+              }
+              return [...prev, evt];
+            });
+          } else if (evt.type === 'done') {
+            const result = evt.result || {};
+            setCasePaymentsResult({
+              type: 'success',
+              message: 'Dummy case and payment data generated.',
+              details: result?.summary || result,
+            });
+            setShowCasePaymentsModal(false);
+          } else if (evt.type === 'error') {
+            setCasePaymentsResult({
+              type: 'error',
+              message: evt.message || 'Failed to create dummy case/payment data',
+              details: evt.details || evt,
+            });
+            setShowCasePaymentsModal(false);
+          }
+        }
+      }
+    } catch (err) {
+      setCasePaymentsResult({
+        type: 'error',
+        message: err?.message || 'Failed to create dummy case/payment data',
+      });
+    } finally {
+      setIsCreatingCasePayments(false);
+    }
+  };
+
   return (
     <div className={styles.demoNavigation}>
       <span>Demo Controls</span>
@@ -546,20 +613,6 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
           onChange={({ detail }) => setIamOn(detail.checked)}
         >
           IAM {iamOn ? '(On)' : '(Off)'}
-        </Toggle>
-        <Toggle
-          checked={useLiveCases}
-          onChange={({ detail }) => {
-            setUseLiveCases(detail.checked);
-          }}
-        >
-          Use live case data
-        </Toggle>
-        <Toggle
-          checked={contentDensity === 'compact'}
-          onChange={({ detail }) => setContentDensity(detail.checked ? 'compact' : 'comfortable')}
-        >
-          Compact density
         </Toggle>
         <Button variant="primary" onClick={handleOpenClearModal}>
           Clear ISET test data
@@ -579,6 +632,7 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
           disabled={iamOn}
         />
         <Button variant="link" loading={isCreatingDummy} onClick={handleOpenAiDummyModal}>Create Dummy Draft</Button>
+        <Button variant="link" loading={isCreatingCasePayments} onClick={handleOpenCasePaymentsModal}>Create Dummy Case Payments</Button>
       </div>
 
       {showAiDummyModal && (
@@ -627,6 +681,17 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
                 placeholder="Select province"
               />
             </FormField>
+            <FormField
+              label="Additional request details (optional)"
+              description="Provide optional guidance for AI-generated applicant profile and draft answers."
+            >
+              <Textarea
+                value={dummyAdditionalDetails}
+                onChange={({ detail }) => setDummyAdditionalDetails(detail.value)}
+                rows={4}
+                placeholder="Optional guidance for this dummy draft"
+              />
+            </FormField>
             {isCreatingDummy && (
               <Box>
                 <strong>Progress:</strong>
@@ -637,6 +702,88 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
                       <li key={ev.chunk}>
                         {ev.chunk} — {status}
                         {ev && !ev.ok && !ev.pending && ev.raw ? ' (invalid JSON)' : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </Box>
+            )}
+          </SpaceBetween>
+        </Modal>
+      )}
+
+      {showCasePaymentsModal && (
+        <Modal
+          visible={showCasePaymentsModal}
+          header="Generate dummy case payments"
+          closeAriaLabel="Close dummy case payment options"
+          onDismiss={() => { if (!isCreatingCasePayments) setShowCasePaymentsModal(false); }}
+          footer={
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button onClick={() => setShowCasePaymentsModal(false)} disabled={isCreatingCasePayments}>Cancel</Button>
+              <Button
+                variant="primary"
+                loading={isCreatingCasePayments}
+                disabled={isCreatingCasePayments}
+                onClick={handleCreateDummyCasePayments}
+              >
+                Generate cases/payments
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="m">
+            <Box>
+              Generates synthetic clients, cases, interventions, draft payment packets, payment lines, and evidence docs for payment-flow testing.
+            </Box>
+            <FormField label="Clients" description="Number of clients to generate (1-20).">
+              <Input
+                type="number"
+                value={casePaymentsClients}
+                onChange={({ detail }) => setCasePaymentsClients(detail.value)}
+                placeholder="3"
+                inputMode="numeric"
+              />
+            </FormField>
+            <FormField label="Interventions per client" description="Number of interventions per client (1-10).">
+              <Input
+                type="number"
+                value={casePaymentsInterventionsPerClient}
+                onChange={({ detail }) => setCasePaymentsInterventionsPerClient(detail.value)}
+                placeholder="2"
+                inputMode="numeric"
+              />
+            </FormField>
+            <FormField
+              label="Intervention type codes (optional)"
+              description="Comma-separated intervention code values (for example: 12,13,14)."
+            >
+              <Input
+                value={casePaymentsInterventionTypes}
+                onChange={({ detail }) => setCasePaymentsInterventionTypes(detail.value)}
+                placeholder="12,13,14"
+              />
+            </FormField>
+            <FormField
+              label="Additional request details (optional)"
+              description="Guidance passed to the generator for profile/intervention context."
+            >
+              <Textarea
+                value={casePaymentsAdditionalDetails}
+                onChange={({ detail }) => setCasePaymentsAdditionalDetails(detail.value)}
+                rows={4}
+                placeholder="Optional guidance for the generated data"
+              />
+            </FormField>
+            {isCreatingCasePayments && (
+              <Box>
+                <strong>Progress:</strong>
+                <ul>
+                  {(casePaymentsProgressEvents.length ? casePaymentsProgressEvents : [{ chunk: 'processing', pending: true }]).map(ev => {
+                    const status = ev.ok ? 'done' : (ev.pending ? 'pending' : 'error');
+                    return (
+                      <li key={ev.chunk}>
+                        {ev.chunk} — {status}
                       </li>
                     );
                   })}
@@ -741,6 +888,21 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
                 {renderResultDetails(dummyResult.details)}
               </>
             )}
+          </SpaceBetween>
+        </Modal>
+      )}
+
+      {casePaymentsResult && (
+        <Modal
+          visible={true}
+          header={casePaymentsResult.type === 'success' ? 'Dummy Case Payments Created' : 'Dummy Case Payments Error'}
+          closeAriaLabel="Close dummy case payments status"
+          onDismiss={() => setCasePaymentsResult(null)}
+          footer={<SpaceBetween size="xs" direction="horizontal"><Button variant="primary" onClick={() => setCasePaymentsResult(null)}>Close</Button></SpaceBetween>}
+        >
+          <SpaceBetween size="s">
+            <Box>{casePaymentsResult.message}</Box>
+            {renderResultDetails(casePaymentsResult.details)}
           </SpaceBetween>
         </Modal>
       )}

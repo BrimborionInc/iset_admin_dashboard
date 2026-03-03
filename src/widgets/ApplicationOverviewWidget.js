@@ -342,6 +342,7 @@ const ApplicationOverviewWidget = ({
   const {
     userId: currentUserId,
     displayName: currentUserName,
+    email: currentUserEmail,
     role: currentUserRole,
     regionId: currentUserRegionId,
     regionIds: currentUserRegionIds,
@@ -1701,65 +1702,32 @@ const ApplicationOverviewWidget = ({
   const overviewItems = [];
 
   const referenceNumber = payload?.submission_snapshot?.reference_number || caseData?.tracking_id;
-  if (referenceNumber) {
-    overviewItems.push({
-      label: 'Reference #',
-      value: (
-        <CopyToClipboard
-          copyButtonAriaLabel="Copy reference number"
-          copyErrorText="Reference number failed to copy"
-          copySuccessText="Reference number copied"
-          textToCopy={referenceNumber}
-          variant="inline"
-        />
-      ),
-    });
-  }
-
-  overviewItems.push({ label: 'Application Status', value: statusFormField });
-
-  const docsRequestedBadgeLabel = docsRequestedActive ? docsRequestedLabel : 'Not requested';
-  const docsRequestedBadgeColor = docsRequestedActive ? (docsRequestedColor || 'grey') : 'grey';
-  const docsRequestedContent = (
-    <SpaceBetween size="xxs">
-      <Badge color={docsRequestedBadgeColor}>{docsRequestedBadgeLabel}</Badge>
-      <Toggle
-        checked={docsRequestedActive}
-        onChange={handleDocsRequestedToggle}
-        disabled={docsRequestToggleDisabled}
-      >
-        Documents requested
-      </Toggle>
-    </SpaceBetween>
-  );
-  overviewItems.push({ label: 'Docs Requested', value: docsRequestedContent });
-
   const preferredName = answers['preferred-name'];
-  if (preferredName) overviewItems.push({ label: 'Preferred Name', value: preferredName });
-
   const contactEmail = caseData?.applicant_email || answers['contact-email-address'] || answers.email;
-  if (contactEmail) {
-    overviewItems.push({
-      label: 'Email',
-      value: (
-        <CopyToClipboard
-          copyButtonAriaLabel="Copy applicant email"
-          copyErrorText="Email failed to copy"
-          copySuccessText="Email copied"
-          textToCopy={contactEmail}
-          variant="inline"
-        />
-      )
-    });
-  }
-
   const phoneNumber = caseData?.applicant_phone || answers['telephone-day'] || answers['telephone-alt'];
-  if (phoneNumber) overviewItems.push({ label: 'Phone', value: phoneNumber });
+  const assignedUserId = caseData?.assigned_user_id ?? caseData?.assigned_to_user_id ?? application?.assigned_to_user_id ?? null;
+  const assignedDisplayName = typeof caseData?.assigned_user_display_name === 'string'
+    ? caseData.assigned_user_display_name.trim()
+    : '';
+  const assignedEmail = caseData?.assigned_user_email;
+  const isCaseManagerCurrentUser = Boolean(
+    (assignedUserId != null && currentUserId && String(assignedUserId) === String(currentUserId)) ||
+    (
+      typeof assignedEmail === 'string' &&
+      assignedEmail.trim() &&
+      typeof currentUserEmail === 'string' &&
+      currentUserEmail.trim() &&
+      assignedEmail.trim().toLowerCase() === currentUserEmail.trim().toLowerCase()
+    )
+  );
+  const assignedStaffDisplay = isCaseManagerCurrentUser
+    ? (currentUserName || 'You')
+    : (assignedDisplayName || assignedEmail || null);
+  const assignedStaffValue = assignedStaffDisplay
+    ? assignedStaffDisplay
+    : null;
 
-  if (provinceLabel) overviewItems.push({ label: 'Province / Territory', value: provinceLabel });
-
-  if (application?.created_at) overviewItems.push({ label: 'Received At', value: formatDateTime(application.created_at) });
-  if (application?.updated_at) overviewItems.push({ label: 'Last Updated', value: formatDateTime(application.updated_at) });
+  let slaValue = null;
   if (application) {
     const assigned = Boolean(
       caseData?.assigned_user_id ||
@@ -1769,14 +1737,12 @@ const ApplicationOverviewWidget = ({
     );
     const statusInfo = getStatusInfo({ application_status: fallbackStatus, case_status: null, case_id: null, assigned_user_id: assigned });
     const slaMeta = computeSlaMeta(application, slaTargets, statusInfo.rawStatus, assigned);
-    overviewItems.push({
-      label: 'SLA Status',
-      value: <Badge color={slaMeta.color}>{slaMeta.label}</Badge>
-    });
+    slaValue = <Badge color={slaMeta.color}>{slaMeta.label}</Badge>;
   }
 
+  let checklistValue = null;
   if (applicantUserId) {
-    let checklistValue = 'Unavailable';
+    checklistValue = 'Unavailable';
     if (checklistLoading) {
       checklistValue = 'Loading...';
     } else if (Number.isFinite(checklistMissingCount)) {
@@ -1792,15 +1758,61 @@ const ApplicationOverviewWidget = ({
         )
         : badge;
     }
-    overviewItems.push({ label: 'Document Checklist', value: checklistValue });
   }
 
-  const assignedName = caseData?.assigned_user_name;
-  const assignedEmail = caseData?.assigned_user_email;
-  if (assignedName || assignedEmail) {
-    const display = assignedName && assignedEmail ? `${assignedName} (${assignedEmail})` : (assignedName || assignedEmail);
-    overviewItems.push({ label: 'Assigned Staff', value: display });
+  const docsRequestedBadgeLabel = docsRequestedActive ? docsRequestedLabel : 'Not requested';
+  const docsRequestedBadgeColor = docsRequestedActive ? (docsRequestedColor || 'grey') : 'grey';
+  const docsRequestedContent = (
+    <SpaceBetween size="xxs">
+      <Badge color={docsRequestedBadgeColor}>{docsRequestedBadgeLabel}</Badge>
+      <Toggle
+        checked={docsRequestedActive}
+        onChange={handleDocsRequestedToggle}
+        disabled={docsRequestToggleDisabled}
+      >
+        Documents requested
+      </Toggle>
+    </SpaceBetween>
+  );
+
+  if (referenceNumber) {
+    overviewItems.push({
+      label: 'Reference #',
+      value: (
+        <CopyToClipboard
+          copyButtonAriaLabel="Copy reference number"
+          copyErrorText="Reference number failed to copy"
+          copySuccessText="Reference number copied"
+          textToCopy={referenceNumber}
+          variant="inline"
+        />
+      ),
+    });
   }
+  if (preferredName) overviewItems.push({ label: 'Preferred Name', value: preferredName });
+  if (contactEmail) {
+    overviewItems.push({
+      label: 'Email',
+      value: (
+        <CopyToClipboard
+          copyButtonAriaLabel="Copy applicant email"
+          copyErrorText="Email failed to copy"
+          copySuccessText="Email copied"
+          textToCopy={contactEmail}
+          variant="inline"
+        />
+      )
+    });
+  }
+  if (phoneNumber) overviewItems.push({ label: 'Phone', value: phoneNumber });
+  if (provinceLabel) overviewItems.push({ label: 'Province / Territory', value: provinceLabel });
+  if (application?.created_at) overviewItems.push({ label: 'Received At', value: formatDateTime(application.created_at) });
+  if (application?.updated_at) overviewItems.push({ label: 'Last Updated', value: formatDateTime(application.updated_at) });
+  overviewItems.push({ label: 'Application Status', value: statusFormField });
+  if (slaValue) overviewItems.push({ label: 'SLA Status', value: slaValue });
+  if (assignedStaffValue) overviewItems.push({ label: 'Case Manager', value: assignedStaffValue });
+  if (checklistValue !== null) overviewItems.push({ label: 'Document Checklist', value: checklistValue });
+  overviewItems.push({ label: 'Docs Requested', value: docsRequestedContent });
 
   if (activeLock) {
     if (lockOwnerLabel) {
@@ -1820,7 +1832,7 @@ const ApplicationOverviewWidget = ({
   ) : error ? (
     <Box color="text-status-critical">{error}</Box>
   ) : overviewItems.length ? (
-    <ColumnLayout columns={6} minColumnWidth={160} variant="text-grid" borders="vertical">
+    <ColumnLayout columns={7} minColumnWidth={160} variant="text-grid" borders="vertical">
       {overviewItems.map(item => (
         <DetailItem key={item.label} label={item.label} value={item.value} />
       ))}

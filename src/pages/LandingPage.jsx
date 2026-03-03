@@ -44,8 +44,8 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - v0.5.2 (13th Feb 2026)',
-      description: 'Release 0.5.2 highlights major admin-console enhancements delivered since 12 Jan 2026.',
+      sectionTitle: 'Release Notes - v0.5.3 (3rd March 2026)',
+      description: 'Release 0.5.3 summarizes admin-console updates delivered since 12 Jan 2026.',
       features: {
         heading: 'What’s New',
         sections: [
@@ -150,8 +150,8 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Notes de version - v0.5.2 (13 février 2026)',
-      description: 'La version 0.5.2 met en évidence les principales améliorations de la console admin livrées depuis le 12 janvier 2026.',
+      sectionTitle: 'Notes de version - v0.5.3 (3 mars 2026)',
+      description: 'La version 0.5.3 résume les mises à jour de la console admin livrées depuis le 12 janvier 2026.',
       features: {
         heading: 'Quoi de neuf',
         sections: [

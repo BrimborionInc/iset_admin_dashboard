@@ -261,7 +261,7 @@ export const ForecastingDataProvider = ({ children }) => {
           };
         });
         const nextTotal = nextAdjustments.reduce((acc, item) => acc + item.scenarioForecast, 0);
-        const nextAdminRate = scenario.adminRate; // keep mock stable
+        const nextAdminRate = scenario.adminRate; // keep rate stable
         return {
           ...scenario,
           adjustments: nextAdjustments,

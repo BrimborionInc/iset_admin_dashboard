@@ -70,12 +70,24 @@ Notes:
 - This stops compute + database, but ALB/NAT gateways/EIPs/VPC endpoints still incur costs unless explicitly removed.
 - Sanity check account before running: `aws sts get-caller-identity`
 
-## DB introspection (dev)
+## DB interaction (dev)
 
 - MySQL runs on the Windows host and only accepts local connections.
-- From WSL, use the Windows client with credentials from `.env`:
-  `"/mnt/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe" -u root -p"<from .env>" -D iset_intake -e "SHOW TABLES;"`
-- If that fails, run `npm run dump:dev-schema` to refresh `docs/data/DB-Structure-Dump/` (kept out of git).
+- From WSL, use the Windows client (not Linux `mysql`):
+  `"/mnt/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe" -h localhost -P 3306 -u root -p"<from .env>" -D iset_intake -e "SELECT 1;"`
+- Read credentials from project `.env` keys: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`, `DB_NAME`.
+- Basic connectivity test:
+  `"/mnt/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe" -h localhost -P 3306 -u root -p"<from .env>" -D iset_intake -e "SELECT DATABASE() AS db, @@hostname AS host, @@port AS port;"`
+- Schema discovery:
+  - Tables: `... -e "SHOW TABLES;"`
+  - Table definition: `... -e "SHOW CREATE TABLE <table_name>\\G"`
+  - Recent rows: `... -e "SELECT * FROM <table_name> ORDER BY id DESC LIMIT 10;"`
+- Safe write workflow for test data:
+  - Validate target table/columns first with `SHOW CREATE TABLE`.
+  - Wrap all write operations in a transaction: `START TRANSACTION; ...; COMMIT;` (or `ROLLBACK;` if verification fails).
+  - Use clearly tagged dummy values (for example `DUMMY_`, `TEST_`) so cleanup is easy.
+  - Never run destructive statements (`DROP`, broad `DELETE`/`UPDATE` without `WHERE`) unless explicitly requested.
+- If host access fails from WSL, run `npm run dump:dev-schema` to refresh `docs/data/DB-Structure-Dump/` (kept out of git) and continue read-only analysis from docs.
 
 ## Cross-app context
 

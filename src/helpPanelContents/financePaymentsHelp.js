@@ -6,14 +6,14 @@ const FinancePaymentsHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Manage payment packets from draft through submission to finance. Each packet groups payment lines and evidence
-        so submissions stay audit-ready and align with Annual Reporting.
+        Manage batch payment submissions from draft through finance handoff. Packets group payment lines and evidence
+        so submissions stay audit-ready.
       </p>
     </Box>
     <Box>
       <strong>What this dashboard covers</strong>
       <ul>
-        <li>Queue: prioritise packets by draft vs submitted status, evidence completeness, and ageing.</li>
+        <li>Batch queue: focus draft packets due for submission, blockers, and ageing.</li>
         <li>Detail: view line items and evidence checklist before submission.</li>
         <li>Communications: track outbound finance emails and follow-ups.</li>
         <li>SLA snapshot: spot bottlenecks across drafts and submissions.</li>
@@ -23,6 +23,7 @@ const FinancePaymentsHelp = () => (
       <strong>Key rules</strong>
       <ul>
         <li>Required evidence must be received before submission.</li>
+        <li>Recurrence and service-period requirements are enforced per payment type from Finance Settings.</li>
         <li>Submitting a packet emails finance and locks edits.</li>
         <li>Reporting unit and region metadata drive finance routing and audit context.</li>
       </ul>
@@ -46,6 +47,6 @@ const FinancePaymentsHelp = () => (
 );
 
 FinancePaymentsHelp.aiContext =
-  "Explain the Finance Payments dashboard: packet queue, detail view, communications log, and SLA snapshot. Include evidence gates, draft/submitted statuses, and that submission emails finance and locks edits.";
+  "Explain the Batch Payments dashboard: due-for-submission queue, detail view, communications log, and SLA snapshot. Include evidence gates, recurrence/service-period policy by payment type, and that submission emails finance and locks edits.";
 
 export default FinancePaymentsHelp;

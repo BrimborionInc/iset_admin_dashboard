@@ -1,18 +1,15 @@
 #!/usr/bin/env node
 /**
- * Publish normalized intake workflow schema to BOTH legacy portal and new public portal.
+ * Publish normalized intake workflow schema to legacy portal output + runtime config.
  *
  * Usage:
  *   node scripts/publish-workflow.js --id <workflowId>
- *   node scripts/publish-workflow.js --id <workflowId> --legacy-only
- *   node scripts/publish-workflow.js --id <workflowId> --new-only
  *
  * Behavior:
  * 1. Loads environment (.env.development by default if NODE_ENV not set) to get ADMIN_API_BASE if needed.
  * 2. Uses existing normalization utilities (buildWorkflowSchema) directly to construct schema from local source data.
  * 3. Writes schema JSON to:
- *      ../../ISET-intake/src/intakeFormSchema.json (legacy)
- *      ../../iset-public-portal/apps/api/src/data/intakeFormSchema.json (new)
+ *      ../../ISET-intake/src/intakeFormSchema.json
  *    (Paths are resolved relative to this script location.)
  * 4. Also writes a small meta file with workflow id and timestamp alongside each target.
  * 5. Skips writing target if contents are unchanged (hash compare) for faster incremental dev.
@@ -29,19 +26,17 @@ try { require('dotenv').config(); } catch (_) { /* ignore */ }
 // ---- CLI ARG PARSE ----
 const args = process.argv.slice(2);
 let workflowId = null;
-let legacyOnly = false;
-let newOnly = false;
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   if (a === '--id') {
     workflowId = args[++i];
-  } else if (a === '--legacy-only') {
-    legacyOnly = true;
-  } else if (a === '--new-only') {
-    newOnly = true;
   } else if (a === '--help' || a === '-h') {
     printHelp();
     process.exit(0);
+  } else if (a === '--legacy-only' || a === '--new-only') {
+    console.error(`ERROR: ${a} is no longer supported.`);
+    printHelp();
+    process.exit(1);
   }
 }
 
@@ -50,11 +45,6 @@ if (!workflowId) {
   printHelp();
   process.exit(1);
 }
-if (legacyOnly && newOnly) {
-  console.error('ERROR: Cannot specify both --legacy-only and --new-only');
-  process.exit(1);
-}
-
 // ---- Load Normalization Logic ----
 let buildWorkflowSchema;
 try {
@@ -86,7 +76,7 @@ async function main() {
   }
 
   const publishedAt = new Date().toISOString();
-  const outputJSON = JSON.stringify(schema, null, 2);
+  const legacyJson = Array.isArray(schema) ? JSON.stringify(schema, null, 2) : JSON.stringify(schema.steps || [], null, 2);
   const schemaMeta = schema && typeof schema === 'object' && schema.meta && typeof schema.meta === 'object' ? schema.meta : null;
   const meta = {
     workflowId,
@@ -113,36 +103,19 @@ async function main() {
   meta.checksum = runtimeChecksum;
   const payloadJson = JSON.stringify(normalizedPayload);
 
-  const targets = [];
-  if (!newOnly) {
-    // legacy portal target
-    targets.push({
-      label: 'legacy',
-      file: path.resolve(__dirname, '../../ISET-intake/src/intakeFormSchema.json'),
-      meta: path.resolve(__dirname, '../../ISET-intake/src/intakeFormSchema.meta.json')
-    });
-  }
-  if (!legacyOnly) {
-    // new portal target
-    targets.push({
-      label: 'new',
-      file: path.resolve(__dirname, '../../iset-public-portal/apps/api/src/data/intakeFormSchema.json'),
-      meta: path.resolve(__dirname, '../../iset-public-portal/apps/api/src/data/intakeFormSchema.meta.json')
-    });
-  }
-
-  for (const t of targets) {
-    ensureDir(path.dirname(t.file));
-    const changed = writeIfChanged(t.file, outputJSON);
-    const metaChanged = writeIfChanged(t.meta, JSON.stringify(meta, null, 2));
-    console.log(`[publish-workflow] ${t.label} -> ${relativeCwd(t.file)} ${changed ? 'UPDATED' : 'unchanged'} (meta ${metaChanged ? 'UPDATED' : 'unchanged'})`);
-  }
+  const legacyTarget = {
+    label: 'legacy',
+    file: path.resolve(__dirname, '../../ISET-intake/src/intakeFormSchema.json'),
+    meta: path.resolve(__dirname, '../../ISET-intake/src/intakeFormSchema.meta.json')
+  };
+  ensureDir(path.dirname(legacyTarget.file));
+  const changed = writeIfChanged(legacyTarget.file, legacyJson);
+  const metaChanged = writeIfChanged(legacyTarget.meta, JSON.stringify(meta, null, 2));
+  console.log(`[publish-workflow] ${legacyTarget.label} -> ${relativeCwd(legacyTarget.file)} ${changed ? 'UPDATED' : 'unchanged'} (meta ${metaChanged ? 'UPDATED' : 'unchanged'})`);
 
   console.log('\nPublish complete.');
 
-  if (!legacyOnly) {
-    await upsertRuntimeConfig(payloadJson, normalizedPayload.version);
-  }
+  await upsertRuntimeConfig(payloadJson, normalizedPayload.version);
 }
 
 function writeIfChanged(file, content) {
@@ -163,7 +136,7 @@ function sha256(s) {
 }
 
 function printHelp() {
-  console.log(`Publish normalized workflow schema to legacy and new portals.\n\nUsage:\n  node scripts/publish-workflow.js --id <workflowId> [--legacy-only|--new-only]\n\nOptions:\n  --id <workflowId>   Required workflow identifier used by normalization layer\n  --legacy-only       Only write to legacy portal (ISET-intake)\n  --new-only          Only write to new portal (iset-public-portal)\n  -h, --help          Show this help\n`);
+  console.log(`Publish normalized workflow schema to legacy portal output and runtime config.\n\nUsage:\n  node scripts/publish-workflow.js --id <workflowId>\n\nOptions:\n  --id <workflowId>   Required workflow identifier used by normalization layer\n  -h, --help          Show this help\n`);
 }
 
 async function upsertRuntimeConfig(payloadJson, version) {

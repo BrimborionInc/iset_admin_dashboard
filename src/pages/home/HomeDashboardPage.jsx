@@ -1759,7 +1759,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                     });
                 }
             } catch (_) {
-                // keep existing sample data on failure
+                // keep existing data on failure
             }
         };
         loadUnassignedApplications();
