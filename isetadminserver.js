@@ -3172,6 +3172,11 @@ async function generatePaymentPacketPdfBuffer({ packet }) {
 const ISET_TEST_DATA_TABLE_ORDER = [
   'iset_internal_notification_dismissal',
   'iset_internal_notification',
+  'staff_message_item',
+  'staff_message',
+  'staff_message_thread_participant',
+  'staff_message_thread',
+  'staff_tutorial_progress',
   'iset_case_action_item',
   'iset_case_action_plan',
   'iset_case_assessment',
@@ -3196,10 +3201,19 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'iset_applicant_watchlist',
   'iset_case_watch',
   'iset_case_conflict_declaration',
+  'iset_document_intervention',
   'application_lock',
   'contact_message_note',
   'contact_message_status_history',
   'contact_message',
+  'input_json_state',
+  'user_session_audit',
+  'finance_saved_view',
+  'budget_allocation',
+  'budget_snapshot_pot_region',
+  'budget_snapshot_pot',
+  'budget_snapshot',
+  'budget_pot_draft',
   'iset_event_receipt',
   'iset_event_outbox',
   'iset_event_entry',
@@ -3224,6 +3238,9 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'esdc_participant_submission',
   'esdc_reporting_note',
   'esdc_reporting_package',
+  'jordan_application_draft',
+  'jordan_application',
+  'system_config_audit',
   'iset_case',
   'client',
   'iset_application',
@@ -18206,9 +18223,11 @@ app.patch('/api/config/runtime/ai-model', async (req, res) => {
       // Reflect immediately in process env & clear volatile override
       process.env.OPENROUTER_MODEL = nextModel;
       delete global.__AI_MODEL_OVERRIDE;
+      __runtimeAiModelCache = { fetchedAt: Date.now(), model: nextModel };
     } catch (fileErr) {
       // Fall back to in-memory override if file write fails
       global.__AI_MODEL_OVERRIDE = nextModel;
+      __runtimeAiModelCache = { fetchedAt: Date.now(), model: nextModel };
       console.warn('[ai-model] Failed to persist to .env, using in-memory override only:', fileErr.message);
     }
     // Also persist to shared runtime_config for public scope so portal can consume
@@ -19382,6 +19401,45 @@ const AI_DUMMY_TEMP = Math.min(1, Math.max(0.1, parseFloat(process.env.AI_DUMMY_
 const AI_DUMMY_TOP_P = Math.min(1, Math.max(0.1, parseFloat(process.env.AI_DUMMY_TOP_P || '0.9')));
 const AI_DUMMY_CACHE_TTL_MS = 60 * 1000;
 let __publishedWorkflowSchemaCache = { fetchedAt: 0, payload: null };
+let __runtimeAiModelCache = { fetchedAt: 0, model: null };
+
+function extractModelIdFromRuntimeValue(input) {
+  if (!input && input !== 0) return null;
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (!trimmed) return null;
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        return extractModelIdFromRuntimeValue(JSON.parse(trimmed));
+      } catch (_) {
+        return trimmed;
+      }
+    }
+    return trimmed;
+  }
+  if (typeof input === 'object') {
+    const candidate = input.model || input.defaultModel || input.id || null;
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  return null;
+}
+
+async function resolveRuntimeAiModel({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && __runtimeAiModelCache.model && (now - __runtimeAiModelCache.fetchedAt) < AI_DUMMY_CACHE_TTL_MS) {
+    return __runtimeAiModelCache.model;
+  }
+  let dbModel = null;
+  try {
+    const [[row]] = await pool.query("SELECT v FROM iset_runtime_config WHERE scope='public' AND k='ai.model' LIMIT 1");
+    dbModel = extractModelIdFromRuntimeValue(row?.v);
+  } catch (_) {
+    dbModel = null;
+  }
+  const resolved = dbModel || (global.__AI_MODEL_OVERRIDE || process.env.OPENROUTER_MODEL || '').trim() || AI_DUMMY_DEFAULT_MODEL;
+  __runtimeAiModelCache = { fetchedAt: now, model: resolved };
+  return resolved;
+}
 
 async function fetchPublishedWorkflowSchema(force = false) {
   const now = Date.now();
@@ -19579,10 +19637,11 @@ async function generateAiDummyDraft({ provinceCode, stepCursor = 'summary-page',
     err.status = 501;
     throw err;
   }
+  const aiModel = await resolveRuntimeAiModel();
   const callDiagnostics = [];
   const callAi = async ({ messages, label, maxTokens = 480 }) => {
     const payload = {
-      model: AI_DUMMY_DEFAULT_MODEL,
+      model: aiModel,
       messages,
       temperature: AI_DUMMY_TEMP,
       top_p: AI_DUMMY_TOP_P,
@@ -19600,7 +19659,7 @@ async function generateAiDummyDraft({ provinceCode, stepCursor = 'summary-page',
       callDiagnostics.push({
         attempt: label,
         status: resp.status,
-        model: AI_DUMMY_DEFAULT_MODEL,
+        model: aiModel,
         contentPreview: String(content || '').slice(0, 200)
       });
       return { content, providerData: resp.data };
@@ -21096,6 +21155,7 @@ async function tryGenerateCasePaymentProfilesViaAi({
   additionalRequestDetails = '',
 }) {
   if (!AI_KEY) return null;
+  const aiModel = await resolveRuntimeAiModel();
   const cleanCount = clampIntegerRange(count, 1, DUMMY_CASE_PAYMENTS_MAX_CLIENTS, DUMMY_CASE_PAYMENTS_DEFAULT_CLIENTS);
   const cleanInterventions = clampIntegerRange(
     interventionsPerClient,
@@ -21129,7 +21189,7 @@ async function tryGenerateCasePaymentProfilesViaAi({
     const response = await axios.post(
       'https://openrouter.ai/api/v1/chat/completions',
       {
-        model: AI_DUMMY_DEFAULT_MODEL,
+        model: aiModel,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: JSON.stringify(payload) },

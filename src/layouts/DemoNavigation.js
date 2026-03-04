@@ -21,62 +21,6 @@ const roleOptions = [
   { label: getRoleDisplayName('Application Assessor'), value: 'Application Assessor' },
 ];
 
-const CLEAR_TABLES = [
-  'iset_internal_notification_dismissal',
-  'iset_internal_notification',
-  'iset_case_action_item',
-  'iset_case_action_plan',
-  'iset_case_assessment',
-  'iset_case_compliance_check',
-  'iset_case_document',
-  'iset_case_event',
-  'iset_case_financial_snapshot',
-  'iset_case_intervention',
-  'finance_transaction',
-  'payment_line_transaction',
-  'payment_batch_line',
-  'payment_packet_document',
-  'payment_packet_communication',
-  'payment_status_event',
-  'payment_override',
-  'payment_packet_line',
-  'payment_batch',
-  'payment_packet',
-  'payee_profile',
-  'iset_case_note',
-  'iset_case_task',
-  'iset_case_watch',
-  'iset_case_conflict_declaration',
-  'application_lock',
-  'esdc_participant_submission_history',
-  'esdc_participant_submission',
-  'contact_message',
-  'contact_message_note',
-  'contact_message_status_history',
-  'documents',
-  'iset_event_receipt',
-  'iset_event_outbox',
-  'iset_event_entry',
-  'iset_intake.message_attachment',
-  'iset_intake.iset_case_reminder',
-  'iset_intake.messages',
-  'message_signing_request',
-  'signing_request',
-  'iset_document',
-  'iset_application_version',
-  'iset_intake.iset_application_escalation',
-  'iset_application_draft_dynamic',
-  'iset_application_file',
-  'iset_application_submission',
-  'iset_application_draft',
-  'pending_uploads',
-  'esdc_reporting_note',
-  'esdc_reporting_package',
-  'iset_case',
-  'client',
-  'iset_application',
-];
-
 const renderResultDetails = (details) => {
   if (!details) {
     return null;
@@ -384,13 +328,14 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
       }
       const users = Array.isArray(data?.users) ? data.users : [];
       const opts = users.map((u) => {
-        const email = u?.email || u?.username || '(unknown)';
-        const username = u?.username || '';
-        const label = username && username !== email ? `${email} (${username})` : email;
+        const dbEmail = (u?.email || '').trim();
+        const cognitoUsername = (u?.username || '').trim();
+        const email = dbEmail && !/@placeholder\.local$/i.test(dbEmail)
+          ? dbEmail
+          : (cognitoUsername || dbEmail || '(unknown)');
         return {
-          label,
+          label: email,
           value: String(u.userId),
-          description: `DB user #${u.userId}`,
         };
       }).filter((o) => o.value);
       setApplicantOptions(opts);
@@ -822,14 +767,7 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
         >
           <SpaceBetween size="m">
             <Box>
-              This action will permanently remove test data from the following ISET tables and any related records to maintain referential integrity. Counters and generated identifiers will also be reset.
-            </Box>
-            <Box as="div">
-              <ul>
-                {CLEAR_TABLES.map((table) => (
-                  <li key={table}>{table}</li>
-                ))}
-              </ul>
+              This action will permanently remove ISET test data and related records to maintain referential integrity. Counters and generated identifiers will also be reset.
             </Box>
             <FormField label='Type "delete" to confirm'>
               <Input
@@ -859,7 +797,6 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
         >
           <SpaceBetween size="s">
             <Box>{clearResult.message}</Box>
-            {renderResultDetails(clearResult.details)}
           </SpaceBetween>
         </Modal>
       )}

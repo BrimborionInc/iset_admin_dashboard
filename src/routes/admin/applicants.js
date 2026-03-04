@@ -2,7 +2,6 @@
 const express = require('express');
 const router = express.Router();
 
-const { requireRole } = require('../../middleware/authz');
 const { resolveAwsCredentials } = require('../../lib/awsCredentials');
 const { CognitoIdentityProviderClient, ListUsersCommand } = require('@aws-sdk/client-cognito-identity-provider');
 
@@ -54,7 +53,7 @@ function toAttrMap(user) {
 // GET /admin/applicants
 // Lists applicant Cognito users that also exist in DB table `user` (matching user.cognito_sub = cognito sub).
 // Response: { source, users: [{ userId, email, username, cognitoSub }] }
-router.get('/applicants', requireRole('System Administrator'), async (req, res) => {
+router.get('/applicants', async (req, res) => {
   try {
     if (!REGION) {
       return res.status(500).json({ error: 'missing_aws_region', message: 'Missing AWS_REGION/COGNITO_REGION' });

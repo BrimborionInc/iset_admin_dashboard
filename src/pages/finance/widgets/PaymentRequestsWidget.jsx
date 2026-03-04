@@ -299,13 +299,13 @@ const simpleStatusOptions = [
 ];
 
 const FINANCE_QUEUE_FILTER_OPTIONS = [
-  { value: "all_due", label: "All due-for-submission" },
-  { value: "ready_to_send", label: "Ready to send" },
+  { value: "view_all", label: "View all packets" },
+  { value: "due_today_or_earlier", label: "Due today or earlier" },
+  { value: "unsubmitted", label: "Unsubmitted" },
+  { value: "submitted", label: "Submitted" },
   { value: "blocked", label: "Blocked" },
   { value: "overdue", label: "Overdue" },
-  { value: "due_today", label: "Due today" },
-  { value: "due_this_week", label: "Due this week" },
-  { value: "no_due_date", label: "No due date" },
+  { value: "no_due_date_set", label: "No due date set" },
 ];
 
 const formatCurrency = value =>
@@ -1331,11 +1331,16 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
   );
 
   const filteredItems = useMemo(() => {
-    const sourceItems = isProgramView ? requestsWithWorkflowMeta : dueSubmissionItems;
+    const queueFilterValue = isProgramView
+      ? null
+      : financeQueueFilter?.value || "view_all";
+    const sourceItems = isProgramView
+      ? requestsWithWorkflowMeta
+      : queueFilterValue === "submitted" || queueFilterValue === "view_all"
+      ? requestsWithWorkflowMeta
+      : dueSubmissionItems;
     const today = toDateOnlyValue(new Date());
     const todayTs = today ? today.getTime() : null;
-    const dueWeekEndTs =
-      todayTs === null ? null : todayTs + (6 * 24 * 60 * 60 * 1000);
     return sourceItems.filter(item => {
       if (
         isProgramView &&
@@ -1345,35 +1350,33 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
         return false;
       }
       if (!isProgramView) {
-        const queueFilterValue = financeQueueFilter?.value || "all_due";
-        if (queueFilterValue === "ready_to_send" && !item.readyToSubmit) {
-          return false;
+        if (queueFilterValue === "submitted") {
+          return normalizePacketStatusKey(item.status) === "submitted";
+        }
+        if (queueFilterValue === "unsubmitted") {
+          return normalizePacketStatusKey(item.status) === "draft";
         }
         if (queueFilterValue === "blocked" && item.readyToSubmit) {
           return false;
         }
         if (
+          queueFilterValue === "due_today_or_earlier" ||
           queueFilterValue === "overdue" ||
-          queueFilterValue === "due_today" ||
-          queueFilterValue === "due_this_week" ||
-          queueFilterValue === "no_due_date"
+          queueFilterValue === "no_due_date_set"
         ) {
           const dueDate = toDateOnlyValue(item?.dueBy);
           const dueTs = dueDate ? dueDate.getTime() : null;
-          if (queueFilterValue === "no_due_date") {
+          if (queueFilterValue === "no_due_date_set") {
             return dueTs === null;
           }
           if (dueTs === null || todayTs === null) {
             return false;
           }
+          if (queueFilterValue === "due_today_or_earlier") {
+            return dueTs <= todayTs;
+          }
           if (queueFilterValue === "overdue") {
             return dueTs < todayTs;
-          }
-          if (queueFilterValue === "due_today") {
-            return dueTs === todayTs;
-          }
-          if (queueFilterValue === "due_this_week") {
-            return dueTs >= todayTs && dueWeekEndTs !== null && dueTs <= dueWeekEndTs;
           }
         }
       }
@@ -1730,7 +1733,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
               {!isProgramView ? (
                 <Button
                   variant="primary"
-                  disabled={!queueSelectedIds.length}
+                  disabled={!bulkReadyPackets.length}
                   onClick={() => {
                     setBulkSubmitError(null);
                     setBulkSubmitModalOpen(true);

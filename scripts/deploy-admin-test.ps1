@@ -13,6 +13,9 @@
 .PARAMETER Region
   AWS region for all CLI calls. Defaults to ca-central-1.
 
+.PARAMETER AwsProfile
+  AWS CLI profile for local AWS calls. Defaults to nwac.
+
 .PARAMETER AutoScalingGroup
   Name of the Auto Scaling Group hosting the admin app. Defaults to nwac-test-asg.
 
@@ -28,6 +31,7 @@
 [CmdletBinding()]
 param(
     [string]$Region = "ca-central-1",
+    [string]$AwsProfile = "nwac",
     [string]$AutoScalingGroup = "nwac-test-asg",
     [string]$Bucket = "nwac-test-artifacts",
     [string]$KeyPrefix = "admin-dashboard",
@@ -64,6 +68,24 @@ function Ensure-Tool([string]$Name) {
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
         throw "Required tool '$Name' was not found in PATH."
     }
+}
+
+function Invoke-AwsCli {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
+
+    $awsArgs = @()
+    if (-not [string]::IsNullOrWhiteSpace($AwsProfile)) {
+        $awsArgs += @("--profile", $AwsProfile)
+    }
+    $awsArgs += $Arguments
+    $output = & aws @awsArgs 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $rendered = if ($output) { [string]::Join("`n", @($output)) } else { "(no output captured)" }
+        throw "AWS CLI command failed: aws $($awsArgs -join ' ')`n$rendered"
+    }
+    return $output
 }
 
 function New-PosixZip {
@@ -146,10 +168,13 @@ function Start-SsmCommand {
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     try {
         [System.IO.File]::WriteAllText($tempFile, $json, $utf8NoBom)
-        $raw = aws ssm send-command `
-            --region $Region `
-            --cli-input-json ("file://{0}" -f $tempFile) `
-            --output json
+        $raw = Invoke-AwsCli -Arguments @(
+            "ssm",
+            "send-command",
+            "--region", $Region,
+            "--cli-input-json", ("file://{0}" -f $tempFile),
+            "--output", "json"
+        )
 
         ($raw | ConvertFrom-Json).Command.CommandId
     }
@@ -168,12 +193,19 @@ function Wait-SsmCommand {
     $failureCount = 0
     while ($true) {
         Start-Sleep -Seconds 5
-        $raw = aws ssm get-command-invocation `
-            --region $Region `
-            --command-id $CommandId `
-            --instance-id $InstanceId `
-            --output json `
-            --query '{Status:Status,StatusDetails:StatusDetails,Stdout:StandardOutputContent,Stderr:StandardErrorContent}' 2>&1
+        $awsArgs = @(
+            "ssm",
+            "get-command-invocation",
+            "--region", $Region,
+            "--command-id", $CommandId,
+            "--instance-id", $InstanceId,
+            "--output", "json",
+            "--query", "{Status:Status,StatusDetails:StatusDetails,Stdout:StandardOutputContent,Stderr:StandardErrorContent}"
+        )
+        if (-not [string]::IsNullOrWhiteSpace($AwsProfile)) {
+            $awsArgs = @("--profile", $AwsProfile) + $awsArgs
+        }
+        $raw = & aws @awsArgs 2>&1
 
         if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)) {
             $failureCount++
@@ -232,6 +264,9 @@ try {
     Write-Section "Pre-flight checks"
     Ensure-Tool "npm"
     Ensure-Tool "aws"
+    $identityArn = (Invoke-AwsCli -Arguments @("sts", "get-caller-identity", "--region", $Region, "--query", "Arn", "--output", "text")).Trim()
+    $profileLabel = if ([string]::IsNullOrWhiteSpace($AwsProfile)) { "<default>" } else { $AwsProfile }
+    Write-Host ("AWS identity: {0} (profile: {1})" -f $identityArn, $profileLabel)
 
     if (-not $SkipBuild) {
         Write-Section "Building React app for test"
@@ -290,13 +325,16 @@ try {
 
     Write-Section "Uploading artefact to S3"
     $s3Key = Join-S3Key -Prefix $KeyPrefix -Name $archiveName
-    aws s3 cp "`"$archivePath`"" ("s3://{0}/{1}" -f $Bucket, $s3Key) --region $Region | Out-Host
+    Invoke-AwsCli -Arguments @("s3", "cp", $archivePath, ("s3://{0}/{1}" -f $Bucket, $s3Key), "--region", $Region) | Out-Host
 
     Write-Section "Discovering instances in Auto Scaling Group '$AutoScalingGroup'"
-    $asgJson = aws autoscaling describe-auto-scaling-groups `
-        --region $Region `
-        --auto-scaling-group-names $AutoScalingGroup `
-        --output json
+    $asgJson = Invoke-AwsCli -Arguments @(
+        "autoscaling",
+        "describe-auto-scaling-groups",
+        "--region", $Region,
+        "--auto-scaling-group-names", $AutoScalingGroup,
+        "--output", "json"
+    )
 
     $asg = ($asgJson | ConvertFrom-Json).AutoScalingGroups
     if (-not $asg -or $asg.Count -eq 0) {
