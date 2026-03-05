@@ -369,6 +369,20 @@ const normalizeInterventionCodeValue = value => {
 const RECURRENCE_MODE_REQUIRED = "required";
 const RECURRENCE_MODE_OPTIONAL = "optional";
 const RECURRENCE_MODE_NOT_ALLOWED = "not_allowed";
+const PAYMENT_TYPE_ALIASES = {
+  wagesubsidyemployer: "WageSubsidyEmployer",
+  wagesubsidy: "WageSubsidyEmployer",
+  targetedwagesubsidyemployer: "WageSubsidyEmployer",
+  targetedwagesubsidy: "WageSubsidyEmployer",
+};
+
+const normalizePaymentTypeCode = value => {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const key = raw.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return PAYMENT_TYPE_ALIASES[key] || raw;
+};
 
 const normalizeRecurrenceMode = value => {
   if (typeof value !== "string") return RECURRENCE_MODE_NOT_ALLOWED;
@@ -412,7 +426,7 @@ const normalizeCostingDefaults = payload => {
           if (typeof item === "string") return { type: item };
           if (item && typeof item === "object") {
             return {
-              type: item.type || item.paymentType || item.payment_type || "",
+              type: normalizePaymentTypeCode(item.type || item.paymentType || item.payment_type) || "",
               notes: item.notes || "",
               recurrenceEnabled: typeof item.recurrenceEnabled === "boolean" ? item.recurrenceEnabled : undefined,
             };
@@ -429,7 +443,7 @@ const normalizeCostingDefaults = payload => {
   const paymentTypes = paymentTypesRaw
     .map(entry => {
       if (!entry || typeof entry !== "object") return null;
-      const code = normalizeInterventionCodeValue(entry.code || entry.paymentType || entry.payment_type);
+      const code = normalizePaymentTypeCode(entry.code || entry.paymentType || entry.payment_type);
       if (!code) return null;
       const recurrence = entry.recurrence && typeof entry.recurrence === "object" ? entry.recurrence : {};
       return {
@@ -487,7 +501,7 @@ const normalizeCostLine = raw => {
   const recurrenceRaw = raw.recurrence && typeof raw.recurrence === "object" ? raw.recurrence : {};
   return {
     id: raw.id || buildUuid(),
-    type: raw.type || raw.paymentType || raw.payment_type || "",
+    type: normalizePaymentTypeCode(raw.type || raw.paymentType || raw.payment_type) || "",
     amount:
       raw.amount === null || typeof raw.amount === "undefined"
         ? ""
@@ -1065,7 +1079,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     const map = new Map();
     if (effectiveCostingDefaults && Array.isArray(effectiveCostingDefaults.paymentTypes)) {
       effectiveCostingDefaults.paymentTypes.forEach(entry => {
-        const code = entry?.code ? String(entry.code).trim() : "";
+        const code = normalizePaymentTypeCode(entry?.code);
         if (!code) return;
         const mode = normalizeRecurrenceMode(entry?.recurrence?.mode);
         map.set(code, mode);
@@ -1077,7 +1091,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const getRecurrenceModeForType = useCallback(
     type => {
       if (!type) return RECURRENCE_MODE_NOT_ALLOWED;
-      const normalized = String(type).trim();
+      const normalized = normalizePaymentTypeCode(type);
       return recurrenceModeByType.get(normalized) || RECURRENCE_MODE_NOT_ALLOWED;
     },
     [recurrenceModeByType]
@@ -1511,7 +1525,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
           ...prev,
           draft: {
             ...prev.draft,
-            type: nextType,
+            type: normalizePaymentTypeCode(nextType) || nextType,
             recurrence,
           },
         };

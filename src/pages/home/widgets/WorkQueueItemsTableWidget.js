@@ -1308,6 +1308,9 @@ const WorkQueueItemsTableWidget = ({
                       );
                     }
                     if (item.bucketId === 'unresolved-conflicts') {
+                      const ownerText = (item.owner || '').toString().trim().toLowerCase();
+                      const hasOwner = Boolean(ownerText) && ownerText !== 'unassigned' && ownerText !== '—' && ownerText !== '-';
+                      const assignLabel = hasOwner ? 'Reassign' : 'Assign';
                       return (
                         <SpaceBetween size="xxs" direction="horizontal">
                           <Link
@@ -1318,16 +1321,7 @@ const WorkQueueItemsTableWidget = ({
                               setAssignModalVisible(true);
                             }}
                           >
-                            Reassign
-                          </Link>
-                          <Link
-                            href="#"
-                            onFollow={event => {
-                              event.preventDefault();
-                              setResolveTarget(item);
-                            }}
-                          >
-                            Resolve
+                            {assignLabel}
                           </Link>
                         </SpaceBetween>
                       );

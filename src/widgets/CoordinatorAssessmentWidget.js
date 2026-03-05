@@ -1,4 +1,5 @@
 import React, { forwardRef, useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useHistory } from 'react-router-dom';
 import { apiFetch } from '../auth/apiClient';
 import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplicationLock';
 import useCurrentUser from '../hooks/useCurrentUser';
@@ -133,7 +134,7 @@ const START_ASSESSMENT_STAGE = 'start_assessment';
 const SUBMIT_ASSESSMENT_STAGE = 'submit_assessment';
 const COMMUNICATION_CHECKLIST_STAGE = 'approve_and_commence';
 const STEP_LABELS = {
-  eligibility: 'EI Eligibility Check',
+  eligibility: 'Assess Eligibility',
   framing: 'What is being proposed?',
   rationale: 'Why is this intervention needed?',
   type: 'How will the intervention be delivered?',
@@ -352,6 +353,23 @@ const parseCurrencyInput = (value) => {
 };
 
 const SUPPORTING_DOCS_REFRESH_EVENT = 'iset:supporting-documents:refresh';
+const parseDocumentMetadata = (value) => {
+  if (!value) return null;
+  if (typeof value === 'object') return value;
+  if (typeof value !== 'string') return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+};
+const resolveDocumentType = (row) => {
+  const direct = row?.document_category || row?.documentType || row?.document_type || null;
+  if (direct) return String(direct).trim().toLowerCase();
+  const metadata = parseDocumentMetadata(row?.metadata);
+  const fromMetadata = metadata?.document_type || metadata?.documentType || null;
+  return fromMetadata ? String(fromMetadata).trim().toLowerCase() : '';
+};
 
 const formatCurrencyDisplay = (value) => {
   const num = parseCurrencyInput(value);
@@ -518,7 +536,7 @@ const normalizeCostLine = (raw, defaults = {}) => {
   const recurrenceRaw = raw.recurrence && typeof raw.recurrence === 'object' ? raw.recurrence : {};
   const normalized = {
     id: raw.id || buildUuid(),
-    type: raw.type || raw.paymentType || raw.payment_type || '',
+    type: normalizePaymentTypeCode(raw.type || raw.paymentType || raw.payment_type) || '',
     amount:
       raw.amount === null || typeof raw.amount === 'undefined'
         ? ''
@@ -593,6 +611,19 @@ const normalizeInterventionCodeValue = (value) => {
   const trimmed = String(value).trim();
   return trimmed ? trimmed : null;
 };
+const PAYMENT_TYPE_ALIASES = {
+  wagesubsidyemployer: 'WageSubsidyEmployer',
+  wagesubsidy: 'WageSubsidyEmployer',
+  targetedwagesubsidyemployer: 'WageSubsidyEmployer',
+  targetedwagesubsidy: 'WageSubsidyEmployer'
+};
+const normalizePaymentTypeCode = (value) => {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const key = raw.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return PAYMENT_TYPE_ALIASES[key] || raw;
+};
 
 const buildPaymentTypeMappingLookup = (mapping) => {
   const lookup = new Map();
@@ -625,7 +656,7 @@ const normalizeCostingDefaults = (payload) => {
           if (typeof item === 'string') return { type: item };
           if (item && typeof item === 'object') {
             return {
-              type: item.type || item.paymentType || item.payment_type || '',
+              type: normalizePaymentTypeCode(item.type || item.paymentType || item.payment_type) || '',
               notes: item.notes || item.description || '',
               recurrenceEnabled: item.recurrenceEnabled ?? item.recurrence_enabled ?? null
             };
@@ -642,7 +673,7 @@ const normalizeCostingDefaults = (payload) => {
   const paymentTypes = paymentTypesRaw
     .map(entry => {
       if (!entry || typeof entry !== 'object') return null;
-      const code = String(entry.code || entry.type || entry.paymentType || entry.payment_type || '').trim();
+      const code = normalizePaymentTypeCode(entry.code || entry.type || entry.paymentType || entry.payment_type);
       if (!code) return null;
       const recurrence = entry.recurrence && typeof entry.recurrence === 'object' ? entry.recurrence : {};
       return {
@@ -1054,6 +1085,7 @@ const extractJsonFromAi = (value) => {
 
 const CoordinatorAssessmentWidget = forwardRef(
   ({ actions, toggleHelpPanel, caseData, application_id, onCaseUpdate, applicationRowVersion, onRowVersionUpdate }, ref) => {
+  const history = useHistory();
   // State for form fields
   const [assessment, setAssessment] = useState(() => buildEmptyAssessment());
   const [initialAssessment, setInitialAssessment] = useState(() => buildEmptyAssessment());
@@ -1132,6 +1164,10 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [eiVerificationUploadError, setEiVerificationUploadError] = useState(null);
   const [eiVerificationUploadSuccess, setEiVerificationUploadSuccess] = useState(null);
   const [eiVerificationUploading, setEiVerificationUploading] = useState(false);
+  const [eiVerificationDocuments, setEiVerificationDocuments] = useState([]);
+  const [eiVerificationDocsLoading, setEiVerificationDocsLoading] = useState(false);
+  const [eiVerificationDocsError, setEiVerificationDocsError] = useState(null);
+  const [eiVerificationDocDownloads, setEiVerificationDocDownloads] = useState({});
   const eiVerificationFileInputRef = useRef(null);
   const checklistFileInputRef = useRef(null);
   const nextChecklistDocTypeRef = useRef('');
@@ -1546,7 +1582,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     const map = new Map();
     if (effectiveCostingDefaults && Array.isArray(effectiveCostingDefaults.paymentTypes)) {
       effectiveCostingDefaults.paymentTypes.forEach(entry => {
-        const code = entry?.code ? String(entry.code).trim() : '';
+        const code = normalizePaymentTypeCode(entry?.code);
         if (!code) return;
         const mode = entry?.recurrence?.mode ? String(entry.recurrence.mode).trim() : 'not_allowed';
         map.set(code, mode || 'not_allowed');
@@ -1557,7 +1593,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const getRecurrenceModeForType = useCallback(
     (type) => {
       if (!type) return 'not_allowed';
-      const normalized = String(type).trim();
+      const normalized = normalizePaymentTypeCode(type);
       return recurrenceModeByType.get(normalized) || 'not_allowed';
     },
     [recurrenceModeByType]
@@ -2860,41 +2896,56 @@ const CoordinatorAssessmentWidget = forwardRef(
     },
     [applicantUserId, applicationId, caseId, dispatchSupportingDocsRefresh, docsChecklistReady, loadDocumentChecklist]
   );
+  const loadEiVerificationDocuments = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!applicantUserId || !applicationId) {
+        setEiVerificationDocuments([]);
+        setEiVerificationDocsError(null);
+        setEiVerificationDocsLoading(false);
+        return;
+      }
+      if (!silent) setEiVerificationDocsLoading(true);
+      setEiVerificationDocsError(null);
+      try {
+        const params = new URLSearchParams();
+        params.set('applicationId', String(applicationId));
+        const res = await apiFetch(`/api/applicants/${applicantUserId}/documents?${params.toString()}`);
+        if (!res.ok) {
+          throw new Error('Failed to load EI verification documents.');
+        }
+        const payload = await res.json().catch(() => []);
+        const docs = (Array.isArray(payload) ? payload : []).filter(row => resolveDocumentType(row) === 'ei_verification');
+        setEiVerificationDocuments(docs);
+        if (docs.length) {
+          setFieldErrors(prev => {
+            if (!prev?.eiVerification) return prev;
+            const next = { ...prev };
+            delete next.eiVerification;
+            return next;
+          });
+        }
+      } catch (err) {
+        setEiVerificationDocsError(err?.message || 'Failed to load EI verification documents.');
+        setEiVerificationDocuments([]);
+      } finally {
+        if (!silent) setEiVerificationDocsLoading(false);
+      }
+    },
+    [apiFetch, applicantUserId, applicationId]
+  );
 
-  const handleEiVerificationFileChange = useCallback(event => {
-    const input = event?.target;
-    const file = input?.files?.[0] || null;
-    if (input) {
-      input.value = '';
-    }
-    setEiVerificationUploadError(null);
-    setEiVerificationUploadSuccess(null);
-    if (!file) {
-      setEiVerificationFile(null);
-      setEiVerificationFileError(null);
-      return;
-    }
-    if (!ELIGIBILITY_ALLOWED_MIME_TYPES.includes(file.type)) {
-      setEiVerificationFile(null);
-      setEiVerificationFileError('Only PDF, JPG, PNG, BMP, or TIFF files are allowed.');
-      return;
-    }
-    if (file.size > ELIGIBILITY_MAX_BYTES) {
-      setEiVerificationFile(null);
-      setEiVerificationFileError('File is too large (max 6 MB).');
-      return;
-    }
-    setEiVerificationFile(file);
-    setEiVerificationFileError(null);
-  }, []);
-
-  const uploadEiVerificationIfSelected = useCallback(async () => {
+  const uploadEiVerificationIfSelected = useCallback(async (selectedFile = null) => {
+    const fileToUpload = selectedFile || eiVerificationFile;
     if (isAssessmentDisabled || !canUploadEiVerification) return true;
-    if (!eiVerificationFile) {
+    if (!fileToUpload) {
       return true;
     }
+    if (eiVerificationUploading) {
+      setEiVerificationUploadError('Upload in progress. Please wait for it to finish.');
+      return false;
+    }
     if (!assessment.esdcEligibility) {
-      setEiVerificationUploadError('Select an eligibility value to upload the document.');
+      setEiVerificationUploadError('Select an Employment Insurance status to upload the document.');
       return false;
     }
     if (!applicantUserId) {
@@ -2910,7 +2961,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     setEiVerificationUploadSuccess(null);
     try {
       const formData = new FormData();
-      formData.append('file', eiVerificationFile);
+      formData.append('file', fileToUpload);
       formData.append('label', 'EI Verification');
       formData.append('documentType', 'ei_verification');
       if (caseId) formData.append('caseId', caseId);
@@ -2939,7 +2990,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         if (errorCode === 'invalid_document_type') {
           throw new Error('The EI Verification document type is not available.');
         }
-        throw new Error(payload?.message || 'Failed to upload EI verification document.');
+          throw new Error(payload?.message || 'Failed to upload EI verification document.');
       }
       if (typeof window !== 'undefined') {
         try {
@@ -2947,10 +2998,11 @@ const CoordinatorAssessmentWidget = forwardRef(
           window.dispatchEvent(new CustomEvent(SUPPORTING_DOCS_REFRESH_EVENT, { detail }));
         } catch (_) {}
       }
-      const uploadedName = eiVerificationFile?.name || 'document';
+      const uploadedName = fileToUpload?.name || 'document';
       setEiVerificationUploadSuccess(`Uploaded ${uploadedName}.`);
       setEiVerificationFile(null);
       setEiVerificationFileError(null);
+      await loadEiVerificationDocuments({ silent: true });
       return true;
     } catch (err) {
       setEiVerificationUploadError(err?.message || 'Failed to upload EI verification document.');
@@ -2958,7 +3010,41 @@ const CoordinatorAssessmentWidget = forwardRef(
     } finally {
       setEiVerificationUploading(false);
     }
-  }, [apiFetch, applicantUserId, applicationId, assessment.esdcEligibility, canUploadEiVerification, caseId, eiVerificationFile, isAssessmentDisabled]);
+  }, [apiFetch, applicantUserId, applicationId, assessment.esdcEligibility, canUploadEiVerification, caseId, eiVerificationFile, eiVerificationUploading, isAssessmentDisabled, loadEiVerificationDocuments]);
+
+  const handleEiVerificationFileChange = useCallback(async event => {
+    const input = event?.target;
+    const file = input?.files?.[0] || null;
+    if (input) {
+      input.value = '';
+    }
+    setEiVerificationUploadError(null);
+    setEiVerificationUploadSuccess(null);
+    if (!file) {
+      setEiVerificationFile(null);
+      setEiVerificationFileError(null);
+      return;
+    }
+    if (!ELIGIBILITY_ALLOWED_MIME_TYPES.includes(file.type)) {
+      setEiVerificationFile(null);
+      setEiVerificationFileError('Only PDF, JPG, PNG, BMP, or TIFF files are allowed.');
+      return;
+    }
+    if (file.size > ELIGIBILITY_MAX_BYTES) {
+      setEiVerificationFile(null);
+      setEiVerificationFileError('File is too large (max 6 MB).');
+      return;
+    }
+    setEiVerificationFile(file);
+    setEiVerificationFileError(null);
+    setFieldErrors(prev => {
+      if (!prev?.eiVerification) return prev;
+      const next = { ...prev };
+      delete next.eiVerification;
+      return next;
+    });
+    await uploadEiVerificationIfSelected(file);
+  }, [uploadEiVerificationIfSelected]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3933,15 +4019,35 @@ const CoordinatorAssessmentWidget = forwardRef(
   const handleInlineAmountBlur = useCallback((lineId) => {
     setInlineAmountEditingId(prev => (prev === lineId ? null : prev));
   }, []);
+  const exitAssessmentWorkspace = useCallback(() => {
+    if (typeof actions?.exitAssessment === 'function') {
+      actions.exitAssessment();
+      return;
+    }
+    if (history && typeof history.goBack === 'function' && typeof window !== 'undefined' && window.history.length > 1) {
+      history.goBack();
+      return;
+    }
+    if (history && typeof history.push === 'function') {
+      history.push('/case-management');
+      return;
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign('/case-management');
+    }
+  }, [actions, history]);
   const handleCancel = () => setShowCancelModal(true);
-  const confirmCancel = () => {
+  const confirmCancel = async () => {
     setAssessment(initialAssessment);
     setLetterDrafts(initialLetterDrafts);
     setShowCancelModal(false);
     setAlert(null);
     setDenyFundingFlowActive(false);
     setIsEditingAssessment(false);
-    releaseLock({ silent: true }).catch(() => {});
+    try {
+      await releaseLock({ silent: true });
+    } catch (_) {}
+    exitAssessmentWorkspace();
   };
   const showLockAlert = useCallback((detail, severity = 'warning') => {
     const message = buildLockConflictMessage(detail);
@@ -4266,6 +4372,44 @@ const CoordinatorAssessmentWidget = forwardRef(
     showLockAlert,
     updateRowVersion
   ]);
+  useEffect(() => {
+    loadEiVerificationDocuments();
+  }, [loadEiVerificationDocuments]);
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const handler = event => {
+      const targetApplicant = event?.detail?.applicantUserId;
+      if (targetApplicant && String(targetApplicant) !== String(applicantUserId || '')) return;
+      loadEiVerificationDocuments({ silent: true });
+    };
+    window.addEventListener(SUPPORTING_DOCS_REFRESH_EVENT, handler);
+    return () => window.removeEventListener(SUPPORTING_DOCS_REFRESH_EVENT, handler);
+  }, [applicantUserId, loadEiVerificationDocuments]);
+  const handleOpenEiVerificationDocument = useCallback(async (item) => {
+    const documentId = item?.id;
+    if (!documentId) return;
+    setEiVerificationDocsError(null);
+    setEiVerificationDocDownloads(prev => ({ ...prev, [documentId]: true }));
+    try {
+      const res = await apiFetch(`/api/documents/${documentId}/presign-download`);
+      if (!res || !res.ok) throw new Error('Failed to open EI verification document.');
+      const payload = await res.json().catch(() => null);
+      if (!payload) throw new Error('Failed to open EI verification document.');
+      const targetUrl = payload?.presigned?.url || payload?.url || '';
+      if (!targetUrl) throw new Error('Document URL is unavailable.');
+      if (typeof window !== 'undefined') {
+        window.open(targetUrl, '_blank', 'noopener,noreferrer');
+      }
+    } catch (err) {
+      setEiVerificationDocsError(err?.message || 'Failed to open EI verification document.');
+    } finally {
+      setEiVerificationDocDownloads(prev => {
+        const next = { ...prev };
+        delete next[documentId];
+        return next;
+      });
+    }
+  }, [apiFetch]);
   function validateAssessment(assessment) {
     const errors = {};
     // 1. Overview
@@ -4284,7 +4428,10 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
     // 4. ESDC Eligibility
     if (!assessment.esdcEligibility) {
-      errors.esdcEligibility = 'Eligibility is required.';
+      errors.esdcEligibility = 'Employment Insurance status is required.';
+    }
+    if (canUploadEiVerification && !eiVerificationFile && !eiVerificationDocuments.length) {
+      errors.eiVerification = 'An EI verification document is required before continuing.';
     }
     // 5. Proposed interventions + dates
     const proposed = Array.isArray(assessment.proposedInterventions) ? assessment.proposedInterventions : [];
@@ -5387,7 +5534,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       const hasInterventionFieldError = (keys = []) =>
         Object.values(interventionErrors).some(entry => entry && keys.some(key => entry[key]));
       if (stepId === 'eligibility') {
-        return !errors.esdcEligibility;
+        return !errors.esdcEligibility && !errors.eiVerification;
       }
       if (stepId === 'framing') {
         if (interventionErrors._global) return false;
@@ -5991,27 +6138,45 @@ const CoordinatorAssessmentWidget = forwardRef(
   const showBarriersErrors = shouldShowStepErrors('barriers');
   const showCostErrors = shouldShowStepErrors('cost');
   const showDecisionErrors = shouldShowStepErrors('decision');
+  const sortedEiVerificationDocuments = useMemo(() => {
+    if (!Array.isArray(eiVerificationDocuments) || !eiVerificationDocuments.length) return [];
+    const toTime = (value) => {
+      if (!value) return 0;
+      const time = Date.parse(value);
+      return Number.isFinite(time) ? time : 0;
+    };
+    const toNumericId = (value) => {
+      const num = Number(value);
+      return Number.isFinite(num) ? num : null;
+    };
+    return [...eiVerificationDocuments].sort((a, b) => {
+      const byUpload = toTime(b?.uploaded_at) - toTime(a?.uploaded_at);
+      if (byUpload !== 0) return byUpload;
+      const aNum = toNumericId(a?.id);
+      const bNum = toNumericId(b?.id);
+      if (aNum !== null && bNum !== null && aNum !== bNum) return bNum - aNum;
+      return String(b?.id || '').localeCompare(String(a?.id || ''));
+    });
+  }, [eiVerificationDocuments]);
   const interventionFieldErrors = fieldErrors.interventions || {};
   const costLineFieldErrors = fieldErrors.costLines || {};
 
   const eligibilityStepContent = (
-    <SpaceBetween size="l">
+    <SpaceBetween size="m">
       {showDenyFundingShortcut ? (
-        <Header
-          variant="h3"
-          description={
-            <SpaceBetween size="xs">
+        <Box border={{ color: 'border-divider', width: 1 }} borderRadius="medium">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
+            <div>
+              <Box fontWeight="bold">Not eligible for funding?</Box>
               <Box variant="small" color="text-body-secondary">
-                Need to deny funding without completing the assessment? Skip the remaining steps and go straight to the decision.
+                Record a denial now and bypass the remaining assessment steps.
               </Box>
               {denyFundingBlockedReason ? (
                 <Box variant="small" color="text-body-secondary">
                   {denyFundingBlockedReason}
                 </Box>
               ) : null}
-            </SpaceBetween>
-          }
-          actions={
+            </div>
             <Button
               variant="normal"
               onClick={() => setDenyFundingModalVisible(true)}
@@ -6019,10 +6184,8 @@ const CoordinatorAssessmentWidget = forwardRef(
             >
               Deny Funding
             </Button>
-          }
-        >
-          EI Eligibility Check
-        </Header>
+          </div>
+        </Box>
       ) : null}
       {canUploadEiVerification && (
         <input
@@ -6063,42 +6226,89 @@ const CoordinatorAssessmentWidget = forwardRef(
       )}
       <Grid gridDefinition={[{ colspan: 6 }]}>
         <FormField
-          label="Eligibility"
+          label="Employment Insurance Status"
           errorText={showEligibilityErrors && fieldErrors.esdcEligibility ? fieldErrors.esdcEligibility : undefined}
-          description="Select the client's eligibility category for ESDC funding."
+          description={
+            isEligibilityAdmin
+              ? (
+                  assessment.esdcEligibility
+                    ? 'EI status is set. Change only if correction is needed.'
+                    : "Select the client's Employment Insurance status for ESDC funding."
+                )
+              : 'Set by authorized staff only.'
+          }
         >
-          <Select
-            selectedOption={ESDC_OPTIONS.find(o => o.value === assessment.esdcEligibility) || null}
-            onChange={({ detail }) => {
-              handleField('esdcEligibility', detail.selectedOption.value);
-              setEiVerificationUploadError(null);
-              setEiVerificationUploadSuccess(null);
-            }}
-            options={ESDC_OPTIONS}
-            placeholder="Select eligibility"
-            ariaLabel="Eligibility"
-            data-error-focus={showEligibilityErrors && fieldErrors.esdcEligibility ? 'true' : undefined}
-            tabIndex={-1}
-            readOnly={isEligibilityDisabled}
-          />
+          {isEligibilityAdmin ? (
+            <Select
+              selectedOption={ESDC_OPTIONS.find(o => o.value === assessment.esdcEligibility) || null}
+              onChange={({ detail }) => {
+                handleField('esdcEligibility', detail.selectedOption.value);
+                setEiVerificationUploadError(null);
+                setEiVerificationUploadSuccess(null);
+              }}
+              options={ESDC_OPTIONS}
+              placeholder="Select EI status"
+              ariaLabel="Employment Insurance Status"
+              data-error-focus={showEligibilityErrors && fieldErrors.esdcEligibility ? 'true' : undefined}
+              tabIndex={-1}
+              readOnly={isEligibilityDisabled}
+            />
+          ) : (
+            <Box>{assessment.esdcEligibility || 'Not set'}</Box>
+          )}
         </FormField>
       </Grid>
+      <FormField
+        label="Current EI verification documents"
+        errorText={showEligibilityErrors && fieldErrors.eiVerification ? fieldErrors.eiVerification : undefined}
+        stretch
+      >
+        {eiVerificationDocsLoading ? (
+          <Box variant="small" color="text-body-secondary">Loading documents...</Box>
+        ) : sortedEiVerificationDocuments.length ? (
+          <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
+            {sortedEiVerificationDocuments.map((item, index) => {
+              const documentId = item?.id;
+              const label = item?.label || item?.file_name || `Document ${documentId || ''}`.trim();
+              const uploadedAt = item?.uploaded_at ? formatDate(item.uploaded_at) : '';
+              const opening = Boolean(documentId && eiVerificationDocDownloads[documentId]);
+              const isCurrent = index === 0;
+              return (
+                <li key={documentId || `${label}-${uploadedAt}`}>
+                  <Link
+                    onFollow={event => {
+                      event.preventDefault();
+                      handleOpenEiVerificationDocument(item);
+                    }}
+                  >
+                    {opening ? 'Opening...' : label}
+                  </Link>
+                  {uploadedAt ? ` (${uploadedAt})` : ''}
+                  {isCurrent ? ' (Current)' : ''}
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <Box variant="small" color="text-body-secondary">No EI verification document uploaded yet.</Box>
+        )}
+        {eiVerificationDocsError ? (
+          <Box variant="small" color="text-status-error">{eiVerificationDocsError}</Box>
+        ) : null}
+      </FormField>
       {canUploadEiVerification && (
-        <FormField label="EI Verification document" errorText={eiVerificationFileError} stretch>
-          <Box variant="small" color="text-body-secondary">
-            Max size 6 MB. Allowed types: PDF, JPG, PNG, BMP, TIFF.
-          </Box>
-          <SpaceBetween size="xs" direction="horizontal">
+        <FormField label="Add new EI report" errorText={eiVerificationFileError || undefined} stretch>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Button
               onClick={() => eiVerificationFileInputRef.current && eiVerificationFileInputRef.current.click()}
               disabled={isAssessmentDisabled || eiVerificationUploading || !applicationId || !applicantUserId}
             >
               Choose file
             </Button>
-            <Box>{eiVerificationFile ? eiVerificationFile.name : 'No file selected'}</Box>
-          </SpaceBetween>
+            <Box>{eiVerificationFile ? eiVerificationFile.name : 'No new file chosen'}</Box>
+          </div>
           <Box variant="small" color="text-body-secondary">
-            Upload happens when you continue or save.
+            Max size 6 MB. Allowed types: PDF, JPG, PNG, BMP, TIFF.
           </Box>
         </FormField>
       )}
@@ -7130,7 +7340,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         </Box>
         <Box>
           <Header variant="h4">Client context</Header>
-          {reviewEligibility ? <div>Eligibility: {reviewEligibility}</div> : null}
+          {reviewEligibility ? <div>Employment Insurance Status: {reviewEligibility}</div> : null}
           {reviewChildcareNeed ? <div>Childcare need: {reviewChildcareNeed}</div> : null}
           {reviewChildcareFunding ? <div>Childcare funding: {reviewChildcareFunding}</div> : null}
           {reviewPreviousIset ? <div>Previous ISET funding: {reviewPreviousIset}</div> : null}
@@ -8202,7 +8412,7 @@ const CoordinatorAssessmentWidget = forwardRef(
               header="Employment insurance eligibility not checked"
               statusIconAriaLabel="Error"
             >
-              Assessment sections are locked until a NWAC Administrator, Regional Manager, or System Administrator sets ESDC eligibility.
+              Assessment sections are locked until an authorised user sets ESDC eligibility.
             </Alert>
             <Box margin={{ bottom: 's' }} />
           </>
@@ -8240,7 +8450,6 @@ const CoordinatorAssessmentWidget = forwardRef(
                   : undefined,
             }))}
             submitButtonText={wizardSubmitText}
-            cancelButtonText={hideWizardActions ? undefined : (canSubmitAssessment ? 'Cancel' : undefined)}
             previousButtonText={hideWizardActions ? undefined : 'Previous'}
             secondaryActions={null}
           />
@@ -8256,15 +8465,20 @@ const CoordinatorAssessmentWidget = forwardRef(
         <Modal
           visible={showCancelModal}
           onDismiss={() => setShowCancelModal(false)}
-          header="Discard changes?"
+          header="Exit assessment?"
           footer={
             <SpaceBetween direction="horizontal" size="xs">
-              <Button variant="primary" onClick={confirmCancel}>Discard Changes</Button>
+              <Button variant="primary" onClick={confirmCancel}>Exit Assessment</Button>
               <Button variant="normal" onClick={() => setShowCancelModal(false)}>Cancel</Button>
             </SpaceBetween>
           }
         >
-          <Box>Are you sure you want to discard your changes? This action cannot be undone.</Box>
+          <SpaceBetween size="xs">
+            <Box>This will exit the assessment workspace.</Box>
+            <Box variant="small" color="text-body-secondary">
+              Unsaved changes in the current step will be discarded.
+            </Box>
+          </SpaceBetween>
         </Modal>
         <Modal
           visible={checklistWarningVisible}

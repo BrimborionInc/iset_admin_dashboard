@@ -1,50 +1,95 @@
-# Admin Dashboard Assistant Notes
+# Admin Dashboard Assistant Context
 
-Purpose: Standing directives and operating details for assistants and developers working on the admin dashboard.
-Audience: Assistants and developers.
-Last Updated: 2026-01-19
+Purpose: persistent context for future threads.
 
-## Standing directives
+This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
-- Before modifying any dashboard or widget, read `docs/guides/configurable-dashboard-notes.md`. Treat it as a blocker. Summarize how you applied it when you finish a dashboard change.
-- For complex tasks, follow Interview -> Planning -> Implementation.
-- Interview rules: ask one short question at a time, wait for the answer, and only ask about requirements or desired behavior. Do not ask questions about your approach to coding. You own the code and data.
-- If anything is unclear (requirements, data, ownership, API payloads), stop and ask before coding.
-- Prefer evidence over guesses. Inspect payloads, schemas, and renderer code before claiming behavior exists.
-- Keep the document base at `X:\ISET\admin-dashboard\docs` (WSL: `/mnt/x/ISET/admin-dashboard/docs`) updated whenever code or behavior changes. Do not assume docs are current without verifying against the codebase.
-- Own the code and technical approach; avoid unnecessary technical questions when requirements are sufficient.
-- If blocked (tooling, permissions, platform limits), state that clearly before proceeding.
-- Confirm prerequisite account access (e.g., org management vs. member accounts) before directing users to identity/SSO setup.
+Audience: assistants and developers.
+Last Updated: 2026-03-05
 
-## UI and data conventions
+## Working relationship (design dialog)
 
-- Use Cloudscape components over native HTML. Use `Link` from `@cloudscape-design/components` instead of `<a>` unless there is no Cloudscape equivalent.
-- Do not assume parity with the public portal. Verify end-to-end propagation (schema -> runtime JSON -> renderer/template) before changing UI fields.
-- When adding or changing UI fields, confirm the backend response actually exposes the data. Do not assume API payloads.
+- Treat implementation as a design dialog with the user, not literal instruction execution.
+- The user may be wrong or operating from incomplete context; surface contradictions and risks early.
+- If requested changes could break behavior, conflict with data reality, or create regressions, pause and discuss tradeoffs before coding.
+- Challenge weak assumptions with concrete evidence (code paths, payloads, schema, runtime config), then agree on the target behavior.
+- Own technical decisions once requirements are clear, but do not silently make high-risk assumptions.
 
-## Known pitfalls and quality notes
+## How to use this file
 
-- Program Admin "Unassigned Applications" must use `/api/applications`, not `/api/cases`, or applicant names will be missing.
-- Avoid layering workarounds on top of known problems. Fix the root cause.
-- When changes require new files in a deployment package, update `scripts/deploy-admin-test.ps1` and/or `../ISET-intake/scripts/deploy-portal-test.ps1` to stage the additional files.
-- For tutorial changes, verify full step progression end-to-end (including `Next` on every step) against the target page layout; do not ship if any step can dead-end due to missing hotspots.
+- Use this as a starting context map, then verify details in code before making claims.
+- Treat linked docs as the source of truth for deeper implementation details.
+- Keep this file focused on practical orientation (what matters, where to look, what commonly breaks).
+
+## Thread-start checklist
+
+- Clarify requirements if business behavior is ambiguous.
+- Confirm real behavior from code/API payloads before changing UI.
+- For dashboard/widget work, read `docs/guides/configurable-dashboard-notes.md` first.
+- Keep doc updates in the same change when behavior or structure changes.
+- If blocked by tooling, permissions, or environment access, call it out immediately.
+
+## Core conventions
+
+- Prefer Cloudscape components over native HTML. Use `Link` from `@cloudscape-design/components` instead of raw `<a>` unless there is no Cloudscape equivalent.
+- Do not assume parity with the public portal. Verify the full chain:
+  schema -> runtime config JSON -> API payload -> renderer/template.
+- When adding/changing UI fields, confirm the backend actually returns the data.
+- Fix root causes instead of layering workarounds.
+
+## High-value repo map
+
+- Docs base path: `X:\ISET\admin-dashboard\docs` (WSL: `/mnt/x/ISET/admin-dashboard/docs`)
+- Admin intake preview renderer: `apps/web/src/features/intake/ComponentRenderer.tsx`
+- Public portal renderer (other repo): `../ISET-intake/src/renderer/renderers.js`
+- Help panel content: `src/helpPanelContents/*`
+- Admin test deploy staging script: `scripts/deploy-admin-test.ps1`
+- Portal test deploy staging script: `../ISET-intake/scripts/deploy-portal-test.ps1`
+
+## Known pitfalls
+
+- Program Admin "Unassigned Applications" must use `/api/applications`, not `/api/cases`, or applicant names are missing.
+- Tutorial updates must be validated end-to-end (including `Next` progression on every step) so no step dead-ends due to missing hotspots.
+- If a change introduces new deployment artifacts, update the relevant deploy script(s) so files are staged.
 
 ## Documentation maintenance
 
 - Update `docs/meta/changelog.md` for user-visible or operational changes.
-- Record structural reorganizations in `docs/meta/project-map.md`.
-- Keep credentials and environment-specific secrets out of this library.
-- When refactoring dashboards or widgets, update the matching dashboard-level and widget-level help panel content (`src/helpPanelContents/*`) and `aiContext` strings in the same change so guidance stays in sync with runtime behavior.
+- Record major structural doc reorganizations in `docs/meta/project-map.md`.
+- Maintain `docs/meta/next-release-notes-log.md` as a standing running log for the next Landing Page "What's New" update.
+- Keep release-note entries tagged with an explicit target release number (for example `v0.5.4`) and verify the current public version from `src/pages/LandingPage.jsx` before drafting or updating entries.
+- Keep credentials and environment-specific secrets out of docs.
+- When refactoring dashboards/widgets, update matching help panel content (`src/helpPanelContents/*`) and related `aiContext` strings in the same change.
 
-## Database documentation
+## Database documentation and access
 
-- Start with `docs/data/database-documentation.md` for the database documentation index and cross-app pointers.
-- When tables/columns/relationships change, update the index plus the relevant domain docs it links to.
-- Regenerate `docs/data/DB-Structure-Dump/` via `npm run dump:dev-schema` after schema changes (not committed).
+- Start at `docs/data/database-documentation.md` for DB index and cross-app pointers.
+- When tables/columns/relationships change, update the index and linked domain docs.
+- Regenerate schema dump after schema changes (do not commit dump files):
+  `npm run dump:dev-schema`
 
-## Prod start/stop (NWAC, ca-central-1)
+### DB interaction from WSL (dev)
 
-Use these commands to shut down or restart prod for cost savings. All commands run in `ca-central-1`.
+- MySQL runs on the Windows host and accepts local connections.
+- Use Windows MySQL client from WSL (not Linux `mysql`):
+  `"/mnt/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe" -h localhost -P 3306 -u root -p"<from .env>" -D iset_intake -e "SELECT 1;"`
+- Read credentials from `.env`: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`, `DB_NAME`.
+- Connectivity check:
+  `"/mnt/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe" -h localhost -P 3306 -u root -p"<from .env>" -D iset_intake -e "SELECT DATABASE() AS db, @@hostname AS host, @@port AS port;"`
+- Schema discovery:
+  - Tables: `... -e "SHOW TABLES;"`
+  - Table DDL: `... -e "SHOW CREATE TABLE <table_name>\\G"`
+  - Recent rows: `... -e "SELECT * FROM <table_name> ORDER BY id DESC LIMIT 10;"`
+- Safe write workflow for test data:
+  - Confirm table/columns with `SHOW CREATE TABLE`.
+  - Wrap writes in `START TRANSACTION; ...; COMMIT;` (or `ROLLBACK;`).
+  - Use clearly tagged dummy values like `DUMMY_` and `TEST_`.
+  - Never run destructive broad statements unless explicitly requested.
+- If host DB access fails from WSL, run `npm run dump:dev-schema` and continue with read-only analysis from docs.
+
+## Prod start/stop reference (NWAC, ca-central-1)
+
+Use these commands to shut down or restart prod for cost savings (all in `ca-central-1`).
 
 Shutdown:
 - Scale ASG to zero:
@@ -60,36 +105,19 @@ Restart:
   - `aws rds start-db-cluster --region ca-central-1 --db-cluster-identifier nwac-prod-db`
 - Scale ASG back up:
   - `aws autoscaling update-auto-scaling-group --region ca-central-1 --auto-scaling-group-name nwac-prod-asg --min-size 1 --desired-capacity 1`
-- Optional: if you uploaded a new `admin-dashboard-latest.zip`, force replacement to ensure the new artifact is pulled:
+- Optional: after uploading new `admin-dashboard-latest.zip`, force replacement so new artifact is pulled:
   - `aws autoscaling start-instance-refresh --region ca-central-1 --auto-scaling-group-name nwac-prod-asg --preferences MinHealthyPercentage=100,InstanceWarmup=900,SkipMatching=false`
 - Verify:
   - `aws autoscaling describe-auto-scaling-groups --region ca-central-1 --auto-scaling-group-names nwac-prod-asg --query 'AutoScalingGroups[0].{Min:MinSize,Desired:DesiredCapacity,Instances:Instances[].[InstanceId,LifecycleState,HealthStatus]}' --output table`
   - `aws rds describe-db-clusters --region ca-central-1 --db-cluster-identifier nwac-prod-db --query 'DBClusters[0].Status' --output text`
 
 Notes:
-- This stops compute + database, but ALB/NAT gateways/EIPs/VPC endpoints still incur costs unless explicitly removed.
-- Sanity check account before running: `aws sts get-caller-identity`
+- This stops compute + database, but ALB/NAT/EIP/VPC endpoint costs may remain.
+- Confirm target AWS account before running commands:
+  `aws sts get-caller-identity`
 
-## DB interaction (dev)
+## Cross-app boundaries
 
-- MySQL runs on the Windows host and only accepts local connections.
-- From WSL, use the Windows client (not Linux `mysql`):
-  `"/mnt/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe" -h localhost -P 3306 -u root -p"<from .env>" -D iset_intake -e "SELECT 1;"`
-- Read credentials from project `.env` keys: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`, `DB_NAME`.
-- Basic connectivity test:
-  `"/mnt/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe" -h localhost -P 3306 -u root -p"<from .env>" -D iset_intake -e "SELECT DATABASE() AS db, @@hostname AS host, @@port AS port;"`
-- Schema discovery:
-  - Tables: `... -e "SHOW TABLES;"`
-  - Table definition: `... -e "SHOW CREATE TABLE <table_name>\\G"`
-  - Recent rows: `... -e "SELECT * FROM <table_name> ORDER BY id DESC LIMIT 10;"`
-- Safe write workflow for test data:
-  - Validate target table/columns first with `SHOW CREATE TABLE`.
-  - Wrap all write operations in a transaction: `START TRANSACTION; ...; COMMIT;` (or `ROLLBACK;` if verification fails).
-  - Use clearly tagged dummy values (for example `DUMMY_`, `TEST_`) so cleanup is easy.
-  - Never run destructive statements (`DROP`, broad `DELETE`/`UPDATE` without `WHERE`) unless explicitly requested.
-- If host access fails from WSL, run `npm run dump:dev-schema` to refresh `docs/data/DB-Structure-Dump/` (kept out of git) and continue read-only analysis from docs.
-
-## Cross-app context
-
-- The admin dashboard and the public portal are separate. Do not copy env files or code between apps without approval.
-- Portal renderer: `../ISET-intake/src/renderer/renderers.js`. Admin preview renderer: `apps/web/src/features/intake/ComponentRenderer.tsx`. Confirm which one you are editing.
+- Admin dashboard and public portal are separate apps/repos.
+- Do not copy env files or code between apps without explicit approval.
+- Confirm which renderer you are editing before making intake-rendering changes.

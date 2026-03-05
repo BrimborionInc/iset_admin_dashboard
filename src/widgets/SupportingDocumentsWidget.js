@@ -23,8 +23,6 @@ import {
 import SupportingDocumentsHelp from '../helpPanelContents/supportingDocumentsHelp';
 import { useCaseWorkspace } from '../pages/Caseworking/caseWorkspace/CaseWorkspaceContext.jsx';
 
-const API_BASE_URL = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
-
 const REFRESH_EVENT = 'iset:supporting-documents:refresh';
 
 const PREFERENCES_STORAGE_KEY = 'supporting-documents-table-preferences-v2';
@@ -658,16 +656,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         }
         const payload = await res.json().catch(() => null);
         if (!payload) throw new Error('Invalid download response');
-        let targetUrl = '';
-        if (payload.mode === 's3') {
-          targetUrl = payload.presigned?.url || '';
-        } else if (payload.mode === 'local-direct') {
-          const path = payload.path || '';
-          if (path) {
-            const normalized = path.startsWith('/') ? path : `/${path}`;
-            targetUrl = API_BASE_URL ? `${API_BASE_URL}${normalized}` : normalized;
-          }
-        }
+        const targetUrl = payload.presigned?.url || '';
         if (!targetUrl) {
           throw new Error('Document download unavailable');
         }

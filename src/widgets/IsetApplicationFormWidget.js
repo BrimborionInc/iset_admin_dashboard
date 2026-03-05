@@ -170,6 +170,27 @@ const OPTION_LABELS = {
 };
 
 const cloneAnswers = (source) => JSON.parse(JSON.stringify(source || {}));
+const normaliseSinInput = (value) => String(value ?? '').replace(/\D/g, '').slice(0, 9);
+const formatSinDisplay = (value) => {
+  if (value === null || value === undefined || value === '') return NOT_PROVIDED;
+  const digits = String(value).replace(/\D/g, '');
+  if (!digits) return renderPlainText(value);
+  const grouped = digits.match(/.{1,3}/g)?.join(' ') || digits;
+  return <Box>{grouped}</Box>;
+};
+const isValidSinChecksum = (digits) => {
+  if (!/^\d{9}$/.test(digits)) return false;
+  let sum = 0;
+  for (let i = 0; i < digits.length; i += 1) {
+    let digit = Number(digits[i]);
+    if (i % 2 === 1) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    sum += digit;
+  }
+  return sum % 10 === 0;
+};
 
 // Normalise a wide variety of yes/no input shapes to 'yes' | 'no' | null
 const normaliseYesNo = (value) => {
@@ -395,6 +416,46 @@ const answersDiff = (baseline = {}, updated = {}) => {
   return diff;
 };
 
+const areValuesEqual = (left, right) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+
+const toDisplayLabel = (fieldKey) =>
+  String(fieldKey || '')
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, char => char.toUpperCase());
+
+const normaliseFieldLabel = (label) => {
+  if (typeof label === 'string') return label.trim();
+  if (label && typeof label === 'object' && typeof label.props?.children === 'string') {
+    return String(label.props.children).trim();
+  }
+  return '';
+};
+
+const summariseDiffValue = (value) => {
+  if (value === null || value === undefined || value === '') return '—';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    if (!value.length) return '—';
+    const isSimple = value.every(item => ['string', 'number', 'boolean'].includes(typeof item) || item === null || item === undefined);
+    if (isSimple) return value.map(item => (item === null || item === undefined || item === '' ? '—' : String(item))).join(', ');
+    return `${value.length} item(s)`;
+  }
+  if (value && typeof value === 'object') {
+    if (Object.prototype.hasOwnProperty.call(value, 'signed')) {
+      const signedText = value.signed ? 'Signed' : 'Not signed';
+      const nameText = value.name ? ` (${value.name})` : '';
+      return `${signedText}${nameText}`;
+    }
+    if (value.name && typeof value.name === 'string') return value.name;
+    return '[complex value]';
+  }
+  return String(value);
+};
+
 const REGISTRATION_KEYS = ['sfn-registration-number', 'nsfn-registration-number', 'metis-registration-number', 'inuit-registration-number', 'registration-number'];
 const REGISTRATION_KEY_BY_IDENTITY = {
   first_nations_status: 'sfn-registration-number',
@@ -580,7 +641,13 @@ const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, on
         optionsKey: 'gender_identity',
         renderValue: answers => formatOption('gender_identity', answers['gender_identity'])
       },
-      { label: 'Social Insurance Number', field: 'social-insurance-number', controlType: 'input', renderValue: answers => renderPlainText(answers['social-insurance-number']) },
+      {
+        label: 'Social Insurance Number',
+        field: 'social-insurance-number',
+        controlType: 'input',
+        constraintText: 'Enter a 9-digit SIN.',
+        renderValue: answers => formatSinDisplay(answers['social-insurance-number'])
+      },
       {
         label: 'Legal Indigenous identity',
         field: 'legal-indigenous-identity',
@@ -900,6 +967,7 @@ const Section = ({
   editableAnswers,
   renderEditableField,
   onFieldChange,
+  fieldErrors = {},
   saving
 }) => {
   const displaySource = isEditing && editable ? editableAnswers : answers;
@@ -997,7 +1065,12 @@ const Section = ({
         {isEditing && editable && editableItems.length > 0 && (
           <ColumnLayout columns={columns} variant="text-grid">
             {editableItems.map(item => (
-              <FormField key={`${id}-${item.field}`} label={item.label} constraintText={item.constraintText}>
+              <FormField
+                key={`${id}-${item.field}`}
+                label={item.label}
+                constraintText={item.constraintText}
+                errorText={fieldErrors[item.field]}
+              >
                 {renderEditableField(item)}
               </FormField>
             ))}
@@ -1032,6 +1105,7 @@ const IsetApplicationFormWidget = ({
   const [conflictDownloadLoading, setConflictDownloadLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editableAnswers, setEditableAnswers] = useState({});
+  const [fieldErrors, setFieldErrors] = useState({});
   const [showEditConfirm, setShowEditConfirm] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -1210,6 +1284,16 @@ const IsetApplicationFormWidget = ({
   }, [answers, isEditing]);
 
   const handleFieldChange = useCallback((field, value) => {
+    setFieldErrors(prev => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+    if (field === 'social-insurance-number') {
+      setEditableAnswers(prev => ({ ...prev, [field]: normaliseSinInput(value) }));
+      return;
+    }
     if (field === 'registration-number') {
       setEditableAnswers(prev => {
         const targetKey = getRegistrationTargetKey({ ...answers, ...prev });
@@ -1249,6 +1333,20 @@ const IsetApplicationFormWidget = ({
     } finally {
       setBandSearchLoading(prev => ({ ...prev, [targetKey]: false }));
     }
+  }, []);
+
+  const validateEditableAnswers = useCallback((candidateAnswers = {}) => {
+    const errors = {};
+    const rawSin = candidateAnswers?.['social-insurance-number'];
+    if (rawSin !== undefined && rawSin !== null && String(rawSin).trim() !== '') {
+      const digitsOnly = String(rawSin).replace(/\D/g, '');
+      if (!/^\d{9}$/.test(digitsOnly)) {
+        errors['social-insurance-number'] = 'SIN must be exactly 9 digits.';
+      } else if (!isValidSinChecksum(digitsOnly)) {
+        errors['social-insurance-number'] = 'SIN checksum is invalid.';
+      }
+    }
+    return errors;
   }, []);
 
   const handleOpenConsentModal = useCallback(() => {
@@ -1341,20 +1439,29 @@ const IsetApplicationFormWidget = ({
     }
     setShowEditConfirm(false);
     setIsEditing(true);
+    setFieldErrors({});
     setEditableAnswers(buildEditableAnswers(answers));
   }, [acquireLock, answers, isDecisionFinal, locking, lockedByAnotherUser, pushFlash]);
 
   const handleCancelEditing = useCallback(() => {
     setIsEditing(false);
+    setFieldErrors({});
     setEditableAnswers(buildEditableAnswers(answers));
     releaseLock({ silent: true }).catch(() => {});
   }, [answers, releaseLock]);
 
   const handleSave = useCallback(async () => {
     if (!application_id) return;
+    const validationErrors = validateEditableAnswers(editableAnswers);
+    if (Object.keys(validationErrors).length > 0) {
+      setFieldErrors(validationErrors);
+      pushFlash({ type: 'error', content: 'Please correct validation errors before saving.' });
+      return;
+    }
     const changes = answersDiff(answers, editableAnswers);
     if (!Object.keys(changes).length) {
       setIsEditing(false);
+      setFieldErrors({});
       releaseLock({ silent: true }).catch(() => {});
       pushFlash({ type: 'info', content: 'No changes to save' });
       return;
@@ -1424,7 +1531,7 @@ const IsetApplicationFormWidget = ({
           await refreshApplication();
           return;
         }
-        const message = body?.error || 'Failed to save application updates';
+        const message = body?.message || body?.error || 'Failed to save application updates';
         const err = new Error(message);
         err.status = response.status;
         throw err;
@@ -1432,6 +1539,7 @@ const IsetApplicationFormWidget = ({
 
       setIsEditing(false);
       setShowEditConfirm(false);
+      setFieldErrors({});
       setVersionsLoaded(false);
       pushFlash({ type: 'success', content: 'Application updates saved' });
       await refreshApplication();
@@ -1467,6 +1575,7 @@ const IsetApplicationFormWidget = ({
     application_id,
     rowVersion,
     editableAnswers,
+    validateEditableAnswers,
     lockHeldByCurrentUser,
     lockState.owned,
     pushFlash,
@@ -1654,7 +1763,7 @@ const IsetApplicationFormWidget = ({
         });
       }
       await fetchVersionsList();
-      setVersionDetails(null);
+      closeVersionModal();
       setIsEditing(false);
       releaseLock({ silent: true }).catch(() => {});
     } catch (error) {
@@ -1675,7 +1784,8 @@ const IsetApplicationFormWidget = ({
     refreshLockHeartbeat,
     refreshCaseData,
     onCaseUpdate,
-    onRowVersionUpdate
+    onRowVersionUpdate,
+    closeVersionModal
   ]);
 
   const renderEditableField = useCallback((item) => {
@@ -1774,8 +1884,10 @@ const IsetApplicationFormWidget = ({
     }
     return (
       <Input
-        value={value ?? ''}
+        value={fieldKey === 'social-insurance-number' ? normaliseSinInput(value) : (value ?? '')}
         onChange={({ detail }) => handleFieldChange(fieldKey, detail.value)}
+        inputMode={fieldKey === 'social-insurance-number' ? 'numeric' : undefined}
+        maxLength={fieldKey === 'social-insurance-number' ? 9 : undefined}
         disabled={disabled}
       />
     );
@@ -1784,6 +1896,7 @@ const IsetApplicationFormWidget = ({
     {
       id: 'version',
       header: 'Version',
+      minWidth: 140,
       cell: item => {
         const qualifiers = [];
         if (item.isCurrent) qualifiers.push('current');
@@ -1795,38 +1908,35 @@ const IsetApplicationFormWidget = ({
     {
       id: 'savedAt',
       header: 'Saved at',
+      minWidth: 170,
       cell: item => formatDateTime(item.savedAt)
     },
     {
       id: 'savedBy',
-      header: 'Saved by',
+      header: 'Changes Saved by',
+      minWidth: 170,
       cell: item => item.savedBy || '—'
-    },
-    {
-      id: 'changeSummary',
-      header: 'Change summary',
-      cell: item => item.changeSummary ? <Box>{item.changeSummary}</Box> : '—'
     },
     {
       id: 'actions',
       header: 'Actions',
+      minWidth: 110,
       cell: item => (
-        <SpaceBetween direction="horizontal" size="xs">
-          <Button size="small" onClick={() => handleViewVersion(item)} disabled={versionDetailsLoading}>
-            View
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'nowrap' }}>
+          <Button variant="inline-link" onClick={() => handleViewVersion(item)} disabled={versionDetailsLoading}>
+            View changes
           </Button>
-          {item.canRestore && (
+          {item.canRestore ? (
             <Button
-              size="small"
-              variant="primary"
+              variant="inline-link"
               onClick={() => handleRestoreVersion(item)}
               disabled={restoringVersionId === item.id}
               loading={restoringVersionId === item.id}
             >
               Restore
             </Button>
-          )}
-        </SpaceBetween>
+          ) : null}
+        </div>
       )
     }
   ], [handleRestoreVersion, handleViewVersion, restoringVersionId, versionDetailsLoading]);
@@ -1840,6 +1950,49 @@ const IsetApplicationFormWidget = ({
       }),
     [handleOpenConsentModal, handleOpenIndigenousModal, handleOpenConflictModal]
   );
+  const fieldLabelLookup = useMemo(() => {
+    const lookup = new Map();
+    const fromSchema = schemaSnapshot?.fields && typeof schemaSnapshot.fields === 'object'
+      ? Object.entries(schemaSnapshot.fields)
+      : [];
+    fromSchema.forEach(([key, field]) => {
+      const schemaLabel = extractOptionLabel(field?.label);
+      if (schemaLabel) lookup.set(key, schemaLabel);
+    });
+    sectionDefinitions.forEach(section => {
+      (section?.items || []).forEach(item => {
+        if (!item?.field) return;
+        const label = normaliseFieldLabel(item.label);
+        if (label && !lookup.has(item.field)) {
+          lookup.set(item.field, label);
+        }
+      });
+    });
+    return lookup;
+  }, [schemaSnapshot, sectionDefinitions]);
+  const versionDiffRows = useMemo(() => {
+    if (!versionDetails) return [];
+    const selectedAnswers = versionDetails?.payload?.answers && typeof versionDetails.payload.answers === 'object'
+      ? versionDetails.payload.answers
+      : {};
+    const currentAnswers = answers && typeof answers === 'object' ? answers : {};
+    const keys = new Set([...Object.keys(currentAnswers), ...Object.keys(selectedAnswers)]);
+    const rows = [];
+    keys.forEach(key => {
+      if (!key || key === 'registration-number') return;
+      const currentValue = currentAnswers[key];
+      const selectedValue = selectedAnswers[key];
+      if (areValuesEqual(currentValue, selectedValue)) return;
+      rows.push({
+        id: key,
+        field: fieldLabelLookup.get(key) || toDisplayLabel(key),
+        currentValue: summariseDiffValue(currentValue),
+        selectedValue: summariseDiffValue(selectedValue)
+      });
+    });
+    rows.sort((a, b) => a.field.localeCompare(b.field));
+    return rows;
+  }, [answers, fieldLabelLookup, versionDetails]);
 
   const consentSignature = answers?.consent || {};
   const consentSignedName = consentSignature?.name || 'Not provided';
@@ -2131,6 +2284,7 @@ const IsetApplicationFormWidget = ({
                 editableAnswers={editableAnswers}
                 renderEditableField={renderEditableField}
                 onFieldChange={handleFieldChange}
+                fieldErrors={fieldErrors}
                 saving={saving}
               />
             ))}
@@ -2161,6 +2315,7 @@ const IsetApplicationFormWidget = ({
                 editableAnswers={editableAnswers}
                 renderEditableField={renderEditableField}
                 onFieldChange={handleFieldChange}
+                fieldErrors={fieldErrors}
                 saving={saving}
               />
             ))}
@@ -2219,35 +2374,57 @@ const IsetApplicationFormWidget = ({
             </SpaceBetween>
           }
         >
-          <SpaceBetween size="m">
-            {versionError && <Box color="text-status-critical">{versionError}</Box>}
-            <Table
-              items={versions}
-              trackBy="rowId"
-              columnDefinitions={versionColumns}
-              loading={versionsLoading}
-              loadingText="Loading versions"
-              empty={<Box>No saved versions yet</Box>}
-            />
-            <SpaceBetween direction="horizontal" size="xs">
-              <Button onClick={fetchVersionsList} disabled={versionsLoading} iconName="refresh">
-                Refresh
-              </Button>
-            </SpaceBetween>
-            {versionDetailsLoading && (
-              <Spinner />
-            )}
-            {versionDetails && !versionDetailsLoading && (
-              <ExpandableSection
-                headerText={versionDetails.id ? `Version ${versionDetails.version} details` : 'Current version details'}
-                defaultExpanded={false}
+          {versionError ? <Box color="text-status-critical" margin={{ bottom: 's' }}>{versionError}</Box> : null}
+          <Table
+            header={
+              <Header
+                variant="h3"
+                actions={
+                  <Button onClick={fetchVersionsList} disabled={versionsLoading} iconName="refresh">
+                    Refresh
+                  </Button>
+                }
               >
-                <Box fontFamily="monospace" whiteSpace="pre-wrap">
-                  {JSON.stringify(versionDetails.payload?.answers ?? versionDetails.payload ?? {}, null, 2)}
-                </Box>
-              </ExpandableSection>
-            )}
-          </SpaceBetween>
+                Saved versions
+              </Header>
+            }
+            items={versions}
+            trackBy="rowId"
+            columnDefinitions={versionColumns}
+            resizableColumns
+            loading={versionsLoading}
+            loadingText="Loading versions"
+            empty={<Box>No saved versions yet</Box>}
+          />
+          {versionDetailsLoading ? <Box margin={{ top: 's' }}><Spinner /></Box> : null}
+          {versionDetails && !versionDetailsLoading ? (
+            <Box margin={{ top: 's' }}>
+              <Header
+                variant="h3"
+                description={`Compared with current version (v${versions.find(item => item.isCurrent)?.version || 'current'})`}
+              >
+                {versionDetails.id ? `Changes in v${versionDetails.version}` : 'Changes in current version'}
+              </Header>
+              {versionDetails.id === null ? (
+                <Box variant="small" color="text-body-secondary">Select an older version to view differences.</Box>
+              ) : versionDiffRows.length ? (
+                <Table
+                  variant="embedded"
+                  trackBy="id"
+                  items={versionDiffRows}
+                  columnDefinitions={[
+                    { id: 'field', header: 'Field', cell: item => item.field, minWidth: 220 },
+                    { id: 'currentValue', header: 'Current', cell: item => item.currentValue, minWidth: 220 },
+                    { id: 'selectedValue', header: `Selected (v${versionDetails.version})`, cell: item => item.selectedValue, minWidth: 220 }
+                  ]}
+                  resizableColumns
+                  empty={<Box>No differences found.</Box>}
+                />
+              ) : (
+                <Box variant="small" color="text-body-secondary">No differences from the current version.</Box>
+              )}
+            </Box>
+          ) : null}
         </Modal>
       )}
       {indigenousModalVisible && (

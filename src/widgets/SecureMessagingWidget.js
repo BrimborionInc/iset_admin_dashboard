@@ -12,6 +12,7 @@ import {
   Table,
   Tabs,
   Modal,
+  Container,
   Input,
   Textarea,
   Checkbox,
@@ -80,11 +81,10 @@ const APPROVED_CASE_STATUSES = new Set([
   'approved'
 ]);
 
-const buildAttachmentUrl = filePath => {
-  if (!filePath) return '#';
-  const base = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
-  if (!base) return filePath;
-  return `${base}${filePath.startsWith('/') ? '' : '/'}${filePath}`;
+const buildAttachmentUrl = attachment => {
+  const directUrl = attachment?.download_url || '';
+  if (directUrl) return directUrl;
+  return '#';
 };
 
 const SecureMessagingWidget = ({
@@ -975,36 +975,47 @@ const SecureMessagingWidget = ({
       return val || 'Form';
     };
     const statusLabel = (raw) => normalizeStatus(raw || 'pending');
+    const detailRowStyle = {
+      display: 'grid',
+      gridTemplateColumns: '88px 1fr',
+      columnGap: '10px',
+      alignItems: 'start'
+    };
+    const detailLabelStyle = { fontWeight: 700, color: '#414d5c', paddingTop: '2px' };
+    const detailValueStyle = { color: '#16191f' };
     return (
       <SpaceBetween size="s">
-        <div>
-          <label style={{ fontWeight: 'bold' }}>From:</label>
-          <Input readOnly value={getSenderName(selectedMessage)} />
+        <div style={detailRowStyle}>
+          <Box as="span" style={detailLabelStyle}>From:</Box>
+          <Box style={detailValueStyle}>{getSenderName(selectedMessage)}</Box>
         </div>
-        <div>
-          <label style={{ fontWeight: 'bold' }}>To:</label>
-          <Input readOnly value={getRecipientName(selectedMessage)} />
+        <div style={detailRowStyle}>
+          <Box as="span" style={detailLabelStyle}>To:</Box>
+          <Box style={detailValueStyle}>{getRecipientName(selectedMessage)}</Box>
         </div>
-        <div>
-          <label style={{ fontWeight: 'bold' }}>Sent:</label>
-          <Input readOnly value={formatDateTime(selectedMessage.created_at)} />
+        <div style={detailRowStyle}>
+          <Box as="span" style={detailLabelStyle}>Sent:</Box>
+          <Box style={detailValueStyle}>{formatDateTime(selectedMessage.created_at)}</Box>
         </div>
-        <div>
-          <label style={{ fontWeight: 'bold' }}>Subject:</label>
-          <Input readOnly value={selectedMessage.subject || '(No subject)'} />
+        <div style={detailRowStyle}>
+          <Box as="span" style={detailLabelStyle}>Subject:</Box>
+          <Box style={detailValueStyle} fontWeight="bold">{selectedMessage.subject || '(No subject)'}</Box>
         </div>
-        <div>
-          <label style={{ fontWeight: 'bold' }}>Message:</label>
-          <Textarea readOnly value={selectedMessage.body || ''} rows={6} />
-        </div>
-        <div>
-          <label style={{ fontWeight: 'bold' }}>Urgent:</label>
-          <Input readOnly value={selectedMessage.urgent ? 'Yes' : 'No'} />
-        </div>
+        <Container>
+          <div
+            style={{
+              height: '220px',
+              overflowY: 'auto',
+              whiteSpace: 'pre-wrap'
+            }}
+          >
+            {selectedMessage.body || '(No message body)'}
+          </div>
+        </Container>
         {signingAttachments.length > 0 && (
-          <div>
-            <label style={{ fontWeight: 'bold' }}>Forms attached:</label>
-            <ul style={{ paddingLeft: 16, marginTop: 4, marginBottom: 4 }}>
+          <div style={detailRowStyle}>
+            <Box as="span" style={detailLabelStyle}>Forms:</Box>
+            <ul style={{ paddingLeft: 16, marginTop: 2, marginBottom: 0 }}>
               {signingAttachments.map(att => (
                 <li key={att.id} style={{ marginBottom: 4 }}>
                   <span style={{ fontWeight: 600 }}>{att.workflow_name || `Form ${att.workflow_id || att.id}`}</span>{' '}
@@ -1017,14 +1028,14 @@ const SecureMessagingWidget = ({
         )}
         {attachmentsLoading && <Spinner />}
         {attachmentsError && <Box color="text-status-critical">{attachmentsError}</Box>}
-        {attachments.length > 0 && (
-          <div>
-            <label style={{ fontWeight: 'bold' }}>Attachments:</label>
-            <ul style={{ paddingLeft: 16 }}>
+        <div style={detailRowStyle}>
+          <Box as="span" style={detailLabelStyle}>Files:</Box>
+          {attachments.length > 0 ? (
+            <ul style={{ paddingLeft: 16, marginTop: 2, marginBottom: 0 }}>
               {attachments.map(attachment => (
                 <li key={attachment.id} style={{ marginBottom: 4 }}>
                   <a
-                    href={buildAttachmentUrl(attachment.file_path || '')}
+                    href={buildAttachmentUrl(attachment)}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -1038,8 +1049,10 @@ const SecureMessagingWidget = ({
                 </li>
               ))}
             </ul>
-          </div>
-        )}
+          ) : (
+            <Box color="text-body-secondary">No attachments.</Box>
+          )}
+        </div>
       </SpaceBetween>
     );
   };

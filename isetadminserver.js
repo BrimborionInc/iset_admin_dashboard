@@ -941,12 +941,6 @@ function ensureDirectoryExists(dirPath) {
 ensureDirectoryExists(INTAKE_UPLOADS_ROOT);
 ensureDirectoryExists(ADMIN_MANUAL_UPLOAD_DIR);
 
-function toIntakeRelativePath(absolutePath) {
-  if (!absolutePath) return null;
-  const relative = path.relative(INTAKE_ROOT, absolutePath);
-  return relative ? relative.replace(/\\/g, '/') : null;
-}
-
 function sanitiseUploadFilename(originalName) {
   const fallback = 'document';
   if (!originalName || typeof originalName !== 'string') {
@@ -982,11 +976,6 @@ const adminDocumentUpload = multer({
   fileFilter: adminUploadFileFilter
 });
 
-const resolveUploadStorageMode = () => {
-  const storageModeEnv = (process.env.UPLOAD_MODE || process.env.UPLOAD_DRIVER || '').toLowerCase();
-  return storageModeEnv === 's3' ? 's3' : 'local-direct';
-};
-
 function computeFileSha256(filePath) {
   return new Promise((resolve, reject) => {
     if (!filePath) return resolve(null);
@@ -1011,22 +1000,13 @@ async function duplicateDocumentFile({ filePath, fileName, applicantUserId }) {
   if (!filePath) {
     throw new Error('missing_file_path');
   }
-  const storageMode = resolveUploadStorageMode();
-  if (storageMode === 's3') {
-    const { generateKey, copyObject, DRIVER } = require('../ISET-intake/s3Provider');
-    if (DRIVER !== 's3' || typeof copyObject !== 'function') {
-      throw new Error('s3_copy_unavailable');
-    }
-    const key = generateKey(applicantUserId || 'admin', fileName || 'document');
-    await copyObject({ sourceKey: filePath, targetKey: key });
-    return key;
+  const { generateKey, copyObject, DRIVER } = require('../ISET-intake/s3Provider');
+  if (DRIVER !== 's3' || typeof copyObject !== 'function') {
+    throw new Error('s3_copy_unavailable');
   }
-  const normalized = String(filePath).replace(/\\/g, '/').replace(/^\/+/, '');
-  const sourcePath = path.join(INTAKE_ROOT, normalized);
-  const targetName = sanitiseUploadFilename(fileName || 'document');
-  const targetPath = path.join(ADMIN_MANUAL_UPLOAD_DIR, targetName);
-  await fs.promises.copyFile(sourcePath, targetPath);
-  return toIntakeRelativePath(targetPath);
+  const key = generateKey(applicantUserId || 'admin', fileName || 'document');
+  await copyObject({ sourceKey: filePath, targetKey: key });
+  return key;
 }
 
 function normalisePositiveInteger(value) {
@@ -1259,29 +1239,21 @@ async function storeAssessmentPdfDocument({
   const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
   const normalizedActorUserId = normalisePositiveInteger(actorUserId);
   const normalizedClientId = normalisePositiveInteger(clientId);
-  const storageMode = resolveUploadStorageMode();
   let relativePath = null;
-  if (storageMode === 's3') {
-    const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
-    if (DRIVER !== 's3') {
-      throw new Error('s3_upload_unavailable');
-    }
-    const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
-    const presigned = await presignPut({ key, contentType: 'application/pdf' });
-    await axios.put(presigned.url, pdfBuffer, {
-      headers: {
-        ...(presigned.headers || {}),
-        'Content-Type': 'application/pdf',
-        ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
-      }
-    });
-    relativePath = key;
-  } else {
-    const safeName = sanitiseUploadFilename(displayName);
-    const targetPath = path.join(ADMIN_MANUAL_UPLOAD_DIR, safeName);
-    await fs.promises.writeFile(targetPath, pdfBuffer);
-    relativePath = toIntakeRelativePath(targetPath);
+  const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+  if (DRIVER !== 's3') {
+    throw new Error('s3_upload_unavailable');
   }
+  const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
+  const presigned = await presignPut({ key, contentType: 'application/pdf' });
+  await axios.put(presigned.url, pdfBuffer, {
+    headers: {
+      ...(presigned.headers || {}),
+      'Content-Type': 'application/pdf',
+      ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+    }
+  });
+  relativePath = key;
   if (!relativePath) {
     throw new Error('path_resolution_failed');
   }
@@ -1338,29 +1310,21 @@ async function storeApplicationFormPdfDocument({
   const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
   const normalizedActorUserId = normalisePositiveInteger(actorUserId);
   const normalizedClientId = normalisePositiveInteger(clientId);
-  const storageMode = resolveUploadStorageMode();
   let relativePath = null;
-  if (storageMode === 's3') {
-    const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
-    if (DRIVER !== 's3') {
-      throw new Error('s3_upload_unavailable');
-    }
-    const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
-    const presigned = await presignPut({ key, contentType: 'application/pdf' });
-    await axios.put(presigned.url, pdfBuffer, {
-      headers: {
-        ...(presigned.headers || {}),
-        'Content-Type': 'application/pdf',
-        ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
-      }
-    });
-    relativePath = key;
-  } else {
-    const safeName = sanitiseUploadFilename(displayName);
-    const targetPath = path.join(ADMIN_MANUAL_UPLOAD_DIR, safeName);
-    await fs.promises.writeFile(targetPath, pdfBuffer);
-    relativePath = toIntakeRelativePath(targetPath);
+  const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+  if (DRIVER !== 's3') {
+    throw new Error('s3_upload_unavailable');
   }
+  const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
+  const presigned = await presignPut({ key, contentType: 'application/pdf' });
+  await axios.put(presigned.url, pdfBuffer, {
+    headers: {
+      ...(presigned.headers || {}),
+      'Content-Type': 'application/pdf',
+      ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+    }
+  });
+  relativePath = key;
   if (!relativePath) {
     throw new Error('path_resolution_failed');
   }
@@ -1417,29 +1381,21 @@ async function storeFinancialOverviewPdfDocument({
   const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
   const normalizedActorUserId = normalisePositiveInteger(actorUserId);
   const normalizedClientId = normalisePositiveInteger(clientId);
-  const storageMode = resolveUploadStorageMode();
   let relativePath = null;
-  if (storageMode === 's3') {
-    const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
-    if (DRIVER !== 's3') {
-      throw new Error('s3_upload_unavailable');
-    }
-    const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
-    const presigned = await presignPut({ key, contentType: 'application/pdf' });
-    await axios.put(presigned.url, pdfBuffer, {
-      headers: {
-        ...(presigned.headers || {}),
-        'Content-Type': 'application/pdf',
-        ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
-      }
-    });
-    relativePath = key;
-  } else {
-    const safeName = sanitiseUploadFilename(displayName);
-    const targetPath = path.join(ADMIN_MANUAL_UPLOAD_DIR, safeName);
-    await fs.promises.writeFile(targetPath, pdfBuffer);
-    relativePath = toIntakeRelativePath(targetPath);
+  const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+  if (DRIVER !== 's3') {
+    throw new Error('s3_upload_unavailable');
   }
+  const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
+  const presigned = await presignPut({ key, contentType: 'application/pdf' });
+  await axios.put(presigned.url, pdfBuffer, {
+    headers: {
+      ...(presigned.headers || {}),
+      'Content-Type': 'application/pdf',
+      ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+    }
+  });
+  relativePath = key;
   if (!relativePath) {
     throw new Error('path_resolution_failed');
   }
@@ -1502,29 +1458,21 @@ async function storeDecisionLetterPdfDocument({
   if (!normalizedClientId) {
     throw new Error('client_id_required');
   }
-  const storageMode = resolveUploadStorageMode();
   let relativePath = null;
-  if (storageMode === 's3') {
-    const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
-    if (DRIVER !== 's3') {
-      throw new Error('s3_upload_unavailable');
-    }
-    const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
-    const presigned = await presignPut({ key, contentType: 'application/pdf' });
-    await axios.put(presigned.url, pdfBuffer, {
-      headers: {
-        ...(presigned.headers || {}),
-        'Content-Type': 'application/pdf',
-        ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
-      }
-    });
-    relativePath = key;
-  } else {
-    const safeName = sanitiseUploadFilename(displayName);
-    const targetPath = path.join(ADMIN_MANUAL_UPLOAD_DIR, safeName);
-    await fs.promises.writeFile(targetPath, pdfBuffer);
-    relativePath = toIntakeRelativePath(targetPath);
+  const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+  if (DRIVER !== 's3') {
+    throw new Error('s3_upload_unavailable');
   }
+  const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
+  const presigned = await presignPut({ key, contentType: 'application/pdf' });
+  await axios.put(presigned.url, pdfBuffer, {
+    headers: {
+      ...(presigned.headers || {}),
+      'Content-Type': 'application/pdf',
+      ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+    }
+  });
+  relativePath = key;
   if (!relativePath) {
     throw new Error('path_resolution_failed');
   }
@@ -1594,29 +1542,21 @@ async function storeFundingAgreementPdfDocument({
   const checksum = pdfBuffer ? crypto.createHash('sha256').update(pdfBuffer).digest('hex') : null;
   const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
   const normalizedActorUserId = normalisePositiveInteger(actorUserId);
-  const storageMode = resolveUploadStorageMode();
   let relativePath = null;
-  if (storageMode === 's3') {
-    const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
-    if (DRIVER !== 's3') {
-      throw new Error('s3_upload_unavailable');
-    }
-    const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
-    const presigned = await presignPut({ key, contentType: 'application/pdf' });
-    await axios.put(presigned.url, pdfBuffer, {
-      headers: {
-        ...(presigned.headers || {}),
-        'Content-Type': 'application/pdf',
-        ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
-      }
-    });
-    relativePath = key;
-  } else {
-    const safeName = sanitiseUploadFilename(displayName);
-    const targetPath = path.join(ADMIN_MANUAL_UPLOAD_DIR, safeName);
-    await fs.promises.writeFile(targetPath, pdfBuffer);
-    relativePath = toIntakeRelativePath(targetPath);
+  const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+  if (DRIVER !== 's3') {
+    throw new Error('s3_upload_unavailable');
   }
+  const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
+  const presigned = await presignPut({ key, contentType: 'application/pdf' });
+  await axios.put(presigned.url, pdfBuffer, {
+    headers: {
+      ...(presigned.headers || {}),
+      'Content-Type': 'application/pdf',
+      ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+    }
+  });
+  relativePath = key;
   if (!relativePath) {
     throw new Error('path_resolution_failed');
   }
@@ -1671,29 +1611,21 @@ async function storeGeneratedDocument({
   }
   const sizeBytes = Number.isFinite(Number(buffer?.length)) ? Number(buffer.length) : null;
   const checksum = buffer ? crypto.createHash('sha256').update(buffer).digest('hex') : null;
-  const storageMode = resolveUploadStorageMode();
   let relativePath = null;
-  if (storageMode === 's3') {
-    const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
-    if (DRIVER !== 's3') {
-      throw new Error('s3_upload_unavailable');
-    }
-    const key = generateKey(actorUserId || 'admin', fileName);
-    const presigned = await presignPut({ key, contentType });
-    await axios.put(presigned.url, buffer, {
-      headers: {
-        ...(presigned.headers || {}),
-        'Content-Type': contentType,
-        ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
-      }
-    });
-    relativePath = key;
-  } else {
-    const safeName = sanitiseUploadFilename(fileName);
-    const targetPath = path.join(ADMIN_MANUAL_UPLOAD_DIR, safeName);
-    await fs.promises.writeFile(targetPath, buffer);
-    relativePath = toIntakeRelativePath(targetPath);
+  const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+  if (DRIVER !== 's3') {
+    throw new Error('s3_upload_unavailable');
   }
+  const key = generateKey(actorUserId || 'admin', fileName);
+  const presigned = await presignPut({ key, contentType });
+  await axios.put(presigned.url, buffer, {
+    headers: {
+      ...(presigned.headers || {}),
+      'Content-Type': contentType,
+      ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+    }
+  });
+  relativePath = key;
   if (!relativePath) {
     throw new Error('path_resolution_failed');
   }
@@ -1732,23 +1664,17 @@ const sanitizeArchiveName = name => {
 
 const loadDocumentBuffer = async docRow => {
   if (!docRow?.file_path) return null;
-  const storageMode = resolveUploadStorageMode();
-  if (storageMode === 's3') {
-    const { presignGet, DRIVER } = require('../ISET-intake/s3Provider');
-    if (DRIVER !== 's3' || typeof presignGet !== 'function') {
-      throw new Error('s3_download_unavailable');
-    }
-    const presigned = await presignGet({ key: docRow.file_path });
-    const url = presigned?.url || presigned?.signedUrl;
-    if (!url) {
-      throw new Error('s3_presign_failed');
-    }
-    const response = await axios.get(url, { responseType: 'arraybuffer' });
-    return Buffer.from(response.data);
+  const { presignGet, DRIVER } = require('../ISET-intake/s3Provider');
+  if (DRIVER !== 's3' || typeof presignGet !== 'function') {
+    throw new Error('s3_download_unavailable');
   }
-  const normalized = String(docRow.file_path).replace(/\\/g, '/').replace(/^\/+/, '');
-  const fullPath = path.join(INTAKE_ROOT, normalized);
-  return fs.promises.readFile(fullPath);
+  const presigned = await presignGet({ key: docRow.file_path });
+  const url = presigned?.url || presigned?.signedUrl;
+  if (!url) {
+    throw new Error('s3_presign_failed');
+  }
+  const response = await axios.get(url, { responseType: 'arraybuffer' });
+  return Buffer.from(response.data);
 };
 
 const normalizeArchiveEntryBuffer = value => {
@@ -11039,7 +10965,15 @@ function clonePayload(payload) {
 
 function resolveRequestActor(req) {
   const actorId = req.auth?.sub || req.auth?.id || req.auth?.user_id || req.auth?.userId || req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
-  const actorName = req.auth?.name || req.get('X-Dev-Username') || req.get('x-dev-username') || null;
+  const actorName = (
+    req.auth?.name ||
+    req.auth?.preferred_username ||
+    [req.auth?.given_name, req.auth?.family_name].filter(Boolean).join(' ').trim() ||
+    req.auth?.email ||
+    req.get('X-Dev-Username') ||
+    req.get('x-dev-username') ||
+    null
+  );
   return { actorId, actorName };
 }
 
@@ -12832,6 +12766,49 @@ async function insertNewVersionEntry(connection, applicationId, version, payload
       metadata.restoredFromVersion || null
     ]
   );
+}
+
+async function resolveVersionSavedByLabels(connection, versionRows = []) {
+  const ids = Array.from(
+    new Set(
+      (Array.isArray(versionRows) ? versionRows : [])
+        .map(row => (row?.created_by_id == null ? '' : String(row.created_by_id).trim()))
+        .filter(Boolean)
+    )
+  );
+  if (!ids.length) return new Map();
+
+  const cognitoSubs = ids.filter(id => /[A-Za-z-]/.test(id));
+  const numericIds = ids.filter(id => /^\d+$/.test(id));
+  const clauses = [];
+  const params = [];
+  if (cognitoSubs.length) {
+    clauses.push(`cognito_sub IN (${cognitoSubs.map(() => '?').join(',')})`);
+    params.push(...cognitoSubs);
+  }
+  if (numericIds.length) {
+    clauses.push(`CAST(id AS CHAR) IN (${numericIds.map(() => '?').join(',')})`);
+    params.push(...numericIds);
+  }
+  if (!clauses.length) return new Map();
+
+  const [rows] = await connection.query(
+    `SELECT CAST(id AS CHAR) AS id_char, cognito_sub, display_name, email
+       FROM staff_profiles
+      WHERE ${clauses.join(' OR ')}`,
+    params
+  );
+
+  const byKey = new Map();
+  for (const row of rows || []) {
+    const label = normaliseString(row?.display_name) || normaliseString(row?.email) || null;
+    if (!label) continue;
+    const sub = normaliseString(row?.cognito_sub);
+    const idChar = normaliseString(row?.id_char);
+    if (sub) byKey.set(sub, label);
+    if (idChar) byKey.set(idChar, label);
+  }
+  return byKey;
 }
 
 const DEFAULT_LOCK_CONFIG = Object.freeze({
@@ -29544,39 +29521,28 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
     const originalNameRaw = typeof file.originalname === 'string' ? file.originalname.trim() : '';
     const fileNameForDb = (originalNameRaw || file.filename || 'document').slice(0, 255);
 
-    const storageModeEnv = (process.env.UPLOAD_MODE || process.env.UPLOAD_DRIVER || '').toLowerCase();
-    const storageMode = storageModeEnv === 's3' ? 's3' : 'local-direct';
-
     let relativePath = null;
-    if (storageMode === 's3') {
-      try {
-        const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
-        if (DRIVER !== 's3') {
-          throw new Error('s3 driver not configured');
+    try {
+      const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+      if (DRIVER !== 's3') {
+        throw new Error('s3 driver not configured');
+      }
+      const key = generateKey(applicantId || uploaderUserId || 'admin', originalNameRaw || fileNameForDb);
+      const contentType = mimeType || 'application/octet-stream';
+      const presigned = await presignPut({ key, contentType });
+      await axios.put(presigned.url, fs.createReadStream(file.path), {
+        headers: {
+          ...(presigned.headers || {}),
+          'Content-Type': contentType,
+          ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
         }
-        const key = generateKey(applicantId || uploaderUserId || 'admin', originalNameRaw || fileNameForDb);
-        const contentType = mimeType || 'application/octet-stream';
-        const presigned = await presignPut({ key, contentType });
-        await axios.put(presigned.url, fs.createReadStream(file.path), {
-          headers: {
-            ...(presigned.headers || {}),
-            'Content-Type': contentType,
-            ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
-          }
-        });
-        relativePath = key;
-        cleanupUploadedFile();
-      } catch (uploadErr) {
-        cleanupUploadedFile();
-        console.error('[admin:documents:upload:s3] upload failed', uploadErr);
-        return res.status(500).json({ error: 'object_store_upload_failed' });
-      }
-    } else {
-      relativePath = toIntakeRelativePath(file.path);
-      if (!relativePath) {
-        cleanupUploadedFile();
-        return res.status(500).json({ error: 'path_resolution_failed' });
-      }
+      });
+      relativePath = key;
+      cleanupUploadedFile();
+    } catch (uploadErr) {
+      cleanupUploadedFile();
+      console.error('[admin:documents:upload:s3] upload failed', uploadErr);
+      return res.status(500).json({ error: 'object_store_upload_failed' });
     }
 
     let insertId = null;
@@ -29756,44 +29722,34 @@ app.post('/api/allocations/evidence/upload', (req, res) => {
     const sizeBytes = Number.isFinite(Number(file.size)) ? Number(file.size) : null;
     const originalNameRaw = typeof file.originalname === 'string' ? file.originalname.trim() : '';
     const fileNameForDb = (originalNameRaw || file.filename || 'document').slice(0, 255);
-    const storageMode = resolveUploadStorageMode();
-
     let relativePath = null;
-    if (storageMode === 's3') {
-      try {
-        const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
-        if (DRIVER !== 's3') {
-          throw new Error('s3 driver not configured');
+    try {
+      const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+      if (DRIVER !== 's3') {
+        throw new Error('s3 driver not configured');
+      }
+      const key = generateKey('allocations', originalNameRaw || fileNameForDb);
+      const contentType = mimeType || 'application/octet-stream';
+      const presigned = await presignPut({ key, contentType });
+      await axios.put(presigned.url, fs.createReadStream(file.path), {
+        headers: {
+          ...(presigned.headers || {}),
+          'Content-Type': contentType,
+          ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
         }
-        const key = generateKey('allocations', originalNameRaw || fileNameForDb);
-        const contentType = mimeType || 'application/octet-stream';
-        const presigned = await presignPut({ key, contentType });
-        await axios.put(presigned.url, fs.createReadStream(file.path), {
-          headers: {
-            ...(presigned.headers || {}),
-            'Content-Type': contentType,
-            ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
-          }
-        });
-        relativePath = key;
-        cleanupUploadedFile();
-      } catch (uploadErr) {
-        cleanupUploadedFile();
-        console.error('[allocations:evidence:upload:s3] upload failed', uploadErr);
-        return res.status(500).json({ error: 'object_store_upload_failed' });
-      }
-    } else {
-      relativePath = toIntakeRelativePath(file.path);
-      if (!relativePath) {
-        cleanupUploadedFile();
-        return res.status(500).json({ error: 'path_resolution_failed' });
-      }
+      });
+      relativePath = key;
+      cleanupUploadedFile();
+    } catch (uploadErr) {
+      cleanupUploadedFile();
+      console.error('[allocations:evidence:upload:s3] upload failed', uploadErr);
+      return res.status(500).json({ error: 'object_store_upload_failed' });
     }
 
     return res.status(200).json({
       ok: true,
       key: relativePath,
-      url: storageMode === 'local-direct' ? `/uploads/${relativePath}` : null,
+      url: null,
       name: fileNameForDb,
       size: sizeBytes,
       type: mimeType,
@@ -29808,20 +29764,10 @@ app.post('/api/allocations/evidence/delete', async (req, res) => {
   if (!key || key.includes('..')) {
     return res.status(400).json({ error: 'key_required' });
   }
-  const storageMode = resolveUploadStorageMode();
   try {
-    if (storageMode === 's3') {
-      const { deleteObject, DRIVER } = require('../ISET-intake/s3Provider');
-      if (DRIVER === 's3' && typeof deleteObject === 'function') {
-        await deleteObject(key);
-      }
-    } else {
-      const absPath = path.join(INTAKE_ROOT, key);
-      if (absPath.startsWith(INTAKE_ROOT)) {
-        await fs.promises.unlink(absPath).catch(err => {
-          if (err && err.code !== 'ENOENT') throw err;
-        });
-      }
+    const { deleteObject, DRIVER } = require('../ISET-intake/s3Provider');
+    if (DRIVER === 's3' && typeof deleteObject === 'function') {
+      await deleteObject(key);
     }
     return res.json({ ok: true });
   } catch (err) {
@@ -29836,22 +29782,17 @@ app.post('/api/allocations/evidence/presign-download', async (req, res) => {
   if (!key || key.includes('..')) {
     return res.status(400).json({ error: 'key_required' });
   }
-  const storageMode = resolveUploadStorageMode();
   try {
-    if (storageMode === 's3') {
-      const { presignGet, DRIVER } = require('../ISET-intake/s3Provider');
-      if (DRIVER !== 's3' || typeof presignGet !== 'function') {
-        return res.status(500).json({ error: 'presign_unavailable' });
-      }
-      const presigned = await presignGet({ key });
-      const url = presigned?.url || presigned?.signedUrl || null;
-      if (!url) {
-        return res.status(500).json({ error: 'presign_failed' });
-      }
-      return res.json({ ok: true, mode: 's3', url });
+    const { presignGet, DRIVER } = require('../ISET-intake/s3Provider');
+    if (DRIVER !== 's3' || typeof presignGet !== 'function') {
+      return res.status(500).json({ error: 'presign_unavailable' });
     }
-    const normalized = key.startsWith('uploads/') ? `/${key}` : `/uploads/${key}`;
-    return res.json({ ok: true, mode: 'local-direct', url: normalized });
+    const presigned = await presignGet({ key });
+    const url = presigned?.url || presigned?.signedUrl || null;
+    if (!url) {
+      return res.status(500).json({ error: 'presign_failed' });
+    }
+    return res.json({ ok: true, mode: 's3', url });
   } catch (err) {
     console.error('[allocations:evidence:presign] failed', err);
     return res.status(500).json({ error: 'presign_failed', message: err.message || 'Presign failed' });
@@ -31226,31 +31167,23 @@ app.get('/api/documents/:id/presign-download', async (req, res) => {
     if (!doc.file_path) {
       return res.status(404).json({ error: 'file_missing' });
     }
-    const storageModeEnv = (process.env.UPLOAD_MODE || process.env.UPLOAD_DRIVER || '').toLowerCase();
-    const storageMode = storageModeEnv === 's3' ? 's3' : 'local-direct';
-    if (storageMode === 's3') {
-      try {
-        const { presignGet } = require('../ISET-intake/s3Provider');
-        const presigned = await presignGet({ key: doc.file_path });
-        return res.json({
-          mode: 's3',
-          fileId: doc.id,
-          filename: doc.file_name,
-          key: doc.file_path,
-          presigned
-        });
-      } catch (err) {
-        console.error('[admin:documents:presign-download:s3] error', err);
-        return res.status(500).json({ error: 's3_presign_failed' });
+    try {
+      const { presignGet, DRIVER } = require('../ISET-intake/s3Provider');
+      if (DRIVER !== 's3' || typeof presignGet !== 'function') {
+        return res.status(500).json({ error: 'presign_unavailable' });
       }
+      const presigned = await presignGet({ key: doc.file_path });
+      return res.json({
+        mode: 's3',
+        fileId: doc.id,
+        filename: doc.file_name,
+        key: doc.file_path,
+        presigned
+      });
+    } catch (err) {
+      console.error('[admin:documents:presign-download:s3] error', err);
+      return res.status(500).json({ error: 's3_presign_failed' });
     }
-    const normalizedPath = String(doc.file_path).replace(/\\\\/g, '/').replace(/^\/+/, '');
-    return res.json({
-      mode: 'local-direct',
-      fileId: doc.id,
-      filename: doc.file_name,
-      path: '/' + normalizedPath
-    });
   } catch (error) {
     console.error('[admin:documents:presign-download] error', error);
     return res.status(500).json({ error: 'failed_to_presign_document' });
@@ -37094,11 +37027,25 @@ app.post('/api/admin/messages', async (req, res) => {
 
 // Mark a message as deleted
 app.put('/api/admin/messages/:id/delete', async (req, res) => {
-  const messageId = req.params.id;
+  const messageId = Number.parseInt(req.params.id, 10);
   try {
+    if (!Number.isFinite(messageId) || messageId <= 0) {
+      return res.status(400).json({ error: 'invalid_message_id' });
+    }
+    const ownerUserId = await resolveOrCreateUserIdFromAuth(req);
+    if (!ownerUserId) return res.status(401).json({ error: 'unauthorized' });
+    await ensureCaseMessageItemTable();
+    await seedCaseMessageItemForOwner({ messageId, ownerUserId });
     const [result] = await pool.query(
-      'UPDATE messages SET deleted = 1 WHERE id = ?',
-      [messageId]
+      `UPDATE message_item
+          SET folder_before_deleted = CASE
+              WHEN folder IN ('inbox','sent') THEN folder
+              ELSE folder_before_deleted
+            END,
+            folder = 'deleted',
+            deleted_at = COALESCE(deleted_at, CURRENT_TIMESTAMP)
+        WHERE message_id = ? AND owner_user_id = ? AND purged_at IS NULL`,
+      [messageId, ownerUserId]
     );
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'Message not found' });
@@ -37112,13 +37059,62 @@ app.put('/api/admin/messages/:id/delete', async (req, res) => {
 
 // Update message status (PUT /api/admin/messages/:id/status)
 app.put('/api/admin/messages/:id/status', async (req, res) => {
-  const messageId = req.params.id;
+  const messageId = Number.parseInt(req.params.id, 10);
   const { status } = req.body;
   if (!status) {
     return res.status(400).json({ error: 'Missing status' });
   }
   try {
-    await pool.query('UPDATE messages SET status = ? WHERE id = ?', [status, messageId]);
+    if (!Number.isFinite(messageId) || messageId <= 0) {
+      return res.status(400).json({ error: 'invalid_message_id' });
+    }
+    const ownerUserId = await resolveOrCreateUserIdFromAuth(req);
+    if (!ownerUserId) return res.status(401).json({ error: 'unauthorized' });
+    await ensureCaseMessageItemTable();
+    await seedCaseMessageItemForOwner({ messageId, ownerUserId });
+
+    const statusValue = String(status).trim().toLowerCase();
+    if (!['unread', 'read', 'replied', 'archived', 'deleted'].includes(statusValue)) {
+      return res.status(400).json({ error: 'invalid_status' });
+    }
+
+    if (statusValue === 'read' || statusValue === 'replied') {
+      await pool.query(
+        `UPDATE message_item
+            SET read_at = COALESCE(read_at, CURRENT_TIMESTAMP)
+          WHERE message_id = ? AND owner_user_id = ? AND purged_at IS NULL`,
+        [messageId, ownerUserId]
+      );
+    } else if (statusValue === 'unread') {
+      await pool.query(
+        `UPDATE message_item
+            SET read_at = NULL
+          WHERE message_id = ? AND owner_user_id = ? AND folder = 'inbox' AND purged_at IS NULL`,
+        [messageId, ownerUserId]
+      );
+    } else if (statusValue === 'archived' || statusValue === 'deleted') {
+      await pool.query(
+        `UPDATE message_item
+            SET folder_before_deleted = CASE
+                WHEN folder IN ('inbox','sent') THEN folder
+                ELSE folder_before_deleted
+              END,
+              folder = 'deleted',
+              deleted_at = COALESCE(deleted_at, CURRENT_TIMESTAMP)
+          WHERE message_id = ? AND owner_user_id = ? AND purged_at IS NULL`,
+        [messageId, ownerUserId]
+      );
+    }
+
+    if (statusValue === 'read' || statusValue === 'replied' || statusValue === 'unread') {
+      await pool.query(
+        `UPDATE messages
+            SET status = ?
+          WHERE id = ?
+            AND recipient_id = ?`,
+        [statusValue, messageId, ownerUserId]
+      );
+    }
     res.status(200).json({ message: 'Status updated' });
   } catch (error) {
     console.error('Error updating message status:', error);
@@ -37131,6 +37127,8 @@ app.put('/api/admin/messages/:id/status', async (req, res) => {
 // Routes below intentionally avoid /api/admin/messages, which is already used for applicant/case messaging.
 
 const STAFF_MESSAGE_FOLDERS = new Set(['inbox', 'sent', 'deleted']);
+const CASE_MESSAGE_FOLDERS = new Set(['inbox', 'sent', 'deleted']);
+let __caseMessageItemTableReady = false;
 
 function normaliseStaffProfileSummaryRow(row) {
   if (!row) return null;
@@ -37154,6 +37152,76 @@ function truncatePreview(value, maxLen = 160) {
 function normaliseStaffMessageFolder(raw) {
   const value = String(raw || '').trim().toLowerCase();
   return STAFF_MESSAGE_FOLDERS.has(value) ? value : null;
+}
+
+function normaliseCaseMessageFolder(raw) {
+  const value = String(raw || '').trim().toLowerCase();
+  return CASE_MESSAGE_FOLDERS.has(value) ? value : null;
+}
+
+async function ensureCaseMessageItemTable(connection = pool) {
+  if (__caseMessageItemTableReady) return;
+  await connection.query(`CREATE TABLE IF NOT EXISTS message_item (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    message_id INT NOT NULL,
+    owner_user_id INT NOT NULL,
+    folder ENUM('inbox','sent','deleted') NOT NULL,
+    folder_before_deleted ENUM('inbox','sent') NULL,
+    read_at DATETIME NULL,
+    deleted_at DATETIME NULL,
+    purged_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uniq_message_owner (message_id, owner_user_id),
+    KEY idx_message_item_owner_folder (owner_user_id, folder, purged_at),
+    KEY idx_message_item_message (message_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`);
+  __caseMessageItemTableReady = true;
+}
+
+async function seedCaseMessageItemForOwner({ runner = pool, messageId, ownerUserId }) {
+  const numericMessageId = Number(messageId);
+  const numericOwnerUserId = Number(ownerUserId);
+  if (!Number.isFinite(numericMessageId) || numericMessageId <= 0) return false;
+  if (!Number.isFinite(numericOwnerUserId) || numericOwnerUserId <= 0) return false;
+  await ensureCaseMessageItemTable(runner);
+  const [result] = await runner.query(
+    `INSERT IGNORE INTO message_item (message_id, owner_user_id, folder, folder_before_deleted, read_at, deleted_at, purged_at)
+     SELECT
+       m.id,
+       ?,
+       CASE
+         WHEN COALESCE(m.deleted, 0) = 1 THEN 'deleted'
+         WHEN m.sender_id = ? THEN 'sent'
+         ELSE 'inbox'
+       END AS folder,
+       CASE
+         WHEN COALESCE(m.deleted, 0) = 1
+           THEN CASE WHEN m.sender_id = ? THEN 'sent' ELSE 'inbox' END
+         ELSE NULL
+       END AS folder_before_deleted,
+       CASE
+         WHEN m.sender_id = ? THEN COALESCE(m.created_at, NOW())
+         WHEN LOWER(COALESCE(m.status, '')) IN ('read', 'replied') THEN COALESCE(m.created_at, NOW())
+         ELSE NULL
+       END AS read_at,
+       CASE WHEN COALESCE(m.deleted, 0) = 1 THEN COALESCE(m.created_at, NOW()) ELSE NULL END AS deleted_at,
+       NULL AS purged_at
+     FROM messages m
+    WHERE m.id = ?
+      AND (m.sender_id = ? OR m.recipient_id = ?)`,
+    [
+      numericOwnerUserId,
+      numericOwnerUserId,
+      numericOwnerUserId,
+      numericOwnerUserId,
+      numericMessageId,
+      numericOwnerUserId,
+      numericOwnerUserId,
+    ]
+  );
+  return Boolean(result?.affectedRows);
 }
 
 app.get('/api/me/staff-profiles', async (req, res) => {
@@ -38822,6 +38890,10 @@ app.get('/api/cases/:id/messages', async (req, res) => {
   const caseId = parseInt(req.params.id, 10);
   if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
   try {
+    const ownerUserId = await resolveOrCreateUserIdFromAuth(req);
+    if (!ownerUserId) return res.status(401).json({ error: 'unauthorized' });
+    await ensureCaseMessageItemTable();
+
     // Resolve applicant user id for this case
     let caseRow;
     try {
@@ -38849,13 +38921,66 @@ app.get('/api/cases/:id/messages', async (req, res) => {
 
     const limit = Math.min(Math.max(parseInt(req.query.limit || '200', 10) || 200, 1), 1000);
     const offset = Math.max(parseInt(req.query.offset || '0', 10) || 0, 0);
+
+    // Best-effort seed for messages created before mailbox-item model for this owner.
+    await pool.query(
+      `INSERT IGNORE INTO message_item (message_id, owner_user_id, folder, folder_before_deleted, read_at, deleted_at, purged_at)
+       SELECT
+         m.id,
+         ?,
+         CASE
+           WHEN COALESCE(m.deleted, 0) = 1 THEN 'deleted'
+           WHEN m.sender_id = ? THEN 'sent'
+           ELSE 'inbox'
+         END AS folder,
+         CASE
+           WHEN COALESCE(m.deleted, 0) = 1
+             THEN CASE WHEN m.sender_id = ? THEN 'sent' ELSE 'inbox' END
+           ELSE NULL
+         END AS folder_before_deleted,
+         CASE
+           WHEN m.sender_id = ? THEN COALESCE(m.created_at, NOW())
+           WHEN LOWER(COALESCE(m.status, '')) IN ('read', 'replied') THEN COALESCE(m.created_at, NOW())
+           ELSE NULL
+         END AS read_at,
+       CASE WHEN COALESCE(m.deleted, 0) = 1 THEN COALESCE(m.created_at, NOW()) ELSE NULL END AS deleted_at,
+        NULL AS purged_at
+       FROM messages m
+      WHERE m.case_id = ?
+      `,
+      [ownerUserId, ownerUserId, ownerUserId, ownerUserId, caseId]
+    );
+
     const [rows] = await pool.query(
-      `SELECT id, case_id, application_id, sender_id, recipient_id, subject, body, status, deleted, urgent, created_at
-         FROM messages
-        WHERE sender_id = ? OR recipient_id = ?
+      `SELECT
+          m.id,
+          m.case_id,
+          m.application_id,
+          m.sender_id,
+          m.recipient_id,
+          m.subject,
+          m.body,
+          CASE
+            WHEN mi.folder = 'inbox' AND mi.read_at IS NULL THEN 'unread'
+            ELSE 'read'
+          END AS status,
+          CASE WHEN mi.folder = 'deleted' THEN 1 ELSE 0 END AS deleted,
+          m.urgent,
+          m.created_at,
+          mi.folder,
+          mi.folder_before_deleted,
+          mi.read_at,
+          mi.deleted_at,
+          mi.purged_at
+         FROM messages m
+         JOIN message_item mi
+           ON mi.message_id = m.id
+          AND mi.owner_user_id = ?
+          AND mi.purged_at IS NULL
+        WHERE m.case_id = ?
         ORDER BY created_at ASC
         LIMIT ? OFFSET ?`,
-      [applicantId, applicantId, limit, offset]
+      [ownerUserId, caseId, limit, offset]
     );
 
     const messageIds = rows.map(r => r.id);
@@ -39348,6 +39473,41 @@ app.post('/api/cases/:id/messages', async (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, 'unread', FALSE, ?, NOW())`,
       [senderId, recipientId, caseId, messageApplicationId, subjectValue, bodyValue, !!urgent]
     );
+    await ensureCaseMessageItemTable();
+    const deliveryRows = [];
+    deliveryRows.push([
+      result.insertId,
+      senderId,
+      'sent',
+      null,
+      new Date(),
+      null,
+      null,
+    ]);
+    if (recipientId !== senderId) {
+      deliveryRows.push([
+        result.insertId,
+        recipientId,
+        'inbox',
+        null,
+        null,
+        null,
+        null,
+      ]);
+    }
+    if (deliveryRows.length) {
+      await pool.query(
+        `INSERT INTO message_item (message_id, owner_user_id, folder, folder_before_deleted, read_at, deleted_at, purged_at)
+         VALUES ?
+         ON DUPLICATE KEY UPDATE
+           folder = VALUES(folder),
+           folder_before_deleted = VALUES(folder_before_deleted),
+           read_at = VALUES(read_at),
+           deleted_at = VALUES(deleted_at),
+           purged_at = VALUES(purged_at)`,
+        [deliveryRows]
+      );
+    }
 
     // Create signing requests and link to message
     if (attachmentRows.length) {
@@ -46668,10 +46828,6 @@ const buildPaymentPacketBundleLink = async ({
   connection,
   expiresInSeconds,
 }) => {
-  const storageMode = resolveUploadStorageMode();
-  if (storageMode !== 's3') {
-    return { url: null, expiresAt: null };
-  }
   const bundle = await buildPaymentPacketBundleDocument({ packetId, packet, actorUserId, connection });
   if (!bundle?.filePath) return { url: null, expiresAt: null };
   const { presignGet, DRIVER } = require('../ISET-intake/s3Provider');
@@ -54136,15 +54292,17 @@ app.get('/api/applications/:id/versions', async (req, res) => {
       'SELECT id, application_id, version, change_summary, created_by_id, created_by_name, restored_from_version, created_at FROM iset_application_version WHERE application_id = ? ORDER BY version DESC, id DESC',
       [applicationId]
     );
+    const savedByLookup = await resolveVersionSavedByLabels(connection, rows);
     const currentVersionNumber = Number(current.row.version || 1);
     const versions = rows.map(row => {
       const versionNumber = Number(row.version);
+      const actorId = row.created_by_id == null ? null : String(row.created_by_id).trim();
       return {
         id: row.id,
         version: versionNumber,
         changeSummary: row.change_summary || null,
         savedById: row.created_by_id || null,
-        savedBy: row.created_by_name || null,
+        savedBy: (actorId ? savedByLookup.get(actorId) : null) || null,
         restoredFromVersion: row.restored_from_version === null ? null : Number(row.restored_from_version),
         savedAt: row.created_at,
         isCurrent: false,
@@ -54227,6 +54385,8 @@ app.get('/api/applications/:id/versions/:versionId', async (req, res) => {
     if (payload && typeof payload === 'string') {
       try { payload = JSON.parse(payload); } catch { payload = {}; }
     }
+    const savedByLookup = await resolveVersionSavedByLabels(connection, [versionRow]);
+    const actorId = versionRow.created_by_id == null ? null : String(versionRow.created_by_id).trim();
     res.json({
       id: versionRow.id,
       applicationId,
@@ -54234,7 +54394,7 @@ app.get('/api/applications/:id/versions/:versionId', async (req, res) => {
       payload: payload || {},
       changeSummary: versionRow.change_summary || null,
       savedById: versionRow.created_by_id || null,
-      savedBy: versionRow.created_by_name || null,
+      savedBy: (actorId ? savedByLookup.get(actorId) : null) || null,
       restoredFromVersion: versionRow.restored_from_version === null ? null : Number(versionRow.restored_from_version),
       savedAt: versionRow.created_at,
       isCurrent: Number(versionRow.version) === currentVersionNumber
@@ -54614,6 +54774,31 @@ app.post('/api/applications/:id/versions', async (req, res) => {
     const existingAnswers = updatedPayload.answers && typeof updatedPayload.answers === 'object'
       ? { ...updatedPayload.answers }
       : {};
+    const mergedAnswers = { ...existingAnswers, ...newAnswers };
+    const sinRaw = (
+      mergedAnswers['social-insurance-number'] ??
+      mergedAnswers['social_insurance_number'] ??
+      mergedAnswers['sin-number'] ??
+      mergedAnswers['sin_number'] ??
+      null
+    );
+    if (sinRaw !== null && typeof sinRaw !== 'undefined' && String(sinRaw).trim() !== '') {
+      const sinDigits = cleanSin(sinRaw) || '';
+      if (!/^\d{9}$/.test(sinDigits)) {
+        await connection.rollback();
+        return res.status(422).json({
+          error: 'invalid_sin_format',
+          message: 'SIN must be exactly 9 digits.'
+        });
+      }
+      if (!isValidSin(sinDigits)) {
+        await connection.rollback();
+        return res.status(422).json({
+          error: 'invalid_sin_checksum',
+          message: 'SIN checksum is invalid.'
+        });
+      }
+    }
     updatedPayload.answers = existingAnswers;
     Object.assign(updatedPayload.answers, newAnswers);
 
@@ -54759,15 +54944,12 @@ app.post('/api/applications/:id/versions/:versionId/restore', async (req, res) =
 if (fs.existsSync(buildDir)) {
   app.get('*', (req, res, next) => {
     const pathLower = (req.path || '').toLowerCase();
-    if (pathLower.startsWith('/api') || pathLower.startsWith('/healthz') || pathLower.startsWith('/uploads')) {
+    if (pathLower.startsWith('/api') || pathLower.startsWith('/healthz')) {
       return next();
     }
     res.sendFile(path.join(buildDir, 'index.html'));
   });
 }
-
-// Serve uploaded files statically for document viewing (corrected path)
-app.use('/uploads', express.static(INTAKE_UPLOADS_ROOT));
 
 app.listen(port, '0.0.0.0', () => {
   console.log(`Server running on port ${port}`);
@@ -55388,6 +55570,11 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
   const messageId = req.params.id;
   const caseIdFromQuery = req.query.case_id ? parseInt(req.query.case_id, 10) : null;
   try {
+    const ownerUserId = await resolveOrCreateUserIdFromAuth(req);
+    if (!ownerUserId) return res.status(401).json({ error: 'unauthorized' });
+    await ensureCaseMessageItemTable();
+    await seedCaseMessageItemForOwner({ messageId, ownerUserId });
+
     // Get all attachments for this message
     const [attachments] = await pool.query(
       `SELECT id, message_id, file_path, original_filename, uploaded_at, user_id, application_id
@@ -55405,6 +55592,16 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
     );
     if (!message) {
       return res.status(404).json({ error: 'Message not found' });
+    }
+    const [[itemRow]] = await pool.query(
+      `SELECT id
+         FROM message_item
+        WHERE message_id = ? AND owner_user_id = ? AND purged_at IS NULL
+        LIMIT 1`,
+      [messageId, ownerUserId]
+    );
+    if (!itemRow) {
+      return res.status(403).json({ error: 'forbidden' });
     }
 
     let caseId = caseIdFromQuery;
@@ -55533,7 +55730,30 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
       });
     }
 
-    res.status(200).json(attachments);
+    let attachmentsWithLinks = attachments;
+    try {
+      const { presignGet, DRIVER } = require('../ISET-intake/s3Provider');
+      if (DRIVER === 's3' && typeof presignGet === 'function') {
+        attachmentsWithLinks = await Promise.all(
+          attachments.map(async att => {
+            const key = att?.file_path ? String(att.file_path).replace(/^\/+/, '') : '';
+            if (!key) return { ...att, download_url: null };
+            try {
+              const presigned = await presignGet({ key });
+              const url = presigned?.url || presigned?.signedUrl || null;
+              return { ...att, download_url: url };
+            } catch (err) {
+              console.warn('[admin:messages:attachments] presign failed for message %s attachment %s: %s', messageId, att?.id, err?.message || err);
+              return { ...att, download_url: null };
+            }
+          })
+        );
+      }
+    } catch (err) {
+      console.warn('[admin:messages:attachments] failed to prepare download links: %s', err?.message || err);
+    }
+
+    res.status(200).json(attachmentsWithLinks);
   } catch (error) {
     console.error('Error fetching message attachments:', error);
     res.status(500).json({ error: 'Failed to fetch message attachments' });
@@ -55773,26 +55993,30 @@ app.post('/api/signing-requests/:id/sign', async (req, res) => {
 
 // Hard delete a message and its attachments
 app.delete('/api/admin/messages/:id/hard-delete', async (req, res) => {
-  const messageId = req.params.id;
-  const conn = await pool.getConnection();
+  const messageId = Number.parseInt(req.params.id, 10);
   try {
-    await conn.beginTransaction();
-    // Delete attachments first
-    await conn.query('DELETE FROM message_attachment WHERE message_id = ?', [messageId]);
-    // Delete the message
-    const [result] = await conn.query('DELETE FROM messages WHERE id = ?', [messageId]);
-    await conn.commit();
+    if (!Number.isFinite(messageId) || messageId <= 0) {
+      return res.status(400).json({ error: 'invalid_message_id' });
+    }
+    const ownerUserId = await resolveOrCreateUserIdFromAuth(req);
+    if (!ownerUserId) return res.status(401).json({ error: 'unauthorized' });
+    await ensureCaseMessageItemTable();
+    await seedCaseMessageItemForOwner({ messageId, ownerUserId });
+
+    const [result] = await pool.query(
+      `UPDATE message_item
+          SET purged_at = COALESCE(purged_at, CURRENT_TIMESTAMP)
+        WHERE message_id = ? AND owner_user_id = ? AND folder = 'deleted' AND purged_at IS NULL`,
+      [messageId, ownerUserId]
+    );
     if (result.affectedRows === 0) {
       res.status(404).json({ error: 'Message not found' });
     } else {
-      res.status(200).json({ message: 'Message and attachments deleted' });
+      res.status(200).json({ message: 'Message permanently removed from your deleted items' });
     }
   } catch (error) {
-    await conn.rollback();
     console.error('Error hard deleting message:', error);
     res.status(500).json({ error: 'Failed to hard delete message' });
-  } finally {
-    conn.release();
   }
 });
 

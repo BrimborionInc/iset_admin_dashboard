@@ -579,8 +579,6 @@ const buildIntacctApBillPreview = (packet, config = null) => {
   return { xml: xmlLines.join("\n"), missingFields };
 };
 
-const API_BASE_URL = (process.env.REACT_APP_API_BASE_URL || "").replace(/\/$/, "");
-
 const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const {
     selectedRequest,
@@ -1071,16 +1069,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       }
       const payload = await res.json().catch(() => null);
       if (!payload) throw new Error("Invalid download response");
-      let targetUrl = "";
-      if (payload.mode === "s3") {
-        targetUrl = payload.presigned?.url || "";
-      } else if (payload.mode === "local-direct") {
-        const path = payload.path || "";
-        if (path) {
-          const normalized = path.startsWith("/") ? path : `/${path}`;
-          targetUrl = API_BASE_URL ? `${API_BASE_URL}${normalized}` : normalized;
-        }
-      }
+      const targetUrl = payload.presigned?.url || "";
       if (!targetUrl) {
         throw new Error("Document download unavailable");
       }

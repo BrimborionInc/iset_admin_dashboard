@@ -2,6 +2,24 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-03-05
+- Docs: Rewrote `docs/AGENTS.md` as a thread-handoff/quick-onboarding guide focused on durable codebase/docbase/database context, critical conventions, known pitfalls, and location-first references.
+- Docs: Clarified `docs/AGENTS.md` to explicitly frame assistant/user collaboration as a design dialog (challenge assumptions, discuss tradeoffs before high-risk implementation, avoid literal blind execution).
+- UX: Home work-queue conflict rows now show inline actions `Open workspace` and `Reassign` (falling back to `Assign` if no current owner), while hiding the inline `Resolve` action; underlying resolve code path remains in place for potential reinstatement.
+- Docs/UX: Updated homepage help-panel content (`Home dashboard`, `Work Queue`, `Work Queue Items`, `Metrics`, `My Tagged Applications`, `Recent Activity`, and `Development Tracker`) to align guidance with current role-based queues, inline actions, tagging behavior, and widget controls.
+- Docs: Added `docs/meta/next-release-notes-log.md` as the standing running log for next-release "What's New" drafting (version-tagged entries), and updated `docs/AGENTS.md` to require maintaining it in future threads.
+- UX: Assessment wizard Step 1 is now titled `Assess Eligibility`, with simplified role guidance and clearer copy for EI status ownership/eligibility lock messaging.
+- UX: Assessment wizard `Cancel` now exits edit mode via confirmation instead of appearing to discard changes with no navigation effect.
+- UX: EI verification UX in assessment Step 1 now surfaces current documents inline, flags the latest document as current, and updates immediately when a new report is selected.
+- UX/Validation: ISET Application Form SIN handling now combines strict edit-mode validation (9-digit + checksum), numeric/length input constraints, and grouped read-only display formatting (`XXX XXX XXX`).
+- UX/Data: Version history modal refreshed for readability (smaller footprint, tighter columns, inline-link actions), `Saved by` now resolves from `staff_profiles.display_name` (fallback `email`), and `View` now shows a human-readable field-diff view (`View changes`) instead of raw JSON.
+- UX: Successful version restore now closes the Version History modal automatically.
+- Fix/Storage: Secure Messaging Message Details attachments now resolve to presigned S3 download URLs instead of local `/uploads` links.
+- Ops/Storage: Removed legacy static `/uploads` delivery and remaining local-direct document download fallbacks; admin document/evidence download flows now operate as S3-only.
+- Workflow: Secure messaging (applicant portal + case widgets) now uses per-user mailbox items for folder state, so delete/purge operations only affect the current user’s folders and no longer remove messages for other participants.
+- Fix: Applicant portal replies now inherit case/application linkage from the replied message, restoring visibility of applicant replies in case-scoped secure messaging widgets.
+- Fix: Assessment cost-line recurrence policy now resolves payment-type aliases/legacy labels (including wage subsidy variants), so `optional` recurrence settings correctly enable installments in coordinator and case-workspace editors.
+
 ## 2026-03-03
 - UX: Removed the `Supporting documents` section from the ISET Application Form widget; document review/management remains in the dedicated Supporting Documents widget.
 - UX: Moved the Application Assessment `Deny Funding` shortcut from Step 2 (`What is being proposed?`) to Step 1 (`EI Eligibility Check`) as a step-header action.
