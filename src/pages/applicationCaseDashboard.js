@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ContentLayout, SpaceBetween, Box } from '@cloudscape-design/components';
+import { ContentLayout, SpaceBetween, Box, Flashbar } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
-import { useParams, useLocation } from 'react-router-dom';
+import { useParams, useLocation, useHistory } from 'react-router-dom';
 import { apiFetch } from '../auth/apiClient';
 import ApplicationOverviewWidget from '../widgets/ApplicationOverviewWidget';
 import IsetApplicationFormWidget from '../widgets/IsetApplicationFormWidget';
@@ -220,9 +220,11 @@ const boardI18nStrings = {
 const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplitPanelOpen, setAvailableItems }) => {
   const { id } = useParams(); // id = iset_case.id
   const location = useLocation();
+  const history = useHistory();
   const [caseData, setCaseData] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [appRowVersion, setAppRowVersion] = useState(0);
+  const [flashItems, setFlashItems] = useState([]);
   const [layout, setLayout] = useState(() => loadLayoutFromStorage() ?? defaultLayout);
   const paletteSignatureRef = useRef(JSON.stringify(computePaletteItems(layout)));
   const cacheRef = useRef(typeof window !== 'undefined' ? (window.__ISET_CASE_CACHE || (window.__ISET_CASE_CACHE = new Map())) : new Map());
@@ -230,6 +232,24 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
 
   const boardItems = useMemo(() => toBoardItems(layout), [layout]);
   const paletteItems = useMemo(() => computePaletteItems(layout), [layout]);
+
+  useEffect(() => {
+    const message = location?.state?.flashMessage;
+    if (!message) return;
+    setFlashItems([
+      {
+        type: location.state.flashType || 'success',
+        dismissible: true,
+        content: message,
+      },
+    ]);
+    history.replace({
+      pathname: location.pathname,
+      search: location.search,
+      hash: location.hash,
+      state: {},
+    });
+  }, [history, location]);
 
   useEffect(() => {
     try {
@@ -377,25 +397,41 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
     return nextData;
   };
 
-  const loadCaseResponse = useCallback(async (caseId, { retries = 1 } = {}) => {
+  const loadCaseResponse = useCallback(async (caseId, { retries = 3 } = {}) => {
     let attempt = 0;
     while (true) {
       try {
+        console.info('[case:ui] requesting case', { caseId, attempt: attempt + 1, retries: retries + 1 });
         const res = await apiFetch(`/api/cases/${caseId}`);
-        if (res.ok) return res;
+        console.info('[case:ui] response received', { caseId, status: res.status, ok: res.ok, attempt: attempt + 1 });
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          return { status: res.status, headers: res.headers, data };
+        }
         if (res.status >= 500 && attempt < retries) {
           attempt += 1;
-          await new Promise(resolve => setTimeout(resolve, 250));
+          const waitMs = 250 * Math.pow(2, attempt - 1);
+          console.warn('[case:ui] transient server response, retrying', { caseId, status: res.status, waitMs, attempt: attempt + 1 });
+          await new Promise(resolve => setTimeout(resolve, waitMs));
           continue;
         }
-        throw res;
+        const body = await res.json().catch(() => null);
+        const err = new Error(body?.error || body?.message || `Case request failed (${res.status})`);
+        err.status = res.status;
+        err.body = body;
+        err.headers = res.headers;
+        throw err;
       } catch (err) {
         const status = typeof err?.status === 'number' ? err.status : null;
+        const message = typeof err?.message === 'string' ? err.message : null;
         if ((status === null || status >= 500) && attempt < retries) {
           attempt += 1;
-          await new Promise(resolve => setTimeout(resolve, 250));
+          const waitMs = 250 * Math.pow(2, attempt - 1);
+          console.warn('[case:ui] request failed, retrying', { caseId, status, message, waitMs, attempt: attempt + 1 });
+          await new Promise(resolve => setTimeout(resolve, waitMs));
           continue;
         }
+        console.error('[case:ui] case load failed after retries', { caseId, status, message, attempts: attempt + 1 });
         throw err;
       }
     }
@@ -404,8 +440,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
   const refreshCaseData = useCallback(async () => {
     if (!id) return null;
     try {
-      const res = await loadCaseResponse(id, { retries: 1 });
-      const data = await res.json();
+      const { data } = await loadCaseResponse(id, { retries: 1 });
       if (!data.assigned_user_email && location?.state?.assessorEmail) {
         data.assigned_user_email = location.state.assessorEmail;
       }
@@ -422,12 +457,9 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
       return applied;
     } catch (err) {
       let message = 'Failed to refresh case';
-      if (err && typeof err.json === 'function') {
-        try {
-          const body = await err.json();
-          message = body?.error || body?.message || message;
-        } catch (_) {}
-      }
+      const body = err?.body || null;
+      if (body) message = body?.error || body?.message || message;
+      else if (err?.message) message = err.message;
       if (err?.status && err.status !== 200) {
         message = `${message} (${err.status})`;
       }
@@ -452,9 +484,10 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
         if (!inflightRef.current.has(key)) {
           inflightRef.current.set(key, loadCaseResponse(id, { retries: 1 }));
         }
-        const res = await inflightRef.current.get(key);
-        if (!res.ok) throw res;
-        const data = await res.json();
+        const { data } = await inflightRef.current.get(key);
+        if (!data || typeof data !== 'object') {
+          throw new Error('Case API returned an invalid payload.');
+        }
         const hydrated = { ...data };
         if (!isMounted) return;
         if (!hydrated.assigned_user_email && location?.state?.assessorEmail) {
@@ -470,28 +503,54 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
           setAppRowVersion(incomingVersion);
         }
         setLoadError(null);
-        updateBreadcrumbs &&
-          updateBreadcrumbs([
-            { text: 'Home', href: '/' },
-            { text: 'Application Management', href: '/case-management' },
-            { text: normalised.tracking_id || id },
-          ]);
+        if (updateBreadcrumbs) {
+          try {
+            updateBreadcrumbs([
+              { text: 'Home', href: '/' },
+              { text: 'Application Management', href: '/case-management' },
+              { text: normalised.tracking_id || id },
+            ]);
+          } catch (breadcrumbErr) {
+            console.error('[case:ui] breadcrumb update failed', {
+              caseId: id,
+              message: breadcrumbErr?.message || String(breadcrumbErr),
+            });
+          }
+        }
       } catch (resErr) {
         if (!isMounted) return;
         setCaseData(cacheRef.current.get(key) || null);
         try {
-          const body = resErr && resErr.json ? await resErr.json() : null;
+          const body = resErr?.body || null;
           const statusSuffix = resErr?.status ? ` (${resErr.status})` : '';
           const fallbackMessage =
             'Failed to load application. Probably a glitch. Please refresh the page to try again. If the problem persists please contact support.';
-          const rawMessage = body?.error || body?.message || fallbackMessage;
+          const rawMessage = body?.error || body?.message || resErr?.message || fallbackMessage;
           const userMessage = rawMessage === 'Failed to load case' ? fallbackMessage : rawMessage;
-          setLoadError(`${userMessage}${statusSuffix}`);
+          const traceFromBody = body?.trace_id ? ` [trace ${body.trace_id}]` : '';
+          const traceFromHeader = typeof resErr?.headers?.get === 'function'
+            ? (resErr.headers.get('x-case-trace-id') ? ` [trace ${resErr.headers.get('x-case-trace-id')}]` : '')
+            : '';
+          setLoadError(`${userMessage}${statusSuffix}${traceFromBody || traceFromHeader}`);
+          console.error('[case:ui] failed to load case payload', {
+            caseId: id,
+            status: resErr?.status || null,
+            traceId: body?.trace_id || (typeof resErr?.headers?.get === 'function' ? resErr.headers.get('x-case-trace-id') : null) || null,
+            body,
+          });
         } catch (_) {
           const statusSuffix = resErr?.status ? ` (${resErr.status})` : '';
-          setLoadError(
-            `Failed to load application. Probably a glitch. Please refresh the page to try again. If the problem persists please contact support.${statusSuffix}`
-          );
+          const networkMessage = typeof resErr?.message === 'string' ? resErr.message : '';
+          const composed = networkMessage
+            ? `Failed to load application. ${networkMessage}${statusSuffix}`
+            : `Failed to load application. Probably a glitch. Please refresh the page to try again. If the problem persists please contact support.${statusSuffix}`;
+          setLoadError(composed);
+          console.error('[case:ui] failed to load case (non-response error)', {
+            caseId: id,
+            status: resErr?.status || null,
+            message: networkMessage || null,
+            error: resErr,
+          });
         }
       } finally {
         inflightRef.current.delete(key);
@@ -543,7 +602,15 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
 
   return (
     <ContentLayout>
-        <SpaceBetween size="l">
+      <SpaceBetween size="l">
+        {flashItems.length ? (
+          <Flashbar
+            items={flashItems}
+            onDismiss={({ detail }) => {
+              setFlashItems((items) => items.filter((_, index) => index !== detail.itemIndex));
+            }}
+          />
+        ) : null}
         <Board
           items={boardItems}
           onItemsChange={handleItemsChange}

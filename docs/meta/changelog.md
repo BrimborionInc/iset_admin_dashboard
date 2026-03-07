@@ -2,6 +2,14 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-03-06
+- Feature: Added a new `Application Intake` dashboard route (`/iset/applications/intake`) under New ISET Applications for manual staff-entered intake.
+- UX: Added `Manual Application Intake` page scaffold with frontend-held working state, session autosave, field-level validation, and `Create Application` gating until required fields are valid.
+- API: Added `POST /api/applications/manual-intake` to create manual-origin records transactionally (`user` -> `iset_application_submission` -> `iset_application` -> `client` -> `iset_case`).
+- Events: Manual intake create now emits `application_submitted` via shared case event service with manual-origin metadata (`origin_channel=admin_manual`, actor/timestamp details) while preserving baseline submission payload keys.
+- UX: Successful manual create now redirects directly to the new application workspace (`/application-case/:id`) with a success flash banner.
+- Access: Enabled `Application Intake` route access for System Administrator, Program Administrator, Regional Coordinator, and Application Assessor in role matrix/navigation.
+
 ## 2026-03-05
 - Docs: Rewrote `docs/AGENTS.md` as a thread-handoff/quick-onboarding guide focused on durable codebase/docbase/database context, critical conventions, known pitfalls, and location-first references.
 - Docs: Clarified `docs/AGENTS.md` to explicitly frame assistant/user collaboration as a design dialog (challenge assumptions, discuss tradeoffs before high-risk implementation, avoid literal blind execution).

@@ -695,6 +695,7 @@ const normalizeCostingDefaults = (payload) => {
 const normalizePaymentTypeMappingPayload = (payload) => {
   if (!payload || payload.enabled === false) return null;
   const interventionsRaw = Array.isArray(payload.interventions) ? payload.interventions : [];
+  const isTrue = (value) => value === true || value === 1 || value === '1' || value === 'true';
   const interventions = interventionsRaw
     .map(entry => {
       if (!entry || typeof entry !== 'object') return null;
@@ -707,12 +708,29 @@ const normalizePaymentTypeMappingPayload = (payload) => {
       return {
         code,
         name: entry.name || entry.label || null,
-        availablePaymentTypes: types
+        availablePaymentTypes: types,
+        defaultOnAssessment:
+          isTrue(entry.defaultOnAssessment) ||
+          isTrue(entry.default_on_assessment) ||
+          isTrue(entry.defaultInAssessment) ||
+          isTrue(entry.default_in_assessment)
       };
     })
     .filter(Boolean);
   if (!interventions.length) return null;
   return { ...payload, interventions };
+};
+
+const buildDefaultAssessmentInterventionsFromMapping = (mapping) => {
+  if (!mapping || !Array.isArray(mapping.interventions)) return [];
+  return mapping.interventions
+    .filter(entry => entry?.defaultOnAssessment === true)
+    .map(entry => {
+      const code = normalizeInterventionCodeValue(entry?.code);
+      if (!code) return null;
+      return buildEmptyIntervention({ code });
+    })
+    .filter(Boolean);
 };
 
 const isRecurrenceScheduleComplete = (line) => {
@@ -1178,6 +1196,8 @@ const CoordinatorAssessmentWidget = forwardRef(
   const wizardStepRestoreKeyRef = useRef(null);
   const wizardStepRestoreStepsRef = useRef(null);
   const wizardNavPrimeRef = useRef({ signature: null, restoreStep: null });
+  const defaultInterventionSeedCaseKeyRef = useRef(null);
+  const defaultInterventionSeedAppliedRef = useRef(false);
   const widgetRootRef = useRef(null);
   const alertAnchorRef = useRef(null);
   const previousAlertKeyRef = useRef(null);
@@ -2096,6 +2116,36 @@ const CoordinatorAssessmentWidget = forwardRef(
     return allowed.has(normalizedRole);
   }, [normalizedRole]);
   const showChildcareFunding = assessment.childcareNeed === 'yes';
+  useEffect(() => {
+    const caseSeedKey = String(caseData?.id || caseData?.case_id || application_id || '');
+    if (defaultInterventionSeedCaseKeyRef.current === caseSeedKey) return;
+    defaultInterventionSeedCaseKeyRef.current = caseSeedKey;
+    defaultInterventionSeedAppliedRef.current = false;
+  }, [application_id, caseData?.case_id, caseData?.id]);
+  useEffect(() => {
+    if (defaultInterventionSeedAppliedRef.current) return;
+    if (paymentTypeMappingLoading) return;
+    const assessmentCurrent = Array.isArray(assessment.proposedInterventions)
+      ? assessment.proposedInterventions
+      : [];
+    if (assessmentCurrent.length) {
+      defaultInterventionSeedAppliedRef.current = true;
+      return;
+    }
+    const seededInterventions = buildDefaultAssessmentInterventionsFromMapping(paymentTypeMapping);
+    defaultInterventionSeedAppliedRef.current = true;
+    if (!seededInterventions.length) return;
+    setAssessment(prev => {
+      const current = Array.isArray(prev.proposedInterventions) ? prev.proposedInterventions : [];
+      if (current.length) return prev;
+      return { ...prev, proposedInterventions: seededInterventions };
+    });
+    setInitialAssessment(prev => {
+      const current = Array.isArray(prev.proposedInterventions) ? prev.proposedInterventions : [];
+      if (current.length) return prev;
+      return { ...prev, proposedInterventions: seededInterventions };
+    });
+  }, [assessment.proposedInterventions, paymentTypeMapping, paymentTypeMappingLoading]);
   useEffect(() => {
     setAssessment(prev => {
       const current = Array.isArray(prev.proposedInterventions) ? prev.proposedInterventions : [];

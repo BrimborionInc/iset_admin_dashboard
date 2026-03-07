@@ -28361,6 +28361,29 @@ app.get('/api/workflows/:id/preview', async (req, res) => {
   }
 });
 
+// GET /api/workflows/published/intake-schema -> runtime published intake schema payload
+app.get('/api/workflows/published/intake-schema', async (_req, res) => {
+  try {
+    const payload = await fetchPublishedWorkflowSchema(false);
+    const steps = Array.isArray(payload?.schema)
+      ? payload.schema
+      : (Array.isArray(payload?.schemaEnvelope?.steps) ? payload.schemaEnvelope.steps : []);
+    return res.status(200).json({
+      payload,
+      steps,
+      meta: payload?.meta || null,
+      version: payload?.version || null,
+      workflowId: payload?.meta?.workflowId || null
+    });
+  } catch (error) {
+    console.error('GET /api/workflows/published/intake-schema failed:', error);
+    return res.status(500).json({
+      error: 'runtime_schema_missing',
+      message: error?.message || 'Published intake schema unavailable'
+    });
+  }
+});
+
 // Dev: validate workflow contract without fetching steps manually
 app.get('/api/workflows/:id/validate', async (req,res) => {
   if (!buildWorkflowSchema || !validateWorkflow) return res.status(500).json({ error:'validator_unavailable' });
@@ -36199,10 +36222,15 @@ app.patch('/api/action-plans/:id', async (req, res) => {
 
 app.get('/api/cases/:id', async (req, res) => {
   const caseId = req.params.id;
+  const traceId = `case-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const startedAt = Date.now();
   const staffProfileIdRaw = req?.staffProfile?.id ?? req?.auth?.staffProfileId ?? null;
   const parsedStaffProfileId = staffProfileIdRaw != null ? Number.parseInt(staffProfileIdRaw, 10) : null;
   const conflictJoinStaffId = Number.isFinite(parsedStaffProfileId) ? parsedStaffProfileId : 0;
+  let usedFallbackQuery = false;
+  let fallbackReason = null;
   try {
+    console.info('[case:detail] start', { traceId, caseId, conflictJoinStaffId });
     await ensureAssessmentBudgetPotColumn();
     // Fetch case core details + assessment snapshot
     const baseSql = `
@@ -36296,6 +36324,8 @@ app.get('/api/cases/:id', async (req, res) => {
       const noTable = e && e.code === 'ER_NO_SUCH_TABLE';
       const badField = e && e.code === 'ER_BAD_FIELD_ERROR';
       if (noTable || badField) {
+        usedFallbackQuery = true;
+        fallbackReason = e.code || 'fallback';
         if (!global.__LOGGED_CASE_DETAIL_FALLBACK) {
           console.warn('[case:detail] falling back (reason=' + e.code + '): building dynamic minimal query');
           global.__LOGGED_CASE_DETAIL_FALLBACK = true;
@@ -36335,10 +36365,10 @@ app.get('/api/cases/:id', async (req, res) => {
         const hasStaffDisplayName = hasStaffProfiles && staffCols.includes('display_name');
         let applicantJoin = ''; let applicantSelect = 'NULL AS applicant_name, NULL AS applicant_email, NULL AS applicant_user_id';
         if (hasSubmissionUser) {
-          applicantJoin = 'JOIN iset_application_submission s ON a.submission_id = s.id JOIN user applicant ON s.user_id = applicant.id';
+          applicantJoin = 'LEFT JOIN user applicant ON s.user_id = applicant.id';
           applicantSelect = 'applicant.name AS applicant_name, applicant.email AS applicant_email, applicant.id AS applicant_user_id';
         } else if (hasAppUserId) {
-          applicantJoin = 'JOIN user applicant ON a.user_id = applicant.id';
+          applicantJoin = 'LEFT JOIN user applicant ON a.user_id = applicant.id';
           applicantSelect = 'applicant.name AS applicant_name, applicant.email AS applicant_email, applicant.id AS applicant_user_id';
         }
         // Only include submission join if application table exists and has submission_id
@@ -36429,10 +36459,35 @@ app.get('/api/cases/:id', async (req, res) => {
     row.caseContext = safeJsonParse(row.case_context_json, null) || null;
     delete row.case_context_json;
     res.set('Cache-Control','no-store, max-age=0');
+    res.set('X-Case-Trace-Id', traceId);
+    console.info('[case:detail] success', {
+      traceId,
+      caseId,
+      applicationId: row.application_id || null,
+      usedFallbackQuery,
+      fallbackReason,
+      durationMs: Date.now() - startedAt
+    });
     res.status(200).json(row);
   } catch (error) {
-    console.error('Error fetching case:', error);
-    res.status(500).json({ error: 'Failed to fetch case' });
+    console.error('[case:detail] failed', {
+      traceId,
+      caseId,
+      usedFallbackQuery,
+      fallbackReason,
+      durationMs: Date.now() - startedAt,
+      code: error?.code || null,
+      errno: error?.errno || null,
+      sqlState: error?.sqlState || null,
+      sqlMessage: error?.sqlMessage || error?.message || null
+    });
+    res.set('X-Case-Trace-Id', traceId);
+    const payload = { error: 'Failed to fetch case', trace_id: traceId };
+    if (process.env.NODE_ENV !== 'production') {
+      payload.detail = error?.sqlMessage || error?.message || null;
+      payload.code = error?.code || null;
+    }
+    res.status(500).json(payload);
   }
 });
 
@@ -41991,10 +42046,19 @@ const normalizePaymentInterventionMappingEntry = entry => {
   const normalizedList = Array.from(
     new Set(list.map(normalizePaymentTypeCode).filter(Boolean))
   );
+  const defaultOnAssessmentRaw =
+    entry.defaultOnAssessment ??
+    entry.default_on_assessment ??
+    entry.defaultInAssessment ??
+    entry.default_in_assessment ??
+    entry.defaultOnApplicationAssessment ??
+    entry.default_on_application_assessment;
+  const defaultOnAssessment = normalizeBooleanLike(defaultOnAssessmentRaw) === true;
   return {
     code,
     name,
     availablePaymentTypes: normalizedList,
+    defaultOnAssessment,
   };
 };
 
@@ -54011,6 +54075,659 @@ app.delete('/api/ptmas/:id', async (req, res) => {
 });
 
 // --- End PTMA Endpoints ---
+
+const MANUAL_INTAKE_WORKFLOW_ID = 'iset-v1';
+
+function buildManualSubmissionReference() {
+  const stamp = Date.now().toString(36).toUpperCase();
+  const suffix = crypto.randomBytes(3).toString('hex').toUpperCase();
+  return `MI-${stamp}-${suffix}`.slice(0, 32);
+}
+
+function toManualLocale(language = 'en') {
+  const normalized = String(language || '').toLowerCase();
+  return normalized === 'fr' ? 'fr-CA' : 'en-CA';
+}
+
+function normalizeStringValue(value) {
+  return String(value || '').trim();
+}
+
+function toLowerStringValue(value) {
+  return normalizeStringValue(value).toLowerCase();
+}
+
+function extractSchemaSteps(schemaPayload) {
+  if (Array.isArray(schemaPayload?.schema)) return schemaPayload.schema;
+  if (Array.isArray(schemaPayload?.schemaEnvelope?.steps)) return schemaPayload.schemaEnvelope.steps;
+  return [];
+}
+
+function buildSubmissionSchemaSnapshot(schemaPayload) {
+  const fullSchema = extractSchemaSteps(schemaPayload);
+  const fields = {};
+  const pushField = (comp, stepId) => {
+    if (!comp || !comp.storageKey) return;
+    const entry = { step: stepId, type: comp.type || comp.template_key || null };
+    if (comp.label) {
+      if (typeof comp.label === 'object') {
+        entry.label = {};
+        if (comp.label.en) entry.label.en = comp.label.en;
+        if (comp.label.fr) entry.label.fr = comp.label.fr;
+      } else if (typeof comp.label === 'string') {
+        entry.label = comp.label;
+      }
+    }
+    if (Array.isArray(comp.options) && comp.options.length > 0) {
+      entry.options = comp.options.map((option) => {
+        const out = { value: option?.value };
+        if (option?.label) {
+          if (typeof option.label === 'object') {
+            const lbl = {};
+            if (option.label.en) lbl.en = option.label.en;
+            if (option.label.fr) lbl.fr = option.label.fr;
+            out.label = lbl;
+          } else if (typeof option.label === 'string') {
+            out.label = option.label;
+          }
+        }
+        return out;
+      });
+    }
+    fields[comp.storageKey] = entry;
+  };
+
+  for (const step of fullSchema) {
+    if (!step || !Array.isArray(step.components)) continue;
+    for (const comp of step.components) {
+      pushField(comp, step.stepId || step.id || null);
+    }
+  }
+
+  const schemaVersion =
+    (schemaPayload && typeof schemaPayload.version === 'string' && schemaPayload.version.trim()) ||
+    (schemaPayload?.meta && typeof schemaPayload.meta.version === 'string' && schemaPayload.meta.version.trim()) ||
+    (Array.isArray(fullSchema) && fullSchema.length ? 'v1' : 'unknown');
+
+  return {
+    version: schemaVersion,
+    captured_at: new Date().toISOString(),
+    fields
+  };
+}
+
+function buildLegacyManualPayload(body = {}) {
+  const firstName = normalizeStringValue(body.firstName);
+  const lastName = normalizeStringValue(body.lastName);
+  const email = toLowerStringValue(body.email);
+  const preferredLanguage = toLowerStringValue(body.preferredLanguage) || 'en';
+  const province = normalizeStringValue(body.province).toLowerCase();
+  const postalCode = normalizeStringValue(body.postalCode).toUpperCase();
+  const payload = {};
+  if (firstName) payload['first-name'] = firstName;
+  if (lastName) payload['last-name'] = lastName;
+  if (email) payload['contact-email-address'] = email;
+  if (normalizeStringValue(body.phone)) payload['telephone-day'] = normalizeStringValue(body.phone);
+  if (preferredLanguage) payload['preferred-language'] = preferredLanguage;
+  if (normalizeStringValue(body.dateOfBirth)) payload.dob = normalizeStringValue(body.dateOfBirth);
+  if (normalizeStringValue(body.gender)) payload.gender = normalizeStringValue(body.gender);
+  if (normalizeStringValue(body.street)) payload['address-street-address'] = normalizeStringValue(body.street);
+  if (normalizeStringValue(body.city)) payload['address-city'] = normalizeStringValue(body.city);
+  if (province) payload['address-province'] = province;
+  if (postalCode) payload['address-postcode'] = postalCode;
+  if (normalizeStringValue(body.country)) payload.country = normalizeStringValue(body.country).toUpperCase();
+  return payload;
+}
+
+function resolveManualIntakeRequest(body = {}) {
+  const intakePayload =
+    body.intakePayload && typeof body.intakePayload === 'object' && !Array.isArray(body.intakePayload)
+      ? { ...body.intakePayload }
+      : buildLegacyManualPayload(body);
+  const historyInput = Array.isArray(body.history) ? body.history : [];
+  const history = historyInput.filter((entry) => typeof entry === 'string');
+  const docRefs = body.docRefs && typeof body.docRefs === 'object' ? body.docRefs : null;
+  const workflowId = normalizeStringValue(body.workflowId) || MANUAL_INTAKE_WORKFLOW_ID;
+  return { intakePayload, history, docRefs, workflowId };
+}
+
+function normalizePayloadLanguage(payload = {}) {
+  const value = payload['preferred-language'] || payload['preferred_language'] || 'en';
+  return toLowerStringValue(value) === 'fr' ? 'fr' : 'en';
+}
+
+function deriveSignatureName(payload = {}) {
+  const firstName = normalizeStringValue(payload['first-name'] || payload.first_name);
+  const lastName = normalizeStringValue(payload['last-name'] || payload.last_name);
+  const preferred = normalizeStringValue(payload['preferred-name'] || payload.preferred_name);
+  return [preferred || firstName, lastName].filter(Boolean).join(' ').trim() || 'Applicant';
+}
+
+function isSchemaValueEmpty(value, storageType) {
+  if (storageType === 'files' || storageType === 'multi') {
+    if (!Array.isArray(value)) return true;
+    return value.length === 0;
+  }
+  if (storageType === 'signature') {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return true;
+    const signed = Boolean(value.signed);
+    const name = normalizeStringValue(value.name);
+    return !signed || !name;
+  }
+  if (value === null || typeof value === 'undefined') return true;
+  if (typeof value === 'string') return value.trim().length === 0;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === 'object') return Object.keys(value).length === 0;
+  return false;
+}
+
+function isConditionValuePresent(value) {
+  if (value === null || typeof value === 'undefined') return false;
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'object') return Object.keys(value).length > 0;
+  return true;
+}
+
+function coerceConditionNumber(value) {
+  if (value === null || typeof value === 'undefined' || value === '') return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function resolveConditionRefValue(ref, payload, schemaSteps) {
+  if (Object.prototype.hasOwnProperty.call(payload, ref)) return payload[ref];
+  for (const step of schemaSteps || []) {
+    const components = Array.isArray(step?.components) ? step.components : [];
+    for (const component of components) {
+      if (!component) continue;
+      const matches = String(component.id) === String(ref)
+        || component?.props?.name === ref
+        || component?.storageKey === ref;
+      if (!matches) continue;
+      const key = component.storageKey || component?.props?.name || component.id;
+      if (key && Object.prototype.hasOwnProperty.call(payload, key)) return payload[key];
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+function isComponentVisibleForPayload(component, payload, schemaSteps) {
+  const conditions = component?.conditions?.all;
+  if (!Array.isArray(conditions) || conditions.length === 0) return true;
+
+  for (const condition of conditions) {
+    if (!condition || !condition.ref || !condition.op) return false;
+    const raw = resolveConditionRefValue(condition.ref, payload, schemaSteps);
+    const leftNum = coerceConditionNumber(raw);
+    const rightNum = coerceConditionNumber(condition.value);
+    switch (condition.op) {
+      case 'exists':
+        if (!isConditionValuePresent(raw)) return false;
+        break;
+      case 'notExists':
+        if (isConditionValuePresent(raw)) return false;
+        break;
+      case 'equals':
+        if (leftNum !== null && rightNum !== null) {
+          if (leftNum !== rightNum) return false;
+        } else if (String(raw ?? '') !== String(condition.value ?? '')) {
+          return false;
+        }
+        break;
+      case 'notEquals':
+        if (leftNum !== null && rightNum !== null) {
+          if (leftNum === rightNum) return false;
+        } else if (String(raw ?? '') === String(condition.value ?? '')) {
+          return false;
+        }
+        break;
+      case '>':
+        if (leftNum === null || rightNum === null || !(leftNum > rightNum)) return false;
+        break;
+      case '<':
+        if (leftNum === null || rightNum === null || !(leftNum < rightNum)) return false;
+        break;
+      case '>=':
+        if (leftNum === null || rightNum === null || !(leftNum >= rightNum)) return false;
+        break;
+      case '<=':
+        if (leftNum === null || rightNum === null || !(leftNum <= rightNum)) return false;
+        break;
+      default:
+        return false;
+    }
+  }
+  return true;
+}
+
+function validatePayloadAgainstPublishedSchema(payload = {}, schemaPayload, options = {}) {
+  const schemaSteps = extractSchemaSteps(schemaPayload);
+  if (!schemaSteps.length) {
+    const error = new Error('runtime_schema_missing');
+    error.statusCode = 500;
+    throw error;
+  }
+  const excludedStorageTypes = options.excludedStorageTypes instanceof Set
+    ? options.excludedStorageTypes
+    : new Set();
+  const schemaFieldSpecs = buildSchemaFieldSpecs(schemaSteps);
+  const normalizedResult = normalizePayloadToPublishedSchema(payload, schemaFieldSpecs, {
+    signatureName: deriveSignatureName(payload)
+  });
+  const filteredPayload = { ...normalizedResult.normalized };
+  const excludedKeys = [];
+  for (const [key, spec] of schemaFieldSpecs.entries()) {
+    if (!spec || !excludedStorageTypes.has(spec.storageType)) continue;
+    if (Object.prototype.hasOwnProperty.call(filteredPayload, key)) {
+      delete filteredPayload[key];
+      excludedKeys.push(key);
+    }
+  }
+  const requiredErrors = {};
+  schemaSteps.forEach((step) => {
+    const components = Array.isArray(step?.components) ? step.components : [];
+    components.forEach((component) => {
+      const storageKey = component?.storageKey || component?.props?.name;
+      if (!storageKey) return;
+      if (!isComponentVisibleForPayload(component, filteredPayload, schemaSteps)) return;
+      const requiredByFlag = component.required === true;
+      const requiredByValidation = component.validation && typeof component.validation === 'object' && component.validation.required === true;
+      const isRequired = requiredByFlag || requiredByValidation;
+      if (!isRequired) return;
+      const storageType = getComponentStorageType(component);
+      if (storageType === 'non_input') return;
+      if (excludedStorageTypes.has(storageType)) return;
+      if (isSchemaValueEmpty(filteredPayload[storageKey], storageType)) {
+        requiredErrors[storageKey] = 'required';
+      }
+    });
+  });
+  return {
+    normalizedPayload: filteredPayload,
+    droppedKeys: normalizedResult.droppedKeys,
+    coercedKeys: normalizedResult.coercedKeys,
+    excludedKeys,
+    requiredErrors
+  };
+}
+
+function extractManualApplicantSeed(payload = {}) {
+  const firstName = normalizeStringValue(payload['first-name'] || payload.first_name);
+  const lastName = normalizeStringValue(payload['last-name'] || payload.last_name);
+  const email = toLowerStringValue(payload['contact-email-address'] || payload.contact_email_address || payload.email);
+  const preferredLanguage = normalizePayloadLanguage(payload);
+  const dateOfBirth = toDateOnly(payload.dob || payload['date-of-birth'] || payload.date_of_birth);
+  const phone = normalizeStringValue(payload['telephone-day'] || payload.telephone_day || payload.phone);
+  const gender = normalizeStringValue(payload.gender || payload.gender_identity || payload['gender-identity']);
+  const street = normalizeStringValue(payload['address-street-address'] || payload.address_street_address || payload.street);
+  const city = normalizeStringValue(payload['address-city'] || payload.address_city || payload.city);
+  const province = normalizeStringValue(payload['address-province'] || payload.address_province || payload.province).toUpperCase();
+  const postalCode = normalizeStringValue(payload['address-postcode'] || payload.address_postcode || payload.postal_code).toUpperCase();
+  const country = normalizeStringValue(payload.country || payload['address-country']).toUpperCase() || 'CA';
+  return {
+    firstName,
+    lastName,
+    email,
+    preferredLanguage,
+    dateOfBirth,
+    phone,
+    gender,
+    street,
+    city,
+    province,
+    postalCode,
+    country
+  };
+}
+
+function validateManualApplicantSeed(seed) {
+  const errors = {};
+  if (!seed.email) errors['contact-email-address'] = 'required_for_account';
+  if (!seed.firstName) errors['first-name'] = 'required_for_account';
+  if (!seed.lastName) errors['last-name'] = 'required_for_account';
+  return errors;
+}
+
+function buildManualMetadata({ req, actor, actorRole, actorEmail, body, nowIso }) {
+  return {
+    origin_channel: 'admin_manual',
+    origin_mode: 'staff_entered',
+    intake_source: toLowerStringValue(body.intakeSource || body.intake_source || 'manual_entry'),
+    intake_source_notes: normalizeStringValue(body.intakeSourceNotes || body.intake_source_notes) || null,
+    created_by_staff_id: actor.actorId || null,
+    created_by_staff_role: actorRole,
+    created_by_staff_email: actorEmail,
+    manual_entry_timestamp: nowIso,
+    submitted_via: 'admin_dashboard',
+    request_ip: req.ip || null
+  };
+}
+
+async function resolveOrCreateManualApplicantUser(connection, input) {
+  const fullName = `${input.firstName} ${input.lastName}`.trim();
+  const preferredLanguage = input.preferredLanguage === 'fr' ? 'fr' : 'en';
+  const [[existing]] = await connection.query(
+    'SELECT id, cognito_sub FROM user WHERE email = ? LIMIT 1',
+    [input.email]
+  );
+
+  if (existing && existing.id) {
+    await connection.query(
+      `UPDATE user
+          SET name = ?,
+              phone_number = ?,
+              preferred_language = ?,
+              date_of_birth = ?,
+              gender = ?,
+              street = ?,
+              city = ?,
+              state = ?,
+              postal_code = ?,
+              country = ?,
+              updated_at = NOW()
+        WHERE id = ?`,
+      [
+        fullName || null,
+        input.phone || null,
+        preferredLanguage,
+        input.dateOfBirth || null,
+        input.gender || null,
+        input.street || null,
+        input.city || null,
+        input.province || null,
+        input.postalCode || null,
+        input.country || 'CA',
+        existing.id,
+      ]
+    );
+    return { id: Number(existing.id), cognitoSub: existing.cognito_sub || null };
+  }
+
+  const [insertUser] = await connection.query(
+    `INSERT INTO user
+      (name, email, email_verified, suspended, preferred_language, phone_number, date_of_birth, gender, street, city, state, postal_code, country)
+     VALUES (?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      fullName || null,
+      input.email,
+      preferredLanguage,
+      input.phone || null,
+      input.dateOfBirth || null,
+      input.gender || null,
+      input.street || null,
+      input.city || null,
+      input.province || null,
+      input.postalCode || null,
+      input.country || 'CA',
+    ]
+  );
+
+  return { id: Number(insertUser.insertId), cognitoSub: null };
+}
+
+async function resolveOrCreateManualClient(connection, { applicantUser, applicantSeed, addressPayload }) {
+  const cognitoSub = normalizeStringValue(applicantUser?.cognitoSub) || null;
+  const initials = `${applicantSeed.firstName.charAt(0) || ''}${applicantSeed.lastName.charAt(0) || ''}`.toUpperCase();
+  const addressJson = JSON.stringify(addressPayload || {});
+
+  const updateClientById = async (clientId) => {
+    await connection.query(
+      `UPDATE client
+          SET dob = ?,
+              gender = ?,
+              last_name = ?,
+              first_name = ?,
+              initials = ?,
+              address_json = ?,
+              updated_at = NOW()
+        WHERE id = ?`,
+      [
+        applicantSeed.dateOfBirth || null,
+        applicantSeed.gender || null,
+        applicantSeed.lastName,
+        applicantSeed.firstName,
+        initials || null,
+        addressJson,
+        clientId,
+      ]
+    );
+    return Number(clientId);
+  };
+
+  if (cognitoSub) {
+    const [[existingBySub]] = await connection.query(
+      'SELECT id FROM client WHERE applicant_cognito_sub = ? LIMIT 1',
+      [cognitoSub]
+    );
+    if (existingBySub?.id) {
+      return updateClientById(existingBySub.id);
+    }
+  }
+
+  try {
+    const [clientResult] = await connection.query(
+      `INSERT INTO client
+        (dob, gender, aboriginal_group, last_name, first_name, initials, address_json, applicant_cognito_sub, created_at, updated_at)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        applicantSeed.dateOfBirth || null,
+        applicantSeed.gender || null,
+        applicantSeed.lastName,
+        applicantSeed.firstName,
+        initials || null,
+        addressJson,
+        cognitoSub,
+      ]
+    );
+    return Number(clientResult.insertId);
+  } catch (error) {
+    if (error?.code === 'ER_DUP_ENTRY' && cognitoSub) {
+      const [[existingAfterRace]] = await connection.query(
+        'SELECT id FROM client WHERE applicant_cognito_sub = ? LIMIT 1',
+        [cognitoSub]
+      );
+      if (existingAfterRace?.id) {
+        return updateClientById(existingAfterRace.id);
+      }
+    }
+    throw error;
+  }
+}
+
+// Create manual-origin application intake record from admin dashboard.
+app.post('/api/applications/manual-intake', async (req, res) => {
+  const body = req.body || {};
+  const { intakePayload: requestedPayload, history, docRefs, workflowId } = resolveManualIntakeRequest(body);
+  const actor = resolveRequestActor(req);
+  const actorRole = inferUserRole(req) || null;
+  const actorEmail = req?.auth?.email || null;
+  const actorStaffProfileId = Number.parseInt(req?.staffProfile?.id, 10);
+  const createdByStaffProfileId = Number.isFinite(actorStaffProfileId) ? actorStaffProfileId : null;
+  const sourceIp = req.ip || (req.headers['x-forwarded-for'] || '').split(',')[0] || null;
+  const userAgent = req.headers['user-agent'] || null;
+  const nowIso = new Date().toISOString();
+
+  const connection = await pool.getConnection();
+  try {
+    let publishedSchema = null;
+    try {
+      publishedSchema = await fetchPublishedWorkflowSchema(true);
+    } catch (schemaErr) {
+      console.error('[manual-intake] failed to load published schema:', schemaErr.message);
+      return res.status(500).json({
+        error: 'runtime_schema_missing',
+        message: 'Published intake schema is unavailable.',
+      });
+    }
+
+    const schemaValidation = validatePayloadAgainstPublishedSchema(
+      requestedPayload,
+      publishedSchema,
+      { excludedStorageTypes: new Set(['signature', 'files']) }
+    );
+    if (Object.keys(schemaValidation.requiredErrors).length > 0) {
+      return res.status(422).json({
+        error: 'validation_failed',
+        message: 'Manual intake validation failed against published intake schema.',
+        fields: schemaValidation.requiredErrors,
+        droppedKeys: schemaValidation.droppedKeys,
+        coercedKeys: schemaValidation.coercedKeys,
+        excludedKeys: schemaValidation.excludedKeys,
+      });
+    }
+
+    const intakePayload = { ...schemaValidation.normalizedPayload };
+    const manualMetadata = buildManualMetadata({
+      req,
+      actor,
+      actorRole,
+      actorEmail,
+      body,
+      nowIso
+    });
+    manualMetadata.signature_capture = 'deferred_to_applicant';
+    manualMetadata.document_capture = 'deferred_to_application_workspace';
+    intakePayload.manual_intake = manualMetadata;
+    const applicantSeed = extractManualApplicantSeed(intakePayload);
+    const applicantValidationErrors = validateManualApplicantSeed(applicantSeed);
+    if (Object.keys(applicantValidationErrors).length > 0) {
+      return res.status(422).json({
+        error: 'validation_failed',
+        message: 'Manual intake could not create applicant account from submitted payload.',
+        fields: applicantValidationErrors,
+      });
+    }
+    const schemaSnapshot = buildSubmissionSchemaSnapshot(publishedSchema);
+
+    await connection.beginTransaction();
+
+    const applicantUser = await resolveOrCreateManualApplicantUser(connection, applicantSeed);
+
+    let referenceNumber = buildManualSubmissionReference();
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const [[existingRef]] = await connection.query(
+        'SELECT id FROM iset_application_submission WHERE reference_number = ? LIMIT 1',
+        [referenceNumber]
+      );
+      if (!existingRef) break;
+      referenceNumber = buildManualSubmissionReference();
+    }
+
+    const checksum = crypto
+      .createHash('sha256')
+      .update(JSON.stringify(intakePayload), 'utf8')
+      .digest('hex');
+
+    const [submissionResult] = await connection.query(
+      `INSERT INTO iset_application_submission
+        (user_id, workflow_id, reference_number, status, submitted_at, intake_payload, schema_snapshot, history, doc_refs, locale, source_ip, user_agent, checksum_sha256)
+       VALUES (?, ?, ?, 'submitted', NOW(), ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        applicantUser.id,
+        workflowId,
+        referenceNumber,
+        JSON.stringify(intakePayload),
+        JSON.stringify(schemaSnapshot),
+        JSON.stringify(history || []),
+        docRefs ? JSON.stringify(docRefs) : null,
+        toManualLocale(applicantSeed.preferredLanguage),
+        sourceIp,
+        userAgent,
+        checksum,
+      ]
+    );
+    const submissionId = Number(submissionResult.insertId);
+
+    const applicationPayload = {
+      source: 'admin_manual_intake',
+      ingested_at: nowIso,
+      submission_snapshot: {
+        id: submissionId,
+        reference_number: referenceNumber,
+        user_id: applicantUser.id,
+      },
+      manual_intake: manualMetadata,
+    };
+    const [applicationResult] = await connection.query(
+      `INSERT INTO iset_application
+        (submission_id, payload_json, status, version, created_at, updated_at)
+       VALUES (?, ?, 'submitted', 1, NOW(), NOW())`,
+      [submissionId, JSON.stringify(applicationPayload)]
+    );
+    const applicationId = Number(applicationResult.insertId);
+
+    const addressPayload = {
+      address: {
+        street: applicantSeed.street || null,
+        city: applicantSeed.city || null,
+        province: applicantSeed.province || null,
+        postcode: applicantSeed.postalCode || null,
+        country: applicantSeed.country || 'CA',
+      },
+      region: {
+        code: applicantSeed.province || null,
+      },
+    };
+    const clientId = await resolveOrCreateManualClient(connection, {
+      applicantUser,
+      applicantSeed,
+      addressPayload
+    });
+
+    const [caseResult] = await connection.query(
+      `INSERT INTO iset_case
+        (application_id, case_number, client_id, status, stage, opened_at, created_by_staff_profile_id, updated_by_staff_profile_id, created_at, updated_at)
+       VALUES (?, ?, ?, 'submitted', 'intake', NOW(), ?, ?, NOW(), NOW())`,
+      [applicationId, referenceNumber, clientId, createdByStaffProfileId, createdByStaffProfileId]
+    );
+    const caseId = Number(caseResult.insertId);
+
+    await connection.commit();
+
+    await captureCaseEvent({
+      type: 'application_submitted',
+      caseId,
+      actorId: actor.actorId || null,
+      actorName: actor.actorName || null,
+      actorType: 'staff',
+      trackingId: referenceNumber,
+      payload: {
+        submission_id: submissionId,
+        reference_number: referenceNumber,
+        workflow_id: workflowId,
+        ip: sourceIp,
+        user_agent: userAgent,
+        origin_channel: 'admin_manual',
+        origin_mode: 'staff_entered',
+        intake_source: manualMetadata.intake_source || null,
+        intake_source_notes: manualMetadata.intake_source_notes || null,
+        created_by_staff_id: manualMetadata.created_by_staff_id,
+        created_by_staff_role: manualMetadata.created_by_staff_role,
+        created_by_staff_email: manualMetadata.created_by_staff_email,
+        manual_entry_timestamp: manualMetadata.manual_entry_timestamp,
+      },
+    });
+
+    return res.status(201).json({
+      message: 'manual_application_created',
+      case_id: caseId,
+      application_id: applicationId,
+      submission_id: submissionId,
+      tracking_id: referenceNumber,
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('POST /api/applications/manual-intake failed:', error);
+    return res.status(500).json({
+      error: 'manual_intake_create_failed',
+      message: error.message || 'Failed to create manual intake application.',
+    });
+  } finally {
+    connection.release();
+  }
+});
 
 // Get full iset_application by application_id
 app.get('/api/applications/:id', async (req, res) => {

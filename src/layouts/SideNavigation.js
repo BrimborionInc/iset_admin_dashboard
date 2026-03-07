@@ -125,6 +125,7 @@ const SideNavigation = ({ currentRole, showTutorialHotspots = false, notificatio
       type: 'section',
       text: 'New ISET Applications',
       items: [
+        { type: 'link', text: 'Manual Intake', href: '/iset/applications/intake' },
         { type: 'link', text: 'Application Assessment', href: '/case-assignment-dashboard' },
       ],
     },
@@ -134,6 +135,7 @@ const SideNavigation = ({ currentRole, showTutorialHotspots = false, notificatio
       items: [
         { type: 'link', text: 'Case Management', href: '/iset/cases' },
         { type: 'link', text: 'My Case Queue', href: '/case-management' },
+        { type: 'link', text: 'Job Bank Search', href: '/job-bank-search' },
       ],
     },
     {

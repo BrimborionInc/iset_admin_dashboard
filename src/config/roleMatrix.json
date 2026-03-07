@@ -15,6 +15,12 @@
       "Regional Coordinator",
       "Application Assessor"
     ],
+    "/iset/applications/intake": [
+      "System Administrator",
+      "Program Administrator",
+      "Regional Coordinator",
+      "Application Assessor"
+    ],
     "/audit-logs-dashboard": [
       "System Administrator"
     ],
@@ -45,6 +51,12 @@
       "Program Administrator"
     ],
     "/messages": [
+      "System Administrator",
+      "Program Administrator",
+      "Regional Coordinator",
+      "Application Assessor"
+    ],
+    "/job-bank-search": [
       "System Administrator",
       "Program Administrator",
       "Regional Coordinator",

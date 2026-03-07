@@ -1403,6 +1403,11 @@ const AppContent = ({ currentRole }) => {
 
   const [chatVisible, setChatVisible] = useState(false);
 
+  useEffect(() => {
+    setIsHelpPanelOpen(false);
+    setChatVisible(false);
+  }, [location?.pathname, location?.search]);
+
   const openPaletteInTools = useCallback((items) => {
     try { setAvailableItems(items || []); } catch {}
     setSplitPanelOpen(true);

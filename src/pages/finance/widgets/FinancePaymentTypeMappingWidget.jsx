@@ -6,6 +6,7 @@ import {
   Box,
   Button,
   ButtonDropdown,
+  Checkbox,
   ColumnLayout,
   FormField,
   Header,
@@ -86,6 +87,13 @@ const buildDefaultPaymentTypes = () =>
   }));
 
 const normalizeString = value => (typeof value === "string" ? value.trim() : "");
+
+const normalizeBoolean = value => {
+  if (typeof value === "boolean") return value;
+  if (value === 1 || value === "1" || value === "true") return true;
+  if (value === 0 || value === "0" || value === "false") return false;
+  return false;
+};
 
 const normalizePaymentTypeKey = value => normalizeString(value).toLowerCase();
 
@@ -334,6 +342,12 @@ const normalizeInterventions = list => {
       code,
       name: name || "",
       availablePaymentTypes,
+      defaultOnAssessment: normalizeBoolean(
+        entry.defaultOnAssessment ??
+          entry.default_on_assessment ??
+          entry.defaultInAssessment ??
+          entry.default_in_assessment,
+      ),
     });
   });
   return Array.from(map.values());
@@ -364,6 +378,12 @@ const mergeInterventionsWithCodes = (interventions, codes) => {
       availablePaymentTypes: Array.isArray(entry?.availablePaymentTypes)
         ? entry.availablePaymentTypes
         : [],
+      defaultOnAssessment: normalizeBoolean(
+        entry?.defaultOnAssessment ??
+          entry?.default_on_assessment ??
+          entry?.defaultInAssessment ??
+          entry?.default_in_assessment,
+      ),
     });
   });
   const merged = [];
@@ -377,6 +397,7 @@ const mergeInterventionsWithCodes = (interventions, codes) => {
       code: entry.code,
       name: entry.label || match?.name || "",
       availablePaymentTypes: match?.availablePaymentTypes || [],
+      defaultOnAssessment: Boolean(match?.defaultOnAssessment),
     });
     existing.delete(entry.code);
   });
@@ -385,6 +406,7 @@ const mergeInterventionsWithCodes = (interventions, codes) => {
       code: entry.code,
       name: entry.name || "",
       availablePaymentTypes: entry.availablePaymentTypes || [],
+      defaultOnAssessment: Boolean(entry.defaultOnAssessment),
     });
   });
   return merged;
@@ -654,9 +676,19 @@ const normalizeInterventionsForSignature = list => {
       availablePaymentTypes: Array.isArray(entry?.availablePaymentTypes)
         ? entry.availablePaymentTypes.map(value => normalizeString(value)).filter(Boolean)
         : [],
+      defaultOnAssessment: normalizeBoolean(
+        entry?.defaultOnAssessment ??
+          entry?.default_on_assessment ??
+          entry?.defaultInAssessment ??
+          entry?.default_in_assessment,
+      ),
     }))
     .filter(
-      entry => entry.code || entry.name || (entry.availablePaymentTypes || []).length > 0,
+      entry =>
+        entry.code ||
+        entry.name ||
+        (entry.availablePaymentTypes || []).length > 0 ||
+        entry.defaultOnAssessment,
     );
 };
 
@@ -1086,7 +1118,9 @@ const FinancePaymentTypeMappingWidget = ({ actions = {}, metadata = {}, toggleHe
     try {
       const payload = normalizeMapping(draft);
       const mappedInterventions = (payload.interventions || []).filter(
-        entry => entry?.code && (entry.availablePaymentTypes || []).length > 0,
+        entry =>
+          entry?.code &&
+          ((entry.availablePaymentTypes || []).length > 0 || entry.defaultOnAssessment === true),
       );
       const paymentTypesPayload = normalizePaymentTypes(payload.paymentTypes).map(entry => ({
         code: entry.code,
@@ -1482,6 +1516,19 @@ const FinancePaymentTypeMappingWidget = ({ actions = {}, metadata = {}, toggleHe
                 />
               );
             },
+          },
+          {
+            label: "Default in application assessment (step 2)",
+            control: (item, index) => (
+              <Checkbox
+                checked={Boolean(item?.defaultOnAssessment)}
+                onChange={({ detail }) =>
+                  updateIntervention(index, { defaultOnAssessment: detail.checked })
+                }
+              >
+                Add this intervention by default for new assessments
+              </Checkbox>
+            ),
           },
         ]}
       />

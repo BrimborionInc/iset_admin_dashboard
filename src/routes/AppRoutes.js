@@ -45,8 +45,10 @@ import ManageIntakeSteps from '../pages/manageIntakeSteps.js'; // Import the ren
 import ManageIntakeStepsHelpPanel from '../helpPanelContents/manageIntakeStepsHelpPanel'; // Correct the import path
 import CaseAssignmentDashboard from '../pages/caseAssignmentDashboard.js'; // Import the new component
 import ApplicationCaseDashboard from '../pages/applicationCaseDashboard.js'; // Import the new component
+import ManualApplicationIntakePage from '../pages/intake/ManualApplicationIntakePage.jsx';
 import CaseAssignmentDashboardHelp from '../helpPanelContents/caseAssignmentDashboardHelp.js';
 import ApplicationCaseDashboardHelp from '../helpPanelContents/applicationCaseDashboardHelp.js';
+import ManualApplicationIntakeHelp from '../helpPanelContents/manualApplicationIntakeHelp.js';
 import NWACHubManagementDashboard from '../pages/nwacHubManagement.js'; // Import the NWAC Hub Management dashboard
 import AuthCallback from '../pages/AuthCallback.js';
 import UploadConfigDashboard from '../pages/uploadConfigDashboard.js';
@@ -78,6 +80,8 @@ import PortfolioDashboardHelp from '../helpPanelContents/portfolioDashboardHelp.
 import CaseWorkspacePage from '../pages/Caseworking/CaseWorkspacePage.jsx';
 import CaseWorkspaceHelp from '../helpPanelContents/caseWorkspaceHelp.js';
 import ProgramPaymentsPage from '../pages/Caseworking/ProgramPaymentsPage.jsx';
+import JobBankSearchPage from '../pages/integrations/JobBankSearchPage.jsx';
+import JobBankSearchHelp from '../helpPanelContents/jobBankSearchHelp.js';
 import EsdcSubmissionsOverviewPage from '../pages/esdc/EsdcSubmissionsOverviewPage.jsx';
 import EsdcParticipantSubmissionsPage from '../pages/esdc/EsdcParticipantSubmissionsPage.jsx';
 import EsdcReportingPackagesPage from '../pages/esdc/EsdcReportingPackagesPage.jsx';
@@ -579,6 +583,37 @@ const AppRoutes = ({
         )}
       </Route>
 
+      <Route path="/iset/applications/intake">
+        <Guard path="/iset/applications/intake">
+          {renderContent(
+            ManualApplicationIntakePage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Manual Intake', href: '/iset/applications/intake' }
+            ],
+            'Manual Application Intake',
+            <ManualApplicationIntakeHelp />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() => window.dispatchEvent(new CustomEvent('manualIntake:openPalette'))}
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() => window.dispatchEvent(new CustomEvent('manualIntake:resetLayout'))}
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
+            ManualApplicationIntakeHelp.aiContext
+          )}
+        </Guard>
+      </Route>
+
       <Route path="/esdc/overview">
         <Guard roles={['System Administrator', 'Program Administrator']} path="/esdc/overview">
           {renderContent(
@@ -834,6 +869,22 @@ const AppRoutes = ({
         </Guard>
       </Route>
 
+      <Route path="/job-bank-search">
+        <Guard path="/job-bank-search">
+          {renderContent(
+            JobBankSearchPage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Job Search', href: '/job-bank-search' },
+            ],
+            'Job Bank Search',
+            <JobBankSearchHelp />,
+            null,
+            JobBankSearchHelp.aiContext
+          )}
+        </Guard>
+      </Route>
+
       <Route path="/cases/:caseId">
         <Guard path="/cases/:caseId">
           {renderContent(
@@ -847,6 +898,12 @@ const AppRoutes = ({
             <CaseWorkspaceHelp />,
             (
               <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="external"
+                  onClick={() => window.open('/job-bank-search', '_blank', 'noopener,noreferrer')}
+                >
+                  Job Search
+                </Button>
                 <Button
                   iconName="add-plus"
                   onClick={() => window.dispatchEvent(new CustomEvent("iset-case-workspace:openPalette"))}
@@ -879,6 +936,12 @@ const AppRoutes = ({
             <ApplicationCaseDashboardHelp />,
             (
               <SpaceBetween direction="horizontal" size="xs">
+                <Button
+                  iconName="external"
+                  onClick={() => window.open('/job-bank-search', '_blank', 'noopener,noreferrer')}
+                >
+                  Job Search
+                </Button>
                 <Button
                   iconName="add-plus"
                   onClick={() => window.dispatchEvent(new CustomEvent("applicationAssessment:openPalette"))}

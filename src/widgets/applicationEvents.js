@@ -249,8 +249,14 @@ const formatEventMessage = (event, actorDisplay) => {
     }
     case 'application_submitted': {
       const submitter = actorDisplay || trimValue(payload.submitter_name) || trimValue(payload.submitter_email);
-      const base = 'Application submitted';
-      return ensureSentence(submitter ? `${base} by ${submitter}` : base);
+      const source = trimValue(payload.intake_source).replace(/_/g, ' ');
+      const sourceNotes = trimValue(payload.intake_source_notes);
+      const isManual = trimValue(payload.origin_channel) === 'admin_manual';
+      const parts = ['Application submitted'];
+      if (submitter) parts.push(`by ${submitter}`);
+      if (isManual && source) parts.push(`(intake source: ${source})`);
+      if (isManual && sourceNotes) parts.push(`Notes: ${sourceNotes}`);
+      return ensureSentence(parts.join(' '));
     }
     case 'escalation_created':
     case 'escalation_escalated':
