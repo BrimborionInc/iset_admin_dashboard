@@ -260,12 +260,6 @@ export const useApplicationLock = (applicationId, options = {}) => {
       return { ok: true, released: false, skipped: true };
     }
 
-    if (!current.localOwner) {
-      clearHeartbeat();
-      setState(cloneDefaultState());
-      return { ok: true, released: false, skipped: true };
-    }
-
     clearHeartbeat();
     setState((prev) => ({ ...prev, status: 'releasing' }));
 

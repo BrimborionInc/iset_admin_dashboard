@@ -28,7 +28,7 @@ import { apiFetch } from "../../../../auth/apiClient";
 import { boardItemI18nStrings } from "../../widgets/common";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
 import useCurrentUser from "../../../../hooks/useCurrentUser.js";
-import { PAYMENT_TYPE_OPTIONS } from "../../../finance/widgets/paymentOptions";
+import { PAYMENT_TYPE_OPTIONS, PAYEE_TYPE_OPTIONS, findOptionByValue } from "../../../finance/widgets/paymentOptions";
 import { getCurrencyInputDisplayValue } from "../../../../utils/currencyFormat";
 import styles from "./InterventionAssessmentWidget.module.css";
 
@@ -119,11 +119,79 @@ const STEP_LABELS = {
 const REQUIRED_STEP_IDS = ["plan", "framing", "rationale", "cost"];
 
 const RATIONALE_WORD_LIMIT = 400;
+const OTHER_FUNDING_INVOLVED_OPTIONS = [
+  { label: "No", value: "no" },
+  { label: "Yes", value: "yes" },
+  { label: "Unknown", value: "unknown" },
+];
+const OTHER_FUNDER_TYPE_OPTIONS = [
+  {
+    label: "ISET Holder",
+    value: "iset_holder",
+    description: "Another ISET holder funding part of the plan.",
+  },
+  {
+    label: "Federal Program",
+    value: "federal_program",
+    description: "Federal funding program outside ISET.",
+  },
+  {
+    label: "Prov/Terr Program",
+    value: "provincial_territorial_program",
+    description: "Provincial or territorial grant/support.",
+  },
+  {
+    label: "Indigenous Government",
+    value: "indigenous_government_org",
+    description: "Band, Tribal Council, Métis/Inuit/regional Indigenous org.",
+  },
+  {
+    label: "Employer",
+    value: "employer",
+    description: "Employer-funded training, wage support, or sponsorship.",
+  },
+  {
+    label: "Bursary/Scholarship",
+    value: "education_bursary_scholarship",
+    description: "Education bursary, scholarship, or award.",
+  },
+  {
+    label: "Nonprofit/Charity",
+    value: "nonprofit_charity",
+    description: "Foundation, charity, or community nonprofit support.",
+  },
+  {
+    label: "Insurance/Compensation",
+    value: "insurance_compensation",
+    description: "Insurance, WCB/WSIB, settlement, or compensation support.",
+  },
+  {
+    label: "Personal/Family",
+    value: "personal_family",
+    description: "Self-funded or family-funded support.",
+  },
+  {
+    label: "Other Public",
+    value: "other_public",
+    description: "Municipal or other public agency support.",
+  },
+  {
+    label: "Other",
+    value: "other",
+    description: "Any other funding source.",
+  },
+];
+const OTHER_FUNDER_TYPE_VALUE_SET = new Set(OTHER_FUNDER_TYPE_OPTIONS.map(option => option.value));
+const resolveOtherFunderTypeLabel = value =>
+  OTHER_FUNDER_TYPE_OPTIONS.find(option => option.value === normalizeOtherFunderType(value))?.label || "Other";
 
 const defaultFormState = {
   actionPlanId: "",
   rationale: "",
-  otherFunding: "",
+  otherFundingInvolved: "",
+  otherFundingSources: [],
+  otherFundingNwacCoverage: "",
+  otherFundingNotes: "",
   childcareNeed: "",
   childcareFunding: "",
   barriers: [],
@@ -220,6 +288,25 @@ const deriveEndDateFromOccurrences = (startDate, occurrences) => {
   return addMonthsUtc(startDate, occurrences - 1);
 };
 
+const resolveCaseContext = caseData => {
+  if (caseData?.caseContext && typeof caseData.caseContext === "object") {
+    return caseData.caseContext;
+  }
+  if (caseData?.case_context && typeof caseData.case_context === "object") {
+    return caseData.case_context;
+  }
+  const rawContext = caseData?.case_context_json;
+  if (typeof rawContext === "string" && rawContext.trim()) {
+    try {
+      const parsed = JSON.parse(rawContext);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch (_) {
+      return {};
+    }
+  }
+  return {};
+};
+
 const autoOccurrencesFromDates = (startDate, endDate, period) => {
   if (!startDate || !endDate || !period) return null;
   const startUtc = parseIsoDateToUtc(startDate);
@@ -258,6 +345,111 @@ const buildUuid = () => {
     return crypto.randomUUID();
   }
   return `tmp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+};
+
+const normalizeOtherFundingInvolved = value => {
+  if (value === null || typeof value === "undefined") return "";
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === "yes") return "yes";
+  if (normalized === "no") return "no";
+  if (normalized === "unknown") return "unknown";
+  return "";
+};
+
+const normalizeOtherFunderType = value => {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  if (!normalized) return "other";
+  if (OTHER_FUNDER_TYPE_VALUE_SET.has(normalized)) return normalized;
+  return "other";
+};
+
+const buildEmptyOtherFundingSource = (overrides = {}) => {
+  const base = {
+    id: overrides.id || buildUuid(),
+    name: "",
+    type: "other",
+    coverage: "",
+    ...overrides,
+  };
+  return {
+    ...base,
+    type: normalizeOtherFunderType(base.type || "other"),
+  };
+};
+
+const buildOtherFundingSourceModalState = (overrides = {}) => ({
+  visible: false,
+  mode: "add",
+  sourceId: null,
+  draft: buildEmptyOtherFundingSource(),
+  original: null,
+  ...overrides,
+});
+
+const validateOtherFundingSourceDraft = draft => {
+  const next = buildEmptyOtherFundingSource(draft || {});
+  const errors = {};
+  if (!String(next.name || "").trim()) {
+    errors.name = "Funder name is required.";
+  }
+  if (!String(next.coverage || "").trim()) {
+    errors.coverage = "Coverage details are required.";
+  }
+  return errors;
+};
+
+const normalizeOtherFundingSources = (value, { keepEmpty = false, preserveWhitespace = false } = {}) => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(entry => {
+      if (!entry || typeof entry !== "object") return null;
+      const rawName = String(entry.name || "");
+      const rawCoverage = String(entry.coverage || "");
+      const normalized = buildEmptyOtherFundingSource({
+        id: entry.id || buildUuid(),
+        name: preserveWhitespace ? rawName : rawName.trim(),
+        type: entry.type || "other",
+        coverage: preserveWhitespace ? rawCoverage : rawCoverage.trim(),
+      });
+      const hasValues = rawName.trim() || rawCoverage.trim();
+      return hasValues || keepEmpty ? normalized : null;
+    })
+    .filter(Boolean);
+};
+
+const normalizeOtherFundingDetails = (rawDetails, options = {}) => {
+  const source = rawDetails && typeof rawDetails === "object" ? rawDetails : {};
+  const keepEmptySources = Boolean(options.keepEmptySources);
+  const preserveWhitespace = Boolean(options.preserveWhitespace);
+  const involved = normalizeOtherFundingInvolved(source.involved);
+  const populatedSources = normalizeOtherFundingSources(
+    source.sources,
+    { preserveWhitespace }
+  );
+  const sources = keepEmptySources
+    ? normalizeOtherFundingSources(
+        source.sources,
+        { keepEmpty: true, preserveWhitespace }
+      )
+    : populatedSources;
+  const rawNwacCoverage = String(source.nwacCoverage || "");
+  const nwacCoverage = preserveWhitespace ? rawNwacCoverage : rawNwacCoverage.trim();
+  const rawNotes = String(source.notes || "");
+  const notes = preserveWhitespace ? rawNotes : rawNotes.trim();
+
+  const resolvedInvolved =
+    involved ||
+    (populatedSources.length || String(nwacCoverage || "").trim() || String(notes || "").trim() ? "yes" : "");
+
+  return {
+    involved: resolvedInvolved,
+    sources,
+    nwacCoverage,
+    notes,
+  };
 };
 
 const normalizeId = value => {
@@ -369,11 +561,67 @@ const normalizeInterventionCodeValue = value => {
 const RECURRENCE_MODE_REQUIRED = "required";
 const RECURRENCE_MODE_OPTIONAL = "optional";
 const RECURRENCE_MODE_NOT_ALLOWED = "not_allowed";
+const SUBMISSION_TIMING_INTERVENTION_START = "intervention_start";
+const SUBMISSION_TIMING_INTERVENTION_END = "intervention_end";
+const SUBMISSION_TIMING_RECURRENCE_SCHEDULE = "recurrence_schedule";
+const SUBMISSION_TIMING_MANUAL_TRIGGER = "manual_trigger";
+const DEFAULT_SUBMISSION_TIMING_BY_TYPE = {
+  LivingAllowance: SUBMISSION_TIMING_RECURRENCE_SCHEDULE,
+  TuitionFeesDirect: SUBMISSION_TIMING_INTERVENTION_START,
+  TuitionFeesReimbursement: SUBMISSION_TIMING_INTERVENTION_END,
+  SpecializedEquipmentAdvance: SUBMISSION_TIMING_INTERVENTION_START,
+  SpecializedEquipmentReimbursement: SUBMISSION_TIMING_INTERVENTION_END,
+  WageSubsidyEmployer: SUBMISSION_TIMING_RECURRENCE_SCHEDULE,
+  Childcare: SUBMISSION_TIMING_RECURRENCE_SCHEDULE,
+  Transportation: SUBMISSION_TIMING_RECURRENCE_SCHEDULE,
+  BooksMaterialsDirect: SUBMISSION_TIMING_INTERVENTION_START,
+  BooksMaterialsReimbursement: SUBMISSION_TIMING_INTERVENTION_END,
+  JCPProjectCost: SUBMISSION_TIMING_MANUAL_TRIGGER,
+  SEBSupport: SUBMISSION_TIMING_RECURRENCE_SCHEDULE,
+  OtherEligibleCost: SUBMISSION_TIMING_MANUAL_TRIGGER,
+};
 const PAYMENT_TYPE_ALIASES = {
   wagesubsidyemployer: "WageSubsidyEmployer",
   wagesubsidy: "WageSubsidyEmployer",
   targetedwagesubsidyemployer: "WageSubsidyEmployer",
   targetedwagesubsidy: "WageSubsidyEmployer",
+};
+const PAYEE_TYPE_PARTICIPANT_CLIENT = "ParticipantClient";
+const PAYEE_TYPES_DEFAULT_FROM_INTERVENTION = new Set([
+  "AccreditedEducationalTrainingInstitution",
+  "EmployerWageSubsidyPartner",
+  "CommunityNonProfitOrganization",
+]);
+const PAYMENT_TYPE_DEFAULT_PAYEE_TYPE = {
+  LivingAllowance: PAYEE_TYPE_PARTICIPANT_CLIENT,
+  TuitionFeesReimbursement: PAYEE_TYPE_PARTICIPANT_CLIENT,
+  SpecializedEquipmentReimbursement: PAYEE_TYPE_PARTICIPANT_CLIENT,
+  Transportation: PAYEE_TYPE_PARTICIPANT_CLIENT,
+  BooksMaterialsReimbursement: PAYEE_TYPE_PARTICIPANT_CLIENT,
+  TuitionFeesDirect: "AccreditedEducationalTrainingInstitution",
+  WageSubsidyEmployer: "EmployerWageSubsidyPartner",
+  Childcare: "ChildcareProvider",
+  BooksMaterialsDirect: "TrainingRelatedSupplier",
+  SpecializedEquipmentAdvance: "TrainingRelatedSupplier",
+  JCPProjectCost: "CommunityNonProfitOrganization",
+};
+const normalizePayeeTypeKey = value =>
+  String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+const PAYEE_TYPE_DETAIL_TARGET_BY_KEY = {
+  participantclient: "client",
+  client: "client",
+  vendor: "vendor",
+  traininginstitution: "institution",
+  traininginstitute: "institution",
+  traininginstitue: "institution",
+  accreditededucationaltraininginstitution: "institution",
+  employer: "employer",
+  employerwagesubsidypartner: "employer",
+  childcareprovider: "childcare provider",
+  communitynonprofitorganization: "community organization",
+  trainingrelatedsupplier: "supplier",
+  professionalbusinessservicesprovider: "service provider",
+  other: "other payee",
 };
 
 const normalizePaymentTypeCode = value => {
@@ -382,6 +630,45 @@ const normalizePaymentTypeCode = value => {
   if (!raw) return null;
   const key = raw.toLowerCase().replace(/[^a-z0-9]+/g, "");
   return PAYMENT_TYPE_ALIASES[key] || raw;
+};
+const deriveDefaultPayeeTypeForCostLine = costLineType => {
+  const normalizedType = normalizePaymentTypeCode(costLineType);
+  if (!normalizedType) return "";
+  return PAYMENT_TYPE_DEFAULT_PAYEE_TYPE[normalizedType] || "";
+};
+const deriveDefaultPayeeNameForCostLine = (payeeType, intervention, participantLegalName) => {
+  const normalizedType = String(payeeType || "").trim();
+  if (!normalizedType) return "";
+  if (normalizedType === PAYEE_TYPE_PARTICIPANT_CLIENT) {
+    return participantLegalName || "";
+  }
+  if (PAYEE_TYPES_DEFAULT_FROM_INTERVENTION.has(normalizedType)) {
+    return String(intervention?.institution || "").trim();
+  }
+  return "";
+};
+const applyCostLinePayeeDefaults = (draft, intervention, participantLegalName, options = {}) => {
+  if (!draft || typeof draft !== "object") return draft;
+  const { allowTypeAutofill = true } = options;
+  const payee = draft.payee && typeof draft.payee === "object" ? draft.payee : {};
+  let payeeType = String(payee.type || "").trim();
+  if (!payeeType && allowTypeAutofill) {
+    payeeType = deriveDefaultPayeeTypeForCostLine(draft.type);
+  }
+  const existingName = String(payee.name || "").trim();
+  const defaultName = deriveDefaultPayeeNameForCostLine(payeeType, intervention, participantLegalName);
+  const nextPayee = {
+    type: payeeType,
+    name: existingName,
+    reference: String(payee.reference || "").trim(),
+  };
+  if (payeeType === PAYEE_TYPE_PARTICIPANT_CLIENT) {
+    nextPayee.name = defaultName || existingName;
+    nextPayee.reference = "";
+  } else if (!nextPayee.name && defaultName) {
+    nextPayee.name = defaultName;
+  }
+  return { ...draft, payee: nextPayee };
 };
 
 const normalizeRecurrenceMode = value => {
@@ -393,6 +680,16 @@ const normalizeRecurrenceMode = value => {
     return RECURRENCE_MODE_NOT_ALLOWED;
   }
   return RECURRENCE_MODE_NOT_ALLOWED;
+};
+
+const normalizeSubmissionTiming = value => {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === SUBMISSION_TIMING_INTERVENTION_START) return SUBMISSION_TIMING_INTERVENTION_START;
+  if (normalized === SUBMISSION_TIMING_INTERVENTION_END) return SUBMISSION_TIMING_INTERVENTION_END;
+  if (normalized === SUBMISSION_TIMING_RECURRENCE_SCHEDULE) return SUBMISSION_TIMING_RECURRENCE_SCHEDULE;
+  if (normalized === SUBMISSION_TIMING_MANUAL_TRIGGER) return SUBMISSION_TIMING_MANUAL_TRIGGER;
+  return null;
 };
 
 const buildPaymentTypeMappingLookup = mapping => {
@@ -469,6 +766,11 @@ const buildEmptyCostLine = overrides => ({
   type: "",
   amount: "",
   notes: "",
+  payee: {
+    type: "",
+    name: "",
+    reference: "",
+  },
   recurrence: {
     enabled: false,
     startDate: "",
@@ -499,6 +801,7 @@ const buildEmptyIntervention = overrides => ({
 const normalizeCostLine = raw => {
   if (!raw || typeof raw !== "object") return null;
   const recurrenceRaw = raw.recurrence && typeof raw.recurrence === "object" ? raw.recurrence : {};
+  const payeeRaw = raw.payee && typeof raw.payee === "object" ? raw.payee : {};
   return {
     id: raw.id || buildUuid(),
     type: normalizePaymentTypeCode(raw.type || raw.paymentType || raw.payment_type) || "",
@@ -507,6 +810,11 @@ const normalizeCostLine = raw => {
         ? ""
         : String(raw.amount),
     notes: raw.notes || raw.description || "",
+    payee: {
+      type: String(payeeRaw.type || raw.payeeType || raw.payee_type || "").trim(),
+      name: String(payeeRaw.name || raw.payeeName || raw.payee_name || "").trim(),
+      reference: String(payeeRaw.reference || raw.payeeReference || raw.payee_reference || "").trim(),
+    },
     recurrence: {
       enabled: Boolean(recurrenceRaw.enabled),
       startDate: recurrenceRaw.startDate || "",
@@ -598,7 +906,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const [form, setForm] = useState(defaultFormState);
   const [currentStep, setCurrentStep] = useState(BASE_STEP_IDS[0]);
   const [attemptedSteps, setAttemptedSteps] = useState({});
-  const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [completionNote, setCompletionNote] = useState(null);
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -615,6 +923,10 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   });
   const [interventionModalErrors, setInterventionModalErrors] = useState({});
   const [interventionDeleteId, setInterventionDeleteId] = useState(null);
+  const [otherFundingSourceModal, setOtherFundingSourceModal] = useState(() =>
+    buildOtherFundingSourceModalState()
+  );
+  const [otherFundingSourceModalErrors, setOtherFundingSourceModalErrors] = useState({});
   const [proposedInterventionsTableVersion, setProposedInterventionsTableVersion] = useState(0);
   const [costLineModal, setCostLineModal] = useState({
     visible: false,
@@ -625,6 +937,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     original: null,
   });
   const [costLineModalErrors, setCostLineModalErrors] = useState({});
+  const [costLineAmountFocused, setCostLineAmountFocused] = useState(false);
+  const [costLineAmountPerPeriodFocused, setCostLineAmountPerPeriodFocused] = useState(false);
   const [inlineAmountEditingId, setInlineAmountEditingId] = useState(null);
   const [decisionBlockerVisible, setDecisionBlockerVisible] = useState(false);
   const [decisionBlockerReasons, setDecisionBlockerReasons] = useState([]);
@@ -648,6 +962,80 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     () => caseData?.applicantUserId ?? caseData?.applicant_user_id ?? null,
     [caseData]
   );
+  const participantLegalName = useMemo(() => {
+    const caseContext = resolveCaseContext(caseData);
+    const personal = caseContext.applicationPersonal && typeof caseContext.applicationPersonal === "object"
+      ? caseContext.applicationPersonal
+      : {};
+    const answers = caseContext.applicationAnswers && typeof caseContext.applicationAnswers === "object"
+      ? caseContext.applicationAnswers
+      : {};
+    const client = caseData?.client && typeof caseData.client === "object" ? caseData.client : {};
+    const clientDetails = client.details && typeof client.details === "object" ? client.details : {};
+    const normalizeNamePart = value => {
+      if (value === null || typeof value === "undefined") return "";
+      const trimmed = String(value).trim();
+      return trimmed || "";
+    };
+    const buildFullName = (first, last) => {
+      const firstName = normalizeNamePart(first);
+      const lastName = normalizeNamePart(last);
+      if (!firstName || !lastName) return "";
+      return `${firstName} ${lastName}`;
+    };
+    const normalizeFullName = value => {
+      const text = normalizeNamePart(value);
+      if (!text) return "";
+      return text.includes(" ") ? text : "";
+    };
+    const candidates = [
+      normalizeFullName(caseData?.applicant_legal_name || caseData?.applicantLegalName),
+      buildFullName(
+        caseData?.submission_first_name || caseData?.submissionFirstName || caseData?.first_name || caseData?.firstName,
+        caseData?.submission_last_name || caseData?.submissionLastName || caseData?.last_name || caseData?.lastName
+      ),
+      buildFullName(client.firstName, client.lastName),
+      buildFullName(
+        clientDetails.first_name || clientDetails.firstName || clientDetails.given_name || clientDetails.givenName,
+        clientDetails.last_name || clientDetails.lastName || clientDetails.family_name || clientDetails.familyName
+      ),
+      buildFullName(
+        caseContext.first_name || caseContext.firstName || caseContext.given_name || caseContext.givenName,
+        caseContext.last_name || caseContext.lastName || caseContext.family_name || caseContext.familyName
+      ),
+      buildFullName(
+        personal.first_name || personal.firstName || personal.given_name || personal.givenName,
+        personal.last_name || personal.lastName || personal.family_name || personal.familyName
+      ),
+      buildFullName(
+        answers["first-name"] || answers.first_name || answers["personal-first-name"] || answers.personal_first_name,
+        answers["last-name"] || answers.last_name || answers["personal-last-name"] || answers.personal_last_name
+      ),
+      normalizeFullName(
+        client.fullName || client.full_name || clientDetails.full_name || clientDetails.fullName || caseData?.applicant_name || caseData?.applicantName
+      ),
+    ];
+    return candidates.find(Boolean) || "";
+  }, [caseData]);
+  useEffect(() => {
+    if (!participantLegalName) return;
+    setCostLineModal(prev => {
+      if (!prev?.visible || !prev?.draft) return prev;
+      const payee = prev.draft.payee && typeof prev.draft.payee === "object" ? prev.draft.payee : {};
+      if (String(payee.type || "").trim() !== PAYEE_TYPE_PARTICIPANT_CLIENT) return prev;
+      if (String(payee.name || "").trim() === participantLegalName) return prev;
+      return {
+        ...prev,
+        draft: {
+          ...prev.draft,
+          payee: {
+            ...payee,
+            name: participantLegalName,
+          },
+        },
+      };
+    });
+  }, [participantLegalName]);
 
   const logWizard = useCallback(() => {}, []);
 
@@ -675,7 +1063,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     if (Array.isArray(draft.proposedInterventions) && draft.proposedInterventions.length) return true;
     const textKeys = [
       "rationale",
-      "otherFunding",
+      "otherFundingInvolved",
+      "otherFundingNwacCoverage",
+      "otherFundingNotes",
       "childcareNeed",
       "childcareFunding",
       "eiVerificationStatus",
@@ -683,6 +1073,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       "decisionNotes",
     ];
     if (textKeys.some(key => String(draft[key] || "").trim())) return true;
+    if (Array.isArray(draft.otherFundingSources) && draft.otherFundingSources.length) return true;
     if (Array.isArray(draft.barriers) && draft.barriers.length) return true;
     return false;
   }, []);
@@ -693,6 +1084,19 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     if (Array.isArray(storedDraft.proposedInterventions)) {
       merged.proposedInterventions = storedDraft.proposedInterventions;
     }
+    const normalizedOtherFunding = normalizeOtherFundingDetails(
+      {
+        involved: merged.otherFundingInvolved,
+        sources: merged.otherFundingSources,
+        nwacCoverage: merged.otherFundingNwacCoverage,
+        notes: merged.otherFundingNotes,
+      },
+      { keepEmptySources: true, preserveWhitespace: true }
+    );
+    merged.otherFundingInvolved = normalizedOtherFunding.involved;
+    merged.otherFundingSources = normalizedOtherFunding.sources;
+    merged.otherFundingNwacCoverage = normalizedOtherFunding.nwacCoverage;
+    merged.otherFundingNotes = normalizedOtherFunding.notes;
     return merged;
   }, []);
 
@@ -753,11 +1157,14 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     (isSubmittedStatus && canEditSubmitted) ||
     (!statusValue && !hasBlockingProposal);
   const isFormLocked = !isEditable || isSubmitting;
-  const statusLabel = statusValue
-    ? statusValue.replace(/_/g, " ").replace(/\b\w/g, char => char.toUpperCase())
-    : hasBlockingProposal
-      ? "Read only"
-      : "Draft";
+  const statusLabel = completionNote
+    ? "Completed"
+    : statusValue
+      ? statusValue.replace(/_/g, " ").replace(/\b\w/g, char => char.toUpperCase())
+      : hasBlockingProposal
+        ? "Read only"
+        : "Draft";
+  const statusBadgeColor = completionNote ? "green" : "blue";
 
   const activeStepIds = useMemo(
     () => (isSubmittedStatus ? [...BASE_STEP_IDS, ...SUBMITTED_STEP_IDS] : BASE_STEP_IDS),
@@ -944,6 +1351,145 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     setForm(prev => ({ ...prev, [key]: value }));
   };
 
+  const updateOtherFundingFields = useCallback(
+    updater => {
+      setForm(prev => {
+        const next = typeof updater === "function" ? updater(prev) : { ...prev, ...(updater || {}) };
+        const normalizedOtherFunding = normalizeOtherFundingDetails(
+          {
+            involved: next.otherFundingInvolved,
+            sources: next.otherFundingSources,
+            nwacCoverage: next.otherFundingNwacCoverage,
+            notes: next.otherFundingNotes,
+          },
+          { keepEmptySources: true, preserveWhitespace: true }
+        );
+        return {
+          ...next,
+          otherFundingInvolved: normalizedOtherFunding.involved,
+          otherFundingSources: normalizedOtherFunding.sources,
+          otherFundingNwacCoverage: normalizedOtherFunding.nwacCoverage,
+          otherFundingNotes: normalizedOtherFunding.notes,
+        };
+      });
+    },
+    []
+  );
+
+  const addOtherFundingSource = useCallback(
+    sourceDraft => {
+      const nextSource = buildEmptyOtherFundingSource(sourceDraft || {});
+      updateOtherFundingFields(prev => ({
+        ...prev,
+        otherFundingSources: [
+          ...(Array.isArray(prev.otherFundingSources) ? prev.otherFundingSources : []),
+          nextSource,
+        ],
+      }));
+    },
+    [updateOtherFundingFields]
+  );
+
+  const updateOtherFundingSource = useCallback(
+    (sourceId, updates) => {
+      updateOtherFundingFields(prev => ({
+        ...prev,
+        otherFundingSources: (Array.isArray(prev.otherFundingSources) ? prev.otherFundingSources : []).map(source =>
+          idsMatch(source.id, sourceId)
+            ? buildEmptyOtherFundingSource({ ...source, ...(updates || {}) })
+            : source
+        ),
+      }));
+    },
+    [updateOtherFundingFields]
+  );
+
+  const removeOtherFundingSource = useCallback(
+    sourceId => {
+      updateOtherFundingFields(prev => ({
+        ...prev,
+        otherFundingSources: (Array.isArray(prev.otherFundingSources) ? prev.otherFundingSources : []).filter(
+          source => !idsMatch(source.id, sourceId)
+        ),
+      }));
+    },
+    [updateOtherFundingFields]
+  );
+
+  const resetOtherFundingSourceModal = useCallback(() => {
+    setOtherFundingSourceModal(buildOtherFundingSourceModalState());
+    setOtherFundingSourceModalErrors({});
+  }, []);
+
+  const openAddOtherFundingSourceModal = useCallback(() => {
+    setOtherFundingSourceModal(
+      buildOtherFundingSourceModalState({
+        visible: true,
+        mode: "add",
+        sourceId: null,
+        draft: buildEmptyOtherFundingSource(),
+        original: null,
+      })
+    );
+    setOtherFundingSourceModalErrors({});
+  }, []);
+
+  const openEditOtherFundingSourceModal = useCallback(
+    sourceId => {
+      const current = Array.isArray(form.otherFundingSources) ? form.otherFundingSources : [];
+      const source = current.find(item => idsMatch(item?.id, sourceId));
+      if (!source) return;
+      const normalized = buildEmptyOtherFundingSource(source);
+      setOtherFundingSourceModal(
+        buildOtherFundingSourceModalState({
+          visible: true,
+          mode: "edit",
+          sourceId: normalized.id,
+          draft: normalized,
+          original: normalized,
+        })
+      );
+      setOtherFundingSourceModalErrors({});
+    },
+    [form.otherFundingSources]
+  );
+
+  const updateOtherFundingSourceModalDraft = useCallback(updates => {
+    setOtherFundingSourceModal(prev => {
+      if (!prev?.draft) return prev;
+      return {
+        ...prev,
+        draft: buildEmptyOtherFundingSource({
+          ...prev.draft,
+          ...(updates || {}),
+        }),
+      };
+    });
+  }, []);
+
+  const saveOtherFundingSourceModal = useCallback(() => {
+    const draft = buildEmptyOtherFundingSource(otherFundingSourceModal.draft || {});
+    const errors = validateOtherFundingSourceDraft(draft);
+    if (Object.keys(errors).length > 0) {
+      setOtherFundingSourceModalErrors(errors);
+      return;
+    }
+    if (otherFundingSourceModal.mode === "edit" && otherFundingSourceModal.sourceId) {
+      updateOtherFundingSource(otherFundingSourceModal.sourceId, draft);
+      resetOtherFundingSourceModal();
+      return;
+    }
+    addOtherFundingSource(draft);
+    resetOtherFundingSourceModal();
+  }, [
+    addOtherFundingSource,
+    otherFundingSourceModal.draft,
+    otherFundingSourceModal.mode,
+    otherFundingSourceModal.sourceId,
+    resetOtherFundingSourceModal,
+    updateOtherFundingSource,
+  ]);
+
   useEffect(() => {
     if (!interventionCodesLoading && (!interventionCodes || interventionCodes.length === 0)) {
       loadInterventionCodes().catch(() => {});
@@ -1096,6 +1642,37 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     },
     [recurrenceModeByType]
   );
+  const submissionTimingByType = useMemo(() => {
+    const map = new Map();
+    const paymentTypes = Array.isArray(paymentTypeMapping?.paymentTypes)
+      ? paymentTypeMapping.paymentTypes
+      : [];
+    paymentTypes.forEach(entry => {
+      const code = normalizePaymentTypeCode(entry?.code || entry?.paymentType || entry?.payment_type);
+      if (!code) return;
+      const timing =
+        normalizeSubmissionTiming(entry?.submissionTiming || entry?.submission_timing) ||
+        DEFAULT_SUBMISSION_TIMING_BY_TYPE[code] ||
+        SUBMISSION_TIMING_MANUAL_TRIGGER;
+      map.set(code, timing);
+    });
+    Object.entries(DEFAULT_SUBMISSION_TIMING_BY_TYPE).forEach(([code, timing]) => {
+      if (!map.has(code)) map.set(code, timing);
+    });
+    return map;
+  }, [paymentTypeMapping]);
+  const getSubmissionTimingForType = useCallback(
+    type => {
+      const code = normalizePaymentTypeCode(type);
+      if (!code) return SUBMISSION_TIMING_MANUAL_TRIGGER;
+      return (
+        submissionTimingByType.get(code) ||
+        DEFAULT_SUBMISSION_TIMING_BY_TYPE[code] ||
+        SUBMISSION_TIMING_MANUAL_TRIGGER
+      );
+    },
+    [submissionTimingByType]
+  );
 
   const getAllowedPaymentTypesForIntervention = useCallback(
     code => {
@@ -1107,19 +1684,112 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     },
     [paymentTypeMappingLookup]
   );
+  const getCostLineDetailsText = useCallback(
+    (line, intervention = null) => {
+      const recurrenceMode = getRecurrenceModeForType(line?.type);
+      const recurrence = line?.recurrence || {};
+      const recurrenceEnabled =
+        recurrenceMode === RECURRENCE_MODE_REQUIRED || Boolean(recurrence.enabled);
+      let occurrences = null;
+      if (recurrenceEnabled) {
+        const occurrencesRaw =
+          recurrence.occurrences === "" ||
+          recurrence.occurrences === null ||
+          typeof recurrence.occurrences === "undefined"
+            ? null
+            : Number(recurrence.occurrences);
+        occurrences = Number.isFinite(occurrencesRaw) && occurrencesRaw > 0 ? occurrencesRaw : null;
+        if (!occurrences) {
+          const startDate = formatDate(recurrence.startDate);
+          const endDate = formatDate(recurrence.endDate);
+          if (startDate && endDate) {
+            const computed = autoOccurrencesFromDates(startDate, endDate, "monthly");
+            if (computed) occurrences = computed;
+          }
+        }
+      }
+      const amountPerPeriod = parseCurrencyInput(recurrence.amountPerPeriod);
+      const perPeriodText =
+        recurrenceEnabled && amountPerPeriod !== null
+          ? `${formatCurrencyDisplay(amountPerPeriod)} per month`
+          : "";
+      const submissionTiming = getSubmissionTimingForType(line?.type);
+      const interventionStart = formatDate(intervention?.startDate);
+      const interventionEnd = formatDate(intervention?.endDate);
+      const recurrenceStart = formatDate(recurrence.startDate);
+      const recurrenceEnd = formatDate(recurrence.endDate);
+      const explicitPayableDate = formatDate(
+        line?.payableDate ||
+          line?.payable_date ||
+          line?.paymentDate ||
+          line?.payment_date ||
+          line?.dateDue ||
+          line?.date_due
+      );
+      const firstInstallmentDate =
+        recurrenceStart ||
+        explicitPayableDate ||
+        (submissionTiming === SUBMISSION_TIMING_INTERVENTION_END
+          ? interventionEnd || recurrenceEnd
+          : interventionStart || recurrenceEnd);
+      const firstInstallmentDateLabel = firstInstallmentDate
+        ? formatShortDate(firstInstallmentDate)
+        : "";
+      let payableText = "payable";
+      if (recurrenceEnabled) {
+        if (occurrences && occurrences > 0) {
+          payableText = `payable in ${occurrences} monthly installment${
+            occurrences === 1 ? "" : "s"
+          }`;
+        } else {
+          payableText = "payable in monthly installments";
+        }
+        if (firstInstallmentDateLabel) {
+          payableText += ` starting ${firstInstallmentDateLabel}`;
+        }
+      } else {
+        let payableDate = "";
+        if (submissionTiming === SUBMISSION_TIMING_INTERVENTION_START) {
+          payableDate = formatShortDate(interventionStart || recurrenceStart || explicitPayableDate);
+        } else if (submissionTiming === SUBMISSION_TIMING_INTERVENTION_END) {
+          payableDate = formatShortDate(interventionEnd || recurrenceEnd || explicitPayableDate);
+        } else if (submissionTiming === SUBMISSION_TIMING_RECURRENCE_SCHEDULE) {
+          payableDate = formatShortDate(
+            recurrenceStart || explicitPayableDate || interventionStart || interventionEnd
+          );
+        } else if (submissionTiming === SUBMISSION_TIMING_MANUAL_TRIGGER) {
+          payableDate = formatShortDate(explicitPayableDate);
+        }
+        payableText = payableDate ? `payable on ${payableDate}` : "payable";
+      }
+      const payeeName = String(line?.payee?.name || "").trim();
+      const explicitPayeeTypeKey = normalizePayeeTypeKey(line?.payee?.type);
+      const inferredPayeeTypeKey = normalizePayeeTypeKey(deriveDefaultPayeeTypeForCostLine(line?.type));
+      const payeeTypeKey = explicitPayeeTypeKey || inferredPayeeTypeKey;
+      const payeeTarget = PAYEE_TYPE_DETAIL_TARGET_BY_KEY[payeeTypeKey] || "";
+      const payeeText = payeeName ? `to ${payeeName}` : payeeTarget ? `to ${payeeTarget}` : "";
+      const notesText = String(line?.notes || "").trim();
+      let text = payableText || "—";
+      if (perPeriodText) {
+        text = `${text} (${perPeriodText})`;
+      }
+      if (payeeText) {
+        text = `${text} ${payeeText}`;
+      }
+      return {
+        text,
+        notesText
+      };
+    },
+    [getRecurrenceModeForType, getSubmissionTimingForType]
+  );
 
   const buildCostItemOptions = useCallback(
     intervention => {
       const allowed = new Set(getAllowedPaymentTypesForIntervention(intervention?.code));
-      const used = new Set(
-        Array.isArray(intervention?.costLines)
-          ? intervention.costLines.map(line => line?.type).filter(Boolean)
-          : []
-      );
       return PAYMENT_TYPE_OPTIONS.filter(option => {
         if (!option?.value) return false;
         if (allowed.size && !allowed.has(option.value)) return false;
-        if (used.has(option.value)) return false;
         return true;
       });
     },
@@ -1421,17 +2091,33 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     interventionId => {
       const intervention = proposedInterventions.find(item => idsMatch(item.id, interventionId));
       if (!intervention) return;
+      const draft = applyCostLinePayeeDefaults(
+        buildEmptyCostLine({
+          recurrence: {
+            enabled: false,
+            startDate: intervention.startDate || "",
+            endDate: intervention.endDate || "",
+            occurrences: "",
+            amountPerPeriod: "",
+          },
+        }),
+        intervention,
+        participantLegalName,
+        { allowTypeAutofill: true }
+      );
       setCostLineModal({
         visible: true,
         mode: "add",
         interventionId,
         lineId: null,
-        draft: buildEmptyCostLine({ recurrence: { enabled: false, startDate: intervention.startDate || "", endDate: intervention.endDate || "", occurrences: "", amountPerPeriod: "" } }),
+        draft,
         original: null,
       });
       setCostLineModalErrors({});
+      setCostLineAmountFocused(false);
+      setCostLineAmountPerPeriodFocused(false);
     },
-    [proposedInterventions]
+    [participantLegalName, proposedInterventions]
   );
 
   const openCostLineModal = useCallback(
@@ -1439,17 +2125,28 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       const intervention = proposedInterventions.find(item => idsMatch(item.id, interventionId));
       const line = intervention?.costLines?.find(item => idsMatch(item.id, lineId));
       if (!intervention || !line) return;
+      const normalizedLine = normalizeCostLine(line) || buildEmptyCostLine();
+      const draft = applyCostLinePayeeDefaults(normalizedLine, intervention, participantLegalName, {
+        allowTypeAutofill: false,
+      });
       setCostLineModal({
         visible: true,
         mode: "view",
         interventionId,
         lineId,
-        draft: { ...line },
-        original: { ...line },
+        draft,
+        original: applyCostLinePayeeDefaults(
+          normalizeCostLine(line) || buildEmptyCostLine(),
+          intervention,
+          participantLegalName,
+          { allowTypeAutofill: false }
+        ),
       });
       setCostLineModalErrors({});
+      setCostLineAmountFocused(false);
+      setCostLineAmountPerPeriodFocused(false);
     },
-    [proposedInterventions]
+    [participantLegalName, proposedInterventions]
   );
 
   const resetCostLineModal = () => {
@@ -1462,6 +2159,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       original: null,
     });
     setCostLineModalErrors({});
+    setCostLineAmountFocused(false);
+    setCostLineAmountPerPeriodFocused(false);
   };
 
   const updateCostLineDraft = updater => {
@@ -1477,6 +2176,39 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       };
     });
   };
+  const updateCostLinePayeeType = useCallback(
+    nextPayeeType => {
+      setCostLineModal(prev => {
+        if (!prev.draft) return prev;
+        const intervention =
+          proposedInterventions.find(item => idsMatch(item.id, prev.interventionId)) || null;
+        const normalizedPayeeType = String(nextPayeeType || "").trim();
+        const nextPayee = {
+          ...(prev.draft.payee || {}),
+          type: normalizedPayeeType,
+        };
+        if (normalizedPayeeType === PAYEE_TYPE_PARTICIPANT_CLIENT) {
+          nextPayee.name = "";
+          nextPayee.reference = "";
+        }
+        const nextDraft = applyCostLinePayeeDefaults(
+          {
+            ...prev.draft,
+            payee: nextPayee,
+          },
+          intervention,
+          participantLegalName,
+          { allowTypeAutofill: false }
+        );
+        return {
+          ...prev,
+          draft: nextDraft,
+        };
+      });
+      setCostLineModalErrors({});
+    },
+    [participantLegalName, proposedInterventions]
+  );
 
   const buildRecurrenceFromIntervention = useCallback(
     (intervention, enabled) => {
@@ -1521,18 +2253,24 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         const recurrence = recurrenceEnabled
           ? { ...mergedRecurrence, enabled: true }
           : baseRecurrence;
-        return {
-          ...prev,
-          draft: {
+        const nextDraft = applyCostLinePayeeDefaults(
+          {
             ...prev.draft,
             type: normalizePaymentTypeCode(nextType) || nextType,
             recurrence,
           },
+          intervention,
+          participantLegalName,
+          { allowTypeAutofill: true }
+        );
+        return {
+          ...prev,
+          draft: nextDraft,
         };
       });
       setCostLineModalErrors({});
     },
-    [buildRecurrenceFromIntervention, getRecurrenceModeForType, proposedInterventions]
+    [buildRecurrenceFromIntervention, getRecurrenceModeForType, participantLegalName, proposedInterventions]
   );
 
   const toggleCostLineRecurrence = useCallback(
@@ -1589,9 +2327,19 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   );
 
   const blurCostLineAmount = useCallback(() => {
+    setCostLineAmountFocused(false);
     updateCostLineDraft(draft => {
-      const formatted = formatCurrencyDisplay(draft.amount);
-      return { ...draft, amount: formatted || "" };
+      const sanitized = sanitizeCurrencyInput(draft.amount);
+      return { ...draft, amount: sanitized || "" };
+    });
+  }, [updateCostLineDraft]);
+
+  const blurCostLineAmountPerPeriod = useCallback(() => {
+    setCostLineAmountPerPeriodFocused(false);
+    updateCostLineDraft(draft => {
+      const recurrence = { ...(draft.recurrence || {}) };
+      recurrence.amountPerPeriod = sanitizeCurrencyInput(recurrence.amountPerPeriod) || "";
+      return { ...draft, recurrence };
     });
   }, [updateCostLineDraft]);
 
@@ -1707,7 +2455,13 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
 
   const commitCostLine = () => {
     const draft = costLineModal.draft || null;
-    const errors = validateCostLineDraft(draft);
+    const intervention = proposedInterventions.find(item =>
+      idsMatch(item.id, costLineModal.interventionId)
+    );
+    const resolvedDraft = applyCostLinePayeeDefaults(draft, intervention || null, participantLegalName, {
+      allowTypeAutofill: true,
+    });
+    const errors = validateCostLineDraft(resolvedDraft);
     if (Object.keys(errors).length) {
       setCostLineModalErrors(errors);
       return;
@@ -1717,12 +2471,12 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         if (!idsMatch(intervention.id, costLineModal.interventionId)) return intervention;
         const lines = Array.isArray(intervention.costLines) ? intervention.costLines : [];
         if (costLineModal.mode === "add") {
-          return { ...intervention, costLines: [...lines, draft] };
+          return { ...intervention, costLines: [...lines, resolvedDraft] };
         }
         if (costLineModal.mode === "edit") {
           return {
             ...intervention,
-            costLines: lines.map(line => (idsMatch(line.id, costLineModal.lineId) ? draft : line)),
+            costLines: lines.map(line => (idsMatch(line.id, costLineModal.lineId) ? resolvedDraft : line)),
           };
         }
         return intervention;
@@ -1782,6 +2536,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       setCurrentInterventionStatus(null);
       setError(null);
       setSuccessMessage("");
+      setCompletionNote(null);
       setAttemptedSteps({});
       setCurrentStep(storedStep || BASE_STEP_IDS[0]);
       if (planId) {
@@ -1811,6 +2566,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       }
       setError(null);
       setSuccessMessage("");
+      setCompletionNote(null);
       setAttemptedSteps({});
       setCurrentStep(BASE_STEP_IDS[0]);
       setForm(prev => ({
@@ -1901,11 +2657,17 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
             .map(val => BARRIER_OPTIONS.find(opt => opt.value === (val.value || val)))
             .filter(Boolean)
         : [];
+      const normalizedOtherFunding = normalizeOtherFundingDetails(
+        metadata.otherFundingDetails
+      );
       const hydratedForm = {
         ...defaultFormState,
         actionPlanId: draft.actionPlanId ? String(draft.actionPlanId) : form.actionPlanId,
         rationale: metadata.rationale || draft.notes || "",
-        otherFunding: metadata.otherFunding || "",
+        otherFundingInvolved: normalizedOtherFunding.involved,
+        otherFundingSources: normalizedOtherFunding.sources,
+        otherFundingNwacCoverage: normalizedOtherFunding.nwacCoverage,
+        otherFundingNotes: normalizedOtherFunding.notes,
         childcareNeed: metadata.childcareNeed || "",
         childcareFunding: metadata.childcareFunding || "",
         barriers: mappedBarriers,
@@ -1934,6 +2696,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       setHydratedDraftId(draft.id || null);
       setHydratedDraftUpdatedAt(draft.updatedAt || draft.createdAt || null);
       setCurrentInterventionStatus(draftStatus || null);
+      setCompletionNote(null);
       setAttemptedSteps({});
       setCurrentStep(nextStep);
       setEiVerificationFile(null);
@@ -2000,6 +2763,10 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
 
   const serializeCostLine = useCallback(line => {
     const recurrence = line?.recurrence || {};
+    const payee = line?.payee || {};
+    const payeeType = typeof payee.type === "string" ? payee.type.trim() : "";
+    const payeeName = typeof payee.name === "string" ? payee.name.trim() : "";
+    const payeeReference = typeof payee.reference === "string" ? payee.reference.trim() : "";
     const occurrencesValue =
       recurrence.occurrences === "" || recurrence.occurrences === null || typeof recurrence.occurrences === "undefined"
         ? null
@@ -2010,6 +2777,14 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       type: line?.type || null,
       amount: parseCurrencyInput(line?.amount),
       notes: line?.notes || null,
+      payee:
+        payeeType || payeeName || payeeReference
+          ? {
+              type: payeeType || null,
+              name: payeeName || null,
+              reference: payeeReference || null,
+            }
+          : null,
       recurrence: {
         enabled: Boolean(recurrence.enabled),
         startDate: formatDate(recurrence.startDate) || null,
@@ -2144,6 +2919,14 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       const primaryEndDate = primary?.endDate || "";
       const interventionDuration = calculateDurationDays(primaryStartDate, primaryEndDate);
       const primaryCost = Number.isFinite(interventionTotals.get(primary?.id)) ? interventionTotals.get(primary?.id) : 0;
+      const normalizedOtherFunding = normalizeOtherFundingDetails(
+        {
+          involved: form.otherFundingInvolved,
+          sources: form.otherFundingSources,
+          nwacCoverage: form.otherFundingNwacCoverage,
+          notes: form.otherFundingNotes,
+        }
+      );
       return {
         code: primary?.code || null,
         title: resolveInterventionLabel(primary?.code) || "Draft intervention",
@@ -2159,7 +2942,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
           proposedInterventions: proposedPayload.length ? proposedPayload : null,
           rationale: form.rationale || "",
           barriers: Array.isArray(form.barriers) ? form.barriers.map(item => item.value || item) : [],
-          otherFunding: form.otherFunding || "",
+          otherFundingDetails: normalizedOtherFunding,
           childcareNeed: form.childcareNeed || "",
           childcareFunding: form.childcareFunding || "",
           review: {
@@ -2477,7 +3260,14 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
             : [],
           rationale: form.rationale || "",
           barriers: Array.isArray(form.barriers) ? form.barriers.map(item => item.value || item) : [],
-          otherFunding: form.otherFunding || "",
+          otherFundingDetails: normalizeOtherFundingDetails(
+            {
+              involved: form.otherFundingInvolved,
+              sources: form.otherFundingSources,
+              nwacCoverage: form.otherFundingNwacCoverage,
+              notes: form.otherFundingNotes,
+            }
+          ),
           childcareNeed: form.childcareNeed || "",
           childcareFunding: form.childcareFunding || "",
           review: {
@@ -2628,6 +3418,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
           setCurrentInterventionStatus("planned");
           setSuccessMessage("Interventions approved and created.");
           resetProposalState();
+          setCompletionNote({
+            type: "success",
+            header: "Intervention workflow complete",
+            body: "Approved interventions were created. Start a new proposal from the Interventions table when you are ready.",
+          });
         } else {
           const payload = buildProposalPayload(outcome);
           const updated = await updateInterventionRecord(actionPlanId, Number(activeInterventionIdValue), payload);
@@ -2641,6 +3436,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
           setSuccessMessage(updated ? "Decision submitted." : "Decision submitted.");
           if (outcome === "rejected") {
             resetProposalState();
+            setCompletionNote({
+              type: "info",
+              header: "Proposal closed",
+              body: "The proposal was rejected and closed. Start a new proposal from the Interventions table when needed.",
+            });
           }
         }
       } catch (err) {
@@ -2703,13 +3503,21 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const showCostErrors = Boolean(attemptedSteps.cost);
   const showDecisionErrors = Boolean(attemptedSteps.decision);
 
-  const headerDescription = isSubmittedStatus && isEditable
-    ? "Review the submitted proposal, verify EI status, and record the decision."
-    : isEditable
-      ? "Propose new interventions for this client. Save progress to finish later. Only one draft proposal can exist at a time."
-      : statusValue
-        ? "Viewing this proposal in read-only mode."
-        : "Select a draft or submitted proposal from the Interventions table to view it here.";
+  const handleStartAnotherProposal = useCallback(() => {
+    setCompletionNote(null);
+    setSuccessMessage("");
+    setError(null);
+  }, []);
+
+  const headerDescription = completionNote
+    ? "This intervention workflow is complete."
+    : isSubmittedStatus && isEditable
+      ? "Review the submitted proposal, verify EI status, and record the decision."
+      : isEditable
+        ? "Propose new interventions for this client. Save progress to finish later. Only one draft proposal can exist at a time."
+        : statusValue
+          ? "Viewing this proposal in read-only mode."
+          : "Select a draft or submitted proposal from the Interventions table to view it here.";
 
   const infoLink = metadata.helpComponent && toggleHelpPanel ? (
     <Link
@@ -2889,16 +3697,138 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     </SpaceBetween>
   );
 
+  const otherFundingSourceItems = useMemo(
+    () => normalizeOtherFundingSources(form.otherFundingSources, { keepEmpty: true }),
+    [form.otherFundingSources]
+  );
+
+  const otherFundingSourceTableColumns = useMemo(
+    () => [
+      {
+        id: "name",
+        header: "Funder name",
+        minWidth: 180,
+        cell: item => item.name || "—",
+      },
+      {
+        id: "type",
+        header: "Funder type",
+        minWidth: 140,
+        cell: item => resolveOtherFunderTypeLabel(item.type),
+      },
+      {
+        id: "coverage",
+        header: "What this funder covers",
+        minWidth: 260,
+        cell: item => item.coverage || "—",
+      },
+      {
+        id: "actions",
+        header: "Actions",
+        width: 92,
+        minWidth: 92,
+        cell: item => (
+          <SpaceBetween direction="horizontal" size="xxs">
+            <Button
+              variant="inline-icon"
+              iconName="edit"
+              ariaLabel={`Edit ${item.name || "other funder"}`}
+              onClick={() => openEditOtherFundingSourceModal(item.id)}
+              disabled={isFormLocked}
+            />
+            <Button
+              variant="inline-icon"
+              iconName="remove"
+              ariaLabel={`Delete ${item.name || "other funder"}`}
+              onClick={() => removeOtherFundingSource(item.id)}
+              disabled={isFormLocked}
+            />
+          </SpaceBetween>
+        ),
+      },
+    ],
+    [isFormLocked, openEditOtherFundingSourceModal, removeOtherFundingSource]
+  );
+
   const otherFundingStepContent = (
     <SpaceBetween size="m">
       <FormField
-        label="Other funding sources"
-        description="Current participant: document any changes since the original approval. Note new or ended funding sources (Band funding, scholarships, other programs), any amount changes, and attach supporting documentation to avoid double-dipping."
+        label="Other funding involved?"
+        description="Identify whether other funding is part of this request."
       >
+        <Select
+          selectedOption={
+            OTHER_FUNDING_INVOLVED_OPTIONS.find(option => option.value === form.otherFundingInvolved) || null
+          }
+          onChange={({ detail }) => {
+            const nextValue = detail.selectedOption?.value || "";
+            if (nextValue !== "yes") {
+              resetOtherFundingSourceModal();
+            }
+            updateOtherFundingFields(prev => {
+              const resetValues = nextValue === "yes"
+                ? {}
+                : {
+                    otherFundingSources: [],
+                    otherFundingNwacCoverage: "",
+                  };
+              return {
+                ...prev,
+                otherFundingInvolved: nextValue,
+                ...resetValues,
+              };
+            });
+          }}
+          options={OTHER_FUNDING_INVOLVED_OPTIONS}
+          placeholder="Select"
+          disabled={isFormLocked}
+        />
+      </FormField>
+      {form.otherFundingInvolved === "yes" && (
+        <SpaceBetween size="m">
+          <Table
+            stripedRows
+            variant="embedded"
+            trackBy="id"
+            items={otherFundingSourceItems}
+            columnDefinitions={otherFundingSourceTableColumns}
+            resizableColumns
+            header={
+              <Header
+                variant="h3"
+                actions={
+                  <Button onClick={openAddOtherFundingSourceModal} disabled={isFormLocked}>
+                    Add other funder
+                  </Button>
+                }
+              >
+                Other funders
+              </Header>
+            }
+            empty={
+              <Alert type="info">
+                Add each non-NWAC funder so coordination is clear.
+              </Alert>
+            }
+          />
+          <FormField
+            label="What NWAC funding will cover"
+            description="Describe the NWAC-funded supports to avoid overlap."
+          >
+            <Textarea
+              value={form.otherFundingNwacCoverage || ""}
+              onChange={({ detail }) => updateOtherFundingFields({ otherFundingNwacCoverage: detail.value })}
+              rows={3}
+              disabled={isFormLocked}
+            />
+          </FormField>
+        </SpaceBetween>
+      )}
+      <FormField label="Additional notes (optional)">
         <Textarea
-          value={form.otherFunding}
-          onChange={({ detail }) => handleChange("otherFunding", detail.value)}
-          rows={4}
+          value={form.otherFundingNotes || ""}
+          onChange={({ detail }) => updateOtherFundingFields({ otherFundingNotes: detail.value })}
+          rows={3}
           disabled={isFormLocked}
         />
       </FormField>
@@ -3024,28 +3954,17 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
                   },
                 },
                 {
-                  id: "installments",
-                  header: "Installments",
+                  id: "details",
+                  header: "Details",
                   cell: item => {
                     const lineErrors = costErrors[intervention.id]?.[item.id] || {};
-                    const recurrence = item.recurrence || {};
-                    const enabled = Boolean(recurrence.enabled);
-                    if (!enabled) {
-                      return (
-                        <SpaceBetween size="xxs">
-                          <Box>in 1 installment</Box>
-                          {showCostErrors && lineErrors.recurrence && (
-                            <Box color="text-status-error" fontSize="body-s">
-                              {lineErrors.recurrence}
-                            </Box>
-                          )}
-                        </SpaceBetween>
-                      );
-                    }
-                    const occurrences = recurrence.occurrences ? String(recurrence.occurrences) : "—";
+                    const details = getCostLineDetailsText(item, intervention);
                     return (
                       <SpaceBetween size="xxs">
-                        <Box>{`in ${occurrences} installment${occurrences === "1" ? "" : "s"}`}</Box>
+                        <Box>{details.text}</Box>
+                        {details.notesText && (
+                          <Box fontStyle="italic">{details.notesText}</Box>
+                        )}
                         {showCostErrors && lineErrors.recurrence && (
                           <Box color="text-status-error" fontSize="body-s">
                             {lineErrors.recurrence}
@@ -3091,6 +4010,18 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     </SpaceBetween>
   );
 
+  const reviewOtherFundingInvolved =
+    form.otherFundingInvolved === "yes"
+      ? "Yes"
+      : form.otherFundingInvolved === "no"
+        ? "No"
+        : form.otherFundingInvolved === "unknown"
+          ? "Unknown"
+          : "";
+  const reviewOtherFundingSources = normalizeOtherFundingSources(form.otherFundingSources);
+  const reviewOtherFundingNotes = String(form.otherFundingNotes || "").trim();
+  const reviewOtherFundingNwacCoverage = String(form.otherFundingNwacCoverage || "").trim();
+
   const reviewStepContent = (
     <SpaceBetween size="m">
       <ColumnLayout columns={2} variant="text-grid">
@@ -3101,7 +4032,29 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         </Box>
         <Box>
           <Header variant="h4">Other funding</Header>
-          <div>{form.otherFunding || "—"}</div>
+          {reviewOtherFundingInvolved ? (
+            <div>Other funding involved: {reviewOtherFundingInvolved}</div>
+          ) : null}
+          {reviewOtherFundingSources.length ? (
+            <SpaceBetween size="xxs">
+              {reviewOtherFundingSources.map((source, index) => (
+                <div key={source.id || `${source.name}-${index}`}>
+                  {resolveOtherFunderTypeLabel(source.type)}: {source.name || "Unnamed funder"}
+                  {source.coverage ? ` — ${source.coverage}` : ""}
+                </div>
+              ))}
+            </SpaceBetween>
+          ) : null}
+          {reviewOtherFundingNwacCoverage ? (
+            <div>NWAC funding covers: {reviewOtherFundingNwacCoverage}</div>
+          ) : null}
+          {reviewOtherFundingNotes ? (
+            <div>Notes: {reviewOtherFundingNotes}</div>
+          ) : null}
+          {!reviewOtherFundingInvolved &&
+            !reviewOtherFundingSources.length &&
+            !reviewOtherFundingNwacCoverage &&
+            !reviewOtherFundingNotes && <div>—</div>}
         </Box>
         <Box>
           <Header variant="h4">Proposed interventions</Header>
@@ -3262,6 +4215,87 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
           <Box key={reason}>{reason}</Box>
         ))}
       </SpaceBetween>
+    </Modal>
+  );
+
+  const otherFundingSourceModalDraft = otherFundingSourceModal.draft
+    ? buildEmptyOtherFundingSource(otherFundingSourceModal.draft)
+    : null;
+  const otherFundingSourceModalDirty =
+    otherFundingSourceModal.mode === "edit"
+      ? JSON.stringify(otherFundingSourceModalDraft || {}) !==
+        JSON.stringify(otherFundingSourceModal.original || {})
+      : true;
+
+  const otherFundingSourceModalContent = (
+    <Modal
+      visible={otherFundingSourceModal.visible}
+      onDismiss={resetOtherFundingSourceModal}
+      header={otherFundingSourceModal.mode === "add" ? "Add other funder" : "Edit other funder"}
+      footer={
+        <SpaceBetween direction="horizontal" size="xs">
+          <Button
+            variant="primary"
+            onClick={saveOtherFundingSourceModal}
+            disabled={isFormLocked || (otherFundingSourceModal.mode === "edit" && !otherFundingSourceModalDirty)}
+          >
+            {otherFundingSourceModal.mode === "add" ? "Add funder" : "Save changes"}
+          </Button>
+          <Button variant="link" onClick={resetOtherFundingSourceModal}>Cancel</Button>
+        </SpaceBetween>
+      }
+    >
+      {otherFundingSourceModalDraft && (
+        <SpaceBetween size="s">
+          <FormField label="Funder name" errorText={otherFundingSourceModalErrors.name}>
+            <Input
+              value={otherFundingSourceModalDraft.name || ""}
+              onChange={({ detail }) => {
+                updateOtherFundingSourceModalDraft({ name: detail.value });
+                setOtherFundingSourceModalErrors(prev => {
+                  const next = { ...prev };
+                  delete next.name;
+                  return next;
+                });
+              }}
+              readOnly={isFormLocked}
+            />
+          </FormField>
+          <FormField label="Funder type">
+            <Select
+              selectedOption={
+                OTHER_FUNDER_TYPE_OPTIONS.find(option => option.value === otherFundingSourceModalDraft.type) ||
+                OTHER_FUNDER_TYPE_OPTIONS.find(option => option.value === "other") ||
+                OTHER_FUNDER_TYPE_OPTIONS[0]
+              }
+              onChange={({ detail }) => {
+                updateOtherFundingSourceModalDraft({ type: detail.selectedOption?.value || "other" });
+              }}
+              options={OTHER_FUNDER_TYPE_OPTIONS}
+              placeholder="Select funder type"
+              readOnly={isFormLocked}
+            />
+          </FormField>
+          <FormField
+            label="What this funder covers"
+            errorText={otherFundingSourceModalErrors.coverage}
+          >
+            <Textarea
+              value={otherFundingSourceModalDraft.coverage || ""}
+              rows={4}
+              onChange={({ detail }) => {
+                updateOtherFundingSourceModalDraft({ coverage: detail.value });
+                setOtherFundingSourceModalErrors(prev => {
+                  const next = { ...prev };
+                  delete next.coverage;
+                  return next;
+                });
+              }}
+              readOnly={isFormLocked}
+            />
+          </FormField>
+        </SpaceBetween>
+      )}
     </Modal>
   );
 
@@ -3675,19 +4709,29 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     ? false
     : costLineRecurrenceRequired || Boolean(costLineDraft?.recurrence?.enabled);
   const costLineAmountDisplay = costLineDraft
-    ? (isCostLineEditable
-      ? sanitizeCurrencyInput(costLineDraft.amount)
-      : getCurrencyInputDisplayValue(parseCurrencyInput(costLineDraft.amount) ?? "", false))
+    ? getCurrencyInputDisplayValue(
+        sanitizeCurrencyInput(costLineDraft.amount),
+        isCostLineEditable ? costLineAmountFocused : false,
+      )
     : "";
   const costLineAmountPerPeriodDisplay = costLineDraft
-    ? (isCostLineEditable
-      ? sanitizeCurrencyInput(costLineDraft.recurrence?.amountPerPeriod)
-      : getCurrencyInputDisplayValue(parseCurrencyInput(costLineDraft.recurrence?.amountPerPeriod) ?? "", false))
+    ? getCurrencyInputDisplayValue(
+        sanitizeCurrencyInput(costLineDraft.recurrence?.amountPerPeriod),
+        isCostLineEditable ? costLineAmountPerPeriodFocused : false,
+      )
     : "";
   const costLineRecurrenceStart =
     costLineDraft?.recurrence?.startDate || costLineIntervention?.startDate || "";
   const costLineRecurrenceEnd =
     costLineDraft?.recurrence?.endDate || costLineIntervention?.endDate || "";
+  const costLinePayeeType = String(costLineDraft?.payee?.type || "").trim();
+  const isParticipantPayeeType = costLinePayeeType === PAYEE_TYPE_PARTICIPANT_CLIENT;
+  const lockParticipantPayeeName = isParticipantPayeeType && Boolean(participantLegalName);
+  const costLinePayeeNamePlaceholder = isParticipantPayeeType
+    ? participantLegalName
+      ? "Auto-filled from participant legal name"
+      : "Participant legal name unavailable - enter full legal name"
+    : "Enter payee name";
 
   const costLineModalContent = (
     <Modal
@@ -3752,11 +4796,53 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
               inputMode="decimal"
               value={costLineAmountDisplay}
               onChange={({ detail }) => updateCostLineAmount(detail.value)}
+              onFocus={() => setCostLineAmountFocused(true)}
               onBlur={blurCostLineAmount}
               placeholder="0.00"
               readOnly={!isCostLineEditable || isFormLocked}
             />
           </FormField>
+          <FormField label="Payee type">
+            <Select
+              selectedOption={findOptionByValue(PAYEE_TYPE_OPTIONS, costLineDraft.payee?.type)}
+              onChange={({ detail }) => updateCostLinePayeeType(detail.selectedOption?.value || "")}
+              options={PAYEE_TYPE_OPTIONS}
+              placeholder="Select payee type"
+              readOnly={!isCostLineEditable || isFormLocked}
+            />
+          </FormField>
+          <FormField label="Payee name">
+            <Input
+              value={costLineDraft.payee?.name || ""}
+              onChange={({ detail }) =>
+                updateCostLineDraft({
+                  payee: {
+                    ...(costLineDraft.payee || {}),
+                    name: detail.value,
+                  },
+                })
+              }
+              placeholder={costLinePayeeNamePlaceholder}
+              readOnly={!isCostLineEditable || isFormLocked || lockParticipantPayeeName}
+            />
+          </FormField>
+          {costLinePayeeType && !isParticipantPayeeType && (
+            <FormField label="Payee reference (optional)">
+              <Input
+                value={costLineDraft.payee?.reference || ""}
+                onChange={({ detail }) =>
+                  updateCostLineDraft({
+                    payee: {
+                      ...(costLineDraft.payee || {}),
+                      reference: detail.value,
+                    },
+                  })
+                }
+                placeholder="Vendor/account reference"
+                readOnly={!isCostLineEditable || isFormLocked}
+              />
+            </FormField>
+          )}
           <FormField label="Installments (monthly)" errorText={costLineModalErrors.recurrence}>
             <Checkbox
               checked={costLineRecurrenceEnabled}
@@ -3803,6 +4889,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
                     inputMode="decimal"
                     value={costLineAmountPerPeriodDisplay}
                     onChange={({ detail }) => updateCostLineAmountPerPeriod(detail.value)}
+                    onFocus={() => setCostLineAmountPerPeriodFocused(true)}
+                    onBlur={blurCostLineAmountPerPeriod}
                     readOnly={!isCostLineEditable || isFormLocked}
                   />
                 </FormField>
@@ -3844,6 +4932,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const activeStepIndex = Math.max(activeStepIds.indexOf(currentStep), 0);
   const wizardSubmitLabel = isSubmittedStatus ? "Submit Decision" : "Submit for approval";
   const wizardSubmitHandler = isSubmittedStatus ? handleSubmitDecision : handleSubmitProposal;
+  const wizardIsWorking = isSubmitting || eiVerificationUploading;
 
   return (
     <BoardItem header={
@@ -3852,8 +4941,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         info={infoLink}
         actions={
           <SpaceBetween direction="horizontal" size="s">
-            <Badge color="blue">{statusLabel}</Badge>
-            {isEditable && !isSubmittedStatus && (
+            <Badge color={statusBadgeColor}>{statusLabel}</Badge>
+            {isEditable && !isSubmittedStatus && !completionNote && (
               <Button variant="primary" disabled={!isDirty} onClick={handleSave}>Save Progress</Button>
             )}
           </SpaceBetween>
@@ -3878,62 +4967,75 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
             {error}
           </Alert>
         )}
-        {successMessage && (
+        {successMessage && !completionNote && (
           <Alert type="success" dismissible onDismiss={() => setSuccessMessage("")} statusIconAriaLabel="Success">
             {successMessage}
           </Alert>
         )}
-        <Wizard
-          className={isPlanStepBlocked || isFramingStepBlocked ? styles.blockNext : undefined}
-          activeStepIndex={activeStepIndex}
-          onNavigate={async ({ detail }) => {
-            const requestedStepIndex = detail?.requestedStepIndex;
-            if (requestedStepIndex < 0 || requestedStepIndex >= activeStepIds.length) return;
-            const requestedStepId = activeStepIds[requestedStepIndex];
-            const currentIdx = activeStepIds.indexOf(currentStep);
-            const movingForward = requestedStepIndex > currentIdx;
-            if (movingForward && isPlanStepBlocked) {
-              setAttemptedSteps(prev => ({ ...prev, plan: true }));
-              setError("Create an action plan before proposing interventions.");
-              return;
-            }
-            if (movingForward && isFramingStepBlocked) {
-              setAttemptedSteps(prev => ({ ...prev, framing: true }));
-              setError("Add at least one proposed intervention before continuing.");
-              return;
-            }
-            if (movingForward) {
-              setAttemptedSteps(prev => ({ ...prev, [currentStep]: true }));
-              if (!validateStep(currentStep)) {
-                setError("Complete required fields before continuing.");
+        {completionNote ? (
+          <Alert
+            type={completionNote.type || "success"}
+            header={completionNote.header}
+            statusIconAriaLabel={completionNote.type === "info" ? "Info" : "Success"}
+            action={<Button onClick={handleStartAnotherProposal}>Start new proposal</Button>}
+          >
+            {completionNote.body}
+          </Alert>
+        ) : (
+          <Wizard
+            className={isPlanStepBlocked || isFramingStepBlocked ? styles.blockNext : undefined}
+            activeStepIndex={activeStepIndex}
+            isLoadingNextStep={wizardIsWorking}
+            onNavigate={async ({ detail }) => {
+              const requestedStepIndex = detail?.requestedStepIndex;
+              if (requestedStepIndex < 0 || requestedStepIndex >= activeStepIds.length) return;
+              const requestedStepId = activeStepIds[requestedStepIndex];
+              const currentIdx = activeStepIds.indexOf(currentStep);
+              const movingForward = requestedStepIndex > currentIdx;
+              if (movingForward && isPlanStepBlocked) {
+                setAttemptedSteps(prev => ({ ...prev, plan: true }));
+                setError("Create an action plan before proposing interventions.");
                 return;
               }
-            }
-            if (
-              requestedStepIndex !== currentIdx &&
-              !isSubmittedStatus &&
-              isEditable &&
-              isDirty &&
-              !isSubmitting &&
-              canAutoSave
-            ) {
-              const saveResult = await handleSave({ silent: true });
-              if (!saveResult?.ok) {
-                setError(saveResult?.error?.message || "Failed to save progress.");
+              if (movingForward && isFramingStepBlocked) {
+                setAttemptedSteps(prev => ({ ...prev, framing: true }));
+                setError("Add at least one proposed intervention before continuing.");
                 return;
               }
-            }
-            setError(null);
-            setCurrentStep(requestedStepId);
-          }}
-          onSubmit={isEditable ? wizardSubmitHandler : undefined}
-          submitButtonText={isEditable ? wizardSubmitLabel : "Read only"}
-          cancelButtonText={isEditable ? "Cancel" : undefined}
-          nextButtonText="Next"
-          previousButtonText="Previous"
-          steps={steps}
-        />
+              if (movingForward) {
+                setAttemptedSteps(prev => ({ ...prev, [currentStep]: true }));
+                if (!validateStep(currentStep)) {
+                  setError("Complete required fields before continuing.");
+                  return;
+                }
+              }
+              if (
+                requestedStepIndex !== currentIdx &&
+                !isSubmittedStatus &&
+                isEditable &&
+                isDirty &&
+                !isSubmitting &&
+                canAutoSave
+              ) {
+                const saveResult = await handleSave({ silent: true });
+                if (!saveResult?.ok) {
+                  setError(saveResult?.error?.message || "Failed to save progress.");
+                  return;
+                }
+              }
+              setError(null);
+              setCurrentStep(requestedStepId);
+            }}
+            onSubmit={isEditable && !wizardIsWorking ? wizardSubmitHandler : undefined}
+            submitButtonText={isEditable ? (wizardIsWorking ? "Working" : wizardSubmitLabel) : "Read only"}
+            cancelButtonText={isEditable ? "Cancel" : undefined}
+            nextButtonText="Next"
+            previousButtonText="Previous"
+            steps={steps}
+          />
+        )}
         {decisionBlockerModal}
+        {otherFundingSourceModalContent}
         {interventionModalContent}
         {interventionDeleteModal}
         {costLineModalContent}

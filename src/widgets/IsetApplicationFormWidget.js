@@ -513,6 +513,13 @@ const CONFLICT_DECLARATION_PARAGRAPHS = [
   'I have not requested that my application be given priority ahead of other applicants, as I understand my application will be assessed in the order in which it was received by NWAC and/or the regional PTMA.',
   'I have disclosed below any relationships, positive or negative biases, or circumstances that may create a real or perceived conflict of interest.'
 ];
+const AUTHORIZATION_RELEASE_PARAGRAPHS = [
+  "I, the undersigned, give my expressed and informed consent to the educational/training institute or my Employer (under a TWS or JCP), to release information to the Native Women's Association of Canada and/or its sub-agreement holders to the Indigenous Skills and Employment Training Program (hereinafter referred to as ISET).",
+  'I understand that my consent and authorization is valid in perpetuity for all information related to the program, classes, attendance, or wage subsidy that are funded by Employment and Social Development Canada (ESDC) under the ISET program and delivered by NWAC and/or its sub-agreement holders.',
+  "I understand that it is my personal responsibility to inform the Registrar's Office, my Employer and the NWAC and/or its sub-agreement holder in writing should I decide to withdraw my consent to release student information.",
+  'Under the Freedom of Information and Protection of Individual Privacy Act, I have the right to privacy of personal information held by government institutions, including institutions of learning.',
+  'My signature denotes my consent and authorization for the training/educational institution or Employer for which I received funding or wage subsidy through the ISET program to release personal information as described above to NWAC and/or its designate.'
+];
 const CONFLICT_DECLARATION_STATEMENT =
   'Are you declaring a conflict of interest or bias in relation to your ISET application?';
 const CONFLICT_OPTION_LABELS = {
@@ -532,7 +539,7 @@ const resolveSignatureTimestamp = (signature) => {
   );
 };
 
-const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, onOpenConflictModal } = {}) => [
+const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, onOpenAuthorizationModal, onOpenConflictModal } = {}) => [
   {
     id: 'consent',
     title: 'Consent & declarations',
@@ -591,6 +598,32 @@ const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, on
         renderValue: answers => (
           signatureStatus(answers?.consent)
         )
+      },
+      {
+        label: (
+          <Box display="inline-flex" alignItems="center">
+            <Box as="span" display="inline" fontWeight="bold" margin={{ right: 'xxs' }}>
+              Authorization for release of ISET client information
+            </Box>
+            <Button
+              variant="icon"
+              iconName="external"
+              ariaLabel="View authorization for release of ISET client information"
+              onClick={event => {
+                event?.preventDefault();
+                event?.stopPropagation();
+                onOpenAuthorizationModal?.();
+              }}
+            />
+          </Box>
+        ),
+        editable: false,
+        renderValue: answers =>
+          signatureStatus(
+            answers?.auth_froici_sing ||
+            answers?.auth_froici_sign ||
+            answers?.authorization_for_release_of_iset_client_information
+          )
       },
       {
         label: (
@@ -1099,6 +1132,8 @@ const IsetApplicationFormWidget = ({
   const [flashbarItems, setFlashbarItems] = useState([]);
   const [consentModalVisible, setConsentModalVisible] = useState(false);
   const [consentDownloadLoading, setConsentDownloadLoading] = useState(false);
+  const [authorizationModalVisible, setAuthorizationModalVisible] = useState(false);
+  const [authorizationDownloadLoading, setAuthorizationDownloadLoading] = useState(false);
   const [indigenousModalVisible, setIndigenousModalVisible] = useState(false);
   const [indigenousDownloadLoading, setIndigenousDownloadLoading] = useState(false);
   const [conflictModalVisible, setConflictModalVisible] = useState(false);
@@ -1355,6 +1390,14 @@ const IsetApplicationFormWidget = ({
 
   const handleCloseConsentModal = useCallback(() => {
     setConsentModalVisible(false);
+  }, []);
+
+  const handleOpenAuthorizationModal = useCallback(() => {
+    setAuthorizationModalVisible(true);
+  }, []);
+
+  const handleCloseAuthorizationModal = useCallback(() => {
+    setAuthorizationModalVisible(false);
   }, []);
 
   const handleOpenIndigenousModal = useCallback(() => {
@@ -1946,9 +1989,10 @@ const IsetApplicationFormWidget = ({
       buildSectionDefinitions({
         onOpenConsentModal: handleOpenConsentModal,
         onOpenIndigenousModal: handleOpenIndigenousModal,
+        onOpenAuthorizationModal: handleOpenAuthorizationModal,
         onOpenConflictModal: handleOpenConflictModal
       }),
-    [handleOpenConsentModal, handleOpenIndigenousModal, handleOpenConflictModal]
+    [handleOpenConsentModal, handleOpenIndigenousModal, handleOpenAuthorizationModal, handleOpenConflictModal]
   );
   const fieldLabelLookup = useMemo(() => {
     const lookup = new Map();
@@ -2007,6 +2051,18 @@ const IsetApplicationFormWidget = ({
     null;
   const displayTimestamp = consentSignedAtRaw || submissionTimestampRaw;
   const consentSignedAt = displayTimestamp ? formatDateTime(displayTimestamp) : '-';
+
+  const authorizationSignature = (
+    answers?.auth_froici_sing ||
+    answers?.auth_froici_sign ||
+    answers?.authorization_for_release_of_iset_client_information ||
+    {}
+  );
+  const authorizationSignedName = authorizationSignature?.name || 'Not provided';
+  const authorizationSigned = Boolean(authorizationSignature?.signed);
+  const authorizationSignedAtRaw = resolveSignatureTimestamp(authorizationSignature);
+  const authorizationDisplayTimestamp = authorizationSignedAtRaw || submissionTimestampRaw;
+  const authorizationSignedAt = authorizationDisplayTimestamp ? formatDateTime(authorizationDisplayTimestamp) : '-';
 
   const indigenousSignature = answers?.indigenous_declaration || {};
   const indigenousSignedName = indigenousSignature?.name || 'Not provided';
@@ -2068,6 +2124,55 @@ const IsetApplicationFormWidget = ({
       setConsentDownloadLoading(false);
     }
   }, [application?.id, consentSigned, consentSignedName, displayTimestamp, pushFlash]);
+
+  const handleDownloadAuthorization = useCallback(async () => {
+    if (typeof window === 'undefined' || !application?.id) return;
+    setAuthorizationDownloadLoading(true);
+    try {
+      const response = await apiFetch('/api/authorization-release/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          applicationId: application.id,
+          declarationSigned: authorizationSigned,
+          declarationSignedName: authorizationSignedName,
+          declarationSignedAt: authorizationDisplayTimestamp
+        })
+      });
+      if (!response.ok) {
+        let message = 'Failed to download authorization for release form';
+        try {
+          const errBody = await response.json();
+          if (errBody?.error) message = errBody.error;
+        } catch (_) {}
+        throw new Error(message);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+        throw new Error('Authorization release response was empty');
+      }
+      const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const fileName = `authorization-release-iset-client-information-${application.id}.pdf`;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      pushFlash({ type: 'error', content: error?.message || 'Failed to download authorization for release form' });
+    } finally {
+      setAuthorizationDownloadLoading(false);
+    }
+  }, [
+    application?.id,
+    authorizationSigned,
+    authorizationSignedName,
+    authorizationDisplayTimestamp,
+    pushFlash
+  ]);
 
   const handleDownloadIndigenous = useCallback(async () => {
     if (typeof window === 'undefined' || !application?.id) return;
@@ -2425,6 +2530,87 @@ const IsetApplicationFormWidget = ({
               )}
             </Box>
           ) : null}
+        </Modal>
+      )}
+      {authorizationModalVisible && (
+        <Modal
+          visible
+          size="large"
+          header="Authorization for Release of ISET Client Information"
+          onDismiss={handleCloseAuthorizationModal}
+          footer={
+            <SpaceBetween direction="horizontal" size="xs" alignItems="end">
+              <Button onClick={handleDownloadAuthorization} loading={authorizationDownloadLoading} disabled={authorizationDownloadLoading}>
+                Download (PDF)
+              </Button>
+              <Button variant="primary" onClick={handleCloseAuthorizationModal}>
+                Close
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="l">
+            <Box textAlign="center">
+              <Box margin={{ bottom: 's' }} display="flex" justifyContent="center">
+                <img
+                  src="/nwac-consent-logo.png"
+                  alt="Native Women's Association of Canada logo"
+                  style={{ maxHeight: '64px', width: 'auto' }}
+                />
+              </Box>
+              <Box fontSize="heading-s" fontWeight="bold">
+                Native Women's Association of Canada
+              </Box>
+              <Box fontSize="body-s" color="text-body-secondary">
+                Association des femmes autochtones du Canada
+              </Box>
+            </Box>
+            <SpaceBetween size="s">
+              {AUTHORIZATION_RELEASE_PARAGRAPHS.map((paragraph, index) => (
+                <Box key={index} lineHeight="body-m">
+                  {paragraph}
+                </Box>
+              ))}
+            </SpaceBetween>
+            <ColumnLayout columns={2} variant="text-grid">
+              <SpaceBetween size="xs">
+                <Box fontWeight="bold">Client signature</Box>
+                <Box
+                  borderColor="border-divider"
+                  borderStyle="solid"
+                  borderWidth="1px"
+                  borderRadius="small"
+                  padding="m"
+                  backgroundColor="background-secondary"
+                  minHeight="4rem"
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="flex-start"
+                >
+                  {authorizationSigned ? (
+                    <Box fontFamily="'Segoe Script', 'Lucida Handwriting', cursive" fontSize="heading-xl">
+                      {authorizationSignedName}
+                    </Box>
+                  ) : (
+                    <Box color="text-status-inactive">Not signed</Box>
+                  )}
+                </Box>
+                <Box fontSize="body-s" color="text-body-secondary">
+                  Client signature
+                </Box>
+              </SpaceBetween>
+              <SpaceBetween size="xs">
+                <Box fontWeight="bold">Signed on</Box>
+                <Box>{authorizationSigned ? authorizationSignedAt : 'Not signed'}</Box>
+                <Box fontSize="body-s" color="text-body-secondary">
+                  Electronic consent captured via the ISET intake portal.
+                </Box>
+              </SpaceBetween>
+            </ColumnLayout>
+            <Box color="text-body-secondary" fontSize="body-s" textAlign="center">
+              NWAC wishes to acknowledge support for this project through the Government of Canada's ISET Program.
+            </Box>
+          </SpaceBetween>
         </Modal>
       )}
       {indigenousModalVisible && (

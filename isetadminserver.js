@@ -28,10 +28,10 @@ const ENSURED_HISTORY_EVENT_TYPE_ENUM = { prepared: false };
 const INTAKE_ROOT = path.resolve(__dirname, '..', 'ISET-intake');
 const INTAKE_UPLOADS_ROOT = path.join(INTAKE_ROOT, 'uploads');
 const ADMIN_MANUAL_UPLOAD_DIR = path.join(INTAKE_UPLOADS_ROOT, 'manual');
-const ASSESSMENT_PDF_TEMPLATE_PATH = path.join(__dirname, 'tmp_assessment_template.html');
-const APPLICATION_FORM_PDF_TEMPLATE_PATH = path.join(__dirname, 'tmp_application_form_template.html');
-const FINANCIAL_OVERVIEW_PDF_TEMPLATE_PATH = path.join(__dirname, 'tmp_financial_overview_template.html');
-const FUNDING_AGREEMENT_PDF_TEMPLATE_PATH = path.join(__dirname, 'tmp_cfa_template.html');
+const ASSESSMENT_PDF_TEMPLATE_PATH = path.join(__dirname, 'src', 'server', 'templates', 'pdf', 'assessment.html');
+const APPLICATION_FORM_PDF_TEMPLATE_PATH = path.join(__dirname, 'src', 'server', 'templates', 'pdf', 'application-form.html');
+const FINANCIAL_OVERVIEW_PDF_TEMPLATE_PATH = path.join(__dirname, 'src', 'server', 'templates', 'pdf', 'financial-overview.html');
+const FUNDING_AGREEMENT_PDF_TEMPLATE_PATH = path.join(__dirname, 'src', 'server', 'templates', 'pdf', 'funding-agreement.html');
 const CFA_TEMPLATE_KEY = 'ISET_CFA_STANDARD';
 const CFA_SNAPSHOT_SCHEMA_VERSION = '1';
 const CFA_TEMPLATE_VERSION = '1';
@@ -1524,6 +1524,7 @@ async function storeFundingAgreementPdfDocument({
   cfaVersionId,
   pdfBuffer,
   isRedline = false,
+  signedByClient = false,
   connection = null
 }) {
   if (!caseId || !applicationId || !pdfBuffer) return null;
@@ -1534,10 +1535,15 @@ async function storeFundingAgreementPdfDocument({
   }
   const docType = 'funding_agreement';
   const labelBase = `CFA v${versionNumber}`;
-  const label = isRedline ? `${labelBase} (redline)` : labelBase;
+  const label = isRedline
+    ? `${labelBase} (redline)`
+    : signedByClient
+      ? `${labelBase} (signed)`
+      : `${labelBase} (for signature)`;
   const baseRef = normaliseString(trackingId) || String(caseId);
-  const docSlug = isRedline ? 'cfa-redline' : 'cfa';
-  const displayName = `${docSlug}-v${versionNumber}-${baseRef}.pdf`;
+  const displayName = isRedline
+    ? `cfa-v${versionNumber}-${baseRef}-redline.pdf`
+    : `cfa-v${versionNumber}-${baseRef}.pdf`;
   const sizeBytes = Number.isFinite(Number(pdfBuffer?.length)) ? Number(pdfBuffer.length) : null;
   const checksum = pdfBuffer ? crypto.createHash('sha256').update(pdfBuffer).digest('hex') : null;
   const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
@@ -1569,6 +1575,7 @@ async function storeFundingAgreementPdfDocument({
     variant: isRedline ? 'redline' : 'clean',
     template_key: CFA_TEMPLATE_KEY
   });
+  const source = 'system_generated';
 
   const insertPayload = [
     caseId,
@@ -1577,6 +1584,7 @@ async function storeFundingAgreementPdfDocument({
     normalizedClientId,
     normalizedApplicantUserId,
     normalizedActorUserId,
+    source,
     displayName,
     relativePath,
     'application/pdf',
@@ -1590,7 +1598,7 @@ async function storeFundingAgreementPdfDocument({
   const [result] = await runner.query(
     `INSERT INTO iset_document
        (case_id, application_id, action_plan_id, client_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
-     VALUES (?,?,?,?,?,?,'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+     VALUES (?,?,?,?,?,?,?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
     insertPayload
   );
   return result?.insertId || null;
@@ -1730,6 +1738,13 @@ const CONFLICT_DECLARATION_PARAGRAPHS = [
   "I have not requested that my application be given priority ahead of other applicants, as I understand my application will be assessed in the order in which it was received by NWAC and/or the regional PTMA.",
   "I have disclosed below any relationships, positive or negative biases, or circumstances that may create a real or perceived conflict of interest."
 ];
+const AUTHORIZATION_RELEASE_PARAGRAPHS = [
+  "I, the undersigned, give my expressed and informed consent to the educational/training institute or my Employer (under a TWS or JCP), to release information to the Native Women's Association of Canada and/or its sub-agreement holders to the Indigenous Skills and Employment Training Program (hereinafter referred to as ISET).",
+  'I understand that my consent and authorization is valid in perpetuity for all information related to the program, classes, attendance, or wage subsidy that are funded by Employment and Social Development Canada (ESDC) under the ISET program and delivered by NWAC and/or its sub-agreement holders.',
+  "I understand that it is my personal responsibility to inform the Registrar's Office, my Employer and the NWAC and/or its sub-agreement holder in writing should I decide to withdraw my consent to release student information.",
+  'Under the Freedom of Information and Protection of Individual Privacy Act, I have the right to privacy of personal information held by government institutions, including institutions of learning.',
+  'My signature denotes my consent and authorization for the training/educational institution or Employer for which I received funding or wage subsidy through the ISET program to release personal information as described above to NWAC and/or its designate.'
+];
 
 const INDIGENOUS_DECLARATION_STATEMENT =
   'I hereby declare that I am an Indigenous person in Canada, which for the purposes of the Indigenous Skills and Employment Training (ISET) Program is inclusive of persons who are First Nations, Inuit, or Metis.';
@@ -1793,28 +1808,189 @@ const resolvePaymentTypeLabel = (value) => {
   return PAYMENT_TYPE_LABELS[normalized] || normalized;
 };
 
-const formatCostLineInstallments = (line) => {
-  if (!line || typeof line !== 'object') return '';
+const resolveCostLineOccurrences = (line, intervention = null, { allowInterventionFallback = false } = {}) => {
+  if (!line || typeof line !== 'object') return null;
   const recurrence = line.recurrence && typeof line.recurrence === 'object' ? line.recurrence : {};
   const occurrencesRaw = recurrence.occurrences;
-  const occurrences = Number.isFinite(Number(occurrencesRaw)) && Number(occurrencesRaw) > 0
+  const directOccurrences = Number.isFinite(Number(occurrencesRaw)) && Number(occurrencesRaw) > 0
     ? Number(occurrencesRaw)
     : null;
-  const amountPerPeriod = parseCurrencyValue(recurrence.amountPerPeriod);
-  const startDate = toDateOnlyString(recurrence.startDate);
-  const endDate = toDateOnlyString(recurrence.endDate);
-  const hasRecurrenceData = Boolean(recurrence.enabled || occurrences || amountPerPeriod !== null || startDate || endDate);
-  const base = occurrences
-    ? `in ${occurrences} installment${occurrences === 1 ? '' : 's'}`
-    : (hasRecurrenceData ? 'recurring installments' : 'in 1 installment');
-  const parts = [base];
+  if (directOccurrences) return directOccurrences;
+  const recurrenceStart = toDateOnlyString(recurrence.startDate);
+  const recurrenceEnd = toDateOnlyString(recurrence.endDate);
+  if (recurrenceStart && recurrenceEnd) {
+    return calculateInclusiveMonthCount(recurrenceStart, recurrenceEnd);
+  }
+  if (allowInterventionFallback) {
+    const interventionStart = toDateOnlyString(intervention?.startDate ?? intervention?.interventionStartDate ?? null);
+    const interventionEnd = toDateOnlyString(intervention?.endDate ?? intervention?.interventionEndDate ?? null);
+    if (interventionStart && interventionEnd) {
+      return calculateInclusiveMonthCount(interventionStart, interventionEnd);
+    }
+  }
+  return null;
+};
+
+const resolveCostLineSubmissionTiming = (line, submissionTimingByType = null) => {
+  const code = normalizePaymentTypeCode(line?.type);
+  if (!code) return 'manual_trigger';
+  let timingValue = null;
+  if (submissionTimingByType instanceof Map) {
+    timingValue = submissionTimingByType.get(code) || null;
+  } else if (submissionTimingByType && typeof submissionTimingByType === 'object') {
+    timingValue = submissionTimingByType[code] || null;
+  }
+  return (
+    normalizePaymentSubmissionTiming(timingValue) ||
+    PAYMENT_SUBMISSION_TIMING_DEFAULTS[code] ||
+    'manual_trigger'
+  );
+};
+
+const resolveCostLinePayableText = ({
+  line,
+  intervention = null,
+  submissionTimingByType = null,
+  recurrenceEnabled = false,
+  occurrences = null
+}) => {
+  const recurrence = line?.recurrence && typeof line.recurrence === 'object' ? line.recurrence : {};
+  const submissionTiming = resolveCostLineSubmissionTiming(line, submissionTimingByType);
+  const interventionStart = toDateOnlyString(intervention?.startDate ?? intervention?.interventionStartDate ?? null);
+  const interventionEnd = toDateOnlyString(intervention?.endDate ?? intervention?.interventionEndDate ?? null);
+  const recurrenceStart = toDateOnlyString(recurrence.startDate);
+  const recurrenceEnd = toDateOnlyString(recurrence.endDate);
+  const explicitPayableDate = resolveCostLinePayableDate(line);
+  const firstInstallmentDate = recurrenceStart ||
+    explicitPayableDate ||
+    (submissionTiming === 'intervention_end'
+      ? (interventionEnd || recurrenceEnd)
+      : (interventionStart || recurrenceEnd));
+  const firstInstallmentDateLabel = formatFundingDate(firstInstallmentDate);
+
+  if (recurrenceEnabled) {
+    const occurrenceCount = Number.isFinite(Number(occurrences)) && Number(occurrences) > 0
+      ? Number(occurrences)
+      : null;
+    let text = occurrenceCount
+      ? `payable in ${occurrenceCount} monthly installment${occurrenceCount === 1 ? '' : 's'}`
+      : 'payable in monthly installments';
+    if (firstInstallmentDateLabel) {
+      text += ` starting ${firstInstallmentDateLabel}`;
+    }
+    return text;
+  }
+  let payableDate = '';
+  if (submissionTiming === 'intervention_start') {
+    payableDate = formatFundingDate(interventionStart || recurrenceStart || explicitPayableDate);
+  } else if (submissionTiming === 'intervention_end') {
+    payableDate = formatFundingDate(interventionEnd || recurrenceEnd || explicitPayableDate);
+  } else if (submissionTiming === 'recurrence_schedule') {
+    payableDate = formatFundingDate(recurrenceStart || explicitPayableDate || interventionStart || interventionEnd);
+  } else if (submissionTiming === 'manual_trigger') {
+    payableDate = formatFundingDate(explicitPayableDate);
+  }
+  if (payableDate) {
+    return `payable on ${payableDate}`;
+  }
+  return 'payable';
+};
+
+const resolveCostLinePayeeLabel = (line) => {
+  if (!line || typeof line !== 'object') return '';
+  const payee = line.payee && typeof line.payee === 'object' ? line.payee : {};
+  const payeeName = normaliseString(
+    payee.name ||
+    line.payeeName ||
+    line.payee_name ||
+    null
+  );
+  if (payeeName) return payeeName;
+  const rawType = normaliseString(
+    payee.type ||
+    line.payeeType ||
+    line.payee_type ||
+    null
+  );
+  if (!rawType) return '';
+  const key = rawType.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const typeLabelMap = {
+    participantclient: 'client',
+    client: 'client',
+    accreditededucationaltraininginstitution: 'institution',
+    traininginstitution: 'institution',
+    institution: 'institution',
+    employerwagesubsidypartner: 'employer',
+    employer: 'employer',
+    childcareprovider: 'childcare provider',
+    communitynonprofitorganization: 'community organization',
+    trainingrelatedsupplier: 'supplier',
+    professionalbusinessservicesprovider: 'service provider',
+    vendor: 'vendor',
+    other: 'payee'
+  };
+  return typeLabelMap[key] || '';
+};
+
+const resolveCostLinePayableDate = (line) => {
+  if (!line || typeof line !== 'object') return '';
+  const recurrence = line.recurrence && typeof line.recurrence === 'object' ? line.recurrence : {};
+  const candidates = [
+    line.payableDate,
+    line.payable_date,
+    line.paymentDate,
+    line.payment_date,
+    line.dateDue,
+    line.date_due,
+    recurrence.startDate,
+    recurrence.start_date
+  ];
+  for (const candidate of candidates) {
+    const normalized = toDateOnlyString(candidate);
+    if (normalized) return normalized;
+  }
+  return '';
+};
+
+const formatCostLineDetails = (
+  line,
+  intervention = null,
+  submissionTimingByType = null,
+  recurrencePolicyByType = null
+) => {
+  if (!line || typeof line !== 'object') return '';
+  const recurrence = line.recurrence && typeof line.recurrence === 'object' ? line.recurrence : {};
+  const recurrenceEnabledExplicit = recurrence.enabled === true || String(recurrence.enabled || '').toLowerCase() === 'true';
+  const recurrenceMode = resolveRecurrenceModeForPaymentType(line?.type, recurrencePolicyByType);
+  const recurrenceRequired = recurrenceMode === 'required';
+  const recurrenceEnabled = recurrenceEnabledExplicit || recurrenceRequired;
+  const occurrences = recurrenceEnabled
+    ? resolveCostLineOccurrences(line, intervention, { allowInterventionFallback: true })
+    : null;
+  const amountPerPeriod = recurrenceEnabled ? parseCurrencyValue(recurrence.amountPerPeriod) : null;
+  const payeeLabel = resolveCostLinePayeeLabel(line);
+  const payableText = resolveCostLinePayableText({
+    line,
+    intervention,
+    submissionTimingByType,
+    recurrenceEnabled,
+    occurrences
+  });
+  let detailText = payableText || '';
   if (amountPerPeriod !== null) {
-    parts.push(`$${amountPerPeriod.toFixed(2)} per period`);
+    const amountText = formatFundingCurrency(amountPerPeriod);
+    if (amountText) {
+      detailText = detailText
+        ? `${detailText} (${amountText} per month)`
+        : `${amountText} per month`;
+    }
   }
-  if (startDate || endDate) {
-    parts.push(`${startDate || '...'} to ${endDate || '...'}`);
+  if (payeeLabel) {
+    detailText = detailText
+      ? `${detailText} to ${payeeLabel}`
+      : `to ${payeeLabel}`;
   }
-  return parts.join(' ');
+  return detailText;
 };
 
 const resolveDeliveryModeLabel = (value) => {
@@ -1865,18 +2041,20 @@ const buildAssessmentProposedInterventionsHtml = ({
       const typeLabel = resolvePaymentTypeLabel(line?.type);
       const amountValue = formatCurrencyValue(line?.amount);
       const amountText = amountValue ? `$${amountValue}` : '';
-      const installments = formatCostLineInstallments(line);
-      const notes = formatMultilineHtml(line?.notes);
+      const details = formatCostLineDetails(line, intervention);
+      const notes = normaliseString(line?.notes);
+      const detailsHtml = notes
+        ? `${escapeHtml(details || '')}<br /><em>${formatMultilineHtml(notes)}</em>`
+        : escapeHtml(details || '');
       return `
         <tr>
           <td>${escapeHtml(typeLabel || '')}</td>
           <td class="amount">${escapeHtml(amountText)}</td>
-          <td>${escapeHtml(installments || '')}</td>
-          <td>${notes}</td>
+          <td>${detailsHtml}</td>
         </tr>`;
     }).join('');
 
-    const costRowsHtml = costRows || '<tr><td colspan="4">No cost items recorded.</td></tr>';
+    const costRowsHtml = costRows || '<tr><td colspan="3">No cost items recorded.</td></tr>';
     const costTotal = computeCostLinesTotal(costLines);
     const fallbackTotal = Number.isFinite(Number(intervention?.costTotal))
       ? Number(intervention.costTotal)
@@ -1930,8 +2108,7 @@ const buildAssessmentProposedInterventionsHtml = ({
             <tr>
               <th>Cost item</th>
               <th>Amount</th>
-              <th>Installments</th>
-              <th>Notes</th>
+              <th>Details</th>
             </tr>
           </thead>
           <tbody>
@@ -1999,12 +2176,88 @@ async function fetchAssessmentApplicantContext({ applicationId, applicantUserId 
   return { applicantName, trackingId, applicantUserId: resolvedApplicantUserId };
 }
 
+function formatAssessmentOtherFundingDetailsForPdf(structuredDetails, fallbackText = '') {
+  const source = structuredDetails && typeof structuredDetails === 'object' ? structuredDetails : null;
+  if (!source) return normaliseString(fallbackText) || '';
+
+  const normalizeInvolved = value => {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'yes' || normalized === 'no' || normalized === 'unknown') return normalized;
+    return '';
+  };
+  const normalizeType = value => {
+    const normalized = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (!normalized) return 'other';
+    return normalized;
+  };
+  const typeLabelLookup = {
+    iset_holder: 'ISET Holder',
+    federal_program: 'Federal Program',
+    provincial_territorial_program: 'Prov/Terr Program',
+    indigenous_government_org: 'Indigenous Government',
+    employer: 'Employer',
+    education_bursary_scholarship: 'Bursary/Scholarship',
+    nonprofit_charity: 'Nonprofit/Charity',
+    insurance_compensation: 'Insurance/Compensation',
+    personal_family: 'Personal/Family',
+    other_public: 'Other Public',
+    other: 'Other',
+  };
+
+  const involved = normalizeInvolved(source.involved);
+  const sources = Array.isArray(source.sources) ? source.sources : [];
+  const normalizedSources = sources
+    .map(entry => {
+      if (!entry || typeof entry !== 'object') return null;
+      const name = String(entry.name || '').trim();
+      const coverage = String(entry.coverage || '').trim();
+      if (!name && !coverage) return null;
+      const type = normalizeType(entry.type);
+      const typeLabel = typeLabelLookup[type] || 'Other';
+      return { typeLabel, name, coverage };
+    })
+    .filter(Boolean);
+  const nwacCoverage = String(source.nwacCoverage || '').trim();
+  const notes = String(source.notes || '').trim();
+
+  const lines = [];
+  if (involved) {
+    const involvedLabel = involved === 'yes' ? 'Yes' : involved === 'no' ? 'No' : 'Unknown';
+    lines.push(`Other funding involved: ${involvedLabel}`);
+  }
+  if (normalizedSources.length) {
+    normalizedSources.forEach((entry, index) => {
+      const nameLabel = entry.name || 'Unnamed funder';
+      const coverageLabel = entry.coverage || 'Coverage not specified';
+      lines.push(`${index + 1}. ${entry.typeLabel}: ${nameLabel} - ${coverageLabel}`);
+    });
+  }
+  if (nwacCoverage) {
+    lines.push(`NWAC funding covers: ${nwacCoverage}`);
+  }
+  if (notes) {
+    lines.push(`Notes: ${notes}`);
+  }
+
+  if (!lines.length) {
+    return normaliseString(fallbackText) || '';
+  }
+  return lines.join('\n');
+}
+
 function buildAssessmentPdfFields({
   caseRow,
   applicantName,
   referenceNumber,
   caseContext
 }) {
+  const resolvedAssessmentDate = toDateOnlyString(
+    caseRow?.assessment_date_of_assessment ??
+    caseRow?.date_of_assessment ??
+    caseRow?.assessmentDateOfAssessment ??
+    caseRow?.dateOfAssessment ??
+    null
+  );
   const barriers = Array.isArray(caseRow?.assessment_employment_barriers)
     ? caseRow.assessment_employment_barriers
     : [];
@@ -2056,6 +2309,10 @@ function buildAssessmentPdfFields({
     caseRow?.caseContext ||
     (caseRow?.case_context_json ? safeJsonParse(caseRow.case_context_json, null) : null) ||
     {};
+  const otherFundingSourcesDetails = formatAssessmentOtherFundingDetailsForPdf(
+    resolvedCaseContext?.assessmentOtherFunding,
+    caseRow?.assessment_other_funding_details
+  );
   const costSettings = resolvedCaseContext?.assessmentCostSettings || resolvedCaseContext?.assessment_cost_settings || null;
   const costTypeRaw = typeof costSettings?.type === 'string' ? costSettings.type.trim().toLowerCase() : '';
   let costType = costTypeRaw === 'recurring' ? 'recurring' : costTypeRaw === 'one_time' ? 'one_time' : null;
@@ -2169,13 +2426,8 @@ function buildAssessmentPdfFields({
   const childcareNeedNo = childcareNeedValue === 'no';
 
   const budgetPotCode = normaliseString(caseRow?.assessment_intervention_pot_code);
-  const budgetPotName = normaliseString(caseRow?.assessment_intervention_pot_name);
-  const budgetPotLabel = budgetPotCode && budgetPotName
-    ? `${budgetPotCode} - ${budgetPotName}`
-    : (budgetPotCode || budgetPotName || '');
-  const postingContextLabel = caseRow?.assessment_posting_context
-    ? formatCaseStatusLabel(caseRow.assessment_posting_context)
-    : '';
+  const budgetPotLabel = budgetPotCode || '';
+  const postingContextLabel = normalizePostingContext(caseRow?.assessment_posting_context) || '';
 
   const conflictChoice = normaliseString(caseRow?.assessment_conflict_declaration_choice);
   const conflictChoiceNormalized = conflictChoice ? conflictChoice.toLowerCase() : null;
@@ -2218,7 +2470,7 @@ function buildAssessmentPdfFields({
   return {
     nwac_logo: getNwacLogoDataUri(),
     reference_number: resolvedReference,
-    date_of_assessment: toDateOnlyString(caseRow?.assessment_date_of_assessment),
+    date_of_assessment: resolvedAssessmentDate,
     client_name: applicantName || '',
     conflict_declaration_signed: Boolean(caseRow?.assessment_conflict_declaration_signed),
     conflict_choice_no: conflictChoiceNo,
@@ -2228,7 +2480,7 @@ function buildAssessmentPdfFields({
     training_employment_goal: caseRow?.assessment_employment_goals || '',
     previously_funded_iset: previouslyFundedValue,
     previously_funded_iset_details: caseRow?.assessment_previous_iset_details || '',
-    other_funding_sources_details: caseRow?.assessment_other_funding_details || '',
+    other_funding_sources_details: otherFundingSourcesDetails,
     esdc_eligibility: esdcEligibilityValue,
     proposed_interventions_html: { html: proposedInterventionsHtml },
     intervention_code: interventionDisplay,
@@ -2247,7 +2499,7 @@ function buildAssessmentPdfFields({
     childcare_funding_details: caseRow?.assessment_childcare_funding_details || '',
     intervention_cost_total: interventionCostTotalRaw === null || typeof interventionCostTotalRaw === 'undefined'
       ? ''
-      : formatCurrencyValue(interventionCostTotalRaw),
+      : `$${formatCurrencyValue(interventionCostTotalRaw)}`,
     intervention_count: interventionCount,
     cost_type: costType,
     recurring_period: recurringPeriod,
@@ -6821,7 +7073,31 @@ const resolveFundingAgreementInterventionLabelBase = (intervention = {}, labelLo
   return '';
 };
 
-const buildFundingAgreementInterventionsHtml = ({ interventions, interventionLabelLookup }) => {
+const buildSubmissionTimingByTypeLookup = (mapping = null) => {
+  const lookup = new Map();
+  Object.entries(PAYMENT_SUBMISSION_TIMING_DEFAULTS || {}).forEach(([code, timing]) => {
+    const normalizedCode = normalizePaymentTypeCode(code);
+    const normalizedTiming = normalizePaymentSubmissionTiming(timing);
+    if (!normalizedCode || !normalizedTiming) return;
+    lookup.set(normalizedCode, normalizedTiming);
+  });
+  const paymentTypes = Array.isArray(mapping?.paymentTypes) ? mapping.paymentTypes : [];
+  paymentTypes.forEach(entry => {
+    const code = normalizePaymentTypeCode(entry?.code || entry?.paymentType || entry?.payment_type);
+    if (!code) return;
+    const timing = normalizePaymentSubmissionTiming(entry?.submissionTiming || entry?.submission_timing);
+    if (!timing) return;
+    lookup.set(code, timing);
+  });
+  return lookup;
+};
+
+const buildFundingAgreementInterventionsHtml = ({
+  interventions,
+  interventionLabelLookup,
+  submissionTimingByType = null,
+  recurrencePolicyByType = null
+}) => {
   const list = Array.isArray(interventions) ? interventions : [];
   if (!list.length) {
     return '<div class="empty-state">No interventions recorded.</div>';
@@ -6860,24 +7136,26 @@ const buildFundingAgreementInterventionsHtml = ({ interventions, interventionLab
       const typeLabel = resolvePaymentTypeLabel(line?.type) || normaliseString(line?.type) || '';
       const amountValue = parseCurrencyValue(line?.amount);
       const amountText = formatFundingCurrency(amountValue);
-      const installments = formatCostLineInstallments(line);
-      const notes = formatMultilineHtml(line?.notes);
+      const details = formatCostLineDetails(line, intervention, submissionTimingByType, recurrencePolicyByType);
+      const notes = normaliseString(line?.notes);
+      const detailsHtml = notes
+        ? `${escapeHtml(details || '')}<br /><em>${formatMultilineHtml(notes)}</em>`
+        : escapeHtml(details || '');
       return `
         <tr>
           <td>${escapeHtml(typeLabel)}</td>
           <td>${escapeHtml(amountText)}</td>
-          <td>${escapeHtml(installments || '')}</td>
-          <td>${notes}</td>
+          <td>${detailsHtml}</td>
         </tr>`;
     }).join('');
 
-    const rowsHtml = costRows || '<tr><td colspan="4">No cost items recorded.</td></tr>';
+    const rowsHtml = costRows || '<tr><td colspan="3">No cost items recorded.</td></tr>';
     const lineTotal = computeCostLinesTotal(costLines);
     const fallbackTotal = parseCurrencyValue(intervention?.costTotal);
     const totalValue = lineTotal !== null ? lineTotal : fallbackTotal;
     const totalText = formatFundingCurrency(totalValue);
     const totalRow = totalText
-      ? `<tr><td><strong>Total</strong></td><td><strong>${escapeHtml(totalText)}</strong></td><td colspan="2"></td></tr>`
+      ? `<tr><td><strong>Total</strong></td><td><strong>${escapeHtml(totalText)}</strong></td><td></td></tr>`
       : '';
     const metaHtml = metaFields.length
       ? `<div class="intervention-meta">${metaFields
@@ -6896,8 +7174,7 @@ const buildFundingAgreementInterventionsHtml = ({ interventions, interventionLab
               <tr>
                 <th>Cost item</th>
                 <th class="amount">Amount</th>
-                <th>Installments</th>
-                <th>Notes</th>
+                <th>Details</th>
               </tr>
             </thead>
             <tbody>
@@ -7184,6 +7461,9 @@ function resolveFundingAgreementTokens({
     client_name: applicantName || '',
     case_manager_signature: caseManagerName || '',
     case_manager_signed_date: caseManagerSignedDate || '',
+    show_case_manager_signature: '',
+    client_signature: '',
+    client_signed_date: '',
     institution: institution || '',
     program_name: programName || '',
     start_date: formatFundingDate(startDate),
@@ -7537,6 +7817,44 @@ function replaceTokensInI18n(value, tokens, options = {}) {
   return value;
 }
 
+function removeCaseManagerSignatureBlockFromI18n(value) {
+  const stripFromString = input => {
+    if (typeof input !== 'string' || !input) return input;
+    return input.replace(
+      /<div class="signature-block">\s*<span class="label">Case Manager Signature<\/span>[\s\S]*?<\/div>\s*<\/div>/gi,
+      ''
+    );
+  };
+  if (!value) return value;
+  if (typeof value === 'string') return stripFromString(value);
+  if (typeof value === 'object') {
+    const next = { ...value };
+    ['en', 'fr'].forEach(lang => {
+      if (typeof next[lang] === 'string') {
+        next[lang] = stripFromString(next[lang]);
+      }
+    });
+    return next;
+  }
+  return value;
+}
+
+function removeCaseManagerSignatureBlockFromSchema(schema) {
+  if (!schema || !Array.isArray(schema.steps)) return schema;
+  const steps = schema.steps.map(step => {
+    if (!step || !Array.isArray(step.components)) return step;
+    const components = step.components.map(comp => {
+      if (!comp || comp.type !== 'paragraph') return comp;
+      const next = { ...comp };
+      if (next.html) next.html = removeCaseManagerSignatureBlockFromI18n(next.html);
+      if (next.text) next.text = removeCaseManagerSignatureBlockFromI18n(next.text);
+      return next;
+    });
+    return { ...step, components };
+  });
+  return { ...schema, steps };
+}
+
 function applyPrefillTokensToSchema(schema, tokens, options = {}) {
   if (!schema || !Array.isArray(schema.steps)) return schema;
   const steps = schema.steps.map(step => {
@@ -7825,13 +8143,32 @@ const normalizeProposedCostLine = (raw) => {
           amountPerPeriod
         }
       : null;
+  const payeeRaw = raw.payee && typeof raw.payee === 'object' ? raw.payee : {};
+  const payeeType = normaliseString(
+    payeeRaw.type ?? raw.payeeType ?? raw.payee_type ?? null
+  );
+  const payeeName = normaliseString(
+    payeeRaw.name ?? raw.payeeName ?? raw.payee_name ?? null
+  );
+  const payeeReference = normaliseString(
+    payeeRaw.reference ?? raw.payeeReference ?? raw.payee_reference ?? null
+  );
+  const payee =
+    payeeType || payeeName || payeeReference
+      ? {
+          type: payeeType || null,
+          name: payeeName || null,
+          reference: payeeReference || null,
+        }
+      : null;
   if (!type && amount === null && !notes && !recurrence) return null;
   return {
     id: id || null,
     type: type || null,
     amount,
     notes: notes || null,
-    recurrence
+    recurrence,
+    payee,
   };
 };
 
@@ -8121,6 +8458,14 @@ async function buildCfaSnapshotFromAssessment({ connection, caseId }) {
   if (!assessmentRow) {
     throw new Error('assessment_not_found');
   }
+  const [interventionRows] = await connection.query(
+    `SELECT id, status, intervention_code, start_date, end_date, intervention_cost, budget_amount, approved_amount,
+            related_noc, related_noc_version, funding_stream_decision AS funding_stream, metadata_json, notes
+       FROM iset_case_intervention
+      WHERE case_id = ?
+      ORDER BY start_date IS NULL, start_date ASC, id ASC`,
+    [caseId]
+  );
   const buildFallbackAssessmentIntervention = () => {
     const itpPayload = safeJsonParse(assessmentRow?.itp_payload, null) || {};
     const wagePayload = safeJsonParse(assessmentRow?.wage_payload, null) || {};
@@ -8202,7 +8547,40 @@ async function buildCfaSnapshotFromAssessment({ connection, caseId }) {
       );
     }
   }
-  const interventions = sortCfaInterventions(proposedInterventions);
+  const interventionTableInterventions = Array.isArray(interventionRows)
+    ? interventionRows
+        .filter(row => shouldIncludeInterventionForCfa(row.status))
+        .map(row => buildCfaInterventionSnapshot(row, null))
+        .filter(Boolean)
+    : [];
+  const proposedCostLineCount = proposedInterventions.reduce(
+    (sum, entry) => sum + (Array.isArray(entry?.costLines) ? entry.costLines.length : 0),
+    0
+  );
+  const tableCostLineCount = interventionTableInterventions.reduce(
+    (sum, entry) => sum + (Array.isArray(entry?.costLines) ? entry.costLines.length : 0),
+    0
+  );
+  let interventions = proposedInterventions;
+  if (
+    interventionTableInterventions.length > proposedInterventions.length ||
+    (
+      interventionTableInterventions.length === proposedInterventions.length &&
+      interventionTableInterventions.length > 0 &&
+      tableCostLineCount > proposedCostLineCount
+    )
+  ) {
+    console.warn(
+      '[cfa] using case interventions source for case %s (table_count=%s assessment_count=%s table_cost_lines=%s assessment_cost_lines=%s).',
+      caseId,
+      interventionTableInterventions.length,
+      proposedInterventions.length,
+      tableCostLineCount,
+      proposedCostLineCount
+    );
+    interventions = interventionTableInterventions;
+  }
+  interventions = sortCfaInterventions(interventions);
 
   return {
     case: {
@@ -8231,9 +8609,21 @@ async function buildCfaSnapshotFromAssessment({ connection, caseId }) {
 async function buildCfaTemplateTokens({ connection, interventions, applicantName, caseManagerName, caseManagerSignedDate }) {
   const codes = interventions.map(item => item?.code).filter(Boolean);
   const interventionLabelLookup = await fetchInterventionCodeLabels(connection, codes);
+  let submissionTimingByType = null;
+  let recurrencePolicyByType = null;
+  try {
+    const paymentTypeMapping = await readPaymentInterventionMapping(connection);
+    submissionTimingByType = buildSubmissionTimingByTypeLookup(paymentTypeMapping);
+    recurrencePolicyByType = buildRecurrencePolicyByPaymentType(paymentTypeMapping);
+  } catch (err) {
+    submissionTimingByType = buildSubmissionTimingByTypeLookup(null);
+    recurrencePolicyByType = buildRecurrencePolicyByPaymentType(null);
+  }
   const interventionsHtml = buildFundingAgreementInterventionsHtml({
     interventions,
-    interventionLabelLookup
+    interventionLabelLookup,
+    submissionTimingByType,
+    recurrencePolicyByType
   });
   const livingAllowanceSectionsHtml = buildFundingAgreementLivingAllowanceSectionsHtml({
     interventions,
@@ -8252,10 +8642,166 @@ async function buildCfaTemplateTokens({ connection, interventions, applicantName
     client_name: applicantName || '',
     case_manager_signature: caseManagerName || '',
     case_manager_signed_date: caseManagerSignedDate || '',
+    show_case_manager_signature: true,
+    client_signature: '',
+    client_signed_date: '',
     interventions_html: interventionsHtml,
     living_allowance_sections_html: livingAllowanceSectionsHtml,
     funding_total: fundingTotal,
   };
+}
+
+function extractParticipantSignatureNameFromPayload(payload) {
+  if (!payload || typeof payload !== 'object') return '';
+  const directCandidates = [
+    payload.client_signature,
+    payload.signature,
+    payload.sig,
+    payload.name,
+  ];
+  for (const candidate of directCandidates) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+    if (candidate && typeof candidate === 'object') {
+      const signed = candidate.signed === true || String(candidate.signed || '').toLowerCase() === 'true';
+      const name = normaliseString(candidate.name || candidate.value || null);
+      if (signed && name) return name;
+    }
+  }
+  for (const value of Object.values(payload)) {
+    if (!value || typeof value !== 'object') continue;
+    const signed = value.signed === true || String(value.signed || '').toLowerCase() === 'true';
+    const name = normaliseString(value.name || value.value || null);
+    if (signed && name) return name;
+  }
+  return '';
+}
+
+async function regenerateSignedCfaDocument({
+  connection,
+  cfaVersionId,
+  participantUserId,
+  signedPayload,
+  actorUserId,
+  createdByUserId = null
+}) {
+  const runner = connection || pool;
+  const [[versionRow]] = await runner.query(
+    `SELECT v.id, v.version_number, v.metadata_json, s.case_id
+       FROM cfa_version v
+       JOIN cfa_series s ON s.id = v.series_id
+      WHERE v.id = ?
+      LIMIT 1`,
+    [cfaVersionId]
+  );
+  if (!versionRow) return null;
+  const snapshot = safeJsonParse(versionRow.metadata_json, null) || {};
+  const interventions = Array.isArray(snapshot?.interventions) ? snapshot.interventions : [];
+  if (!interventions.length) return null;
+
+  const caseId = normalisePositiveInteger(versionRow.case_id);
+  if (!caseId) return null;
+  const [[caseRow]] = await runner.query(
+    `SELECT id, application_id, client_id, applicant_user_id, assigned_to_user_id, reference_number, case_number
+       FROM iset_case
+      WHERE id = ?
+      LIMIT 1`,
+    [caseId]
+  );
+  if (!caseRow?.application_id || !caseRow?.client_id) return null;
+
+  let caseManagerName = '';
+  if (caseRow.assigned_to_user_id) {
+    const [[staffRow]] = await runner.query(
+      `SELECT display_name, name
+         FROM staff_profiles
+        WHERE id = ?
+        LIMIT 1`,
+      [caseRow.assigned_to_user_id]
+    );
+    caseManagerName = normaliseString(staffRow?.display_name || staffRow?.name || '') || '';
+  }
+  if (!caseManagerName && createdByUserId) {
+    const [[senderUser]] = await runner.query(
+      `SELECT email, name
+         FROM user
+        WHERE id = ?
+        LIMIT 1`,
+      [createdByUserId]
+    );
+    const senderEmail = normaliseString(senderUser?.email || '');
+    if (senderEmail) {
+      const [[senderStaff]] = await runner.query(
+        `SELECT display_name, name
+           FROM staff_profiles
+          WHERE LOWER(email) = LOWER(?)
+          LIMIT 1`,
+        [senderEmail]
+      );
+      caseManagerName = normaliseString(senderStaff?.display_name || senderStaff?.name || '') || '';
+    }
+    if (!caseManagerName) {
+      caseManagerName = normaliseString(senderUser?.name || '') || '';
+    }
+  }
+  const caseManagerSignedDate = formatFundingDate(new Date());
+  const clientSignature =
+    extractParticipantSignatureNameFromPayload(signedPayload) ||
+    normaliseString(snapshot?.client?.name || '') ||
+    '';
+  const clientSignedDate = formatFundingDate(new Date());
+  const tokens = await buildCfaTemplateTokens({
+    connection: runner,
+    interventions,
+    applicantName: normaliseString(snapshot?.client?.name || '') || '',
+    caseManagerName,
+    caseManagerSignedDate
+  });
+  tokens.show_case_manager_signature = true;
+  tokens.client_signature = clientSignature;
+  tokens.client_signed_date = clientSignedDate;
+
+  const signedBuffer = await generateFundingAgreementPdfBuffer({ tokens });
+  const signedDocId = await storeFundingAgreementPdfDocument({
+    caseId,
+    applicationId: caseRow.application_id,
+    actionPlanId: null,
+    clientId: caseRow.client_id,
+    applicantUserId: caseRow.applicant_user_id || participantUserId || null,
+    actorUserId: actorUserId || participantUserId || null,
+    versionNumber: Number(versionRow.version_number) || 1,
+    trackingId: normaliseString(caseRow.reference_number) || normaliseString(caseRow.case_number) || null,
+    cfaVersionId,
+    pdfBuffer: signedBuffer,
+    isRedline: false,
+    signedByClient: true,
+    connection: runner
+  });
+  if (!signedDocId) return null;
+
+  const [[currentCleanRow]] = await runner.query(
+    `SELECT document_id
+       FROM cfa_version_documents
+      WHERE cfa_version_id = ?
+        AND document_type = 'clean'
+      LIMIT 1`,
+    [cfaVersionId]
+  );
+  const previousDocId = normalisePositiveInteger(currentCleanRow?.document_id);
+  if (previousDocId && previousDocId !== signedDocId) {
+    await runner.query(
+      `UPDATE iset_document
+          SET status = 'archived', updated_at = NOW()
+        WHERE id = ?`,
+      [previousDocId]
+    );
+  }
+  await runner.query(
+    `INSERT INTO cfa_version_documents (cfa_version_id, document_type, document_id)
+     VALUES (?, 'clean', ?)
+     ON DUPLICATE KEY UPDATE document_id = VALUES(document_id), created_at = CURRENT_TIMESTAMP`,
+    [cfaVersionId, signedDocId]
+  );
+  return signedDocId;
 }
 
 async function ensureCfaSeries(connection, { caseId, templateKey, createdByStaffProfileId }) {
@@ -10928,6 +11474,123 @@ const isMissingTableErrorLocal = (err) => {
   const message = typeof err.message === 'string' ? err.message : '';
   return /does(n't| not) exist/i.test(message) || /no such table/i.test(message);
 };
+
+const isMissingColumnErrorLocal = (err) => {
+  if (!err) return false;
+  if (err.code === 'ER_BAD_FIELD_ERROR') return true;
+  const message = typeof err.message === 'string' ? err.message : '';
+  return /unknown column/i.test(message);
+};
+
+const CLEAR_TEST_OBJECT_KEY_SOURCES = [
+  { table: 'iset_document', column: 'file_path' },
+  { table: 'iset_application_file', column: 'file_path' },
+  { table: 'iset_intake.message_attachment', column: 'file_path' },
+  { table: 'pending_uploads', column: 'object_key' },
+  { table: 'documents', column: 'file_path' },
+  { table: 'documents', column: 'storage_key' },
+  { table: 'zzz_legacy_documents', column: 'storage_key' }
+];
+
+function normalizeObjectKeyForPurge(rawValue) {
+  if (typeof rawValue !== 'string') return null;
+  const trimmed = rawValue.trim();
+  if (!trimmed) return null;
+  // We only delete object keys, not full URLs.
+  if (trimmed.includes('://')) return null;
+  const withoutLeadingSlash = trimmed.replace(/^\/+/, '');
+  if (!withoutLeadingSlash || withoutLeadingSlash.includes('..')) return null;
+  return withoutLeadingSlash;
+}
+
+async function collectClearTestObjectKeys(connection) {
+  const keys = new Set();
+  const report = [];
+  for (const source of CLEAR_TEST_OBJECT_KEY_SOURCES) {
+    try {
+      const [rows] = await connection.query(
+        `SELECT ${source.column} AS object_key FROM ${source.table} WHERE ${source.column} IS NOT NULL`
+      );
+      let collected = 0;
+      for (const row of rows || []) {
+        const key = normalizeObjectKeyForPurge(row?.object_key);
+        if (!key) continue;
+        if (!keys.has(key)) {
+          keys.add(key);
+          collected += 1;
+        }
+      }
+      report.push({ table: source.table, column: source.column, collected });
+    } catch (err) {
+      if (isMissingTableErrorLocal(err) || isMissingColumnErrorLocal(err)) {
+        report.push({ table: source.table, column: source.column, skipped: true, reason: 'missing_source' });
+        continue;
+      }
+      throw err;
+    }
+  }
+  return { keys: Array.from(keys), report };
+}
+
+async function purgeClearTestObjectKeys(objectKeys = []) {
+  const summary = {
+    enabled: false,
+    driver: process.env.UPLOAD_DRIVER || process.env.UPLOAD_MODE || null,
+    bucket: process.env.OBJECT_BUCKET || null,
+    attempted: objectKeys.length,
+    deleted: 0,
+    skipped: 0,
+    failed: 0,
+    failures: []
+  };
+  if (!objectKeys.length) {
+    summary.enabled = true;
+    return summary;
+  }
+  try {
+    const { DRIVER, deleteObject } = require('../ISET-intake/s3Provider');
+    summary.driver = DRIVER || summary.driver;
+    if (DRIVER !== 's3') {
+      summary.skipped = objectKeys.length;
+      summary.failures.push({ reason: 'driver_not_s3' });
+      return summary;
+    }
+    const bucket = process.env.OBJECT_BUCKET || '';
+    summary.bucket = bucket || null;
+    if (!bucket) {
+      summary.skipped = objectKeys.length;
+      summary.failures.push({ reason: 'missing_bucket' });
+      return summary;
+    }
+    // Safety guard: clear-test endpoint must never purge from a prod bucket.
+    if (/\bprod\b/i.test(bucket)) {
+      summary.skipped = objectKeys.length;
+      summary.failures.push({ reason: 'unsafe_bucket_blocked' });
+      return summary;
+    }
+    summary.enabled = true;
+    for (const key of objectKeys) {
+      try {
+        const result = await deleteObject({ key });
+        if (result?.deleted) {
+          summary.deleted += 1;
+        } else {
+          summary.skipped += 1;
+        }
+      } catch (err) {
+        summary.failed += 1;
+        if (summary.failures.length < 50) {
+          summary.failures.push({ key, message: err?.message || 'delete_failed' });
+        }
+      }
+    }
+    return summary;
+  } catch (err) {
+    summary.skipped = objectKeys.length;
+    summary.failures.push({ reason: 'purge_unavailable', message: err?.message || 'purge_unavailable' });
+    return summary;
+  }
+}
 
 async function clearTableWithCount(connection, tableName) {
   try {
@@ -17959,9 +18622,15 @@ app.post('/api/clear-iset-test-data', async (_req, res) => {
   let connection;
   const report = [];
   const startedAt = Date.now();
+  let objectKeyReport = [];
+  let objectKeysToDelete = [];
+  let objectPurgeSummary = null;
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
+    const collected = await collectClearTestObjectKeys(connection);
+    objectKeyReport = collected.report || [];
+    objectKeysToDelete = collected.keys || [];
     await connection.query('SET FOREIGN_KEY_CHECKS = 0');
     for (const tableName of ISET_TEST_DATA_TABLE_ORDER) {
       try {
@@ -17975,7 +18644,14 @@ app.post('/api/clear-iset-test-data', async (_req, res) => {
     await refreshFinancePotSums(connection);
     await connection.query('SET FOREIGN_KEY_CHECKS = 1');
     await connection.commit();
-    res.json({ ok: true, cleared: report, durationMs: Date.now() - startedAt });
+    objectPurgeSummary = await purgeClearTestObjectKeys(objectKeysToDelete);
+    res.json({
+      ok: true,
+      cleared: report,
+      durationMs: Date.now() - startedAt,
+      objectKeySources: objectKeyReport,
+      objectPurge: objectPurgeSummary
+    });
   } catch (err) {
     if (connection) {
       try { await connection.rollback(); } catch (_) {}
@@ -17984,7 +18660,13 @@ app.post('/api/clear-iset-test-data', async (_req, res) => {
     const message = err?.message || 'Failed to clear test data';
     const table = err?.tableName || null;
     console.error('[clear-iset-test-data] failed', table ? `${table}:` : '', message);
-    res.status(500).json({ error: 'clear_test_data_failed', message, table });
+    res.status(500).json({
+      error: 'clear_test_data_failed',
+      message,
+      table,
+      objectKeySources: objectKeyReport,
+      objectPurge: objectPurgeSummary
+    });
   } finally {
     if (connection) connection.release();
   }
@@ -25365,6 +26047,122 @@ const cancelDocRequestReminders = async ({ caseId, actorStaffProfileId }) => {
   }
 };
 
+const setDocsRequestedFromSecureMessage = async ({
+  caseId,
+  applicationId,
+  actorUserId = null,
+  actorName = null,
+  actorStaffProfileId = null
+}) => {
+  const numericCaseId = Number(caseId);
+  const numericApplicationId = Number(applicationId);
+  if (!Number.isFinite(numericCaseId) || numericCaseId <= 0) return { updated: false, reason: 'invalid_case_id' };
+  if (!Number.isFinite(numericApplicationId) || numericApplicationId <= 0) return { updated: false, reason: 'invalid_application_id' };
+
+  const [[currentRow]] = await pool.query(
+    `SELECT status,
+            docs_requested_active,
+            docs_requested_at,
+            docs_requested_cleared_at,
+            docs_requested_source
+       FROM iset_application
+      WHERE id = ?
+      LIMIT 1`,
+    [numericApplicationId]
+  );
+  if (!currentRow) return { updated: false, reason: 'application_not_found' };
+
+  const alreadyActive = Number(currentRow.docs_requested_active || 0) === 1;
+  if (alreadyActive) {
+    return { updated: false, reason: 'already_active' };
+  }
+
+  const statusKey =
+    normaliseCaseStatusValue(currentRow.status) ||
+    String(currentRow.status || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const shouldSetDocsRequestedStatus = statusKey === 'submitted' || statusKey === 'in_review';
+
+  if (shouldSetDocsRequestedStatus) {
+    await pool.query(
+      `UPDATE iset_application
+          SET status = 'docs_requested',
+              docs_requested_active = 1,
+              docs_requested_at = NOW(),
+              docs_requested_cleared_at = NULL,
+              docs_requested_source = 'secure_message'
+        WHERE id = ?`,
+      [numericApplicationId]
+    );
+  } else {
+    await pool.query(
+      `UPDATE iset_application
+          SET docs_requested_active = 1,
+              docs_requested_at = NOW(),
+              docs_requested_cleared_at = NULL,
+              docs_requested_source = 'secure_message'
+        WHERE id = ?`,
+      [numericApplicationId]
+    );
+  }
+
+  const [[updatedRow]] = await pool.query(
+    `SELECT status,
+            docs_requested_active,
+            docs_requested_at,
+            docs_requested_cleared_at,
+            docs_requested_source
+       FROM iset_application
+      WHERE id = ?
+      LIMIT 1`,
+    [numericApplicationId]
+  );
+  const trackingId = await fetchTrackingIdForCase(numericApplicationId, numericCaseId);
+  const docsRequestedAt = updatedRow?.docs_requested_at || new Date();
+  const docsRequestedSource = updatedRow?.docs_requested_source || 'secure_message';
+
+  try {
+    await captureCaseEvent({
+      type: 'document_request_set',
+      caseId: numericCaseId,
+      actorId: actorUserId || null,
+      actorName: actorName || null,
+      payload: {
+        tracking_id: trackingId,
+        application_id: numericApplicationId,
+        case_id: numericCaseId,
+        docs_requested_at: toIsoDateTime(docsRequestedAt),
+        docs_requested_cleared_at: null,
+        source: docsRequestedSource,
+        message: 'Documents requested.'
+      },
+      trackingId
+    });
+  } catch (eventErr) {
+    console.warn('[doc-requests] failed to emit document_request_set', eventErr?.message || eventErr);
+  }
+
+  try {
+    await upsertDocRequestReminders({
+      caseId: numericCaseId,
+      applicationId: numericApplicationId,
+      docsRequestedAt,
+      docsRequestedSource,
+      actorStaffProfileId: Number.isFinite(Number(actorStaffProfileId)) ? Number(actorStaffProfileId) : null
+    });
+  } catch (reminderErr) {
+    if (!isMissingTableErrorLocal(reminderErr)) {
+      console.warn('[doc-requests] reminder sync failed', reminderErr?.message || reminderErr);
+    }
+  }
+
+  return {
+    updated: true,
+    status: updatedRow?.status || null,
+    docsRequestedAt: toIsoDateTime(docsRequestedAt),
+    source: docsRequestedSource
+  };
+};
+
 
 const listReminders = async (options = {}) => {
   const { caseId, applicationId, includeGlobal = false, statuses = [], limit, offset } = options;
@@ -30704,6 +31502,22 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       const docTypes = Array.isArray(item.documentTypes) ? item.documentTypes.map(String) : [];
       let effectiveRequired = baseRequired;
       let effectiveMinCount = Number.isFinite(Number(item.minCount)) ? Number(item.minCount) : 1;
+      const normalizedDocTypeIds = docTypes.map(type =>
+        String(type || '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+      );
+      const hasFundingDisbursementCost = decisionApproved && assessmentCostTotal !== null && assessmentCostTotal > 0;
+      const isFundingDisbursementDoc = normalizedDocTypeIds.some(typeId =>
+        typeId === 'funding_agreement' ||
+        typeId === 'client_acknowledgement' ||
+        typeId === 'eft_form' ||
+        typeId === 'eft_or_wire_transfer_form' ||
+        typeId === 'eft_or_wire_transfer_direct_deposit_form' ||
+        typeId === 'voided_cheque'
+      );
+      if (isFundingDisbursementDoc) {
+        // Funding package artifacts are only required when the approved assessment includes funding.
+        effectiveRequired = hasFundingDisbursementCost;
+      }
 
       const appSatisfied =
         !isIntervention &&
@@ -30802,7 +31616,7 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       }
 
       if (normalizedId === 'client-acknowledgement') {
-        effectiveRequired = approvalOrLater;
+        effectiveRequired = hasFundingDisbursementCost;
         const matchedCount = baseMatches.length;
         const status = computeStatus(effectiveRequired, matchedCount, 1);
         return {
@@ -30970,7 +31784,7 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
       }
 
       if (normalizedId === 'funding-agreement') {
-        effectiveRequired = decisionApproved;
+        effectiveRequired = hasFundingDisbursementCost;
         const matchedCount = baseMatches.length;
         const status = computeStatus(effectiveRequired, matchedCount, 1);
         return {
@@ -31886,6 +32700,9 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
         owner_region.code AS owner_region_code,
         owner_region.name_en AS owner_region_name,
         s.reference_number AS submission_reference_number,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"first-name\"')) AS submission_first_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"last-name\"')) AS submission_last_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
         c.created_at AS case_created_at,
         COALESCE(
           applicant_submission.id,
@@ -32305,6 +33122,7 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
     const contextAnswers = caseContext?.applicationAnswers || {};
 
     const firstNameCandidates = [
+      row.submission_first_name,
       contextPersonal.first_name,
       contextPersonal.firstName,
       contextPersonal.given_name,
@@ -32313,6 +33131,7 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       row.client_first_name,
     ];
     const lastNameCandidates = [
+      row.submission_last_name,
       contextPersonal.last_name,
       contextPersonal.lastName,
       contextPersonal.family_name,
@@ -32321,6 +33140,7 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       row.client_last_name,
     ];
     const preferredNameCandidates = [
+      row.submission_preferred_name,
       contextPersonal.preferred_name,
       contextPersonal.preferredName,
       caseContext?.preferredName,
@@ -32413,6 +33233,9 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
 
     const applicantUserIdValue = resolveApplicantUserId(row.applicant_user_id);
     const applicantNameValue = normaliseString(row.applicant_name) || null;
+    const applicantLegalNameValue =
+      [firstName, lastName].filter(Boolean).join(' ') ||
+      (applicantNameValue && applicantNameValue.includes(' ') ? applicantNameValue : null);
     const applicantEmailValue = normaliseString(row.applicant_email) || null;
 
     const response = {
@@ -32424,6 +33247,11 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       applicant_user_id: applicantUserIdValue,
       applicantName: applicantNameValue,
       applicant_name: applicantNameValue,
+      applicantLegalName: applicantLegalNameValue,
+      applicant_legal_name: applicantLegalNameValue,
+      submission_first_name: normaliseString(row.submission_first_name) || null,
+      submission_last_name: normaliseString(row.submission_last_name) || null,
+      submission_preferred_name: normaliseString(row.submission_preferred_name) || null,
       applicantEmail: applicantEmailValue,
       applicant_email: applicantEmailValue,
       applicationStatus: applicationStatusNormalised || row.application_status || null,
@@ -32630,6 +33458,15 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       assessmentRow?.justification ?? row.assessment_justification ?? null;
     response.assessment_nwac_review =
       assessmentRow?.nwac_review ?? row.assessment_nwac_review ?? null;
+    const assessmentReviewStatusRaw = typeof caseContext?.assessment_nwac_review_status === 'string'
+      ? caseContext.assessment_nwac_review_status.trim().toLowerCase()
+      : null;
+    response.assessment_nwac_review_status =
+      assessmentReviewStatusRaw === 'approve' ||
+      assessmentReviewStatusRaw === 'reject' ||
+      assessmentReviewStatusRaw === 'push_back'
+        ? assessmentReviewStatusRaw
+        : null;
     response.assessment_nwac_reason =
       assessmentRow?.nwac_reason ?? row.assessment_nwac_reason ?? null;
     response.assessment_intervention_code = interventionCodeValue;
@@ -36261,6 +37098,9 @@ app.get('/api/cases/:id', async (req, res) => {
         JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers.\"address-province\"')) AS application_address_province,
         JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers.province')) AS application_province_fallback,
         JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"address-province\"')) AS submission_address_province,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"first-name\"')) AS submission_first_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"last-name\"')) AS submission_last_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
         ca.date_of_assessment AS assessment_date_of_assessment,
         ca.overview AS case_summary,
         ca.employment_goals AS assessment_employment_goals,
@@ -36409,6 +37249,20 @@ app.get('/api/cases/:id', async (req, res) => {
       return res.status(404).json({ error: 'Case not found' });
     }
     const row = rows[0];
+    const submissionFirstName = normaliseString(row.submission_first_name) || null;
+    const submissionLastName = normaliseString(row.submission_last_name) || null;
+    const submissionPreferredName = normaliseString(row.submission_preferred_name) || null;
+    const applicantLegalName =
+      [submissionFirstName, submissionLastName].filter(Boolean).join(' ') ||
+      (() => {
+        const applicantName = normaliseString(row.applicant_name) || '';
+        return applicantName.includes(' ') ? applicantName : '';
+      })() ||
+      null;
+    row.submission_first_name = submissionFirstName;
+    row.submission_last_name = submissionLastName;
+    row.submission_preferred_name = submissionPreferredName;
+    row.applicant_legal_name = applicantLegalName;
     if (!row.applicant_user_id && row.application_id) {
       try {
         const [[r2]] = await pool.query(`SELECT s.user_id FROM iset_application a JOIN iset_application_submission s ON a.submission_id = s.id WHERE a.id=? LIMIT 1`, [row.application_id]);
@@ -38973,6 +39827,11 @@ app.get('/api/cases/:id/messages', async (req, res) => {
     }
     const applicantId = caseRow?.applicant_user_id || null;
     if (!applicantId) return res.status(404).json({ error: 'applicant_not_found' });
+    const requesterRole = canonicaliseAccessRole(inferUserRole(req));
+    const isStaffRequester = Boolean(requesterRole);
+    if (!isStaffRequester && Number(ownerUserId) !== Number(applicantId)) {
+      return res.status(403).json({ error: 'forbidden_case_access' });
+    }
 
     const limit = Math.min(Math.max(parseInt(req.query.limit || '200', 10) || 200, 1), 1000);
     const offset = Math.max(parseInt(req.query.offset || '0', 10) || 0, 0);
@@ -39076,7 +39935,7 @@ app.get('/api/cases/:id/messages', async (req, res) => {
 
 // Secure messaging: send message to applicant for case
 // POST /api/cases/:id/messages  { subject, body, urgent, attachments?: [{ workflow_id, due_at?, checklist_doc_type? }] }
-app.post('/api/cases/:id/messages', async (req, res) => {
+const handlePostCaseSecureMessage = async (req, res) => {
   const caseId = parseInt(req.params.id, 10);
   const {
     subject,
@@ -39501,11 +40360,8 @@ app.post('/api/cases/:id/messages', async (req, res) => {
           ...snapshotTokens
         };
       }
-      if (fundingAgreementTokens && typeof fundingAgreementTokens === 'object') {
-        // Keep case manager signature/date placeholders unresolved for applicant view.
-        delete fundingAgreementTokens.case_manager_signature;
-        delete fundingAgreementTokens.case_manager_signed_date;
-      }
+      // Keep case manager signature tokens in the stored schema so the signed artifact can include them.
+      // Participant-facing views hide this block at read time.
     }
 
     const requestedApplicationId = normalisePositiveInteger(req.body?.applicationId);
@@ -39565,6 +40421,8 @@ app.post('/api/cases/:id/messages', async (req, res) => {
     }
 
     // Create signing requests and link to message
+    let createdSigningRequestCount = 0;
+    const createdSigningRequestDocTypes = new Set();
     if (attachmentRows.length) {
       const schemaCache = new Map();
       for (const wf of attachmentRows) {
@@ -39629,6 +40487,10 @@ app.post('/api/cases/:id/messages', async (req, res) => {
           ]
         );
         const signingRequestId = ins.insertId;
+        createdSigningRequestCount += 1;
+        if (docType) {
+          createdSigningRequestDocTypes.add(String(docType).trim().toLowerCase());
+        }
         await pool.query(
           `INSERT INTO message_signing_request (message_id, signing_request_id) VALUES (?, ?)`,
           [result.insertId, signingRequestId]
@@ -39707,6 +40569,30 @@ app.post('/api/cases/:id/messages', async (req, res) => {
       actorName ||
       req?.auth?.name ||
       null;
+    const senderStaffProfileId = resolveActiveStaffProfileId(req);
+
+    const docsRequestedEligibleDocType = docTypeValue => {
+      const normalized = String(docTypeValue || '').trim().toLowerCase();
+      if (!normalized) return false;
+      if (normalized === 'assessment_approval_letter' || normalized === 'assessment_denial_letter') return false;
+      return true;
+    };
+    const hasDocsRequestedSigningForms =
+      createdSigningRequestCount > 0 &&
+      Array.from(createdSigningRequestDocTypes).some(docsRequestedEligibleDocType);
+    if (hasDocsRequestedSigningForms && caseApplicationId) {
+      try {
+        await setDocsRequestedFromSecureMessage({
+          caseId,
+          applicationId: caseApplicationId,
+          actorUserId: senderId,
+          actorName: assessorDisplayName || fromNameValue || null,
+          actorStaffProfileId: senderStaffProfileId
+        });
+      } catch (docsErr) {
+        console.warn('[doc-requests] failed to set docs requested from secure message', docsErr?.message || docsErr);
+      }
+    }
 
     const effectiveApplicantName =
       toNameValue ||
@@ -39742,7 +40628,230 @@ app.post('/api/cases/:id/messages', async (req, res) => {
     console.error('POST /api/cases/:id/messages failed:', e.message);
     res.status(500).json({ error: 'failed_to_send_message' });
   }
-});
+};
+
+app.post('/api/cases/:id/messages', handlePostCaseSecureMessage);
+
+async function invokeCaseSecureMessageHandler({ req, caseId, payload }) {
+  if (!req || !Number.isInteger(Number(caseId)) || Number(caseId) < 1) {
+    return { ok: false, status: 400, body: { error: 'invalid_case_id' } };
+  }
+  const syntheticReq = Object.create(req);
+  syntheticReq.params = { ...(req.params || {}), id: String(caseId) };
+  syntheticReq.body = payload && typeof payload === 'object' ? payload : {};
+
+  const responseState = { status: 200, body: null };
+  const syntheticRes = {
+    status(code) {
+      responseState.status = Number(code) || 500;
+      return this;
+    },
+    json(body) {
+      responseState.body = body;
+      return this;
+    }
+  };
+
+  try {
+    await handlePostCaseSecureMessage(syntheticReq, syntheticRes);
+  } catch (err) {
+    return {
+      ok: false,
+      status: 500,
+      body: {
+        error: 'failed_to_send_message',
+        detail: err?.message || String(err)
+      }
+    };
+  }
+
+  return {
+    ok: responseState.status >= 200 && responseState.status < 300,
+    status: responseState.status,
+    body: responseState.body
+  };
+}
+
+function normalizePreferredLanguageToken(value) {
+  const token = normaliseString(value).toLowerCase();
+  if (!token) return null;
+  if (token === 'fr' || token === 'fr-ca' || token === 'fr_ca' || token.includes('french')) return 'fr';
+  if (token === 'en' || token === 'en-ca' || token === 'en_ca' || token.includes('english')) return 'en';
+  return null;
+}
+
+function resolveCasePreferredLanguage(caseContext) {
+  const context = caseContext && typeof caseContext === 'object' ? caseContext : {};
+  const answers = context.applicationAnswers && typeof context.applicationAnswers === 'object'
+    ? context.applicationAnswers
+    : {};
+  const personal = context.applicationPersonal && typeof context.applicationPersonal === 'object'
+    ? context.applicationPersonal
+    : {};
+  const payload = context.applicationPayload && typeof context.applicationPayload === 'object'
+    ? context.applicationPayload
+    : {};
+  const candidates = [
+    answers['preferred-language'],
+    answers.preferred_language,
+    answers['language-spoken'],
+    answers.language_spoken,
+    personal.preferred_language,
+    personal.language,
+    context['preferred-language'],
+    context.preferred_language,
+    context.preferredLanguage,
+    context.languageSpoken,
+    payload['preferred-language'],
+    payload.preferred_language,
+  ];
+  for (const value of candidates) {
+    const normalized = normalizePreferredLanguageToken(value);
+    if (normalized) return normalized;
+  }
+  return 'en';
+}
+
+function resolveCaseApplicantDisplayName(caseContext, fallback = 'Applicant') {
+  const context = caseContext && typeof caseContext === 'object' ? caseContext : {};
+  const personal = context.applicationPersonal && typeof context.applicationPersonal === 'object'
+    ? context.applicationPersonal
+    : {};
+  const answers = context.applicationAnswers && typeof context.applicationAnswers === 'object'
+    ? context.applicationAnswers
+    : {};
+  const candidates = [
+    personal.preferred_name,
+    personal.preferredName,
+    context.preferredName,
+    answers['preferred-name'],
+    answers.preferred_name,
+    resolveApplicantNameFromPayload(context.applicationPayload || null, null),
+    personal.first_name && personal.last_name ? `${personal.first_name} ${personal.last_name}` : null,
+    personal.firstName && personal.lastName ? `${personal.firstName} ${personal.lastName}` : null,
+  ];
+  for (const candidate of candidates) {
+    const value = normaliseString(candidate);
+    if (value) return value;
+  }
+  return fallback;
+}
+
+function buildAutoFundingFormsMessage({ language = 'en', applicantName = 'Applicant', trackingId = null } = {}) {
+  const safeName = normaliseString(applicantName) || 'Applicant';
+  const referenceLine = trackingId ? `\nReference: ${trackingId}` : '';
+  if (language === 'fr') {
+    return {
+      subject: 'Documents de financement ISET - signature requise',
+      body: [
+        `Bonjour ${safeName},`,
+        '',
+        'Votre demande au programme ISET a ete approuvee.',
+        '',
+        'Veuillez remplir et signer les documents joints appropries :',
+        '- Client Funding Agreement',
+        '- Client Acknowledgement of Funding Source',
+        '- EFT & Wire Transfer Direct Debit',
+        '',
+        'Veuillez soumettre les documents signes dans votre fil de messagerie securisee des que possible.',
+        referenceLine ? referenceLine.trim() : '',
+        '',
+        'Cordialement,',
+        'Programme ISET de NWAC'
+      ].filter(Boolean).join('\n')
+    };
+  }
+  return {
+    subject: 'ISET funding documents - signature required',
+    body: [
+      `Dear ${safeName},`,
+      '',
+      'Your ISET application has been approved.',
+      '',
+      'Please complete and sign the appropriate attached documents:',
+      '- Client Funding Agreement',
+      '- Client Acknowledgement of Funding Source',
+      '- EFT & Wire Transfer Direct Debit',
+      '',
+      'Please submit the signed documents through your secure messaging thread as soon as possible.',
+      referenceLine ? referenceLine.trim() : '',
+      '',
+      'Sincerely,',
+      'NWAC ISET Program'
+    ].filter(Boolean).join('\n')
+  };
+}
+
+async function resolveAutoFundingFormsAttachments(connection = pool) {
+  const [rows] = await connection.query(
+    `SELECT id, name, status, workflow_type, document_type, updated_at
+       FROM iset_intake.workflow
+      WHERE workflow_type IN ('consent-no-prefill', 'consent-cm-prefill')
+      ORDER BY updated_at DESC, id DESC`
+  );
+  const normalizeKey = value => normaliseString(value).toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  const pickBest = (current, candidate) => {
+    if (!candidate) return current;
+    if (!current) return candidate;
+    const score = row => {
+      const status = normaliseString(row?.status).toLowerCase();
+      if (status === 'active') return 3;
+      if (status === 'draft') return 2;
+      return 1;
+    };
+    const currentScore = score(current);
+    const candidateScore = score(candidate);
+    if (candidateScore > currentScore) return candidate;
+    if (candidateScore < currentScore) return current;
+    const currentUpdated = current?.updated_at ? new Date(current.updated_at).getTime() : 0;
+    const candidateUpdated = candidate?.updated_at ? new Date(candidate.updated_at).getTime() : 0;
+    if (candidateUpdated > currentUpdated) return candidate;
+    if (candidateUpdated < currentUpdated) return current;
+    return Number(candidate?.id || 0) > Number(current?.id || 0) ? candidate : current;
+  };
+
+  const selected = {
+    funding: null,
+    acknowledgement: null,
+    eft: null
+  };
+
+  for (const row of rows || []) {
+    const docTypeKey = normalizeKey(row?.document_type);
+    const nameKey = normalizeKey(row?.name);
+    if (docTypeKey === 'funding_agreement') {
+      selected.funding = pickBest(selected.funding, row);
+      continue;
+    }
+    if (docTypeKey === 'client_acknowledgement') {
+      selected.acknowledgement = pickBest(selected.acknowledgement, row);
+      continue;
+    }
+    const eftTypeMatch = new Set(['eft_or_wire_transfer_form', 'eft_form', 'eft']).has(docTypeKey);
+    const eftNameMatch = nameKey.includes('eft') && (nameKey.includes('wire') || nameKey.includes('debit'));
+    if (eftTypeMatch || eftNameMatch) {
+      selected.eft = pickBest(selected.eft, row);
+    }
+  }
+
+  const attachments = [];
+  if (selected.funding?.id) {
+    attachments.push({ workflow_id: Number(selected.funding.id), checklist_doc_type: 'funding_agreement' });
+  }
+  if (selected.acknowledgement?.id) {
+    attachments.push({ workflow_id: Number(selected.acknowledgement.id), checklist_doc_type: 'client_acknowledgement' });
+  }
+  if (selected.eft?.id) {
+    attachments.push({ workflow_id: Number(selected.eft.id), checklist_doc_type: 'eft_or_wire_transfer_form' });
+  }
+
+  const missing = [];
+  if (!selected.funding?.id) missing.push('funding_agreement');
+  if (!selected.acknowledgement?.id) missing.push('client_acknowledgement');
+  if (!selected.eft?.id) missing.push('eft_or_wire_transfer_form');
+
+  return { attachments, missing };
+}
 
 // --- Hands-on tutorials (Cloudscape AnnotationContext) progress -------------------
 // Stores per-staff completion/dismissal in the DB so tutorial state follows users across devices.
@@ -40552,6 +41661,14 @@ const normalizePostingContext = value => {
   const norm = String(value).trim().toLowerCase();
   if (norm === 'external' || norm === 'internal') return norm;
   return null;
+};
+
+const normalizeAssessmentReviewStatus = value => {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized !== 'approve' && normalized !== 'reject' && normalized !== 'push_back') return null;
+  return normalized;
 };
 
 // Validate that a pot is chargeable (funding stream) and return the GL/project code for the given posting context.
@@ -41402,7 +42519,34 @@ const normalizePayeeTypeKey = value => {
   if (!value) return null;
   const raw = String(value).trim();
   if (!raw) return null;
-  return raw.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const normalized = raw.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const aliasMap = {
+    // Canonical legacy buckets used by evidence/policy config.
+    participant: 'client',
+    participantclient: 'client',
+    client: 'client',
+    institution: 'institution',
+    traininginstitution: 'institution',
+    educationalinstitution: 'institution',
+    accreditedinstitution: 'institution',
+    accreditededucationaltraininginstitution: 'institution',
+    employer: 'employer',
+    employerwagesubsidypartner: 'employer',
+    wagesubsidypartner: 'employer',
+    vendor: 'vendor',
+    supplier: 'vendor',
+    serviceprovider: 'vendor',
+    childcareprovider: 'vendor',
+    trainingrelatedsupplier: 'vendor',
+    professionalbusinessservicesprovider: 'vendor',
+    professionalservicesprovider: 'vendor',
+    businessservicesprovider: 'vendor',
+    other: 'other',
+    communityorganization: 'other',
+    nonprofitorganization: 'other',
+    communitynonprofitorganization: 'other',
+  };
+  return aliasMap[normalized] || normalized;
 };
 
 const normalizeEvidenceTypeKey = value => {
@@ -43819,6 +44963,19 @@ const validatePaymentLinePolicy = ({
       message: `Amount exceeds configured cap (${cap}).`,
     });
   }
+  const payeeType = typeof (line?.payee_type || line?.payeeType || '') === 'string'
+    ? String(line?.payee_type || line?.payeeType || '').trim()
+    : '';
+  const payeeName = typeof (line?.payee_name || line?.payeeName || '') === 'string'
+    ? String(line?.payee_name || line?.payeeName || '').trim()
+    : '';
+  if (!payeeType || !payeeName) {
+    errors.push({
+      field: 'payee',
+      code: 'payee_missing',
+      message: 'Payee type and payee name are required before submission.',
+    });
+  }
 
   if (paymentTypeCode && interventionPaymentTypeMap) {
     const allowed = resolveAllowedPaymentTypesForIntervention(interventionPaymentTypeMap, intervention);
@@ -45467,6 +46624,17 @@ const resolveAutoPacketPayee = ({ paymentType, partnerName, clientName, fallback
   return { payeeType: fallbackPayeeType, payeeName: fallbackPayeeName };
 };
 
+const resolveAutoPacketPayeeFromCostLine = payeeRaw => {
+  if (!payeeRaw || typeof payeeRaw !== 'object') return null;
+  const payeeType = resolveAutoPacketPayeeType(payeeRaw.type || payeeRaw.payeeType || payeeRaw.payee_type) || null;
+  const payeeName = normaliseString(payeeRaw.name || payeeRaw.payeeName || payeeRaw.payee_name || null);
+  const payeeReference = normaliseString(
+    payeeRaw.reference || payeeRaw.payeeReference || payeeRaw.payee_reference || null
+  );
+  if (!payeeType || !payeeName) return null;
+  return { payeeType, payeeName, payeeReference: payeeReference || null };
+};
+
 const buildAutoPaymentLinesFromCostLines = ({
   interventionRow,
   interventionMetadata,
@@ -45524,6 +46692,8 @@ const buildAutoPaymentLinesFromCostLines = ({
       fallbackType: fallbackPayeeType,
       fallbackName: fallbackPayeeName,
     });
+    const payeeFromCostLine = resolveAutoPacketPayeeFromCostLine(entry.payee);
+    const resolvedPayee = payeeFromCostLine || payee;
     const baseMeta = pruneNullish({
       autoGenerated: true,
       source: 'assessment_cost_line',
@@ -45559,8 +46729,9 @@ const buildAutoPaymentLinesFromCostLines = ({
           };
           pushLine({
             paymentType,
-            payeeType: payee.payeeType,
-            payeeName: payee.payeeName,
+            payeeType: resolvedPayee.payeeType,
+            payeeName: resolvedPayee.payeeName,
+            payeeReference: resolvedPayee.payeeReference || null,
             amount: lineAmount,
             currency: 'CAD',
             servicePeriodStart: periodItem.start,
@@ -45581,8 +46752,9 @@ const buildAutoPaymentLinesFromCostLines = ({
     const requiresPeriod = recurrenceMode !== RECURRENCE_MODE_NOT_ALLOWED;
     pushLine({
       paymentType,
-      payeeType: payee.payeeType,
-      payeeName: payee.payeeName,
+      payeeType: resolvedPayee.payeeType,
+      payeeName: resolvedPayee.payeeName,
+      payeeReference: resolvedPayee.payeeReference || null,
       amount,
       currency: 'CAD',
       servicePeriodStart: requiresPeriod ? recurrenceStart || interventionStart : null,
@@ -46160,7 +47332,7 @@ async function createAutoPaymentPacketFromIntervention({
       line.payeeType,
       line.payeeName,
       null,
-      null,
+      line.payeeReference || null,
       line.amount,
       line.currency || 'CAD',
       line.servicePeriodStart || null,
@@ -55208,6 +56380,89 @@ app.post('/api/consent-letter/pdf', async (req, res) => {
   }
 });
 
+app.post('/api/authorization-release/pdf', async (req, res) => {
+  const { applicationId, declarationSigned, declarationSignedName, declarationSignedAt } = req.body || {};
+  if (!applicationId) {
+    return res.status(400).json({ error: 'applicationId is required' });
+  }
+
+  const signed = Boolean(declarationSigned);
+  const rawSignatureName = typeof declarationSignedName === 'string' ? declarationSignedName.trim() : '';
+  const signatureBoxContent = signed ? escapeHtml(rawSignatureName || 'Not provided') : 'Not signed';
+  const signedOnDisplay = signed ? formatSignatureDate(declarationSignedAt) : 'Not signed';
+  const signedOnHtml = escapeHtml(signedOnDisplay);
+  const logoDataUri = getConsentLogoDataUri();
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Authorization for Release of ISET Client Information</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; color: #1b1b1b; margin: 40px; line-height: 1.5; }
+    h1 { text-align: center; font-size: 24px; margin-bottom: 12px; }
+    .logo { text-align: center; margin-bottom: 24px; }
+    .logo img { max-height: 80px; width: auto; }
+    .signature-box { border: 1px solid #9ba7b6; border-radius: 6px; padding: 16px; min-height: 80px; display: flex; align-items: center; font-size: 22px; font-family: 'Segoe Script', 'Lucida Handwriting', cursive; }
+    .signature-label { font-size: 12px; color: #6b7280; margin-top: 4px; }
+    .meta { font-size: 14px; color: #374151; }
+    .footer { text-align: center; font-size: 12px; color: #6b7280; margin-top: 48px; }
+    .paragraph { margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    td { vertical-align: top; padding-right: 16px; }
+  </style>
+</head>
+<body>
+  <div class="logo">
+    ${logoDataUri ? `<img src="${logoDataUri}" alt="Native Women's Association of Canada logo" />` : ''}
+  </div>
+  <h1>Authorization for Release of ISET Client Information</h1>
+  ${AUTHORIZATION_RELEASE_PARAGRAPHS.map(paragraph => `<p class="paragraph">${escapeHtml(paragraph)}</p>`).join('')}
+  <table style="margin-top: 24px;">
+    <tr>
+      <td style="width: 50%;">
+        <div class="meta"><strong>Client signature</strong></div>
+        <div class="signature-box">${signatureBoxContent}</div>
+        <div class="signature-label">Client signature</div>
+      </td>
+      <td style="width: 50%;">
+        <div class="meta"><strong>Signed on</strong></div>
+        <div class="meta">${signedOnHtml}</div>
+        <div class="signature-label">Electronic consent captured via the ISET intake portal.</div>
+      </td>
+    </tr>
+  </table>
+  <div class="footer">NWAC wishes to acknowledge support for this project through the Government of Canada's ISET Program.</div>
+</body>
+</html>`;
+
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '25mm', bottom: '25mm', left: '20mm', right: '20mm' }
+    });
+    await page.close();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="authorization-release-iset-client-information-${applicationId}.pdf"`);
+    return res.end(pdfBuffer);
+  } catch (err) {
+    console.error('[authorization-release-pdf] failed to generate PDF:', err);
+    return res.status(500).json({ error: 'Unable to generate authorization release PDF' });
+  } finally {
+    if (browser) {
+      try { await browser.close(); } catch (_) {}
+    }
+  }
+});
+
 app.post('/api/indigenous-declaration/pdf', async (req, res) => {
   const { applicationId, declarationSigned, declarationSignedName, declarationSignedAt, affiliation } = req.body || {};
   if (!applicationId) {
@@ -56624,6 +57879,18 @@ app.post('/api/signing-requests/:id/sign', async (req, res) => {
             AND status <> 'signed'`,
         [userId, cfaVersionId]
       );
+      try {
+        await regenerateSignedCfaDocument({
+          connection: pool,
+          cfaVersionId,
+          participantUserId: userId,
+          signedPayload: payload,
+          actorUserId: userId,
+          createdByUserId: row.created_by_user_id || null
+        });
+      } catch (signedDocErr) {
+        console.warn('[cfa] failed to regenerate signed clean document', signedDocErr?.message || signedDocErr);
+      }
     }
     const caseId = Number(row.case_id);
     if (Number.isInteger(caseId) && caseId > 0) {
@@ -56653,7 +57920,8 @@ app.post('/api/signing-requests/:id/sign', async (req, res) => {
           `SELECT COUNT(*) AS pending_count
              FROM signing_request
             WHERE case_id = ?
-              AND status <> 'signed'`,
+              AND status IN ('pending', 'viewed')
+              AND LOWER(COALESCE(checklist_doc_type, '')) NOT IN ('assessment_approval_letter', 'assessment_denial_letter')`,
           [caseId]
         );
         const pendingCount = Number(pendingRow?.pending_count || 0);
@@ -56862,6 +58130,12 @@ app.put('/api/cases/:id', async (req, res) => {
   let autoPlanApprovalUserId = null;
   let assessmentBudgetPotId = undefined;
   let assessmentBudgetPotProvided = false;
+  let hasAssessmentPayload = false;
+  let beforeAssessmentBudgetPotId = null;
+  let beforeAssessmentPostingContext = null;
+  let beforeAssessmentReviewStatus = null;
+  let assessmentReviewStatus = null;
+  let assessmentReviewStatusProvided = false;
   let previousConflictDeclarationSigned = null;
   let conflictDeclarationJustSigned = false;
   let conflictDeclarationSignedAt = null;
@@ -56900,6 +58174,10 @@ app.put('/api/cases/:id', async (req, res) => {
     beforeApplicationStatus = normaliseCaseStatusValue(existingCase.application_status) || existingCase.application_status || null;
     const beforeStatusLower = beforeStatus ? String(beforeStatus).toLowerCase() : null;
     const beforeStatusNormalised = normaliseCaseStatusValue(beforeStatus);
+    const existingCaseContext = safeJsonParse(existingCase.case_context_json, null);
+    beforeAssessmentReviewStatus = normalizeAssessmentReviewStatus(
+      existingCaseContext?.assessment_nwac_review_status
+    );
     beforeDocsRequestedActive = Number(existingCase.docs_requested_active || 0) === 1;
     beforeDocsRequestedAt = existingCase.docs_requested_at || null;
     beforeDocsRequestedClearedAt = existingCase.docs_requested_cleared_at || null;
@@ -57106,6 +58384,7 @@ app.put('/api/cases/:id', async (req, res) => {
       'assessment_wage',
       'assessment_recommendation',
       'assessment_justification',
+      'assessment_nwac_review_status',
       'assessment_nwac_review',
       'assessment_nwac_reason',
       'assessment_intervention_code',
@@ -57124,11 +58403,23 @@ app.put('/api/cases/:id', async (req, res) => {
       'case_summary'
     ];
 
-    const conflictSignatureRequested = Object.prototype.hasOwnProperty.call(body, 'assessment_conflict_declaration_signed');
-    const hasAssessmentPayload = assessmentKeys.some(key => Object.prototype.hasOwnProperty.call(body, key));
-    const hasCaseContextPayload =
-      Object.prototype.hasOwnProperty.call(body, 'caseContext') ||
-      Object.prototype.hasOwnProperty.call(body, 'case_context');
+  const conflictSignatureRequested = Object.prototype.hasOwnProperty.call(body, 'assessment_conflict_declaration_signed');
+  hasAssessmentPayload = assessmentKeys.some(key => Object.prototype.hasOwnProperty.call(body, key));
+  const hasCaseContextPayload =
+    Object.prototype.hasOwnProperty.call(body, 'caseContext') ||
+    Object.prototype.hasOwnProperty.call(body, 'case_context');
+
+  if (hasAssessmentPayload) {
+    const [[existingAssessmentRow]] = await conn.query(
+      `SELECT intervention_budget_pot_id, posting_context
+         FROM iset_case_assessment
+        WHERE case_id = ?
+        LIMIT 1`,
+      [caseId]
+    );
+    beforeAssessmentBudgetPotId = normalisePositiveInteger(existingAssessmentRow?.intervention_budget_pot_id);
+    beforeAssessmentPostingContext = normalizePostingContext(existingAssessmentRow?.posting_context) || null;
+  }
 
   const rawAssessmentPotId =
     body.assessment_intervention_pot_id ??
@@ -57140,6 +58431,21 @@ app.put('/api/cases/:id', async (req, res) => {
     assessmentBudgetPotProvided = true;
     const parsedPotId = toNumericRange(rawAssessmentPotId, { min: 1, max: null, stripNonDigits: true });
     assessmentBudgetPotId = typeof parsedPotId === 'undefined' ? null : parsedPotId;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'assessment_nwac_review_status')) {
+    assessmentReviewStatusProvided = true;
+    const normalizedDecision = normalizeAssessmentReviewStatus(body.assessment_nwac_review_status);
+    if (!normalizedDecision) {
+      await conn.rollback();
+      return res.status(422).json({
+        success: false,
+        error: 'invalid_assessment_nwac_review_status',
+        message: 'Funding decision must be one of: approve, reject, push_back.',
+        lock: lockCheck.lock || null
+      });
+    }
+    assessmentReviewStatus = normalizedDecision;
   }
 
     const canonicalRoleForApproval = canonicaliseAccessRole(identity.role);
@@ -57325,6 +58631,18 @@ app.put('/api/cases/:id', async (req, res) => {
       }
       await conn.query('UPDATE iset_case SET case_context_json = ? WHERE id = ?', [jsonValue, caseId]);
       shouldMarkSubmissionNeedsReview = true;
+    }
+
+    if (assessmentReviewStatusProvided) {
+      const [[contextRow]] = await conn.query(
+        'SELECT case_context_json FROM iset_case WHERE id = ? LIMIT 1 FOR UPDATE',
+        [caseId]
+      );
+      const currentContext = safeJsonParse(contextRow?.case_context_json, null);
+      const nextContext = mergeCaseContext(currentContext, {
+        assessment_nwac_review_status: assessmentReviewStatus
+      });
+      await conn.query('UPDATE iset_case SET case_context_json = ? WHERE id = ?', [JSON.stringify(nextContext), caseId]);
     }
 
     if (conflictSignatureRequested) {
@@ -57959,28 +59277,54 @@ app.put('/api/cases/:id', async (req, res) => {
     }
 
     const submittedStatus = normaliseCaseStatusValue(body.status) || normaliseCaseStatusValue(body.applicationStatus);
+    const assessmentHasApplicationId = Number.isFinite(Number(caseRow?.application_id));
     const shouldGenerateAssessmentPdf =
-      assessmentSubmitted && submittedStatus === 'pending_approval' && Number.isFinite(Number(caseRow?.application_id));
+      assessmentSubmitted && submittedStatus === 'pending_approval' && assessmentHasApplicationId;
+    const afterCaseContext = safeJsonParse(caseRow?.case_context_json, null);
+    const afterAssessmentReviewStatus = normalizeAssessmentReviewStatus(
+      afterCaseContext?.assessment_nwac_review_status
+    );
+    const afterAssessmentPotId = normalisePositiveInteger(caseRow?.assessment_intervention_pot_id);
+    const afterAssessmentPostingContext = normalizePostingContext(caseRow?.assessment_posting_context) || null;
+    const budgetPotOrPostingChanged =
+      hasAssessmentPayload &&
+      (beforeAssessmentBudgetPotId !== afterAssessmentPotId ||
+        beforeAssessmentPostingContext !== afterAssessmentPostingContext);
+    const reviewTransitionedToApproved =
+      hasAssessmentPayload &&
+      beforeAssessmentReviewStatus !== 'approve' &&
+      afterAssessmentReviewStatus === 'approve';
+    const shouldRegenerateAssessmentPdfForBudgetPot =
+      !shouldGenerateAssessmentPdf &&
+      assessmentHasApplicationId &&
+      afterAssessmentReviewStatus === 'approve' &&
+      afterAssessmentPotId !== null &&
+      (budgetPotOrPostingChanged || reviewTransitionedToApproved);
+    const generateAndStoreAssessmentPdf = async () => {
+      const applicantContext = await fetchAssessmentApplicantContext({
+        applicationId: caseRow.application_id,
+        applicantUserId: caseRow.applicant_user_id
+      });
+      const pdfBuffer = await generateAssessmentPdfBuffer({
+        caseRow,
+        applicantName: applicantContext.applicantName,
+        referenceNumber: applicantContext.trackingId || trackingId
+      });
+      await storeAssessmentPdfDocument({
+        applicationId: caseRow.application_id,
+        caseId,
+        clientId: caseRow.client_id,
+        applicantUserId: applicantContext.applicantUserId,
+        actorUserId: actorId,
+        trackingId: applicantContext.trackingId || trackingId,
+        pdfBuffer
+      });
+      return applicantContext;
+    };
+
     if (shouldGenerateAssessmentPdf) {
       try {
-        const applicantContext = await fetchAssessmentApplicantContext({
-          applicationId: caseRow.application_id,
-          applicantUserId: caseRow.applicant_user_id
-        });
-        const pdfBuffer = await generateAssessmentPdfBuffer({
-          caseRow,
-          applicantName: applicantContext.applicantName,
-          referenceNumber: applicantContext.trackingId || trackingId
-        });
-        await storeAssessmentPdfDocument({
-          applicationId: caseRow.application_id,
-          caseId,
-          clientId: caseRow.client_id,
-          applicantUserId: applicantContext.applicantUserId,
-          actorUserId: actorId,
-          trackingId: applicantContext.trackingId || trackingId,
-          pdfBuffer
-        });
+        const applicantContext = await generateAndStoreAssessmentPdf();
         try {
           const applicationPayload = await readApplicationPayload(pool, caseRow.application_id, { forUpdate: false });
           if (!applicationPayload) {
@@ -58036,8 +59380,16 @@ app.put('/api/cases/:id', async (req, res) => {
       }
     }
 
-    if (body.assessment_nwac_review) {
-      const outcome = body.assessment_nwac_review || null;
+    if (shouldRegenerateAssessmentPdfForBudgetPot) {
+      try {
+        await generateAndStoreAssessmentPdf();
+      } catch (err) {
+        console.error('[assessment-pdf] budget-pot regeneration failed:', err?.message || err);
+      }
+    }
+
+    if (assessmentReviewStatusProvided) {
+      const outcome = assessmentReviewStatus;
       const reason = body.assessment_nwac_reason || null;
       const approvalCost = parseCostValue(
         body.assessment_intervention_cost_total ??
@@ -58049,7 +59401,9 @@ app.put('/api/cases/:id', async (req, res) => {
         typeof assessmentBudgetPotId !== 'undefined'
           ? assessmentBudgetPotId
           : toNumericRange(body.assessment_intervention_pot_id, { min: 1, max: null, stripNonDigits: true });
-      const postingContext = normalizePostingContext(body.postingContext || body.posting_context || caseRow?.posting_context) || null;
+      const postingContext = normalizePostingContext(
+        body.postingContext || body.posting_context || caseRow?.assessment_posting_context
+      ) || null;
       const outcomeLabel = outcome === 'approve' ? 'approved' : outcome ? 'not approved' : 'submitted';
       await captureCaseEvent({
         type: 'nwac_review_submitted',
@@ -58073,6 +59427,80 @@ app.put('/api/cases/:id', async (req, res) => {
         actorId,
         actorName,
       });
+    }
+    if (reviewTransitionedToApproved) {
+      const proposedInterventions = normalizeAssessmentProposedInterventions(
+        caseRow?.assessment_proposed_interventions
+      );
+      const proposedInterventionsTotal = computeProposedInterventionsTotal(proposedInterventions);
+      const explicitAssessmentCost = parseCostValue(
+        caseRow?.assessment_intervention_cost_total ??
+        body.assessment_intervention_cost_total ??
+        body.intervention_cost_total ??
+        null
+      );
+      const approvedCostTotal = explicitAssessmentCost !== null
+        ? explicitAssessmentCost
+        : (Number.isFinite(proposedInterventionsTotal) ? proposedInterventionsTotal : null);
+      const hasNonZeroApprovedCost = Number.isFinite(approvedCostTotal) && approvedCostTotal > 0;
+      if (hasNonZeroApprovedCost) {
+        try {
+          const preferredLanguage = resolveCasePreferredLanguage(afterCaseContext);
+          const applicantDisplayName = resolveCaseApplicantDisplayName(afterCaseContext, 'Applicant');
+          const staffDisplayName = normaliseString(
+            (await resolveStaffDisplayName(pool, req)) ||
+            actorName ||
+            req?.staffProfile?.display_name ||
+            req?.staffProfile?.name ||
+            req?.auth?.name ||
+            'NWAC ISET Program'
+          ) || 'NWAC ISET Program';
+          const { subject, body: messageBody } = buildAutoFundingFormsMessage({
+            language: preferredLanguage,
+            applicantName: applicantDisplayName,
+            trackingId
+          });
+          const workflowResolution = await resolveAutoFundingFormsAttachments(pool);
+          if (!workflowResolution.missing.length) {
+            const autoMessagePayload = {
+              subject,
+              body: messageBody,
+              urgent: false,
+              toDisplayName: applicantDisplayName,
+              fromDisplayName: staffDisplayName,
+              attachments: workflowResolution.attachments
+            };
+            if (Number.isFinite(Number(caseRow?.application_id)) && Number(caseRow.application_id) > 0) {
+              autoMessagePayload.applicationId = Number(caseRow.application_id);
+            }
+            const autoMessageResult = await invokeCaseSecureMessageHandler({
+              req,
+              caseId,
+              payload: autoMessagePayload
+            });
+            if (!autoMessageResult.ok) {
+              console.warn(
+                '[auto-funding-message] send failed for case %s (status=%s, error=%s)',
+                caseId,
+                autoMessageResult.status,
+                autoMessageResult.body?.error || autoMessageResult.body?.detail || 'unknown_error'
+              );
+            }
+          } else {
+            console.warn(
+              '[auto-funding-message] skipped for case %s; missing workflows for %s',
+              caseId,
+              workflowResolution.missing.join(', ')
+            );
+          }
+        } catch (autoMessageErr) {
+          console.warn(
+            '[auto-funding-message] failed for case %s: %s',
+            caseId,
+            autoMessageErr?.message || autoMessageErr
+          );
+        }
+      }
     }
     if (conflictDeclarationJustSigned) {
       const signedAtIso = (conflictDeclarationSignedAt || new Date()).toISOString();

@@ -90,13 +90,18 @@ const SOURCE_LABELS = {
   application_submission: 'Application submission',
   secure_message_attachment: 'Message attachment',
   manual_upload: 'Manual upload',
-  system_generated: 'Digitally signed'
+  system_generated: 'System Generated'
 };
 
-const formatSourceLabel = source => {
+const formatSourceLabel = item => {
+  const source = item?.source;
   if (!source) return '';
   const normalized = String(source).trim().toLowerCase();
   if (!normalized) return '';
+  if (normalized === 'system_generated') {
+    const label = String(item?.label || parseMetadata(item?.metadata)?.label || '').toLowerCase();
+    if (label.includes('(signed)')) return 'Digitally signed';
+  }
   return SOURCE_LABELS[normalized] || normalized.replace(/_/g, ' ');
 };
 
@@ -1336,7 +1341,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           return 'Client';
         }
       },
-      { id: 'source', header: 'Source', cell: item => formatSourceLabel(item.source) },
+      { id: 'source', header: 'Source', cell: item => formatSourceLabel(item) },
       {
         id: 'scope',
         header: 'Scope',

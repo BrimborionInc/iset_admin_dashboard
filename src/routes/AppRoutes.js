@@ -589,7 +589,7 @@ const AppRoutes = ({
             ManualApplicationIntakePage,
             [
               { text: 'Home', href: '/' },
-              { text: 'Manual Intake', href: '/iset/applications/intake' }
+              { text: 'Manual Application Intake', href: '/iset/applications/intake' }
             ],
             'Manual Application Intake',
             <ManualApplicationIntakeHelp />,
@@ -900,7 +900,7 @@ const AppRoutes = ({
               <SpaceBetween size="xs" direction="horizontal">
                 <Button
                   iconName="external"
-                  onClick={() => window.open('/job-bank-search', '_blank', 'noopener,noreferrer')}
+                  onClick={() => window.location.assign('/job-bank-search')}
                 >
                   Job Search
                 </Button>
@@ -938,7 +938,7 @@ const AppRoutes = ({
               <SpaceBetween direction="horizontal" size="xs">
                 <Button
                   iconName="external"
-                  onClick={() => window.open('/job-bank-search', '_blank', 'noopener,noreferrer')}
+                  onClick={() => window.location.assign('/job-bank-search')}
                 >
                   Job Search
                 </Button>

@@ -1518,7 +1518,7 @@ const FinancePaymentTypeMappingWidget = ({ actions = {}, metadata = {}, toggleHe
             },
           },
           {
-            label: "Default in application assessment (step 2)",
+            label: "Auto-add?",
             control: (item, index) => (
               <Checkbox
                 checked={Boolean(item?.defaultOnAssessment)}

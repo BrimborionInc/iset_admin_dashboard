@@ -566,6 +566,15 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
     setLayout(current => current); // ensure board rerenders when caseData changes
   }, [caseData]);
 
+  const lockApplicationId = caseData?.application_id ?? caseData?.applicationId ?? null;
+
+  useEffect(() => {
+    return () => {
+      if (!lockApplicationId) return;
+      apiFetch(`/api/locks/application/${lockApplicationId}`, { method: 'DELETE' }).catch(() => {});
+    };
+  }, [lockApplicationId]);
+
   const renderBoardItem = (item, actions) => {
     if (!item?.id) return null;
     const definition = widgetRegistry[item.id];

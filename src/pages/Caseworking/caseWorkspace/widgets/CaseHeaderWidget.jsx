@@ -24,6 +24,7 @@ import useCurrentUser from "../../../../hooks/useCurrentUser.js";
 import { toCanonicalRole } from "../../../../context/RoleMatrixContext.js";
 import { usePaymentsData } from "../../../finance/widgets/PaymentsDataContext.jsx";
 import { buildApplicantWatchlistIdentity, formatSinDisplay } from "../../../../utils/applicantWatchlist.js";
+import { buildLockConflictMessage } from "../../../../hooks/useApplicationLock.js";
 
 const AWAITING_SUBMISSION_STATUSES = new Set([
   "draft",
@@ -444,6 +445,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const quickActions = useMemo(() => {
     const items = [];
     const hasCase = Boolean(caseData?.id);
+    const lockApplicationId = caseData?.applicationId || caseData?.application_id || null;
     const isReadyToClose = statusKey === "ready_to_close";
     const isClosed = statusKey === "closed";
     const isArchived = statusKey === "archived";
@@ -485,10 +487,15 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     if (canReopen) {
       items.push({ id: "reopen-case", text: "Reopen case" });
     }
+    if (lockApplicationId) {
+      items.push({ id: "release-lock", text: "Release lock" });
+    }
 
     return items;
   }, [
     caseData?.id,
+    caseData?.applicationId,
+    caseData?.application_id,
     statusKey,
     isSystemAdmin,
     isProgramAdmin,
@@ -945,6 +952,45 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         setWatchlistNotes("");
         setWatchlistModalOpen(true);
         setActionNotice(null);
+      } else if (detail.id === "release-lock") {
+        const lockApplicationId = caseData?.applicationId || caseData?.application_id || null;
+        if (!lockApplicationId) {
+          setActionError("No application lock is available to release.");
+          return;
+        }
+        setActionError(null);
+        setActionNotice(null);
+        setActionLoading(true);
+        try {
+          const response = await apiFetch(`/api/locks/application/${lockApplicationId}`, { method: "DELETE" });
+          let payload = null;
+          try {
+            payload = await response.json();
+          } catch (_) {
+            payload = null;
+          }
+          if (response.status === 423) {
+            const message = buildLockConflictMessage({
+              reason: payload?.reason || payload?.error,
+              lock: payload?.lock,
+            });
+            setActionError(message);
+            return;
+          }
+          if (!response.ok) {
+            throw new Error(payload?.message || payload?.error || "Unable to release lock.");
+          }
+          if (payload?.released === false) {
+            setActionNotice({ type: "info", text: "No active lock to release." });
+          } else {
+            setActionNotice({ type: "success", text: "Lock released." });
+          }
+          await refresh();
+        } catch (err) {
+          setActionError(err?.message || "Unable to release lock.");
+        } finally {
+          setActionLoading(false);
+        }
       }
     },
     [

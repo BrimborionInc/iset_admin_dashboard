@@ -42,6 +42,8 @@ This guide documents every environment variable and secret the test environment 
 | Migrations | `MIGRATION_STRICT=true` | Block startup if migrations fail | Static |
 
 > **Note:** Store sensitive values (`DB_PASS`, Cognito client secrets if any) in AWS Secrets Manager or SSM Parameter Store SecureStrings. Deployment scripts should pull them at runtime rather than committing plaintext `.env.test`.
+>
+> **Uploads encryption note (as verified 2026-03-09):** test bucket `nwac-test-uploads-20251014` is encrypted with SSE-S3 (`AES256`), not KMS.
 
 ---
 

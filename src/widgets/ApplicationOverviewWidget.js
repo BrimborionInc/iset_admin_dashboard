@@ -843,6 +843,7 @@ const ApplicationOverviewWidget = ({
   const canReopenClosed = hasCaseId && normalizedStatusKey === 'closed' && isAdminRole;
   const canReopenArchived = hasCaseId && normalizedStatusKey === 'archived' && isSystemAdministratorRole;
   const canReopenApplication = canReopenClosed || canReopenArchived;
+  const canReleaseLock = Boolean(application_id);
   const canEscalate = hasCaseId && !APPLICATION_TERMINAL_STATUSES.has(normalizedStatusKey) && !hasOpenEscalation && (isApplicationAssessorRole || isRegionalCoordinatorRole);
   const canEscalateUp = hasOpenEscalation && isEscalationOwner && roleKey === 'regional_manager';
   const canRespondEscalation = hasOpenEscalation && isEscalationOwner;
@@ -868,6 +869,7 @@ const ApplicationOverviewWidget = ({
       archive: canArchiveApplication ? { id: 'archive', text: 'Archive application' } : null,
       reopen: canReopenApplication ? { id: 'reopen', text: 'Reopen application' } : null,
       'audit-trail': layoutActions['audit-trail'] || null,
+      'release-lock': canReleaseLock ? { id: 'release-lock', text: 'Release lock' } : null,
     };
     const order = [
       'review-assessment',
@@ -885,6 +887,7 @@ const ApplicationOverviewWidget = ({
       'archive',
       'reopen',
       'audit-trail',
+      'release-lock',
     ];
     return order.reduce((acc, id) => {
       const item = actionsById[id];
@@ -899,6 +902,7 @@ const ApplicationOverviewWidget = ({
     canCloseApplication,
     canArchiveApplication,
     canReopenApplication,
+    canReleaseLock,
     canEscalate,
     canRespondEscalation,
     canResolveEscalation,
@@ -1072,6 +1076,49 @@ const ApplicationOverviewWidget = ({
     );
   }, []);
 
+  const releaseApplicationLockNow = useCallback(async () => {
+    if (!application_id) {
+      setStatusFeedback({ type: 'info', content: 'No application lock is available to release.' });
+      return;
+    }
+    setStatusFeedback(null);
+    setSavingStatus(true);
+    try {
+      const response = await apiFetch(`/api/locks/application/${application_id}`, { method: 'DELETE' });
+      let body = null;
+      try {
+        body = await response.json();
+      } catch (_) {
+        body = null;
+      }
+      if (response.status === 423) {
+        const message = buildLockConflictMessage({ reason: body?.reason || body?.error, lock: body?.lock });
+        setStatusFeedback({ type: 'warning', content: message });
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(body?.message || body?.error || 'Failed to release lock.');
+      }
+
+      // Clear local lock state and refresh lock metadata.
+      await releaseLock({ silent: true }).catch(() => {});
+      await fetchLatestApplication();
+      try {
+        await refreshCasePayload();
+      } catch (_) {}
+
+      if (body?.released === false) {
+        setStatusFeedback({ type: 'info', content: 'No active lock to release.' });
+      } else {
+        setStatusFeedback({ type: 'success', content: 'Lock released.' });
+      }
+    } catch (err) {
+      setStatusFeedback({ type: 'error', content: err?.message || 'Failed to release lock.' });
+    } finally {
+      setSavingStatus(false);
+    }
+  }, [application_id, fetchLatestApplication, refreshCasePayload, releaseLock]);
+
   const handleQuickActionSelect = ({ detail }) => {
     const actionId = detail?.id;
     if (!actionId) return;
@@ -1084,6 +1131,10 @@ const ApplicationOverviewWidget = ({
       setWatchlistError(null);
       setWatchlistNotes('');
       setWatchlistModalOpen(true);
+      return;
+    }
+    if (actionId === 'release-lock') {
+      releaseApplicationLockNow();
       return;
     }
     if (lockedByAnotherUser) {

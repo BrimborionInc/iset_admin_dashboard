@@ -5,6 +5,7 @@ import FinanceEmailRoutingWidget from "./widgets/FinanceEmailRoutingWidget.jsx";
 import FinanceIntacctIntegrationWidget from "./widgets/FinanceIntacctIntegrationWidget.jsx";
 import FinancePaymentTypeMappingWidget from "./widgets/FinancePaymentTypeMappingWidget.jsx";
 import FinanceSettingsOverviewWidget from "./widgets/FinanceSettingsOverviewWidget.jsx";
+import FinancePaymentTypeMappingHelp from "../../helpPanelContents/financePaymentTypeMappingHelp.js";
 
 const STORAGE_KEY = "finance-settings-layout-v2";
 
@@ -27,9 +28,9 @@ const widgetRegistry = {
     component: FinancePaymentTypeMappingWidget,
     title: "Payment type mapping",
     description: "Configure allowed payment types, recurrence, submission timing, and evidence rules.",
-    helpComponent: null,
+    helpComponent: FinancePaymentTypeMappingHelp,
     helpTitle: "Payment type mapping",
-    aiContext: null,
+    aiContext: FinancePaymentTypeMappingHelp.aiContext || null,
   },
   emailRouting: {
     id: "emailRouting",

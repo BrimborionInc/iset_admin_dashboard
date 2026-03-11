@@ -123,15 +123,15 @@ const SideNavigation = ({ currentRole, showTutorialHotspots = false, notificatio
   const allNavItems = [
     {
       type: 'section',
-      text: 'New ISET Applications',
+      text: 'Intake and Assessment',
       items: [
-        { type: 'link', text: 'Manual Intake', href: '/iset/applications/intake' },
+        { type: 'link', text: 'Manual Application Intake', href: '/iset/applications/intake' },
         { type: 'link', text: 'Application Assessment', href: '/case-assignment-dashboard' },
       ],
     },
     {
       type: 'section',
-      text: 'Current ISET Clients',
+      text: 'Case Management',
       items: [
         { type: 'link', text: 'Case Management', href: '/iset/cases' },
         { type: 'link', text: 'My Case Queue', href: '/case-management' },
@@ -155,7 +155,7 @@ const SideNavigation = ({ currentRole, showTutorialHotspots = false, notificatio
     },
     {
       type: 'section',
-      text: 'Prepare ESDC XML',
+      text: 'ESDC Reporting',
       items: [
         { type: 'link', text: 'Overview', href: '/esdc/overview' },
         { type: 'link', text: 'ILMP Exports', href: '/esdc/participants' },

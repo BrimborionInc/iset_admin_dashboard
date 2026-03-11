@@ -7,7 +7,7 @@ import { canCompleteOutcomeReview, getCaseStatusContext, getApplicationStatusCon
 import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, Alert, Modal, FormField, Input, Textarea, Checkbox, DatePicker, Select, Grid, ColumnLayout, Table, RadioGroup, Autosuggest, StatusIndicator, Wizard, Hotspot } from '@cloudscape-design/components';
 import ApplicationAssessmentHelp, { NwacAssessmentHelp } from '../helpPanelContents/applicationAssessmentHelp';
 import { BoardItem } from '@cloudscape-design/board-components';
-import { PAYMENT_TYPE_OPTIONS } from '../pages/finance/widgets/paymentOptions';
+import { PAYMENT_TYPE_OPTIONS, PAYEE_TYPE_OPTIONS, findOptionByValue } from '../pages/finance/widgets/paymentOptions';
 import { getCurrencyInputDisplayValue } from '../utils/currencyFormat';
 
 const BARRIERS = [
@@ -28,12 +28,133 @@ const RECOMMEND_OPTIONS = [
 ];
 const DENIAL_REASON_OPTIONS = [
   { value: 'eligibility_not_met', label: 'Eligibility criteria not met' },
-  { value: 'documentation_missing', label: 'Required documentation not provided' },
-  { value: 'intervention_outcomes_mismatch', label: 'Intervention not aligned with employability outcomes' },
-  { value: 'funding_unavailable', label: 'Funding not available under the requested stream' },
-  { value: 'duplicate_funding', label: 'Duplication with other funding' }
+  { value: 'documentation_missing', label: 'Required identity/supporting documentation not sufficient' },
+  { value: 'training_not_aligned', label: 'Training not aligned with employment goal or labour-market outcomes' },
+  { value: 'already_educated_employable', label: 'Applicant is already educated/employable for current objective' },
+  { value: 'institution_not_eligible', label: 'Selected institution/program is not eligible under ISET criteria' },
+  { value: 'duplicate_funding', label: 'Requested supports duplicate confirmed funding from another source' },
+  { value: 'funding_unavailable', label: 'Funding not available under the requested stream' }
 ];
 const DENIAL_REASON_WORD_LIMIT = 100;
+const normalizeTemplateSentence = (value) => {
+  const normalized = String(value || '').trim().replace(/\s+/g, ' ');
+  if (!normalized) return '';
+  return /[.!?]$/.test(normalized) ? normalized : `${normalized}.`;
+};
+const buildDenialTemplateDraftForReason = ({
+  reasonCode,
+  requestedProgramName,
+  requestedInstitution,
+  employmentGoal,
+  denialExplanation,
+  optionsForward,
+  partialServicesAvailable,
+  otherFundingSummary
+} = {}) => {
+  const programPhrase = (() => {
+    const program = String(requestedProgramName || '').trim();
+    const institution = String(requestedInstitution || '').trim();
+    if (program && institution) return `to pursue ${program} at ${institution}`;
+    if (program) return `to pursue ${program}`;
+    if (institution) return `to pursue training at ${institution}`;
+    return 'seeking training support';
+  })();
+  const intro = [
+    `Thank you for your recent application to the Native Women's Association of Canada (NWAC), through its Indigenous Skills and Employment Training (ISET) Program ${programPhrase}.`,
+    'We appreciate the time and effort you invested in the application process and the interest you have shown in pursuing higher education and training.'
+  ].join(' ');
+  const detail = normalizeTemplateSentence(denialExplanation);
+  const nextStepsText = Array.isArray(optionsForward) ? optionsForward.map(normalizeTemplateSentence).filter(Boolean).join(' ') : '';
+  const partialServicesText = Array.isArray(partialServicesAvailable) && partialServicesAvailable.length
+    ? `In the meantime, we can continue to offer limited supports including ${partialServicesAvailable.join(', ')}.`
+    : '';
+  const goalText = String(employmentGoal || '').trim();
+
+  const buildReason = (...paragraphs) =>
+    paragraphs
+      .map(p => String(p || '').trim())
+      .filter(Boolean)
+      .join('\n\n');
+
+  switch (String(reasonCode || '').trim()) {
+    case 'documentation_missing':
+      return {
+        decision_intro: intro,
+        decision_reason: buildReason(
+          'After reviewing your application, we are unable to approve your funding request at this time because the required documentation confirming eligibility is not yet sufficient under NWAC ISET criteria.',
+          detail ||
+            'A self-declaration or partial third-party confirmation may be helpful, but on its own it is not sufficient to establish eligibility for NWAC ISET funding.',
+          'We would be happy to reassess your eligibility when the required supporting documentation is received.',
+          partialServicesText || nextStepsText
+        )
+      };
+    case 'institution_not_eligible':
+      return {
+        decision_intro: intro,
+        decision_reason: buildReason(
+          'Under NWAC ISET eligibility criteria, funding is limited to publicly funded or provincially recognized training institutions and programs.',
+          detail ||
+            'Based on the information in your file, the selected institution or program is not currently eligible for funding under this requirement.',
+          nextStepsText ||
+            'If you identify a comparable program through an eligible institution, we would be pleased to reassess your application provided other criteria are met.'
+        )
+      };
+    case 'duplicate_funding':
+      return {
+        decision_intro: intro,
+        decision_reason: buildReason(
+          'As part of our standard review process, NWAC verifies existing financial supports to avoid overlap in funding.',
+          detail ||
+            (otherFundingSummary
+              ? `Our file review indicates existing support already covers requested costs (${otherFundingSummary}).`
+              : 'Our review indicates that requested supports overlap with confirmed funding from another source.'),
+          'Because overlapping supports cannot be duplicated under ISET policy, we are not able to approve this request at this time.',
+          nextStepsText
+        )
+      };
+    case 'already_educated_employable':
+      return {
+        decision_intro: intro,
+        decision_reason: buildReason(
+          'The ISET program prioritizes applicants facing significant barriers to employment and limited access to education or occupational training.',
+          detail ||
+            'Based on your file, you are currently considered educated and employable for your present objective, and your request does not meet current funding-priority criteria.',
+          nextStepsText ||
+            'We encourage you to explore alternate funding pathways such as scholarships, grants, or bursaries for advanced studies.'
+        )
+      };
+    case 'training_not_aligned':
+      return {
+        decision_intro: intro,
+        decision_reason: buildReason(
+          `At this time, your application is not approved because the proposed training does not align closely enough with your stated employment objective${goalText ? ` (${goalText})` : ''}.`,
+          detail ||
+            'ISET funding decisions must be linked to a clear skills-development and labour-market pathway.',
+          nextStepsText ||
+            'You are welcome to reapply when your selected program aligns more directly with your employment goal and labour-market outcomes.'
+        )
+      };
+    case 'funding_unavailable':
+      return {
+        decision_intro: intro,
+        decision_reason: buildReason(
+          'At this time, your application is not approved because funding is not currently available under the requested stream.',
+          detail || '',
+          nextStepsText || 'Please contact your case manager to review alternate supports or future intake opportunities.'
+        )
+      };
+    case 'eligibility_not_met':
+    default:
+      return {
+        decision_intro: intro,
+        decision_reason: buildReason(
+          'After reviewing your application against NWAC ISET eligibility criteria, your request is not approved at this time.',
+          detail || 'The information currently on file does not meet one or more eligibility requirements for this funding request.',
+          nextStepsText || 'You may reapply if your circumstances change and program criteria are met.'
+        )
+      };
+  }
+};
 const TARGET_PROGRAM_LABELS = {
   skills_development: 'Skills Development (Education)',
   tws: 'Targeted Wage Subsidy',
@@ -92,7 +213,6 @@ const DECISION_READY_STATUS = 'decision_ready';
 const APPLICATION_FINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived']);
 const APPLICATION_LOCKED_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived', DECISION_READY_STATUS]);
 const DECISION_READY_STATUSES = new Set([DECISION_READY_STATUS, 'approved']);
-const APPROVED_CASE_STATUSES = new Set(['initiated', 'active', 'dormant', 'ready_to_close', 'closed', 'archived', 'approved']);
 const OVERVIEW_WORD_LIMIT = 400;
 const EMPLOYMENT_GOALS_WORD_LIMIT = 400;
 const NOT_APPROVED_CASE_STATUS = 'in_review';
@@ -148,9 +268,74 @@ const STEP_LABELS = {
   review: 'Review and submit',
   decision: 'Approval and decision',
   communication: 'Communication & agreement',
-  fundingDocs: 'Complete funding documentation'
+  fundingDocs: 'Funding forms and signatures'
 };
 const REQUIRED_STEP_IDS = BASE_STEP_IDS.slice(0, BASE_STEP_IDS.length - 1);
+const OTHER_FUNDING_INVOLVED_OPTIONS = [
+  { label: 'No', value: 'no' },
+  { label: 'Yes', value: 'yes' },
+  { label: 'Unknown', value: 'unknown' }
+];
+const OTHER_FUNDER_TYPE_OPTIONS = [
+  {
+    label: 'ISET Holder',
+    value: 'iset_holder',
+    description: 'Another ISET holder funding part of the plan.'
+  },
+  {
+    label: 'Federal Program',
+    value: 'federal_program',
+    description: 'Federal funding program outside ISET.'
+  },
+  {
+    label: 'Prov/Terr Program',
+    value: 'provincial_territorial_program',
+    description: 'Provincial or territorial grant/support.'
+  },
+  {
+    label: 'Indigenous Government',
+    value: 'indigenous_government_org',
+    description: 'Band, Tribal Council, Métis/Inuit/regional Indigenous org.'
+  },
+  {
+    label: 'Employer',
+    value: 'employer',
+    description: 'Employer-funded training, wage support, or sponsorship.'
+  },
+  {
+    label: 'Bursary/Scholarship',
+    value: 'education_bursary_scholarship',
+    description: 'Education bursary, scholarship, or award.'
+  },
+  {
+    label: 'Nonprofit/Charity',
+    value: 'nonprofit_charity',
+    description: 'Foundation, charity, or community nonprofit support.'
+  },
+  {
+    label: 'Insurance/Compensation',
+    value: 'insurance_compensation',
+    description: 'Insurance, WCB/WSIB, settlement, or compensation support.'
+  },
+  {
+    label: 'Personal/Family',
+    value: 'personal_family',
+    description: 'Self-funded or family-funded support.'
+  },
+  {
+    label: 'Other Public',
+    value: 'other_public',
+    description: 'Municipal or other public agency support.'
+  },
+  {
+    label: 'Other',
+    value: 'other',
+    description: 'Any other funding source.'
+  }
+];
+const OTHER_FUNDER_TYPE_VALUE_SET = new Set(OTHER_FUNDER_TYPE_OPTIONS.map(option => option.value));
+const resolveOtherFunderTypeLabel = value =>
+  OTHER_FUNDER_TYPE_OPTIONS.find(option => option.value === normalizeOtherFunderType(value))?.label || 'Other';
 
 const scrollToPageTop = () => {
   if (typeof window !== 'undefined') {
@@ -207,6 +392,25 @@ const scrollWidgetAndPageTopOnce = (rootRef) => {
   } catch (err) {
     debugScroll('window scrollTo failed', err?.message);
   }
+};
+
+const resolveCaseContext = (caseData) => {
+  if (caseData?.caseContext && typeof caseData.caseContext === 'object') {
+    return caseData.caseContext;
+  }
+  if (caseData?.case_context && typeof caseData.case_context === 'object') {
+    return caseData.case_context;
+  }
+  const rawContext = caseData?.case_context_json;
+  if (typeof rawContext === 'string' && rawContext.trim()) {
+    try {
+      const parsed = JSON.parse(rawContext);
+      if (parsed && typeof parsed === 'object') return parsed;
+    } catch (_) {
+      return {};
+    }
+  }
+  return {};
 };
 
 // Helper to format date as YYYY-MM-DD
@@ -490,6 +694,137 @@ const buildUuid = () => {
   return `tmp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 };
 
+const normalizeOtherFundingInvolved = value => {
+  if (value === null || typeof value === 'undefined') return '';
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === 'yes') return 'yes';
+  if (normalized === 'no') return 'no';
+  if (normalized === 'unknown') return 'unknown';
+  return '';
+};
+
+const normalizeOtherFunderType = value => {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+  if (!normalized) return 'other';
+  if (OTHER_FUNDER_TYPE_VALUE_SET.has(normalized)) return normalized;
+  return 'other';
+};
+
+const buildEmptyOtherFundingSource = (overrides = {}) => {
+  const base = {
+    id: overrides.id || buildUuid(),
+    name: '',
+    type: 'other',
+    coverage: '',
+    ...overrides
+  };
+  return {
+    ...base,
+    type: normalizeOtherFunderType(base.type || 'other')
+  };
+};
+
+const buildOtherFundingSourceModalState = (overrides = {}) => ({
+  visible: false,
+  mode: 'add',
+  sourceId: null,
+  draft: buildEmptyOtherFundingSource(),
+  original: null,
+  ...overrides
+});
+
+const validateOtherFundingSourceDraft = draft => {
+  const next = buildEmptyOtherFundingSource(draft || {});
+  const errors = {};
+  if (!String(next.name || '').trim()) {
+    errors.name = 'Funder name is required.';
+  }
+  if (!String(next.coverage || '').trim()) {
+    errors.coverage = 'Coverage details are required.';
+  }
+  return errors;
+};
+
+const normalizeOtherFundingSources = (value, { keepEmpty = false, preserveWhitespace = false } = {}) => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(entry => {
+      if (!entry || typeof entry !== 'object') return null;
+      const rawName = String(entry.name || '');
+      const rawCoverage = String(entry.coverage || '');
+      const normalized = buildEmptyOtherFundingSource({
+        id: entry.id || buildUuid(),
+        name: preserveWhitespace ? rawName : rawName.trim(),
+        type: entry.type || 'other',
+        coverage: preserveWhitespace ? rawCoverage : rawCoverage.trim()
+      });
+      const hasValues = rawName.trim() || rawCoverage.trim();
+      return hasValues || keepEmpty ? normalized : null;
+    })
+    .filter(Boolean);
+};
+
+const normalizeOtherFundingDetails = (rawDetails, options = {}) => {
+  const source = rawDetails && typeof rawDetails === 'object' ? rawDetails : {};
+  const keepEmptySources = Boolean(options.keepEmptySources);
+  const preserveWhitespace = Boolean(options.preserveWhitespace);
+  const involved = normalizeOtherFundingInvolved(source.involved);
+  const populatedSources = normalizeOtherFundingSources(
+    source.sources,
+    { preserveWhitespace }
+  );
+  const sources = keepEmptySources
+    ? normalizeOtherFundingSources(
+        source.sources,
+        { keepEmpty: true, preserveWhitespace }
+      )
+    : populatedSources;
+  const rawNwacCoverage = String(source.nwacCoverage || '');
+  const nwacCoverage = preserveWhitespace ? rawNwacCoverage : rawNwacCoverage.trim();
+  const rawNotes = String(source.notes || '');
+  const notes = preserveWhitespace ? rawNotes : rawNotes.trim();
+  const resolvedInvolved =
+    involved ||
+    (populatedSources.length || String(nwacCoverage || '').trim() || String(notes || '').trim() ? 'yes' : '');
+  return {
+    involved: resolvedInvolved,
+    sources,
+    nwacCoverage,
+    notes
+  };
+};
+
+const buildOtherFundingSummary = details => {
+  if (!details || typeof details !== 'object') return '';
+  const involved = normalizeOtherFundingInvolved(details.involved);
+  const sources = normalizeOtherFundingSources(details.sources);
+  const nwacCoverage = String(details.nwacCoverage || '').trim();
+  const notes = String(details.notes || '').trim();
+  const lines = [];
+  if (involved === 'yes') lines.push('Other funding involved: Yes.');
+  if (involved === 'no') lines.push('Other funding involved: No.');
+  if (involved === 'unknown') lines.push('Other funding involved: Unknown.');
+  if (sources.length) {
+    const formatted = sources.map(entry => {
+      const typeLabel = resolveOtherFunderTypeLabel(entry.type);
+      const name = entry.name || 'Unnamed funder';
+      const coverage = entry.coverage || 'Coverage not specified';
+      return `${typeLabel}: ${name} (${coverage})`;
+    });
+    lines.push(`Other funders: ${formatted.join('; ')}`);
+  }
+  if (nwacCoverage) {
+    lines.push(`NWAC funding covers: ${nwacCoverage}`);
+  }
+  if (notes) {
+    lines.push(`Notes: ${notes}`);
+  }
+  return lines.join(' ');
+};
+
 const sanitizeCurrencyInput = (value) => {
   if (value === null || value === undefined) return '';
   const cleaned = String(value).replace(/[^\d.]/g, '');
@@ -504,6 +839,11 @@ const buildEmptyCostLine = (overrides = {}) => ({
   type: '',
   amount: '',
   notes: '',
+  payee: {
+    type: '',
+    name: '',
+    reference: ''
+  },
   recurrence: {
     enabled: false,
     startDate: '',
@@ -534,6 +874,7 @@ const buildEmptyIntervention = (overrides = {}) => ({
 const normalizeCostLine = (raw, defaults = {}) => {
   if (!raw || typeof raw !== 'object') return null;
   const recurrenceRaw = raw.recurrence && typeof raw.recurrence === 'object' ? raw.recurrence : {};
+  const payeeRaw = raw.payee && typeof raw.payee === 'object' ? raw.payee : {};
   const normalized = {
     id: raw.id || buildUuid(),
     type: normalizePaymentTypeCode(raw.type || raw.paymentType || raw.payment_type) || '',
@@ -542,6 +883,11 @@ const normalizeCostLine = (raw, defaults = {}) => {
         ? ''
         : String(raw.amount),
     notes: raw.notes || raw.description || '',
+    payee: {
+      type: String(payeeRaw.type || raw.payeeType || raw.payee_type || '').trim(),
+      name: String(payeeRaw.name || raw.payeeName || raw.payee_name || '').trim(),
+      reference: String(payeeRaw.reference || raw.payeeReference || raw.payee_reference || '').trim()
+    },
     recurrence: {
       enabled: Boolean(recurrenceRaw.enabled ?? raw.recurrenceEnabled ?? raw.recurrence_enabled),
       startDate: formatDate(recurrenceRaw.startDate || recurrenceRaw.start_date || raw.recurrenceStartDate || raw.recurrence_start_date || ''),
@@ -617,12 +963,116 @@ const PAYMENT_TYPE_ALIASES = {
   targetedwagesubsidyemployer: 'WageSubsidyEmployer',
   targetedwagesubsidy: 'WageSubsidyEmployer'
 };
+const PAYEE_TYPE_PARTICIPANT_CLIENT = 'ParticipantClient';
+const PAYEE_TYPES_DEFAULT_FROM_INTERVENTION = new Set([
+  'AccreditedEducationalTrainingInstitution',
+  'EmployerWageSubsidyPartner',
+  'CommunityNonProfitOrganization'
+]);
+const PAYMENT_TYPE_DEFAULT_PAYEE_TYPE = {
+  LivingAllowance: PAYEE_TYPE_PARTICIPANT_CLIENT,
+  TuitionFeesReimbursement: PAYEE_TYPE_PARTICIPANT_CLIENT,
+  SpecializedEquipmentReimbursement: PAYEE_TYPE_PARTICIPANT_CLIENT,
+  Transportation: PAYEE_TYPE_PARTICIPANT_CLIENT,
+  BooksMaterialsReimbursement: PAYEE_TYPE_PARTICIPANT_CLIENT,
+  TuitionFeesDirect: 'AccreditedEducationalTrainingInstitution',
+  WageSubsidyEmployer: 'EmployerWageSubsidyPartner',
+  Childcare: 'ChildcareProvider',
+  BooksMaterialsDirect: 'TrainingRelatedSupplier',
+  SpecializedEquipmentAdvance: 'TrainingRelatedSupplier',
+  JCPProjectCost: 'CommunityNonProfitOrganization'
+};
+const SUBMISSION_TIMING_INTERVENTION_START = 'intervention_start';
+const SUBMISSION_TIMING_INTERVENTION_END = 'intervention_end';
+const SUBMISSION_TIMING_RECURRENCE_SCHEDULE = 'recurrence_schedule';
+const SUBMISSION_TIMING_MANUAL_TRIGGER = 'manual_trigger';
+const DEFAULT_SUBMISSION_TIMING_BY_TYPE = {
+  LivingAllowance: SUBMISSION_TIMING_RECURRENCE_SCHEDULE,
+  TuitionFeesDirect: SUBMISSION_TIMING_INTERVENTION_START,
+  TuitionFeesReimbursement: SUBMISSION_TIMING_INTERVENTION_END,
+  SpecializedEquipmentAdvance: SUBMISSION_TIMING_INTERVENTION_START,
+  SpecializedEquipmentReimbursement: SUBMISSION_TIMING_INTERVENTION_END,
+  WageSubsidyEmployer: SUBMISSION_TIMING_RECURRENCE_SCHEDULE,
+  Childcare: SUBMISSION_TIMING_RECURRENCE_SCHEDULE,
+  Transportation: SUBMISSION_TIMING_RECURRENCE_SCHEDULE,
+  BooksMaterialsDirect: SUBMISSION_TIMING_INTERVENTION_START,
+  BooksMaterialsReimbursement: SUBMISSION_TIMING_INTERVENTION_END,
+  JCPProjectCost: SUBMISSION_TIMING_MANUAL_TRIGGER,
+  SEBSupport: SUBMISSION_TIMING_RECURRENCE_SCHEDULE,
+  OtherEligibleCost: SUBMISSION_TIMING_MANUAL_TRIGGER
+};
+const normalizePayeeTypeKey = value =>
+  String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+const PAYEE_TYPE_DETAIL_TARGET_BY_KEY = {
+  participantclient: 'client',
+  client: 'client',
+  vendor: 'vendor',
+  traininginstitution: 'institution',
+  traininginstitute: 'institution',
+  traininginstitue: 'institution',
+  accreditededucationaltraininginstitution: 'institution',
+  employer: 'employer',
+  employerwagesubsidypartner: 'employer',
+  childcareprovider: 'childcare provider',
+  communitynonprofitorganization: 'community organization',
+  trainingrelatedsupplier: 'supplier',
+  professionalbusinessservicesprovider: 'service provider',
+  other: 'other payee'
+};
 const normalizePaymentTypeCode = (value) => {
   if (!value) return null;
   const raw = String(value).trim();
   if (!raw) return null;
   const key = raw.toLowerCase().replace(/[^a-z0-9]+/g, '');
   return PAYMENT_TYPE_ALIASES[key] || raw;
+};
+const normalizeSubmissionTiming = (value) => {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (normalized === SUBMISSION_TIMING_INTERVENTION_START) return SUBMISSION_TIMING_INTERVENTION_START;
+  if (normalized === SUBMISSION_TIMING_INTERVENTION_END) return SUBMISSION_TIMING_INTERVENTION_END;
+  if (normalized === SUBMISSION_TIMING_RECURRENCE_SCHEDULE) return SUBMISSION_TIMING_RECURRENCE_SCHEDULE;
+  if (normalized === SUBMISSION_TIMING_MANUAL_TRIGGER) return SUBMISSION_TIMING_MANUAL_TRIGGER;
+  return null;
+};
+const deriveDefaultPayeeTypeForCostLine = (costLineType) => {
+  const normalizedType = normalizePaymentTypeCode(costLineType);
+  if (!normalizedType) return '';
+  return PAYMENT_TYPE_DEFAULT_PAYEE_TYPE[normalizedType] || '';
+};
+const deriveDefaultPayeeNameForCostLine = (payeeType, intervention, participantLegalName) => {
+  const normalizedType = String(payeeType || '').trim();
+  if (!normalizedType) return '';
+  if (normalizedType === PAYEE_TYPE_PARTICIPANT_CLIENT) {
+    return participantLegalName || '';
+  }
+  if (PAYEE_TYPES_DEFAULT_FROM_INTERVENTION.has(normalizedType)) {
+    return String(intervention?.institution || '').trim();
+  }
+  return '';
+};
+const applyCostLinePayeeDefaults = (draft, intervention, participantLegalName, options = {}) => {
+  if (!draft || typeof draft !== 'object') return draft;
+  const { allowTypeAutofill = true } = options;
+  const payee = draft.payee && typeof draft.payee === 'object' ? draft.payee : {};
+  let payeeType = String(payee.type || '').trim();
+  if (!payeeType && allowTypeAutofill) {
+    payeeType = deriveDefaultPayeeTypeForCostLine(draft.type);
+  }
+  const existingName = String(payee.name || '').trim();
+  const defaultName = deriveDefaultPayeeNameForCostLine(payeeType, intervention, participantLegalName);
+  const nextPayee = {
+    type: payeeType,
+    name: existingName,
+    reference: String(payee.reference || '').trim()
+  };
+  if (payeeType === PAYEE_TYPE_PARTICIPANT_CLIENT) {
+    nextPayee.name = defaultName || existingName;
+    nextPayee.reference = '';
+  } else if (!nextPayee.name && defaultName) {
+    nextPayee.name = defaultName;
+  }
+  return { ...draft, payee: nextPayee };
 };
 
 const buildPaymentTypeMappingLookup = (mapping) => {
@@ -822,7 +1272,9 @@ const mergeAssessmentState = (current, incoming) => {
     'previousISET',
     'previousISETDetails',
     'barriersOther',
-    'otherFunding',
+    'otherFundingInvolved',
+    'otherFundingNwacCoverage',
+    'otherFundingNotes',
     'esdcEligibility',
     'recommendation',
     'justification',
@@ -840,6 +1292,9 @@ const mergeAssessmentState = (current, incoming) => {
   }
   if (isEmptyArray(incoming.priorities) && Array.isArray(current?.priorities) && current.priorities.length) {
     next.priorities = current.priorities;
+  }
+  if (isEmptyArray(incoming.otherFundingSources) && Array.isArray(current?.otherFundingSources) && current.otherFundingSources.length) {
+    next.otherFundingSources = current.otherFundingSources;
   }
 
   if (Array.isArray(incoming.proposedInterventions) && incoming.proposedInterventions.length) {
@@ -861,7 +1316,10 @@ const buildEmptyAssessment = () => ({
   barriers: [],
   barriersOther: '',
   priorities: [],
-  otherFunding: '',
+  otherFundingInvolved: '',
+  otherFundingSources: [],
+  otherFundingNwacCoverage: '',
+  otherFundingNotes: '',
   esdcEligibility: '',
   proposedInterventions: [],
   recommendation: '',
@@ -1295,7 +1753,8 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [nocSuggestions, setNocSuggestions] = useState([]);
   const [nocSuggestionsLoading, setNocSuggestionsLoading] = useState(false);
   const [paymentTypeMapping, setPaymentTypeMapping] = useState(null);
-  const [paymentTypeMappingLoading, setPaymentTypeMappingLoading] = useState(false);
+  // Start in loading state so default intervention seeding cannot run before mapping fetch starts.
+  const [paymentTypeMappingLoading, setPaymentTypeMappingLoading] = useState(true);
   const [costingDefaults, setCostingDefaults] = useState(null);
   const [costingDefaultsLoading, setCostingDefaultsLoading] = useState(false);
   const [interventionModal, setInterventionModal] = useState({
@@ -1307,6 +1766,10 @@ const CoordinatorAssessmentWidget = forwardRef(
   });
   const [interventionModalErrors, setInterventionModalErrors] = useState({});
   const [interventionDeleteId, setInterventionDeleteId] = useState(null);
+  const [otherFundingSourceModal, setOtherFundingSourceModal] = useState(() =>
+    buildOtherFundingSourceModalState()
+  );
+  const [otherFundingSourceModalErrors, setOtherFundingSourceModalErrors] = useState({});
   const [costLineModal, setCostLineModal] = useState({
     visible: false,
     mode: 'view',
@@ -1316,6 +1779,8 @@ const CoordinatorAssessmentWidget = forwardRef(
     original: null
   });
   const [costLineModalErrors, setCostLineModalErrors] = useState({});
+  const [costLineAmountFocused, setCostLineAmountFocused] = useState(false);
+  const [costLineAmountPerPeriodFocused, setCostLineAmountPerPeriodFocused] = useState(false);
   const [inlineAmountEditingId, setInlineAmountEditingId] = useState(null);
   const [endDateAdjustModal, setEndDateAdjustModal] = useState(null);
   const [occurrenceConfirmModal, setOccurrenceConfirmModal] = useState(null);
@@ -1367,16 +1832,8 @@ const CoordinatorAssessmentWidget = forwardRef(
     const decision = assessment.nwacReviewStatus;
     if (decision === 'approve') return 'approved';
     if (decision === 'reject') return 'denied';
-    if (decision === 'push_back') return null;
-    if (rawApplicationStatusNormalized === 'approved') return 'approved';
-    if (rawApplicationStatusNormalized === 'rejected' || rawApplicationStatusNormalized === 'declined') return 'denied';
-    if (rawApplicationStatusNormalized === 'decision_ready' || rawApplicationStatusNormalized === 'completed') {
-      const caseStatusNorm = String(canonicalCaseStatusSnapshot || rawCaseStatusSnapshot || '').trim().toLowerCase();
-      if (APPROVED_CASE_STATUSES.has(caseStatusNorm)) return 'approved';
-      if (caseStatusNorm === NOT_APPROVED_CASE_STATUS) return 'denied';
-    }
     return null;
-  }, [assessment.nwacReviewStatus, rawApplicationStatusNormalized, canonicalCaseStatusSnapshot, rawCaseStatusSnapshot]);
+  }, [assessment.nwacReviewStatus]);
   const activeLetterKey = decisionOutcome === 'approved' ? 'approval' : decisionOutcome === 'denied' ? 'denial' : null;
   const applicantUserId = caseData?.applicant_user_id ?? caseData?.applicantUserId ?? null;
   const applicationId = caseData?.application_id ?? caseData?.applicationId ?? application_id ?? null;
@@ -1395,7 +1852,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     setDecisionLetterSent(prev => ({ ...(prev || {}), ...sent }));
   }, [caseData?.caseContext]);
   const applicantName = useMemo(() => {
-    const ctx = caseData?.caseContext || {};
+    const ctx = resolveCaseContext(caseData);
     const personal = ctx.applicationPersonal || {};
     const answers = ctx.applicationAnswers || {};
     const candidates = [
@@ -1412,6 +1869,76 @@ const CoordinatorAssessmentWidget = forwardRef(
     ];
     return candidates.map(v => (typeof v === 'string' ? v.trim() : v)).find(Boolean) || '';
   }, [caseData]);
+  const participantLegalName = useMemo(() => {
+    const ctx = resolveCaseContext(caseData);
+    const personal = ctx.applicationPersonal || {};
+    const answers = ctx.applicationAnswers || {};
+    const client = caseData?.client && typeof caseData.client === 'object' ? caseData.client : {};
+    const clientDetails = client.details && typeof client.details === 'object' ? client.details : {};
+    const normalizeNamePart = value => {
+      if (value === null || typeof value === 'undefined') return '';
+      const trimmed = String(value).trim();
+      return trimmed || '';
+    };
+    const buildFullName = (first, last) => {
+      const firstName = normalizeNamePart(first);
+      const lastName = normalizeNamePart(last);
+      if (!firstName || !lastName) return '';
+      return `${firstName} ${lastName}`;
+    };
+    const normalizeFullName = value => {
+      const text = normalizeNamePart(value);
+      if (!text) return '';
+      return text.includes(' ') ? text : '';
+    };
+    const candidates = [
+      normalizeFullName(caseData?.applicant_legal_name || caseData?.applicantLegalName),
+      buildFullName(
+        caseData?.submission_first_name || caseData?.submissionFirstName || caseData?.first_name || caseData?.firstName,
+        caseData?.submission_last_name || caseData?.submissionLastName || caseData?.last_name || caseData?.lastName
+      ),
+      buildFullName(client.firstName, client.lastName),
+      buildFullName(
+        clientDetails.first_name || clientDetails.firstName || clientDetails.given_name || clientDetails.givenName,
+        clientDetails.last_name || clientDetails.lastName || clientDetails.family_name || clientDetails.familyName
+      ),
+      buildFullName(
+        ctx.first_name || ctx.firstName || ctx.given_name || ctx.givenName,
+        ctx.last_name || ctx.lastName || ctx.family_name || ctx.familyName
+      ),
+      buildFullName(
+        personal.first_name || personal.firstName || personal.given_name || personal.givenName,
+        personal.last_name || personal.lastName || personal.family_name || personal.familyName
+      ),
+      buildFullName(
+        answers['first-name'] || answers.first_name || answers['personal-first-name'] || answers.personal_first_name,
+        answers['last-name'] || answers.last_name || answers['personal-last-name'] || answers.personal_last_name
+      ),
+      normalizeFullName(
+        client.fullName || client.full_name || clientDetails.full_name || clientDetails.fullName || caseData?.applicant_name || caseData?.applicantName
+      ),
+    ];
+    return candidates.find(Boolean) || '';
+  }, [caseData]);
+  useEffect(() => {
+    if (!participantLegalName) return;
+    setCostLineModal(prev => {
+      if (!prev?.visible || !prev?.draft) return prev;
+      const payee = prev.draft.payee && typeof prev.draft.payee === 'object' ? prev.draft.payee : {};
+      if (String(payee.type || '').trim() !== PAYEE_TYPE_PARTICIPANT_CLIENT) return prev;
+      if (String(payee.name || '').trim() === participantLegalName) return prev;
+      return {
+        ...prev,
+        draft: {
+          ...prev.draft,
+          payee: {
+            ...payee,
+            name: participantLegalName,
+          },
+        },
+      };
+    });
+  }, [participantLegalName]);
   const trackingReference = useMemo(() => {
     const candidates = [
       caseData?.tracking_id,
@@ -1594,6 +2121,14 @@ const CoordinatorAssessmentWidget = forwardRef(
     const normalized = typeof raw === 'string' ? raw.trim().toLowerCase() : raw === true ? 'yes' : String(raw);
     return ['yes', 'true', '1'].includes(normalized);
   }, [readApplicationAnswer]);
+  // Costing should follow the wizard's "Childcare Need" answer first.
+  const includeChildcareCostItems = useMemo(() => {
+    const childcareNeed = String(assessment.childcareNeed || '').trim().toLowerCase();
+    if (childcareNeed === 'yes') return true;
+    if (childcareNeed === 'no') return false;
+    // Fallback for older assessments where childcare need is not set yet.
+    return hasChildcareRequest;
+  }, [assessment.childcareNeed, hasChildcareRequest]);
   const effectiveCostingDefaults = useMemo(() => {
     if (costingDefaults && costingDefaults.enabled !== false) return costingDefaults;
     return { enabled: false, strategy: 'allowed', interventions: [], paymentTypes: [] };
@@ -1618,34 +2153,132 @@ const CoordinatorAssessmentWidget = forwardRef(
     },
     [recurrenceModeByType]
   );
-  const getInstallmentText = useCallback(
-    (line) => {
+  const submissionTimingByType = useMemo(() => {
+    const map = new Map();
+    const paymentTypes = Array.isArray(paymentTypeMapping?.paymentTypes)
+      ? paymentTypeMapping.paymentTypes
+      : [];
+    paymentTypes.forEach(entry => {
+      const code = normalizePaymentTypeCode(entry?.code || entry?.paymentType || entry?.payment_type);
+      if (!code) return;
+      const timing =
+        normalizeSubmissionTiming(entry?.submissionTiming || entry?.submission_timing) ||
+        DEFAULT_SUBMISSION_TIMING_BY_TYPE[code] ||
+        SUBMISSION_TIMING_MANUAL_TRIGGER;
+      map.set(code, timing);
+    });
+    Object.entries(DEFAULT_SUBMISSION_TIMING_BY_TYPE).forEach(([code, timing]) => {
+      if (!map.has(code)) map.set(code, timing);
+    });
+    return map;
+  }, [paymentTypeMapping]);
+  const getSubmissionTimingForType = useCallback(
+    (type) => {
+      const code = normalizePaymentTypeCode(type);
+      if (!code) return SUBMISSION_TIMING_MANUAL_TRIGGER;
+      return (
+        submissionTimingByType.get(code) ||
+        DEFAULT_SUBMISSION_TIMING_BY_TYPE[code] ||
+        SUBMISSION_TIMING_MANUAL_TRIGGER
+      );
+    },
+    [submissionTimingByType]
+  );
+  const getCostLineDetailsText = useCallback(
+    (line, intervention = null) => {
       const mode = getRecurrenceModeForType(line?.type);
       const required = mode === 'required';
       const enabled = Boolean(line?.recurrence?.enabled);
-      if (!enabled && !required) {
-        return 'in 1 installment';
-      }
+      const recurrenceEnabled = enabled || required;
       const recurrence = line?.recurrence || {};
-      const occurrencesRaw =
-        recurrence.occurrences === '' || recurrence.occurrences === null || typeof recurrence.occurrences === 'undefined'
-          ? null
-          : Number(recurrence.occurrences);
-      let occurrences = Number.isFinite(occurrencesRaw) && occurrencesRaw > 0 ? occurrencesRaw : null;
-      if (!occurrences) {
-        const startDate = formatDate(recurrence.startDate);
-        const endDate = formatDate(recurrence.endDate);
-        if (startDate && endDate) {
-          const computed = autoOccurrencesFromDates(startDate, endDate, 'monthly');
-          if (computed) occurrences = computed;
+      let occurrences = null;
+      if (recurrenceEnabled) {
+        const occurrencesRaw =
+          recurrence.occurrences === '' || recurrence.occurrences === null || typeof recurrence.occurrences === 'undefined'
+            ? null
+            : Number(recurrence.occurrences);
+        occurrences = Number.isFinite(occurrencesRaw) && occurrencesRaw > 0 ? occurrencesRaw : null;
+        if (!occurrences) {
+          const startDate = formatDate(recurrence.startDate);
+          const endDate = formatDate(recurrence.endDate);
+          if (startDate && endDate) {
+            const computed = autoOccurrencesFromDates(startDate, endDate, 'monthly');
+            if (computed) occurrences = computed;
+          }
         }
       }
-      if (!occurrences) {
-        return 'in — installments';
+      const amountPerPeriod = parseCurrencyInput(recurrence.amountPerPeriod);
+      const perPeriodText =
+        recurrenceEnabled && amountPerPeriod !== null
+          ? `${formatCurrencyDisplay(amountPerPeriod)} per month`
+          : '';
+      const submissionTiming = getSubmissionTimingForType(line?.type);
+      const interventionStart = formatDate(intervention?.startDate);
+      const interventionEnd = formatDate(intervention?.endDate);
+      const recurrenceStart = formatDate(recurrence.startDate);
+      const recurrenceEnd = formatDate(recurrence.endDate);
+      const explicitPayableDate = formatDate(
+        line?.payableDate ||
+          line?.payable_date ||
+          line?.paymentDate ||
+          line?.payment_date ||
+          line?.dateDue ||
+          line?.date_due
+      );
+      const firstInstallmentDate =
+        recurrenceStart ||
+        explicitPayableDate ||
+        (submissionTiming === SUBMISSION_TIMING_INTERVENTION_END
+          ? interventionEnd || recurrenceEnd
+          : interventionStart || recurrenceEnd);
+      const firstInstallmentDateLabel = firstInstallmentDate
+        ? formatShortDate(firstInstallmentDate)
+        : '';
+      let payableText = 'payable';
+      if (recurrenceEnabled) {
+        if (occurrences && occurrences > 0) {
+          payableText = `payable in ${occurrences} monthly installment${occurrences === 1 ? '' : 's'}`;
+        } else {
+          payableText = 'payable in monthly installments';
+        }
+        if (firstInstallmentDateLabel) {
+          payableText += ` starting ${firstInstallmentDateLabel}`;
+        }
+      } else {
+        let payableDate = '';
+        if (submissionTiming === SUBMISSION_TIMING_INTERVENTION_START) {
+          payableDate = formatShortDate(interventionStart || recurrenceStart || explicitPayableDate);
+        } else if (submissionTiming === SUBMISSION_TIMING_INTERVENTION_END) {
+          payableDate = formatShortDate(interventionEnd || recurrenceEnd || explicitPayableDate);
+        } else if (submissionTiming === SUBMISSION_TIMING_RECURRENCE_SCHEDULE) {
+          payableDate = formatShortDate(
+            recurrenceStart || explicitPayableDate || interventionStart || interventionEnd
+          );
+        } else if (submissionTiming === SUBMISSION_TIMING_MANUAL_TRIGGER) {
+          payableDate = formatShortDate(explicitPayableDate);
+        }
+        payableText = payableDate ? `payable on ${payableDate}` : 'payable';
       }
-      return `in ${occurrences} installment${occurrences === 1 ? '' : 's'}`;
+      const payeeName = String(line?.payee?.name || '').trim();
+      const explicitPayeeTypeKey = normalizePayeeTypeKey(line?.payee?.type);
+      const inferredPayeeTypeKey = normalizePayeeTypeKey(deriveDefaultPayeeTypeForCostLine(line?.type));
+      const payeeTypeKey = explicitPayeeTypeKey || inferredPayeeTypeKey;
+      const payeeTarget = PAYEE_TYPE_DETAIL_TARGET_BY_KEY[payeeTypeKey] || '';
+      const payeeText = payeeName ? `to ${payeeName}` : payeeTarget ? `to ${payeeTarget}` : '';
+      const notesText = String(line?.notes || '').trim();
+      let text = payableText || '—';
+      if (perPeriodText) {
+        text = `${text} (${perPeriodText})`;
+      }
+      if (payeeText) {
+        text = `${text} ${payeeText}`;
+      }
+      return {
+        text,
+        notesText
+      };
     },
-    [getRecurrenceModeForType]
+    [getRecurrenceModeForType, getSubmissionTimingForType]
   );
   const getAllowedPaymentTypesForIntervention = useCallback(
     (code) => {
@@ -1660,19 +2293,14 @@ const CoordinatorAssessmentWidget = forwardRef(
   const buildCostItemOptions = useCallback(
     (intervention) => {
       const allowed = new Set(getAllowedPaymentTypesForIntervention(intervention?.code));
-      const used = new Set(
-        Array.isArray(intervention?.costLines)
-          ? intervention.costLines.map(line => line?.type).filter(Boolean)
-          : []
-      );
       return PAYMENT_TYPE_OPTIONS.filter(option => {
         if (!option?.value) return false;
         if (allowed.size && !allowed.has(option.value)) return false;
-        if (used.has(option.value)) return false;
+        if (!includeChildcareCostItems && option.value === 'Childcare') return false;
         return true;
       });
     },
-    [getAllowedPaymentTypesForIntervention]
+    [getAllowedPaymentTypesForIntervention, includeChildcareCostItems]
   );
   const buildRecurrenceFromIntervention = useCallback(
     (intervention, enabled) => {
@@ -1721,7 +2349,7 @@ const CoordinatorAssessmentWidget = forwardRef(
           if (!type) return null;
           if (allowed.size && !allowed.has(type)) return null;
           if (!hasLivingAllowanceRequest && type === 'LivingAllowance') return null;
-          if (!hasChildcareRequest && type === 'Childcare') return null;
+          if (!includeChildcareCostItems && type === 'Childcare') return null;
           if (seen.has(type)) return null;
           seen.add(type);
           const recurrenceMode = getRecurrenceModeForType(type);
@@ -1743,7 +2371,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       effectiveCostingDefaults,
       getAllowedPaymentTypesForIntervention,
       getRecurrenceModeForType,
-      hasChildcareRequest,
+      includeChildcareCostItems,
       hasLivingAllowanceRequest
     ]
   );
@@ -1936,6 +2564,10 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   const serializeCostLine = useCallback((line) => {
     const recurrence = line?.recurrence || {};
+    const payee = line?.payee || {};
+    const payeeType = typeof payee.type === 'string' ? payee.type.trim() : '';
+    const payeeName = typeof payee.name === 'string' ? payee.name.trim() : '';
+    const payeeReference = typeof payee.reference === 'string' ? payee.reference.trim() : '';
     const occurrencesValue =
       recurrence.occurrences === '' || recurrence.occurrences === null || typeof recurrence.occurrences === 'undefined'
         ? null
@@ -1946,6 +2578,14 @@ const CoordinatorAssessmentWidget = forwardRef(
       type: line?.type || null,
       amount: parseCurrencyInput(line?.amount),
       notes: line?.notes || null,
+      payee:
+        payeeType || payeeName || payeeReference
+          ? {
+              type: payeeType || null,
+              name: payeeName || null,
+              reference: payeeReference || null
+            }
+          : null,
       recurrence: {
         enabled: Boolean(recurrence.enabled),
         startDate: formatDate(recurrence.startDate) || null,
@@ -1979,7 +2619,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     [serializeCostLine]
   );
 
-  const buildAssessmentPayload = useCallback(() => {
+  const buildAssessmentPayload = useCallback(({ includeDecisionFields = false } = {}) => {
     const proposedInterventionsPayload = serializeProposedInterventions(proposedInterventions);
     const primary = proposedInterventions[0] || null;
     const primaryStartDate = primary?.startDate || '';
@@ -1990,6 +2630,15 @@ const CoordinatorAssessmentWidget = forwardRef(
       hasProposedInterventions && Number.isFinite(overallCostTotal)
         ? overallCostTotal
         : null;
+    const normalizedOtherFunding = normalizeOtherFundingDetails(
+      {
+        involved: assessment.otherFundingInvolved,
+        sources: assessment.otherFundingSources,
+        nwacCoverage: assessment.otherFundingNwacCoverage,
+        notes: assessment.otherFundingNotes
+      }
+    );
+    const otherFundingSummary = buildOtherFundingSummary(normalizedOtherFunding);
     const payload = {
       assessment_date_of_assessment: formatDate(assessment.dateOfAssessment) || null,
       assessment_employment_goals: assessment.employmentGoals || null,
@@ -1998,7 +2647,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       assessment_employment_barriers: assessment.barriers || null,
       assessment_employment_barriers_other_details: assessment.barriersOther || null,
       assessment_local_area_priorities: assessment.priorities || null,
-      assessment_other_funding_details: assessment.otherFunding || null,
+      assessment_other_funding_details: otherFundingSummary || null,
       assessment_esdc_eligibility: isEligibilityAdmin ? (assessment.esdcEligibility || null) : undefined,
       assessment_intervention_start_date: formatDate(primaryStartDate) || null,
       assessment_intervention_end_date: formatDate(primaryEndDate) || null,
@@ -2026,8 +2675,6 @@ const CoordinatorAssessmentWidget = forwardRef(
       },
       assessment_recommendation: assessment.recommendation || null,
       assessment_justification: assessment.justification || null,
-      assessment_nwac_review: assessment.nwacReview || null,
-      assessment_nwac_reason: assessment.nwacReason || null,
       assessment_intervention_code: primary?.code || null,
       assessment_intervention_duration_days: interventionDuration !== null ? String(interventionDuration) : null,
       assessment_intervention_cost_total: overallTotalValue !== null ? overallTotalValue.toFixed(2) : null,
@@ -2040,11 +2687,17 @@ const CoordinatorAssessmentWidget = forwardRef(
       case_summary: assessment.overview || null,
       assessment_proposed_interventions: proposedInterventionsPayload.length ? proposedInterventionsPayload : null
     };
+    if (includeDecisionFields) {
+      payload.assessment_nwac_review_status = assessment.nwacReviewStatus || null;
+      payload.assessment_nwac_review = assessment.nwacReview || null;
+      payload.assessment_nwac_reason = assessment.nwacReason || null;
+    }
     const baseContext = caseData?.caseContext && typeof caseData.caseContext === 'object' ? caseData.caseContext : null;
     const includeLetterDrafts = letterDrafts && typeof letterDrafts === 'object';
-    if (baseContext || includeLetterDrafts) {
+    if (baseContext || includeLetterDrafts || normalizedOtherFunding.involved || normalizedOtherFunding.sources.length || normalizedOtherFunding.nwacCoverage || normalizedOtherFunding.notes) {
       payload.caseContext = {
         ...(baseContext || {}),
+        assessmentOtherFunding: normalizedOtherFunding,
         ...(includeLetterDrafts ? { decisionLetterDrafts: letterDrafts } : {})
       };
     }
@@ -2090,10 +2743,20 @@ const CoordinatorAssessmentWidget = forwardRef(
     () => fundingDocsChecklistItems.filter(item => item?.required !== false),
     [fundingDocsChecklistItems]
   );
+  const fundingDocsChecklistInProgressCount = useMemo(
+    () => requiredFundingDocsChecklistItems.filter(item => item?.status === 'in_progress').length,
+    [requiredFundingDocsChecklistItems]
+  );
   const fundingDocsChecklistMissingCount = useMemo(
     () => requiredFundingDocsChecklistItems.filter(item => item?.status !== 'complete').length,
     [requiredFundingDocsChecklistItems]
   );
+  const docsRequestedActive = Number(
+    caseData?.docs_requested_active ??
+    caseData?.docsRequestedActive ??
+    0
+  ) === 1;
+  const fundingFormsRequestSent = docsRequestedActive || fundingDocsChecklistInProgressCount > 0;
   const showFundingDocsChecklist = decisionOutcome === 'approved';
   const fundingDocsChecklistComplete = showFundingDocsChecklist
     ? Boolean(
@@ -2412,19 +3075,31 @@ const CoordinatorAssessmentWidget = forwardRef(
       return def;
     };
     const derivedOutcomeStatus = (() => {
-      if (caseData?.assessment_nwac_review_status) {
-        return String(caseData.assessment_nwac_review_status);
-      }
+      const raw = typeof caseData?.assessment_nwac_review_status === 'string'
+        ? caseData.assessment_nwac_review_status.trim().toLowerCase()
+        : '';
+      if (raw === 'approve' || raw === 'reject' || raw === 'push_back') return raw;
+
+      const reviewRaw = typeof caseData?.assessment_nwac_review === 'string'
+        ? caseData.assessment_nwac_review.trim().toLowerCase()
+        : '';
+      if (reviewRaw === 'agree' || reviewRaw === 'approve' || reviewRaw === 'approved') return 'approve';
+      if (reviewRaw === 'disagree' || reviewRaw === 'reject' || reviewRaw === 'denied') return 'reject';
+
       const statusNorm = typeof rawApplicationStatusNormalized === 'string'
         ? rawApplicationStatusNormalized.trim().toLowerCase()
         : (typeof canonicalApplicationStatus === 'string' ? canonicalApplicationStatus.trim().toLowerCase() : '');
       const caseStatusNorm = typeof caseData?.status === 'string'
         ? caseData.status.trim().toLowerCase()
         : '';
-      if (statusNorm === 'approved') return 'approve';
+      const approvedCaseStatuses = new Set(['initiated', 'active', 'dormant', 'ready_to_close', 'closed', 'archived', 'approved']);
+      const deniedCaseStatuses = new Set(['in_review', 'pending_approval', 'pending', 'open', 'submitted', 'rejected']);
+
+      if (statusNorm === 'approved' || statusNorm === 'completed') return 'approve';
       if (statusNorm === 'rejected') return 'reject';
-      if (statusNorm === 'decision_ready' || statusNorm === 'completed') {
-        return APPROVED_CASE_STATUSES.has(caseStatusNorm) ? 'approve' : 'reject';
+      if (statusNorm === DECISION_READY_STATUS) {
+        if (approvedCaseStatuses.has(caseStatusNorm)) return 'approve';
+        if (deniedCaseStatuses.has(caseStatusNorm)) return 'reject';
       }
       return '';
     })();
@@ -2521,6 +3196,9 @@ const CoordinatorAssessmentWidget = forwardRef(
       ? normalizeProposedInterventions(parsedProposed)
       : (legacyHasValues ? [legacyIntervention] : []);
 
+    const normalizedOtherFunding = normalizeOtherFundingDetails(
+      caseData?.caseContext?.assessmentOtherFunding
+    );
     const placeholders = {
       dateOfAssessment: caseData.assessment_date_of_assessment || '',
       clientName: caseData.assigned_user_email || '',
@@ -2551,7 +3229,10 @@ const CoordinatorAssessmentWidget = forwardRef(
       priorities: Array.isArray(caseData?.assessment_local_area_priorities)
         ? caseData.assessment_local_area_priorities
         : [],
-      otherFunding: caseData?.assessment_other_funding_details || caseData?.other_funding_details || '',
+      otherFundingInvolved: normalizedOtherFunding.involved,
+      otherFundingSources: normalizedOtherFunding.sources,
+      otherFundingNwacCoverage: normalizedOtherFunding.nwacCoverage,
+      otherFundingNotes: normalizedOtherFunding.notes,
       esdcEligibility: caseData.assessment_esdc_eligibility || '',
       proposedInterventions,
       recommendation: caseData.assessment_recommendation || '',
@@ -3347,6 +4028,10 @@ const CoordinatorAssessmentWidget = forwardRef(
       if (field === 'childcareNeed' && value !== 'yes') {
         nextAssessment.childcareFunding = '';
       }
+      if (field === 'otherFundingInvolved' && value !== 'yes') {
+        nextAssessment.otherFundingSources = [];
+        nextAssessment.otherFundingNwacCoverage = '';
+      }
       if (field === 'esdcEligibility') {
         nextAssessment.interventionPotId = '';
         nextAssessment.postingContext = '';
@@ -3361,6 +4046,23 @@ const CoordinatorAssessmentWidget = forwardRef(
       if (field === 'postingContext') {
         const { postingContext: _ignore, ...rest } = fieldErrors;
         setFieldErrors(rest);
+      }
+      if (
+        ['otherFundingInvolved', 'otherFundingSources', 'otherFundingNwacCoverage', 'otherFundingNotes'].includes(field)
+      ) {
+        const normalizedOtherFunding = normalizeOtherFundingDetails(
+          {
+            involved: nextAssessment.otherFundingInvolved,
+            sources: nextAssessment.otherFundingSources,
+            nwacCoverage: nextAssessment.otherFundingNwacCoverage,
+            notes: nextAssessment.otherFundingNotes
+          },
+          { keepEmptySources: true, preserveWhitespace: true }
+        );
+        nextAssessment.otherFundingInvolved = normalizedOtherFunding.involved;
+        nextAssessment.otherFundingSources = normalizedOtherFunding.sources;
+        nextAssessment.otherFundingNwacCoverage = normalizedOtherFunding.nwacCoverage;
+        nextAssessment.otherFundingNotes = normalizedOtherFunding.notes;
       }
       return nextAssessment;
     });
@@ -3669,6 +4371,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     if (!line || typeof line !== 'object') return buildEmptyCostLine();
     return {
       ...line,
+      payee: { ...(line.payee || {}) },
       recurrence: { ...(line.recurrence || {}) }
     };
   }, []);
@@ -3707,27 +4410,39 @@ const CoordinatorAssessmentWidget = forwardRef(
       original: null
     });
     setCostLineModalErrors({});
+    setCostLineAmountFocused(false);
+    setCostLineAmountPerPeriodFocused(false);
   }, []);
   const openCostLineModal = useCallback(
     (interventionId, lineId) => {
       const intervention = proposedInterventions.find(item => item.id === interventionId);
       const line = intervention?.costLines?.find(entry => entry.id === lineId);
       if (!line) return;
-      const draft = cloneCostLine(line);
+      const draft = applyCostLinePayeeDefaults(cloneCostLine(line), intervention, participantLegalName, {
+        allowTypeAutofill: false
+      });
       setCostLineModal({
         visible: true,
         mode: 'view',
         interventionId,
         lineId,
         draft,
-        original: draft
+        original: applyCostLinePayeeDefaults(cloneCostLine(line), intervention, participantLegalName, {
+          allowTypeAutofill: false
+        })
       });
       setCostLineModalErrors({});
     },
-    [cloneCostLine, proposedInterventions]
+    [cloneCostLine, participantLegalName, proposedInterventions]
   );
   const openAddCostLineModal = useCallback((interventionId) => {
-    const draft = buildEmptyCostLine();
+    const intervention = proposedInterventions.find(item => item.id === interventionId) || null;
+    const draft = applyCostLinePayeeDefaults(
+      buildEmptyCostLine(),
+      intervention,
+      participantLegalName,
+      { allowTypeAutofill: true }
+    );
     setCostLineModal({
       visible: true,
       mode: 'add',
@@ -3737,7 +4452,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       original: draft
     });
     setCostLineModalErrors({});
-  }, []);
+  }, [participantLegalName, proposedInterventions]);
   const startCostLineEdit = useCallback(() => {
     setCostLineModal(prev => {
       if (!prev.draft) return prev;
@@ -3768,6 +4483,35 @@ const CoordinatorAssessmentWidget = forwardRef(
       return { ...prev, draft: nextDraft };
     });
   }, []);
+  const updateCostLinePayeeType = useCallback(
+    (nextPayeeType) => {
+      setCostLineModal(prev => {
+        if (!prev.draft) return prev;
+        const intervention = proposedInterventions.find(item => item.id === prev.interventionId) || null;
+        const normalizedPayeeType = String(nextPayeeType || '').trim();
+        const nextPayee = {
+          ...(prev.draft.payee || {}),
+          type: normalizedPayeeType
+        };
+        if (normalizedPayeeType === PAYEE_TYPE_PARTICIPANT_CLIENT) {
+          nextPayee.name = '';
+          nextPayee.reference = '';
+        }
+        const nextDraft = applyCostLinePayeeDefaults(
+          {
+            ...prev.draft,
+            payee: nextPayee
+          },
+          intervention,
+          participantLegalName,
+          { allowTypeAutofill: false }
+        );
+        return { ...prev, draft: nextDraft };
+      });
+      setCostLineModalErrors({});
+    },
+    [participantLegalName, proposedInterventions]
+  );
   const updateCostLineType = useCallback(
     (nextType) => {
       setCostLineModal(prev => {
@@ -3786,18 +4530,24 @@ const CoordinatorAssessmentWidget = forwardRef(
         const recurrence = recurrenceEnabled
           ? { ...mergedRecurrence, enabled: true }
           : baseRecurrence;
-        return {
-          ...prev,
-          draft: {
+        const nextDraft = applyCostLinePayeeDefaults(
+          {
             ...prev.draft,
             type: nextType,
             recurrence
-          }
+          },
+          intervention,
+          participantLegalName,
+          { allowTypeAutofill: true }
+        );
+        return {
+          ...prev,
+          draft: nextDraft
         };
       });
       setCostLineModalErrors({});
     },
-    [buildRecurrenceFromIntervention, getRecurrenceModeForType, proposedInterventions]
+    [buildRecurrenceFromIntervention, getRecurrenceModeForType, participantLegalName, proposedInterventions]
   );
   const toggleCostLineRecurrence = useCallback(
     (enabled) => {
@@ -3848,9 +4598,18 @@ const CoordinatorAssessmentWidget = forwardRef(
     });
   }, [updateCostLineDraft]);
   const blurCostLineAmount = useCallback(() => {
+    setCostLineAmountFocused(false);
     updateCostLineDraft(draft => {
-      const formatted = formatCurrencyDisplay(draft.amount);
-      return { ...draft, amount: formatted || '' };
+      const sanitized = sanitizeCurrencyInput(draft.amount);
+      return { ...draft, amount: sanitized || '' };
+    });
+  }, [updateCostLineDraft]);
+  const blurCostLineAmountPerPeriod = useCallback(() => {
+    setCostLineAmountPerPeriodFocused(false);
+    updateCostLineDraft(draft => {
+      const recurrence = { ...(draft.recurrence || {}) };
+      recurrence.amountPerPeriod = sanitizeCurrencyInput(recurrence.amountPerPeriod) || '';
+      return { ...draft, recurrence };
     });
   }, [updateCostLineDraft]);
   const updateCostLineAmountPerPeriod = useCallback((value) => {
@@ -3935,20 +4694,16 @@ const CoordinatorAssessmentWidget = forwardRef(
     const errors = {};
     if (!draft.type) {
       errors.type = 'Select a cost item.';
-    } else if (mode === 'add') {
-      const typesInUse = new Set(
-        Array.isArray(intervention.costLines) ? intervention.costLines.map(line => line.type).filter(Boolean) : []
-      );
-      if (typesInUse.has(draft.type)) {
-        errors.type = 'This cost item already exists for the intervention.';
-      }
     }
     const recurrenceMode = getRecurrenceModeForType(draft.type);
     const recurrenceRequired = recurrenceMode === 'required';
     const recurrenceEnabled = recurrenceRequired || Boolean(draft.recurrence?.enabled);
+    const payeeDraft = applyCostLinePayeeDefaults(draft, intervention, participantLegalName, {
+      allowTypeAutofill: true
+    });
     const recalcOccurrences = !draft.recurrence?.occurrences && Boolean(draft.recurrence?.endDate);
     const hydratedDraft = hydrateCostLineRecurrence(
-      { ...draft, recurrence: { ...(draft.recurrence || {}), enabled: recurrenceEnabled } },
+      { ...payeeDraft, recurrence: { ...(payeeDraft.recurrence || {}), enabled: recurrenceEnabled } },
       intervention,
       'total',
       { recalcOccurrences }
@@ -3980,6 +4735,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     costLineModal,
     getRecurrenceModeForType,
     hydrateCostLineRecurrence,
+    participantLegalName,
     proposedInterventions,
     resetCostLineModal
   ]);
@@ -4990,14 +5746,12 @@ const CoordinatorAssessmentWidget = forwardRef(
     const useAssessorInterventionContext = !isDenialDraft;
     const applicantTargetProgramForLetter =
       isDenialDraft && applicantRequestedSupportLabels.length ? null : applicantTargetProgram || null;
+    const decisionDate = formatDate(new Date());
     setDraftingLetter(true);
     setDraftingLetterError(null);
     letterBodyDirtyRef.current = false;
+    let denialTemplateDraft = null;
     try {
-      const toAmount = (value) => {
-        const amount = parseCurrencyToNumber(value);
-        return amount > 0 ? amount : null;
-      };
       const interventions = Array.isArray(proposedInterventions) ? proposedInterventions : [];
       const multiInterventions = interventions.length > 1;
       const primary = multiInterventions ? null : (interventions[0] || null);
@@ -5053,7 +5807,6 @@ const CoordinatorAssessmentWidget = forwardRef(
         .map(item => item?.label || item?.id)
         .filter(Boolean);
       const decisionLabel = activeLetterKey === 'approval' ? 'Approval' : 'Denial';
-      const decisionDate = formatDate(new Date());
       if (!isDenialDraft) {
         const submissionDate = (() => {
           const raw =
@@ -5069,75 +5822,114 @@ const CoordinatorAssessmentWidget = forwardRef(
           if (!raw) return '';
           return raw.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ');
         };
-        const getCostLineLabel = (type) => {
-          const label = getSupportLabelFromPaymentType(type);
-          if (label) return label;
-          const fallback = paymentTypeLabelLookup.get(String(type)) || toReadablePaymentType(type);
-          return formatSupportLabelForLetter(fallback);
+        const normalizeSpace = (value) => String(value || '').trim().replace(/\s+/g, ' ');
+        const toSentenceCaseLabel = (value) => {
+          const normalized = normalizeSpace(value);
+          if (!normalized) return '';
+          return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`;
         };
-        const resolveOccurrences = (recurrence = {}) => {
+        const getCostLineLabel = (type) => {
+          const normalizedType = normalizePaymentTypeCode(type);
+          const direct = normalizedType ? paymentTypeLabelLookup.get(String(normalizedType)) : '';
+          const plainDirect = String(direct || '').replace(/\s*\([^)]*\)\s*/g, ' ').trim();
+          if (plainDirect) return toSentenceCaseLabel(plainDirect);
+          const supportLabel = getSupportLabelFromPaymentType(normalizedType || type);
+          if (supportLabel) return toSentenceCaseLabel(supportLabel);
+          const fallback = toReadablePaymentType(normalizedType || type);
+          return toSentenceCaseLabel(fallback);
+        };
+        const resolveOccurrences = (recurrence = {}, intervention = null) => {
           const raw = recurrence.occurrences;
           const parsed = Number(raw);
           if (Number.isFinite(parsed) && parsed > 0) return parsed;
-          const startDate = formatDate(recurrence.startDate);
-          const endDate = formatDate(recurrence.endDate);
+          const startDate = formatDate(recurrence.startDate) || formatDate(intervention?.startDate);
+          const endDate = formatDate(recurrence.endDate) || formatDate(intervention?.endDate);
           if (startDate && endDate) {
             return autoOccurrencesFromDates(startDate, endDate, 'monthly') || null;
           }
           return null;
         };
-        const buildCostLineDetail = (line) => {
+        const resolvePayeePhrase = (line) => {
+          const payeeName = normalizeSpace(line?.payee?.name);
+          const payeeTypeKey = normalizePayeeTypeKey(
+            line?.payee?.type || deriveDefaultPayeeTypeForCostLine(line?.type)
+          );
+          const applicantNameNormalized = normalizeSpace(applicantName || '').toLowerCase();
+          const payeeNameNormalized = payeeName.toLowerCase();
+          const payeeIsApplicant =
+            payeeTypeKey === 'participantclient' ||
+            payeeTypeKey === 'client' ||
+            (payeeNameNormalized && applicantNameNormalized && payeeNameNormalized === applicantNameNormalized);
+          if (payeeIsApplicant) return 'you';
+          if (payeeName) return payeeName;
+          const payeeTarget = PAYEE_TYPE_DETAIL_TARGET_BY_KEY[payeeTypeKey] || '';
+          if (payeeTarget) return `the ${payeeTarget}`;
+          return 'the approved payee';
+        };
+        const resolvePayableDateLabel = (line, intervention = null) => {
+          const recurrence = line?.recurrence && typeof line.recurrence === 'object' ? line.recurrence : {};
+          const submissionTiming = getSubmissionTimingForType(line?.type);
+          const interventionStart = formatDate(intervention?.startDate);
+          const interventionEnd = formatDate(intervention?.endDate);
+          const recurrenceStart = formatDate(recurrence.startDate);
+          const recurrenceEnd = formatDate(recurrence.endDate);
+          const explicitPayableDate = formatDate(
+            line?.payableDate ||
+              line?.payable_date ||
+              line?.paymentDate ||
+              line?.payment_date ||
+              line?.dateDue ||
+              line?.date_due
+          );
+          let payableDate = '';
+          if (submissionTiming === SUBMISSION_TIMING_INTERVENTION_START) {
+            payableDate = interventionStart || recurrenceStart || explicitPayableDate;
+          } else if (submissionTiming === SUBMISSION_TIMING_INTERVENTION_END) {
+            payableDate = interventionEnd || recurrenceEnd || explicitPayableDate;
+          } else if (submissionTiming === SUBMISSION_TIMING_RECURRENCE_SCHEDULE) {
+            payableDate = recurrenceStart || explicitPayableDate || interventionStart || interventionEnd;
+          } else if (submissionTiming === SUBMISSION_TIMING_MANUAL_TRIGGER) {
+            payableDate = explicitPayableDate;
+          }
+          return payableDate ? formatShortDate(payableDate) : '';
+        };
+        const buildCostLineDetail = (line, intervention = null) => {
           if (!line?.type) return null;
           const label = getCostLineLabel(line.type);
           if (!label) return null;
-          const recurrenceMode = getRecurrenceModeForType(line?.type);
-          const recurrenceEnabled = Boolean(line?.recurrence?.enabled) || recurrenceMode === 'required';
-          if (recurrenceEnabled) {
-            const amount = parseCurrencyToNumber(line.amount);
-            const occurrences = resolveOccurrences(line.recurrence || {});
-            const perPeriodRaw = parseCurrencyToNumber(line?.recurrence?.amountPerPeriod);
-            if (!(amount > 0) && !(perPeriodRaw > 0)) return null;
-            let perPeriod = perPeriodRaw > 0 ? perPeriodRaw : null;
-            if (!perPeriod && occurrences && amount > 0) {
-              perPeriod = amount / occurrences;
-            }
-            const amountText = formatCurrencyForLetter(perPeriod || amount);
-            let detail = `${label}: ${amountText} paid in monthly installments`;
-            if (line.type === 'LivingAllowance') {
-              detail += ', subject to your submission of attendance reports';
-            }
-            return detail;
-          }
           const amount = parseCurrencyToNumber(line.amount);
           if (!(amount > 0)) return null;
           const amountText = formatCurrencyForLetter(amount);
-          const paymentExplanation = getPaymentExplanationForType(line.type);
-          const method = paymentExplanation || 'payment method will be confirmed in your funding agreement';
-          return `${label}: ${amountText}${method ? ` (${method})` : ''}`;
-        };
-        const interventionsForLetter = interventions
-          .map(intervention => {
-            const labelBase =
-              resolveInterventionLabel(intervention?.code) ||
-              intervention?.programName ||
-              intervention?.institution ||
-              '';
-            const costLines = Array.isArray(intervention?.costLines) ? intervention.costLines : [];
-            const costLineDetails = costLines.map(buildCostLineDetail).filter(Boolean);
-            if (!labelBase && costLineDetails.length === 0) return null;
-            const startDate = formatDate(intervention?.startDate);
-            const endDate = formatDate(intervention?.endDate);
-            let summary = labelBase || 'Approved intervention';
-            if (startDate && endDate && startDate !== endDate) {
-              summary += ` (starting on ${startDate} and ending on ${endDate})`;
-            } else if (startDate) {
-              summary += ` (starting on ${startDate})`;
-            } else if (endDate) {
-              summary += ` (ending on ${endDate})`;
+          const payeePhrase = resolvePayeePhrase(line);
+          const payableDateLabel = resolvePayableDateLabel(line, intervention);
+          const recurrenceMode = getRecurrenceModeForType(line?.type);
+          const recurrenceEnabled = Boolean(line?.recurrence?.enabled) || recurrenceMode === 'required';
+          if (recurrenceEnabled) {
+            const occurrences = resolveOccurrences(line.recurrence || {}, intervention);
+            let detail = `${label}: ${amountText} payable to ${payeePhrase}`;
+            if (occurrences && occurrences > 0) {
+              detail += ` in ${occurrences} monthly installment${occurrences === 1 ? '' : 's'}`;
+            } else {
+              detail += ' in monthly installments';
             }
-            return { summary, costLineDetails };
-          })
-          .filter(Boolean);
+            if (payableDateLabel) {
+              detail += ` after ${payableDateLabel}`;
+            }
+            if (line.type === 'LivingAllowance') {
+              detail += ' on production of an attendance report';
+            }
+            return `${detail}.`;
+          }
+          let detail = `${label}: ${amountText} payable to ${payeePhrase}`;
+          if (payableDateLabel) {
+            detail += ` after ${payableDateLabel}`;
+          }
+          return `${detail}.`;
+        };
+        const fundingLineItems = interventions.flatMap(intervention => {
+          const costLines = Array.isArray(intervention?.costLines) ? intervention.costLines : [];
+          return costLines.map(line => buildCostLineDetail(line, intervention)).filter(Boolean);
+        });
         const introParts = ['We are pleased to inform you that your application for ISET funding'];
         if (trackingReference) {
           introParts.push(`reference ${trackingReference}`);
@@ -5147,14 +5939,9 @@ const CoordinatorAssessmentWidget = forwardRef(
         }
         const approvalIntro = `${introParts.join(' ')} has been approved.`;
         let fundingParagraph = 'Funding has been approved for the supports listed in your application.';
-        if (interventionsForLetter.length) {
+        if (fundingLineItems.length) {
           const lines = ['Funding has been approved for the following:'];
-          interventionsForLetter.forEach(intervention => {
-            lines.push(`- ${intervention.summary}`);
-            intervention.costLineDetails.forEach(detail => {
-              lines.push(`  - ${detail}`);
-            });
-          });
+          fundingLineItems.forEach(detail => lines.push(`- ${detail}`));
           fundingParagraph = lines.join('\n');
         }
         const closingParagraph =
@@ -5181,16 +5968,70 @@ const CoordinatorAssessmentWidget = forwardRef(
         ? DENIAL_REASON_OPTIONS.find(option => option.value === denialReasonChoice) || null
         : null;
       const denialReasonLabel = denialReasonSelection?.label || null;
+      const denialReasonCode = isDenialDraft ? String(denialReasonChoice || '').trim() : '';
       const denialExplanation = isDenialDraft && typeof denialReasonExplanation === 'string'
         ? denialReasonExplanation.trim()
         : '';
       const reasonSeed = isDenialDraft ? denialExplanation : assessment.justification;
       const reasonSeedIsPlaceholder = !isDenialDraft && isLikelyPlaceholderText(reasonSeed || '');
       const decisionAuthority = "This decision was made under NWAC's ISET authority, based on review of the Case Manager recommendation.";
-      const hasClearDenialRemedy = isDenialDraft && denialReasonChoice === 'documentation_missing';
-      const optionsForward = hasClearDenialRemedy
-        ? ['Provide the missing documentation and request a reassessment.']
+      const optionsForwardByReason = {
+        documentation_missing: ['Provide the required documentation and request a reassessment.'],
+        training_not_aligned: ['Reapply when your selected program aligns more directly with your employment goal and labour-market outcomes.'],
+        already_educated_employable: ['Explore alternate funding pathways such as scholarships, grants, or bursaries for advanced studies.'],
+        institution_not_eligible: ['Reapply with a comparable program offered through a publicly funded or provincially recognized institution.'],
+        duplicate_funding: ['Contact your case manager if your existing funding situation changes and reassessment is needed.'],
+        funding_unavailable: ['Contact your case manager to review other available supports or timing options.'],
+        eligibility_not_met: ['You may reapply if your circumstances change and eligibility criteria are met.']
+      };
+      const optionsForward = isDenialDraft
+        ? (optionsForwardByReason[denialReasonCode] || [])
         : [];
+      const partialServicesAvailable = isDenialDraft && denialReasonCode === 'documentation_missing'
+        ? [
+            'Career and client assessments',
+            'Access to labour-market information and career exploration support',
+            'Referrals to other programs and community agencies',
+            'Resume and cover-letter support'
+          ]
+        : [];
+      const normalizedOtherFunding = normalizeOtherFundingDetails({
+        involved: assessment.otherFundingInvolved,
+        sources: assessment.otherFundingSources,
+        nwacCoverage: assessment.otherFundingNwacCoverage,
+        notes: assessment.otherFundingNotes
+      });
+      const otherFundingSummary = buildOtherFundingSummary(normalizedOtherFunding);
+      const applicantLabourForceStatus = normalizeAnswerValue(
+        readApplicationAnswer(['labour-force-status', 'labour_force_status', 'labourForceStatus'])
+      ) || null;
+      const applicantHighestEducation = normalizeAnswerValue(
+        readApplicationAnswer(['highest-education', 'highest_education', 'highestEducation'])
+      ) || null;
+      const applicantLegalIndigenousIdentity = normalizeAnswerValue(
+        readApplicationAnswer(['legal-indigenous-identity', 'legal_indigenous_identity', 'legalIndigenousIdentity'])
+      ) || null;
+      const requestedProgramName = primary?.programName || null;
+      const requestedInstitution = primary?.institution || null;
+      const requestedInterventionLabel = primary ? (resolveInterventionLabel(primary.code) || null) : null;
+      const requestedInterventionCode = primary?.code || null;
+      const applicantEmploymentGoal = String(
+        assessment.employmentGoals ||
+          normalizeAnswerValue(readApplicationAnswer(['long-term-goal', 'long_term_goal', 'longTermGoal'])) ||
+          ''
+      ).trim() || null;
+      denialTemplateDraft = isDenialDraft
+        ? buildDenialTemplateDraftForReason({
+            reasonCode: denialReasonCode,
+            requestedProgramName,
+            requestedInstitution,
+            employmentGoal: applicantEmploymentGoal,
+            denialExplanation,
+            optionsForward,
+            partialServicesAvailable,
+            otherFundingSummary
+          })
+        : null;
       const approvedInterventions = interventions.map(item => ({
         label: resolveInterventionLabel(item?.code) || null,
         program_name: item?.programName || null,
@@ -5212,6 +6053,11 @@ const CoordinatorAssessmentWidget = forwardRef(
         applicant_requested_support_detail: applicantRequestedSupportDetail || null,
         applicant_requested_supports_text: applicantRequestedSupportsText || null,
         applicant_request_summary: applicantRequestSummary || null,
+        applicant_employment_goal: applicantEmploymentGoal,
+        requested_program_name: requestedProgramName,
+        requested_institution: requestedInstitution,
+        requested_intervention_label: requestedInterventionLabel,
+        requested_intervention_code: requestedInterventionCode,
         assessment_summary: assessment.overview || null,
         employment_goals: assessment.employmentGoals || null,
         program_name: useAssessorInterventionContext ? (primary?.programName || null) : null,
@@ -5234,12 +6080,46 @@ const CoordinatorAssessmentWidget = forwardRef(
         decision_reason_seed: reasonSeed || null,
         decision_reason_seed_is_placeholder: reasonSeedIsPlaceholder || null,
         decision_authority: decisionAuthority,
+        denial_reason_code: denialReasonCode || null,
         denial_reason_label: denialReasonLabel,
         denial_reason_explanation: denialExplanation || null,
-        options_going_forward: optionsForward
+        applicant_labour_force_status: applicantLabourForceStatus,
+        applicant_highest_education: applicantHighestEducation,
+        applicant_legal_indigenous_identity: applicantLegalIndigenousIdentity,
+        assessment_other_funding_summary: otherFundingSummary || null,
+        partial_services_available: partialServicesAvailable.length ? partialServicesAvailable : null,
+        options_going_forward: optionsForward,
+        denial_template_intro: denialTemplateDraft?.decision_intro || null,
+        denial_template_reason: denialTemplateDraft?.decision_reason || null
       };
       const prompt = isDenialDraft
-        ? `Draft a concise denial letter for the NWAC ISET program. Return JSON only with keys: letter_title, decision_intro, decision_label, decision_reason, next_step_1, next_step_2. Keep each field brief, professional, and trauma-informed.\n\nRequired content:\n- decision_intro: one short paragraph written as a letter (no labels, no lists). State that funding is not approved and reference the supports requested using applicant_requested_supports_text when available. Use lower-case common nouns for supports (for example: \"tuition\", \"books or program materials\", \"living allowance\"). Do not mention applicant_target_program unless supports are missing. Include the decision date and decision_authority in a natural sentence. Avoid formulaic phrasing like \"On <date>, funding is not approved for your request:\".\n- decision_reason: a short paragraph explaining why, using denial_reason_explanation as the source. Use denial_reason_label only as background guidance; do not quote or restate it. Do not mention labels, form fields, or the exact wording the assessor typed; paraphrase into applicant-facing language. Write in second person (\"you/your\"). If a name appears in denial_reason_explanation, replace it with \"you\". Include the effective date. If denial_reason_explanation contains a suggested remedy or referral, include it explicitly in this paragraph (paraphrased). Do not add suggestions that are not present. If options_going_forward is not empty and no suggestion is provided in denial_reason_explanation, include one short remedy sentence based on options_going_forward.\n- decision_label should be \"Not approved\" and letter_title should be \"Letter of Denial\".\n- next_step_1/next_step_2: only include if options_going_forward has clear remedies; otherwise return empty strings. Keep any assessor-provided suggestions in decision_reason, not in next_step_1/next_step_2.\n\nDo not include: reassurance about worthiness or judgment, colon-led lists, bullet lists, detailed evidence weighing, subjective language, financial amounts, hypothetical approvals, legal findings, or new reasons beyond denial_reason_explanation. If a field is unknown, omit it.\n\nContext:\n${JSON.stringify(contextPayload, null, 2)}`
+        ? `Draft a denial letter for the NWAC ISET program using TEMPLATE-FIRST mode. Return JSON only with keys: letter_title, decision_intro, decision_label, decision_reason, next_step_1, next_step_2.
+
+Strict template rules:
+- Use denial_template_intro and denial_template_reason as the base text.
+- Keep paragraph order and sentence intent very close to the templates.
+- You may only make minimal edits for grammar, flow, and applicant-specific details.
+- Keep the overall tone formal, respectful, and criteria-based.
+
+Required output:
+- letter_title: "Letter of Denial"
+- decision_label: "Not approved"
+- decision_intro: close to denial_template_intro
+- decision_reason: close to denial_template_reason
+- next_step_1: ""
+- next_step_2: ""
+
+Content rules:
+- Explicitly state the request is not approved at this time.
+- Ground rationale in denial_reason_code, denial_reason_label, denial_reason_explanation, and context facts.
+- Use options_going_forward and partial_services_available when present.
+- Do not add headings, bullets, legal citations, placeholders, or any fabricated facts.
+
+If context fields are missing:
+- Keep the template structure and remove only the missing clause gracefully.
+
+Context:
+${JSON.stringify(contextPayload, null, 2)}`
         : `Draft a concise approval letter for the NWAC ISET program. Return JSON only with keys: letter_title, decision_intro, decision_label, decision_reason, next_step_1, next_step_2. Keep each field brief, professional, and applicant-facing.\n\nRequired content:\n- decision_intro: one short paragraph written as a letter (no labels, no lists). Start the paragraph with \"We are pleased to inform you\". State that funding is approved and list the funded supports using funded_supports_text when available. Use lower-case common nouns for supports. If approved_interventions_count > 1, include a short clause that the approval covers multiple interventions. If funded_supports_text is missing, use applicant_requested_supports_text or applicant_requested_support_detail. Avoid formulaic phrasing like \"On <date>\".\n- decision_reason: a second paragraph that always appears. Include the decision_authority sentence in natural language. If decision_reason_seed_is_placeholder is false and decision_reason_seed is present, include one applicant-facing sentence that paraphrases the justification without quoting or reusing phrases. If payment_explanations_text is present, include one sentence that explains reimbursement/direct payment using those phrases. If missing_documents is not empty, include a sentence listing the missing documents and stating they are required to release payment.\n- letter_title should be \"Letter of Approval\" and decision_label should be \"Approved\".\n- next_step_1/next_step_2: return empty strings.\n\nDo not include: Decision/Reason/Next steps labels, bullet lists, start/end date callouts, dollar amounts, internal notes/test language, or new reasons beyond decision_reason_seed. If a field is unknown, omit it.\n\nContext:\n${JSON.stringify(contextPayload, null, 2)}`;
       const resp = await apiFetch('/api/ai/chat', {
         method: 'POST',
@@ -5283,8 +6163,21 @@ const CoordinatorAssessmentWidget = forwardRef(
         const nextSteps = Array.isArray(parsed.next_steps || parsed.nextSteps) ? (parsed.next_steps || parsed.nextSteps) : [];
         const rawStep1 = parsed.next_step_1 || nextSteps[0] || '';
         const rawStep2 = parsed.next_step_2 || nextSteps[1] || '';
-        const nextStep1 = isDenialDraft ? rawStep1 : (rawStep1 || current.next_step_1);
-        let nextStep2 = isDenialDraft ? rawStep2 : (rawStep2 || current.next_step_2 || defaultDocStep);
+        const fallbackDenialIntro = denialTemplateDraft?.decision_intro || current.decision_intro;
+        const fallbackDenialReason = denialTemplateDraft?.decision_reason || current.decision_reason;
+        const parsedIntro = scrubLetterText(parsed.decision_intro || '');
+        const parsedReason = scrubLetterText(parsed.decision_reason || '');
+        const denialIntroLooksOnTemplate = /^thank you for your recent application/i.test(parsedIntro);
+        const denialReasonLooksOnTemplate =
+          parsedReason.length >= 120 && /(not approved|unable to approve)/i.test(parsedReason);
+        const resolvedDecisionIntro = isDenialDraft
+          ? (denialIntroLooksOnTemplate ? parsedIntro : fallbackDenialIntro)
+          : scrubLetterText(parsed.decision_intro || current.decision_intro);
+        const resolvedDecisionReason = isDenialDraft
+          ? (denialReasonLooksOnTemplate ? parsedReason : fallbackDenialReason)
+          : scrubLetterText(parsed.decision_reason || current.decision_reason);
+        const nextStep1 = isDenialDraft ? '' : (rawStep1 || current.next_step_1);
+        let nextStep2 = isDenialDraft ? '' : (rawStep2 || current.next_step_2 || defaultDocStep);
         if (!isDenialDraft) {
           const step2HasCost = typeof nextStep2 === 'string' && /\$|cost|amount/i.test(nextStep2);
           if (step2HasCost) {
@@ -5296,17 +6189,37 @@ const CoordinatorAssessmentWidget = forwardRef(
           [activeLetterKey]: {
             ...current,
             decision_date: isDenialDraft ? decisionDate : current.decision_date,
-            letter_title: parsed.letter_title || current.letter_title,
-            decision_intro: scrubLetterText(parsed.decision_intro || current.decision_intro),
-            decision_label: parsed.decision_label || current.decision_label,
-            decision_reason: scrubLetterText(parsed.decision_reason || current.decision_reason),
+            letter_title: isDenialDraft ? 'Letter of Denial' : (parsed.letter_title || current.letter_title),
+            decision_intro: resolvedDecisionIntro,
+            decision_label: isDenialDraft ? 'Not approved' : (parsed.decision_label || current.decision_label),
+            decision_reason: resolvedDecisionReason,
             next_step_1: nextStep1,
             next_step_2: nextStep2
           }
         };
       });
     } catch (err) {
-      setDraftingLetterError(err?.message || 'Failed to generate a letter draft.');
+      if (isDenialDraft && denialTemplateDraft) {
+        setLetterDrafts(prev => {
+          const current = prev?.[activeLetterKey] || buildEmptyDecisionLetterDraft();
+          return {
+            ...prev,
+            [activeLetterKey]: {
+              ...current,
+              decision_date: decisionDate,
+              letter_title: 'Letter of Denial',
+              decision_label: 'Not approved',
+              decision_intro: denialTemplateDraft?.decision_intro || current.decision_intro,
+              decision_reason: denialTemplateDraft?.decision_reason || current.decision_reason,
+              next_step_1: '',
+              next_step_2: ''
+            }
+          };
+        });
+        setDraftingLetterError('AI draft unavailable. A template-based denial draft was applied instead.');
+      } else {
+        setDraftingLetterError(err?.message || 'Failed to generate a letter draft.');
+      }
     } finally {
       setDraftingLetter(false);
     }
@@ -5339,7 +6252,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       if (!result.ok) {
         setAlert({
           type: 'warning',
-          content: 'Decision letter sent, but the case record was not updated. Refresh to ensure the funding documentation step remains available.',
+          content: 'Decision letter sent, but the case record was not updated. Refresh to ensure the Funding forms and signatures step remains available.',
           dismissible: true,
           statusIconAriaLabel: 'Warning'
         });
@@ -5722,23 +6635,23 @@ const CoordinatorAssessmentWidget = forwardRef(
       }, 0);
       return;
     }
-    // Send full assessment payload to backend
-    const lockCheck = await ensureLockForOperation();
-    if (!lockCheck.ok) return;
-    const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
-    const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
-    const payload = {
-      ...buildAssessmentPayload(),
-      assessment_submit_action: true,
-      assessment_nwac_review_status: decision || null,
-      status: isOutcomeApproved ? 'initiated' : NOT_APPROVED_CASE_STATUS,
-      applicationStatus: isOutcomePushBack ? 'in_review' : DECISION_READY_STATUS
-    };
-    const requestBody = { ...payload };
-    if (versionToken > 0) {
-      requestBody.expectedRowVersion = versionToken;
-    }
+    setIsSubmittingAssessment(true);
     try {
+      // Send full assessment payload to backend
+      const lockCheck = await ensureLockForOperation();
+      if (!lockCheck.ok) return;
+      const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
+      const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
+      const payload = {
+        ...buildAssessmentPayload({ includeDecisionFields: true }),
+        assessment_submit_action: true,
+        status: isOutcomeApproved ? 'initiated' : NOT_APPROVED_CASE_STATUS,
+        applicationStatus: isOutcomePushBack ? 'in_review' : DECISION_READY_STATUS
+      };
+      const requestBody = { ...payload };
+      if (versionToken > 0) {
+        requestBody.expectedRowVersion = versionToken;
+      }
       // 1. Update case with NWAC review and status
       const res = await apiFetch(`/api/cases/${caseData.id}`, {
         method: 'PUT',
@@ -5777,6 +6690,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         status: payload.status,
         statusRaw: payload.status,
         applicationStatus: payload.applicationStatus || caseData?.applicationStatus || null,
+        assessment_nwac_review_status: payload.assessment_nwac_review_status,
         assessment_nwac_review: payload.assessment_nwac_review,
         assessment_nwac_reason: payload.assessment_nwac_reason
       };
@@ -5823,6 +6737,8 @@ const CoordinatorAssessmentWidget = forwardRef(
     } catch (err) {
       setAlert({ type: 'error', content: err.message || 'Failed to submit outcome notice.', dismissible: true, statusIconAriaLabel: 'Error' });
       scrollAfterAction();
+    } finally {
+      setIsSubmittingAssessment(false);
     }
   };
 
@@ -6028,7 +6944,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     });
     if (!checklistOk) return;
     await markApplicationCompleted({
-      successMessage: 'Funding documentation complete. Application marked as completed.'
+      successMessage: 'All required funding forms are complete. Application marked as completed.'
     });
   };
   const handleWizardNavigate = async ({ detail }) => {
@@ -6764,6 +7680,91 @@ const CoordinatorAssessmentWidget = forwardRef(
     handleField('priorities', next);
   };
 
+  const addOtherFundingSource = sourceDraft => {
+    const current = Array.isArray(assessment.otherFundingSources) ? assessment.otherFundingSources : [];
+    handleField('otherFundingSources', [...current, buildEmptyOtherFundingSource(sourceDraft || {})]);
+  };
+
+  const updateOtherFundingSource = (sourceId, updates = {}) => {
+    const current = Array.isArray(assessment.otherFundingSources) ? assessment.otherFundingSources : [];
+    const next = current.map(source =>
+      String(source?.id || '') === String(sourceId || '')
+        ? buildEmptyOtherFundingSource({ ...source, ...updates })
+        : source
+    );
+    handleField('otherFundingSources', next);
+  };
+
+  const removeOtherFundingSource = (sourceId) => {
+    const current = Array.isArray(assessment.otherFundingSources) ? assessment.otherFundingSources : [];
+    const next = current.filter(source => String(source?.id || '') !== String(sourceId || ''));
+    handleField('otherFundingSources', next);
+  };
+
+  const resetOtherFundingSourceModal = () => {
+    setOtherFundingSourceModal(buildOtherFundingSourceModalState());
+    setOtherFundingSourceModalErrors({});
+  };
+
+  const openAddOtherFundingSourceModal = () => {
+    setOtherFundingSourceModal(
+      buildOtherFundingSourceModalState({
+        visible: true,
+        mode: 'add',
+        sourceId: null,
+        draft: buildEmptyOtherFundingSource(),
+        original: null
+      })
+    );
+    setOtherFundingSourceModalErrors({});
+  };
+
+  const openEditOtherFundingSourceModal = sourceId => {
+    const current = Array.isArray(assessment.otherFundingSources) ? assessment.otherFundingSources : [];
+    const source = current.find(item => String(item?.id || '') === String(sourceId || ''));
+    if (!source) return;
+    const normalized = buildEmptyOtherFundingSource(source);
+    setOtherFundingSourceModal(
+      buildOtherFundingSourceModalState({
+        visible: true,
+        mode: 'edit',
+        sourceId: normalized.id,
+        draft: normalized,
+        original: normalized
+      })
+    );
+    setOtherFundingSourceModalErrors({});
+  };
+
+  const updateOtherFundingSourceModalDraft = updates => {
+    setOtherFundingSourceModal(prev => {
+      if (!prev?.draft) return prev;
+      return {
+        ...prev,
+        draft: buildEmptyOtherFundingSource({
+          ...prev.draft,
+          ...(updates || {})
+        })
+      };
+    });
+  };
+
+  const saveOtherFundingSourceModal = () => {
+    const draft = buildEmptyOtherFundingSource(otherFundingSourceModal.draft || {});
+    const errors = validateOtherFundingSourceDraft(draft);
+    if (Object.keys(errors).length > 0) {
+      setOtherFundingSourceModalErrors(errors);
+      return;
+    }
+    if (otherFundingSourceModal.mode === 'edit' && otherFundingSourceModal.sourceId) {
+      updateOtherFundingSource(otherFundingSourceModal.sourceId, draft);
+      resetOtherFundingSourceModal();
+      return;
+    }
+    addOtherFundingSource(draft);
+    resetOtherFundingSourceModal();
+  };
+
   const previousIsetStepContent = (
     <SpaceBetween size="l">
       <Grid gridDefinition={[{ colspan: 6 }]}>
@@ -6784,7 +7785,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         <Grid gridDefinition={[{ colspan: 12 }]}>
           <FormField
             label="Previous ISET funding details"
-            description="Provide program names, dates, and outcomes for prior ISET-funded interventions."
+            description="If yes, please include year, program(s) and amount(s)"
             errorText={showPreviousIsetErrors && fieldErrors.previousISETDetails ? fieldErrors.previousISETDetails : undefined}
           >
             <Textarea
@@ -6860,16 +7861,128 @@ const CoordinatorAssessmentWidget = forwardRef(
     </SpaceBetween>
   );
 
+  const otherFundingSourceItems = useMemo(
+    () => normalizeOtherFundingSources(assessment.otherFundingSources, { keepEmpty: true }),
+    [assessment.otherFundingSources]
+  );
+
+  const otherFundingSourceTableColumns = [
+    {
+      id: 'name',
+      header: 'Funder name',
+      minWidth: 180,
+      cell: item => item.name || '\u2014'
+    },
+    {
+      id: 'type',
+      header: 'Funder type',
+      minWidth: 140,
+      cell: item => resolveOtherFunderTypeLabel(item.type)
+    },
+    {
+      id: 'coverage',
+      header: 'What this funder covers',
+      minWidth: 260,
+      cell: item => item.coverage || '\u2014'
+    },
+    {
+      id: 'actions',
+      header: 'Actions',
+      width: 92,
+      minWidth: 92,
+      cell: item => (
+        <SpaceBetween direction="horizontal" size="xxs">
+          <Button
+            variant="inline-icon"
+            iconName="edit"
+            ariaLabel={`Edit ${item.name || 'other funder'}`}
+            onClick={() => openEditOtherFundingSourceModal(item.id)}
+            disabled={isAssessmentDisabled}
+          />
+          <Button
+            variant="inline-icon"
+            iconName="remove"
+            ariaLabel={`Delete ${item.name || 'other funder'}`}
+            onClick={() => removeOtherFundingSource(item.id)}
+            disabled={isAssessmentDisabled}
+          />
+        </SpaceBetween>
+      )
+    }
+  ];
+
   const otherFundingStepContent = (
     <SpaceBetween size="l">
       <Grid gridDefinition={[{ colspan: 12 }]}>
         <FormField
-          label="Funding source details"
-          description="Capture band try-first funding, EI/CRF stream notes, or other sponsors supporting this request."
+          label="Other funding involved?"
+          description="Identify whether other funding is part of this request."
         >
+          <Select
+            selectedOption={
+              OTHER_FUNDING_INVOLVED_OPTIONS.find(option => option.value === assessment.otherFundingInvolved) || null
+            }
+            onChange={({ detail }) => {
+              const nextValue = detail.selectedOption?.value || '';
+              if (nextValue !== 'yes') {
+                resetOtherFundingSourceModal();
+              }
+              handleField('otherFundingInvolved', nextValue);
+            }}
+            options={OTHER_FUNDING_INVOLVED_OPTIONS}
+            placeholder="Select"
+            readOnly={isAssessmentDisabled}
+          />
+        </FormField>
+      </Grid>
+      {assessment.otherFundingInvolved === 'yes' && (
+        <SpaceBetween size="m">
+          <Table
+            stripedRows
+            variant="embedded"
+            trackBy="id"
+            items={otherFundingSourceItems}
+            columnDefinitions={otherFundingSourceTableColumns}
+            resizableColumns
+            header={
+              <Header
+                variant="h3"
+                actions={
+                  <Button onClick={openAddOtherFundingSourceModal} disabled={isAssessmentDisabled}>
+                    Add other funder
+                  </Button>
+                }
+              >
+                Other funders
+              </Header>
+            }
+            empty={
+              <Alert type="info">
+                Add each non-NWAC funder so coordination is clear.
+              </Alert>
+            }
+          />
+          <Grid gridDefinition={[{ colspan: 12 }]}>
+            <FormField
+              label="What NWAC funding will cover"
+              description="Describe the NWAC-funded supports to avoid overlap."
+            >
+              <Textarea
+                value={assessment.otherFundingNwacCoverage || ''}
+                onChange={({ detail }) => handleField('otherFundingNwacCoverage', detail.value)}
+                rows={3}
+                readOnly={isAssessmentDisabled}
+              />
+            </FormField>
+          </Grid>
+        </SpaceBetween>
+      )}
+      <Grid gridDefinition={[{ colspan: 12 }]}>
+        <FormField label="Additional notes (optional)">
           <Textarea
-            value={assessment.otherFunding || ''}
-            onChange={({ detail }) => handleField('otherFunding', detail.value)}
+            value={assessment.otherFundingNotes || ''}
+            onChange={({ detail }) => handleField('otherFundingNotes', detail.value)}
+            rows={3}
             readOnly={isAssessmentDisabled}
           />
         </FormField>
@@ -6955,10 +8068,18 @@ const CoordinatorAssessmentWidget = forwardRef(
                   }
                 },
                 {
-                  id: 'installments',
-                  header: 'Installments',
+                  id: 'details',
+                  header: 'Details',
                   cell: item => {
-                    return getInstallmentText(item);
+                    const details = getCostLineDetailsText(item, intervention);
+                    return (
+                      <SpaceBetween size="xxs">
+                        <Box>{details.text}</Box>
+                        {details.notesText && (
+                          <Box fontStyle="italic">{details.notesText}</Box>
+                        )}
+                      </SpaceBetween>
+                    );
                   }
                 },
                 {
@@ -7026,6 +8147,11 @@ const CoordinatorAssessmentWidget = forwardRef(
           onDismiss={() => setChecklistUploadSuccess(null)}
         >
           {checklistUploadSuccess}
+        </Alert>
+      )}
+      {fundingFormsRequestSent && (
+        <Alert type="info" header="Signature request sent">
+          A secure message requesting funding-form signatures has been sent to the applicant. Mark the application complete only when every required item shows <strong>Complete</strong>.
         </Alert>
       )}
       <SpaceBetween size="s">
@@ -7249,7 +8375,7 @@ const CoordinatorAssessmentWidget = forwardRef(
                   : documentChecklistLoading
                     ? 'Loading checklist...'
                     : fundingDocsChecklistMissingCount > 0
-                      ? `${fundingDocsChecklistMissingCount} required item${fundingDocsChecklistMissingCount === 1 ? '' : 's'} missing`
+                      ? `${fundingDocsChecklistMissingCount} required item${fundingDocsChecklistMissingCount === 1 ? '' : 's'} outstanding`
                       : <StatusIndicator type="success">All required items are complete.</StatusIndicator>
             }
             actions={
@@ -7281,10 +8407,10 @@ const CoordinatorAssessmentWidget = forwardRef(
               </SpaceBetween>
             }
           >
-            Funding documentation checklist
+            Funding forms checklist
           </Header>
           <Box variant="small" color="text-body-secondary" margin={{ bottom: 's' }}>
-            Click a document name to upload a file, or send the forms to the applicant for signature using Secure Messaging.
+            Once the client signs and submits the following forms you should mark the application complete. At this point the the client witll become active in the Case Management workspace, if they are not aleady.
           </Box>
           <Table
             stripedRows
@@ -7339,7 +8465,17 @@ const CoordinatorAssessmentWidget = forwardRef(
   const reviewEligibility = assessment.esdcEligibility?.trim() || '';
   const reviewChildcareFunding = assessment.childcareFunding?.trim() || '';
   const reviewPreviousIsetDetails = assessment.previousISETDetails?.trim() || '';
-  const reviewOtherFunding = assessment.otherFunding?.trim() || '';
+  const reviewOtherFundingInvolved =
+    assessment.otherFundingInvolved === 'yes'
+      ? 'Yes'
+      : assessment.otherFundingInvolved === 'no'
+        ? 'No'
+        : assessment.otherFundingInvolved === 'unknown'
+          ? 'Unknown'
+          : '';
+  const reviewOtherFundingSources = normalizeOtherFundingSources(assessment.otherFundingSources);
+  const reviewOtherFundingNwacCoverage = String(assessment.otherFundingNwacCoverage || '').trim();
+  const reviewOtherFundingNotes = String(assessment.otherFundingNotes || '').trim();
   const reviewBarriers = assessment.barriers?.length ? assessment.barriers.join(', ') : 'None';
   const reviewBarriersOther = (assessment.barriers || []).includes('Other')
     ? (assessment.barriersOther || '').trim()
@@ -7395,7 +8531,19 @@ const CoordinatorAssessmentWidget = forwardRef(
           {reviewChildcareFunding ? <div>Childcare funding: {reviewChildcareFunding}</div> : null}
           {reviewPreviousIset ? <div>Previous ISET funding: {reviewPreviousIset}</div> : null}
           {reviewPreviousIsetDetails ? <div>Previous ISET details: {reviewPreviousIsetDetails}</div> : null}
-          {reviewOtherFunding ? <div>Other funding sources: {reviewOtherFunding}</div> : null}
+          {reviewOtherFundingInvolved ? <div>Other funding involved: {reviewOtherFundingInvolved}</div> : null}
+          {reviewOtherFundingSources.length ? (
+            <SpaceBetween size="xxs">
+              {reviewOtherFundingSources.map((source, index) => (
+                <div key={source.id || `${source.name}-${index}`}>
+                  {resolveOtherFunderTypeLabel(source.type)}: {source.name || 'Unnamed funder'}
+                  {source.coverage ? ` — ${source.coverage}` : ''}
+                </div>
+              ))}
+            </SpaceBetween>
+          ) : null}
+          {reviewOtherFundingNwacCoverage ? <div>NWAC funding covers: {reviewOtherFundingNwacCoverage}</div> : null}
+          {reviewOtherFundingNotes ? <div>Notes: {reviewOtherFundingNotes}</div> : null}
         </Box>
         <Box>
           <Header variant="h4">Proposed Interventions</Header>
@@ -7448,6 +8596,86 @@ const CoordinatorAssessmentWidget = forwardRef(
   const hasFundingDecision = Boolean(assessment.nwacReviewStatus);
   const shouldShowDecisionPendingAlert =
     showDecisionPendingAlert && isIsetCoordinator && !hasFundingDecision && !isDecisionFinal;
+
+  const otherFundingSourceModalDraft = otherFundingSourceModal.draft
+    ? buildEmptyOtherFundingSource(otherFundingSourceModal.draft)
+    : null;
+  const otherFundingSourceModalDirty =
+    otherFundingSourceModal.mode === 'edit'
+      ? JSON.stringify(otherFundingSourceModalDraft || {}) !==
+        JSON.stringify(otherFundingSourceModal.original || {})
+      : true;
+  const otherFundingSourceModalContent = (
+    <Modal
+      visible={otherFundingSourceModal.visible}
+      onDismiss={resetOtherFundingSourceModal}
+      header={otherFundingSourceModal.mode === 'add' ? 'Add other funder' : 'Edit other funder'}
+      footer={
+        <SpaceBetween direction="horizontal" size="xs">
+          <Button
+            variant="primary"
+            onClick={saveOtherFundingSourceModal}
+            disabled={isAssessmentDisabled || (otherFundingSourceModal.mode === 'edit' && !otherFundingSourceModalDirty)}
+          >
+            {otherFundingSourceModal.mode === 'add' ? 'Add funder' : 'Save changes'}
+          </Button>
+          <Button variant="link" onClick={resetOtherFundingSourceModal}>Cancel</Button>
+        </SpaceBetween>
+      }
+    >
+      {otherFundingSourceModalDraft && (
+        <SpaceBetween size="s">
+          <FormField label="Funder name" errorText={otherFundingSourceModalErrors.name}>
+            <Input
+              value={otherFundingSourceModalDraft.name || ''}
+              onChange={({ detail }) => {
+                updateOtherFundingSourceModalDraft({ name: detail.value });
+                setOtherFundingSourceModalErrors(prev => {
+                  const next = { ...prev };
+                  delete next.name;
+                  return next;
+                });
+              }}
+              readOnly={isAssessmentDisabled}
+            />
+          </FormField>
+          <FormField label="Funder type">
+            <Select
+              selectedOption={
+                OTHER_FUNDER_TYPE_OPTIONS.find(option => option.value === otherFundingSourceModalDraft.type) ||
+                OTHER_FUNDER_TYPE_OPTIONS.find(option => option.value === 'other') ||
+                OTHER_FUNDER_TYPE_OPTIONS[0]
+              }
+              onChange={({ detail }) => {
+                updateOtherFundingSourceModalDraft({ type: detail.selectedOption?.value || 'other' });
+              }}
+              options={OTHER_FUNDER_TYPE_OPTIONS}
+              placeholder="Select funder type"
+              readOnly={isAssessmentDisabled}
+            />
+          </FormField>
+          <FormField
+            label="What this funder covers"
+            errorText={otherFundingSourceModalErrors.coverage}
+          >
+            <Textarea
+              value={otherFundingSourceModalDraft.coverage || ''}
+              rows={4}
+              onChange={({ detail }) => {
+                updateOtherFundingSourceModalDraft({ coverage: detail.value });
+                setOtherFundingSourceModalErrors(prev => {
+                  const next = { ...prev };
+                  delete next.coverage;
+                  return next;
+                });
+              }}
+              readOnly={isAssessmentDisabled}
+            />
+          </FormField>
+        </SpaceBetween>
+      )}
+    </Modal>
+  );
 
   const interventionModalDraft = interventionModal.draft || null;
   const interventionModalMode = interventionModal.mode;
@@ -7663,19 +8891,29 @@ const CoordinatorAssessmentWidget = forwardRef(
       ? JSON.stringify(costLineDraft || {}) !== JSON.stringify(costLineModal.original || {})
       : true;
   const costLineAmountDisplay = costLineDraft
-    ? (isCostLineEditable
-      ? sanitizeCurrencyInput(costLineDraft.amount)
-      : getCurrencyInputDisplayValue(parseCurrencyInput(costLineDraft.amount) ?? '', false))
+    ? getCurrencyInputDisplayValue(
+        sanitizeCurrencyInput(costLineDraft.amount),
+        isCostLineEditable ? costLineAmountFocused : false
+      )
     : '';
   const costLineAmountPerPeriodDisplay = costLineDraft
-    ? (isCostLineEditable
-      ? sanitizeCurrencyInput(costLineDraft.recurrence?.amountPerPeriod)
-      : getCurrencyInputDisplayValue(parseCurrencyInput(costLineDraft.recurrence?.amountPerPeriod) ?? '', false))
+    ? getCurrencyInputDisplayValue(
+        sanitizeCurrencyInput(costLineDraft.recurrence?.amountPerPeriod),
+        isCostLineEditable ? costLineAmountPerPeriodFocused : false
+      )
     : '';
   const costLineRecurrenceStart =
     costLineDraft?.recurrence?.startDate || costLineIntervention?.startDate || '';
   const costLineRecurrenceEnd =
     costLineDraft?.recurrence?.endDate || costLineIntervention?.endDate || '';
+  const costLinePayeeType = String(costLineDraft?.payee?.type || '').trim();
+  const isParticipantPayeeType = costLinePayeeType === PAYEE_TYPE_PARTICIPANT_CLIENT;
+  const lockParticipantPayeeName = isParticipantPayeeType && Boolean(participantLegalName);
+  const costLinePayeeNamePlaceholder = isParticipantPayeeType
+    ? participantLegalName
+      ? 'Auto-filled from participant legal name'
+      : 'Participant legal name unavailable - enter full legal name'
+    : 'Enter payee name';
 
   const costLineDetailModal = (
     <Modal
@@ -7735,11 +8973,53 @@ const CoordinatorAssessmentWidget = forwardRef(
               inputMode="decimal"
               value={costLineAmountDisplay}
               onChange={({ detail }) => updateCostLineAmount(detail.value)}
+              onFocus={() => setCostLineAmountFocused(true)}
               onBlur={blurCostLineAmount}
               placeholder="0.00"
               readOnly={!isCostLineEditable || isAssessmentDisabled}
             />
           </FormField>
+          <FormField label="Payee type">
+            <Select
+              selectedOption={findOptionByValue(PAYEE_TYPE_OPTIONS, costLineDraft.payee?.type)}
+              onChange={({ detail }) => updateCostLinePayeeType(detail.selectedOption?.value || '')}
+              options={PAYEE_TYPE_OPTIONS}
+              placeholder="Select payee type"
+              readOnly={!isCostLineEditable || isAssessmentDisabled}
+            />
+          </FormField>
+          <FormField label="Payee name">
+            <Input
+              value={costLineDraft.payee?.name || ''}
+              onChange={({ detail }) =>
+                updateCostLineDraft({
+                  payee: {
+                    ...(costLineDraft.payee || {}),
+                    name: detail.value
+                  }
+                })
+              }
+              placeholder={costLinePayeeNamePlaceholder}
+              readOnly={!isCostLineEditable || isAssessmentDisabled || lockParticipantPayeeName}
+            />
+          </FormField>
+          {costLinePayeeType && !isParticipantPayeeType && (
+            <FormField label="Payee reference (optional)">
+              <Input
+                value={costLineDraft.payee?.reference || ''}
+                onChange={({ detail }) =>
+                  updateCostLineDraft({
+                    payee: {
+                      ...(costLineDraft.payee || {}),
+                      reference: detail.value
+                    }
+                  })
+                }
+                placeholder="Vendor/account reference"
+                readOnly={!isCostLineEditable || isAssessmentDisabled}
+              />
+            </FormField>
+          )}
           <FormField
             label="Installments (monthly)"
             errorText={costLineModalErrors.recurrence}
@@ -7784,6 +9064,8 @@ const CoordinatorAssessmentWidget = forwardRef(
                     inputMode="decimal"
                     value={costLineAmountPerPeriodDisplay}
                     onChange={({ detail }) => updateCostLineAmountPerPeriod(detail.value)}
+                    onFocus={() => setCostLineAmountPerPeriodFocused(true)}
+                    onBlur={blurCostLineAmountPerPeriod}
                     readOnly={!isCostLineEditable || isAssessmentDisabled}
                   />
                 </FormField>
@@ -8234,8 +9516,8 @@ const CoordinatorAssessmentWidget = forwardRef(
     .filter(Boolean);
 
   const activeStepIndex = Math.max(activeStepIds.indexOf(currentStep), 0);
-  const canSubmitAssessment = !isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment);
-  const canSubmitOutcome = !isEligibilityGateActive && !lockedByAnotherUser && showOutcomeByStatus && showNWACSection && !isEditingAssessment && !isOutcomeNoticeDisabled && canManageOutcomeReview && !checkingChecklist;
+  const canSubmitAssessment = !isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && !isSubmittingAssessment;
+  const canSubmitOutcome = !isEligibilityGateActive && !lockedByAnotherUser && showOutcomeByStatus && showNWACSection && !isEditingAssessment && !isOutcomeNoticeDisabled && canManageOutcomeReview && !checkingChecklist && !isSubmittingAssessment;
   const canSubmitCommunication =
     isCommunicationStep &&
     showCommunicationStep &&
@@ -8257,14 +9539,14 @@ const CoordinatorAssessmentWidget = forwardRef(
       ? (canSubmitCommunication ? handleCommunicationComplete : undefined)
       : (showNWACSection ? (canSubmitOutcome ? handleApproveClick : undefined) : (canSubmitAssessment ? handleSubmit : undefined));
   const wizardSubmitLabel = isFundingDocsStep
-    ? 'Complete funding documentation'
+    ? 'Mark application complete'
     : isCommunicationStep
       ? 'Send Letter'
       : (showNWACSection ? 'Commit' : 'Submit assessment');
   const wizardReadOnlyLabel = 'Read only';
   const hideWizardActions = !wizardSubmitHandler && (isDecisionFinal || isLockedStatus) && !isFundingDocsStep;
   const wizardSubmitText =
-    isCommunicationSending
+    isCommunicationSending || isSubmittingAssessment || checkingChecklist
       ? 'Working'
       : (wizardSubmitHandler
         ? wizardSubmitLabel
@@ -8504,6 +9786,7 @@ const CoordinatorAssessmentWidget = forwardRef(
             secondaryActions={null}
           />
         </div>
+        {otherFundingSourceModalContent}
         {interventionModalContent}
         {interventionDeleteModal}
         {costLineDetailModal}

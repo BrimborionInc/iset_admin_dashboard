@@ -112,6 +112,7 @@ Uploads and generated files are stored in AWS object storage rather than on the 
 
 Technical details  
 - Upload bucket: `nwac-prod-uploads-b6bb`  
+- Default encryption: SSE-KMS (AWS KMS key; prod policy requirement).  
 - Access is via presigned URLs configured in the portal environment (`UPLOAD_MODE=s3`).
 
 ## 10) Captcha / Bot Protection

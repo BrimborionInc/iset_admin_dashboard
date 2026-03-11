@@ -283,6 +283,14 @@ const extractValidationIssues = validation => {
   };
 };
 
+const isPayeeValidationDetail = detail => {
+  if (!detail || typeof detail !== "object") return false;
+  const field = String(detail.field || "").toLowerCase();
+  const code = String(detail.error || "").toLowerCase();
+  if (code === "payee_missing") return true;
+  return field === "payee" || field === "payeename" || field === "payeetype";
+};
+
 const buildEvidenceMeta = item => {
   if (item.required && !item.received) {
     return { indicator: "error", label: "Missing" };
@@ -837,6 +845,17 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const validationStatus =
     typeof packetValidation?.status === "string" ? packetValidation.status.toLowerCase() : null;
   const isValidated = validationStatus === "passed";
+  const payeeMissingLineIds = useMemo(() => {
+    const { details } = extractValidationIssues(packetValidation);
+    const ids = new Set();
+    details.forEach(detail => {
+      if (!isPayeeValidationDetail(detail)) return;
+      const lineId = detail.lineId || detail.line_id || detail.line || null;
+      if (!lineId) return;
+      ids.add(String(lineId));
+    });
+    return ids;
+  }, [packetValidation]);
 
   const selectedLine = useMemo(() => {
     if (!packetLines.length) return null;
@@ -1758,7 +1777,21 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     {
       id: "payee",
       header: "Payee",
-      cell: item => `${item.payeeName} (${item.payeeType})`,
+      cell: item => {
+        const payeeLabel = [
+          item.payeeName || "—",
+          item.payeeType ? `(${item.payeeType})` : "",
+        ]
+          .join(" ")
+          .trim();
+        const showMissingPayee = payeeMissingLineIds.has(String(item.id || ""));
+        return (
+          <SpaceBetween size="xxs">
+            <Box>{payeeLabel}</Box>
+            {showMissingPayee ? <StatusIndicator type="error">Payee missing</StatusIndicator> : null}
+          </SpaceBetween>
+        );
+      },
     },
     {
       id: "amount",

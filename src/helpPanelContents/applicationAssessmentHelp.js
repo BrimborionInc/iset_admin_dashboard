@@ -42,8 +42,10 @@ const ApplicationAssessmentHelp = () => {
       <li>Select <em>Edit</em> and confirm to acquire the lock.</li>
       <li>Record EI eligibility and upload verification if required.</li>
       <li>Complete the assessment overview, employment goals, barriers, priorities, other funding, and previous ISET details.</li>
+      <li>In <em>Other funding</em>, record whether other funding exists, add each non-NWAC funder, and capture what NWAC will cover to prevent overlap.</li>
       <li>Capture intervention details (dates, provider, delivery mode, NOC code/version when required, childcare needs).</li>
       <li>Enter costs using the ITP and/or wage subsidy breakdowns and confirm totals.</li>
+      <li>When adding or editing cost items, capture payee details in the same modal when available (payee is encouraged here but not required to advance this step).</li>
       <li>Review the checklist step and upload missing documents as needed.</li>
       <li>Set the recommendation and justification on the Review step.</li>
       <li>Click <em>Save</em> to keep a draft, or <em>Submit assessment</em> to move the application to <strong>pending approval</strong>.</li>
@@ -53,8 +55,9 @@ const ApplicationAssessmentHelp = () => {
     <p>
       After submission, the NWAC section unlocks for reviewers to record the decision and assurance outcome. Approved
       or Not Approved moves the application to decision ready; Push back returns it to in review. The Communication step
-      then appears to draft and send the approval or denial letter. Approved cases continue to Complete funding documentation
-      to finish the checklist; denial letters complete the application.
+      then appears to draft and send the approval or denial letter. Approved cases continue to Funding forms and signatures
+      to monitor form completion; mark the application complete only when all required items show Complete. Denial letters
+      complete the application.
     </p>
 
     <h3>Need to revise?</h3>
@@ -94,7 +97,7 @@ const ApplicationAssessmentHelp = () => {
 ApplicationAssessmentHelp.aiContext = `
 You are assisting a coordinator filling out the Application Assessment widget. Key behaviors and constraints:
 - Edit requires acquiring an assessment lock; editing is blocked after a final decision or when another user holds the lock.
-- Sections include EI eligibility, overview/employment goals, barriers and local priorities, previous ISET, other funding, intervention details (provider, dates, program name, NOC + version as needed, childcare need), costs (ITP and/or wage breakdowns), recommendation, justification, and the document checklist.
+- Sections include EI eligibility, overview/employment goals, barriers and local priorities, previous ISET, structured other funding (involved yes/no/unknown, repeatable funders, NWAC coverage, notes), intervention details (provider, dates, program name, NOC + version as needed, childcare need), costs (ITP and/or wage breakdowns plus optional early payee capture in cost-item modals), recommendation, justification, and the document checklist.
 - Save keeps a draft without changing status; Submit assessment moves the application to pending approval and unlocks NWAC review.
 - Use related widgets for context: Application Overview (status/owner), ISET Application Form (applicant data/version history), Supporting Documents (evidence/checklist), Notes and Tasks (audit trail), Secure Messaging (doc requests).
 `;
@@ -169,8 +172,9 @@ NwacAssessmentHelp.aiContext = `
 You are assisting an NWAC reviewer who is completing the outcome notice at the end of the Application Assessment widget.
 Explain how to record the funding decision, assurance outcome, and required reasons, and what happens when Commit is
 selected. Approved or Not Approved moves the application to decision ready and unlocks the Communication step; approvals
-then require completing the funding documentation checklist after the letter is sent, while denials complete after the letter
-is sent. Push back returns the assessment to the coordinator for updates. Editing is disabled after a final decision unless
+then require completing Funding forms and signatures after the letter is sent; complete the application only when all
+required items are Complete, while denials complete after the letter is sent. Push back returns the assessment to the
+coordinator for updates. Editing is disabled after a final decision unless
 reopening is permitted. Status and audit logs update automatically.
 `;
 

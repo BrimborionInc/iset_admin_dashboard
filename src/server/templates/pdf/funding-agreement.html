@@ -232,6 +232,9 @@
 
 <h2>Approved funding</h2>
 {{{interventions_html}}}
+<div class="note">
+  Details include payable timing, installment cadence, payee, and any note provided.
+</div>
 
 <!-- IF funding_total -->
 <div class="field">
@@ -266,6 +269,17 @@
   suspension or revocation of this funding agreement and repayment of funds to Employment and Social Development Canada (ESDC).
 </p>
 
+<!-- IF client_signature -->
+<div class="signature-block">
+  <span class="label">Client Signature</span>
+  <div class="signature-panel">
+    <div class="signature-line signature-name">{{client_signature}}</div>
+    <div class="signature-meta">Signed on {{client_signed_date}}</div>
+  </div>
+</div>
+<!-- END client_signature -->
+
+<!-- IF show_case_manager_signature -->
 <div class="signature-block">
   <span class="label">Case Manager Signature</span>
   <div class="signature-panel">
@@ -273,6 +287,7 @@
     <div class="signature-meta">Signed on {{case_manager_signed_date}}</div>
   </div>
 </div>
+<!-- END show_case_manager_signature -->
 
 
 </body>

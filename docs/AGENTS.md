@@ -5,7 +5,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-03-05
+Last Updated: 2026-03-10
 
 ## Working relationship (design dialog)
 
@@ -16,6 +16,17 @@ Last Updated: 2026-03-05
 - Own technical decisions once requirements are clear, but do not silently make high-risk assumptions.
 - In discovery/design conversations, Codex leads the design process: provide concrete recommendations, challenge contradictions directly, and drive toward a robust design before implementation planning.
 - Treat the user as business-domain authority and Codex as design authority; use constructive, direct challenge ("confrontational perfectionism") to remove ambiguity and weak decisions early.
+- During interviews/discovery, avoid list-style question dumps. Ask one question at a time and track answers across the conversation.
+- Keep questioning intentional: ask only when a material assumption is required or intent is unclear enough to risk rework.
+- Continue the interview until requirements are sufficient to move to the next phase; do not ask questions for their own sake.
+- Codex owns code and data decisions. Do not expect Bill to answer implementation-level questions about code paths, payloads, schema, or persistence mechanics.
+- Codex must inspect the codebase and database directly and make defensible data-handling decisions from evidence.
+- Interview focus with Bill should be UI/UX behavior, workflow expectations, and business intent.
+- It is expected to challenge current code/data design when flaws are found; use confrontational perfectionism to reach a robust design before refactor planning.
+- Do not ask "preference boundary" questions when a clear, defensible recommendation already exists.
+- In those cases, state the recommendation, apply it as the default, and only ask for confirmation or an explicit override.
+- Do not ask questions for the sake of visible collaboration; minimize user questions.
+- Ask only when requirements are genuinely ambiguous or when a real dilemma remains after code/data introspection.
 
 ## How to use this file
 
@@ -38,6 +49,13 @@ Last Updated: 2026-03-05
   schema -> runtime config JSON -> API payload -> renderer/template.
 - When adding/changing UI fields, confirm the backend actually returns the data.
 - Fix root causes instead of layering workarounds.
+
+## Development data policy (no legacy fallbacks)
+
+- This system is in active development; do not assume legacy data constraints by default.
+- After refactors, dev/test databases can be purged of old records that would otherwise require backward-compatibility handling.
+- As a principle, avoid adding legacy fallback fields, compatibility branches, or dual-write/dual-read logic when they increase code or data complexity without current operational need.
+- Prefer a clean target model and simple code paths. Only introduce compatibility handling when explicitly required and validated from current production constraints.
 
 ## High-value repo map
 
@@ -117,6 +135,16 @@ Notes:
 - This stops compute + database, but ALB/NAT/EIP/VPC endpoint costs may remain.
 - Confirm target AWS account before running commands:
   `aws sts get-caller-identity`
+
+### AWS CLI profile/account mapping (Codex sandbox)
+
+- Keep prod and test identities as separate AWS CLI profiles; never rely on implicit defaults.
+- Current known mappings in this Codex environment (verified 2026-03-09):
+  - `default` -> `arn:aws:iam::468278742295:user/nwac-prod-automation` (prod account `468278742295`)
+  - `nwac-test` -> `arn:aws:iam::124355655255:user/CODEX_CLI_Admin` (test account `124355655255`)
+- Always pass `--profile` for AWS commands in threads that touch infra or storage:
+  - Test example: `aws s3api get-bucket-encryption --bucket nwac-test-uploads-20251014 --region ca-central-1 --profile nwac-test`
+  - Prod example: `aws sts get-caller-identity --profile default`
 
 ## Cross-app boundaries
 

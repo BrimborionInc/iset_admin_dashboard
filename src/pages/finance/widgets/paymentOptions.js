@@ -15,12 +15,54 @@ export const PAYMENT_TYPE_OPTIONS = [
 ];
 
 export const PAYEE_TYPE_OPTIONS = [
-  { value: "Client", label: "Client" },
-  { value: "Vendor", label: "Vendor" },
-  { value: "Institution", label: "Training institution" },
-  { value: "Employer", label: "Employer" },
-  { value: "Other", label: "Other" },
+  {
+    value: "ParticipantClient",
+    label: "Participant (Client)",
+    description:
+      "Payment made directly to the client (e.g., living allowance or reimbursement).",
+  },
+  {
+    value: "AccreditedEducationalTrainingInstitution",
+    label: "Accredited Educational / Training Institution",
+    description:
+      "College, university, or approved training institution delivering the program.",
+  },
+  {
+    value: "EmployerWageSubsidyPartner",
+    label: "Employer (Wage Subsidy Partner)",
+    description:
+      "Employer participating in a wage subsidy or work placement arrangement.",
+  },
+  {
+    value: "ChildcareProvider",
+    label: "Childcare Provider",
+    description:
+      "Licensed or eligible childcare provider supporting the client during training.",
+  },
+  {
+    value: "CommunityNonProfitOrganization",
+    label: "Community / Non-Profit Organization",
+    description:
+      "Community or non-profit organization delivering a project or training activity.",
+  },
+  {
+    value: "TrainingRelatedSupplier",
+    label: "Training-Related Supplier (Books, Equipment, Materials)",
+    description:
+      "Supplier providing required books, materials, equipment, or certification fees.",
+  },
+  {
+    value: "ProfessionalBusinessServicesProvider",
+    label: "Professional / Business Services Provider",
+    description:
+      "Professional service supporting a self-employment activity (e.g., accounting or business training).",
+  },
 ];
 
-export const findOptionByValue = (options, value) =>
-  options.find(option => option.value === value) || null;
+export const findOptionByValue = (options, value) => {
+  const match = options.find(option => option.value === value);
+  if (match) return match;
+  if (value === null || typeof value === "undefined" || value === "") return null;
+  // Keep legacy/stored values visible even when not present in current options.
+  return { value: String(value), label: String(value) };
+};

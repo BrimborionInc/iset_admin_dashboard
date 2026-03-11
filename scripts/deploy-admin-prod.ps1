@@ -153,11 +153,6 @@ try {
     if (Test-Path -LiteralPath $envProdPath) {
         Copy-Item -Path $envProdPath -Destination (Join-Path $stagingPath ".env.production") -Force
     }
-    Copy-Item -Path (Join-Path $repoRoot "tmp_assessment_template.html") -Destination (Join-Path $stagingPath "tmp_assessment_template.html") -Force
-    Copy-Item -Path (Join-Path $repoRoot "tmp_application_form_template.html") -Destination (Join-Path $stagingPath "tmp_application_form_template.html") -Force
-    Copy-Item -Path (Join-Path $repoRoot "tmp_financial_overview_template.html") -Destination (Join-Path $stagingPath "tmp_financial_overview_template.html") -Force
-    Copy-Item -Path (Join-Path $repoRoot "tmp_cfa_template.html") -Destination (Join-Path $stagingPath "tmp_cfa_template.html") -Force
-
     $directoriesToStage = @("src", "shared", "templates", "blocksteps", "public", "sql")
     foreach ($dir in $directoriesToStage) {
         $sourceDir = Join-Path $repoRoot $dir

@@ -19,14 +19,133 @@ const ROLE_COLUMNS = [
   { key: 'Application Assessor', label: getRoleDisplayName('Application Assessor'), editable: true }
 ];
 
+const NAV_SECTIONS = [
+  {
+    section: 'Intake and Assessment',
+    items: [
+      { href: '/iset/applications/intake', label: 'Manual Application Intake' },
+      { href: '/case-assignment-dashboard', label: 'Application Assessment' },
+    ],
+  },
+  {
+    section: 'Case Management',
+    items: [
+      { href: '/iset/cases', label: 'Case Management' },
+      { href: '/case-management', label: 'My Case Queue' },
+      { href: '/job-bank-search', label: 'Job Bank Search' },
+    ],
+  },
+  {
+    section: 'Budgets and Payments',
+    items: [
+      { href: '/finance/overview', label: 'Finance Overview' },
+      { href: '/finance/budgets', label: 'Budgets' },
+      { href: '/finance/allocations', label: 'Allocations & Transfers' },
+      { href: '/finance/payments', label: 'Payments' },
+      { href: '/finance/reconciliation', label: 'Reconciliation' },
+      { href: '/finance/reports', label: 'Financial Reports' },
+      { href: '/finance/monitoring', label: 'Monitoring & Evidence' },
+      { href: '/finance/forecasting', label: 'Forecasting & Scenarios' },
+      { href: '/finance/settings', label: 'Finance Settings' },
+    ],
+  },
+  {
+    section: 'ESDC Reporting',
+    items: [
+      { href: '/esdc/overview', label: 'Overview' },
+      { href: '/esdc/participants', label: 'ILMP Exports' },
+      { href: '/esdc/reporting', label: 'Reporting' },
+    ],
+  },
+  {
+    section: 'Edit Digital Forms',
+    items: [
+      { href: '/manage-components', label: 'Manage Intake Steps' },
+      { href: '/manage-workflows', label: 'Manage Workflows' },
+    ],
+  },
+  {
+    section: 'Analytics Dashboard',
+    items: [{ href: '/reporting-and-monitoring-dashboard', label: 'Reporting and Monitoring' }],
+  },
+  {
+    section: 'ISET Administration',
+    items: [
+      { href: '/nwac-hub-management', label: 'NWAC Hub Management' },
+      { href: '/ptma-management', label: 'PTMA Management' },
+    ],
+  },
+  {
+    section: 'Configuration',
+    items: [
+      { href: '/user-management-dashboard', label: 'User Management' },
+      { href: '/release-management-dashboard', label: 'Release Management' },
+      { href: '/manage-notifications', label: 'Notification Settings' },
+      { href: '/template-editor', label: 'Template Editor' },
+      { href: '/language-settings-dashboard', label: 'Language Settings' },
+      { href: '/configuration/events', label: 'Event Logging' },
+      { href: '/configuration-settings', label: 'Configuration Settings' },
+      { href: '/configuration/query-editor', label: 'Query Editor' },
+      { href: '/admin/upload-config', label: 'File Upload Config' },
+    ],
+  },
+  {
+    section: 'Security',
+    items: [
+      { href: '/audit-logs-dashboard', label: 'Audit and Logs' },
+      { href: '/manage-security-options', label: 'Security Settings' },
+      { href: '/access-control', label: 'Access Control' },
+    ],
+  },
+  {
+    section: 'Support',
+    items: [
+      { href: '/documentation', label: 'Guidance' },
+      { href: '/tutorials-dashboard', label: 'Tutorials' },
+      { href: '/help-support-dashboard', label: 'Help and Support' },
+    ],
+  },
+  {
+    section: 'Footer links',
+    items: [
+      { href: '/contact-communications', label: 'Contact Communications' },
+      { href: '/messages', label: 'Messages' },
+    ],
+  },
+];
+
+const NAV_ROUTE_META = NAV_SECTIONS.reduce((acc, section, sectionIndex) => {
+  (section.items || []).forEach((item, routeIndex) => {
+    if (!item?.href) return;
+    acc[item.href] = {
+      section: section.section,
+      sectionOrder: sectionIndex,
+      routeOrder: routeIndex,
+      label: item.label,
+    };
+  });
+  return acc;
+}, {});
+
+const DEFAULT_META = {
+  section: 'Other routes',
+  sectionOrder: Number.MAX_SAFE_INTEGER,
+  routeOrder: Number.MAX_SAFE_INTEGER,
+  label: null,
+};
+
 const ROUTE_LABELS = {
+  '/arms-reporting': 'ARMS Reporting',
   '/access-control': 'Access Control',
   '/admin/upload-config': 'File Upload Config',
   '/application-case/:id': 'Application Case',
   '/audit-logs-dashboard': 'Audit and Logs',
+  '/capacity-planning-dashboard': 'Capacity Planning',
   '/case-assignment-dashboard': 'Manage Applications',
   '/case-assignment-dashboard?view=assignment': 'Application Assignment',
   '/contact-communications': 'Contact Communications',
+  '/custom-dashboards-dashboard': 'Custom Dashboards',
+  '/documentation': 'Documentation',
   '/messages': 'Messages',
   '/configuration-settings': 'Configuration Settings',
   '/configuration/events': 'Event Capture',
@@ -50,7 +169,9 @@ const ROUTE_LABELS = {
   '/template-editor': 'Template Editor',
   '/manage-security-options': 'Security Settings',
   '/manage-workflows': 'Manage Workflows',
+  '/iset/applications/intake': 'Manual Application Intake',
   '/iset/cases': 'ISET Clients',
+  '/iset/cases/new': 'New Case',
   '/cases/:caseId': 'Case Workspace',
   '/modify-component/:id': 'Modify Intake Step',
   '/modify-workflow': 'Modify Workflow',
@@ -63,7 +184,44 @@ const ROUTE_LABELS = {
   '/visual-settings': 'Visual Settings'
 };
 
-const getRouteLabel = (route) => ROUTE_LABELS[route] || route;
+const toTitleCase = text =>
+  String(text || '')
+    .split(' ')
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+
+const normalizeAcronyms = text =>
+  text
+    .replace(/\bIset\b/g, 'ISET')
+    .replace(/\bEsdc\b/g, 'ESDC')
+    .replace(/\bIlmp\b/g, 'ILMP')
+    .replace(/\bNwac\b/g, 'NWAC')
+    .replace(/\bArms\b/g, 'ARMS');
+
+const prettifyRouteLabel = route => {
+  const path = String(route || '').split('?')[0];
+  if (!path || path === '/') return 'Home';
+  const normalized = path
+    .split('/')
+    .filter(Boolean)
+    .map(segment => segment.replace(/^:/, ''))
+    .join(' ')
+    .replace(/[-_]+/g, ' ')
+    .replace(/\bdashboard\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return path;
+  return normalizeAcronyms(toTitleCase(normalized));
+};
+
+const getRouteMeta = route => {
+  const exact = NAV_ROUTE_META[route];
+  if (exact) return exact;
+  const base = String(route || '').split('?')[0];
+  return NAV_ROUTE_META[base] || DEFAULT_META;
+};
+const getRouteLabel = route => getRouteMeta(route).label || ROUTE_LABELS[route] || prettifyRouteLabel(route);
 
 const AccessControlMatrix = () => {
   const { roleMatrix, isLoading, error, pendingRoutes, reloadRoleMatrix, refreshRoleMatrix, updateRouteRoles } = useRoleMatrix();
@@ -74,10 +232,17 @@ const AccessControlMatrix = () => {
     return Object.entries(roleMatrix.routes)
       .map(([path, allowed]) => ({
         path,
+        section: getRouteMeta(path).section,
+        sectionOrder: getRouteMeta(path).sectionOrder,
+        routeOrder: getRouteMeta(path).routeOrder,
         name: getRouteLabel(path),
         allowed: Array.isArray(allowed) ? allowed : [],
       }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => {
+        if (a.sectionOrder !== b.sectionOrder) return a.sectionOrder - b.sectionOrder;
+        if (a.routeOrder !== b.routeOrder) return a.routeOrder - b.routeOrder;
+        return a.name.localeCompare(b.name);
+      });
   }, [roleMatrix]);
 
   const handleToggle = useCallback(async (route, role, checked) => {
@@ -107,6 +272,15 @@ const AccessControlMatrix = () => {
   );
 
   const columns = [
+    {
+      id: 'section',
+      header: 'Navigation section',
+      cell: item => item.section,
+      sortingComparator: (a, b) => {
+        if (a.sectionOrder !== b.sectionOrder) return a.sectionOrder - b.sectionOrder;
+        return a.section.localeCompare(b.section);
+      },
+    },
     {
       id: 'name',
       header: 'Dashboard',

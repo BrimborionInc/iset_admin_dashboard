@@ -132,6 +132,10 @@
       resize: none;
     }
 
+    textarea.other-funding-details {
+      min-height: 72px;
+    }
+
     .check-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -276,7 +280,7 @@
       </div>
       <div class="field">
         <label>Date of Assessment</label>
-        <input type="date" data-field="date_of_assessment" />
+        <input type="text" data-field="date_of_assessment" />
       </div>
     </div>
 
@@ -327,7 +331,7 @@
       </tr>
       <tr>
         <td class="label">Other funding sources for this intervention</td>
-        <td colspan="3"><textarea data-field="other_funding_sources_details"></textarea></td>
+        <td colspan="3"><textarea class="other-funding-details" data-field="other_funding_sources_details"></textarea></td>
       </tr>
       <tr>
         <td class="label">Note</td>

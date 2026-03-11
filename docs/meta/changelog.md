@@ -2,6 +2,33 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-03-11
+- UX/Assessment: Cost-item choices in `What will it cost?` now follow the wizard `Childcare Need` answer (yes/no) so childcare cost items are presented or hidden accordingly.
+- Fix/Assessment: Application Assessment default-intervention auto-seeding now waits for the payment-intervention mapping fetch to complete before running, preventing false “seeded” state on first render.
+- Security/Messaging: Hardened secure-message isolation so applicants only see messages where they are sender/recipient (`/api/messages`), with defensive cleanup of stale invalid mailbox rows; case-thread fetch (`/api/cases/:id/messages`) now blocks applicant access to other applicants' cases.
+- UX/Help: Finance Settings `Payment type mapping` now shows a widget `Info` link with dedicated help-panel guidance, and the intervention default column label was shortened to `Auto-add?`.
+- Workflow/UX: Renamed approval follow-up stage from `Complete funding documentation` to `Funding forms and signatures`; final action now reads `Mark application complete`, and step guidance now explicitly requires all required checklist items to be `Complete` before completion.
+- Messaging/Workflow: Sending secure messages with signing-form attachments now sets docs-requested state/reminders server-side (`docs_requested_active=1`, source `secure_message`, reminder creation, and event capture) even for system-triggered sends.
+- Messaging/Workflow: Applicant signing completion now clears docs-requested state/reminders when all pending non-letter signing requests for the case are complete.
+- Messaging/Workflow: When NWAC review transitions to approved and assessment cost is non-zero, the backend now auto-generates a client secure message with attachments for `Client Funding Agreement`, `Client Acknowledgement of Funding Source`, and `EFT & Wire Transfer Direct Debit`; message subject/body now auto-localize to applicant language preference from intake/case context.
+- API/Checklist: Gate 6 funding-document requirements now enforce `assessment total cost > 0` for funding package artifacts (`funding_agreement`, `client_acknowledgement`, `EFT_form`/wire transfer form, and `voided_cheque`), so zero-cost approved assessments no longer block on those documents.
+- Intake/Docs: Intake submission now auto-generates and stores `iset_client_info_release` (Authorization for Release of ISET Client Information) as a signed PDF, and the Application Form widget now includes a dedicated link/modal + PDF download action for that signed form.
+
+## 2026-03-10
+- UX/Data: Refactored `Other funding` in both Application Assessment and Case Workspace Proposed Interventions wizards to a structured flow (`involved?`, repeatable non-NWAC funders, NWAC coverage, notes) while retaining backward-compatible summary text persistence for existing records.
+- Help: Updated Application Assessment and Case Workspace Proposed Interventions help-panel guidance/AI context to match the new structured Other funding step behavior.
+- Refactor/UX: Intervention proposal cost-line modals in both Application Workspace and Case Workspace now support early payee capture (`payee type`, `payee name`, optional `reference`) without adding a new costing-table column.
+- API/Data: `assessment_proposed_interventions` cost-line normalization/serialization now supports optional payee payloads so early payee values persist with proposed interventions.
+- Payments/API: Auto-generated payment packet lines now prefer payee values from proposal cost lines (with existing fallback derivation retained) and now forward `payee_reference` when present.
+- Validation: Payment packet validation now blocks submission with explicit `payee_missing` policy errors when line payee details are incomplete.
+- UX: Payment packet detail table now shows line-level `Payee missing` indicators after validation, complementing top-level validation-block messaging.
+- Docs: Added planning tracker `docs/planning/vendor-payee-early-capture-refactor.md` and updated related help-panel guidance for Application Assessment, Case Workspace Proposed Interventions, and Finance Payment Detail.
+- Docs: Expanded `docs/AGENTS.md` interview directives (single-question interview flow, avoid preference-boundary probing, Codex-owned code/data decisions, and minimal-question policy).
+
+## 2026-03-09
+- Ops/Storage: `POST /api/clear-iset-test-data` now also purges object-store files linked to records being cleared (collects object keys before DB delete, then deletes keys after commit), returning `objectPurge` and `objectKeySources` in the response for audit visibility.
+- Safety/Ops: Clear-test object purge now blocks deletion when `OBJECT_BUCKET` appears production-like (`prod`) to prevent accidental production bucket removal.
+
 ## 2026-03-06
 - Feature: Added a new `Application Intake` dashboard route (`/iset/applications/intake`) under New ISET Applications for manual staff-entered intake.
 - UX: Added `Manual Application Intake` page scaffold with frontend-held working state, session autosave, field-level validation, and `Create Application` gating until required fields are valid.

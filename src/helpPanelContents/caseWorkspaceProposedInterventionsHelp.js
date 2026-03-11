@@ -34,12 +34,20 @@ const CaseWorkspaceProposedInterventionsHelp = () => (
     <ul>
       <li>Record research that supports the intervention choice (labour demand, credential requirements, wage range).</li>
       <li>Costs must tie directly to the intervention or a barrier the intervention addresses.</li>
+      <li>Use the Other funding step to mark whether outside funding exists, list each non-NWAC funder, and state what NWAC will cover.</li>
+      <li>Capture payee details while adding/editing cost lines when known; missing payee can be completed later in payment review.</li>
       <li>Keep dates, costs, and program details consistent across documents and the case file.</li>
       <li>EI verification is required for approvals; attach the required document before submitting.</li>
+    </ul>
+
+    <h3>After final decision</h3>
+    <ul>
+      <li>When a proposal is approved or rejected, the widget shows a completion note instead of jumping back to Step 1.</li>
+      <li>Use the Interventions table or the "Start new proposal" action to begin a new proposal when ready.</li>
     </ul>
   </div>
 );
 
-CaseWorkspaceProposedInterventionsHelp.aiContext = `You are assisting PATH case managers using the Proposed Interventions widget in the Case Workspace. Focus on user guidance: define what a good intervention looks like (goal, timeframe, supports, employment outcome), stress that multiple interventions each need their own rationale and expected impact, and reference the PATH training content for funding streams (ITP, TWS, JCP, SEB, group training). Remind users to document research and keep dates/costs consistent in the file, and to attach EI verification before approval. Keep language practical and user-facing, not implementation details.`;
+CaseWorkspaceProposedInterventionsHelp.aiContext = `You are assisting PATH case managers using the Proposed Interventions widget in the Case Workspace. Focus on user guidance: define what a good intervention looks like (goal, timeframe, supports, employment outcome), stress that multiple interventions each need their own rationale and expected impact, and reference the PATH training content for funding streams (ITP, TWS, JCP, SEB, group training). Remind users to document research, use the Other funding step to capture involved yes/no/unknown plus each non-NWAC funder and NWAC coverage, capture payee details in cost-line modals when known, keep dates/costs consistent in the file, and attach EI verification before approval. Explain that after a final approval/rejection decision the widget shows a completion note (rather than restarting at Step 1), and users can start again from the Interventions table or the "Start new proposal" action. Keep language practical and user-facing, not implementation details.`;
 
 export default CaseWorkspaceProposedInterventionsHelp;

@@ -571,6 +571,15 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     loadCase().catch(() => {});
   }, [loadCase]);
 
+  const lockApplicationId = state.caseData?.applicationId ?? state.caseData?.application_id ?? null;
+
+  useEffect(() => {
+    return () => {
+      if (!lockApplicationId) return;
+      apiFetch(`/api/locks/application/${lockApplicationId}`, { method: "DELETE" }).catch(() => {});
+    };
+  }, [lockApplicationId]);
+
   const loadInterventionCodes = useCallback(async () => {
     if (interventionCodesLoaded && interventionCodes.length > 0) {
       return interventionCodes;

@@ -23,6 +23,7 @@ const FinancePaymentDetailHelp = () => (
         <li>Service period and recurrence are enforced from Finance Settings recurrence policy per payment type.</li>
         <li>Evidence checklist shows required vs received items per line.</li>
         <li>Missing required evidence blocks submission.</li>
+        <li>Missing payee details also block submission and are flagged by line after validation.</li>
       </ul>
     </Box>
     <Box>
@@ -51,6 +52,6 @@ const FinancePaymentDetailHelp = () => (
 );
 
 FinancePaymentDetailHelp.aiContext =
-  "Explain the payment detail widget: line items, recurrence/service-period policy by payment type, evidence checklist, validate step, submit-to-finance action, and the Intacct XML (Draft) preview tab. Mention evidence gates and that submission emails finance, locks edits, and the XML preview is read-only and not transmitted.";
+  "Explain the payment detail widget: line items, recurrence/service-period policy by payment type, evidence checklist, validate step, submit-to-finance action, and the Intacct XML (Draft) preview tab. Mention evidence and payee completeness gates, that submission emails finance and locks edits, and the XML preview is read-only and not transmitted.";
 
 export default FinancePaymentDetailHelp;

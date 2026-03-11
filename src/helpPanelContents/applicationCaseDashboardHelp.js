@@ -63,7 +63,7 @@ const ApplicationCaseDashboardHelp = ({ onRestartTutorial, onEndTutorial }) => {
         <li>Review the <em>ISET Application Form</em> for intake details and signatures; edit only if permitted.</li>
         <li>Complete the <em>Application Assessment</em> steps, saving progress as needed, then submit for NWAC review.</li>
         <li>Use <em>Supporting Documents</em> and the checklist to confirm required evidence; request missing items via <em>Secure Messaging</em>.</li>
-        <li>After a decision is recorded, use the Communication step to draft/send the letter; approved cases continue to Complete funding documentation to finish the checklist.</li>
+        <li>After a decision is recorded, use the Communication step to draft/send the letter; approved cases continue to Funding forms and signatures and should only be completed when all required checklist items show Complete.</li>
         <li>Capture context in <em>Notes and Tasks</em> and monitor updates in the <em>Events Timeline</em>.</li>
       </ol>
 
