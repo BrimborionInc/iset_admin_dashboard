@@ -4,7 +4,7 @@ import { apiFetch } from '../auth/apiClient';
 import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplicationLock';
 import useCurrentUser from '../hooks/useCurrentUser';
 import { canCompleteOutcomeReview, getCaseStatusContext, getApplicationStatusContext, getRoleGroups } from '../utils/rbac';
-import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, Alert, Modal, FormField, Input, Textarea, Checkbox, DatePicker, Select, Grid, ColumnLayout, Table, RadioGroup, Autosuggest, StatusIndicator, Wizard, Hotspot } from '@cloudscape-design/components';
+import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, Alert, Modal, FormField, Input, Textarea, Checkbox, DatePicker, Select, Grid, ColumnLayout, Table, RadioGroup, Autosuggest, StatusIndicator, Wizard, Hotspot, Tabs } from '@cloudscape-design/components';
 import ApplicationAssessmentHelp, { NwacAssessmentHelp } from '../helpPanelContents/applicationAssessmentHelp';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { PAYMENT_TYPE_OPTIONS, PAYEE_TYPE_OPTIONS, findOptionByValue } from '../pages/finance/widgets/paymentOptions';
@@ -825,6 +825,329 @@ const buildOtherFundingSummary = details => {
   return lines.join(' ');
 };
 
+const toSafeFileToken = (value, fallback = 'letter') => {
+  const token = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return token || fallback;
+};
+
+const toTitleCaseWords = (value) =>
+  String(value || '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, char => char.toUpperCase());
+
+const toSentenceCaseWords = (value) => {
+  const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`;
+};
+
+const formatCostTypeForLetter = (type) => {
+  const direct = String(type || '').trim();
+  if (!direct) return 'Approved support';
+  if (SUPPORT_LABEL_OVERRIDES[direct]) {
+    return toSentenceCaseWords(SUPPORT_LABEL_OVERRIDES[direct]);
+  }
+  return toSentenceCaseWords(toTitleCaseWords(direct));
+};
+
+const formatCaseManagerSignatureLines = ({ caseManagerName = '', caseManagerEmail = '', caseManagerPhone = '' } = {}) => {
+  const lines = [];
+  lines.push("NATIVE WOMEN'S ASSOCIATION OF CANADA (ISET Program)");
+  lines.push('');
+  if (caseManagerName) lines.push(caseManagerName);
+  if (caseManagerEmail) lines.push(caseManagerEmail);
+  if (caseManagerPhone) lines.push(caseManagerPhone);
+  return lines.join('\n');
+};
+
+const buildInstitutionApprovalLetters = ({
+  interventions = [],
+  interventionTotals = new Map(),
+  applicantName = '',
+  trackingReference = '',
+  decisionDate = '',
+  caseManagerName = '',
+  caseManagerEmail = '',
+  caseManagerPhone = ''
+} = {}) => {
+  const normalizePayeeType = value => String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const resolveInstitutionPayeeCategory = (line, institutionName) => {
+    const payee = line?.payee && typeof line.payee === 'object' ? line.payee : {};
+    const payeeTypeKey = normalizePayeeType(payee.type);
+    const payeeTypeRaw = String(payee.type || '').trim().toLowerCase();
+    const payeeName = String(payee.name || '').trim().toLowerCase();
+    const institutionKey = String(institutionName || '').trim().toLowerCase();
+    const paymentType = String(line?.type || '').trim().toLowerCase();
+    const payeeHint = `${payeeTypeKey} ${payeeTypeRaw} ${payeeName}`.trim();
+
+    if (/(participant|client|student|applicant)/.test(payeeHint)) return 'client';
+    if (/(institution|university|college|school|training)/.test(payeeHint)) return 'institution';
+    if (/(employer|supplier|vendor|provider|organization|organisation|community|nonprofit|charity)/.test(payeeHint)) return 'other';
+
+    if (
+      payeeTypeKey === 'accreditededucationaltraininginstitution' ||
+      payeeTypeKey === 'traininginstitution' ||
+      payeeTypeKey === 'traininginstitute'
+    ) {
+      return 'institution';
+    }
+
+    if (institutionKey && payeeName && payeeName.includes(institutionKey)) return 'institution';
+    if (paymentType.includes('tuition')) return 'institution';
+    if (paymentType.includes('reimbursement')) return 'client';
+
+    if (
+      paymentType.includes('living') ||
+      paymentType.includes('transport') ||
+      paymentType.includes('childcare')
+    ) {
+      return 'client';
+    }
+    if (paymentType.includes('books') || paymentType.includes('materials') || paymentType.includes('equipment')) {
+      if (paymentType.includes('direct')) return 'other';
+      return 'client';
+    }
+
+    return 'other';
+  };
+  const byInstitution = new Map();
+  (Array.isArray(interventions) ? interventions : []).forEach(intervention => {
+    const institution = String(intervention?.institution || '').trim();
+    if (!institution) return;
+    const interventionId = intervention?.id;
+    const totalAmount = Number(interventionTotals?.get(interventionId) || 0);
+    if (!(totalAmount > 0)) return;
+    if (!byInstitution.has(institution)) {
+      byInstitution.set(institution, {
+        institution,
+        totalAmount: 0,
+        programs: new Set(),
+        terms: new Set(),
+        lineItems: []
+      });
+    }
+    const target = byInstitution.get(institution);
+    target.totalAmount += totalAmount;
+    const programName = String(intervention?.programName || '').trim();
+    if (programName) target.programs.add(programName);
+    const termLabel = formatInterventionDates(intervention?.startDate, intervention?.endDate);
+    if (termLabel && termLabel !== '—') target.terms.add(termLabel);
+    const costLines = Array.isArray(intervention?.costLines) ? intervention.costLines : [];
+    costLines.forEach((line, lineIndex) => {
+      const amount = parseCurrencyToNumber(line?.amount);
+      if (!(amount > 0)) return;
+      const label = formatCostTypeForLetter(line?.type);
+      target.lineItems.push({
+        id: `${interventionId || 'intervention'}-${line?.id || lineIndex + 1}`,
+        label,
+        amount,
+        termLabel,
+        type: line?.type || '',
+        payee: line?.payee && typeof line.payee === 'object' ? { ...line.payee } : null
+      });
+    });
+  });
+  return Array.from(byInstitution.values()).map((item, index) => {
+    const programText = item.programs.size ? Array.from(item.programs).join(', ') : 'approved training supports';
+    const termText = item.terms.size ? Array.from(item.terms).join('; ') : 'As assessed';
+    const fundingLines = item.lineItems.length
+      ? item.lineItems
+      : [{
+          id: `total-${index + 1}`,
+          label: 'Approved training costs',
+          amount: item.totalAmount,
+          termLabel: termText,
+          type: 'TuitionFeesDirect',
+          payee: { type: 'AccreditedEducationalTrainingInstitution', name: item.institution }
+        }];
+    const formatFundingLine = line => `- ${line.label}: ${formatCurrencyForLetter(line.amount)}  Term/Dates: ${line.termLabel || termText}`;
+    const institutionPayLines = [];
+    const clientPayLines = [];
+    const otherPayLines = [];
+    fundingLines.forEach(line => {
+      const category = resolveInstitutionPayeeCategory(line, item.institution);
+      if (category === 'institution') {
+        institutionPayLines.push(line);
+      } else if (category === 'client') {
+        clientPayLines.push(line);
+      } else {
+        otherPayLines.push(line);
+      }
+    });
+    const fundingSectionParts = [];
+    if (institutionPayLines.length) {
+      fundingSectionParts.push(
+        `The NWAC ISET Program has approved payment of the following costs directly to ${item.institution} on behalf of the student:`,
+        institutionPayLines.map(formatFundingLine).join('\n')
+      );
+    }
+    if (clientPayLines.length) {
+      fundingSectionParts.push(
+        'The following supports have also been approved for payment directly to the student:',
+        clientPayLines.map(formatFundingLine).join('\n')
+      );
+    }
+    if (otherPayLines.length) {
+      fundingSectionParts.push(
+        'The following supports have also been approved for payment to other eligible payees:',
+        otherPayLines.map(formatFundingLine).join('\n')
+      );
+    }
+    const fundingSection = fundingSectionParts.join('\n\n');
+    const signatureBlock = formatCaseManagerSignatureLines({
+      caseManagerName,
+      caseManagerEmail,
+      caseManagerPhone
+    });
+    const body = [
+      'Letter of Approval (Institution)',
+      `Date: ${decisionDate || ''}`,
+      '',
+      item.institution,
+      '',
+      'To Whom It May Concern,',
+      '',
+      "This letter is to formally confirm that the Native Women's Association of Canada (NWAC), through its Indigenous Skills and Employment Training (ISET) Program, has approved education-related funding on behalf of the following student:",
+      '',
+      `Student Name: ${applicantName || 'Student'}`,
+      `Training Institution: ${item.institution}`,
+      `Program of Study: ${programText}`,
+      '',
+      fundingSection,
+      '',
+      "These funds are provided under the ISET Program and are intended solely to support the student's participation in the approved training program noted above. Please note that all payments are made on behalf of the student. In the event of an overpayment, withdrawal, or change in enrollment status, any unused or refunded funds must be returned directly to the NWAC ISET Program and not issued to the student.",
+      '',
+      'Should you require additional documentation or clarification, please do not hesitate to contact the undersigned.',
+      '',
+      'Sincerely,',
+      signatureBlock
+    ].join('\n');
+    return {
+      id: `institution-${index + 1}`,
+      recipientName: item.institution,
+      title: `Institution Letter — ${item.institution}`,
+      fileName: `institution-letter-${toSafeFileToken(item.institution, `recipient-${index + 1}`)}.txt`,
+      body
+    };
+  });
+};
+
+const buildCoFunderApprovalLetters = ({
+  fundingSources = [],
+  nwacCoverage = '',
+  notes = '',
+  interventions = [],
+  interventionTotals = new Map(),
+  applicantName = '',
+  trackingReference = '',
+  decisionDate = '',
+  caseManagerName = '',
+  caseManagerEmail = '',
+  caseManagerPhone = ''
+} = {}) => {
+  const coverageText = String(nwacCoverage || '').trim();
+  const notesText = String(notes || '').trim();
+  const normalizeInlineText = value => String(value || '').replace(/\s+/g, ' ').trim();
+  const approvedTotal = (Array.isArray(interventions) ? interventions : [])
+    .reduce((sum, intervention) => sum + Number(interventionTotals?.get(intervention?.id) || 0), 0);
+  const institutionSet = new Set();
+  const programSet = new Set();
+  const termSet = new Set();
+  const nwacFundingBreakdownLines = [];
+  (Array.isArray(interventions) ? interventions : []).forEach(intervention => {
+    const institution = String(intervention?.institution || '').trim();
+    const program = String(intervention?.programName || '').trim();
+    if (institution) institutionSet.add(institution);
+    if (program) programSet.add(program);
+    const term = formatInterventionDates(intervention?.startDate, intervention?.endDate);
+    if (term && term !== '—') termSet.add(term);
+    const costLines = Array.isArray(intervention?.costLines) ? intervention.costLines : [];
+    costLines.forEach(line => {
+      const amount = parseCurrencyToNumber(line?.amount);
+      if (!(amount > 0)) return;
+      const lineLabel = formatCostTypeForLetter(line?.type);
+      const payee = line?.payee && typeof line.payee === 'object' ? line.payee : {};
+      const payeeType = String(payee.type || deriveDefaultPayeeTypeForCostLine(line?.type) || '').trim();
+      const explicitPayeeName = normalizeInlineText(payee.name || '');
+      const defaultPayeeName = normalizeInlineText(
+        deriveDefaultPayeeNameForCostLine(payeeType, intervention, applicantName || '')
+      );
+      const payeeName = explicitPayeeName || defaultPayeeName;
+      const payeeTypeKey = normalizePayeeTypeKey(payeeType);
+      const payeePhrase = (() => {
+        if (payeeName) return payeeName;
+        if (payeeTypeKey === 'participantclient' || payeeTypeKey === 'client') return applicantName || 'the student';
+        const target = PAYEE_TYPE_DETAIL_TARGET_BY_KEY[payeeTypeKey] || '';
+        return target ? `the ${target}` : 'the approved payee';
+      })();
+      const termLabel = term && term !== '—' ? term : '';
+      nwacFundingBreakdownLines.push(
+        `- ${lineLabel}: ${formatCurrencyForLetter(amount)} payable to ${payeePhrase}${termLabel ? ` (Term/Dates: ${termLabel})` : ''}`
+      );
+    });
+  });
+  const institutionText = institutionSet.size ? Array.from(institutionSet).join('; ') : 'the approved training institution';
+  const programText = programSet.size ? Array.from(programSet).join('; ') : 'the approved program';
+  const termText = termSet.size ? Array.from(termSet).join('; ') : 'the approved term(s)';
+  const signatureBlock = formatCaseManagerSignatureLines({
+    caseManagerName,
+    caseManagerEmail,
+    caseManagerPhone
+  });
+  return (Array.isArray(fundingSources) ? fundingSources : [])
+    .map((source, index) => {
+      const funderName = String(source?.name || '').trim();
+      if (!funderName) return null;
+      const funderTypeLabel = resolveOtherFunderTypeLabel(source?.type);
+      const sourceCoverage = String(source?.coverage || '').trim();
+      const body = [
+        'Letter of Approval (Other Funding Source)',
+        `Date: ${decisionDate || ''}`,
+        '',
+        funderName,
+        '',
+        'To Whom It May Concern,',
+        '',
+        `I am writing to let you know that the Native Women's Association of Canada (NWAC), through its Indigenous Skills and Employment Training (ISET) Program, will be funding ${applicantName || 'the student'} for ${termText} in ${programText} at ${institutionText}.`,
+        '',
+        approvedTotal > 0
+          ? `I have approved funding in the amount of ${formatCurrencyForLetter(approvedTotal)} for eligible costs under this intervention plan, which will be paid directly to approved payees as specified in the assessment.`
+          : 'I have approved funding for eligible costs under this intervention plan, which will be paid directly to approved payees as specified in the assessment.',
+        nwacFundingBreakdownLines.length ? '' : null,
+        nwacFundingBreakdownLines.length ? 'NWAC funding breakdown:' : null,
+        nwacFundingBreakdownLines.length ? nwacFundingBreakdownLines.join('\n') : null,
+        '',
+        `As documented in the assessment records, ${funderName} (${funderTypeLabel}) is identified as funding the following:`,
+        sourceCoverage ? `- ${normalizeInlineText(sourceCoverage)}` : '- Funding details to be confirmed through your office.',
+        coverageText ? `- NWAC coverage summary: ${normalizeInlineText(coverageText)}` : '',
+        notesText ? `- Coordination notes: ${normalizeInlineText(notesText)}` : '',
+        trackingReference ? `- File reference: ${normalizeInlineText(trackingReference)}` : '',
+        '',
+        'If you have any questions, please do not hesitate to contact me directly.',
+        '',
+        'Sincerely,',
+        signatureBlock
+      ]
+        .map(line => (line === null || typeof line === 'undefined' ? '' : String(line)))
+        .join('\n');
+      return {
+        id: source?.id || `funder-${index + 1}`,
+        recipientName: funderName,
+        title: `Other Funding Source Letter — ${funderName}`,
+        fileName: `other-funding-source-letter-${toSafeFileToken(funderName, `recipient-${index + 1}`)}.txt`,
+        body
+      };
+    })
+    .filter(Boolean);
+};
+
 const sanitizeCurrencyInput = (value) => {
   if (value === null || value === undefined) return '';
   const cleaned = String(value).replace(/[^\d.]/g, '');
@@ -1369,6 +1692,14 @@ const getDecisionLetterSent = (context) => {
   }
   return null;
 };
+const getDecisionLetterPackDrafts = (context) => {
+  if (!context || typeof context !== 'object') return null;
+  const raw = context.decisionLetterPackDrafts || context.decision_letter_pack_drafts || null;
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw;
+  }
+  return null;
+};
 const normalizeDecisionDateValue = (value, fallback = '') => {
   const trimmed = typeof value === 'string' ? value.trim() : '';
   if (!trimmed) return fallback || '';
@@ -1568,6 +1899,11 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [letterDrafts, setLetterDrafts] = useState(() => buildEmptyDecisionLetterDrafts());
   const [initialLetterDrafts, setInitialLetterDrafts] = useState(() => buildEmptyDecisionLetterDrafts());
   const [letterBody, setLetterBody] = useState('');
+  const [approvalLetterPackTabId, setApprovalLetterPackTabId] = useState('client');
+  const [approvalLetterPackGenerated, setApprovalLetterPackGenerated] = useState(false);
+  const [savedApprovalLetterPackDrafts, setSavedApprovalLetterPackDrafts] = useState(
+    () => getDecisionLetterPackDrafts(caseData?.caseContext) || null
+  );
   const [decisionLetterSent, setDecisionLetterSent] = useState(() => getDecisionLetterSent(caseData?.caseContext) || {});
   const letterBodyDirtyRef = useRef(false);
   const lastActiveLetterKeyRef = useRef(null);
@@ -1614,7 +1950,9 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [isEditingAssessment, setIsEditingAssessment] = useState(false);
   const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
   const [showApproveConfirmModal, setShowApproveConfirmModal] = useState(false);
+  const [showSendApprovalLetterConfirmModal, setShowSendApprovalLetterConfirmModal] = useState(false);
   const [showDecisionPendingAlert, setShowDecisionPendingAlert] = useState(true);
+  const [showFundingDocsIncompleteModal, setShowFundingDocsIncompleteModal] = useState(false);
   const [localAssessmentSubmitted, setLocalAssessmentSubmitted] = useState(false);
   const [checklistWarningVisible, setChecklistWarningVisible] = useState(false);
   const [checklistWarningItems, setChecklistWarningItems] = useState([]);
@@ -1825,7 +2163,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const applicationStatusContext = getApplicationStatusContext(rawApplicationStatus);
   const canonicalApplicationStatus = applicationStatusContext.canonicalStatus || canonicalCaseStatusSnapshot;
   const isPendingApprovalStatus = rawApplicationStatusNormalized === 'pending_approval';
-  const normalizedApplicationStatus = rawApplicationStatusNormalized || canonicalApplicationStatus || '';
+  const normalizedApplicationStatus = canonicalApplicationStatus || rawApplicationStatusNormalized || '';
   const isDecisionReadyStatus = DECISION_READY_STATUSES.has(normalizedApplicationStatus);
   const isCompletedStatus = normalizedApplicationStatus === 'completed';
   const decisionOutcome = useMemo(() => {
@@ -1851,6 +2189,10 @@ const CoordinatorAssessmentWidget = forwardRef(
     if (!sent) return;
     setDecisionLetterSent(prev => ({ ...(prev || {}), ...sent }));
   }, [caseData?.caseContext]);
+  useEffect(() => {
+    const saved = getDecisionLetterPackDrafts(caseData?.caseContext);
+    setSavedApprovalLetterPackDrafts(saved || null);
+  }, [caseData?.caseContext]);
   const applicantName = useMemo(() => {
     const ctx = resolveCaseContext(caseData);
     const personal = ctx.applicationPersonal || {};
@@ -1869,6 +2211,49 @@ const CoordinatorAssessmentWidget = forwardRef(
     ];
     return candidates.map(v => (typeof v === 'string' ? v.trim() : v)).find(Boolean) || '';
   }, [caseData]);
+  const applicantSalutationName = useMemo(() => {
+    const ctx = resolveCaseContext(caseData);
+    const personal = ctx.applicationPersonal || {};
+    const answers = ctx.applicationAnswers || {};
+    const normalize = value => {
+      if (value === null || typeof value === 'undefined') return '';
+      return String(value).trim();
+    };
+    const firstToken = value => {
+      const normalized = normalize(value);
+      if (!normalized) return '';
+      return normalized.split(/\s+/)[0] || '';
+    };
+    const preferredCandidates = [
+      caseData?.preferred_name,
+      caseData?.preferredName,
+      ctx.preferredName,
+      ctx.preferred_name,
+      answers['preferred-name'],
+      answers.preferred_name,
+      personal.preferred_name,
+      personal.preferredName
+    ];
+    const preferred = preferredCandidates.map(normalize).find(Boolean);
+    if (preferred) return preferred;
+    const firstNameCandidates = [
+      caseData?.submission_first_name,
+      caseData?.submissionFirstName,
+      caseData?.first_name,
+      caseData?.firstName,
+      ctx.first_name,
+      ctx.firstName,
+      personal.first_name,
+      personal.firstName,
+      answers['first-name'],
+      answers.first_name,
+      answers['personal-first-name'],
+      answers.personal_first_name
+    ];
+    const firstName = firstNameCandidates.map(normalize).find(Boolean);
+    if (firstName) return firstName;
+    return firstToken(applicantName);
+  }, [applicantName, caseData]);
   const participantLegalName = useMemo(() => {
     const ctx = resolveCaseContext(caseData);
     const personal = ctx.applicationPersonal || {};
@@ -2111,6 +2496,83 @@ const CoordinatorAssessmentWidget = forwardRef(
     if (applicantTargetProgram) return applicantTargetProgram;
     return '';
   }, [applicantRequestedSupportsText, applicantTargetProgram]);
+  const otherFundingForLetters = useMemo(
+    () =>
+      normalizeOtherFundingDetails({
+        involved: assessment.otherFundingInvolved,
+        sources: assessment.otherFundingSources,
+        nwacCoverage: assessment.otherFundingNwacCoverage,
+        notes: assessment.otherFundingNotes
+      }),
+    [
+      assessment.otherFundingInvolved,
+      assessment.otherFundingNwacCoverage,
+      assessment.otherFundingNotes,
+      assessment.otherFundingSources
+    ]
+  );
+  const institutionApprovalLetters = useMemo(
+    () =>
+      buildInstitutionApprovalLetters({
+        interventions: proposedInterventions,
+        interventionTotals,
+        applicantName: participantLegalName || applicantName,
+        trackingReference,
+        decisionDate: formatDate(new Date()),
+        caseManagerName: currentUserName || '',
+        caseManagerEmail: currentUserEmail || '',
+        caseManagerPhone: ''
+      }),
+    [
+      applicantName,
+      participantLegalName,
+      currentUserEmail,
+      currentUserName,
+      interventionTotals,
+      proposedInterventions,
+      trackingReference
+    ]
+  );
+  const coFunderApprovalLetters = useMemo(
+    () =>
+      buildCoFunderApprovalLetters({
+        fundingSources: otherFundingForLetters.sources,
+        nwacCoverage: otherFundingForLetters.nwacCoverage,
+        notes: otherFundingForLetters.notes,
+        interventions: proposedInterventions,
+        interventionTotals,
+        applicantName: participantLegalName || applicantName,
+        trackingReference,
+        decisionDate: formatDate(new Date()),
+        caseManagerName: currentUserName || '',
+        caseManagerEmail: currentUserEmail || '',
+        caseManagerPhone: ''
+      }),
+    [
+      applicantName,
+      participantLegalName,
+      currentUserEmail,
+      currentUserName,
+      interventionTotals,
+      otherFundingForLetters.notes,
+      otherFundingForLetters.nwacCoverage,
+      otherFundingForLetters.sources,
+      proposedInterventions,
+      trackingReference
+    ]
+  );
+  const downloadLetterAsText = useCallback((fileName, body) => {
+    if (!body || typeof window === 'undefined' || typeof document === 'undefined') return;
+    const blob = new Blob([body], { type: 'text/plain;charset=utf-8' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName || `approval-letter-${Date.now()}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  }, []);
   const hasLivingAllowanceRequest = useMemo(
     () => requestedSupportTypes.includes('living_allowance'),
     [requestedSupportTypes]
@@ -3001,17 +3463,57 @@ const CoordinatorAssessmentWidget = forwardRef(
     if (!activeLetterKey) return buildEmptyDecisionLetterDraft();
     return letterDrafts?.[activeLetterKey] || buildEmptyDecisionLetterDraft();
   }, [activeLetterKey, letterDrafts]);
+  const showApprovalLetterPackTabs = activeLetterKey === 'approval';
+  const isClientLetterTab = !showApprovalLetterPackTabs || approvalLetterPackTabId === 'client';
   const letterWorkflowId = activeLetterKey ? letterWorkflows?.[activeLetterKey] : null;
   const letterAlreadySent = Boolean(activeLetterKey && decisionLetterSent?.[activeLetterKey]);
   const isLetterEditingDisabled = lockedByAnotherUser || isCompletedStatus || letterAlreadySent;
   const canGenerateLetterDraft = Boolean(activeLetterKey) && !isLetterEditingDisabled && !draftingLetter;
-  const canSaveLetterDraft = Boolean(activeLetterKey) && !isLetterEditingDisabled;
+  const canSaveLetterDraft = Boolean(activeLetterKey) && isClientLetterTab && !isLetterEditingDisabled;
   const canSendLetter =
     Boolean(activeLetterKey) &&
     !isLetterEditingDisabled &&
     !!letterWorkflowId &&
     !sendingLetter &&
     hasDecisionLetterContent(activeLetterDraft);
+  useEffect(() => {
+    if (!showApprovalLetterPackTabs && approvalLetterPackTabId !== 'client') {
+      setApprovalLetterPackTabId('client');
+    }
+  }, [approvalLetterPackTabId, showApprovalLetterPackTabs]);
+  useEffect(() => {
+    if (activeLetterKey !== 'approval') {
+      if (approvalLetterPackGenerated) setApprovalLetterPackGenerated(false);
+      return;
+    }
+    const savedApprovalPack = savedApprovalLetterPackDrafts?.approval;
+    const savedGenerated = Boolean(savedApprovalPack && typeof savedApprovalPack === 'object');
+    if ((hasDecisionLetterContent(activeLetterDraft) || savedGenerated) && !approvalLetterPackGenerated) {
+      setApprovalLetterPackGenerated(true);
+    }
+  }, [activeLetterDraft, activeLetterKey, approvalLetterPackGenerated, savedApprovalLetterPackDrafts]);
+  const approvalSavedPack = useMemo(() => {
+    const raw = savedApprovalLetterPackDrafts?.approval;
+    return raw && typeof raw === 'object' ? raw : null;
+  }, [savedApprovalLetterPackDrafts]);
+  const approvalSavedInstitutionLetters = useMemo(() => {
+    const raw = approvalSavedPack?.institutionLetters;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter(item => item && typeof item === 'object');
+  }, [approvalSavedPack]);
+  const approvalSavedCoFunderLetters = useMemo(() => {
+    const raw = approvalSavedPack?.coFunderLetters;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter(item => item && typeof item === 'object');
+  }, [approvalSavedPack]);
+  const approvalInstitutionLettersForDisplay =
+    approvalLetterPackGenerated && approvalSavedInstitutionLetters.length
+      ? approvalSavedInstitutionLetters
+      : institutionApprovalLetters;
+  const approvalCoFunderLettersForDisplay =
+    approvalLetterPackGenerated && approvalSavedCoFunderLetters.length
+      ? approvalSavedCoFunderLetters
+      : coFunderApprovalLetters;
   useEffect(() => {
     const letterContextKey = `${caseId || 'case'}:${activeLetterKey || 'none'}`;
     if (!activeLetterKey) {
@@ -5700,20 +6202,42 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   const persistLetterDraft = useCallback(
     async ({ silent = false } = {}) => {
-      const result = await persistLetterContext({ silent });
+      const contextUpdates = activeLetterKey === 'approval'
+        ? {
+            decisionLetterPackDrafts: {
+              ...(savedApprovalLetterPackDrafts || {}),
+              approval: {
+                generated_at: new Date().toISOString(),
+                institutionLetters: institutionApprovalLetters,
+                coFunderLetters: coFunderApprovalLetters
+              }
+            }
+          }
+        : null;
+      const result = await persistLetterContext({ silent, contextUpdates });
       if (!result.ok) return result;
+      if (activeLetterKey === 'approval' && contextUpdates?.decisionLetterPackDrafts) {
+        setSavedApprovalLetterPackDrafts(contextUpdates.decisionLetterPackDrafts);
+      }
       setInitialLetterDrafts(letterDrafts);
       if (!silent) {
         setAlert({
           type: 'success',
-          content: 'Letter draft saved.',
+          content: activeLetterKey === 'approval' ? 'Letter drafts saved.' : 'Letter draft saved.',
           dismissible: true,
           statusIconAriaLabel: 'Success'
         });
       }
       return result;
     },
-    [letterDrafts, persistLetterContext]
+    [
+      activeLetterKey,
+      coFunderApprovalLetters,
+      institutionApprovalLetters,
+      letterDrafts,
+      persistLetterContext,
+      savedApprovalLetterPackDrafts
+    ]
   );
 
   const openDenialReasonModal = () => {
@@ -5816,6 +6340,38 @@ const CoordinatorAssessmentWidget = forwardRef(
             caseData?.created_at ||
             null;
           return formatDate(raw);
+        })();
+        const requestedProgramNameFallback = String(primary?.programName || '').trim();
+        const requestedInstitutionFallback = String(primary?.institution || '').trim();
+        const requestedInterventionLabelFallback = String(resolveInterventionLabel(primary?.code) || '').trim();
+        const requestPhraseMode = (() => {
+          if (interventions.length > 1) return 'support';
+          if (requestedProgramNameFallback || isEducationCode(primary?.code)) return 'pursuit';
+          return 'support';
+        })();
+        const requestPhrase = (() => {
+          if (interventions.length > 1) {
+            return 'to receive support for the approved interventions in your plan';
+          }
+          if (requestedProgramNameFallback && requestedInstitutionFallback) {
+            return `to pursue ${requestedProgramNameFallback} at ${requestedInstitutionFallback}`;
+          }
+          if (requestedProgramNameFallback) {
+            return `to pursue ${requestedProgramNameFallback}`;
+          }
+          if (requestedInstitutionFallback && isEducationCode(primary?.code)) {
+            return `to pursue training at ${requestedInstitutionFallback}`;
+          }
+          if (requestedInstitutionFallback) {
+            return `to receive support for training at ${requestedInstitutionFallback}`;
+          }
+          if (requestedInterventionLabelFallback) {
+            const label = requestedInterventionLabelFallback.toLowerCase();
+            return requestPhraseMode === 'pursuit'
+              ? `to pursue ${label}`
+              : `to receive support for ${label}`;
+          }
+          return 'to receive Indigenous Skills and Employment Training (ISET) support';
         })();
         const toReadablePaymentType = (value) => {
           const raw = String(value || '').trim();
@@ -5930,22 +6486,88 @@ const CoordinatorAssessmentWidget = forwardRef(
           const costLines = Array.isArray(intervention?.costLines) ? intervention.costLines : [];
           return costLines.map(line => buildCostLineDetail(line, intervention)).filter(Boolean);
         });
-        const introParts = ['We are pleased to inform you that your application for ISET funding'];
-        if (trackingReference) {
-          introParts.push(`reference ${trackingReference}`);
+        const openingTemplate =
+          'I am writing to let you know that I have assessed your application{{REFERENCE_CLAUSE}} for funding to the Native Women\'s Association of Canada (NWAC), through its Indigenous Skills and Employment Training (ISET) Program{{SUBMISSION_CLAUSE}}, {{REQUEST_PHRASE}}.';
+        const closingTemplate =
+          'If you have any questions, please do not hesitate to contact me directly. I look forward to supporting you through your ISET intervention.';
+        const aiContext = {
+          request_mode: requestPhraseMode,
+          has_multiple_interventions: interventions.length > 1
+        };
+        const hasRequiredTokens = (value) =>
+          typeof value === 'string' &&
+          value.includes('{{REFERENCE_CLAUSE}}') &&
+          value.includes('{{SUBMISSION_CLAUSE}}') &&
+          value.includes('{{REQUEST_PHRASE}}');
+        let openingParagraphTemplate = openingTemplate;
+        let closingParagraph = closingTemplate;
+        try {
+          const prompt = `You are editing approved funding letters for case managers.
+
+Rewrite the templates for clarity and professionalism while keeping facts unchanged.
+Return JSON only with keys: opening_paragraph, closing_sentence.
+
+Hard requirements:
+- Keep placeholders exactly as written: {{REFERENCE_CLAUSE}}, {{SUBMISSION_CLAUSE}}, {{REQUEST_PHRASE}}.
+- Do not add new placeholders.
+- Do not add any personal data.
+- Keep a formal, supportive, applicant-facing tone.
+- Keep each sentence concise.
+
+Opening template:
+${openingTemplate}
+
+Closing template:
+${closingTemplate}
+
+Context:
+${JSON.stringify(aiContext, null, 2)}`;
+          const resp = await apiFetch('/api/ai/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              messages: [
+                { role: 'system', content: 'You improve letter copy. Respond only with JSON.' },
+                { role: 'user', content: prompt }
+              ],
+              temperature: 0.2
+            })
+          });
+          if (resp.ok) {
+            const data = await resp.json().catch(() => ({}));
+            const content = data?.choices?.[0]?.message?.content || '';
+            const parsed = extractJsonFromAi(content);
+            const aiOpening = typeof parsed?.opening_paragraph === 'string' ? parsed.opening_paragraph.trim() : '';
+            const aiClosing = typeof parsed?.closing_sentence === 'string' ? parsed.closing_sentence.trim() : '';
+            if (hasRequiredTokens(aiOpening)) {
+              openingParagraphTemplate = aiOpening;
+            }
+            if (aiClosing) {
+              closingParagraph = aiClosing;
+            }
+          }
+        } catch (_) {
+          // Keep deterministic templates when AI is unavailable.
         }
-        if (submissionDate) {
-          introParts.push(`submitted on ${submissionDate}`);
-        }
-        const approvalIntro = `${introParts.join(' ')} has been approved.`;
-        let fundingParagraph = 'Funding has been approved for the supports listed in your application.';
+        const resolvedOpeningParagraph = openingParagraphTemplate
+          .replace(/\{\{REFERENCE_CLAUSE\}\}/g, trackingReference ? ` (reference ${trackingReference})` : '')
+          .replace(/\{\{SUBMISSION_CLAUSE\}\}/g, submissionDate ? ` submitted on ${submissionDate}` : '')
+          .replace(/\{\{REQUEST_PHRASE\}\}/g, requestPhrase)
+          .replace(/[ \t]{2,}/g, ' ')
+          .replace(/\s+,/g, ',')
+          .replace(/\s+\./g, '.')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+        const recipientName = String(applicantSalutationName || '').trim() || 'Client';
+        const approvalIntro = [`Dear ${recipientName},`, '', resolvedOpeningParagraph].join('\n');
+        let fundingParagraph = 'I have approved funding for your eligible supports under this intervention.';
         if (fundingLineItems.length) {
-          const lines = ['Funding has been approved for the following:'];
+          const lines = ['I have approved the following funding amounts:'];
           fundingLineItems.forEach(detail => lines.push(`- ${detail}`));
           fundingParagraph = lines.join('\n');
         }
-        const closingParagraph =
-          'NWAC will soon send the required funding forms for your signature so we can release the approved funding. Please check your secure messaging inbox for these documents.';
+        const agreementParagraph =
+          'I have attached the Client Funding Agreement for your review, along with an Acknowledgement of Funding Source form and a Banking Details form. Please review and complete all attachments at your earliest convenience so we can proceed with your funding deposit.';
         setLetterDrafts(prev => {
           const current = prev?.[activeLetterKey] || buildEmptyDecisionLetterDraft();
           return {
@@ -5956,7 +6578,7 @@ const CoordinatorAssessmentWidget = forwardRef(
               letter_title: 'Letter of Approval',
               decision_label: 'Approved',
               decision_intro: approvalIntro,
-              decision_reason: [fundingParagraph, closingParagraph].filter(Boolean).join('\n\n'),
+              decision_reason: [fundingParagraph, agreementParagraph, closingParagraph].filter(Boolean).join('\n\n'),
               next_step_1: '',
               next_step_2: ''
             }
@@ -6043,7 +6665,8 @@ const CoordinatorAssessmentWidget = forwardRef(
         decision: decisionLabel,
         decision_date: decisionDate,
         effective_date: decisionDate,
-        applicant_name: applicantName || null,
+        applicant_name: applicantSalutationName || null,
+        applicant_full_name: applicantName || null,
         tracking_id: trackingReference || null,
         case_number: caseData?.case_number || null,
         applicant_target_program: applicantTargetProgramForLetter,
@@ -6080,6 +6703,8 @@ const CoordinatorAssessmentWidget = forwardRef(
         decision_reason_seed: reasonSeed || null,
         decision_reason_seed_is_placeholder: reasonSeedIsPlaceholder || null,
         decision_authority: decisionAuthority,
+        case_manager_name: currentUserName || null,
+        case_manager_email: currentUserEmail || null,
         denial_reason_code: denialReasonCode || null,
         denial_reason_label: denialReasonLabel,
         denial_reason_explanation: denialExplanation || null,
@@ -6120,7 +6745,41 @@ If context fields are missing:
 
 Context:
 ${JSON.stringify(contextPayload, null, 2)}`
-        : `Draft a concise approval letter for the NWAC ISET program. Return JSON only with keys: letter_title, decision_intro, decision_label, decision_reason, next_step_1, next_step_2. Keep each field brief, professional, and applicant-facing.\n\nRequired content:\n- decision_intro: one short paragraph written as a letter (no labels, no lists). Start the paragraph with \"We are pleased to inform you\". State that funding is approved and list the funded supports using funded_supports_text when available. Use lower-case common nouns for supports. If approved_interventions_count > 1, include a short clause that the approval covers multiple interventions. If funded_supports_text is missing, use applicant_requested_supports_text or applicant_requested_support_detail. Avoid formulaic phrasing like \"On <date>\".\n- decision_reason: a second paragraph that always appears. Include the decision_authority sentence in natural language. If decision_reason_seed_is_placeholder is false and decision_reason_seed is present, include one applicant-facing sentence that paraphrases the justification without quoting or reusing phrases. If payment_explanations_text is present, include one sentence that explains reimbursement/direct payment using those phrases. If missing_documents is not empty, include a sentence listing the missing documents and stating they are required to release payment.\n- letter_title should be \"Letter of Approval\" and decision_label should be \"Approved\".\n- next_step_1/next_step_2: return empty strings.\n\nDo not include: Decision/Reason/Next steps labels, bullet lists, start/end date callouts, dollar amounts, internal notes/test language, or new reasons beyond decision_reason_seed. If a field is unknown, omit it.\n\nContext:\n${JSON.stringify(contextPayload, null, 2)}`;
+        : `Draft an approval letter for the NWAC ISET program using TEMPLATE-FIRST mode, aligned to NWAC's manual approval-letter style. Return JSON only with keys: letter_title, decision_intro, decision_label, decision_reason, next_step_1, next_step_2.
+
+Strict template rules:
+- Keep a formal, case-manager voice ("I am writing...", "I have approved...").
+- Match this high-level sequence:
+  1) Salutation and opening assessment statement.
+  2) Approved funding amounts section.
+  3) Client Funding Outcome & Agreement return instruction.
+  4) Questions/support closing sentence.
+- Keep wording close to this pattern while adapting only to available context fields.
+
+Required output:
+- letter_title: "Letter of Approval"
+- decision_label: "Approved"
+- decision_intro:
+  - Start with "Dear <applicant_name>," (use "Dear Client," if applicant_name is missing).
+  - Include one opening paragraph that says the application was assessed under NWAC ISET and approved.
+  - Reference requested_program_name/requested_institution when available.
+- decision_reason:
+  - First paragraph: "I have approved the following funding amounts:" followed by plain-text bullets only when funding details exist.
+  - Use funded_supports, funding_breakdown, or payment_explanations_text when present.
+  - If detailed amounts are unavailable, include a concise generic funding-approval paragraph without fabricated figures.
+  - Include a paragraph stating the Client Funding Agreement, Acknowledgement of Funding Source form, and Banking Details form are attached, and asking the client to complete all attachments so funding deposit can proceed.
+  - Include a final contact/support sentence.
+- next_step_1: ""
+- next_step_2: ""
+
+Hard constraints:
+- Do not invent amounts, institution, program, address, phone number, dates, or signature details not present in context.
+- Do not include placeholders (e.g., "INSERT ... HERE").
+- Do not use markdown headings/tables.
+- Keep content applicant-facing and concise.
+
+Context:
+${JSON.stringify(contextPayload, null, 2)}`;
       const resp = await apiFetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -6148,6 +6807,7 @@ ${JSON.stringify(contextPayload, null, 2)}`
         if (isDenialDraft) {
           next = next.replace(/\bThis decision is not a judgment[^.]*\.\s*/gi, '');
         }
+        next = next.replace(/^.*\bINSERT\b.+\bHERE\b.*$/gim, '');
         return next
           .replace(/^\s*(Decision|Reason|Next steps?)\s*:\s*/gim, '')
           .replace(/[ \t]{2,}/g, ' ')
@@ -6233,6 +6893,7 @@ ${JSON.stringify(contextPayload, null, 2)}`
       openDenialReasonModal();
       return;
     }
+    setApprovalLetterPackGenerated(true);
     await generateLetterDraft();
   };
 
@@ -6311,7 +6972,19 @@ ${JSON.stringify(contextPayload, null, 2)}`
         body: JSON.stringify(payload)
       });
       if (!response.ok) {
-        const detail = await response.text().catch(() => '');
+        let detail = '';
+        try {
+          const data = await response.json();
+          if (data && typeof data === 'object') {
+            if (data.error === 'funding_forms_workflows_missing' && Array.isArray(data.missing) && data.missing.length) {
+              detail = `Required funding-form workflows are missing: ${data.missing.join(', ')}.`;
+            } else {
+              detail = data.message || data.error || '';
+            }
+          }
+        } catch (_) {
+          detail = await response.text().catch(() => '');
+        }
         throw new Error(detail || 'Failed to send the decision letter.');
       }
       setAlert({
@@ -6914,13 +7587,13 @@ ${JSON.stringify(contextPayload, null, 2)}`
     if (!showCommunicationStep || isCompletedStatus) {
       return;
     }
+    if (decisionOutcome === 'approved') {
+      setShowSendApprovalLetterConfirmModal(true);
+      return;
+    }
     setHasSubmitted(true);
     const letterResult = await handleSendDecisionLetter();
     if (!letterResult.ok) return;
-    if (decisionOutcome === 'approved') {
-      setHasSubmitted(false);
-      return;
-    }
     if (decisionOutcome === 'denied') {
       await updateApplicationStatus({
         nextStatus: 'rejected',
@@ -6937,6 +7610,10 @@ ${JSON.stringify(contextPayload, null, 2)}`
     if (!showFundingDocsStep || isCompletedStatus) {
       return;
     }
+    if (!fundingDocsChecklistComplete) {
+      setShowFundingDocsIncompleteModal(true);
+      return;
+    }
     setHasSubmitted(true);
     const checklistOk = await runDocumentChecklist(null, {
       allowBypass: false,
@@ -6946,6 +7623,14 @@ ${JSON.stringify(contextPayload, null, 2)}`
     await markApplicationCompleted({
       successMessage: 'All required funding forms are complete. Application marked as completed.'
     });
+  };
+  const handleConfirmSendApprovalLetter = async () => {
+    if (sendingLetter) return;
+    setShowSendApprovalLetterConfirmModal(false);
+    setHasSubmitted(true);
+    const letterResult = await handleSendDecisionLetter();
+    if (!letterResult.ok) return;
+    setHasSubmitted(false);
   };
   const handleWizardNavigate = async ({ detail }) => {
     const { requestedStepIndex, reason } = detail || {};
@@ -8258,8 +8943,62 @@ ${JSON.stringify(contextPayload, null, 2)}`
   );
 
   const letterGuidance = decisionOutcome === 'approved'
-    ? 'Write or generate a short approval letter explaining what is being approved, which supports are funded, and how payments/reimbursements work. Keep the letter policy and evidence based. If in doubt, please consult your manager.'
+    ? 'Edit the client approval letter, then review the institution and other-funder letters in the tabs before downloading them.'
     : 'Write or generate a short letter explaining what is being denied and the reason for denial. Keep the letter policy and evidence based. If in doubt, please consult your manager.';
+
+  const renderReadOnlyLetters = (letters, emptyMessage, options = {}) => {
+    if (options.requireDraftGeneration && !approvalLetterPackGenerated) {
+      return (
+        <Alert type="info" statusIconAriaLabel="Info">
+          Click <strong>Generate drafts</strong> to create the approval letter pack.
+        </Alert>
+      );
+    }
+    if (!Array.isArray(letters) || !letters.length) {
+      return (
+        <Alert type="info" statusIconAriaLabel="Info">
+          {emptyMessage}
+        </Alert>
+      );
+    }
+    return (
+      <SpaceBetween size="l">
+        {letters.map(letter => (
+          <Box key={letter.id || letter.title}>
+            <Header
+              variant="h4"
+              actions={
+                <Button
+                  onClick={() => downloadLetterAsText(letter.fileName, letter.body)}
+                  iconName="download"
+                >
+                  Download
+                </Button>
+              }
+            >
+              {letter.title}
+            </Header>
+            <Textarea
+              value={letter.body || ''}
+              readOnly
+              rows={14}
+            />
+          </Box>
+        ))}
+      </SpaceBetween>
+    );
+  };
+
+  const clientLetterTabContent = (
+    <SpaceBetween size="m">
+      <Textarea
+        value={letterBody}
+        onChange={handleLetterBodyChange}
+        rows={18}
+        disabled={isLetterEditingDisabled}
+      />
+    </SpaceBetween>
+  );
 
   const communicationStepContent = (
     <SpaceBetween size="m">
@@ -8275,13 +9014,13 @@ ${JSON.stringify(contextPayload, null, 2)}`
                 iconAlign="left"
                 iconName="gen-ai"
               >
-                Generate draft
+                {activeLetterKey === 'approval' ? 'Generate drafts' : 'Generate draft'}
               </Button>
               <Button
                 onClick={() => persistLetterDraft({ silent: false })}
                 disabled={!canSaveLetterDraft}
               >
-                Save draft
+                {activeLetterKey === 'approval' ? 'Save drafts' : 'Save draft'}
               </Button>
             </SpaceBetween>
           }
@@ -8314,12 +9053,44 @@ ${JSON.stringify(contextPayload, null, 2)}`
             <Box>
               {letterGuidance}
             </Box>
-            <Textarea
-              value={letterBody}
-              onChange={handleLetterBodyChange}
-              rows={18}
-              disabled={isLetterEditingDisabled}
-            />
+            {showApprovalLetterPackTabs ? (
+              <Tabs
+                activeTabId={approvalLetterPackTabId}
+                onChange={({ detail }) => setApprovalLetterPackTabId(detail.activeTabId)}
+                tabs={[
+                  {
+                    id: 'client',
+                    label: 'Client letter',
+                    content: clientLetterTabContent
+                  },
+                  {
+                    id: 'institution',
+                    label: 'Institution letter',
+                    content: renderReadOnlyLetters(
+                      approvalInstitutionLettersForDisplay,
+                      'No institution-directed funding was identified from intervention delivery details and cost lines.',
+                      { requireDraftGeneration: true }
+                    )
+                  },
+                  {
+                    id: 'other-funding',
+                    label: 'Letters to other funders',
+                    content: renderReadOnlyLetters(
+                      approvalCoFunderLettersForDisplay,
+                      'No other funding sources were provided in the Other funding sources step.',
+                      { requireDraftGeneration: true }
+                    )
+                  }
+                ]}
+              />
+            ) : (
+              <Textarea
+                value={letterBody}
+                onChange={handleLetterBodyChange}
+                rows={18}
+                disabled={isLetterEditingDisabled}
+              />
+            )}
           </SpaceBetween>
         )}
       </Box>
@@ -9485,9 +10256,9 @@ ${JSON.stringify(contextPayload, null, 2)}`
     ? 'How will the interventions be delivered?'
     : STEP_LABELS.type;
   const communicationStepTitle = decisionOutcome === 'approved'
-    ? 'Send approval letter'
+    ? 'Approval letters'
     : decisionOutcome === 'denied'
-      ? 'Send denial letter'
+      ? 'Denial letter'
       : STEP_LABELS.communication;
   const stepDefinitionById = {
     eligibility: { title: STEP_LABELS.eligibility, content: eligibilityStepContent, isOptional: false },
@@ -9530,8 +10301,7 @@ ${JSON.stringify(contextPayload, null, 2)}`
     showFundingDocsStep &&
     !lockedByAnotherUser &&
     !isCompletedStatus &&
-    !checkingChecklist &&
-    fundingDocsChecklistComplete;
+    !checkingChecklist;
   const isCommunicationSending = isCommunicationStep && sendingLetter;
   const wizardSubmitHandler = isFundingDocsStep
     ? (canSubmitFundingDocs ? handleFundingDocsComplete : undefined)
@@ -9539,9 +10309,9 @@ ${JSON.stringify(contextPayload, null, 2)}`
       ? (canSubmitCommunication ? handleCommunicationComplete : undefined)
       : (showNWACSection ? (canSubmitOutcome ? handleApproveClick : undefined) : (canSubmitAssessment ? handleSubmit : undefined));
   const wizardSubmitLabel = isFundingDocsStep
-    ? 'Mark application complete'
+    ? (isCompletedStatus ? 'Application completed' : 'Mark application complete')
     : isCommunicationStep
-      ? 'Send Letter'
+      ? (decisionOutcome === 'approved' ? 'Send Client Approval letter' : 'Send Letter')
       : (showNWACSection ? 'Commit' : 'Submit assessment');
   const wizardReadOnlyLabel = 'Read only';
   const hideWizardActions = !wizardSubmitHandler && (isDecisionFinal || isLockedStatus) && !isFundingDocsStep;
@@ -9795,6 +10565,57 @@ ${JSON.stringify(contextPayload, null, 2)}`
         {denialReasonModal}
         {denyFundingModal}
         {checklistUploadModal}
+        <Modal
+          visible={showSendApprovalLetterConfirmModal}
+          onDismiss={() => setShowSendApprovalLetterConfirmModal(false)}
+          header="Send Client Approval letter?"
+          footer={
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button
+                variant="primary"
+                onClick={handleConfirmSendApprovalLetter}
+                loading={sendingLetter}
+              >
+                Send Client Approval letter
+              </Button>
+              <Button
+                variant="normal"
+                onClick={() => setShowSendApprovalLetterConfirmModal(false)}
+                disabled={sendingLetter}
+              >
+                Cancel
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="s">
+            <Box>
+              This will send the Letter of Approval to the client with attached Client Funding Agreement, Client Acknowledgement of Funding Source form, and EFT/Wire Transfer form for completion.
+            </Box>
+            <Box>
+              Institution letters and letters to other funders are not sent by the system. Send those manually as needed.
+            </Box>
+          </SpaceBetween>
+        </Modal>
+        <Modal
+          visible={showFundingDocsIncompleteModal}
+          onDismiss={() => setShowFundingDocsIncompleteModal(false)}
+          header="Checklist incomplete"
+          footer={
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button
+                variant="primary"
+                onClick={() => setShowFundingDocsIncompleteModal(false)}
+              >
+                OK
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <Box>
+            This application cannot be marked complete until all required checklist items have been signed and submitted by the applicant.
+          </Box>
+        </Modal>
         <Modal
           visible={showCancelModal}
           onDismiss={() => setShowCancelModal(false)}

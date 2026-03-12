@@ -55,9 +55,10 @@ const ApplicationAssessmentHelp = () => {
     <p>
       After submission, the NWAC section unlocks for reviewers to record the decision and assurance outcome. Approved
       or Not Approved moves the application to decision ready; Push back returns it to in review. The Communication step
-      then appears to draft and send the approval or denial letter. Approved cases continue to Funding forms and signatures
-      to monitor form completion; mark the application complete only when all required items show Complete. Denial letters
-      complete the application.
+      then appears to draft and send the approval or denial letter. For approvals, the client letter remains editable
+      while institution and other-funding-source letters are available as admin-only read-only tabs for preview/download.
+      Approved cases continue to Funding forms and signatures to monitor form completion; mark the application complete
+      only when all required items show Complete. Denial letters complete the application.
     </p>
 
     <h3>Need to revise?</h3>
@@ -100,6 +101,7 @@ You are assisting a coordinator filling out the Application Assessment widget. K
 - Sections include EI eligibility, overview/employment goals, barriers and local priorities, previous ISET, structured other funding (involved yes/no/unknown, repeatable funders, NWAC coverage, notes), intervention details (provider, dates, program name, NOC + version as needed, childcare need), costs (ITP and/or wage breakdowns plus optional early payee capture in cost-item modals), recommendation, justification, and the document checklist.
 - Save keeps a draft without changing status; Submit assessment moves the application to pending approval and unlocks NWAC review.
 - Use related widgets for context: Application Overview (status/owner), ISET Application Form (applicant data/version history), Supporting Documents (evidence/checklist), Notes and Tasks (audit trail), Secure Messaging (doc requests).
+- In approved outcomes, treat Communication as a letter pack: edit/send only the client letter; institution and other funding source letters are admin-only preview/download tabs.
 `;
 
 export const NwacAssessmentHelp = ({ onRestartTutorial, onEndTutorial }) => {

@@ -21,6 +21,7 @@ const FINAL_CASE_STATUSES = new Set(['ready_to_close', 'closed', 'archived', 're
 const APPLICATION_FINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived']);
 
 const APPLICATION_STATUS_SYNONYMS = Object.freeze({
+  complete: 'completed',
   withdrawn: 'closed',
 });
 

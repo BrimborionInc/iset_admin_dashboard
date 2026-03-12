@@ -2,6 +2,13 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-03-12
+- Messaging/Workflow: Approval letters now carry required funding-signature forms as attachments in the same secure message (`Client Funding Agreement`, `Client Acknowledgement of Funding Source`, `EFT/Wire form`) instead of sending a separate follow-up message.
+- Messaging/Workflow: Sending an approval letter now triggers docs-requested/reminder automation through the same secure-message path as manual form requests because non-letter signing attachments are included with the letter send.
+- UX/Lettering: Approval draft generation now uses a single privacy-safe AI copy-edit pass with placeholder tokens (no applicant personal data sent), then deterministically injects case values locally and preserves fixed funding/forms paragraphs.
+- Fix/Checklist: Approval-letter auto-attachments now stamp EFT signing requests with canonical `EFT_form`, so signed EFT submissions correctly clear the funding forms checklist item.
+- UX/Lettering: Approved communication now behaves as an admin letter pack: the client approval letter remains editable, while institution and other funding source letters appear as separate read-only tabs with download actions for admin-side use.
+
 ## 2026-03-11
 - UX/Assessment: Cost-item choices in `What will it cost?` now follow the wizard `Childcare Need` answer (yes/no) so childcare cost items are presented or hidden accordingly.
 - Fix/Assessment: Application Assessment default-intervention auto-seeding now waits for the payment-intervention mapping fetch to complete before running, preventing false “seeded” state on first render.
@@ -10,7 +17,7 @@ Format: YYYY-MM-DD - Category: Short description
 - Workflow/UX: Renamed approval follow-up stage from `Complete funding documentation` to `Funding forms and signatures`; final action now reads `Mark application complete`, and step guidance now explicitly requires all required checklist items to be `Complete` before completion.
 - Messaging/Workflow: Sending secure messages with signing-form attachments now sets docs-requested state/reminders server-side (`docs_requested_active=1`, source `secure_message`, reminder creation, and event capture) even for system-triggered sends.
 - Messaging/Workflow: Applicant signing completion now clears docs-requested state/reminders when all pending non-letter signing requests for the case are complete.
-- Messaging/Workflow: When NWAC review transitions to approved and assessment cost is non-zero, the backend now auto-generates a client secure message with attachments for `Client Funding Agreement`, `Client Acknowledgement of Funding Source`, and `EFT & Wire Transfer Direct Debit`; message subject/body now auto-localize to applicant language preference from intake/case context.
+- Messaging/Workflow: Approved communications now include attachments for `Client Funding Agreement`, `Client Acknowledgement of Funding Source`, and `EFT & Wire Transfer Direct Debit` in the approval-letter send flow (no separate funding-forms message).
 - API/Checklist: Gate 6 funding-document requirements now enforce `assessment total cost > 0` for funding package artifacts (`funding_agreement`, `client_acknowledgement`, `EFT_form`/wire transfer form, and `voided_cheque`), so zero-cost approved assessments no longer block on those documents.
 - Intake/Docs: Intake submission now auto-generates and stores `iset_client_info_release` (Authorization for Release of ISET Client Information) as a signed PDF, and the Application Form widget now includes a dedicated link/modal + PDF download action for that signed form.
 

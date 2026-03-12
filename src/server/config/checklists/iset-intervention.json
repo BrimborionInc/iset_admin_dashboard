@@ -415,7 +415,7 @@
           ],
           "required": true,
           "documentTypes": [
-            "eft_or_wire_transfer_form"
+            "EFT_form"
           ],
           "notes": "Mandatory for non-zero-cost action plans; reusable if details have not changed."
         },

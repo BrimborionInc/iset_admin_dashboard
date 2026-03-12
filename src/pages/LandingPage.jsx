@@ -44,49 +44,49 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - v0.5.3 (3rd March 2026)',
-      description: 'Release 0.5.3 summarizes admin-console updates delivered since 12 Jan 2026.',
+      sectionTitle: 'Release Notes - v0.5.4 (12th March 2026)',
+      description: 'Release 0.5.4 focuses on stronger approval communications and clearer document follow-up for case managers and applicants.',
       features: {
         heading: 'What’s New',
         sections: [
           {
-            title: 'Tutorial platform and guided onboarding',
+            title: 'Approval letters are now managed as a complete letter pack',
             paragraphs: [
-              'Added a centralized tutorials platform with role-aware tours for homepage, application workspace, and case workspace.',
-              'Introduced the Tutorials dashboard under Support so staff can run tours and manage progress directly.',
-              'Tutorial completion and dismissal now persist per staff member in MySQL and can be reset from the UI.'
+              'Case managers can now generate all approval drafts in one place: client letter, institution letter, and letters to other funders.',
+              'The client letter remains editable, while institution and other-funder letters are ready to review and download from tabs.',
+              'This reduces manual drafting and keeps communications more consistent across cases.'
             ]
           },
           {
-            title: 'Payments and finance workflow upgrades',
+            title: 'Client approval sends now include required forms in one message',
             paragraphs: [
-              'Case workspace approvals now auto-create draft payment packets from proposed intervention cost lines.',
-              'Packet validation and queue/detail views now reflect Sage Intacct submission outcomes and resubmission handling.',
-              'Finance settings now include Sage Intacct integration controls and improved XML draft preview behavior.'
+              'When staff send the client approval letter, the system now includes the Client Funding Agreement, Client Acknowledgement of Funding Source, and EFT/Wire Transfer form automatically.',
+              'A confirmation prompt now makes clear what is sent automatically and what must still be sent manually (institution and other-funder letters).',
+              'Applicants receive one clear package of documents to complete.'
             ]
           },
           {
-            title: 'Assessment and intervention management improvements',
+            title: 'Document request tracking is more reliable',
             paragraphs: [
-              'Proposed Interventions and coordinator assessment workflows now support robust multi-intervention costing with line-item persistence.',
-              'Decision, validation, and save behavior were hardened to reduce dead ends and improve reliability in assessment progression.',
-              'Approved interventions now enforce budget-pot linkage so downstream finance transactions are generated consistently.'
+              'Approval-letter sends now trigger Docs Requested and reminder scheduling automatically, matching expected workflow behavior.',
+              'EFT/Wire submissions sent through the approval-letter flow now clear the correct checklist item.',
+              'When requested documents are completed and Docs Requested is cleared, related reminders are also removed automatically.'
             ]
           },
           {
-            title: 'Configuration and admin tooling',
+            title: 'Letter quality and personalization improved',
             paragraphs: [
-              'Added a Query Editor dashboard for System Administrators with SQL execution controls and multi-view results.',
-              'Added a Document Checklists configuration widget to manage required documents by status gate for applications and interventions.',
-              'Regional Manager scope now supports multi-region behavior in development workflows.'
+              'Client letters now greet applicants using preferred name when available (otherwise first name).',
+              'Institution letters now clearly separate supports paid directly to institutions from supports paid directly to students.',
+              'Letters to other funders now include total NWAC support plus line-level funding details, including payee context.'
             ]
           },
           {
-            title: 'Workspace and role-based UX updates',
+            title: 'Decision workflow is clearer for case managers',
             paragraphs: [
-              'Homepage and workspace guidance, labels, and help content were aligned with current queue-based operations.',
-              'Case and application workspace layouts now reset appropriately for tutorial and hotspot-dependent flows.',
-              'Role handling and prompt logic were updated so onboarding behaviors remain consistent across role aliases.'
+              'The final communication stage is now labeled Approval letters, with clearer generation and review flow.',
+              'Sending is now available safely from any letter tab with confirmation guardrails.',
+              'Completion prompts now clearly tell staff when required signed forms are still outstanding.'
             ]
           },
         ]
@@ -150,49 +150,49 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Notes de version - v0.5.3 (3 mars 2026)',
-      description: 'La version 0.5.3 résume les mises à jour de la console admin livrées depuis le 12 janvier 2026.',
+      sectionTitle: 'Notes de version - v0.5.4 (12 mars 2026)',
+      description: 'La version 0.5.4 met l’accent sur des communications d’approbation plus solides et un meilleur suivi des documents à signer.',
       features: {
         heading: 'Quoi de neuf',
         sections: [
           {
-            title: 'Plateforme de tutoriels et intégration guidée',
+            title: 'Les lettres d’approbation sont maintenant gérées comme un ensemble',
             paragraphs: [
-              'Ajout d’une plateforme de tutoriels centralisée avec des parcours par rôle pour l’accueil, l’espace demande et l’espace dossier.',
-              'Ajout du tableau de bord des tutoriels dans Soutien pour lancer les parcours et gérer l’état de progression.',
-              'La complétion et la mise en sourdine des tutoriels sont maintenant enregistrées par membre du personnel dans MySQL avec réinitialisation en libre-service.'
+              'Les gestionnaires de cas peuvent maintenant générer au même endroit les brouillons de lettre client, lettre institution et lettres aux autres bailleurs.',
+              'La lettre client reste modifiable, tandis que les autres lettres sont prêtes à réviser et à télécharger dans des onglets dédiés.',
+              'Cela réduit le travail de rédaction manuelle et améliore la cohérence des communications.'
             ]
           },
           {
-            title: 'Améliorations des flux paiements et finances',
+            title: 'L’envoi d’approbation client inclut maintenant les formulaires requis',
             paragraphs: [
-              'Les approbations dans l’espace dossier créent maintenant automatiquement des paquets de paiement brouillon à partir des lignes de coûts proposées.',
-              'La validation des paquets et les vues file/détail reflètent maintenant les résultats de soumission Sage Intacct et la reprise des soumissions.',
-              'Les paramètres Finance incluent désormais la configuration d’intégration Sage Intacct et un aperçu XML brouillon amélioré.'
+              'Lors de l’envoi de la lettre d’approbation client, le système joint automatiquement l’Entente de financement client, l’Accusé de financement et le formulaire EFT/virement.',
+              'Une confirmation indique clairement ce qui est envoyé automatiquement et ce qui doit être envoyé manuellement (lettres institution et autres bailleurs).',
+              'La cliente reçoit un seul envoi clair avec les documents à compléter.'
             ]
           },
           {
-            title: 'Améliorations évaluation et interventions',
+            title: 'Le suivi des demandes de documents est plus fiable',
             paragraphs: [
-              'Les flux Interventions proposées et évaluation coordonnateur prennent mieux en charge le multi-intervention avec persistance détaillée des coûts.',
-              'Les comportements de décision, validation et sauvegarde ont été renforcés pour réduire les blocages dans la progression.',
-              'Les interventions approuvées imposent maintenant la liaison au budget d’un plan d’action pour assurer une génération cohérente des transactions financières.'
+              'L’envoi de la lettre d’approbation active maintenant automatiquement Documents demandés et la planification des rappels.',
+              'Les soumissions EFT/virement envoyées via ce nouveau flux effacent correctement l’élément correspondant de la liste de contrôle.',
+              'Quand les documents requis sont complets et que Documents demandés est désactivé, les rappels associés sont aussi retirés automatiquement.'
             ]
           },
           {
-            title: 'Configuration et outils administratifs',
+            title: 'Qualité et personnalisation des lettres améliorées',
             paragraphs: [
-              'Ajout d’un tableau de bord Éditeur de requêtes pour les administrateurs système avec exécution SQL contrôlée et plusieurs vues de résultats.',
-              'Ajout d’un widget de configuration des listes de contrôle de documents par porte de statut pour les demandes et interventions.',
-              'La portée des gestionnaires régionaux prend maintenant en charge le multi-région dans les flux de développement.'
+              'Les lettres client utilisent maintenant le prénom préféré lorsqu’il est disponible (sinon le prénom).',
+              'Les lettres aux institutions distinguent clairement les montants payés à l’institution de ceux payés directement à la cliente.',
+              'Les lettres aux autres bailleurs incluent maintenant le total NWAC ainsi qu’un détail ligne par ligne avec le bénéficiaire.'
             ]
           },
           {
-            title: 'Mises à jour UX des espaces de travail et rôles',
+            title: 'Le flux de décision est plus clair pour les gestionnaires de cas',
             paragraphs: [
-              'Le contenu d’aide, les libellés et les indications d’accueil/espaces de travail ont été alignés avec les opérations actuelles basées sur les files.',
-              'Les dispositions d’écran des espaces demande et dossier se réinitialisent correctement pour les parcours tutoriels et points d’ancrage.',
-              'La gestion des rôles et des invites a été renforcée pour garder des comportements d’intégration cohérents malgré les alias de rôles.'
+              'L’étape finale de communication est maintenant libellée Lettres d’approbation, avec un flux plus clair de génération et de révision.',
+              'L’envoi est maintenant possible de façon sécurisée à partir de n’importe quel onglet de lettre, avec confirmation.',
+              'Les messages de complétion indiquent clairement quand des formulaires signés requis sont encore en attente.'
             ]
           }
         ]

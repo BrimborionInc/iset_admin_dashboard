@@ -2,9 +2,9 @@
 
 Purpose: running capture of user-facing fixes/changes for the next "What's New" update on `src/pages/LandingPage.jsx`.
 
-Current public release in Landing Page: `v0.5.3` (`3rd March 2026`)
-Target next release notes draft: `v0.5.4` (date TBD)
-Last Updated: 2026-03-11
+Current public release in Landing Page: `v0.5.4` (`12th March 2026`)
+Target next release notes draft: `v0.5.5` (date TBD)
+Last Updated: 2026-03-12
 
 ## How to use
 
@@ -18,13 +18,18 @@ Last Updated: 2026-03-11
 
 ## Entries
 
+- 2026-03-12 | Release v0.5.4 | UX/Lettering | Application Assessment > Communication | Added approval letter-pack tabs: editable client letter plus admin-only institution and other funding source letters as read-only preview/download outputs. | Keeps portal delivery limited to the client letter while exposing non-client correspondence artifacts in-place for case managers.
+- 2026-03-12 | Release v0.5.4 | Fix/Checklist | Application Assessment > Funding forms checklist | Fixed EFT checklist mismatch in approval-letter auto-send flow by using canonical `EFT_form` document type on generated signing requests. | Signed EFT forms sent via approval-letter flow now clear the EFT checklist item the same way as manual secure-message sends.
+- 2026-03-12 | Release v0.5.4 | UX/Lettering | Application Assessment > Approval draft generation | Approval drafting now runs one privacy-safe AI copy-edit pass using placeholders, then injects case-specific values locally to keep deterministic outcomes and avoid sending applicant personal data to AI. | Funding amount lines and forms instruction remain deterministic/fixed in app logic.
+- 2026-03-12 | Release v0.5.4 | Messaging/Workflow | Application Assessment > Send approval letter | Refactored approval send so required signing forms are attached to the same approval-letter secure message, instead of sending a separate auto-generated "signature required" message. | Backend now auto-appends funding-form workflows when an approval-letter attachment is sent and returns a config error if required workflows are missing.
+- 2026-03-12 | Release v0.5.4 | Workflow/Automation | Secure Messaging + Docs Requested | Approval-letter sends now trigger docs-requested/reminder automation via the standard secure-message-with-signing-attachments path. | Keeps docs-request behavior aligned with manual toggle-equivalent form-request sends.
 - 2026-03-11 | Release v0.5.4 | UX/Assessment | Application Assessment > What will it cost? | Updated cost-item presentation to follow the `Childcare Need` answer in the wizard, so `Childcare` lines are shown/hidden based on Yes/No selection. | Uses intake childcare-requested as fallback only when the wizard answer is not yet set.
 - 2026-03-11 | Release v0.5.4 | Fix/Assessment | Application Assessment > Proposed Interventions (Step 2) | Fixed default intervention auto-add timing so Finance Settings `Auto-add?` entries are seeded after mapping fetch completes. | Prevents empty Step 2 when defaults exist but initial render raced ahead of mapping load.
 - 2026-03-11 | Release v0.5.4 | Security/Messaging | Applicant Secure Messages | Fixed message-visibility leakage by enforcing sender/recipient ownership in applicant `/api/messages` reads and cleaning invalid mailbox rows; also blocked applicant access to other case IDs in `/api/cases/:id/messages`. | Prevents cross-applicant secure-message exposure when stale/invalid `message_item` rows exist.
 - 2026-03-11 | Release v0.5.4 | UX/Help | Finance Settings > Payment type mapping | Added widget `Info` link + dedicated help-panel content and shortened the intervention default column label to `Auto-add?`. | Improves readability and discoverability of mapping rules in Finance Settings.
 - 2026-03-11 | Release v0.5.4 | UX/Workflow | Application Assessment > Approved follow-up stage | Renamed final approved stage to `Funding forms and signatures` and updated submit action to `Mark application complete`, with explicit guidance to complete only after all required checklist items show Complete. | Updated assessment help and workspace help text to match.
 - 2026-03-11 | Release v0.5.4 | Messaging/Workflow | Secure Messaging + Signing requests | Sending messages with signing-form attachments now sets docs-requested/reminders server-side (including auto-generated sends), and docs-requested now auto-clears when all pending non-letter signing requests are signed. | Aligns manual and automated form-request behavior.
-- 2026-03-11 | Release v0.5.4 | Workflow/Automation | Application Assessment > Approval transition | Approved assessments with non-zero costs now auto-generate a client secure message with three signing attachments (`Client Funding Agreement`, `Client Acknowledgement of Funding Source`, `EFT & Wire Transfer Direct Debit`). | Subject/body are auto-generated in English or French based on intake/case `preferred-language`.
+- 2026-03-11 | Release v0.5.4 | Workflow/Automation | Application Assessment > Approval transition | Approved flows now include three signing attachments (`Client Funding Agreement`, `Client Acknowledgement of Funding Source`, `EFT & Wire Transfer Direct Debit`) as part of approval-letter communication. | Superseded implementation now attaches forms directly to the approval-letter message.
 - 2026-03-11 | Release v0.5.4 | Intake/Docs | Application Workspace > Application Form + Intake submission | Added signed-form support for `Authorization for Release of ISET Client Information` so submission auto-generates/stores the PDF (`iset_client_info_release`) and Application Form now exposes the same form beside other consent/declaration signed forms with in-widget PDF download. | Uses published intake signature key `auth_froici_sing` and dedicated admin PDF endpoint.
 - 2026-03-10 | Release v0.5.4 | UX/Data | Application Assessment + Case Workspace > Other Funding step | Refactored Other Funding into a structured flow with `involved?` state, repeatable non-NWAC funders, NWAC coverage summary, and optional notes. | Persists backward-compatible summary text while storing structured detail for future coordination/letter workflows.
 - 2026-03-10 | Release v0.5.4 | UX | Application Workspace + Case Workspace > Proposed Intervention Cost Items | Cost-item add/edit modal now includes early payee capture fields (`payee type`, `payee name`, optional `reference`) without adding a new table column. | Payee remains optional at costing-step progression time.

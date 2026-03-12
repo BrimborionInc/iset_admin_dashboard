@@ -39951,6 +39951,19 @@ const handlePostCaseSecureMessage = async (req, res) => {
   const bodyValue = typeof body === 'string' ? body.trim() : '';
   const toNameValue = typeof toDisplayName === 'string' ? toDisplayName.trim() : '';
   const fromNameValue = typeof fromDisplayName === 'string' ? fromDisplayName.trim() : '';
+  const attachmentSpecs = Array.isArray(attachments)
+    ? attachments
+        .map((item) => {
+          const workflowId = parseInt(item?.workflow_id, 10);
+          if (!Number.isInteger(workflowId) || workflowId < 1) return null;
+          return {
+            workflow_id: workflowId,
+            due_at: item?.due_at || null,
+            checklist_doc_type: item?.checklist_doc_type || null
+          };
+        })
+        .filter(Boolean)
+    : [];
   if (!subjectValue || !bodyValue) return res.status(400).json({ error: 'missing_required_fields' });
   if (!toNameValue || !fromNameValue) {
     return res.status(400).json({ error: 'recipient_and_sender_names_required' });
@@ -40026,9 +40039,9 @@ const handlePostCaseSecureMessage = async (req, res) => {
     let decisionLetterTokensByWorkflowId = new Map();
     const decisionLetterDocs = [];
     const letterDocTypes = new Set(['assessment_approval_letter', 'assessment_denial_letter']);
-    if (Array.isArray(attachments) && attachments.length) {
-      const wfIds = attachments
-        .map(a => parseInt(a?.workflow_id, 10))
+    if (attachmentSpecs.length) {
+      const wfIds = attachmentSpecs
+        .map(a => a.workflow_id)
         .filter(n => Number.isInteger(n) && n > 0);
       if (wfIds.length) {
         const placeholders = wfIds.map(() => '?').join(',');
@@ -40044,6 +40057,55 @@ const handlePostCaseSecureMessage = async (req, res) => {
             document_type: r.document_type || null
           }))
           .filter(r => r.workflow_type === 'consent-no-prefill' || r.workflow_type === 'consent-cm-prefill');
+      }
+    }
+    const hasApprovalLetterAttachment = attachmentRows.some(
+      row => row.document_type === 'assessment_approval_letter'
+    );
+    if (hasApprovalLetterAttachment) {
+      const workflowResolution = await resolveAutoFundingFormsAttachments(pool);
+      if (workflowResolution.missing.length) {
+        return res.status(409).json({
+          error: 'funding_forms_workflows_missing',
+          missing: workflowResolution.missing
+        });
+      }
+      const existingIds = new Set(attachmentSpecs.map(item => item.workflow_id));
+      const requiredFormAttachments = workflowResolution.attachments.filter(item => {
+        const workflowId = Number(item?.workflow_id);
+        return Number.isInteger(workflowId) && workflowId > 0 && !existingIds.has(workflowId);
+      });
+      if (requiredFormAttachments.length) {
+        requiredFormAttachments.forEach(item => {
+          const workflowId = Number(item.workflow_id);
+          existingIds.add(workflowId);
+          attachmentSpecs.push({
+            workflow_id: workflowId,
+            due_at: item?.due_at || null,
+            checklist_doc_type: item?.checklist_doc_type || null
+          });
+        });
+        const additionalIds = requiredFormAttachments
+          .map(item => Number(item.workflow_id))
+          .filter(id => Number.isInteger(id) && id > 0);
+        if (additionalIds.length) {
+          const placeholders = additionalIds.map(() => '?').join(',');
+          const [additionalRows] = await pool.query(
+            `SELECT id, name, workflow_type, document_type FROM iset_intake.workflow WHERE id IN (${placeholders})`,
+            additionalIds
+          );
+          const existingRowIds = new Set(attachmentRows.map(row => Number(row.id)));
+          const normalizedAdditionalRows = (additionalRows || [])
+            .map(r => ({
+              id: r.id,
+              name: r.name || `Workflow ${r.id}`,
+              workflow_type: normalizeWorkflowType(r.workflow_type || 'consent-no-prefill', { required: true }),
+              document_type: r.document_type || null
+            }))
+            .filter(r => (r.workflow_type === 'consent-no-prefill' || r.workflow_type === 'consent-cm-prefill'))
+            .filter(r => !existingRowIds.has(Number(r.id)));
+          attachmentRows = [...attachmentRows, ...normalizedAdditionalRows];
+        }
       }
     }
     if (attachmentRows.length) {
@@ -40463,7 +40525,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
             }
           };
         }
-        const attachmentMeta = attachments.find(a => parseInt(a?.workflow_id, 10) === wf.id) || {};
+        const attachmentMeta = attachmentSpecs.find(a => Number(a?.workflow_id) === Number(wf.id)) || {};
         const docType =
           attachmentMeta.checklist_doc_type ||
           wf.document_type ||
@@ -40632,157 +40694,8 @@ const handlePostCaseSecureMessage = async (req, res) => {
 
 app.post('/api/cases/:id/messages', handlePostCaseSecureMessage);
 
-async function invokeCaseSecureMessageHandler({ req, caseId, payload }) {
-  if (!req || !Number.isInteger(Number(caseId)) || Number(caseId) < 1) {
-    return { ok: false, status: 400, body: { error: 'invalid_case_id' } };
-  }
-  const syntheticReq = Object.create(req);
-  syntheticReq.params = { ...(req.params || {}), id: String(caseId) };
-  syntheticReq.body = payload && typeof payload === 'object' ? payload : {};
-
-  const responseState = { status: 200, body: null };
-  const syntheticRes = {
-    status(code) {
-      responseState.status = Number(code) || 500;
-      return this;
-    },
-    json(body) {
-      responseState.body = body;
-      return this;
-    }
-  };
-
-  try {
-    await handlePostCaseSecureMessage(syntheticReq, syntheticRes);
-  } catch (err) {
-    return {
-      ok: false,
-      status: 500,
-      body: {
-        error: 'failed_to_send_message',
-        detail: err?.message || String(err)
-      }
-    };
-  }
-
-  return {
-    ok: responseState.status >= 200 && responseState.status < 300,
-    status: responseState.status,
-    body: responseState.body
-  };
-}
-
-function normalizePreferredLanguageToken(value) {
-  const token = normaliseString(value).toLowerCase();
-  if (!token) return null;
-  if (token === 'fr' || token === 'fr-ca' || token === 'fr_ca' || token.includes('french')) return 'fr';
-  if (token === 'en' || token === 'en-ca' || token === 'en_ca' || token.includes('english')) return 'en';
-  return null;
-}
-
-function resolveCasePreferredLanguage(caseContext) {
-  const context = caseContext && typeof caseContext === 'object' ? caseContext : {};
-  const answers = context.applicationAnswers && typeof context.applicationAnswers === 'object'
-    ? context.applicationAnswers
-    : {};
-  const personal = context.applicationPersonal && typeof context.applicationPersonal === 'object'
-    ? context.applicationPersonal
-    : {};
-  const payload = context.applicationPayload && typeof context.applicationPayload === 'object'
-    ? context.applicationPayload
-    : {};
-  const candidates = [
-    answers['preferred-language'],
-    answers.preferred_language,
-    answers['language-spoken'],
-    answers.language_spoken,
-    personal.preferred_language,
-    personal.language,
-    context['preferred-language'],
-    context.preferred_language,
-    context.preferredLanguage,
-    context.languageSpoken,
-    payload['preferred-language'],
-    payload.preferred_language,
-  ];
-  for (const value of candidates) {
-    const normalized = normalizePreferredLanguageToken(value);
-    if (normalized) return normalized;
-  }
-  return 'en';
-}
-
-function resolveCaseApplicantDisplayName(caseContext, fallback = 'Applicant') {
-  const context = caseContext && typeof caseContext === 'object' ? caseContext : {};
-  const personal = context.applicationPersonal && typeof context.applicationPersonal === 'object'
-    ? context.applicationPersonal
-    : {};
-  const answers = context.applicationAnswers && typeof context.applicationAnswers === 'object'
-    ? context.applicationAnswers
-    : {};
-  const candidates = [
-    personal.preferred_name,
-    personal.preferredName,
-    context.preferredName,
-    answers['preferred-name'],
-    answers.preferred_name,
-    resolveApplicantNameFromPayload(context.applicationPayload || null, null),
-    personal.first_name && personal.last_name ? `${personal.first_name} ${personal.last_name}` : null,
-    personal.firstName && personal.lastName ? `${personal.firstName} ${personal.lastName}` : null,
-  ];
-  for (const candidate of candidates) {
-    const value = normaliseString(candidate);
-    if (value) return value;
-  }
-  return fallback;
-}
-
-function buildAutoFundingFormsMessage({ language = 'en', applicantName = 'Applicant', trackingId = null } = {}) {
-  const safeName = normaliseString(applicantName) || 'Applicant';
-  const referenceLine = trackingId ? `\nReference: ${trackingId}` : '';
-  if (language === 'fr') {
-    return {
-      subject: 'Documents de financement ISET - signature requise',
-      body: [
-        `Bonjour ${safeName},`,
-        '',
-        'Votre demande au programme ISET a ete approuvee.',
-        '',
-        'Veuillez remplir et signer les documents joints appropries :',
-        '- Client Funding Agreement',
-        '- Client Acknowledgement of Funding Source',
-        '- EFT & Wire Transfer Direct Debit',
-        '',
-        'Veuillez soumettre les documents signes dans votre fil de messagerie securisee des que possible.',
-        referenceLine ? referenceLine.trim() : '',
-        '',
-        'Cordialement,',
-        'Programme ISET de NWAC'
-      ].filter(Boolean).join('\n')
-    };
-  }
-  return {
-    subject: 'ISET funding documents - signature required',
-    body: [
-      `Dear ${safeName},`,
-      '',
-      'Your ISET application has been approved.',
-      '',
-      'Please complete and sign the appropriate attached documents:',
-      '- Client Funding Agreement',
-      '- Client Acknowledgement of Funding Source',
-      '- EFT & Wire Transfer Direct Debit',
-      '',
-      'Please submit the signed documents through your secure messaging thread as soon as possible.',
-      referenceLine ? referenceLine.trim() : '',
-      '',
-      'Sincerely,',
-      'NWAC ISET Program'
-    ].filter(Boolean).join('\n')
-  };
-}
-
 async function resolveAutoFundingFormsAttachments(connection = pool) {
+  const EFT_CHECKLIST_DOC_TYPE = 'EFT_form';
   const [rows] = await connection.query(
     `SELECT id, name, status, workflow_type, document_type, updated_at
        FROM iset_intake.workflow
@@ -40827,7 +40740,7 @@ async function resolveAutoFundingFormsAttachments(connection = pool) {
       selected.acknowledgement = pickBest(selected.acknowledgement, row);
       continue;
     }
-    const eftTypeMatch = new Set(['eft_or_wire_transfer_form', 'eft_form', 'eft']).has(docTypeKey);
+    const eftTypeMatch = docTypeKey === 'eft_form';
     const eftNameMatch = nameKey.includes('eft') && (nameKey.includes('wire') || nameKey.includes('debit'));
     if (eftTypeMatch || eftNameMatch) {
       selected.eft = pickBest(selected.eft, row);
@@ -40842,13 +40755,13 @@ async function resolveAutoFundingFormsAttachments(connection = pool) {
     attachments.push({ workflow_id: Number(selected.acknowledgement.id), checklist_doc_type: 'client_acknowledgement' });
   }
   if (selected.eft?.id) {
-    attachments.push({ workflow_id: Number(selected.eft.id), checklist_doc_type: 'eft_or_wire_transfer_form' });
+    attachments.push({ workflow_id: Number(selected.eft.id), checklist_doc_type: EFT_CHECKLIST_DOC_TYPE });
   }
 
   const missing = [];
   if (!selected.funding?.id) missing.push('funding_agreement');
   if (!selected.acknowledgement?.id) missing.push('client_acknowledgement');
-  if (!selected.eft?.id) missing.push('eft_or_wire_transfer_form');
+  if (!selected.eft?.id) missing.push(EFT_CHECKLIST_DOC_TYPE);
 
   return { attachments, missing };
 }
@@ -59428,80 +59341,8 @@ app.put('/api/cases/:id', async (req, res) => {
         actorName,
       });
     }
-    if (reviewTransitionedToApproved) {
-      const proposedInterventions = normalizeAssessmentProposedInterventions(
-        caseRow?.assessment_proposed_interventions
-      );
-      const proposedInterventionsTotal = computeProposedInterventionsTotal(proposedInterventions);
-      const explicitAssessmentCost = parseCostValue(
-        caseRow?.assessment_intervention_cost_total ??
-        body.assessment_intervention_cost_total ??
-        body.intervention_cost_total ??
-        null
-      );
-      const approvedCostTotal = explicitAssessmentCost !== null
-        ? explicitAssessmentCost
-        : (Number.isFinite(proposedInterventionsTotal) ? proposedInterventionsTotal : null);
-      const hasNonZeroApprovedCost = Number.isFinite(approvedCostTotal) && approvedCostTotal > 0;
-      if (hasNonZeroApprovedCost) {
-        try {
-          const preferredLanguage = resolveCasePreferredLanguage(afterCaseContext);
-          const applicantDisplayName = resolveCaseApplicantDisplayName(afterCaseContext, 'Applicant');
-          const staffDisplayName = normaliseString(
-            (await resolveStaffDisplayName(pool, req)) ||
-            actorName ||
-            req?.staffProfile?.display_name ||
-            req?.staffProfile?.name ||
-            req?.auth?.name ||
-            'NWAC ISET Program'
-          ) || 'NWAC ISET Program';
-          const { subject, body: messageBody } = buildAutoFundingFormsMessage({
-            language: preferredLanguage,
-            applicantName: applicantDisplayName,
-            trackingId
-          });
-          const workflowResolution = await resolveAutoFundingFormsAttachments(pool);
-          if (!workflowResolution.missing.length) {
-            const autoMessagePayload = {
-              subject,
-              body: messageBody,
-              urgent: false,
-              toDisplayName: applicantDisplayName,
-              fromDisplayName: staffDisplayName,
-              attachments: workflowResolution.attachments
-            };
-            if (Number.isFinite(Number(caseRow?.application_id)) && Number(caseRow.application_id) > 0) {
-              autoMessagePayload.applicationId = Number(caseRow.application_id);
-            }
-            const autoMessageResult = await invokeCaseSecureMessageHandler({
-              req,
-              caseId,
-              payload: autoMessagePayload
-            });
-            if (!autoMessageResult.ok) {
-              console.warn(
-                '[auto-funding-message] send failed for case %s (status=%s, error=%s)',
-                caseId,
-                autoMessageResult.status,
-                autoMessageResult.body?.error || autoMessageResult.body?.detail || 'unknown_error'
-              );
-            }
-          } else {
-            console.warn(
-              '[auto-funding-message] skipped for case %s; missing workflows for %s',
-              caseId,
-              workflowResolution.missing.join(', ')
-            );
-          }
-        } catch (autoMessageErr) {
-          console.warn(
-            '[auto-funding-message] failed for case %s: %s',
-            caseId,
-            autoMessageErr?.message || autoMessageErr
-          );
-        }
-      }
-    }
+    // Approval transitions no longer send a separate auto-generated funding-forms message.
+    // Funding forms are attached to the approval letter message at send time.
     if (conflictDeclarationJustSigned) {
       const signedAtIso = (conflictDeclarationSignedAt || new Date()).toISOString();
       const conflictChoiceForEvent = conflictDeclarationChoice || 'no_conflict';
