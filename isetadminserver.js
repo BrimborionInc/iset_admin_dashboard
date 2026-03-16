@@ -20053,6 +20053,400 @@ const buildHistoryForStep = (stepCursor, stepOrder = DUMMY_STEP_ORDER_FALLBACK) 
   return [...canonicalOrder];
 };
 
+const DUMMY_DRAFT_UPLOAD_PREFIX = 'uploads/dummy';
+const DUMMY_DRAFT_SAMPLE_DIR_CANDIDATES = [
+  process.env.DUMMY_DRAFT_SAMPLE_DIR || '',
+  '/mnt/c/Users/Wilson/Documents/Samples',
+  'C:\\Users\\Wilson\\Documents\\Samples'
+].filter(Boolean);
+const DUMMY_DRAFT_UPLOAD_SAMPLE_FILES = {
+  'govt-id': [
+    { sampleName: 'Drivers Licence.png', displayName: 'Drivers Licence.png' }
+  ],
+  'status-card': [
+    { sampleName: 'Status Card.png', displayName: 'Status Card.png' }
+  ],
+  'uploaded-letters-of-reference': [
+    { sampleName: 'Reference.pdf', displayName: 'Reference Letter 1.pdf' },
+    { sampleName: 'Reference.pdf', displayName: 'Reference Letter 2.pdf' }
+  ],
+  'acceptance-letter': [
+    { sampleName: 'Acceptance Letter.png', displayName: 'Acceptance Letter.png' }
+  ],
+  'applicant-pay-stubs': [
+    { sampleName: 'Pay.png', displayName: 'Pay.png' },
+    { sampleName: 'Pay - Copy.png', displayName: 'Pay - Copy.png' },
+    { sampleName: 'Pay - Copy (2).png', displayName: 'Pay - Copy (2).png' }
+  ],
+  'spouse-pay-stubs': [
+    { sampleName: 'Pay.png', displayName: 'Spouse Pay 1.png' },
+    { sampleName: 'Pay - Copy.png', displayName: 'Spouse Pay 2.png' },
+    { sampleName: 'Pay - Copy (2).png', displayName: 'Spouse Pay 3.png' }
+  ],
+  'upload-social-assistance': [
+    { sampleName: 'Social Assistance.png', displayName: 'Social Assistance.png' }
+  ],
+  'upload-child-support': [
+    { sampleName: 'Child Support.png', displayName: 'Child Support.png' }
+  ],
+  'upload-ccb-statement': [
+    { sampleName: 'CBB.png', displayName: 'CBB.png' }
+  ],
+  'upload-jordans': [
+    { sampleName: 'Jordans.png', displayName: 'Jordans.png' }
+  ],
+  'upload-spousal-alimony': [
+    { sampleName: 'LOD.png', displayName: 'Spousal Support Letter.png' }
+  ],
+  'band-denial-letter': [
+    { sampleName: 'LOD.png', displayName: 'Band Denial Letter.png' }
+  ],
+  'band-funding-letter': [
+    { sampleName: 'Band Funding.png', displayName: 'Band Funding.png' }
+  ],
+  'medical-documents': [
+    { sampleName: 'LOD.png', displayName: 'Medical Documentation.png' }
+  ],
+  'lease-mortgage-statement': [
+    { sampleName: 'Rental Agreement.png', displayName: 'Rental Agreement.png' }
+  ],
+  'upload-utilities': [
+    { sampleName: 'Utility.png', displayName: 'Utility.png' },
+    { sampleName: 'Utility - Copy.png', displayName: 'Utility - Copy.png' },
+    { sampleName: 'Utility - Copy (2).png', displayName: 'Utility - Copy (2).png' }
+  ],
+  'uploaded-resume': [
+    { sampleName: 'Resume.docx', displayName: 'Resume.docx' }
+  ],
+  default: [
+    { sampleName: 'Drivers Licence.png', displayName: 'Dummy Upload.png' }
+  ]
+};
+let __dummyDraftSampleDirCache = null;
+
+function dummyDraftResolveText(value) {
+  if (!value && value !== 0) return '';
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  if (typeof value === 'object') {
+    return value.en || value.fr || Object.values(value).find(v => typeof v === 'string') || '';
+  }
+  return '';
+}
+
+function dummyDraftGetByPath(obj, rawPath) {
+  if (obj == null || !rawPath || typeof rawPath !== 'string') return undefined;
+  const tokens = rawPath.replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean);
+  let cursor = obj;
+  for (const token of tokens) {
+    if (cursor == null) return undefined;
+    cursor = cursor[token];
+  }
+  return cursor;
+}
+
+function dummyDraftCoerceNumeric(left, right) {
+  const a = typeof left === 'string' && left.trim() !== '' ? Number(left) : left;
+  const b = typeof right === 'string' && right.trim() !== '' ? Number(right) : right;
+  if (Number.isFinite(a) && Number.isFinite(b)) return [a, b];
+  return [left, right];
+}
+
+function dummyDraftLooselyEqual(left, right) {
+  if ((left === null && typeof right === 'undefined') || (typeof left === 'undefined' && right === null)) {
+    return true;
+  }
+  const [a, b] = dummyDraftCoerceNumeric(left, right);
+  if (Number.isFinite(a) && Number.isFinite(b)) return a === b;
+  return a === b;
+}
+
+function evaluateDummyDraftUploadVisibility(component, answers) {
+  if (!component || typeof component !== 'object') return true;
+  const conds = component.conditions || component.props?.conditions;
+  const rules = Array.isArray(conds?.all) ? conds.all : [];
+  if (!rules.length) return true;
+  for (const rule of rules) {
+    if (!rule || typeof rule !== 'object') return true;
+    const current = dummyDraftGetByPath(answers, rule.ref);
+    switch (rule.op) {
+      case 'exists':
+        if (current === undefined || current === null || (typeof current === 'string' && current.trim() === '')) return false;
+        break;
+      case 'notExists':
+        if (!(current === undefined || current === null || (typeof current === 'string' && current.trim() === ''))) return false;
+        break;
+      case 'emptyOrZero':
+        if (current === undefined || current === null || current === false) break;
+        if (typeof current === 'string') {
+          const trimmed = current.trim();
+          if (!trimmed) break;
+          const numeric = Number(trimmed);
+          if (Number.isFinite(numeric) && numeric === 0) break;
+          return false;
+        }
+        if (typeof current === 'number') {
+          if (Number.isFinite(current) && current === 0) break;
+          return false;
+        }
+        if (Array.isArray(current)) {
+          if (current.length === 0) break;
+          return false;
+        }
+        return false;
+      case 'equals':
+        if (!dummyDraftLooselyEqual(current, rule.value)) return false;
+        break;
+      case 'notEquals':
+        if (dummyDraftLooselyEqual(current, rule.value)) return false;
+        break;
+      case '>': {
+        const [a, b] = dummyDraftCoerceNumeric(current, rule.value);
+        if (!(Number.isFinite(a) && Number.isFinite(b)) || !(a > b)) return false;
+        break;
+      }
+      case '<': {
+        const [a, b] = dummyDraftCoerceNumeric(current, rule.value);
+        if (!(Number.isFinite(a) && Number.isFinite(b)) || !(a < b)) return false;
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return true;
+}
+
+function resolveDummyDraftSampleDir() {
+  if (__dummyDraftSampleDirCache !== null) {
+    return __dummyDraftSampleDirCache;
+  }
+  __dummyDraftSampleDirCache = DUMMY_DRAFT_SAMPLE_DIR_CANDIDATES.find(candidate => {
+    try {
+      return fs.existsSync(candidate);
+    } catch (_) {
+      return false;
+    }
+  }) || '';
+  return __dummyDraftSampleDirCache;
+}
+
+function guessDummyDraftMimeType(fileName) {
+  const ext = String(path.extname(fileName || '') || '').toLowerCase();
+  switch (ext) {
+    case '.png':
+      return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.gif':
+      return 'image/gif';
+    case '.bmp':
+      return 'image/bmp';
+    case '.webp':
+      return 'image/webp';
+    case '.heic':
+      return 'image/heic';
+    case '.pdf':
+      return 'application/pdf';
+    case '.doc':
+      return 'application/msword';
+    case '.docx':
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    case '.rtf':
+      return 'application/rtf';
+    case '.txt':
+      return 'text/plain';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+function resolveDummyDraftSampleMeta(sampleName, displayName) {
+  const sampleDir = resolveDummyDraftSampleDir();
+  const fallbackMimeType = guessDummyDraftMimeType(sampleName || displayName);
+  const fallbackSize = 1024;
+  if (!sampleDir || !sampleName) {
+    return { mimeType: fallbackMimeType, sizeBytes: fallbackSize };
+  }
+  try {
+    const samplePath = path.join(sampleDir, sampleName);
+    const stats = fs.statSync(samplePath);
+    return {
+      mimeType: guessDummyDraftMimeType(sampleName || displayName),
+      sizeBytes: Number.isFinite(Number(stats.size)) ? Number(stats.size) : fallbackSize
+    };
+  } catch (_) {
+    return { mimeType: fallbackMimeType, sizeBytes: fallbackSize };
+  }
+}
+
+function sanitizeDummyDraftUploadName(fileName) {
+  const lower = String(fileName || 'file')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  return lower || 'file';
+}
+
+function buildDummyDraftUploadPath(userId, fileName) {
+  const now = new Date();
+  return [
+    DUMMY_DRAFT_UPLOAD_PREFIX,
+    now.getUTCFullYear(),
+    String(now.getUTCMonth() + 1).padStart(2, '0'),
+    String(now.getUTCDate()).padStart(2, '0'),
+    normalisePositiveInteger(userId) || 'anon',
+    `${crypto.randomUUID()}-${sanitizeDummyDraftUploadName(fileName)}`
+  ].join('/');
+}
+
+function selectDummyDraftUploadTemplates(component) {
+  const storageKey = String(component?.storageKey || component?.id || '').trim();
+  const configured = DUMMY_DRAFT_UPLOAD_SAMPLE_FILES[storageKey] || DUMMY_DRAFT_UPLOAD_SAMPLE_FILES.default;
+  return configured.map((entry, index) => ({
+    sampleName: entry.sampleName,
+    displayName: entry.displayName || entry.sampleName || `${storageKey || 'upload'}-${index + 1}`
+  }));
+}
+
+function findDummyDraftDocumentUploadStep(schemaSteps) {
+  const candidates = (schemaSteps || []).filter(step => (
+    Array.isArray(step?.components) && step.components.some(component => String(component?.type || '').toLowerCase() === 'file-upload')
+  ));
+  if (!candidates.length) return null;
+  return candidates.find(step => {
+    const stepId = String(step?.stepId || step?.id || '').toLowerCase();
+    const title = dummyDraftResolveText(step?.title).toLowerCase();
+    return stepId.includes('document-upload') || title.includes('document upload');
+  }) || candidates[candidates.length - 1];
+}
+
+async function clearDummyDraftUploadMetadata(userId) {
+  const normalizedUserId = normalisePositiveInteger(userId);
+  if (!normalizedUserId) return;
+  const prefixLike = `${DUMMY_DRAFT_UPLOAD_PREFIX}/%`;
+  await pool.query(
+    'DELETE FROM iset_application_file WHERE user_id = ? AND file_path LIKE ?',
+    [normalizedUserId, prefixLike]
+  );
+  await pool.query(
+    `DELETE FROM iset_document
+      WHERE applicant_user_id = ?
+        AND application_id IS NULL
+        AND source = 'application_submission'
+        AND file_path LIKE ?`,
+    [normalizedUserId, prefixLike]
+  );
+}
+
+async function seedDummyDraftUploadMetadata({ schemaSteps, payloadData, userId }) {
+  const normalizedUserId = normalisePositiveInteger(userId);
+  if (!normalizedUserId) {
+    return { payloadPatch: {}, warnings: ['dummy_upload_seed_skipped:user_missing'], seededCount: 0 };
+  }
+  const documentStep = findDummyDraftDocumentUploadStep(schemaSteps);
+  if (!documentStep) {
+    return { payloadPatch: {}, warnings: ['dummy_upload_seed_skipped:document_step_missing'], seededCount: 0 };
+  }
+  const components = Array.isArray(documentStep.components) ? documentStep.components : [];
+  const uploadComponents = components.filter(component => String(component?.type || '').toLowerCase() === 'file-upload');
+  if (!uploadComponents.length) {
+    return { payloadPatch: {}, warnings: ['dummy_upload_seed_skipped:no_file_components'], seededCount: 0 };
+  }
+
+  const warnings = [];
+  try {
+    await clearDummyDraftUploadMetadata(normalizedUserId);
+  } catch (err) {
+    warnings.push('dummy_upload_seed_cleanup_failed');
+    console.warn('[dummy-draft-uploads] cleanup failed for user %s: %s', normalizedUserId, err?.message || err);
+  }
+
+  const payloadPatch = {};
+  let seededCount = 0;
+  for (const component of uploadComponents) {
+    const storageKey = String(component?.storageKey || component?.id || '').trim();
+    if (!storageKey) continue;
+    if (!evaluateDummyDraftUploadVisibility(component, payloadData)) continue;
+
+    const templates = selectDummyDraftUploadTemplates(component);
+    const label = dummyDraftResolveText(component?.documentLabel || component?.label) || storageKey;
+    const documentType = String(component?.documentType || component?.document_type || '').trim();
+    const nextEntries = [];
+    let componentInsertFailed = false;
+
+    for (const template of templates) {
+      const displayName = template.displayName || template.sampleName || `${storageKey}.bin`;
+      const { mimeType, sizeBytes } = resolveDummyDraftSampleMeta(template.sampleName, displayName);
+      const filePath = buildDummyDraftUploadPath(normalizedUserId, displayName);
+      nextEntries.push({
+        name: displayName,
+        size: sizeBytes,
+        type: mimeType,
+        fileId: null,
+        filePath
+      });
+      try {
+        await pool.query(
+          `INSERT INTO iset_application_file
+             (user_id, file_path, original_filename, document_type, status, virus_scan_status, detected_mime, scan_notes)
+           VALUES (?, ?, ?, ?, 'clean', 'skipped', ?, ?)`,
+          [
+            normalizedUserId,
+            filePath,
+            displayName,
+            documentType,
+            mimeType,
+            'admin_ai_dummy_draft_placeholder'
+          ]
+        );
+        await pool.query(
+          `INSERT INTO iset_document
+             (applicant_user_id, application_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category, visibility)
+           VALUES (?, NULL, 'application_submission', ?, ?, ?, ?, ?, ?, NULL, 'active', ?, 'internal')
+           ON DUPLICATE KEY UPDATE
+             updated_at = CURRENT_TIMESTAMP,
+             status = 'active',
+             mime_type = VALUES(mime_type),
+             label = VALUES(label),
+             metadata = VALUES(metadata),
+             size_bytes = VALUES(size_bytes),
+             document_category = VALUES(document_category)`,
+          [
+            normalizedUserId,
+            displayName,
+            filePath,
+            mimeType,
+            label,
+            JSON.stringify({
+              label,
+              document_type: documentType || null,
+              generatedBy: 'admin_ai_dummy_draft',
+              placeholderUpload: true,
+              storageSeeded: false
+            }),
+            sizeBytes,
+            documentType || null
+          ]
+        );
+      } catch (err) {
+        componentInsertFailed = true;
+        console.warn('[dummy-draft-uploads] metadata insert failed for %s (%s): %s', storageKey, normalizedUserId, err?.message || err);
+      }
+      seededCount += 1;
+    }
+
+    payloadPatch[storageKey] = component.multiple ? nextEntries : (nextEntries[0] || null);
+    if (componentInsertFailed) {
+      warnings.push(`dummy_upload_seed_metadata_failed:${storageKey}`);
+    }
+  }
+
+  return { payloadPatch, warnings, seededCount };
+}
+
 // --- AI-generated dummy draft helpers --------------------------------------
 const AI_DUMMY_DEFAULT_MODEL = (global.__AI_MODEL_OVERRIDE || process.env.OPENROUTER_MODEL || '').trim() || 'mistralai/mistral-7b-instruct';
 const AI_DUMMY_MAX_TOKENS = Math.max(400, Math.min(1600, parseInt(process.env.AI_DUMMY_MAX_TOKENS || '900', 10) || 900));
@@ -20726,6 +21120,32 @@ Vary applicant names across drafts; avoid repeating similar first/last initials.
   if (regRaw && typeof regRaw === 'object' && !Array.isArray(regRaw)) {
     const regFromObject = regRaw.registration_number || regRaw.value || extractPrimitiveFromObject(regRaw);
     finalPayloadData['registration-number'] = regFromObject ? String(regFromObject) : null;
+  }
+  try {
+    const seededUploads = await seedDummyDraftUploadMetadata({
+      schemaSteps,
+      payloadData: finalPayloadData,
+      userId
+    });
+    if (seededUploads?.payloadPatch && Object.keys(seededUploads.payloadPatch).length) {
+      Object.assign(finalPayloadData, seededUploads.payloadPatch);
+    }
+    if (Array.isArray(seededUploads?.warnings) && seededUploads.warnings.length) {
+      warnings.push(...seededUploads.warnings);
+    }
+    if (Number.isFinite(seededUploads?.seededCount) && seededUploads.seededCount > 0) {
+      const uploadSeedEvent = {
+        chunk: 'dummy-document-uploads',
+        ok: true,
+        missing: [],
+        preview: `${seededUploads.seededCount} placeholder uploads`
+      };
+      chunkLogs.push(uploadSeedEvent);
+      if (typeof onProgress === 'function') onProgress({ type: 'chunk', ...uploadSeedEvent });
+    }
+  } catch (err) {
+    warnings.push('dummy_upload_seed_failed');
+    console.warn('[ai-dummy-draft] placeholder upload seeding failed for user %s: %s', userId, err?.message || err);
   }
   const history = buildHistoryForStep(canonicalStepCursor, stepOrder);
   const draftPayload = { ...finalPayloadData, history };
@@ -34100,16 +34520,292 @@ app.get('/api/reference/noc-codes', async (req, res) => {
     params.push(cappedLimit);
 
     const [rows] = await pool.query(sql, params);
-    const codes = rows.map(row => ({
+    let codes = rows.map(row => ({
       code: row.code,
       version: row.version_code,
       title: row.title,
     }));
+
+    if (searchTerm && versionCode === '2021' && codes.length < cappedLimit) {
+      const fallbackCodes = await expandNocCodesFromJobBankTitles({
+        query: searchTerm,
+        versionCode,
+        existingCodes: codes.map(item => item.code),
+        limit: cappedLimit - codes.length,
+      });
+      if (fallbackCodes.length) {
+        codes = [...codes, ...fallbackCodes].slice(0, cappedLimit);
+      }
+    }
+
     res.set('Cache-Control', 'public, max-age=600');
     res.json({ codes });
   } catch (error) {
     console.error('GET /api/reference/noc-codes failed:', error);
     res.status(500).json({ error: 'noc_codes_fetch_failed', detail: error?.message || String(error) });
+  }
+});
+
+const JOB_BANK_BASE_URL = 'https://www.jobbank.gc.ca';
+const JOB_BANK_OCCUPATION_TYPEAHEAD_URL = `${JOB_BANK_BASE_URL}/core/ta-jobtitle_en/select`;
+const JOB_BANK_LOCATION_TYPEAHEAD_URL = `${JOB_BANK_BASE_URL}/core/ta-cityprovsuggest_en/select`;
+const JOB_BANK_OCCUPATION_SUMMARY_URL = `${JOB_BANK_BASE_URL}/marketreport/summary-occupation`;
+
+function normaliseLookupText(value) {
+  const normalized = normaliseString(value);
+  if (!normalized) return '';
+  return String(normalized)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+async function expandNocCodesFromJobBankTitles({ query, versionCode, existingCodes = [], limit = 25 }) {
+  const normalizedQuery = normaliseString(query);
+  if (!normalizedQuery || !versionCode || limit <= 0) return [];
+
+  const params = new URLSearchParams();
+  params.set('q', normalizedQuery);
+  params.set('wt', 'json');
+  params.set('rows', '25');
+  params.append('fq', 'noc_job_title_type_id:1');
+
+  const response = await axios.get(`${JOB_BANK_OCCUPATION_TYPEAHEAD_URL}?${params.toString()}`, {
+    timeout: 10000,
+  });
+
+  const docs = Array.isArray(response?.data?.response?.docs) ? response.data.response.docs : [];
+  const seen = new Set(existingCodes.map(code => String(code).trim()));
+  const rankedCodes = [];
+
+  docs.forEach((doc, index) => {
+    const code = normaliseString(doc?.noc21_code);
+    if (!code || seen.has(code)) return;
+    seen.add(code);
+    rankedCodes.push({
+      code,
+      score: scoreJobBankOccupationDoc(doc, { query: normalizedQuery, nocCode: code, index }),
+      index,
+    });
+  });
+
+  if (!rankedCodes.length) return [];
+
+  rankedCodes.sort((left, right) => {
+    if (right.score !== left.score) return right.score - left.score;
+    return left.index - right.index;
+  });
+
+  const topCodes = rankedCodes.slice(0, limit).map(item => item.code);
+  if (!topCodes.length) return [];
+
+  const placeholders = topCodes.map(() => '?').join(', ');
+  const [rows] = await pool.query(
+    `
+      SELECT code, version_code, title
+        FROM noc_code
+       WHERE is_active = 1
+         AND version_code = ?
+         AND code IN (${placeholders})
+    `,
+    [versionCode, ...topCodes]
+  );
+
+  const rowByCode = new Map(
+    (Array.isArray(rows) ? rows : []).map(row => [
+      String(row.code).trim(),
+      {
+        code: row.code,
+        version: row.version_code,
+        title: row.title,
+      },
+    ])
+  );
+
+  return topCodes.map(code => rowByCode.get(code)).filter(Boolean);
+}
+
+function scoreJobBankOccupationDoc(doc, { query, nocCode, index }) {
+  let score = 0;
+  const normalizedQuery = normaliseLookupText(query);
+  const normalizedTitle = normaliseLookupText(doc?.title);
+  const normalizedNocCode = normaliseLookupText(nocCode);
+  const docNocCode = normaliseLookupText(doc?.noc21_code);
+
+  if (normalizedNocCode && docNocCode === normalizedNocCode) score += 1000;
+  if (normalizedQuery) {
+    if (normalizedTitle === normalizedQuery) score += 500;
+    if (normalizedTitle.startsWith(normalizedQuery)) score += 250;
+    if (normalizedTitle.includes(normalizedQuery)) score += 100;
+  }
+  if (String(doc?.example_ind || '') === '1') score += 25;
+  return score - index;
+}
+
+async function fetchJobBankOccupationDocs({ query, nocCode }) {
+  const params = new URLSearchParams();
+  params.set('q', normaliseString(nocCode) || normaliseString(query) || '');
+  params.set('wt', 'json');
+  params.set('rows', '25');
+  params.append('fq', 'noc_job_title_type_id:1');
+  if (nocCode) params.append('fq', `noc21_code:${nocCode}`);
+
+  const response = await axios.get(`${JOB_BANK_OCCUPATION_TYPEAHEAD_URL}?${params.toString()}`, {
+    timeout: 10000,
+  });
+
+  return Array.isArray(response?.data?.response?.docs) ? response.data.response.docs : [];
+}
+
+function pickJobBankOccupationDoc(docs, { query, nocCode }) {
+  if (!Array.isArray(docs) || !docs.length) return null;
+
+  const ranked = docs
+    .map((doc, index) => ({
+      doc,
+      score: scoreJobBankOccupationDoc(doc, { query, nocCode, index }),
+      index,
+    }))
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score;
+      return left.index - right.index;
+    });
+
+  return ranked[0]?.doc || null;
+}
+
+function buildJobBankLocationParam(doc) {
+  const docId = String(doc?.docid || '');
+  if (docId.startsWith('PR')) return normaliseString(doc?.province_cd)?.toUpperCase() || 'ca';
+  if (docId.startsWith('P')) return normaliseString(doc?.postalcode) || 'ca';
+  return normaliseString(doc?.city_id) || 'ca';
+}
+
+function buildJobBankLocationLabel(doc) {
+  const docId = String(doc?.docid || '');
+  if (docId.startsWith('PR')) return normaliseString(doc?.province_name) || 'Canada';
+  if (docId.startsWith('P')) return normaliseString(doc?.postalcode) || 'Canada';
+
+  const name = normaliseString(doc?.name);
+  const provinceCode = normaliseString(doc?.province_cd)?.toUpperCase();
+  if (name && provinceCode) return `${name}, ${provinceCode}`;
+  return name || 'Canada';
+}
+
+function scoreJobBankLocationDoc(doc, { location, index }) {
+  let score = 0;
+  const normalizedLocation = normaliseLookupText(location);
+  const uppercaseLocation = (normaliseString(location) || '').toUpperCase();
+  const docId = String(doc?.docid || '');
+  const normalizedName = normaliseLookupText(doc?.name);
+  const normalizedProvinceName = normaliseLookupText(doc?.province_name);
+  const provinceCode = (normaliseString(doc?.province_cd) || '').toUpperCase();
+
+  if (docId.startsWith('PR') && provinceCode && uppercaseLocation === provinceCode) score += 1000;
+  if (docId.startsWith('PR') && normalizedProvinceName && normalizedProvinceName === normalizedLocation) score += 900;
+  if (normalizedName && normalizedName === normalizedLocation) score += 850;
+  if (normalizedProvinceName && normalizedProvinceName.includes(normalizedLocation)) score += 100;
+  if (normalizedName && normalizedName.includes(normalizedLocation)) score += 75;
+
+  return score - index;
+}
+
+async function resolveJobBankLocation(locationText) {
+  const location = normaliseString(locationText);
+  if (!location) {
+    return {
+      locationInput: 'Canada',
+      locationParam: 'ca',
+    };
+  }
+
+  const normalizedLocation = normaliseLookupText(location);
+  if (normalizedLocation === 'ca' || normalizedLocation === 'canada') {
+    return {
+      locationInput: 'Canada',
+      locationParam: 'ca',
+    };
+  }
+
+  const params = new URLSearchParams();
+  params.set('q', location);
+  params.set('wt', 'json');
+  params.set('rows', '10');
+  params.append('fq', 'NOT postalcode_cnt:0');
+
+  const response = await axios.get(`${JOB_BANK_LOCATION_TYPEAHEAD_URL}?${params.toString()}`, {
+    timeout: 10000,
+  });
+  const docs = Array.isArray(response?.data?.response?.docs) ? response.data.response.docs : [];
+  if (!docs.length) {
+    return {
+      locationInput: location,
+      locationParam: 'ca',
+    };
+  }
+
+  const best = docs
+    .map((doc, index) => ({
+      doc,
+      score: scoreJobBankLocationDoc(doc, { location, index }),
+      index,
+    }))
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score;
+      return left.index - right.index;
+    })[0]?.doc;
+
+  return {
+    locationInput: buildJobBankLocationLabel(best),
+    locationParam: buildJobBankLocationParam(best),
+  };
+}
+
+app.get('/api/reference/jobbank-occupation-summary', async (req, res) => {
+  const query = normaliseString(req.query?.query);
+  const nocCode = normaliseString(req.query?.nocCode);
+  const location = normaliseString(req.query?.location);
+
+  if (!query && !nocCode) {
+    return res.status(422).json({
+      error: 'jobbank_occupation_query_required',
+      message: 'An occupation query or NOC code is required.',
+    });
+  }
+
+  try {
+    const docs = await fetchJobBankOccupationDocs({ query, nocCode });
+    const bestOccupation = pickJobBankOccupationDoc(docs, { query, nocCode });
+
+    if (!bestOccupation?.noc_job_title_concordance_id) {
+      return res.status(404).json({
+        error: 'jobbank_occupation_not_found',
+        message: 'No matching Job Bank occupation could be resolved.',
+      });
+    }
+
+    const resolvedLocation = await resolveJobBankLocation(location);
+    const occupationId = String(bestOccupation.noc_job_title_concordance_id).trim();
+    const locationParam = resolvedLocation.locationParam || 'ca';
+    const summaryUrl = `${JOB_BANK_OCCUPATION_SUMMARY_URL}/${encodeURIComponent(occupationId)}/${encodeURIComponent(locationParam)}`;
+
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      summaryUrl,
+      occupation: {
+        id: occupationId,
+        title: normaliseString(bestOccupation.title) || query || nocCode,
+        nocCode: normaliseString(bestOccupation.noc21_code) || nocCode || null,
+      },
+      location: resolvedLocation,
+    });
+  } catch (error) {
+    console.error('GET /api/reference/jobbank-occupation-summary failed:', error);
+    res.status(500).json({
+      error: 'jobbank_occupation_summary_failed',
+      message: 'Unable to resolve the Job Bank occupation summary page.',
+      detail: error?.message || String(error),
+    });
   }
 });
 

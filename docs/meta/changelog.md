@@ -2,6 +2,16 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-03-16
+- Workflow/Content: Added `scripts/update-workflow21-trauma-copy.js` and revised workflow `21` intake step-library copy in the dev database for trauma-informed, bilingual applicant-facing language, including summary-page label snapshots and document-upload/legal declaration text cleanup.
+- Workflow/Content: Simplified workflow `21` step `76` consent copy further into plain-language informed permission, removing statute references from that step while leaving the later legal-submission consent block unchanged.
+- Docs/Planning: Added `docs/planning/intacct-mock-dashboard-design.md` as the durable handoff and design baseline for the separate mock Sage Intacct dashboard, PATH bill-splitting correction, phased MVP plan, and future reconciliation sync work.
+
+## 2026-03-13
+- UX/Integration: Refactored the Job Bank Search dashboard into two tabs: `Find a Job` retains the original posting-search flow, while `Explore a Profession` adds a PATH 2021-NOC autosuggest plus location input that resolves to the matching Job Bank profession summary page in the lower embedded frame.
+- API/Integration: Added a Job Bank profession-summary resolver endpoint that translates PATH profession/location inputs into Job Bank's own occupation and location identifiers before building the final summary-page URL.
+- UX/Help: Updated the Job Bank Search help panel to explain the new tabbed flow, the 2021-NOC profession picker, and the Job Bank summary-page resolver behavior.
+
 ## 2026-03-12
 - Messaging/Workflow: Approval letters now carry required funding-signature forms as attachments in the same secure message (`Client Funding Agreement`, `Client Acknowledgement of Funding Source`, `EFT/Wire form`) instead of sending a separate follow-up message.
 - Messaging/Workflow: Sending an approval letter now triggers docs-requested/reminder automation through the same secure-message path as manual form requests because non-letter signing attachments are included with the letter send.

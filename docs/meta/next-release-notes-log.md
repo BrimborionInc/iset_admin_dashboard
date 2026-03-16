@@ -4,7 +4,7 @@ Purpose: running capture of user-facing fixes/changes for the next "What's New" 
 
 Current public release in Landing Page: `v0.5.4` (`12th March 2026`)
 Target next release notes draft: `v0.5.5` (date TBD)
-Last Updated: 2026-03-12
+Last Updated: 2026-03-13
 
 ## How to use
 
@@ -18,6 +18,7 @@ Last Updated: 2026-03-12
 
 ## Entries
 
+- 2026-03-13 | Release v0.5.5 | UX/Integration | Job Bank Search dashboard | Reworked Job Bank Search into `Find a Job` and `Explore a Profession` tabs; the new profession tab uses PATH's 2021 NOC suggestions plus location input to open the matching Job Bank summary page in the lower embedded frame. | Includes a backend resolver that maps PATH profession/location inputs to Job Bank's own occupation/location identifiers instead of loading the intermediate Job Bank search form.
 - 2026-03-12 | Release v0.5.4 | UX/Lettering | Application Assessment > Communication | Added approval letter-pack tabs: editable client letter plus admin-only institution and other funding source letters as read-only preview/download outputs. | Keeps portal delivery limited to the client letter while exposing non-client correspondence artifacts in-place for case managers.
 - 2026-03-12 | Release v0.5.4 | Fix/Checklist | Application Assessment > Funding forms checklist | Fixed EFT checklist mismatch in approval-letter auto-send flow by using canonical `EFT_form` document type on generated signing requests. | Signed EFT forms sent via approval-letter flow now clear the EFT checklist item the same way as manual secure-message sends.
 - 2026-03-12 | Release v0.5.4 | UX/Lettering | Application Assessment > Approval draft generation | Approval drafting now runs one privacy-safe AI copy-edit pass using placeholders, then injects case-specific values locally to keep deterministic outcomes and avoid sending applicant personal data to AI. | Funding amount lines and forms instruction remain deterministic/fixed in app logic.
