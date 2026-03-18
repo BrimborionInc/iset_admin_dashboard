@@ -402,7 +402,7 @@
           "documentTypes": [
             "client_acknowledgement"
           ],
-          "notes": "Mandatory for non-zero-cost action plans (i.e., where a planned intervention has costs)."
+          "notes": "Mandatory for non-zero-cost action plans (i.e., where an approved intervention has costs)."
         },
         {
           "id": "eft-or-wire-transfer-form",

@@ -35,6 +35,12 @@ const DEFAULT_STATUS_FILTERS = [
   "closed",
   "archived",
 ];
+const CLIENT_CATEGORY_OPTIONS = [
+  { label: "Show Active Clients", value: "active" },
+  { label: "Show Dormant Clients", value: "dormant" },
+  { label: "Show Ineligible Clients", value: "ineligible_reporting" },
+  { label: "Show All Clients", value: "all" },
+];
 
 const formatDate = value => {
   if (!value) return "-";
@@ -285,6 +291,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const [columnWidths, setColumnWidths] = useState(() => loadColumnWidths());
   const [preferences, setPreferences] = useState(() => loadPreferences());
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
+  const [clientCategory, setClientCategory] = useState(CLIENT_CATEGORY_OPTIONS[0]);
   const preferencesRef = useRef(preferences);
   const pageSize = preferences.pageSize ?? DEFAULT_PAGE_SIZE;
 
@@ -318,6 +325,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     searchText,
     statusFilters: DEFAULT_STATUS_FILTERS,
     ownerFilters: undefined,
+    clientCategory: clientCategory?.value || "active",
     page: currentPageIndex,
     pageSize,
     sort: null,
@@ -647,7 +655,23 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   }, [preferences.visibleColumns, columnWidths]);
 
   const selectedAgreement = selectedAgreements?.[0] || null;
+  const handleClientCategoryChange = ({ detail }) => {
+    const nextOption = detail?.selectedOption || CLIENT_CATEGORY_OPTIONS[0];
+    setClientCategory(nextOption);
+    setCurrentPageIndex(1);
+    setExpandedItems([]);
+  };
   const headerActionItems = [];
+  headerActionItems.push(
+    <Select
+      key="client-category"
+      selectedOption={clientCategory}
+      options={CLIENT_CATEGORY_OPTIONS}
+      onChange={handleClientCategoryChange}
+      ariaLabel="Client category filter"
+      selectedAriaLabel="selected"
+    />
+  );
   if (selectedAgreement) {
     headerActionItems.push(
       <Button key="clear" iconName="close" onClick={clearAgreementFilters}>

@@ -2,6 +2,33 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-03-18
+- Fix/Agreements: Participant-facing redline CFAs now render the intervention update badge correctly and apply explicit strike/add styling to redlined details cells, so removed funding lines no longer appear as plain rows and badge HTML no longer leaks into the document.
+- UX/Layout: Starting or resuming intervention proposal/revision work from Case Workspace now switches the dashboard into an intervention-focused layout with `Case header`, `Action plans`, `Interventions`, and the intervention workflow widget visible together.
+- Messaging/Workflow: Approval-letter funding packages no longer auto-attach `Client Acknowledgement of Funding Source`, because that form is now collected during the application process.
+- Fix/Messaging: Case Workspace proposed-intervention approval letters now attach the funding package (`Client Funding Agreement`, `EFT/Wire form`) when the approved intervention being sent includes funded cost lines, even if the original assessment on the case had no funding.
+- UX/Workflow: Case Workspace proposed-intervention approval now exposes inline parent Action Plan funding settings (`Funding stream`, `Budget pot`, `Paid from`) in the decision step when approval needs them, instead of forcing staff to leave the wizard to repair the plan first.
+- UX/Lettering: Application Workspace approval letters now switch to intervention-focused wording when the approved assessment has no funded cost lines, emphasizing the approved intervention(s) and dates instead of funding-disbursement language.
+- Messaging/Workflow: Sending an approval letter from Application Workspace now skips the auto-attached funding package (`Client Funding Agreement`, `EFT/Wire form`) when the approved assessment contains no funded cost lines.
+- UX/Agreements: Revised Client Funding Agreements now generate and send as redline revisions against the prior signed CFA, with amended funding rows and totals shown inline using strikeout/added markup instead of only storing a separate coarse diff PDF.
+- UX/Agreements: Client Funding Agreement generation now reflects already-paid intervention cost lines in the detail text, for example switching one-time items from `payable on ...` to `paid on ...` and showing partial-payment wording for recurring lines with historical paid amounts.
+- Refactor: Intervention status handling now uses a canonical set only: `draft`, `submitted`, `in_review`, `changes_requested`, `approved`, `rejected`, `in_progress`, `suspended`, `completed`, `cancelled`.
+- UX: Pre-start approved interventions now display as `Approved` across Case Workspace and finance flows instead of using the legacy `planned` state.
+- API: Auto-created and newly approved interventions now persist `approved` as the pre-start status, and activation flows transition only from `approved` to `in_progress`.
+- Ops: Added `sql/20260318_0001_cleanup_intervention_statuses.sql` to normalize old intervention statuses and change the table default to `draft`.
+- Fix/Payments: Auto-generated payment packets now create their line items transactionally, and payee-type storage was widened to fit the configured detailed payee codes used by approved cost lines.
+- Fix/Payments: Aligned the `payment_packet.status` DB enum with the live scheduling workflow so `awaiting_trigger` and `released` are now valid persisted packet statuses, matching the existing server/UI behavior.
+
+## 2026-03-17
+- UX/Lettering: Approval-letter packs in Application Assessment and Case Workspace proposed interventions now generate dedicated `Loan Provider` letters for funded `Student Loan Repayment` lines, grouped by provider/account and available as a separate preview/download tab.
+- UX/Assessment: Cost-line modals now relabel the payee fields for `Student Loan Repayment` to `Loan provider / servicer name` and `Loan account number`, making the approval-letter data entry explicit at assessment time.
+- UX/Data: Payee-type selectors in Application Assessment, Case Workspace, and Finance payment modals now load from a runtime-config payee-type catalog instead of a hardcoded frontend list; seeded the catalog in runtime config and added `Student Loan Provider / Servicer` for `Student Loan Repayment` lines.
+- Fix/Workflow: Eligibility-denial reporting seeding now keys off a persisted structured denial reason code from the denial-letter workflow instead of the free-text assessment note, so `eligibility_not_met` denials reliably create the reporting-only downstream records.
+- UX/Wording: Application-status labels now display `Not Approved` instead of `Rejected` across application-facing admin UI surfaces while keeping the underlying system status code as `rejected`.
+- Workflow/Reporting: Eligibility denials (`eligibility_not_met`) now auto-seed reporting-only downstream records: ensure client, create a closed action plan, create one completed `Career Research and Exploration` intervention, and initialize ESDC participant validation without sending the record into normal casework queues.
+- Workflow/Reporting: Denied-ineligible records now stay editable in Application Workspace for ILMP corrections after rejection, with automatic downstream resync/revalidation and clear Application Overview status messaging for blocked vs ready ESDC reporting state.
+- Reporting/Batching: ESDC batch prepare/submit now include only `ready` participants and automatically exclude `blocked` / `needs_review` records instead of failing the whole batch; the batch widget now shows ready/review/blocked counts and excluded-record details.
+
 ## 2026-03-16
 - Workflow/Content: Added `scripts/update-workflow21-trauma-copy.js` and revised workflow `21` intake step-library copy in the dev database for trauma-informed, bilingual applicant-facing language, including summary-page label snapshots and document-upload/legal declaration text cleanup.
 - Workflow/Content: Simplified workflow `21` step `76` consent copy further into plain-language informed permission, removing statute references from that step while leaving the later legal-submission consent block unchanged.

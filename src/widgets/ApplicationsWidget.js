@@ -186,9 +186,11 @@ const ASSESSMENT_STATUSES = new Set([
 const getStatusInfo = (row) => {
   const applicationStatusRaw = typeof row.application_status === 'string' ? row.application_status.trim() : '';
   const rawStatus = normalizeClosedStatus(applicationStatusRaw || 'submitted');
-  const label = rawStatus
-    .replace(/[_-]+/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase());
+  const label = rawStatus === 'rejected'
+    ? 'Not Approved'
+    : rawStatus
+        .replace(/[_-]+/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
   const isUnassignedCase = rawStatus === 'submitted' && !row.assigned_user_id;
   const eligibilityMissing =
     !row.assessment_esdc_eligibility &&

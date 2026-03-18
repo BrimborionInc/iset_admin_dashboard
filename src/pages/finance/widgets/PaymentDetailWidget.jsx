@@ -27,7 +27,7 @@ import xmlHighlight from "@cloudscape-design/code-view/highlight/xml";
 import { apiFetch } from "../../../auth/apiClient";
 import { boardItemI18nStrings } from "./common";
 import { usePaymentsData } from "./PaymentsDataContext.jsx";
-import { PAYMENT_TYPE_OPTIONS, PAYEE_TYPE_OPTIONS, findOptionByValue } from "./paymentOptions";
+import { findOptionByValue } from "./paymentOptions";
 
 const formatCurrency = value =>
   new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(value);
@@ -133,24 +133,67 @@ const packetStatusMeta = {
   awaiting_trigger: { label: "Awaiting trigger", indicator: "warning" },
   released: { label: "Ready to send", indicator: "success" },
   submitted: { label: "Submitted to finance", indicator: "info" },
+  confirmed: { label: "Confirmed paid", indicator: "success" },
+  closed: { label: "Closed", indicator: "success" },
   cancelled: { label: "Cancelled", indicator: "error" },
 };
 
 const lineStatusMeta = {
   needs_evidence: { label: "Needs evidence", indicator: "warning" },
-  ready: { label: "Ready to submit", indicator: "success" },
+  ready_for_program: { label: "Ready for program review", indicator: "success" },
+  ready_for_finance: { label: "Ready for finance review", indicator: "success" },
+  approved: { label: "Approved", indicator: "success" },
+  held: { label: "Held", indicator: "warning" },
+  batched: { label: "Batched", indicator: "info" },
+  paid: { label: "Paid", indicator: "success" },
   submitted: { label: "Submitted", indicator: "info" },
   cancelled: { label: "Cancelled", indicator: "error" },
 };
 
 const resolveLineStatusMeta = (line, packetStatusKey) => {
-  if (line?.status === "cancelled") return lineStatusMeta.cancelled;
+  const normalizedStatus = String(line?.status || "").trim().toLowerCase();
+  if (normalizedStatus && lineStatusMeta[normalizedStatus]) {
+    return lineStatusMeta[normalizedStatus];
+  }
   if (packetStatusKey === "submitted") return lineStatusMeta.submitted;
   if ((line?.evidenceSummary?.missing ?? 0) > 0) {
     return lineStatusMeta.needs_evidence;
   }
-  return lineStatusMeta.ready;
+  return lineStatusMeta.ready_for_program;
 };
+
+const editableLineStatusOptions = [
+  {
+    value: "needs_evidence",
+    label: "Needs evidence",
+    description: "Line is not ready for review yet.",
+  },
+  {
+    value: "ready_for_program",
+    label: "Ready for program review",
+    description: "Line is ready for program review.",
+  },
+  {
+    value: "ready_for_finance",
+    label: "Ready for finance review",
+    description: "Line is ready for finance review.",
+  },
+  {
+    value: "approved",
+    label: "Approved",
+    description: "Line is approved for downstream finance processing.",
+  },
+  {
+    value: "held",
+    label: "Held",
+    description: "Line is on hold pending follow-up.",
+  },
+  {
+    value: "cancelled",
+    label: "Cancelled",
+    description: "Line is cancelled and will not be paid.",
+  },
+];
 
 const normalizeInterventionCodeValue = value => {
   if (value === null || value === undefined || value === "") return null;
@@ -592,12 +635,15 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     selectedRequest,
     updatePacketStatus,
     validatePacket,
+    updateLineStatus,
     updateLine,
     deleteLine,
     addPacketLines,
     createRecurringLines,
     reloadRequests,
     paymentTypeMappingLookup,
+    paymentTypeOptions: configuredPaymentTypeOptions,
+    payeeTypeOptions: configuredPayeeTypeOptions,
     paymentTypeRecurrencePolicyLookup,
     paymentTypeMappingLoading,
   } = usePaymentsData();
@@ -650,6 +696,8 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     payeeReference: "",
     amount: "",
     potId: "",
+    status: "",
+    holdReason: "",
     servicePeriodStart: "",
     servicePeriodEnd: "",
     requestedPaymentDate: "",
@@ -657,6 +705,13 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   });
   const [lineSubmitting, setLineSubmitting] = useState(false);
   const [lineError, setLineError] = useState(null);
+  const [markPaidModalOpen, setMarkPaidModalOpen] = useState(false);
+  const [markPaidSubmitting, setMarkPaidSubmitting] = useState(false);
+  const [markPaidError, setMarkPaidError] = useState(null);
+  const [markPaidForm, setMarkPaidForm] = useState({
+    paidAt: "",
+    paymentReference: "",
+  });
   const [deleteLineModalOpen, setDeleteLineModalOpen] = useState(false);
   const [deleteLineSubmitting, setDeleteLineSubmitting] = useState(false);
   const [deleteLineError, setDeleteLineError] = useState(null);
@@ -683,9 +738,9 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     return paymentTypeMappingLookup.get(selectedInterventionCode);
   }, [paymentTypeMappingLookup, selectedInterventionCode]);
   const linePaymentTypeOptions = useMemo(() => {
-    if (!allowedPaymentTypes) return PAYMENT_TYPE_OPTIONS;
-    return PAYMENT_TYPE_OPTIONS.filter(option => allowedPaymentTypes.has(option.value));
-  }, [allowedPaymentTypes]);
+    if (!allowedPaymentTypes) return configuredPaymentTypeOptions;
+    return configuredPaymentTypeOptions.filter(option => allowedPaymentTypes.has(option.value));
+  }, [allowedPaymentTypes, configuredPaymentTypeOptions]);
   const linePaymentTypeInvalid = useMemo(() => {
     if (!allowedPaymentTypes) return false;
     if (!lineForm.paymentType) return false;
@@ -698,12 +753,13 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       : "Payment type is not allowed for the selected intervention.";
   }, [linePaymentTypeInvalid, selectedInterventionCode]);
   const linePaymentTypeEmptyMessage = useMemo(() => {
+    if (!configuredPaymentTypeOptions.length) return "No payment types are configured.";
     if (!allowedPaymentTypes) return "No payment types available.";
     if (allowedPaymentTypes.size === 0) {
       return "No payment types are available for this intervention.";
     }
     return "No payment types match.";
-  }, [allowedPaymentTypes]);
+  }, [allowedPaymentTypes, configuredPaymentTypeOptions]);
 
   useEffect(() => {
     let cancelled = false;
@@ -840,6 +896,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
 
   const packetLines = selectedRequest?.lines ?? [];
   const packetStatusKey = normalizePacketStatusKey(selectedRequest?.status);
+  const packetStatusValue = String(selectedRequest?.status || "").trim().toLowerCase();
   const packetValidation =
     selectedRequest?.validation || selectedRequest?.metadata?.paymentValidation || null;
   const validationStatus =
@@ -874,6 +931,12 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     packetStatusKey === "draft";
   const showRecurringLinesButton = false;
   const canEditPacketLines = selectedRequest && packetStatusKey === "draft";
+  const canMarkLinePaid =
+    Boolean(selectedRequest) &&
+    packetStatusValue === "submitted" &&
+    Boolean(selectedLine) &&
+    selectedLine.status !== "paid" &&
+    selectedLine.status !== "cancelled";
   const canUploadEvidence = packetStatusKey === "draft";
   const intacctPreview = useMemo(
     () => buildIntacctApBillPreview(selectedRequest, intacctConfig),
@@ -1377,8 +1440,8 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     return { value: lineForm.paymentType, label };
   }, [lineForm.paymentType, linePaymentTypeInvalid, linePaymentTypeOptions]);
   const selectedLinePayeeType = useMemo(
-    () => findOptionByValue(PAYEE_TYPE_OPTIONS, lineForm.payeeType),
-    [lineForm.payeeType]
+    () => findOptionByValue(configuredPayeeTypeOptions, lineForm.payeeType),
+    [configuredPayeeTypeOptions, lineForm.payeeType]
   );
   const lineRegionCode = useMemo(
     () => normalizeRegionCode(selectedRequest?.reportingUnit),
@@ -1618,6 +1681,8 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       payeeReference: "",
       amount: "",
       potId: "",
+      status: "",
+      holdReason: "",
       servicePeriodStart: "",
       servicePeriodEnd: "",
       requestedPaymentDate: "",
@@ -1647,6 +1712,8 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       payeeReference: selectedLine.payeeReference || "",
       amount: selectedLine.amount ? String(selectedLine.amount) : "",
       potId: selectedLine.potId || "",
+      status: selectedLine.status || "",
+      holdReason: selectedLine.holdReason || "",
       servicePeriodStart: selectedLine.servicePeriodStart || "",
       servicePeriodEnd: selectedLine.servicePeriodEnd || "",
       requestedPaymentDate: selectedLine.requestedPaymentDate || "",
@@ -1660,6 +1727,27 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     setDeleteLineError(null);
     setDeleteLineModalOpen(true);
   };
+
+  const openMarkPaidModal = () => {
+    if (!selectedLine || !canMarkLinePaid) return;
+    setMarkPaidError(null);
+    setMarkPaidForm({
+      paidAt: selectedLine.paidAt ? String(selectedLine.paidAt).slice(0, 10) : new Date().toISOString().slice(0, 10),
+      paymentReference: selectedLine.paymentReference || "",
+    });
+    setMarkPaidModalOpen(true);
+  };
+
+  const selectedLineStatus = useMemo(() => {
+    const found = findOptionByValue(editableLineStatusOptions, lineForm.status);
+    if (found) return found;
+    if (!lineForm.status) return null;
+    const fallbackMeta = lineStatusMeta[lineForm.status];
+    if (fallbackMeta) {
+      return { value: lineForm.status, label: fallbackMeta.label };
+    }
+    return { value: lineForm.status, label: lineForm.status };
+  }, [lineForm.status]);
 
   useEffect(() => {
     if (!lineModalOpen) return;
@@ -1715,6 +1803,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     }
     setLineSubmitting(true);
     setLineError(null);
+    let fieldsSaved = false;
     try {
       const payload = {
         paymentType,
@@ -1723,13 +1812,21 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         payeeReference: lineForm.payeeReference ? lineForm.payeeReference.trim() : null,
         amount: amountValue,
         potId: Number(potId),
+        holdReason: lineForm.status === "held" ? lineForm.holdReason.trim() || null : null,
         servicePeriodStart: lineForm.servicePeriodStart || null,
         servicePeriodEnd: lineForm.servicePeriodEnd || null,
         requestedPaymentDate: lineForm.requestedPaymentDate || null,
         invoiceReferenceNumber: lineForm.invoiceReferenceNumber || null,
       };
       if (lineModalMode === "edit" && selectedLine?.id) {
+        const nextStatus = lineForm.status || selectedLine.status || "needs_evidence";
         await updateLine(selectedLine.id, payload);
+        fieldsSaved = true;
+        if (nextStatus !== selectedLine.status) {
+          await updateLineStatus(selectedLine.id, nextStatus, {
+            holdReason: nextStatus === "held" ? lineForm.holdReason.trim() || null : null,
+          });
+        }
         setActionStatus({ type: "success", message: `Line ${selectedLine.id} updated.` });
       } else {
         await addPacketLines(selectedRequest.id, { line: payload });
@@ -1738,11 +1835,16 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       setLineModalOpen(false);
     } catch (err) {
       const detailMessages = formatLineErrorDetails(err?.details || err?.payload?.details);
-      if (detailMessages?.length) {
-        setLineError(detailMessages);
-      } else {
-        setLineError(err?.message || "Failed to save payment line.");
+      const failureMessage = detailMessages?.length
+        ? detailMessages
+        : err?.message || "Failed to save payment line.";
+      if (fieldsSaved) {
+        setActionStatus({
+          type: "warning",
+          message: `Line ${selectedLine?.id || ""} details were saved, but the status change failed.`,
+        });
       }
+      setLineError(failureMessage);
     } finally {
       setLineSubmitting(false);
     }
@@ -1760,6 +1862,27 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       setDeleteLineError(err?.message || "Failed to delete payment line.");
     } finally {
       setDeleteLineSubmitting(false);
+    }
+  };
+
+  const handleMarkPaid = async () => {
+    if (!selectedLine || !canMarkLinePaid) return;
+    setMarkPaidSubmitting(true);
+    setMarkPaidError(null);
+    try {
+      await updateLineStatus(selectedLine.id, "paid", {
+        paidAt: markPaidForm.paidAt || new Date().toISOString().slice(0, 10),
+        paymentReference: markPaidForm.paymentReference.trim() || null,
+      });
+      setMarkPaidModalOpen(false);
+      setActionStatus({ type: "success", message: `Line ${selectedLine.id} marked as paid.` });
+    } catch (err) {
+      const detailMessages = formatLineErrorDetails(err?.details || err?.payload?.details);
+      setMarkPaidError(
+        detailMessages?.length ? detailMessages : err?.message || "Failed to mark payment line as paid.",
+      );
+    } finally {
+      setMarkPaidSubmitting(false);
     }
   };
 
@@ -1988,7 +2111,6 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     </span>
   );
 
-  const packetStatusValue = String(selectedRequest?.status || "").trim().toLowerCase();
   const canValidatePacket = packetStatusKey === "draft";
   const canReleasePacket = packetStatusValue === "awaiting_trigger" && isValidated;
   const canSubmitPacket =
@@ -2116,23 +2238,32 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                         variant="h3"
                         counter={`(${packetLines.length})`}
                         actions={
-                          canEditPacketLines ? (
+                          canEditPacketLines || canMarkLinePaid ? (
                             <SpaceBetween direction="horizontal" size="xs">
-                              <Button onClick={openLineCreateModal} disabled={!canEditPacketLines}>
-                                Add line
-                              </Button>
-                              <Button
-                                onClick={openLineEditModal}
-                                disabled={!canEditPacketLines || !selectedLine}
-                              >
-                                Edit selected
-                              </Button>
-                              <Button
-                                onClick={openDeleteLineModal}
-                                disabled={!canEditPacketLines || !selectedLine}
-                              >
-                                Delete selected
-                              </Button>
+                              {canEditPacketLines ? (
+                                <>
+                                  <Button onClick={openLineCreateModal} disabled={!canEditPacketLines}>
+                                    Add line
+                                  </Button>
+                                  <Button
+                                    onClick={openLineEditModal}
+                                    disabled={!canEditPacketLines || !selectedLine}
+                                  >
+                                    Edit selected
+                                  </Button>
+                                  <Button
+                                    onClick={openDeleteLineModal}
+                                    disabled={!canEditPacketLines || !selectedLine}
+                                  >
+                                    Delete selected
+                                  </Button>
+                                </>
+                              ) : null}
+                              {canMarkLinePaid ? (
+                                <Button onClick={openMarkPaidModal} disabled={!canMarkLinePaid}>
+                                  Mark paid
+                                </Button>
+                              ) : null}
                             </SpaceBetween>
                           ) : undefined
                         }
@@ -2431,7 +2562,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             <FormField label="Payee type">
               <Select
                 selectedOption={selectedLinePayeeType}
-                options={PAYEE_TYPE_OPTIONS}
+                options={configuredPayeeTypeOptions}
                 onChange={({ detail }) =>
                   setLineForm(current => ({ ...current, payeeType: detail.selectedOption?.value || "" }))
                 }
@@ -2475,6 +2606,32 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                 empty={linePotEmptyMessage}
               />
             </FormField>
+            {lineModalMode === "edit" ? (
+              <FormField label="Line status">
+                <Select
+                  selectedOption={selectedLineStatus}
+                  options={editableLineStatusOptions}
+                  onChange={({ detail }) =>
+                    setLineForm(current => ({
+                      ...current,
+                      status: detail.selectedOption?.value || "",
+                    }))
+                  }
+                  placeholder="Select line status"
+                />
+              </FormField>
+            ) : null}
+            {lineModalMode === "edit" && lineForm.status === "held" ? (
+              <FormField label="Hold reason (optional)">
+                <Input
+                  value={lineForm.holdReason}
+                  onChange={({ detail }) =>
+                    setLineForm(current => ({ ...current, holdReason: detail.value }))
+                  }
+                  placeholder="Reason for hold"
+                />
+              </FormField>
+            ) : null}
             {requiresLinePeriod ? (
               <>
                 <FormField
@@ -2563,6 +2720,74 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           <Box>
             This will permanently delete line {selectedLine?.id || "?"} from the packet.
           </Box>
+        </SpaceBetween>
+      </Modal>
+      <Modal
+        visible={markPaidModalOpen}
+        onDismiss={() => {
+          if (markPaidSubmitting) return;
+          setMarkPaidModalOpen(false);
+          setMarkPaidError(null);
+        }}
+        header="Mark payment line as paid"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button
+              variant="link"
+              onClick={() => {
+                setMarkPaidModalOpen(false);
+                setMarkPaidError(null);
+              }}
+              disabled={markPaidSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleMarkPaid}
+              loading={markPaidSubmitting}
+            >
+              Save payment confirmation
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="m">
+          {markPaidError ? (
+            <Alert type="error" dismissible onDismiss={() => setMarkPaidError(null)}>
+              {Array.isArray(markPaidError) ? (
+                <SpaceBetween size="xs">
+                  {markPaidError.map((message, index) => (
+                    <Box key={`${message}-${index}`} variant="p">
+                      {message}
+                    </Box>
+                  ))}
+                </SpaceBetween>
+              ) : (
+                markPaidError
+              )}
+            </Alert>
+          ) : null}
+          <ColumnLayout columns={2} variant="text-grid">
+            <FormField label="Paid date">
+              <DatePicker
+                value={markPaidForm.paidAt}
+                onChange={({ detail }) =>
+                  setMarkPaidForm(current => ({ ...current, paidAt: detail.value }))
+                }
+                placeholder="YYYY-MM-DD"
+              />
+            </FormField>
+            <FormField label="Payment reference (optional)">
+              <Input
+                value={markPaidForm.paymentReference}
+                onChange={({ detail }) =>
+                  setMarkPaidForm(current => ({ ...current, paymentReference: detail.value }))
+                }
+                placeholder="Reference from finance email"
+              />
+            </FormField>
+          </ColumnLayout>
         </SpaceBetween>
       </Modal>
       <Modal

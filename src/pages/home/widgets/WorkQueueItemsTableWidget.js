@@ -339,9 +339,11 @@ const computeSlaMeta = (row, slaTargets, rawStatus, isAssigned) => {
 const getStatusInfo = (row) => {
   const applicationStatusRaw = typeof row.status === 'string' ? row.status.trim() : '';
   const rawStatus = normalizeClosedStatus(applicationStatusRaw || 'submitted');
-  const label = rawStatus
-    .replace(/[_-]+/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase());
+  const label = rawStatus === 'rejected'
+    ? 'Not Approved'
+    : rawStatus
+        .replace(/[_-]+/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
   const isUnassignedCase = rawStatus === 'submitted' && !row.assigned_user_id;
   const isInterventionApproval =
     row?.bucketId === 'interventions-awaiting-approval' ||

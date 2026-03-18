@@ -15,7 +15,7 @@ Last Updated: 2025-11-24
 
 ## Approval flow
 - On approval, if a case exists: prompt “Reuse existing case (recommended)” vs “Create new case (rare)”. Default to reuse.
-- Reuse path: if the case is closed/archived, reopen it; create a new action plan for the approved application; add any indicated interventions in draft/planned.
+- Reuse path: if the case is closed/archived, reopen it; create a new action plan for the approved application; add any indicated interventions in draft/approved.
 - New-case path: allowed only with justification (e.g., explicitly documented edge case); create a separate case row and seed the plan/interventions there.
 
 ## Data rules (platform)

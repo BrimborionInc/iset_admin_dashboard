@@ -142,34 +142,6 @@ const formatGateStatusSummary = gate => {
   return `Applies when ${scopeLabel} status is ${statuses.map(formatStatusLabel).join(", ")}.`;
 };
 
-const mergeOptions = (primary = [], secondary = []) => {
-  const map = new Map();
-  primary.forEach(option => {
-    if (option?.value) map.set(option.value, option);
-  });
-  secondary.forEach(option => {
-    if (option?.value && !map.has(option.value)) map.set(option.value, option);
-  });
-  return Array.from(map.values());
-};
-
-const buildDocTypeFallbacks = configs => {
-  const codes = new Set();
-  ["application", "intervention"].forEach(scope => {
-    const gates = configs?.[scope]?.gates || [];
-    gates.forEach(gate => {
-      (gate.items || []).forEach(item => {
-        (item.documentTypes || []).forEach(code => {
-          if (code) codes.add(code);
-        });
-      });
-    });
-  });
-  return Array.from(codes)
-    .sort((a, b) => a.localeCompare(b))
-    .map(code => ({ value: code, label: code }));
-};
-
 const buildDocTypeLabelMap = options =>
   new Map(
     (options || [])
@@ -213,14 +185,9 @@ const DocumentChecklistConfigWidget = ({ actions, metadata, toggleHelpPanel }) =
   const [idTouched, setIdTouched] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  const docTypeFallbacks = useMemo(() => buildDocTypeFallbacks(edit), [edit]);
-  const mergedDocTypeOptions = useMemo(
-    () => mergeOptions(docTypeOptions, docTypeFallbacks),
-    [docTypeOptions, docTypeFallbacks],
-  );
   const docTypeLabelMap = useMemo(
-    () => buildDocTypeLabelMap(mergedDocTypeOptions),
-    [mergedDocTypeOptions],
+    () => buildDocTypeLabelMap(docTypeOptions),
+    [docTypeOptions],
   );
   const sourceLabelMap = useMemo(() => buildSourceLabelMap(SOURCE_OPTIONS), []);
 
@@ -278,9 +245,7 @@ const DocumentChecklistConfigWidget = ({ actions, metadata, toggleHelpPanel }) =
               }))
           : [];
         setDocTypeOptions(opts);
-      } catch (_) {
-        // fallback options are derived from the checklist config
-      }
+      } catch (_) {}
     })();
     return () => {
       cancelled = true;
@@ -825,7 +790,7 @@ const DocumentChecklistConfigWidget = ({ actions, metadata, toggleHelpPanel }) =
                       documentTypes: detail.selectedOptions.map(option => option.value),
                     }))
                   }
-                  options={mergedDocTypeOptions}
+                  options={docTypeOptions}
                   placeholder="Choose document types"
                   filteringType="auto"
                 />

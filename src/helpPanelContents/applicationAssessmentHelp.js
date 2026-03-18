@@ -46,6 +46,7 @@ const ApplicationAssessmentHelp = () => {
       <li>Capture intervention details (dates, provider, delivery mode, NOC code/version when required, childcare needs).</li>
       <li>Enter costs using the ITP and/or wage subsidy breakdowns and confirm totals.</li>
       <li>When adding or editing cost items, capture payee details in the same modal when available (payee is encouraged here but not required to advance this step).</li>
+      <li>For Student Loan Repayment lines, enter the loan provider/servicer name and loan account number in the cost-item modal so the approval-letter pack can draft the lender letter correctly.</li>
       <li>Review the checklist step and upload missing documents as needed.</li>
       <li>Set the recommendation and justification on the Review step.</li>
       <li>Click <em>Save</em> to keep a draft, or <em>Submit assessment</em> to move the application to <strong>pending approval</strong>.</li>
@@ -56,9 +57,12 @@ const ApplicationAssessmentHelp = () => {
       After submission, the NWAC section unlocks for reviewers to record the decision and assurance outcome. Approved
       or Not Approved moves the application to decision ready; Push back returns it to in review. The Communication step
       then appears to draft and send the approval or denial letter. For approvals, the client letter remains editable
-      while institution and other-funding-source letters are available as admin-only read-only tabs for preview/download.
-      Approved cases continue to Funding forms and signatures to monitor form completion; mark the application complete
-      only when all required items show Complete. Denial letters complete the application.
+      while institution, loan-provider (when Student Loan Repayment is funded), and other-funding-source letters are
+      available as admin-only read-only tabs for preview/download. Approved cases with funded cost lines continue to
+      Funding forms and signatures to monitor form completion. If the approved intervention does not include funded cost
+      lines, the client letter should focus on the approved intervention dates and no funding package forms are
+      required. Mark the application complete only when all required items show Complete. Denial letters complete the
+      application.
     </p>
 
     <h3>Need to revise?</h3>
@@ -98,10 +102,11 @@ const ApplicationAssessmentHelp = () => {
 ApplicationAssessmentHelp.aiContext = `
 You are assisting a coordinator filling out the Application Assessment widget. Key behaviors and constraints:
 - Edit requires acquiring an assessment lock; editing is blocked after a final decision or when another user holds the lock.
-- Sections include EI eligibility, overview/employment goals, barriers and local priorities, previous ISET, structured other funding (involved yes/no/unknown, repeatable funders, NWAC coverage, notes), intervention details (provider, dates, program name, NOC + version as needed, childcare need), costs (ITP and/or wage breakdowns plus optional early payee capture in cost-item modals), recommendation, justification, and the document checklist.
+- Sections include EI eligibility, overview/employment goals, barriers and local priorities, previous ISET, structured other funding (involved yes/no/unknown, repeatable funders, NWAC coverage, notes), intervention details (provider, dates, program name, NOC + version as needed, childcare need), costs (ITP and/or wage breakdowns plus optional early payee capture in cost-item modals, including loan provider plus loan account number for Student Loan Repayment), recommendation, justification, and the document checklist.
 - Save keeps a draft without changing status; Submit assessment moves the application to pending approval and unlocks NWAC review.
 - Use related widgets for context: Application Overview (status/owner), ISET Application Form (applicant data/version history), Supporting Documents (evidence/checklist), Notes and Tasks (audit trail), Secure Messaging (doc requests).
-- In approved outcomes, treat Communication as a letter pack: edit/send only the client letter; institution and other funding source letters are admin-only preview/download tabs.
+- In approved outcomes, treat Communication as a letter pack: edit/send only the client letter; institution, loan-provider (when Student Loan Repayment exists), and other funding source letters are admin-only preview/download tabs.
+- If the approved intervention does not include funded cost lines, the client approval letter should focus on the approved intervention(s) and dates, and no funding package forms are required.
 `;
 
 export const NwacAssessmentHelp = ({ onRestartTutorial, onEndTutorial }) => {
@@ -174,7 +179,8 @@ NwacAssessmentHelp.aiContext = `
 You are assisting an NWAC reviewer who is completing the outcome notice at the end of the Application Assessment widget.
 Explain how to record the funding decision, assurance outcome, and required reasons, and what happens when Commit is
 selected. Approved or Not Approved moves the application to decision ready and unlocks the Communication step; approvals
-then require completing Funding forms and signatures after the letter is sent; complete the application only when all
+with funded cost lines then require completing Funding forms and signatures after the letter is sent, while zero-funding
+approvals send an intervention-focused approval letter without a funding package. Complete the application only when all
 required items are Complete, while denials complete after the letter is sent. Push back returns the assessment to the
 coordinator for updates. Editing is disabled after a final decision unless
 reopening is permitted. Status and audit logs update automatically.

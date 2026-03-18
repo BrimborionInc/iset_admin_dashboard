@@ -29,44 +29,7 @@ const PREFERENCES_STORAGE_KEY = 'supporting-documents-table-preferences-v2';
 const COLUMN_WIDTHS_STORAGE_KEY = 'supporting-documents-table-widths-v2';
 const ALL_COLUMN_IDS = ['label', 'file_name', 'source', 'case_number', 'scope', 'uploaded_at', 'actions'];
 const REQUIRED_COLUMN_IDS = ['file_name', 'actions'];
-const DOCUMENT_TYPE_OPTIONS_FALLBACK = [
-  { value: '', label: 'Select document type', scope: 'application' },
-  { value: 'application_form', label: 'Application form (legacy)', scope: 'application' },
-  { value: 'ei_consent', label: 'EI Consent Form', scope: 'application' },
-  { value: 'ei_verification', label: 'EI Eligibility Verification', scope: 'application' },
-  { value: 'indigenous_declaration', label: 'Indigenous declaration', scope: 'client' },
-  { value: 'conflict_of_interest', label: 'Conflict of Interest Form', scope: 'application' },
-  { value: 'status_card', label: 'Status card', scope: 'client' },
-  { value: 'letter_of_reference', label: 'Letter of reference', scope: 'client' },
-  { value: 'identity_document', label: 'Identity document', scope: 'client' },
-  { value: 'supporting_evidence', label: 'Supporting evidence', scope: 'application' },
-  { value: 'client_acknowledgement', label: 'Client acknowledgement', scope: 'application' },
-  { value: 'iset_client_info_release', label: 'Authorization for the Release of ISET Client Information', scope: 'client' },
-  { value: 'media_consent', label: 'Media consent', scope: 'application' },
-  { value: 'financial_overview', label: 'Financial overview/budget', scope: 'application' },
-  { value: 'financial_records', label: 'Income evidence', scope: 'application' },
-  { value: 'financial_evidence', label: 'Expense evidence', scope: 'application' },
-  { value: 'statement_of_account', label: 'Statement of Account', scope: 'application' },
-  { value: 'acceptance_letter', label: 'Letter of Acceptance', scope: 'application' },
-  { value: 'band_funding_confirmation', label: 'Band funding confirmation', scope: 'application' },
-  { value: 'band_funding_denial', label: 'Band funding denial', scope: 'application' },
-  { value: 'band_funding_decision', label: 'Band funding decision', scope: 'application' },
-  { value: 'medical_documentation', label: 'Medical documentation', scope: 'application' },
-  { value: 'resume', label: 'Resume', scope: 'client' },
-  { value: 'case_assessment', label: 'Case manager assessment', scope: 'case' },
-  { value: 'assessment_approval_letter', label: 'Assessment approval letter', scope: 'application' },
-  { value: 'assessment_denial_letter', label: 'Assessment denial letter', scope: 'application' },
-  { value: 'funding_agreement', label: 'Funding agreement', scope: 'action_plan' },
-  { value: 'attendance_form', label: 'Attendance form', scope: 'action_plan' },
-  { value: 'alternate_payee_letter', label: 'Alternate payee letter', scope: 'payment_packet' },
-  { value: 'institution_letter', label: 'Institution letter', scope: 'action_plan' },
-  { value: 'equipment_quote', label: 'Equipment quote', scope: 'action_plan' },
-  { value: 'employer_duties_letter', label: 'Employer duties letter', scope: 'action_plan' },
-  { value: 'employer_offer_letter_after_subsidy', label: 'Employer offer letter after subsidy', scope: 'action_plan' },
-  { value: 'wage_plan', label: 'Wage plan / MERCs schedule', scope: 'action_plan' },
-  { value: 'receipt', label: 'Receipt', scope: 'payment_packet' },
-  { value: 'voided_cheque', label: 'Voided cheque', scope: 'payment_packet' }
-];
+const DOCUMENT_TYPE_PLACEHOLDER_OPTION = { value: '', label: 'Select document type', scope: 'application' };
 
 const formatDate = value => {
   if (!value) return '';
@@ -107,6 +70,8 @@ const formatSourceLabel = item => {
 
 const formatApplicationStatus = value => {
   if (!value) return '';
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === 'rejected') return 'Not Approved';
   return String(value).trim().replace(/_/g, ' ');
 };
 
@@ -153,11 +118,10 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
                 scope: d.scope || 'application'
               }))
           : [];
-        const list = [{ value: '', label: 'Select document type', scope: 'application' }, ...opts];
+        const list = [DOCUMENT_TYPE_PLACEHOLDER_OPTION, ...opts];
         setDocumentTypeOptions(list);
       } catch (_) {
-        // fall back to static options
-        setDocumentTypeOptions(DOCUMENT_TYPE_OPTIONS_FALLBACK);
+        setDocumentTypeOptions([DOCUMENT_TYPE_PLACEHOLDER_OPTION]);
       }
     })();
     return () => { cancelled = true; };
@@ -170,7 +134,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [pendingDownloads, setPendingDownloads] = useState({});
-  const [documentTypeOptions, setDocumentTypeOptions] = useState(DOCUMENT_TYPE_OPTIONS_FALLBACK);
+  const [documentTypeOptions, setDocumentTypeOptions] = useState([DOCUMENT_TYPE_PLACEHOLDER_OPTION]);
   const [labelModalVisible, setLabelModalVisible] = useState(false);
   const [pendingLabel, setPendingLabel] = useState('');
   const [labelError, setLabelError] = useState('');

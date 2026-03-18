@@ -33,11 +33,12 @@ const IsetApplicationFormHelpPanelContent = () => (
 
     <h3>Editing the record</h3>
     <ul>
-      <li>Select <em>Edit</em> and confirm to acquire an edit lock; editing is disabled after a final decision or if another user holds the lock.</li>
+      <li>Select <em>Edit</em> and confirm to acquire an edit lock; editing is disabled after a final decision unless the record is a denied-ineligible ILMP reporting file, or if another user holds the lock.</li>
       <li>Only editable fields expose inputs; Save writes a new version and keeps the original submission available in version history.</li>
       <li>Use <em>View versions</em> to compare or restore earlier submissions; Save or Cancel releases your lock.</li>
       <li>Monthly income/expense tables allow inline correction; clear incorrect totals with the inline clear controls.</li>
       <li>Open Indigenous Declaration or conflict-of-interest modals to review and download signed PDFs.</li>
+      <li>For denied-ineligible ILMP records, fixes made here automatically resync the client/reporting data and re-run ILMP validation.</li>
     </ul>
 
     <h3>Tips for coordinators</h3>
@@ -51,9 +52,10 @@ const IsetApplicationFormHelpPanelContent = () => (
 
 IsetApplicationFormHelpPanelContent.aiContext = `
 You are assisting an ISET coordinator using the ISET Application Form widget. Key behaviors:
-- Edit flow: press Edit, confirm, acquire an edit lock, then Save or Cancel to release; editing is blocked after a final decision or when another user holds the lock.
+- Edit flow: press Edit, confirm, acquire an edit lock, then Save or Cancel to release; editing is blocked after a final decision except for denied-ineligible ILMP reporting records, and it is always blocked when another user holds the lock.
 - Versioning: every save creates a new version; **View versions** shows history and allows restore. Original submission remains available.
 - Scope: sections include identity/contact, eligibility answers, supports/barriers, income/expense tables, and submission signatures. Income and expense amounts can be corrected inline during edit mode.
+- Reporting-only denied cases: when the overview indicates the record was denied on eligibility grounds but retained for ILMP reporting, fixes made here automatically resync downstream client/action-plan/intervention data and revalidate ESDC readiness.
 - Declarations: use the Indigenous declaration or conflict-of-interest modals to review and download signed PDFs.
 - Related widgets: log coordinator-made edits in Notes and Tasks; request missing docs via Secure Messaging (attachments appear in Supporting Documents); align with the Application Assessment widget before final decisions.
 `;

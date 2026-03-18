@@ -6,6 +6,10 @@ const PortfolioCasesTableHelp = () => (
       The cases table lists every ISET case you can access. Use the search, filters, and column preferences
       to focus on a subset, then select a row to open the detailed case workspace.
     </p>
+    <p>
+      Use the <strong>Show</strong> selector in the widget header to switch between <strong>Active</strong>,
+      <strong> Dormant</strong>, <strong>Ineligible (Reporting Only)</strong>, and <strong>All</strong> client views.
+    </p>
 
     <h3>Columns</h3>
     <ul>
@@ -26,6 +30,6 @@ const PortfolioCasesTableHelp = () => (
   </div>
 );
 
-PortfolioCasesTableHelp.aiContext = `You are helping an NWAC case manager using the ISET Portfolio dashboard. The cases table lists clients with owner, agreement number, intervention counts, finance status, fiscal actuals, and variance. Selecting a row opens the case workspace.`;
+PortfolioCasesTableHelp.aiContext = `You are helping an NWAC case manager using the ISET Portfolio dashboard. The cases table lists clients with owner, agreement number, intervention counts, finance status, fiscal actuals, and variance. The widget header includes a Show selector for Active, Dormant, Ineligible (Reporting Only), and All client views. Selecting a row opens the case workspace.`;
 
 export default PortfolioCasesTableHelp;

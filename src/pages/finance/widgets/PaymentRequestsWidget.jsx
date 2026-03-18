@@ -27,9 +27,10 @@ import {
 import { apiFetch } from "../../../auth/apiClient";
 import { boardItemI18nStrings } from "./common";
 import { usePaymentsData } from "./PaymentsDataContext.jsx";
-import { PAYMENT_TYPE_OPTIONS, PAYEE_TYPE_OPTIONS, findOptionByValue } from "./paymentOptions";
+import { findOptionByValue } from "./paymentOptions";
 import useCurrentUser from "../../../hooks/useCurrentUser";
 import { toCanonicalRole } from "../../../context/RoleMatrixContext";
+import { normalizeInterventionStatus } from "../../../utils/interventionStatus.js";
 
 const COLUMN_WIDTHS_STORAGE_KEY = "finance-payments-requests-widths-v4";
 const PREFERENCES_STORAGE_KEY = "finance-payments-requests-preferences-v4";
@@ -99,34 +100,8 @@ const EMPTY_CREATE_FORM = {
   partialPayment: false,
 };
 
-const normalizeInterventionStatusValue = status => {
-  const value = String(status || "").trim().toLowerCase();
-  const aliases = {
-    planning: "planned",
-    "in-review": "in_review",
-    "in review": "in_review",
-    "changes-requested": "changes_requested",
-    "changes requested": "changes_requested",
-    active: "in_progress",
-    inprogress: "in_progress",
-    "in-progress": "in_progress",
-    progress: "in_progress",
-    "on-hold": "suspended",
-    on_hold: "suspended",
-    "ready-to-close": "ready_to_close",
-    "ready to close": "ready_to_close",
-    readyclose: "ready_to_close",
-    complete: "completed",
-    closed: "completed",
-    done: "completed",
-    finished: "completed",
-    canceled: "cancelled",
-  };
-  return aliases[value] || value;
-};
-
 const isBlockedInterventionStatus = status =>
-  BLOCKED_INTERVENTION_STATUSES.has(normalizeInterventionStatusValue(status));
+  BLOCKED_INTERVENTION_STATUSES.has(normalizeInterventionStatus(status));
 
 const formatInterventionDisplay = item => {
   if (!item) return "-";
@@ -733,6 +708,8 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     updatePacketStatus,
     createPacket,
     paymentTypeMappingLookup,
+    paymentTypeOptions: configuredPaymentTypeOptions,
+    payeeTypeOptions: configuredPayeeTypeOptions,
     paymentTypeRecurrencePolicyLookup,
     paymentTypeMappingLoading,
     loading,
@@ -905,9 +882,9 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     return paymentTypeMappingLookup.get(selectedInterventionCode);
   }, [paymentTypeMappingLookup, selectedInterventionCode]);
   const paymentTypeOptions = useMemo(() => {
-    if (!allowedPaymentTypes) return PAYMENT_TYPE_OPTIONS;
-    return PAYMENT_TYPE_OPTIONS.filter(option => allowedPaymentTypes.has(option.value));
-  }, [allowedPaymentTypes]);
+    if (!allowedPaymentTypes) return configuredPaymentTypeOptions;
+    return configuredPaymentTypeOptions.filter(option => allowedPaymentTypes.has(option.value));
+  }, [allowedPaymentTypes, configuredPaymentTypeOptions]);
   const paymentTypeRestrictionError = useMemo(() => {
     if (!allowedPaymentTypes) return null;
     if (!createForm.paymentType) return null;
@@ -917,12 +894,13 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
       : "Payment type is not allowed for the selected intervention.";
   }, [allowedPaymentTypes, createForm.paymentType, selectedInterventionCode]);
   const paymentTypeEmptyMessage = useMemo(() => {
+    if (!configuredPaymentTypeOptions.length) return "No payment types are configured.";
     if (!allowedPaymentTypes) return "No payment types available.";
     if (allowedPaymentTypes.size === 0) {
       return "No payment types are available for this intervention.";
     }
     return "No payment types match.";
-  }, [allowedPaymentTypes]);
+  }, [allowedPaymentTypes, configuredPaymentTypeOptions]);
   const derivedInterventionAmount = useMemo(
     () => resolveInterventionAmount(selectedInterventionOption),
     [selectedInterventionOption]
@@ -1433,8 +1411,8 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     [createForm.paymentType, paymentTypeOptions]
   );
   const selectedPayeeType = useMemo(
-    () => findOptionByValue(PAYEE_TYPE_OPTIONS, createForm.payeeType),
-    [createForm.payeeType]
+    () => findOptionByValue(configuredPayeeTypeOptions, createForm.payeeType),
+    [configuredPayeeTypeOptions, createForm.payeeType]
   );
   const selectedReportingUnit = useMemo(
     () => regionOptions.find(option => option.value === createForm.reportingUnit) || null,
@@ -2029,7 +2007,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
               <FormField label="Payee type">
                 <Select
                   selectedOption={selectedPayeeType}
-                  options={PAYEE_TYPE_OPTIONS}
+                  options={configuredPayeeTypeOptions}
                   onChange={({ detail }) => updateCreateForm("payeeType", detail.selectedOption?.value || "")}
                   placeholder="Select payee type"
                 />

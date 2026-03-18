@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Autosuggest,
@@ -18,9 +18,22 @@ import {
 import { apiFetch } from "../../../../auth/apiClient.js";
 import useCurrentUser from "../../../../hooks/useCurrentUser.js";
 import { formatCurrencyDisplay, getCurrencyInputDisplayValue } from "../../../../utils/currencyFormat.js";
+import {
+  formatInterventionStatusLabel,
+  INTERVENTION_CLOSED_STATUSES,
+  INTERVENTION_OPEN_STATUSES,
+  normalizeInterventionStatus,
+} from "../../../../utils/interventionStatus.js";
+import {
+  isEducationInterventionCode as isEducationCode,
+  isEmployerInterventionCode as isEmployerCode,
+  isWageSubsidyInterventionCode as isWageSubsidyCode,
+  requiresExternalPartnerForInterventionCode as requiresExternalPartnerForCode,
+  requiresNocForInterventionCode as requiresNocForCode,
+} from "../../../../utils/interventionCodeRules.js";
 
 const BASE_STATUS_OPTIONS = [
-  { value: "planned", label: "Planned" },
+  { value: "approved", label: "Approved" },
   { value: "in_progress", label: "In progress" },
   { value: "suspended", label: "Suspended" },
 ];
@@ -30,19 +43,6 @@ const CLOSE_STATUS_OPTIONS = [
   { value: "cancelled", label: "Cancelled" },
 ];
 
-const OPEN_INTERVENTION_STATUSES = new Set([
-  "draft",
-  "submitted",
-  "in_review",
-  "changes_requested",
-  "approved",
-  "rejected",
-  "planned",
-  "in_progress",
-  "suspended",
-  "ready_to_close",
-]);
-const CLOSED_INTERVENTION_STATUSES = new Set(["completed", "cancelled"]);
 const IN_PROGRESS_OUTCOME = "2";
 const DEFAULT_CLOSED_OUTCOME = "1";
 const POSTING_CONTEXT_OPTIONS = [
@@ -64,7 +64,7 @@ const calculateDurationDays = (start, end) => {
 
 const defaultForm = {
   code: "",
-  status: "planned",
+  status: "approved",
   startDate: "",
   endDate: "",
   durationDays: "",
@@ -75,14 +75,14 @@ const defaultForm = {
   noc: "",
   nocVersion: "",
   postingContext: "external",
+  deliveryMode: "partner",
+  institution: "",
+  programName: "",
+  itpDetails: "",
+  wageSubsidyDetails: "",
 };
 
 const FORM_KEYS = Object.keys(defaultForm);
-
-const requiresNocForCode = value => {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) && numeric >= 6 && numeric <= 13;
-};
 
 const CANONICAL_INTERVENTION_LABELS = {
   "1": "Career research and exploration",
@@ -116,11 +116,14 @@ const pickDefaultNocVersion = options => {
 const normaliseFormNumbers = value =>
   typeof value === "number" && Number.isFinite(value) ? String(value) : "";
 
+const normaliseInterventionText = value => (typeof value === "string" ? value : "");
+
 const buildInitialForm = (mode, intervention) => {
   if (mode === "edit" && intervention) {
+    const metadata = intervention.metadata && typeof intervention.metadata === "object" ? intervention.metadata : {};
     return {
       code: intervention.code ? String(intervention.code) : "",
-      status: normaliseStatus(intervention.status || "planned"),
+      status: normalizeInterventionStatus(intervention.status, "approved"),
       startDate: intervention.startDate || "",
       endDate: intervention.endDate || "",
       durationDays: intervention.endDate ? normaliseFormNumbers(intervention.durationDays) : "",
@@ -131,32 +134,37 @@ const buildInitialForm = (mode, intervention) => {
       noc: intervention.noc || "",
       nocVersion: intervention.nocVersion || "",
       postingContext: intervention.postingContext || intervention.metadata?.postingContext || "external",
+      deliveryMode:
+        intervention.deliveryMode === "in_house" || metadata.deliveryMode === "in_house" ? "in_house" : "partner",
+      institution: normaliseInterventionText(
+        intervention.institution ??
+          metadata.institution ??
+          metadata.trainingInstitution ??
+          metadata.training_institution ??
+          ""
+      ),
+      programName: normaliseInterventionText(
+        intervention.programName ?? metadata.programName ?? metadata.program_name ?? ""
+      ),
+      itpDetails: normaliseInterventionText(
+        intervention.itpDetails ?? metadata.itpDetails ?? metadata.itp_details ?? ""
+      ),
+      wageSubsidyDetails: normaliseInterventionText(
+        intervention.wageSubsidyDetails ??
+          metadata.wageSubsidyDetails ??
+          metadata.wage_subsidy_details ??
+          ""
+      ),
     };
   }
   return { ...defaultForm };
 };
 
-const normaliseStatus = value => {
-  if (!value) return "planned";
-  const status = String(value).trim().toLowerCase();
-  if (["inprogress", "in-progress"].includes(status)) return "in_progress";
-  if (["planned", "planning", "draft"].includes(status)) return "planned";
-  if (["suspended", "on-hold", "on_hold"].includes(status)) return "suspended";
-  if (["completed", "complete", "closed"].includes(status)) return "completed";
-  if (["cancelled", "canceled"].includes(status)) return "cancelled";
-  return status;
-};
-
-const formatStatusLabel = value =>
-  String(value || "")
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, char => char.toUpperCase());
-
-const isClosedStatusValue = status => CLOSED_INTERVENTION_STATUSES.has(normaliseStatus(status));
+const isClosedStatusValue = status => INTERVENTION_CLOSED_STATUSES.has(normalizeInterventionStatus(status));
 
 const ensureOutcomeForStatus = (status, currentOutcome) => {
-  const normalized = normaliseStatus(status);
-  if (OPEN_INTERVENTION_STATUSES.has(normalized)) {
+  const normalized = normalizeInterventionStatus(status);
+  if (INTERVENTION_OPEN_STATUSES.has(normalized)) {
     return IN_PROGRESS_OUTCOME;
   }
   if (currentOutcome && currentOutcome !== IN_PROGRESS_OUTCOME) {
@@ -167,7 +175,7 @@ const ensureOutcomeForStatus = (status, currentOutcome) => {
 
 const buildCloseForm = intervention => {
   const resolvedStatus =
-    normaliseStatus(intervention?.status) === "cancelled" ? "cancelled" : "completed";
+    normalizeInterventionStatus(intervention?.status) === "cancelled" ? "cancelled" : "completed";
   const resolvedOutcome =
     intervention?.outcome && intervention?.outcome !== IN_PROGRESS_OUTCOME
       ? String(intervention.outcome).trim()
@@ -277,7 +285,7 @@ const InterventionModal = ({
       return draft;
     })();
 
-    prepared.status = normaliseStatus(prepared.status);
+    prepared.status = normalizeInterventionStatus(prepared.status, "approved");
     prepared.outcome = ensureOutcomeForStatus(prepared.status, prepared.outcome);
 
     initialFormRef.current = { ...prepared };
@@ -358,7 +366,7 @@ const InterventionModal = ({
     }
   }, [isClosing]);
 
-  const interventionStatus = normaliseStatus(intervention?.status);
+  const interventionStatus = normalizeInterventionStatus(intervention?.status, "approved");
   const isClosedIntervention = ["completed", "cancelled"].includes(interventionStatus);
   const isAccessReadOnly = Boolean(readOnly || (mode === "edit" && isClosedIntervention && !canClose));
   const isViewMode = mode === "edit" && !isEditing;
@@ -405,16 +413,27 @@ const InterventionModal = ({
 
   const statusOptions = useMemo(() => {
     const options = [...BASE_STATUS_OPTIONS];
-    const current = normaliseStatus(form.status);
+    const current = normalizeInterventionStatus(form.status, "approved");
     if (current && !options.some(option => option.value === current)) {
-      options.push({ value: current, label: formatStatusLabel(current), disabled: true });
+      options.push({ value: current, label: formatInterventionStatusLabel(current), disabled: true });
     }
     return options;
   }, [form.status]);
 
   const selectedStatusOption = useMemo(
-    () => statusOptions.find(option => option.value === normaliseStatus(form.status)) || statusOptions[0],
+    () => statusOptions.find(option => option.value === normalizeInterventionStatus(form.status, "approved")) || statusOptions[0],
     [statusOptions, form.status]
+  );
+  const isEducationIntervention = useMemo(() => isEducationCode(form.code), [form.code]);
+  const isEmployerIntervention = useMemo(() => isEmployerCode(form.code), [form.code]);
+  const isWageSubsidyIntervention = useMemo(() => isWageSubsidyCode(form.code), [form.code]);
+  const requiresExternalPartner = useMemo(() => requiresExternalPartnerForCode(form.code), [form.code]);
+  const selectedDeliveryModeOption = useMemo(
+    () =>
+      form.deliveryMode === "in_house"
+        ? { value: "in_house", label: "In-house (no external partner)" }
+        : { value: "partner", label: "External delivery partner" },
+    [form.deliveryMode]
   );
 
   const selectedCloseStatusOption = useMemo(
@@ -508,9 +527,6 @@ const InterventionModal = ({
   );
 
   const costInputValue = useMemo(() => form.cost, [form.cost]);
-  const formattedCostDisplay = useMemo(() => {
-    return formatCurrencyDisplay(costInputValue);
-  }, [costInputValue]);
   const [isCostFocused, setIsCostFocused] = useState(false);
   const [isActualCostFocused, setIsActualCostFocused] = useState(false);
   const [packetLineItems, setPacketLineItems] = useState([]);
@@ -545,7 +561,7 @@ const InterventionModal = ({
     return () => {
       cancelled = true;
     };
-  }, [apiFetch, visible, intervention?.id]);
+  }, [visible, intervention?.id]);
 
   const costLineItems = useMemo(() => {
     return (Array.isArray(packetLineItems) ? packetLineItems : []).map((line, index) => ({
@@ -588,7 +604,7 @@ const InterventionModal = ({
       next.durationDays = duration !== null ? String(duration) : "";
     }
 
-    next.status = normaliseStatus(next.status);
+    next.status = normalizeInterventionStatus(next.status, "approved");
     next.outcome = ensureOutcomeForStatus(next.status, next.outcome);
 
     return next;
@@ -610,7 +626,11 @@ const InterventionModal = ({
     if (isCloseReadOnly) return;
     setCloseForm(current => {
       const nextValue =
-        field === "status" ? normaliseStatus(value) : typeof value === "string" ? value.trim() : value;
+        field === "status"
+          ? normalizeInterventionStatus(value, "completed")
+          : typeof value === "string"
+            ? value.trim()
+            : value;
       return { ...current, [field]: nextValue };
     });
   };
@@ -713,7 +733,7 @@ const InterventionModal = ({
     if (isAccessReadOnly) return;
     setValidationError(null);
     setFieldErrors({});
-    const statusNormalized = normaliseStatus(form.status);
+    const statusNormalized = normalizeInterventionStatus(form.status, "approved");
     const outcomeValue = ensureOutcomeForStatus(statusNormalized, form.outcome);
     const trimmedCode = (form.code ?? "").toString().trim();
     const errors = {};
@@ -761,7 +781,6 @@ const InterventionModal = ({
       }
     }
     if (form.startDate && form.endDate) {
-      const start = new Date(form.startDate);
       const maxEnd = new Date(form.startDate);
       maxEnd.setMonth(maxEnd.getMonth() + 60);
       const end = new Date(form.endDate);
@@ -823,6 +842,19 @@ const InterventionModal = ({
       notes: form.notes.trim() || null,
       noc: form.noc.trim() || null,
       nocVersion: form.nocVersion.trim() || null,
+      deliveryMode: form.deliveryMode === "in_house" ? "in_house" : "partner",
+      institution: form.institution.trim() || null,
+      programName: form.programName.trim() || null,
+      itpDetails: form.itpDetails.trim() || null,
+      wageSubsidyDetails: form.wageSubsidyDetails.trim() || null,
+      metadata: {
+        deliveryMode: form.deliveryMode === "in_house" ? "in_house" : "partner",
+        institution: form.institution.trim() || null,
+        trainingInstitution: form.institution.trim() || null,
+        programName: form.programName.trim() || null,
+        itpDetails: form.itpDetails.trim() || null,
+        wageSubsidyDetails: form.wageSubsidyDetails.trim() || null,
+      },
     };
 
     setLoading(true);
@@ -990,7 +1022,7 @@ const InterventionModal = ({
           </Alert>
         )}
         <Box color="text-body-secondary" fontSize="body-s">
-          All fields can be updated while the intervention remains in a planned or in-progress state. Use "Close intervention" to record the final outcome and actual spend. Activating an intervention will also activate its parent action plan if it is still in draft.
+          All fields can be updated while the intervention remains in an approved, in-progress, or suspended state. Use "Close intervention" to record the final outcome and actual spend. Activating an intervention will also activate its parent action plan if it is still in draft.
         </Box>
         {mode === "edit" && (isClosing || isClosedIntervention) && (
           <SpaceBetween size="s">
@@ -1061,7 +1093,7 @@ const InterventionModal = ({
               <FormField label="Status">
                 <Select
                   selectedOption={selectedStatusOption}
-                  onChange={({ detail }) => handleChange("status", detail.selectedOption?.value || "planned")}
+                  onChange={({ detail }) => handleChange("status", detail.selectedOption?.value || "approved")}
                   options={statusOptions}
                   readOnly={isFormReadOnly}
                 />
@@ -1172,7 +1204,97 @@ const InterventionModal = ({
                   </FormField>
                 </>
               )}
+              {!requiresExternalPartner && (
+                <>
+                  <FormField label="Delivery mode" description="Choose how this will run.">
+                    <Select
+                      selectedOption={selectedDeliveryModeOption}
+                      onChange={({ detail }) => handleChange("deliveryMode", detail.selectedOption?.value || "partner")}
+                      options={[
+                        { value: "partner", label: "External delivery partner" },
+                        { value: "in_house", label: "In-house (no external partner)" },
+                      ]}
+                      readOnly={isFormReadOnly}
+                    />
+                  </FormField>
+                  {form.deliveryMode !== "in_house" ? (
+                    <FormField label="Delivery partner / provider">
+                      <Input
+                        value={form.institution}
+                        onChange={({ detail }) => handleChange("institution", detail.value)}
+                        readOnly={isFormReadOnly}
+                      />
+                    </FormField>
+                  ) : (
+                    <Box />
+                  )}
+                </>
+              )}
             </ColumnLayout>
+            {isEducationIntervention && (
+              <SpaceBetween size="s">
+                <ColumnLayout columns={2} variant="text-grid">
+                  <FormField label="Institution" description="Training provider or school delivering the program.">
+                    <Input
+                      value={form.institution}
+                      onChange={({ detail }) => handleChange("institution", detail.value)}
+                      readOnly={isFormReadOnly}
+                    />
+                  </FormField>
+                  <FormField label="Program name (optional)" description="Course, credential, or stream name.">
+                    <Input
+                      value={form.programName}
+                      onChange={({ detail }) => handleChange("programName", detail.value)}
+                      readOnly={isFormReadOnly}
+                    />
+                  </FormField>
+                </ColumnLayout>
+                <FormField
+                  label="In-Training Plan (ITP) details"
+                  description="Outline curriculum, milestones, supports, materials, and how this leads to the employment goal."
+                >
+                  <Textarea
+                    value={form.itpDetails}
+                    rows={3}
+                    onChange={({ detail }) => handleChange("itpDetails", detail.value)}
+                    readOnly={isFormReadOnly}
+                  />
+                </FormField>
+              </SpaceBetween>
+            )}
+            {isEmployerIntervention && (
+              <SpaceBetween size="s">
+                <ColumnLayout columns={2} variant="text-grid">
+                  <FormField
+                    label="Employer / delivery partner"
+                    description="Employer or host organization providing the placement."
+                  >
+                    <Input
+                      value={form.institution}
+                      onChange={({ detail }) => handleChange("institution", detail.value)}
+                      readOnly={isFormReadOnly}
+                    />
+                  </FormField>
+                  <FormField label="Program name (optional)" description="Job title, role, or program name.">
+                    <Input
+                      value={form.programName}
+                      onChange={({ detail }) => handleChange("programName", detail.value)}
+                      readOnly={isFormReadOnly}
+                    />
+                  </FormField>
+                </ColumnLayout>
+                {isWageSubsidyIntervention && (
+                  <FormField label="Wage subsidy details">
+                    <Textarea
+                      value={form.wageSubsidyDetails}
+                      rows={3}
+                      onChange={({ detail }) => handleChange("wageSubsidyDetails", detail.value)}
+                      readOnly={isFormReadOnly}
+                    />
+                  </FormField>
+                )}
+              </SpaceBetween>
+            )}
           </SpaceBetween>
 
           <SpaceBetween size="s">

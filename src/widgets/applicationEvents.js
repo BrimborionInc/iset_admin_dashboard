@@ -17,7 +17,7 @@ const STATUS_LABELS = {
   decision_ready: 'Decision Ready',
   approved: 'Approved',
   completed: 'Completed',
-  rejected: 'Rejected',
+  rejected: 'Not Approved',
   closed: 'Closed',
   withdrawn: 'Closed',
   archived: 'Archived'

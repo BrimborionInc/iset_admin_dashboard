@@ -13,6 +13,7 @@ const buildQuery = ({
   searchText,
   statusFilters,
   ownerFilters,
+  clientCategory,
   page,
   pageSize,
   sort,
@@ -27,6 +28,9 @@ const buildQuery = ({
   }
   if (Array.isArray(ownerFilters) && ownerFilters.length) {
     query.set("owner", ownerFilters.join(","));
+  }
+  if (clientCategory) {
+    query.set("clientCategory", String(clientCategory));
   }
   if (page && Number.isFinite(page)) {
     query.set("page", String(page));
@@ -172,6 +176,7 @@ export default function useCasesData({
   searchText,
   statusFilters,
   ownerFilters,
+  clientCategory,
   page,
   pageSize,
   sort,
@@ -190,6 +195,7 @@ export default function useCasesData({
         searchText,
         statusFilters,
         ownerFilters,
+        clientCategory,
         page,
         pageSize,
         sort,
@@ -246,7 +252,7 @@ export default function useCasesData({
         });
       }
     },
-    [enabled, searchText, statusFilters, ownerFilters, page, pageSize, sort, groupByClient]
+    [enabled, searchText, statusFilters, ownerFilters, clientCategory, page, pageSize, sort, groupByClient]
   );
 
   useEffect(() => {

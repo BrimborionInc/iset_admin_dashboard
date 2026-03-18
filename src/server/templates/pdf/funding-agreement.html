@@ -128,6 +128,11 @@
       background: #f0fff4;
     }
 
+    .redline-modified {
+      border-color: #1d4ed8;
+      background: #eff6ff;
+    }
+
     .redline-removed {
       border-color: #a61d24;
       background: #fff1f2;
@@ -147,6 +152,35 @@
     .redline-modified-badge {
       color: #1d4ed8;
       border-color: #1d4ed8;
+    }
+
+    .redline-row-added td {
+      background: #f0fff4;
+    }
+
+    .redline-row-removed td {
+      background: #fff1f2;
+      text-decoration: line-through;
+    }
+
+    .redline-inline-old {
+      color: #a61d24;
+      text-decoration: line-through;
+    }
+
+    .redline-inline-old em {
+      text-decoration: line-through;
+    }
+
+    .redline-inline-new {
+      color: #2f855a;
+      font-weight: 600;
+    }
+
+    .redline-inline-arrow {
+      color: #1d4ed8;
+      font-weight: 600;
+      margin: 0 4px;
     }
 
     .intervention-title {
@@ -233,13 +267,13 @@
 <h2>Approved funding</h2>
 {{{interventions_html}}}
 <div class="note">
-  Details include payable timing, installment cadence, payee, and any note provided.
+  Details include payment timing or status, installment cadence, payee, and any note provided.
 </div>
 
 <!-- IF funding_total -->
 <div class="field">
   <div class="field-panel">
-    <div class="field-value">{{funding_total}}</div>
+    <div class="field-value">{{{funding_total_html}}}</div>
     <div class="field-label">Total approved funding</div>
   </div>
 </div>

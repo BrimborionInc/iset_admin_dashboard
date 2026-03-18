@@ -80,17 +80,21 @@ Persisted in `iset_case_action_plan.status`:
 ### 2.5 Intervention Statuses
 Persisted in `iset_case_intervention.status`. Common values:
 
-- `planned`
+- `draft`
+- `submitted`
+- `in_review`
+- `changes_requested`
+- `approved`
+- `rejected`
 - `in_progress`
-- `suspended` / `on_hold`
+- `suspended`
 - `completed`
-- `failed_to_report`
 - `cancelled`
 
-The set is intentionally broad to accommodate funder reporting requirements; case status ignores these directly but action plan metrics may incorporate them.
+The intervention status set is now canonical and single-source. `approved` is the pre-start approved state; `planned`, `on_hold`, and `ready_to_close` are not valid intervention statuses.
 
 **Outcome handling:**
-- ESDC outcome codes now derive from status. Open states (`planned`, `in_progress`, `suspended`) always persist outcome code `02 – In progress`.
+- ESDC outcome codes now derive from status. Open delivery states (`approved`, `in_progress`, `suspended`) always persist outcome code `02 – In progress`.
 - The close workflow (available only when editing an open intervention) gathers the final status (`completed` or `cancelled`) and unlocks the ESDC outcome selector for the terminal code that should be persisted.
 - Closed interventions surface the ESDC outcome in read-only form both in the modal and in the Interventions table (column renamed to "ESDC Outcome").
 
@@ -101,7 +105,7 @@ The set is intentionally broad to accommodate funder reporting requirements; cas
 ### 3.1 Application → Case Interactions
 1. **Submission** (`submitted`): auto-created `iset_case` row defaults to `pending_approval`.
 2. **Assessment Submitted** (`pending_approval`): triggered in `CoordinatorAssessmentWidget.handleSubmit`, which sends `status: 'pending_approval'` via `PUT /api/cases/:id`. Backend persists the new application status and recalculates action plan-derived case status (which typically remains `pending_approval` until approval).
-3. **Outcome Decision** (`approved` / `rejected`): `handleComplete` records the decision and moves the application to `decision_ready`. For denials, the application status moves to `rejected` only after the denial letter is sent in the communication step; approvals continue to follow the approval/funding-docs path. When the outcome is **approved** the server also seeds an initial action plan and intervention from the NWAC recommendation. As of 2026‑02 the auto-generated plan always starts in `draft` (regardless of the recommended start date) and the intervention in `planned`, keeping the case in `initiated` until a caseworker explicitly activates the plan.
+3. **Outcome Decision** (`approved` / `rejected`): `handleComplete` records the decision and moves the application to `decision_ready`. For denials, the application status moves to `rejected` only after the denial letter is sent in the communication step; approvals continue to follow the approval/funding-docs path. When the outcome is **approved** the server also seeds an initial action plan and intervention from the NWAC recommendation. As of 2026‑03 the auto-generated plan always starts in `draft` (regardless of the recommended start date) and the intervention in `approved`, keeping the case in `initiated` until a caseworker explicitly activates the plan.
 4. **Manual Overrides**: The Application Overview widget can POST/PUT `status` changes via `PUT /api/cases/:id`. Locks ensure only one user manipulates state at a time.
 5. **Secure Messaging with forms**: Sending a secure message with attached forms from the Application Workspace while status is `submitted` or `in_review` sets `docs_requested_active` and updates the application status to `docs_requested` so the applicant action is still visible.
 6. **Manual doc-request toggle**: The Application Overview widget can set/clear `docs_requested_active` without changing application status, and the secure-message flow auto-clears document requests once all signing requests are complete.

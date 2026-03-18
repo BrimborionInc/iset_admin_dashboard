@@ -29,8 +29,16 @@ import { apiFetch } from "../../../../auth/apiClient";
 import { boardItemI18nStrings } from "../../widgets/common";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
 import useCurrentUser from "../../../../hooks/useCurrentUser.js";
-import { PAYMENT_TYPE_OPTIONS, PAYEE_TYPE_OPTIONS, findOptionByValue } from "../../../finance/widgets/paymentOptions";
+import { findOptionByValue } from "../../../finance/widgets/paymentOptions";
 import { getCurrencyInputDisplayValue } from "../../../../utils/currencyFormat";
+import { normalizeInterventionStatus } from "../../../../utils/interventionStatus.js";
+import {
+  isEducationInterventionCode as isEducationCode,
+  isEmployerInterventionCode as isEmployerCode,
+  isWageSubsidyInterventionCode as isWageSubsidyCode,
+  requiresExternalPartnerForInterventionCode as requiresExternalPartnerForCode,
+  requiresNocForInterventionCode as requiresNocForCode,
+} from "../../../../utils/interventionCodeRules.js";
 import styles from "./InterventionAssessmentWidget.module.css";
 
 const BARRIER_OPTIONS = [
@@ -50,6 +58,11 @@ const ESDC_OPTIONS = [
   { label: "CRF", value: "CRF" },
   { label: "EI Active Claim", value: "EI Active Claim" },
   { label: "EI Reach Back", value: "EI Reach Back" },
+];
+
+const POSTING_CONTEXT_OPTIONS = [
+  { value: "external", label: "External (region/PTMA)" },
+  { value: "internal", label: "Internal (NWAC)" },
 ];
 
 const EI_ELIGIBILITY_ROLE_KEYS = new Set([
@@ -272,6 +285,7 @@ const buildInstitutionApprovalLetters = ({
   caseManagerName = "",
   caseManagerEmail = "",
   caseManagerPhone = "",
+  isRevision = false,
 } = {}) => {
   const normalizePayeeType = value => String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
   const resolveInstitutionPayeeCategory = (line, institutionName) => {
@@ -372,19 +386,25 @@ const buildInstitutionApprovalLetters = ({
     const fundingSectionParts = [];
     if (institutionPayLines.length) {
       fundingSectionParts.push(
-        `The NWAC ISET Program has approved payment of the following costs directly to ${item.institution} on behalf of the student:`,
+        isRevision
+          ? `The revised approved costs payable directly to ${item.institution} on behalf of the student are:`
+          : `The NWAC ISET Program has approved payment of the following costs directly to ${item.institution} on behalf of the student:`,
         institutionPayLines.map(formatFundingLine).join("\n")
       );
     }
     if (clientPayLines.length) {
       fundingSectionParts.push(
-        "The following supports have also been approved for payment directly to the student:",
+        isRevision
+          ? "The following revised supports are also approved for payment directly to the student:"
+          : "The following supports have also been approved for payment directly to the student:",
         clientPayLines.map(formatFundingLine).join("\n")
       );
     }
     if (otherPayLines.length) {
       fundingSectionParts.push(
-        "The following supports have also been approved for payment to other eligible payees:",
+        isRevision
+          ? "The following revised supports are also approved for payment to other eligible payees:"
+          : "The following supports have also been approved for payment to other eligible payees:",
         otherPayLines.map(formatFundingLine).join("\n")
       );
     }
@@ -394,14 +414,16 @@ const buildInstitutionApprovalLetters = ({
       caseManagerPhone,
     });
     const body = [
-      "Letter of Approval (Institution)",
+      isRevision ? "Funding Revision Letter (Institution)" : "Letter of Approval (Institution)",
       `Date: ${decisionDate || ""}`,
       "",
       item.institution,
       "",
       "To Whom It May Concern,",
       "",
-      "This letter is to formally confirm that the Native Women's Association of Canada (NWAC), through its Indigenous Skills and Employment Training (ISET) Program, has approved education-related funding on behalf of the following student:",
+      isRevision
+        ? "This letter is to formally confirm that the Native Women's Association of Canada (NWAC), through its Indigenous Skills and Employment Training (ISET) Program, has approved a revision to the education-related funding previously approved on behalf of the following student:"
+        : "This letter is to formally confirm that the Native Women's Association of Canada (NWAC), through its Indigenous Skills and Employment Training (ISET) Program, has approved education-related funding on behalf of the following student:",
       "",
       `Student Name: ${applicantName || "Student"}`,
       `Training Institution: ${item.institution}`,
@@ -409,7 +431,9 @@ const buildInstitutionApprovalLetters = ({
       "",
       fundingSectionParts.join("\n\n"),
       "",
-      "These funds are provided under the ISET Program and are intended solely to support the student's participation in the approved training program noted above. Please note that all payments are made on behalf of the student. In the event of an overpayment, withdrawal, or change in enrollment status, any unused or refunded funds must be returned directly to the NWAC ISET Program and not issued to the student.",
+      isRevision
+        ? "These revised funds are provided under the ISET Program and are intended solely to support the student's participation in the approved training program noted above. Please note that all payments are made on behalf of the student. In the event of an overpayment, withdrawal, or change in enrollment status, any unused or refunded funds must be returned directly to the NWAC ISET Program and not issued to the student."
+        : "These funds are provided under the ISET Program and are intended solely to support the student's participation in the approved training program noted above. Please note that all payments are made on behalf of the student. In the event of an overpayment, withdrawal, or change in enrollment status, any unused or refunded funds must be returned directly to the NWAC ISET Program and not issued to the student.",
       "",
       "Should you require additional documentation or clarification, please do not hesitate to contact the undersigned.",
       "",
@@ -419,7 +443,9 @@ const buildInstitutionApprovalLetters = ({
     return {
       id: `institution-${index + 1}`,
       recipientName: item.institution,
-      title: `Institution Letter — ${item.institution}`,
+      title: isRevision
+        ? `Institution Funding Revision Letter — ${item.institution}`
+        : `Institution Letter — ${item.institution}`,
       fileName: `institution-letter-${toSafeFileToken(item.institution, `recipient-${index + 1}`)}.txt`,
       body,
     };
@@ -437,6 +463,7 @@ const buildCoFunderApprovalLetters = ({
   caseManagerName = "",
   caseManagerEmail = "",
   caseManagerPhone = "",
+  isRevision = false,
 } = {}) => {
   const normalizeInlineText = value => String(value || "").replace(/\s+/g, " ").trim();
   const approvedTotal = (Array.isArray(interventions) ? interventions : []).reduce((sum, intervention) => {
@@ -498,20 +525,26 @@ const buildCoFunderApprovalLetters = ({
       const funderTypeLabel = resolveOtherFunderTypeLabel(source?.type);
       const sourceCoverage = String(source?.coverage || "").trim();
       const body = [
-        "Letter of Approval (Other Funding Source)",
+        isRevision ? "Funding Revision Letter (Other Funding Source)" : "Letter of Approval (Other Funding Source)",
         `Date: ${decisionDate || ""}`,
         "",
         funderName,
         "",
         "To Whom It May Concern,",
         "",
-        `I am writing to let you know that the Native Women's Association of Canada (NWAC), through its Indigenous Skills and Employment Training (ISET) Program, will be funding ${applicantName || "the student"} for ${termText} in ${programText} at ${institutionText}.`,
+        isRevision
+          ? `I am writing to let you know that the Native Women's Association of Canada (NWAC), through its Indigenous Skills and Employment Training (ISET) Program, has approved a revision to the funding for ${applicantName || "the student"} for ${termText} in ${programText} at ${institutionText}.`
+          : `I am writing to let you know that the Native Women's Association of Canada (NWAC), through its Indigenous Skills and Employment Training (ISET) Program, will be funding ${applicantName || "the student"} for ${termText} in ${programText} at ${institutionText}.`,
         "",
         approvedTotal > 0
-          ? `I have approved funding in the amount of $${Number(approvedTotal).toFixed(2)} for eligible costs under this intervention plan, which will be paid directly to approved payees as specified in the assessment.`
-          : "I have approved funding for eligible costs under this intervention plan, which will be paid directly to approved payees as specified in the assessment.",
+          ? isRevision
+            ? `The revised approved NWAC funding is $${Number(approvedTotal).toFixed(2)} for eligible costs under this intervention plan, which will be paid directly to approved payees as specified in the assessment.`
+            : `I have approved funding in the amount of $${Number(approvedTotal).toFixed(2)} for eligible costs under this intervention plan, which will be paid directly to approved payees as specified in the assessment.`
+          : isRevision
+            ? "The approved NWAC funding for eligible costs under this intervention plan has been revised and will be paid directly to approved payees as specified in the assessment."
+            : "I have approved funding for eligible costs under this intervention plan, which will be paid directly to approved payees as specified in the assessment.",
         nwacFundingBreakdownLines.length ? "" : null,
-        nwacFundingBreakdownLines.length ? "NWAC funding breakdown:" : null,
+        nwacFundingBreakdownLines.length ? (isRevision ? "Revised NWAC funding breakdown:" : "NWAC funding breakdown:") : null,
         nwacFundingBreakdownLines.length ? nwacFundingBreakdownLines.join("\n") : null,
         "",
         `As documented in the assessment records, ${funderName} (${funderTypeLabel}) is identified as funding the following:`,
@@ -530,12 +563,116 @@ const buildCoFunderApprovalLetters = ({
       return {
         id: source?.id || `funder-${index + 1}`,
         recipientName: funderName,
-        title: `Other Funding Source Letter — ${funderName}`,
+        title: isRevision
+          ? `Other Funding Source Revision Letter — ${funderName}`
+          : `Other Funding Source Letter — ${funderName}`,
         fileName: `other-funding-source-letter-${toSafeFileToken(funderName, `recipient-${index + 1}`)}.txt`,
         body,
       };
     })
     .filter(Boolean);
+};
+
+const buildLoanProviderApprovalLetters = ({
+  interventions = [],
+  applicantName = "",
+  trackingReference = "",
+  decisionDate = "",
+  caseManagerName = "",
+  caseManagerEmail = "",
+  caseManagerPhone = "",
+  isRevision = false,
+} = {}) => {
+  const normalizeInlineText = value => String(value || "").replace(/\s+/g, " ").trim();
+  const formatCurrency = value => `$${Number(value || 0).toFixed(2)}`;
+  const groupedLetters = new Map();
+
+  (Array.isArray(interventions) ? interventions : []).forEach(intervention => {
+    const termLabel = formatInterventionDates(intervention?.startDate, intervention?.endDate);
+    const costLines = Array.isArray(intervention?.costLines) ? intervention.costLines : [];
+    costLines.forEach((line, lineIndex) => {
+      if (normalizePaymentTypeCode(line?.type) !== "StudentLoanRepayment") return;
+      const amount = parseCurrencyToNumber(line?.amount);
+      if (!(amount > 0)) return;
+      const payee = line?.payee && typeof line.payee === "object" ? line.payee : {};
+      const payeeType = String(payee.type || deriveDefaultPayeeTypeForCostLine(line?.type) || "").trim();
+      const explicitPayeeName = normalizeInlineText(payee.name || "");
+      const defaultPayeeName = normalizeInlineText(
+        deriveDefaultPayeeNameForCostLine(payeeType, intervention, applicantName || "")
+      );
+      const payeeName = explicitPayeeName || defaultPayeeName || "Student loan provider";
+      const accountNumber = normalizeInlineText(payee.reference || "");
+      const groupKey = `${payeeName.toLowerCase()}::${accountNumber.toLowerCase() || "no-account"}`;
+      if (!groupedLetters.has(groupKey)) {
+        groupedLetters.set(groupKey, {
+          payeeName,
+          accountNumber,
+          totalAmount: 0,
+          lineItems: [],
+        });
+      }
+      const target = groupedLetters.get(groupKey);
+      target.totalAmount += amount;
+      target.lineItems.push({
+        id: `${intervention?.id || "intervention"}-${line?.id || lineIndex + 1}`,
+        label: formatCostTypeForLetter(line?.type),
+        amount,
+        termLabel: termLabel && termLabel !== "—" ? termLabel : "",
+      });
+    });
+  });
+
+  const signatureBlock = formatCaseManagerSignatureLines({
+    caseManagerName,
+    caseManagerEmail,
+    caseManagerPhone,
+  });
+
+  return Array.from(groupedLetters.values()).map((item, index) => {
+    const applicantPossessive = applicantName ? `${applicantName}'s` : "the participant's";
+    const fundingLines = item.lineItems.map(line =>
+      `- ${line.label}: ${formatCurrency(line.amount)}${line.termLabel ? ` (Term/Dates: ${line.termLabel})` : ""}`
+    );
+    const body = [
+      isRevision ? "Funding Revision Letter (Loan Provider)" : "Letter of Approval (Loan Provider)",
+      `Date: ${decisionDate || ""}`,
+      "",
+      item.payeeName,
+      "",
+      "To Whom It May Concern,",
+      "",
+      isRevision
+        ? `This letter is to formally confirm that the Native Women's Association of Canada (NWAC), through its Indigenous Skills and Employment Training (ISET) Program, has approved a revision to the repayment support for ${applicantPossessive} eligible student loan. The revised total amount is ${formatCurrency(item.totalAmount)}. Please apply this payment to the repayable portion of the account noted below.`
+        : `This letter is to formally confirm that the Native Women's Association of Canada (NWAC), through its Indigenous Skills and Employment Training (ISET) Program, will repay a portion of ${applicantPossessive} eligible student loan in the total amount of ${formatCurrency(item.totalAmount)}. Please apply this payment to the repayable portion of the account noted below.`,
+      "",
+      `Student Name: ${applicantName || "Student"}`,
+      item.accountNumber
+        ? `Loan Account Number: ${item.accountNumber}`
+        : "Loan Account Number: To be confirmed by case manager",
+      trackingReference ? `File Reference: ${normalizeInlineText(trackingReference)}` : null,
+      fundingLines.length ? "" : null,
+      fundingLines.length ? (isRevision ? "Revised approved repayment lines:" : "Approved repayment lines:") : null,
+      fundingLines.length ? fundingLines.join("\n") : null,
+      "",
+      "If there is an overpayment, or if the participant withdraws from the approved program, any refunded funds must be returned directly to the NWAC ISET Program and not to the participant.",
+      "",
+      "Please let me know if you have any questions.",
+      "",
+      "Sincerely,",
+      signatureBlock,
+    ]
+      .map(line => (line === null || typeof line === "undefined" ? "" : String(line)))
+      .join("\n");
+    return {
+      id: `loan-provider-${index + 1}`,
+      recipientName: item.payeeName,
+      title: isRevision
+        ? `Loan Provider Revision Letter — ${item.payeeName}`
+        : `Loan Provider Letter — ${item.payeeName}`,
+      fileName: `loan-provider-letter-${toSafeFileToken(item.payeeName, `recipient-${index + 1}`)}.txt`,
+      body,
+    };
+  });
 };
 
 const formatDate = value => {
@@ -857,36 +994,6 @@ const recalcRecurringAmounts = ({ amount, amountPerPeriod, occurrences, adjustMo
   return { amount, amountPerPeriod };
 };
 
-const EDUCATION_CODES = new Set([4, 5, 9, 10, 11, 12, 13]);
-const EMPLOYER_CODES = new Set([6, 7, 8, 17]);
-const WAGE_SUBSIDY_CODES = new Set([7, 8]);
-const NOC_REQUIRED_CODES = new Set([6, 7, 8, 9, 10, 11, 12, 13, 17]);
-
-const isEducationCode = value => {
-  if (!value) return false;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) && EDUCATION_CODES.has(numeric);
-};
-
-const isEmployerCode = value => {
-  if (!value) return false;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) && EMPLOYER_CODES.has(numeric);
-};
-
-const isWageSubsidyCode = value => {
-  if (!value) return false;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) && WAGE_SUBSIDY_CODES.has(numeric);
-};
-
-const requiresExternalPartnerForCode = value => isEducationCode(value) || isEmployerCode(value);
-const requiresNocForCode = value => {
-  if (!value) return false;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) && NOC_REQUIRED_CODES.has(numeric);
-};
-
 const normalizeInterventionCodeValue = value => {
   if (value === null || value === undefined) return null;
   const trimmed = String(value).trim();
@@ -939,6 +1046,7 @@ const PAYMENT_TYPE_DEFAULT_PAYEE_TYPE = {
   BooksMaterialsDirect: "TrainingRelatedSupplier",
   SpecializedEquipmentAdvance: "TrainingRelatedSupplier",
   JCPProjectCost: "CommunityNonProfitOrganization",
+  StudentLoanRepayment: "StudentLoanServicer",
 };
 const normalizePayeeTypeKey = value =>
   String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -956,6 +1064,7 @@ const PAYEE_TYPE_DETAIL_TARGET_BY_KEY = {
   communitynonprofitorganization: "community organization",
   trainingrelatedsupplier: "supplier",
   professionalbusinessservicesprovider: "service provider",
+  studentloanservicer: "student loan provider",
   other: "other payee",
 };
 
@@ -1039,6 +1148,96 @@ const buildPaymentTypeMappingLookup = mapping => {
     lookup.set(code, new Set(types));
   });
   return lookup;
+};
+
+const normalizePaymentTypeMappingPayload = payload => {
+  if (!payload || typeof payload !== "object") {
+    return { enabled: false, paymentTypes: [], payeeTypes: [], interventions: [] };
+  }
+  const paymentTypesRaw = Array.isArray(payload.paymentTypes)
+    ? payload.paymentTypes
+    : Array.isArray(payload.payment_types)
+      ? payload.payment_types
+      : [];
+  const payeeTypesRaw = Array.isArray(payload.payeeTypes)
+    ? payload.payeeTypes
+    : Array.isArray(payload.payee_types)
+      ? payload.payee_types
+      : [];
+  const paymentTypes = paymentTypesRaw
+    .map(entry => {
+      if (!entry || typeof entry !== "object") return null;
+      const code = normalizePaymentTypeCode(
+        entry.code || entry.value || entry.paymentType || entry.payment_type,
+      );
+      if (!code) return null;
+      return {
+        code,
+        label:
+          typeof entry.label === "string" && entry.label.trim()
+            ? entry.label.trim()
+            : typeof entry.name === "string" && entry.name.trim()
+              ? entry.name.trim()
+              : code,
+        submissionTiming: normalizeSubmissionTiming(
+          entry.submissionTiming || entry.submission_timing,
+        ),
+      };
+    })
+    .filter(Boolean);
+  const payeeTypes = payeeTypesRaw
+    .map(entry => {
+      if (!entry || typeof entry !== "object") return null;
+      const codeRaw = entry.code || entry.value || entry.payeeType || entry.payee_type;
+      const code = typeof codeRaw === "string" ? codeRaw.trim() : "";
+      if (!code) return null;
+      return {
+        code,
+        label:
+          typeof entry.label === "string" && entry.label.trim()
+            ? entry.label.trim()
+            : typeof entry.name === "string" && entry.name.trim()
+              ? entry.name.trim()
+              : code,
+        description:
+          typeof entry.description === "string" && entry.description.trim()
+            ? entry.description.trim()
+            : typeof entry.helpText === "string" && entry.helpText.trim()
+              ? entry.helpText.trim()
+              : null,
+      };
+    })
+    .filter(Boolean);
+  const interventionsRaw = Array.isArray(payload.interventions) ? payload.interventions : [];
+  const interventions = interventionsRaw
+    .map(entry => {
+      if (!entry || typeof entry !== "object") return null;
+      const code = normalizeInterventionCodeValue(
+        entry.code || entry.interventionCode || entry.intervention_code,
+      );
+      if (!code) return null;
+      const typesRaw =
+        entry.availablePaymentTypes ||
+        entry.available_payment_types ||
+        entry.paymentTypes ||
+        entry.payment_types ||
+        [];
+      const types = Array.isArray(typesRaw)
+        ? Array.from(new Set(typesRaw.map(value => String(value || "").trim()).filter(Boolean)))
+        : [];
+      return {
+        code,
+        name: entry.name || entry.label || null,
+        availablePaymentTypes: types,
+      };
+    })
+    .filter(Boolean);
+  return {
+    enabled: payload.enabled !== false,
+    paymentTypes,
+    payeeTypes,
+    interventions,
+  };
 };
 
 const normalizeCostingDefaults = payload => {
@@ -1166,6 +1365,15 @@ const normalizeCostLine = raw => {
   };
 };
 
+const hasApprovedFundingAmount = line => {
+  if (!line || typeof line !== "object") return false;
+  const totalAmount = parseCurrencyInput(line.amount);
+  if (totalAmount !== null && totalAmount > 0) return true;
+  const recurrence = line.recurrence && typeof line.recurrence === "object" ? line.recurrence : {};
+  const amountPerPeriod = parseCurrencyInput(recurrence.amountPerPeriod);
+  return amountPerPeriod !== null && amountPerPeriod > 0;
+};
+
 const normalizeProposedIntervention = raw => {
   if (!raw || typeof raw !== "object") return null;
   const costLines = Array.isArray(raw.costLines)
@@ -1194,6 +1402,21 @@ const normalizeProposedInterventions = raw => {
   return normalized.length ? normalized : [];
 };
 
+const normalizeRevisionContext = raw => {
+  if (!raw || typeof raw !== "object") return null;
+  const sourceInterventionId = raw.sourceInterventionId || raw.source_intervention_id || null;
+  if (!sourceInterventionId) return null;
+  const sourceActionPlanId = raw.sourceActionPlanId || raw.source_action_plan_id || null;
+  return {
+    kind: raw.kind || "approved_intervention",
+    sourceInterventionId: String(sourceInterventionId),
+    sourceActionPlanId: sourceActionPlanId ? String(sourceActionPlanId) : "",
+    sourceStatus: normalizeInterventionStatus(raw.sourceStatus || raw.source_status, null),
+    sourceTitle: raw.sourceTitle || raw.source_title || "Intervention",
+    openedAt: raw.openedAt || raw.opened_at || null,
+  };
+};
+
 const isRecurrenceScheduleComplete = line => {
   const recurrence = line?.recurrence || {};
   if (!recurrence.enabled) return false;
@@ -1218,7 +1441,10 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const {
     caseId: workspaceCaseId,
     caseData,
+    refresh,
+    updateActionPlan,
     createIntervention,
+    deleteIntervention: deleteInterventionRecord,
     updateIntervention: updateInterventionRecord,
     interventionCodes,
     interventionCodesLoading,
@@ -1226,6 +1452,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     nocVersions,
     nocVersionsLoading,
     loadNocVersions,
+    fundingStreams,
+    fundingStreamsLoading,
+    loadFundingStreams,
     selectedActionPlanId,
     setSelectedActionPlanId,
     selectedInterventionId,
@@ -1249,6 +1478,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const [hydratedDraftId, setHydratedDraftId] = useState(null);
   const [hydratedDraftUpdatedAt, setHydratedDraftUpdatedAt] = useState(null);
   const [currentInterventionStatus, setCurrentInterventionStatus] = useState(null);
+  const [revisionContext, setRevisionContext] = useState(null);
   const [interventionModal, setInterventionModal] = useState({
     visible: false,
     mode: "view",
@@ -1292,6 +1522,15 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const [eiVerificationUploadError, setEiVerificationUploadError] = useState(null);
   const [eiVerificationUploadSuccess, setEiVerificationUploadSuccess] = useState(null);
   const [eiVerificationUploading, setEiVerificationUploading] = useState(false);
+  const [actionPlanFundingDraft, setActionPlanFundingDraft] = useState({
+    fundingStream: "",
+    budgetPot: "",
+    postingContext: "external",
+  });
+  const [actionPlanFundingErrors, setActionPlanFundingErrors] = useState({});
+  const [actionPlanFundingSaving, setActionPlanFundingSaving] = useState(false);
+  const [actionPlanBudgetPotOptions, setActionPlanBudgetPotOptions] = useState([]);
+  const [actionPlanBudgetPotLoading, setActionPlanBudgetPotLoading] = useState(false);
   const eiVerificationFileInputRef = useRef(null);
   const initialFormRef = useRef(defaultFormState);
   const wizardStepRestoreKeyRef = useRef(null);
@@ -1535,7 +1774,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     const plans = caseData?.actionPlans || [];
     return plans.some(plan =>
       (plan.interventions || []).some(intervention => {
-        const statusValue = String(intervention?.status || "").toLowerCase();
+        const statusValue = normalizeInterventionStatus(intervention?.status, null);
         return statusValue === "submitted";
       })
     );
@@ -1545,7 +1784,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     const plans = caseData?.actionPlans || [];
     return plans.some(plan =>
       (plan.interventions || []).some(intervention => {
-        const statusValue = String(intervention?.status || "").toLowerCase();
+        const statusValue = normalizeInterventionStatus(intervention?.status, null);
         return statusValue === "draft" || statusValue === "changes_requested";
       })
     );
@@ -1553,10 +1792,15 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
 
   const hasBlockingProposal = hasBlockingSubmitted || hasBlockingDraft;
 
-  const statusValue = String(currentInterventionStatus || "").toLowerCase();
+  const statusValue = normalizeInterventionStatus(currentInterventionStatus, null);
   const isDraftStatus = statusValue === "draft";
   const isSubmittedStatus = statusValue === "submitted";
   const isChangesRequestedStatus = statusValue === "changes_requested";
+  const isRevisionMode = Boolean(revisionContext?.sourceInterventionId);
+  const revisionSourceInterventionId = revisionContext?.sourceInterventionId || null;
+  const revisionSourceActionPlanId = revisionContext?.sourceActionPlanId || "";
+  const revisionSourceStatus = revisionContext?.sourceStatus || "approved";
+  const revisionSourceTitle = revisionContext?.sourceTitle || "this approved intervention";
   const decisionOutcomeKey = String(form.decisionOutcome || "").trim().toLowerCase();
   const isApprovedDecisionOutcome = decisionOutcomeKey === "approved";
   const isRejectedDecisionOutcome = decisionOutcomeKey === "rejected";
@@ -1564,6 +1808,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const role = currentUser?.role || null;
   const canonicalRole = role === "Regional Manager" ? "Regional Coordinator" : role;
   const canManageEiEligibility = EI_ELIGIBILITY_ROLE_KEYS.has(normalizeRoleKey(role));
+  const isAssessor = canonicalRole === "Application Assessor";
   const canEditSubmitted =
     canonicalRole === "Regional Coordinator" ||
     canonicalRole === "Program Administrator" ||
@@ -1658,20 +1903,277 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     () => normalizeFundingStream(selectedPlan?.fundingStream || selectedPlan?.funding_stream),
     [selectedPlan]
   );
+  const selectedPlanBudgetPot = useMemo(
+    () => (selectedPlan?.budgetPot || selectedPlan?.budget_pot ? String(selectedPlan?.budgetPot || selectedPlan?.budget_pot) : ""),
+    [selectedPlan]
+  );
+  const selectedPlanPostingContext = useMemo(
+    () => String(selectedPlan?.postingContext || selectedPlan?.posting_context || "external").trim().toLowerCase() || "external",
+    [selectedPlan]
+  );
+  const participantProvince = useMemo(() => {
+    const context = caseData?.caseContext || {};
+    const clientRegionCode =
+      caseData?.client?.regionDetails?.code ||
+      caseData?.client?.region?.code ||
+      null;
+    const answersProvince =
+      context?.applicationAnswers?.["address-province"] ||
+      context?.applicationPayload?.answers?.["address-province"] ||
+      null;
+    const resolved =
+      context.addressProvince ||
+      context.address?.province ||
+      clientRegionCode ||
+      answersProvince ||
+      "";
+    return resolved ? String(resolved).trim().toUpperCase() : "";
+  }, [caseData]);
 
   const requiredFundingStream = useMemo(
     () => deriveFundingStreamFromEiStatus(form.eiVerificationStatus),
     [form.eiVerificationStatus]
   );
 
+  const effectiveDecisionPlanFundingStream = useMemo(
+    () => normalizeFundingStream(actionPlanFundingDraft.fundingStream || selectedPlanFundingStream),
+    [actionPlanFundingDraft.fundingStream, selectedPlanFundingStream]
+  );
+
   const hasPlanFundingMismatch = useMemo(
     () =>
       Boolean(
         requiredFundingStream &&
-          selectedPlanFundingStream &&
-          requiredFundingStream !== selectedPlanFundingStream
+          effectiveDecisionPlanFundingStream &&
+          requiredFundingStream !== effectiveDecisionPlanFundingStream
       ),
-    [requiredFundingStream, selectedPlanFundingStream]
+    [effectiveDecisionPlanFundingStream, requiredFundingStream]
+  );
+  const needsActionPlanFundingSetup = useMemo(
+    () =>
+      Boolean(
+        isApprovedDecisionOutcome &&
+          selectedPlan &&
+          (!selectedPlanFundingStream || !selectedPlanBudgetPot || hasPlanFundingMismatch)
+      ),
+    [
+      hasPlanFundingMismatch,
+      isApprovedDecisionOutcome,
+      selectedPlan,
+      selectedPlanBudgetPot,
+      selectedPlanFundingStream,
+    ]
+  );
+
+  useEffect(() => {
+    if (!selectedPlan) {
+      setActionPlanFundingDraft({
+        fundingStream: requiredFundingStream || "",
+        budgetPot: "",
+        postingContext: "external",
+      });
+      setActionPlanFundingErrors({});
+      return;
+    }
+    setActionPlanFundingDraft({
+      fundingStream: selectedPlanFundingStream || requiredFundingStream || "",
+      budgetPot: selectedPlanBudgetPot || "",
+      postingContext: selectedPlanPostingContext || "external",
+    });
+    setActionPlanFundingErrors({});
+  }, [
+    requiredFundingStream,
+    selectedPlan,
+    selectedPlanBudgetPot,
+    selectedPlanFundingStream,
+    selectedPlanPostingContext,
+  ]);
+
+  const actionPlanFundingStreamOptions = useMemo(() => {
+    const formatted = (Array.isArray(fundingStreams) ? fundingStreams : [])
+      .map(item => {
+        if (!item) return null;
+        const value = item.code ? String(item.code).trim() : null;
+        const label = item.label ? String(item.label).trim() : value;
+        if (!value || !label) return null;
+        return { value, label };
+      })
+      .filter(Boolean);
+    if (
+      actionPlanFundingDraft.fundingStream &&
+      !formatted.some(option => option.value === actionPlanFundingDraft.fundingStream)
+    ) {
+      formatted.push({
+        value: actionPlanFundingDraft.fundingStream,
+        label: `${actionPlanFundingDraft.fundingStream} (legacy)`,
+        disabled: true,
+      });
+    }
+    return formatted;
+  }, [actionPlanFundingDraft.fundingStream, fundingStreams]);
+
+  const selectedActionPlanFundingStreamOption = useMemo(
+    () =>
+      actionPlanFundingStreamOptions.find(option => option.value === actionPlanFundingDraft.fundingStream) || null,
+    [actionPlanFundingDraft.fundingStream, actionPlanFundingStreamOptions]
+  );
+
+  const selectedActionPlanBudgetPotOption = useMemo(() => {
+    if (!actionPlanFundingDraft.budgetPot) return null;
+    return (
+      actionPlanBudgetPotOptions.find(option => String(option.value) === String(actionPlanFundingDraft.budgetPot)) ||
+      {
+        value: String(actionPlanFundingDraft.budgetPot),
+        label:
+          actionPlanBudgetPotOptions.find(option => String(option.value) === String(actionPlanFundingDraft.budgetPot))
+            ?.label || String(actionPlanFundingDraft.budgetPot),
+      }
+    );
+  }, [actionPlanBudgetPotOptions, actionPlanFundingDraft.budgetPot]);
+
+  const selectedActionPlanPostingContextOption = useMemo(
+    () =>
+      POSTING_CONTEXT_OPTIONS.find(option => option.value === actionPlanFundingDraft.postingContext) ||
+      POSTING_CONTEXT_OPTIONS[0],
+    [actionPlanFundingDraft.postingContext]
+  );
+
+  const loadActionPlanBudgetPotOptions = useCallback(
+    async query => {
+      setActionPlanBudgetPotLoading(true);
+      try {
+        const resp = await apiFetch("/api/reference/budget-pots-lite?chargeableOnly=0");
+        if (!resp.ok) {
+          throw new Error(`Lookup failed (${resp.status})`);
+        }
+        const data = await resp.json();
+        const qLower = String(query || "").trim().toLowerCase();
+        const selectedBudgetPotId = actionPlanFundingDraft.budgetPot
+          ? String(actionPlanFundingDraft.budgetPot)
+          : "";
+        const selectedFundingStream = normalizeFundingStream(actionPlanFundingDraft.fundingStream);
+        const options = (Array.isArray(data) ? data : [])
+          .filter(item => {
+            const potType =
+              item?.pot_type ??
+              item?.potType ??
+              item?.type ??
+              item?.nodeType ??
+              item?.metadata?.pot_type ??
+              item?.metadata?.nodeType ??
+              "";
+            const normalizedType = String(potType).trim().toLowerCase().replace(/[_\s]+/g, " ");
+            return normalizedType === "funding stream";
+          })
+          .filter(item => {
+            const itemId = item?.id || item?.value || item?.code || "";
+            const itemIdString = itemId ? String(itemId) : "";
+            const isSelectedItem = selectedBudgetPotId && itemIdString && itemIdString === selectedBudgetPotId;
+            const isActive = !(item?.isActive === false || item?.is_active === false || item?.is_active === 0);
+            if (!isActive && !isSelectedItem) return false;
+
+            const fundingSourceRaw = item.fundingSource || item.funding_source || "";
+            const deriveStreamFromCode = codeValue => {
+              const codeString = normalizeFundingStream(codeValue);
+              if (!codeString) return "";
+              if (codeString.includes("-EI") || codeString.endsWith(" EI")) return "EI";
+              if (codeString.includes("-CRF") || codeString.endsWith(" CRF")) return "CRF";
+              return "";
+            };
+            if (selectedFundingStream) {
+              const potFundingStream =
+                normalizeFundingStream(fundingSourceRaw) || deriveStreamFromCode(item.code);
+              if (potFundingStream && potFundingStream !== selectedFundingStream) {
+                return false;
+              }
+            }
+
+            if (!participantProvince) return true;
+            const regions = Array.isArray(item.regions)
+              ? item.regions.map(region => String(region).trim().toUpperCase())
+              : [];
+            if (isSelectedItem && !regions.length) return true;
+            if (!regions.length) return false;
+            return regions.includes(participantProvince) || isSelectedItem;
+          })
+          .filter(item => {
+            if (!qLower) return true;
+            const name = String(item?.name || "").toLowerCase();
+            const code = String(item?.code || "").toLowerCase();
+            return name.includes(qLower) || code.includes(qLower);
+          })
+          .map(item => {
+            const value = item.id || item.value || item.code;
+            if (!value) return null;
+            const code = item.code || "";
+            const name = item.name || item.label || "";
+            const label = [code, name].filter(Boolean).join(" - ") || code || name || String(value);
+            return {
+              value: String(value),
+              label,
+              description: code || undefined,
+            };
+          })
+          .filter(Boolean);
+        setActionPlanBudgetPotOptions(options);
+      } catch (err) {
+        console.warn("[InterventionAssessment] action plan pot lookup failed", err);
+        setActionPlanBudgetPotOptions([]);
+      } finally {
+        setActionPlanBudgetPotLoading(false);
+      }
+    },
+    [actionPlanFundingDraft.budgetPot, actionPlanFundingDraft.fundingStream, apiFetch, participantProvince]
+  );
+
+  useEffect(() => {
+    if (!needsActionPlanFundingSetup) return;
+    loadFundingStreams().catch(() => {});
+  }, [loadFundingStreams, needsActionPlanFundingSetup]);
+
+  useEffect(() => {
+    if (!needsActionPlanFundingSetup) {
+      setActionPlanBudgetPotOptions([]);
+      return;
+    }
+    if (!actionPlanFundingDraft.fundingStream) {
+      setActionPlanBudgetPotOptions([]);
+      return;
+    }
+    loadActionPlanBudgetPotOptions().catch(() => {});
+  }, [
+    actionPlanFundingDraft.fundingStream,
+    loadActionPlanBudgetPotOptions,
+    needsActionPlanFundingSetup,
+  ]);
+
+  useEffect(() => {
+    if (!isAssessor) return;
+    if (!actionPlanFundingDraft.budgetPot) return;
+    if (actionPlanFundingDraft.postingContext === "external") return;
+    setActionPlanFundingDraft(current => ({ ...current, postingContext: "external" }));
+  }, [actionPlanFundingDraft.budgetPot, actionPlanFundingDraft.postingContext, isAssessor]);
+
+  const validateActionPlanFundingDraft = useCallback(
+    draft => {
+      const nextDraft = draft || actionPlanFundingDraft;
+      const errors = {};
+      if (!normalizeFundingStream(nextDraft.fundingStream)) {
+        errors.fundingStream = "Funding stream is required.";
+      }
+      if (!String(nextDraft.budgetPot || "").trim()) {
+        errors.budgetPot = "Budget pot is required.";
+      }
+      if (!String(nextDraft.postingContext || "").trim()) {
+        errors.postingContext = "Paid from is required.";
+      }
+      const nextFundingStream = normalizeFundingStream(nextDraft.fundingStream);
+      if (requiredFundingStream && nextFundingStream && nextFundingStream !== requiredFundingStream) {
+        errors.fundingStream = `Funding stream must match EI eligibility (${requiredFundingStream}).`;
+      }
+      return errors;
+    },
+    [actionPlanFundingDraft, requiredFundingStream]
   );
 
   useEffect(() => {
@@ -1987,7 +2489,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         const response = await apiFetch("/api/config/runtime/payment-type-mapping", { method: "GET" });
         if (!response.ok) throw new Error(`Failed to load payment mapping (${response.status})`);
         const payload = await response.json().catch(() => null);
-        if (!cancelled) setPaymentTypeMapping(payload);
+        if (!cancelled) setPaymentTypeMapping(normalizePaymentTypeMappingPayload(payload));
       } catch (_) {
         if (!cancelled) setPaymentTypeMapping(null);
       } finally {
@@ -2084,14 +2586,42 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     [paymentTypeMapping]
   );
 
+  const configuredPaymentTypeOptions = useMemo(() => {
+    const list = Array.isArray(paymentTypeMapping?.paymentTypes) ? paymentTypeMapping.paymentTypes : [];
+    return list
+      .map(entry => {
+        const code = normalizePaymentTypeCode(entry?.code);
+        if (!code) return null;
+        return {
+          value: code,
+          label: entry?.label || code,
+        };
+      })
+      .filter(Boolean);
+  }, [paymentTypeMapping]);
+  const configuredPayeeTypeOptions = useMemo(() => {
+    const list = Array.isArray(paymentTypeMapping?.payeeTypes) ? paymentTypeMapping.payeeTypes : [];
+    return list
+      .map(entry => {
+        const code = typeof entry?.code === "string" ? entry.code.trim() : "";
+        if (!code) return null;
+        return {
+          value: code,
+          label: entry?.label || code,
+          description: entry?.description || undefined,
+        };
+      })
+      .filter(Boolean);
+  }, [paymentTypeMapping]);
+
   const paymentTypeLabelLookup = useMemo(() => {
     const map = new Map();
-    PAYMENT_TYPE_OPTIONS.forEach(option => {
+    configuredPaymentTypeOptions.forEach(option => {
       if (!option?.value) return;
       map.set(String(option.value), option.label || option.value);
     });
     return map;
-  }, []);
+  }, [configuredPaymentTypeOptions]);
 
   const effectiveCostingDefaults = useMemo(() => {
     if (costingDefaults && costingDefaults.enabled !== false) return costingDefaults;
@@ -2264,13 +2794,13 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const buildCostItemOptions = useCallback(
     intervention => {
       const allowed = new Set(getAllowedPaymentTypesForIntervention(intervention?.code));
-      return PAYMENT_TYPE_OPTIONS.filter(option => {
+      return configuredPaymentTypeOptions.filter(option => {
         if (!option?.value) return false;
         if (allowed.size && !allowed.has(option.value)) return false;
         return true;
       });
     },
-    [getAllowedPaymentTypesForIntervention]
+    [configuredPaymentTypeOptions, getAllowedPaymentTypesForIntervention]
   );
 
   const buildSuggestedCostLines = useCallback(
@@ -2406,6 +2936,10 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   );
 
   const confirmInterventionDelete = useCallback(() => {
+    if (isRevisionMode) {
+      setInterventionDeleteId(null);
+      return;
+    }
     const deleteId = interventionDeleteId;
     if (deleteId !== null && typeof deleteId !== "undefined") {
       const nextProposedInterventions = proposedInterventions.filter(
@@ -2430,9 +2964,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     wizardStepKey,
     setInterventionWizardDraft,
     hasMeaningfulDraft,
+    isRevisionMode,
   ]);
 
   const openAddInterventionModal = useCallback(() => {
+    if (isRevisionMode) return;
     setInterventionModal({
       visible: true,
       mode: "add",
@@ -2441,7 +2977,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       original: null,
     });
     setInterventionModalErrors({});
-  }, []);
+  }, [isRevisionMode]);
 
   const openViewInterventionModal = useCallback(
     interventionId => {
@@ -3011,6 +3547,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       setHydratedDraftId(null);
       setHydratedDraftUpdatedAt(null);
       setCurrentInterventionStatus(null);
+      setRevisionContext(null);
       setError(null);
       setSuccessMessage("");
       setCompletionNote(null);
@@ -3038,6 +3575,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       setHydratedDraftId(null);
       setHydratedDraftUpdatedAt(null);
       setCurrentInterventionStatus(null);
+      setRevisionContext(null);
       if (typeof setSelectedInterventionId === "function") {
         setSelectedInterventionId(null);
       }
@@ -3104,6 +3642,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     const hydrate = draft => {
       if (!draft) return;
       const metadata = draft.metadata || {};
+      const revision = normalizeRevisionContext(metadata.revision);
       const review = metadata.review && typeof metadata.review === "object" ? metadata.review : {};
       const storedStepKey = caseId && draft.id ? `${caseId}:${draft.id}` : null;
       const storedDraft = resolveStoredDraft(storedStepKey);
@@ -3128,6 +3667,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
               : [],
           }),
         ];
+      }
+      if (revision && nextProposed.length > 1) {
+        nextProposed = nextProposed.slice(0, 1);
       }
       const mappedBarriers = Array.isArray(metadata.barriers)
         ? metadata.barriers
@@ -3173,6 +3715,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       setHydratedDraftId(draft.id || null);
       setHydratedDraftUpdatedAt(draft.updatedAt || draft.createdAt || null);
       setCurrentInterventionStatus(draftStatus || null);
+      setRevisionContext(revision);
       setCompletionNote(null);
       setAttemptedSteps({});
       setCurrentStep(nextStep);
@@ -3221,7 +3764,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
 
   const requiresPrimaryNoc = useMemo(
     () => Boolean(primaryIntervention?.code && requiresNocForCode(primaryIntervention.code)),
-    [primaryIntervention, requiresNocForCode]
+    [primaryIntervention]
   );
   const hasPrimaryNoc = useMemo(
     () => Boolean(primaryIntervention?.interventionNocVersion && primaryIntervention?.interventionNoc),
@@ -3390,7 +3933,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
 
   const buildProposalPayload = useCallback(
     statusValue => {
-      const proposedPayload = serializeProposedInterventions(proposedInterventions);
+      const proposedPayload = serializeProposedInterventions(
+        isRevisionMode ? proposedInterventions.slice(0, 1) : proposedInterventions
+      );
       const primary = primaryIntervention;
       const primaryStartDate = primary?.startDate || "";
       const primaryEndDate = primary?.endDate || "";
@@ -3416,6 +3961,18 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         noc: primary?.interventionNoc || null,
         nocVersion: primary?.interventionNocVersion || null,
         metadata: {
+          ...(isRevisionMode && revisionContext
+            ? {
+                revision: {
+                  kind: revisionContext.kind || "approved_intervention",
+                  sourceInterventionId: revisionContext.sourceInterventionId,
+                  sourceActionPlanId: revisionContext.sourceActionPlanId || null,
+                  sourceStatus: revisionContext.sourceStatus || null,
+                  sourceTitle: revisionContext.sourceTitle || null,
+                  openedAt: revisionContext.openedAt || null,
+                },
+              }
+            : {}),
           proposedInterventions: proposedPayload.length ? proposedPayload : null,
           rationale: form.rationale || "",
           barriers: Array.isArray(form.barriers) ? form.barriers.map(item => item.value || item) : [],
@@ -3434,8 +3991,10 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     },
     [
       form,
+      isRevisionMode,
       primaryIntervention,
       proposedInterventions,
+      revisionContext,
       serializeProposedInterventions,
       interventionTotals,
       resolveInterventionLabel,
@@ -3702,13 +4261,16 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   );
 
   const buildApprovedInterventionPayload = useCallback(
-    intervention => {
+    (intervention, { approvedStatus = "approved", potId = null, postingContext = null } = {}) => {
       const totalCost = interventionTotals.get(intervention.id) || 0;
       const durationDays = calculateDurationDays(intervention.startDate, intervention.endDate);
+      const approvedCostLines = Array.isArray(intervention.costLines)
+        ? intervention.costLines.filter(hasApprovedFundingAmount).map(serializeCostLine)
+        : [];
       return {
         code: intervention.code || null,
         title: resolveInterventionLabel(intervention.code) || "Intervention",
-        status: "planned",
+        status: approvedStatus,
         startDate: intervention.startDate || null,
         endDate: intervention.endDate || null,
         durationDays: durationDays !== null ? String(durationDays) : null,
@@ -3716,6 +4278,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         notes: form.rationale || "",
         noc: intervention.interventionNoc || null,
         nocVersion: intervention.interventionNocVersion || null,
+        potId: potId || null,
+        postingContext: postingContext || null,
         metadata: {
           snapshot: {
             code: intervention.code || null,
@@ -3728,13 +4292,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
             wageSubsidyDetails: intervention.wageSubsidyDetails || "",
             nocVersion: intervention.interventionNocVersion || "",
             nocCode: intervention.interventionNoc || "",
-            costLines: Array.isArray(intervention.costLines)
-              ? intervention.costLines.map(serializeCostLine)
-              : [],
+            costLines: approvedCostLines,
           },
-          costLines: Array.isArray(intervention.costLines)
-            ? intervention.costLines.map(serializeCostLine)
-            : [],
+          costLines: approvedCostLines,
           rationale: form.rationale || "",
           barriers: Array.isArray(form.barriers) ? form.barriers.map(item => item.value || item) : [],
           otherFundingDetails: normalizeOtherFundingDetails(
@@ -3778,6 +4338,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       setHydratedDraftId(null);
       setHydratedDraftUpdatedAt(null);
       setCurrentInterventionStatus(null);
+      setRevisionContext(null);
       if (typeof setSelectedInterventionId === "function") {
         setSelectedInterventionId(null);
       }
@@ -3800,9 +4361,94 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       caseId,
       clearInterventionWizardDraft,
       clearInterventionWizardStep,
+      setRevisionContext,
       setSelectedInterventionId,
     ]
   );
+
+  const resolvedApprovalPotId = useMemo(() => {
+    const draftPotId = String(actionPlanFundingDraft.budgetPot || "").trim();
+    if (draftPotId) return draftPotId;
+    return selectedPlanBudgetPot || "";
+  }, [actionPlanFundingDraft.budgetPot, selectedPlanBudgetPot]);
+
+  const resolvedApprovalPostingContext = useMemo(() => {
+    const draftPostingContext = String(actionPlanFundingDraft.postingContext || "").trim().toLowerCase();
+    if (draftPostingContext) return draftPostingContext;
+    return selectedPlanPostingContext || "external";
+  }, [actionPlanFundingDraft.postingContext, selectedPlanPostingContext]);
+
+  const ensureActionPlanFundingReadyForApproval = useCallback(async () => {
+    if (!needsActionPlanFundingSetup || !selectedPlan?.id) {
+      return { ok: true };
+    }
+    const validationErrors = validateActionPlanFundingDraft(actionPlanFundingDraft);
+    if (Object.keys(validationErrors).length) {
+      setActionPlanFundingErrors(validationErrors);
+      return { ok: false };
+    }
+
+    const nextFundingStream = normalizeFundingStream(actionPlanFundingDraft.fundingStream);
+    const nextBudgetPot = String(actionPlanFundingDraft.budgetPot || "").trim();
+    const nextPostingContext =
+      String(actionPlanFundingDraft.postingContext || "").trim().toLowerCase() || "external";
+    const selectedFundingStream = normalizeFundingStream(selectedPlanFundingStream);
+    const selectedBudgetPot = String(selectedPlanBudgetPot || "").trim();
+    const selectedPosting = String(selectedPlanPostingContext || "external").trim().toLowerCase() || "external";
+
+    if (
+      nextFundingStream === selectedFundingStream &&
+      nextBudgetPot === selectedBudgetPot &&
+      nextPostingContext === selectedPosting
+    ) {
+      setActionPlanFundingErrors({});
+      return { ok: true };
+    }
+
+    setActionPlanFundingSaving(true);
+    try {
+      await updateActionPlan(selectedPlan.id, {
+        name: selectedPlan.title || `Action Plan ${selectedPlan.id}`,
+        startDate: selectedPlan.startDate || null,
+        reviewDate: selectedPlan.endDate || null,
+        summary: selectedPlan.summary || null,
+        fundingStream: nextFundingStream || null,
+        budgetPot: nextBudgetPot || null,
+        postingContext: nextPostingContext || "external",
+      });
+      setActionPlanFundingErrors({});
+      await refresh().catch(() => {});
+      return { ok: true };
+    } catch (err) {
+      const nextErrors = {};
+      if (err?.code === "funding_stream_required") {
+        nextErrors.fundingStream = err?.message || "Funding stream is required.";
+      } else if (err?.code === "budget_pot_not_found") {
+        nextErrors.budgetPot = err?.message || "Budget pot not found.";
+      } else if (
+        ["missing_internal_gl_code", "missing_external_gl_code", "posting_context_not_permitted"].includes(err?.code)
+      ) {
+        nextErrors.postingContext = err?.message || "Check Paid from selection.";
+      }
+      if (Object.keys(nextErrors).length) {
+        setActionPlanFundingErrors(nextErrors);
+      }
+      setError(err?.message || "Failed to update action plan funding settings.");
+      return { ok: false, error: err };
+    } finally {
+      setActionPlanFundingSaving(false);
+    }
+  }, [
+    actionPlanFundingDraft,
+    needsActionPlanFundingSetup,
+    refresh,
+    selectedPlan,
+    selectedPlanBudgetPot,
+    selectedPlanFundingStream,
+    selectedPlanPostingContext,
+    updateActionPlan,
+    validateActionPlanFundingDraft,
+  ]);
 
   const getDecisionBlockingIssues = useCallback(
     ({ requireActiveIntervention = true } = {}) => {
@@ -3825,6 +4471,21 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         if (hasPlanFundingMismatch) {
           reasons.push(`Action Plan funding stream must match EI eligibility (${requiredFundingStream}).`);
           targetStep = targetStep || "decision";
+        }
+        if (needsActionPlanFundingSetup) {
+          const fundingErrors = validateActionPlanFundingDraft(actionPlanFundingDraft);
+          if (fundingErrors.fundingStream) {
+            reasons.push(fundingErrors.fundingStream);
+            targetStep = targetStep || "decision";
+          }
+          if (fundingErrors.budgetPot) {
+            reasons.push("Select a budget pot for the parent Action Plan.");
+            targetStep = targetStep || "decision";
+          }
+          if (fundingErrors.postingContext) {
+            reasons.push("Select where the parent Action Plan budget pot is paid from.");
+            targetStep = targetStep || "decision";
+          }
         }
       }
       if (outcome === "changes_requested" && !form.decisionNotes.trim()) {
@@ -3853,8 +4514,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       form.decisionOutcome,
       form.eiVerificationDocumentId,
       form.eiVerificationStatus,
+      actionPlanFundingDraft,
       hasPlanFundingMismatch,
+      needsActionPlanFundingSetup,
       requiredFundingStream,
+      validateActionPlanFundingDraft,
     ]
   );
 
@@ -3877,6 +4541,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       const outcome = form.decisionOutcome;
       const { reasons, targetStep } = getDecisionBlockingIssues({ requireActiveIntervention: true });
       if (reasons.length) {
+        if (needsActionPlanFundingSetup) {
+          setActionPlanFundingErrors(validateActionPlanFundingDraft(actionPlanFundingDraft));
+        }
         setDecisionBlockerReasons(reasons);
         setDecisionBlockerTargetStep(targetStep);
         setDecisionBlockerVisible(true);
@@ -3886,39 +4553,100 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       setIsSubmitting(true);
       try {
         if (outcome === "approved") {
-          const uploadOk = await uploadEiVerificationIfSelected({ interventionId: activeInterventionIdValue });
+          const actionPlanFundingResult = await ensureActionPlanFundingReadyForApproval();
+          if (!actionPlanFundingResult?.ok) {
+            setIsSubmitting(false);
+            return { ok: false };
+          }
+          const approvalPotId = resolvedApprovalPotId || null;
+          const approvalPostingContext = resolvedApprovalPostingContext || "external";
+          const uploadTargetInterventionId =
+            isRevisionMode && revisionSourceInterventionId
+              ? revisionSourceInterventionId
+              : activeInterventionIdValue;
+          const uploadOk = await uploadEiVerificationIfSelected({ interventionId: uploadTargetInterventionId });
           if (!uploadOk) {
             setIsSubmitting(false);
             return { ok: false };
           }
           const interventionsToCreate = proposedInterventions.length
-            ? proposedInterventions
+            ? (isRevisionMode ? proposedInterventions.slice(0, 1) : proposedInterventions)
             : [];
           if (!interventionsToCreate.length) {
             setError("Add at least one proposed intervention before approving.");
             return { ok: false };
           }
-          const [primary, ...rest] = interventionsToCreate;
-          const primaryPayload = buildApprovedInterventionPayload(primary);
-          const updated = await updateInterventionRecord(actionPlanId, Number(activeInterventionIdValue), primaryPayload);
-          const created = [];
-          for (const intervention of rest) {
-            const payload = buildApprovedInterventionPayload(intervention);
-            const row = await createIntervention(actionPlanId, payload);
-            if (row?.id) created.push(row.id);
+          if (isRevisionMode && revisionSourceInterventionId) {
+            const [primary] = interventionsToCreate;
+            const sourceActionPlanId = Number(revisionSourceActionPlanId || form.actionPlanId);
+            const primaryPayload = buildApprovedInterventionPayload(primary, {
+              approvedStatus: revisionSourceStatus || "approved",
+              potId: approvalPotId,
+              postingContext: approvalPostingContext,
+            });
+            const updated = await updateInterventionRecord(
+              sourceActionPlanId,
+              Number(revisionSourceInterventionId),
+              {
+                ...primaryPayload,
+                revisionAppliedFromInterventionId: Number(activeInterventionIdValue),
+              }
+            );
+            if (form.eiVerificationDocumentId) {
+              await linkEiDocumentToInterventions(form.eiVerificationDocumentId, [
+                updated?.id || Number(revisionSourceInterventionId),
+              ]);
+            }
+            let cleanupError = null;
+            if (
+              typeof deleteInterventionRecord === "function" &&
+              activeInterventionIdValue &&
+              String(activeInterventionIdValue) !== String(revisionSourceInterventionId)
+            ) {
+              try {
+                await deleteInterventionRecord(Number(activeInterventionIdValue));
+              } catch (err) {
+                cleanupError = err;
+              }
+            }
+            setCurrentInterventionStatus(revisionSourceStatus || "approved");
+            resetProposalState();
+            setCompletionNote({
+              type: cleanupError ? "info" : "success",
+              header: cleanupError ? "Revision applied with follow-up needed" : "Revision workflow complete",
+              body: cleanupError
+                ? `The approved revision was applied to ${revisionSourceTitle}, but the temporary revision draft could not be cleaned up automatically. ${cleanupError.message || "Delete it from the interventions table if needed."}`
+                : `The approved revision was applied to ${revisionSourceTitle}.`,
+            });
+          } else {
+            const [primary, ...rest] = interventionsToCreate;
+            const primaryPayload = buildApprovedInterventionPayload(primary, {
+              potId: approvalPotId,
+              postingContext: approvalPostingContext,
+            });
+            const updated = await updateInterventionRecord(actionPlanId, Number(activeInterventionIdValue), primaryPayload);
+            const created = [];
+            for (const intervention of rest) {
+              const payload = buildApprovedInterventionPayload(intervention, {
+                potId: approvalPotId,
+                postingContext: approvalPostingContext,
+              });
+              const row = await createIntervention(actionPlanId, payload);
+              if (row?.id) created.push(row.id);
+            }
+            const allIds = [updated?.id || Number(activeInterventionIdValue), ...created].filter(Boolean);
+            if (form.eiVerificationDocumentId) {
+              await linkEiDocumentToInterventions(form.eiVerificationDocumentId, allIds);
+            }
+            setCurrentInterventionStatus("approved");
+            setSuccessMessage("Interventions approved and created.");
+            resetProposalState();
+            setCompletionNote({
+              type: "success",
+              header: "Intervention workflow complete",
+              body: "Approved interventions were created. Start a new proposal from the Interventions table when you are ready.",
+            });
           }
-          const allIds = [updated?.id || Number(activeInterventionIdValue), ...created].filter(Boolean);
-          if (form.eiVerificationDocumentId) {
-            await linkEiDocumentToInterventions(form.eiVerificationDocumentId, allIds);
-          }
-          setCurrentInterventionStatus("planned");
-          setSuccessMessage("Interventions approved and created.");
-          resetProposalState();
-          setCompletionNote({
-            type: "success",
-            header: "Intervention workflow complete",
-            body: "Approved interventions were created. Start a new proposal from the Interventions table when you are ready.",
-          });
         } else {
           const payload = buildProposalPayload(outcome);
           const updated = await updateInterventionRecord(actionPlanId, Number(activeInterventionIdValue), payload);
@@ -3934,8 +4662,10 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
             resetProposalState();
             setCompletionNote({
               type: "info",
-              header: "Proposal closed",
-              body: "The proposal was rejected and closed. Start a new proposal from the Interventions table when needed.",
+              header: isRevisionMode ? "Revision closed" : "Proposal closed",
+              body: isRevisionMode
+                ? `The revision was rejected and ${revisionSourceTitle} was left unchanged.`
+                : "The proposal was rejected and closed. Start a new proposal from the Interventions table when needed.",
             });
           }
         }
@@ -3953,17 +4683,26 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       buildApprovedInterventionPayload,
       buildProposalPayload,
       createIntervention,
+      deleteInterventionRecord,
+      ensureActionPlanFundingReadyForApproval,
       form,
-      hasPlanFundingMismatch,
       isEditable,
+      isRevisionMode,
       isSubmittedStatus,
       linkEiDocumentToInterventions,
       proposedInterventions,
-      requiredFundingStream,
+      resolvedApprovalPotId,
+      resolvedApprovalPostingContext,
       resetProposalState,
+      revisionSourceActionPlanId,
+      revisionSourceInterventionId,
+      revisionSourceStatus,
+      revisionSourceTitle,
       updateInterventionRecord,
       uploadEiVerificationIfSelected,
-      eiVerificationFile,
+      validateActionPlanFundingDraft,
+      needsActionPlanFundingSetup,
+      actionPlanFundingDraft,
       getDecisionBlockingIssues,
     ]
   );
@@ -4011,8 +4750,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         caseManagerName: currentUserName || "",
         caseManagerEmail: currentUserEmail || "",
         caseManagerPhone: "",
+        isRevision: isRevisionMode,
       }),
-    [applicantSalutationName, currentUserEmail, currentUserName, participantLegalName, proposedInterventions]
+    [applicantSalutationName, currentUserEmail, currentUserName, isRevisionMode, participantLegalName, proposedInterventions]
   );
   const coFunderApprovalLetters = useMemo(
     () =>
@@ -4027,6 +4767,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         caseManagerName: currentUserName || "",
         caseManagerEmail: currentUserEmail || "",
         caseManagerPhone: "",
+        isRevision: isRevisionMode,
       }),
     [
       applicantSalutationName,
@@ -4035,6 +4776,29 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       form.otherFundingNotes,
       form.otherFundingNwacCoverage,
       form.otherFundingSources,
+      isRevisionMode,
+      participantLegalName,
+      proposedInterventions,
+      trackingReference,
+    ]
+  );
+  const loanProviderApprovalLetters = useMemo(
+    () =>
+      buildLoanProviderApprovalLetters({
+        interventions: proposedInterventions,
+        applicantName: participantLegalName || applicantSalutationName || "Client",
+        trackingReference,
+        decisionDate: formatDate(new Date()),
+        caseManagerName: currentUserName || "",
+        caseManagerEmail: currentUserEmail || "",
+        caseManagerPhone: "",
+        isRevision: isRevisionMode,
+      }),
+    [
+      applicantSalutationName,
+      currentUserEmail,
+      currentUserName,
+      isRevisionMode,
       participantLegalName,
       proposedInterventions,
       trackingReference,
@@ -4042,7 +4806,6 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   );
   const buildApprovedClientLetterBody = useCallback(() => {
     const recipient = String(applicantSalutationName || "").trim() || "Client";
-    const referenceClause = trackingReference ? ` (reference ${trackingReference})` : "";
     const interventions = Array.isArray(proposedInterventions) ? proposedInterventions : [];
     const primary = interventions[0] || null;
     const requestPhrase = (() => {
@@ -4080,26 +4843,35 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       })
       .filter(Boolean);
     const fundingParagraph = fundingLines.length
-      ? ["I have approved the following funding amounts:", ...fundingLines].join("\n")
-      : "I have approved funding for your eligible supports under this intervention.";
+      ? [
+          isRevisionMode ? "The revised approved funding is:" : "The approved funding is:",
+          ...fundingLines,
+        ].join("\n")
+      : isRevisionMode
+        ? "The approved funding for your eligible supports under this intervention has been updated."
+        : "Funding has been approved for your eligible supports under this intervention.";
     return [
-      "Letter of Approval",
+      isRevisionMode ? "Funding Revision Letter" : "Letter of Approval",
       `Date: ${formatDate(new Date())}`,
       "",
       `Dear ${recipient},`,
       "",
-      `I am writing to let you know that I have assessed your intervention proposal${referenceClause} for funding to the Native Women's Association of Canada (NWAC), through its Indigenous Skills and Employment Training (ISET) Program, ${requestPhrase}.`,
+      isRevisionMode
+        ? `I’m writing with an update about your ISET support. After reviewing the requested changes to your approved intervention, I’m pleased to confirm that the funding for your intervention has been changed as follows. This revised approval will continue to support you ${requestPhrase}.`
+        : `I’m pleased to let you know that the Native Women's Association of Canada (NWAC), through its Indigenous Skills and Employment Training (ISET) Program, has approved funding to support you ${requestPhrase}.`,
       "",
       fundingParagraph,
       "",
-      "I have attached the Client Funding Agreement for your review, along with an Acknowledgement of Funding Source form and a Banking Details form. Please review and complete all attachments at your earliest convenience so we can proceed with your funding deposit.",
+      isRevisionMode
+        ? "I have attached a red-line revised Client Funding Agreement for your review, along with a Banking Details form. When you have a moment, please review and complete any required attachments so we can keep your funding moving without delay."
+        : "I have attached the Client Funding Agreement for your review, along with a Banking Details form. When you have a moment, please review and complete the attachments so we can move ahead with your funding deposit.",
       "",
-      "If you have any questions, please do not hesitate to contact me directly. I look forward to supporting you through your ISET intervention.",
+      "If you have any questions, please reach out to me directly. I look forward to continuing to support you through your ISET intervention.",
       "",
       "Sincerely,",
       DEFAULT_ORG_NAME,
     ].join("\n");
-  }, [applicantSalutationName, participantLegalName, proposedInterventions, trackingReference]);
+  }, [applicantSalutationName, isRevisionMode, participantLegalName, proposedInterventions]);
   const buildDeniedClientLetterBody = useCallback(() => {
     const recipient = String(applicantSalutationName || "").trim() || "Client";
     const reason = String(form.decisionNotes || "").trim();
@@ -4157,13 +4929,17 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       setSendingLetterError("Letter workflow is not configured yet.");
       return { ok: false };
     }
-    setSendingLetter(true);
-    setSendingLetterError(null);
-    try {
-      const subject = isApprovedDecisionOutcome ? "Letter of Approval" : "Letter of Denial";
+      setSendingLetter(true);
+      setSendingLetterError(null);
+      try {
+      const subject = isApprovedDecisionOutcome
+        ? (isRevisionMode ? "Funding Revision Approval" : "Letter of Approval")
+        : "Letter of Denial";
       const body = String(clientLetterBody || "").trim()
         || (isApprovedDecisionOutcome
-          ? "Please review your approval letter in the portal."
+          ? (isRevisionMode
+            ? "Please review your funding revision letter in the portal."
+            : "Please review your approval letter in the portal.")
           : "Please review your decision letter in the portal.");
       const payload = {
         subject,
@@ -4217,13 +4993,19 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     clientLetterBody,
     currentUserName,
     isApprovedDecisionOutcome,
+    isRevisionMode,
     participantLegalName,
   ]);
   const executeCommunicationSubmit = useCallback(async () => {
     const decisionResult = await handleSubmitDecision();
     if (!decisionResult?.ok) return;
-    await handleSendDecisionLetter({ interventionId: activeInterventionIdValue });
-  }, [activeInterventionIdValue, handleSendDecisionLetter, handleSubmitDecision]);
+    await handleSendDecisionLetter({
+      interventionId:
+        isRevisionMode && revisionSourceInterventionId
+          ? revisionSourceInterventionId
+          : activeInterventionIdValue,
+    });
+  }, [activeInterventionIdValue, handleSendDecisionLetter, handleSubmitDecision, isRevisionMode, revisionSourceInterventionId]);
   const handleSubmitCommunication = useCallback(async () => {
     if (isApprovedDecisionOutcome) {
       setShowSendApprovalLetterConfirmModal(true);
@@ -4253,13 +5035,19 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
 
   const headerDescription = completionNote
     ? "This intervention workflow is complete."
-    : isSubmittedStatus && isEditable
-      ? "Review the submitted proposal, verify EI status, and record the decision."
-      : isEditable
-        ? "Propose new interventions for this client. Save progress to finish later. Only one draft proposal can exist at a time."
-        : statusValue
-          ? "Viewing this proposal in read-only mode."
-          : "Select a draft or submitted proposal from the Interventions table to view it here.";
+    : isSubmittedStatus && isEditable && isRevisionMode
+      ? `Review the submitted revision for ${revisionSourceTitle}, verify EI status, and record the decision.`
+      : isSubmittedStatus && isEditable
+        ? "Review the submitted proposal, verify EI status, and record the decision."
+        : isEditable && isRevisionMode
+          ? `Revise ${revisionSourceTitle}. The approved intervention stays unchanged until this revision is approved.`
+          : isEditable
+            ? "Propose new interventions for this client. Save progress to finish later. Only one draft proposal can exist at a time."
+            : statusValue && isRevisionMode
+              ? `Viewing the revision for ${revisionSourceTitle} in read-only mode.`
+              : statusValue
+                ? "Viewing this proposal in read-only mode."
+                : "Select a draft or submitted proposal from the Interventions table to view it here.";
 
   const infoLink = metadata.helpComponent && toggleHelpPanel ? (
     <Link
@@ -4276,6 +5064,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
 
   const planStepContent = (
     <SpaceBetween size="m">
+      {isRevisionMode && (
+        <Alert type="info">
+          This draft revises {revisionSourceTitle}. The approved intervention remains the current record until this revision is approved.
+        </Alert>
+      )}
       {!planOptions.length ? (
         <Alert type="info">
           No active or draft action plans are available. Create an action plan before proposing interventions.
@@ -4283,7 +5076,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       ) : (
         <FormField
           label="Action Plan"
-          description="Choose the action plan this proposal belongs to."
+          description={isRevisionMode ? "Choose the action plan this revision belongs to." : "Choose the action plan this proposal belongs to."}
           errorText={showPlanErrors && !form.actionPlanId ? "Action Plan is required." : undefined}
         >
           <Select
@@ -4322,6 +5115,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
 
   const framingStepContent = (
     <SpaceBetween size="l">
+      {isRevisionMode && (
+        <Alert type="info">
+          This revision updates a single approved intervention. Adding or removing interventions is not available in this flow.
+        </Alert>
+      )}
       <Table
         key={`proposed-interventions-${proposedInterventionsTableVersion}`}
         stripedRows
@@ -4384,7 +5182,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
                 iconName="remove"
                 ariaLabel="Delete intervention"
                 onClick={() => setInterventionDeleteId(item.id)}
-                disabled={isFormLocked}
+                disabled={isFormLocked || isRevisionMode}
               />
             ),
           },
@@ -4393,7 +5191,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
           <Header
             variant="h3"
             actions={
-              <Button onClick={openAddInterventionModal} disabled={isFormLocked}>
+              <Button onClick={openAddInterventionModal} disabled={isFormLocked || isRevisionMode}>
                 Add intervention
               </Button>
             }
@@ -4876,9 +5674,120 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
           </FormField>
           {hasPlanFundingMismatch && (
             <Alert type="warning">
-              EI eligibility indicates {requiredFundingStream} funding, but the selected Action Plan is {selectedPlanFundingStream}.
-              Select a matching Action Plan before approving.
+              EI eligibility indicates {requiredFundingStream} funding, but the parent Action Plan is currently set to{" "}
+              {selectedPlanFundingStream || "no funding stream"}.
+              Update the Action Plan funding settings below before approving.
             </Alert>
+          )}
+          {needsActionPlanFundingSetup && selectedPlan && (
+            <SpaceBetween size="s">
+              <Alert type="info">
+                This approval needs funding settings on the parent Action Plan. The values below will update{" "}
+                <strong>{selectedPlan.title || `Action Plan ${selectedPlan.id}`}</strong> when you submit the decision.
+              </Alert>
+              <ColumnLayout columns={3} variant="text-grid">
+                <FormField
+                  label="Funding stream"
+                  description="Select the funding stream for the parent Action Plan."
+                  errorText={showDecisionErrors ? actionPlanFundingErrors.fundingStream : undefined}
+                >
+                  <Select
+                    selectedOption={selectedActionPlanFundingStreamOption}
+                    options={actionPlanFundingStreamOptions}
+                    onChange={({ detail }) => {
+                      const nextFundingStream = detail.selectedOption?.value || "";
+                      setActionPlanFundingErrors(prev => {
+                        const next = { ...prev };
+                        delete next.fundingStream;
+                        delete next.budgetPot;
+                        return next;
+                      });
+                      setActionPlanFundingDraft(current => ({
+                        ...current,
+                        fundingStream: nextFundingStream,
+                        budgetPot: "",
+                        postingContext:
+                          nextFundingStream && (current.postingContext || (isAssessor ? "external" : "external")),
+                      }));
+                    }}
+                    placeholder={fundingStreamsLoading ? "Loading funding streams" : "Select funding stream"}
+                    statusType={fundingStreamsLoading ? "loading" : "finished"}
+                    empty={fundingStreamsLoading ? undefined : "No funding streams available"}
+                    disabled={isFormLocked || actionPlanFundingSaving}
+                  />
+                </FormField>
+                <FormField
+                  label="Budget pot"
+                  description="Select the budget pot for the parent Action Plan."
+                  errorText={showDecisionErrors ? actionPlanFundingErrors.budgetPot : undefined}
+                >
+                  <Select
+                    selectedOption={selectedActionPlanBudgetPotOption}
+                    options={actionPlanBudgetPotOptions}
+                    onChange={({ detail }) => {
+                      const nextPot = detail.selectedOption?.value || "";
+                      setActionPlanFundingErrors(prev => {
+                        const next = { ...prev };
+                        delete next.budgetPot;
+                        return next;
+                      });
+                      setActionPlanFundingDraft(current => ({
+                        ...current,
+                        budgetPot: nextPot,
+                        postingContext:
+                          nextPot && (current.postingContext || (isAssessor ? "external" : "external")),
+                      }));
+                    }}
+                    filteringType="auto"
+                    onLoadItems={({ detail }) => {
+                      if (detail?.filteringText !== undefined) {
+                        loadActionPlanBudgetPotOptions(detail.filteringText);
+                      }
+                    }}
+                    placeholder={
+                      !actionPlanFundingDraft.fundingStream
+                        ? "Select funding stream first"
+                        : actionPlanBudgetPotLoading
+                        ? "Loading budget pots"
+                        : "Select budget pot"
+                    }
+                    statusType={actionPlanBudgetPotLoading ? "loading" : "finished"}
+                    empty={actionPlanBudgetPotLoading ? undefined : "No budget pots found"}
+                    disabled={isFormLocked || actionPlanFundingSaving || !actionPlanFundingDraft.fundingStream}
+                  />
+                </FormField>
+                <FormField
+                  label="Paid from"
+                  description="Select whether this budget pot is charged externally or internally."
+                  errorText={showDecisionErrors ? actionPlanFundingErrors.postingContext : undefined}
+                >
+                  {isAssessor ? (
+                    <Input value="External (region/PTMA)" readOnly disabled={!actionPlanFundingDraft.budgetPot} />
+                  ) : (
+                    <Select
+                      selectedOption={selectedActionPlanPostingContextOption}
+                      options={POSTING_CONTEXT_OPTIONS}
+                      onChange={({ detail }) => {
+                        setActionPlanFundingErrors(prev => {
+                          const next = { ...prev };
+                          delete next.postingContext;
+                          return next;
+                        });
+                        setActionPlanFundingDraft(current => ({
+                          ...current,
+                          postingContext: detail.selectedOption?.value || "external",
+                        }));
+                      }}
+                      placeholder="Select"
+                      disabled={isFormLocked || actionPlanFundingSaving || !actionPlanFundingDraft.budgetPot}
+                    />
+                  )}
+                </FormField>
+              </ColumnLayout>
+              <Box variant="small" color="text-body-secondary">
+                Approval will save these funding settings to the parent Action Plan and then continue with intervention approval.
+              </Box>
+            </SpaceBetween>
           )}
           <FormField
             label="EI Verification document"
@@ -4992,7 +5901,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
             </SpaceBetween>
           }
         >
-          {isApprovedDecisionOutcome ? "Approval letters" : "Denial letter"}
+          {isApprovedDecisionOutcome
+            ? (isRevisionMode ? "Funding revision letters" : "Approval letters")
+            : "Denial letter"}
         </Header>
         {letterWorkflowsError && (
           <Alert type="error" statusIconAriaLabel="Error" dismissible onDismiss={() => setLetterWorkflowsError(null)}>
@@ -5011,7 +5922,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         ) : isApprovedDecisionOutcome ? (
           <SpaceBetween size="m">
             <Box>
-              Edit the client approval letter, then review the institution and other-funder letters in the tabs before downloading them.
+              {isRevisionMode
+                ? "Edit the client funding revision letter, then review the red-line revised Client Funding Agreement and the institution, loan-provider, and other-funder letters before downloading them."
+                : "Edit the client approval letter, then review the institution, loan-provider, and other-funder letters in the tabs before downloading them."}
             </Box>
             <Tabs
               activeTabId={approvalLetterPackTabId}
@@ -5034,6 +5947,15 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
                   content: renderReadOnlyLetters(
                     institutionApprovalLetters,
                     "No institution-directed funding was identified from intervention delivery details and cost lines.",
+                    { requireDraftGeneration: true }
+                  ),
+                },
+                {
+                  id: "loan-provider",
+                  label: "Loan provider letters",
+                  content: renderReadOnlyLetters(
+                    loanProviderApprovalLetters,
+                    "No student loan repayment lines were identified in the approved cost items.",
                     { requireDraftGeneration: true }
                   ),
                 },
@@ -5067,7 +5989,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         if (sendingLetter) return;
         setShowSendApprovalLetterConfirmModal(false);
       }}
-      header="Send client approval letter?"
+      header={isRevisionMode ? "Send client funding revision letter?" : "Send client approval letter?"}
       footer={
         <SpaceBetween direction="horizontal" size="xs">
           <Button
@@ -5076,7 +5998,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
             loading={sendingLetter}
             disabled={sendingLetter}
           >
-            Send client approval letter
+            {isRevisionMode ? "Send client funding revision letter" : "Send client approval letter"}
           </Button>
           <Button
             variant="normal"
@@ -5090,8 +6012,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     >
       <SpaceBetween size="s">
         <Box>
-          This will send the client approval letter with the Client Funding Agreement, Client
-          Acknowledgement of Funding Source, and EFT & Wire Transfer Direct Debit form attached.
+          {isRevisionMode
+            ? "This will send the client funding revision letter with the red-line revised Client Funding Agreement and EFT & Wire Transfer Direct Debit form attached."
+            : "This will send the client approval letter with the Client Funding Agreement and EFT & Wire Transfer Direct Debit form attached."}
         </Box>
         <Box>
           Institution letters and letters to other funders are not sent automatically by the
@@ -5584,7 +6507,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
           <Button
             variant="primary"
             onClick={confirmInterventionDelete}
-            disabled={isFormLocked}
+            disabled={isFormLocked || isRevisionMode}
           >
             Delete intervention
           </Button>
@@ -5638,12 +6561,17 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const costLineRecurrenceEnd =
     costLineDraft?.recurrence?.endDate || costLineIntervention?.endDate || "";
   const costLinePayeeType = String(costLineDraft?.payee?.type || "").trim();
+  const costLineIsStudentLoanRepayment =
+    normalizePaymentTypeCode(costLineDraft?.type) === "StudentLoanRepayment" ||
+    normalizePayeeTypeKey(costLinePayeeType) === "studentloanservicer";
   const isParticipantPayeeType = costLinePayeeType === PAYEE_TYPE_PARTICIPANT_CLIENT;
   const lockParticipantPayeeName = isParticipantPayeeType && Boolean(participantLegalName);
   const costLinePayeeNamePlaceholder = isParticipantPayeeType
     ? participantLegalName
       ? "Auto-filled from participant legal name"
       : "Participant legal name unavailable - enter full legal name"
+    : costLineIsStudentLoanRepayment
+      ? "Enter loan provider or servicer name"
     : "Enter payee name";
 
   const costLineModalContent = (
@@ -5717,14 +6645,14 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
           </FormField>
           <FormField label="Payee type">
             <Select
-              selectedOption={findOptionByValue(PAYEE_TYPE_OPTIONS, costLineDraft.payee?.type)}
+              selectedOption={findOptionByValue(configuredPayeeTypeOptions, costLineDraft.payee?.type)}
               onChange={({ detail }) => updateCostLinePayeeType(detail.selectedOption?.value || "")}
-              options={PAYEE_TYPE_OPTIONS}
+              options={configuredPayeeTypeOptions}
               placeholder="Select payee type"
               readOnly={!isCostLineEditable || isFormLocked}
             />
           </FormField>
-          <FormField label="Payee name">
+          <FormField label={costLineIsStudentLoanRepayment ? "Loan provider / servicer name" : "Payee name"}>
             <Input
               value={costLineDraft.payee?.name || ""}
               onChange={({ detail }) =>
@@ -5740,7 +6668,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
             />
           </FormField>
           {costLinePayeeType && !isParticipantPayeeType && (
-            <FormField label="Payee reference (optional)">
+            <FormField label={costLineIsStudentLoanRepayment ? "Loan account number (optional)" : "Payee reference (optional)"}>
               <Input
                 value={costLineDraft.payee?.reference || ""}
                 onChange={({ detail }) =>
@@ -5751,7 +6679,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
                     },
                   })
                 }
-                placeholder="Vendor/account reference"
+                placeholder={costLineIsStudentLoanRepayment ? "Enter loan account number" : "Vendor/account reference"}
                 readOnly={!isCostLineEditable || isFormLocked}
               />
             </FormField>
@@ -5829,7 +6757,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       title:
         stepId === COMMUNICATION_STEP_ID
           ? isApprovedDecisionOutcome
-            ? "Approval letters"
+            ? (isRevisionMode ? "Funding revision letters" : "Approval letters")
             : "Denial letter"
           : STEP_LABELS[stepId],
       content: {
@@ -5852,7 +6780,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const isCommunicationStep = currentStep === COMMUNICATION_STEP_ID;
   const wizardSubmitLabel = isCommunicationStep
     ? isApprovedDecisionOutcome
-      ? "Send Client Approval letter"
+      ? (isRevisionMode ? "Send Client Funding Revision Letter" : "Send Client Approval letter")
       : "Send Client Denial letter"
     : isSubmittedStatus
       ? "Submit Decision"
@@ -5878,7 +6806,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
           </SpaceBetween>
         }
       >
-        Propose new intervention
+        {isRevisionMode ? "Revise approved intervention" : "Propose new intervention"}
       </Header>
     } i18nStrings={boardItemI18nStrings} settings={
       <ButtonDropdown
@@ -5935,6 +6863,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
               if (movingForward && currentStep === "decision" && requestedStepId === COMMUNICATION_STEP_ID) {
                 const { reasons, targetStep } = getDecisionBlockingIssues({ requireActiveIntervention: true });
                 if (reasons.length) {
+                  if (needsActionPlanFundingSetup) {
+                    setActionPlanFundingErrors(validateActionPlanFundingDraft(actionPlanFundingDraft));
+                  }
                   setDecisionBlockerReasons(reasons);
                   setDecisionBlockerTargetStep(targetStep);
                   setDecisionBlockerVisible(true);

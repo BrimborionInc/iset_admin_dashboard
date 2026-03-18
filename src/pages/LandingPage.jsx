@@ -44,60 +44,76 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - v0.5.4 (12th March 2026)',
-      description: 'Release 0.5.4 focuses on stronger approval communications and clearer document follow-up for case managers and applicants.',
+      sectionTitle: 'Release Notes - v0.5.5 (18th March 2026)',
+      description: 'Release 0.5.5 improves continuity between intake, assessment, and case management, with stronger intervention revision workflows and clearer participant-facing documents.',
       features: {
         heading: 'What’s New',
         sections: [
           {
-            title: 'Approval letters are now managed as a complete letter pack',
+            title: 'Funding forms now begin earlier in intake',
             paragraphs: [
-              'Case managers can now generate all approval drafts in one place: client letter, institution letter, and letters to other funders.',
-              'The client letter remains editable, while institution and other-funder letters are ready to review and download from tabs.',
-              'This reduces manual drafting and keeps communications more consistent across cases.'
+              'The Client Acknowledgement of Funding Source is now collected during intake as part of the application process, rather than being requested later after approval.',
+              'Other Funding Sources now include Student Loan / Canada aid, with a required student loan statement upload when that option is selected.',
+              'This brings key funding evidence forward and reduces document follow-up later in the workflow.'
             ]
           },
           {
-            title: 'Client approval sends now include required forms in one message',
+            title: 'Student loan coordination is more detailed',
             paragraphs: [
-              'When staff send the client approval letter, the system now includes the Client Funding Agreement, Client Acknowledgement of Funding Source, and EFT/Wire Transfer form automatically.',
-              'A confirmation prompt now makes clear what is sent automatically and what must still be sent manually (institution and other-funder letters).',
-              'Applicants receive one clear package of documents to complete.'
+              'Student-loan documentation and lender-facing letters now support a more detailed breakdown of debt, improving coordination with loan providers and funders.',
+              'PATH also captures loan-provider / servicer details more cleanly so account-specific information can flow through to the right documents and follow-up steps.',
+              'This makes student-loan support easier to review, approve, and communicate accurately.'
             ]
           },
           {
-            title: 'Document request tracking is more reliable',
+            title: 'Action plans and ineligible reporting are clearer',
             paragraphs: [
-              'Approval-letter sends now trigger Docs Requested and reminder scheduling automatically, matching expected workflow behavior.',
-              'EFT/Wire submissions sent through the approval-letter flow now clear the correct checklist item.',
-              'When requested documents are completed and Docs Requested is cleared, related reminders are also removed automatically.'
+              'The first Action Plan now uses a clearer, more appropriate name so the participant journey reads more naturally from the start of service delivery.',
+              'When an application is deemed ineligible, PATH still creates the Action Plan and Career Assessment intervention needed for ESDC reporting, then closes them automatically with the appropriate reporting status.',
+              'This keeps operational records clearer while preserving the reporting trail NWAC needs.'
             ]
           },
           {
-            title: 'Letter quality and personalization improved',
+            title: 'Approved interventions can now return to assessment',
             paragraphs: [
-              'Client letters now greet applicants using preferred name when available (otherwise first name).',
-              'Institution letters now clearly separate supports paid directly to institutions from supports paid directly to students.',
-              'Letters to other funders now include total NWAC support plus line-level funding details, including payee context.'
+              'Case managers can now start Revise approved intervention from Case Workspace and move approved intervention work back into assessment-style review.',
+              'The approved record stays in place until the revision is approved, while the new revision draft moves through the gated workflow again with supporting document and checklist controls.',
+              'Where funding changes are approved, PATH can issue revised participant documents, including red-line funding agreements that show what changed.'
             ]
           },
           {
-            title: 'Decision workflow is clearer for case managers',
+            title: 'Public portal language and presentation have been softened',
             paragraphs: [
-              'The final communication stage is now labeled Approval letters, with clearer generation and review flow.',
-              'Sending is now available safely from any letter tab with confirmation guardrails.',
-              'Completion prompts now clearly tell staff when required signed forms are still outstanding.'
+              'Applicant-facing wording and presentation have been reviewed to feel warmer, clearer, and less transactional.',
+              'The portal now presents participant documents more formally, including a more visible My documents experience once documents are available.',
+              'This helps participants understand what is needed from them without the portal feeling abrupt or overly administrative.'
             ]
           },
         ]
       },
       knownBugs: {
         heading: 'Known Bugs',
-        sections: []
+        sections: [
+          {
+            title: 'No major release blockers logged',
+            paragraphs: [
+              'No major release-blocking issues are currently logged for v0.5.5.',
+              'If staff identify workflow, document, or reporting issues during day-to-day use, they should continue to log them with the NWAC PATH support team for review.'
+            ]
+          }
+        ]
       },
       comingNext: {
         heading: 'Coming Soon',
-        sections: []
+        sections: [
+          {
+            title: 'NWAC HQ reporting dashboard',
+            paragraphs: [
+              'A reporting dashboard for NWAC HQ administrators is planned next, based on the existing spreadsheet reporting model.',
+              'The intent is an analytics-style dashboard with slice-and-dice filtering, homepage call-outs, and a standard set of operational reports available directly inside PATH.'
+            ]
+          }
+        ]
       }
     },
     resources: {
@@ -150,60 +166,76 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Notes de version - v0.5.4 (12 mars 2026)',
-      description: 'La version 0.5.4 met l’accent sur des communications d’approbation plus solides et un meilleur suivi des documents à signer.',
+      sectionTitle: 'Notes de version - v0.5.5 (18 mars 2026)',
+      description: 'La version 0.5.5 améliore la continuité entre l’accueil, l’évaluation et la gestion des dossiers, avec un meilleur traitement des révisions d’intervention et des documents plus clairs pour les participantes.',
       features: {
         heading: 'Quoi de neuf',
         sections: [
           {
-            title: 'Les lettres d’approbation sont maintenant gérées comme un ensemble',
+            title: 'Les formulaires de financement commencent maintenant dès l’accueil',
             paragraphs: [
-              'Les gestionnaires de cas peuvent maintenant générer au même endroit les brouillons de lettre client, lettre institution et lettres aux autres bailleurs.',
-              'La lettre client reste modifiable, tandis que les autres lettres sont prêtes à réviser et à télécharger dans des onglets dédiés.',
-              'Cela réduit le travail de rédaction manuelle et améliore la cohérence des communications.'
+              'L’Accusé de financement est maintenant recueilli dès le processus d’accueil, au lieu d’être demandé plus tard après l’approbation.',
+              'Les autres sources de financement incluent maintenant Prêt étudiant / aide canadienne, avec téléversement obligatoire du relevé de prêt lorsque cette option est sélectionnée.',
+              'Les pièces justificatives de financement sont ainsi recueillies plus tôt et nécessitent moins de suivi par la suite.'
             ]
           },
           {
-            title: 'L’envoi d’approbation client inclut maintenant les formulaires requis',
+            title: 'La coordination des prêts étudiants est plus détaillée',
             paragraphs: [
-              'Lors de l’envoi de la lettre d’approbation client, le système joint automatiquement l’Entente de financement client, l’Accusé de financement et le formulaire EFT/virement.',
-              'Une confirmation indique clairement ce qui est envoyé automatiquement et ce qui doit être envoyé manuellement (lettres institution et autres bailleurs).',
-              'La cliente reçoit un seul envoi clair avec les documents à compléter.'
+              'La documentation liée aux prêts étudiants et les lettres destinées aux prêteurs prennent maintenant en charge une ventilation plus détaillée de la dette.',
+              'PATH saisit aussi plus clairement les renseignements sur le prêteur ou le service de prêt afin que ces détails soient repris correctement dans les documents et suivis.',
+              'Cela facilite l’examen, l’approbation et la communication des soutiens liés aux prêts étudiants.'
             ]
           },
           {
-            title: 'Le suivi des demandes de documents est plus fiable',
+            title: 'Les plans d’action et le suivi des inéligibilités sont plus clairs',
             paragraphs: [
-              'L’envoi de la lettre d’approbation active maintenant automatiquement Documents demandés et la planification des rappels.',
-              'Les soumissions EFT/virement envoyées via ce nouveau flux effacent correctement l’élément correspondant de la liste de contrôle.',
-              'Quand les documents requis sont complets et que Documents demandés est désactivé, les rappels associés sont aussi retirés automatiquement.'
+              'Le premier plan d’action porte maintenant un nom plus clair et plus approprié pour mieux refléter le début du parcours de la participante.',
+              'Lorsqu’une demande est jugée inadmissible, PATH crée quand même le plan d’action et l’intervention d’évaluation de carrière requis pour les rapports ESDC, puis les ferme automatiquement avec le bon statut de rapport.',
+              'Les dossiers demeurent ainsi cohérents sur le plan opérationnel tout en répondant aux besoins de reddition de comptes de l’AFAC.'
             ]
           },
           {
-            title: 'Qualité et personnalisation des lettres améliorées',
+            title: 'Les interventions approuvées peuvent maintenant retourner en évaluation',
             paragraphs: [
-              'Les lettres client utilisent maintenant le prénom préféré lorsqu’il est disponible (sinon le prénom).',
-              'Les lettres aux institutions distinguent clairement les montants payés à l’institution de ceux payés directement à la cliente.',
-              'Les lettres aux autres bailleurs incluent maintenant le total NWAC ainsi qu’un détail ligne par ligne avec le bénéficiaire.'
+              'Les gestionnaires de cas peuvent maintenant utiliser Réviser l’intervention approuvée dans l’espace de travail du dossier afin de renvoyer une intervention approuvée dans un flux de réévaluation.',
+              'Le dossier approuvé demeure en place jusqu’à l’approbation de la révision, pendant que le brouillon révisé repasse par les étapes contrôlées et les vérifications documentaires.',
+              'Lorsque des changements de financement sont approuvés, PATH peut aussi produire des documents révisés pour la participante, y compris des ententes de financement en mode révision annotée.'
             ]
           },
           {
-            title: 'Le flux de décision est plus clair pour les gestionnaires de cas',
+            title: 'Le langage et la présentation du portail public ont été adoucis',
             paragraphs: [
-              'L’étape finale de communication est maintenant libellée Lettres d’approbation, avec un flux plus clair de génération et de révision.',
-              'L’envoi est maintenant possible de façon sécurisée à partir de n’importe quel onglet de lettre, avec confirmation.',
-              'Les messages de complétion indiquent clairement quand des formulaires signés requis sont encore en attente.'
+              'Le texte et la présentation destinés aux participantes ont été revus pour être plus chaleureux, plus clairs et moins transactionnels.',
+              'Le portail présente maintenant les documents de façon plus formelle, notamment avec une expérience Mes documents plus visible lorsque des documents sont disponibles.',
+              'Les participantes comprennent ainsi plus facilement ce qui est attendu d’elles, sans que le portail paraisse brusque ou trop administratif.'
             ]
           }
         ]
       },
       knownBugs: {
         heading: 'Bugs connus',
-        sections: []
+        sections: [
+          {
+            title: 'Aucun bloqueur majeur consigné',
+            paragraphs: [
+              'Aucun problème bloquant majeur n’est actuellement consigné pour la version 0.5.5.',
+              'Si le personnel constate des problèmes de flux de travail, de documents ou de rapports, ils doivent continuer de les signaler à l’équipe de soutien PATH de l’AFAC.'
+            ]
+          }
+        ]
       },
       comingNext: {
         heading: 'À venir bientôt',
-        sections: []
+        sections: [
+          {
+            title: 'Tableau de bord de rapports pour le siège social de l’AFAC',
+            paragraphs: [
+              'La prochaine amélioration majeure prévue est un tableau de bord de rapports pour les administratrices du siège social de l’AFAC, basé sur le modèle actuel de rapport par feuille de calcul.',
+              'L’objectif est d’offrir un tableau de bord analytique avec filtres dynamiques, indicateurs visibles sur la page d’accueil et un ensemble de rapports opérationnels standards accessibles directement dans PATH.'
+            ]
+          }
+        ]
       }
     },
     resources: {

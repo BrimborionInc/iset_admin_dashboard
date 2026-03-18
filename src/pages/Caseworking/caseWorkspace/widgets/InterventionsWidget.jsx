@@ -20,10 +20,19 @@ import {
 import { boardItemI18nStrings } from "../../widgets/common";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
 import InterventionModal from "../modals/InterventionModal.jsx";
+import {
+  formatInterventionStatusLabel,
+  isInterventionActivatableStatus,
+  isInterventionClosedStatus,
+  isInterventionClosableStatus,
+  isInterventionDeletableStatus,
+  isInterventionProposalStatus,
+  normalizeInterventionStatus,
+} from "../../../../utils/interventionStatus.js";
 
 const formatCurrency = value => {
   const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return "-";
+  if (!Number.isFinite(numeric)) return "—";
   return `$${numeric.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
@@ -67,32 +76,6 @@ const stripCodePrefix = value => {
     .trim();
 };
 
-const normaliseStatus = status => {
-  const value = String(status || "").trim().toLowerCase();
-  const aliases = {
-    planning: "planned",
-    "in-review": "in_review",
-    "in review": "in_review",
-    "changes-requested": "changes_requested",
-    "changes requested": "changes_requested",
-    active: "in_progress",
-    inprogress: "in_progress",
-    "in-progress": "in_progress",
-    progress: "in_progress",
-    "on-hold": "suspended",
-    on_hold: "suspended",
-    "ready-to-close": "ready_to_close",
-    "ready to close": "ready_to_close",
-    readyclose: "ready_to_close",
-    complete: "completed",
-    closed: "completed",
-    done: "completed",
-    finished: "completed",
-    canceled: "cancelled",
-  };
-  return aliases[value] || value;
-};
-
 const getEiStatusValue = item => {
   const metadata = parseMetadata(item?.metadata);
   const review = metadata?.review || {};
@@ -100,21 +83,17 @@ const getEiStatusValue = item => {
 };
 
 const getStatusDisplayLabel = item => {
-  const value = normaliseStatus(item?.status);
+  const value = normalizeInterventionStatus(item?.status, null);
   if (value === "submitted") {
     const hasEiStatus = Boolean(getEiStatusValue(item));
     return `Submitted - EI ${hasEiStatus ? "verified" : "unverified"}`;
   }
-  return formatLabel(item?.status);
+  return formatInterventionStatusLabel(item?.status);
 };
-const isClosedStatus = status => ["completed", "cancelled"].includes(normaliseStatus(status));
-const isOpenStatus = status => ["planned", "in_progress", "suspended"].includes(normaliseStatus(status));
-const isClosableStatus = status => ["in_progress", "suspended"].includes(normaliseStatus(status));
-const isPlannedStatus = status => normaliseStatus(status) === "planned";
-const isDraftStatus = status => normaliseStatus(status) === "draft";
-const isBlockingProposalStatus = status => ["draft", "submitted"].includes(normaliseStatus(status));
-const isProposalWorkflowStatus = status =>
-  ["draft", "submitted", "in_review", "changes_requested"].includes(normaliseStatus(status));
+const isDraftStatus = status => normalizeInterventionStatus(status) === "draft";
+const isBlockingProposalStatus = status => ["draft", "submitted"].includes(normalizeInterventionStatus(status));
+const isRevisionEligibleStatus = status =>
+  ["approved", "in_progress", "suspended"].includes(normalizeInterventionStatus(status, null));
 
 const statusIndicatorType = status => {
   const value = (status || "").toLowerCase();
@@ -151,7 +130,7 @@ const getActualCost = item => toNumberOrNull(item.actualAmount);
 const getDisplayCost = item => {
   const actual = getActualCost(item);
   const planned = getPlannedCost(item);
-  const closed = isClosedStatus(item.status);
+  const closed = isInterventionClosedStatus(item.status);
   if (closed && actual !== null) {
     return { value: actual, label: "actual" };
   }
@@ -185,7 +164,7 @@ const STATUS_FILTER_OPTIONS = [
   { id: "draft", text: "Draft" },
   { id: "submitted", text: "Submitted" },
   { id: "rejected", text: "Rejected" },
-  { id: "planned", text: "Planned" },
+  { id: "approved", text: "Approved" },
   { id: "in_progress", text: "In progress" },
   { id: "closed", text: "Closed" },
 ];
@@ -326,6 +305,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     caseData,
     selectedActionPlanId,
     createIntervention,
+    reviseIntervention,
     updateIntervention,
     closeIntervention,
     deleteIntervention,
@@ -392,6 +372,31 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     return plans.some(plan =>
       (plan.interventions || []).some(intervention => isBlockingProposalStatus(intervention?.status))
     );
+  }, [caseData]);
+  const hasOpenProposal = useMemo(() => {
+    const plans = caseData?.actionPlans || [];
+    return plans.some(plan =>
+      (plan.interventions || []).some(intervention => isInterventionProposalStatus(intervention?.status))
+    );
+  }, [caseData]);
+  const openRevisionDraftsBySourceId = useMemo(() => {
+    const plans = caseData?.actionPlans || [];
+    const map = new Map();
+    plans.forEach(plan => {
+      (plan.interventions || []).forEach(intervention => {
+        if (!isInterventionProposalStatus(intervention?.status)) return;
+        const revisionMetadata = parseMetadata(intervention?.metadata)?.revision;
+        const sourceInterventionId = revisionMetadata?.sourceInterventionId;
+        if (!sourceInterventionId) return;
+        const existing = map.get(String(sourceInterventionId));
+        const existingTime = new Date(existing?.updatedAt || existing?.createdAt || 0).getTime();
+        const nextTime = new Date(intervention?.updatedAt || intervention?.createdAt || 0).getTime();
+        if (!existing || nextTime >= existingTime) {
+          map.set(String(sourceInterventionId), intervention);
+        }
+      });
+    });
+    return map;
   }, [caseData]);
 
   const interventions = activePlan?.interventions ?? [];
@@ -607,9 +612,9 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       return interventions;
     }
     return interventions.filter(item => {
-      const value = normaliseStatus(item?.status);
+      const value = normalizeInterventionStatus(item?.status, null);
       if (statusFilter === "closed") {
-        return isClosedStatus(value);
+        return isInterventionClosedStatus(value);
       }
       return value === statusFilter;
     });
@@ -660,7 +665,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const planStatus = (activePlan?.status || "").toLowerCase();
   const canModify = !!activePlan && ["draft", "active"].includes(planStatus);
   const canCloseSelected =
-    canModify && !!selectedIntervention && isClosableStatus(selectedIntervention?.status);
+    canModify && !!selectedIntervention && isInterventionClosableStatus(selectedIntervention?.status);
 
   const dispatchWizardSelection = useCallback(
     intervention => {
@@ -711,20 +716,29 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       }
       const items = [{ id: "view", text: "View intervention" }];
       if (canModify) {
-        const normalized = normaliseStatus(status);
-        if (["approved", "planned"].includes(normalized)) {
+        const normalized = normalizeInterventionStatus(status, null);
+        const matchingRevisionDraft = intervention?.id
+          ? openRevisionDraftsBySourceId.get(String(intervention.id))
+          : null;
+        if (isRevisionEligibleStatus(normalized) && (matchingRevisionDraft || !hasOpenProposal)) {
+          items.push({
+            id: "revise",
+            text: matchingRevisionDraft ? "Resume revision draft" : "Revise approved intervention",
+          });
+        }
+        if (isInterventionActivatableStatus(normalized)) {
           items.push({ id: "activate", text: "Activate intervention" });
         }
-        if (["in_progress", "suspended"].includes(normalized)) {
+        if (isInterventionClosableStatus(normalized)) {
           items.push({ id: "close", text: "Close intervention" });
         }
-        if (["submitted", "in_review", "changes_requested", "approved", "rejected", "planned"].includes(normalized)) {
+        if (isInterventionDeletableStatus(normalized)) {
           items.push({ id: "delete", text: "Delete intervention" });
         }
       }
       return items;
     },
-    [canModify]
+    [canModify, hasOpenProposal, openRevisionDraftsBySourceId]
   );
 
   const openDraftWizard = () => {
@@ -759,7 +773,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       }
       setSuccessMessage(null);
       setErrorMessage(null);
-      if (isProposalWorkflowStatus(target.status)) {
+      if (isInterventionProposalStatus(target.status)) {
         openInterventionInWizard(target);
         return;
       }
@@ -793,7 +807,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         setErrorMessage("Select an intervention to close.");
         return;
       }
-      if (!canModify || !isOpenStatus(target.status)) {
+      if (!canModify || !isInterventionClosableStatus(target.status)) {
         setErrorMessage(
           "Interventions that are already completed or cancelled cannot be closed again."
         );
@@ -896,9 +910,9 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       setErrorMessage("Select an intervention to activate.");
       return;
     }
-    const normalized = normaliseStatus(target.status);
-    if (!["planned", "approved"].includes(normalized)) {
-      setErrorMessage("Only approved or planned interventions can be activated.");
+    const normalized = normalizeInterventionStatus(target.status, null);
+    if (!isInterventionActivatableStatus(normalized)) {
+      setErrorMessage("Only approved interventions can be activated.");
       return;
     }
     setErrorMessage(null);
@@ -916,6 +930,51 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       setErrorMessage(err?.message || "Unable to activate intervention.");
     }
   };
+
+  const handleReviseIntervention = useCallback(
+    async interventionToRevise => {
+      const target = interventionToRevise || selectedIntervention;
+      if (!target?.id) {
+        setErrorMessage("Select an intervention to revise.");
+        return;
+      }
+      const existingRevisionDraft = openRevisionDraftsBySourceId.get(String(target.id));
+      setErrorMessage(null);
+      setSuccessMessage(null);
+      if (existingRevisionDraft?.id) {
+        openInterventionInWizard(existingRevisionDraft);
+        return;
+      }
+      if (hasOpenProposal) {
+        setErrorMessage("A draft or submitted proposal already exists. Resume it from the table.");
+        return;
+      }
+      try {
+        const draft = await reviseIntervention(target.id);
+        if (draft?.actionPlanId && typeof setSelectedActionPlanId === "function") {
+          setSelectedActionPlanId(draft.actionPlanId);
+        }
+        if (draft?.id) {
+          openInterventionInWizard(draft);
+          setSuccessMessage(
+            `Revision draft opened for "${target.title || target.code || "Intervention"}".`
+          );
+          return;
+        }
+        setErrorMessage("Unable to open the revision draft.");
+      } catch (err) {
+        setErrorMessage(err?.message || "Unable to start intervention revision.");
+      }
+    },
+    [
+      hasOpenProposal,
+      openInterventionInWizard,
+      openRevisionDraftsBySourceId,
+      reviseIntervention,
+      selectedIntervention,
+      setSelectedActionPlanId,
+    ]
+  );
 
   const handleDeleteConfirm = async () => {
     if (!pendingDelete) return;
@@ -1024,6 +1083,8 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                   }
                   if (detail?.id === "resume") {
                     resumeDraft(item);
+                  } else if (detail?.id === "revise") {
+                    handleReviseIntervention(item);
                   } else if (detail?.id === "view") {
                     openWizardView(item);
                   } else if (detail?.id === "close") {
@@ -1055,6 +1116,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     columnWidthsMap,
     getInterventionActionItems,
     formMode,
+    handleReviseIntervention,
     openWizardView,
     openCloseModal,
     resumeDraft,
@@ -1285,7 +1347,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
               const item = detail.selectedItems?.[0];
               setSelectedInterventionId(item?.id ?? null);
               if (item) {
-                const isProposal = isProposalWorkflowStatus(item.status);
+                const isProposal = isInterventionProposalStatus(item.status);
                 if (isProposal) {
                   openInterventionInWizard(item);
                 }
@@ -1355,8 +1417,8 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       >
         <SpaceBetween size="s">
           <Box>
-            Delete this intervention? Draft, submitted, in-review, changes requested, approved, rejected,
-            and planned interventions can be deleted. Deleting will also remove any draft payment packages
+            Delete this intervention? Draft, submitted, in-review, changes requested, approved,
+            and rejected interventions can be deleted. Deleting will also remove any draft payment packages
             and budget cost items tied to this intervention. Active or closed interventions should be closed
             instead to maintain history.
           </Box>

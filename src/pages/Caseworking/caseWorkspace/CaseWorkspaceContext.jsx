@@ -1,5 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../../../auth/apiClient.js";
+import {
+  isInterventionOpenStatus,
+  normalizeInterventionStatus,
+} from "../../../utils/interventionStatus.js";
 
 const interventionWizardStepStore = new Map();
 const interventionWizardDraftStore = new Map();
@@ -12,64 +16,6 @@ const cloneWizardDraft = value => {
   } catch {
     return { ...value };
   }
-};
-
-const normaliseInterventionStatus = status => {
-  if (!status) return "planned";
-  const value = String(status).trim().toLowerCase();
-  const direct = new Set([
-    "draft",
-    "submitted",
-    "in_review",
-    "changes_requested",
-    "approved",
-    "rejected",
-    "planned",
-    "in_progress",
-    "suspended",
-    "ready_to_close",
-    "completed",
-    "cancelled",
-  ]);
-  const aliases = {
-    planning: "planned",
-    "in-review": "in_review",
-    "in review": "in_review",
-    "changes-requested": "changes_requested",
-    "changes requested": "changes_requested",
-    active: "in_progress",
-    inprogress: "in_progress",
-    "in-progress": "in_progress",
-    progress: "in_progress",
-    "on-hold": "suspended",
-    on_hold: "suspended",
-    "ready-to-close": "ready_to_close",
-    "ready to close": "ready_to_close",
-    readyclose: "ready_to_close",
-    complete: "completed",
-    closed: "completed",
-    done: "completed",
-    finished: "completed",
-    canceled: "cancelled",
-  };
-  if (aliases[value]) return aliases[value];
-  if (direct.has(value)) return value;
-  return value || "planned";
-};
-
-const isOpenInterventionStatus = status => {
-  const value = normaliseInterventionStatus(status);
-  return [
-    "draft",
-    "submitted",
-    "in_review",
-    "changes_requested",
-    "approved",
-    "planned",
-    "in_progress",
-    "suspended",
-    "ready_to_close",
-  ].includes(value);
 };
 
 const toNumberOrNull = value => {
@@ -93,6 +39,38 @@ const buildInterventionFromApi = (planId, payload = {}) => {
     payload.metadataJson ||
     payload.metadata_json ||
     null;
+  const resolvedInstitution =
+    payload.institution ||
+    payload.trainingInstitution ||
+    payload.training_institution ||
+    resolvedMetadata?.institution ||
+    resolvedMetadata?.trainingInstitution ||
+    resolvedMetadata?.training_institution ||
+    null;
+  const resolvedProgramName =
+    payload.programName ||
+    payload.program_name ||
+    resolvedMetadata?.programName ||
+    resolvedMetadata?.program_name ||
+    null;
+  const resolvedItpDetails =
+    payload.itpDetails ||
+    payload.itp_details ||
+    resolvedMetadata?.itpDetails ||
+    resolvedMetadata?.itp_details ||
+    null;
+  const resolvedWageSubsidyDetails =
+    payload.wageSubsidyDetails ||
+    payload.wage_subsidy_details ||
+    resolvedMetadata?.wageSubsidyDetails ||
+    resolvedMetadata?.wage_subsidy_details ||
+    null;
+  const resolvedDeliveryMode =
+    payload.deliveryMode ||
+    payload.delivery_mode ||
+    resolvedMetadata?.deliveryMode ||
+    resolvedMetadata?.delivery_mode ||
+    "partner";
   const compliance =
     payload.compliance && typeof payload.compliance === "object"
       ? {
@@ -100,7 +78,7 @@ const buildInterventionFromApi = (planId, payload = {}) => {
           finance: payload.compliance.finance || "pending",
         }
       : { ilmp: "pending", finance: "pending" };
-  const status = normaliseInterventionStatus(payload.status);
+  const status = normalizeInterventionStatus(payload.status, "draft");
   const durationDays = toNumberOrNull(payload.durationDays);
   const plannedCost =
     toNumberOrNull(payload.plannedCost) ??
@@ -141,6 +119,11 @@ const buildInterventionFromApi = (planId, payload = {}) => {
     potId: payload.potId || payload.fundingStream || null,
     fundingStream: payload.fundingStream || null,
     postingContext: payload.postingContext || payload.posting_context || payload.metadata?.postingContext || null,
+    deliveryMode: resolvedDeliveryMode === "in_house" ? "in_house" : "partner",
+    institution: resolvedInstitution,
+    programName: resolvedProgramName,
+    itpDetails: resolvedItpDetails,
+    wageSubsidyDetails: resolvedWageSubsidyDetails,
     noc: resolvedNoc,
     nocVersion: resolvedNocVersion,
     notes: payload.notes || null,
@@ -163,7 +146,7 @@ const recomputeInterventionCounts = plans => {
     const list = Array.isArray(plan.interventions) ? plan.interventions : [];
     total += list.length;
     list.forEach(item => {
-      if (isOpenInterventionStatus(item?.status)) {
+      if (isInterventionOpenStatus(item?.status)) {
         open += 1;
       }
     });
@@ -376,6 +359,7 @@ const CaseWorkspaceContext = createContext({
   createActionPlan: () => Promise.resolve({}),
   updateActionPlan: () => Promise.resolve(),
   createIntervention: () => Promise.resolve({}),
+  reviseIntervention: () => Promise.resolve({}),
   updateIntervention: () => Promise.resolve({}),
   closeIntervention: () => Promise.resolve({}),
   runComplianceChecks: () => Promise.resolve(),
@@ -872,6 +856,83 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
           const updated = [...current, intervention];
           return { ...plan, interventions: updated, interventionCount: updated.length };
         });
+        const { open, total } = recomputeInterventionCounts(nextPlans);
+        return {
+          ...prev,
+          caseData: {
+            ...prev.caseData,
+            actionPlans: nextPlans,
+            counts: {
+              ...(prev.caseData.counts || {}),
+              openInterventions: open,
+              totalInterventions: total,
+            },
+          },
+        };
+      });
+      return intervention;
+    },
+    [apiFetch, markCompliancePending]
+  );
+
+  const reviseIntervention = useCallback(
+    async interventionId => {
+      const response = await apiFetch(`/api/interventions/${interventionId}/revise`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!response.ok) {
+        let details = null;
+        try {
+          details = await response.json();
+        } catch (_) {
+          details = null;
+        }
+        const message =
+          details?.message ||
+          details?.error ||
+          `Failed to start intervention revision (${response.status})`;
+        const error = new Error(message);
+        error.status = response.status;
+        error.code = details?.error;
+        error.details = details;
+        throw error;
+      }
+      const data = await response.json();
+      const actionPlanId = data?.actionPlanId ?? data?.action_plan_id ?? null;
+      const intervention = buildInterventionFromApi(actionPlanId, data);
+      if (!intervention) {
+        return null;
+      }
+      markCompliancePending();
+      setState(prev => {
+        if (!prev.caseData) return prev;
+        const targetPlanId = intervention.actionPlanId || actionPlanId;
+        let interventionPlaced = false;
+        const nextPlans = prev.caseData.actionPlans.map(plan => {
+          if (String(plan.id) !== String(targetPlanId)) {
+            return plan;
+          }
+          const current = Array.isArray(plan.interventions) ? plan.interventions : [];
+          const exists = current.some(item => String(item.id) === String(intervention.id));
+          const updated = exists
+            ? current.map(item => (String(item.id) === String(intervention.id) ? intervention : item))
+            : [...current, intervention];
+          interventionPlaced = true;
+          return { ...plan, interventions: updated, interventionCount: updated.length };
+        });
+        if (!interventionPlaced && targetPlanId) {
+          const targetIndex = nextPlans.findIndex(plan => String(plan.id) === String(targetPlanId));
+          if (targetIndex >= 0) {
+            const plan = nextPlans[targetIndex];
+            const current = Array.isArray(plan.interventions) ? plan.interventions : [];
+            const exists = current.some(item => String(item.id) === String(intervention.id));
+            const updated = exists
+              ? current.map(item => (String(item.id) === String(intervention.id) ? intervention : item))
+              : [...current, intervention];
+            nextPlans[targetIndex] = { ...plan, interventions: updated, interventionCount: updated.length };
+          }
+        }
         const { open, total } = recomputeInterventionCounts(nextPlans);
         return {
           ...prev,
@@ -1575,6 +1636,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     createActionPlan,
     updateActionPlan,
     createIntervention,
+    reviseIntervention,
     updateIntervention,
     closeIntervention,
     runComplianceChecks,
@@ -1614,7 +1676,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     setInterventionWizardDraft,
     clearInterventionWizardStep,
     clearInterventionWizardDraft,
-  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, createIntervention, updateIntervention, closeIntervention, runComplianceChecks, prepareIlmpExport, markReadyToClose, closeCase, reopenCase, archiveCase, fetchActionPlanContext, upsertActionPlanReviewReminder, saveCaseContext, deleteActionPlan, deleteIntervention, interventionCodes, interventionCodesLoading, loadInterventionCodes, interventionOutcomes, interventionOutcomesLoading, loadInterventionOutcomes, fundingStreams, fundingStreamsLoading, loadFundingStreams, nocVersions, nocVersionsLoading, loadNocVersions, searchNocCodes, activateActionPlan, closeActionPlan, selectedActionPlanId, selectedInterventionId, getInterventionWizardStep, getInterventionWizardKeyForCase, getInterventionWizardDraft, setInterventionWizardStep, setInterventionWizardDraft, clearInterventionWizardStep, clearInterventionWizardDraft]);
+  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, createIntervention, reviseIntervention, updateIntervention, closeIntervention, runComplianceChecks, prepareIlmpExport, markReadyToClose, closeCase, reopenCase, archiveCase, fetchActionPlanContext, upsertActionPlanReviewReminder, saveCaseContext, deleteActionPlan, deleteIntervention, interventionCodes, interventionCodesLoading, loadInterventionCodes, interventionOutcomes, interventionOutcomesLoading, loadInterventionOutcomes, fundingStreams, fundingStreamsLoading, loadFundingStreams, nocVersions, nocVersionsLoading, loadNocVersions, searchNocCodes, activateActionPlan, closeActionPlan, selectedActionPlanId, selectedInterventionId, getInterventionWizardStep, getInterventionWizardKeyForCase, getInterventionWizardDraft, setInterventionWizardStep, setInterventionWizardDraft, clearInterventionWizardStep, clearInterventionWizardDraft]);
 
   return (
     <CaseWorkspaceContext.Provider value={contextValue}>

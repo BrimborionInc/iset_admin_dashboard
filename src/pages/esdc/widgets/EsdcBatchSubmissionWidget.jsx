@@ -10,8 +10,7 @@ import {
   Header,
   Link,
   Modal,
-  SpaceBetween,
-  StatusIndicator
+  SpaceBetween
 } from '@cloudscape-design/components';
 import CodeView from '@cloudscape-design/code-view/code-view';
 import xmlHighlight from '@cloudscape-design/code-view/highlight/xml';
@@ -26,15 +25,14 @@ const EsdcBatchSubmissionWidget = ({
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
   const [xml, setXml] = useState('');
-  const [participants, setParticipants] = useState([]);
-  const [showWarningsModal, setShowWarningsModal] = useState(false);
-  const [warnings, setWarnings] = useState([]);
-  const [blocking, setBlocking] = useState([]);
+  const [skipped, setSkipped] = useState([]);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [filename, setFilename] = useState(() => `esdc-participants-${new Date().toISOString().slice(0,10)}.xml`);
   const [downloadPath, setDownloadPath] = useState('');
   const [queueCount, setQueueCount] = useState(0);
-  const [validatedCount, setValidatedCount] = useState(0);
+  const [readyCount, setReadyCount] = useState(0);
+  const [needsReviewCount, setNeedsReviewCount] = useState(0);
+  const [blockedCount, setBlockedCount] = useState(0);
 
   const handleSettingsClick = ({ detail }) => {
     if (detail?.id === 'remove' && typeof actions.removeItem === 'function') {
@@ -68,9 +66,13 @@ const EsdcBatchSubmissionWidget = ({
       if (!resp.ok) return;
       const items = Array.isArray(body.items) ? body.items : [];
       const total = typeof body.total === 'number' ? body.total : items.length;
-      const validated = items.filter(it => it.last_validated_at).length;
+      const ready = items.filter(it => it.readiness_status === 'ready').length;
+      const needsReview = items.filter(it => it.readiness_status === 'needs_review').length;
+      const blocked = items.filter(it => it.readiness_status === 'blocked').length;
       setQueueCount(total);
-      setValidatedCount(validated);
+      setReadyCount(ready);
+      setNeedsReviewCount(needsReview);
+      setBlockedCount(blocked);
     } catch (_) {
       // ignore errors for gating UI
     }
@@ -83,24 +85,10 @@ const EsdcBatchSubmissionWidget = ({
     return () => window.removeEventListener('esdcParticipants:refresh', handler);
   }, [loadQueueInfo]);
 
-  const downloadXml = () => {
-    if (!xml) return;
-    const blob = new Blob([xml], { type: 'text/xml;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `esdc-participants-${Date.now()}.xml`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
   const prepareBatch = async (opts = {}) => {
     setLoading(true);
     setAlert(null);
-    setWarnings([]);
-    setBlocking([]);
+    setSkipped([]);
     try {
       const resp = await apiFetch('/api/esdc/participants/batch-prepare', {
         method: 'POST',
@@ -109,33 +97,30 @@ const EsdcBatchSubmissionWidget = ({
       });
       const body = await resp.json().catch(() => ({}));
       if (!resp.ok) {
-        if (resp.status === 409) {
-          if (Array.isArray(body.blocking) && body.blocking.length) {
-            setBlocking(body.blocking);
-            setAlert({ type: 'error', message: 'Blocked participants detected. Fix blockers before generating.' });
-          } else if (Array.isArray(body.warnings) && body.warnings.length) {
-            setWarnings(body.warnings);
-            setShowWarningsModal(true);
-            setAlert({ type: 'warning', message: 'Warnings detected. Review and confirm to proceed.' });
-          } else {
-            setAlert({ type: 'error', message: body.error || body.message || 'Batch prepare failed.' });
-          }
-        } else {
-          setAlert({ type: 'error', message: body.error || body.message || 'Batch prepare failed.' });
-        }
+        setAlert({ type: 'error', message: body.error || body.message || 'Batch prepare failed.' });
         setXml('');
-        setParticipants([]);
         return;
       }
       setXml(body.xml || '');
-      setParticipants(Array.isArray(body.participants) ? body.participants : []);
-      setAlert({ type: 'success', message: `Generated batch for ${body.participants?.length || 0} participants.` });
+      setSkipped(Array.isArray(body.skipped) ? body.skipped : []);
+      if ((body.participants?.length || 0) > 0) {
+        setAlert({
+          type: 'success',
+          message: `Generated batch for ${body.participants?.length || 0} ready participants.${(body.skipped?.length || 0) ? ` Excluded ${body.skipped.length} non-ready records.` : ''}`
+        });
+      } else {
+        setAlert({
+          type: 'info',
+          message: (body.skipped?.length || 0)
+            ? `No ready participants were available. ${body.skipped.length} records remain excluded until their ILMP issues are resolved.`
+            : 'No ready participants were available for batch generation.'
+        });
+      }
       triggerRefresh();
       loadQueueInfo();
     } catch (err) {
       setAlert({ type: 'error', message: err?.message || 'Batch prepare failed.' });
       setXml('');
-      setParticipants([]);
     } finally {
       setLoading(false);
     }
@@ -152,16 +137,16 @@ const EsdcBatchSubmissionWidget = ({
       });
       const body = await resp.json().catch(() => ({}));
       if (!resp.ok) {
+        setSkipped(Array.isArray(body.skipped) ? body.skipped : []);
         setAlert({ type: 'error', message: body.error || body.message || 'Batch submit failed.' });
         setXml('');
-        setParticipants([]);
         return;
       }
       setXml(body.xml || '');
-      setParticipants(Array.isArray(body.participants) ? body.participants : []);
+      setSkipped(Array.isArray(body.skipped) ? body.skipped : []);
       setAlert({
         type: 'success',
-        message: `Submitted batch ${body.batchId || ''} for ${body.participants?.length || 0} participants.`
+        message: `Submitted batch ${body.batchId || ''} for ${body.participants?.length || 0} ready participants.${(body.skipped?.length || 0) ? ` Excluded ${body.skipped.length} non-ready records.` : ''}`
       });
       triggerRefresh();
       loadQueueInfo();
@@ -180,7 +165,6 @@ const EsdcBatchSubmissionWidget = ({
     } catch (err) {
       setAlert({ type: 'error', message: err?.message || 'Batch submit failed.' });
       setXml('');
-      setParticipants([]);
     } finally {
       setLoading(false);
       setShowSubmitModal(false);
@@ -188,28 +172,23 @@ const EsdcBatchSubmissionWidget = ({
   };
 
   const issuesList = useMemo(() => {
-    const render = (title, list) => (
-          <SpaceBetween size="xxs">
-            <Box variant="strong">{title}</Box>
-            <Box as="ul" padding={{ left: 'm' }}>
-              {list.map(item => (
-                <li key={`${item.id}-${item.case_id || ''}`}>
-                  <Link href={`/cases/${item.case_id || item.id}`}>
-                    {item.participant_name || item.tracking_id || `Submission #${item.id}`}
-                  </Link>
-                  {item.detail ? ` — ${item.detail}` : ''}
-                </li>
-              ))}
+    if (!skipped.length) return null;
+    return (
+      <SpaceBetween size="xxs">
+        <Box variant="strong">Excluded from batch</Box>
+        <Box as="ul" padding={{ left: 'm' }}>
+          {skipped.map(item => (
+            <li key={`${item.id}-${item.case_id || ''}`}>
+              <Link href={item.case_id ? `/application-case/${item.case_id}` : `/esdc/participants/${item.id}`}>
+                {item.participant_name || item.tracking_id || `Submission #${item.id}`}
+              </Link>
+              {item.detail ? ` — ${item.detail}` : ''}
+            </li>
+          ))}
         </Box>
       </SpaceBetween>
     );
-    return (
-      <>
-        {blocking.length > 0 && render('Blocked participants', blocking)}
-        {warnings.length > 0 && render('Warnings', warnings)}
-      </>
-    );
-  }, [blocking, warnings]);
+  }, [skipped]);
 
   return (
     <>
@@ -226,7 +205,7 @@ const EsdcBatchSubmissionWidget = ({
                 iconName="refresh"
                 onClick={() => prepareBatch()}
                 loading={loading}
-                disabled={queueCount === 0 || validatedCount === 0}
+                disabled={readyCount === 0}
               >
                 Generate batch XML
               </Button>
@@ -266,7 +245,7 @@ const EsdcBatchSubmissionWidget = ({
             </Alert>
           )}
           <Box variant="p">
-            Participants included: <strong>{participants.length}</strong>. Batch generation blocks on validation blockers; warnings require confirmation.
+            Ready now: <strong>{readyCount}</strong> of <strong>{queueCount}</strong>. Needs review: <strong>{needsReviewCount}</strong>. Blocked: <strong>{blockedCount}</strong>. Batch generation includes only ready participants and excludes the rest automatically.
           </Box>
           {xml ? (
             <ExpandableSection headerText="Batch ILMP payload" defaultExpanded>
@@ -293,31 +272,6 @@ const EsdcBatchSubmissionWidget = ({
           )}
         </SpaceBetween>
       </BoardItem>
-      <Modal
-        visible={showWarningsModal}
-        header="Warnings detected"
-        closeAriaLabel="Close warning modal"
-        onDismiss={() => setShowWarningsModal(false)}
-        footer={(
-          <SpaceBetween size="xs" direction="horizontal">
-            <Button variant="normal" onClick={() => setShowWarningsModal(false)}>Cancel</Button>
-            <Button
-              variant="primary"
-              onClick={() => {
-                setShowWarningsModal(false);
-                prepareBatch({ ignoreWarnings: true });
-              }}
-            >
-              Proceed with warnings
-            </Button>
-          </SpaceBetween>
-        )}
-      >
-        <SpaceBetween size="s">
-          <Box>One or more participants have warnings. You can proceed, but review recommended.</Box>
-          {issuesList}
-        </SpaceBetween>
-      </Modal>
       <Modal
         visible={showSubmitModal}
         header="Confirm batch submission"

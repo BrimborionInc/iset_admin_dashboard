@@ -178,6 +178,12 @@ const normalizePaymentTypeCode = value => {
   return trimmed || null;
 };
 
+const normalizePayeeTypeCode = value => {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim();
+  return trimmed || null;
+};
+
 const normalizeRecurrenceMode = value => {
   if (typeof value !== "string") return RECURRENCE_MODE_NOT_ALLOWED;
   const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
@@ -334,7 +340,48 @@ const normalizePacket = packet => {
 
 const normalizePaymentTypeMappingPayload = payload => {
   if (!payload || typeof payload !== "object") return null;
+  const paymentTypesRaw = Array.isArray(payload.paymentTypes)
+    ? payload.paymentTypes
+    : Array.isArray(payload.payment_types)
+      ? payload.payment_types
+      : [];
+  const paymentTypes = paymentTypesRaw
+    .map(entry => {
+      if (!entry || typeof entry !== "object") return null;
+      const code = normalizePaymentTypeCode(
+        entry.code ?? entry.value ?? entry.paymentType ?? entry.payment_type ?? null,
+      );
+      if (!code) return null;
+      const labelRaw = entry.label ?? entry.name ?? null;
+      const label = typeof labelRaw === "string" && labelRaw.trim() ? labelRaw.trim() : code;
+      return { code, label };
+    })
+    .filter(Boolean);
   const interventionsRaw = Array.isArray(payload.interventions) ? payload.interventions : [];
+  const payeeTypesRaw = Array.isArray(payload.payeeTypes)
+    ? payload.payeeTypes
+    : Array.isArray(payload.payee_types)
+      ? payload.payee_types
+      : [];
+  const payeeTypes = payeeTypesRaw
+    .map(entry => {
+      if (!entry || typeof entry !== "object") return null;
+      const code = normalizePayeeTypeCode(
+        entry.code ?? entry.value ?? entry.payeeType ?? entry.payee_type ?? null,
+      );
+      if (!code) return null;
+      const labelRaw = entry.label ?? entry.name ?? null;
+      const descriptionRaw = entry.description ?? entry.helpText ?? entry.help_text ?? null;
+      return {
+        code,
+        label: typeof labelRaw === "string" && labelRaw.trim() ? labelRaw.trim() : code,
+        description:
+          typeof descriptionRaw === "string" && descriptionRaw.trim()
+            ? descriptionRaw.trim()
+            : null,
+      };
+    })
+    .filter(Boolean);
   const interventions = interventionsRaw
     .map(entry => {
       if (!entry || typeof entry !== "object") return null;
@@ -369,6 +416,8 @@ const normalizePaymentTypeMappingPayload = payload => {
   return {
     ...payload,
     enabled: payload.enabled !== false,
+    paymentTypes,
+    payeeTypes,
     interventions,
     recurrencePolicies,
   };
@@ -1112,6 +1161,41 @@ export const PaymentsDataProvider = ({ children, filters = {} }) => {
     () => buildPaymentTypeMappingLookup(paymentTypeMapping),
     [paymentTypeMapping],
   );
+  const paymentTypeOptions = useMemo(() => {
+    const list = Array.isArray(paymentTypeMapping?.paymentTypes) ? paymentTypeMapping.paymentTypes : [];
+    return list
+      .map(entry => {
+        const code = normalizePaymentTypeCode(entry?.code);
+        if (!code) return null;
+        return {
+          value: code,
+          label: entry?.label || code,
+        };
+      })
+      .filter(Boolean);
+  }, [paymentTypeMapping]);
+  const paymentTypeOptionMap = useMemo(() => {
+    const map = new Map();
+    paymentTypeOptions.forEach(option => {
+      if (!option?.value) return;
+      map.set(option.value, option);
+    });
+    return map;
+  }, [paymentTypeOptions]);
+  const payeeTypeOptions = useMemo(() => {
+    const list = Array.isArray(paymentTypeMapping?.payeeTypes) ? paymentTypeMapping.payeeTypes : [];
+    return list
+      .map(entry => {
+        const code = normalizePayeeTypeCode(entry?.code);
+        if (!code) return null;
+        return {
+          value: code,
+          label: entry?.label || code,
+          description: entry?.description || undefined,
+        };
+      })
+      .filter(Boolean);
+  }, [paymentTypeMapping]);
   const paymentTypeRecurrencePolicyLookup = useMemo(
     () => buildRecurrencePolicyLookup(paymentTypeMapping),
     [paymentTypeMapping],
@@ -1143,6 +1227,9 @@ export const PaymentsDataProvider = ({ children, filters = {} }) => {
       slaSnapshot,
       paymentTypeMapping,
       paymentTypeMappingLookup,
+      paymentTypeOptions,
+      paymentTypeOptionMap,
+      payeeTypeOptions,
       paymentTypeRecurrencePolicyLookup,
       paymentTypeMappingLoading,
       loading,
@@ -1174,6 +1261,9 @@ export const PaymentsDataProvider = ({ children, filters = {} }) => {
       slaSnapshot,
       paymentTypeMapping,
       paymentTypeMappingLookup,
+      paymentTypeOptions,
+      paymentTypeOptionMap,
+      payeeTypeOptions,
       paymentTypeRecurrencePolicyLookup,
       paymentTypeMappingLoading,
       loading,

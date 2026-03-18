@@ -50,7 +50,7 @@ Last Updated: 2026-01-15
 - 2026-01-15: If there is no active action plan, require selecting an existing plan before proposing interventions; instruct the user to create a plan first.
 - 2026-01-15: Action plan creation stays separate from the proposal flow. Step 1 requires selecting an existing plan; do not create plans inline. EI status stays at the end; if it mismatches the selected plan, warn/block approval and let the user reselect the correct plan.
 - 2026-01-15: Action plan selection is the first step before any other steps to force plan context upfront.
-- 2026-01-15: Step 1 plan selector should list all non-terminal plans (draft/planned/active), excluding closed plans.
+- 2026-01-15: Step 1 plan selector should list all non-terminal plans (`draft`/`active`), excluding closed plans.
 - 2026-01-15: Exclude archived plans from the Step 1 plan selector.
 - 2026-01-15: Default the Step 1 selection to the active plan when one exists.
 - 2026-01-15: If a submitted proposal is pending approval, warn and block starting a new proposal at Step 1.
@@ -62,7 +62,7 @@ Last Updated: 2026-01-15
 - 2026-01-15: Case note titles should be "Intervention proposal — Request changes" and "Intervention proposal — Rejected".
 - 2026-01-15: "Request changes" keeps the proposal editable and blocks creating new proposals until it is resubmitted.
 - 2026-01-15: Rejected proposals are read-only and do not block new proposals.
-- 2026-01-15: Approved proposals should create interventions in planned status (planned/approved treated as equivalent in UI).
+- 2026-01-15: Approved proposals should create interventions in approved status (pre-start approved state).
 - 2026-01-15: Place "Other funding sources" immediately after the rationale step.
 - 2026-01-15: If no eligible action plans exist, show a plain-text instruction to create one first (no link/button).
 - 2026-01-15: Keep the current step order from the full widget, inserting "Other funding sources" after rationale.
@@ -78,7 +78,7 @@ Last Updated: 2026-01-15
 - Port type, childcare, cost (line items), and other funding steps (lite rationale variant).
 - Implement simplified docs checklist scaffold (no required items yet).
 - Implement decision step: approve/request changes/reject, EI eligibility + upload required on approve only.
-- Implement approval routing: validate funding stream vs selected plan; block on mismatch with warning; create planned interventions on approval.
+- Implement approval routing: validate funding stream vs selected plan; block on mismatch with warning; create approved interventions on approval.
 - Add case-note creation for request-changes/reject with required reason text.
 - Confirm EI verification upload attaches to each approved intervention via `iset_document_intervention`.
 - Manual QA: draft/save, submit, request changes, reject, approve, plan mismatch handling.

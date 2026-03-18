@@ -198,10 +198,11 @@ const defaultLayout = [
   { id: "secure-messaging", rowSpan: 4, columnSpan: 2 },
 ];
 
-const proposeInterventionLayout = [
+const interventionWorkflowLayout = [
   { id: "caseHeader", rowSpan: 3, columnSpan: 4 },
-  { id: "participantDetails", rowSpan: 7, columnSpan: 2 },
-  { id: "interventionAssessment", rowSpan: 7, columnSpan: 2 },
+  { id: "actionPlans", rowSpan: 3, columnSpan: 2 },
+  { id: "interventionAssessment", rowSpan: 6, columnSpan: 2 },
+  { id: "interventions", rowSpan: 4, columnSpan: 2 },
 ];
 
 const managePlansLayout = [
@@ -242,7 +243,8 @@ const QUICK_ACTION_LAYOUTS = {
   documentsMessages: documentsMessagesLayout,
   managePayments: managePaymentsLayout,
   esdcValidation: esdcValidationLayout,
-  proposeIntervention: proposeInterventionLayout,
+  proposeIntervention: interventionWorkflowLayout,
+  interventionWorkflow: interventionWorkflowLayout,
 };
 
 const exportLayout = items =>
@@ -507,8 +509,8 @@ const CaseWorkspacePage = ({
   useEffect(() => {
     const openHandler = () => openPalette();
     const resetHandler = () => resetLayout();
-    const proposeHandler = () => {
-      applyLayout(proposeInterventionLayout);
+    const interventionWorkflowHandler = () => {
+      applyLayout(interventionWorkflowLayout);
     };
     const setLayoutHandler = event => {
       const detail = event?.detail || {};
@@ -523,13 +525,15 @@ const CaseWorkspacePage = ({
     };
     window.addEventListener("iset-case-workspace:openPalette", openHandler);
     window.addEventListener("iset-case-workspace:resetLayout", resetHandler);
-    window.addEventListener("iset:intervention-assessment:new", proposeHandler);
+    window.addEventListener("iset:intervention-assessment:new", interventionWorkflowHandler);
+    window.addEventListener("iset:intervention-assessment:select", interventionWorkflowHandler);
     window.addEventListener("iset-case-workspace:set-layout", setLayoutHandler);
     window.addEventListener("iset-case-workspace:add-widget", addWidgetHandler);
     return () => {
       window.removeEventListener("iset-case-workspace:openPalette", openHandler);
       window.removeEventListener("iset-case-workspace:resetLayout", resetHandler);
-      window.removeEventListener("iset:intervention-assessment:new", proposeHandler);
+      window.removeEventListener("iset:intervention-assessment:new", interventionWorkflowHandler);
+      window.removeEventListener("iset:intervention-assessment:select", interventionWorkflowHandler);
       window.removeEventListener("iset-case-workspace:set-layout", setLayoutHandler);
       window.removeEventListener("iset-case-workspace:add-widget", addWidgetHandler);
     };

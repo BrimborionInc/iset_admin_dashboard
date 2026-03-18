@@ -21,7 +21,6 @@ import {
 } from "@cloudscape-design/components";
 import { apiFetch } from "../../../auth/apiClient";
 import { boardItemI18nStrings } from "./common";
-import { PAYMENT_TYPE_OPTIONS } from "./paymentOptions";
 
 const RECURRENCE_MODE_REQUIRED = "required";
 const RECURRENCE_MODE_OPTIONAL = "optional";
@@ -74,17 +73,6 @@ const EMPTY_PAYMENT_EVIDENCE_RULE_SET = {
   optional: [],
   postPayRequired: [],
 };
-
-const buildDefaultPaymentTypes = () =>
-  PAYMENT_TYPE_OPTIONS.map(option => ({
-    code: option.value,
-    label: option.label || option.value,
-    notes: "",
-    requiredEvidence: [],
-    recurrenceMode: DEFAULT_RECURRENCE_MODE_BY_TYPE[option.value] || RECURRENCE_MODE_NOT_ALLOWED,
-    submissionTiming:
-      DEFAULT_SUBMISSION_TIMING_BY_TYPE[option.value] || SUBMISSION_TIMING_MANUAL_TRIGGER,
-  }));
 
 const normalizeString = value => (typeof value === "string" ? value.trim() : "");
 
@@ -616,20 +604,18 @@ const normalizeCostingDefaultsForSignature = config => {
 
 const buildCostingSignature = config => JSON.stringify(normalizeCostingDefaultsForSignature(config));
 
-const normalizeMapping = (raw, { useDefaults = false } = {}) => {
+const normalizeMapping = raw => {
   const source = raw && typeof raw === "object" ? raw : {};
   const paymentTypes = normalizePaymentTypes(source.paymentTypes || source.payment_types);
   const interventions = normalizeInterventions(source.interventions || []);
   const version = normalizeString(source.version);
   const generatedOn = normalizeString(source.generatedOn || source.generated_on);
   const notes = normalizeNotes(source.notes);
-  const shouldUseDefaults = useDefaults && !paymentTypes.length && !interventions.length;
-  const normalizedPaymentTypes = shouldUseDefaults ? buildDefaultPaymentTypes() : paymentTypes;
   return {
     version,
     generatedOn,
     notes,
-    paymentTypes: normalizedPaymentTypes,
+    paymentTypes,
     interventions,
   };
 };

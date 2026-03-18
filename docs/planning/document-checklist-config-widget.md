@@ -53,13 +53,13 @@ Last Updated: 2026-01-20
 - Intervention gate mapping (accepted):
   - Needed to Submit Proposal: `draft`, `changes_requested`.
   - Needed to Enable Funding: `submitted`, `in_review`.
-  - Needed to Release Payments: `approved`, `in_progress`, `suspended`, `ready_to_close`.
+  - Needed to Release Payments: `approved`, `in_progress`, `suspended`.
 - Intervention terminal statuses (`completed`, `cancelled`) are excluded from checklists.
 - The widget edits document requirements within each gate; gate/status mappings are read-only in the UI for now.
 
 ## Superseded Decisions (Status Cleanup)
 - Canonical application status list (cleaned): `submitted`, `in_review`, `docs_requested`, `closure_notice`, `pending_approval`, `pending_completion`, `completed`, `closed`, `archived`.
-- Canonical intervention status list (cleaned): `draft`, `submitted`, `in_review`, `changes_requested`, `approved`, `rejected`, `in_progress`, `suspended`, `ready_to_close`, `completed`, `cancelled` (drop `planned`).
+- Canonical intervention status list (cleaned): `draft`, `submitted`, `in_review`, `changes_requested`, `approved`, `rejected`, `in_progress`, `suspended`, `completed`, `cancelled`.
 - No aliases: enforce hard, single-source status values only.
 - Status cleanup scope included the full application + intervention status model (not just checklist gating).
 - Assume clean DB; no migration/alias/fallback handling.

@@ -1419,9 +1419,26 @@ const IsetApplicationFormWidget = ({
   const diff = useMemo(() => answersDiff(answers, editableAnswers), [answers, editableAnswers]);
   const hasDirtyFields = isEditing && Object.keys(diff).length > 0;
   const decisionStatusSource = caseData?.applicationStatus || caseData?.application_status || caseData?.status || '';
+  const reportingCaseContext = caseData?.caseContext || {};
+  const reportingCorrectionAllowed = Boolean(
+    reportingCaseContext?.reportingOnlyDeniedIneligible || reportingCaseContext?.reportingCorrectionAllowed
+  );
   const isDecisionFinal = ['approved', 'rejected', 'declined', 'decision_ready', 'completed'].includes(
     decisionStatusSource.toLowerCase()
   );
+  const isDecisionEditLocked = isDecisionFinal && !reportingCorrectionAllowed;
+  const reportingComplianceStatus = caseData?.compliance?.ilmp?.status || 'pending';
+  const reportingStatusMessage = reportingCorrectionAllowed
+    ? (
+      reportingComplianceStatus === 'clean'
+        ? 'This denied-ineligible record is valid for ILMP reporting and will flow into the ESDC queue automatically.'
+        : reportingComplianceStatus === 'blocked'
+          ? 'This denied-ineligible record is blocked from ILMP reporting until the missing or invalid data below is corrected.'
+          : reportingComplianceStatus === 'warning'
+            ? 'This denied-ineligible record still needs ILMP review before it can be included in ESDC reporting.'
+            : 'This denied-ineligible record stays editable here so ILMP reporting data can be corrected without opening Case Workspace.'
+    )
+    : '';
   const activeLock = useMemo(() => {
     if (lockState.owned && lockState.lock) {
       return lockState.lock;
@@ -1454,24 +1471,24 @@ const IsetApplicationFormWidget = ({
   const lockedByAnotherUser = Boolean(lockOwnerId && !lockHeldByCurrentUser);
 
   useEffect(() => {
-    if (isDecisionFinal) {
+    if (isDecisionEditLocked) {
       setIsEditing(false);
       setShowEditConfirm(false);
       releaseLock({ silent: true }).catch(() => {});
     }
-  }, [isDecisionFinal, releaseLock]);
+  }, [isDecisionEditLocked, releaseLock]);
 
   const handleRequestEdit = useCallback(() => {
-    if (isDecisionFinal) return;
+    if (isDecisionEditLocked) return;
     if (lockedByAnotherUser) {
       pushFlash({ type: 'warning', content: buildLockConflictMessage({ reason: 'owned_by_other', lock: activeLock }) });
       return;
     }
     setShowEditConfirm(true);
-  }, [activeLock, isDecisionFinal, lockedByAnotherUser, pushFlash]);
+  }, [activeLock, isDecisionEditLocked, lockedByAnotherUser, pushFlash]);
 
   const handleConfirmEdit = useCallback(async () => {
-    if (isDecisionFinal || locking || lockedByAnotherUser) return;
+    if (isDecisionEditLocked || locking || lockedByAnotherUser) return;
     setLocking(true);
     const result = await acquireLock();
     setLocking(false);
@@ -1484,7 +1501,7 @@ const IsetApplicationFormWidget = ({
     setIsEditing(true);
     setFieldErrors({});
     setEditableAnswers(buildEditableAnswers(answers));
-  }, [acquireLock, answers, isDecisionFinal, locking, lockedByAnotherUser, pushFlash]);
+  }, [acquireLock, answers, isDecisionEditLocked, locking, lockedByAnotherUser, pushFlash]);
 
   const handleCancelEditing = useCallback(() => {
     setIsEditing(false);
@@ -2305,7 +2322,7 @@ const IsetApplicationFormWidget = ({
 
   const headerActions = (
     <SpaceBetween direction="horizontal" size="xs">
-      {isEditing && !isDecisionFinal ? (
+      {isEditing && !isDecisionEditLocked ? (
 
         <>
           <Button onClick={handleOpenVersionModal} disabled={saving}>
@@ -2321,7 +2338,7 @@ const IsetApplicationFormWidget = ({
       ) : (
         <Button
           onClick={handleRequestEdit}
-          disabled={loading || !application || isDecisionFinal || lockedByAnotherUser || isClosedStatus}
+          disabled={loading || !application || isDecisionEditLocked || lockedByAnotherUser || isClosedStatus}
           variant="primary"
         >
           Edit
@@ -2376,6 +2393,23 @@ const IsetApplicationFormWidget = ({
               <Flashbar items={flashbarItems} />
             </Box>
           )}
+          {reportingCorrectionAllowed && (
+            <Box margin={{ bottom: 's' }}>
+              <Alert
+                type={
+                  reportingComplianceStatus === 'clean'
+                    ? 'success'
+                    : reportingComplianceStatus === 'blocked'
+                      ? 'error'
+                      : reportingComplianceStatus === 'warning'
+                        ? 'warning'
+                        : 'info'
+                }
+              >
+                {reportingStatusMessage}
+              </Alert>
+            </Box>
+          )}
           <Box variant="small" margin={{ bottom: 's' }}>
             This view presents the applicant's submitted ISET application. Review each section for accuracy, capture clarifications when needed, and use edit mode to publish updates to the case file.
           </Box>
@@ -2399,7 +2433,7 @@ const IsetApplicationFormWidget = ({
                 headerDescription="Applicant's description of their long-term employment objective."
                 defaultExpanded={false}
               >
-                {isEditing && !isDecisionFinal ? (
+                {isEditing && !isDecisionEditLocked ? (
                   <Textarea
                     rows={5}
                     value={employmentNarrativeValue}

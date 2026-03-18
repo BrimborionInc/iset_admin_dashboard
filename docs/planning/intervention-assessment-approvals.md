@@ -1,7 +1,7 @@
 # Intervention Assessment & Approvals Plan (Draft)
 Status: Draft (design in progress)  
 Owners: Casework / Admin Dashboard  
-Last updated: 2025-12-25
+Last updated: 2026-03-18
 
 ## Purpose
 Document the target workflow for proposing, reviewing, approving, and running interventions within the existing Case Workspace. Keep queues aligned to current widgets (Action Plans + Interventions) instead of inventing parallel queue UIs.
@@ -9,7 +9,7 @@ Document the target workflow for proposing, reviewing, approving, and running in
 ## Scope / Guardrails
 - Live in Case Workspace: Interventions widget + Action Plans widget; no new standalone queues.
 - Keep a single intervention `status` column and extend its allowed values to cover pre-approval stages; avoid parallel approval-status fields.
-- Reuse existing execution states (`planned`, `in_progress`, `suspended`, `completed`, `cancelled`, `ready_to_close`), see `docs/guides/status-lifecycle-implementation.md`.
+- Use the canonical intervention status set: `draft`, `submitted`, `in_review`, `changes_requested`, `approved`, `rejected`, `in_progress`, `suspended`, `completed`, `cancelled`.
 - Require an active Action Plan before an intervention can start (`in_progress`); if no active plan, prompt to activate/create one.
 
 ## Implementation Progress (UI)
@@ -18,10 +18,10 @@ Document the target workflow for proposing, reviewing, approving, and running in
 - EI verification step now validates eligibility on Next and triggers uploads on Next/Save Progress when a file is selected (no standalone upload button). Uploads attach to the intervention (not application) and show a blocking alert if no intervention record exists. Submit Decision is gated on decision outcome, EI status, and submitted-stage checklist completeness.
 - EI verification step now blocks progression when EI status implies a funding stream mismatch with the selected Action Plan, shows instructions to close/create the correct plan, and provides an Action Plan picker to reassign.
 - EI step now persists Action Plan reassignment on Next/Save Progress and keeps the selected plan aligned with the intervention record so submitted proposals move between plans cleanly.
-- Status normalization currently recognizes: `draft`, `submitted`, `in_review`, `changes_requested`, `approved`, `rejected`, `planned`, `in_progress`, `suspended`, `ready_to_close`, `completed`, `cancelled` (plus aliases like `in-progress`, `ready-to-close`, `canceled`).
+- Status normalization now uses the canonical set only: `draft`, `submitted`, `in_review`, `changes_requested`, `approved`, `rejected`, `in_progress`, `suspended`, `completed`, `cancelled`.
 - Interventions table status now shows “Submitted — EI verified/unverified” based on EI status value (document presence is handled by the checklist).
 - Intervention checklist logic now follows the reduced submission list (band funding letter, acceptance letter if institution, financial overview + evidence if living allowance) and adds EI verification at approval.
-- Interventions table action menu now maps status → actions: draft = Resume/Delete; submitted/in_review/changes_requested/rejected = View (+Delete if plan editable); approved/planned = View (+Activate/Delete if plan editable); in_progress/suspended = View (+Close if plan editable); ready_to_close/completed/cancelled = View only. For approved and beyond, View opens the intervention details modal instead of the proposal wizard.
+- Interventions table action menu now maps status → actions: draft = Resume/Delete; submitted/in_review/changes_requested/rejected = View (+Delete if plan editable); approved = View (+Activate/Delete if plan editable); in_progress/suspended = View (+Close if plan editable); completed/cancelled = View only. For approved and beyond, View opens the intervention details modal instead of the proposal wizard.
 - Intervention details modal now treats approved/review statuses as open (close section only for completed/cancelled or explicit close) and removes the duplicate Close intervention block; status select shows non-execution statuses as disabled when present.
 - Action plan PATCH error fix: ensure `esdcExisting` is initialized before accessing `esdcExisting.postingContext` in `isetadminserver.js`.
 - Interventions widget CTA relabeled to “Propose intervention”.
@@ -56,23 +56,23 @@ Document the target workflow for proposing, reviewing, approving, and running in
 - ILMP export requires structured fields (intervention code, NOC/version, duration, cost, outcome, childcare flags) per CR-0007.
 
 ## Target Workflow (single status, linear)
-- Status set (ordered): `draft` → `submitted` → `in_review` → (`changes_requested` → `submitted`/`in_review`) → `approved`/`rejected` → `planned` (alias for approved/pending start if we keep backward compatibility) → `in_progress` → `suspended` (optional) → `ready_to_close` (flagged state) → `completed`/`cancelled`.
+- Status set (ordered): `draft` → `submitted` → `in_review` → (`changes_requested` → `submitted`/`in_review`) → `approved`/`rejected` → `in_progress` → `suspended` (optional) → `completed`/`cancelled`.
 - **Draft (CM)**: Created from Interventions widget (“Add intervention”), prefilled from Coordinator Assessment when available. Editable by Case Manager only. Status `draft`.
 - **Submit for review (CM)**: CM clicks “Submit for approval”; locks primary fields for CM, sets status `submitted`.
-- **Eligibility review (RM/NWAC)**: RM/NWAC works in status `in_review`; records EI result, funding stream, docs. Outcomes: `approved` (or `planned` for backward compatibility), `rejected`, or `changes_requested`.
+- **Eligibility review (RM/NWAC)**: RM/NWAC works in status `in_review`; records EI result, funding stream, docs. Outcomes: `approved`, `rejected`, or `changes_requested`.
 - **Changes requested (RM → CM)**: Status `changes_requested`; unlocks editable fields, preserves review notes. CM resubmits to `submitted`.
-- **Approved / Planned (RM/NWAC)**: Status `approved` (or `planned` if we reuse the existing label) until CM starts execution. Banner nudges CM to activate the Action Plan if not active.
+- **Approved (RM/NWAC)**: Status `approved` until CM starts execution. Banner nudges CM to activate the Action Plan if not active.
 - **In progress (CM)**: Status `in_progress`; blocked unless Action Plan is `active`.
-- **Ready to close (system/CM)**: Use `ready_to_close` flag/status when end date passed or actuals missing; CM records outcome, actual cost/duration.
+- **Close readiness (system/CM)**: Use reminders or UI flags when end date passed or actuals are missing; CM records outcome, actual cost, and duration through the close flow.
 - **Closed (CM)**: Status `completed` or `cancelled` with outcome code; remains immutable unless reopened with audit.
 
 ## Queue / Filter Mapping (reuse existing UI)
 - Case Manager Drafts: `draft` or `changes_requested` (Interventions table filter).
 - Pending Eligibility: `submitted` or `in_review`.
 - Regional Manager home queue: `interventions-awaiting-approval` bucket fed by `submitted`/`in_review` interventions.
-- Ready to Activate: `approved`/`planned` + Action Plan not active → banner/action to activate plan or start when plan is active.
+- Ready to Activate: `approved` + Action Plan not active → banner/action to activate plan or start when plan is active.
 - Active/Monitoring: `in_progress`/`suspended`.
-- Ready to Close: `ready_to_close` flag or `in_progress` with past end date/missing actuals; surfaced via table filter + reminder.
+- Ready to Close: close-readiness flag or `in_progress` with past end date/missing actuals; surfaced via table filter + reminder.
 - Closed: `completed`/`cancelled`.
 
 ## Inputs by Stage
@@ -95,7 +95,7 @@ Document the target workflow for proposing, reviewing, approving, and running in
 - Implication: do not reuse the application gating that blocks submission on missing EI eligibility. Adjust validation so CM can submit a proposal without pre-verified EI, while the approval step requires the EI check/result + docs to finalize `approved`.
 
 ## Data Model Notes (design, not implemented)
-- Single `status` column extended to include pre-approval states (`draft`, `submitted`, `in_review`, `changes_requested`, `approved`, `rejected`) in addition to execution states (`planned`, `in_progress`, `suspended`, `ready_to_close`, `completed`, `cancelled`).
+- Single `status` column includes both pre-approval states (`draft`, `submitted`, `in_review`, `changes_requested`, `approved`, `rejected`) and execution states (`in_progress`, `suspended`, `completed`, `cancelled`).
 - Track reviewer metadata (`reviewed_by_staff_profile_id`, `reviewed_at`, `review_notes`, `eligibility_result`, `funding_stream_decision`, `required_docs_flags`) alongside the intervention; no separate approval-status column.
 - Consider computed views or API filters for queues; reuse Interventions list queries with status filters.
 - DB impact: `iset_case_intervention.status` is varchar (no enum) so new states require no type change. Add reviewer/eligibility columns via migration (`sql/20251223_add_intervention_review_fields.sql`). Funding stream column was dropped (see `sql/20251210_drop_intervention_funding_stream.sql`); keep funding stream selection at the Action Plan level. Enforce plan linkage + active-plan start guard in service logic; a NOT NULL on `action_plan_id` is a stretch goal if legacy rows allow it.
@@ -141,7 +141,7 @@ Document the target workflow for proposing, reviewing, approving, and running in
 - State clarity: A persistent banner indicates “Proposal — not approved” with a short note that submission will send it to RM/NWAC for approval and that EI eligibility is checked during approval, not now.
 
 ### Status / Data Model
-- Single intervention status column extended: `draft`, `submitted`, `in_review`, `changes_requested`, `approved`, `rejected`, plus existing `planned`/`in_progress`/`suspended`/`ready_to_close`/`completed`/`cancelled`. Treat `approved` as the pre-start equivalent of today’s `planned` (alias if needed for backward compatibility).
+- Single intervention status column: `draft`, `submitted`, `in_review`, `changes_requested`, `approved`, `rejected`, `in_progress`, `suspended`, `completed`, `cancelled`.
 - No separate Proposal table; proposals are interventions in pre-approval states.
 - Reviewer metadata on `iset_case_intervention`: `reviewed_by_staff_profile_id`, `reviewed_at`, `review_notes`, `eligibility_result`, `funding_stream_decision`, `required_docs_flags`.
 - Action Plan link required on create; block `in_progress` unless plan is `active`. Allow create when only a draft plan exists, but require activation before start.
@@ -171,7 +171,7 @@ Document the target workflow for proposing, reviewing, approving, and running in
 - Validation changes: remove “EI required pre-submit” from reused components; add approval-time EI requirement. Keep `recomputeCaseStatus` unchanged (plan-driven).
 
 ### Blocking Decisions
-- Status naming/alias: collapse or alias `approved`/`planned`? Affects migration and UI labels.
+- Status naming/alias is resolved: use canonical `approved` only; do not retain a `planned` intervention alias.
 - Create with no active plan: allow link to draft plan, but enforce active plan before start—confirm ops agreement.
 - Shared form extraction: commit to extracting Coordinator Assessment sections vs duplicating logic; otherwise the modal will drift from intake assessment rules.
 

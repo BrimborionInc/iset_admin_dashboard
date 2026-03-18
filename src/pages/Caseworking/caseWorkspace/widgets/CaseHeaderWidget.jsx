@@ -25,6 +25,7 @@ import { toCanonicalRole } from "../../../../context/RoleMatrixContext.js";
 import { usePaymentsData } from "../../../finance/widgets/PaymentsDataContext.jsx";
 import { buildApplicantWatchlistIdentity, formatSinDisplay } from "../../../../utils/applicantWatchlist.js";
 import { buildLockConflictMessage } from "../../../../hooks/useApplicationLock.js";
+import { normalizeInterventionStatus } from "../../../../utils/interventionStatus.js";
 
 const AWAITING_SUBMISSION_STATUSES = new Set([
   "draft",
@@ -406,25 +407,20 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       inProgress: 0,
       closed: 0,
     };
-    const normaliseStatus = value =>
-      String(value || "")
-        .trim()
-        .toLowerCase()
-        .replace(/[-\s]+/g, "_");
     plans.forEach(plan => {
       const interventions = Array.isArray(plan.interventions) ? plan.interventions : [];
       interventions.forEach(intervention => {
         counts.total += 1;
-        const status = normaliseStatus(intervention?.status);
+        const status = normalizeInterventionStatus(intervention?.status, null);
         if (status === "draft") {
           counts.draft += 1;
         } else if (["submitted", "in_review", "changes_requested"].includes(status)) {
           counts.submitted += 1;
-        } else if (["approved", "planned"].includes(status)) {
+        } else if (status === "approved") {
           counts.approved += 1;
-        } else if (["in_progress", "suspended", "ready_to_close"].includes(status)) {
+        } else if (["in_progress", "suspended"].includes(status)) {
           counts.inProgress += 1;
-        } else if (["completed", "cancelled", "canceled", "rejected"].includes(status)) {
+        } else if (["completed", "cancelled", "rejected"].includes(status)) {
           counts.closed += 1;
         }
       });

@@ -143,9 +143,11 @@ const getStatusInfo = (row) => {
   const caseStatusRaw = typeof row.case_status === 'string' ? row.case_status.trim() : '';
   const fallbackStatus = row.case_id ? 'submitted' : 'new';
   const rawStatus = normalizeClosedStatus(applicationStatusRaw || caseStatusRaw || fallbackStatus);
-  const label = rawStatus
-    .replace(/[_-]+/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase());
+  const label = rawStatus === 'rejected'
+    ? 'Not Approved'
+    : rawStatus
+        .replace(/[_-]+/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
   const isUnassignedCase = Boolean(row.case_id) && !row.assigned_user_id && rawStatus === 'submitted';
   const statusType = (() => {
     if (['approved', 'completed'].includes(rawStatus)) return 'success';
@@ -226,7 +228,7 @@ const APPLICATION_STATUS_OPTIONS = [
   { label: 'Decision Ready', value: 'decision_ready' },
   { label: 'Approved', value: 'approved' },
   { label: 'Completed', value: 'completed' },
-  { label: 'Rejected', value: 'rejected' },
+  { label: 'Not Approved', value: 'rejected' },
   { label: 'Closed', value: 'closed' },
   { label: 'Archived', value: 'archived' },
 ];
@@ -699,6 +701,29 @@ const ApplicationOverviewWidget = ({
   const watchlistDisplaySin = formatSinDisplay(watchlistIdentity.sin) || 'Unavailable';
   const watchlistExplanation =
     'Adding an applicant or participant to the watchlist means their future applications will be flagged for administrator review. Use this when the applicant owes money to the program or when there are similar risk concerns. If a new application is received with the same Social Insurance Number, administrators will be alerted automatically.';
+  const isReportingOnlyDeniedIneligible = Boolean(
+    caseData?.caseContext?.reportingOnlyDeniedIneligible || caseData?.caseContext?.reportingCorrectionAllowed
+  );
+  const ilmpCompliance = caseData?.compliance?.ilmp || null;
+  const ilmpStatus = ilmpCompliance?.status || 'pending';
+  const ilmpStatusType = ilmpStatus === 'clean'
+    ? 'success'
+    : ilmpStatus === 'blocked'
+      ? 'error'
+      : ilmpStatus === 'warning'
+        ? 'warning'
+        : 'info';
+  const ilmpStatusLabel = ilmpStatus === 'clean'
+    ? 'Ready for ESDC queue'
+    : ilmpStatus === 'blocked'
+      ? 'Blocked from ESDC queue'
+      : ilmpStatus === 'warning'
+        ? 'Needs ILMP review'
+        : 'Pending validation';
+  const ilmpMessages = Array.isArray(ilmpCompliance?.messages) ? ilmpCompliance.messages : [];
+  const ilmpParticipantWorkspacePath = caseData?.esdc_submission_id
+    ? `/esdc/participants/${caseData.esdc_submission_id}`
+    : null;
   const provinceSource = useMemo(
     () =>
       caseData?.application_address_province ||
@@ -1864,6 +1889,12 @@ const ApplicationOverviewWidget = ({
   if (assignedStaffValue) overviewItems.push({ label: 'Case Manager', value: assignedStaffValue });
   if (checklistValue !== null) overviewItems.push({ label: 'Document Checklist', value: checklistValue });
   overviewItems.push({ label: 'Docs Requested', value: docsRequestedContent });
+  if (isReportingOnlyDeniedIneligible) {
+    overviewItems.push({
+      label: 'ESDC Reporting',
+      value: <StatusIndicator type={ilmpStatusType}>{ilmpStatusLabel}</StatusIndicator>
+    });
+  }
 
   if (activeLock) {
     if (lockOwnerLabel) {
@@ -1972,6 +2003,27 @@ const ApplicationOverviewWidget = ({
             onDismiss={() => setStatusFeedback(null)}
           >
             {statusFeedback.content}
+          </Alert>
+        )}
+        {isReportingOnlyDeniedIneligible && (
+          <Alert type={ilmpStatus === 'blocked' ? 'error' : ilmpStatus === 'warning' ? 'warning' : ilmpStatus === 'clean' ? 'success' : 'info'}>
+            <SpaceBetween size="xs">
+              <Box>
+                This eligibility-denied record is retained for ILMP reporting. Fix missing reporting data in the Application Form widget; corrections revalidate automatically and blocked records stay out of normal casework queues.
+              </Box>
+              {ilmpMessages.length > 0 && (
+                <Box as="ul" padding={{ left: 'm' }}>
+                  {ilmpMessages.map(message => (
+                    <li key={message}>{message}</li>
+                  ))}
+                </Box>
+              )}
+              {ilmpParticipantWorkspacePath ? (
+                <Box>
+                  <Link href={ilmpParticipantWorkspacePath}>Open ESDC participant workspace</Link>
+                </Box>
+              ) : null}
+            </SpaceBetween>
           </Alert>
         )}
         {overviewContent}
