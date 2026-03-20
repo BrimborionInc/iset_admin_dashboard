@@ -155,7 +155,7 @@ const SideNavigation = ({ currentRole, showTutorialHotspots = false, notificatio
     },
     {
       type: 'section',
-      text: 'ESDC Reporting',
+      text: 'ILMP Submissions',
       items: [
         { type: 'link', text: 'Overview', href: '/esdc/overview' },
         { type: 'link', text: 'ILMP Exports', href: '/esdc/participants' },
@@ -172,9 +172,10 @@ const SideNavigation = ({ currentRole, showTutorialHotspots = false, notificatio
     },
     {
       type: 'section',
-      text: 'Analytics Dashboard',
+      text: 'Reporting',
       defaultExpanded: false,
       items: [
+        { type: 'link', text: 'Data and Results', href: '/reporting/data-and-results' },
         { type: 'link', text: 'Reporting and Monitoring', href: '/reporting-and-monitoring-dashboard' },
       ],
     },

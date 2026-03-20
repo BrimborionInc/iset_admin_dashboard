@@ -4,7 +4,7 @@ Purpose: running capture of user-facing fixes/changes for the next "What's New" 
 
 Current public release in Landing Page: `v0.5.5` (`18th March 2026`)
 Target next release notes draft: `v0.5.6` (date TBD)
-Last Updated: 2026-03-18
+Last Updated: 2026-03-19
 
 ## How to use
 
@@ -18,6 +18,19 @@ Last Updated: 2026-03-18
 
 ## Entries
 
+- 2026-03-19 | Release v0.5.6 | UX/Reporting | Reporting navigation + dashboard scaffold | Renamed the reporting navigation sections to `ILMP Submissions` and `Reporting`, and added a new `Reporting > Data and Results` dashboard scaffold with standard board controls. | Default access is enabled for System Administrators and NWAC Administrators via the access-control matrix seed.
+- 2026-03-19 | Release v0.5.6 | UX/Reporting | Data and Results workbook layout | Reworked `Reporting > Data and Results` into a fixed report-style page that follows the NWAC workbook section names, order, and broad layout instead of a generic widget board. | Added a shared province/territory multi-select filter bar as the first slice-and-dice control, with room for more report-wide filters later.
+- 2026-03-19 | Release v0.5.6 | UX/Reporting | Data and Results demo mode | Added a `Demo mode` toggle in the report controls so the workbook-aligned sections can be populated with in-page sample data during development and demos. | Demo values respond to the province/territory multi-select, making the slice-and-dice interaction visible before live reporting data is wired.
+- 2026-03-19 | Release v0.5.6 | API/Reporting | Data and Results quarterly uploads | Connected `Quarterly Data Uploads` to a live PATH reporting endpoint backed by reporting-package records, while keeping the workbook quarter schedule visible when no package rows have been recorded yet. | This section is agreement-wide, so the province/territory filter does not currently change its status rows.
+- 2026-03-19 | Release v0.5.6 | API/Reporting | Data and Results live report sections | Wired the remaining workbook sections in `Reporting > Data and Results` to live cumulative PATH aggregates for year-end results, interventions, client results, data uploads, and action-plan statuses. | Province/territory filters now drive those live sections; AOP targets remain blank until reporting targets are configured in PATH runtime config.
+- 2026-03-19 | Release v0.5.6 | UX/API/Reporting | Data and Results AOP targets | Added an `Edit targets` action in the overall-results section so admins can maintain the three AOP target values directly from the dashboard. | Values persist to PATH runtime config and immediately populate the live AOP target column.
+- 2026-03-19 | Release v0.5.6 | UX/API/Reporting | Data and Results additional comments | Added an `Edit comments` action in the final workbook section so admins can maintain fiscal-year `Additional Comments` narrative text directly from the dashboard. | Values persist to PATH runtime config under fiscal-year-scoped keys and display read-only in the report.
+- 2026-03-19 | Release v0.5.6 | UX/Reporting | Data and Results geography filter wording | Clarified the shared geography filter label to explicitly refer to participant home province/territory. | This matches the current backend filtering dimension already used by the live report.
+- 2026-03-19 | Release v0.5.6 | UX/Reporting | Data and Results control-bar cleanup | Removed the redundant `Current geography` and `Data source` summary tiles from the report controls. | The active geography is already visible in the filter selection, and demo/live state is already communicated elsewhere in the page.
+- 2026-03-19 | Release v0.5.6 | UX/API/Reporting | Data and Results interventions settings | Added Interventions-only header settings so that section can switch between `Completed`, `Planned`, `Active`, and `Cancelled` intervention views and group counts by `By start date` or `By end date`. | The default view remains workbook-aligned: completed interventions by end date.
+- 2026-03-19 | Release v0.5.6 | UX/API/Reporting | Data and Results interventions cost view | Expanded the Interventions section with a `Show` selector for `Count` or `Cost`. | `Cost` values are allocated by payment month, and completed interventions use actual cost when available before falling back to planned cost.
+- 2026-03-19 | Release v0.5.6 | UX/Reporting | Data and Results board sections | Converted the report sections in `Reporting > Data and Results` into removable board items with `Add section` and `Reset layout` controls, and moved `Interventions` to the top of the default layout. | The report controls remain fixed above the board so filtering still applies consistently across all visible sections.
+- 2026-03-19 | Release v0.5.6 | Fix/Reporting | Data and Results board rendering | Fixed a runaway render-loop regression introduced during the new removable-section board refactor. | The palette synchronization now follows the same guarded initialization pattern as the proven finance/contact dashboards.
 - 2026-03-18 | Release v0.5.5 | Docs/UI | Landing Page release notes | Refreshed the public landing-page release notes to publish the v0.5.5 summary in English and French. | Highlights intake funding-form changes, student-loan support, intervention revision workflow, softer portal language, and the upcoming NWAC HQ reporting dashboard.
 - 2026-03-18 | Release v0.5.5 | Fix/Agreements | Client Funding Agreement revisions | Fixed participant-facing redline CFAs so the `Updated` badge now renders as styled text instead of leaked HTML markup, and removed funding-line details now display with explicit redline styling. | Prevents escaped `<span ...>` markup in the intervention title and makes removed detail rows read as struck-through amendments rather than plain active funding lines.
 - 2026-03-18 | Release v0.5.5 | UX/Layout | Case Workspace > intervention workflow | Starting or resuming `Propose new intervention` / `Revise approved intervention` now switches the dashboard to the intervention workflow layout automatically. | The layout now mirrors the Case Header quick-action behavior and surfaces `Case header`, `Action plans`, `Interventions`, and the intervention workflow widget together.
@@ -78,6 +91,9 @@ Last Updated: 2026-03-18
 
 ### What's New (draft bullets)
 
+- v0.5.4: Reporting > Data and Results now uses a cleaner 3-column control layout with participant province/territory, case manager, fiscal year, and demo-mode controls aligned to the workbook-style reporting page.
+- v0.5.4: Reporting > Data and Results now supports case-manager slice-and-dice filtering on the live PATH-backed operational sections, while keeping Quarterly Data Uploads agreement-wide.
+- v0.5.4: Reporting > Data and Results AOP targets are now maintained per fiscal year, keeping target editing aligned with the selected reporting year.
 - Homepage conflict queue workflow now emphasizes reassignment as the inline remediation path (`Reassign`/`Assign`) and removes inline conflict resolve.
 - Homepage help guidance has been aligned with current queue operations and widget controls across Program Admin/Regional Manager/ISET Coordinator views.
 - Assessment Step 1 now surfaces current EI verification documents directly in the wizard, marks the latest as current, and updates the list immediately when a new EI report is added.

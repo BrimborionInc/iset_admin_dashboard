@@ -170,6 +170,10 @@
     "/release-management-dashboard": [
       "System Administrator"
     ],
+    "/reporting/data-and-results": [
+      "System Administrator",
+      "Program Administrator"
+    ],
     "/reporting-and-monitoring-dashboard": [
       "System Administrator"
     ],

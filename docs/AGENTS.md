@@ -5,7 +5,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-03-10
+Last Updated: 2026-03-19
 
 ## Working relationship (design dialog)
 
@@ -60,11 +60,32 @@ Last Updated: 2026-03-10
 ## High-value repo map
 
 - Docs base path: `X:\ISET\admin-dashboard\docs` (WSL: `/mnt/x/ISET/admin-dashboard/docs`)
+- Operational reporting workbook reference: `docs/data/NWAC - data info 2025-26.xlsx`
 - Admin intake preview renderer: `apps/web/src/features/intake/ComponentRenderer.tsx`
 - Public portal renderer (other repo): `../ISET-intake/src/renderer/renderers.js`
 - Help panel content: `src/helpPanelContents/*`
 - Admin test deploy staging script: `scripts/deploy-admin-test.ps1`
 - Portal test deploy staging script: `../ISET-intake/scripts/deploy-portal-test.ps1`
+
+## Operational reporting context
+
+- For PATH/NWAC operational reporting work, inspect workbook references in `docs/data` before designing report schemas or dashboard widgets.
+- Verified reference workbook on 2026-03-19: `docs/data/NWAC - data info 2025-26.xlsx`.
+- Current workbook structure: `Sheet1` contains the working content and `Sheet2` is empty.
+- The verified workbook includes sections for overall results targets vs year-end results, quarterly data uploads, and interventions, with instructions pointing to Data Gateway and ILMP workflows.
+- Current management-reporting direction: keep dashboard naming, ordering, and layout closely aligned to the workbook so NWAC users can map the UI directly to the existing report.
+- For reporting filters, use a shared report-controls block rather than per-section filters. Current page-level controls are participant home province/territory, case manager, fiscal year, and a results-view segmented control for cumulative vs monthly values; demo mode currently lives in the report-controls header actions.
+- Current `Reporting > Data and Results` implementation detail: the `Interventions` section now also has section-level controls for show mode (`Count`, `Cost`), intervention status (`Completed`, `Planned`, `Active`, `Cancelled`), and date basis. The default workbook-aligned view is `Count` for `Completed` interventions by `By end date`; when `Cost` is selected, values are shown by payment month and completed interventions use actual cost when available.
+- Geography for NWAC reporting means participant home province/territory unless explicitly stated otherwise.
+- Current `Reporting > Data and Results` implementation direction: keep a workbook-aligned default layout, but render the report sections as full-width removable Cloudscape board items so users can hide and restore sections without changing the report controls.
+- Current `Reporting > Data and Results` layout direction: `Interventions` is the first section shown under the report controls by default; removed sections should be restorable through standard board palette/header actions.
+- Current `Reporting > Data and Results` demo/dev rule: support a `Demo mode` toggle in the report-controls header actions that populates the report with sample data, and make shared report filters apply to demo data too.
+- Current `Reporting > Data and Results` demo/dev rule: demo figures should remain internally consistent across sections. In particular, sample overall results, client results, and intervention totals should reconcile with each other so the demo does not show contradictory numbers.
+- Current `Reporting > Data and Results` live-data rule: `Quarterly Data Uploads` is backed by agreement-level `esdc_reporting_package` data, so it should stay workbook-aligned and explicitly note that participant home province/territory and case manager filters do not change that section.
+- Current `Reporting > Data and Results` live-data rule: `Overall Results`, `Interventions`, `Client Results`, `Data Uploads`, and `Status of Action Plans` are wired to cumulative PATH reporting aggregates derived from action plans, interventions, and participant submission history, while `Additional Comments` is a saved fiscal-year narrative note stored in runtime config.
+- Current `Reporting > Data and Results` configuration rule: the three AOP targets in the overall-results section are admin-editable from the dashboard and persist to fiscal-year-scoped runtime config keys like `reporting.dataAndResults / targets.<startYear>`, with read fallback to the older global `targets` key.
+- Current `Reporting > Data and Results` configuration rule: `Additional Comments` is admin-editable from the dashboard and persists to runtime config under fiscal-year-scoped keys like `reporting.dataAndResults / additionalComments.<startYear>`.
+- Current `Reporting > Data and Results` copy rule: user-visible descriptions, status text, help content, and empty-state messages should read as end-user reporting guidance for management/NWAC review, not as developer-facing implementation notes.
 
 ## Known pitfalls
 

@@ -520,6 +520,12 @@ const AUTHORIZATION_RELEASE_PARAGRAPHS = [
   'Under the Freedom of Information and Protection of Individual Privacy Act, I have the right to privacy of personal information held by government institutions, including institutions of learning.',
   'My signature denotes my consent and authorization for the training/educational institution or Employer for which I received funding or wage subsidy through the ISET program to release personal information as described above to NWAC and/or its designate.'
 ];
+const CLIENT_ACKNOWLEDGEMENT_PARAGRAPHS = [
+  'I, the undersigned, acknowledge that I have been advised by the Native Women’s Association of Canada and/or its sub-agreement holders to the Indigenous Skills and Employment Training Program (hereinafter referred to as ISET) that funding for skills and employment training, living allowance, wage subsidies or other sources of funding are Government of Canada resources advanced through Employment and Social Development Canada (ESDC) to fund the ISET program.',
+  'I give my consent to the Native Women’s Association of Canada and/or its sub-agreement holders and their designated authorized representatives, to contact other service agencies, funding providers, educational and training institutions to verify information regarding my application and for verification of household income sources.',
+  'Requests for supporting documentation may include but is not limited to: acceptance letter from training institution, letter of decision by Band; ID (Status/Treaty Card, driver’s license, Passport, Health Card or other Government-issued identification); tax assessments; child tax benefit (CTB) statement; Social Assistance statement or letter from agency/caseworker; Record of Employment (ROE); paystubs; letter of employment, bank statements, and other documentation as may be required for verification purposes.',
+  'I understand and acknowledge that any false or misleading statements and/or omission of information by me, may be grounds for immediate suspension of any funding and further, revocation of any funding arrangement between me and the Native Women’s Association of Canada and/or its sub-agreement holders, and may result in a repayment of funds to Employment and Social Development Canada (ESDC), for monies I received to which I was not entitled.'
+];
 const CONFLICT_DECLARATION_STATEMENT =
   'Are you declaring a conflict of interest or bias in relation to your ISET application?';
 const CONFLICT_OPTION_LABELS = {
@@ -539,7 +545,13 @@ const resolveSignatureTimestamp = (signature) => {
   );
 };
 
-const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, onOpenAuthorizationModal, onOpenConflictModal } = {}) => [
+const buildSectionDefinitions = ({
+  onOpenConsentModal,
+  onOpenIndigenousModal,
+  onOpenAuthorizationModal,
+  onOpenClientAcknowledgementModal,
+  onOpenConflictModal
+} = {}) => [
   {
     id: 'consent',
     title: 'Consent & declarations',
@@ -624,6 +636,27 @@ const buildSectionDefinitions = ({ onOpenConsentModal, onOpenIndigenousModal, on
             answers?.auth_froici_sign ||
             answers?.authorization_for_release_of_iset_client_information
           )
+      },
+      {
+        label: (
+          <Box display="inline-flex" alignItems="center">
+            <Box as="span" display="inline" fontWeight="bold" margin={{ right: 'xxs' }}>
+              Client acknowledgement of funding source
+            </Box>
+            <Button
+              variant="icon"
+              iconName="external"
+              ariaLabel="View client acknowledgement of funding source"
+              onClick={event => {
+                event?.preventDefault();
+                event?.stopPropagation();
+                onOpenClientAcknowledgementModal?.();
+              }}
+            />
+          </Box>
+        ),
+        editable: false,
+        renderValue: answers => signatureStatus(answers?.sig_caofs)
       },
       {
         label: (
@@ -1134,6 +1167,8 @@ const IsetApplicationFormWidget = ({
   const [consentDownloadLoading, setConsentDownloadLoading] = useState(false);
   const [authorizationModalVisible, setAuthorizationModalVisible] = useState(false);
   const [authorizationDownloadLoading, setAuthorizationDownloadLoading] = useState(false);
+  const [clientAcknowledgementModalVisible, setClientAcknowledgementModalVisible] = useState(false);
+  const [clientAcknowledgementDownloadLoading, setClientAcknowledgementDownloadLoading] = useState(false);
   const [indigenousModalVisible, setIndigenousModalVisible] = useState(false);
   const [indigenousDownloadLoading, setIndigenousDownloadLoading] = useState(false);
   const [conflictModalVisible, setConflictModalVisible] = useState(false);
@@ -1398,6 +1433,14 @@ const IsetApplicationFormWidget = ({
 
   const handleCloseAuthorizationModal = useCallback(() => {
     setAuthorizationModalVisible(false);
+  }, []);
+
+  const handleOpenClientAcknowledgementModal = useCallback(() => {
+    setClientAcknowledgementModalVisible(true);
+  }, []);
+
+  const handleCloseClientAcknowledgementModal = useCallback(() => {
+    setClientAcknowledgementModalVisible(false);
   }, []);
 
   const handleOpenIndigenousModal = useCallback(() => {
@@ -2007,9 +2050,16 @@ const IsetApplicationFormWidget = ({
         onOpenConsentModal: handleOpenConsentModal,
         onOpenIndigenousModal: handleOpenIndigenousModal,
         onOpenAuthorizationModal: handleOpenAuthorizationModal,
+        onOpenClientAcknowledgementModal: handleOpenClientAcknowledgementModal,
         onOpenConflictModal: handleOpenConflictModal
       }),
-    [handleOpenConsentModal, handleOpenIndigenousModal, handleOpenAuthorizationModal, handleOpenConflictModal]
+    [
+      handleOpenConsentModal,
+      handleOpenIndigenousModal,
+      handleOpenAuthorizationModal,
+      handleOpenClientAcknowledgementModal,
+      handleOpenConflictModal
+    ]
   );
   const fieldLabelLookup = useMemo(() => {
     const lookup = new Map();
@@ -2080,6 +2130,14 @@ const IsetApplicationFormWidget = ({
   const authorizationSignedAtRaw = resolveSignatureTimestamp(authorizationSignature);
   const authorizationDisplayTimestamp = authorizationSignedAtRaw || submissionTimestampRaw;
   const authorizationSignedAt = authorizationDisplayTimestamp ? formatDateTime(authorizationDisplayTimestamp) : '-';
+  const clientAcknowledgementSignature = answers?.sig_caofs || {};
+  const clientAcknowledgementSignedName = clientAcknowledgementSignature?.name || 'Not provided';
+  const clientAcknowledgementSigned = Boolean(clientAcknowledgementSignature?.signed);
+  const clientAcknowledgementSignedAtRaw = resolveSignatureTimestamp(clientAcknowledgementSignature);
+  const clientAcknowledgementDisplayTimestamp = clientAcknowledgementSignedAtRaw || submissionTimestampRaw;
+  const clientAcknowledgementSignedAt = clientAcknowledgementDisplayTimestamp
+    ? formatDateTime(clientAcknowledgementDisplayTimestamp)
+    : '-';
 
   const indigenousSignature = answers?.indigenous_declaration || {};
   const indigenousSignedName = indigenousSignature?.name || 'Not provided';
@@ -2188,6 +2246,55 @@ const IsetApplicationFormWidget = ({
     authorizationSigned,
     authorizationSignedName,
     authorizationDisplayTimestamp,
+    pushFlash
+  ]);
+
+  const handleDownloadClientAcknowledgement = useCallback(async () => {
+    if (typeof window === 'undefined' || !application?.id) return;
+    setClientAcknowledgementDownloadLoading(true);
+    try {
+      const response = await apiFetch('/api/client-acknowledgement/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          applicationId: application.id,
+          declarationSigned: clientAcknowledgementSigned,
+          declarationSignedName: clientAcknowledgementSignedName,
+          declarationSignedAt: clientAcknowledgementDisplayTimestamp
+        })
+      });
+      if (!response.ok) {
+        let message = 'Failed to download client acknowledgement of funding source';
+        try {
+          const errBody = await response.json();
+          if (errBody?.error) message = errBody.error;
+        } catch (_) {}
+        throw new Error(message);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+        throw new Error('Client acknowledgement response was empty');
+      }
+      const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const fileName = `client-acknowledgement-of-funding-source-${application.id}.pdf`;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      pushFlash({ type: 'error', content: error?.message || 'Failed to download client acknowledgement of funding source' });
+    } finally {
+      setClientAcknowledgementDownloadLoading(false);
+    }
+  }, [
+    application?.id,
+    clientAcknowledgementSigned,
+    clientAcknowledgementSignedName,
+    clientAcknowledgementDisplayTimestamp,
     pushFlash
   ]);
 
@@ -2638,6 +2745,91 @@ const IsetApplicationFormWidget = ({
                 <Box>{authorizationSigned ? authorizationSignedAt : 'Not signed'}</Box>
                 <Box fontSize="body-s" color="text-body-secondary">
                   Electronic consent captured via the ISET intake portal.
+                </Box>
+              </SpaceBetween>
+            </ColumnLayout>
+            <Box color="text-body-secondary" fontSize="body-s" textAlign="center">
+              NWAC wishes to acknowledge support for this project through the Government of Canada's ISET Program.
+            </Box>
+          </SpaceBetween>
+        </Modal>
+      )}
+      {clientAcknowledgementModalVisible && (
+        <Modal
+          visible
+          size="large"
+          header="Client Acknowledgement of Funding Source"
+          onDismiss={handleCloseClientAcknowledgementModal}
+          footer={
+            <SpaceBetween direction="horizontal" size="xs" alignItems="end">
+              <Button
+                onClick={handleDownloadClientAcknowledgement}
+                loading={clientAcknowledgementDownloadLoading}
+                disabled={clientAcknowledgementDownloadLoading}
+              >
+                Download (PDF)
+              </Button>
+              <Button variant="primary" onClick={handleCloseClientAcknowledgementModal}>
+                Close
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="l">
+            <Box textAlign="center">
+              <Box margin={{ bottom: 's' }} display="flex" justifyContent="center">
+                <img
+                  src="/nwac-consent-logo.png"
+                  alt="Native Women's Association of Canada logo"
+                  style={{ maxHeight: '64px', width: 'auto' }}
+                />
+              </Box>
+              <Box fontSize="heading-s" fontWeight="bold">
+                Native Women's Association of Canada
+              </Box>
+              <Box fontSize="body-s" color="text-body-secondary">
+                Association des femmes autochtones du Canada
+              </Box>
+            </Box>
+            <SpaceBetween size="s">
+              {CLIENT_ACKNOWLEDGEMENT_PARAGRAPHS.map((paragraph, index) => (
+                <Box key={index} lineHeight="body-m">
+                  {paragraph}
+                </Box>
+              ))}
+            </SpaceBetween>
+            <ColumnLayout columns={2} variant="text-grid">
+              <SpaceBetween size="xs">
+                <Box fontWeight="bold">Client signature</Box>
+                <Box
+                  borderColor="border-divider"
+                  borderStyle="solid"
+                  borderWidth="1px"
+                  borderRadius="small"
+                  padding="m"
+                  backgroundColor="background-secondary"
+                  minHeight="4rem"
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="flex-start"
+                >
+                  {clientAcknowledgementSigned ? (
+                    <Box fontFamily="'Segoe Script', 'Lucida Handwriting', cursive" fontSize="heading-xl">
+                      {clientAcknowledgementSignedName}
+                    </Box>
+                  ) : (
+                    <Box color="text-status-inactive">Not signed</Box>
+                  )}
+                </Box>
+                <Box fontSize="body-s" color="text-body-secondary">
+                  Client signature
+                </Box>
+              </SpaceBetween>
+              <SpaceBetween size="xs">
+                <Box fontWeight="bold">Signed on</Box>
+                <Box>{clientAcknowledgementSigned ? clientAcknowledgementSignedAt : 'Not signed'}</Box>
+                <Box fontSize="body-s" color="text-body-secondary">
+                  Electronic acknowledgement captured via the ISET intake portal.
                 </Box>
               </SpaceBetween>
             </ColumnLayout>

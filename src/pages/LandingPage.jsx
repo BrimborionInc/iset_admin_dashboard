@@ -44,11 +44,19 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - v0.5.5 (18th March 2026)',
-      description: 'Release 0.5.5 improves continuity between intake, assessment, and case management, with stronger intervention revision workflows and clearer participant-facing documents.',
+      sectionTitle: 'Release Notes - v0.5.6 (19th March 2026)',
+      description: 'Release 0.5.6 introduces the new NWAC reporting dashboard in PATH and continues to strengthen intake, assessment, and case management workflows.',
       features: {
         heading: 'What’s New',
         sections: [
+          {
+            title: 'New Data and Results reporting dashboard',
+            paragraphs: [
+              'NWAC management and administrators can now review annual results, quarterly submission tracking, interventions, client results, data uploads, and reporting notes directly inside PATH.',
+              'The dashboard follows the familiar NWAC report structure while adding shared filters, demo mode, cumulative or monthly views, and intervention-specific controls for count, cost, status, and date basis.',
+              'Admin users can also maintain annual AOP targets and fiscal-year Additional Comments directly from the dashboard.'
+            ]
+          },
           {
             title: 'Funding forms now begin earlier in intake',
             paragraphs: [
@@ -97,7 +105,7 @@ const copy = {
           {
             title: 'No major release blockers logged',
             paragraphs: [
-              'No major release-blocking issues are currently logged for v0.5.5.',
+              'No major release-blocking issues are currently logged for v0.5.6.',
               'If staff identify workflow, document, or reporting issues during day-to-day use, they should continue to log them with the NWAC PATH support team for review.'
             ]
           }
@@ -107,10 +115,10 @@ const copy = {
         heading: 'Coming Soon',
         sections: [
           {
-            title: 'NWAC HQ reporting dashboard',
+            title: 'Further reporting refinements',
             paragraphs: [
-              'A reporting dashboard for NWAC HQ administrators is planned next, based on the existing spreadsheet reporting model.',
-              'The intent is an analytics-style dashboard with slice-and-dice filtering, homepage call-outs, and a standard set of operational reports available directly inside PATH.'
+              'The first reporting dashboard is now live, and the next phase will focus on operational validation, additional slice-and-dice filters, and refinements based on NWAC feedback.',
+              'This includes continuing to align PATH reporting outputs with the existing reporting workbook and expanding management-focused reporting views over time.'
             ]
           }
         ]
@@ -166,11 +174,19 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Notes de version - v0.5.5 (18 mars 2026)',
-      description: 'La version 0.5.5 améliore la continuité entre l’accueil, l’évaluation et la gestion des dossiers, avec un meilleur traitement des révisions d’intervention et des documents plus clairs pour les participantes.',
+      sectionTitle: 'Notes de version - v0.5.6 (19 mars 2026)',
+      description: 'La version 0.5.6 introduit le nouveau tableau de bord de rapports NWAC dans PATH et poursuit les améliorations de l’accueil, de l’évaluation et de la gestion des dossiers.',
       features: {
         heading: 'Quoi de neuf',
         sections: [
+          {
+            title: 'Nouveau tableau de bord Rapports et résultats',
+            paragraphs: [
+              'La direction et les administratrices de l’AFAC peuvent maintenant consulter directement dans PATH les résultats annuels, le suivi des soumissions trimestrielles, les interventions, les résultats clients, les téléversements de données et les notes de rapport.',
+              'Le tableau de bord reprend la structure familière du rapport NWAC tout en ajoutant des filtres communs, un mode démo, une vue cumulative ou mensuelle, ainsi que des contrôles propres aux interventions pour le nombre, le coût, le statut et la base de date.',
+              'Les utilisatrices administratrices peuvent aussi gérer directement dans le tableau de bord les cibles annuelles de l’AOP et les commentaires supplémentaires par année financière.'
+            ]
+          },
           {
             title: 'Les formulaires de financement commencent maintenant dès l’accueil',
             paragraphs: [
@@ -219,7 +235,7 @@ const copy = {
           {
             title: 'Aucun bloqueur majeur consigné',
             paragraphs: [
-              'Aucun problème bloquant majeur n’est actuellement consigné pour la version 0.5.5.',
+              'Aucun problème bloquant majeur n’est actuellement consigné pour la version 0.5.6.',
               'Si le personnel constate des problèmes de flux de travail, de documents ou de rapports, ils doivent continuer de les signaler à l’équipe de soutien PATH de l’AFAC.'
             ]
           }
@@ -229,10 +245,10 @@ const copy = {
         heading: 'À venir bientôt',
         sections: [
           {
-            title: 'Tableau de bord de rapports pour le siège social de l’AFAC',
+            title: 'Autres améliorations des rapports',
             paragraphs: [
-              'La prochaine amélioration majeure prévue est un tableau de bord de rapports pour les administratrices du siège social de l’AFAC, basé sur le modèle actuel de rapport par feuille de calcul.',
-              'L’objectif est d’offrir un tableau de bord analytique avec filtres dynamiques, indicateurs visibles sur la page d’accueil et un ensemble de rapports opérationnels standards accessibles directement dans PATH.'
+              'La première version du tableau de bord de rapports est maintenant en ligne, et la prochaine phase portera sur la validation opérationnelle, l’ajout de filtres supplémentaires et les ajustements selon les commentaires de l’AFAC.',
+              'Cela comprend la poursuite de l’alignement entre les sorties de rapport PATH et le classeur de rapport existant, ainsi que l’élargissement graduel des vues de gestion.'
             ]
           }
         ]

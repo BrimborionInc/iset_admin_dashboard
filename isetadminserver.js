@@ -1747,6 +1747,12 @@ const AUTHORIZATION_RELEASE_PARAGRAPHS = [
   'Under the Freedom of Information and Protection of Individual Privacy Act, I have the right to privacy of personal information held by government institutions, including institutions of learning.',
   'My signature denotes my consent and authorization for the training/educational institution or Employer for which I received funding or wage subsidy through the ISET program to release personal information as described above to NWAC and/or its designate.'
 ];
+const CLIENT_ACKNOWLEDGEMENT_PARAGRAPHS = [
+  'I, the undersigned, acknowledge that I have been advised by the Native Women’s Association of Canada and/or its sub-agreement holders to the Indigenous Skills and Employment Training Program (hereinafter referred to as ISET) that funding for skills and employment training, living allowance, wage subsidies or other sources of funding are Government of Canada resources advanced through Employment and Social Development Canada (ESDC) to fund the ISET program.',
+  'I give my consent to the Native Women’s Association of Canada and/or its sub-agreement holders and their designated authorized representatives, to contact other service agencies, funding providers, educational and training institutions to verify information regarding my application and for verification of household income sources.',
+  'Requests for supporting documentation may include but is not limited to: acceptance letter from training institution, letter of decision by Band; ID (Status/Treaty Card, driver’s license, Passport, Health Card or other Government-issued identification); tax assessments; child tax benefit (CTB) statement; Social Assistance statement or letter from agency/caseworker; Record of Employment (ROE); paystubs; letter of employment, bank statements, and other documentation as may be required for verification purposes.',
+  'I understand and acknowledge that any false or misleading statements and/or omission of information by me, may be grounds for immediate suspension of any funding and further, revocation of any funding arrangement between me and the Native Women’s Association of Canada and/or its sub-agreement holders, and may result in a repayment of funds to Employment and Social Development Canada (ESDC), for monies I received to which I was not entitled.'
+];
 
 const INDIGENOUS_DECLARATION_STATEMENT =
   'I hereby declare that I am an Indigenous person in Canada, which for the purposes of the Indigenous Skills and Employment Training (ISET) Program is inclusive of persons who are First Nations, Inuit, or Metis.';
@@ -18764,28 +18770,9 @@ esdcRouter.get('/participants', async (req, res, next) => {
   // Only show submissions that still require action (pending or needing resubmission).
   where.push(
     `
-    (
-      LOWER(COALESCE(eps.submission_status, '')) IN ('pending','rejected')
-      OR (
-        LOWER(COALESCE(eps.submission_status, '')) = 'submitted'
-        AND LOWER(COALESCE(ap.status, '')) IN ('closed','ready_to_close','ready-to-close','ready to close')
-        AND ap.result_date IS NOT NULL
-        AND ap.result_code IS NOT NULL
-        AND NOT EXISTS (
-          SELECT 1
-          FROM iset_case_intervention ci
-          WHERE ci.case_id = eps.case_id
-            AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
-            AND (
-              ci.start_date IS NULL
-              OR LOWER(COALESCE(ci.status, '')) NOT IN (${terminalInterventionStatuses.map(() => '?').join(',')})
-            )
-        )
-      )
-    )
+    LOWER(COALESCE(eps.submission_status, '')) IN ('pending','rejected')
     `
   );
-  params.push(...terminalInterventionStatuses);
 
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
@@ -19015,25 +19002,7 @@ esdcRouter.post('/participants/validate-all', async (req, res, next) => {
       FROM esdc_participant_submission eps
       LEFT JOIN iset_case_action_plan ap ON ap.id = eps.action_plan_id
       WHERE ap.archived_at IS NULL
-        AND (
-          LOWER(COALESCE(eps.submission_status, '')) IN ('pending','rejected')
-          OR (
-            LOWER(COALESCE(eps.submission_status, '')) = 'submitted'
-            AND LOWER(COALESCE(ap.status, '')) IN ('closed','ready_to_close','ready-to-close','ready to close')
-            AND ap.result_date IS NOT NULL
-            AND ap.result_code IS NOT NULL
-            AND NOT EXISTS (
-              SELECT 1
-              FROM iset_case_intervention ci
-              WHERE ci.case_id = eps.case_id
-                AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
-                AND (
-                  ci.start_date IS NULL
-                  OR LOWER(COALESCE(ci.status, '')) NOT IN (${terminalInterventionStatuses.map(() => '?').join(',')})
-                )
-            )
-          )
-        )
+        AND LOWER(COALESCE(eps.submission_status, '')) IN ('pending','rejected')
         AND (
           (
             LOWER(COALESCE(ap.status, '')) = 'active'
@@ -19070,7 +19039,7 @@ esdcRouter.post('/participants/validate-all', async (req, res, next) => {
           )
         )
       `,
-      [...terminalInterventionStatuses, ...startedInterventionStatuses, ...terminalInterventionStatuses]
+      [...startedInterventionStatuses, ...terminalInterventionStatuses]
     );
 
     const ids = rows.map(r => r.id).filter(Boolean);
@@ -19238,27 +19207,9 @@ async function collectReadyEsdcBatchParticipants() {
           )
         )
       )
-      AND (
-        LOWER(COALESCE(eps.submission_status, '')) IN ('pending','rejected')
-        OR (
-          LOWER(COALESCE(eps.submission_status, '')) = 'submitted'
-          AND LOWER(COALESCE(ap.status, '')) IN ('closed','ready_to_close','ready-to-close','ready to close')
-          AND ap.result_date IS NOT NULL
-          AND ap.result_code IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1
-            FROM iset_case_intervention ci
-            WHERE ci.case_id = eps.case_id
-              AND (ci.action_plan_id = ap.id OR ci.action_plan_id IS NULL)
-              AND (
-                ci.start_date IS NULL
-                OR LOWER(COALESCE(ci.status, '')) NOT IN (${terminalInterventionStatuses.map(() => '?').join(',')})
-              )
-          )
-        )
-      )
+      AND LOWER(COALESCE(eps.submission_status, '')) IN ('pending','rejected')
     `,
-    [...startedInterventionStatuses, ...terminalInterventionStatuses, ...terminalInterventionStatuses]
+    [...startedInterventionStatuses, ...terminalInterventionStatuses]
   );
 
   const clientGroups = new Map();
@@ -19818,6 +19769,1480 @@ esdcRouter.post('/participants/:id/history', async (req, res, next) => {
 
 // Mount under your existing API router:
 app.use('/api/esdc', esdcRouter);
+
+const REPORTING_DASHBOARD_ALLOWED_ROLES = new Set(['System Administrator', 'Program Administrator']);
+
+function hasOperationalReportingAccess(req) {
+  const role = canonicaliseAccessRole(inferUserRole(req));
+  return REPORTING_DASHBOARD_ALLOWED_ROLES.has(role);
+}
+
+function padReportingDatePart(value) {
+  return String(value).padStart(2, '0');
+}
+
+function buildReportingIsoDate(year, month, day) {
+  return `${year}-${padReportingDatePart(month)}-${padReportingDatePart(day)}`;
+}
+
+function buildReportingMonthEndDate(year, month) {
+  const date = new Date(Date.UTC(year, month, 0));
+  return buildReportingIsoDate(
+    date.getUTCFullYear(),
+    date.getUTCMonth() + 1,
+    date.getUTCDate()
+  );
+}
+
+function resolveReportingFiscalYearStartYear(referenceDate = new Date()) {
+  const date = referenceDate instanceof Date ? referenceDate : new Date(referenceDate);
+  if (Number.isNaN(date.getTime())) {
+    const now = new Date();
+    return now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+  }
+  return date.getMonth() >= 3 ? date.getFullYear() : date.getFullYear() - 1;
+}
+
+function formatReportingFiscalYearLabel(startYear) {
+  return `${startYear}-${String(startYear + 1).slice(-2)}`;
+}
+
+function buildReportingQuarterSchedule(startYear) {
+  const nextYear = startYear + 1;
+  const fiscalYearLabel = formatReportingFiscalYearLabel(startYear);
+  return [
+    {
+      period: 'Q1',
+      reportingPeriod: `FY${String(startYear).slice(-2)}-${String(nextYear).slice(-2)} Q1`,
+      fiscalYear: fiscalYearLabel,
+      periodStart: buildReportingIsoDate(startYear, 4, 1),
+      periodEnd: buildReportingIsoDate(startYear, 6, 30),
+      dueDate: buildReportingIsoDate(startYear, 6, 30),
+    },
+    {
+      period: 'Q2',
+      reportingPeriod: `FY${String(startYear).slice(-2)}-${String(nextYear).slice(-2)} Q2`,
+      fiscalYear: fiscalYearLabel,
+      periodStart: buildReportingIsoDate(startYear, 7, 1),
+      periodEnd: buildReportingIsoDate(startYear, 9, 30),
+      dueDate: buildReportingIsoDate(startYear, 9, 30),
+    },
+    {
+      period: 'Q3',
+      reportingPeriod: `FY${String(startYear).slice(-2)}-${String(nextYear).slice(-2)} Q3`,
+      fiscalYear: fiscalYearLabel,
+      periodStart: buildReportingIsoDate(startYear, 10, 1),
+      periodEnd: buildReportingIsoDate(startYear, 12, 31),
+      dueDate: buildReportingIsoDate(startYear, 12, 31),
+    },
+    {
+      period: 'Q4',
+      reportingPeriod: `FY${String(startYear).slice(-2)}-${String(nextYear).slice(-2)} Q4`,
+      fiscalYear: fiscalYearLabel,
+      periodStart: buildReportingIsoDate(nextYear, 1, 1),
+      periodEnd: buildReportingIsoDate(nextYear, 3, 31),
+      dueDate: buildReportingIsoDate(nextYear, 3, 31),
+    },
+  ];
+}
+
+const REPORTING_PERIOD_KEYS = [
+  'April (p1)',
+  'May (p2)',
+  'June (p3)',
+  'July (p4)',
+  'August (p5)',
+  'September (p6)',
+  'October (p7)',
+  'November (p8)',
+  'December (p9)',
+  'January (p10)',
+  'February (p11)',
+  'March (p12)',
+  'Final (p14)',
+];
+
+const REPORTING_INTERVENTION_LABEL_BY_CODE = {
+  1: '1. Career research and exploration',
+  2: '2. Diagnostic assessment',
+  3: '3. Employment counselling',
+  4: '4. Skills development - Essential Skills',
+  5: '5. Skills development - Academic upgrading',
+  6: '6. Work experience - job creation partnerships',
+  7: '7. Work experience - wage subsidy',
+  8: '8. Work experience - student employment',
+  9: '9. Occupational skills training - certificate',
+  10: '10. Occupational skills training - diploma',
+  11: '11. Occupational skills training - degree',
+  12: '12. Occupational skills training - apprenticeship',
+  13: '13. Occupational skills training - vocational',
+  14: '14. Self - employment',
+  15: '15. Job search preparation strategies',
+  16: '16. Job search supports',
+  17: '17. Employer referral',
+  18: '18. Employment retention supports',
+  19: '19. Referral to agencies',
+  20: '20. Pre-career development',
+};
+
+const REPORTING_INTERVENTION_ROW_LABELS = [
+  ...Object.values(REPORTING_INTERVENTION_LABEL_BY_CODE),
+  'TOTAL',
+];
+
+const REPORTING_CLIENT_RESULT_ROW_LABELS = [
+  'Clients Served - Total',
+  'Employed - Total',
+  'Returned to school - Total',
+];
+
+const REPORTING_DATA_UPLOAD_ROW_LABELS = [
+  'Submitted',
+  'Processed',
+  'Accepted',
+  'Number of Errors',
+];
+
+const REPORTING_ACTION_PLAN_STATUS_ROW_LABELS = [
+  '3. Action Plans with a pending result',
+  '4. Action Plans with data integrity issues',
+  '5. Action Plans with a repeat Employed Result',
+  '6. Action Plans with a repeat Returned to School Result',
+  '8. Action Plans with an Unemployed Result',
+];
+
+const REPORTING_SUMMARY_METRICS = [
+  { metric: 'Clients Served', rowLabel: 'Clients Served - Total', targetKey: 'clientsServed' },
+  { metric: 'Clients Employed', rowLabel: 'Employed - Total', targetKey: 'clientsEmployed' },
+  { metric: 'Clients Returned to School', rowLabel: 'Returned to school - Total', targetKey: 'clientsReturnedToSchool' },
+];
+
+const REPORTING_TARGETS_CONFIG_SCOPE = 'reporting.dataAndResults';
+const REPORTING_TARGETS_CONFIG_GLOBAL_KEY = 'targets';
+const REPORTING_TARGETS_CONFIG_PRIMARY = { scope: REPORTING_TARGETS_CONFIG_SCOPE, key: REPORTING_TARGETS_CONFIG_GLOBAL_KEY };
+const REPORTING_TARGETS_CONFIG_LEGACY_CANDIDATES = [
+  { scope: 'reporting', key: 'dataAndResults.targets' },
+  { scope: 'dashboard.reporting', key: 'dataAndResults.targets' },
+];
+const REPORTING_ADDITIONAL_COMMENTS_SCOPE = 'reporting.dataAndResults';
+const REPORTING_ADDITIONAL_COMMENTS_MAX_LENGTH = 5000;
+const REPORTING_CASE_MANAGER_ROLE_KEYS = ['Application Assessor', 'Regional Coordinator'];
+const REPORTING_INTERVENTION_MEASURES = new Set(['count', 'cost']);
+const REPORTING_INTERVENTION_STATUS_GROUPS = {
+  completed: new Set(['completed']),
+  planned: new Set(['approved']),
+  active: new Set(['in_progress', 'suspended']),
+  cancelled: new Set(['cancelled']),
+};
+
+const REPORTING_ADDRESS_PROVINCE_EXPR = `COALESCE(
+  JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."address-province"')),
+  JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."address-province"'))
+)`;
+
+function buildReportingSnapshotPeriods(startYear) {
+  const nextYear = startYear + 1;
+  return [
+    { key: 'April (p1)', cutoff: buildReportingMonthEndDate(startYear, 4) },
+    { key: 'May (p2)', cutoff: buildReportingMonthEndDate(startYear, 5) },
+    { key: 'June (p3)', cutoff: buildReportingMonthEndDate(startYear, 6) },
+    { key: 'July (p4)', cutoff: buildReportingMonthEndDate(startYear, 7) },
+    { key: 'August (p5)', cutoff: buildReportingMonthEndDate(startYear, 8) },
+    { key: 'September (p6)', cutoff: buildReportingMonthEndDate(startYear, 9) },
+    { key: 'October (p7)', cutoff: buildReportingMonthEndDate(startYear, 10) },
+    { key: 'November (p8)', cutoff: buildReportingMonthEndDate(startYear, 11) },
+    { key: 'December (p9)', cutoff: buildReportingMonthEndDate(startYear, 12) },
+    { key: 'January (p10)', cutoff: buildReportingMonthEndDate(nextYear, 1) },
+    { key: 'February (p11)', cutoff: buildReportingMonthEndDate(nextYear, 2) },
+    { key: 'March (p12)', cutoff: buildReportingMonthEndDate(nextYear, 3) },
+    { key: 'Final (p14)', cutoff: buildReportingMonthEndDate(nextYear, 3) },
+  ];
+}
+
+function buildReportingPeriodValues(periods) {
+  return periods.reduce((acc, period) => {
+    acc[period.key] = 0;
+    return acc;
+  }, {});
+}
+
+function parseReportingFiscalYearStartValue(rawValue) {
+  const parsed = Number.parseInt(String(rawValue ?? ''), 10);
+  if (Number.isInteger(parsed) && parsed >= 2020 && parsed <= 2100) {
+    return parsed;
+  }
+  return null;
+}
+
+function resolveReportingFiscalYearStartValue(rawValue, fallbackDate = new Date()) {
+  return parseReportingFiscalYearStartValue(rawValue) || resolveReportingFiscalYearStartYear(fallbackDate);
+}
+
+function buildReportingMatrixRows(labels, periods) {
+  return labels.map(label => ({
+    label,
+    values: buildReportingPeriodValues(periods),
+  }));
+}
+
+function normaliseReportingProvinceCode(value) {
+  const normalised = normaliseString(value);
+  if (!normalised) return null;
+  return PROVINCE_CODE_MAP[normalised.toLowerCase()] || normalised.toUpperCase();
+}
+
+function matchesReportingProvinceFilter(rawProvince, provinceCodes) {
+  if (!Array.isArray(provinceCodes) || !provinceCodes.length) {
+    return true;
+  }
+  const provinceCode = normaliseReportingProvinceCode(rawProvince);
+  return Boolean(provinceCode && provinceCodes.includes(provinceCode));
+}
+
+function addReportingCumulativeValue(values, isoDate, periods, amount = 1) {
+  const comparableDate = toDateOnly(isoDate);
+  if (!comparableDate) return false;
+  periods.forEach(period => {
+    if (comparableDate <= period.cutoff) {
+      values[period.key] = Number(values[period.key] || 0) + amount;
+    }
+  });
+  return true;
+}
+
+function countReportingRowsWithValues(rows = [], periods = []) {
+  const keys = periods.map(period => period.key);
+  return rows.reduce((count, row) => {
+    const values = row?.values || {};
+    const hasValue = keys.some(key => Number(values[key] || 0) > 0);
+    return count + (hasValue ? 1 : 0);
+  }, 0);
+}
+
+function buildReportingTargetsKey(fiscalYearStart) {
+  return `targets.${fiscalYearStart}`;
+}
+
+function buildReportingTargetsConfigCandidates(fiscalYearStart) {
+  const candidates = [];
+  if (Number.isInteger(fiscalYearStart) && fiscalYearStart >= 2020 && fiscalYearStart <= 2100) {
+    candidates.push({
+      scope: REPORTING_TARGETS_CONFIG_SCOPE,
+      key: buildReportingTargetsKey(fiscalYearStart),
+    });
+  }
+  candidates.push(REPORTING_TARGETS_CONFIG_PRIMARY, ...REPORTING_TARGETS_CONFIG_LEGACY_CANDIDATES);
+  return candidates;
+}
+
+function normalizeReportingTargetNumber(value) {
+  if (value === null || typeof value === 'undefined' || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normaliseReportingTargetsConfig(rawValue) {
+  const parsed = safeJsonParse(rawValue, rawValue);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return {};
+  }
+  const clientsServed =
+    normalizeReportingTargetNumber(parsed.clientsServed) ??
+    normalizeReportingTargetNumber(parsed['Clients Served']) ??
+    normalizeReportingTargetNumber(parsed.clients_served);
+  const clientsEmployed =
+    normalizeReportingTargetNumber(parsed.clientsEmployed) ??
+    normalizeReportingTargetNumber(parsed['Clients Employed']) ??
+    normalizeReportingTargetNumber(parsed.clients_employed);
+  const clientsReturnedToSchool =
+    normalizeReportingTargetNumber(parsed.clientsReturnedToSchool) ??
+    normalizeReportingTargetNumber(parsed['Clients Returned to School']) ??
+    normalizeReportingTargetNumber(parsed.clients_returned_to_school);
+
+  return {
+    clientsServed,
+    clientsEmployed,
+    clientsReturnedToSchool,
+  };
+}
+
+function validateReportingDataAndResultsTargets(rawValue) {
+  const payload = rawValue && typeof rawValue === 'object' && !Array.isArray(rawValue)
+    ? rawValue
+    : {};
+  const fields = [
+    { key: 'clientsServed', label: 'Clients Served target' },
+    { key: 'clientsEmployed', label: 'Clients Employed target' },
+    { key: 'clientsReturnedToSchool', label: 'Clients Returned to School target' },
+  ];
+  const value = {};
+
+  for (const field of fields) {
+    const rawFieldValue = payload[field.key];
+    if (rawFieldValue === null || typeof rawFieldValue === 'undefined' || rawFieldValue === '') {
+      value[field.key] = null;
+      continue;
+    }
+    const parsed = Number(rawFieldValue);
+    if (!Number.isFinite(parsed) || parsed < 0 || !Number.isInteger(parsed)) {
+      return {
+        ok: false,
+        error: 'invalid_reporting_target',
+        message: `${field.label} must be a whole number or blank.`,
+      };
+    }
+    value[field.key] = parsed;
+  }
+
+  return { ok: true, value };
+}
+
+async function readReportingDataAndResultsTargetsConfig(fiscalYearStart, executor = pool) {
+  const runner = executor || pool;
+  const resolvedFiscalYearStart = resolveReportingFiscalYearStartValue(fiscalYearStart);
+  const defaultKey = buildReportingTargetsKey(resolvedFiscalYearStart);
+  if (!runner || typeof runner.query !== 'function') {
+    return {
+      targets: {},
+      source: 'default',
+      scope: REPORTING_TARGETS_CONFIG_SCOPE,
+      key: defaultKey,
+      fiscalYearStart: resolvedFiscalYearStart,
+      fiscalYear: formatReportingFiscalYearLabel(resolvedFiscalYearStart),
+      updatedAt: null,
+    };
+  }
+
+  for (const candidate of buildReportingTargetsConfigCandidates(resolvedFiscalYearStart)) {
+    try {
+      const [rows] = await runner.query(
+        'SELECT v, updated_at FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
+        [candidate.scope, candidate.key]
+      );
+      if (Array.isArray(rows) && rows.length) {
+        return {
+          targets: normaliseReportingTargetsConfig(rows[0].v),
+          source: 'stored',
+          scope: candidate.scope,
+          key: candidate.key,
+          fiscalYearStart: resolvedFiscalYearStart,
+          fiscalYear: formatReportingFiscalYearLabel(resolvedFiscalYearStart),
+          updatedAt: rows[0].updated_at ? toIsoDateTime(rows[0].updated_at) : null,
+        };
+      }
+    } catch (err) {
+      if (isMissingTableErrorLocal(err) || isMissingColumnErrorLocal(err)) {
+        return {
+          targets: {},
+          source: 'default',
+          scope: REPORTING_TARGETS_CONFIG_SCOPE,
+          key: defaultKey,
+          fiscalYearStart: resolvedFiscalYearStart,
+          fiscalYear: formatReportingFiscalYearLabel(resolvedFiscalYearStart),
+          updatedAt: null,
+        };
+      }
+      console.warn('[reporting:data-and-results] targets load failed:', err?.message || err);
+      return {
+        targets: {},
+        source: 'error',
+        scope: REPORTING_TARGETS_CONFIG_SCOPE,
+        key: defaultKey,
+        fiscalYearStart: resolvedFiscalYearStart,
+        fiscalYear: formatReportingFiscalYearLabel(resolvedFiscalYearStart),
+        updatedAt: null,
+      };
+    }
+  }
+
+  return {
+    targets: {},
+    source: 'default',
+    scope: REPORTING_TARGETS_CONFIG_SCOPE,
+    key: defaultKey,
+    fiscalYearStart: resolvedFiscalYearStart,
+    fiscalYear: formatReportingFiscalYearLabel(resolvedFiscalYearStart),
+    updatedAt: null,
+  };
+}
+
+async function writeReportingDataAndResultsTargetsConfig(fiscalYearStart, nextTargets, executor = pool) {
+  const runner = executor || pool;
+  const resolvedFiscalYearStart = resolveReportingFiscalYearStartValue(fiscalYearStart);
+  const targetKey = buildReportingTargetsKey(resolvedFiscalYearStart);
+  if (!runner || typeof runner.query !== 'function') {
+    return {
+      targets: nextTargets,
+      source: 'memory',
+      scope: REPORTING_TARGETS_CONFIG_SCOPE,
+      key: targetKey,
+      fiscalYearStart: resolvedFiscalYearStart,
+      fiscalYear: formatReportingFiscalYearLabel(resolvedFiscalYearStart),
+      updatedAt: null,
+    };
+  }
+  await ensureRuntimeConfigTable();
+  await runner.query(
+    'INSERT INTO iset_runtime_config (scope,k,v) VALUES (?,?,CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP',
+    [
+      REPORTING_TARGETS_CONFIG_SCOPE,
+      targetKey,
+      JSON.stringify(nextTargets),
+    ]
+  );
+  return readReportingDataAndResultsTargetsConfig(resolvedFiscalYearStart, runner);
+}
+
+async function loadReportingDataAndResultsTargets(executor = pool, fiscalYearStart) {
+  const config = await readReportingDataAndResultsTargetsConfig(fiscalYearStart, executor);
+  return config.targets || {};
+}
+
+function buildReportingAdditionalCommentsKey(fiscalYearStart) {
+  return `additionalComments.${fiscalYearStart}`;
+}
+
+function normaliseReportingAdditionalCommentsConfig(rawValue) {
+  const parsed = safeJsonParse(rawValue, rawValue);
+  if (typeof parsed === 'string') {
+    return parsed.replace(/\r\n?/g, '\n').trim();
+  }
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const comments =
+      typeof parsed.comments === 'string'
+        ? parsed.comments
+        : typeof parsed.comment === 'string'
+          ? parsed.comment
+          : '';
+    return comments.replace(/\r\n?/g, '\n').trim();
+  }
+  return '';
+}
+
+function validateReportingAdditionalComments(rawValue) {
+  const payload = rawValue && typeof rawValue === 'object' && !Array.isArray(rawValue)
+    ? rawValue
+    : {};
+  const comments = String(payload.comments ?? payload.comment ?? '')
+    .replace(/\r\n?/g, '\n')
+    .trim();
+  if (comments.length > REPORTING_ADDITIONAL_COMMENTS_MAX_LENGTH) {
+    return {
+      ok: false,
+      error: 'invalid_reporting_comments',
+      message: `Additional comments must be ${REPORTING_ADDITIONAL_COMMENTS_MAX_LENGTH} characters or fewer.`,
+    };
+  }
+  return { ok: true, value: { comments } };
+}
+
+async function readReportingAdditionalCommentsConfig(fiscalYearStart, executor = pool) {
+  const runner = executor || pool;
+  const key = buildReportingAdditionalCommentsKey(fiscalYearStart);
+  const fallback = {
+    comments: '',
+    source: 'default',
+    scope: REPORTING_ADDITIONAL_COMMENTS_SCOPE,
+    key,
+    fiscalYearStart,
+    fiscalYear: formatReportingFiscalYearLabel(fiscalYearStart),
+    updatedAt: null,
+  };
+  if (!runner || typeof runner.query !== 'function') {
+    return fallback;
+  }
+
+  try {
+    const [rows] = await runner.query(
+      'SELECT v, updated_at FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
+      [REPORTING_ADDITIONAL_COMMENTS_SCOPE, key]
+    );
+    if (!Array.isArray(rows) || !rows.length) {
+      return fallback;
+    }
+    return {
+      comments: normaliseReportingAdditionalCommentsConfig(rows[0].v),
+      source: 'stored',
+      scope: REPORTING_ADDITIONAL_COMMENTS_SCOPE,
+      key,
+      fiscalYearStart,
+      fiscalYear: formatReportingFiscalYearLabel(fiscalYearStart),
+      updatedAt: rows[0].updated_at ? toIsoDateTime(rows[0].updated_at) : null,
+    };
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || isMissingColumnErrorLocal(err)) {
+      return fallback;
+    }
+    console.warn('[reporting:data-and-results] additional comments load failed:', err?.message || err);
+    return {
+      ...fallback,
+      source: 'error',
+    };
+  }
+}
+
+async function writeReportingAdditionalCommentsConfig(fiscalYearStart, commentsPayload, executor = pool) {
+  const runner = executor || pool;
+  const key = buildReportingAdditionalCommentsKey(fiscalYearStart);
+  if (!runner || typeof runner.query !== 'function') {
+    return {
+      comments: commentsPayload.comments || '',
+      source: 'memory',
+      scope: REPORTING_ADDITIONAL_COMMENTS_SCOPE,
+      key,
+      fiscalYearStart,
+      fiscalYear: formatReportingFiscalYearLabel(fiscalYearStart),
+      updatedAt: null,
+    };
+  }
+  await ensureRuntimeConfigTable();
+  await runner.query(
+    'INSERT INTO iset_runtime_config (scope,k,v) VALUES (?,?,CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP',
+    [
+      REPORTING_ADDITIONAL_COMMENTS_SCOPE,
+      key,
+      JSON.stringify({ comments: commentsPayload.comments || '' }),
+    ]
+  );
+  return readReportingAdditionalCommentsConfig(fiscalYearStart, runner);
+}
+
+function normaliseReportingProvinceCodes(rawValue) {
+  const inputs = Array.isArray(rawValue)
+    ? rawValue
+    : String(rawValue || '')
+      .split(',');
+  return Array.from(
+    new Set(
+      inputs
+        .map(value => {
+          const normalised = normaliseString(value);
+          if (!normalised) return null;
+          return PROVINCE_CODE_MAP[normalised.toLowerCase()] || normalised.toUpperCase();
+        })
+        .filter(code => code && /^[A-Z]{2}$/.test(code))
+    )
+  );
+}
+
+function normaliseReportingCaseManagerIds(rawValue) {
+  const inputs = Array.isArray(rawValue)
+    ? rawValue
+    : String(rawValue || '')
+      .split(',');
+  return Array.from(
+    new Set(
+      inputs
+        .map(value => normalisePositiveInteger(value))
+        .filter(Boolean)
+    )
+  );
+}
+
+function matchesReportingCaseManagerFilter(rawAssignedToUserId, caseManagerIds) {
+  if (!Array.isArray(caseManagerIds) || !caseManagerIds.length) {
+    return true;
+  }
+  const assignedToUserId = normalisePositiveInteger(rawAssignedToUserId);
+  return Boolean(assignedToUserId && caseManagerIds.includes(assignedToUserId));
+}
+
+function normaliseReportingInterventionStatusView(rawValue) {
+  const value = normaliseString(rawValue)?.toLowerCase() || '';
+  return REPORTING_INTERVENTION_STATUS_GROUPS[value] ? value : 'completed';
+}
+
+function normaliseReportingInterventionMeasure(rawValue) {
+  const value = normaliseString(rawValue)?.toLowerCase() || '';
+  return REPORTING_INTERVENTION_MEASURES.has(value) ? value : 'count';
+}
+
+function normaliseReportingInterventionDateBasis(rawValue) {
+  const value = normaliseString(rawValue)?.toLowerCase() || '';
+  if (value === 'payment' || value === 'payment_month' || value === 'bypaymentmonth') {
+    return 'payment';
+  }
+  if (value === 'start' || value === 'start_date' || value === 'bystartdate') {
+    return 'start';
+  }
+  return 'end';
+}
+
+function matchesReportingInterventionStatus(rawStatus, statusView) {
+  const allowedStatuses =
+    REPORTING_INTERVENTION_STATUS_GROUPS[normaliseReportingInterventionStatusView(statusView)] ||
+    REPORTING_INTERVENTION_STATUS_GROUPS.completed;
+  const statusKey = normaliseInterventionStatus(rawStatus, null);
+  return Boolean(statusKey && allowedStatuses.has(statusKey));
+}
+
+function resolveReportingInterventionBucketDate(row, dateBasis) {
+  if (normaliseReportingInterventionDateBasis(dateBasis) === 'start') {
+    return toDateOnly(row?.started_on);
+  }
+  return toDateOnly(row?.ended_on);
+}
+
+function scaleReportingCurrencyAmounts(amounts, targetTotal) {
+  const list = Array.isArray(amounts) ? amounts.map(value => Number(value) || 0) : [];
+  const targetCents = Math.max(0, Math.round(Number(targetTotal || 0) * 100));
+  if (!list.length) return [];
+  if (!targetCents) return list.map(() => 0);
+  const sourceCents = list.map(value => Math.max(0, Math.round(value * 100)));
+  const sourceTotal = sourceCents.reduce((sum, value) => sum + value, 0);
+  if (!sourceTotal) {
+    const evenAllocation = list.map(() => 0);
+    for (let index = 0; index < targetCents; index += 1) {
+      evenAllocation[index % evenAllocation.length] += 1;
+    }
+    return evenAllocation.map(value => value / 100);
+  }
+  const rawAllocations = sourceCents.map(value => (targetCents * value) / sourceTotal);
+  const scaledCents = rawAllocations.map(value => Math.floor(value));
+  let remaining = targetCents - scaledCents.reduce((sum, value) => sum + value, 0);
+  const remainderOrder = rawAllocations
+    .map((value, index) => ({
+      index,
+      remainder: value - scaledCents[index],
+      weight: sourceCents[index],
+    }))
+    .sort((left, right) =>
+      right.remainder - left.remainder ||
+      right.weight - left.weight ||
+      left.index - right.index
+    );
+  for (let index = 0; index < remainderOrder.length && remaining > 0; index += 1) {
+    scaledCents[remainderOrder[index].index] += 1;
+    remaining -= 1;
+  }
+  return scaledCents.map(value => value / 100);
+}
+
+function resolveReportingInterventionScheduledDate(lineInput, interventionRow, submissionTimingByType) {
+  const submissionTiming = resolveCostLineSubmissionTiming(
+    { type: lineInput?.paymentType || null },
+    submissionTimingByType
+  );
+  const interventionStartDate = toDateOnly(interventionRow?.started_on || interventionRow?.start_date || null);
+  const interventionEndDate = toDateOnly(interventionRow?.ended_on || interventionRow?.end_date || null);
+  const requestedDate = toDateOnly(lineInput?.requestedPaymentDate || lineInput?.requested_payment_date || null);
+  const serviceStart = toDateOnly(lineInput?.servicePeriodStart || lineInput?.service_period_start || null);
+  const serviceEnd = toDateOnly(lineInput?.servicePeriodEnd || lineInput?.service_period_end || null);
+  if (submissionTiming === 'intervention_start') {
+    return interventionStartDate || serviceStart || requestedDate || null;
+  }
+  if (submissionTiming === 'intervention_end') {
+    return interventionEndDate || serviceEnd || requestedDate || interventionStartDate || null;
+  }
+  if (submissionTiming === 'recurrence_schedule') {
+    return requestedDate || serviceStart || interventionStartDate || null;
+  }
+  return requestedDate || serviceStart || interventionStartDate || null;
+}
+
+function buildReportingInterventionAmountEntries(
+  row,
+  {
+    paymentTypeMapping = null,
+    recurrencePolicyByType = null,
+    submissionTimingByType = null,
+    statusView = 'completed',
+  } = {}
+) {
+  const metadata = safeJsonParse(row?.metadata_json, null) || {};
+  const snapshotSource = metadata?.snapshot && typeof metadata.snapshot === 'object'
+    ? metadata.snapshot
+    : {};
+  const mergedCostLines = Array.isArray(metadata.costLines)
+    ? metadata.costLines
+    : Array.isArray(metadata.cost_lines)
+    ? metadata.cost_lines
+    : Array.isArray(snapshotSource.costLines)
+    ? snapshotSource.costLines
+    : [];
+  const allowedPaymentTypes = paymentTypeMapping
+    ? resolveAllowedPaymentTypesForIntervention(paymentTypeMapping, row)
+    : null;
+  const paymentLines = buildAutoPaymentLinesFromCostLines({
+    interventionRow: {
+      ...row,
+      start_date: row?.started_on ?? row?.start_date ?? null,
+      end_date: row?.ended_on ?? row?.end_date ?? null,
+    },
+    interventionMetadata: {
+      ...metadata,
+      costLines: mergedCostLines,
+    },
+    clientPayeeName: 'Client',
+    partnerName: null,
+    fallbackPayeeType: 'Client',
+    fallbackPayeeName: 'Client',
+    allowedPaymentTypes,
+    recurrencePolicyByType,
+  });
+  let entries = paymentLines
+    .map(line => ({
+      date: resolveReportingInterventionScheduledDate(line, row, submissionTimingByType),
+      amount: Number(line?.amount || 0),
+    }))
+    .filter(entry => entry.date && Number.isFinite(entry.amount) && entry.amount > 0);
+
+  const plannedTotalFromEntries = entries.reduce((sum, entry) => sum + entry.amount, 0);
+  const plannedTotalFallback = parseCurrencyValue(
+    metadata.costTotal ??
+    snapshotSource.costTotal ??
+    metadata.cost ??
+    snapshotSource.cost ??
+    row?.intervention_cost ??
+    row?.budget_amount ??
+    row?.approved_amount ??
+    null
+  );
+  const plannedTotal = plannedTotalFromEntries > 0
+    ? Math.round(plannedTotalFromEntries * 100) / 100
+    : (Number.isFinite(plannedTotalFallback) ? plannedTotalFallback : null);
+  const actualTotal = parseCurrencyValue(row?.actual_amount ?? null);
+  const resolvedTotal =
+    statusView === 'completed' && Number.isFinite(actualTotal) && actualTotal > 0
+      ? actualTotal
+      : plannedTotal;
+
+  if (entries.length && Number.isFinite(resolvedTotal) && resolvedTotal > 0) {
+    const scaledAmounts = scaleReportingCurrencyAmounts(
+      entries.map(entry => entry.amount),
+      resolvedTotal
+    );
+    entries = entries.map((entry, index) => ({
+      ...entry,
+      amount: scaledAmounts[index],
+    }));
+    return entries;
+  }
+
+  if (Number.isFinite(resolvedTotal) && resolvedTotal > 0) {
+    const fallbackDate =
+      toDateOnly(row?.ended_on || null) ||
+      toDateOnly(row?.started_on || null) ||
+      toDateOnly(row?.start_date || null) ||
+      toDateOnly(row?.end_date || null) ||
+      null;
+    if (fallbackDate) {
+      return [{ date: fallbackDate, amount: Math.round(resolvedTotal * 100) / 100 }];
+    }
+  }
+
+  return entries;
+}
+
+function mapReportingPackageStatus(status) {
+  const key = normaliseString(status)?.toLowerCase() || '';
+  if (key === 'accepted') return { statusKey: 'accepted', statusLabel: 'Accepted' };
+  if (key === 'submitted') return { statusKey: 'submitted', statusLabel: 'Submitted' };
+  if (key === 'ready') return { statusKey: 'ready', statusLabel: 'Ready to submit' };
+  if (key === 'in_review') return { statusKey: 'in-review', statusLabel: 'In review' };
+  if (key === 'rejected') return { statusKey: 'rejected', statusLabel: 'Rejected' };
+  return { statusKey: 'pending', statusLabel: 'Pending' };
+}
+
+app.get('/api/reporting/data-and-results/filter-options', async (req, res) => {
+  if (!hasOperationalReportingAccess(req)) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+
+  const fiscalYearStart = resolveReportingFiscalYearStartValue(
+    req.query.fiscalYearStart ?? req.query.fiscalYear
+  );
+  const fallbackCaseManagers = PLACEHOLDER_ASSIGNABLE_STAFF
+    .filter(staff => REPORTING_CASE_MANAGER_ROLE_KEYS.includes(normaliseString(staff?.role) || ''))
+    .map(staff => ({
+      value: String(staff.id),
+      label: normaliseString(staff.display_name || staff.name || staff.email) || `Staff #${staff.id}`,
+      role: normaliseString(staff.role) || null,
+    }));
+
+  try {
+    const [rows] = await pool.query(
+      `
+      SELECT
+        sp.id,
+        COALESCE(NULLIF(TRIM(sp.display_name), ''), NULLIF(TRIM(sp.name), ''), NULLIF(TRIM(sp.email), ''), CONCAT('Staff #', sp.id)) AS label,
+        sp.primary_role
+      FROM staff_profiles sp
+      WHERE sp.status = 'active'
+        AND sp.primary_role IN (${REPORTING_CASE_MANAGER_ROLE_KEYS.map(() => '?').join(', ')})
+      ORDER BY label ASC
+      `,
+      REPORTING_CASE_MANAGER_ROLE_KEYS
+    );
+
+    const caseManagers = Array.isArray(rows) && rows.length
+      ? rows.map(row => ({
+          value: String(row.id),
+          label: row.label,
+          role: normaliseString(row.primary_role) || null,
+        }))
+      : fallbackCaseManagers;
+
+    res.set('Cache-Control', 'no-store, max-age=0');
+    return res.json({
+      fiscalYearStart,
+      fiscalYear: formatReportingFiscalYearLabel(fiscalYearStart),
+      caseManagers,
+    });
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || isMissingColumnErrorLocal(err)) {
+      res.set('Cache-Control', 'no-store, max-age=0');
+      return res.json({
+        fiscalYearStart,
+        fiscalYear: formatReportingFiscalYearLabel(fiscalYearStart),
+        caseManagers: fallbackCaseManagers,
+      });
+    }
+    console.error('[reporting:data-and-results] filter options fetch failed:', err?.message || err);
+    return res.status(500).json({
+      error: 'reporting_filter_options_fetch_failed',
+      message: err?.message || 'Reporting filter options fetch failed.',
+    });
+  }
+});
+
+app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
+  if (!hasOperationalReportingAccess(req)) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+
+  const fiscalYearStartInput = Number.parseInt(
+    String(req.query.fiscalYearStart ?? req.query.fiscalYear ?? ''),
+    10
+  );
+  const fiscalYearStart = Number.isInteger(fiscalYearStartInput) && fiscalYearStartInput >= 2020 && fiscalYearStartInput <= 2100
+    ? fiscalYearStartInput
+    : resolveReportingFiscalYearStartYear();
+  const fiscalYearEnd = buildReportingIsoDate(fiscalYearStart + 1, 3, 31);
+  const fiscalYearStartDate = buildReportingIsoDate(fiscalYearStart, 4, 1);
+  const provinceCodes = normaliseReportingProvinceCodes(req.query.provinces ?? req.query.province ?? []);
+  const caseManagerIds = normaliseReportingCaseManagerIds(
+    req.query.caseManagers ?? req.query.caseManager ?? req.query.manager ?? []
+  );
+  const interventionMeasure = normaliseReportingInterventionMeasure(
+    req.query.interventionMeasure ?? req.query.interventionsMeasure ?? req.query.interventionShow
+  );
+  const interventionStatusView = normaliseReportingInterventionStatusView(
+    req.query.interventionStatus ?? req.query.interventionsStatus ?? req.query.interventionView
+  );
+  const requestedInterventionDateBasis = normaliseReportingInterventionDateBasis(
+    req.query.interventionDateBasis ?? req.query.interventionDate ?? req.query.interventionDateView
+  );
+  const interventionDateBasis = interventionMeasure === 'cost'
+    ? 'payment'
+    : requestedInterventionDateBasis;
+  const snapshotPeriods = buildReportingSnapshotPeriods(fiscalYearStart);
+
+  const interventions = buildReportingMatrixRows(REPORTING_INTERVENTION_ROW_LABELS, snapshotPeriods);
+  const clientResults = buildReportingMatrixRows(REPORTING_CLIENT_RESULT_ROW_LABELS, snapshotPeriods);
+  const dataUploads = buildReportingMatrixRows(REPORTING_DATA_UPLOAD_ROW_LABELS, snapshotPeriods);
+  const actionPlanStatuses = buildReportingMatrixRows(REPORTING_ACTION_PLAN_STATUS_ROW_LABELS, snapshotPeriods);
+
+  const interventionsByLabel = new Map(interventions.map(row => [row.label, row]));
+  const clientResultsByLabel = new Map(clientResults.map(row => [row.label, row]));
+  const dataUploadsByLabel = new Map(dataUploads.map(row => [row.label, row]));
+  const actionPlanStatusesByLabel = new Map(actionPlanStatuses.map(row => [row.label, row]));
+
+  try {
+    const [
+      interventionRows,
+      actionPlanRows,
+      participantSubmissionRows,
+      submissionHistoryRows,
+      reportingTargets,
+      paymentTypeMapping,
+      recurrencePolicyByType,
+    ] = await Promise.all([
+      pool.query(
+        `
+        SELECT
+          ci.id,
+          ci.intervention_code,
+          ci.status,
+          ci.metadata_json,
+          ci.intervention_cost,
+          ci.budget_amount,
+          ci.approved_amount,
+          ci.actual_amount,
+          ci.start_date AS started_on,
+          COALESCE(ci.end_date, DATE(ci.closed_at)) AS ended_on,
+          c.assigned_to_user_id,
+          ${REPORTING_ADDRESS_PROVINCE_EXPR} AS address_province
+        FROM iset_case_intervention ci
+        JOIN iset_case c ON c.id = ci.case_id
+        LEFT JOIN iset_application a ON a.id = c.application_id
+        LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
+        WHERE ci.intervention_code IS NOT NULL
+          AND (
+            (ci.start_date IS NOT NULL AND ci.start_date <= ?)
+            OR (
+              COALESCE(ci.end_date, DATE(ci.closed_at)) IS NOT NULL
+              AND COALESCE(ci.end_date, DATE(ci.closed_at)) <= ?
+            )
+          )
+        `,
+        [fiscalYearEnd, fiscalYearEnd]
+      ),
+      pool.query(
+        `
+        SELECT
+          ap.id,
+          ap.case_id,
+          COALESCE(CAST(c.client_id AS CHAR), CONCAT('case-', c.id)) AS client_key,
+          ap.status,
+          ap.effective_date,
+          DATE(ap.activated_at) AS activated_on,
+          DATE(ap.closed_at) AS closed_on,
+          DATE(ap.archived_at) AS archived_on,
+          DATE(ap.created_at) AS created_on,
+          ap.result_code,
+          ap.result_date,
+          c.assigned_to_user_id,
+          ${REPORTING_ADDRESS_PROVINCE_EXPR} AS address_province
+        FROM iset_case_action_plan ap
+        JOIN iset_case c ON c.id = ap.case_id
+        LEFT JOIN iset_application a ON a.id = c.application_id
+        LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
+        WHERE COALESCE(ap.effective_date, DATE(ap.activated_at), DATE(ap.created_at)) <= ?
+           OR (ap.result_date IS NOT NULL AND ap.result_date <= ?)
+        `,
+        [fiscalYearEnd, fiscalYearEnd]
+      ),
+      pool.query(
+        `
+        SELECT
+          eps.id,
+          eps.case_id,
+          eps.action_plan_id,
+          eps.readiness_status,
+          COALESCE(eps.last_validated_at, eps.updated_at, eps.created_at) AS observed_at,
+          c.assigned_to_user_id
+        FROM esdc_participant_submission eps
+        JOIN iset_case c ON c.id = eps.case_id
+        WHERE COALESCE(eps.last_validated_at, eps.updated_at, eps.created_at) <= ?
+        `,
+        [fiscalYearEnd]
+      ),
+      pool.query(
+        `
+        SELECT
+          h.event_type,
+          h.occurred_at,
+          eps.case_id,
+          eps.action_plan_id,
+          c.assigned_to_user_id,
+          ${REPORTING_ADDRESS_PROVINCE_EXPR} AS address_province
+        FROM esdc_participant_submission_history h
+        JOIN esdc_participant_submission eps ON eps.id = h.participant_submission_id
+        JOIN iset_case c ON c.id = eps.case_id
+        LEFT JOIN iset_application a ON a.id = c.application_id
+        LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
+        WHERE h.event_type IN ('submitted', 'accepted', 'rejected')
+          AND DATE(h.occurred_at) BETWEEN ? AND ?
+        `,
+        [fiscalYearStartDate, fiscalYearEnd]
+      ),
+      loadReportingDataAndResultsTargets(pool, fiscalYearStart),
+      interventionMeasure === 'cost' ? readPaymentInterventionMapping(pool) : Promise.resolve(null),
+      interventionMeasure === 'cost' ? readPaymentRecurrencePolicyByType(pool) : Promise.resolve(null),
+    ]);
+
+    const interventionsRaw = Array.isArray(interventionRows?.[0]) ? interventionRows[0] : [];
+    const actionPlansRaw = Array.isArray(actionPlanRows?.[0]) ? actionPlanRows[0] : [];
+    const participantSubmissionsRaw = Array.isArray(participantSubmissionRows?.[0]) ? participantSubmissionRows[0] : [];
+    const submissionHistoryRaw = Array.isArray(submissionHistoryRows?.[0]) ? submissionHistoryRows[0] : [];
+
+    const scopedInterventions = interventionsRaw.filter(row => (
+      matchesReportingInterventionStatus(row.status, interventionStatusView) &&
+      matchesReportingProvinceFilter(row.address_province, provinceCodes) &&
+      matchesReportingCaseManagerFilter(row.assigned_to_user_id, caseManagerIds)
+    ));
+    const submissionTimingByType = interventionMeasure === 'cost'
+      ? buildSubmissionTimingByTypeLookup(paymentTypeMapping)
+      : null;
+    const filteredInterventions = [];
+
+    if (interventionMeasure === 'cost') {
+      scopedInterventions.forEach(row => {
+        const label = REPORTING_INTERVENTION_LABEL_BY_CODE[Number(row.intervention_code)];
+        if (!label || !interventionsByLabel.has(label)) return;
+        const amountEntries = buildReportingInterventionAmountEntries(row, {
+          paymentTypeMapping,
+          recurrencePolicyByType,
+          submissionTimingByType,
+          statusView: interventionStatusView,
+        }).filter(entry => entry.date >= fiscalYearStartDate && entry.date <= fiscalYearEnd);
+        if (!amountEntries.length) return;
+        filteredInterventions.push(row);
+        amountEntries.forEach(entry => {
+          addReportingCumulativeValue(
+            interventionsByLabel.get(label).values,
+            entry.date,
+            snapshotPeriods,
+            entry.amount
+          );
+        });
+      });
+    } else {
+      scopedInterventions
+        .filter(row => {
+          const bucketDate = resolveReportingInterventionBucketDate(row, interventionDateBasis);
+          return Boolean(bucketDate && bucketDate >= fiscalYearStartDate && bucketDate <= fiscalYearEnd);
+        })
+        .forEach(row => {
+          filteredInterventions.push(row);
+          const label = REPORTING_INTERVENTION_LABEL_BY_CODE[Number(row.intervention_code)];
+          if (!label || !interventionsByLabel.has(label)) return;
+          addReportingCumulativeValue(
+            interventionsByLabel.get(label).values,
+            resolveReportingInterventionBucketDate(row, interventionDateBasis),
+            snapshotPeriods,
+            1
+          );
+        });
+    }
+
+    const totalInterventionsRow = interventionsByLabel.get('TOTAL');
+    if (totalInterventionsRow) {
+      REPORTING_PERIOD_KEYS.forEach(periodKey => {
+        totalInterventionsRow.values[periodKey] = interventions
+          .filter(row => row.label !== 'TOTAL')
+          .reduce((total, row) => total + Number(row.values[periodKey] || 0), 0);
+      });
+    }
+
+    const filteredActionPlans = actionPlansRaw.filter(row => (
+      matchesReportingProvinceFilter(row.address_province, provinceCodes) &&
+      matchesReportingCaseManagerFilter(row.assigned_to_user_id, caseManagerIds)
+    ));
+
+    filteredActionPlans.forEach(row => {
+      const resultDate = toDateOnly(row.result_date);
+      const resultCode = normaliseString(row.result_code);
+
+      if (resultCode && resultDate && resultDate >= fiscalYearStartDate && resultDate <= fiscalYearEnd) {
+        addReportingCumulativeValue(
+          clientResultsByLabel.get('Clients Served - Total').values,
+          resultDate,
+          snapshotPeriods,
+          1
+        );
+      }
+      if (resultCode === '2' && resultDate && resultDate >= fiscalYearStartDate && resultDate <= fiscalYearEnd) {
+        addReportingCumulativeValue(
+          clientResultsByLabel.get('Employed - Total').values,
+          resultDate,
+          snapshotPeriods,
+          1
+        );
+      }
+      if (resultCode === '4' && resultDate && resultDate >= fiscalYearStartDate && resultDate <= fiscalYearEnd) {
+        addReportingCumulativeValue(
+          clientResultsByLabel.get('Returned to school - Total').values,
+          resultDate,
+          snapshotPeriods,
+          1
+        );
+      }
+      if (resultCode === '1' && resultDate && resultDate >= fiscalYearStartDate && resultDate <= fiscalYearEnd) {
+        addReportingCumulativeValue(
+          actionPlanStatusesByLabel.get('8. Action Plans with an Unemployed Result').values,
+          resultDate,
+          snapshotPeriods,
+          1
+        );
+      }
+    });
+
+    const submissionsByActionPlanId = new Map();
+    const submissionsByCaseId = new Map();
+    participantSubmissionsRaw
+      .filter(row => matchesReportingCaseManagerFilter(row.assigned_to_user_id, caseManagerIds))
+      .forEach(row => {
+        if (row.action_plan_id && !submissionsByActionPlanId.has(row.action_plan_id)) {
+          submissionsByActionPlanId.set(row.action_plan_id, row);
+        }
+        if (row.case_id && !submissionsByCaseId.has(row.case_id)) {
+          submissionsByCaseId.set(row.case_id, row);
+        }
+      });
+
+    snapshotPeriods.forEach(period => {
+      let pendingResultCount = 0;
+      let dataIntegrityCount = 0;
+
+      filteredActionPlans.forEach(row => {
+        const statusKey = normaliseString(row.status)?.toLowerCase() || '';
+        if (statusKey === 'draft' || statusKey === 'archived') {
+          return;
+        }
+
+        const planStartDate =
+          toDateOnly(row.effective_date) ||
+          toDateOnly(row.activated_on) ||
+          toDateOnly(row.created_on);
+        const archivedOn = toDateOnly(row.archived_on);
+        const resultDate = toDateOnly(row.result_date);
+        const resultCode = normaliseString(row.result_code);
+
+        if (!planStartDate || planStartDate > period.cutoff) {
+          return;
+        }
+        if (archivedOn && archivedOn <= period.cutoff) {
+          return;
+        }
+        if (!resultCode || !resultDate || resultDate > period.cutoff) {
+          pendingResultCount += 1;
+        }
+
+        const submissionRow =
+          submissionsByActionPlanId.get(row.id) ||
+          submissionsByCaseId.get(row.case_id) ||
+          null;
+        const observedAt = toDateOnly(submissionRow?.observed_at);
+        if (
+          submissionRow &&
+          submissionRow.readiness_status === 'blocked' &&
+          observedAt &&
+          observedAt <= period.cutoff
+        ) {
+          dataIntegrityCount += 1;
+        }
+      });
+
+      actionPlanStatusesByLabel.get('3. Action Plans with a pending result').values[period.key] = pendingResultCount;
+      actionPlanStatusesByLabel.get('4. Action Plans with data integrity issues').values[period.key] = dataIntegrityCount;
+    });
+
+    const addRepeatResultCounts = (resultCode, rowLabel) => {
+      const grouped = new Map();
+      filteredActionPlans.forEach(row => {
+        const rowResultCode = normaliseString(row.result_code);
+        const resultDate = toDateOnly(row.result_date);
+        if (rowResultCode !== resultCode || !resultDate || resultDate > fiscalYearEnd) {
+          return;
+        }
+        const clientKey = row.client_key || `plan-${row.id}`;
+        if (!grouped.has(clientKey)) {
+          grouped.set(clientKey, []);
+        }
+        grouped.get(clientKey).push({ id: row.id, resultDate });
+      });
+
+      grouped.forEach(entries => {
+        entries
+          .sort((left, right) => {
+            if (left.resultDate !== right.resultDate) {
+              return left.resultDate.localeCompare(right.resultDate);
+            }
+            return Number(left.id || 0) - Number(right.id || 0);
+          })
+          .forEach((entry, index) => {
+            if (index === 0) return;
+            if (entry.resultDate < fiscalYearStartDate) return;
+            addReportingCumulativeValue(
+              actionPlanStatusesByLabel.get(rowLabel).values,
+              entry.resultDate,
+              snapshotPeriods,
+              1
+            );
+          });
+      });
+    };
+
+    addRepeatResultCounts('2', '5. Action Plans with a repeat Employed Result');
+    addRepeatResultCounts('4', '6. Action Plans with a repeat Returned to School Result');
+
+    const filteredSubmissionHistory = submissionHistoryRaw.filter(row => (
+      matchesReportingProvinceFilter(row.address_province, provinceCodes) &&
+      matchesReportingCaseManagerFilter(row.assigned_to_user_id, caseManagerIds)
+    ));
+
+    filteredSubmissionHistory.forEach(row => {
+      const occurredAt = toDateOnly(row.occurred_at);
+      if (!occurredAt || occurredAt < fiscalYearStartDate || occurredAt > fiscalYearEnd) {
+        return;
+      }
+      if (row.event_type === 'submitted') {
+        addReportingCumulativeValue(
+          dataUploadsByLabel.get('Submitted').values,
+          occurredAt,
+          snapshotPeriods,
+          1
+        );
+      }
+      if (row.event_type === 'accepted' || row.event_type === 'rejected') {
+        addReportingCumulativeValue(
+          dataUploadsByLabel.get('Processed').values,
+          occurredAt,
+          snapshotPeriods,
+          1
+        );
+      }
+      if (row.event_type === 'accepted') {
+        addReportingCumulativeValue(
+          dataUploadsByLabel.get('Accepted').values,
+          occurredAt,
+          snapshotPeriods,
+          1
+        );
+      }
+      if (row.event_type === 'rejected') {
+        addReportingCumulativeValue(
+          dataUploadsByLabel.get('Number of Errors').values,
+          occurredAt,
+          snapshotPeriods,
+          1
+        );
+      }
+    });
+
+    const overallResults = REPORTING_SUMMARY_METRICS.map(definition => {
+      const resultRow = clientResultsByLabel.get(definition.rowLabel);
+      return {
+        metric: definition.metric,
+        target: reportingTargets?.[definition.targetKey] ?? null,
+        result: Number(resultRow?.values?.['Final (p14)'] || 0),
+      };
+    });
+
+    const hasTargetsConfigured = overallResults.some(item => item.target !== null);
+    const hasAnyOperationalData =
+      filteredInterventions.length > 0 ||
+      filteredActionPlans.length > 0 ||
+      filteredSubmissionHistory.length > 0;
+
+    const sectionStatus = {
+      overall: hasAnyOperationalData ? (hasTargetsConfigured ? 'live' : 'partial') : 'no_records',
+      interventions: filteredInterventions.length ? 'live' : 'no_records',
+      clientResults: filteredActionPlans.length ? 'live' : 'no_records',
+      dataUploads: filteredSubmissionHistory.length ? 'live' : 'no_records',
+      actionPlanStatuses: filteredActionPlans.length ? 'live' : 'no_records',
+    };
+
+    res.set('Cache-Control', 'no-store, max-age=0');
+    return res.json({
+      fiscalYear: formatReportingFiscalYearLabel(fiscalYearStart),
+      fiscalYearStart,
+      generatedAt: new Date().toISOString(),
+      selectedProvinceCodes: provinceCodes,
+      selectedCaseManagerIds: caseManagerIds,
+      interventionMeasure,
+      interventionStatusView,
+      interventionDateBasis,
+      overallResults,
+      interventions,
+      clientResults,
+      dataUploads,
+      actionPlanStatuses,
+      meta: {
+        hasAnyOperationalData,
+        hasTargetsConfigured,
+        sectionStatus,
+        notes: {
+          overall: hasTargetsConfigured
+            ? 'Year-end results and annual targets are shown below.'
+            : 'Year-end results are shown below. Annual targets have not been entered for this fiscal year yet.',
+          interventions: interventionMeasure === 'cost'
+            ? `Intervention costs are shown cumulatively for ${interventionStatusView} interventions by payment month. Completed interventions use actual cost when available; other statuses use planned cost.`
+            : `Intervention counts are shown cumulatively for ${interventionStatusView} interventions by ${interventionDateBasis} date.`,
+          clientResults: 'Client results are shown cumulatively for the selected fiscal year.',
+          dataUploads: 'Data upload totals are shown cumulatively for the selected fiscal year. Submitted counts recorded submission events, and Processed includes accepted uploads and uploads returned with errors.',
+          actionPlanStatuses: 'Action plan status counts are shown cumulatively for the selected fiscal year.',
+        },
+        rowCounts: {
+          filteredInterventions: filteredInterventions.length,
+          actionPlans: filteredActionPlans.length,
+          submissionEvents: filteredSubmissionHistory.length,
+          interventionRowsWithValues: countReportingRowsWithValues(interventions, snapshotPeriods),
+          clientResultRowsWithValues: countReportingRowsWithValues(clientResults, snapshotPeriods),
+          dataUploadRowsWithValues: countReportingRowsWithValues(dataUploads, snapshotPeriods),
+          actionPlanStatusRowsWithValues: countReportingRowsWithValues(actionPlanStatuses, snapshotPeriods),
+        },
+      },
+    });
+  } catch (err) {
+    if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
+      res.set('Cache-Control', 'no-store, max-age=0');
+      return res.json({
+        fiscalYear: formatReportingFiscalYearLabel(fiscalYearStart),
+        fiscalYearStart,
+        generatedAt: new Date().toISOString(),
+        selectedProvinceCodes: provinceCodes,
+        selectedCaseManagerIds: caseManagerIds,
+        interventionMeasure,
+        interventionStatusView,
+        interventionDateBasis,
+        overallResults: REPORTING_SUMMARY_METRICS.map(definition => ({
+          metric: definition.metric,
+          target: null,
+          result: 0,
+        })),
+        interventions,
+        clientResults,
+        dataUploads,
+        actionPlanStatuses,
+        meta: {
+          hasAnyOperationalData: false,
+          hasTargetsConfigured: false,
+          sectionStatus: {
+            overall: 'no_records',
+            interventions: 'no_records',
+            clientResults: 'no_records',
+            dataUploads: 'no_records',
+            actionPlanStatuses: 'no_records',
+          },
+          notes: {
+            overall: 'Reporting information is not available at the moment.',
+            interventions: 'Reporting information is not available at the moment.',
+            clientResults: 'Reporting information is not available at the moment.',
+            dataUploads: 'Reporting information is not available at the moment.',
+            actionPlanStatuses: 'Reporting information is not available at the moment.',
+          },
+          rowCounts: {
+            filteredInterventions: 0,
+            actionPlans: 0,
+            submissionEvents: 0,
+            interventionRowsWithValues: 0,
+            clientResultRowsWithValues: 0,
+            dataUploadRowsWithValues: 0,
+            actionPlanStatusRowsWithValues: 0,
+          },
+        },
+      });
+    }
+    console.error('[reporting:data-and-results] live report fetch failed:', err?.message || err);
+    return res.status(500).json({
+      error: 'live_report_fetch_failed',
+      message: err?.message || 'Live report fetch failed.',
+    });
+  }
+});
+
+app.get('/api/reporting/data-and-results/quarterly-uploads', async (req, res) => {
+  if (!hasOperationalReportingAccess(req)) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+
+  const fiscalYearStartInput = Number.parseInt(
+    String(req.query.fiscalYearStart ?? req.query.fiscalYear ?? ''),
+    10
+  );
+  const fiscalYearStart = Number.isInteger(fiscalYearStartInput) && fiscalYearStartInput >= 2020 && fiscalYearStartInput <= 2100
+    ? fiscalYearStartInput
+    : resolveReportingFiscalYearStartYear();
+  const quarterSchedule = buildReportingQuarterSchedule(fiscalYearStart);
+  const provinceCodes = normaliseReportingProvinceCodes(req.query.provinces ?? req.query.province ?? []);
+  const caseManagerIds = normaliseReportingCaseManagerIds(
+    req.query.caseManagers ?? req.query.caseManager ?? req.query.manager ?? []
+  );
+
+  const buildPendingItems = () => quarterSchedule.map(quarter => ({
+    period: quarter.period,
+    reportingPeriod: quarter.reportingPeriod,
+    fiscalYear: quarter.fiscalYear,
+    periodStart: quarter.periodStart,
+    periodEnd: quarter.periodEnd,
+    dueDate: quarter.dueDate,
+    receivedDate: null,
+    statusKey: 'pending',
+    statusLabel: 'Pending',
+    packageId: null,
+    ownerTeam: null,
+    rejectionReason: null,
+    updatedAt: null,
+  }));
+
+  try {
+    const [rows] = await pool.query(
+      `
+      SELECT
+        id,
+        reporting_period,
+        period_start,
+        period_end,
+        due_date,
+        status,
+        owner_team,
+        submitted_at,
+        rejection_reason,
+        updated_at
+      FROM esdc_reporting_package
+      WHERE due_date BETWEEN ? AND ?
+      ORDER BY due_date ASC, id DESC
+      `,
+      [quarterSchedule[0].dueDate, quarterSchedule[quarterSchedule.length - 1].dueDate]
+    );
+
+    const packageByDueDate = new Map();
+    rows.forEach(row => {
+      const dueDateKey = toDateOnly(row.due_date);
+      if (!dueDateKey || packageByDueDate.has(dueDateKey)) return;
+      packageByDueDate.set(dueDateKey, row);
+    });
+
+    const items = quarterSchedule.map(quarter => {
+      const packageRow = packageByDueDate.get(quarter.dueDate);
+      const mappedStatus = mapReportingPackageStatus(packageRow?.status);
+      return {
+        period: quarter.period,
+        reportingPeriod: packageRow?.reporting_period || quarter.reportingPeriod,
+        fiscalYear: quarter.fiscalYear,
+        periodStart: quarter.periodStart,
+        periodEnd: quarter.periodEnd,
+        dueDate: quarter.dueDate,
+        receivedDate: packageRow?.submitted_at ? toDateOnly(packageRow.submitted_at) : null,
+        statusKey: mappedStatus.statusKey,
+        statusLabel: mappedStatus.statusLabel,
+        packageId: packageRow?.id ?? null,
+        ownerTeam: packageRow?.owner_team ?? null,
+        rejectionReason: packageRow?.rejection_reason ?? null,
+        updatedAt: packageRow?.updated_at ? toIsoDateTime(packageRow.updated_at) : null,
+      };
+    });
+
+    const hasLivePackageRows = items.some(item => item.packageId !== null);
+    res.set('Cache-Control', 'no-store, max-age=0');
+    return res.json({
+      fiscalYear: formatReportingFiscalYearLabel(fiscalYearStart),
+      fiscalYearStart,
+      source: 'esdc_reporting_package',
+      sourceStatus: hasLivePackageRows ? 'live' : 'schedule_only',
+      generatedAt: new Date().toISOString(),
+      selectedProvinceCodes: provinceCodes,
+      selectedCaseManagerIds: caseManagerIds,
+      filterAffectsSection: false,
+      filterNote: 'Quarterly submission dates and statuses apply to the agreement as a whole, so province/territory and case manager filters do not change this section.',
+      items,
+    });
+  } catch (err) {
+    if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
+      res.set('Cache-Control', 'no-store, max-age=0');
+      return res.json({
+        fiscalYear: formatReportingFiscalYearLabel(fiscalYearStart),
+        fiscalYearStart,
+        source: 'esdc_reporting_package',
+        sourceStatus: 'schedule_only',
+        generatedAt: new Date().toISOString(),
+        selectedProvinceCodes: provinceCodes,
+        selectedCaseManagerIds: caseManagerIds,
+        filterAffectsSection: false,
+        filterNote: 'Quarterly submission dates and statuses apply to the agreement as a whole, so province/territory and case manager filters do not change this section.',
+        items: buildPendingItems(),
+      });
+    }
+    console.error('[reporting:data-and-results] quarterly uploads fetch failed:', err?.message || err);
+    return res.status(500).json({
+      error: 'quarterly_uploads_fetch_failed',
+      message: err?.message || 'Quarterly uploads fetch failed.',
+    });
+  }
+});
 
 
 app.get('/api/admin/contact-messages/:id', async (req, res) => {
@@ -20554,6 +21979,76 @@ app.patch('/api/config/runtime/backend-jobs', async (req, res) => {
   } catch (err) {
     console.error('[backend-jobs] config update failed:', err);
     res.status(500).json({ error: 'backend_jobs_config_update_failed', message: err.message });
+  }
+});
+
+app.get('/api/config/runtime/reporting-data-results-targets', async (req, res) => {
+  try {
+    if (!hasOperationalReportingAccess(req)) return res.status(403).json({ error: 'forbidden' });
+    const fiscalYearStart = resolveReportingFiscalYearStartValue(
+      req.query.fiscalYearStart ?? req.query.fiscalYear
+    );
+    const config = await readReportingDataAndResultsTargetsConfig(fiscalYearStart);
+    res.json(config);
+  } catch (err) {
+    console.error('[reporting-targets] config fetch failed:', err);
+    res.status(500).json({ error: 'reporting_targets_fetch_failed', message: err.message });
+  }
+});
+
+app.patch('/api/config/runtime/reporting-data-results-targets', async (req, res) => {
+  try {
+    if (!hasOperationalReportingAccess(req)) return res.status(403).json({ error: 'forbidden' });
+    const fiscalYearStart = resolveReportingFiscalYearStartValue(
+      req.body?.fiscalYearStart ??
+      req.body?.fiscalYear ??
+      req.query.fiscalYearStart ??
+      req.query.fiscalYear
+    );
+    const validation = validateReportingDataAndResultsTargets(req.body || {});
+    if (!validation.ok) {
+      return res.status(400).json({ error: validation.error, message: validation.message });
+    }
+    const saved = await writeReportingDataAndResultsTargetsConfig(fiscalYearStart, validation.value);
+    res.json({ ok: true, ...saved });
+  } catch (err) {
+    console.error('[reporting-targets] config update failed:', err);
+    res.status(500).json({ error: 'reporting_targets_update_failed', message: err.message });
+  }
+});
+
+app.get('/api/config/runtime/reporting-data-results-comments', async (req, res) => {
+  try {
+    if (!hasOperationalReportingAccess(req)) return res.status(403).json({ error: 'forbidden' });
+    const fiscalYearStart = resolveReportingFiscalYearStartValue(
+      req.query.fiscalYearStart ?? req.query.fiscalYear
+    );
+    const config = await readReportingAdditionalCommentsConfig(fiscalYearStart);
+    res.json(config);
+  } catch (err) {
+    console.error('[reporting-comments] config fetch failed:', err);
+    res.status(500).json({ error: 'reporting_comments_fetch_failed', message: err.message });
+  }
+});
+
+app.patch('/api/config/runtime/reporting-data-results-comments', async (req, res) => {
+  try {
+    if (!hasOperationalReportingAccess(req)) return res.status(403).json({ error: 'forbidden' });
+    const fiscalYearStart = resolveReportingFiscalYearStartValue(
+      req.body?.fiscalYearStart ??
+      req.body?.fiscalYear ??
+      req.query.fiscalYearStart ??
+      req.query.fiscalYear
+    );
+    const validation = validateReportingAdditionalComments(req.body || {});
+    if (!validation.ok) {
+      return res.status(400).json({ error: validation.error, message: validation.message });
+    }
+    const saved = await writeReportingAdditionalCommentsConfig(fiscalYearStart, validation.value);
+    res.json({ ok: true, ...saved });
+  } catch (err) {
+    console.error('[reporting-comments] config update failed:', err);
+    res.status(500).json({ error: 'reporting_comments_update_failed', message: err.message });
   }
 });
 
@@ -58988,6 +60483,89 @@ app.post('/api/authorization-release/pdf', async (req, res) => {
   } catch (err) {
     console.error('[authorization-release-pdf] failed to generate PDF:', err);
     return res.status(500).json({ error: 'Unable to generate authorization release PDF' });
+  } finally {
+    if (browser) {
+      try { await browser.close(); } catch (_) {}
+    }
+  }
+});
+
+app.post('/api/client-acknowledgement/pdf', async (req, res) => {
+  const { applicationId, declarationSigned, declarationSignedName, declarationSignedAt } = req.body || {};
+  if (!applicationId) {
+    return res.status(400).json({ error: 'applicationId is required' });
+  }
+
+  const signed = Boolean(declarationSigned);
+  const rawSignatureName = typeof declarationSignedName === 'string' ? declarationSignedName.trim() : '';
+  const signatureBoxContent = signed ? escapeHtml(rawSignatureName || 'Not provided') : 'Not signed';
+  const signedOnDisplay = signed ? formatSignatureDate(declarationSignedAt) : 'Not signed';
+  const signedOnHtml = escapeHtml(signedOnDisplay);
+  const logoDataUri = getConsentLogoDataUri();
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Client Acknowledgement of Funding Source</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; color: #1b1b1b; margin: 40px; line-height: 1.5; }
+    h1 { text-align: center; font-size: 24px; margin-bottom: 12px; }
+    .logo { text-align: center; margin-bottom: 24px; }
+    .logo img { max-height: 80px; width: auto; }
+    .signature-box { border: 1px solid #9ba7b6; border-radius: 6px; padding: 16px; min-height: 80px; display: flex; align-items: center; font-size: 22px; font-family: 'Segoe Script', 'Lucida Handwriting', cursive; }
+    .signature-label { font-size: 12px; color: #6b7280; margin-top: 4px; }
+    .meta { font-size: 14px; color: #374151; }
+    .footer { text-align: center; font-size: 12px; color: #6b7280; margin-top: 48px; }
+    .paragraph { margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    td { vertical-align: top; padding-right: 16px; }
+  </style>
+</head>
+<body>
+  <div class="logo">
+    ${logoDataUri ? `<img src="${logoDataUri}" alt="Native Women's Association of Canada logo" />` : ''}
+  </div>
+  <h1>Client Acknowledgement of Funding Source</h1>
+  ${CLIENT_ACKNOWLEDGEMENT_PARAGRAPHS.map(paragraph => `<p class="paragraph">${escapeHtml(paragraph)}</p>`).join('')}
+  <table style="margin-top: 24px;">
+    <tr>
+      <td style="width: 50%;">
+        <div class="meta"><strong>Client signature</strong></div>
+        <div class="signature-box">${signatureBoxContent}</div>
+        <div class="signature-label">Client signature</div>
+      </td>
+      <td style="width: 50%;">
+        <div class="meta"><strong>Signed on</strong></div>
+        <div class="meta">${signedOnHtml}</div>
+        <div class="signature-label">Electronic acknowledgement captured via the ISET intake portal.</div>
+      </td>
+    </tr>
+  </table>
+  <div class="footer">NWAC wishes to acknowledge support for this project through the Government of Canada's ISET Program.</div>
+</body>
+</html>`;
+
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '25mm', bottom: '25mm', left: '20mm', right: '20mm' }
+    });
+    await page.close();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="client-acknowledgement-of-funding-source-${applicationId}.pdf"`);
+    return res.end(pdfBuffer);
+  } catch (err) {
+    console.error('[client-acknowledgement-pdf] failed to generate PDF:', err);
+    return res.status(500).json({ error: 'Unable to generate client acknowledgement PDF' });
   } finally {
     if (browser) {
       try { await browser.close(); } catch (_) {}

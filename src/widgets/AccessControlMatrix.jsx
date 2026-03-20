@@ -50,7 +50,7 @@ const NAV_SECTIONS = [
     ],
   },
   {
-    section: 'ESDC Reporting',
+    section: 'ILMP Submissions',
     items: [
       { href: '/esdc/overview', label: 'Overview' },
       { href: '/esdc/participants', label: 'ILMP Exports' },
@@ -65,8 +65,11 @@ const NAV_SECTIONS = [
     ],
   },
   {
-    section: 'Analytics Dashboard',
-    items: [{ href: '/reporting-and-monitoring-dashboard', label: 'Reporting and Monitoring' }],
+    section: 'Reporting',
+    items: [
+      { href: '/reporting/data-and-results', label: 'Data and Results' },
+      { href: '/reporting-and-monitoring-dashboard', label: 'Reporting and Monitoring' },
+    ],
   },
   {
     section: 'ISET Administration',
@@ -178,6 +181,7 @@ const ROUTE_LABELS = {
   '/nwac-hub-management': 'NWAC Hub Management',
   '/ptma-management': 'PTMA Management',
   '/release-management-dashboard': 'Release Management',
+  '/reporting/data-and-results': 'Data and Results',
   '/reporting-and-monitoring-dashboard': 'Reporting and Monitoring',
   '/tutorials-dashboard': 'Tutorials',
   '/user-management-dashboard': 'User Management',

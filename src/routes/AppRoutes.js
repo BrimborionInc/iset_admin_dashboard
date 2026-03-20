@@ -32,6 +32,7 @@ import BookAppointmentQ7 from '../previews/bookAppointmentQ7.js';
 import BookAppointmentQ8 from '../previews/bookAppointmentQ8.js';
 import ConfigurationSettings from '../pages/configurationSettings.js';
 import ReportingAndMonitoringDashboard from '../pages/reportingAndMonitoringDashboard.js'; // Import the new component
+import DataAndResultsDashboard from '../pages/reporting/DataAndResultsDashboard.jsx';
 import ManageNotifications from '../pages/manageNotifications.js';
 import { ManageNotificationsHelp } from '../helpPanelContents/manageNotificationsHelp.js';
 import TemplateEditorDashboard from '../pages/templateEditorDashboard.js';
@@ -90,6 +91,7 @@ import EsdcOverviewHelp from '../helpPanelContents/esdcOverviewHelp.js';
 import EsdcParticipantsHelp from '../helpPanelContents/esdcParticipantsHelp.js';
 import EsdcReportingHelp from '../helpPanelContents/esdcReportingHelp.js';
 import EsdcSubmissionDashboardHelp from '../helpPanelContents/esdcSubmissionDashboardHelp.js';
+import DataAndResultsDashboardHelp from '../helpPanelContents/dataAndResultsDashboardHelp.js';
 import DocumentationLibrary from '../pages/documentation/DocumentationLibrary.jsx';
 import HomeDashboardHelp from '../helpPanelContents/homeDashboardHelp.js';
 import TutorialsDashboardPage from '../pages/support/TutorialsDashboardPage.jsx';
@@ -471,6 +473,43 @@ const AppRoutes = ({
             [{ text: 'Home', href: '/' }, { text: 'Manage Notifications', href: '/manage-notifications' }],
             'Manage Notifications',
             <ManageNotificationsHelp />
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/reporting/data-and-results">
+        <Guard path="/reporting/data-and-results">
+          {renderContent(
+            DataAndResultsDashboard,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Reporting' },
+              { text: 'Data and Results', href: '/reporting/data-and-results' }
+            ],
+            'Data and Results',
+            <DataAndResultsDashboardHelp />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent('dataAndResults:openPalette'))
+                  }
+                >
+                  Add section
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent('dataAndResults:resetLayout'))
+                  }
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
+            DataAndResultsDashboardHelp.aiContext,
+            'Review annual results, quarterly submissions, and reporting notes for the selected fiscal year.'
           )}
         </Guard>
       </Route>
