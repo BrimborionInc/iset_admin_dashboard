@@ -26,6 +26,7 @@ import Board from "@cloudscape-design/board-components/board";
 import BoardItem from "@cloudscape-design/board-components/board-item";
 import { apiFetch } from "../../auth/apiClient";
 import useCurrentUser from "../../hooks/useCurrentUser";
+import useReportingDemoMode from "./useReportingDemoMode";
 
 const PROVINCE_TERRITORY_OPTIONS = [
   { label: "Alberta (AB)", value: "AB" },
@@ -125,6 +126,22 @@ const REPORTING_PERIOD_COLUMNS = [
   "March (p12)",
   "Final (p14)",
 ];
+
+const REPORTING_PERIOD_DISPLAY_LABELS = {
+  "April (p1)": "Apr",
+  "May (p2)": "May",
+  "June (p3)": "Jun",
+  "July (p4)": "Jul",
+  "August (p5)": "Aug",
+  "September (p6)": "Sep",
+  "October (p7)": "Oct",
+  "November (p8)": "Nov",
+  "December (p9)": "Dec",
+  "January (p10)": "Jan",
+  "February (p11)": "Feb",
+  "March (p12)": "Mar",
+  "Final (p14)": "Final",
+};
 
 const RESULTS_VIEW_OPTIONS = [
   { id: "cumulative", text: "Cumulative" },
@@ -242,9 +259,6 @@ const CLIENT_RESULT_ROWS = [
 
 const DATA_UPLOAD_ROWS = [
   "Submitted",
-  "Processed",
-  "Accepted",
-  "Number of Errors",
 ];
 
 const ACTION_PLAN_STATUS_ROWS = [
@@ -293,8 +307,8 @@ const REPORTING_SECTION_REGISTRY = {
   },
   "data-uploads": {
     id: "data-uploads",
-    title: "Data Uploads",
-    description: "Data upload activity for the selected fiscal year.",
+    title: "ILMP Data Uploads",
+    description: "ILMP data upload submissions for the selected fiscal year.",
     defaultRowSpan: 6,
     defaultColumnSpan: 4,
   },
@@ -592,6 +606,11 @@ const matrixHeaderCellStyle = {
   fontWeight: 700,
 };
 
+const matrixValueHeaderCellStyle = {
+  ...matrixHeaderCellStyle,
+  textAlign: "center",
+};
+
 const matrixLabelCellStyle = {
   borderBottom: "1px solid #eaeded",
   padding: "10px 12px",
@@ -648,6 +667,94 @@ const displayValue = (value, valueFormat = "number") => {
   }
   return value;
 };
+
+const extractTextFromNode = node => {
+  if (node === null || typeof node === "undefined" || typeof node === "boolean") {
+    return "";
+  }
+  if (Array.isArray(node)) {
+    return node.map(extractTextFromNode).join(" ");
+  }
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node);
+  }
+  if (React.isValidElement(node)) {
+    return extractTextFromNode(node.props?.children);
+  }
+  return "";
+};
+
+const getDisplayTextValue = (value, valueFormat = "number") => {
+  if (React.isValidElement(value)) {
+    return extractTextFromNode(value).replace(/\s+/g, " ").trim();
+  }
+  if (value === null || typeof value === "undefined" || value === "") {
+    return "Pending";
+  }
+  if (typeof value === "number") {
+    return valueFormat === "currency" ? formatCurrency(value) : formatNumber(value);
+  }
+  return String(value);
+};
+
+const escapeCsvCell = value => `"${String(value ?? "").replace(/"/g, '""')}"`;
+
+const buildCsvContent = rows =>
+  (rows || []).map(row => row.map(escapeCsvCell).join(",")).join("\r\n");
+
+const triggerCsvDownload = (filename, csvContent) => {
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    return;
+  }
+
+  const blob = new Blob(["\ufeff", csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.setAttribute("download", filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+};
+
+const slugifyFilenamePart = value => {
+  const slug = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "report";
+};
+
+const buildOverallResultsCsvRows = rows => [
+  ["Metric", "Targets as established in AOP", "Year-end Results"],
+  ...(rows || []).map(row => [
+    row?.metric || "",
+    getDisplayTextValue(row?.target),
+    getDisplayTextValue(row?.result),
+  ]),
+];
+
+const buildQuarterlyUploadsCsvRows = rows => [
+  ["Period", "Due Date of Reporting Requirement", "Received by Data Gateway", "Status"],
+  ...(rows || []).map(row => [
+    row?.period || "",
+    getDisplayTextValue(row?.dueDate),
+    getDisplayTextValue(row?.receivedDate),
+    getDisplayTextValue(row?.status),
+  ]),
+];
+
+const buildMatrixCsvRows = (rows, valueFormat = "number") => [
+  ["", ...REPORTING_PERIOD_COLUMNS.map(column => REPORTING_PERIOD_DISPLAY_LABELS[column] || column)],
+  ...(rows || []).map(row => [
+    row?.label || "",
+    ...REPORTING_PERIOD_COLUMNS.map(column =>
+      getDisplayTextValue(row?.values?.[column], valueFormat)
+    ),
+  ]),
+];
 
 const getInterventionStatusLabel = value =>
   INTERVENTION_STATUS_OPTIONS.find(option => option.value === value)?.label || "Completed";
@@ -809,67 +916,6 @@ const allocateByWeights = (total, weights) => {
   return allocations;
 };
 
-const allocateByWeightsWithCaps = (total, weights, caps) => {
-  const safeCaps = (caps || []).map(value => Math.max(0, Math.round(Number(value) || 0)));
-  const cappedTotal = Math.min(
-    Math.max(0, Math.round(Number(total) || 0)),
-    sumNumberArray(safeCaps)
-  );
-  const safeWeights = safeCaps.map((_, index) => Math.max(0, Number(weights?.[index]) || 0));
-
-  if (!safeCaps.length || !cappedTotal) {
-    return safeCaps.map(() => 0);
-  }
-
-  const totalWeight = sumNumberArray(safeWeights);
-  if (!totalWeight) {
-    const allocation = safeCaps.map(() => 0);
-    let remaining = cappedTotal;
-    let index = 0;
-    while (remaining > 0) {
-      const targetIndex = index % allocation.length;
-      if (allocation[targetIndex] < safeCaps[targetIndex]) {
-        allocation[targetIndex] += 1;
-        remaining -= 1;
-      }
-      index += 1;
-    }
-    return allocation;
-  }
-
-  const rawAllocations = safeWeights.map(weight => (cappedTotal * weight) / totalWeight);
-  const allocation = rawAllocations.map((value, index) =>
-    Math.min(safeCaps[index], Math.floor(value))
-  );
-  let remaining = cappedTotal - sumNumberArray(allocation);
-
-  const remainderScores = rawAllocations.map((value, index) => ({
-    index,
-    score: value - allocation[index],
-    weight: safeWeights[index],
-  }));
-
-  while (remaining > 0) {
-    const nextCandidate = remainderScores
-      .filter(candidate => allocation[candidate.index] < safeCaps[candidate.index])
-      .sort((left, right) =>
-        right.score - left.score ||
-        right.weight - left.weight ||
-        left.index - right.index
-      )[0];
-
-    if (!nextCandidate) {
-      break;
-    }
-
-    allocation[nextCandidate.index] += 1;
-    remainderScores[nextCandidate.index].score -= 1;
-    remaining -= 1;
-  }
-
-  return allocation;
-};
-
 const allocateCurrencyByWeights = (total, weights) =>
   allocateByWeights(Math.round(Number(total || 0) * 100), weights).map(value => value / 100);
 
@@ -975,19 +1021,10 @@ const buildDemoReportData = ({
   interventions.push(buildDemoRowFromMonthlyCounts("TOTAL", interventionMonthlyTotals));
 
   const submittedMonthly = [...clientsServedMonthly];
-  const processedMonthly = [...submittedMonthly];
-  const errorsMonthly = allocateByWeightsWithCaps(
-    Math.round(sumNumberArray(processedMonthly) * 0.04),
-    DEMO_ACTION_PLAN_MONTHLY_SHARE_WEIGHTS,
-    processedMonthly
-  );
-  const acceptedMonthly = processedMonthly.map(
-    (processedCount, index) => processedCount - errorsMonthly[index]
-  );
 
   const actionPlanTotals = {
     pendingResult: Math.round(results.clientsServed * 0.24),
-    dataIntegrityIssues: Math.round(sumNumberArray(processedMonthly) * 0.04),
+    dataIntegrityIssues: Math.round(sumNumberArray(submittedMonthly) * 0.04),
     repeatEmployedResult: Math.round(results.clientsEmployed * 0.08),
     repeatReturnedToSchoolResult: Math.round(results.clientsReturnedToSchool * 0.08),
     unemployedResult: Math.max(
@@ -1061,9 +1098,6 @@ const buildDemoReportData = ({
       ],
       dataUploads: [
         buildDemoRowFromMonthlyCounts("Submitted", submittedMonthly),
-        buildDemoRowFromMonthlyCounts("Processed", processedMonthly),
-        buildDemoRowFromMonthlyCounts("Accepted", acceptedMonthly),
-        buildDemoRowFromMonthlyCounts("Number of Errors", errorsMonthly),
       ],
       actionPlanStatuses,
     };
@@ -1080,9 +1114,6 @@ const buildDemoReportData = ({
     ],
     dataUploads: [
       buildDemoRowFromMonthlyCounts("Submitted", submittedMonthly),
-      buildDemoRowFromMonthlyCounts("Processed", processedMonthly),
-      buildDemoRowFromMonthlyCounts("Accepted", acceptedMonthly),
-      buildDemoRowFromMonthlyCounts("Number of Errors", errorsMonthly),
     ],
     actionPlanStatuses,
   };
@@ -1286,6 +1317,7 @@ const SimpleSection = ({
   headerActions = null,
   asBoardItem = false,
   actions = null,
+  onDownloadCsv = null,
 }) => {
   const headerContent =
     badgeText && headerActions ? (
@@ -1308,17 +1340,27 @@ const SimpleSection = ({
   const content = <SpaceBetween size="m">{children}</SpaceBetween>;
 
   if (asBoardItem) {
+    const settingsItems = [];
+    if (onDownloadCsv) {
+      settingsItems.push({ id: "download-csv", text: "Download CSV" });
+    }
+    if (actions?.removeItem) {
+      settingsItems.push({ id: "remove", text: "Remove section" });
+    }
+
     return (
       <BoardItem
         header={headerElement}
         settings={
-          actions?.removeItem ? (
+          settingsItems.length ? (
             <ButtonDropdown
-              items={[{ id: "remove", text: "Remove section" }]}
+              items={settingsItems}
               ariaLabel="Board item settings"
               variant="icon"
               onItemClick={({ detail }) => {
-                if (detail.id === "remove") {
+                if (detail.id === "download-csv") {
+                  onDownloadCsv?.();
+                } else if (detail.id === "remove") {
                   actions.removeItem();
                 }
               }}
@@ -1338,7 +1380,6 @@ const SimpleSection = ({
 const MatrixSection = ({
   title,
   description,
-  sourceLabel,
   rows,
   stripedRows = false,
   badgeText = null,
@@ -1349,6 +1390,7 @@ const MatrixSection = ({
   statusMessage,
   asBoardItem = false,
   actions = null,
+  onDownloadCsv = null,
 }) => {
   const headerContent =
     badgeText && headerActions ? (
@@ -1370,19 +1412,14 @@ const MatrixSection = ({
 
   const content = (
     <SpaceBetween size="m">
-      {sourceLabel ? (
-        <Box color="text-body-secondary" fontSize="body-s">
-          Source: {sourceLabel}
-        </Box>
-      ) : null}
       <div style={matrixWrapperStyle}>
         <table style={matrixTableStyle}>
           <thead>
             <tr>
-              <th style={matrixHeaderCellStyle}>Metric</th>
+              <th style={matrixHeaderCellStyle} />
               {REPORTING_PERIOD_COLUMNS.map(column => (
-                <th key={column} style={matrixHeaderCellStyle}>
-                  {column}
+                <th key={column} style={matrixValueHeaderCellStyle}>
+                  {REPORTING_PERIOD_DISPLAY_LABELS[column] || column}
                 </th>
               ))}
             </tr>
@@ -1432,17 +1469,27 @@ const MatrixSection = ({
   );
 
   if (asBoardItem) {
+    const settingsItems = [];
+    if (onDownloadCsv) {
+      settingsItems.push({ id: "download-csv", text: "Download CSV" });
+    }
+    if (actions?.removeItem) {
+      settingsItems.push({ id: "remove", text: "Remove section" });
+    }
+
     return (
       <BoardItem
         header={headerElement}
         settings={
-          actions?.removeItem ? (
+          settingsItems.length ? (
             <ButtonDropdown
-              items={[{ id: "remove", text: "Remove section" }]}
+              items={settingsItems}
               ariaLabel="Board item settings"
               variant="icon"
               onItemClick={({ detail }) => {
-                if (detail.id === "remove") {
+                if (detail.id === "download-csv") {
+                  onDownloadCsv?.();
+                } else if (detail.id === "remove") {
                   actions.removeItem();
                 }
               }}
@@ -1481,7 +1528,7 @@ const DataAndResultsDashboard = ({
   const [selectedFiscalYearOption, setSelectedFiscalYearOption] = useState(
     () => buildFiscalYearOption(getReportingFiscalYearStart())
   );
-  const [demoModeEnabled, setDemoModeEnabled] = useState(false);
+  const [demoModeEnabled, setDemoModeEnabled] = useReportingDemoMode();
   const [monthlyResultsEnabled, setMonthlyResultsEnabled] = useState(false);
   const [interventionMeasure, setInterventionMeasure] = useState("count");
   const [interventionStatusView, setInterventionStatusView] = useState("completed");
@@ -2258,8 +2305,8 @@ const DataAndResultsDashboard = ({
       ? "Monthly client results for the selected fiscal year."
       : "Cumulative client results for the selected fiscal year.",
     dataUploads: monthlyResultsEnabled
-      ? "Monthly upload outcomes for the selected fiscal year."
-      : "Cumulative upload outcomes for the selected fiscal year.",
+      ? "Monthly ILMP data upload submissions for the selected fiscal year."
+      : "Cumulative ILMP data upload submissions for the selected fiscal year.",
     actionPlanStatuses: monthlyResultsEnabled
       ? "Month-end action plan status counts and monthly result counts for the selected fiscal year."
       : "Cumulative action plan status counts for the selected fiscal year.",
@@ -2273,8 +2320,8 @@ const DataAndResultsDashboard = ({
       ? "Monthly client results are shown below."
       : liveReportMeta.notes.clientResults || "Client results are shown below.",
     dataUploads: monthlyResultsEnabled
-      ? "Monthly data upload totals are shown below."
-      : liveReportMeta.notes.dataUploads || "Data upload totals are shown below.",
+      ? "Monthly ILMP data upload submissions are shown below."
+      : liveReportMeta.notes.dataUploads || "ILMP data upload submissions are shown below.",
     actionPlanStatuses: monthlyResultsEnabled
       ? "Pending-result and data-integrity rows show month-end counts; result rows show monthly counts."
       : liveReportMeta.notes.actionPlanStatuses || "Action plan status counts are shown below.",
@@ -2396,9 +2443,9 @@ const DataAndResultsDashboard = ({
     error: liveReportError,
     sectionStatus: liveReportMeta.sectionStatus.dataUploads,
     liveMessage: matrixSectionStatusMessageByMode.dataUploads,
-    emptyMessage: "No data upload activity was found for the selected filters.",
-    errorMessage: "Data upload information is currently unavailable.",
-    loadingMessage: "Updating data upload information.",
+    emptyMessage: "No ILMP data upload submissions were found for the selected filters.",
+    errorMessage: "ILMP data upload information is currently unavailable.",
+    loadingMessage: "Updating ILMP data upload information.",
   });
 
   const actionPlanStatusesSectionStatusType = getLiveSectionStatusType({
@@ -2428,6 +2475,101 @@ const DataAndResultsDashboard = ({
         ? additionalCommentsValue
         : `No comments have been added for FY ${activeFiscalYearLabel} yet.`;
 
+  const downloadSectionCsv = useCallback(sectionId => {
+    const baseFileNameParts = ["data-and-results", `fy-${activeFiscalYearLabel}`];
+    if (demoModeEnabled) {
+      baseFileNameParts.push("sample-data");
+    }
+
+    let filename = "data-and-results.csv";
+    let csvRows = null;
+
+    switch (sectionId) {
+      case "interventions":
+        filename = [
+          ...baseFileNameParts,
+          "interventions",
+          interventionMeasure,
+          interventionStatusView,
+          activeInterventionDateBasis,
+          monthlyResultsEnabled ? "monthly" : "cumulative",
+        ]
+          .map(slugifyFilenamePart)
+          .join("-")
+          .concat(".csv");
+        csvRows = buildMatrixCsvRows(
+          reportData.interventions,
+          interventionMeasure === "cost" ? "currency" : "number"
+        );
+        break;
+      case "overall-results":
+        filename = [
+          ...baseFileNameParts,
+          "overall-results",
+        ]
+          .map(slugifyFilenamePart)
+          .join("-")
+          .concat(".csv");
+        csvRows = buildOverallResultsCsvRows(reportData.overallResults);
+        break;
+      case "quarterly-data-uploads":
+        filename = [
+          ...baseFileNameParts,
+          "quarterly-data-uploads",
+        ]
+          .map(slugifyFilenamePart)
+          .join("-")
+          .concat(".csv");
+        csvRows = buildQuarterlyUploadsCsvRows(reportData.quarterlyUploads);
+        break;
+      case "client-results":
+        filename = [
+          ...baseFileNameParts,
+          "client-results",
+          monthlyResultsEnabled ? "monthly" : "cumulative",
+        ]
+          .map(slugifyFilenamePart)
+          .join("-")
+          .concat(".csv");
+        csvRows = buildMatrixCsvRows(reportData.clientResults);
+        break;
+      case "data-uploads":
+        filename = [
+          ...baseFileNameParts,
+          "ilmp-data-uploads",
+          monthlyResultsEnabled ? "monthly" : "cumulative",
+        ]
+          .map(slugifyFilenamePart)
+          .join("-")
+          .concat(".csv");
+        csvRows = buildMatrixCsvRows(reportData.dataUploads);
+        break;
+      case "action-plan-statuses":
+        filename = [
+          ...baseFileNameParts,
+          "status-of-action-plans",
+          monthlyResultsEnabled ? "monthly" : "cumulative",
+        ]
+          .map(slugifyFilenamePart)
+          .join("-")
+          .concat(".csv");
+        csvRows = buildMatrixCsvRows(reportData.actionPlanStatuses);
+        break;
+      default:
+        return;
+    }
+
+    triggerCsvDownload(filename, buildCsvContent(csvRows));
+  }, [
+    activeFiscalYearLabel,
+    activeInterventionDateBasis,
+    demoModeEnabled,
+    interventionMeasure,
+    interventionStatusView,
+    monthlyResultsEnabled,
+    reportData,
+  ]);
+
   const renderBoardItem = (item, actions) => {
     switch (item?.id) {
       case "interventions":
@@ -2435,6 +2577,7 @@ const DataAndResultsDashboard = ({
           <MatrixSection
             asBoardItem
             actions={actions}
+            onDownloadCsv={() => downloadSectionCsv("interventions")}
             title="Interventions"
             description={matrixSectionDescriptionByMode.interventions}
             rows={reportData.interventions}
@@ -2493,6 +2636,7 @@ const DataAndResultsDashboard = ({
           <SimpleSection
             asBoardItem
             actions={actions}
+            onDownloadCsv={() => downloadSectionCsv("overall-results")}
             title="Overall Results Targets vs Year-end Results"
             description="Annual targets and year-end results."
             badgeText={demoModeEnabled ? "Sample data" : null}
@@ -2528,7 +2672,7 @@ const DataAndResultsDashboard = ({
                 },
                 {
                   id: "result",
-                  header: "Year-end Results (p14)",
+                  header: "Year-end Results",
                   cell: itemRow => displayValue(itemRow.result),
                 },
               ]}
@@ -2543,6 +2687,7 @@ const DataAndResultsDashboard = ({
           <SimpleSection
             asBoardItem
             actions={actions}
+            onDownloadCsv={() => downloadSectionCsv("quarterly-data-uploads")}
             title="Quarterly Data Uploads"
             description="Quarterly submission due dates, receipt dates, and status."
             badgeText={demoModeEnabled ? "Sample data" : null}
@@ -2599,6 +2744,7 @@ const DataAndResultsDashboard = ({
           <MatrixSection
             asBoardItem
             actions={actions}
+            onDownloadCsv={() => downloadSectionCsv("client-results")}
             title="Client Results"
             description={matrixSectionDescriptionByMode.clientResults}
             rows={reportData.clientResults}
@@ -2613,9 +2759,9 @@ const DataAndResultsDashboard = ({
           <MatrixSection
             asBoardItem
             actions={actions}
-            title="Data Uploads"
+            onDownloadCsv={() => downloadSectionCsv("data-uploads")}
+            title="ILMP Data Uploads"
             description={matrixSectionDescriptionByMode.dataUploads}
-            sourceLabel="Data Gateway Website"
             rows={reportData.dataUploads}
             badgeText={demoModeEnabled ? "Sample data" : null}
             badgeColor={demoModeEnabled ? "green" : "blue"}
@@ -2628,9 +2774,9 @@ const DataAndResultsDashboard = ({
           <MatrixSection
             asBoardItem
             actions={actions}
+            onDownloadCsv={() => downloadSectionCsv("action-plan-statuses")}
             title="Status of Action Plans"
             description={matrixSectionDescriptionByMode.actionPlanStatuses}
-            sourceLabel="Secured Website - Status of Action Plans"
             rows={reportData.actionPlanStatuses}
             badgeText={demoModeEnabled ? "Sample data" : null}
             badgeColor={demoModeEnabled ? "green" : "blue"}

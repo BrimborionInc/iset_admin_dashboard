@@ -140,10 +140,11 @@ const SideNavigation = ({ currentRole, showTutorialHotspots = false, notificatio
     },
     {
       type: 'section',
-      text: 'Budgets and Payments',
+      text: 'Budgets and Finance',
       items: [
         { type: 'link', text: 'Finance Overview', href: '/finance/overview' },
         { type: 'link', text: 'Budgets', href: '/finance/budgets' },
+        { type: 'link', text: 'Salaries', href: '/finance/salaries' },
         { type: 'link', text: 'Allocations & Transfers', href: '/finance/allocations' },
         { type: 'link', text: 'Payments', href: '/finance/payments' },
         { type: 'link', text: 'Reconciliation', href: '/finance/reconciliation' },
@@ -175,6 +176,7 @@ const SideNavigation = ({ currentRole, showTutorialHotspots = false, notificatio
       text: 'Reporting',
       defaultExpanded: false,
       items: [
+        { type: 'link', text: 'Regional Snapshot', href: '/reporting/regional-snapshot' },
         { type: 'link', text: 'Data and Results', href: '/reporting/data-and-results' },
         { type: 'link', text: 'Reporting and Monitoring', href: '/reporting-and-monitoring-dashboard' },
       ],

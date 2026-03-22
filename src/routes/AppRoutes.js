@@ -33,10 +33,12 @@ import BookAppointmentQ8 from '../previews/bookAppointmentQ8.js';
 import ConfigurationSettings from '../pages/configurationSettings.js';
 import ReportingAndMonitoringDashboard from '../pages/reportingAndMonitoringDashboard.js'; // Import the new component
 import DataAndResultsDashboard from '../pages/reporting/DataAndResultsDashboard.jsx';
+import RegionalSnapshotDashboard from '../pages/reporting/RegionalSnapshotDashboard.jsx';
 import ManageNotifications from '../pages/manageNotifications.js';
 import { ManageNotificationsHelp } from '../helpPanelContents/manageNotificationsHelp.js';
 import TemplateEditorDashboard from '../pages/templateEditorDashboard.js';
 import TemplateEditorDashboardHelp from '../helpPanelContents/templateEditorDashboardHelp.js';
+import RegionalSnapshotDashboardHelp from '../helpPanelContents/regionalSnapshotDashboardHelp.js';
 import ManageLocationsHelp from '../helpPanelContents/manageLocationsHelp'; // Import the help panel content
 import ModifyComponent from '../pages/modifyIntakeStep.js'; // Import the new component
 import ModifyIntakeStepHelp from '../helpPanelContents/modifyIntakeStep.js'; // Renamed help panel content
@@ -56,6 +58,7 @@ import UploadConfigDashboard from '../pages/uploadConfigDashboard.js';
 import EventCaptureDashboard from '../pages/configuration/EventCaptureDashboard.js';
 import QueryEditorDashboard from '../pages/configuration/QueryEditorDashboard.js';
 import FinanceOverviewPage from '../pages/finance/FinanceOverviewPage.jsx';
+import FinanceSalariesPage from '../pages/finance/FinanceSalariesPage.jsx';
 import FinanceOverviewHelp from '../helpPanelContents/financeOverviewHelp.js';
 import FinanceBudgetsPage from '../pages/finance/FinanceBudgetsPage.jsx';
 import FinanceAllocationsPage from '../pages/finance/FinanceAllocationsPage.jsx';
@@ -66,6 +69,7 @@ import FinanceForecastingPage from '../pages/finance/FinanceForecastingPage.jsx'
 import FinanceSettingsPage from '../pages/finance/FinanceSettingsPage.jsx';
 import FinancePaymentsPage from '../pages/finance/FinancePaymentsPage.jsx';
 import FinanceBudgetsHelp from '../helpPanelContents/financeBudgetsHelp.js';
+import FinanceSalariesHelp from '../helpPanelContents/financeSalariesHelp.js';
 import FinanceAllocationsHelp from '../helpPanelContents/financeAllocationsHelp.js';
 import FinanceReconciliationHelp from '../helpPanelContents/financeReconciliationHelp.js';
 import FinanceReportsHelp from '../helpPanelContents/financeReportsHelp.js';
@@ -510,6 +514,24 @@ const AppRoutes = ({
             ),
             DataAndResultsDashboardHelp.aiContext,
             'Review annual results, quarterly submissions, and reporting notes for the selected fiscal year.'
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/reporting/regional-snapshot">
+        <Guard path="/reporting/regional-snapshot">
+          {renderContent(
+            RegionalSnapshotDashboard,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Reporting' },
+              { text: 'Regional Snapshot', href: '/reporting/regional-snapshot' }
+            ],
+            'Regional Snapshot',
+            <RegionalSnapshotDashboardHelp />,
+            null,
+            RegionalSnapshotDashboardHelp.aiContext,
+            'Review a saved regional snapshot for the selected month, quarter, or fiscal year.'
           )}
         </Guard>
       </Route>
@@ -1020,7 +1042,7 @@ const AppRoutes = ({
             FinanceOverviewPage,
             [
               { text: 'Home', href: '/' },
-              { text: 'Financial Management', href: '/finance/overview' }
+              { text: 'Budgets and Finance', href: '/finance/overview' }
             ],
             'Finance Overview',
             <FinanceOverviewHelp />,
@@ -1044,7 +1066,7 @@ const AppRoutes = ({
             FinanceBudgetsPage,
             [
               { text: 'Home', href: '/' },
-              { text: 'Financial Management', href: '/finance/overview' },
+              { text: 'Budgets and Finance', href: '/finance/overview' },
               { text: 'Budgets', href: '/finance/budgets' }
             ],
             'Budgets',
@@ -1069,13 +1091,48 @@ const AppRoutes = ({
           )}
         </Guard>
       </Route>
+      <Route path="/finance/salaries">
+        <Guard path="/finance/salaries">
+          {renderContent(
+            FinanceSalariesPage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Budgets and Finance', href: '/finance/overview' },
+              { text: 'Salaries', href: '/finance/salaries' }
+            ],
+            'Salaries',
+            <FinanceSalariesHelp />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent("financeSalaries:openPalette"))
+                  }
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent("financeSalaries:resetLayout"))
+                  }
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
+            FinanceSalariesHelp.aiContext
+          )}
+        </Guard>
+      </Route>
       <Route path="/finance/payments">
         <Guard path="/finance/payments">
           {renderContent(
             FinancePaymentsPage,
             [
               { text: 'Home', href: '/' },
-              { text: 'Financial Management', href: '/finance/overview' },
+              { text: 'Budgets and Finance', href: '/finance/overview' },
               { text: 'Batch Payments', href: '/finance/payments' }
             ],
             'Batch Payments',
@@ -1111,7 +1168,7 @@ const AppRoutes = ({
             FinanceAllocationsPage,
             [
               { text: 'Home', href: '/' },
-              { text: 'Financial Management', href: '/finance/overview' },
+              { text: 'Budgets and Finance', href: '/finance/overview' },
               { text: 'Allocations & Transfers', href: '/finance/allocations' }
             ],
             'Allocations & Transfers',
@@ -1147,7 +1204,7 @@ const AppRoutes = ({
             FinanceReconciliationPage,
             [
               { text: 'Home', href: '/' },
-              { text: 'Financial Management', href: '/finance/overview' },
+              { text: 'Budgets and Finance', href: '/finance/overview' },
               { text: 'Reconciliation', href: '/finance/reconciliation' }
             ],
             'Reconciliation',
@@ -1183,7 +1240,7 @@ const AppRoutes = ({
             FinanceReportsPage,
             [
               { text: 'Home', href: '/' },
-              { text: 'Financial Management', href: '/finance/overview' },
+              { text: 'Budgets and Finance', href: '/finance/overview' },
               { text: 'Financial Reports', href: '/finance/reports' }
             ],
             'Financial Reports',
@@ -1219,7 +1276,7 @@ const AppRoutes = ({
             FinanceMonitoringPage,
             [
               { text: 'Home', href: '/' },
-              { text: 'Financial Management', href: '/finance/overview' },
+              { text: 'Budgets and Finance', href: '/finance/overview' },
               { text: 'Monitoring & Evidence', href: '/finance/monitoring' }
             ],
             'Monitoring & Evidence',
@@ -1255,7 +1312,7 @@ const AppRoutes = ({
             FinanceForecastingPage,
             [
               { text: 'Home', href: '/' },
-              { text: 'Financial Management', href: '/finance/overview' },
+              { text: 'Budgets and Finance', href: '/finance/overview' },
               { text: 'Forecasting & Scenarios', href: '/finance/forecasting' }
             ],
             'Forecasting & Scenarios',
@@ -1291,7 +1348,7 @@ const AppRoutes = ({
             FinanceSettingsPage,
             [
               { text: 'Home', href: '/' },
-              { text: 'Financial Management', href: '/finance/overview' },
+              { text: 'Budgets and Finance', href: '/finance/overview' },
               { text: 'Finance Settings', href: '/finance/settings' }
             ],
             'Finance Settings',

@@ -44,11 +44,19 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - v0.5.6 (19th March 2026)',
-      description: 'Release 0.5.6 introduces the new NWAC reporting dashboard in PATH and continues to strengthen intake, assessment, and case management workflows.',
+      sectionTitle: 'Release Notes - v0.5.7 (21st March 2026)',
+      description: 'Release 0.5.7 expands NWAC reporting in PATH with a new Regional Snapshot dashboard and continues to strengthen management and operational reporting tools.',
       features: {
         heading: 'What’s New',
         sections: [
+          {
+            title: 'New Regional Snapshot reporting dashboard',
+            paragraphs: [
+              'PATH now includes a new Regional Snapshot dashboard under Reporting, designed to give NWAC a concise board-style regional summary for the selected reporting period.',
+              'The dashboard presents region information, client activity, funding, admin and operating values, key metrics, compliance status, and comments in a format that closely follows the regional report structure already used by NWAC.',
+              'It also supports demo data and Excel download, including a multi-sheet workbook export with a summary tab and one regional snapshot tab per region.'
+            ]
+          },
           {
             title: 'New Data and Results reporting dashboard',
             paragraphs: [
@@ -105,7 +113,7 @@ const copy = {
           {
             title: 'No major release blockers logged',
             paragraphs: [
-              'No major release-blocking issues are currently logged for v0.5.6.',
+              'No major release-blocking issues are currently logged for v0.5.7.',
               'If staff identify workflow, document, or reporting issues during day-to-day use, they should continue to log them with the NWAC PATH support team for review.'
             ]
           }
@@ -117,8 +125,8 @@ const copy = {
           {
             title: 'Further reporting refinements',
             paragraphs: [
-              'The first reporting dashboard is now live, and the next phase will focus on operational validation, additional slice-and-dice filters, and refinements based on NWAC feedback.',
-              'This includes continuing to align PATH reporting outputs with the existing reporting workbook and expanding management-focused reporting views over time.'
+              'The next phase will focus on operational validation, additional slice-and-dice filters, and refinements based on NWAC feedback across both reporting dashboards.',
+              'This includes continuing to align PATH reporting outputs with NWAC reporting practices and expanding management-focused reporting views over time.'
             ]
           }
         ]
@@ -174,11 +182,19 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Notes de version - v0.5.6 (19 mars 2026)',
-      description: 'La version 0.5.6 introduit le nouveau tableau de bord de rapports NWAC dans PATH et poursuit les améliorations de l’accueil, de l’évaluation et de la gestion des dossiers.',
+      sectionTitle: 'Notes de version - v0.5.7 (21 mars 2026)',
+      description: 'La version 0.5.7 élargit les rapports NWAC dans PATH avec un nouveau tableau de bord d’instantané régional et poursuit les améliorations des outils de gestion et de reddition de comptes.',
       features: {
         heading: 'Quoi de neuf',
         sections: [
+          {
+            title: 'Nouveau tableau de bord Instantané régional',
+            paragraphs: [
+              'PATH comprend maintenant un nouveau tableau de bord Instantané régional dans la section Rapports, conçu pour offrir à l’AFAC un résumé régional concis de style conseil d’administration pour la période sélectionnée.',
+              'Le tableau de bord présente les renseignements sur la région, l’activité client, le financement, les coûts administratifs et opérationnels, les indicateurs clés, le statut de conformité et les commentaires dans une présentation qui reprend de près la structure du rapport régional déjà utilisée par l’AFAC.',
+              'Il prend aussi en charge des données de démonstration ainsi qu’un téléchargement Excel, y compris un classeur à plusieurs onglets avec un onglet sommaire et un onglet d’instantané par région.'
+            ]
+          },
           {
             title: 'Nouveau tableau de bord Rapports et résultats',
             paragraphs: [
@@ -235,7 +251,7 @@ const copy = {
           {
             title: 'Aucun bloqueur majeur consigné',
             paragraphs: [
-              'Aucun problème bloquant majeur n’est actuellement consigné pour la version 0.5.6.',
+              'Aucun problème bloquant majeur n’est actuellement consigné pour la version 0.5.7.',
               'Si le personnel constate des problèmes de flux de travail, de documents ou de rapports, ils doivent continuer de les signaler à l’équipe de soutien PATH de l’AFAC.'
             ]
           }
@@ -247,8 +263,8 @@ const copy = {
           {
             title: 'Autres améliorations des rapports',
             paragraphs: [
-              'La première version du tableau de bord de rapports est maintenant en ligne, et la prochaine phase portera sur la validation opérationnelle, l’ajout de filtres supplémentaires et les ajustements selon les commentaires de l’AFAC.',
-              'Cela comprend la poursuite de l’alignement entre les sorties de rapport PATH et le classeur de rapport existant, ainsi que l’élargissement graduel des vues de gestion.'
+              'La prochaine phase portera sur la validation opérationnelle, l’ajout de filtres supplémentaires et les ajustements selon les commentaires de l’AFAC pour les deux tableaux de bord de rapports.',
+              'Cela comprend la poursuite de l’alignement entre les sorties de rapport PATH et les pratiques de reddition de comptes de l’AFAC, ainsi que l’élargissement graduel des vues de gestion.'
             ]
           }
         ]

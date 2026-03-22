@@ -6,6 +6,8 @@ Purpose: Single entrypoint for database documentation across the admin dashboard
 - `docs/data/database-overview.md` - Quick orientation, logical relationships, and demo-data guidance.
 - `docs/data/case-finance-data-architecture.md` - Case/finance ERM narrative and key table relationships.
 - `docs/data/documents-model.md` - Unified document model and linking rules.
+- `docs/data/finance-regional-salaries.md` - Annual province/territory salary entry records used by the Budgets and Finance salaries dashboard.
+- `docs/data/regional-snapshot-reporting.md` - Saved Board-style regional snapshot report records and manual-input schema.
 - `docs/data/tutorial-progress.md` - Hands-on tutorial completion/dismissal tracking (`staff_tutorial_progress`).
 - `docs/planning/document-model-erm-adjustment.md` - ERM changes and rationale for document relationships.
 - `docs/data/record-locking.md` - `application_lock` and optimistic/pessimistic concurrency tables.

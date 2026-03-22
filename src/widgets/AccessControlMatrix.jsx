@@ -36,10 +36,11 @@ const NAV_SECTIONS = [
     ],
   },
   {
-    section: 'Budgets and Payments',
+    section: 'Budgets and Finance',
     items: [
       { href: '/finance/overview', label: 'Finance Overview' },
       { href: '/finance/budgets', label: 'Budgets' },
+      { href: '/finance/salaries', label: 'Salaries' },
       { href: '/finance/allocations', label: 'Allocations & Transfers' },
       { href: '/finance/payments', label: 'Payments' },
       { href: '/finance/reconciliation', label: 'Reconciliation' },
@@ -67,6 +68,7 @@ const NAV_SECTIONS = [
   {
     section: 'Reporting',
     items: [
+      { href: '/reporting/regional-snapshot', label: 'Regional Snapshot' },
       { href: '/reporting/data-and-results', label: 'Data and Results' },
       { href: '/reporting-and-monitoring-dashboard', label: 'Reporting and Monitoring' },
     ],
@@ -155,6 +157,7 @@ const ROUTE_LABELS = {
   '/configuration/query-editor': 'Query Editor',
   '/finance/allocations': 'Allocations & Transfers',
   '/finance/budgets': 'Budgets',
+  '/finance/salaries': 'Salaries',
   '/finance/payments': 'Finance Payments',
   '/finance/forecasting': 'Forecasting & Scenarios',
   '/finance/monitoring': 'Monitoring & Evidence',
@@ -181,6 +184,7 @@ const ROUTE_LABELS = {
   '/nwac-hub-management': 'NWAC Hub Management',
   '/ptma-management': 'PTMA Management',
   '/release-management-dashboard': 'Release Management',
+  '/reporting/regional-snapshot': 'Regional Snapshot',
   '/reporting/data-and-results': 'Data and Results',
   '/reporting-and-monitoring-dashboard': 'Reporting and Monitoring',
   '/tutorials-dashboard': 'Tutorials',

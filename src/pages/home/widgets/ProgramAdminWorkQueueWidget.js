@@ -39,14 +39,9 @@ export const PROGRAM_ADMIN_BUCKETS = [
     description: 'Applications escalated for your attention.'
   },
   {
-    id: 'applications-awaiting-approval',
-    label: 'Application Assessments',
-    description: 'Assessed ISET applications awaiting your decision.'
-  },
-  {
-    id: 'interventions-awaiting-approval',
-    label: 'New Interventions',
-    description: 'Proposed additional interventions awaiting approval.'
+    id: 'approvals',
+    label: 'Approvals',
+    description: 'Applications and intervention proposals waiting for your decision.'
   },
   {
     id: 'payments-issues',
@@ -140,8 +135,8 @@ export const PROGRAM_ADMIN_SAMPLE_ITEMS = [
   {
     id: 'APP-1984',
     title: 'APP-1984 · Apprenticeship Accelerator',
-    bucketId: 'applications-awaiting-approval',
-    type: 'Application',
+    bucketId: 'approvals',
+    type: 'AwaitingApproval',
     applicant: 'Apprenticeship Accelerator',
     region: 'Fraser',
     owner: 'T. Firth',
@@ -154,7 +149,7 @@ export const PROGRAM_ADMIN_SAMPLE_ITEMS = [
   {
     id: 'INT-118',
     title: 'Intervention · Welding simulator upgrade',
-    bucketId: 'interventions-awaiting-approval',
+    bucketId: 'approvals',
     type: 'InterventionApproval',
     applicant: 'Coastal Welding Program',
     region: 'Vancouver Island',
@@ -232,7 +227,11 @@ const sanitizeVisibleContent = (candidate, allowedIds) => {
   const deduped = [];
   const seen = new Set();
   asArray.forEach(value => {
-    const id = typeof value === 'string' ? value : null;
+    const rawId = typeof value === 'string' ? value : null;
+    const id =
+      rawId === 'applications-awaiting-approval' || rawId === 'interventions-awaiting-approval'
+        ? 'approvals'
+        : rawId;
     if (!id || !allowed.has(id) || seen.has(id)) return;
     seen.add(id);
     deduped.push(id);

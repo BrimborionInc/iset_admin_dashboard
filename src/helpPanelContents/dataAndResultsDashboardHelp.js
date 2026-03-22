@@ -13,7 +13,7 @@ const DataAndResultsDashboardHelp = () => (
     <ul>
       <li>Annual targets and year-end results for the selected fiscal year.</li>
       <li>Quarterly submission due dates, receipt dates, and current status.</li>
-      <li>Interventions, client results, data uploads, and action plan status counts for the selected fiscal year.</li>
+      <li>Interventions, client results, ILMP data upload submissions, and action plan status counts for the selected fiscal year.</li>
       <li>Additional comments for the selected fiscal year.</li>
     </ul>
 
@@ -41,7 +41,7 @@ const DataAndResultsDashboardHelp = () => (
 DataAndResultsDashboardHelp.aiContext = `
 Data and Results dashboard for management and NWAC reporting review. Keep explanations concise,
 plain-language, and focused on what the report shows. Cover annual targets and year-end results,
-quarterly submissions, interventions, client results, data uploads, action plan statuses, and
+quarterly submissions, interventions, client results, ILMP data upload submissions, action plan statuses, and
 fiscal-year comments. Explain that the report can be filtered by participant home province or
 territory, case manager, and fiscal year. Explain that Results view switches the matrix sections
 between cumulative and monthly values. Explain that the Interventions section also has its own

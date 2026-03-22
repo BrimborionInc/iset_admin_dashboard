@@ -2,6 +2,23 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-03-22
+- UX/API/Reporting: Wired `Regional Snapshot` coordinator salary values to the new `Budgets and Finance > Salaries` data so monthly, quarterly, and annual snapshots now derive salary from the selected region's annual salary entry instead of storing a separate manual amount.
+- UX/API/Finance: Added `Budgets and Finance > Salaries`, a new standard board-based dashboard for annual salary tracking by province or territory, with a fiscal-year control, explicit budget-pot assignment, annual salary entry, and derived monthly values for review.
+- Data/Finance: Added the `finance_regional_salary_entry` table for annual regional salary totals keyed by `region_code + fiscal_year_start`, and seeded the current dev fiscal year with logical regional salary-pot assignments.
+
+## 2026-03-20
+- API/UX/Reporting: Wired Regional Snapshot `C. Funding` and the matching Excel export to live PATH client funding by summing scheduled payment lines for the selected region and period, split by `CRF` and `EI`, and removed manual editing of those two client-funding fields from the snapshot editor.
+- Fix/API/Reporting: Refactored Regional Snapshot client activity to use the case-level `portfolio_region_id` as the canonical reporting region, defaulted from applicant/client province, and backfilled current dev cases so regional counts no longer depend on staff assignment or finance records.
+- UX/API/Reporting: Corrected the Regional Snapshot funding labels from OCR-derived `ER` / `IF` to `CRF` / `EI`, including the saved snapshot schema, edit form, on-screen report, and Excel export.
+- UX/Reporting: Added Excel export to `Reporting > Regional Snapshot`, including `Download Excel` for the current region and `Download all Excel` for the selected period with a summary tab followed by one worksheet per region.
+- UX/Reporting: Added `Download CSV` to the Data and Results board-item menus for each data section, exporting the exact filtered/demo/monthly-or-cumulative view currently shown on screen.
+- UX/API/Home: Reworked the homepage Metrics widget into a configurable KPI widget with cleaner defaults (`New applications`, `Applications approved`, `Applications denied`, `Active cases`, `Employed`, `Returned to school`) and added metric selection from a longer list of application, outcome, case, intervention, and funding measures.
+- API/Home: Redefined homepage `Funds committed` to sum approved intervention value in the selected period, and started stamping intervention review timestamps when proposals are approved or otherwise decisioned so commitment reporting aligns with approvals rather than downstream finance transactions.
+- UX/Home: Simplified the NWAC homepage Work Queue by merging application approvals and intervention approvals into a single `Approvals` queue so the summary card and item table reflect one combined approval workload.
+- UX/Home: Moved the Metrics widget period range from the header into the widget body below the metric tiles, keeping the exact applied date range visible without crowding the header actions.
+- Data/Reporting: Added the `iset_regional_snapshot_report` schema for saved regional Board-style reporting snapshots by region and reporting period, including manual funding/admin fields, compliance flag, comments, and authoring metadata.
+
 ## 2026-03-19
 - UX/Reporting: Renamed the reporting side-navigation sections to `ILMP Submissions` and `Reporting`, and added a new `Reporting > Data and Results` dashboard scaffold using the standard Cloudscape board pattern. Default access is enabled for System Administrators and NWAC Administrators through the route access matrix.
 - UX/Reporting: Refined `Reporting > Data and Results` into a fixed workbook-aligned reporting page with the report sections ordered to match the NWAC spreadsheet and a shared province/territory multi-select filter bar for future slice-and-dice controls.
@@ -29,6 +46,7 @@ Format: YYYY-MM-DD - Category: Short description
 - UX/Reporting: Converted `Reporting > Data and Results` workbook sections into removable Cloudscape board items with standard `Add section` / `Reset layout` controls, and moved `Interventions` to the top of the default layout under the report filters.
 - Fix/Reporting: Corrected a Cloudscape board runaway-loop regression on `Reporting > Data and Results` by aligning the new board palette synchronization with the repo’s known-good dashboard pattern, preventing initial palette sync from repeatedly triggering upstream re-renders.
 - UX/Release Notes: Published landing-page release notes as `v0.5.6` dated `19th March 2026`, and promoted the new reporting dashboard from `Coming Soon` to the top of `What’s New` in both English and French.
+- UX/API/Reporting: Renamed the reporting section to `ILMP Data Uploads` and reduced it to the supported `Submitted` row only, removing implied gateway outcome rows that PATH cannot currently source.
 
 ## 2026-03-18
 - Fix/Agreements: Participant-facing redline CFAs now render the intervention update badge correctly and apply explicit strike/add styling to redlined details cells, so removed funding lines no longer appear as plain rows and badge HTML no longer leaks into the document.

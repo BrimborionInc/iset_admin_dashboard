@@ -108,7 +108,13 @@ const renderResultDetails = (details) => {
 };
 
 const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setCurrentRole }) => {
-  const [iamOn, setIamOn] = useState(() => sessionStorage.getItem('iamBypass') !== 'off');
+  const [iamOn, setIamOn] = useState(() => {
+    const stored = sessionStorage.getItem('iamBypass');
+    if (stored) {
+      return stored !== 'off';
+    }
+    return process.env.REACT_APP_DEV_AUTH_BYPASS !== 'true';
+  });
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [confirmationValue, setConfirmationValue] = useState('');
   const [isClearingTestData, setIsClearingTestData] = useState(false);

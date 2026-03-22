@@ -346,7 +346,6 @@ const getStatusInfo = (row) => {
         .replace(/\b\w/g, c => c.toUpperCase());
   const isUnassignedCase = rawStatus === 'submitted' && !row.assigned_user_id;
   const isInterventionApproval =
-    row?.bucketId === 'interventions-awaiting-approval' ||
     row?.type === 'InterventionApproval' ||
     row?.type === 'Intervention';
   const eligibilityMissing =
@@ -1362,7 +1361,7 @@ const WorkQueueItemsTableWidget = ({
                         </SpaceBetween>
                       );
                     }
-                    if (item.bucketId === 'applications-awaiting-approval') {
+                    if (item.type === 'AwaitingApproval') {
                       return (
                         <SpaceBetween size="xxs" direction="horizontal">
                           <Link
@@ -1405,7 +1404,7 @@ const WorkQueueItemsTableWidget = ({
                         </SpaceBetween>
                       );
                     }
-                    if (item.bucketId === 'interventions-awaiting-approval') {
+                    if (item.type === 'InterventionApproval') {
                       return null;
                     }
                     if (item.bucketId === 'overdue') {

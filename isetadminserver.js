@@ -17123,13 +17123,20 @@ const METRICS_NON_LEGACY_APPLICATION_STATUSES = [
   'closure_notice',
   'pending_approval',
   'decision_ready',
+  'approved',
   'completed',
+  'rejected',
+  'declined',
   'closed'
 ];
+const METRICS_APPROVED_APPLICATION_STATUSES = ['approved', 'completed'];
+const METRICS_DENIED_APPLICATION_STATUSES = ['rejected', 'declined'];
+const METRICS_IN_REVIEW_APPLICATION_STATUSES = ['in_review'];
+const METRICS_AWAITING_APPROVAL_APPLICATION_STATUSES = ['pending_approval'];
 const METRICS_APPLICATION_DECISION_STATUSES = ['decision_ready', 'completed'];
 const METRICS_INTERVENTION_DECISION_STATUSES = ['approved', 'changes_requested', 'rejected'];
 const METRICS_ACTIVE_CASE_STATUSES = ['initiated', 'active', 'dormant', 'ready_to_close'];
-const METRICS_COMMITTED_TRANSACTION_STATUSES = ['submitted', 'approved'];
+const METRICS_COMMITTED_INTERVENTION_STATUSES = ['approved', 'in_progress', 'suspended', 'completed'];
 const METRICS_SPENT_TRANSACTION_STATUSES = ['posted'];
 const METRICS_DEFAULT_TIMEZONE = 'America/Toronto';
 const METRICS_TIMEZONE_BY_REGION_CODE = {
@@ -17328,6 +17335,32 @@ const applyMetricsScopeFilters = (filters, params, scope, options = {}) => {
 
 const normalizeStatusList = values => values.map(value => String(value).trim().toLowerCase());
 
+const buildEmptyMetricsValues = () => ({
+  newApplications: 0,
+  approved: 0,
+  denied: 0,
+  inReview: 0,
+  awaitingApproval: 0,
+  activeCases: 0,
+  actionPlansStarted: 0,
+  newInterventionProposals: 0,
+  interventionsCompleted: 0,
+  employed: 0,
+  returnedToSchool: 0,
+  fundsCommitted: 0,
+  fundsSpent: 0,
+  decisionsMade: 0,
+});
+
+async function safeMetricsValue(label, query, fallback = 0) {
+  try {
+    return await query();
+  } catch (err) {
+    console.warn(`[dashboard-metrics] ${label} failed:`, err?.message || err);
+    return fallback;
+  }
+}
+
 async function countMetricsNewApplications(pool, { start, end, scope }) {
   try {
     const statuses = normalizeStatusList(METRICS_NON_LEGACY_APPLICATION_STATUSES);
@@ -17387,6 +17420,63 @@ async function countMetricsApplicationDecisions(pool, { start, end, scope }) {
   }
 }
 
+async function countMetricsApplicationStatusBuckets(pool, { start, end, scope }) {
+  const bucketStatusMap = {
+    approved: normalizeStatusList(METRICS_APPROVED_APPLICATION_STATUSES),
+    denied: normalizeStatusList(METRICS_DENIED_APPLICATION_STATUSES),
+    inReview: normalizeStatusList(METRICS_IN_REVIEW_APPLICATION_STATUSES),
+    awaitingApproval: normalizeStatusList(METRICS_AWAITING_APPROVAL_APPLICATION_STATUSES),
+  };
+
+  try {
+    const allStatuses = Array.from(new Set(Object.values(bucketStatusMap).flat()));
+    const placeholders = allStatuses.map(() => '?').join(',');
+    const statusExpr = `REPLACE(LOWER(TRIM(a.status)), ' ', '_')`;
+    const filters = [
+      'COALESCE(a.updated_at, a.created_at) >= ?',
+      'COALESCE(a.updated_at, a.created_at) < ?',
+      `${statusExpr} IN (${placeholders})`
+    ];
+    const params = [start, end, ...allStatuses];
+    applyMetricsScopeFilters(filters, params, scope);
+    const sql = `
+      SELECT ${statusExpr} AS status_key, COUNT(*) AS total
+        FROM iset_application a
+        LEFT JOIN iset_case c ON c.application_id = a.id
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       WHERE ${filters.join(' AND ')}
+       GROUP BY ${statusExpr}
+    `;
+    const [rows] = await pool.query(sql, params);
+    const countsByStatus = new Map(
+      (Array.isArray(rows) ? rows : []).map(row => [row?.status_key, Number(row?.total ?? 0)])
+    );
+
+    return Object.entries(bucketStatusMap).reduce((acc, [bucketKey, statusValues]) => {
+      acc[bucketKey] = statusValues.reduce(
+        (total, statusValue) => total + Number(countsByStatus.get(statusValue) || 0),
+        0
+      );
+      return acc;
+    }, {
+      approved: 0,
+      denied: 0,
+      inReview: 0,
+      awaitingApproval: 0,
+    });
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || (err && err.code === 'ER_BAD_FIELD_ERROR')) {
+      return {
+        approved: 0,
+        denied: 0,
+        inReview: 0,
+        awaitingApproval: 0,
+      };
+    }
+    throw err;
+  }
+}
+
 async function countMetricsInterventionDecisions(pool, { start, end, scope }) {
   try {
     const statuses = normalizeStatusList(METRICS_INTERVENTION_DECISION_STATUSES);
@@ -17440,6 +17530,151 @@ async function countMetricsActiveCases(pool, scope) {
   }
 }
 
+async function countMetricsActionPlanStarts(pool, { start, end, scope }) {
+  try {
+    const filters = [
+      'COALESCE(ap.effective_date, DATE(ap.activated_at), DATE(ap.created_at)) >= ?',
+      'COALESCE(ap.effective_date, DATE(ap.activated_at), DATE(ap.created_at)) < ?'
+    ];
+    const params = [start, end];
+    applyMetricsScopeFilters(filters, params, scope);
+    const sql = `
+      SELECT COUNT(*) AS total
+        FROM iset_case_action_plan ap
+        JOIN iset_case c ON c.id = ap.case_id
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       WHERE ${filters.join(' AND ')}
+    `;
+    const [[row]] = await pool.query(sql, params);
+    return Number(row?.total ?? 0);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || (err && err.code === 'ER_BAD_FIELD_ERROR')) {
+      return 0;
+    }
+    throw err;
+  }
+}
+
+async function countMetricsNewInterventionProposals(pool, { start, end, scope }) {
+  try {
+    const statusExpr = `REPLACE(LOWER(TRIM(ci.status)), ' ', '_')`;
+    const filters = [
+      'COALESCE(ci.created_at, ci.updated_at) >= ?',
+      'COALESCE(ci.created_at, ci.updated_at) < ?',
+      `${statusExpr} <> ?`
+    ];
+    const params = [start, end, 'draft'];
+    applyMetricsScopeFilters(filters, params, scope, { caseAlias: 'c', staffAlias: 'sp' });
+    const sql = `
+      SELECT COUNT(*) AS total
+        FROM iset_case_intervention ci
+        JOIN iset_case c ON c.id = ci.case_id
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       WHERE ${filters.join(' AND ')}
+    `;
+    const [[row]] = await pool.query(sql, params);
+    return Number(row?.total ?? 0);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || (err && err.code === 'ER_BAD_FIELD_ERROR')) {
+      return 0;
+    }
+    throw err;
+  }
+}
+
+async function countMetricsCompletedInterventions(pool, { start, end, scope }) {
+  try {
+    const statusExpr = `REPLACE(LOWER(TRIM(ci.status)), ' ', '_')`;
+    const filters = [
+      `${statusExpr} = ?`,
+      'COALESCE(ci.end_date, DATE(ci.closed_at), DATE(ci.updated_at), DATE(ci.created_at)) >= ?',
+      'COALESCE(ci.end_date, DATE(ci.closed_at), DATE(ci.updated_at), DATE(ci.created_at)) < ?'
+    ];
+    const params = ['completed', start, end];
+    applyMetricsScopeFilters(filters, params, scope, { caseAlias: 'c', staffAlias: 'sp' });
+    const sql = `
+      SELECT COUNT(*) AS total
+        FROM iset_case_intervention ci
+        JOIN iset_case c ON c.id = ci.case_id
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       WHERE ${filters.join(' AND ')}
+    `;
+    const [[row]] = await pool.query(sql, params);
+    return Number(row?.total ?? 0);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || (err && err.code === 'ER_BAD_FIELD_ERROR')) {
+      return 0;
+    }
+    throw err;
+  }
+}
+
+async function sumMetricsCommittedInterventionAmounts(pool, { start, end, scope }) {
+  try {
+    const statuses = normalizeStatusList(METRICS_COMMITTED_INTERVENTION_STATUSES);
+    const placeholders = statuses.map(() => '?').join(',');
+    const statusExpr = `REPLACE(LOWER(TRIM(ci.status)), ' ', '_')`;
+    const commitmentDateExpr = 'COALESCE(ci.reviewed_at, ci.created_at)';
+    const filters = [
+      `${commitmentDateExpr} >= ?`,
+      `${commitmentDateExpr} < ?`,
+      `${statusExpr} IN (${placeholders})`
+    ];
+    const params = [start, end, ...statuses];
+    applyMetricsScopeFilters(filters, params, scope, { caseAlias: 'c', staffAlias: 'sp' });
+    const sql = `
+      SELECT COALESCE(SUM(COALESCE(ci.approved_amount, ci.budget_amount, ci.intervention_cost, 0)), 0) AS total
+        FROM iset_case_intervention ci
+        JOIN iset_case c ON c.id = ci.case_id
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       WHERE ${filters.join(' AND ')}
+    `;
+    const [[row]] = await pool.query(sql, params);
+    return Number(row?.total ?? 0);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || (err && err.code === 'ER_BAD_FIELD_ERROR')) {
+      return 0;
+    }
+    throw err;
+  }
+}
+
+async function countMetricsActionPlanOutcomeBuckets(pool, { start, end, scope }) {
+  try {
+    const filters = [
+      'ap.result_date >= ?',
+      'ap.result_date < ?',
+      'ap.result_code IN (?, ?)'
+    ];
+    const params = [start, end, '2', '4'];
+    applyMetricsScopeFilters(filters, params, scope);
+    const sql = `
+      SELECT ap.result_code, COUNT(*) AS total
+        FROM iset_case_action_plan ap
+        JOIN iset_case c ON c.id = ap.case_id
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       WHERE ${filters.join(' AND ')}
+       GROUP BY ap.result_code
+    `;
+    const [rows] = await pool.query(sql, params);
+    const countsByResult = new Map(
+      (Array.isArray(rows) ? rows : []).map(row => [String(row?.result_code ?? ''), Number(row?.total ?? 0)])
+    );
+    return {
+      employed: Number(countsByResult.get('2') || 0),
+      returnedToSchool: Number(countsByResult.get('4') || 0),
+    };
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || (err && err.code === 'ER_BAD_FIELD_ERROR')) {
+      return {
+        employed: 0,
+        returnedToSchool: 0,
+      };
+    }
+    throw err;
+  }
+}
+
 async function sumMetricsTransactions(pool, { start, end, scope, statuses }) {
   try {
     const statusValues = normalizeStatusList(statuses);
@@ -17476,13 +17711,7 @@ const buildEmptyMetricsPeriods = periods => {
       startLocal: period?.startLocal || null,
       endLocal: period?.endLocal || null,
       rangeLabel: period?.rangeLabel || null,
-      metrics: {
-        newApplications: 0,
-        decisionsMade: 0,
-        activeCases: 0,
-        fundsCommitted: 0,
-        fundsSpent: 0
-      }
+      metrics: buildEmptyMetricsValues()
     };
   });
   return entries;
@@ -19898,9 +20127,6 @@ const REPORTING_CLIENT_RESULT_ROW_LABELS = [
 
 const REPORTING_DATA_UPLOAD_ROW_LABELS = [
   'Submitted',
-  'Processed',
-  'Accepted',
-  'Number of Errors',
 ];
 
 const REPORTING_ACTION_PLAN_STATUS_ROW_LABELS = [
@@ -19928,6 +20154,11 @@ const REPORTING_ADDITIONAL_COMMENTS_SCOPE = 'reporting.dataAndResults';
 const REPORTING_ADDITIONAL_COMMENTS_MAX_LENGTH = 5000;
 const REPORTING_CASE_MANAGER_ROLE_KEYS = ['Application Assessor', 'Regional Coordinator'];
 const REPORTING_INTERVENTION_MEASURES = new Set(['count', 'cost']);
+const REGIONAL_SNAPSHOT_PERIOD_TYPES = new Set(['month', 'quarter', 'year']);
+const REGIONAL_SNAPSHOT_SNAPSHOT_STATUSES = new Set(['draft', 'final']);
+const REGIONAL_SNAPSHOT_NAME_MAX_LENGTH = 255;
+const REGIONAL_SNAPSHOT_FLAG_MAX_LENGTH = 64;
+const REGIONAL_SNAPSHOT_COMMENT_MAX_LENGTH = 5000;
 const REPORTING_INTERVENTION_STATUS_GROUPS = {
   completed: new Set(['completed']),
   planned: new Set(['approved']),
@@ -20307,6 +20538,514 @@ async function writeReportingAdditionalCommentsConfig(fiscalYearStart, commentsP
   return readReportingAdditionalCommentsConfig(fiscalYearStart, runner);
 }
 
+function normaliseRegionalSnapshotPeriodType(rawValue) {
+  const value = normaliseString(rawValue)?.toLowerCase() || '';
+  return REGIONAL_SNAPSHOT_PERIOD_TYPES.has(value) ? value : 'year';
+}
+
+function normaliseRegionalSnapshotPeriodKey(periodType, rawValue) {
+  const value = normaliseString(rawValue)?.toLowerCase() || '';
+  if (periodType === 'month') {
+    return ['apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec', 'jan', 'feb', 'mar'].includes(value)
+      ? value
+      : 'apr';
+  }
+  if (periodType === 'quarter') {
+    return ['q1', 'q2', 'q3', 'q4'].includes(value) ? value : 'q1';
+  }
+  return 'annual';
+}
+
+function buildRegionalSnapshotPeriodDefinition(fiscalYearStart, rawPeriodType, rawPeriodKey) {
+  const periodType = normaliseRegionalSnapshotPeriodType(rawPeriodType);
+  const periodKey = normaliseRegionalSnapshotPeriodKey(periodType, rawPeriodKey);
+  const nextYear = fiscalYearStart + 1;
+  if (periodType === 'month') {
+    const monthMap = {
+      apr: { label: 'April', year: fiscalYearStart, month: 4 },
+      may: { label: 'May', year: fiscalYearStart, month: 5 },
+      jun: { label: 'June', year: fiscalYearStart, month: 6 },
+      jul: { label: 'July', year: fiscalYearStart, month: 7 },
+      aug: { label: 'August', year: fiscalYearStart, month: 8 },
+      sep: { label: 'September', year: fiscalYearStart, month: 9 },
+      oct: { label: 'October', year: fiscalYearStart, month: 10 },
+      nov: { label: 'November', year: fiscalYearStart, month: 11 },
+      dec: { label: 'December', year: fiscalYearStart, month: 12 },
+      jan: { label: 'January', year: nextYear, month: 1 },
+      feb: { label: 'February', year: nextYear, month: 2 },
+      mar: { label: 'March', year: nextYear, month: 3 },
+    };
+    const monthDef = monthMap[periodKey] || monthMap.apr;
+    return {
+      periodType,
+      periodKey,
+      label: monthDef.label,
+      fiscalYearStart,
+      fiscalYear: formatReportingFiscalYearLabel(fiscalYearStart),
+      start: buildReportingIsoDate(monthDef.year, monthDef.month, 1),
+      end: buildReportingMonthEndDate(monthDef.year, monthDef.month),
+    };
+  }
+  if (periodType === 'quarter') {
+    const quarterDef = buildReportingQuarterSchedule(fiscalYearStart)
+      .map(item => ({
+        key: item.period.toLowerCase(),
+        label: item.period,
+        start: item.periodStart,
+        end: item.periodEnd,
+      }))
+      .find(item => item.key === periodKey) || {
+        key: 'q1',
+        label: 'Q1',
+        start: buildReportingIsoDate(fiscalYearStart, 4, 1),
+        end: buildReportingIsoDate(fiscalYearStart, 6, 30),
+      };
+    return {
+      periodType,
+      periodKey: quarterDef.key,
+      label: quarterDef.label,
+      fiscalYearStart,
+      fiscalYear: formatReportingFiscalYearLabel(fiscalYearStart),
+      start: quarterDef.start,
+      end: quarterDef.end,
+    };
+  }
+  return {
+    periodType: 'year',
+    periodKey: 'annual',
+    label: `FY ${formatReportingFiscalYearLabel(fiscalYearStart)}`,
+    fiscalYearStart,
+    fiscalYear: formatReportingFiscalYearLabel(fiscalYearStart),
+    start: buildReportingIsoDate(fiscalYearStart, 4, 1),
+    end: buildReportingIsoDate(nextYear, 3, 31),
+  };
+}
+
+function buildRegionalSnapshotEndExclusive(endDate) {
+  const date = new Date(`${toDateOnly(endDate)}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function normaliseRegionalSnapshotText(value, maxLength) {
+  const text = typeof value === 'string' ? value.replace(/\r\n?/g, '\n').trim() : '';
+  if (!text) return null;
+  return text.slice(0, maxLength);
+}
+
+function normaliseRegionalSnapshotAmount(value) {
+  if (value === null || typeof value === 'undefined' || value === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Number(numeric.toFixed(2)) : NaN;
+}
+
+function validateRegionalSnapshotPayload(rawValue) {
+  const payload = rawValue && typeof rawValue === 'object' && !Array.isArray(rawValue)
+    ? rawValue
+    : {};
+  const fieldDefs = [
+    { key: 'regionalManagerName', maxLength: REGIONAL_SNAPSHOT_NAME_MAX_LENGTH, type: 'text' },
+    { key: 'regionalCoordinatorName', maxLength: REGIONAL_SNAPSHOT_NAME_MAX_LENGTH, type: 'text' },
+    { key: 'complianceFlag', maxLength: REGIONAL_SNAPSHOT_FLAG_MAX_LENGTH, type: 'text' },
+    { key: 'commentsRecommendations', maxLength: REGIONAL_SNAPSHOT_COMMENT_MAX_LENGTH, type: 'text' },
+    { key: 'operatingCostsAmount', type: 'amount' },
+  ];
+  const value = {};
+  for (const field of fieldDefs) {
+    if (field.type === 'text') {
+      value[field.key] = normaliseRegionalSnapshotText(payload[field.key], field.maxLength);
+      continue;
+    }
+    const amount = normaliseRegionalSnapshotAmount(payload[field.key]);
+    if (Number.isNaN(amount) || (amount !== null && amount < 0)) {
+      return {
+        ok: false,
+        error: 'invalid_regional_snapshot_amount',
+        message: `${field.key} must be a positive amount or blank.`,
+      };
+    }
+    value[field.key] = amount;
+  }
+  const snapshotStatusRaw = normaliseString(payload.snapshotStatus)?.toLowerCase() || 'draft';
+  value.snapshotStatus = REGIONAL_SNAPSHOT_SNAPSHOT_STATUSES.has(snapshotStatusRaw) ? snapshotStatusRaw : 'draft';
+  return { ok: true, value };
+}
+
+function sumRegionalSnapshotPair(firstValue, secondValue) {
+  const first = Number(firstValue);
+  const second = Number(secondValue);
+  const hasFirst = Number.isFinite(first);
+  const hasSecond = Number.isFinite(second);
+  if (!hasFirst && !hasSecond) return null;
+  return (hasFirst ? first : 0) + (hasSecond ? second : 0);
+}
+
+function buildRegionalSnapshotDerivedValues(snapshot, liveMetrics, fundingMetrics) {
+  const totalFunding = sumRegionalSnapshotPair(
+    fundingMetrics?.crfFundingAmount,
+    fundingMetrics?.eiFundingAmount
+  );
+  const totalAdminCost = sumRegionalSnapshotPair(snapshot?.coordinatorSalaryAmount, snapshot?.operatingCostsAmount);
+  const fundedCount = Number(liveMetrics?.funded ?? 0);
+  return {
+    totalFunding,
+    totalAdminCost,
+    clientAverageAmountFunded:
+      Number.isFinite(totalFunding) && fundedCount > 0 ? totalFunding / fundedCount : null,
+    adminCostPerClient:
+      Number.isFinite(totalAdminCost) && fundedCount > 0 ? totalAdminCost / fundedCount : null,
+    adminRatioPercent:
+      Number.isFinite(totalFunding) && totalFunding > 0 && Number.isFinite(totalAdminCost)
+        ? (totalAdminCost / totalFunding) * 100
+        : null,
+  };
+}
+
+function resolveRegionalSnapshotPeriodMonthCount(periodType) {
+  if (periodType === 'month') return 1;
+  if (periodType === 'quarter') return 3;
+  return 12;
+}
+
+async function readRegionalSnapshotSalaryMetrics(
+  { regionCode, fiscalYearStart, periodType },
+  executor = pool
+) {
+  const runner = executor || pool;
+  const fallback = {
+    annualSalaryAmount: null,
+    derivedMonthlyAmount: null,
+    coordinatorSalaryAmount: null,
+    budgetPotId: null,
+    budgetPotName: null,
+  };
+  if (!runner || typeof runner.query !== 'function' || !regionCode) return fallback;
+  try {
+    const [rows] = await runner.query(
+      `
+      SELECT
+        frse.annual_salary_amount,
+        frse.budget_pot_id,
+        bp.name AS budget_pot_name
+      FROM finance_regional_salary_entry frse
+      LEFT JOIN budget_pot bp ON bp.id = frse.budget_pot_id
+      WHERE frse.region_code = ?
+        AND frse.fiscal_year_start = ?
+      LIMIT 1
+      `,
+      [regionCode, fiscalYearStart]
+    );
+    const row = Array.isArray(rows) && rows.length ? rows[0] : null;
+    const annualSalaryAmount =
+      row?.annual_salary_amount === null || typeof row?.annual_salary_amount === 'undefined'
+        ? null
+        : Number(Number(row.annual_salary_amount).toFixed(2));
+    const derivedMonthlyAmount =
+      annualSalaryAmount === null
+        ? null
+        : Number((annualSalaryAmount / FINANCE_SALARY_MONTH_COUNT).toFixed(2));
+    const monthCount = resolveRegionalSnapshotPeriodMonthCount(periodType);
+    return {
+      annualSalaryAmount,
+      derivedMonthlyAmount,
+      coordinatorSalaryAmount:
+        annualSalaryAmount === null
+          ? null
+          : Number(((annualSalaryAmount * monthCount) / FINANCE_SALARY_MONTH_COUNT).toFixed(2)),
+      budgetPotId: row?.budget_pot_id ? Number(row.budget_pot_id) : null,
+      budgetPotName: row?.budget_pot_name || null,
+    };
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || isMissingColumnErrorLocal(err)) {
+      return fallback;
+    }
+    throw err;
+  }
+}
+
+async function readRegionalSnapshotRegionOptions(executor = pool) {
+  const runner = executor || pool;
+  if (!runner || typeof runner.query !== 'function') return [];
+  const [rows] = await runner.query(
+    'SELECT region_id, code, name_en FROM canada_region ORDER BY CASE WHEN code = ? THEN 1 ELSE 0 END, name_en ASC',
+    ['XX']
+  );
+  return Array.isArray(rows)
+    ? rows.map(row => ({
+        regionId: Number(row.region_id),
+        code: row.code,
+        name: row.name_en,
+      }))
+    : [];
+}
+
+async function readRegionalSnapshotDefaults(regionId, executor = pool) {
+  const runner = executor || pool;
+  if (!runner || typeof runner.query !== 'function') {
+    return { regionalManagerName: null, regionalCoordinatorName: null };
+  }
+  const [rows] = await runner.query(
+    `
+    SELECT
+      primary_role,
+      COALESCE(NULLIF(TRIM(display_name), ''), NULLIF(TRIM(name), ''), NULLIF(TRIM(email), '')) AS label
+    FROM staff_profiles
+    WHERE status = 'active'
+      AND region_id = ?
+      AND primary_role IN ('Regional Coordinator', 'Application Assessor')
+    ORDER BY label ASC
+    `,
+    [regionId]
+  );
+  const manager = (rows || []).find(row => row.primary_role === 'Regional Coordinator');
+  const coordinator = (rows || []).find(row => row.primary_role === 'Application Assessor');
+  return {
+    regionalManagerName: manager?.label || null,
+    regionalCoordinatorName: coordinator?.label || null,
+  };
+}
+
+async function readRegionalSnapshotRow({ regionId, periodType, periodStart, periodEnd }, executor = pool) {
+  const runner = executor || pool;
+  if (!runner || typeof runner.query !== 'function') return null;
+  const [rows] = await runner.query(
+    `
+    SELECT
+      rs.*,
+      COALESCE(NULLIF(TRIM(cb.display_name), ''), NULLIF(TRIM(cb.name), ''), NULLIF(TRIM(cb.email), '')) AS created_by_name,
+      COALESCE(NULLIF(TRIM(ub.display_name), ''), NULLIF(TRIM(ub.name), ''), NULLIF(TRIM(ub.email), '')) AS updated_by_name
+    FROM iset_regional_snapshot_report rs
+    LEFT JOIN staff_profiles cb ON cb.id = rs.created_by_staff_profile_id
+    LEFT JOIN staff_profiles ub ON ub.id = rs.updated_by_staff_profile_id
+    WHERE rs.region_id = ?
+      AND rs.period_type = ?
+      AND rs.period_start = ?
+      AND rs.period_end = ?
+    LIMIT 1
+    `,
+    [regionId, periodType, periodStart, periodEnd]
+  );
+  return Array.isArray(rows) && rows.length ? rows[0] : null;
+}
+
+async function readRegionalSnapshotLiveMetrics({ regionId, periodStart, periodEnd }, executor = pool) {
+  const runner = executor || pool;
+  const fallback = {
+    applicationsReceived: 0,
+    funded: 0,
+    deniedIneligibleWithdrawn: 0,
+    pendingDecision: 0,
+  };
+  if (!runner || typeof runner.query !== 'function') return fallback;
+  const startDateTime = `${toDateOnly(periodStart)} 00:00:00`;
+  const endExclusive = buildRegionalSnapshotEndExclusive(periodEnd);
+  if (!endExclusive) return fallback;
+  try {
+    const [applicationsReceivedRows] = await runner.query(
+      `
+      SELECT COUNT(DISTINCT s.id) AS total
+      FROM iset_application_submission s
+      JOIN iset_application a ON a.submission_id = s.id
+      JOIN iset_case c ON c.application_id = a.id
+      WHERE c.portfolio_region_id = ?
+        AND s.submitted_at >= ?
+        AND s.submitted_at < ?
+      `,
+      [regionId, startDateTime, endExclusive]
+    );
+    const statusExpr = `REPLACE(LOWER(TRIM(a.status)), ' ', '_')`;
+    const [fundedRows] = await runner.query(
+      `
+      SELECT COUNT(DISTINCT a.id) AS total
+      FROM iset_application a
+      JOIN iset_case c ON c.application_id = a.id
+      WHERE c.portfolio_region_id = ?
+        AND ${statusExpr} IN ('approved', 'completed')
+        AND COALESCE(a.updated_at, a.created_at) >= ?
+        AND COALESCE(a.updated_at, a.created_at) < ?
+      `,
+      [regionId, startDateTime, endExclusive]
+    );
+    const [deniedRows] = await runner.query(
+      `
+      SELECT COUNT(DISTINCT a.id) AS total
+      FROM iset_application a
+      JOIN iset_case c ON c.application_id = a.id
+      WHERE c.portfolio_region_id = ?
+        AND ${statusExpr} IN ('rejected', 'declined', 'withdrawn', 'cancelled')
+        AND COALESCE(a.updated_at, a.created_at) >= ?
+        AND COALESCE(a.updated_at, a.created_at) < ?
+      `,
+      [regionId, startDateTime, endExclusive]
+    );
+    const applicationsReceived = Number(applicationsReceivedRows?.[0]?.total ?? 0);
+    const funded = Number(fundedRows?.[0]?.total ?? 0);
+    const deniedIneligibleWithdrawn = Number(deniedRows?.[0]?.total ?? 0);
+    return {
+      applicationsReceived,
+      funded,
+      deniedIneligibleWithdrawn,
+      pendingDecision: Math.max(0, applicationsReceived - funded - deniedIneligibleWithdrawn),
+    };
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || isMissingColumnErrorLocal(err)) {
+      return fallback;
+    }
+    throw err;
+  }
+}
+
+async function readRegionalSnapshotFundingMetrics({ regionId, periodStart, periodEnd }, executor = pool) {
+  const runner = executor || pool;
+  const fallback = {
+    crfFundingAmount: 0,
+    eiFundingAmount: 0,
+  };
+  if (!runner || typeof runner.query !== 'function') return fallback;
+  try {
+    const paymentTypeMapping = await readPaymentInterventionMapping(runner).catch(() => null);
+    const submissionTimingByType = buildSubmissionTimingByTypeLookup(paymentTypeMapping);
+    const [rows] = await runner.query(
+      `
+      SELECT
+        ppl.amount,
+        ppl.payment_type,
+        ppl.requested_payment_date,
+        ppl.service_period_start,
+        ppl.service_period_end,
+        ppl.funding_stream,
+        bp.funding_source AS pot_funding_source,
+        ci.start_date,
+        ci.end_date
+      FROM payment_packet_line ppl
+      JOIN iset_case_intervention ci ON ci.id = ppl.intervention_id
+      JOIN iset_case c ON c.id = ci.case_id
+      LEFT JOIN budget_pot bp ON bp.id = ppl.budget_pot_id
+      WHERE c.portfolio_region_id = ?
+        AND ppl.status <> 'cancelled'
+      `,
+      [regionId]
+    );
+    const periodStartDate = toDateOnly(periodStart);
+    const periodEndDate = toDateOnly(periodEnd);
+    let crfFundingAmount = 0;
+    let eiFundingAmount = 0;
+
+    (rows || []).forEach(row => {
+      const scheduledDate = resolveReportingInterventionScheduledDate(
+        {
+          paymentType: row?.payment_type,
+          requestedPaymentDate: row?.requested_payment_date,
+          servicePeriodStart: row?.service_period_start,
+          servicePeriodEnd: row?.service_period_end,
+        },
+        row,
+        submissionTimingByType
+      );
+      if (!scheduledDate || scheduledDate < periodStartDate || scheduledDate > periodEndDate) {
+        return;
+      }
+      const amount = Number(row?.amount || 0);
+      if (!Number.isFinite(amount) || amount <= 0) return;
+      const fundingSource =
+        normalizeFundingSource(row?.pot_funding_source) ||
+        normalizeFundingSource(row?.funding_stream) ||
+        'OTHER';
+      if (fundingSource === 'CRF') {
+        crfFundingAmount += amount;
+      } else if (fundingSource === 'EI') {
+        eiFundingAmount += amount;
+      }
+    });
+
+    return {
+      crfFundingAmount: Math.round(crfFundingAmount * 100) / 100,
+      eiFundingAmount: Math.round(eiFundingAmount * 100) / 100,
+    };
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || isMissingColumnErrorLocal(err)) {
+      return fallback;
+    }
+    throw err;
+  }
+}
+
+async function buildRegionalSnapshotPayload({
+  regionId,
+  fiscalYearStart,
+  periodType,
+  periodKey,
+  executor = pool,
+}) {
+  const period = buildRegionalSnapshotPeriodDefinition(fiscalYearStart, periodType, periodKey);
+  const [regionRows] = await executor.query(
+    'SELECT region_id, code, name_en FROM canada_region WHERE region_id = ? LIMIT 1',
+    [regionId]
+  );
+  const regionRow = Array.isArray(regionRows) && regionRows.length ? regionRows[0] : null;
+  if (!regionRow) {
+    const error = new Error('Region not found.');
+    error.statusCode = 404;
+    throw error;
+  }
+  const [snapshotRow, defaults, liveMetrics, fundingMetrics] = await Promise.all([
+    readRegionalSnapshotRow({
+      regionId,
+      periodType: period.periodType,
+      periodStart: period.start,
+      periodEnd: period.end,
+    }, executor),
+    readRegionalSnapshotDefaults(regionId, executor),
+    readRegionalSnapshotLiveMetrics({
+      regionId,
+      periodStart: period.start,
+      periodEnd: period.end,
+    }, executor),
+    readRegionalSnapshotFundingMetrics({
+      regionId,
+      periodStart: period.start,
+      periodEnd: period.end,
+    }, executor),
+  ]);
+  const salaryMetrics = await readRegionalSnapshotSalaryMetrics(
+    {
+      regionCode: regionRow.code,
+      fiscalYearStart,
+      periodType: period.periodType,
+    },
+    executor
+  );
+
+  const snapshot = {
+    id: snapshotRow?.id ? Number(snapshotRow.id) : null,
+    snapshotStatus: snapshotRow?.snapshot_status || 'draft',
+    regionalManagerName: snapshotRow?.regional_manager_name || defaults.regionalManagerName || '',
+    regionalCoordinatorName: snapshotRow?.regional_coordinator_name || defaults.regionalCoordinatorName || '',
+    coordinatorSalaryAmount: salaryMetrics.coordinatorSalaryAmount,
+    operatingCostsAmount: snapshotRow?.operating_costs_amount !== null && snapshotRow?.operating_costs_amount !== undefined ? Number(snapshotRow.operating_costs_amount) : null,
+    complianceFlag: snapshotRow?.compliance_flag || '',
+    commentsRecommendations: snapshotRow?.comments_recommendations || '',
+    updatedAt: snapshotRow?.updated_at ? toIsoDateTime(snapshotRow.updated_at) : null,
+    updatedByName: snapshotRow?.updated_by_name || null,
+    createdAt: snapshotRow?.created_at ? toIsoDateTime(snapshotRow.created_at) : null,
+    createdByName: snapshotRow?.created_by_name || null,
+  };
+  return {
+    region: {
+      regionId: Number(regionRow.region_id),
+      code: regionRow.code,
+      name: regionRow.name_en,
+    },
+    period,
+    liveMetrics,
+    fundingMetrics,
+    salaryMetrics,
+    snapshot,
+    derivedMetrics: buildRegionalSnapshotDerivedValues(snapshot, liveMetrics, fundingMetrics),
+  };
+}
+
 function normaliseReportingProvinceCodes(rawValue) {
   const inputs = Array.isArray(rawValue)
     ? rawValue
@@ -20606,6 +21345,167 @@ app.get('/api/reporting/data-and-results/filter-options', async (req, res) => {
   }
 });
 
+app.get('/api/reporting/regional-snapshot/filter-options', async (req, res) => {
+  if (!hasOperationalReportingAccess(req)) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const fiscalYearStart = resolveReportingFiscalYearStartValue(
+    req.query.fiscalYearStart ?? req.query.fiscalYear
+  );
+  try {
+    const regions = await readRegionalSnapshotRegionOptions(pool);
+    res.set('Cache-Control', 'no-store, max-age=0');
+    return res.json({
+      fiscalYearStart,
+      fiscalYear: formatReportingFiscalYearLabel(fiscalYearStart),
+      regions,
+    });
+  } catch (err) {
+    console.error('[reporting:regional-snapshot] filter options fetch failed:', err?.message || err);
+    return res.status(500).json({
+      error: 'regional_snapshot_filter_options_fetch_failed',
+      message: err?.message || 'Regional snapshot filter options fetch failed.',
+    });
+  }
+});
+
+app.get('/api/reporting/regional-snapshot', async (req, res) => {
+  if (!hasOperationalReportingAccess(req)) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const regionId = normalisePositiveInteger(req.query.regionId ?? req.query.region_id);
+  if (!regionId) {
+    return res.status(400).json({ error: 'region_required', message: 'Select a region.' });
+  }
+  const fiscalYearStart = resolveReportingFiscalYearStartValue(
+    req.query.fiscalYearStart ?? req.query.fiscalYear
+  );
+  const periodType = normaliseRegionalSnapshotPeriodType(req.query.periodType ?? req.query.period_type);
+  const periodKey = normaliseRegionalSnapshotPeriodKey(
+    periodType,
+    req.query.periodKey ?? req.query.period_key
+  );
+  try {
+    const payload = await buildRegionalSnapshotPayload({
+      regionId,
+      fiscalYearStart,
+      periodType,
+      periodKey,
+      executor: pool,
+    });
+    res.set('Cache-Control', 'no-store, max-age=0');
+    return res.json(payload);
+  } catch (err) {
+    if (err?.statusCode) {
+      return res.status(err.statusCode).json({
+        error: 'regional_snapshot_fetch_failed',
+        message: err.message,
+      });
+    }
+    console.error('[reporting:regional-snapshot] fetch failed:', err?.message || err);
+    return res.status(500).json({
+      error: 'regional_snapshot_fetch_failed',
+      message: err?.message || 'Regional snapshot fetch failed.',
+    });
+  }
+});
+
+app.put('/api/reporting/regional-snapshot', async (req, res) => {
+  if (!hasOperationalReportingAccess(req)) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const regionId = normalisePositiveInteger(req.body?.regionId ?? req.body?.region_id);
+  if (!regionId) {
+    return res.status(400).json({ error: 'region_required', message: 'Select a region.' });
+  }
+  const fiscalYearStart = resolveReportingFiscalYearStartValue(
+    req.body?.fiscalYearStart ?? req.body?.fiscalYear
+  );
+  const periodType = normaliseRegionalSnapshotPeriodType(req.body?.periodType ?? req.body?.period_type);
+  const periodKey = normaliseRegionalSnapshotPeriodKey(
+    periodType,
+    req.body?.periodKey ?? req.body?.period_key
+  );
+  const validation = validateRegionalSnapshotPayload(req.body || {});
+  if (!validation.ok) {
+    return res.status(422).json({
+      error: validation.error,
+      message: validation.message,
+    });
+  }
+  const period = buildRegionalSnapshotPeriodDefinition(fiscalYearStart, periodType, periodKey);
+  const actorStaffProfileId = resolveActiveStaffProfileId(req) || null;
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    await connection.query(
+      `
+      INSERT INTO iset_regional_snapshot_report (
+        region_id,
+        period_type,
+        period_start,
+        period_end,
+        snapshot_status,
+        regional_manager_name,
+        regional_coordinator_name,
+        operating_costs_amount,
+        compliance_flag,
+        comments_recommendations,
+        created_by_staff_profile_id,
+        updated_by_staff_profile_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        snapshot_status = VALUES(snapshot_status),
+        regional_manager_name = VALUES(regional_manager_name),
+        regional_coordinator_name = VALUES(regional_coordinator_name),
+        operating_costs_amount = VALUES(operating_costs_amount),
+        compliance_flag = VALUES(compliance_flag),
+        comments_recommendations = VALUES(comments_recommendations),
+        updated_by_staff_profile_id = VALUES(updated_by_staff_profile_id),
+        updated_at = CURRENT_TIMESTAMP
+      `,
+      [
+        regionId,
+        period.periodType,
+        period.start,
+        period.end,
+        validation.value.snapshotStatus,
+        validation.value.regionalManagerName,
+        validation.value.regionalCoordinatorName,
+        validation.value.operatingCostsAmount,
+        validation.value.complianceFlag,
+        validation.value.commentsRecommendations,
+        actorStaffProfileId,
+        actorStaffProfileId,
+      ]
+    );
+    await connection.commit();
+    const payload = await buildRegionalSnapshotPayload({
+      regionId,
+      fiscalYearStart,
+      periodType,
+      periodKey,
+      executor: pool,
+    });
+    res.set('Cache-Control', 'no-store, max-age=0');
+    return res.json(payload);
+  } catch (err) {
+    if (connection) {
+      try { await connection.rollback(); } catch (_) {}
+    }
+    console.error('[reporting:regional-snapshot] save failed:', err?.message || err);
+    return res.status(500).json({
+      error: 'regional_snapshot_save_failed',
+      message: err?.message || 'Regional snapshot save failed.',
+    });
+  } finally {
+    if (connection) {
+      connection.release();
+    }
+  }
+});
+
 app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
   if (!hasOperationalReportingAccess(req)) {
     return res.status(403).json({ error: 'forbidden' });
@@ -20742,7 +21642,7 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
         JOIN iset_case c ON c.id = eps.case_id
         LEFT JOIN iset_application a ON a.id = c.application_id
         LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
-        WHERE h.event_type IN ('submitted', 'accepted', 'rejected')
+        WHERE h.event_type IN ('submitted')
           AND DATE(h.occurred_at) BETWEEN ? AND ?
         `,
         [fiscalYearStartDate, fiscalYearEnd]
@@ -20976,30 +21876,6 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
           1
         );
       }
-      if (row.event_type === 'accepted' || row.event_type === 'rejected') {
-        addReportingCumulativeValue(
-          dataUploadsByLabel.get('Processed').values,
-          occurredAt,
-          snapshotPeriods,
-          1
-        );
-      }
-      if (row.event_type === 'accepted') {
-        addReportingCumulativeValue(
-          dataUploadsByLabel.get('Accepted').values,
-          occurredAt,
-          snapshotPeriods,
-          1
-        );
-      }
-      if (row.event_type === 'rejected') {
-        addReportingCumulativeValue(
-          dataUploadsByLabel.get('Number of Errors').values,
-          occurredAt,
-          snapshotPeriods,
-          1
-        );
-      }
     });
 
     const overallResults = REPORTING_SUMMARY_METRICS.map(definition => {
@@ -21052,7 +21928,7 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
             ? `Intervention costs are shown cumulatively for ${interventionStatusView} interventions by payment month. Completed interventions use actual cost when available; other statuses use planned cost.`
             : `Intervention counts are shown cumulatively for ${interventionStatusView} interventions by ${interventionDateBasis} date.`,
           clientResults: 'Client results are shown cumulatively for the selected fiscal year.',
-          dataUploads: 'Data upload totals are shown cumulatively for the selected fiscal year. Submitted counts recorded submission events, and Processed includes accepted uploads and uploads returned with errors.',
+          dataUploads: 'ILMP data upload submissions are shown cumulatively for the selected fiscal year.',
           actionPlanStatuses: 'Action plan status counts are shown cumulatively for the selected fiscal year.',
         },
         rowCounts: {
@@ -27754,17 +28630,45 @@ app.get('/api/dashboard/metrics', async (req, res) => {
       const end = formatDateTimeForSql(period.endUtc);
       const [
         newApplications,
-        applicationDecisions,
-        interventionDecisions,
+        applicationStatusBuckets,
+        actionPlansStarted,
+        newInterventionProposals,
+        interventionsCompleted,
+        actionPlanOutcomeBuckets,
         fundsCommitted,
         fundsSpent
       ] = await Promise.all([
-        countMetricsNewApplications(pool, { start, end, scope: context.scope }),
-        countMetricsApplicationDecisions(pool, { start, end, scope: context.scope }),
-        countMetricsInterventionDecisions(pool, { start, end, scope: context.scope }),
-        sumMetricsTransactions(pool, { start, end, scope: context.scope, statuses: METRICS_COMMITTED_TRANSACTION_STATUSES }),
-        sumMetricsTransactions(pool, { start, end, scope: context.scope, statuses: METRICS_SPENT_TRANSACTION_STATUSES })
+        safeMetricsValue('newApplications', () => countMetricsNewApplications(pool, { start, end, scope: context.scope })),
+        safeMetricsValue(
+          'applicationStatusBuckets',
+          () => countMetricsApplicationStatusBuckets(pool, { start, end, scope: context.scope }),
+          { approved: 0, denied: 0, inReview: 0, awaitingApproval: 0 }
+        ),
+        safeMetricsValue('actionPlansStarted', () => countMetricsActionPlanStarts(pool, { start, end, scope: context.scope })),
+        safeMetricsValue(
+          'newInterventionProposals',
+          () => countMetricsNewInterventionProposals(pool, { start, end, scope: context.scope })
+        ),
+        safeMetricsValue(
+          'interventionsCompleted',
+          () => countMetricsCompletedInterventions(pool, { start, end, scope: context.scope })
+        ),
+        safeMetricsValue(
+          'actionPlanOutcomeBuckets',
+          () => countMetricsActionPlanOutcomeBuckets(pool, { start, end, scope: context.scope }),
+          { employed: 0, returnedToSchool: 0 }
+        ),
+        safeMetricsValue(
+          'fundsCommitted',
+          () => sumMetricsCommittedInterventionAmounts(pool, { start, end, scope: context.scope })
+        ),
+        safeMetricsValue(
+          'fundsSpent',
+          () => sumMetricsTransactions(pool, { start, end, scope: context.scope, statuses: METRICS_SPENT_TRANSACTION_STATUSES })
+        )
       ]);
+      const approved = Number(applicationStatusBuckets?.approved ?? 0);
+      const denied = Number(applicationStatusBuckets?.denied ?? 0);
       return {
         key,
         value: {
@@ -27774,10 +28678,19 @@ app.get('/api/dashboard/metrics', async (req, res) => {
           rangeLabel: period.rangeLabel,
           metrics: {
             newApplications,
-            decisionsMade: applicationDecisions + interventionDecisions,
+            approved,
+            denied,
+            inReview: Number(applicationStatusBuckets?.inReview ?? 0),
+            awaitingApproval: Number(applicationStatusBuckets?.awaitingApproval ?? 0),
             activeCases,
+            actionPlansStarted,
+            newInterventionProposals,
+            interventionsCompleted,
+            employed: Number(actionPlanOutcomeBuckets?.employed ?? 0),
+            returnedToSchool: Number(actionPlanOutcomeBuckets?.returnedToSchool ?? 0),
             fundsCommitted,
-            fundsSpent
+            fundsSpent,
+            decisionsMade: approved + denied,
           }
         }
       };
@@ -33319,28 +34232,10 @@ app.post('/api/cases', async (req, res) => {
     let portfolioRegionId = null;
     const clientAddress = safeJsonParse(clientRow.address_json, null);
     if (clientAddress && typeof clientAddress === 'object') {
-      const addressDetails =
-        clientAddress.address && typeof clientAddress.address === 'object'
-          ? clientAddress.address
-          : clientAddress;
-      const province =
-        addressDetails?.province ||
-        addressDetails?.province_code ||
-        addressDetails?.provinceCode ||
-        clientAddress?.province ||
-        clientAddress?.province_code ||
-        clientAddress?.provinceCode ||
-        null;
-      const regionCode = normalizeRegionCode(province);
-      if (regionCode) {
-        const [[regionRow]] = await conn.query(
-          'SELECT region_id FROM canada_region WHERE code = ? LIMIT 1',
-          [regionCode]
-        );
-        if (Number.isFinite(Number(regionRow?.region_id))) {
-          portfolioRegionId = Number(regionRow.region_id);
-        }
-      }
+      portfolioRegionId = await resolveRegionIdFromProvinceValue(
+        extractProvinceFromAddressPayload(clientAddress),
+        conn
+      );
     }
 
     const normalizedStatus = typeof status === 'string' && status.trim() ? status.trim() : 'open';
@@ -38683,6 +39578,9 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       postingContext,
     });
 
+    const shouldStampReviewDecision = ['approved', 'changes_requested', 'rejected'].includes(statusValue);
+    const reviewedByStaffProfileId = shouldStampReviewDecision ? (resolveActiveStaffProfileId(req) || null) : null;
+
     const [result] = await pool.query(
       `INSERT INTO iset_case_intervention
          (case_id,
@@ -38702,8 +39600,12 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
           notes,
           metadata_json,
           esdc_intervention_json,
-          created_by_staff_profile_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          created_by_staff_profile_id,
+          reviewed_by_staff_profile_id,
+          reviewed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${
+         shouldStampReviewDecision ? 'NOW()' : 'NULL'
+       })`,
       [
         planRow.case_id,
         planId,
@@ -38723,6 +39625,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         Object.keys(metadataClean).length ? JSON.stringify(metadataClean) : null,
         Object.keys(esdcPayload).length ? JSON.stringify(esdcPayload) : null,
         createdBy,
+        reviewedByStaffProfileId,
       ]
     );
 
@@ -39551,6 +40454,14 @@ app.patch('/api/interventions/:id', async (req, res) => {
     if (statusProvided) {
       updates.push('status = ?');
       params.push(statusValue);
+      if (
+        statusValue !== previousStatus &&
+        ['approved', 'changes_requested', 'rejected'].includes(statusValue)
+      ) {
+        updates.push('reviewed_by_staff_profile_id = ?');
+        params.push(resolveActiveStaffProfileId(req) || null);
+        updates.push('reviewed_at = NOW()');
+      }
     }
 
     if (isReassigning) {
@@ -46057,6 +46968,37 @@ const normalizeRegionCode = (value) => {
     .find(key => normalized.includes(key));
   return match ? PROVINCE_CODE_MAP[match] : null;
 };
+
+async function resolveRegionIdFromProvinceValue(provinceValue, executor = pool) {
+  const regionCode = normalizeRegionCode(provinceValue);
+  if (!regionCode || !executor || typeof executor.query !== 'function') {
+    return null;
+  }
+  const [[regionRow]] = await executor.query(
+    'SELECT region_id FROM canada_region WHERE code = ? LIMIT 1',
+    [regionCode]
+  );
+  return Number.isFinite(Number(regionRow?.region_id)) ? Number(regionRow.region_id) : null;
+}
+
+function extractProvinceFromAddressPayload(addressPayload) {
+  if (!addressPayload || typeof addressPayload !== 'object') {
+    return null;
+  }
+  const addressDetails =
+    addressPayload.address && typeof addressPayload.address === 'object'
+      ? addressPayload.address
+      : addressPayload;
+  return (
+    addressDetails?.province ||
+    addressDetails?.province_code ||
+    addressDetails?.provinceCode ||
+    addressPayload?.province ||
+    addressPayload?.province_code ||
+    addressPayload?.provinceCode ||
+    null
+  );
+}
 
 async function readFinanceEmailRouting(connection = null) {
   const runner = connection || pool;
@@ -53652,6 +54594,354 @@ const updateReconciliationMetadata = async ({ ids = [], updates = {}, connection
   return updatedIds;
 };
 
+const FINANCE_SALARY_MONTH_COUNT = 12;
+
+function roundFinanceCurrencyAmount(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return 0;
+  return Math.round(amount * 100) / 100;
+}
+
+function buildFinanceSalaryFiscalYearBounds(fiscalYearStart) {
+  const startYear = resolveReportingFiscalYearStartValue(fiscalYearStart);
+  return {
+    fiscalYearStart: startYear,
+    fiscalYear: formatReportingFiscalYearLabel(startYear),
+    start: buildReportingIsoDate(startYear, 4, 1),
+    end: buildReportingIsoDate(startYear + 1, 3, 31),
+  };
+}
+
+function buildFinanceSalaryFiscalYearOptions(referenceDate = new Date()) {
+  const currentFiscalYearStart = resolveReportingFiscalYearStartYear(referenceDate);
+  return [currentFiscalYearStart - 1, currentFiscalYearStart, currentFiscalYearStart + 1].map(startYear => ({
+    value: String(startYear),
+    label: `FY ${formatReportingFiscalYearLabel(startYear)}`,
+  }));
+}
+
+function normaliseFinanceSalaryAmount(rawValue) {
+  if (rawValue === null || typeof rawValue === 'undefined' || rawValue === '') {
+    return null;
+  }
+  const numeric = Number(String(rawValue).replace(/,/g, '').trim());
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return null;
+  }
+  return roundFinanceCurrencyAmount(numeric);
+}
+
+async function readFinanceSalaryPotOptionsByRegion(regionCodes = [], executor = pool) {
+  const runner = executor || pool;
+  const codes = Array.from(
+    new Set(
+      (Array.isArray(regionCodes) ? regionCodes : [])
+        .map(code => normaliseString(code)?.toUpperCase() || null)
+        .filter(code => code && /^[A-Z]{2}$/.test(code) && code !== 'XX')
+    )
+  );
+  if (!runner || typeof runner.query !== 'function' || !codes.length) {
+    return new Map();
+  }
+  const [rows] = await runner.query(
+    `
+    SELECT
+      bpr.region_code,
+      bp.id,
+      bp.code,
+      bp.name,
+      CASE
+        WHEN UPPER(COALESCE(bp.code, '')) LIKE '%SAL%'
+          OR UPPER(COALESCE(bp.name, '')) LIKE '%SALAR%'
+        THEN 1
+        ELSE 0
+      END AS is_salary_like
+    FROM budget_pot_region bpr
+    JOIN budget_pot bp ON bp.id = bpr.pot_id
+    WHERE bpr.region_code IN (${codes.map(() => '?').join(', ')})
+    ORDER BY
+      bpr.region_code ASC,
+      is_salary_like DESC,
+      bp.name ASC,
+      bp.id ASC
+    `,
+    codes
+  );
+  const map = new Map();
+  (rows || []).forEach(row => {
+    const regionCode = normaliseString(row.region_code)?.toUpperCase();
+    if (!regionCode) return;
+    const nextOption = {
+      value: String(row.id),
+      label: row.name || row.code || `Pot #${row.id}`,
+      code: row.code || null,
+      isSalaryLike: Boolean(row.is_salary_like),
+    };
+    if (!map.has(regionCode)) {
+      map.set(regionCode, []);
+    }
+    map.get(regionCode).push(nextOption);
+  });
+  return map;
+}
+
+async function readFinanceSalaryDashboardPayload(
+  { fiscalYearStart },
+  executor = pool
+) {
+  const runner = executor || pool;
+  const bounds = buildFinanceSalaryFiscalYearBounds(fiscalYearStart);
+  const [regions] = await runner.query(
+    `
+    SELECT code, name_en
+    FROM canada_region
+    WHERE code <> ?
+    ORDER BY name_en ASC
+    `,
+    ['XX']
+  );
+  const regionCodes = (regions || []).map(row => row.code);
+  const potOptionsByRegion = await readFinanceSalaryPotOptionsByRegion(regionCodes, runner);
+  const [rows] = await runner.query(
+    `
+    SELECT
+      cr.code AS region_code,
+      cr.name_en AS region_name,
+      entry_row.id AS entry_id,
+      entry_row.budget_pot_id,
+      entry_row.annual_salary_amount,
+      entry_row.updated_at,
+      COALESCE(
+        NULLIF(TRIM(sp.display_name), ''),
+        NULLIF(TRIM(sp.name), ''),
+        NULLIF(TRIM(sp.email), '')
+      ) AS updated_by_name
+    FROM canada_region cr
+    LEFT JOIN finance_regional_salary_entry entry_row
+      ON entry_row.region_code = cr.code
+     AND entry_row.fiscal_year_start = ?
+    LEFT JOIN staff_profiles sp ON sp.id = entry_row.updated_by_staff_profile_id
+    WHERE cr.code <> ?
+    ORDER BY cr.name_en ASC
+    `,
+    [bounds.fiscalYearStart, 'XX']
+  );
+
+  const normalizedRows = (rows || []).map(row => {
+    const regionCode = row.region_code;
+    const potOptions = potOptionsByRegion.get(regionCode) || [];
+    const suggestedPotId =
+      potOptions.find(option => option.isSalaryLike)?.value ||
+      potOptions[0]?.value ||
+      null;
+    const selectedPotId = row.budget_pot_id ? String(row.budget_pot_id) : suggestedPotId;
+    const selectedPot = potOptions.find(option => option.value === selectedPotId) || null;
+    return {
+      regionCode,
+      regionName: row.region_name,
+      entryId: row.entry_id ? String(row.entry_id) : null,
+      budgetPotId: selectedPotId,
+      budgetPotName: selectedPot?.label || null,
+      annualSalaryAmount:
+        row.annual_salary_amount === null || typeof row.annual_salary_amount === 'undefined'
+          ? null
+          : roundFinanceCurrencyAmount(row.annual_salary_amount),
+      derivedMonthlyAmount:
+        row.annual_salary_amount === null || typeof row.annual_salary_amount === 'undefined'
+          ? null
+          : roundFinanceCurrencyAmount(Number(row.annual_salary_amount) / FINANCE_SALARY_MONTH_COUNT),
+      updatedAt: row.updated_at ? toIsoDateTime(row.updated_at) : null,
+      updatedByName: row.updated_by_name || null,
+      potOptions,
+      suggestedPotId,
+    };
+  });
+
+  const enteredRegionCount = normalizedRows.filter(row => row.annualSalaryAmount !== null).length;
+  const assignedPotCount = normalizedRows.filter(row => row.budgetPotId).length;
+  const annualTotal = roundFinanceCurrencyAmount(
+    normalizedRows.reduce((sum, row) => sum + Number(row.annualSalaryAmount || 0), 0)
+  );
+  return {
+    fiscalYearStart: bounds.fiscalYearStart,
+    fiscalYear: bounds.fiscalYear,
+    fiscalYearOptions: buildFinanceSalaryFiscalYearOptions(),
+    rows: normalizedRows,
+    summary: {
+      annualTotal,
+      derivedMonthlyTotal: roundFinanceCurrencyAmount(annualTotal / FINANCE_SALARY_MONTH_COUNT),
+      enteredRegionCount,
+      missingRegionCount: Math.max(0, normalizedRows.length - enteredRegionCount),
+      assignedPotCount,
+      regionCount: normalizedRows.length,
+    },
+  };
+}
+
+app.get('/api/finance/salaries', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  const fiscalYearStart = resolveReportingFiscalYearStartValue(req.query?.fiscalYearStart ?? req.query?.fiscalYear);
+  try {
+    const payload = await readFinanceSalaryDashboardPayload({ fiscalYearStart }, pool);
+    res.set('Cache-Control', 'no-store, max-age=0');
+    return res.json(payload);
+  } catch (err) {
+    console.error('[finance:salaries] fetch failed:', err?.message || err);
+    return res.status(500).json({
+      error: 'finance_salaries_fetch_failed',
+      message: err?.message || 'Finance salaries fetch failed.',
+    });
+  }
+});
+
+app.put('/api/finance/salaries', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  const fiscalYearStart = resolveReportingFiscalYearStartValue(req.body?.fiscalYearStart ?? req.body?.fiscalYear);
+  const inputRows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  if (!inputRows.length) {
+    return res.status(400).json({
+      error: 'finance_salaries_rows_required',
+      message: 'Provide at least one salary row to save.',
+    });
+  }
+
+  const validatedRows = [];
+  const seenRegionCodes = new Set();
+  for (const rawRow of inputRows) {
+    const regionCode = normaliseString(rawRow?.regionCode ?? rawRow?.region_code)?.toUpperCase() || '';
+    if (!regionCode || !/^[A-Z]{2}$/.test(regionCode) || regionCode === 'XX') {
+      return res.status(422).json({
+        error: 'invalid_finance_salary_region',
+        message: 'Each salary row must target a valid province or territory.',
+      });
+    }
+    if (seenRegionCodes.has(regionCode)) {
+      return res.status(422).json({
+        error: 'duplicate_finance_salary_region',
+        message: `Duplicate salary row received for ${regionCode}.`,
+      });
+    }
+    seenRegionCodes.add(regionCode);
+
+    const rawBudgetPotValue = rawRow?.budgetPotId ?? rawRow?.budget_pot_id ?? null;
+    const budgetPotId =
+      rawBudgetPotValue === null || typeof rawBudgetPotValue === 'undefined' || rawBudgetPotValue === ''
+        ? null
+        : normalisePositiveInteger(rawBudgetPotValue);
+    if (rawBudgetPotValue !== null && typeof rawBudgetPotValue !== 'undefined' && rawBudgetPotValue !== '' && !budgetPotId) {
+      return res.status(422).json({
+        error: 'invalid_finance_salary_budget_pot',
+        message: `Select a valid budget pot for ${regionCode}.`,
+      });
+    }
+
+    const rawAnnualSalaryAmount = rawRow?.annualSalaryAmount ?? rawRow?.annual_salary_amount ?? null;
+    const annualSalaryAmount = normaliseFinanceSalaryAmount(rawAnnualSalaryAmount);
+    if (
+      rawAnnualSalaryAmount !== null &&
+      typeof rawAnnualSalaryAmount !== 'undefined' &&
+      rawAnnualSalaryAmount !== '' &&
+      annualSalaryAmount === null
+    ) {
+      return res.status(422).json({
+        error: 'invalid_finance_salary_amount',
+        message: `Enter a valid non-negative annual salary amount for ${regionCode}.`,
+      });
+    }
+    if (annualSalaryAmount !== null && !budgetPotId) {
+      return res.status(422).json({
+        error: 'finance_salary_budget_pot_required',
+        message: `Assign a budget pot before saving an annual salary amount for ${regionCode}.`,
+      });
+    }
+    validatedRows.push({
+      regionCode,
+      budgetPotId,
+      annualSalaryAmount,
+    });
+  }
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    const regionCodes = validatedRows.map(row => row.regionCode);
+    const [regionRows] = await connection.query(
+      `
+      SELECT code
+      FROM canada_region
+      WHERE code IN (${regionCodes.map(() => '?').join(', ')})
+        AND code <> ?
+      `,
+      [...regionCodes, 'XX']
+    );
+    const validRegionCodes = new Set((regionRows || []).map(row => row.code));
+    if (validRegionCodes.size !== regionCodes.length) {
+      return res.status(422).json({
+        error: 'invalid_finance_salary_region',
+        message: 'One or more salary rows reference an invalid province or territory.',
+      });
+    }
+
+    const potOptionsByRegion = await readFinanceSalaryPotOptionsByRegion(regionCodes, connection);
+    for (const row of validatedRows) {
+      if (!row.budgetPotId) continue;
+      const allowedPotIds = new Set((potOptionsByRegion.get(row.regionCode) || []).map(option => option.value));
+      if (!allowedPotIds.has(String(row.budgetPotId))) {
+        return res.status(422).json({
+          error: 'invalid_finance_salary_budget_pot',
+          message: `The selected budget pot is not assigned to ${row.regionCode}.`,
+        });
+      }
+    }
+
+    const actorStaffProfileId = resolveActiveStaffProfileId(req) || null;
+    await connection.beginTransaction();
+    await connection.query(
+      `
+      INSERT INTO finance_regional_salary_entry (
+        region_code,
+        fiscal_year_start,
+        budget_pot_id,
+        annual_salary_amount,
+        created_by_staff_profile_id,
+        updated_by_staff_profile_id
+      ) VALUES ${validatedRows.map(() => '(?, ?, ?, ?, ?, ?)').join(', ')}
+      ON DUPLICATE KEY UPDATE
+        budget_pot_id = VALUES(budget_pot_id),
+        annual_salary_amount = VALUES(annual_salary_amount),
+        updated_by_staff_profile_id = VALUES(updated_by_staff_profile_id),
+        updated_at = CURRENT_TIMESTAMP
+      `,
+      validatedRows.flatMap(row => [
+        row.regionCode,
+        fiscalYearStart,
+        row.budgetPotId,
+        row.annualSalaryAmount,
+        actorStaffProfileId,
+        actorStaffProfileId,
+      ])
+    );
+    await connection.commit();
+
+    const payload = await readFinanceSalaryDashboardPayload({ fiscalYearStart }, pool);
+    res.set('Cache-Control', 'no-store, max-age=0');
+    return res.json(payload);
+  } catch (err) {
+    if (connection) {
+      try { await connection.rollback(); } catch (_) {}
+    }
+    console.error('[finance:salaries] save failed:', err?.message || err);
+    return res.status(500).json({
+      error: 'finance_salaries_save_failed',
+      message: err?.message || 'Finance salaries save failed.',
+    });
+  } finally {
+    if (connection) {
+      connection.release();
+    }
+  }
+});
+
 app.get('/api/finance/budget-pots', async (req, res) => {
   if (requireFinanceRole(req, res)) return;
   try {
@@ -59862,11 +61152,16 @@ app.post('/api/applications/manual-intake', async (req, res) => {
       addressPayload
     });
 
+    const portfolioRegionId = await resolveRegionIdFromProvinceValue(
+      applicantSeed.province || null,
+      connection
+    );
+
     const [caseResult] = await connection.query(
       `INSERT INTO iset_case
-        (application_id, case_number, client_id, status, stage, opened_at, created_by_staff_profile_id, updated_by_staff_profile_id, created_at, updated_at)
-       VALUES (?, ?, ?, 'submitted', 'intake', NOW(), ?, ?, NOW(), NOW())`,
-      [applicationId, referenceNumber, clientId, createdByStaffProfileId, createdByStaffProfileId]
+        (application_id, case_number, client_id, status, stage, opened_at, portfolio_region_id, created_by_staff_profile_id, updated_by_staff_profile_id, created_at, updated_at)
+       VALUES (?, ?, ?, 'submitted', 'intake', NOW(), ?, ?, ?, NOW(), NOW())`,
+      [applicationId, referenceNumber, clientId, portfolioRegionId, createdByStaffProfileId, createdByStaffProfileId]
     );
     const caseId = Number(caseResult.insertId);
 

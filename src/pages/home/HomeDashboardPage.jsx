@@ -601,8 +601,6 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                             const parsed = Number(bucket.count);
                             const mappedId = bucket.id === 'new-submissions'
                                 ? 'unassigned-applications'
-                                : bucket.id === 'awaiting-decision'
-                                ? 'applications-awaiting-approval'
                                 : bucket.id;
                             nextCounts[mappedId] = Number.isFinite(parsed) ? parsed : 0;
                         }
@@ -1935,7 +1933,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         trackingId: tracking,
                         case_id: row.caseId || row.case_id || null,
                         application_id: row.applicationId || row.application_id || null,
-                        bucketId: 'applications-awaiting-approval',
+                        bucketId: 'approvals',
                         type: 'AwaitingApproval',
                         applicant: applicantName,
                         applicant_name: applicantName,
@@ -1958,13 +1956,9 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                     };
                 });
                 setProgramAdminItems(current => {
-                    const nonAwaiting = current.filter(item => item.bucketId !== 'applications-awaiting-approval');
+                    const nonAwaiting = current.filter(item => item.type !== 'AwaitingApproval');
                     return [...mapped, ...nonAwaiting];
                 });
-                setProgramAdminCounts(current => ({
-                    ...current,
-                    'applications-awaiting-approval': mapped.length
-                }));
             } catch (_) {
                 // keep existing items on failure
             }
@@ -2017,7 +2011,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         trackingId: tracking,
                         case_id: caseId,
                         application_id: row.applicationId || row.application_id || null,
-                        bucketId: 'interventions-awaiting-approval',
+                        bucketId: 'approvals',
                         type: 'InterventionApproval',
                         applicant: applicantName,
                         applicant_name: applicantName,
@@ -2037,13 +2031,9 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                     };
                 });
                 setProgramAdminItems(current => {
-                    const nonInterventions = current.filter(item => item.bucketId !== 'interventions-awaiting-approval');
+                    const nonInterventions = current.filter(item => item.type !== 'InterventionApproval');
                     return [...mapped, ...nonInterventions];
                 });
-                setProgramAdminCounts(current => ({
-                    ...current,
-                    'interventions-awaiting-approval': mapped.length
-                }));
             } catch (_) {
                 // keep existing items on failure
             }
