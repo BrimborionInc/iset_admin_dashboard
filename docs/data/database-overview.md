@@ -51,6 +51,8 @@ Notes:
 
 If a future question asks "which tables should I populate?", start from the relevant domain doc and cross-check the schema dump for required columns and constraints.
 
+For client-file imports that are not meant to recreate historical applications, the target sequence is different: `client` -> `iset_case` -> `case_context_json`, with assessment/action-plan/intervention rows created later only if the real workflow reaches those stages. Core case creation, case updates, and case listing now support that model; remaining caveats are mostly around participant-account-dependent features like secure messaging and applicant-scoped documents. See `docs/guides/client-file-imports.md` before designing import tooling.
+
 ## Schema lookup shortcuts (dev)
 ```sh
 # From WSL (Windows MySQL client)

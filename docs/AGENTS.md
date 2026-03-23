@@ -5,7 +5,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-03-22
+Last Updated: 2026-03-23
 
 ## Working relationship (design dialog)
 
@@ -60,12 +60,55 @@ Last Updated: 2026-03-22
 ## High-value repo map
 
 - Docs base path: `X:\ISET\admin-dashboard\docs` (WSL: `/mnt/x/ISET/admin-dashboard/docs`)
+- Client-file import guide: `docs/guides/client-file-imports.md`
+- Client Batch Import dashboard reference: `docs/dashboards/client-file-import-dashboard.md`
+- Query Editor dashboard reference: `docs/dashboards/query-editor-dashboard.md`
 - Operational reporting workbook reference: `docs/data/NWAC - data info 2025-26.xlsx`
 - Admin intake preview renderer: `apps/web/src/features/intake/ComponentRenderer.tsx`
 - Public portal renderer (other repo): `../ISET-intake/src/renderer/renderers.js`
 - Help panel content: `src/helpPanelContents/*`
 - Admin test deploy staging script: `scripts/deploy-admin-test.ps1`
 - Portal test deploy staging script: `../ISET-intake/scripts/deploy-portal-test.ps1`
+
+## Documentation gateway
+
+- Start here for current orientation, then go deeper into the docs below rather than relying on planning notes alone.
+- Live dashboard behavior: `docs/dashboards/*`
+- Import and data-backload constraints: `docs/guides/client-file-imports.md`
+- Client Batch Import dashboard: `docs/dashboards/client-file-import-dashboard.md`
+- Widget-level docs index: `docs/widgets/admin/README.md`
+- Workflow-level docs index: `docs/workflows/admin/README.md`
+- Project structure / architecture map: `docs/meta/project-map.md`
+- Historical plans and design notes: `docs/planning/*` (useful for intent/history, but verify against code before treating as current behavior)
+
+## Query Editor status
+
+- Route: `/configuration/query-editor`
+- Default access: System Administrator only
+- Current input model: typed/pasted SQL text in the dashboard editor, plus single-file `.sql` / `.txt` upload that loads file contents into the editor
+- Current execution model: frontend posts `{ sql }` to `/api/admin/query-editor`; backend executes one or more semicolon-delimited statements against the active environment DB connection
+- Current file-upload constraint: client-side upload limit is 900 KB so requests stay within the server's 1 MB JSON body limit
+- Current result handling: `SELECT` results are capped at 100 rows per statement; write statements return rows affected/status; multiple statements use a result-set selector
+- Separate path to keep distinct: the startup migration runner executes `.sql` files from `/sql`, but that is not the Query Editor dashboard
+
+## Client Batch Import status
+
+- Route: `/iset/imports/client-files`
+- Current navigation label: `Configuration > Client Batch Import`
+- Default access: System Administrator and Program Administrator
+- Current upload support: one `.xlsx`, `.xlsm`, or `.csv` file per dry run
+- Current limits: 5 MB and 500 data rows per run
+- Current flow: upload -> dry run -> review -> commit
+- Current matching order: raw `SIN`, prior case/submission `SIN` fallback, normalized email, then name + DOB
+- Current commit model:
+  - create a new `client` + application-less `iset_case`
+  - create an application-less `iset_case` for an existing client
+  - update the single existing case linked to the matched client
+- Current non-goals:
+  - no applicant `user` creation
+  - no historical application recreation
+  - no placeholder assessment/action-plan/intervention/document rows
+- Read `docs/dashboards/client-file-import-dashboard.md` and `docs/guides/client-file-imports.md` before changing import UX or matching rules.
 
 ## Operational reporting context
 
@@ -99,6 +142,10 @@ Last Updated: 2026-03-22
 ## Known pitfalls
 
 - Program Admin "Unassigned Applications" must use `/api/applications`, not `/api/cases`, or applicant names are missing.
+- Schema allows `iset_case.application_id = NULL`, and core case create/update/list flows now support client-file cases.
+- Supporting Documents now has a case-based mode for application-less client files: it reads from `GET /api/cases/:id/documents`, uploads through `POST /api/cases/:id/documents/upload`, hides the checklist tab, and allows `client`, `case`, `action_plan`, plus application-type document categories. When no linked application exists, application-type uploads fall back to action-plan or case storage instead of requiring a fake application record.
+- Secure Messaging still depends on applicant/application linkage today; imported client-file cases without a participant account can manage documents, plans, and interventions but still cannot message the client until a participant account exists.
+- Case Header now exposes explicit backload quick actions on application-less cases: `Add existing action plan`, `Add existing intervention`, and `Upload existing documents`.
 - Tutorial updates must be validated end-to-end (including `Next` progression on every step) so no step dead-ends due to missing hotspots.
 - If a change introduces new deployment artifacts, update the relevant deploy script(s) so files are staged.
 

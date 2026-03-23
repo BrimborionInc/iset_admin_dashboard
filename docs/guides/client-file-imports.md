@@ -1,0 +1,118 @@
+# Client File Imports
+
+Date: 2026-03-23
+
+## Summary
+
+- The schema can represent a client file without a historical application.
+- Do not create placeholder application, submission, assessment, action-plan, or intervention rows just to satisfy referential integrity.
+- A true client-file import should be modeled as `client` + `iset_case` + seeded `case_context_json`.
+- Core case creation, case updates, and case listing now support that model, but some participant-facing features still depend on an applicant account / application link.
+
+## Current source of truth
+
+- Participant identity and contact details now live primarily in `iset_case.case_context_json`.
+- The Case Workspace participant editor writes those values back through `PUT /api/cases/:id`.
+- Action plans, interventions, notes, tasks, reminders, and most case operations are case-linked rather than application-linked.
+
+## What the schema allows
+
+- `iset_case.application_id` is nullable, while `client_id` remains the real ownership link.
+- `iset_case_assessment` is keyed by `case_id`.
+- `iset_case_action_plan` is keyed by `case_id`.
+- `iset_case_intervention` is keyed by `case_id` and optionally linked to an action plan.
+- `iset_case_note` and `iset_case_task` are keyed by `case_id`.
+- `iset_case_reminder` and `iset_document` can carry an `application_id`, but that link is optional.
+
+This means the database does not require a fake intake history just to preserve integrity.
+
+## What the runtime still assumes today
+
+- `POST /api/cases` now supports a client-file case with `client_id` only.
+- `PUT /api/cases/:id` now works for application-less cases when the change is truly case-level (`case_context_json`, assessment, case status). Application-specific fields still require an application link.
+- `GET /api/cases` now includes application-less cases in the main cases dashboard list.
+- Secure messaging still resolves the participant recipient from `case -> application -> submission -> user`, so it does not currently support a case that only has client/profile data. The workspace now suppresses message actions when no participant account is linked.
+- Supporting Documents now has a real case-based mode for client-file-only cases:
+  - reads from `GET /api/cases/:id/documents`
+  - uploads through `POST /api/cases/:id/documents/upload`
+  - allows `client`, `case`, and `action_plan` document types without fabricating applicant/application rows
+  - intentionally hides the checklist tab when there is no applicant/application chain
+- This means missing assessments, action plans, or interventions are not what governs document upload. The widget now distinguishes between applicant-driven checklist mode and case-based document mode.
+- Application-form/version widgets are inherently not available for a client-file-only case, because there is no original intake payload to show.
+
+## Current backload operating model
+
+- Imported client files are operationally usable on day one without fabricating historical intake, assessment, or approval data.
+- The Case Workspace now exposes explicit backload quick actions for application-less cases:
+  - `Add existing action plan`
+  - `Add existing intervention`
+  - `Upload existing documents`
+- Those actions are for recording pre-go-live reality only. They create real action-plan, intervention, and document records, but they do so silently:
+  - no applicant emails
+  - no approval routing
+  - no checklist progression
+  - no client-notification side effects
+- New post-go-live activity should still use the normal PATH workflow, for example `Propose new intervention`.
+
+## Recommendation
+
+- Treat spreadsheet backloads like this as client-file imports, not historical-application imports.
+- Create or match the `client` first.
+- Create a real `iset_case` for that client with `application_id = NULL`.
+- Seed `case_context_json` with the participant profile fields imported from the spreadsheet.
+- Create a `user` only when an email is present and there is an actual business reason to support login, secure messaging, or applicant-linked document flows.
+- Leave assessment rows absent unless they truly existed and need to be modeled explicitly.
+- Allow action plans, interventions, funding/cost lines, and documents to be backloaded later through the explicit case-workspace backload actions rather than by inventing fake intake history.
+- If the organization later decides historical applications matter, import them as a second phase with their own explicit rules rather than fabricating them during client-file setup.
+- Do not create placeholder application, submission, approval, or applicant-account records just to unlock later case-management features.
+
+## Current dashboard implementation
+
+- Route: `/iset/imports/client-files`
+- Current navigation label: `Configuration > Client Batch Import`
+- Upload support: `.xlsx`, `.xlsm`, `.csv`
+- Current limits: 5 MB and 500 data rows per run
+- Current flow: upload -> dry run -> review blocked/warning rows -> commit
+- Current matching order:
+  - raw `SIN`
+  - case/submission `SIN` fallback
+  - normalized email
+  - name + DOB when DOB is available, otherwise a stricter name-only fallback
+- Current commit actions:
+  - create a new `client` + application-less `iset_case`
+  - create an application-less `iset_case` for an existing client
+  - update the single existing case already linked to the matched client
+- Current block conditions:
+  - missing required name fields or required headers
+  - duplicate rows in the uploaded file
+  - conflicting matches to more than one client
+  - multiple existing cases for the matched client
+- Current DOB rule:
+  - blank DOB is allowed
+  - invalid DOB becomes a warning and imports as blank
+- Current non-goals:
+  - no applicant `user` creation
+  - no historical application recreation
+  - no placeholder assessment/action-plan/intervention/document rows
+
+## Code touchpoints
+
+- `isetadminserver.js`:
+  - `POST /api/cases`
+  - `PUT /api/cases/:id`
+  - `GET /api/cases`
+  - `GET /api/cases/:id/workspace`
+  - `GET/POST /api/cases/:id/messages`
+- `isetadminserver.js`:
+  - `POST /api/imports/client-files/dry-run`
+  - `POST /api/imports/client-files/commit`
+- `src/pages/imports/ClientFileImportDashboard.jsx`
+- `src/pages/imports/widgets/ClientFileImportWidget.jsx`
+- `src/pages/Caseworking/caseWorkspace/widgets/ParticipantDetailsWidget.jsx`
+- `src/pages/Caseworking/caseWorkspace/widgets/CaseHeaderWidget.jsx`
+- `src/pages/Caseworking/caseWorkspace/modals/ExistingActionPlanModal.jsx`
+- `src/pages/Caseworking/caseWorkspace/modals/ExistingInterventionModal.jsx`
+- `src/widgets/SupportingDocumentsWidget.js`
+- `src/widgets/caseWorkspace/SecureMessagingWidget.js`
+- `docs/dashboards/client-file-import-dashboard.md`
+- `docs/guides/case-workspace-guidance.md`

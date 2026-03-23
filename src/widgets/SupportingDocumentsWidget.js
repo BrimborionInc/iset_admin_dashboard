@@ -24,12 +24,15 @@ import SupportingDocumentsHelp from '../helpPanelContents/supportingDocumentsHel
 import { useCaseWorkspace } from '../pages/Caseworking/caseWorkspace/CaseWorkspaceContext.jsx';
 
 const REFRESH_EVENT = 'iset:supporting-documents:refresh';
+const OPEN_UPLOAD_EVENT = 'iset:supporting-documents:open-upload';
+const CASE_DOCUMENT_SCOPES = new Set(['client', 'case', 'action_plan', 'application']);
 
 const PREFERENCES_STORAGE_KEY = 'supporting-documents-table-preferences-v2';
 const COLUMN_WIDTHS_STORAGE_KEY = 'supporting-documents-table-widths-v2';
+const CASE_MODE_INFO_DISMISSED_KEY = 'supporting-documents-case-mode-info-dismissed-v1';
 const ALL_COLUMN_IDS = ['label', 'file_name', 'source', 'case_number', 'scope', 'uploaded_at', 'actions'];
 const REQUIRED_COLUMN_IDS = ['file_name', 'actions'];
-const DOCUMENT_TYPE_PLACEHOLDER_OPTION = { value: '', label: 'Select document type', scope: 'application' };
+const DOCUMENT_TYPE_PLACEHOLDER_OPTION = { value: '', label: 'Select document type', scope: '' };
 
 const formatDate = value => {
   if (!value) return '';
@@ -88,6 +91,12 @@ const SCOPE_LABELS = {
 };
 
 const formatScopeLabel = scope => SCOPE_LABELS[scope] || 'Application';
+
+const ModalScopeHint = ({ children }) => (
+  <Box variant="small" color="text-body-secondary">
+    {children}
+  </Box>
+);
 
 const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) => {
   const workspace = useCaseWorkspace();
@@ -221,6 +230,15 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       return [];
     }
   });
+  const [showCaseModeInfo, setShowCaseModeInfo] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    try {
+      return window.localStorage.getItem(CASE_MODE_INFO_DISMISSED_KEY) !== 'true';
+    } catch (err) {
+      console.error('[SupportingDocuments] failed to read case mode info preference', err);
+      return true;
+    }
+  });
   const fileInputRef = useRef(null);
   const nextUploadLabelRef = useRef('');
   const nextUploadCategoryRef = useRef('');
@@ -245,6 +263,41 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     workspace?.application_id ??
     workspace?.applicationId ??
     null;
+  const canUseApplicantDocumentMode = Boolean(applicantUserId);
+  const isCaseDocumentMode = Boolean(isCaseWorkspace && caseId && !applicantUserId);
+  const canUploadDocuments = canUseApplicantDocumentMode || isCaseDocumentMode;
+  const caseWorkspaceApplicationId = applicationId ? String(applicationId) : '';
+  const usesApplicationScopeFallback = useCallback(
+    scope => scope === 'application' && isCaseDocumentMode && !caseWorkspaceApplicationId,
+    [isCaseDocumentMode, caseWorkspaceApplicationId]
+  );
+  const buildApplicationFallbackTarget = useCallback(
+    (actionPlanValue, interventionValues) => {
+      const nextActionPlanId = String(actionPlanValue || '').trim();
+      if (nextActionPlanId) {
+        return {
+          applicationId: '',
+          actionPlanId: nextActionPlanId,
+          interventionIds: normalizeIdList(interventionValues),
+          caseId: ''
+        };
+      }
+      return {
+        applicationId: '',
+        actionPlanId: '',
+        interventionIds: [],
+        caseId: caseId ? String(caseId) : ''
+      };
+    },
+    [caseId]
+  );
+  const uploadBlockedMessage = isCaseDocumentMode
+    ? 'Unable to upload until a case is selected.'
+    : 'Unable to upload until an applicant is selected.';
+  const widgetTitle = isCaseDocumentMode ? 'Case Documents' : 'Supporting Documents';
+  const widgetSummary = isCaseDocumentMode
+    ? 'This widget shows documents attached to the client file, case, action plans, and linked interventions for imported or application-less cases.'
+    : 'This widget displays documents related to the applicant, including application, action plan, payment packet, and secure message attachments.';
   const interventionOptions = useMemo(() => {
     const plans = caseData?.actionPlans || [];
     const options = [];
@@ -387,8 +440,18 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       setApplicationsLoading(false);
     }
   }, [applicantUserId, applicationId, isCaseWorkspace]);
+  const availableDocumentTypeOptions = useMemo(() => {
+    if (!isCaseDocumentMode) {
+      return documentTypeOptions;
+    }
+    const filtered = documentTypeOptions.filter(
+      opt => !opt?.value || CASE_DOCUMENT_SCOPES.has(opt.scope || 'application')
+    );
+    return filtered.length ? filtered : [DOCUMENT_TYPE_PLACEHOLDER_OPTION];
+  }, [documentTypeOptions, isCaseDocumentMode]);
   const getDocumentTypeScope = useCallback(
     code => {
+      if (!code) return '';
       const match = documentTypeOptions.find(opt => opt.value === code);
       return match?.scope || 'application';
     },
@@ -449,7 +512,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         typeof applicationIdOverride === 'string' || typeof applicationIdOverride === 'number'
           ? String(applicationIdOverride || '')
           : selectedApplicationFilter;
-      if (!applicantUserId) {
+      if (!canUploadDocuments) {
         setDocuments([]);
         setLoading(false);
         setRefreshing(false);
@@ -469,12 +532,15 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           params.set('applicationId', filterApplicationId);
         }
         const query = params.toString() ? `?${params.toString()}` : '';
-        const res = await apiFetch(`/api/applicants/${applicantUserId}/documents${query}`);
-        if (!res.ok) throw new Error('Failed to load supporting documents');
+        const endpoint = canUseApplicantDocumentMode
+          ? `/api/applicants/${applicantUserId}/documents${query}`
+          : `/api/cases/${caseId}/documents${query}`;
+        const res = await apiFetch(endpoint);
+        if (!res.ok) throw new Error(`Failed to load ${isCaseDocumentMode ? 'case documents' : 'supporting documents'}`);
         const data = await res.json().catch(() => []);
         setDocuments(Array.isArray(data) ? data : []);
       } catch (err) {
-        setError(err?.message || 'Failed to load supporting documents');
+        setError(err?.message || `Failed to load ${isCaseDocumentMode ? 'case documents' : 'supporting documents'}`);
       } finally {
         if (silent) {
           setRefreshing(false);
@@ -483,14 +549,25 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         }
       }
     },
-    [applicantUserId, isCaseWorkspace, selectedApplicationFilter, selectedInterventionFilter]
+    [
+      applicantUserId,
+      canUploadDocuments,
+      canUseApplicantDocumentMode,
+      caseId,
+      isCaseDocumentMode,
+      isCaseWorkspace,
+      selectedApplicationFilter,
+      selectedInterventionFilter,
+    ]
   );
 
   const loadChecklist = useCallback(async () => {
-    if (!applicantUserId) {
+    if (!canUseApplicantDocumentMode) {
       setChecklistItems([]);
       setMissingRequiredCount(0);
       setChecklistGateLabel('');
+      setChecklistError(null);
+      setChecklistLoading(false);
       return;
     }
     const selectedIntervention =
@@ -529,24 +606,26 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     } finally {
       setChecklistLoading(false);
     }
-  }, [applicantUserId, applicationId, interventionOptions, isCaseWorkspace, selectedInterventionFilter]);
+  }, [applicantUserId, applicationId, canUseApplicantDocumentMode, interventionOptions, isCaseWorkspace, selectedInterventionFilter]);
 
   useEffect(() => {
-    if (!applicantUserId) {
+    if (!canUploadDocuments) {
       setDocuments([]);
       setLoading(false);
       setRefreshing(false);
       setChecklistItems([]);
       setMissingRequiredCount(0);
       setChecklistGateLabel('');
+      setChecklistError(null);
+      setChecklistLoading(false);
       return;
     }
     loadDocuments();
     loadChecklist();
-  }, [applicantUserId, isCaseWorkspace, selectedApplicationFilter, selectedInterventionFilter, loadDocuments, loadChecklist]);
+  }, [canUploadDocuments, loadDocuments, loadChecklist]);
 
   useEffect(() => {
-    if (!applicantUserId) {
+    if (!canUseApplicantDocumentMode) {
       setApplicationOptions([]);
       setSelectedApplicationFilter('');
       setPendingApplication('');
@@ -557,7 +636,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     }
     setPendingApplication(applicationId ? String(applicationId) : '');
     loadApplicantApplications();
-  }, [applicantUserId, applicationId, isCaseWorkspace, loadApplicantApplications]);
+  }, [canUseApplicantDocumentMode, applicationId, isCaseWorkspace, loadApplicantApplications]);
 
   useEffect(() => {
     if (!isCaseWorkspace) {
@@ -598,18 +677,27 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   ]);
 
   useEffect(() => {
-    if (!applicantUserId || typeof window === 'undefined') return;
+    if (!canUploadDocuments || typeof window === 'undefined') return;
     const handler = event => {
       const targetApplicant = event?.detail?.applicantUserId;
-      if (targetApplicant && targetApplicant !== applicantUserId) return;
+      const targetCase = event?.detail?.caseId;
+      if (targetApplicant && applicantUserId && String(targetApplicant) !== String(applicantUserId)) return;
+      if (targetCase && caseId && String(targetCase) !== String(caseId)) return;
       loadDocuments({ silent: true });
-      loadChecklist();
+      if (canUseApplicantDocumentMode) {
+        loadChecklist();
+      }
     };
     window.addEventListener(REFRESH_EVENT, handler);
     return () => {
       window.removeEventListener(REFRESH_EVENT, handler);
     };
-  }, [applicantUserId, loadDocuments, loadChecklist]);
+  }, [applicantUserId, canUploadDocuments, canUseApplicantDocumentMode, caseId, loadDocuments, loadChecklist]);
+
+  useEffect(() => {
+    if (canUseApplicantDocumentMode || activeTabId === 'documents') return;
+    setActiveTabId('documents');
+  }, [activeTabId, canUseApplicantDocumentMode]);
 
   const handleViewDocument = useCallback(
     async item => {
@@ -647,19 +735,23 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   );
   const openLabelModal = useCallback(() => {
     if (uploading) return;
-    if (!applicantUserId) {
-      setError('Unable to upload until an applicant is selected.');
+    if (!canUploadDocuments) {
+      setError(uploadBlockedMessage);
       return;
     }
     setLabelError('');
     setPendingApplicationError('');
     setPendingActionPlanError('');
     setPendingCategoryError('');
-    const initialApplication =
-      selectedApplicationFilter ||
-      (applicationId ? String(applicationId) : '') ||
-      (applicationOptions.length === 1 ? applicationOptions[0].value : '');
-    setPendingApplication(initialApplication || '');
+    if (!availableDocumentTypeOptions.some(opt => opt.value === pendingCategory)) {
+      setPendingCategory('');
+    }
+    const initialApplication = canUseApplicantDocumentMode
+      ? selectedApplicationFilter ||
+        (applicationId ? String(applicationId) : '') ||
+        (applicationOptions.length === 1 ? applicationOptions[0].value : '')
+      : '';
+    setPendingApplication(canUseApplicantDocumentMode ? initialApplication || '' : '');
     if (isCaseWorkspace) {
       const initialIntervention =
         selectedInterventionFilter ||
@@ -686,19 +778,37 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     setLabelModalVisible(true);
     setPendingLabel(prev => prev || '');
   }, [
-    applicantUserId,
+    canUploadDocuments,
     uploading,
     isCaseWorkspace,
+    canUseApplicantDocumentMode,
     selectedApplicationFilter,
     selectedInterventionFilter,
     selectedInterventionId,
     applicationId,
     applicationOptions,
+    availableDocumentTypeOptions,
     interventionOptions,
     actionPlanOptions,
     actionPlanInterventionMap,
-    interventionPlanMap
+    interventionPlanMap,
+    pendingCategory,
+    uploadBlockedMessage,
   ]);
+  useEffect(() => {
+    if (!canUploadDocuments || typeof window === 'undefined') return undefined;
+    const handler = event => {
+      const targetApplicant = event?.detail?.applicantUserId;
+      const targetCase = event?.detail?.caseId;
+      if (targetApplicant && applicantUserId && String(targetApplicant) !== String(applicantUserId)) return;
+      if (targetCase && caseId && String(targetCase) !== String(caseId)) return;
+      openLabelModal();
+    };
+    window.addEventListener(OPEN_UPLOAD_EVENT, handler);
+    return () => {
+      window.removeEventListener(OPEN_UPLOAD_EVENT, handler);
+    };
+  }, [applicantUserId, canUploadDocuments, caseId, openLabelModal]);
   const handleLabelModalDismiss = useCallback(() => {
     setLabelModalVisible(false);
     setLabelError('');
@@ -722,10 +832,22 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     let targetActionPlanId = '';
     let targetInterventionIds = [];
     if (scope === 'application') {
-      targetApplicationId = (pendingApplication || '').trim();
-      if (!targetApplicationId) {
-        setPendingApplicationError('Select which application this document should be attached to.');
-        return;
+      if (canUseApplicantDocumentMode) {
+        targetApplicationId = (pendingApplication || '').trim();
+        if (!targetApplicationId) {
+          setPendingApplicationError('Select which application this document should be attached to.');
+          return;
+        }
+      } else if (caseWorkspaceApplicationId) {
+        targetApplicationId = caseWorkspaceApplicationId;
+      } else {
+        const fallbackTarget = buildApplicationFallbackTarget(pendingActionPlan, pendingInterventions);
+        targetActionPlanId = fallbackTarget.actionPlanId;
+        targetInterventionIds = fallbackTarget.interventionIds;
+        if (!targetActionPlanId && !fallbackTarget.caseId) {
+          setLabelError('This document must be attached to a case or action plan.');
+          return;
+        }
       }
     }
     if (scope === 'case') {
@@ -761,7 +883,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     pendingApplication,
     pendingActionPlan,
     pendingInterventions,
-    isCaseWorkspace,
+    canUseApplicantDocumentMode,
+    caseWorkspaceApplicationId,
+    buildApplicationFallbackTarget,
     getDocumentTypeScope,
     caseId
   ]);
@@ -773,8 +897,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         input.value = '';
       }
       if (!file) return;
-      if (!applicantUserId) {
-        setError('Unable to upload until an applicant is selected.');
+      if (!canUploadDocuments) {
+        setError(uploadBlockedMessage);
         return;
       }
       setUploading(true);
@@ -795,7 +919,10 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         formData.append('label', labelForUpload);
         const categoryForUpload = (nextUploadCategoryRef.current || '').trim();
         if (categoryForUpload) formData.append('documentType', categoryForUpload);
-        const response = await apiFetch(`/api/applicants/${applicantUserId}/documents/upload`, {
+        const uploadPath = canUseApplicantDocumentMode
+          ? `/api/applicants/${applicantUserId}/documents/upload`
+          : `/api/cases/${caseId}/documents/upload`;
+        const response = await apiFetch(uploadPath, {
           method: 'POST',
           body: formData
         });
@@ -824,6 +951,12 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           if (errorCode === 'invalid_applicant_id') {
             throw new Error('Unable to determine which applicant this upload belongs to.');
           }
+          if (errorCode === 'invalid_case_id') {
+            throw new Error('Unable to determine which case this upload belongs to.');
+          }
+          if (errorCode === 'client_id_required') {
+            throw new Error('Unable to determine which client this document belongs to.');
+          }
           if (errorCode === 'application_required_for_document') {
             throw new Error('Select an application for this document type before uploading.');
           }
@@ -848,7 +981,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           throw new Error(payload?.message || 'Failed to upload document.');
         }
         await loadDocuments({ silent: true });
-        await loadChecklist();
+        if (canUseApplicantDocumentMode) {
+          await loadChecklist();
+        }
       } catch (err) {
         const message = err?.message || 'Failed to upload document.';
         setError(message);
@@ -861,12 +996,21 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         nextUploadInterventionIdsRef.current = [];
         setPendingLabel('');
         setPendingCategory('');
-        setPendingApplication(applicationId ? String(applicationId) : '');
+        setPendingApplication(canUseApplicantDocumentMode && applicationId ? String(applicationId) : '');
         setPendingActionPlan('');
         setPendingInterventions([]);
       }
     },
-    [applicantUserId, caseId, applicationId, loadDocuments, loadChecklist]
+    [
+      applicantUserId,
+      applicationId,
+      canUploadDocuments,
+      canUseApplicantDocumentMode,
+      caseId,
+      loadChecklist,
+      loadDocuments,
+      uploadBlockedMessage,
+    ]
   );
   const handleInlineEdit = useCallback(
     async (item, column, newValue) => {
@@ -967,6 +1111,11 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     if (scope === 'application') {
       if (item.application_id) {
         nextApplicationId = String(item.application_id);
+      } else if (item.action_plan_id) {
+        nextActionPlanId = String(item.action_plan_id);
+        nextInterventionIds = normalizeIdList(item.intervention_ids);
+      } else if (caseWorkspaceApplicationId) {
+        nextApplicationId = String(caseWorkspaceApplicationId);
       }
     } else if (scope === 'action_plan') {
       if (item.action_plan_id) {
@@ -984,7 +1133,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     setEditInterventionIds(nextInterventionIds);
     setEditAttachError('');
     setEditModalVisible(true);
-  }, [getDocumentTypeScope, resolveDocumentType]);
+  }, [caseWorkspaceApplicationId, getDocumentTypeScope, resolveDocumentType]);
 
   const handleEditDismiss = useCallback(() => {
     setEditModalVisible(false);
@@ -1020,12 +1169,27 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     const scope = getDocumentTypeScope(trimmedType);
     const payload = { label: trimmedLabel, documentType: trimmedType };
     if (scope === 'application') {
-      const nextApplicationId = (editApplicationId || '').trim();
-      if (!nextApplicationId) {
-        setEditAttachError('Select which application this document should be attached to.');
-        return;
+      if (canUseApplicantDocumentMode) {
+        const nextApplicationId = (editApplicationId || '').trim();
+        if (!nextApplicationId) {
+          setEditAttachError('Select which application this document should be attached to.');
+          return;
+        }
+        payload.applicationId = nextApplicationId;
+      } else if (caseWorkspaceApplicationId) {
+        payload.applicationId = caseWorkspaceApplicationId;
+      } else {
+        const fallbackTarget = buildApplicationFallbackTarget(editActionPlanId, editInterventionIds);
+        if (fallbackTarget.actionPlanId) {
+          payload.actionPlanId = fallbackTarget.actionPlanId;
+          payload.interventionIds = fallbackTarget.interventionIds;
+        } else if (fallbackTarget.caseId) {
+          payload.caseId = fallbackTarget.caseId;
+        } else {
+          setEditAttachError('This document must be attached to a case or action plan.');
+          return;
+        }
       }
-      payload.applicationId = nextApplicationId;
     } else if (scope === 'case') {
       const nextCaseId = caseId ? String(caseId) : editDocument?.case_id ? String(editDocument.case_id) : '';
       if (!nextCaseId) {
@@ -1058,7 +1222,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         throw new Error(payload?.message || 'Failed to update document.');
       }
       await loadDocuments({ silent: true });
-      await loadChecklist();
+      if (canUseApplicantDocumentMode) {
+        await loadChecklist();
+      }
       handleEditDismiss();
     } catch (err) {
       setEditLabelError(err?.message || 'Failed to update document.');
@@ -1070,10 +1236,13 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     editApplicationId,
     editActionPlanId,
     editInterventionIds,
+    buildApplicationFallbackTarget,
+    caseWorkspaceApplicationId,
     getDocumentTypeScope,
     loadDocuments,
     loadChecklist,
     handleEditDismiss,
+    canUseApplicantDocumentMode,
     caseId
   ]);
 
@@ -1087,6 +1256,11 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     if (scope === 'application') {
       if (item.application_id) {
         nextApplicationId = String(item.application_id);
+      } else if (item.action_plan_id) {
+        nextActionPlanId = String(item.action_plan_id);
+        nextInterventionIds = normalizeIdList(item.intervention_ids);
+      } else if (caseWorkspaceApplicationId) {
+        nextApplicationId = String(caseWorkspaceApplicationId);
       } else if (selectedApplicationFilter) {
         nextApplicationId = String(selectedApplicationFilter);
       } else if (applicationId) {
@@ -1123,6 +1297,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     actionPlanInterventionMap,
     actionPlanOptions,
     applicationId,
+    caseWorkspaceApplicationId,
     getDocumentTypeScope,
     interventionPlanMap,
     resolveDocumentType,
@@ -1160,12 +1335,27 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     const scope = getDocumentTypeScope(trimmedType);
     const payload = { label: trimmedLabel, documentType: trimmedType };
     if (scope === 'application') {
-      const nextApplicationId = (duplicateApplicationId || '').trim();
-      if (!nextApplicationId) {
-        setDuplicateError('Select which application this document should be attached to.');
-        return;
+      if (canUseApplicantDocumentMode) {
+        const nextApplicationId = (duplicateApplicationId || '').trim();
+        if (!nextApplicationId) {
+          setDuplicateError('Select which application this document should be attached to.');
+          return;
+        }
+        payload.applicationId = nextApplicationId;
+      } else if (caseWorkspaceApplicationId) {
+        payload.applicationId = caseWorkspaceApplicationId;
+      } else {
+        const fallbackTarget = buildApplicationFallbackTarget(duplicateActionPlanId, duplicateInterventionIds);
+        if (fallbackTarget.actionPlanId) {
+          payload.actionPlanId = fallbackTarget.actionPlanId;
+          payload.interventionIds = fallbackTarget.interventionIds;
+        } else if (fallbackTarget.caseId) {
+          payload.caseId = fallbackTarget.caseId;
+        } else {
+          setDuplicateError('This document must be attached to a case or action plan.');
+          return;
+        }
       }
-      payload.applicationId = nextApplicationId;
     } else if (scope === 'case') {
       const nextCaseId = caseId ? String(caseId) : duplicateDocument?.case_id ? String(duplicateDocument.case_id) : '';
       if (!nextCaseId) {
@@ -1200,7 +1390,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         throw new Error(payload?.message || 'Failed to duplicate document.');
       }
       await loadDocuments({ silent: true });
-      await loadChecklist();
+      if (canUseApplicantDocumentMode) {
+        await loadChecklist();
+      }
       handleDuplicateDismiss();
     } catch (err) {
       setDuplicateError(err?.message || 'Failed to duplicate document.');
@@ -1214,18 +1406,33 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     duplicateApplicationId,
     duplicateActionPlanId,
     duplicateInterventionIds,
+    buildApplicationFallbackTarget,
+    caseWorkspaceApplicationId,
     getDocumentTypeScope,
     loadDocuments,
     loadChecklist,
     handleDuplicateDismiss,
+    canUseApplicantDocumentMode,
     caseId
   ]);
 
   const handleRefresh = () => {
-    if (!applicantUserId) return;
+    if (!canUploadDocuments) return;
     loadDocuments({ silent: true });
-    loadChecklist();
+    if (canUseApplicantDocumentMode) {
+      loadChecklist();
+    }
   };
+
+  const handleDismissCaseModeInfo = useCallback(() => {
+    setShowCaseModeInfo(false);
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(CASE_MODE_INFO_DISMISSED_KEY, 'true');
+    } catch (err) {
+      console.error('[SupportingDocuments] failed to persist case mode info preference', err);
+    }
+  }, []);
 
   const handleApplicationFilterChange = useCallback(
     ({ detail }) => {
@@ -1523,7 +1730,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   );
 
   const interventionFilterOptions = useMemo(() => {
-    const opts = [{ value: '', label: 'All documents (client + action plans)' }];
+    const opts = [{ value: '', label: 'All case documents' }];
     interventionOptions.forEach(opt => {
       opts.push({
         value: opt.value,
@@ -1610,8 +1817,18 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
 
   const pendingDocScope = getDocumentTypeScope(pendingCategory);
   const editDocType = editCategory || resolveDocumentType(editDocument);
-  const editDocScope = editDocType ? getDocumentTypeScope(editDocType) : 'application';
+  const editDocScope = editDocType ? getDocumentTypeScope(editDocType) : '';
   const duplicateDocScope = getDocumentTypeScope(duplicateCategory);
+  const pendingUsesApplicationFallback = usesApplicationScopeFallback(pendingDocScope);
+  const editUsesApplicationFallback = usesApplicationScopeFallback(editDocScope);
+  const duplicateUsesApplicationFallback = usesApplicationScopeFallback(duplicateDocScope);
+  const pendingUsesDirectCaseApplication =
+    pendingDocScope === 'application' && isCaseDocumentMode && !canUseApplicantDocumentMode && Boolean(caseWorkspaceApplicationId);
+  const editUsesDirectCaseApplication =
+    editDocScope === 'application' && isCaseDocumentMode && !canUseApplicantDocumentMode && Boolean(caseWorkspaceApplicationId);
+  const duplicateUsesDirectCaseApplication =
+    duplicateDocScope === 'application' && isCaseDocumentMode && !canUseApplicantDocumentMode && Boolean(caseWorkspaceApplicationId);
+  const showChecklistTab = canUseApplicantDocumentMode;
   const uploadApplicationOptions = useMemo(() => {
     if (!applicationSelectOptions.length) {
       return [{ value: '', label: 'No applications available' }];
@@ -1639,8 +1856,13 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const originalInterventionIds = normalizeIdList(editDocument?.intervention_ids);
   const editAssociationChanged =
     (editDocScope === 'application' &&
+      !editUsesApplicationFallback &&
       editApplicationId &&
       editApplicationId !== originalApplicationId) ||
+    (editDocScope === 'application' &&
+      editUsesApplicationFallback &&
+      (((editActionPlanId || '') !== originalActionPlanId) ||
+        JSON.stringify(normalizeIdList(editInterventionIds)) !== JSON.stringify(originalInterventionIds))) ||
     (editDocScope === 'action_plan' &&
       ((editActionPlanId || '') !== originalActionPlanId ||
         JSON.stringify(normalizeIdList(editInterventionIds)) !== JSON.stringify(originalInterventionIds)));
@@ -1672,112 +1894,166 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           </SpaceBetween>
         }
       >
-        <FormField
-          label="Document label"
-          description="Enter how this document should be listed in Supporting Documents."
-          errorText={labelError}
-        >
-          <Input
-            value={pendingLabel}
-            placeholder="e.g., Government ID"
-            onChange={({ detail }) => setPendingLabel(detail.value)}
-            autoFocus
-          />
-        </FormField>
-        <FormField
-          label="Document type"
-          description="Select the category for this document."
-          errorText={pendingCategoryError}
-      >
-          <Select
-            selectedOption={documentTypeOptions.find(opt => opt.value === pendingCategory) || documentTypeOptions[0]}
-            onChange={({ detail }) => setPendingCategory(detail.selectedOption.value || '')}
-            options={documentTypeOptions}
-            selectedAriaLabel="Selected document type"
-            placeholder="Select document type"
-          />
-        </FormField>
-        {pendingDocScope === 'client' || pendingDocScope === 'payment_packet' ? (
-          <Alert type="info">
-            {pendingDocScope === 'client'
-              ? 'Client-scoped documents are reusable across all cases.'
-              : 'Payment packet documents are reusable and do not need an application or action plan.'}
-          </Alert>
-        ) : null}
-        {pendingDocScope === 'case' ? (
+        <SpaceBetween size="s">
           <FormField
-            label="Case"
-            description="This document will be attached to the active case."
+            label="Document label"
+            description="Enter how this document should be listed in Supporting Documents."
+            errorText={labelError}
           >
-            <Box>
-              {caseData?.case_number || caseData?.caseNumber
-                ? `Case ${caseData.case_number || caseData.caseNumber}`
-                : caseId
-                  ? `Case ${caseId}`
-                  : 'No case selected'}
-            </Box>
-          </FormField>
-        ) : null}
-        {pendingDocScope === 'application' ? (
-          <FormField
-            label="Attach to application"
-            description="Select which application this document should be attached to."
-            errorText={pendingApplicationError}
-          >
-            <Select
-              selectedOption={uploadSelectedApplicationOption}
-              onChange={({ detail }) => {
-                setPendingApplicationError('');
-                setPendingApplication(detail.selectedOption.value || '');
-              }}
-              options={uploadApplicationOptions}
-              placeholder={applicationSelectOptions.length ? 'Select application' : 'No applications available'}
-              loading={applicationsLoading}
-              filteringType="none"
+            <Input
+              value={pendingLabel}
+              placeholder="e.g., Government ID"
+              onChange={({ detail }) => setPendingLabel(detail.value)}
+              autoFocus
             />
           </FormField>
-        ) : null}
-        {pendingDocScope === 'action_plan' ? (
-          <>
+          <FormField
+            label="Document type"
+            description="Select the category for this document."
+            errorText={pendingCategoryError}
+          >
+            <Select
+              selectedOption={
+                availableDocumentTypeOptions.find(opt => opt.value === pendingCategory) || availableDocumentTypeOptions[0]
+              }
+              onChange={({ detail }) => setPendingCategory(detail.selectedOption.value || '')}
+              options={availableDocumentTypeOptions}
+              selectedAriaLabel="Selected document type"
+              placeholder="Select document type"
+            />
+          </FormField>
+          {pendingDocScope === 'client' || pendingDocScope === 'payment_packet' ? (
+            <ModalScopeHint>
+              {pendingDocScope === 'client'
+                ? 'Client-scoped documents are reusable across all cases.'
+                : 'Payment packet documents stay attached to the client record.'}
+            </ModalScopeHint>
+          ) : null}
+          {pendingDocScope === 'case' ? (
             <FormField
-              label="Action plan"
-              description="Select which action plan this document should be attached to."
-              errorText={pendingActionPlanError}
+              label="Case"
+              description="This document will be attached to the active case."
+            >
+              <Box>
+                {caseData?.case_number || caseData?.caseNumber
+                  ? `Case ${caseData.case_number || caseData.caseNumber}`
+                  : caseId
+                    ? `Case ${caseId}`
+                    : 'No case selected'}
+              </Box>
+            </FormField>
+          ) : null}
+          {pendingDocScope === 'application' && canUseApplicantDocumentMode ? (
+            <FormField
+              label="Attach to application"
+              description="Select which application this document should be attached to."
+              errorText={pendingApplicationError}
             >
               <Select
-                selectedOption={selectedPendingActionPlanOption}
+                selectedOption={uploadSelectedApplicationOption}
                 onChange={({ detail }) => {
-                  setPendingActionPlanError('');
-                  const nextPlan = detail.selectedOption?.value || '';
-                  setPendingActionPlan(nextPlan);
-                  setPendingInterventions([]);
+                  setPendingApplicationError('');
+                  setPendingApplication(detail.selectedOption.value || '');
                 }}
-                options={actionPlanOptions}
-                placeholder={actionPlanOptions.length ? 'Select action plan' : 'No action plans available'}
+                options={uploadApplicationOptions}
+                placeholder={applicationSelectOptions.length ? 'Select application' : 'No applications available'}
+                loading={applicationsLoading}
                 filteringType="none"
               />
             </FormField>
-            <FormField
-              label="Link interventions (optional)"
-              description="Select one or more interventions this document supports."
-            >
-              <Multiselect
-                selectedOptions={pendingSelectedInterventionOptions}
-                onChange={({ detail }) => {
-                  const nextIds = (detail.selectedOptions || []).map(opt => opt.value);
-                  setPendingInterventions(nextIds);
-                }}
-                options={pendingActionPlanInterventionOptions}
-                placeholder={
-                  pendingActionPlanInterventionOptions.length
-                    ? 'Select interventions'
-                    : 'No interventions available'
-                }
-                disabled={!pendingActionPlan}
-              />
-            </FormField>
-          </>
-        ) : null}
+          ) : null}
+          {pendingDocScope === 'application' && pendingUsesDirectCaseApplication ? (
+            <ModalScopeHint>
+              This case already has a linked application. PATH will attach this document there.
+            </ModalScopeHint>
+          ) : null}
+          {pendingDocScope === 'application' && pendingUsesApplicationFallback ? (
+            <>
+              <ModalScopeHint>
+                No linked application exists for this case. PATH will store this document under the selected action
+                plan, or the case file if no action plan is chosen.
+              </ModalScopeHint>
+              <FormField
+                label="Store under action plan"
+                description="Optional but recommended for imported or backloaded application documents."
+                errorText={pendingActionPlanError}
+              >
+                <Select
+                  selectedOption={selectedPendingActionPlanOption}
+                  onChange={({ detail }) => {
+                    setPendingActionPlanError('');
+                    const nextPlan = detail.selectedOption?.value || '';
+                    setPendingActionPlan(nextPlan);
+                    setPendingInterventions([]);
+                  }}
+                  options={actionPlanOptions}
+                  placeholder={actionPlanOptions.length ? 'Select action plan (optional)' : 'No action plans available'}
+                  filteringType="none"
+                />
+              </FormField>
+              <FormField
+                label="Link interventions (optional)"
+                description="Select the interventions this document supports."
+              >
+                <Multiselect
+                  selectedOptions={pendingSelectedInterventionOptions}
+                  onChange={({ detail }) => {
+                    const nextIds = (detail.selectedOptions || []).map(opt => opt.value);
+                    setPendingInterventions(nextIds);
+                  }}
+                  options={pendingActionPlanInterventionOptions}
+                  placeholder={
+                    pendingActionPlanInterventionOptions.length
+                      ? 'Select interventions'
+                      : 'No interventions available'
+                  }
+                  disabled={!pendingActionPlan}
+                />
+              </FormField>
+            </>
+          ) : null}
+          {pendingDocScope === 'action_plan' ? (
+            <>
+              <FormField
+                label="Action plan"
+                description="Select which action plan this document should be attached to."
+                errorText={pendingActionPlanError}
+              >
+                <Select
+                  selectedOption={selectedPendingActionPlanOption}
+                  onChange={({ detail }) => {
+                    setPendingActionPlanError('');
+                    const nextPlan = detail.selectedOption?.value || '';
+                    setPendingActionPlan(nextPlan);
+                    setPendingInterventions([]);
+                  }}
+                  options={actionPlanOptions}
+                  placeholder={actionPlanOptions.length ? 'Select action plan' : 'No action plans available'}
+                  filteringType="none"
+                />
+              </FormField>
+              <FormField
+                label="Link interventions (optional)"
+                description="Select one or more interventions this document supports."
+              >
+                <Multiselect
+                  selectedOptions={pendingSelectedInterventionOptions}
+                  onChange={({ detail }) => {
+                    const nextIds = (detail.selectedOptions || []).map(opt => opt.value);
+                    setPendingInterventions(nextIds);
+                  }}
+                  options={pendingActionPlanInterventionOptions}
+                  placeholder={
+                    pendingActionPlanInterventionOptions.length
+                      ? 'Select interventions'
+                      : 'No interventions available'
+                  }
+                  disabled={!pendingActionPlan}
+                />
+              </FormField>
+            </>
+          ) : null}
+        </SpaceBetween>
       </Modal>
       <Modal
         visible={deleteModalVisible}
@@ -1836,14 +2112,16 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           </FormField>
           <FormField label="Document type" errorText={editCategoryError}>
             <Select
-              selectedOption={documentTypeOptions.find(opt => opt.value === editCategory) || documentTypeOptions[0]}
+              selectedOption={
+                availableDocumentTypeOptions.find(opt => opt.value === editCategory) || availableDocumentTypeOptions[0]
+              }
               onChange={({ detail }) => setEditCategory(detail.selectedOption.value || '')}
-              options={documentTypeOptions}
+              options={availableDocumentTypeOptions}
               selectedAriaLabel="Selected document type"
               placeholder="Select document type"
             />
           </FormField>
-          {editDocScope === 'application' && (
+          {editDocScope === 'application' && canUseApplicantDocumentMode && (
             <>
               <FormField
                 label="Attach to application"
@@ -1870,8 +2148,63 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
               )}
             </>
           )}
+          {editDocScope === 'application' && editUsesDirectCaseApplication && (
+            <ModalScopeHint>
+              This case already has a linked application. PATH will keep this document attached there.
+            </ModalScopeHint>
+          )}
+          {editDocScope === 'application' && editUsesApplicationFallback && (
+            <>
+              <ModalScopeHint>
+                No linked application exists for this case. PATH will store this document under the selected action
+                plan, or the case file if no action plan is chosen.
+              </ModalScopeHint>
+              <FormField
+                label="Store under action plan"
+                description="Optional but recommended for imported or backloaded application documents."
+                errorText={editAttachError}
+              >
+                <Select
+                  selectedOption={selectedEditActionPlanOption}
+                  onChange={({ detail }) => {
+                    setEditAttachError('');
+                    const nextPlan = detail.selectedOption?.value || '';
+                    setEditActionPlanId(nextPlan);
+                    setEditInterventionIds([]);
+                  }}
+                  options={actionPlanOptions}
+                  placeholder={actionPlanOptions.length ? 'Select action plan (optional)' : 'No action plans available'}
+                  filteringType="none"
+                />
+              </FormField>
+              <FormField
+                label="Link interventions (optional)"
+                description="Select the interventions this document supports."
+              >
+                <Multiselect
+                  selectedOptions={editSelectedInterventionOptions}
+                  onChange={({ detail }) => {
+                    const nextIds = (detail.selectedOptions || []).map(opt => opt.value);
+                    setEditInterventionIds(nextIds);
+                  }}
+                  options={editActionPlanInterventionOptions}
+                  placeholder={
+                    editActionPlanInterventionOptions.length
+                      ? 'Select interventions'
+                      : 'No interventions available'
+                  }
+                  disabled={!editActionPlanId}
+                />
+              </FormField>
+              {editAssociationChanged && (
+                <Alert type="warning" header="Moving this document">
+                  Changing the action plan or intervention links will update where this document appears.
+                </Alert>
+              )}
+            </>
+          )}
           {editDocScope === 'case' && (
-            <Alert type="info">Case-scoped documents are attached to the current case.</Alert>
+            <ModalScopeHint>This document is attached to the current case.</ModalScopeHint>
           )}
           {editDocScope === 'action_plan' && (
             <>
@@ -1920,10 +2253,10 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
             </>
           )}
           {editDocScope === 'client' && (
-            <Alert type="info">Client-scoped documents do not require an attachment.</Alert>
+            <ModalScopeHint>Client-scoped documents do not require an application, case, or action plan.</ModalScopeHint>
           )}
           {editDocScope === 'payment_packet' && (
-            <Alert type="info">Payment packet documents are attached to the client.</Alert>
+            <ModalScopeHint>Payment packet documents stay attached to the client record.</ModalScopeHint>
           )}
         </SpaceBetween>
       </Modal>
@@ -1955,14 +2288,16 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           </FormField>
           <FormField label="Document type">
             <Select
-              selectedOption={documentTypeOptions.find(opt => opt.value === duplicateCategory) || documentTypeOptions[0]}
+              selectedOption={
+                availableDocumentTypeOptions.find(opt => opt.value === duplicateCategory) || availableDocumentTypeOptions[0]
+              }
               onChange={({ detail }) => setDuplicateCategory(detail.selectedOption.value || '')}
-              options={documentTypeOptions}
+              options={availableDocumentTypeOptions}
               selectedAriaLabel="Selected document type"
               placeholder="Select document type"
             />
           </FormField>
-          {duplicateDocScope === 'application' && (
+          {duplicateDocScope === 'application' && canUseApplicantDocumentMode && (
             <FormField label="Attach to application">
               <Select
                 selectedOption={selectedDuplicateApplicationOption}
@@ -1977,8 +2312,54 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
               />
             </FormField>
           )}
+          {duplicateDocScope === 'application' && duplicateUsesDirectCaseApplication && (
+            <ModalScopeHint>
+              This case already has a linked application. PATH will attach the duplicate there.
+            </ModalScopeHint>
+          )}
+          {duplicateDocScope === 'application' && duplicateUsesApplicationFallback && (
+            <>
+              <ModalScopeHint>
+                No linked application exists for this case. PATH will store the duplicate under the selected action
+                plan, or the case file if no action plan is chosen.
+              </ModalScopeHint>
+              <FormField label="Store under action plan">
+                <Select
+                  selectedOption={selectedDuplicateActionPlanOption}
+                  onChange={({ detail }) => {
+                    setDuplicateError('');
+                    const nextPlan = detail.selectedOption?.value || '';
+                    setDuplicateActionPlanId(nextPlan);
+                    setDuplicateInterventionIds([]);
+                  }}
+                  options={actionPlanOptions}
+                  placeholder={actionPlanOptions.length ? 'Select action plan (optional)' : 'No action plans available'}
+                  filteringType="none"
+                />
+              </FormField>
+              <FormField
+                label="Link interventions (optional)"
+                description="Select the interventions this document supports."
+              >
+                <Multiselect
+                  selectedOptions={duplicateSelectedInterventionOptions}
+                  onChange={({ detail }) => {
+                    const nextIds = (detail.selectedOptions || []).map(opt => opt.value);
+                    setDuplicateInterventionIds(nextIds);
+                  }}
+                  options={duplicateActionPlanInterventionOptions}
+                  placeholder={
+                    duplicateActionPlanInterventionOptions.length
+                      ? 'Select interventions'
+                      : 'No interventions available'
+                  }
+                  disabled={!duplicateActionPlanId}
+                />
+              </FormField>
+            </>
+          )}
           {duplicateDocScope === 'case' && (
-            <Alert type="info">Case-scoped documents will attach to the current case.</Alert>
+            <ModalScopeHint>This duplicate will attach to the current case.</ModalScopeHint>
           )}
           {duplicateDocScope === 'action_plan' && (
             <>
@@ -2018,10 +2399,10 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
             </>
           )}
           {duplicateDocScope === 'client' && (
-            <Alert type="info">Client-scoped documents do not need an application association.</Alert>
+            <ModalScopeHint>Client-scoped documents do not need an application, case, or action plan.</ModalScopeHint>
           )}
           {duplicateDocScope === 'payment_packet' && (
-            <Alert type="info">Payment packet documents are attached to the client.</Alert>
+            <ModalScopeHint>Payment packet documents stay attached to the client record.</ModalScopeHint>
           )}
         </SpaceBetween>
       </Modal>
@@ -2034,7 +2415,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
                 variant="primary"
                 iconName="upload"
                 onClick={openLabelModal}
-                disabled={!applicantUserId}
+                disabled={!canUploadDocuments}
                 loading={uploading}
               >
                 Upload
@@ -2044,7 +2425,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
                 iconName="refresh"
                 ariaLabel="Refresh supporting documents"
                 onClick={handleRefresh}
-                disabled={loading || refreshing || !applicantUserId}
+                disabled={loading || refreshing || !canUploadDocuments}
               />
             </SpaceBetween>
           }
@@ -2066,7 +2447,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           }
         >
           <Hotspot hotspotId="app-workspace-supporting-documents" direction="right" />
-          Supporting Documents
+          {widgetTitle}
         </Header>
       }
       i18nStrings={{
@@ -2090,19 +2471,15 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     >
       <SpaceBetween size="s">
         <Box variant="small">
-          This widget displays documents related to the applicant, including application, action plan, payment packet,
-          and secure message attachments.
+          {widgetSummary}
         </Box>
-        <FormField label={isCaseWorkspace ? 'View documents for intervention' : 'View documents for'}>
-          <Select
-            selectedOption={isCaseWorkspace ? selectedInterventionFilterOption : selectedApplicationFilterOption}
-            onChange={isCaseWorkspace ? handleInterventionFilterChange : handleApplicationFilterChange}
-            options={isCaseWorkspace ? interventionFilterOptions : applicationFilterOptions}
-            placeholder="All documents"
-            loading={!isCaseWorkspace && applicationsLoading}
-            filteringType="none"
-          />
-        </FormField>
+        {isCaseDocumentMode && showCaseModeInfo ? (
+          <Alert type="info" dismissible onDismiss={handleDismissCaseModeInfo}>
+            Imported or application-less client files use case-based documents here. Uploads are silent and do not drive
+            applicant checklist workflow, approvals, or client notifications. Application-type documents can still be
+            uploaded and will be stored under an action plan or the case when no linked application exists.
+          </Alert>
+        ) : null}
         {error && (
           <Alert type="error" dismissible onDismiss={() => setError(null)}>
             {error}
@@ -2119,7 +2496,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
                 <Table
                   trackBy="id"
                   loading={loading || refreshing}
-                  loadingText="Loading supporting documents"
+                  loadingText={`Loading ${isCaseDocumentMode ? 'case documents' : 'supporting documents'}`}
                   variant="embedded"
                   items={documents}
                   columnDefinitions={columnDefinitionsForTable}
@@ -2133,67 +2510,84 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
                     activateEditLabel: (column, item) => `Edit ${item?.label || item?.file_name || 'document'} ${column.header}`,
                     cancelEditLabel: column => `Cancel editing ${column.header}`,
                     submitEditLabel: column => `Submit editing ${column.header}`,
-                    tableLabel: 'Supporting documents'
+                    tableLabel: isCaseDocumentMode ? 'Case documents' : 'Supporting documents'
                   }}
-                  empty={<Box textAlign="center">No supporting documents to display.</Box>}
+                  empty={
+                    <Box textAlign="center">
+                      {isCaseDocumentMode ? 'No case documents to display.' : 'No supporting documents to display.'}
+                    </Box>
+                  }
                 />
               )
             },
-            {
-              id: 'checklist',
-              label: (
-                <SpaceBetween direction="horizontal" size="xs">
-                  <span>Checklist</span>
-                  {missingRequiredCount > 0 ? (
-                    <StatusIndicator type="error">{`${missingRequiredCount} missing`}</StatusIndicator>
-                  ) : (
-                    <StatusIndicator type="success">Complete</StatusIndicator>
-                  )}
-                </SpaceBetween>
-              ),
-              content: (
-                <SpaceBetween size="s">
-                  {checklistError && (
-                    <Alert type="error" dismissible onDismiss={() => setChecklistError(null)}>
-                      {checklistError}
-                    </Alert>
-                  )}
-                  {isCaseWorkspace && !selectedInterventionFilter && (
-                    <Alert type="info">Select an intervention to view its checklist.</Alert>
-                  )}
-                  <Table
-                    trackBy="id"
-                    variant="embedded"
-                    header={
-                      checklistGateLabel
-                        ? <Header variant="h3">{checklistGateLabel}</Header>
-                        : <Header variant="h3">Checklist</Header>
-                    }
-                    loading={checklistLoading}
-                    loadingText="Loading checklist"
-                    items={visibleChecklistItems}
-                    resizableColumns
-                    columnDefinitions={[
-                      { id: 'label', header: 'Item', cell: item => item.label, minWidth: 220 },
-                      {
-                        id: 'status',
-                        header: 'Status',
-                        minWidth: 160,
-                        cell: item => {
-                          if (item.status === 'complete') return <StatusIndicator type="success">Complete</StatusIndicator>;
-                          if (item.status === 'missing') return <StatusIndicator type="error">Missing</StatusIndicator>;
-                          if (item.status === 'in_progress') return <StatusIndicator type="info">In progress</StatusIndicator>;
-                          return <StatusIndicator type="pending">Pending</StatusIndicator>;
-                        }
-                      }
-                    ]}
-                    empty={<Box textAlign="center">No checklist items required.</Box>}
-                  />
-                </SpaceBetween>
-              )
-            }
-          ]}
+            ...(showChecklistTab
+              ? [
+                  {
+                    id: 'checklist',
+                    label: (
+                      <SpaceBetween direction="horizontal" size="xs">
+                        <span>Checklist</span>
+                        {missingRequiredCount > 0 ? (
+                          <StatusIndicator type="error">{`${missingRequiredCount} missing`}</StatusIndicator>
+                        ) : (
+                          <StatusIndicator type="success">Complete</StatusIndicator>
+                        )}
+                      </SpaceBetween>
+                    ),
+                    content: (
+                      <SpaceBetween size="s">
+                        {checklistError && (
+                          <Alert type="error" dismissible onDismiss={() => setChecklistError(null)}>
+                            {checklistError}
+                          </Alert>
+                        )}
+                        {isCaseWorkspace && !selectedInterventionFilter && (
+                          <Alert type="info">Select an intervention to view its checklist.</Alert>
+                        )}
+                        <Table
+                          trackBy="id"
+                          variant="embedded"
+                          header={
+                            checklistGateLabel
+                              ? <Header variant="h3">{checklistGateLabel}</Header>
+                              : <Header variant="h3">Checklist</Header>
+                          }
+                          loading={checklistLoading}
+                          loadingText="Loading checklist"
+                          items={visibleChecklistItems}
+                          resizableColumns
+                          columnDefinitions={[
+                            { id: 'label', header: 'Item', cell: item => item.label, minWidth: 220 },
+                            {
+                              id: 'status',
+                              header: 'Status',
+                              minWidth: 160,
+                              cell: item => {
+                                if (item.status === 'complete') return <StatusIndicator type="success">Complete</StatusIndicator>;
+                                if (item.status === 'missing') return <StatusIndicator type="error">Missing</StatusIndicator>;
+                                if (item.status === 'in_progress') return <StatusIndicator type="info">In progress</StatusIndicator>;
+                                return <StatusIndicator type="pending">Pending</StatusIndicator>;
+                              }
+                            }
+                          ]}
+                          empty={<Box textAlign="center">No checklist items required.</Box>}
+                        />
+                      </SpaceBetween>
+                    )
+                  }
+                ]
+              : [])]}
         />
+        <FormField label={isCaseWorkspace ? 'Show documents relevant to' : 'View documents for'}>
+          <Select
+            selectedOption={isCaseWorkspace ? selectedInterventionFilterOption : selectedApplicationFilterOption}
+            onChange={isCaseWorkspace ? handleInterventionFilterChange : handleApplicationFilterChange}
+            options={isCaseWorkspace ? interventionFilterOptions : applicationFilterOptions}
+            placeholder={isCaseWorkspace ? 'All case documents' : 'All documents'}
+            loading={!isCaseWorkspace && applicationsLoading}
+            filteringType="none"
+          />
+        </FormField>
       </SpaceBetween>
       </BoardItem>
     </>

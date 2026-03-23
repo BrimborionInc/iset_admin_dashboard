@@ -26,6 +26,8 @@ import { usePaymentsData } from "../../../finance/widgets/PaymentsDataContext.js
 import { buildApplicantWatchlistIdentity, formatSinDisplay } from "../../../../utils/applicantWatchlist.js";
 import { buildLockConflictMessage } from "../../../../hooks/useApplicationLock.js";
 import { normalizeInterventionStatus } from "../../../../utils/interventionStatus.js";
+import ExistingActionPlanModal from "../modals/ExistingActionPlanModal.jsx";
+import ExistingInterventionModal from "../modals/ExistingInterventionModal.jsx";
 
 const AWAITING_SUBMISSION_STATUSES = new Set([
   "draft",
@@ -72,6 +74,8 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const [watchlistNotes, setWatchlistNotes] = useState("");
   const [watchlistError, setWatchlistError] = useState(null);
   const [watchlistSaving, setWatchlistSaving] = useState(false);
+  const [existingActionPlanModalOpen, setExistingActionPlanModalOpen] = useState(false);
+  const [existingInterventionModalOpen, setExistingInterventionModalOpen] = useState(false);
   const canonicalRole = toCanonicalRole(currentUser?.role || null);
   const isSystemAdmin = canonicalRole === "System Administrator";
   const isProgramAdmin = canonicalRole === "Program Administrator";
@@ -456,12 +460,18 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     const canReopenClosed = hasCase && (isReadyToClose || isClosed) && (isSystemAdmin || isProgramAdmin);
     const canReopenArchived = hasCase && isArchived && isSystemAdmin;
     const canReopen = canReopenClosed || canReopenArchived;
+    const isBackloadEligible = hasCase && !lockApplicationId && !isArchived;
 
     if (canAssign) {
       items.push({ id: "assign", text: "Assign / reassign" });
     }
     if (canPropose) {
       items.push({ id: "propose-intervention", text: "Propose new intervention" });
+    }
+    if (isBackloadEligible) {
+      items.push({ id: "backload-action-plan", text: "Add existing action plan" });
+      items.push({ id: "backload-intervention", text: "Add existing intervention" });
+      items.push({ id: "backload-documents", text: "Upload existing documents" });
     }
     items.push({ id: "manage-plans-interventions", text: "View plans and interventions" });
     items.push({ id: "manage-payments", text: "View payments" });
@@ -802,6 +812,37 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     );
   }, []);
 
+  const handleExistingActionPlanCreated = useCallback(
+    async createdPlan => {
+      setExistingActionPlanModalOpen(false);
+      setActionError(null);
+      setActionNotice({
+        type: "success",
+        text: createdPlan?.status === "closed" ? "Existing action plan recorded as closed." : "Existing action plan recorded.",
+      });
+      requestLayoutSwitch("managePlans");
+      await refresh();
+    },
+    [refresh, requestLayoutSwitch]
+  );
+
+  const handleExistingInterventionCreated = useCallback(
+    async createdIntervention => {
+      setExistingInterventionModalOpen(false);
+      setActionError(null);
+      setActionNotice({
+        type: "success",
+        text:
+          createdIntervention?.status && ["completed", "cancelled"].includes(String(createdIntervention.status).toLowerCase())
+            ? "Existing intervention recorded as closed."
+            : "Existing intervention recorded.",
+      });
+      requestLayoutSwitch("managePlans");
+      await refresh();
+    },
+    [refresh, requestLayoutSwitch]
+  );
+
   const handleWatchlistSubmit = useCallback(async () => {
     if (!watchlistReady) {
       setWatchlistError("Name, date of birth, and SIN are required to add to the watchlist.");
@@ -921,6 +962,27 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
               detail: { planId },
             })
           );
+        }
+      } else if (detail.id === "backload-action-plan") {
+        setActionError(null);
+        setActionNotice(null);
+        setExistingActionPlanModalOpen(true);
+      } else if (detail.id === "backload-intervention") {
+        setActionError(null);
+        setActionNotice(null);
+        setExistingInterventionModalOpen(true);
+      } else if (detail.id === "backload-documents") {
+        setActionError(null);
+        setActionNotice(null);
+        requestLayoutSwitch("documentsMessages");
+        if (typeof window !== "undefined") {
+          window.setTimeout(() => {
+            window.dispatchEvent(
+              new CustomEvent("iset:supporting-documents:open-upload", {
+                detail: { caseId: caseData?.id || null },
+              })
+            );
+          }, 0);
         }
       } else if (detail.id === "manage-plans-interventions") {
         requestLayoutSwitch("managePlans");
@@ -1079,6 +1141,17 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
             <StatusIndicator type="info">No case data available.</StatusIndicator>
           </Box>
         ) : null}
+        <ExistingActionPlanModal
+          visible={existingActionPlanModalOpen}
+          onDismiss={() => setExistingActionPlanModalOpen(false)}
+          onCreated={handleExistingActionPlanCreated}
+        />
+        <ExistingInterventionModal
+          visible={existingInterventionModalOpen}
+          initialActionPlanId={selectedActionPlanId || caseData?.actionPlans?.[0]?.id || null}
+          onDismiss={() => setExistingInterventionModalOpen(false)}
+          onCreated={handleExistingInterventionCreated}
+        />
         <Modal
           visible={assignModalVisible}
           onDismiss={() => {

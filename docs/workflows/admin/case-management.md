@@ -46,8 +46,9 @@ Widget references:
 
 1. Open case workspace from queue item.
 2. Confirm case header and participant profile context.
-3. Maintain or activate action plan.
-4. Create/update interventions and track status/cost progression.
+3. For imported/application-less client files, use the Case Header backload actions to add existing action plans, existing interventions, and existing documents without fabricating intake history.
+4. Maintain or activate action plan.
+5. Create/update interventions and track status/cost progression.
 5. Validate compliance/export readiness as needed.
 6. Draft and refine case-linked payment packets.
 7. Communicate and store supporting evidence/messages.

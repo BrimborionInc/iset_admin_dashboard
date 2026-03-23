@@ -49,9 +49,11 @@ import ManageIntakeStepsHelpPanel from '../helpPanelContents/manageIntakeStepsHe
 import CaseAssignmentDashboard from '../pages/caseAssignmentDashboard.js'; // Import the new component
 import ApplicationCaseDashboard from '../pages/applicationCaseDashboard.js'; // Import the new component
 import ManualApplicationIntakePage from '../pages/intake/ManualApplicationIntakePage.jsx';
+import ClientFileImportDashboard from '../pages/imports/ClientFileImportDashboard.jsx';
 import CaseAssignmentDashboardHelp from '../helpPanelContents/caseAssignmentDashboardHelp.js';
 import ApplicationCaseDashboardHelp from '../helpPanelContents/applicationCaseDashboardHelp.js';
 import ManualApplicationIntakeHelp from '../helpPanelContents/manualApplicationIntakeHelp.js';
+import ClientFileImportDashboardHelp from '../helpPanelContents/clientFileImportDashboardHelp.js';
 import NWACHubManagementDashboard from '../pages/nwacHubManagement.js'; // Import the NWAC Hub Management dashboard
 import AuthCallback from '../pages/AuthCallback.js';
 import UploadConfigDashboard from '../pages/uploadConfigDashboard.js';
@@ -671,6 +673,43 @@ const AppRoutes = ({
               </SpaceBetween>
             ),
             ManualApplicationIntakeHelp.aiContext
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/iset/imports/client-files">
+        <Guard path="/iset/imports/client-files">
+          {renderContent(
+            ClientFileImportDashboard,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Configuration', href: '/configuration-settings' },
+              { text: 'Client Batch Import', href: '/iset/imports/client-files' }
+            ],
+            'Client Batch Import',
+            <ClientFileImportDashboardHelp />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent('clientFileImport:openPalette'))
+                  }
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() =>
+                    window.dispatchEvent(new CustomEvent('clientFileImport:resetLayout'))
+                  }
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            ),
+            ClientFileImportDashboardHelp.aiContext,
+            'Backload participant spreadsheets into client files with dry-run validation and duplicate matching.'
           )}
         </Guard>
       </Route>

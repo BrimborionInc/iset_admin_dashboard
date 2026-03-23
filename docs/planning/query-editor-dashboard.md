@@ -1,6 +1,11 @@
-Purpose: Track planning and implementation for the Query Editor configuration dashboard scaffold.
+Purpose: Historical planning note for the initial Query Editor dashboard scaffold. For the implemented dashboard and current behavior, use `docs/dashboards/query-editor-dashboard.md`.
 Audience: Admin dashboard engineers and product owners.
-Last Updated: 2026-02-02
+Last Updated: 2026-03-23
+
+## Status
+- Historical planning document only.
+- The dashboard is now implemented.
+- Current live behavior differs from this original scaffold-only plan in several places; verify against code and `docs/dashboards/query-editor-dashboard.md`.
 
 ## Background
 - A new Configuration dashboard titled "Query Editor" is required.

@@ -1,6 +1,6 @@
 # Unified Documents Model (iset_document)
 
-Date: 2026-01-08
+Date: 2026-03-23
 
 ## Summary
 The unified `iset_document` table now anchors every document to a single `client_id`, with optional links to applications, cases, or action plans. Intervention links are stored in the `iset_document_intervention` join table, and payment evidence attachments live in `payment_packet_document`.
@@ -27,7 +27,8 @@ Related tables:
 ## Scope Rules
 - `document_type.scope` supports: `client`, `application`, `case`, `action_plan`, `payment_packet`.
 - Action plan documents attach to `action_plan_id` and optionally link to one or more interventions via `iset_document_intervention`.
-- Application and case documents attach to their respective IDs only.
+- Case documents attach to `case_id`.
+- Application documents normally attach to `application_id`, but in case-based uploads for imported/application-less files they can fall back to `action_plan_id` when a plan is selected, or `case_id` otherwise. The requested scope is preserved in document metadata as a fallback note; PATH does not fabricate an application row.
 
 ## Source Values
 - `application_submission`: Uploaded or generated as part of the original application submission.
@@ -38,12 +39,19 @@ Related tables:
 ## Endpoint Changes
 - `GET /api/applicants/:id/documents` now returns action plan context (`action_plan_id`, `intervention_ids`) alongside case/application references.
 - `POST /api/applicants/:id/documents/upload` enforces `document_type.scope` rules, requires `client_id`, and accepts action plan + intervention links.
-- `PUT /api/documents/:id` and `/api/documents/:id/duplicate` update action plan + intervention associations (no `linked_intervention_id`).
+- `GET /api/cases/:id/documents` now supports application-less case workspaces by returning client/case/action-plan documents keyed from the case.
+- `POST /api/cases/:id/documents/upload` now supports manual staff uploads for application-less client-file cases without requiring an applicant-user chain, including application-type documents that fall back to action-plan or case storage when no real application exists.
+- `PUT /api/documents/:id` and `/api/documents/:id/duplicate` update action plan + intervention associations (no `linked_intervention_id`) and preserve the same application-scope fallback rules in case-based mode.
 - `GET /api/admin/messages/:id/attachments` upserts attachments into `iset_document` with `client_id` + case/application context when a `case_id` query param is provided.
 - `POST /api/finance/payment-packets/:id/documents` validates `iset_document.client_id` matches the packet.
 
 ## Widget Updates
 `SupportingDocumentsWidget` supports action plan scoping with optional multi-intervention links, updates scope labels (client/application/case/action plan/payment packet), and continues to refresh from the `iset:supporting-documents:refresh` event fired by Secure Messaging.
+As of 2026-03-23, the widget has two real operating modes:
+- applicant/application mode: full document list plus checklist, keyed by `/api/applicants/:id/*`
+- case-based mode for imported/application-less client files: document list plus upload, keyed by `/api/cases/:id/documents*`
+
+In case-based mode, the widget intentionally hides the checklist tab because checklist logic remains applicant/application driven. It still allows application-type document categories, but stores them against an action plan or the case when there is no linked application.
 
 ## Cross-widget Hooks (2025-09-21)
 - SecureMessagingWidget dispatches `iset:supporting-documents:refresh` after attachments load, giving SupportingDocumentsWidget an immediate view of newly adopted files.
@@ -55,7 +63,6 @@ Related tables:
 - Idempotency: enforced via `UNIQUE (file_path)` + `ON DUPLICATE KEY UPDATE` for applicant/application/user/origin fields so re-opening a message repairs missing metadata.
 
 ## Future Enhancements
-- Add an upload endpoint for manual staff uploads: `POST /api/cases/:id/documents`.
 - Add checksum calculation on file write for dedupe.
 - Enforce authorization checks (scope applicant/case) in endpoints (current implementation assumes prior auth middleware + future scoping additions).
 - Optionally move storage to S3; `file_path` can become object key.

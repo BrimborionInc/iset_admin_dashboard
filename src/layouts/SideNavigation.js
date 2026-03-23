@@ -201,6 +201,7 @@ const SideNavigation = ({ currentRole, showTutorialHotspots = false, notificatio
         { type: 'link', text: 'Language Settings', href: '/language-settings-dashboard' },
         { type: 'link', text: 'Event Logging', href: '/configuration/events' },
         { type: 'link', text: 'Configuration Settings', href: '/configuration-settings' },
+        { type: 'link', text: 'Client Batch Import', href: '/iset/imports/client-files' },
         { type: 'link', text: 'Query Editor', href: '/configuration/query-editor' },
         { type: 'link', text: 'File Upload Config', href: '/admin/upload-config' },
       ],

@@ -77,6 +77,7 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
     rawApplicantUserId == null || rawApplicantUserId === '' || Number.isNaN(applicantUserIdNum)
       ? null
       : applicantUserIdNum;
+  const messagingAvailable = Boolean(applicantUserId);
   const applicantName = caseData?.applicant_name || 'Applicant';
   const assignedToName = caseData?.assigned_to_name || '';
 
@@ -109,7 +110,13 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
 
   const loadMessages = useCallback(
     async (options = {}) => {
-      if (!caseId) return;
+      if (!caseId || !messagingAvailable) {
+        setMessages([]);
+        setLoadError(null);
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
       const { silent = false } = options;
       if (silent) {
         setRefreshing(true);
@@ -143,18 +150,19 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
         }
       }
     },
-    [caseId]
+    [caseId, messagingAvailable]
   );
 
   useEffect(() => {
-    if (!caseId) {
+    if (!caseId || !messagingAvailable) {
       setMessages([]);
+      setLoadError(null);
       setLoading(false);
       setRefreshing(false);
       return;
     }
     loadMessages();
-  }, [caseId, loadMessages]);
+  }, [caseId, loadMessages, messagingAvailable]);
 
   const handleInfoClick = () => {
     if (typeof toggleHelpPanel === 'function') {
@@ -669,9 +677,9 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
                 iconName="refresh"
                 ariaLabel="Refresh"
                 onClick={handleRefresh}
-                disabled={loading || refreshing || !caseId}
+                disabled={loading || refreshing || !caseId || !messagingAvailable}
               />
-              <Button variant="primary" onClick={handleNewMessage} disabled={!caseId}>
+              <Button variant="primary" onClick={handleNewMessage} disabled={!caseId || !messagingAvailable}>
                 New Message
               </Button>
             </SpaceBetween>
@@ -715,6 +723,10 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
         </Box>
         {!caseId ? (
           <Box color="text-status-warning">Messages will be available once the case is fully loaded.</Box>
+        ) : !messagingAvailable ? (
+          <Box color="text-body-secondary">
+            Secure messaging becomes available after a participant applicant account is linked to this case.
+          </Box>
         ) : (
           <Tabs
             activeTabId={activeTabId}

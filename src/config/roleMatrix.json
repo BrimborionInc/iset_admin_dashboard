@@ -34,6 +34,10 @@
       "System Administrator",
       "Program Administrator"
     ],
+    "/iset/imports/client-files": [
+      "System Administrator",
+      "Program Administrator"
+    ],
     "/iset/payments": [
       "System Administrator",
       "Program Administrator",

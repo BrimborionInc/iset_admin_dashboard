@@ -92,15 +92,7 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole }) =>
       utilities.push({ type: 'button', iconName: 'settings', ariaLabel: 'Settings', onClick: () => console.log('Settings clicked') });
     }
     utilities.push({ type: 'button', iconName: 'support', ariaLabel: 'Support', onClick: openHelpPanel });
-    if (bypass) {
-      utilities.push({
-        type: 'menu-dropdown',
-        text: email,
-        ariaLabel: 'Dev bypass account',
-        items: [{ id: 'dev-bypass', text: 'Developer bypass mode' }],
-        onItemClick: () => {}
-      });
-    } else {
+    if (!bypass) {
       utilities.push({
         type: 'menu-dropdown',
         text: email,

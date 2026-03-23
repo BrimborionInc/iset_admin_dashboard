@@ -2,6 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const archiver = require('archiver');
+const ExcelJS = require('exceljs');
 const multer = require('multer');
 const puppeteer = require('puppeteer');
 const { PassThrough } = require('stream');
@@ -49,6 +50,9 @@ const ADMIN_UPLOAD_ALLOWED_MIME_TYPES = new Set([
   'image/tiff'
 ]);
 const ADMIN_UPLOAD_MAX_BYTES = Number(process.env.ADMIN_UPLOAD_MAX_BYTES || 10 * 1024 * 1024);
+const CLIENT_FILE_IMPORT_MAX_BYTES = Number(process.env.CLIENT_FILE_IMPORT_MAX_BYTES || 5 * 1024 * 1024);
+const CLIENT_FILE_IMPORT_MAX_ROWS = Number(process.env.CLIENT_FILE_IMPORT_MAX_ROWS || 500);
+const CLIENT_FILE_IMPORT_ALLOWED_EXTENSIONS = new Set(['.xlsx', '.xlsm', '.csv']);
 const DEFAULT_BACKEND_JOBS_CONFIG = {
   reminderPollMinutes: 5,
   allocationPollMinutes: 60,
@@ -488,6 +492,7 @@ async function resolveClientIdFromApplicationId(applicationId, connection = pool
 }
 
 async function resolveClientIdForDocument({
+  clientId = null,
   applicantUserId = null,
   caseId = null,
   actionPlanId = null,
@@ -500,6 +505,9 @@ async function resolveClientIdForDocument({
     if (!Number.isFinite(normalized) || normalized <= 0) return;
     candidates.push({ source, id: normalized });
   };
+  if (clientId) {
+    pushCandidate('client', clientId);
+  }
   if (actionPlanId) {
     const clientId = await resolveClientIdFromActionPlanId(actionPlanId, connection);
     if (clientId) pushCandidate('action_plan', clientId);
@@ -544,6 +552,154 @@ async function resolveApplicationIdForCaseId(caseId, connection = pool) {
     [normalizedCaseId]
   );
   return row?.application_id ? Number(row.application_id) : null;
+}
+
+async function resolveDocumentAttachmentContext({
+  requestedScope = 'application',
+  caseId = null,
+  applicationId = null,
+  actionPlanId = null,
+  interventionIds = [],
+  connection = pool,
+} = {}) {
+  const normalizedScope = requestedScope || 'application';
+  let nextCaseId = normalisePositiveInteger(caseId);
+  let nextApplicationId = normalisePositiveInteger(applicationId);
+  let nextActionPlanId = normalisePositiveInteger(actionPlanId);
+  let nextInterventionIds = normalizeIdList(interventionIds);
+  let effectiveStorageScope = normalizedScope;
+  let usedApplicationFallback = false;
+
+  const ensureActionPlanId = async () => {
+    if (!nextActionPlanId && nextInterventionIds.length) {
+      nextActionPlanId = await resolveActionPlanIdForInterventions({
+        interventionIds: nextInterventionIds,
+        connection,
+      });
+    }
+    return nextActionPlanId;
+  };
+
+  const ensureCaseId = async () => {
+    if (!nextCaseId) {
+      const planId = await ensureActionPlanId();
+      if (planId) {
+        nextCaseId = await resolveCaseIdForActionPlan(planId, connection);
+      }
+    }
+    return nextCaseId;
+  };
+
+  if (normalizedScope === 'client' || normalizedScope === 'payment_packet') {
+    return {
+      caseId: null,
+      applicationId: null,
+      actionPlanId: null,
+      interventionIds: [],
+      effectiveStorageScope: normalizedScope,
+      usedApplicationFallback,
+    };
+  }
+
+  if (normalizedScope === 'case') {
+    await ensureCaseId();
+    if (!nextCaseId) {
+      const err = new Error('case_required_for_document');
+      err.code = 'case_required_for_document';
+      throw err;
+    }
+    return {
+      caseId: nextCaseId,
+      applicationId: null,
+      actionPlanId: null,
+      interventionIds: [],
+      effectiveStorageScope: 'case',
+      usedApplicationFallback,
+    };
+  }
+
+  if (normalizedScope === 'action_plan') {
+    await ensureActionPlanId();
+    if (!nextActionPlanId) {
+      const err = new Error('action_plan_required_for_document');
+      err.code = 'action_plan_required_for_document';
+      throw err;
+    }
+    nextInterventionIds = await ensureInterventionsBelongToActionPlan({
+      actionPlanId: nextActionPlanId,
+      interventionIds: nextInterventionIds,
+      connection,
+    });
+    return {
+      caseId: null,
+      applicationId: null,
+      actionPlanId: nextActionPlanId,
+      interventionIds: nextInterventionIds,
+      effectiveStorageScope: 'action_plan',
+      usedApplicationFallback,
+    };
+  }
+
+  if (normalizedScope === 'application') {
+    if (!nextApplicationId) {
+      const resolvedCaseId = await ensureCaseId();
+      if (resolvedCaseId) {
+        nextApplicationId = await resolveApplicationIdForCaseId(resolvedCaseId, connection);
+      }
+    }
+    if (nextApplicationId) {
+      return {
+        caseId: null,
+        applicationId: nextApplicationId,
+        actionPlanId: null,
+        interventionIds: [],
+        effectiveStorageScope: 'application',
+        usedApplicationFallback,
+      };
+    }
+
+    await ensureActionPlanId();
+    if (nextActionPlanId) {
+      nextInterventionIds = await ensureInterventionsBelongToActionPlan({
+        actionPlanId: nextActionPlanId,
+        interventionIds: nextInterventionIds,
+        connection,
+      });
+      return {
+        caseId: null,
+        applicationId: null,
+        actionPlanId: nextActionPlanId,
+        interventionIds: nextInterventionIds,
+        effectiveStorageScope: 'action_plan',
+        usedApplicationFallback: true,
+      };
+    }
+
+    await ensureCaseId();
+    if (nextCaseId) {
+      return {
+        caseId: nextCaseId,
+        applicationId: null,
+        actionPlanId: null,
+        interventionIds: [],
+        effectiveStorageScope: 'case',
+        usedApplicationFallback: true,
+      };
+    }
+
+    const err = new Error('application_required_for_document');
+    err.code = 'application_required_for_document';
+    throw err;
+  }
+
+  return {
+    caseId: nextCaseId || null,
+    applicationId: nextApplicationId || null,
+    actionPlanId: nextActionPlanId || null,
+    interventionIds: nextInterventionIds,
+    effectiveStorageScope,
+    usedApplicationFallback,
+  };
 }
 
 async function resolveActionPlanIdForInterventions({ interventionIds, connection = pool } = {}) {
@@ -13247,6 +13403,14 @@ function toIsoDateTime(value) {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return null;
   return date.toISOString();
+}
+
+function buildGeneratedCaseNumber(caseId, dateValue = new Date()) {
+  const numericCaseId = Number.parseInt(caseId, 10);
+  if (!Number.isInteger(numericCaseId) || numericCaseId <= 0) return null;
+  const candidateDate =
+    dateValue instanceof Date && !Number.isNaN(dateValue.getTime()) ? dateValue : new Date();
+  return `CASE-${candidateDate.getFullYear()}-${String(numericCaseId).padStart(7, '0')}`;
 }
 
 function safeJsonParse(value, fallback = null) {
@@ -34129,9 +34293,11 @@ app.delete('/api/steps/:id', async (req, res) => {
  * In new minimal schema:
  * - If application_id is provided, create case referencing existing working application.
  * - Else if submission_id provided, ingest submission -> working application (iset_application) then create case.
+ * - Else create a client-file case linked only to client_id.
  * Body fields:
  *   submission_id?: number
  *   application_id?: number
+ *   client_id: number
  *   assigned_to_user_id?: number | null
  */
 app.post('/api/cases', async (req, res) => {
@@ -34148,10 +34314,6 @@ app.post('/api/cases', async (req, res) => {
   const resolvedClientId = Number.parseInt(client_id ?? clientId ?? '', 10);
   if (!Number.isInteger(resolvedClientId) || resolvedClientId < 1) {
     return res.status(422).json({ error: 'client_id_required' });
-  }
-
-  if (!application_id && !submission_id) {
-    return res.status(400).json({ error: 'Provide either application_id or submission_id' });
   }
 
   const [[clientRow]] = await pool.query('SELECT id, address_json FROM client WHERE id = ? LIMIT 1', [
@@ -34238,12 +34400,22 @@ app.post('/api/cases', async (req, res) => {
       );
     }
 
-    const normalizedStatus = typeof status === 'string' && status.trim() ? status.trim() : 'open';
+    const defaultStatus = workingApplicationId || submission_id
+      ? 'open'
+      : CASE_STATUS_DERIVED_VALUES.initiated;
+    const normalizedStatus = typeof status === 'string' && status.trim()
+      ? status.trim()
+      : defaultStatus;
 
     const [insertCase] = await conn.query(
-      'INSERT INTO iset_case (application_id, client_id, assigned_to_user_id, status, portfolio_region_id, created_at, updated_at) VALUES (?,?,?,?,?,NOW(),NOW())',
+      'INSERT INTO iset_case (application_id, client_id, assigned_to_user_id, status, portfolio_region_id, opened_at, created_at, updated_at) VALUES (?,?,?,?,?,NOW(),NOW(),NOW())',
       [workingApplicationId, resolvedClientId, assignTargetId, normalizedStatus, portfolioRegionId]
     );
+    const createdCaseId = Number(insertCase.insertId);
+    const generatedCaseNumber = workingApplicationId ? null : buildGeneratedCaseNumber(createdCaseId);
+    if (generatedCaseNumber) {
+      await conn.query('UPDATE iset_case SET case_number = ? WHERE id = ?', [generatedCaseNumber, createdCaseId]);
+    }
 
     await conn.commit();
 
@@ -34265,11 +34437,12 @@ app.post('/api/cases', async (req, res) => {
 
     return res.status(201).json({
       message: 'case_created',
-      case_id: insertCase.insertId,
+      case_id: createdCaseId,
       application_id: workingApplicationId,
       client_id: resolvedClientId,
       assigned_to_user_id: assignTargetId,
       status: normalizedStatus,
+      case_number: generatedCaseNumber,
     });
   } catch (err) {
     await conn.rollback();
@@ -34457,7 +34630,8 @@ async function emitDocumentUploadedEvent({ req, caseId, applicationId, applicant
   }
 }
 
-app.post('/api/applicants/:id/documents/upload', (req, res) => {
+function handleAdminDocumentUpload({ requireApplicant = false, applicantIdHint = null, caseIdHint = null } = {}) {
+  return (req, res) => {
   adminDocumentUpload.single('file')(req, res, async err => {
     if (err) {
       const isMulterError = err instanceof multer.MulterError;
@@ -34474,7 +34648,9 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
       return res.status(400).json({ error: 'upload_failed', message: err.message || 'Upload failed' });
     }
 
-    const applicantId = normalisePositiveInteger(req.params.id);
+    const applicantId = normalisePositiveInteger(
+      applicantIdHint || req.params.id || req.body?.applicantUserId || req.body?.applicant_user_id
+    );
     const cleanupUploadedFile = () => {
       if (req.file && req.file.path) {
         fs.unlink(req.file.path, unlinkErr => {
@@ -34485,7 +34661,7 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
       }
     };
 
-    if (!applicantId) {
+    if (requireApplicant && !applicantId) {
       cleanupUploadedFile();
       return res.status(400).json({ error: 'invalid_applicant_id' });
     }
@@ -34538,11 +34714,9 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
         return res.status(500).json({ error: 'document_type_lookup_failed' });
       }
     }
-    const metadataObj = {};
-    if (label) metadataObj.label = label;
-    if (docType) metadataObj.document_type = docType;
-    const metadata = Object.keys(metadataObj).length ? JSON.stringify(metadataObj) : null;
-    const caseIdRaw = normalisePositiveInteger(req.body?.caseId || req.body?.case_id);
+    const caseIdRaw = normalisePositiveInteger(
+      caseIdHint || req.body?.caseId || req.body?.case_id || (!requireApplicant ? req.params.id : null)
+    );
     const applicationIdRaw = normalisePositiveInteger(req.body?.applicationId || req.body?.application_id);
     const actionPlanIdRaw = normalisePositiveInteger(req.body?.actionPlanId || req.body?.action_plan_id);
     const interventionIdRaw = normalisePositiveInteger(req.body?.interventionId || req.body?.linkedInterventionId);
@@ -34552,52 +34726,36 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
     let actionPlanId = actionPlanIdRaw;
     let interventionIds = Array.from(new Set([...interventionIdsRaw, interventionIdRaw].filter(Boolean)));
     const normalizedScope = docTypeScope || 'application';
+    const metadataObj = {};
+    if (label) metadataObj.label = label;
+    if (docType) metadataObj.document_type = docType;
 
     try {
-      if (normalizedScope === 'client' || normalizedScope === 'payment_packet') {
-        caseId = null;
-        applicationId = null;
-        actionPlanId = null;
-        interventionIds = [];
-      } else if (normalizedScope === 'case') {
-        if (!caseId) {
-          cleanupUploadedFile();
-          return res.status(400).json({ error: 'case_required_for_document' });
-        }
-        applicationId = null;
-        actionPlanId = null;
-        interventionIds = [];
-      } else if (normalizedScope === 'application') {
-        if (!applicationId && caseId) {
-          applicationId = await resolveApplicationIdForCaseId(caseId);
-        }
-        if (!applicationId) {
-          cleanupUploadedFile();
-          return res.status(400).json({ error: 'application_required_for_document' });
-        }
-        caseId = null;
-        actionPlanId = null;
-        interventionIds = [];
-      } else if (normalizedScope === 'action_plan') {
-        if (!actionPlanId && interventionIds.length) {
-          actionPlanId = await resolveActionPlanIdForInterventions({ interventionIds });
-        }
-        if (!actionPlanId) {
-          cleanupUploadedFile();
-          return res.status(400).json({ error: 'action_plan_required_for_document' });
-        }
-        interventionIds = await ensureInterventionsBelongToActionPlan({
-          actionPlanId,
-          interventionIds,
-        });
-        caseId = null;
-        applicationId = null;
+      const attachment = await resolveDocumentAttachmentContext({
+        requestedScope: normalizedScope,
+        caseId,
+        applicationId,
+        actionPlanId,
+        interventionIds,
+      });
+      caseId = attachment.caseId;
+      applicationId = attachment.applicationId;
+      actionPlanId = attachment.actionPlanId;
+      interventionIds = attachment.interventionIds;
+      if (attachment.usedApplicationFallback) {
+        metadataObj.scope_fallback = {
+          requested: normalizedScope,
+          storedAs: attachment.effectiveStorageScope,
+        };
+      } else if (metadataObj.scope_fallback) {
+        delete metadataObj.scope_fallback;
       }
     } catch (err) {
       cleanupUploadedFile();
       const errorCode = err?.code || 'document_link_validation_failed';
       return res.status(400).json({ error: errorCode });
     }
+    const metadata = Object.keys(metadataObj).length ? JSON.stringify(metadataObj) : null;
     const source = 'manual_upload';
     const uploaderUserId = resolveAdminActorUserId(req);
     const mimeType = file.mimetype || null;
@@ -34635,9 +34793,9 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
     try {
       resolvedClientId = await resolveClientIdForDocument({
         applicantUserId: applicantId,
-        caseId,
-        actionPlanId,
-        applicationId,
+        caseId: caseId || caseIdRaw,
+        actionPlanId: actionPlanId || actionPlanIdRaw,
+        applicationId: applicationId || applicationIdRaw,
       });
       if (!resolvedClientId) {
         cleanupUploadedFile();
@@ -34767,7 +34925,18 @@ app.post('/api/applicants/:id/documents/upload', (req, res) => {
       });
     }
   });
-});
+  };
+}
+
+app.post(
+  '/api/applicants/:id/documents/upload',
+  handleAdminDocumentUpload({ requireApplicant: true })
+);
+
+app.post(
+  '/api/cases/:id/documents/upload',
+  handleAdminDocumentUpload({ requireApplicant: false })
+);
 
 app.post('/api/allocations/evidence/upload', (req, res) => {
   adminDocumentUpload.single('file')(req, res, async err => {
@@ -34949,7 +35118,6 @@ app.put('/api/documents/:id', async (req, res) => {
   if (!metadataObj || typeof metadataObj !== 'object') metadataObj = {};
   metadataObj.label = label;
   if (docType) metadataObj.document_type = docType;
-  const metadata = JSON.stringify(metadataObj);
 
   const effectiveDocType = docType || metadataObj.document_type || null;
   let docTypeScope = 'application';
@@ -34977,54 +35145,39 @@ app.put('/api/documents/:id', async (req, res) => {
   let nextInterventionIds = interventionIdsProvided ? interventionIds : existingInterventionIds;
 
   try {
-    if (docTypeScope === 'client' || docTypeScope === 'payment_packet') {
-      nextCaseId = null;
-      nextApplicationId = null;
-      nextActionPlanId = null;
-      nextInterventionIds = [];
-    } else if (docTypeScope === 'case') {
-      if (!nextCaseId) {
-        return res.status(400).json({ error: 'case_required_for_document' });
-      }
-      nextApplicationId = null;
-      nextActionPlanId = null;
-      nextInterventionIds = [];
-    } else if (docTypeScope === 'application') {
-      if (!nextApplicationId && nextCaseId) {
-        nextApplicationId = await resolveApplicationIdForCaseId(nextCaseId);
-      }
-      if (!nextApplicationId) {
-        return res.status(400).json({ error: 'application_required_for_document' });
-      }
-      nextCaseId = null;
-      nextActionPlanId = null;
-      nextInterventionIds = [];
-    } else if (docTypeScope === 'action_plan') {
-      if (!nextActionPlanId && nextInterventionIds.length) {
-        nextActionPlanId = await resolveActionPlanIdForInterventions({ interventionIds: nextInterventionIds });
-      }
-      if (!nextActionPlanId) {
-        return res.status(400).json({ error: 'action_plan_required_for_document' });
-      }
-      nextInterventionIds = await ensureInterventionsBelongToActionPlan({
-        actionPlanId: nextActionPlanId,
-        interventionIds: nextInterventionIds,
-      });
-      nextCaseId = null;
-      nextApplicationId = null;
+    const attachment = await resolveDocumentAttachmentContext({
+      requestedScope: docTypeScope,
+      caseId: nextCaseId,
+      applicationId: nextApplicationId,
+      actionPlanId: nextActionPlanId,
+      interventionIds: nextInterventionIds,
+    });
+    nextCaseId = attachment.caseId;
+    nextApplicationId = attachment.applicationId;
+    nextActionPlanId = attachment.actionPlanId;
+    nextInterventionIds = attachment.interventionIds;
+    if (attachment.usedApplicationFallback) {
+      metadataObj.scope_fallback = {
+        requested: docTypeScope,
+        storedAs: attachment.effectiveStorageScope,
+      };
+    } else if (metadataObj.scope_fallback) {
+      delete metadataObj.scope_fallback;
     }
   } catch (err) {
     const errorCode = err?.code || 'document_link_validation_failed';
     return res.status(400).json({ error: errorCode });
   }
+  const metadata = JSON.stringify(metadataObj);
 
   let resolvedClientId = null;
   try {
     resolvedClientId = await resolveClientIdForDocument({
+      clientId: existingRow.client_id,
       applicantUserId: existingRow.applicant_user_id,
-      caseId: nextCaseId,
-      actionPlanId: nextActionPlanId,
-      applicationId: nextApplicationId,
+      caseId: nextCaseId || normalisePositiveInteger(existingRow.case_id),
+      actionPlanId: nextActionPlanId || normalisePositiveInteger(existingRow.action_plan_id),
+      applicationId: nextApplicationId || normalisePositiveInteger(existingRow.application_id),
     });
     if (!resolvedClientId) {
       return res.status(422).json({ error: 'client_id_required' });
@@ -35065,7 +35218,7 @@ app.put('/api/documents/:id', async (req, res) => {
     if (!result || result.affectedRows === 0) {
       return res.status(404).json({ error: 'document_not_found' });
     }
-    if (docTypeScope === 'action_plan') {
+    if (nextActionPlanId) {
       await updateDocumentInterventionLinks({
         documentId,
         interventionIds: nextInterventionIds,
@@ -35253,56 +35406,43 @@ app.post('/api/documents/:id/duplicate', async (req, res) => {
     let nextApplicationId = applicationIdProvided ? applicationId : normalisePositiveInteger(doc.application_id);
     let nextActionPlanId = actionPlanIdProvided ? actionPlanId : normalisePositiveInteger(doc.action_plan_id);
     let nextInterventionIds = interventionIdsProvided ? interventionIds : existingInterventionIds;
+    let metadataObj = parseMetadata(doc.metadata);
+    if (!metadataObj || typeof metadataObj !== 'object') metadataObj = {};
+    metadataObj.label = labelOverride || doc.label || doc.file_name || null;
+    if (docType) metadataObj.document_type = docType;
 
     try {
-      if (docTypeScope === 'client' || docTypeScope === 'payment_packet') {
-        nextCaseId = null;
-        nextApplicationId = null;
-        nextActionPlanId = null;
-        nextInterventionIds = [];
-      } else if (docTypeScope === 'case') {
-        if (!nextCaseId) {
-          return res.status(400).json({ error: 'case_required_for_document' });
-        }
-        nextApplicationId = null;
-        nextActionPlanId = null;
-        nextInterventionIds = [];
-      } else if (docTypeScope === 'application') {
-        if (!nextApplicationId && nextCaseId) {
-          nextApplicationId = await resolveApplicationIdForCaseId(nextCaseId);
-        }
-        if (!nextApplicationId) {
-          return res.status(400).json({ error: 'application_required_for_document' });
-        }
-        nextCaseId = null;
-        nextActionPlanId = null;
-        nextInterventionIds = [];
-      } else if (docTypeScope === 'action_plan') {
-        if (!nextActionPlanId && nextInterventionIds.length) {
-          nextActionPlanId = await resolveActionPlanIdForInterventions({ interventionIds: nextInterventionIds });
-        }
-        if (!nextActionPlanId) {
-          return res.status(400).json({ error: 'action_plan_required_for_document' });
-        }
-        nextInterventionIds = await ensureInterventionsBelongToActionPlan({
-          actionPlanId: nextActionPlanId,
-          interventionIds: nextInterventionIds,
-        });
-        nextCaseId = null;
-        nextApplicationId = null;
+      const attachment = await resolveDocumentAttachmentContext({
+        requestedScope: docTypeScope,
+        caseId: nextCaseId,
+        applicationId: nextApplicationId,
+        actionPlanId: nextActionPlanId,
+        interventionIds: nextInterventionIds,
+      });
+      nextCaseId = attachment.caseId;
+      nextApplicationId = attachment.applicationId;
+      nextActionPlanId = attachment.actionPlanId;
+      nextInterventionIds = attachment.interventionIds;
+      if (attachment.usedApplicationFallback) {
+        metadataObj.scope_fallback = {
+          requested: docTypeScope,
+          storedAs: attachment.effectiveStorageScope,
+        };
+      } else if (metadataObj.scope_fallback) {
+        delete metadataObj.scope_fallback;
       }
     } catch (err) {
       const errorCode = err?.code || 'document_link_validation_failed';
       return res.status(400).json({ error: errorCode });
     }
-
     let resolvedClientId = null;
     try {
       resolvedClientId = await resolveClientIdForDocument({
+        clientId: doc.client_id,
         applicantUserId: doc.applicant_user_id,
-        caseId: nextCaseId,
-        actionPlanId: nextActionPlanId,
-        applicationId: nextApplicationId,
+        caseId: nextCaseId || normalisePositiveInteger(doc.case_id),
+        actionPlanId: nextActionPlanId || normalisePositiveInteger(doc.action_plan_id),
+        applicationId: nextApplicationId || normalisePositiveInteger(doc.application_id),
       });
       if (!resolvedClientId) {
         return res.status(422).json({ error: 'client_id_required' });
@@ -35315,7 +35455,6 @@ app.post('/api/documents/:id/duplicate', async (req, res) => {
       return res.status(400).json({ error: errorCode });
     }
 
-    const metadataObj = parseMetadata(doc.metadata) || {};
     const nextLabel = labelOverride || doc.label || doc.file_name || 'Document';
     metadataObj.label = nextLabel;
     if (docType) metadataObj.document_type = docType;
@@ -35350,7 +35489,7 @@ app.post('/api/documents/:id/duplicate', async (req, res) => {
     );
     const insertId = result?.insertId || null;
     if (insertId) {
-      if (docTypeScope === 'action_plan') {
+      if (nextActionPlanId) {
         await updateDocumentInterventionLinks({
           documentId: insertId,
           interventionIds: nextInterventionIds,
@@ -36252,6 +36391,104 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
   }
 });
 
+app.get('/api/cases/:id/documents', async (req, res) => {
+  const caseId = normalisePositiveInteger(req.params.id);
+  const interventionFilterId = normalisePositiveInteger(req.query.interventionId);
+  if (!caseId) {
+    return res.status(400).json({ error: 'invalid_case_id' });
+  }
+  try {
+    const [[caseRow]] = await pool.query(
+      'SELECT id, client_id, application_id, case_number FROM iset_case WHERE id = ? LIMIT 1',
+      [caseId]
+    );
+    if (!caseRow) {
+      return res.status(404).json({ error: 'case_not_found' });
+    }
+    const clientId = normalisePositiveInteger(caseRow.client_id);
+    if (!clientId) {
+      return res.status(422).json({ error: 'client_id_required' });
+    }
+
+    const docTypeScopeMap = await loadDocumentTypeScopeMap();
+    const whereClauses = ['d.client_id = ?', `d.status = 'active'`];
+    const params = [clientId];
+
+    if (interventionFilterId) {
+      whereClauses.push(
+        `(EXISTS (
+            SELECT 1
+              FROM iset_document_intervention di
+             WHERE di.document_id = d.id
+               AND di.intervention_id = ?
+          )
+          OR d.action_plan_id = (SELECT action_plan_id FROM iset_case_intervention WHERE id = ?)
+          OR d.case_id = (SELECT case_id FROM iset_case_intervention WHERE id = ?)
+          OR d.application_id = (
+            SELECT c.application_id
+              FROM iset_case_intervention i
+              LEFT JOIN iset_case c ON c.id = i.case_id
+             WHERE i.id = ?
+          )
+          OR (d.case_id IS NULL AND d.application_id IS NULL AND d.action_plan_id IS NULL)
+        )`
+      );
+      params.push(interventionFilterId, interventionFilterId, interventionFilterId, interventionFilterId);
+    } else {
+      whereClauses.push(
+        `(
+          d.case_id = ?
+          OR ap.case_id = ?
+          OR d.application_id = COALESCE(?, -1)
+          OR (d.case_id IS NULL AND d.application_id IS NULL AND d.action_plan_id IS NULL)
+        )`
+      );
+      params.push(caseId, caseId, caseRow.application_id || null);
+    }
+
+    const whereSql = `WHERE ${whereClauses.join(' AND ')}`;
+    const [rows] = await pool.query(
+      `SELECT
+          d.id,
+          d.case_id,
+          COALESCE(c.case_number, ac.case_number, ?) AS case_number,
+          d.application_id,
+          d.action_plan_id,
+          d.file_name,
+          d.file_path,
+          d.label,
+          d.metadata,
+          d.document_category,
+          d.source,
+          d.created_at AS uploaded_at,
+          COALESCE(
+            JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')),
+            s.reference_number
+          ) AS reference_number
+       FROM iset_document d
+       LEFT JOIN iset_case c ON c.id = d.case_id
+       LEFT JOIN iset_case_action_plan ap ON ap.id = d.action_plan_id
+       LEFT JOIN iset_case ac ON ac.id = ap.case_id
+       LEFT JOIN iset_application a ON a.id = COALESCE(d.application_id, c.application_id, ac.application_id)
+       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+       ${whereSql}
+       ORDER BY d.created_at DESC`,
+      [caseRow.case_number || null, ...params]
+    );
+    const docIds = rows.map(row => Number(row.id)).filter(Number.isFinite);
+    const interventionMap = await fetchDocumentInterventionMap({ documentIds: docIds });
+    const items = rows.map(row => ({
+      ...row,
+      intervention_ids: interventionMap.get(Number(row.id)) || [],
+      scope: docTypeScopeMap.get(row.document_category) || 'application'
+    }));
+    return res.status(200).json(items);
+  } catch (error) {
+    console.error('Error fetching case documents:', error);
+    return res.status(500).json({ error: 'Failed to fetch case documents' });
+  }
+});
+
 app.get('/api/documents/:id/presign-download', async (req, res) => {
   const documentId = Number(req.params.id);
   if (!Number.isFinite(documentId) || documentId <= 0) {
@@ -36410,11 +36647,12 @@ app.get('/api/cases', async (req, res) => {
           OR LOWER(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.full_name'))) LIKE ?
           OR LOWER(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."preferred-name"'))) LIKE ?
           OR LOWER(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) LIKE ?
+          OR LOWER(COALESCE(c.case_number, '')) LIKE ?
           OR LOWER(COALESCE(sp.display_name, sp.name, '')) LIKE ?
           OR LOWER(COALESCE(sp.email, '')) LIKE ?
         )`.replace(/\s+/g, ' ')
       );
-      params.push(search, search, search, search, search, search, search);
+      params.push(search, search, search, search, search, search, search, search);
     }
 
     const role = inferUserRole(req);
@@ -36580,10 +36818,14 @@ app.get('/api/cases', async (req, res) => {
 
     const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-    const itemsSql = `
+    const orderedItemsSql = `
       ${selectSql}
       ${whereSql}
       ORDER BY ${sortColumn} ${direction}
+    `;
+
+    const itemsSql = `
+      ${orderedItemsSql}
       LIMIT ? OFFSET ?
     `;
 
@@ -36687,6 +36929,7 @@ app.get('/api/cases', async (req, res) => {
 	        applicationId: row.application_id || null,
 	        trackingId:
 	          row.tracking_id ||
+	          row.case_number ||
 	          payloadSubmission.reference_number ||
           (row.id ? `CASE-${row.id}` : null),
         submittedAt: toIsoString(row.submitted_at),
@@ -36712,6 +36955,8 @@ app.get('/api/cases', async (req, res) => {
       });
     }
 
+    const [groupRows] = await pool.query(orderedItemsSql, params);
+    const groupedCases = groupRows.map(mapRowToCase);
     const groups = new Map();
     const formatClientName = (client = {}) => {
       const parts = [];
@@ -36721,7 +36966,7 @@ app.get('/api/cases', async (req, res) => {
       return combined || 'Unknown client';
     };
 
-    items.forEach(caseItem => {
+    groupedCases.forEach(caseItem => {
       const key = caseItem.client?.id ? `client-${caseItem.client.id}` : `case-${caseItem.id}`;
       if (!groups.has(key)) {
         groups.set(key, {
@@ -36755,10 +37000,11 @@ app.get('/api/cases', async (req, res) => {
     });
 
     const groupedItems = Array.from(groups.values());
+    const pagedGroupedItems = groupedItems.slice(offset, offset + pageSize);
 
     res.json({
       grouped: true,
-      items: groupedItems,
+      items: pagedGroupedItems,
       page,
       pageSize,
       totalCount: groupedItems.length,
@@ -38689,7 +38935,29 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
     startDate = null,
     reviewDate = null,
     ownerStaffProfileId = null,
+    status: requestedStatus = null,
+    initialStatus = null,
+    backloadMode = false,
+    entryMode = null,
+    resultCode = null,
+    resultDate = null,
+    resultEducationLevel = null,
+    futureEducationLevel = null,
+    resultNoc = null,
+    resultNocVersion = null,
+    outcomeSummary = null,
+    closureNotes = null,
   } = req.body || {};
+  const isBackloadMode =
+    backloadMode === true ||
+    String(entryMode || '').trim().toLowerCase() === 'backload';
+  const normalizePlanStatus = (value, fallback = 'draft') => {
+    const normalized = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (normalized === 'draft' || normalized === 'active' || normalized === 'closed') {
+      return normalized;
+    }
+    return fallback;
+  };
 
   const trimmedName = typeof name === 'string' ? name.trim() : '';
   if (!trimmedName) {
@@ -38774,8 +39042,14 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
     resolvedOwnerStaffProfileId = Number(caseRow.assigned_to_user_id);
   }
 
-  const planStatus = 'draft';
-  const metadata = { ...(summary ? { summary } : {}), postingContext };
+  const planStatus = isBackloadMode
+    ? normalizePlanStatus(initialStatus || requestedStatus, 'active')
+    : 'draft';
+  const metadata = {
+    ...(summary ? { summary } : {}),
+    postingContext,
+    ...(isBackloadMode ? { source: 'manual_backload', entryMode: 'existing' } : {}),
+  };
   const caseIdentifier = caseRow.case_number || caseRow.tracking_id || `Case #${caseId}`;
 
   let connection;
@@ -38784,6 +39058,7 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
     await connection.beginTransaction();
 
     const CODE_SETS = {
+      resultCode: new Set(['1','2','3','4','5','6','7','9']),
       educationLevel: new Set(['1','2','3','4','5','6','7','8','9','10','11','12']),
       educationProvince: new Set(['1','2','3','4','5','6','7','8','9','10','11','12','13','14','16']),
       yesNo: new Set(['0','1']),
@@ -38794,6 +39069,7 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
       prevEmploymentSchedule: new Set(['1','2']),
       barrier: new Set(['1','2','3','4','5','6','7','8','9','10','11','12']),
       nocVersion: new Set(['2016','2021']),
+      futureEducation: new Set(['5','8','9','10']),
     };
     const normaliseCode = (value, set) => {
       if (value === null || typeof value === 'undefined') return null;
@@ -38819,6 +39095,21 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
         return res.status(422).json({ error: 'budget_pot_not_found', message: 'Budget pot is required and must exist.' });
       }
     }
+    if (planStatus === 'active') {
+      const [[existingActive]] = await connection.query(
+        `SELECT id
+           FROM iset_case_action_plan
+          WHERE case_id = ?
+            AND status = 'active'
+            AND archived_at IS NULL
+          LIMIT 1`,
+        [caseId]
+      );
+      if (existingActive) {
+        await connection.rollback();
+        return res.status(409).json({ error: 'active_plan_exists', detail: 'case_already_has_active_plan' });
+      }
+    }
     const fundingStream = (() => {
       if (typeof req.body.fundingStream === 'string') {
         const val = req.body.fundingStream.trim();
@@ -38833,11 +39124,11 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
       }
       return null;
     })();
-    if (!fundingStream) {
+    if (!fundingStream && !isBackloadMode) {
       res.status(422).json({ error: 'funding_stream_required', message: 'Funding stream is required for action plans.' });
       return;
     }
-    const derivedAgreementNumber = deriveAgreementNumberFromFundingStream(fundingStream);
+    const derivedAgreementNumber = fundingStream ? deriveAgreementNumberFromFundingStream(fundingStream) : null;
     const agreementNumber = derivedAgreementNumber;
 
     const educationLevel = normaliseCode(req.body.educationLevel, CODE_SETS.educationLevel);
@@ -38849,12 +39140,18 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
       return;
     }
 
-    const socialAssistanceRecipient = requireCode(req.body.socialAssistanceRecipient, CODE_SETS.yesNo, 'social_assistance_recipient', res);
-    if (socialAssistanceRecipient === null) return;
-    const eiClaimantCode = requireCode(req.body.eiClaimant, CODE_SETS.eiClaimant, 'ei_claimant', res);
-    if (eiClaimantCode === null) return;
-    const prevEmployment = requireCode(req.body.prevEmployment, CODE_SETS.prevEmployment, 'previous_employment', res);
-    if (prevEmployment === null) return;
+    const socialAssistanceRecipient = isBackloadMode
+      ? normaliseCode(req.body.socialAssistanceRecipient, CODE_SETS.yesNo)
+      : requireCode(req.body.socialAssistanceRecipient, CODE_SETS.yesNo, 'social_assistance_recipient', res);
+    if (!isBackloadMode && socialAssistanceRecipient === null) return;
+    const eiClaimantCode = isBackloadMode
+      ? normaliseCode(req.body.eiClaimant, CODE_SETS.eiClaimant)
+      : requireCode(req.body.eiClaimant, CODE_SETS.eiClaimant, 'ei_claimant', res);
+    if (!isBackloadMode && eiClaimantCode === null) return;
+    const prevEmployment = isBackloadMode
+      ? normaliseCode(req.body.prevEmployment, CODE_SETS.prevEmployment)
+      : requireCode(req.body.prevEmployment, CODE_SETS.prevEmployment, 'previous_employment', res);
+    if (!isBackloadMode && prevEmployment === null) return;
 
     let prevEmploymentNoc = null;
     let prevEmploymentNocVersion = null;
@@ -38898,8 +39195,10 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
     const childcareNeed = normaliseCode(req.body.childcareNeed, CODE_SETS.yesNo);
     let childcareFunding = null;
     if (childcareNeed === '1') {
-      childcareFunding = requireCode(req.body.childcareFunding, CODE_SETS.childcareFunding, 'childcare_funding', res);
-      if (childcareFunding === null) return;
+      childcareFunding = isBackloadMode
+        ? normaliseCode(req.body.childcareFunding, CODE_SETS.childcareFunding)
+        : requireCode(req.body.childcareFunding, CODE_SETS.childcareFunding, 'childcare_funding', res);
+      if (!isBackloadMode && childcareFunding === null) return;
     }
 
     const barrierCodes = (() => {
@@ -38912,6 +39211,93 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
         .map(val => String(val).trim())
         .filter(code => CODE_SETS.barrier.has(code));
     })();
+
+    let resultCodeValue = null;
+    let resultDateValue = null;
+    let resultEducationValue = null;
+    let futureEducationValue = null;
+    let resultNocVersionValue = null;
+    let resultNocValue = null;
+    if (isBackloadMode && planStatus === 'closed') {
+      resultCodeValue = normaliseCode(resultCode, CODE_SETS.resultCode);
+      if (!resultCodeValue) {
+        await connection.rollback();
+        return res.status(422).json({
+          error: 'result_code_required',
+          message: 'Result code is required for a closed action plan.'
+        });
+      }
+      resultDateValue =
+        typeof resultDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(resultDate.trim()) ? resultDate.trim() : null;
+      if (!resultDateValue) {
+        await connection.rollback();
+        return res.status(422).json({
+          error: 'invalid_result_date',
+          message: 'Result date must be in YYYY-MM-DD format for a closed action plan.'
+        });
+      }
+      if (startDate && resultDateValue < startDate) {
+        await connection.rollback();
+        return res.status(422).json({
+          error: 'result_date_before_start',
+          message: 'Result date cannot be before the action plan start date.'
+        });
+      }
+      if (resultDateValue > toDateOnly(new Date())) {
+        await connection.rollback();
+        return res.status(422).json({
+          error: 'result_date_in_future',
+          message: 'Result date cannot be in the future.'
+        });
+      }
+      resultEducationValue = normaliseCode(resultEducationLevel, CODE_SETS.educationLevel);
+      if (!resultEducationValue) {
+        await connection.rollback();
+        return res.status(422).json({
+          error: 'result_education_required',
+          message: 'Action Plan Result Education Level is required for a closed action plan.'
+        });
+      }
+      if (resultCodeValue === '4') {
+        futureEducationValue = normaliseCode(futureEducationLevel, CODE_SETS.futureEducation);
+        if (!futureEducationValue) {
+          await connection.rollback();
+          return res.status(422).json({
+            error: 'future_education_required',
+            message: 'Future education level is required for Returned to school.'
+          });
+        }
+      }
+      if (resultCodeValue === '2') {
+        resultNocVersionValue = normaliseCode(resultNocVersion, CODE_SETS.nocVersion);
+        if (!resultNocVersionValue) {
+          await connection.rollback();
+          return res.status(422).json({
+            error: 'result_noc_version_required',
+            message: 'NOC version is required for Employed result.'
+          });
+        }
+        const resultNocDigits =
+          typeof resultNoc === 'string' ? resultNoc.replace(/\D/g, '') : String(resultNoc || '').replace(/\D/g, '');
+        const requiredLength = resultNocVersionValue === '2021' ? 5 : 4;
+        if (!resultNocDigits || resultNocDigits.length !== requiredLength) {
+          await connection.rollback();
+          return res.status(422).json({
+            error: 'result_noc_invalid',
+            message: `NOC code must be ${requiredLength} digits for version ${resultNocVersionValue}.`
+          });
+        }
+        const knownResultNoc = await isValidNocCodeForVersion(connection, resultNocDigits, resultNocVersionValue);
+        if (!knownResultNoc) {
+          await connection.rollback();
+          return res.status(422).json({
+            error: 'result_noc_invalid',
+            message: `NOC code ${resultNocDigits} is not valid for version ${resultNocVersionValue}.`
+          });
+        }
+        resultNocValue = resultNocDigits;
+      }
+    }
 
     const esdcPayload = {
       agreementNumber: derivedAgreementNumber,
@@ -38929,6 +39315,12 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
       actionPlanChildcareNeed: childcareNeed,
       actionPlanChildcareFundedCode: childcareFunding,
       BarrierToEmployment: barrierCodes && barrierCodes.length ? barrierCodes : null,
+      actionPlanResultCode: resultCodeValue,
+      actionPlanResultDate: resultDateValue,
+      actionPlanResultEducationLevel: resultEducationValue,
+      actionPlanFutureEducationLevel: futureEducationValue,
+      actionPlanResultRelatedNOC: resultNocValue,
+      actionPlanResultRelatedNOCVersion: resultNocVersionValue,
     };
 
     const [result] = await connection.query(
@@ -38953,6 +39345,36 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
         JSON.stringify(esdcPayload),
       ]
     );
+
+    if (isBackloadMode && planStatus === 'active') {
+      await connection.query(
+        `UPDATE iset_case_action_plan
+            SET activated_at = COALESCE(activated_at, NOW()),
+                closed_at = NULL,
+                archived_at = NULL,
+                updated_at = NOW()
+          WHERE id = ?`,
+        [result.insertId]
+      );
+    }
+    if (isBackloadMode && planStatus === 'closed') {
+      const summaryValue =
+        typeof outcomeSummary === 'string' ? outcomeSummary.trim() || null : null;
+      const closureNotesValue =
+        typeof closureNotes === 'string' ? closureNotes.trim() || null : null;
+      await connection.query(
+        `UPDATE iset_case_action_plan
+            SET closed_at = COALESCE(closed_at, NOW()),
+                archived_at = NULL,
+                result_code = ?,
+                result_date = ?,
+                outcome_summary = ?,
+                closure_notes = ?,
+                updated_at = NOW()
+          WHERE id = ?`,
+        [resultCodeValue, resultDateValue, summaryValue, closureNotesValue, result.insertId]
+      );
+    }
 
     // Seed case_context_json from assessment if empty
     try {
@@ -39024,7 +39446,7 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
 
     // Create a reminder for the plan review date (if provided)
     try {
-      if (reviewDate) {
+      if (reviewDate && !isBackloadMode) {
         const reminderDueAt = parseReminderDateInput(`${reviewDate}T08:00:00`, 'due_at');
         let ownerEmail = null;
         if (resolvedOwnerStaffProfileId) {
@@ -39276,7 +39698,12 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     approvedAmount = null,
     actualAmount = null,
     metadata: metadataPayload = null,
+    backloadMode = false,
+    entryMode = null,
   } = req.body || {};
+  const isBackloadMode =
+    backloadMode === true ||
+    String(entryMode || '').trim().toLowerCase() === 'backload';
 
   const trimmedCode = normalizeInterventionCodeValue(code) || '';
   if (!trimmedCode) {
@@ -39382,7 +39809,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     }
 
     const planStatus = String(planRow.status || '').trim().toLowerCase();
-    if (planStatus === 'archived' || planStatus === 'closed') {
+    if (!isBackloadMode && (planStatus === 'archived' || planStatus === 'closed')) {
       return res.status(409).json({ error: 'plan_not_editable', message: 'Cannot add interventions to a closed or archived plan.' });
     }
 
@@ -39418,7 +39845,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       if (Number.isFinite(potId)) return String(potId);
       return '';
     })();
-    if (!trimmedPotId && statusValue === 'approved') {
+    if (!trimmedPotId && statusValue === 'approved' && !isBackloadMode) {
       const planPotId = normalisePositiveInteger(planRow.budget_pot) || null;
       if (!planPotId) {
         return res.status(400).json({
@@ -39465,7 +39892,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
           postingContext === 'internal'
             ? (potRow.gl_project_code_internal || '').trim()
             : (potRow.gl_project_code_external || '').trim();
-        if (!glProjectCodeUsed) {
+        if (!glProjectCodeUsed && !isBackloadMode) {
           return res.status(400).json({
             error: postingContext === 'internal' ? 'missing_internal_gl_code' : 'missing_external_gl_code',
             message:
@@ -39543,11 +39970,26 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     const metadataSource =
       metadataPayload && typeof metadataPayload === 'object' ? metadataPayload : null;
     const metadata = metadataSource ? { ...metadataSource } : {};
+    const normalizedCostLines = Array.isArray(metadataSource?.costLines)
+      ? metadataSource.costLines.map(normalizeProposedCostLine).filter(Boolean)
+      : [];
+    if (normalizedCostLines.length && plannedCostInt === null) {
+      const totalFromLines = computeCostLinesTotal(normalizedCostLines);
+      if (Number.isFinite(totalFromLines)) {
+        plannedCostInt = Math.round(totalFromLines);
+      }
+    }
     const ensure = (key, value) => {
       if (!Object.prototype.hasOwnProperty.call(metadata, key) || metadata[key] === undefined) {
         metadata[key] = value;
       }
     };
+    if (isBackloadMode && !metadata.source) {
+      metadata.source = 'manual_backload';
+    }
+    if (isBackloadMode && !metadata.entryMode) {
+      metadata.entryMode = 'existing';
+    }
     ensure('code', trimmedCode);
     ensure('title', trimmedTitle);
     if (durationWeeksValue !== null) ensure('durationWeeks', durationWeeksValue);
@@ -39560,6 +40002,21 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     if (trimmedOutcomeCreate) ensure('outcome', trimmedOutcomeCreate);
     if (trimmedNoc) ensure('noc', trimmedNoc);
     if (trimmedNocVersion) ensure('nocVersion', trimmedNocVersion);
+    if (normalizedCostLines.length) ensure('costLines', normalizedCostLines);
+    if (isBackloadMode || normalizedCostLines.length) {
+      const snapshot =
+        metadata.snapshot && typeof metadata.snapshot === 'object' ? { ...metadata.snapshot } : {};
+      snapshot.code = snapshot.code || trimmedCode;
+      snapshot.title = snapshot.title || trimmedTitle;
+      snapshot.startDate = snapshot.startDate || startDateValue || null;
+      snapshot.endDate = snapshot.endDate || endDateValue || null;
+      snapshot.nocCode = snapshot.nocCode || trimmedNoc || null;
+      snapshot.nocVersion = snapshot.nocVersion || trimmedNocVersion || null;
+      if (normalizedCostLines.length) {
+        snapshot.costLines = normalizedCostLines;
+      }
+      metadata.snapshot = snapshot;
+    }
     if (!metadata.compliance || typeof metadata.compliance !== 'object') {
       metadata.compliance = { ilmp: 'pending', finance: 'pending' };
     }
@@ -39578,7 +40035,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       postingContext,
     });
 
-    const shouldStampReviewDecision = ['approved', 'changes_requested', 'rejected'].includes(statusValue);
+    const shouldStampReviewDecision = !isBackloadMode && ['approved', 'changes_requested', 'rejected'].includes(statusValue);
     const reviewedByStaffProfileId = shouldStampReviewDecision ? (resolveActiveStaffProfileId(req) || null) : null;
 
     const [result] = await pool.query(
@@ -39642,7 +40099,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         : Number.isFinite(plannedCostInt)
         ? plannedCostInt
         : null;
-    if (trimmedPotId && amountForFinance !== null) {
+    if (!isBackloadMode && trimmedPotId && amountForFinance !== null) {
       await upsertFinanceTransactionForIntervention({
         caseId: planRow.case_id,
         interventionId,
@@ -39658,7 +40115,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       });
     }
     await markIlmpNeedsReviewForCase(planRow.case_id);
-    if (shouldIncludeInterventionForCfa(statusValue)) {
+    if (!isBackloadMode && shouldIncludeInterventionForCfa(statusValue)) {
       try {
         const actorUserId = await resolveOrCreateUserIdFromAuth(req);
         const staffProfileId = resolveActiveStaffProfileId(req);
@@ -39677,7 +40134,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         console.warn('[cfa] create draft failed after intervention create', err?.message || err);
       }
     }
-    if (statusValue === 'approved') {
+    if (!isBackloadMode && statusValue === 'approved') {
       try {
         const actorUserId = await resolveOrCreateUserIdFromAuth(req);
         const actorRole = canonicaliseAccessRole(role) || role;
@@ -46998,6 +47455,1421 @@ function extractProvinceFromAddressPayload(addressPayload) {
     addressPayload?.provinceCode ||
     null
   );
+}
+
+const clientFileImportUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: CLIENT_FILE_IMPORT_MAX_BYTES }
+});
+
+const CLIENT_FILE_IMPORT_FIELD_DEFINITIONS = [
+  {
+    key: 'firstName',
+    label: 'First Name',
+    required: true,
+    aliases: ['firstname', 'givenname', 'givennames']
+  },
+  {
+    key: 'lastName',
+    label: 'Last Name',
+    required: true,
+    aliases: ['lastname', 'surname', 'familyname']
+  },
+  {
+    key: 'middleInitials',
+    label: 'Middle Initials',
+    aliases: ['middleinitial', 'middleinitials', 'middle', 'middlename', 'middlenames', 'middle name(s)']
+  },
+  {
+    key: 'preferredName',
+    label: 'Preferred Name',
+    aliases: ['preferredname', 'preferred', 'nickname']
+  },
+  {
+    key: 'dateOfBirth',
+    label: 'Date of Birth',
+    aliases: ['dob', 'birthdate', 'dateofbirth']
+  },
+  {
+    key: 'birthGender',
+    label: 'Birth Gender',
+    aliases: ['birthgender', 'sex', 'biologicalsex', 'genderatbirth', 'birthsex']
+  },
+  {
+    key: 'identityGender',
+    label: 'Identity Gender',
+    aliases: ['identitygender', 'genderidentity', 'identifiedgender']
+  },
+  {
+    key: 'indigenousIdentity',
+    label: 'Indigenous Identity',
+    aliases: ['indigenousidentity', 'legalindigenousidentity', 'aboriginalgroup']
+  },
+  {
+    key: 'sin',
+    label: 'SIN',
+    aliases: ['socialinsurancenumber', 'sinnumber', 'socialinsurance', 'sin9digitswillbehashed']
+  },
+  {
+    key: 'email',
+    label: 'Email',
+    aliases: ['emailaddress', 'primaryemail']
+  },
+  {
+    key: 'phonePrimary',
+    label: 'Phone Primary',
+    aliases: ['phone', 'primaryphone', 'phonenumber', 'telephoneday']
+  },
+  {
+    key: 'phoneAlternate',
+    label: 'Phone Alternate',
+    aliases: ['phonealternate', 'alternatephone', 'secondaryphone', 'telephonealt']
+  },
+  {
+    key: 'addressLine1',
+    label: 'Address Line 1',
+    aliases: ['addressline1', 'streetaddress', 'addressstreetaddress', 'address']
+  },
+  {
+    key: 'city',
+    label: 'City',
+    aliases: ['town']
+  },
+  {
+    key: 'province',
+    label: 'Province',
+    aliases: ['provincecode', 'state', 'region']
+  },
+  {
+    key: 'postalCode',
+    label: 'Postal Code',
+    aliases: ['postalcode', 'postcode', 'zip', 'zipcode']
+  },
+  {
+    key: 'mailingAddress',
+    label: 'Mailing Address',
+    aliases: ['mailingaddress', 'mailingaddressonlyifdifferent', 'mailingaddressifdifferent']
+  },
+  {
+    key: 'homeCommunity',
+    label: 'Home Community',
+    aliases: ['homecommunity', 'community']
+  },
+];
+
+const CLIENT_FILE_IMPORT_REQUIRED_KEYS = CLIENT_FILE_IMPORT_FIELD_DEFINITIONS
+  .filter(field => field.required)
+  .map(field => field.key);
+
+const CLIENT_FILE_IMPORT_IGNORED_TEMPLATE_HEADERS = new Set([
+  'qcstatusauto',
+  'homecommunitycodesaved',
+]);
+
+const CLIENT_FILE_IMPORT_HEADER_MAP = CLIENT_FILE_IMPORT_FIELD_DEFINITIONS.reduce((map, field) => {
+  const allLabels = [field.label, ...(field.aliases || [])];
+  allLabels.forEach(label => {
+    map.set(
+      String(label || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ''),
+      field.key
+    );
+  });
+  return map;
+}, new Map());
+
+const CLIENT_FILE_IMPORT_GUIDANCE_FIELD_PATH_PATTERN = /^(client|address_json|case_context_json|application|submission)\./i;
+const CLIENT_FILE_IMPORT_GUIDANCE_TEXT_PATTERNS = [
+  /\brequired\b/i,
+  /\boptional\b/i,
+  /\bchoose from list\b/i,
+  /\bdigits only\b/i,
+  /\bdd\/mm\/yyyy\b/i,
+  /\bshows code\b/i,
+  /^text(?:\s|\(|$)/i,
+  /^date(?:\s|\(|$)/i,
+];
+
+const CLIENT_FILE_IMPORT_MATCH_SOURCE_ORDER = ['sin', 'sin_case_or_submission', 'email', 'name_dob', 'name_only'];
+
+const CLIENT_FILE_IMPORT_GENDER_MAP = new Map([
+  ['female', 'female'],
+  ['f', 'female'],
+  ['woman', 'female'],
+  ['male', 'male'],
+  ['m', 'male'],
+  ['man', 'male'],
+]);
+
+const CLIENT_FILE_IMPORT_GENDER_IDENTITY_OTHER_KEYS = new Set([
+  'other',
+  'non_binary',
+  'nonbinary',
+  'two_spirit',
+  'twospirit',
+  'genderqueer',
+  'gender_fluid',
+  'genderfluid',
+  'trans',
+  'transgender',
+]);
+
+const CLIENT_FILE_IMPORT_INDIGENOUS_MAP = new Map([
+  ['first_nations_status', 'first_nations_status'],
+  ['status', 'first_nations_status'],
+  ['status_fn', 'first_nations_status'],
+  ['fn_status', 'first_nations_status'],
+  ['status_indian', 'first_nations_status'],
+  ['status_first_nations', 'first_nations_status'],
+  ['first_nations_non_status', 'first_nations_non_status'],
+  ['non_status', 'first_nations_non_status'],
+  ['non_status_fn', 'first_nations_non_status'],
+  ['fn_non_status', 'first_nations_non_status'],
+  ['non_status_first_nations', 'first_nations_non_status'],
+  ['non_status_indian', 'first_nations_non_status'],
+  ['inuit', 'inuit'],
+  ['m_tis', 'metis'],
+  ['metis', 'metis'],
+]);
+
+function normalizeClientFileImportHeader(value) {
+  return String(value || '')
+    .replace(/^\uFEFF/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function normalizeClientFileImportRequestedRowNumber(value) {
+  const normalized = normaliseString(value);
+  if (!normalized) return null;
+  if (!/^\d+$/.test(normalized)) {
+    const err = new Error('invalid_first_data_row_number');
+    err.code = 'invalid_first_data_row_number';
+    throw err;
+  }
+  const rowNumber = Number(normalized);
+  if (!Number.isInteger(rowNumber) || rowNumber < 1) {
+    const err = new Error('invalid_first_data_row_number');
+    err.code = 'invalid_first_data_row_number';
+    throw err;
+  }
+  return rowNumber;
+}
+
+function scoreClientFileImportHeaderEntry(entry = {}) {
+  const matchedFieldKeys = new Set();
+  (entry?.cells || []).forEach(value => {
+    const normalizedHeader = normalizeClientFileImportHeader(value);
+    const fieldKey = CLIENT_FILE_IMPORT_HEADER_MAP.get(normalizedHeader) || null;
+    if (fieldKey) {
+      matchedFieldKeys.add(fieldKey);
+    }
+  });
+  const requiredHeaderCount = CLIENT_FILE_IMPORT_REQUIRED_KEYS.filter(key => matchedFieldKeys.has(key)).length;
+  return {
+    matchedFieldKeys,
+    matchedHeaderCount: matchedFieldKeys.size,
+    requiredHeaderCount,
+  };
+}
+
+function detectClientFileImportHeaderIndex(rowEntries = []) {
+  let bestIndex = -1;
+  let bestScore = null;
+
+  rowEntries.forEach((entry, index) => {
+    const score = scoreClientFileImportHeaderEntry(entry);
+    if (!score.matchedHeaderCount) return;
+    if (
+      !bestScore ||
+      score.requiredHeaderCount > bestScore.requiredHeaderCount ||
+      (
+        score.requiredHeaderCount === bestScore.requiredHeaderCount &&
+        score.matchedHeaderCount > bestScore.matchedHeaderCount
+      )
+    ) {
+      bestIndex = index;
+      bestScore = score;
+    }
+  });
+
+  if (bestIndex < 0) return -1;
+  if ((bestScore?.requiredHeaderCount || 0) < CLIENT_FILE_IMPORT_REQUIRED_KEYS.length) {
+    return -1;
+  }
+  return bestIndex;
+}
+
+function isLikelyClientFileImportGuidanceRow(raw = {}) {
+  const values = Object.values(raw).map(value => normaliseString(value)).filter(Boolean);
+  if (!values.length) return false;
+
+  let fieldPathSignals = 0;
+  let guidanceSignals = 0;
+
+  values.forEach(value => {
+    const lower = value.toLowerCase();
+    if (CLIENT_FILE_IMPORT_GUIDANCE_FIELD_PATH_PATTERN.test(lower)) {
+      fieldPathSignals += 1;
+    }
+    if (CLIENT_FILE_IMPORT_GUIDANCE_TEXT_PATTERNS.some(pattern => pattern.test(lower))) {
+      guidanceSignals += 1;
+    }
+  });
+
+  return fieldPathSignals >= 2 || guidanceSignals >= 2;
+}
+
+function detectClientFileImportFirstDataRow(mappedRows = []) {
+  const firstDataEntry = mappedRows.find(entry => !isLikelyClientFileImportGuidanceRow(entry.raw));
+  return firstDataEntry ? firstDataEntry.rowNumber : null;
+}
+
+function detectClientFileImportDelimiter(text) {
+  const lines = String(text || '').split(/\r\n|\n|\r/);
+  const sampleLine = lines.find(line => normaliseString(line)) || '';
+  const candidates = [',', ';', '\t'];
+  let best = ',';
+  let bestCount = -1;
+  candidates.forEach(delimiter => {
+    const count = sampleLine.split(delimiter).length - 1;
+    if (count > bestCount) {
+      best = delimiter;
+      bestCount = count;
+    }
+  });
+  return best;
+}
+
+function parseClientFileImportDelimitedRows(text, delimiter = ',') {
+  const rows = [];
+  let currentRow = [];
+  let currentValue = '';
+  let inQuotes = false;
+  const raw = String(text || '');
+
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index];
+    if (inQuotes) {
+      if (char === '"') {
+        if (raw[index + 1] === '"') {
+          currentValue += '"';
+          index += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        currentValue += char;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = true;
+      continue;
+    }
+    if (char === delimiter) {
+      currentRow.push(currentValue);
+      currentValue = '';
+      continue;
+    }
+    if (char === '\r') {
+      if (raw[index + 1] === '\n') {
+        index += 1;
+      }
+      currentRow.push(currentValue);
+      rows.push(currentRow);
+      currentRow = [];
+      currentValue = '';
+      continue;
+    }
+    if (char === '\n') {
+      currentRow.push(currentValue);
+      rows.push(currentRow);
+      currentRow = [];
+      currentValue = '';
+      continue;
+    }
+    currentValue += char;
+  }
+
+  currentRow.push(currentValue);
+  rows.push(currentRow);
+
+  return rows;
+}
+
+function coerceClientFileImportCellValue(value) {
+  if (value === null || typeof value === 'undefined') return '';
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? '' : value.toISOString().slice(0, 10);
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'object') {
+    if (value && typeof value.text === 'string' && value.text.trim()) {
+      return value.text;
+    }
+    if (value && typeof value.result !== 'undefined') {
+      return coerceClientFileImportCellValue(value.result);
+    }
+    try {
+      return JSON.stringify(value);
+    } catch (_) {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+async function readClientFileImportFile(file) {
+  const fileName = String(file?.originalname || file?.name || '').trim();
+  if (!fileName || !file?.buffer) {
+    const err = new Error('missing_import_file');
+    err.code = 'missing_import_file';
+    throw err;
+  }
+
+  const extension = path.extname(fileName).toLowerCase();
+  if (!CLIENT_FILE_IMPORT_ALLOWED_EXTENSIONS.has(extension)) {
+    const err = new Error('unsupported_import_file_type');
+    err.code = 'unsupported_import_file_type';
+    throw err;
+  }
+
+  if (extension === '.csv') {
+    const text = file.buffer.toString('utf8').replace(/^\uFEFF/, '');
+    const delimiter = detectClientFileImportDelimiter(text);
+    const rows = parseClientFileImportDelimitedRows(text, delimiter)
+      .map((cells, index) => ({
+        rowNumber: index + 1,
+        cells: cells.map(cell => coerceClientFileImportCellValue(cell)),
+      }))
+      .filter(entry => entry.cells.some(cell => normaliseString(cell)));
+    return {
+      fileName,
+      worksheetName: 'CSV',
+      rowEntries: rows,
+    };
+  }
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(file.buffer);
+
+  const worksheet = workbook.worksheets.find(sheet => {
+    for (let rowNumber = 1; rowNumber <= sheet.rowCount; rowNumber += 1) {
+      const row = sheet.getRow(rowNumber);
+      const cellCount = Math.max(row.cellCount || 0, sheet.columnCount || 0);
+      for (let column = 1; column <= cellCount; column += 1) {
+        const cell = row.getCell(column);
+        const value = coerceClientFileImportCellValue(
+          typeof cell.text === 'string' && cell.text.trim() ? cell.text : cell.value
+        );
+        if (normaliseString(value)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  });
+
+  if (!worksheet) {
+    const err = new Error('import_file_empty');
+    err.code = 'import_file_empty';
+    throw err;
+  }
+
+  const rowEntries = [];
+  for (let rowNumber = 1; rowNumber <= worksheet.rowCount; rowNumber += 1) {
+    const row = worksheet.getRow(rowNumber);
+    const cellCount = Math.max(row.cellCount || 0, worksheet.columnCount || 0);
+    const cells = [];
+    for (let column = 1; column <= cellCount; column += 1) {
+      const cell = row.getCell(column);
+      cells.push(
+        coerceClientFileImportCellValue(
+          typeof cell.text === 'string' && cell.text.trim() ? cell.text : cell.value
+        )
+      );
+    }
+    if (cells.some(cell => normaliseString(cell))) {
+      rowEntries.push({ rowNumber, cells });
+    }
+  }
+
+  return {
+    fileName,
+    worksheetName: worksheet.name || 'Sheet1',
+    rowEntries,
+  };
+}
+
+function extractClientFileImportRows(rowEntries = [], options = {}) {
+  const requestedFirstDataRowNumber = normalizeClientFileImportRequestedRowNumber(options.firstDataRowNumber);
+  const headerIndex = detectClientFileImportHeaderIndex(rowEntries);
+
+  if (headerIndex < 0) {
+    const err = new Error('header_row_not_found');
+    err.code = 'header_row_not_found';
+    throw err;
+  }
+
+  const headerEntry = rowEntries[headerIndex];
+  const columnMap = new Map();
+  const duplicateMappedHeaders = [];
+  const unknownHeaders = [];
+
+  (headerEntry.cells || []).forEach((value, index) => {
+    const label = normaliseString(value);
+    if (!label) return;
+    const normalizedHeader = normalizeClientFileImportHeader(value);
+    const fieldKey = CLIENT_FILE_IMPORT_HEADER_MAP.get(normalizedHeader) || null;
+    if (!fieldKey) {
+      if (CLIENT_FILE_IMPORT_IGNORED_TEMPLATE_HEADERS.has(normalizedHeader)) {
+        return;
+      }
+      unknownHeaders.push(label);
+      return;
+    }
+    if (columnMap.has(fieldKey)) {
+      duplicateMappedHeaders.push(label);
+      return;
+    }
+    columnMap.set(fieldKey, index);
+  });
+
+  const missingRequiredHeaders = CLIENT_FILE_IMPORT_REQUIRED_KEYS.filter(key => !columnMap.has(key));
+  if (missingRequiredHeaders.length) {
+    const err = new Error('missing_required_headers');
+    err.code = 'missing_required_headers';
+    err.details = missingRequiredHeaders;
+    throw err;
+  }
+  if (duplicateMappedHeaders.length) {
+    const err = new Error('duplicate_headers');
+    err.code = 'duplicate_headers';
+    err.details = duplicateMappedHeaders;
+    throw err;
+  }
+
+  const mappedRows = rowEntries
+    .slice(headerIndex + 1)
+    .map(entry => {
+      const raw = {};
+      columnMap.forEach((columnIndex, fieldKey) => {
+        raw[fieldKey] = coerceClientFileImportCellValue(entry.cells?.[columnIndex] || '');
+      });
+      return {
+        rowNumber: entry.rowNumber,
+        raw,
+      };
+    })
+    .filter(entry => Object.values(entry.raw).some(value => normaliseString(value)));
+
+  if (!mappedRows.length) {
+    const err = new Error('no_import_rows');
+    err.code = 'no_import_rows';
+    throw err;
+  }
+
+  let firstDataRowNumber = requestedFirstDataRowNumber;
+  let firstDataRowMode = requestedFirstDataRowNumber ? 'manual' : 'auto';
+  if (firstDataRowNumber !== null && firstDataRowNumber <= headerEntry.rowNumber) {
+    const err = new Error('first_data_row_not_after_header');
+    err.code = 'first_data_row_not_after_header';
+    err.details = { headerRowNumber: headerEntry.rowNumber };
+    throw err;
+  }
+  if (firstDataRowNumber === null) {
+    firstDataRowNumber = detectClientFileImportFirstDataRow(mappedRows);
+  }
+  if (firstDataRowNumber === null) {
+    const err = new Error('no_import_rows');
+    err.code = 'no_import_rows';
+    throw err;
+  }
+
+  const skippedLeadingRowCount = mappedRows.filter(entry => entry.rowNumber < firstDataRowNumber).length;
+  const rows = mappedRows.filter(entry => entry.rowNumber >= firstDataRowNumber);
+
+  if (!rows.length) {
+    const err = new Error('no_import_rows');
+    err.code = 'no_import_rows';
+    throw err;
+  }
+  if (rows.length > CLIENT_FILE_IMPORT_MAX_ROWS) {
+    const err = new Error('import_row_limit_exceeded');
+    err.code = 'import_row_limit_exceeded';
+    err.details = { maxRows: CLIENT_FILE_IMPORT_MAX_ROWS, rowCount: rows.length };
+    throw err;
+  }
+
+  return {
+    headerRowNumber: headerEntry.rowNumber,
+    firstDataRowNumber,
+    firstDataRowMode,
+    skippedLeadingRowCount,
+    unknownHeaders,
+    rows,
+  };
+}
+
+function normalizeClientFileImportPostalCode(value) {
+  const raw = normaliseString(value);
+  if (!raw) return null;
+  const compact = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!compact) return null;
+  if (!/^[A-Z]\d[A-Z]\d[A-Z]\d$/.test(compact)) {
+    return null;
+  }
+  return `${compact.slice(0, 3)} ${compact.slice(3)}`;
+}
+
+function normalizeClientFileImportGender(value) {
+  const key = normaliseEnumKey(value);
+  if (!key) return { value: null, issue: null };
+  const direct = CLIENT_FILE_IMPORT_GENDER_MAP.get(key) || null;
+  if (direct) return { value: direct, issue: null };
+  return {
+    value: null,
+    issue: {
+      level: 'warning',
+      code: 'birth_gender_unmapped',
+      message: `Birth Gender "${value}" was not recognized and will be left blank.`,
+    }
+  };
+}
+
+function normalizeClientFileImportGenderIdentity(value) {
+  const key = normaliseEnumKey(value);
+  if (!key) return { value: null, issue: null };
+  const direct = CLIENT_FILE_IMPORT_GENDER_MAP.get(key) || null;
+  if (direct) return { value: direct, issue: null };
+  if (CLIENT_FILE_IMPORT_GENDER_IDENTITY_OTHER_KEYS.has(key)) {
+    return { value: 'other', issue: null };
+  }
+  return {
+    value: null,
+    issue: {
+      level: 'warning',
+      code: 'identity_gender_unmapped',
+      message: `Identity Gender "${value}" was not recognized and will be left blank.`,
+    }
+  };
+}
+
+function normalizeClientFileImportIndigenousIdentity(value) {
+  const key = normaliseEnumKey(value);
+  if (!key) return { value: null, issue: null };
+  const direct = CLIENT_FILE_IMPORT_INDIGENOUS_MAP.get(key) || null;
+  if (direct) return { value: direct, issue: null };
+  return {
+    value: null,
+    issue: {
+      level: 'warning',
+      code: 'indigenous_identity_unmapped',
+      message: `Indigenous Identity "${value}" was not recognized and will be left blank.`,
+    }
+  };
+}
+
+function normalizeClientFileImportEmail(value) {
+  const raw = normaliseString(value);
+  if (!raw) {
+    return { value: null, issue: null };
+  }
+
+  const tokens = raw
+    .split(/[;,]+/)
+    .map(entry => normaliseString(entry))
+    .filter(Boolean);
+  const candidates = tokens.length ? tokens : [raw];
+  const valid = [];
+  const invalid = [];
+
+  candidates.forEach(candidate => {
+    const normalized = normalizeEmailAddress(candidate);
+    if (normalized) {
+      valid.push(normalized);
+    } else {
+      invalid.push(candidate);
+    }
+  });
+
+  if (!valid.length) {
+    return {
+      value: null,
+      issue: {
+        level: 'error',
+        code: 'email_invalid',
+        message: 'Email must be a valid email address when provided.',
+      }
+    };
+  }
+
+  if (valid.length > 1) {
+    return {
+      value: valid[0],
+      issue: {
+        level: 'warning',
+        code: 'email_multiple',
+        message: `Multiple email addresses were provided; "${valid[0]}" will be used as the primary email.`,
+      }
+    };
+  }
+
+  if (invalid.length) {
+    return {
+      value: valid[0],
+      issue: {
+        level: 'warning',
+        code: 'email_partially_invalid',
+        message: `Some email values were not recognized; "${valid[0]}" will be used as the primary email.`,
+      }
+    };
+  }
+
+  return { value: valid[0], issue: null };
+}
+
+function normalizeClientFileImportRecord(entry = {}) {
+  const raw = entry.raw || {};
+  const issues = [];
+  const addIssue = issue => {
+    if (!issue) return;
+    issues.push(issue);
+  };
+
+  const firstName = normaliseString(raw.firstName);
+  const lastName = normaliseString(raw.lastName);
+  const middleInitials = normaliseString(raw.middleInitials);
+  const preferredName = normaliseString(raw.preferredName);
+
+  if (!firstName) {
+    addIssue({ level: 'error', code: 'first_name_required', message: 'First Name is required.' });
+  }
+  if (!lastName) {
+    addIssue({ level: 'error', code: 'last_name_required', message: 'Last Name is required.' });
+  }
+
+  const dateOfBirthRaw = normaliseString(raw.dateOfBirth);
+  const parsedDob = dateOfBirthRaw ? parseDate(raw.dateOfBirth) : null;
+  const dateOfBirth = parsedDob ? toDateOnlyString(parsedDob) : null;
+  if (dateOfBirthRaw && !dateOfBirth) {
+    addIssue({
+      level: 'warning',
+      code: 'date_of_birth_invalid',
+      message: 'Date of Birth was not recognized and will be left blank.',
+    });
+  }
+
+  const { value: birthGender, issue: birthGenderIssue } = normalizeClientFileImportGender(raw.birthGender);
+  const { value: identityGender, issue: identityGenderIssue } =
+    normalizeClientFileImportGenderIdentity(raw.identityGender);
+  const { value: indigenousIdentity, issue: indigenousIdentityIssue } =
+    normalizeClientFileImportIndigenousIdentity(raw.indigenousIdentity);
+  addIssue(birthGenderIssue);
+  addIssue(identityGenderIssue);
+  addIssue(indigenousIdentityIssue);
+
+  const sinDigits = cleanSin(raw.sin);
+  if (sinDigits) {
+    if (sinDigits.length !== 9) {
+      addIssue({
+        level: 'warning',
+        code: 'sin_length_invalid',
+        message: 'SIN should contain 9 digits. It will still be imported for later review in case management.',
+      });
+    } else if (!isValidSin(sinDigits)) {
+      addIssue({
+        level: 'warning',
+        code: 'sin_checksum_invalid',
+        message: 'SIN checksum failed. It will still be imported for later review in case management.',
+      });
+    }
+  }
+  const { value: emailNormalized, issue: emailIssue } = normalizeClientFileImportEmail(raw.email);
+  addIssue(emailIssue);
+
+  const phonePrimary = normaliseString(raw.phonePrimary);
+  const phoneAlternate = normaliseString(raw.phoneAlternate);
+  const addressLine1 = normaliseString(raw.addressLine1);
+  const city = normaliseString(raw.city);
+  const provinceInput = normaliseString(raw.province);
+  const province = provinceInput ? normalizeRegionCode(provinceInput) : null;
+  if (provinceInput && !province) {
+    addIssue({
+      level: 'error',
+      code: 'province_invalid',
+      message: `Province "${provinceInput}" was not recognized.`,
+    });
+  }
+
+  const postalCodeInput = normaliseString(raw.postalCode);
+  const postalCode = postalCodeInput ? normalizeClientFileImportPostalCode(postalCodeInput) : null;
+  if (postalCodeInput && !postalCode) {
+    addIssue({
+      level: 'error',
+      code: 'postal_code_invalid',
+      message: 'Postal Code must be a valid Canadian postal code when provided.',
+    });
+  }
+
+  let mailingAddress = normaliseString(raw.mailingAddress);
+  if (mailingAddress && addressLine1 && mailingAddress.toLowerCase() === addressLine1.toLowerCase()) {
+    mailingAddress = null;
+  }
+
+  const homeCommunity = normaliseString(raw.homeCommunity);
+
+  if (!emailNormalized && !phonePrimary && !phoneAlternate) {
+    addIssue({
+      level: 'warning',
+      code: 'contact_missing',
+      message: 'No email or phone number was provided for this row.',
+    });
+  }
+
+  const displayName =
+    [preferredName || firstName, lastName].filter(Boolean).join(' ') ||
+    [firstName, lastName].filter(Boolean).join(' ') ||
+    `Row ${entry.rowNumber || '?'}`;
+
+  return {
+    rowNumber: Number(entry.rowNumber) || null,
+    displayName,
+    issues,
+    normalized: {
+      firstName: firstName || null,
+      lastName: lastName || null,
+      middleInitials: middleInitials || null,
+      preferredName: preferredName || null,
+      dateOfBirth: dateOfBirth || null,
+      birthGender: birthGender || null,
+      identityGender: identityGender || null,
+      indigenousIdentity: indigenousIdentity || null,
+      sin: sinDigits || null,
+      email: emailNormalized || null,
+      emailNormalized,
+      phonePrimary: phonePrimary || null,
+      phoneAlternate: phoneAlternate || null,
+      addressLine1: addressLine1 || null,
+      city: city || null,
+      province: province || null,
+      postalCode: postalCode || null,
+      mailingAddress: mailingAddress || null,
+      homeCommunity: homeCommunity || null,
+    },
+  };
+}
+
+function buildClientFileImportDuplicateKey(normalized = {}) {
+  if (normalized?.sin && normalized.sin.length === 9) {
+    return normalized?.dateOfBirth
+      ? `sin:${normalized.sin}:${normalized.dateOfBirth}`
+      : `sin:${normalized.sin}`;
+  }
+  if (normalized?.emailNormalized) {
+    return `email:${normalized.emailNormalized}`;
+  }
+  if (normalized?.firstName && normalized?.lastName && normalized?.dateOfBirth) {
+    return `name:${normalized.firstName.toLowerCase()}:${normalized.lastName.toLowerCase()}:${normalized.dateOfBirth}`;
+  }
+  return null;
+}
+
+function annotateDuplicateClientFileImportRows(rows = []) {
+  const groups = new Map();
+  rows.forEach(row => {
+    const key = buildClientFileImportDuplicateKey(row?.normalized || {});
+    if (!key) return;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  });
+
+  groups.forEach(group => {
+    if (!Array.isArray(group) || group.length < 2) return;
+    group.forEach(row => {
+      row.issues.push({
+        level: 'error',
+        code: 'duplicate_rows_in_file',
+        message: 'This row appears more than once in the uploaded file.',
+      });
+    });
+  });
+}
+
+function getPrimaryClientFileImportMatchSource(sources = []) {
+  if (!Array.isArray(sources) || !sources.length) return null;
+  return [...sources].sort((left, right) => {
+    const leftIndex = CLIENT_FILE_IMPORT_MATCH_SOURCE_ORDER.indexOf(left);
+    const rightIndex = CLIENT_FILE_IMPORT_MATCH_SOURCE_ORDER.indexOf(right);
+    return (leftIndex < 0 ? 999 : leftIndex) - (rightIndex < 0 ? 999 : rightIndex);
+  })[0] || null;
+}
+
+async function findClientFileImportClientCandidates(connection, normalized = {}) {
+  const candidates = new Map();
+  const addCandidate = (clientId, source) => {
+    const numericClientId = Number(clientId);
+    if (!Number.isInteger(numericClientId) || numericClientId <= 0 || !source) return;
+    if (!candidates.has(numericClientId)) {
+      candidates.set(numericClientId, { clientId: numericClientId, sources: [] });
+    }
+    const entry = candidates.get(numericClientId);
+    if (!entry.sources.includes(source)) {
+      entry.sources.push(source);
+    }
+  };
+
+  if (normalized.sin && normalized.sin.length === 9) {
+    const params = [normalized.sin];
+    let sql = `
+      SELECT id
+        FROM client
+       WHERE JSON_UNQUOTE(JSON_EXTRACT(address_json, '$.sin')) = ?
+    `;
+    if (normalized.dateOfBirth) {
+      sql += ' AND dob = ?';
+      params.push(normalized.dateOfBirth);
+    }
+    sql += ' LIMIT 5';
+    const [rows] = await connection.query(sql, params);
+    rows.forEach(row => addCandidate(row.id, 'sin'));
+
+    if (candidates.size === 0) {
+      const sinCandidateExpr = `COALESCE(
+        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.sin')), ''),
+        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.applicationPersonal.sin')), ''),
+        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.applicationAnswers."social-insurance-number"')), ''),
+        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.applicationAnswers.social_insurance_number')), ''),
+        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.applicationAnswers.sin')), ''),
+        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."social-insurance-number"')), ''),
+        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."social_insurance_number"')), ''),
+        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."socialInsuranceNumber"')), ''),
+        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."sin-number"')), ''),
+        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."sin_number"')), '')
+      )`;
+      const sinDigitsExpr = `REPLACE(REPLACE(REPLACE(${sinCandidateExpr}, ' ', ''), '-', ''), '.', '')`;
+      const paramsFallback = [normalized.sin];
+      let sqlFallback = `
+        SELECT c.client_id
+          FROM iset_case c
+          LEFT JOIN iset_application a ON a.id = c.application_id
+          LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+          JOIN client cl ON cl.id = c.client_id
+         WHERE c.client_id IS NOT NULL
+           AND ${sinDigitsExpr} = ?
+      `;
+      if (normalized.dateOfBirth) {
+        sqlFallback += ' AND cl.dob = ?';
+        paramsFallback.push(normalized.dateOfBirth);
+      }
+      sqlFallback += ' ORDER BY c.updated_at DESC, c.id DESC LIMIT 5';
+      const [fallbackRows] = await connection.query(sqlFallback, paramsFallback);
+      fallbackRows.forEach(row => addCandidate(row.client_id, 'sin_case_or_submission'));
+    }
+  }
+
+  if (normalized.emailNormalized) {
+    const [emailRows] = await connection.query(
+      `SELECT id
+         FROM client
+        WHERE JSON_UNQUOTE(JSON_EXTRACT(address_json, '$.contact.emailNormalized')) = ?
+        LIMIT 5`,
+      [normalized.emailNormalized]
+    );
+    emailRows.forEach(row => addCandidate(row.id, 'email'));
+  }
+
+  if (normalized.firstName && normalized.lastName) {
+    if (normalized.dateOfBirth) {
+      const [nameDobRows] = await connection.query(
+        `SELECT id
+           FROM client
+          WHERE LOWER(first_name) = ?
+            AND LOWER(last_name) = ?
+            AND dob = ?
+          LIMIT 5`,
+        [
+          normalized.firstName.toLowerCase(),
+          normalized.lastName.toLowerCase(),
+          normalized.dateOfBirth,
+        ]
+      );
+      nameDobRows.forEach(row => addCandidate(row.id, 'name_dob'));
+    } else {
+      const [nameOnlyRows] = await connection.query(
+        `SELECT id
+           FROM client
+          WHERE LOWER(first_name) = ?
+            AND LOWER(last_name) = ?
+            AND dob IS NULL
+          LIMIT 5`,
+        [normalized.firstName.toLowerCase(), normalized.lastName.toLowerCase()]
+      );
+      nameOnlyRows.forEach(row => addCandidate(row.id, 'name_only'));
+    }
+  }
+
+  return Array.from(candidates.values()).sort((left, right) => {
+    const leftRank = CLIENT_FILE_IMPORT_MATCH_SOURCE_ORDER.indexOf(getPrimaryClientFileImportMatchSource(left.sources));
+    const rightRank = CLIENT_FILE_IMPORT_MATCH_SOURCE_ORDER.indexOf(getPrimaryClientFileImportMatchSource(right.sources));
+    return (leftRank < 0 ? 999 : leftRank) - (rightRank < 0 ? 999 : rightRank);
+  });
+}
+
+async function loadClientFileImportCaseRows(connection, clientId) {
+  const [rows] = await connection.query(
+    `SELECT id, case_number, status, application_id, updated_at
+       FROM iset_case
+      WHERE client_id = ?
+      ORDER BY updated_at DESC, id DESC`,
+    [clientId]
+  );
+  return Array.isArray(rows) ? rows : [];
+}
+
+function summarizeClientFileImportMatch(clientRow, candidate, caseRows) {
+  const primarySource = getPrimaryClientFileImportMatchSource(candidate?.sources || []);
+  const preferredCase = Array.isArray(caseRows) && caseRows.length === 1 ? caseRows[0] : (caseRows[0] || null);
+  return {
+    id: clientRow?.id ? Number(clientRow.id) : null,
+    firstName: clientRow?.first_name || null,
+    lastName: clientRow?.last_name || null,
+    dateOfBirth: toDateOnlyString(clientRow?.dob) || null,
+    matchSources: candidate?.sources || [],
+    matchSource: primarySource,
+    existingCaseCount: Array.isArray(caseRows) ? caseRows.length : 0,
+    existingCaseId: preferredCase?.id ? Number(preferredCase.id) : null,
+    existingCaseNumber: preferredCase?.case_number || null,
+    existingCaseStatus: preferredCase?.status || null,
+  };
+}
+
+async function classifyClientFileImportRow(connection, row) {
+  const issues = Array.isArray(row?.issues) ? [...row.issues] : [];
+  const hasBlockingError = issues.some(issue => issue?.level === 'error');
+  if (hasBlockingError) {
+    return {
+      rowNumber: row.rowNumber,
+      displayName: row.displayName,
+      action: 'manual_review',
+      ready: false,
+      issues,
+      normalized: row.normalized,
+      matchedClient: null,
+    };
+  }
+
+  const candidates = await findClientFileImportClientCandidates(connection, row.normalized || {});
+  const uniqueClientIds = Array.from(new Set(candidates.map(candidate => Number(candidate.clientId)).filter(Number.isFinite)));
+
+  if (uniqueClientIds.length > 1) {
+    issues.push({
+      level: 'error',
+      code: 'conflicting_client_matches',
+      message: 'This row matched more than one existing client and requires review.',
+    });
+    return {
+      rowNumber: row.rowNumber,
+      displayName: row.displayName,
+      action: 'manual_review',
+      ready: false,
+      issues,
+      normalized: row.normalized,
+      matchedClient: {
+        id: null,
+        matchSources: candidates.map(candidate => candidate.sources).flat(),
+        matchSource: null,
+        existingCaseCount: 0,
+        existingCaseId: null,
+        existingCaseNumber: null,
+        existingCaseStatus: null,
+      },
+    };
+  }
+
+  if (uniqueClientIds.length === 0) {
+    return {
+      rowNumber: row.rowNumber,
+      displayName: row.displayName,
+      action: 'create_client_and_case',
+      ready: true,
+      issues,
+      normalized: row.normalized,
+      matchedClient: null,
+    };
+  }
+
+  const matchedClientId = uniqueClientIds[0];
+  const candidate = candidates.find(entry => Number(entry.clientId) === matchedClientId) || null;
+  const [[clientRow]] = await connection.query(
+    'SELECT id, first_name, last_name, dob, gender, aboriginal_group, initials, address_json FROM client WHERE id = ? LIMIT 1',
+    [matchedClientId]
+  );
+  const caseRows = await loadClientFileImportCaseRows(connection, matchedClientId);
+
+  let action = 'create_case_for_existing_client';
+  if (caseRows.length === 1) {
+    action = 'update_existing_case';
+  } else if (caseRows.length > 1) {
+    action = 'manual_review';
+    issues.push({
+      level: 'error',
+      code: 'multiple_existing_cases',
+      message: 'This client already has multiple cases. Review the match before importing.',
+    });
+  }
+
+  return {
+    rowNumber: row.rowNumber,
+    displayName: row.displayName,
+    action,
+    ready: !issues.some(issue => issue?.level === 'error'),
+    issues,
+    normalized: row.normalized,
+    matchedClient: summarizeClientFileImportMatch(clientRow, candidate, caseRows),
+  };
+}
+
+async function prepareClientFileImportPlan(connection, rows = []) {
+  const normalizedRows = (Array.isArray(rows) ? rows : []).map(entry => normalizeClientFileImportRecord(entry));
+  annotateDuplicateClientFileImportRows(normalizedRows);
+
+  const classifiedRows = [];
+  for (const row of normalizedRows) {
+    classifiedRows.push(await classifyClientFileImportRow(connection, row));
+  }
+
+  const summary = {
+    totalRows: classifiedRows.length,
+    readyRows: classifiedRows.filter(row => row.ready).length,
+    blockedRows: classifiedRows.filter(row => !row.ready).length,
+    warningRows: classifiedRows.filter(row => row.issues.some(issue => issue?.level === 'warning')).length,
+    createClientAndCaseCount: classifiedRows.filter(row => row.action === 'create_client_and_case').length,
+    createCaseForExistingClientCount: classifiedRows.filter(row => row.action === 'create_case_for_existing_client').length,
+    updateExistingCaseCount: classifiedRows.filter(row => row.action === 'update_existing_case').length,
+    matchedClientCount: classifiedRows.filter(row => row.matchedClient?.id).length,
+  };
+
+  return {
+    rows: classifiedRows,
+    summary,
+    canCommit: summary.totalRows > 0 && summary.blockedRows === 0,
+  };
+}
+
+function buildClientFileImportClientAddressPatch(normalized = {}, importMeta = {}) {
+  return pruneNullish({
+    source: 'client_file_import',
+    importedAt: importMeta.importedAt || new Date().toISOString(),
+    importFileName: importMeta.fileName || null,
+    importWorksheetName: importMeta.worksheetName || null,
+    importRowNumber: Number.isFinite(Number(importMeta.rowNumber)) ? Number(importMeta.rowNumber) : null,
+    preferredName: normalized.preferredName || null,
+    address: pruneNullish({
+      line1: normalized.addressLine1 || null,
+      city: normalized.city || null,
+      province: normalized.province || null,
+      postalCode: normalized.postalCode || null,
+    }) || null,
+    mailingAddress: pruneNullish({
+      line1: normalized.mailingAddress || null,
+    }) || null,
+    contact: pruneNullish({
+      email: normalized.email || null,
+      emailNormalized: normalized.emailNormalized || null,
+      phone: normalized.phonePrimary || null,
+      alternatePhone: normalized.phoneAlternate || null,
+      mailingAddress: normalized.mailingAddress || null,
+      homeCommunity: normalized.homeCommunity || null,
+    }) || null,
+    sin: normalized.sin || null,
+  }) || {};
+}
+
+function buildClientFileImportCaseContextPatch(normalized = {}, importMeta = {}) {
+  return pruneNullish({
+    firstName: normalized.firstName || null,
+    lastName: normalized.lastName || null,
+    preferredName: normalized.preferredName || null,
+    middleNames: normalized.middleInitials || null,
+    gender: normalized.birthGender || null,
+    genderIdentity: normalized.identityGender || null,
+    indigenousIdentity: normalized.indigenousIdentity || null,
+    dateOfBirth: normalized.dateOfBirth || null,
+    sin: normalized.sin || null,
+    emailPrimary: normalized.email || null,
+    phonePrimary: normalized.phonePrimary || null,
+    phoneAlt: normalized.phoneAlternate || null,
+    addressLine1: normalized.addressLine1 || null,
+    addressCity: normalized.city || null,
+    addressProvince: normalized.province || null,
+    postalCode: normalized.postalCode || null,
+    mailingLine1: normalized.mailingAddress || null,
+    homeCommunity: normalized.homeCommunity || null,
+    clientFileImport: pruneNullish({
+      importedAt: importMeta.importedAt || new Date().toISOString(),
+      fileName: importMeta.fileName || null,
+      worksheetName: importMeta.worksheetName || null,
+      rowNumber: Number.isFinite(Number(importMeta.rowNumber)) ? Number(importMeta.rowNumber) : null,
+      importedBy: importMeta.actorName || null,
+      mode: importMeta.action || null,
+    }) || null,
+    applicationPersonal: pruneNullish({
+      first_name: normalized.firstName || null,
+      last_name: normalized.lastName || null,
+      preferred_name: normalized.preferredName || null,
+      middle_names: normalized.middleInitials || null,
+      gender: normalized.birthGender || null,
+      gender_identity: normalized.identityGender || null,
+      sin: normalized.sin || null,
+      date_of_birth: normalized.dateOfBirth || null,
+      email: normalized.email || null,
+      phone: normalized.phonePrimary || null,
+      phone_alt: normalized.phoneAlternate || null,
+      home_community: normalized.homeCommunity || null,
+      address: pruneNullish({
+        line1: normalized.addressLine1 || null,
+        city: normalized.city || null,
+        province: normalized.province || null,
+        postalCode: normalized.postalCode || null,
+      }) || null,
+      mailing_address: pruneNullish({
+        line1: normalized.mailingAddress || null,
+      }) || null,
+    }) || null,
+    applicationAnswers: pruneNullish({
+      'first-name': normalized.firstName || null,
+      'last-name': normalized.lastName || null,
+      'preferred-name': normalized.preferredName || null,
+      'middle-names': normalized.middleInitials || null,
+      gender: normalized.birthGender || null,
+      gender_identity: normalized.identityGender || null,
+      dob: normalized.dateOfBirth || null,
+      'social-insurance-number': normalized.sin || null,
+      'address-street-address': normalized.addressLine1 || null,
+      'address-city': normalized.city || null,
+      'address-province': normalized.province || null,
+      'address-postcode': normalized.postalCode || null,
+      'mailing-address-street': normalized.mailingAddress || null,
+      'contact-email-address': normalized.email || null,
+      'telephone-day': normalized.phonePrimary || null,
+      'telephone-alt': normalized.phoneAlternate || null,
+      'legal-indigenous-identity': normalized.indigenousIdentity || null,
+      'home-community': normalized.homeCommunity || null,
+      'home-comminuty': normalized.homeCommunity || null,
+    }) || null,
+  }) || {};
+}
+
+async function upsertClientForImport(connection, normalized = {}, importMeta = {}, existingClientId = null) {
+  const clientAddressPatch = buildClientFileImportClientAddressPatch(normalized, importMeta);
+  if (existingClientId) {
+    const [[existingClient]] = await connection.query(
+      'SELECT id, dob, gender, aboriginal_group, last_name, first_name, initials, address_json FROM client WHERE id = ? LIMIT 1 FOR UPDATE',
+      [existingClientId]
+    );
+    if (!existingClient) {
+      const err = new Error('matched_client_not_found');
+      err.code = 'matched_client_not_found';
+      throw err;
+    }
+    const mergedAddressJson = mergeCaseContext(
+      safeJsonParse(existingClient.address_json, {}) || {},
+      clientAddressPatch
+    );
+    await connection.query(
+      `UPDATE client
+          SET dob = ?,
+              gender = ?,
+              aboriginal_group = ?,
+              last_name = ?,
+              first_name = ?,
+              initials = ?,
+              address_json = ?,
+              updated_at = NOW()
+        WHERE id = ?`,
+      [
+        normalized.dateOfBirth || toDateOnlyString(existingClient.dob) || null,
+        normalized.birthGender || existingClient.gender || null,
+        normalized.indigenousIdentity || existingClient.aboriginal_group || null,
+        normalized.lastName || existingClient.last_name,
+        normalized.firstName || existingClient.first_name,
+        normalized.middleInitials || existingClient.initials || null,
+        JSON.stringify(mergedAddressJson || {}),
+        existingClientId,
+      ]
+    );
+    return Number(existingClientId);
+  }
+
+  const [result] = await connection.query(
+    `INSERT INTO client
+      (dob, gender, aboriginal_group, last_name, first_name, initials, address_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+    [
+      normalized.dateOfBirth || null,
+      normalized.birthGender || null,
+      normalized.indigenousIdentity || null,
+      normalized.lastName || 'Client',
+      normalized.firstName || 'Unknown',
+      normalized.middleInitials || null,
+      JSON.stringify(clientAddressPatch || {}),
+    ]
+  );
+  return Number(result.insertId);
+}
+
+async function createCaseForImportedClient(connection, clientId, normalized = {}, importMeta = {}) {
+  const portfolioRegionId = await resolveRegionIdFromProvinceValue(normalized.province || null, connection);
+  const caseContextJson = buildClientFileImportCaseContextPatch(normalized, importMeta);
+  const actorStaffProfileId = Number.isFinite(Number(importMeta.actorStaffProfileId))
+    ? Number(importMeta.actorStaffProfileId)
+    : null;
+
+  const [insertCase] = await connection.query(
+    `INSERT INTO iset_case
+      (application_id, client_id, assigned_to_user_id, status, portfolio_region_id, opened_at, case_context_json, created_by_staff_profile_id, updated_by_staff_profile_id, created_at, updated_at)
+     VALUES (NULL, ?, NULL, ?, ?, NOW(), ?, ?, ?, NOW(), NOW())`,
+    [
+      clientId,
+      CASE_STATUS_DERIVED_VALUES.initiated,
+      portfolioRegionId,
+      JSON.stringify(caseContextJson || {}),
+      actorStaffProfileId,
+      actorStaffProfileId,
+    ]
+  );
+
+  const caseId = Number(insertCase.insertId);
+  const caseNumber = buildGeneratedCaseNumber(caseId);
+  if (caseNumber) {
+    await connection.query('UPDATE iset_case SET case_number = ? WHERE id = ?', [caseNumber, caseId]);
+  }
+
+  return { caseId, caseNumber };
+}
+
+async function updateExistingImportedCase(connection, caseId, normalized = {}, importMeta = {}) {
+  const [[existingCase]] = await connection.query(
+    'SELECT id, case_number, case_context_json FROM iset_case WHERE id = ? LIMIT 1 FOR UPDATE',
+    [caseId]
+  );
+  if (!existingCase) {
+    const err = new Error('matched_case_not_found');
+    err.code = 'matched_case_not_found';
+    throw err;
+  }
+
+  const nextContext = mergeCaseContext(
+    safeJsonParse(existingCase.case_context_json, {}) || {},
+    buildClientFileImportCaseContextPatch(normalized, importMeta)
+  );
+  const actorStaffProfileId = Number.isFinite(Number(importMeta.actorStaffProfileId))
+    ? Number(importMeta.actorStaffProfileId)
+    : null;
+
+  await connection.query(
+    'UPDATE iset_case SET case_context_json = ?, updated_by_staff_profile_id = ?, updated_at = NOW() WHERE id = ?',
+    [JSON.stringify(nextContext || {}), actorStaffProfileId, caseId]
+  );
+
+  return {
+    caseId: Number(caseId),
+    caseNumber: existingCase.case_number || null,
+  };
+}
+
+async function applyClientFileImportPlan(connection, planRows = [], importMeta = {}) {
+  const results = [];
+  let createdClients = 0;
+  let createdCases = 0;
+  let updatedCases = 0;
+
+  for (const row of planRows) {
+    const normalized = row.normalized || {};
+    const meta = {
+      ...importMeta,
+      rowNumber: row.rowNumber,
+      action: row.action,
+    };
+
+    if (row.action === 'manual_review' || !row.ready) {
+      const err = new Error('import_row_not_ready');
+      err.code = 'import_row_not_ready';
+      err.details = { rowNumber: row.rowNumber, displayName: row.displayName };
+      throw err;
+    }
+
+    let clientId = row.matchedClient?.id ? Number(row.matchedClient.id) : null;
+    if (row.action === 'create_client_and_case') {
+      clientId = await upsertClientForImport(connection, normalized, meta, null);
+      createdClients += 1;
+      const { caseId, caseNumber } = await createCaseForImportedClient(connection, clientId, normalized, meta);
+      createdCases += 1;
+      results.push({
+        rowNumber: row.rowNumber,
+        displayName: row.displayName,
+        action: row.action,
+        clientId,
+        caseId,
+        caseNumber,
+      });
+      continue;
+    }
+
+    clientId = await upsertClientForImport(connection, normalized, meta, clientId);
+    if (row.action === 'create_case_for_existing_client') {
+      const { caseId, caseNumber } = await createCaseForImportedClient(connection, clientId, normalized, meta);
+      createdCases += 1;
+      results.push({
+        rowNumber: row.rowNumber,
+        displayName: row.displayName,
+        action: row.action,
+        clientId,
+        caseId,
+        caseNumber,
+      });
+      continue;
+    }
+
+    if (row.action === 'update_existing_case') {
+      const targetCaseId = row.matchedClient?.existingCaseId ? Number(row.matchedClient.existingCaseId) : null;
+      const { caseId, caseNumber } = await updateExistingImportedCase(connection, targetCaseId, normalized, meta);
+      updatedCases += 1;
+      results.push({
+        rowNumber: row.rowNumber,
+        displayName: row.displayName,
+        action: row.action,
+        clientId,
+        caseId,
+        caseNumber,
+      });
+      continue;
+    }
+
+    const err = new Error('unsupported_import_action');
+    err.code = 'unsupported_import_action';
+    err.details = { rowNumber: row.rowNumber, action: row.action };
+    throw err;
+  }
+
+  return {
+    results,
+    summary: {
+      processedRows: results.length,
+      createdClients,
+      createdCases,
+      updatedCases,
+    },
+  };
 }
 
 async function readFinanceEmailRouting(connection = null) {
@@ -61210,6 +63082,199 @@ app.post('/api/applications/manual-intake', async (req, res) => {
   }
 });
 
+app.post('/api/imports/client-files/dry-run', async (req, res) => {
+  clientFileImportUpload.single('file')(req, res, async err => {
+    if (err) {
+      const isMulterError = err instanceof multer.MulterError;
+      if (isMulterError && err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({
+          error: 'import_file_too_large',
+          message: `Import files are limited to ${Math.round(CLIENT_FILE_IMPORT_MAX_BYTES / (1024 * 1024))} MB.`,
+        });
+      }
+      return res.status(400).json({
+        error: 'import_upload_failed',
+        message: err?.message || 'The import file could not be uploaded.',
+      });
+    }
+
+    try {
+      if (!req.file) {
+        return res.status(422).json({
+          error: 'import_file_required',
+          message: 'Upload one .xlsx, .xlsm, or .csv file to preview the import.',
+        });
+      }
+
+      const firstDataRowNumber = normalizeClientFileImportRequestedRowNumber(req.body?.firstDataRowNumber);
+      const parsedFile = await readClientFileImportFile(req.file);
+      const extracted = extractClientFileImportRows(parsedFile.rowEntries, { firstDataRowNumber });
+      const plan = await prepareClientFileImportPlan(pool, extracted.rows);
+
+      return res.status(200).json({
+        fileName: parsedFile.fileName,
+        worksheetName: parsedFile.worksheetName,
+        headerRowNumber: extracted.headerRowNumber,
+        firstDataRowNumber: extracted.firstDataRowNumber,
+        firstDataRowMode: extracted.firstDataRowMode,
+        skippedLeadingRowCount: extracted.skippedLeadingRowCount,
+        unknownHeaders: extracted.unknownHeaders,
+        summary: plan.summary,
+        canCommit: plan.canCommit,
+        rows: plan.rows,
+      });
+    } catch (error) {
+      if (error?.code === 'unsupported_import_file_type') {
+        return res.status(422).json({
+          error: error.code,
+          message: 'Supported import files are .xlsx, .xlsm, and .csv.',
+        });
+      }
+      if (error?.code === 'import_file_empty' || error?.code === 'header_row_not_found' || error?.code === 'no_import_rows') {
+        return res.status(422).json({
+          error: error.code,
+          message: 'The uploaded file did not contain a usable header row and at least one data row.',
+        });
+      }
+      if (error?.code === 'invalid_first_data_row_number') {
+        return res.status(422).json({
+          error: error.code,
+          message: 'First data row must be a whole number greater than 0.',
+        });
+      }
+      if (error?.code === 'first_data_row_not_after_header') {
+        return res.status(422).json({
+          error: error.code,
+          message: `First data row must be below the detected header row (${error?.details?.headerRowNumber || '?'}).`,
+        });
+      }
+      if (error?.code === 'missing_required_headers') {
+        return res.status(422).json({
+          error: error.code,
+          message: 'The import file is missing one or more required headers.',
+          missingHeaders: error.details,
+        });
+      }
+      if (error?.code === 'duplicate_headers') {
+        return res.status(422).json({
+          error: error.code,
+          message: 'The import file maps more than one column to the same field.',
+          duplicateHeaders: error.details,
+        });
+      }
+      if (error?.code === 'import_row_limit_exceeded') {
+        return res.status(422).json({
+          error: error.code,
+          message: `Import files are limited to ${CLIENT_FILE_IMPORT_MAX_ROWS} data rows per run.`,
+          details: error.details || null,
+        });
+      }
+      console.error('[client-file-import] dry-run failed', error);
+      return res.status(500).json({
+        error: 'client_file_import_dry_run_failed',
+        message: error?.message || 'Failed to preview the client batch import.',
+      });
+    }
+  });
+});
+
+app.post('/api/imports/client-files/commit', async (req, res) => {
+  const body = req.body || {};
+  const rows = Array.isArray(body.rows) ? body.rows : [];
+  const fileName = normaliseString(body.fileName) || null;
+  const worksheetName = normaliseString(body.worksheetName) || null;
+  const actor = resolveRequestActor(req);
+  const actorStaffProfileId = Number.parseInt(req?.staffProfile?.id, 10);
+  const importedAt = new Date().toISOString();
+
+  if (!rows.length) {
+    return res.status(422).json({
+      error: 'import_rows_required',
+      message: 'Run a dry run first, then commit the validated rows.',
+    });
+  }
+  if (rows.length > CLIENT_FILE_IMPORT_MAX_ROWS) {
+    return res.status(422).json({
+      error: 'import_row_limit_exceeded',
+      message: `Import files are limited to ${CLIENT_FILE_IMPORT_MAX_ROWS} data rows per run.`,
+    });
+  }
+
+  const planInput = rows.map((row, index) => ({
+    rowNumber: Number(row?.rowNumber) || index + 1,
+    raw: {
+      firstName: row?.firstName,
+      lastName: row?.lastName,
+      middleInitials: row?.middleInitials,
+      preferredName: row?.preferredName,
+      dateOfBirth: row?.dateOfBirth,
+      birthGender: row?.birthGender,
+      identityGender: row?.identityGender,
+      indigenousIdentity: row?.indigenousIdentity,
+      sin: row?.sin,
+      email: row?.email,
+      phonePrimary: row?.phonePrimary,
+      phoneAlternate: row?.phoneAlternate,
+      addressLine1: row?.addressLine1,
+      city: row?.city,
+      province: row?.province,
+      postalCode: row?.postalCode,
+      mailingAddress: row?.mailingAddress,
+      homeCommunity: row?.homeCommunity,
+    },
+  }));
+
+  const connection = await pool.getConnection();
+  try {
+    const plan = await prepareClientFileImportPlan(connection, planInput);
+    if (!plan.canCommit) {
+      return res.status(422).json({
+        error: 'import_plan_blocked',
+        message: 'One or more rows still require review before commit.',
+        summary: plan.summary,
+        rows: plan.rows,
+      });
+    }
+
+    await connection.beginTransaction();
+    const result = await applyClientFileImportPlan(connection, plan.rows, {
+      fileName,
+      worksheetName,
+      actorName: actor.actorName || null,
+      actorStaffProfileId: Number.isFinite(actorStaffProfileId) ? actorStaffProfileId : null,
+      importedAt,
+    });
+    await connection.commit();
+
+    return res.status(200).json({
+      message: 'client_file_import_committed',
+      summary: result.summary,
+      results: result.results,
+    });
+  } catch (error) {
+    try {
+      await connection.rollback();
+    } catch (_) {
+      // ignore rollback failure
+    }
+    if (error?.code === 'import_row_not_ready') {
+      return res.status(422).json({
+        error: error.code,
+        message: 'One or more rows were no longer ready to import.',
+        details: error.details || null,
+      });
+    }
+    console.error('[client-file-import] commit failed', error);
+    return res.status(500).json({
+      error: 'client_file_import_commit_failed',
+      message: error?.message || 'Failed to commit the client batch import.',
+      details: error?.details || null,
+    });
+  } finally {
+    connection.release();
+  }
+});
+
 // Get full iset_application by application_id
 app.get('/api/applications/:id', async (req, res) => {
   const applicationId = req.params.id;
@@ -63573,7 +65638,7 @@ app.put('/api/cases/:id', async (req, res) => {
               al.owner_email AS lock_owner_email,
               al.expires_at AS lock_expires_at
          FROM iset_case c
-         JOIN iset_application a ON a.id = c.application_id
+         LEFT JOIN iset_application a ON a.id = c.application_id
          LEFT JOIN application_lock al ON al.application_id = c.application_id AND al.expires_at > NOW()
         WHERE c.id = ?
         LIMIT 1 FOR UPDATE`,
@@ -63601,29 +65666,63 @@ app.put('/api/cases/:id', async (req, res) => {
     if (!Number.isInteger(applicationId) || applicationId <= 0) {
       applicationId = null;
     }
-    const currentApplicationRowVersion = Number(existingCase.row_version || 1);
+    const currentApplicationRowVersion = applicationId ? Number(existingCase.row_version || 1) : null;
     newRowVersion = currentApplicationRowVersion;
 
-    lockCheck = await enforceApplicationLock(conn, applicationId, req, lockConfig);
-    if (!lockCheck.ok) {
-      await conn.rollback();
-      return res.status(423).json({
-        success: false,
-        error: lockCheck.reason === 'missing' || lockCheck.reason === 'expired'
-          ? 'lock_required'
-          : (lockCheck.reason === 'identity_missing' ? 'lock_identity_missing' : 'locked'),
-        reason: lockCheck.reason,
-        lock: lockCheck.lock || null
-      });
-    }
-    if (expectedRowVersionNumber !== null && expectedRowVersionNumber !== currentApplicationRowVersion) {
-      await conn.rollback();
-      return res.status(409).json({
-        success: false,
-        error: 'row_version_conflict',
-        currentRowVersion: currentApplicationRowVersion,
-        lock: lockCheck.lock || null
-      });
+    if (applicationId) {
+      lockCheck = await enforceApplicationLock(conn, applicationId, req, lockConfig);
+      if (!lockCheck.ok) {
+        await conn.rollback();
+        return res.status(423).json({
+          success: false,
+          error: lockCheck.reason === 'missing' || lockCheck.reason === 'expired'
+            ? 'lock_required'
+            : (lockCheck.reason === 'identity_missing' ? 'lock_identity_missing' : 'locked'),
+          reason: lockCheck.reason,
+          lock: lockCheck.lock || null
+        });
+      }
+      if (expectedRowVersionNumber !== null && expectedRowVersionNumber !== currentApplicationRowVersion) {
+        await conn.rollback();
+        return res.status(409).json({
+          success: false,
+          error: 'row_version_conflict',
+          currentRowVersion: currentApplicationRowVersion,
+          lock: lockCheck.lock || null
+        });
+      }
+    } else {
+      lockCheck = { ok: true, reason: 'no_application', lock: null };
+      if (expectedRowVersionNumber !== null) {
+        await conn.rollback();
+        return res.status(422).json({
+          success: false,
+          error: 'expected_row_version_requires_application',
+          message: 'Row-version concurrency control is only available for application-backed cases.',
+          lock: null
+        });
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'applicationStatus')) {
+        await conn.rollback();
+        return res.status(422).json({
+          success: false,
+          error: 'application_status_requires_application',
+          message: 'Application status cannot be updated on a client-file case with no linked application.',
+          lock: null
+        });
+      }
+      if (
+        Object.prototype.hasOwnProperty.call(body, 'docsRequested') ||
+        Object.prototype.hasOwnProperty.call(body, 'docsRequestedSource')
+      ) {
+        await conn.rollback();
+        return res.status(422).json({
+          success: false,
+          error: 'docs_requested_requires_application',
+          message: 'Document-request state is only available for application-backed cases.',
+          lock: null
+        });
+      }
     }
 
     if (eligibilityUpdateRequested) {
@@ -63710,7 +65809,9 @@ app.put('/api/cases/:id', async (req, res) => {
       if (statusToPersist && statusToPersist !== beforeStatusNormalised) {
         await conn.query('UPDATE iset_case SET status = ? WHERE id = ?', [statusToPersist, caseId]);
         statusChanged = true;
-        bumpApplicationRowVersion = true;
+        if (applicationId) {
+          bumpApplicationRowVersion = true;
+        }
         shouldRecomputeCaseStatus = true;
         if (derivedCaseStatus === CASE_STATUS_DERIVED_VALUES.initiated) {
           shouldEnsureClientLink = true;
@@ -64017,7 +66118,9 @@ app.put('/api/cases/:id', async (req, res) => {
          ON DUPLICATE KEY UPDATE ${updateClause}`,
         insertValues
       );
-      bumpApplicationRowVersion = true;
+      if (applicationId) {
+        bumpApplicationRowVersion = true;
+      }
     }
   }
 
@@ -64394,7 +66497,7 @@ app.put('/api/cases/:id', async (req, res) => {
               cd2.declaration_choice AS assessment_conflict_declaration_choice,
               cd2.conflict_details AS assessment_conflict_declaration_details
          FROM iset_case c
-         JOIN iset_application a ON c.application_id = a.id
+         LEFT JOIN iset_application a ON c.application_id = a.id
          LEFT JOIN iset_application_submission s ON s.id = a.submission_id
          LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
          LEFT JOIN esdc_intervention_code ic ON ic.code = ca.intervention_code

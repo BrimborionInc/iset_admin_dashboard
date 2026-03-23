@@ -2,6 +2,25 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-03-23
+- UX/API/Casework: `Add existing action plan` now mirrors standard action-plan closeout requirements for closed plans, including result education, future education for `Returned to school`, and NOC version/code for `Employed`, and persists those values into the real action-plan closeout payload.
+- UX/API/Casework: Imported/application-less client files now have explicit Case Workspace backload actions for `Add existing action plan`, `Add existing intervention`, and `Upload existing documents`; the new action-plan/intervention backload paths create real records silently without approval routing, checklist progression, or applicant notifications.
+- UX/API/Casework: Supporting Documents now has a case-based mode for imported/application-less client files, using `GET/POST /api/cases/:id/documents*` so staff can upload case documents without an applicant account, including application-type documents that fall back to action-plan or case storage when no real application exists; the checklist tab is intentionally hidden in that mode.
+- UX/Casework: Supporting Documents in Case Workspace now uses clearer relevance-filter language (`Show documents relevant to`) and a dismissible case-mode notice so the widget no longer implies that intervention is the primary attachment scope for every document.
+- UX/Casework: Supporting Documents now places the application/intervention relevance filter below the tabbed document area instead of above it, reducing top-of-widget clutter in Case Workspace.
+- Fix/Casework: Supporting Documents case-based uploads now preserve client resolution for client-scoped documents instead of dropping the case context before `client_id` is derived, and the widget now surfaces `client_id_required` as a specific upload error.
+- Fix/Casework: The `ISET Clients` widget now paginates grouped client rows correctly by grouping the full filtered case list first and then paging the grouped client result, so the Cloudscape page control can move beyond page 1.
+- UX/Auth: Removed the legacy `Developer bypass mode` top-navigation account item when IAM is off; local auth simulation still works through the existing dev IAM toggle without surfacing that early-dev label in the UI.
+- UX/API/Casework: Client Batch Import no longer blocks on malformed or checksum-failing SIN values; dry run now warns, imports the raw digits for later case-management correction, and stores raw SIN values in the imported client/case profile payloads instead of import-side hashing.
+- UX/API/Casework: Client Batch Import dry-run now auto-detects the real header row, skips leading guidance rows before the first participant row, and lets staff override the first data row explicitly for spreadsheets with extended headers or setup rows.
+- UX/Configuration: Moved `/iset/imports/client-files` into `Configuration` and renamed the navigation entry to `Client Batch Import`.
+- UX/API/Casework: Added `Client Batch Import` at `/iset/imports/client-files`, with spreadsheet dry-run preview, duplicate/client matching, and transactional commit into real `client` + application-less `iset_case` records.
+- Docs/Casework: Added a live Client Batch Import dashboard reference and updated the client-file import guide/gateway docs to reflect the implemented import workflow and its non-goals.
+- UX/Configuration: Query Editor now supports loading a single `.sql` or `.txt` file into the SQL editor before running it through the existing multi-statement query execution flow, with a 900 KB client-side upload limit to stay within the server's 1 MB JSON body limit.
+- Docs/Operations: Added a live Query Editor dashboard reference doc and corrected the gateway docs to reflect current behavior, including SQL file upload support and the shared execution path.
+- Docs/Architecture: Added a client-file import guide clarifying that the schema supports application-less cases, documenting the new core case support, and calling out the remaining participant-account-dependent caveats around secure messaging and applicant-scoped documents.
+- API/Casework: `POST /api/cases`, `PUT /api/cases/:id`, and `GET /api/cases` now support true client-file cases with no linked application, and the Case Workspace secure-messaging widget now suppresses message actions when no participant account is linked.
+
 ## 2026-03-22
 - UX/API/Reporting: Wired `Regional Snapshot` coordinator salary values to the new `Budgets and Finance > Salaries` data so monthly, quarterly, and annual snapshots now derive salary from the selected region's annual salary entry instead of storing a separate manual amount.
 - UX/API/Finance: Added `Budgets and Finance > Salaries`, a new standard board-based dashboard for annual salary tracking by province or territory, with a fiscal-year control, explicit budget-pot assignment, annual salary entry, and derived monthly values for review.
