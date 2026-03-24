@@ -71,23 +71,7 @@ const deriveInitialSections = role => DEFAULT_SECTIONS.map(section => ({
 }));
 
 const buildRequestHeaders = role => {
-  const headers = { Accept: 'application/json' };
-  try {
-    if (role && role !== 'Guest') {
-      headers['X-Dev-Role'] = role;
-    }
-    if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('iamBypass') === 'off') {
-      const token = sessionStorage.getItem('devBypassToken') || process.env.REACT_APP_DEV_AUTH_TOKEN || 'local-dev-secret';
-      headers['X-Dev-Bypass'] = token;
-      const simulatedUser = sessionStorage.getItem('devUserId');
-      if (simulatedUser) headers['X-Dev-UserId'] = simulatedUser;
-      const simulatedRegion = sessionStorage.getItem('devRegionId');
-      if (simulatedRegion) headers['X-Dev-RegionId'] = simulatedRegion;
-    }
-  } catch (_) {
-    // fall through with whatever headers we have
-  }
-  return headers;
+  return { Accept: 'application/json' };
 };
 
 const mergeSections = (baseSections, payloadSections) => {

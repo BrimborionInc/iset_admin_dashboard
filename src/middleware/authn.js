@@ -3,7 +3,7 @@ const { createRemoteJWKSet, jwtVerify } = require('jose');
 
 // Env (staff): COGNITO_STAFF_USER_POOL_ID, COGNITO_STAFF_CLIENT_ID
 // Env (applicant): COGNITO_APPLICANT_USER_POOL_ID, COGNITO_APPLICANT_CLIENT_ID
-// Shared: AWS_REGION, AUTH_PROVIDER=cognito
+// Shared: AWS_REGION
 
 const region = process.env.AWS_REGION || process.env.COGNITO_REGION || '';
 function buildIssuer(poolId) {
@@ -104,30 +104,8 @@ function extractAuthFromClaims(claims, poolType) {
 }
 
 function authnMiddleware() {
-  const enabled = String(process.env.AUTH_PROVIDER || 'none').toLowerCase() === 'cognito';
-  if (!enabled) {
-    return (req, _res, next) => { req.auth = null; next(); };
-  }
   return async (req, res, next) => {
     try {
-      const devBypassOn = (process.env.NODE_ENV !== 'production') && (process.env.DEV_AUTH_BYPASS === '1' || process.env.DEV_AUTH_BYPASS === 'true');
-      // Provide sane default for local development to match frontend default token
-      const devBypassKey = process.env.DEV_AUTH_TOKEN || 'local-dev-secret';
-      const hdrBypass = req.get('x-dev-bypass') || req.get('X-Dev-Bypass') || '';
-      if (devBypassOn && devBypassKey && hdrBypass && hdrBypass === devBypassKey) {
-        const role = req.get('x-dev-role') || undefined;
-        req.auth = { sub: 'dev-bypass-user', role: role ? groupRoleMap[role] || role : undefined, regionId: null, userId: null, groups: role ? [role] : [], subjectType: 'staff', claims: { token_use: 'dev-bypass' } };
-        return next();
-      }
-      const relaxedOpen = (process.env.DEV_AUTH_OPEN === '1' || process.env.DEV_AUTH_RELAXED === '1');
-      if (devBypassOn && relaxedOpen) {
-        const host = req.get('host') || '';
-        if (/localhost|127\.0\.0\.1/i.test(host)) {
-          const role = req.get('x-dev-role') || undefined;
-            req.auth = { sub: 'dev-open', role: role ? groupRoleMap[role] || role : undefined, regionId: null, userId: null, groups: role ? [role] : [], subjectType: role ? 'staff' : 'applicant', claims: { token_use: 'dev-open' } };
-          return next();
-        }
-      }
       const hdr = req.get('authorization') || req.get('Authorization');
       if (!hdr || !/^Bearer\s+/.test(hdr)) return res.status(401).json({ error: 'Missing bearer token' });
       const token = hdr.replace(/^Bearer\s+/i, '').trim();

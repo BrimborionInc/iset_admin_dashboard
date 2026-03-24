@@ -1,6 +1,6 @@
 # User Management Overview
 
-_Last updated: 24 September 2025_
+_Last updated: 24 March 2026_
 
 ## High-level flow
 
@@ -30,7 +30,6 @@ _Last updated: 24 September 2025_
 ### UX affordances
 * The table reflects loading/pending states (`pendingRoutes`) while requests are in flight.
 * Flashbar notifications report success/error; an in-memory audit log records recent actions.
-* IAM toggle set to "On" disables the role simulator Select so the dashboard reflects real Cognito roles.
 
 ## Back-end logic (`src/routes/admin/users.js`)
 
@@ -45,7 +44,7 @@ Adjudicator        → cannot create users
 * Guarding is applied consistently to create, disable (when role provided), and role-change endpoints.
 
 ### Endpoints
-* **GET /users** – lists Cognito users, enriched with role, status, MFA flag, last sign-in, region (from `custom:region_id`). Falls back to a mocked list if Cognito isn’t configured.
+* **GET /users** – lists Cognito users, enriched with role, status, MFA flag, last sign-in, region (from `custom:region_id`). If Cognito admin configuration is missing, the endpoint now fails explicitly instead of returning mock users.
 * **POST /users** – uses `AdminCreateUser`, sets `custom:region_id`, and adds the user to the requested admin group. Region is mandatory for regional roles.
 * **PATCH /users/:username/attributes** – updates `custom:region_id` and/or `custom:user_id` via `AdminUpdateUserAttributes`.
 * **PATCH /users/:username/role** – removes the user from the existing admin group and adds them to the target group (normalised keys).
@@ -53,19 +52,13 @@ Adjudicator        → cannot create users
 * **DELETE /users/:username/role** – removes the user from their admin group (no new group added).
 * **PATCH /users/:username/force-reset** – triggers `AdminResetUserPassword`.
 * **POST /users/:username/resend-invite** – placeholder; returns a stub response while a custom email flow is pending.
-* Dev bypass headers short-circuit the Cognito calls (returning mock success) to keep the UX responsive during local development when IAM is off.
-
 ## Relationship to staff_profiles
 * Creating users seeds `staff_profiles` with identity details (`name`, `display_name`) at creation time, keyed by Cognito `sub`.
 * `staffProfileMiddleware` still upserts operational fields on authenticated requests (cognito `sub`, email, role, `region_id`) and does not need to overwrite `name`/`display_name`.
 * `/api/staff/assignable` also ensures staff profiles exist when listing assignable users. Recent fixes ensure we merge into the existing row instead of creating duplicates and prefer the Cognito GUID for `cognito_sub`.
 
-## IAM toggle and dev bypass
-* IAM **On**: the front-end suppresses dev-bypass headers only for sensitive endpoints (`/api/staff/assignable`, `/api/applications`, `/api/cases`) so they always require real Cognito auth. The rest of the dashboard remains accessible for navigation without redirecting to the Hosted UI.
-* IAM **Off**: the UI sends `X-Dev-*` headers; server-side guard code honours them and the placeholders in `staff_profiles` remain available.
-
 ## Testing tips
-1. Ensure new Cognito users sign in once with IAM on (dev bypass off) so `staff_profiles` captures their GUID and region.
+1. Ensure new Cognito users sign in once so `staff_profiles` captures their GUID and region.
 2. Use the browser console to inspect the current auth context:
    ```js
    fetch('/api/auth/me', { credentials: 'include' })
@@ -77,7 +70,7 @@ Adjudicator        → cannot create users
    SELECT id, application_id, assigned_to_user_id FROM iset_case;
    ```
    and compare `assigned_to_user_id` to `staff_profiles.id`.
-4. To reset dev state, delete the placeholder `staff_profiles` rows, set `DEV_AUTH_BYPASS=false`, and have each user sign in again.
+4. If assignments look wrong, verify there are no stale duplicate `staff_profiles` rows keyed by email instead of Cognito `sub`, then have each user sign in again.
 
 ## Open considerations
 * New-user invitations still rely on Cognito’s default email; the resend endpoint returns a placeholder response until SES is wired up.

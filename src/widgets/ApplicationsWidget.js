@@ -667,11 +667,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
     const staffObj = assignableStaff.find(s => String(s.id) === String(chosen));
     const payload = {};
 
-    if (chosen && String(chosen).startsWith('placeholder-')) {
-      payload.placeholder_email = staffObj?.email || 'user@nwac.ca';
-    } else {
-      payload.assignee_id = chosen;
-    }
+    payload.assignee_id = chosen;
 
     const currentApplicationStatus = (assignTargetCase.application_status || assignTargetCase.status || '').toLowerCase();
     const shouldPromoteStatus = false; // do not auto-change status on assignment

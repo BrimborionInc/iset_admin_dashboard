@@ -5,14 +5,31 @@ const { requireRole } = require('../../middleware/authz');
 const { resolveAwsCredentials } = require('../../lib/awsCredentials');
 const { CognitoIdentityProviderClient, ListUsersCommand, ListUsersInGroupCommand, AdminCreateUserCommand, AdminAddUserToGroupCommand, AdminDisableUserCommand, AdminEnableUserCommand, AdminUpdateUserAttributesCommand, AdminGetUserCommand } = require('@aws-sdk/client-cognito-identity-provider');
 
-const POOL_ID = process.env.COGNITO_USER_POOL_ID;
+const POOL_ID = process.env.COGNITO_STAFF_USER_POOL_ID || process.env.COGNITO_USER_POOL_ID;
 const REGION = process.env.AWS_REGION || process.env.COGNITO_REGION;
 
+function buildConfigError() {
+  const error = new Error('Cognito staff user management is not configured');
+  error.statusCode = 503;
+  error.code = 'cognito_not_configured';
+  return error;
+}
+
 function getClient() {
+  if (!POOL_ID || !REGION) {
+    throw buildConfigError();
+  }
   const credentials = resolveAwsCredentials();
   const config = { region: REGION };
   if (credentials) config.credentials = credentials;
   return new CognitoIdentityProviderClient(config);
+}
+
+function sendRouteError(res, err, fallbackError) {
+  if (err?.statusCode) {
+    return res.status(err.statusCode).json({ error: err.code || fallbackError, detail: err.message });
+  }
+  return res.status(500).json({ error: fallbackError, detail: err?.message });
 }
 
 function hasMfaEnabled(user) {
@@ -148,25 +165,11 @@ async function upsertStaffProfile(pool, { cognitoSub, email, name, displayName, 
   );
 }
 
-const AUTH_ENABLED = String(process.env.AUTH_PROVIDER || 'none').toLowerCase() === 'cognito';
-
 // GET /admin/users - list administrative users (Cognito groups)
 // Response: [{ username, email, role, status, regionId, mfa, lastSignIn }]
 router.get('/users', async (req, res) => {
   try {
     const q = (req.query.q || '').toString().toLowerCase();
-    // If no Cognito configured, return a static mock so UI can integrate early
-    if (!POOL_ID || !REGION || process.env.AUTH_PROVIDER !== 'cognito') {
-      let users = [
-        { username: 'alice@example.org', email: 'alice@example.org', role: 'System_Administrator', status: 'CONFIRMED', regionId: null, mfa: true, lastSignIn: '2025-08-20T14:10:00Z', createdAt: '2025-05-01T10:00:00Z' },
-        { username: 'bob@example.org', email: 'bob@example.org', role: 'NWAC_Administrator', status: 'FORCE_CHANGE_PASSWORD', regionId: null, mfa: false, lastSignIn: null, createdAt: '2025-08-15T12:00:00Z' },
-        { username: 'carol.rc.1@example.org', email: 'carol.rc.1@example.org', role: 'Regional_Manager', status: 'CONFIRMED', regionId: 1, mfa: true, lastSignIn: '2025-08-23T09:01:00Z', createdAt: '2025-07-20T09:30:00Z' },
-        { username: 'dave.adj.1@example.org', email: 'dave.adj.1@example.org', role: 'ISET_Coordinator', status: 'DISABLED', regionId: 1, mfa: false, lastSignIn: '2025-07-29T11:30:00Z', createdAt: '2025-06-18T11:30:00Z' }
-      ];
-      if (q) users = users.filter(u => [u.username, u.email, u.role].some(v => v.toLowerCase().includes(q)));
-      return res.json({ source: 'mock', users });
-    }
-
     const client = getClient();
     // New approach: build user list ONLY from ListUsersInGroup (avoids needing cognito-idp:ListUsers permission).
     // If ListUsers is permitted we can optionally enrich, but it's no longer required.
@@ -335,48 +338,11 @@ router.get('/users', async (req, res) => {
         users: []
       });
     }
-    res.status(500).json({ error: 'Failed to list users', detail: msg });
+    return sendRouteError(res, e, 'Failed to list users');
   }
 });
 
-// In dev (auth disabled) short-circuit create/modify routes with mock behavior
-if (!AUTH_ENABLED) {
-  console.log('[admin-users] AUTH disabled â€“ using mock mutation endpoints');
-  router.post('/users', (req, res) => {
-    console.log('[admin-users][mock] create user body=', req.body);
-    return res.status(201).json({ message: 'Mock user created (auth disabled)' });
-  });
-  router.patch('/users/:username/disable', (req, res) => {
-    console.log('[admin-users][mock] disable', req.params.username);
-    return res.json({ message: 'Mock user disabled (auth disabled)' });
-  });
-  router.patch('/users/:username/enable', (req, res) => {
-    console.log('[admin-users][mock] enable', req.params.username);
-    return res.json({ message: 'Mock user enabled (auth disabled)' });
-  });
-  router.patch('/users/:username/attributes', (req, res) => {
-    console.log('[admin-users][mock] attributes update', req.params.username, 'body=', req.body);
-    return res.json({ message: 'Mock attributes updated (auth disabled)' });
-  });
-  router.patch('/users/:username/role', (req, res) => {
-    console.log('[admin-users][mock] role change', req.params.username, '->', req.body?.newRole);
-    return res.json({ message: 'Mock role updated (auth disabled)' });
-  });
-  router.delete('/users/:username/role', (req, res) => {
-    console.log('[admin-users][mock] role removal', req.params.username);
-    return res.json({ message: 'Mock role removed (auth disabled)' });
-  });
-  router.post('/users/:username/resend-invite', (req, res) => {
-    console.log('[admin-users][mock] resend invite', req.params.username);
-    return res.json({ message: 'Mock invite resent (auth disabled)' });
-  });
-  router.patch('/users/:username/force-reset', (req, res) => {
-    console.log('[admin-users][mock] force reset', req.params.username);
-    return res.json({ message: 'Mock password reset forced (auth disabled)' });
-  });
-} else {
-  // Real (Cognito) endpoints only when auth enabled
-  router.post('/users', requireRole('System Administrator', 'Program Administrator', 'Regional Coordinator'), async (req, res) => {
+router.post('/users', requireRole('System Administrator', 'Program Administrator', 'Regional Coordinator'), async (req, res) => {
     try {
       const actor = req.auth;
       const { email, role, region_id, region_ids, user_id, suppressInvite, name, display_name } = req.body || {};
@@ -457,7 +423,7 @@ if (!AUTH_ENABLED) {
         inviteEmail: suppressInvite ? 'suppressed' : 'sent'
       });
     } catch (e) {
-      res.status(500).json({ error: 'Failed to create user', detail: e?.message });
+      return sendRouteError(res, e, 'Failed to create user');
     }
   });
 
@@ -468,11 +434,6 @@ if (!AUTH_ENABLED) {
       const username = req.params.username;
       const actorKey = normalizeRoleKey(actor?.role);
       const targetKey = normalizeRoleKey(role);
-      console.log('[admin-users][disable] actor=', actor?.role, 'body.role=', role, 'headers.x-dev-bypass=', req.get('x-dev-bypass'));
-      // Dev bypass inside auth-enabled mode (simulate success without Cognito)
-      if (req.get('x-dev-bypass')) {
-        return res.json({ message: 'Dev bypass: user disabled (mock)' });
-      }
       if (!targetKey) return res.status(400).json({ error: 'role required' });
       if (!actorKey) return res.status(403).json({ error: 'Forbidden' });
       if (!canCreateRole(actorKey, targetKey) && actorKey !== 'System_Administrator') return res.status(403).json({ error: 'Forbidden' });
@@ -480,22 +441,18 @@ if (!AUTH_ENABLED) {
       await client.send(new AdminDisableUserCommand({ UserPoolId: POOL_ID, Username: username }));
       res.json({ message: 'User disabled' });
     } catch (e) {
-      res.status(500).json({ error: 'Failed to disable user', detail: e?.message });
+      return sendRouteError(res, e, 'Failed to disable user');
     }
   });
 
   router.patch('/users/:username/enable', requireRole('System Administrator', 'Program Administrator'), async (req, res) => {
     try {
       const username = req.params.username;
-      console.log('[admin-users][enable] actor=', req.auth?.role, 'headers.x-dev-bypass=', req.get('x-dev-bypass'));
-      if (req.get('x-dev-bypass')) {
-        return res.json({ message: 'Dev bypass: user enabled (mock)' });
-      }
       const client = getClient();
       await client.send(new AdminEnableUserCommand({ UserPoolId: POOL_ID, Username: username }));
       res.json({ message: 'User enabled' });
     } catch (e) {
-      res.status(500).json({ error: 'Failed to enable user', detail: e?.message });
+      return sendRouteError(res, e, 'Failed to enable user');
     }
   });
 
@@ -542,7 +499,7 @@ if (!AUTH_ENABLED) {
         regionIds: regionIds.length ? regionIds : null
       });
     } catch (e) {
-      res.status(500).json({ error: 'Failed to update attributes', detail: e?.message });
+      return sendRouteError(res, e, 'Failed to update attributes');
     }
   });
 
@@ -567,14 +524,13 @@ if (!AUTH_ENABLED) {
       await client.send(new AdminAddUserToGroupCommand({ UserPoolId: POOL_ID, Username: username, GroupName: newRoleKey }));
       res.json({ message: 'Role updated' });
     } catch (e) {
-      res.status(500).json({ error: 'Failed to change role', detail: e?.message });
+      return sendRouteError(res, e, 'Failed to change role');
     }
   });
 
   router.delete('/users/:username/role', requireRole('System Administrator', 'Program Administrator', 'Regional Coordinator'), async (req, res) => {
     try {
       const username = req.params.username;
-      if (req.get('x-dev-bypass')) return res.json({ message: 'Dev bypass: role removed (mock)' });
       const { ListGroupsForUserCommand, AdminRemoveUserFromGroupCommand } = require('@aws-sdk/client-cognito-identity-provider');
       const client = getClient();
       const groupsResp = await client.send(new ListGroupsForUserCommand({ Username: username, UserPoolId: POOL_ID }));
@@ -583,34 +539,31 @@ if (!AUTH_ENABLED) {
       await client.send(new AdminRemoveUserFromGroupCommand({ UserPoolId: POOL_ID, Username: username, GroupName: targetGroup.GroupName }));
       res.json({ message: 'Role removed' });
     } catch (e) {
-      res.status(500).json({ error: 'Failed to remove role', detail: e?.message });
+      return sendRouteError(res, e, 'Failed to remove role');
     }
   });
 
   router.post('/users/:username/resend-invite', requireRole('System Administrator', 'Program Administrator', 'Regional Coordinator'), async (req, res) => {
     try {
       // There is no direct "resend invite" if MessageAction SUPPRESS was used; placeholder for integration with custom email flow.
-      if (req.get('x-dev-bypass')) return res.json({ message: 'Dev bypass: invite resent (mock)' });
       res.json({ message: 'Invite resend placeholder (configure SES/Lambda trigger)' });
     } catch (e) {
-      res.status(500).json({ error: 'Failed to resend invite', detail: e?.message });
+      return sendRouteError(res, e, 'Failed to resend invite');
     }
   });
 
   // Force password reset (sets status to FORCE_CHANGE_PASSWORD)
   router.patch('/users/:username/force-reset', requireRole('System Administrator', 'Program Administrator', 'Regional Coordinator'), async (req, res) => {
     try {
-      if (req.get('x-dev-bypass')) return res.json({ message: 'Dev bypass: password reset forced (mock)' });
       const { AdminResetUserPasswordCommand } = require('@aws-sdk/client-cognito-identity-provider');
       const username = req.params.username;
       const client = getClient();
       await client.send(new AdminResetUserPasswordCommand({ UserPoolId: POOL_ID, Username: username }));
       res.json({ message: 'Password reset forced' });
     } catch (e) {
-      res.status(500).json({ error: 'Failed to force password reset', detail: e?.message });
+      return sendRouteError(res, e, 'Failed to force password reset');
     }
   });
-}
 
 module.exports = router;
 

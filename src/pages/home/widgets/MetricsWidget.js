@@ -36,25 +36,25 @@ const METRIC_DEFINITIONS = [
   {
     id: 'inReview',
     label: 'In review',
-    description: 'Applications currently moved into review in the selected period.',
+    description: 'Applications currently in review and updated in the selected period.',
     format: 'count'
   },
   {
     id: 'awaitingApproval',
     label: 'Awaiting approval',
-    description: 'Applications moved into pending approval in the selected period.',
+    description: 'Applications currently pending approval and updated in the selected period.',
     format: 'count'
   },
   {
     id: 'approved',
     label: 'Applications approved',
-    description: 'Applications approved in the selected period.',
+    description: 'Applications currently approved and updated in the selected period.',
     format: 'count'
   },
   {
     id: 'denied',
     label: 'Applications denied',
-    description: 'Applications not approved in the selected period.',
+    description: 'Applications currently not approved and updated in the selected period.',
     format: 'count'
   },
   {
@@ -148,19 +148,54 @@ const formatCurrency = value => {
   });
 };
 
-const MetricTile = ({ label, value, description }) => (
-  <Box padding="s" background="layer-1" borderRadius="medium" width="100%">
-    <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--color-text-label)' }}>
-      {label}
-    </div>
-    <div style={{ fontSize: '1.5rem', fontWeight: 600 }}>{value}</div>
-    {description ? (
-      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-body-secondary)' }}>{description}</div>
-    ) : null}
-  </Box>
-);
+const metricLabelStyle = {
+  fontSize: '0.75rem',
+  textTransform: 'uppercase',
+  color: 'var(--color-text-label)'
+};
 
-const MetricsWidget = ({ actions = {}, metadata = {}, role, toggleHelpPanel }) => {
+const metricValueStyle = {
+  display: 'inline-block',
+  fontSize: '1.75rem',
+  lineHeight: 1.1,
+  fontWeight: 700
+};
+
+const MetricTile = ({ label, value, href, onFollow, description, active }) => {
+  const renderedValue = <span style={metricValueStyle}>{value}</span>;
+
+  return (
+    <Box padding="s" background="layer-1" borderRadius="medium" width="100%">
+      <div style={metricLabelStyle}>
+      {label}
+      </div>
+      <div>
+        {href ? (
+          <Link href={href} onFollow={onFollow}>
+            {renderedValue}
+          </Link>
+        ) : (
+          renderedValue
+        )}
+      </div>
+      {description ? (
+        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-body-secondary)' }}>{description}</div>
+      ) : null}
+      {active ? (
+        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-status-info)' }}>Showing below.</div>
+      ) : null}
+    </Box>
+  );
+};
+
+const MetricsWidget = ({
+  actions = {},
+  metadata = {},
+  role,
+  toggleHelpPanel,
+  metricDrilldown = null,
+  onOpenMetricDrilldown
+}) => {
   const [selectedPeriod, setSelectedPeriod] = useState(PERIOD_OPTIONS[0]);
   const [metricsResponse, setMetricsResponse] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -245,6 +280,28 @@ const MetricsWidget = ({ actions = {}, metadata = {}, role, toggleHelpPanel }) =
   );
   const rangeLabel = periodData?.rangeLabel || '';
 
+  useEffect(() => {
+    if (!metricDrilldown?.metricId || typeof onOpenMetricDrilldown !== 'function') {
+      return;
+    }
+    const activePeriodKey = metricDrilldown?.period?.key || null;
+    if (activePeriodKey === selectedPeriod.value || metricDrilldown?.loading) {
+      return;
+    }
+    onOpenMetricDrilldown({
+      metricId: metricDrilldown.metricId,
+      metricLabel: metricDrilldown.metricLabel,
+      period: selectedPeriod.value
+    });
+  }, [
+    metricDrilldown?.loading,
+    metricDrilldown?.metricId,
+    metricDrilldown?.metricLabel,
+    metricDrilldown?.period?.key,
+    onOpenMetricDrilldown,
+    selectedPeriod.value
+  ]);
+
   const visibleMetricIds = metricPreferences?.visibleContent || DEFAULT_METRIC_IDS;
   const visibleMetricDefinitions = useMemo(
     () => METRIC_DEFINITIONS.filter(metric => visibleMetricIds.includes(metric.id)),
@@ -261,9 +318,20 @@ const MetricsWidget = ({ actions = {}, metadata = {}, role, toggleHelpPanel }) =
           ? '—'
           : metric.format === 'currency'
             ? formatCurrency(periodMetrics[metric.id])
-            : formatCount(periodMetrics[metric.id])
+            : formatCount(periodMetrics[metric.id]),
+        rawValue: Number(periodMetrics[metric.id] ?? 0),
+        clickable:
+          metric.format === 'count' &&
+          Number(periodMetrics[metric.id] ?? 0) > 0 &&
+          typeof onOpenMetricDrilldown === 'function',
+        active:
+          metricDrilldown?.metricId === metric.id &&
+          (metricDrilldown?.period?.key || null) === selectedPeriod.value,
+        busy:
+          metricDrilldown?.metricId === metric.id &&
+          Boolean(metricDrilldown?.loading)
       })),
-    [loading, periodMetrics, visibleMetricDefinitions]
+    [loading, metricDrilldown, onOpenMetricDrilldown, periodMetrics, selectedPeriod.value, visibleMetricDefinitions]
   );
 
   const infoLink = toggleHelpPanel ? (
@@ -363,7 +431,24 @@ const MetricsWidget = ({ actions = {}, metadata = {}, role, toggleHelpPanel }) =
         ) : null}
         <ColumnLayout columns={3} variant="text-grid">
           {metricCards.map(metric => (
-            <MetricTile key={metric.id} label={metric.label} value={metric.value} description={metric.description} />
+            <MetricTile
+              key={metric.id}
+              label={metric.label}
+              value={metric.busy ? 'Loading...' : metric.value}
+              description={metric.description}
+              href={metric.clickable && !metric.busy ? '#' : undefined}
+              active={metric.active}
+              onFollow={metric.clickable && !metric.busy
+                ? event => {
+                    event.preventDefault();
+                    onOpenMetricDrilldown({
+                      metricId: metric.id,
+                      metricLabel: metric.label,
+                      period: selectedPeriod.value
+                    });
+                  }
+                : undefined}
+            />
           ))}
         </ColumnLayout>
         {!metricCards.length ? (

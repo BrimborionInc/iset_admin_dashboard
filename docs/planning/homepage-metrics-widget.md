@@ -1,6 +1,6 @@
 Purpose: Capture the UX, data model, and implementation decisions for the homepage Metrics widget.
 Audience: Admin dashboard engineers, product owners, and operators.
-Last Updated: 2025-12-31
+Last Updated: 2026-03-24
 
 ## Background
 - The homepage is a configurable Cloudscape board that surfaces role-scoped widgets.
@@ -8,27 +8,18 @@ Last Updated: 2025-12-31
 
 ## Goals
 - Provide a Metrics widget on the homepage for all roles except System Administrator.
-- Display the requested metrics for this week, this month, this quarter, and this year:
-  - New Applications
-  - Decisions Made
-  - Active Cases
-  - Funds Committed
-  - Funds Spent
+- Support a configurable mix of application, case, action-plan, intervention, outcome, and funding metrics.
+- Allow count metrics to drill down into the shared homepage Items table without introducing a separate drilldown page.
 
-## Non-goals (initial)
-- No drill-down views or export from the widget (unless explicitly requested).
+## Non-goals (current)
+- No standalone drilldown page; reuse the homepage `Work Queue Items` widget instead.
+- No widget-level geography filter that scopes only Metrics.
 - No System Administrator view.
 
 ## Constraints / References
 - Follow `docs/guides/configurable-dashboard-notes.md` for dashboard/widget wiring.
 - Use Cloudscape components and existing homepage patterns.
 - Confirm data sources in `isetadminserver.js` (no assumptions about API payloads).
-
-## Open Questions
-- Define time windows: calendar-based vs rolling (week start day, timezone, quarter boundaries).
-- Define each metric precisely (source tables, statuses, date fields).
-- Decide if the widget needs a refresh action or auto-refresh interval.
-- Confirm currency formatting for Funds Committed/Spent.
 
 ## Decisions (Interview Log)
 - Time windows are calendar-based (week/month/quarter/year).
@@ -55,33 +46,51 @@ Last Updated: 2025-12-31
 - Application decisions are counted when `iset_application.status` is `decision_ready` (plus `completed` if it advanced post-decision), using `updated_at` in the selected period.
 - Intervention decisions are counted when `iset_case_intervention.status` is `approved`, `changes_requested`, or `rejected`, using `updated_at` in the selected period.
 - Active Cases count is a current snapshot of `iset_case.status` in `initiated`, `active`, `dormant`, or `ready_to_close` (shown for all periods).
+- Count metrics now drill down into the existing homepage `Work Queue Items` widget, which has a separate metric-results mode and a `Back to work queue` action.
+- Currency metrics remain informational only and do not open a row list.
+- The metric drilldown grain must match the counted entity:
+  - application metrics -> application rows
+  - active cases -> case rows
+  - action-plan metrics/outcomes -> action-plan rows
+  - intervention metrics -> intervention rows
+- `Active Cases` drilldown must include application-less client-file cases because the count is case-based.
+- If homepage geography scoping is added later, it should be a shared page-level filter that drives both Metrics and the Items drilldown; do not add a Metrics-only region filter.
+- Regional Coordinator metrics must honor all resolved `regionIds`, not only a single primary region id.
 - Funds Committed sums `finance_transaction.amount` where status is `submitted` or `approved` and `transaction_date` (fallback `created_at`) falls in the selected period.
 - Funds Spent sums `finance_transaction.amount` where status is `posted` and `transaction_date` (fallback `created_at`) falls in the selected period.
 - Non-legacy application statuses include: `submitted`, `in_review`, `docs_requested`, `closure_notice`, `pending_approval`, `decision_ready`, `completed`, `closed`, `archived`.
 
-## Proposed UX
-- Board widget titled "Metrics" with a period selector (week/month/quarter/year) and a refresh action in the header.
-- Five metric tiles: New Applications, Decisions Made, Active Cases, Funds Committed, Funds Spent.
-- Period range label shown above tiles (e.g., `2025-01-01 - 2025-01-07`).
+## Current UX
+- Board widget titled `Metrics` with a period selector (week/month/quarter/year), metric preferences, and a refresh action in the header.
+- Period range label shown below the tiles.
+- Count metric values render as links when the count is non-zero.
+- Selecting a count metric opens the matching rows in the homepage `Work Queue Items` widget.
+- The Items widget remains queue-driven by default; metric drilldown is a temporary alternate mode rather than a fake queue bucket.
 - Loading state uses a Cloudscape StatusIndicator; errors render a Cloudscape Alert.
 
 ## Data Model / Schema
 - Response payload includes `periods.{week|month|quarter|year}` with `metrics` and date range metadata.
 - Metrics values are numeric counts or currency totals; UI formats counts with `en-CA` and currency as CAD.
+- Drilldown payload includes metric metadata plus normalized rows for the shared Items table.
 
 ## API & Persistence
 - New endpoint: `GET /api/dashboard/metrics`.
 - Aggregates by the selected period, applying role-based scope and non-legacy statuses.
+- Drilldown endpoint: `GET /api/dashboard/metrics/details`.
+- No persistence for drilldown state beyond the current browser session; the homepage board still persists layout and visible metrics in browser storage.
 - No persistence beyond DB aggregation; widget re-fetches on refresh.
 
 ## Permissions & Visibility
 - Widget available to all roles except System Administrator.
-- Program Administrators see global totals; Regional Coordinators are scoped to their region; Application Assessors are scoped to their assigned cases.
+- Program Administrators see global totals.
+- Regional Coordinators are scoped to all resolved coordinator `regionIds`.
+- Application Assessors are scoped to their assigned cases.
 
 ## Validation & Error Handling
 - If scope cannot be resolved (e.g., missing region for a Regional Coordinator), returns zeroed metrics.
 - Missing tables or bad field errors return zeroed metrics to keep the dashboard usable.
 - API failures surface an error alert in the widget.
+- Drilldown failures surface an inline error in the shared Items widget instead of changing queue data.
 
 ## Rollout
-- Pending.
+- Live on homepage.

@@ -5,7 +5,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-03-23
+Last Updated: 2026-03-24
 
 ## Working relationship (design dialog)
 
@@ -39,8 +39,13 @@ Last Updated: 2026-03-23
 - Clarify requirements if business behavior is ambiguous.
 - Confirm real behavior from code/API payloads before changing UI.
 - For dashboard/widget work, read `docs/guides/configurable-dashboard-notes.md` first.
+- For homepage Metrics or Items work, read `docs/dashboards/admin-home-metrics-widget.md`.
 - Keep doc updates in the same change when behavior or structure changes.
 - If blocked by tooling, permissions, or environment access, call it out immediately.
+
+## For future Codex threads
+
+Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current project context for this repo. As you work, keep the docbase current: update [AGENTS.md](./AGENTS.md) with durable context pointers, guardrails, and architecture notes that would help future chats; update affected live docs under [`docs/`](./) when behavior changes; and record notable shipped changes in [changelog.md](./meta/changelog.md) and [next-release-notes-log.md](./meta/next-release-notes-log.md). The goal is that a new thread can recover the current state of the system from the repo docs without depending on prior chat history.
 
 ## Core conventions
 
@@ -49,6 +54,13 @@ Last Updated: 2026-03-23
   schema -> runtime config JSON -> API payload -> renderer/template.
 - When adding/changing UI fields, confirm the backend actually returns the data.
 - Fix root causes instead of layering workarounds.
+
+## Auth model
+
+- Admin sign-in now uses real Cognito/IAM only. Do not reintroduce simulated-user flows, IAM on/off toggles, dev-bypass headers, or header-driven role impersonation in admin code.
+- Frontend auth state is centralized in `src/context/AuthContext.js`. Prefer `useAuth()` and `useCurrentUser()` over direct token/session reads in page or widget code.
+- The OAuth callback is handled as a shell-less bootstrapping route. If sign-in behavior changes, inspect `src/App.js`, `src/pages/AuthCallback.js`, `src/auth/cognito.js`, and `src/auth/apiClient.js` together.
+- Server middleware and admin-user routes no longer support `AUTH_PROVIDER=none`, mock admin users, or auth-disabled mutation fallbacks. If auth is misconfigured, fail explicitly instead of inventing local placeholder behavior.
 
 ## Development data policy (no legacy fallbacks)
 
@@ -62,6 +74,8 @@ Last Updated: 2026-03-23
 - Docs base path: `X:\ISET\admin-dashboard\docs` (WSL: `/mnt/x/ISET/admin-dashboard/docs`)
 - Client-file import guide: `docs/guides/client-file-imports.md`
 - Client Batch Import dashboard reference: `docs/dashboards/client-file-import-dashboard.md`
+- Data and Results dashboard reference: `docs/dashboards/data-and-results-dashboard.md`
+- Homepage Metrics dashboard reference: `docs/dashboards/admin-home-metrics-widget.md`
 - Query Editor dashboard reference: `docs/dashboards/query-editor-dashboard.md`
 - Operational reporting workbook reference: `docs/data/NWAC - data info 2025-26.xlsx`
 - Admin intake preview renderer: `apps/web/src/features/intake/ComponentRenderer.tsx`
@@ -76,6 +90,7 @@ Last Updated: 2026-03-23
 - Live dashboard behavior: `docs/dashboards/*`
 - Import and data-backload constraints: `docs/guides/client-file-imports.md`
 - Client Batch Import dashboard: `docs/dashboards/client-file-import-dashboard.md`
+- Data and Results dashboard: `docs/dashboards/data-and-results-dashboard.md`
 - Widget-level docs index: `docs/widgets/admin/README.md`
 - Workflow-level docs index: `docs/workflows/admin/README.md`
 - Project structure / architecture map: `docs/meta/project-map.md`
@@ -110,6 +125,20 @@ Last Updated: 2026-03-23
   - no placeholder assessment/action-plan/intervention/document rows
 - Read `docs/dashboards/client-file-import-dashboard.md` and `docs/guides/client-file-imports.md` before changing import UX or matching rules.
 
+## Homepage dashboard context
+
+- Homepage route: `/`
+- Current homepage Metrics widget behavior is documented in `docs/dashboards/admin-home-metrics-widget.md`.
+- Frontend files to inspect together:
+  - `src/pages/home/HomeDashboardPage.jsx`
+  - `src/pages/home/widgets/MetricsWidget.js`
+  - `src/pages/home/widgets/WorkQueueItemsTableWidget.js`
+- Current drilldown rule: count metrics in the Metrics widget open the existing `Work Queue Items` widget in a dedicated metric-results mode; currency metrics do not open a row list.
+- Current implementation rule: do not fake metric drilldown as another queue bucket. `Work Queue Items` now has separate queue mode and metric-results mode.
+- Current scoping rule: Program Administrators see global metrics, Regional Coordinators must honor all resolved `regionIds`, and Application Assessors are owner-scoped.
+- Current UX rule: do not add a Metrics-only region filter. If homepage geography scoping is added later, make it a shared page-level control that drives both Metrics and the Items drilldown.
+- Current metric caveat: `Active Cases` is a current snapshot metric, so its drilldown list does not change with the selected period.
+
 ## Operational reporting context
 
 - For PATH/NWAC operational reporting work, inspect workbook references in `docs/data` before designing report schemas or dashboard widgets.
@@ -118,14 +147,20 @@ Last Updated: 2026-03-23
 - The verified workbook includes sections for overall results targets vs year-end results, quarterly data uploads, and interventions, with instructions pointing to Data Gateway and ILMP workflows.
 - Current management-reporting direction: keep dashboard naming, ordering, and layout closely aligned to the workbook so NWAC users can map the UI directly to the existing report.
 - For reporting filters, use a shared report-controls block rather than per-section filters. Current page-level controls are participant home province/territory, case manager, fiscal year, and a results-view segmented control for cumulative vs monthly values; demo mode currently lives in the report-controls header actions.
+- Current `Reporting > Data and Results` implementation detail: the `Intake and Assessment` section now leads the default layout and shows participant home province/territory rows with month columns. Its section header controls switch between `New applications`, `Approved applications`, and `Denied applications`, and include a text filter for the province rows.
+- Current `Reporting > Data and Results` implementation detail: `New applications` use `iset_application_submission.submitted_at` for month bucketing. `Approved applications` and `Denied applications` currently use `iset_application.updated_at` as the best available decision-month proxy because PATH does not yet persist dedicated application decision timestamps/history.
 - Current `Reporting > Data and Results` implementation detail: the `Interventions` section now also has section-level controls for show mode (`Count`, `Cost`), intervention status (`Completed`, `Planned`, `Active`, `Cancelled`), and date basis. The default workbook-aligned view is `Count` for `Completed` interventions by `By end date`; when `Cost` is selected, values are shown by payment month and completed interventions use actual cost when available.
+- Current `Reporting > Data and Results` drilldown rule: in live mode, non-zero values in `Intake and Assessment` and `Interventions` open an inline detail panel directly beneath the clicked row rather than in a detached modal/popover or a separate page section.
+- Current `Reporting > Data and Results` drilldown rule: `Intake and Assessment` drilldowns link applicant names to `/application-case/:caseId` when a linked case exists and otherwise fall back to the normal assignment/dashboard route. `Interventions` drilldowns link participant names to `/cases/:caseId`.
+- Current `Reporting > Data and Results` drilldown rule: cumulative clicks show contributing records from fiscal-year start through the clicked month; monthly clicks show only the clicked month; `Final (p14)` still represents the full-year total and uses the full fiscal-year window even in monthly view.
+- Current `Reporting > Data and Results` demo/dev rule: demo mode remains summary-only for drilldown. Do not imply that sample matrix values have live linked-record expansion unless demo drilldown rows are implemented explicitly.
 - Geography for NWAC reporting means participant home province/territory unless explicitly stated otherwise.
 - Current `Reporting > Data and Results` implementation direction: keep a workbook-aligned default layout, but render the report sections as full-width removable Cloudscape board items so users can hide and restore sections without changing the report controls.
-- Current `Reporting > Data and Results` layout direction: `Interventions` is the first section shown under the report controls by default; removed sections should be restorable through standard board palette/header actions.
+- Current `Reporting > Data and Results` layout direction: `Intake and Assessment` is the first section shown under the report controls by default, followed by `Interventions`; removed sections should be restorable through standard board palette/header actions.
 - Current `Reporting > Data and Results` demo/dev rule: support a `Demo mode` toggle in the report-controls header actions that populates the report with sample data, and make shared report filters apply to demo data too.
 - Current `Reporting > Data and Results` demo/dev rule: demo figures should remain internally consistent across sections. In particular, sample overall results, client results, and intervention totals should reconcile with each other so the demo does not show contradictory numbers.
 - Current `Reporting > Data and Results` live-data rule: `Quarterly Data Uploads` is backed by agreement-level `esdc_reporting_package` data, so it should stay workbook-aligned and explicitly note that participant home province/territory and case manager filters do not change that section.
-- Current `Reporting > Data and Results` live-data rule: `Overall Results`, `Interventions`, `Client Results`, `ILMP Data Uploads`, and `Status of Action Plans` are wired to PATH reporting aggregates derived from action plans, interventions, and participant submission history, while `Additional Comments` is a saved fiscal-year narrative note stored in runtime config.
+- Current `Reporting > Data and Results` live-data rule: `Intake and Assessment`, `Overall Results`, `Interventions`, `Client Results`, `ILMP Data Uploads`, and `Status of Action Plans` are wired to PATH reporting aggregates derived from applications, action plans, interventions, and participant submission history, while `Additional Comments` is a saved fiscal-year narrative note stored in runtime config.
 - Current `Reporting > Data and Results` ILMP-upload rule: only `Submitted` counts should be shown in `ILMP Data Uploads`; do not imply accepted/processed/error gateway outcomes unless PATH has a supported API/source for those values.
 - Current `Reporting > Data and Results` configuration rule: the three AOP targets in the overall-results section are admin-editable from the dashboard and persist to fiscal-year-scoped runtime config keys like `reporting.dataAndResults / targets.<startYear>`, with read fallback to the older global `targets` key.
 - Current `Reporting > Data and Results` configuration rule: `Additional Comments` is admin-editable from the dashboard and persists to runtime config under fiscal-year-scoped keys like `reporting.dataAndResults / additionalComments.<startYear>`.

@@ -18,10 +18,10 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import SideNavigation from './layouts/SideNavigation.js';
 import { apiFetch } from './auth/apiClient';
-import { getIdTokenClaims, getRoleFromClaims, hasValidSession, isIamOn } from './auth/cognito';
 import AppRoutes from './routes/AppRoutes.js'; // Ensure this matches the export in AppRoutes.js
 import { helpMessages } from './utils/helpMessages.js';
 import CustomSplitPanel from './layouts/CustomSplitPanel.js';
+import { useAuth } from './context/AuthContext.js';
 import { LocationProvider } from './context/LocationContext';
 import { TutorialsContext } from './context/TutorialsContext';
 import AdminDashboardHelp from './helpPanelContents/adminDashboardHelp.js';
@@ -48,7 +48,7 @@ const MAX_PROMPT_CHARS = 1000;
 const TUTORIAL_COMPLETION_STORAGE_KEY = 'iset-tutorials.completed.v1';
 const TUTORIAL_APP_LAYOUT_RESET_FLAG = 'iset.tutorial.resetApplicationLayout';
 const TUTORIAL_CASE_LAYOUT_RESET_FLAG = 'iset.tutorial.resetCaseWorkspaceLayout';
-const normalizeRoleKey = (value = '') => value.toString().trim().toLowerCase();
+const normalizeRoleKey = value => String(value ?? '').trim().toLowerCase();
 const APPLICATION_WORKSPACE_PROMPT_ROLE_KEYS = new Set([
   'application assessor',
   'iset coordinator',
@@ -558,7 +558,8 @@ const FloatingChat = React.memo(function FloatingChat({
   );
 });
 
-const AppContent = ({ currentRole }) => {
+const AppContent = () => {
+  const { role } = useAuth();
   const [currentHelpContent, setCurrentHelpContent] = useState(helpMessages.overview);
   const [isHelpPanelOpen, setIsHelpPanelOpen] = useState(false);
   const [helpPanelTitle, setHelpPanelTitle] = useState("Help Panel");
@@ -580,13 +581,7 @@ const AppContent = ({ currentRole }) => {
 	  const [pageTutorialPrompt, setPageTutorialPrompt] = useState({ visible: false, tutorialId: null });
 	  const pageTutorialPromptShownRef = useRef(new Set());
 
-  const effectiveRole = useMemo(() => {
-    const iamOnFlag = isIamOn();
-    const signedIn = hasValidSession();
-    const claimsRole = getRoleFromClaims(getIdTokenClaims());
-    const roleFallback = currentRole?.value || currentRole?.label || currentRole;
-    return (iamOnFlag && signedIn && claimsRole) ? claimsRole : roleFallback;
-  }, [currentRole]);
+  const effectiveRole = role || '';
   const normalizedEffectiveRole = useMemo(
     () => normalizeRoleKey(effectiveRole),
     [effectiveRole]
@@ -1507,7 +1502,6 @@ const AppContent = ({ currentRole }) => {
 	              onNavigationChange={({ detail }) => setIsNavigationOpen(detail.open)}
 	              navigation={
 	                <SideNavigation
-                  currentRole={currentRole}
                   showTutorialHotspots={isHomeIntroTutorial(currentTutorial)}
                   notificationCount={scopedNotifications.length}
                   refreshNotifications={refreshNotifications}
@@ -1556,13 +1550,12 @@ const AppContent = ({ currentRole }) => {
               }
               splitPanelPreferences={splitPanelPreferences}
               onSplitPanelPreferencesChange={handleSplitPanelPreferencesChange}
-              content={
-                <SpaceBetween size="l">
-                  <AppRoutes
-                    toggleHelpPanel={toggleHelpPanel}
-                    currentRole={currentRole}
-                    updateBreadcrumbs={updateBreadcrumbs}
-                    setSplitPanelOpen={setSplitPanelOpen}
+	              content={
+	                <SpaceBetween size="l">
+	                  <AppRoutes
+	                    toggleHelpPanel={toggleHelpPanel}
+	                    updateBreadcrumbs={updateBreadcrumbs}
+	                    setSplitPanelOpen={setSplitPanelOpen}
                     splitPanelOpen={splitPanelOpen}
                     setSplitPanelSize={setSplitPanelSize}
                     splitPanelSize={splitPanelSize}

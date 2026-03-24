@@ -1,11 +1,12 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, Box, Button, Container, Header, Modal, SpaceBetween, StatusIndicator, Table, Toggle } from '@cloudscape-design/components';
 import { apiFetch } from '../../auth/apiClient';
+import { useAuth } from '../../context/AuthContext.js';
 import { useTutorials } from '../../context/TutorialsContext';
-import { getIdTokenClaims, getRoleFromClaims, hasValidSession, isIamOn } from '../../auth/cognito';
 import { isTutorialRelevantForRole } from '../../tutorials/tutorialPlatform';
 
 const TutorialsDashboardPage = () => {
+  const { role } = useAuth();
   const { tutorials } = useTutorials();
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -14,24 +15,9 @@ const TutorialsDashboardPage = () => {
   const [success, setSuccess] = useState(null);
   const [lastResetAt, setLastResetAt] = useState(null);
 
-  const effectiveRole = useMemo(() => {
-    let fallbackRole = null;
-    try {
-      const raw = window.sessionStorage?.getItem('currentRole');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        fallbackRole = parsed?.value || parsed?.label || null;
-      }
-    } catch (_) {
-      fallbackRole = null;
-    }
-    const claimsRole = (isIamOn() && hasValidSession()) ? getRoleFromClaims(getIdTokenClaims()) : null;
-    return claimsRole || fallbackRole;
-  }, []);
-
   const visibleTutorials = useMemo(() => (
-    (tutorials || []).filter(tutorial => isTutorialRelevantForRole(tutorial, effectiveRole))
-  ), [tutorials, effectiveRole]);
+    (tutorials || []).filter(tutorial => isTutorialRelevantForRole(tutorial, role))
+  ), [tutorials, role]);
 
   const tutorialRows = useMemo(
     () => visibleTutorials.map(tutorial => ({

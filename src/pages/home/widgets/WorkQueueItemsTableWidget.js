@@ -395,6 +395,14 @@ const columnDefinitionsByKey = {
     cell: item => {
       const displayName = item.applicant || item.applicant_name || item.applicantName || item.title || item.id || '—';
       const workspacePath = getWorkspacePath(item);
+      const secondaryText =
+        item.titleSecondaryText ||
+        [
+          item.trackingId || item.id || null,
+          formatDateOnly(item.submittedAt || item.receivedAt)
+            ? `Received ${formatDateOnly(item.submittedAt || item.receivedAt)}`
+            : null
+        ].filter(Boolean).join(' · ') || '—';
       return (
         <SpaceBetween size="xxs">
           <Box fontWeight="bold">
@@ -410,12 +418,7 @@ const columnDefinitionsByKey = {
             </Link>
           </Box>
           <Box fontSize="body-s" color="text-status-inactive">
-            {[
-              item.trackingId || item.id || null,
-              formatDateOnly(item.submittedAt || item.receivedAt)
-                ? `Received ${formatDateOnly(item.submittedAt || item.receivedAt)}`
-                : null
-            ].filter(Boolean).join(' · ') || '—'}
+            {secondaryText}
           </Box>
         </SpaceBetween>
       );
@@ -455,6 +458,18 @@ const columnDefinitionsByKey = {
     header: 'Type',
     cell: item => item.type || '—',
     sortingField: 'type'
+  },
+  metricSubject: {
+    id: 'metricSubject',
+    header: 'Details',
+    cell: item => item.metricSubject || item.summary || '—',
+    sortingField: 'metricSubject'
+  },
+  eventDate: {
+    id: 'eventDate',
+    header: 'Date',
+    cell: item => formatDateOnly(item.metricEventDate || item.eventDate) || '—',
+    sortingField: 'metricEventDate'
   },
   notes: {
     id: 'notes',
@@ -579,6 +594,12 @@ const columnKeysByType = {
 };
 
 const mixedColumnKeys = ['title', 'type', 'owner', 'status', 'dueDate', 'actions'];
+const metricColumnKeysByPreset = {
+  'metric-applications': ['title', 'region', 'owner', 'status', 'eventDate', 'actions'],
+  'metric-cases': ['title', 'region', 'owner', 'status', 'actions'],
+  'metric-action-plans': ['title', 'metricSubject', 'region', 'owner', 'eventDate', 'actions'],
+  'metric-interventions': ['title', 'intervention', 'region', 'owner', 'status', 'eventDate', 'actions']
+};
 
 const buildColumns = (types = []) => {
   if (!types || types.length === 0) {
@@ -642,6 +663,9 @@ const persistColumnWidths = widths => {
 };
 
 const WorkQueueItemsTableWidget = ({
+  mode = 'queue',
+  metricView = null,
+  onCloseMetricView,
   selectedBucketId,
   bucketDefinitions = PROGRAM_ADMIN_BUCKETS,
   items = [],
@@ -653,12 +677,15 @@ const WorkQueueItemsTableWidget = ({
   const { email: currentUserEmail } = useCurrentUser();
   const canonicalRole = role === 'Regional Manager' ? 'Regional Coordinator' : role;
   const isAssessor = canonicalRole === 'Application Assessor';
-  const canSelectPostingContext = canonicalRole === 'Regional Coordinator' || canonicalRole === 'Program Administrator';
   const roleKey = normalizeRoleKey(role);
   const isProgramAdminRole = PROGRAM_ADMIN_ROLE_KEYS.has(roleKey);
   const normalizedUserEmail = (currentUserEmail || '').trim().toLowerCase();
   const canOverrideProgramAdminLimit = normalizedUserEmail === PROGRAM_ADMIN_APPROVER_EMAIL;
   const canManageEiEligibility = EI_ELIGIBILITY_ROLE_KEYS.has(roleKey);
+  const isMetricMode = mode === 'metric';
+  const metricItems = isMetricMode && Array.isArray(metricView?.items) ? metricView.items : [];
+  const metricLoading = isMetricMode && Boolean(metricView?.loading);
+  const metricError = isMetricMode ? metricView?.error || '' : '';
   const [filteringText, setFilteringText] = useState('');
   const [assignModalVisible, setAssignModalVisible] = useState(false);
   const [assignTarget, setAssignTarget] = useState(null);
@@ -739,14 +766,15 @@ const WorkQueueItemsTableWidget = ({
   }, [canOverrideProgramAdminLimit, canonicalRole, interventionCostValue, isProgramAdminRole]);
   const approvalThresholdBlocked = Boolean(approvalBlockMessage);
   const selectedBucket =
-    useMemo(() => bucketDefinitions.find(bucket => bucket.id === selectedBucketId) || bucketDefinitions[0] || null, [
-      bucketDefinitions,
-      selectedBucketId
-    ]);
-  const shouldWrapLines = selectedBucket && ['exceptions-escalations', 'unresolved-conflicts'].includes(selectedBucket.id);
+    useMemo(
+      () => (isMetricMode ? null : bucketDefinitions.find(bucket => bucket.id === selectedBucketId) || bucketDefinitions[0] || null),
+      [bucketDefinitions, isMetricMode, selectedBucketId]
+    );
+  const shouldWrapLines = !isMetricMode && selectedBucket && ['exceptions-escalations', 'unresolved-conflicts'].includes(selectedBucket.id);
+  const sourceItems = isMetricMode ? metricItems : items;
 
   const decoratedItems = useMemo(() => {
-    return items.map(item => {
+    return sourceItems.map(item => {
       const caseId = resolveCaseId(item);
       return {
         ...item,
@@ -754,13 +782,14 @@ const WorkQueueItemsTableWidget = ({
         __isWatched: caseId ? watchMap.has(caseId) : false
       };
     });
-  }, [items, watchMap]);
+  }, [sourceItems, watchMap]);
 
-  const queueItems = useMemo(() => {
-    if (!selectedBucket) {
-      return [];
-    }
-    const scoped = decoratedItems.filter(item => item.bucketId === selectedBucket.id);
+  const tableItems = useMemo(() => {
+    const scoped = isMetricMode
+      ? decoratedItems
+      : selectedBucket
+        ? decoratedItems.filter(item => item.bucketId === selectedBucket.id)
+        : [];
     if (!filteringText) return scoped;
     const needle = filteringText.toLowerCase();
     return scoped.filter(item => {
@@ -768,6 +797,7 @@ const WorkQueueItemsTableWidget = ({
         item.applicant,
         item.title,
         item.trackingId,
+        item.metricSubject,
         item.status,
         item.owner,
         item.region,
@@ -775,7 +805,7 @@ const WorkQueueItemsTableWidget = ({
       ];
       return fields.some(v => v && String(v).toLowerCase().includes(needle));
     });
-  }, [decoratedItems, selectedBucket, filteringText]);
+  }, [decoratedItems, filteringText, isMetricMode, selectedBucket]);
 
   const [columnWidths, setColumnWidths] = useState(() => loadStoredColumnWidths());
 
@@ -787,13 +817,13 @@ const WorkQueueItemsTableWidget = ({
 
   const itemTypes = useMemo(() => {
     const types = new Set();
-    queueItems.forEach(item => {
+    tableItems.forEach(item => {
       if (item?.type) {
         types.add(item.type);
       }
     });
     return Array.from(types);
-  }, [queueItems]);
+  }, [tableItems]);
 
   const [slaTargets, setSlaTargets] = useState(SLA_DEFAULT_DAYS);
   const resolveEscalationActionMeta = (actionId) => {
@@ -1084,7 +1114,9 @@ const WorkQueueItemsTableWidget = ({
   }, [decisionModalVisible, selectedBudgetPot, budgetPotOptions, decisionTarget, applicantProvinceCode]);
 
   const columnDefinitions = useMemo(() => {
-    let keys = buildColumns(itemTypes);
+    let keys = isMetricMode
+      ? (metricColumnKeysByPreset[metricView?.columnPreset] || metricColumnKeysByPreset['metric-applications'])
+      : buildColumns(itemTypes);
     keys = ['watch', ...keys];
     const dedupedKeys = [];
     const seen = new Set();
@@ -1095,9 +1127,12 @@ const WorkQueueItemsTableWidget = ({
       }
     });
     const isMilestoneQueue =
-      selectedBucketId === 'active-clients-checkins' ||
-      selectedBucketId === 'followups-closure' ||
-      (itemTypes.length === 1 && itemTypes[0] === 'InterventionMilestone');
+      !isMetricMode &&
+      (
+        selectedBucketId === 'active-clients-checkins' ||
+        selectedBucketId === 'followups-closure' ||
+        (itemTypes.length === 1 && itemTypes[0] === 'InterventionMilestone')
+      );
     if (isAssessor) {
       keys = dedupedKeys.filter(key => key !== 'owner');
     } else {
@@ -1141,6 +1176,20 @@ const WorkQueueItemsTableWidget = ({
         const base = columnDefinitionsByKey[key];
         if (!base) return null;
         const widthOverride = widthsMap.get(base.id);
+        if (base.id === 'metricSubject') {
+          return {
+            ...base,
+            width: widthOverride,
+            header: metricView?.subjectLabel || base.header
+          };
+        }
+        if (base.id === 'eventDate') {
+          return {
+            ...base,
+            width: widthOverride,
+            header: metricView?.eventDateLabel || base.header
+          };
+        }
         if (base.id === 'intervention' && isMilestoneQueue) {
           return {
             ...base,
@@ -1148,7 +1197,7 @@ const WorkQueueItemsTableWidget = ({
             header: 'Intervention'
           };
         }
-        if (base.id === 'status') {
+        if (base.id === 'status' && !isMetricMode) {
           return {
             ...base,
             width: widthOverride,
@@ -1194,7 +1243,7 @@ const WorkQueueItemsTableWidget = ({
             }
           };
         }
-        if (base.id === 'dueDate') {
+        if (base.id === 'dueDate' && !isMetricMode) {
           if (isMilestoneQueue) {
             return {
               ...base,
@@ -1258,6 +1307,20 @@ const WorkQueueItemsTableWidget = ({
             width: widthOverride,
             cell: item => {
               const workspacePath = getWorkspacePath(item);
+              if (isMetricMode) {
+                return (
+                  <Link
+                    href={workspacePath || '#'}
+                    onFollow={event => {
+                      if (!workspacePath) {
+                        event.preventDefault();
+                      }
+                    }}
+                  >
+                    Open workspace
+                  </Link>
+                );
+              }
               return (
                 <SpaceBetween size="xs" direction="horizontal" alignItems="center">
                   <Link
@@ -1435,7 +1498,11 @@ const WorkQueueItemsTableWidget = ({
       })
       .filter(Boolean);
   }, [
+    isMetricMode,
     itemTypes,
+    metricView?.columnPreset,
+    metricView?.eventDateLabel,
+    metricView?.subjectLabel,
     selectedBucketId,
     slaTargets,
     columnWidths,
@@ -1443,13 +1510,20 @@ const WorkQueueItemsTableWidget = ({
     role,
     isAssessor,
     canManageEiEligibility,
+    openEscalationModal,
     watchPending,
     handleToggleWatch
   ]);
 
-  const emptyState = selectedBucket
-    ? 'No items are available for this queue yet.'
-    : 'Select a work queue to see items.';
+  const emptyState = isMetricMode
+    ? metricLoading
+      ? 'Loading metric results...'
+      : metricError
+        ? 'Metric results could not be loaded.'
+        : 'No records matched this metric for the selected period.'
+    : selectedBucket
+      ? 'No items are available for this queue yet.'
+      : 'Select a work queue to see items.';
 
   useEffect(() => {
     if (!assignModalVisible || !assignTarget || !(assignTarget.case_id || assignTarget.caseId)) {
@@ -1773,6 +1847,10 @@ const WorkQueueItemsTableWidget = ({
     if (escalationAction?.title && target) return `${escalationAction.title} — ${target}`;
     return escalationAction?.title || 'Escalation action';
   })();
+  const metricSummaryParts = [
+    metricView?.periodIndependent ? metricView?.scopeNote : metricView?.period?.rangeLabel,
+    metricView?.truncated ? `Showing first ${metricItems.length} result(s)` : `${metricItems.length} item(s)`
+  ].filter(Boolean);
 
   return (
     <BoardItem
@@ -1780,32 +1858,52 @@ const WorkQueueItemsTableWidget = ({
         <Header
           variant="h2"
           info={infoLink}
+          actions={
+            isMetricMode && typeof onCloseMetricView === 'function' ? (
+              <Button onClick={onCloseMetricView}>Back to work queue</Button>
+            ) : undefined
+          }
           description={
-            selectedBucket
-              ? `${selectedBucket.description || selectedBucket.label} · ${queueItems.length} item(s)`
-              : 'Select a work queue to view its items.'
+            isMetricMode
+              ? metricLoading
+                ? 'Loading metric results...'
+                : metricSummaryParts.join(' · ') || 'Metric drilldown results.'
+              : selectedBucket
+                ? `${selectedBucket.description || selectedBucket.label} · ${tableItems.length} item(s)`
+                : 'Select a work queue to view its items.'
           }
         >
           <Hotspot hotspotId="home-work-queue-items" direction="right" />
-          {selectedBucket ? `${selectedBucket.label} Items` : 'Work Queue Items'}
+          {isMetricMode
+            ? `${metricView?.metricLabel || 'Metric'} Results`
+            : selectedBucket
+              ? `${selectedBucket.label} Items`
+              : 'Work Queue Items'}
         </Header>
       }
       settings={settingsDropdown(actions)}
       i18nStrings={boardItemI18n}
     >
+      {metricError ? (
+        <Box color="text-status-error" margin={{ bottom: 's' }}>
+          {metricError}
+        </Box>
+      ) : null}
       <Table
         variant="embedded"
         trackBy="id"
-        items={queueItems}
+        items={tableItems}
         columnDefinitions={columnDefinitions}
         resizableColumns
         stickyHeader
         enableKeyboardNavigation
         wrapLines={shouldWrapLines}
+        loading={metricLoading}
+        loadingText="Loading metric results"
         filter={
           <TextFilter
             filteringText={filteringText}
-            filteringPlaceholder="Search queue items"
+            filteringPlaceholder={isMetricMode ? 'Search metric results' : 'Search queue items'}
             onChange={({ detail }) => setFilteringText(detail.filteringText || '')}
           />
         }

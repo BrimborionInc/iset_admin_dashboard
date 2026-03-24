@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Button, SpaceBetween } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
-import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims, buildLoginUrl } from '../../auth/cognito';
 import { apiFetch } from '../../auth/apiClient';
+import { useAuth } from '../../context/AuthContext.js';
 import useCurrentUser from '../../hooks/useCurrentUser';
 import { getRoleDisplayName } from '../../utils/roleDisplay';
 import { formatSinDisplay } from '../../utils/applicantWatchlist';
@@ -97,21 +97,7 @@ const ISET_COORDINATOR_MISSING_DOCS_FILTER = [
 ].join(',');
 
 const buildDevHeaders = (role) => {
-    const headers = { Accept: 'application/json' };
-    try {
-        if (role && role !== 'Guest') {
-            headers['X-Dev-Role'] = role;
-        }
-        if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('iamBypass') === 'off') {
-            const token = sessionStorage.getItem('devBypassToken') || process.env.REACT_APP_DEV_AUTH_TOKEN || 'local-dev-secret';
-            headers['X-Dev-Bypass'] = token;
-            const simulatedUser = sessionStorage.getItem('devUserId');
-            if (simulatedUser) headers['X-Dev-UserId'] = simulatedUser;
-            const simulatedRegion = sessionStorage.getItem('devRegionId');
-            if (simulatedRegion) headers['X-Dev-RegionId'] = simulatedRegion;
-        }
-    } catch (_) {}
-    return headers;
+    return { Accept: 'application/json' };
 };
 
 const isEligibilityPending = (value) => {
@@ -321,39 +307,13 @@ const boardI18nStrings = {
 };
 
 const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel }) => {
-    const iamOn = isIamOn();
-    const signedIn = hasValidSession();
-    const claims = signedIn ? getIdTokenClaims() : null;
-    const tokenRole = claims ? getRoleFromClaims(claims) : null;
-    const [authVersion, setAuthVersion] = useState(0);
-
-    useEffect(() => {
-        const handler = () => setAuthVersion(v => v + 1);
-        window.addEventListener('auth:session-changed', handler);
-        return () => window.removeEventListener('auth:session-changed', handler);
-    }, []);
-
-    const simulatedRole = useMemo(() => {
-        try {
-            const raw = sessionStorage.getItem('currentRole');
-            if (raw) {
-                const parsed = JSON.parse(raw);
-                return parsed?.value || parsed?.label || null;
-            }
-            if (sessionStorage.getItem('simulateSignedOut') === 'true') {
-                return 'Guest';
-            }
-        } catch (_) {}
-        return null;
-    }, []);
-
-    const role = useMemo(() => {
-        if (iamOn) {
-            return tokenRole || simulatedRole || 'Guest';
-        }
-        return simulatedRole || tokenRole || 'Guest';
-    }, [iamOn, tokenRole, simulatedRole]);
+    const { isAuthenticated, role: authenticatedRole, signIn } = useAuth();
+    const role = authenticatedRole || 'Guest';
     const { userId: currentUserId, email: currentUserEmail } = useCurrentUser();
+    const authRefreshKey = useMemo(
+        () => [role, currentUserId || '', currentUserEmail || ''].join(':'),
+        [role, currentUserEmail, currentUserId]
+    );
     const isWorkQueueRole = role === 'Program Administrator' || role === 'Regional Coordinator';
     const isIsetCoordinatorRole = role === 'Application Assessor';
     const isRegionalCoordinatorRole = role === 'Regional Coordinator' || role === 'Regional Manager';
@@ -366,14 +326,6 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         }
         return PROGRAM_ADMIN_BUCKETS;
     }, [isWorkQueueRole, isRegionalCoordinatorRole]);
-
-    const simulateSignedOut = useMemo(() => {
-        try {
-            return sessionStorage.getItem('simulateSignedOut') === 'true';
-        } catch (_) {
-            return false;
-        }
-    }, []);
 
     const initialItems =
         isIsetCoordinatorRole ? ISET_COORDINATOR_SAMPLE_ITEMS : PROGRAM_ADMIN_SAMPLE_ITEMS;
@@ -421,6 +373,8 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
     const storageKey = useMemo(() => `${STORAGE_PREFIX}.${role || 'guest'}`, [role]);
     const defaultLayout = useMemo(() => buildDefaultLayout(role), [role]);
     const [layout, setLayout] = useState(() => loadLayoutFromStorage(storageKey, allowedWidgets) ?? defaultLayout);
+    const metricDrilldownAbortRef = useRef(null);
+    const [metricDrilldown, setMetricDrilldown] = useState(null);
     const boardItems = useMemo(() => toBoardItems(layout, allowedWidgets), [layout, allowedWidgets]);
     const paletteItems = useMemo(() => computePaletteItems(layout, allowedWidgets), [layout, allowedWidgets]);
     const paletteSignatureRef = useRef(JSON.stringify(paletteItems));
@@ -437,6 +391,28 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         } catch (_) {}
     }, [layout, storageKey]);
 
+    const cancelMetricDrilldownRequest = useCallback(() => {
+        if (metricDrilldownAbortRef.current) {
+            metricDrilldownAbortRef.current.abort();
+            metricDrilldownAbortRef.current = null;
+        }
+    }, []);
+
+    const clearMetricDrilldown = useCallback(() => {
+        cancelMetricDrilldownRequest();
+        setMetricDrilldown(null);
+    }, [cancelMetricDrilldownRequest]);
+
+    useEffect(() => {
+        return () => {
+            cancelMetricDrilldownRequest();
+        };
+    }, [cancelMetricDrilldownRequest]);
+
+    useEffect(() => {
+        clearMetricDrilldown();
+    }, [authRefreshKey, clearMetricDrilldown]);
+
     useEffect(() => {
         const signature = JSON.stringify(paletteItems);
         if (signature !== paletteSignatureRef.current) {
@@ -449,10 +425,11 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
 
     const handleProgramAdminBucketSelect = useCallback((bucketId) => {
         if (!bucketId) return;
+        clearMetricDrilldown();
         setProgramAdminBucketId(bucketId);
         const nextItem = programAdminItems.find(item => item.bucketId === bucketId);
         setProgramAdminSelectedItemId(nextItem?.id || null);
-    }, [programAdminItems]);
+    }, [clearMetricDrilldown, programAdminItems]);
 
     const handleProgramAdminItemSelect = useCallback((itemId) => {
         setProgramAdminSelectedItemId(itemId || null);
@@ -461,6 +438,85 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
     const handleProgramAdminRefresh = useCallback(() => {
         setProgramAdminRefresh(v => v + 1);
     }, []);
+
+    const handleMetricDrilldownOpen = useCallback(async ({ metricId, metricLabel, period }) => {
+        if (!metricId || !period || !allowedWidgets['work-queue-items-table']) {
+            return;
+        }
+
+        setLayout(current => {
+            if (current.some(item => item.id === 'work-queue-items-table')) {
+                return current;
+            }
+            return [
+                ...current,
+                {
+                    id: 'work-queue-items-table',
+                    rowSpan: WIDGET_REGISTRY['work-queue-items-table'].defaultRowSpan,
+                    columnSpan: WIDGET_REGISTRY['work-queue-items-table'].defaultColumnSpan
+                }
+            ];
+        });
+
+        cancelMetricDrilldownRequest();
+        const controller = new AbortController();
+        metricDrilldownAbortRef.current = controller;
+
+        setMetricDrilldown({
+            metricId,
+            metricLabel,
+            loading: true,
+            error: '',
+            items: [],
+            period: { key: period }
+        });
+
+        try {
+            const response = await apiFetch(
+                `/api/dashboard/metrics/details?metricId=${encodeURIComponent(metricId)}&period=${encodeURIComponent(period)}`,
+                { signal: controller.signal }
+            );
+            if (!response.ok) {
+                let errorPayload = null;
+                try {
+                    errorPayload = await response.json();
+                } catch (_) {
+                    errorPayload = null;
+                }
+                throw new Error(errorPayload?.message || 'Failed to load metric results.');
+            }
+            const payload = await response.json();
+            if (metricDrilldownAbortRef.current !== controller) {
+                return;
+            }
+            setMetricDrilldown({
+                ...payload,
+                loading: false,
+                error: ''
+            });
+        } catch (err) {
+            if (err?.name === 'AbortError') {
+                return;
+            }
+            if (metricDrilldownAbortRef.current !== controller) {
+                return;
+            }
+            setMetricDrilldown(current => ({
+                ...(current || {
+                    metricId,
+                    metricLabel,
+                    period: { key: period },
+                    items: []
+                }),
+                loading: false,
+                error: err?.message || 'Failed to load metric results.'
+            }));
+        } finally {
+            if (metricDrilldownAbortRef.current === controller) {
+                metricDrilldownAbortRef.current = null;
+            }
+        }
+    }, [allowedWidgets, cancelMetricDrilldownRequest]);
 
     const coordinatorStatusesParam = useMemo(
         () => encodeURIComponent(ISET_COORDINATOR_STATUS_FILTER),
@@ -613,7 +669,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadProgramAdminCounts();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isWorkQueueRole]);
+    }, [role, programAdminRefresh, isWorkQueueRole]);
 
     useEffect(() => {
         if (!isRegionalCoordinatorRole) {
@@ -720,7 +776,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadRegionalManagerAssignedApplications();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isRegionalCoordinatorRole, coordinatorStatusesParam, currentUserId, currentUserEmail]);
+    }, [role, programAdminRefresh, isRegionalCoordinatorRole, coordinatorStatusesParam, currentUserId, currentUserEmail]);
 
     useEffect(() => {
         if (!isIsetCoordinatorRole) {
@@ -806,7 +862,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadAssignedApplications();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isIsetCoordinatorRole, coordinatorStatusesParam]);
+    }, [role, programAdminRefresh, isIsetCoordinatorRole, coordinatorStatusesParam]);
 
     useEffect(() => {
         if (!isIsetCoordinatorRole) {
@@ -891,7 +947,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadMissingDocs();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isIsetCoordinatorRole, coordinatorMissingDocsParam]);
+    }, [role, programAdminRefresh, isIsetCoordinatorRole, coordinatorMissingDocsParam]);
 
     useEffect(() => {
         if (!isIsetCoordinatorRole) {
@@ -977,7 +1033,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadEiEligibility();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isIsetCoordinatorRole, coordinatorEiEligibilityParam]);
+    }, [role, programAdminRefresh, isIsetCoordinatorRole, coordinatorEiEligibilityParam]);
 
     useEffect(() => {
         if (!isIsetCoordinatorRole) {
@@ -1059,7 +1115,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadReadyToAssess();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isIsetCoordinatorRole, coordinatorReadyToAssessParam]);
+    }, [role, programAdminRefresh, isIsetCoordinatorRole, coordinatorReadyToAssessParam]);
 
     useEffect(() => {
         if (!isIsetCoordinatorRole) {
@@ -1144,7 +1200,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadAwaitingApproval();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isIsetCoordinatorRole, coordinatorApprovalsParam]);
+    }, [role, programAdminRefresh, isIsetCoordinatorRole, coordinatorApprovalsParam]);
 
     useEffect(() => {
         if (!isIsetCoordinatorRole) {
@@ -1244,7 +1300,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadFundingAgreements();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isIsetCoordinatorRole, coordinatorFundingAgreementsParam]);
+    }, [role, programAdminRefresh, isIsetCoordinatorRole, coordinatorFundingAgreementsParam]);
 
     useEffect(() => {
         if (!isIsetCoordinatorRole) {
@@ -1332,7 +1388,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadActiveClientMilestones();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isIsetCoordinatorRole, coordinatorMilestoneWindowParam]);
+    }, [role, programAdminRefresh, isIsetCoordinatorRole, coordinatorMilestoneWindowParam]);
 
     useEffect(() => {
         if (!isIsetCoordinatorRole) {
@@ -1430,7 +1486,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadClosureFollowups();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isIsetCoordinatorRole]);
+    }, [role, programAdminRefresh, isIsetCoordinatorRole]);
 
     useEffect(() => {
         if (!isIsetCoordinatorRole) {
@@ -1502,7 +1558,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadPaymentsProofDue();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isIsetCoordinatorRole]);
+    }, [role, programAdminRefresh, isIsetCoordinatorRole]);
 
     useEffect(() => {
         if (!isIsetCoordinatorRole) {
@@ -1673,7 +1729,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadOverdueCombined();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isIsetCoordinatorRole]);
+    }, [role, programAdminRefresh, isIsetCoordinatorRole]);
 
     useEffect(() => {
         if (!isWorkQueueRole) {
@@ -1762,7 +1818,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadUnassignedApplications();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isWorkQueueRole]);
+    }, [role, programAdminRefresh, isWorkQueueRole]);
 
     useEffect(() => {
         if (!isWorkQueueRole) {
@@ -1829,7 +1885,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadConflicts();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isWorkQueueRole]);
+    }, [role, programAdminRefresh, isWorkQueueRole]);
 
     useEffect(() => {
         if (!isWorkQueueRole) {
@@ -1901,7 +1957,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadEiEligibility();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isWorkQueueRole]);
+    }, [role, programAdminRefresh, isWorkQueueRole]);
 
     useEffect(() => {
         if (!isWorkQueueRole) {
@@ -1965,7 +2021,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadAwaitingApproval();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isWorkQueueRole]);
+    }, [role, programAdminRefresh, isWorkQueueRole]);
 
     useEffect(() => {
         if (!isWorkQueueRole) {
@@ -2040,7 +2096,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadInterventionApprovals();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isWorkQueueRole]);
+    }, [role, programAdminRefresh, isWorkQueueRole]);
 
     useEffect(() => {
         if (!isWorkQueueRole) {
@@ -2117,7 +2173,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadWatchlistHits();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isWorkQueueRole]);
+    }, [role, programAdminRefresh, isWorkQueueRole]);
 
     useEffect(() => {
         if (!isWorkQueueRole) {
@@ -2187,19 +2243,17 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadMarkedForClosure();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isWorkQueueRole]);
+    }, [role, programAdminRefresh, isWorkQueueRole]);
 
     useEffect(() => {
         if (!isWorkQueueRole) {
             return;
         }
-        let ignore = false;
         const loadEscalations = async () => {
             await fetchEscalations();
         };
         loadEscalations();
-        return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, fetchEscalations, isWorkQueueRole]);
+    }, [role, programAdminRefresh, fetchEscalations, isWorkQueueRole]);
 
     useEffect(() => {
         if (!isWorkQueueRole) {
@@ -2293,7 +2347,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadOverdue();
         return () => { ignore = true; };
-    }, [role, authVersion, programAdminRefresh, isWorkQueueRole]);
+    }, [role, programAdminRefresh, isWorkQueueRole]);
 
     useEffect(() => {
         if (!isWorkQueueRole && !isIsetCoordinatorRole) {
@@ -2375,7 +2429,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                 <WidgetComponent
                     actions={actions}
                     role={role}
-                    refreshKey={authVersion}
+                    refreshKey={authRefreshKey}
                     selectedBucketId={programAdminBucketId}
                     onSelectBucket={handleProgramAdminBucketSelect}
                     bucketDefinitions={bucketDefinitions}
@@ -2391,7 +2445,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                 <WidgetComponent
                     actions={actions}
                     role={role}
-                    refreshKey={authVersion}
+                    refreshKey={authRefreshKey}
                     selectedBucketId={programAdminBucketId}
                     onSelectBucket={handleProgramAdminBucketSelect}
                     items={programAdminItems}
@@ -2406,7 +2460,10 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                 <WidgetComponent
                     actions={actions}
                     role={role}
-                    refreshKey={authVersion}
+                    refreshKey={authRefreshKey}
+                    mode={metricDrilldown ? 'metric' : 'queue'}
+                    metricView={metricDrilldown}
+                    onCloseMetricView={clearMetricDrilldown}
                     selectedBucketId={programAdminBucketId}
                     selectedItemId={programAdminSelectedItemId}
                     onSelectItem={handleProgramAdminItemSelect}
@@ -2417,23 +2474,35 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                 />
             );
         }
+        if (item.id === 'metrics') {
+            return (
+                <WidgetComponent
+                    actions={actions}
+                    role={role}
+                    refreshKey={authRefreshKey}
+                    metricDrilldown={metricDrilldown}
+                    onOpenMetricDrilldown={handleMetricDrilldownOpen}
+                    toggleHelpPanel={toggleHelpPanel}
+                />
+            );
+        }
         return (
             <WidgetComponent
                 actions={actions}
                 role={role}
-                refreshKey={authVersion}
+                refreshKey={authRefreshKey}
                 toggleHelpPanel={toggleHelpPanel}
             />
         );
     };
 
-    const shouldShowAuthPrompt = (iamOn && !signedIn) || (!iamOn && simulateSignedOut);
+    const shouldShowAuthPrompt = !isAuthenticated;
 
     if (shouldShowAuthPrompt) {
         return (
             <SpaceBetween size="m">
                 <Box variant="p">You are not signed in. Please authenticate to access administrative functions.</Box>
-                <Button variant="primary" onClick={() => window.location.assign(buildLoginUrl())}>Sign in</Button>
+                <Button variant="primary" onClick={signIn}>Sign in</Button>
             </SpaceBetween>
         );
     }

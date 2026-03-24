@@ -36,7 +36,7 @@ Redirect URI / origin mismatch and resulting token storage instability:
 ## Additional Hardening Recommendations (Optional / Future)
 - Add a single `BASE_PORT` or `ADMIN_APP_BASE_URL` constant and eliminate hard-coded localhost references in any deep links.
 - Provide an explicit Sign Out button using `buildLogoutUrl()` and `clearSession()` so users do not rely on manual tab closures (reduces stale refresh token mishaps).
-- Implement exponential backoff for transient 401s where `authPending` flag is active to avoid clearing a valid session during race conditions.
+- Keep `/auth/callback` isolated from the main app shell so route-level components do not evaluate partial auth state during token exchange.
 - Persist session in `localStorage` (optionally encrypted) if multi-tab continuity is desired.
 
 ## Validation Checklist
@@ -61,4 +61,4 @@ and ensure all links reference only the configured `REACT_APP_COGNITO_REDIRECT_U
 - `src/routes/AppRoutes.js` (Guard logic)
 
 ## Last Updated
-2025-09-19
+2026-03-24

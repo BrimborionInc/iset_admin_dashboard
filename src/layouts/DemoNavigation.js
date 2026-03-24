@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import Button from "@cloudscape-design/components/button";
-import Toggle from "@cloudscape-design/components/toggle";
 import Select from "@cloudscape-design/components/select";
 import Modal from "@cloudscape-design/components/modal";
 import SpaceBetween from "@cloudscape-design/components/space-between";
@@ -10,16 +9,6 @@ import Textarea from "@cloudscape-design/components/textarea";
 import Box from "@cloudscape-design/components/box";
 import styles from './DemoNavigation.module.css';
 import { apiFetch } from '../auth/apiClient';
-import { getRoleDisplayName } from '../utils/roleDisplay';
-
-// Canonical simulated roles aligned with backend Cognito groups & middleware
-const roleOptions = [
-  { label: 'Signed Out', value: '__signed_out__' },
-  { label: getRoleDisplayName('System Administrator'), value: 'System Administrator' },
-  { label: getRoleDisplayName('Program Administrator'), value: 'Program Administrator' },
-  { label: getRoleDisplayName('Regional Coordinator'), value: 'Regional Coordinator' },
-  { label: getRoleDisplayName('Application Assessor'), value: 'Application Assessor' },
-];
 
 const renderResultDetails = (details) => {
   if (!details) {
@@ -107,14 +96,7 @@ const renderResultDetails = (details) => {
   return null;
 };
 
-const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setCurrentRole }) => {
-  const [iamOn, setIamOn] = useState(() => {
-    const stored = sessionStorage.getItem('iamBypass');
-    if (stored) {
-      return stored !== 'off';
-    }
-    return process.env.REACT_APP_DEV_AUTH_BYPASS !== 'true';
-  });
+const TopHeader = ({ currentLanguage = 'en', onLanguageChange }) => {
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [confirmationValue, setConfirmationValue] = useState('');
   const [isClearingTestData, setIsClearingTestData] = useState(false);
@@ -139,83 +121,6 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
   const [casePaymentsInterventionsPerClient, setCasePaymentsInterventionsPerClient] = useState('2');
   const [casePaymentsInterventionTypes, setCasePaymentsInterventionTypes] = useState('');
   const [casePaymentsAdditionalDetails, setCasePaymentsAdditionalDetails] = useState('');
-
-  const applySimulatedStaff = (roleValue) => {
-    try {
-      switch (roleValue) {
-        case 'Program Administrator':
-          sessionStorage.setItem('devUserId', '13');
-          sessionStorage.removeItem('devRegionId');
-          break;
-        case 'Regional Coordinator':
-          sessionStorage.setItem('devUserId', '1');
-          sessionStorage.setItem('devRegionId', '14');
-          break;
-        case 'Application Assessor':
-          sessionStorage.setItem('devUserId', '21');
-          sessionStorage.setItem('devRegionId', '14');
-          break;
-        default:
-          sessionStorage.removeItem('devUserId');
-          sessionStorage.removeItem('devRegionId');
-          break;
-      }
-    } catch (err) {
-      // ignore storage failures
-    }
-  };
-
-  // Persist IAM toggle and apply dev-bypass token defaults
-  useEffect(() => {
-    const previous = sessionStorage.getItem('iamBypass');
-    sessionStorage.setItem('iamBypass', iamOn ? 'on' : 'off');
-    if (!sessionStorage.getItem('devBypassToken')) {
-      sessionStorage.setItem('devBypassToken', 'local-dev-secret');
-    }
-    const wasOff = previous === 'off';
-    // If we are turning IAM ON (moving from bypass to real auth), clear simulated role/email
-    if (iamOn && wasOff) {
-      try {
-        sessionStorage.removeItem('simulateSignedOut');
-        sessionStorage.removeItem('currentRole');
-        // Fire event so TopNavigation recomputes and shows real signed-in state or Sign in
-        window.dispatchEvent(new CustomEvent('auth:session-changed', { detail: { session: null, action: 'iam-toggle-on' } }));
-      } catch {}
-    } else if (!iamOn && previous === 'on') {
-      // Turning IAM OFF, restore a default role if none selected yet
-      if (!sessionStorage.getItem('currentRole')) {
-        const defaultRole = { label: getRoleDisplayName('Program Administrator'), value: 'Program Administrator' };
-        try {
-          sessionStorage.setItem('currentRole', JSON.stringify(defaultRole));
-        } catch {}
-      }
-      window.dispatchEvent(new CustomEvent('auth:session-changed', { detail: { session: null, action: 'iam-toggle-off' } }));
-    }
-  }, [iamOn]);
-
-  // Initialize from simulateSignedOut flag
-  useEffect(() => {
-    const sim = sessionStorage.getItem('simulateSignedOut') === 'true';
-    if (sim && (!currentRole || currentRole.value !== '__signed_out__')) {
-      setCurrentRole({ label: 'Signed Out', value: '__signed_out__' });
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Persist currentRole for apiClient and simulation
-  useEffect(() => {
-    try {
-      if (currentRole?.value === '__signed_out__') {
-        sessionStorage.setItem('simulateSignedOut', 'true');
-        sessionStorage.removeItem('currentRole');
-      } else if (currentRole) {
-        sessionStorage.setItem('simulateSignedOut', 'false');
-        sessionStorage.setItem('currentRole', JSON.stringify(currentRole));
-      }
-      // Notify UI to re-evaluate auth-aware UI
-      window.dispatchEvent(new CustomEvent('auth:session-changed', { detail: { session: null, action: 'simulate' } }));
-    } catch {}
-  }, [currentRole]);
 
   const handleOpenClearModal = () => {
     setConfirmVisible(true);
@@ -559,29 +464,9 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole, setC
     <div className={styles.demoNavigation}>
       <span>Demo Controls</span>
       <div className={styles.buttonGroup} style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-        <Toggle
-          checked={iamOn}
-          onChange={({ detail }) => setIamOn(detail.checked)}
-        >
-          IAM {iamOn ? '(On)' : '(Off)'}
-        </Toggle>
         <Button variant="primary" onClick={handleOpenClearModal}>
           Clear ISET test data
         </Button>
-        <Select
-          selectedOption={currentRole}
-          onChange={({ detail }) => {
-            setCurrentRole(detail.selectedOption);
-            applySimulatedStaff(detail.selectedOption?.value || null);
-          }}
-          options={roleOptions}
-          ariaLabel="Select role"
-          selectedAriaLabel="Selected role"
-          placeholder="Select role"
-          className={styles.roleSelect}
-          style={{ minWidth: 200 }}
-          disabled={iamOn}
-        />
         <Button variant="link" loading={isCreatingDummy} onClick={handleOpenAiDummyModal}>Create Dummy Draft</Button>
         <Button variant="link" loading={isCreatingCasePayments} onClick={handleOpenCasePaymentsModal}>Create Dummy Case Payments</Button>
       </div>

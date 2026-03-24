@@ -743,13 +743,6 @@ export default function AuthConfigWidget({
     if (scopeList.length > 0) {
       items.push(<Box key="scopes">Scopes: {scopeList.join(', ')}</Box>);
     }
-    if (authObj.devBypass) {
-      items.push(
-        <StatusIndicator key="dev-bypass" type="warning">
-          Dev authentication bypass active
-        </StatusIndicator>
-      );
-    }
     if (authObj.audit && (authObj.audit.updatedAt || authObj.audit.updatedBy)) {
       items.push(
         <Box key="audit" fontSize="body-s" color="text-status-inactive">

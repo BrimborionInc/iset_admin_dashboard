@@ -49,6 +49,11 @@ const PROVINCE_CODE_INDEX = PROVINCE_TERRITORY_OPTIONS.reduce((acc, option, inde
   return acc;
 }, {});
 
+const REPORTING_PROVINCE_LABEL_BY_CODE = PROVINCE_TERRITORY_OPTIONS.reduce((acc, option) => {
+  acc[option.value] = option.label;
+  return acc;
+}, {});
+
 const DEMO_PROVINCE_WEIGHTS = {
   AB: 0.92,
   BC: 0.88,
@@ -146,6 +151,12 @@ const REPORTING_PERIOD_DISPLAY_LABELS = {
 const RESULTS_VIEW_OPTIONS = [
   { id: "cumulative", text: "Cumulative" },
   { id: "monthly", text: "Monthly" },
+];
+
+const APPLICATION_ACTIVITY_METRIC_OPTIONS = [
+  { label: "New applications", value: "newApplications" },
+  { label: "Approved applications", value: "approvedApplications" },
+  { label: "Denied applications", value: "deniedApplications" },
 ];
 
 const INTERVENTION_STATUS_OPTIONS = [
@@ -274,9 +285,16 @@ const ACTION_PLAN_STATUS_SNAPSHOT_ROWS = new Set([
   "4. Action Plans with data integrity issues",
 ]);
 
-const DASHBOARD_STORAGE_KEY = "reporting-data-and-results-layout.v1";
+const DASHBOARD_STORAGE_KEY = "reporting-data-and-results-layout.v2";
 
 const REPORTING_SECTION_REGISTRY = {
+  "application-activity": {
+    id: "application-activity",
+    title: "Intake and Assessment",
+    description: "New, approved, or denied applications by province or territory.",
+    defaultRowSpan: 8,
+    defaultColumnSpan: 4,
+  },
   interventions: {
     id: "interventions",
     title: "Interventions",
@@ -329,6 +347,7 @@ const REPORTING_SECTION_REGISTRY = {
 };
 
 const DEFAULT_DASHBOARD_LAYOUT = [
+  { id: "application-activity", rowSpan: 8, columnSpan: 4 },
   { id: "interventions", rowSpan: 8, columnSpan: 4 },
   { id: "overall-results", rowSpan: 5, columnSpan: 4 },
   { id: "quarterly-data-uploads", rowSpan: 5, columnSpan: 4 },
@@ -492,6 +511,42 @@ const PENDING_OVERALL_RESULTS_ITEMS = [
   { metric: "Clients Returned to School", target: null, result: null },
 ];
 
+const buildPendingApplicationActivityRows = provinceCodes =>
+  (provinceCodes?.length ? provinceCodes : PROVINCE_TERRITORY_OPTIONS.map(option => option.value)).map(
+    provinceCode => ({
+      provinceCode,
+      label: REPORTING_PROVINCE_LABEL_BY_CODE[provinceCode] || provinceCode,
+      values: REPORTING_PERIOD_COLUMNS.reduce((acc, column) => {
+        acc[column] = null;
+        return acc;
+      }, {}),
+    })
+  );
+
+const normaliseApplicationActivityRows = rows => {
+  if (!Array.isArray(rows) || !rows.length) {
+    return buildPendingApplicationActivityRows();
+  }
+
+  return rows
+    .filter(row => REPORTING_PROVINCE_LABEL_BY_CODE[row?.provinceCode])
+    .sort((left, right) => {
+      const leftIndex = PROVINCE_CODE_INDEX[left?.provinceCode] ?? Number.MAX_SAFE_INTEGER;
+      const rightIndex = PROVINCE_CODE_INDEX[right?.provinceCode] ?? Number.MAX_SAFE_INTEGER;
+      return leftIndex - rightIndex;
+    })
+    .map(row => ({
+      provinceCode: row.provinceCode,
+      label: REPORTING_PROVINCE_LABEL_BY_CODE[row.provinceCode] || row.label || row.provinceCode,
+      values: REPORTING_PERIOD_COLUMNS.reduce((acc, column) => {
+        acc[column] = Object.prototype.hasOwnProperty.call(row?.values || {}, column)
+          ? row.values[column]
+          : null;
+        return acc;
+      }, {}),
+    }));
+};
+
 const buildPendingQuarterlyUploadItems = startYear =>
   buildQuarterDefinitions(startYear).map(item => ({
     period: item.period,
@@ -502,6 +557,11 @@ const buildPendingQuarterlyUploadItems = startYear =>
 
 const buildPendingLiveReportData = () => ({
   overallResults: PENDING_OVERALL_RESULTS_ITEMS,
+  applicationActivity: {
+    newApplications: buildPendingApplicationActivityRows(),
+    approvedApplications: buildPendingApplicationActivityRows(),
+    deniedApplications: buildPendingApplicationActivityRows(),
+  },
   interventions: buildPendingPeriodRows(INTERVENTION_ROWS),
   clientResults: buildPendingPeriodRows(CLIENT_RESULT_ROWS),
   dataUploads: buildPendingPeriodRows(DATA_UPLOAD_ROWS),
@@ -513,6 +573,7 @@ const DEFAULT_LIVE_REPORT_META = {
   hasTargetsConfigured: false,
   sectionStatus: {
     overall: "pending",
+    applicationActivity: "pending",
     interventions: "pending",
     clientResults: "pending",
     dataUploads: "pending",
@@ -520,6 +581,7 @@ const DEFAULT_LIVE_REPORT_META = {
   },
   notes: {
     overall: "",
+    applicationActivity: "",
     interventions: "",
     clientResults: "",
     dataUploads: "",
@@ -833,6 +895,9 @@ const getDemoCaseManagerScale = selectedCaseManagerCount => {
 const DEMO_MONTHLY_SHARE_WEIGHTS = [5, 6, 7, 8, 8, 9, 9, 9, 10, 10, 9, 10];
 const DEMO_EMPLOYED_MONTHLY_SHARE_WEIGHTS = [3, 4, 5, 6, 7, 8, 10, 11, 11, 12, 11, 12];
 const DEMO_SCHOOL_MONTHLY_SHARE_WEIGHTS = [6, 7, 8, 8, 9, 10, 9, 9, 8, 8, 8, 10];
+const DEMO_APPLICATION_NEW_MONTHLY_SHARE_WEIGHTS = [9, 10, 11, 11, 10, 10, 9, 9, 8, 8, 7, 7];
+const DEMO_APPLICATION_APPROVED_MONTHLY_SHARE_WEIGHTS = [3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 11, 12];
+const DEMO_APPLICATION_DENIED_MONTHLY_SHARE_WEIGHTS = [2, 3, 4, 5, 5, 6, 7, 8, 8, 8, 7, 7];
 const DEMO_ACTION_PLAN_MONTHLY_SHARE_WEIGHTS = [4, 5, 6, 7, 7, 8, 9, 10, 10, 11, 11, 12];
 const DEMO_INTERVENTION_START_DATE_SHARE_WEIGHTS = [10, 10, 9, 9, 8, 8, 7, 7, 6, 5, 4, 4];
 const DEMO_INTERVENTION_END_DATE_SHARE_WEIGHTS = DEMO_MONTHLY_SHARE_WEIGHTS;
@@ -938,6 +1003,34 @@ const buildDemoRowFromMonthlyCounts = (label, monthlyCounts) => ({
   values: buildReportingValuesFromMonthlyCounts(monthlyCounts),
 });
 
+const buildProvinceActivityDemoRows = ({ provinceCodes, monthlyTotals }) => {
+  const orderedProvinceCodes = PROVINCE_TERRITORY_OPTIONS
+    .filter(option => provinceCodes.includes(option.value))
+    .map(option => option.value);
+
+  const provinceMonthlyCounts = orderedProvinceCodes.reduce((acc, provinceCode) => {
+    acc[provinceCode] = Array(12).fill(0);
+    return acc;
+  }, {});
+
+  monthlyTotals.forEach((monthTotal, monthIndex) => {
+    const monthWeights = orderedProvinceCodes.map((provinceCode, provinceIndex) =>
+      (DEMO_PROVINCE_WEIGHTS[provinceCode] || 1) * (1 + (((monthIndex + provinceIndex) % 4) * 0.04))
+    );
+    const monthlyAllocations = allocateByWeights(monthTotal, monthWeights);
+    monthlyAllocations.forEach((value, provinceIndex) => {
+      const provinceCode = orderedProvinceCodes[provinceIndex];
+      provinceMonthlyCounts[provinceCode][monthIndex] = value;
+    });
+  });
+
+  return orderedProvinceCodes.map(provinceCode => ({
+    provinceCode,
+    label: REPORTING_PROVINCE_LABEL_BY_CODE[provinceCode] || provinceCode,
+    values: buildReportingValuesFromMonthlyCounts(provinceMonthlyCounts[provinceCode]),
+  }));
+};
+
 const buildDemoOverallResults = ({ targets, results }) =>
   OVERALL_METRIC_DEFINITIONS.map(definition => {
     const metricKey = OVERALL_TARGET_KEY_BY_METRIC[definition.metric];
@@ -974,6 +1067,19 @@ const buildDemoReportData = ({
     clientsReturnedToSchool: Math.round(DEMO_OVERALL_TARGET_BASE_WEIGHT * 11),
   };
 
+  const newApplicationsTotal = Math.max(
+    results.clientsServed + Math.round(filteredResultWeight * 10),
+    Math.round(filteredResultWeight * 60)
+  );
+  const deniedApplicationsTotal = Math.max(0, Math.round(newApplicationsTotal * 0.16));
+  const approvedApplicationsTotal = Math.max(
+    results.clientsServed,
+    Math.min(newApplicationsTotal - deniedApplicationsTotal, Math.round(newApplicationsTotal * 0.7))
+  );
+  const applicationActivityProvinceCodes = PROVINCE_TERRITORY_OPTIONS
+    .filter(option => activeProvinceCodes.includes(option.value))
+    .map(option => option.value);
+
   const clientsServedMonthly = allocateByWeights(results.clientsServed, DEMO_MONTHLY_SHARE_WEIGHTS);
   const employedMonthly = allocateByWeights(
     Math.min(results.clientsEmployed, results.clientsServed),
@@ -983,6 +1089,32 @@ const buildDemoReportData = ({
     Math.min(results.clientsReturnedToSchool, results.clientsServed),
     DEMO_SCHOOL_MONTHLY_SHARE_WEIGHTS
   );
+  const newApplicationsMonthly = allocateByWeights(
+    newApplicationsTotal,
+    DEMO_APPLICATION_NEW_MONTHLY_SHARE_WEIGHTS
+  );
+  const approvedApplicationsMonthly = allocateByWeights(
+    approvedApplicationsTotal,
+    DEMO_APPLICATION_APPROVED_MONTHLY_SHARE_WEIGHTS
+  );
+  const deniedApplicationsMonthly = allocateByWeights(
+    deniedApplicationsTotal,
+    DEMO_APPLICATION_DENIED_MONTHLY_SHARE_WEIGHTS
+  );
+  const applicationActivity = {
+    newApplications: buildProvinceActivityDemoRows({
+      provinceCodes: applicationActivityProvinceCodes,
+      monthlyTotals: newApplicationsMonthly,
+    }),
+    approvedApplications: buildProvinceActivityDemoRows({
+      provinceCodes: applicationActivityProvinceCodes,
+      monthlyTotals: approvedApplicationsMonthly,
+    }),
+    deniedApplications: buildProvinceActivityDemoRows({
+      provinceCodes: applicationActivityProvinceCodes,
+      monthlyTotals: deniedApplicationsMonthly,
+    }),
+  };
   const effectiveInterventionDateBasis =
     interventionMeasure === "cost" ? "payment" : interventionDateBasis;
   const interventionMonthlyWeights =
@@ -1084,6 +1216,7 @@ const buildDemoReportData = ({
     return {
       overallResults: buildDemoOverallResults({ targets, results }),
       quarterlyUploads: buildDemoQuarterlyUploads(activeProvinceCodes, activeFiscalYearStart),
+      applicationActivity,
       interventions: [
         ...interventionCostRows,
         buildDemoRowFromMonthlyCounts(
@@ -1106,6 +1239,7 @@ const buildDemoReportData = ({
   return {
     overallResults: buildDemoOverallResults({ targets, results }),
     quarterlyUploads: buildDemoQuarterlyUploads(activeProvinceCodes, activeFiscalYearStart),
+    applicationActivity,
     interventions,
     clientResults: [
       buildDemoRowFromMonthlyCounts("Clients Served - Total", clientsServedMonthly),
@@ -1377,10 +1511,251 @@ const SimpleSection = ({
   return <Container header={headerElement}>{content}</Container>;
 };
 
+const matrixClickableValueButtonStyle = {
+  appearance: "none",
+  background: "none",
+  border: 0,
+  color: "#0972d3",
+  cursor: "pointer",
+  font: "inherit",
+  margin: 0,
+  padding: 0,
+  textDecoration: "underline",
+};
+
+const matrixExpandedRowCellStyle = {
+  backgroundColor: "#f8fbfd",
+  borderBottom: "1px solid #d5dbdb",
+  padding: "16px 20px",
+};
+
+const matrixActiveValueCellStyle = {
+  backgroundColor: "#ecf3ff",
+  boxShadow: "inset 0 0 0 1px #0972d3",
+};
+
+const createClosedMatrixDrilldownState = () => ({
+  rowId: null,
+  rowLabel: "",
+  column: null,
+  eventDateLabel: "Date",
+  valueFormat: "number",
+  rangeStart: null,
+  rangeEnd: null,
+  resultsView: "cumulative",
+  items: [],
+  truncated: false,
+  loading: false,
+  error: "",
+});
+
+const formatDateOnly = value => {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+  return date.toISOString().slice(0, 10);
+};
+
+const formatStatusLabel = value =>
+  value
+    ? String(value)
+        .trim()
+        .replace(/[_-]+/g, " ")
+        .replace(/\b\w/g, character => character.toUpperCase())
+    : "—";
+
+const getDrilldownStatusType = value => {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (["approved", "completed"].includes(normalized)) return "success";
+  if (["rejected", "declined", "cancelled", "closed", "archived"].includes(normalized)) {
+    return "error";
+  }
+  if (["in_review", "submitted", "pending", "approved"].includes(normalized)) {
+    return "info";
+  }
+  return "pending";
+};
+
+const getDrilldownSubjectName = item =>
+  item?.applicantName ||
+  item?.applicant_name ||
+  item?.participantName ||
+  item?.participant_name ||
+  "Record";
+
+const renderDrilldownSubjectCell = item => {
+  const workspacePath = item?.workspacePath || null;
+  const displayName = getDrilldownSubjectName(item);
+
+  return (
+    <SpaceBetween size="xxs">
+      <Box fontWeight="bold">
+        <Link
+          href={workspacePath || "#"}
+          onFollow={event => {
+            if (!workspacePath) {
+              event.preventDefault();
+            }
+          }}
+        >
+          {displayName}
+        </Link>
+      </Box>
+      <Box fontSize="body-s" color="text-status-inactive">
+        {item?.titleSecondaryText || item?.trackingId || "—"}
+      </Box>
+    </SpaceBetween>
+  );
+};
+
+const buildApplicationDrilldownColumns = eventDateLabel => [
+  {
+    id: "subject",
+    header: "Applicant",
+    cell: renderDrilldownSubjectCell,
+    sortingField: "applicantName",
+  },
+  {
+    id: "status",
+    header: "Status",
+    cell: item => (
+      <StatusIndicator type={getDrilldownStatusType(item?.status)}>
+        {formatStatusLabel(item?.status)}
+      </StatusIndicator>
+    ),
+    sortingField: "status",
+  },
+  {
+    id: "owner",
+    header: "Owner",
+    cell: item => item?.owner || "Unassigned",
+    sortingField: "owner",
+  },
+  {
+    id: "eventDate",
+    header: eventDateLabel || "Date",
+    cell: item => formatDateOnly(item?.metricEventDate),
+    sortingField: "metricEventDate",
+  },
+];
+
+const buildInterventionDrilldownColumns = ({ eventDateLabel, includeAmount = false } = {}) => {
+  const columns = [
+    {
+      id: "subject",
+      header: "Participant",
+      cell: renderDrilldownSubjectCell,
+      sortingField: "applicantName",
+    },
+    {
+      id: "intervention",
+      header: "Intervention",
+      cell: item => item?.intervention_label || item?.intervention_code || "—",
+      sortingField: "intervention_label",
+    },
+    {
+      id: "status",
+      header: "Status",
+      cell: item => (
+        <StatusIndicator type={getDrilldownStatusType(item?.status)}>
+          {formatStatusLabel(item?.status)}
+        </StatusIndicator>
+      ),
+      sortingField: "status",
+    },
+    {
+      id: "owner",
+      header: "Owner",
+      cell: item => item?.owner || "Unassigned",
+      sortingField: "owner",
+    },
+    {
+      id: "eventDate",
+      header: eventDateLabel || "Date",
+      cell: item => formatDateOnly(item?.metricEventDate),
+      sortingField: "metricEventDate",
+    },
+  ];
+
+  if (includeAmount) {
+    columns.push({
+      id: "amount",
+      header: "Amount",
+      cell: item => displayValue(Number(item?.amount || 0), "currency"),
+      sortingField: "amount",
+    });
+  }
+
+  return columns;
+};
+
+const buildDrilldownWindowSummary = drilldown => {
+  if (!drilldown?.rangeStart || !drilldown?.rangeEnd) {
+    return null;
+  }
+  const modeLabel =
+    drilldown.resultsView === "monthly" && drilldown.column !== "Final (p14)"
+      ? "Monthly window"
+      : "Cumulative window";
+  return `${modeLabel}: ${formatDateOnly(drilldown.rangeStart)} to ${formatDateOnly(drilldown.rangeEnd)}`;
+};
+
+const MatrixDrilldownPanel = ({
+  title,
+  drilldown,
+  columnDefinitions,
+  emptyMessage,
+}) => {
+  const windowSummary = buildDrilldownWindowSummary(drilldown);
+
+  return (
+    <SpaceBetween size="s">
+      <Header
+        variant="h3"
+        description={
+          [
+            REPORTING_PERIOD_DISPLAY_LABELS[drilldown?.column] || drilldown?.column || null,
+            windowSummary,
+          ]
+            .filter(Boolean)
+            .join(" · ") || undefined
+        }
+      >
+        {title}
+      </Header>
+      {drilldown?.error ? (
+        <Alert type="error">{drilldown.error}</Alert>
+      ) : null}
+      {drilldown?.truncated ? (
+        <Alert type="info">
+          Showing the first {drilldown.items.length} matching records.
+        </Alert>
+      ) : null}
+      <Table
+        variant="embedded"
+        trackBy="id"
+        items={Array.isArray(drilldown?.items) ? drilldown.items : []}
+        columnDefinitions={columnDefinitions}
+        loading={Boolean(drilldown?.loading)}
+        loadingText="Loading contributing records"
+        wrapLines
+        empty={
+          <Box padding="m">
+            {emptyMessage || "No contributing records were found for this value."}
+          </Box>
+        }
+      />
+    </SpaceBetween>
+  );
+};
+
 const MatrixSection = ({
   title,
   description,
   rows,
+  empty = null,
   stripedRows = false,
   badgeText = null,
   badgeColor = "blue",
@@ -1391,6 +1766,11 @@ const MatrixSection = ({
   asBoardItem = false,
   actions = null,
   onDownloadCsv = null,
+  getRowId = row => row?.provinceCode || row?.label,
+  activeCell = null,
+  onCellFollow = null,
+  isCellDrillable = null,
+  renderExpandedRow = null,
 }) => {
   const headerContent =
     badgeText && headerActions ? (
@@ -1412,58 +1792,101 @@ const MatrixSection = ({
 
   const content = (
     <SpaceBetween size="m">
-      <div style={matrixWrapperStyle}>
-        <table style={matrixTableStyle}>
-          <thead>
-            <tr>
-              <th style={matrixHeaderCellStyle} />
-              {REPORTING_PERIOD_COLUMNS.map(column => (
-                <th key={column} style={matrixValueHeaderCellStyle}>
-                  {REPORTING_PERIOD_DISPLAY_LABELS[column] || column}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, rowIndex) => {
-              const rowBackgroundColor = getMatrixRowBackgroundColor(rowIndex, stripedRows);
-              return (
-                <tr key={row.label}>
-                  <td
-                    style={
-                      row.label === "TOTAL"
-                        ? {
-                            ...matrixLabelCellStyle,
-                            backgroundColor: rowBackgroundColor,
-                            ...matrixTotalRowCellStyle,
-                          }
-                        : { ...matrixLabelCellStyle, backgroundColor: rowBackgroundColor }
-                    }
-                  >
-                    {row.label}
-                  </td>
-                  {REPORTING_PERIOD_COLUMNS.map(column => (
-                    <td
-                      key={`${row.label}-${column}`}
-                      style={
-                        row.label === "TOTAL"
+      {rows.length ? (
+        <div style={matrixWrapperStyle}>
+          <table style={matrixTableStyle}>
+            <thead>
+              <tr>
+                <th style={matrixHeaderCellStyle} />
+                {REPORTING_PERIOD_COLUMNS.map(column => (
+                  <th key={column} style={matrixValueHeaderCellStyle}>
+                    {REPORTING_PERIOD_DISPLAY_LABELS[column] || column}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => {
+                const rowBackgroundColor = getMatrixRowBackgroundColor(rowIndex, stripedRows);
+                const rowId = getRowId(row);
+                const isExpandedRow = activeCell?.rowId === rowId;
+                return (
+                  <React.Fragment key={rowId}>
+                    <tr>
+                      <td
+                        style={
+                          row.label === "TOTAL"
+                            ? {
+                                ...matrixLabelCellStyle,
+                                backgroundColor: rowBackgroundColor,
+                                ...matrixTotalRowCellStyle,
+                              }
+                            : { ...matrixLabelCellStyle, backgroundColor: rowBackgroundColor }
+                        }
+                      >
+                        {row.label}
+                      </td>
+                      {REPORTING_PERIOD_COLUMNS.map(column => {
+                        const cellValue = row.values?.[column];
+                        const isDrillable = typeof onCellFollow === "function" &&
+                          (typeof isCellDrillable === "function"
+                            ? isCellDrillable({ row, rowId, column, value: cellValue })
+                            : Number(cellValue) > 0);
+                        const isActiveCell =
+                          activeCell?.rowId === rowId && activeCell?.column === column;
+                        const cellStyle = row.label === "TOTAL"
                           ? {
                               ...matrixValueCellStyle,
                               backgroundColor: rowBackgroundColor,
                               ...matrixTotalRowCellStyle,
+                              ...(isActiveCell ? matrixActiveValueCellStyle : {}),
                             }
-                          : { ...matrixValueCellStyle, backgroundColor: rowBackgroundColor }
-                      }
-                    >
-                      {displayValue(row.values?.[column], valueFormat)}
-                    </td>
-                  ))}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                          : {
+                              ...matrixValueCellStyle,
+                              backgroundColor: rowBackgroundColor,
+                              ...(isActiveCell ? matrixActiveValueCellStyle : {}),
+                            };
+
+                        return (
+                          <td
+                            key={`${rowId}-${column}`}
+                            style={cellStyle}
+                          >
+                            {isDrillable ? (
+                              <button
+                                type="button"
+                                style={matrixClickableValueButtonStyle}
+                                onClick={() => onCellFollow({ row, rowId, column, value: cellValue })}
+                                aria-label={`Show contributing records for ${row.label}, ${REPORTING_PERIOD_DISPLAY_LABELS[column] || column}`}
+                              >
+                                {displayValue(cellValue, valueFormat)}
+                              </button>
+                            ) : (
+                              displayValue(cellValue, valueFormat)
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                    {isExpandedRow && typeof renderExpandedRow === "function" ? (
+                      <tr>
+                        <td
+                          colSpan={REPORTING_PERIOD_COLUMNS.length + 1}
+                          style={matrixExpandedRowCellStyle}
+                        >
+                          {renderExpandedRow({ row, rowId })}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        empty || <Box padding="m">No information is available.</Box>
+      )}
       <StatusIndicator type={statusType}>{statusMessage}</StatusIndicator>
     </SpaceBetween>
   );
@@ -1530,9 +1953,17 @@ const DataAndResultsDashboard = ({
   );
   const [demoModeEnabled, setDemoModeEnabled] = useReportingDemoMode();
   const [monthlyResultsEnabled, setMonthlyResultsEnabled] = useState(false);
+  const [applicationActivityMetric, setApplicationActivityMetric] = useState("newApplications");
+  const [applicationActivityFilterText, setApplicationActivityFilterText] = useState("");
   const [interventionMeasure, setInterventionMeasure] = useState("count");
   const [interventionStatusView, setInterventionStatusView] = useState("completed");
   const [interventionDateBasis, setInterventionDateBasis] = useState("end");
+  const [applicationActivityDrilldown, setApplicationActivityDrilldown] = useState(
+    createClosedMatrixDrilldownState
+  );
+  const [interventionsDrilldown, setInterventionsDrilldown] = useState(
+    createClosedMatrixDrilldownState
+  );
   const [noRecordsAlertDismissed, setNoRecordsAlertDismissed] = useState(false);
   const [liveReportRefreshKey, setLiveReportRefreshKey] = useState(0);
   const [liveReportData, setLiveReportData] = useState(buildPendingLiveReportData);
@@ -1589,6 +2020,14 @@ const DataAndResultsDashboard = ({
     () => getActiveCaseManagerIds(selectedCaseManagerOptions),
     [selectedCaseManagerOptions]
   );
+  const activeProvinceCodesKey = useMemo(
+    () => activeProvinceCodes.join(","),
+    [activeProvinceCodes]
+  );
+  const activeCaseManagerIdsKey = useMemo(
+    () => activeCaseManagerIds.join(","),
+    [activeCaseManagerIds]
+  );
   const activeFiscalYearStart = useMemo(() => {
     const parsed = Number(selectedFiscalYearOption?.value);
     return Number.isInteger(parsed) ? parsed : defaultFiscalYearStart;
@@ -1607,6 +2046,13 @@ const DataAndResultsDashboard = ({
         ? INTERVENTION_COST_DATE_BASIS_OPTIONS
         : INTERVENTION_COUNT_DATE_BASIS_OPTIONS,
     [interventionMeasure]
+  );
+  const selectedApplicationActivityMetricOption = useMemo(
+    () =>
+      APPLICATION_ACTIVITY_METRIC_OPTIONS.find(
+        option => option.value === applicationActivityMetric
+      ) || APPLICATION_ACTIVITY_METRIC_OPTIONS[0],
+    [applicationActivityMetric]
   );
   const selectedInterventionShowOption = useMemo(
     () =>
@@ -1634,6 +2080,8 @@ const DataAndResultsDashboard = ({
   const paletteItems = useMemo(() => computePaletteItems(boardItems), [boardItems]);
   const paletteSignatureRef = useRef(JSON.stringify(paletteItems));
   const layoutSignatureRef = useRef(JSON.stringify(exportLayout(boardItems)));
+  const applicationActivityDrilldownAbortRef = useRef(null);
+  const interventionsDrilldownAbortRef = useRef(null);
 
   const selectedProvinceSummary = useMemo(() => {
     if (!selectedProvinceOptions.length) {
@@ -1661,9 +2109,57 @@ const DataAndResultsDashboard = ({
     [activeFiscalYearLabel, selectedCaseManagerSummary, selectedProvinceSummary]
   );
 
+  const cancelApplicationActivityDrilldownRequest = useCallback(() => {
+    if (applicationActivityDrilldownAbortRef.current) {
+      applicationActivityDrilldownAbortRef.current.abort();
+      applicationActivityDrilldownAbortRef.current = null;
+    }
+  }, []);
+
+  const cancelInterventionsDrilldownRequest = useCallback(() => {
+    if (interventionsDrilldownAbortRef.current) {
+      interventionsDrilldownAbortRef.current.abort();
+      interventionsDrilldownAbortRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     setNoRecordsAlertDismissed(false);
   }, [selectedFilterSummary]);
+
+  useEffect(() => () => {
+    cancelApplicationActivityDrilldownRequest();
+    cancelInterventionsDrilldownRequest();
+  }, [cancelApplicationActivityDrilldownRequest, cancelInterventionsDrilldownRequest]);
+
+  useEffect(() => {
+    cancelApplicationActivityDrilldownRequest();
+    setApplicationActivityDrilldown(createClosedMatrixDrilldownState());
+  }, [
+    activeCaseManagerIdsKey,
+    activeFiscalYearStart,
+    activeProvinceCodesKey,
+    applicationActivityFilterText,
+    applicationActivityMetric,
+    cancelApplicationActivityDrilldownRequest,
+    demoModeEnabled,
+    monthlyResultsEnabled,
+  ]);
+
+  useEffect(() => {
+    cancelInterventionsDrilldownRequest();
+    setInterventionsDrilldown(createClosedMatrixDrilldownState());
+  }, [
+    activeCaseManagerIdsKey,
+    activeFiscalYearStart,
+    activeInterventionDateBasis,
+    activeProvinceCodesKey,
+    cancelInterventionsDrilldownRequest,
+    demoModeEnabled,
+    interventionMeasure,
+    interventionStatusView,
+    monthlyResultsEnabled,
+  ]);
 
   const hasActiveReportFilters =
     Boolean(selectedProvinceOptions.length) ||
@@ -2181,6 +2677,17 @@ const DataAndResultsDashboard = ({
           overallResults: Array.isArray(payload.overallResults) && payload.overallResults.length
             ? payload.overallResults
             : PENDING_OVERALL_RESULTS_ITEMS,
+          applicationActivity: {
+            newApplications: normaliseApplicationActivityRows(
+              payload.applicationActivity?.newApplications
+            ),
+            approvedApplications: normaliseApplicationActivityRows(
+              payload.applicationActivity?.approvedApplications
+            ),
+            deniedApplications: normaliseApplicationActivityRows(
+              payload.applicationActivity?.deniedApplications
+            ),
+          },
           interventions: Array.isArray(payload.interventions) && payload.interventions.length
             ? payload.interventions
             : buildPendingPeriodRows(INTERVENTION_ROWS),
@@ -2251,6 +2758,7 @@ const DataAndResultsDashboard = ({
       ? {
           overallResults: liveReportData.overallResults,
           quarterlyUploads: liveQuarterlyUploads,
+          applicationActivity: liveReportData.applicationActivity,
           interventions: liveReportData.interventions,
           clientResults: liveReportData.clientResults,
           dataUploads: liveReportData.dataUploads,
@@ -2271,6 +2779,17 @@ const DataAndResultsDashboard = ({
 
     return {
       ...baseReportData,
+      applicationActivity: {
+        newApplications: buildMonthlyPeriodRows(
+          baseReportData.applicationActivity?.newApplications || []
+        ),
+        approvedApplications: buildMonthlyPeriodRows(
+          baseReportData.applicationActivity?.approvedApplications || []
+        ),
+        deniedApplications: buildMonthlyPeriodRows(
+          baseReportData.applicationActivity?.deniedApplications || []
+        ),
+      },
       interventions: buildMonthlyPeriodRows(baseReportData.interventions),
       clientResults: buildMonthlyPeriodRows(baseReportData.clientResults),
       dataUploads: buildMonthlyPeriodRows(baseReportData.dataUploads),
@@ -2296,6 +2815,28 @@ const DataAndResultsDashboard = ({
     statusView: interventionStatusView,
     dateBasis: activeInterventionDateBasis,
   });
+  const applicationActivityMetricLabel =
+    selectedApplicationActivityMetricOption?.label || "New applications";
+  const applicationActivityRows =
+    reportData.applicationActivity?.[applicationActivityMetric] || buildPendingApplicationActivityRows();
+  const trimmedApplicationActivityFilterText = applicationActivityFilterText.trim().toLowerCase();
+  const filteredApplicationActivityRows = applicationActivityRows.filter(row => {
+    if (!trimmedApplicationActivityFilterText) {
+      return true;
+    }
+    const haystack = `${row?.label || ""} ${row?.provinceCode || ""}`.toLowerCase();
+    return haystack.includes(trimmedApplicationActivityFilterText);
+  });
+  const applicationActivityHasValues = applicationActivityRows.some(row =>
+    REPORTING_PERIOD_COLUMNS.some(column => Number(row?.values?.[column] || 0) > 0)
+  );
+  const applicationActivityHasVisibleRows = filteredApplicationActivityRows.length > 0;
+  const applicationActivityDescription = monthlyResultsEnabled
+    ? `${applicationActivityMetricLabel} by participant home province or territory for the selected fiscal year.`
+    : `Cumulative ${applicationActivityMetricLabel.toLowerCase()} by participant home province or territory for the selected fiscal year.`;
+  const applicationActivityLiveMessage = monthlyResultsEnabled
+    ? `The table shows monthly ${applicationActivityMetricLabel.toLowerCase()} by participant home province or territory. ${liveReportMeta.notes.applicationActivity || ""}`.trim()
+    : `The table shows cumulative ${applicationActivityMetricLabel.toLowerCase()} by participant home province or territory. ${liveReportMeta.notes.applicationActivity || ""}`.trim();
 
   const matrixSectionDescriptionByMode = {
     interventions: monthlyResultsEnabled
@@ -2371,6 +2912,28 @@ const DataAndResultsDashboard = ({
         : liveQuarterlyUploadsMeta.sourceStatus === "live"
           ? "Quarterly submission dates and statuses are shown below."
           : `No quarterly submission record has been entered yet for FY ${liveQuarterlyUploadsMeta.fiscalYear}.`;
+
+  const applicationActivitySectionStatusType = demoModeEnabled
+    ? "success"
+    : liveReportError
+      ? "error"
+      : liveReportLoading
+        ? "loading"
+        : applicationActivityHasVisibleRows && applicationActivityHasValues
+          ? "success"
+          : "info";
+
+  const applicationActivitySectionStatusMessage = demoModeEnabled
+    ? `Showing demo data for ${selectedFilterSummary}.`
+    : liveReportError
+      ? "Application intake and assessment information is currently unavailable."
+      : liveReportLoading
+        ? "Updating application intake and assessment information."
+        : !applicationActivityHasVisibleRows
+          ? "No provinces or territories match the current section filter."
+          : applicationActivityHasValues
+            ? applicationActivityLiveMessage
+            : `No ${applicationActivityMetricLabel.toLowerCase()} were found for the selected filters.`;
 
   const overallSectionStatusType = getLiveSectionStatusType({
     demoModeEnabled,
@@ -2475,6 +3038,263 @@ const DataAndResultsDashboard = ({
         ? additionalCommentsValue
         : `No comments have been added for FY ${activeFiscalYearLabel} yet.`;
 
+  const resultsViewKey = monthlyResultsEnabled ? "monthly" : "cumulative";
+  const applicationDrilldownColumns = useMemo(
+    () => buildApplicationDrilldownColumns(applicationActivityDrilldown.eventDateLabel),
+    [applicationActivityDrilldown.eventDateLabel]
+  );
+  const interventionDrilldownColumns = useMemo(
+    () =>
+      buildInterventionDrilldownColumns({
+        eventDateLabel: interventionsDrilldown.eventDateLabel,
+        includeAmount: interventionMeasure === "cost",
+      }),
+    [interventionMeasure, interventionsDrilldown.eventDateLabel]
+  );
+
+  const handleApplicationActivityCellFollow = useCallback(({ row, rowId, column, value }) => {
+    const numericValue = Number(value);
+    if (demoModeEnabled || !Number.isFinite(numericValue) || numericValue <= 0) {
+      return;
+    }
+
+    if (
+      applicationActivityDrilldown.rowId === rowId &&
+      applicationActivityDrilldown.column === column
+    ) {
+      cancelApplicationActivityDrilldownRequest();
+      setApplicationActivityDrilldown(createClosedMatrixDrilldownState());
+      return;
+    }
+
+    cancelApplicationActivityDrilldownRequest();
+    const controller = new AbortController();
+    applicationActivityDrilldownAbortRef.current = controller;
+
+    setApplicationActivityDrilldown({
+      rowId,
+      rowLabel: row?.label || row?.provinceCode || "Province",
+      column,
+      eventDateLabel: applicationActivityMetric === "newApplications" ? "Submitted" : "Decision",
+      valueFormat: "number",
+      rangeStart: null,
+      rangeEnd: null,
+      resultsView: resultsViewKey,
+      items: [],
+      truncated: false,
+      loading: true,
+      error: "",
+    });
+
+    const loadDrilldown = async () => {
+      try {
+        const params = new URLSearchParams();
+        params.set("sectionId", "application-activity");
+        params.set("rowKey", row?.provinceCode || row?.label || "");
+        params.set("periodKey", column);
+        params.set("resultsView", resultsViewKey);
+        params.set("fiscalYearStart", String(activeFiscalYearStart));
+        params.set("applicationMetric", applicationActivityMetric);
+        if (selectedProvinceOptions.length) {
+          params.set("provinces", activeProvinceCodes.join(","));
+        }
+        if (selectedCaseManagerOptions.length) {
+          params.set("caseManagers", activeCaseManagerIds.join(","));
+        }
+
+        const response = await apiFetch(
+          `/api/reporting/data-and-results/drilldown?${params.toString()}`,
+          { signal: controller.signal }
+        );
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.message || "Failed to load contributing application records.");
+        }
+        const payload = await response.json().catch(() => ({}));
+        if (applicationActivityDrilldownAbortRef.current !== controller) {
+          return;
+        }
+        setApplicationActivityDrilldown(current => {
+          if (current.rowId !== rowId || current.column !== column) {
+            return current;
+          }
+          return {
+            ...current,
+            rowLabel: payload.rowLabel || current.rowLabel,
+            eventDateLabel: payload.eventDateLabel || current.eventDateLabel,
+            rangeStart: payload.rangeStart || null,
+            rangeEnd: payload.rangeEnd || null,
+            resultsView: payload.resultsView || current.resultsView,
+            items: Array.isArray(payload.items) ? payload.items : [],
+            truncated: Boolean(payload.truncated),
+            loading: false,
+            error: "",
+          };
+        });
+      } catch (error) {
+        if (error?.name === "AbortError") {
+          return;
+        }
+        if (applicationActivityDrilldownAbortRef.current !== controller) {
+          return;
+        }
+        setApplicationActivityDrilldown(current => {
+          if (current.rowId !== rowId || current.column !== column) {
+            return current;
+          }
+          return {
+            ...current,
+            loading: false,
+            error: error?.message || "Contributing application records could not be loaded.",
+          };
+        });
+      } finally {
+        if (applicationActivityDrilldownAbortRef.current === controller) {
+          applicationActivityDrilldownAbortRef.current = null;
+        }
+      }
+    };
+
+    loadDrilldown();
+  }, [
+    activeCaseManagerIds,
+    activeFiscalYearStart,
+    activeProvinceCodes,
+    applicationActivityDrilldown.column,
+    applicationActivityDrilldown.rowId,
+    applicationActivityMetric,
+    cancelApplicationActivityDrilldownRequest,
+    demoModeEnabled,
+    resultsViewKey,
+    selectedCaseManagerOptions.length,
+    selectedProvinceOptions.length,
+  ]);
+
+  const handleInterventionsCellFollow = useCallback(({ row, rowId, column, value }) => {
+    const numericValue = Number(value);
+    if (demoModeEnabled || !Number.isFinite(numericValue) || numericValue <= 0) {
+      return;
+    }
+
+    if (interventionsDrilldown.rowId === rowId && interventionsDrilldown.column === column) {
+      cancelInterventionsDrilldownRequest();
+      setInterventionsDrilldown(createClosedMatrixDrilldownState());
+      return;
+    }
+
+    cancelInterventionsDrilldownRequest();
+    const controller = new AbortController();
+    interventionsDrilldownAbortRef.current = controller;
+
+    setInterventionsDrilldown({
+      rowId,
+      rowLabel: row?.label || "Intervention",
+      column,
+      eventDateLabel:
+        interventionMeasure === "cost"
+          ? "Payment month"
+          : activeInterventionDateBasis === "start"
+          ? "Start date"
+          : "End date",
+      valueFormat: interventionMeasure === "cost" ? "currency" : "number",
+      rangeStart: null,
+      rangeEnd: null,
+      resultsView: resultsViewKey,
+      items: [],
+      truncated: false,
+      loading: true,
+      error: "",
+    });
+
+    const loadDrilldown = async () => {
+      try {
+        const params = new URLSearchParams();
+        params.set("sectionId", "interventions");
+        params.set("rowKey", row?.label || "");
+        params.set("periodKey", column);
+        params.set("resultsView", resultsViewKey);
+        params.set("fiscalYearStart", String(activeFiscalYearStart));
+        params.set("interventionMeasure", interventionMeasure);
+        params.set("interventionStatus", interventionStatusView);
+        params.set("interventionDateBasis", activeInterventionDateBasis);
+        if (selectedProvinceOptions.length) {
+          params.set("provinces", activeProvinceCodes.join(","));
+        }
+        if (selectedCaseManagerOptions.length) {
+          params.set("caseManagers", activeCaseManagerIds.join(","));
+        }
+
+        const response = await apiFetch(
+          `/api/reporting/data-and-results/drilldown?${params.toString()}`,
+          { signal: controller.signal }
+        );
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.message || "Failed to load contributing intervention records.");
+        }
+        const payload = await response.json().catch(() => ({}));
+        if (interventionsDrilldownAbortRef.current !== controller) {
+          return;
+        }
+        setInterventionsDrilldown(current => {
+          if (current.rowId !== rowId || current.column !== column) {
+            return current;
+          }
+          return {
+            ...current,
+            rowLabel: payload.rowLabel || current.rowLabel,
+            eventDateLabel: payload.eventDateLabel || current.eventDateLabel,
+            valueFormat: payload.valueFormat || current.valueFormat,
+            rangeStart: payload.rangeStart || null,
+            rangeEnd: payload.rangeEnd || null,
+            resultsView: payload.resultsView || current.resultsView,
+            items: Array.isArray(payload.items) ? payload.items : [],
+            truncated: Boolean(payload.truncated),
+            loading: false,
+            error: "",
+          };
+        });
+      } catch (error) {
+        if (error?.name === "AbortError") {
+          return;
+        }
+        if (interventionsDrilldownAbortRef.current !== controller) {
+          return;
+        }
+        setInterventionsDrilldown(current => {
+          if (current.rowId !== rowId || current.column !== column) {
+            return current;
+          }
+          return {
+            ...current,
+            loading: false,
+            error: error?.message || "Contributing intervention records could not be loaded.",
+          };
+        });
+      } finally {
+        if (interventionsDrilldownAbortRef.current === controller) {
+          interventionsDrilldownAbortRef.current = null;
+        }
+      }
+    };
+
+    loadDrilldown();
+  }, [
+    activeCaseManagerIds,
+    activeFiscalYearStart,
+    activeInterventionDateBasis,
+    activeProvinceCodes,
+    cancelInterventionsDrilldownRequest,
+    demoModeEnabled,
+    interventionMeasure,
+    interventionStatusView,
+    interventionsDrilldown.column,
+    interventionsDrilldown.rowId,
+    resultsViewKey,
+    selectedCaseManagerOptions.length,
+    selectedProvinceOptions.length,
+  ]);
+
   const downloadSectionCsv = useCallback(sectionId => {
     const baseFileNameParts = ["data-and-results", `fy-${activeFiscalYearLabel}`];
     if (demoModeEnabled) {
@@ -2485,6 +3305,18 @@ const DataAndResultsDashboard = ({
     let csvRows = null;
 
     switch (sectionId) {
+      case "application-activity":
+        filename = [
+          ...baseFileNameParts,
+          "intake-and-assessment",
+          applicationActivityMetric,
+          monthlyResultsEnabled ? "monthly" : "cumulative",
+        ]
+          .map(slugifyFilenamePart)
+          .join("-")
+          .concat(".csv");
+        csvRows = buildMatrixCsvRows(filteredApplicationActivityRows);
+        break;
       case "interventions":
         filename = [
           ...baseFileNameParts,
@@ -2563,7 +3395,9 @@ const DataAndResultsDashboard = ({
   }, [
     activeFiscalYearLabel,
     activeInterventionDateBasis,
+    applicationActivityMetric,
     demoModeEnabled,
+    filteredApplicationActivityRows,
     interventionMeasure,
     interventionStatusView,
     monthlyResultsEnabled,
@@ -2572,6 +3406,67 @@ const DataAndResultsDashboard = ({
 
   const renderBoardItem = (item, actions) => {
     switch (item?.id) {
+      case "application-activity":
+        return (
+          <MatrixSection
+            asBoardItem
+            actions={actions}
+            onDownloadCsv={() => downloadSectionCsv("application-activity")}
+            title="Intake and Assessment"
+            description={applicationActivityDescription}
+            rows={filteredApplicationActivityRows}
+            getRowId={row => row?.provinceCode || row?.label}
+            stripedRows
+            badgeText={demoModeEnabled ? "Sample data" : null}
+            badgeColor={demoModeEnabled ? "green" : "blue"}
+            activeCell={applicationActivityDrilldown}
+            onCellFollow={handleApplicationActivityCellFollow}
+            isCellDrillable={({ value }) => !demoModeEnabled && Number(value) > 0}
+            renderExpandedRow={() => (
+              <MatrixDrilldownPanel
+                title={`${applicationActivityMetricLabel} · ${applicationActivityDrilldown.rowLabel}`}
+                drilldown={applicationActivityDrilldown}
+                columnDefinitions={applicationDrilldownColumns}
+                emptyMessage="No applications contributed to this value."
+              />
+            )}
+            headerActions={
+              <SpaceBetween direction="horizontal" size="s">
+                <div style={sectionHeaderFieldStyle}>
+                  <Box variant="awsui-key-label">Show</Box>
+                  <Select
+                    selectedOption={selectedApplicationActivityMetricOption}
+                    onChange={({ detail }) =>
+                      setApplicationActivityMetric(
+                        detail.selectedOption?.value || "newApplications"
+                      )
+                    }
+                    options={APPLICATION_ACTIVITY_METRIC_OPTIONS}
+                    ariaLabel="Choose which application activity to show"
+                  />
+                </div>
+                <div style={{ minWidth: "220px" }}>
+                  <Box variant="awsui-key-label">Filter provinces</Box>
+                  <Input
+                    value={applicationActivityFilterText}
+                    onChange={({ detail }) =>
+                      setApplicationActivityFilterText(detail.value || "")
+                    }
+                    placeholder="Search province or code"
+                    ariaLabel="Filter provinces or territories shown in the table"
+                  />
+                </div>
+              </SpaceBetween>
+            }
+            statusType={applicationActivitySectionStatusType}
+            statusMessage={applicationActivitySectionStatusMessage}
+            empty={
+              <Box padding="m">
+                No provinces or territories match the current section filter.
+              </Box>
+            }
+          />
+        );
       case "interventions":
         return (
           <MatrixSection
@@ -2581,10 +3476,24 @@ const DataAndResultsDashboard = ({
             title="Interventions"
             description={matrixSectionDescriptionByMode.interventions}
             rows={reportData.interventions}
+            getRowId={row => row?.label}
             stripedRows
             badgeText={demoModeEnabled ? "Sample data" : null}
             badgeColor={demoModeEnabled ? "green" : "blue"}
             valueFormat={interventionMeasure === "cost" ? "currency" : "number"}
+            activeCell={interventionsDrilldown}
+            onCellFollow={handleInterventionsCellFollow}
+            isCellDrillable={({ value }) => !demoModeEnabled && Number(value) > 0}
+            renderExpandedRow={() => (
+              <MatrixDrilldownPanel
+                title={`${
+                  interventionMeasure === "cost" ? "Intervention cost" : "Interventions"
+                } · ${interventionsDrilldown.rowLabel}`}
+                drilldown={interventionsDrilldown}
+                columnDefinitions={interventionDrilldownColumns}
+                emptyMessage="No interventions contributed to this value."
+              />
+            )}
             headerActions={
               <SpaceBetween direction="horizontal" size="s">
                 <div style={sectionHeaderFieldStyle}>

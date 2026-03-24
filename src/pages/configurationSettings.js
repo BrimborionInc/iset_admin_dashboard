@@ -39,12 +39,7 @@ import LockingSettingsHelp from "../helpPanelContents/lockingSettingsHelp";
 import BackendJobsWidgetHelp from "../helpPanelContents/backendJobsWidgetHelp";
 import DocumentChecklistConfigHelp from "../helpPanelContents/documentChecklistConfigHelp";
 import { apiFetch } from "../auth/apiClient";
-import {
-  getIdTokenClaims,
-  getRoleFromClaims,
-  hasValidSession,
-  isIamOn,
-} from "../auth/cognito";
+import { useAuth } from "../context/AuthContext.js";
 import { useDarkMode as useDarkModeContext } from "../context/DarkModeContext";
 import {
   readDemoNavigationVisibility,
@@ -380,6 +375,7 @@ export default function ConfigurationSettings({
   setAvailableItems,
   setSplitPanelOpen,
 }) {
+  const { role = "" } = useAuth();
   const [layout, setLayout] = useState(() => loadLayout() ?? [...defaultLayout]);
   const boardItems = useMemo(() => toBoardItems(layout), [layout]);
   const paletteItems = useMemo(() => computePaletteItems(boardItems), [boardItems]);
@@ -403,7 +399,6 @@ export default function ConfigurationSettings({
   const [runtime, setRuntime] = useState(null);
   const [security, setSecurity] = useState(null);
   const [error, setError] = useState(null);
-  const [role, setRole] = useState("");
   const { useDarkMode: isDarkMode, setUseDarkMode } = useDarkModeContext();
   const [demoToolbarVisibility, setDemoToolbarVisibility] = useState(() =>
     readDemoNavigationVisibility(),
@@ -536,41 +531,6 @@ export default function ConfigurationSettings({
     });
     return unsubscribe;
   }, []);
-
-  const deriveRole = useCallback(() => {
-    if (isIamOn() && hasValidSession()) {
-      try {
-        const claims = getIdTokenClaims();
-        const nextRole = getRoleFromClaims(claims) || "";
-        setRole(nextRole);
-        return;
-      } catch {
-        // fall back to storage
-      }
-    }
-    try {
-      const signedOut = sessionStorage.getItem("simulateSignedOut") === "true";
-      if (signedOut) {
-        setRole("Signed Out");
-        return;
-      }
-      const raw = sessionStorage.getItem("currentRole");
-      if (raw) {
-        const obj = JSON.parse(raw);
-        if (obj && obj.value) {
-          setRole(obj.value);
-          return;
-        }
-      }
-    } catch {
-      // ignore parsing/storage issues
-    }
-    setRole("Program Administrator");
-  }, []);
-
-  useEffect(() => {
-    deriveRole();
-  }, [deriveRole]);
 
   const canEditAI = role === "System Administrator";
   const canEditAuth = role === "System Administrator";
@@ -1549,13 +1509,6 @@ export default function ConfigurationSettings({
         </Badge>,
       );
     }
-    if (auth.devBypass) {
-      actions.push(
-        <Badge key="dev-bypass" color="red">
-          Dev bypass
-        </Badge>,
-      );
-    }
     if (auth.issuer) {
       actions.push(
         <Button
@@ -1817,8 +1770,8 @@ export default function ConfigurationSettings({
       canSeeAnySecrets,
       demoToolbarColumns,
       demoToolbarRows,
-      effectiveSlaTargets,
       fetchAudit,
+      filteredSlaTargets,
       fullyAdminSecrets,
       handleSlaEdit,
       isDarkMode,
@@ -1832,6 +1785,7 @@ export default function ConfigurationSettings({
       params,
       policyDirty,
       runtime,
+      role,
       savingAuthPolicyScope,
       savingAuthSessionScope,
       savingFallbacks,

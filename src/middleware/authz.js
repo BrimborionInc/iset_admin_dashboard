@@ -1,7 +1,5 @@
 // Authorization middleware and helpers for RBAC and regional scoping
 
-const AUTH_ENABLED = String(process.env.AUTH_PROVIDER || 'none').trim().toLowerCase() === 'cognito';
-
 function normalizeRole(role) {
   if (!role) return role;
   const trimmed = String(role).trim();
@@ -22,16 +20,15 @@ function normalizeRole(role) {
 
 function requireRole(...allowed) {
   return (req, res, next) => {
-    if (!AUTH_ENABLED) return next(); // Dev / auth disabled: allow
     const rawRole = req?.auth?.role;
     const role = normalizeRole(rawRole);
     const normAllowed = allowed.map(a => normalizeRole(a));
     if (!role) {
-      console.debug('[authz] deny: missing role; allowed=', normAllowed, 'env AUTH_PROVIDER=', process.env.AUTH_PROVIDER);
+      console.debug('[authz] deny: missing role; allowed=', normAllowed);
       return res.status(403).json({ error: 'Forbidden' });
     }
     if (!normAllowed.includes(role)) {
-      console.debug('[authz] deny: role', role, 'rawRole=', rawRole, 'not in', normAllowed, 'env AUTH_PROVIDER=', process.env.AUTH_PROVIDER);
+      console.debug('[authz] deny: role', role, 'rawRole=', rawRole, 'not in', normAllowed);
       return res.status(403).json({ error: 'Forbidden' });
     }
     console.debug('[authz] allow role', role, 'allowed=', normAllowed);

@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { SideNavigation as CloudscapeSideNavigation, Badge, Hotspot } from '@cloudscape-design/components';
-import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims } from '../auth/cognito';
+import { useAuth } from '../context/AuthContext.js';
 import { useRoleMatrix, toCanonicalRole } from '../context/RoleMatrixContext';
 import { apiFetch } from '../auth/apiClient';
 
-const SideNavigation = ({ currentRole, showTutorialHotspots = false, notificationCount = 0, refreshNotifications, notificationsLoading = false }) => {
+const SideNavigation = ({ showTutorialHotspots = false, notificationCount = 0, refreshNotifications, notificationsLoading = false }) => {
+  const { currentRole, isAuthenticated } = useAuth();
   const pruneSections = (items = []) =>
     items.filter(item => {
       if (!item) return false;
@@ -16,7 +17,6 @@ const SideNavigation = ({ currentRole, showTutorialHotspots = false, notificatio
 
   const history = useHistory();
   const { roleMatrix } = useRoleMatrix();
-  const [, forceRerender] = useState(0);
   const [expandedSections, setExpandedSections] = useState(() => {
     try {
       const raw = sessionStorage.getItem('sideNavExpanded');
@@ -24,16 +24,6 @@ const SideNavigation = ({ currentRole, showTutorialHotspots = false, notificatio
       return new Set(Array.isArray(arr) ? arr : []);
     } catch { return new Set(); }
   });
-
-  useEffect(() => {
-    const onChange = () => forceRerender(t => t + 1);
-    window.addEventListener('auth:session-changed', onChange);
-    window.addEventListener('storage', onChange);
-    return () => {
-      window.removeEventListener('auth:session-changed', onChange);
-      window.removeEventListener('storage', onChange);
-    };
-  }, []);
 
   useEffect(() => {
     try { sessionStorage.setItem('sideNavExpanded', JSON.stringify(Array.from(expandedSections))); } catch {}
@@ -49,11 +39,6 @@ const SideNavigation = ({ currentRole, showTutorialHotspots = false, notificatio
     });
   }, [showTutorialHotspots]);
 
-  const iamOn = isIamOn();
-  const simSignedOut = (() => { try { return sessionStorage.getItem('simulateSignedOut') === 'true'; } catch { return false; } })();
-  const signedIn = hasValidSession();
-  const tokenRole = getRoleFromClaims(getIdTokenClaims());
-  const effectiveRole = (iamOn && signedIn && tokenRole) ? { value: tokenRole } : currentRole;
   const [contactCount, setContactCount] = useState(null);
   const [messageCount, setMessageCount] = useState(null);
 
@@ -341,7 +326,7 @@ const SideNavigation = ({ currentRole, showTutorialHotspots = false, notificatio
     return [...pruneSections(filteredSections), ...footerItems];
   }
 
-  const filteredNavItems = filterNavItemsForRole(effectiveRole, (iamOn && !signedIn) || (!iamOn && simSignedOut));
+  const filteredNavItems = filterNavItemsForRole(currentRole, !isAuthenticated);
 
   const itemsWithExpandState = useMemo(() => {
     const apply = (items) => items.map(item => {

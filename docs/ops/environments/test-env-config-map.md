@@ -17,18 +17,15 @@ This guide documents every environment variable and secret the test environment 
 | Database | `DB_USER` | Application DB user | Secrets Manager secret (`nwac-test/db/app-user`) |
 | Database | `DB_PASS` | Application DB password | Secrets Manager secret (same as user) |
 | Database | `DB_NAME=iset_intake` | Schema name | Static (matches migrations) |
-| Auth | `AUTH_PROVIDER=cognito` | Enables Cognito middleware | Static |
 | Cognito (staff) | `AWS_REGION` / `REACT_APP_AWS_REGION` | Region for SDK | Terraform var `aws_region` |
-| Cognito (staff) | `COGNITO_USER_POOL_ID` | Admin pool ID | `module.identity.admin_user_pool_id` |
-| Cognito (staff) | `COGNITO_CLIENT_ID` | Admin app client ID | `module.identity.admin_user_pool_client_id` |
+| Cognito (staff) | `COGNITO_STAFF_USER_POOL_ID` / `COGNITO_USER_POOL_ID` | Admin pool ID (staff-specific variable is preferred; generic alias still supported) | `module.identity.admin_user_pool_id` |
+| Cognito (staff) | `COGNITO_STAFF_CLIENT_ID` / `COGNITO_CLIENT_ID` | Admin app client ID (staff-specific variable is preferred; generic alias still supported) | `module.identity.admin_user_pool_client_id` |
 | Cognito (staff) | `COGNITO_ISSUER` / `COGNITO_JWKS_URL` | Token validation | `module.identity.admin_user_pool_issuer` & derived JWKS URL |
 | Cognito (staff) | `COGNITO_DOMAIN` | Hosted UI domain (`https://...`) | `module.identity.admin_hosted_ui_domain` |
 | Cognito (staff) | `COGNITO_REDIRECT_URI` / `REACT_APP_COGNITO_REDIRECT_URI` | Redirect after Hosted UI login | Admin ALB + `/auth/callback` |
 | Cognito (staff) | `REACT_APP_COGNITO_CLIENT_ID` | Frontend copy of client ID | Same as server |
 | Cognito (staff) | `REACT_APP_COGNITO_LOGOUT_URI` | Hosted UI logout | Admin ALB root |
 | Cognito (applicant trust) | `COGNITO_TRUSTED_POOLS` | Allow applicant tokens for messaging widgets | Concatenate applicant pool ID/client ID output |
-| Cognito (applicant trust) | `COGNITO_STAFF_USER_POOL_ID` / `COGNITO_STAFF_CLIENT_ID` | Legacy compatibility | Same as admin pool values |
-| IAM | `DEV_AUTH_BYPASS=false`, `DEV_DISABLE_AUTH=false` | Ensure real auth in test | Static |
 | Storage | `UPLOAD_MODE=s3`, `UPLOAD_DRIVER=s3` | Force S3 driver | Static |
 | Storage | `OBJECT_BUCKET` | Document bucket | `module.data.uploads_bucket_name` (must not be left blank; missing value triggers `{ error: 's3_presign_failed' }` during uploads) |
 | Storage | `OBJECT_REGION=ca-central-1` | Bucket region | Terraform var |

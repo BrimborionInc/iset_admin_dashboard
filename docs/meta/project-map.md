@@ -19,10 +19,10 @@ Purpose: Living reference of structure, core modules, and cross-cutting concerns
 
 ## Key Source Areas (`src/`)
 (Continuously expanded; every newly learned architectural fact must be reflected here immediately – standing directive.)
-- `layouts/`: Navigation & global layout components (e.g., `DemoNavigation.js`, `TopNavigation.js`). Manages IAM bypass, role simulation, and session events.
+- `layouts/`: Navigation & global layout components (e.g., `DemoNavigation.js`, `TopNavigation.js`). Handles global admin controls, top-level navigation, and session-aware layout state.
 - `pages/`: Page-level screens & dashboards (all dashboards, editors, management consoles live here). Examples: `home/HomeDashboardPage.jsx` (landing dashboard), `templateEditorDashboard.js` (standalone notification template authoring), `modifyIntakeStep.js` (intake step/component authoring working area), workflow management pages, code tables, messaging, notifications.
 - `widgets/`: Reusable complex UI building blocks embedded within pages (e.g., `WorkflowPreviewWidget.js` – interactive workflow step preview mirroring portal runtime logic for file upload visibility & messaging). Pages compose multiple widgets; widgets should not own routing.
-- `auth/`: Cognito helpers: `isIamOn`, `hasValidSession`, token parsing and role derivation.
+- `auth/`: Cognito helpers for session storage, token parsing, Hosted UI redirects, and bearer-auth API calls.
 - (Future) `components/`: Smaller presentational or configuration components (to catalog as added).
 ### Configuration dashboards
 - Query Editor route: `src/pages/configuration/QueryEditorDashboard.js` mounted at `/configuration/query-editor`.
@@ -53,9 +53,10 @@ Purpose: Living reference of structure, core modules, and cross-cutting concerns
 - Tutorial status management entry point: `src/pages/support/TutorialsDashboardPage.jsx` (role-filtered tutorial table, per-row completion toggle, and `Reset all`; emits `tutorials:refresh`).
 - Canonical tutorial runbook: `docs/features/tutorial-platform.md`.
 
-## Auth & Role Simulation
-- Session detection via Cognito tokens; simulated roles stored in `sessionStorage.currentRole` with event `auth:session-changed` for reactive updates.
-- IAM toggle disables role selection to avoid contradictory contexts; resetting simulated session state when enabled.
+## Auth
+- Session detection uses real Cognito tokens only.
+- Frontend auth/current-user state is centralized in `src/context/AuthContext.js`.
+- `/auth/callback` is treated as a shell-less bootstrap route in `src/App.js` so the main app does not render against partial auth state.
 
 ## Landing Dashboard
 - File: `src/pages/home/HomeDashboardPage.jsx`.
@@ -148,6 +149,7 @@ Risk Mitigations:
 - `docs/features/landing-page.md`: Iterative change log for dashboard/landing-page evolution.
 - `docs/features/file-uploads/conditional-rules.md`: Spec for expanded file-upload conditional rule logic.
 - `docs/dashboards/client-file-import-dashboard.md`: Current Client Batch Import dashboard behavior and constraints.
+- `docs/dashboards/data-and-results-dashboard.md`: Current `Reporting > Data and Results` behavior, section order, and live/demo data rules.
 - `docs/dashboards/query-editor-dashboard.md`: Current Query Editor dashboard behavior and limitations.
 - `docs/meta/project-map.md`: This map.
 

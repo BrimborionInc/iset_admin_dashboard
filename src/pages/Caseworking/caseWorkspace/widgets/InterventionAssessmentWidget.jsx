@@ -31,6 +31,7 @@ import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
 import useCurrentUser from "../../../../hooks/useCurrentUser.js";
 import { findOptionByValue } from "../../../finance/widgets/paymentOptions";
 import { getCurrencyInputDisplayValue } from "../../../../utils/currencyFormat";
+import { buildApplicantFacingReasonSentence } from "../../../../utils/decisionLetterText";
 import { normalizeInterventionStatus } from "../../../../utils/interventionStatus.js";
 import {
   isEducationInterventionCode as isEducationCode,
@@ -66,6 +67,29 @@ const POSTING_CONTEXT_OPTIONS = [
 ];
 
 const EI_ELIGIBILITY_ROLE_KEYS = new Set([
+  "systemadministrator",
+  "sysadmin",
+  "programadministrator",
+  "programadmin",
+  "nwacadministrator",
+  "regionalcoordinator",
+  "regionalmanager",
+]);
+
+const SUBMITTED_PROPOSAL_EDITOR_ROLE_KEYS = new Set([
+  "systemadministrator",
+  "sysadmin",
+  "programadministrator",
+  "programadmin",
+  "nwacadministrator",
+  "regionalcoordinator",
+  "regionalmanager",
+  "applicationassessor",
+  "adjudicator",
+  "isetcoordinator",
+]);
+
+const SUBMITTED_PROPOSAL_DECIDER_ROLE_KEYS = new Set([
   "systemadministrator",
   "sysadmin",
   "programadministrator",
@@ -1806,20 +1830,20 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const isRejectedDecisionOutcome = decisionOutcomeKey === "rejected";
   const showCommunicationStep = isSubmittedStatus && (isApprovedDecisionOutcome || isRejectedDecisionOutcome);
   const role = currentUser?.role || null;
+  const roleKey = normalizeRoleKey(role);
   const canonicalRole = role === "Regional Manager" ? "Regional Coordinator" : role;
-  const canManageEiEligibility = EI_ELIGIBILITY_ROLE_KEYS.has(normalizeRoleKey(role));
+  const canManageEiEligibility = EI_ELIGIBILITY_ROLE_KEYS.has(roleKey);
   const isAssessor = canonicalRole === "Application Assessor";
-  const canEditSubmitted =
-    canonicalRole === "Regional Coordinator" ||
-    canonicalRole === "Program Administrator" ||
-    canonicalRole === "System Administrator";
+  const canEditSubmittedProposal = SUBMITTED_PROPOSAL_EDITOR_ROLE_KEYS.has(roleKey);
+  const canDecideSubmittedProposal = SUBMITTED_PROPOSAL_DECIDER_ROLE_KEYS.has(roleKey);
 
   const isEditable =
     isDraftStatus ||
     isChangesRequestedStatus ||
-    (isSubmittedStatus && canEditSubmitted) ||
+    (isSubmittedStatus && canEditSubmittedProposal) ||
     (!statusValue && !hasBlockingProposal);
   const isFormLocked = !isEditable || isSubmitting;
+  const isDecisionReadOnly = isFormLocked || !canDecideSubmittedProposal;
   const statusLabel = completionNote
     ? "Completed"
     : statusValue
@@ -1830,10 +1854,10 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const statusBadgeColor = completionNote ? "green" : "blue";
 
   const activeStepIds = useMemo(() => {
-    if (!isSubmittedStatus) return BASE_STEP_IDS;
+    if (!isSubmittedStatus || !canDecideSubmittedProposal) return BASE_STEP_IDS;
     const submitted = [...BASE_STEP_IDS, ...SUBMITTED_STEP_IDS];
     return showCommunicationStep ? [...submitted, COMMUNICATION_STEP_ID] : submitted;
-  }, [isSubmittedStatus, showCommunicationStep]);
+  }, [canDecideSubmittedProposal, isSubmittedStatus, showCommunicationStep]);
 
   const codeOptions = useMemo(() => {
     if (!Array.isArray(interventionCodes) || interventionCodes.length === 0) return [];
@@ -4033,12 +4057,26 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         }
         return { ok: false, error: new Error(message) };
       }
-      const payload = buildProposalPayload("draft");
+      const targetStatus = isSubmittedStatus ? "submitted" : "draft";
+      const payload = buildProposalPayload(targetStatus);
       setIsSubmitting(true);
       try {
+        const submittedTargetId =
+          isSubmittedStatus && activeInterventionIdValue
+            ? Number(activeInterventionIdValue)
+            : null;
         const existingDraft = findEditableDraft();
         const actionPlanId = Number(form.actionPlanId);
-        if (existingDraft && typeof updateInterventionRecord === "function") {
+        if (
+          Number.isInteger(submittedTargetId) &&
+          submittedTargetId > 0 &&
+          typeof updateInterventionRecord === "function"
+        ) {
+          const updated = await updateInterventionRecord(actionPlanId, submittedTargetId, payload);
+          setSelectedDraftId(updated?.id || submittedTargetId);
+          setHydratedDraftId(updated?.id || submittedTargetId);
+          setHydratedDraftUpdatedAt(updated?.updatedAt || updated?.createdAt || null);
+        } else if (existingDraft && typeof updateInterventionRecord === "function") {
           const updated = await updateInterventionRecord(actionPlanId, existingDraft.id, payload);
           setSelectedDraftId(updated?.id || existingDraft.id);
           setHydratedDraftId(updated?.id || existingDraft.id);
@@ -4052,9 +4090,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
             setSelectedInterventionId(created?.id || null);
           }
         }
-        setCurrentInterventionStatus("draft");
+        setCurrentInterventionStatus(targetStatus);
         if (!silent) {
-          setSuccessMessage("Progress saved.");
+          setSuccessMessage(targetStatus === "submitted" ? "Changes saved." : "Progress saved.");
         }
         initialFormRef.current = form;
         return { ok: true };
@@ -4073,7 +4111,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       createIntervention,
       findEditableDraft,
       form,
+      activeInterventionIdValue,
       isEditable,
+      isSubmittedStatus,
       setSelectedInterventionId,
       updateInterventionRecord,
     ]
@@ -4530,6 +4570,10 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       setError(null);
       setSuccessMessage("");
       setAttemptedSteps(prev => ({ ...prev, decision: true }));
+      if (!canDecideSubmittedProposal) {
+        setError("Only approver roles can record a decision on a submitted proposal.");
+        return { ok: false };
+      }
       if (!isEditable) {
         setError("This proposal is read-only and cannot be updated.");
         return { ok: false };
@@ -4682,6 +4726,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       addCaseNote,
       buildApprovedInterventionPayload,
       buildProposalPayload,
+      canDecideSubmittedProposal,
       createIntervention,
       deleteInterventionRecord,
       ensureActionPlanFundingReadyForApproval,
@@ -4874,7 +4919,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   }, [applicantSalutationName, isRevisionMode, participantLegalName, proposedInterventions]);
   const buildDeniedClientLetterBody = useCallback(() => {
     const recipient = String(applicantSalutationName || "").trim() || "Client";
-    const reason = String(form.decisionNotes || "").trim();
+    const reason = buildApplicantFacingReasonSentence(form.decisionNotes, "Our review indicates that");
     return [
       "Letter of Denial",
       `Date: ${formatDate(new Date())}`,
@@ -4882,7 +4927,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       `Dear ${recipient},`,
       "",
       "I am writing to let you know that after review of your intervention proposal under the Native Women's Association of Canada (NWAC) Indigenous Skills and Employment Training (ISET) Program, your request is not approved at this time.",
-      reason ? reason : "Please contact your case manager if you would like to discuss next steps.",
+      reason || "Please contact your case manager if you would like to discuss next steps.",
       "",
       "If you have any questions, please do not hesitate to contact me directly.",
       "",
@@ -5035,6 +5080,10 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
 
   const headerDescription = completionNote
     ? "This intervention workflow is complete."
+    : isSubmittedStatus && isEditable && isRevisionMode && !canDecideSubmittedProposal
+      ? `Update the submitted revision for ${revisionSourceTitle}. Record of decision is limited to approver roles.`
+      : isSubmittedStatus && isEditable && !canDecideSubmittedProposal
+        ? "Update the submitted proposal. Record of decision is limited to approver roles."
     : isSubmittedStatus && isEditable && isRevisionMode
       ? `Review the submitted revision for ${revisionSourceTitle}, verify EI status, and record the decision.`
       : isSubmittedStatus && isEditable
@@ -5047,7 +5096,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
               ? `Viewing the revision for ${revisionSourceTitle} in read-only mode.`
               : statusValue
                 ? "Viewing this proposal in read-only mode."
-                : "Select a draft or submitted proposal from the Interventions table to view it here.";
+    : "Select a draft or submitted proposal from the Interventions table to view it here.";
 
   const infoLink = metadata.helpComponent && toggleHelpPanel ? (
     <Link
@@ -5633,7 +5682,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
           onChange={({ detail }) => handleChange("decisionOutcome", detail.selectedOption?.value || "")}
           options={DECISION_OPTIONS}
           placeholder="Select decision"
-          readOnly={isFormLocked}
+          readOnly={isDecisionReadOnly}
         />
       </FormField>
       {(form.decisionOutcome === "changes_requested" || form.decisionOutcome === "rejected") && (
@@ -5650,7 +5699,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
             onChange={({ detail }) => handleChange("decisionNotes", detail.value)}
             rows={3}
             placeholder="Provide context for this decision."
-            disabled={isFormLocked}
+            disabled={isDecisionReadOnly}
           />
         </FormField>
       )}
@@ -5668,8 +5717,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
               onChange={({ detail }) => handleChange("eiVerificationStatus", detail.selectedOption?.value || "")}
               options={ESDC_OPTIONS}
               placeholder="Select eligibility"
-              readOnly={isFormLocked || !canManageEiEligibility}
-              disabled={!canManageEiEligibility}
+              readOnly={isDecisionReadOnly || !canManageEiEligibility}
+              disabled={isDecisionReadOnly || !canManageEiEligibility}
             />
           </FormField>
           {hasPlanFundingMismatch && (
@@ -5805,7 +5854,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
             <SpaceBetween size="xs" direction="horizontal">
               <Button
                 onClick={() => eiVerificationFileInputRef.current && eiVerificationFileInputRef.current.click()}
-                disabled={isFormLocked || eiVerificationUploading}
+                disabled={isDecisionReadOnly || eiVerificationUploading}
               >
                 Choose file
               </Button>
@@ -6783,12 +6832,16 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       ? (isRevisionMode ? "Send Client Funding Revision Letter" : "Send Client Approval letter")
       : "Send Client Denial letter"
     : isSubmittedStatus
-      ? "Submit Decision"
+      ? canDecideSubmittedProposal
+        ? "Submit Decision"
+        : "Save changes"
       : "Submit for approval";
   const wizardSubmitHandler = isCommunicationStep
     ? handleSubmitCommunication
     : isSubmittedStatus
-      ? handleSubmitDecision
+      ? canDecideSubmittedProposal
+        ? handleSubmitDecision
+        : handleSave
       : handleSubmitProposal;
   const wizardIsWorking = isSubmitting || eiVerificationUploading;
 
@@ -6800,8 +6853,10 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         actions={
           <SpaceBetween direction="horizontal" size="s">
             <Badge color={statusBadgeColor}>{statusLabel}</Badge>
-            {isEditable && !isSubmittedStatus && !completionNote && (
-              <Button variant="primary" disabled={!isDirty} onClick={handleSave}>Save Progress</Button>
+            {isEditable && !completionNote && (!isSubmittedStatus || !canDecideSubmittedProposal) && (
+              <Button variant="primary" disabled={!isDirty} onClick={handleSave}>
+                {isSubmittedStatus ? "Save Changes" : "Save Progress"}
+              </Button>
             )}
           </SpaceBetween>
         }

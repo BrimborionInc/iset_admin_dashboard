@@ -1,7 +1,7 @@
 import ManageWorkflows from '../pages/manageWorkflows.js';
 import ManageWorkflowsHelpPanel from '../helpPanelContents/manageWorkflowsHelpPanel';
 import React from 'react';
-import { isIamOn, hasValidSession, getIdTokenClaims, getRoleFromClaims, buildLoginUrl } from '../auth/cognito';
+import { useAuth } from '../context/AuthContext.js';
 import { useRoleMatrix, toCanonicalRole } from '../context/RoleMatrixContext';
 import { Route, Switch } from 'react-router-dom';
 import ModifyWorkflow from '../pages/modifyWorkflow.js';
@@ -55,7 +55,6 @@ import ApplicationCaseDashboardHelp from '../helpPanelContents/applicationCaseDa
 import ManualApplicationIntakeHelp from '../helpPanelContents/manualApplicationIntakeHelp.js';
 import ClientFileImportDashboardHelp from '../helpPanelContents/clientFileImportDashboardHelp.js';
 import NWACHubManagementDashboard from '../pages/nwacHubManagement.js'; // Import the NWAC Hub Management dashboard
-import AuthCallback from '../pages/AuthCallback.js';
 import UploadConfigDashboard from '../pages/uploadConfigDashboard.js';
 import EventCaptureDashboard from '../pages/configuration/EventCaptureDashboard.js';
 import QueryEditorDashboard from '../pages/configuration/QueryEditorDashboard.js';
@@ -105,7 +104,6 @@ import TutorialsDashboardHelp from '../helpPanelContents/tutorialsDashboardHelp.
 
 const AppRoutes = ({
   toggleHelpPanel,
-  currentRole,
   updateBreadcrumbs,
   setSplitPanelOpen,
   splitPanelOpen,
@@ -115,6 +113,7 @@ const AppRoutes = ({
   breadcrumbs,
   helpMessages,
 }) => {
+  const { isAuthenticated, role, signIn } = useAuth();
   const { roleMatrix, isLoading: roleMatrixLoading } = useRoleMatrix();
 
   const resetToDefaultLayout = () => {
@@ -170,22 +169,19 @@ const AppRoutes = ({
   );
 
   function Guard({ children, roles, path }) {
-    const iamOn = isIamOn();
-    if (!iamOn) return children;
-    if (!hasValidSession()) {
+    if (!isAuthenticated) {
       const AuthRequired = () => (
         <div style={{ padding: 24 }}>
           <p style={{ marginBottom: 12 }}>Please sign in to access this page.</p>
-          <Button variant="primary" onClick={() => window.location.assign(buildLoginUrl())}>Sign in</Button>
+          <Button variant="primary" onClick={signIn}>Sign in</Button>
         </div>
       );
       return renderContent(AuthRequired, [{ text: 'Home', href: '/' }], 'Authentication required');
     }
-    const claims = getIdTokenClaims();
     if (!roles && (roleMatrixLoading || !roleMatrix)) {
       return children;
     }
-    const role = toCanonicalRole(getRoleFromClaims(claims));
+    const canonicalRole = toCanonicalRole(role);
     const allowed = (() => {
       if (Array.isArray(roles) && roles.length) return roles;
       if (path && roleMatrix?.routes) {
@@ -196,7 +192,7 @@ const AppRoutes = ({
       return null;
     })();
     if (allowed) {
-      if (!role || !allowed.includes(role)) {
+      if (!canonicalRole || !allowed.includes(canonicalRole)) {
         const AccessDenied = () => (<div style={{ padding: 24 }}>You do not have permission to view this page.</div>);
         return renderContent(AccessDenied, [{ text: 'Home', href: '/' }], 'Access denied');
       }
@@ -209,10 +205,6 @@ const AppRoutes = ({
 
   return (
     <Switch>
-      <Route path="/auth/callback">
-        <AuthCallback />
-      </Route>
-
       <Route path="/manage-workflows">
         <Guard path="/manage-workflows">
           {renderContent(
@@ -1466,7 +1458,7 @@ const AppRoutes = ({
           AdminDashboard,
           [{ text: 'Home', href: '/' }],
           'NWAC ISET Homepage',
-          <HomeDashboardHelp currentRole={currentRole} />,
+          <HomeDashboardHelp />,
           (
             <Hotspot hotspotId="home-layout-controls" direction="bottom">
               <SpaceBetween size="xs" direction="horizontal">

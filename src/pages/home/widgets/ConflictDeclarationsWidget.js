@@ -178,13 +178,7 @@ const ConflictDeclarationsWidget = ({ role, refreshKey, actions }) => {
     setAssignSubmitting(true);
     setAssignError(null);
     const chosen = selectedAssignee.value;
-    const payload = {};
-    const staffObj = assignableStaff.find(s => String(s.id) === String(chosen));
-    if (chosen && String(chosen).startsWith('placeholder-')) {
-      payload.placeholder_email = staffObj?.email || 'user@nwac.ca';
-    } else {
-      payload.assignee_id = chosen;
-    }
+    const payload = { assignee_id: chosen };
     const caseId = assignTarget.caseId;
     try {
       const resp = await apiFetch(`/api/cases/${caseId}/assign`, {

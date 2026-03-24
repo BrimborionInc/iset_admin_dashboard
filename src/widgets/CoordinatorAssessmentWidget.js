@@ -9,6 +9,7 @@ import ApplicationAssessmentHelp, { NwacAssessmentHelp } from '../helpPanelConte
 import { BoardItem } from '@cloudscape-design/board-components';
 import { findOptionByValue } from '../pages/finance/widgets/paymentOptions';
 import { getCurrencyInputDisplayValue } from '../utils/currencyFormat';
+import { buildApplicantFacingReasonSentence, normalizeTemplateSentence } from '../utils/decisionLetterText';
 
 const BARRIERS = [
   'None', 'Education', 'Lack of Marketable Skills', 'Lack of Work Experience', 'Remoteness', 'Lack of Transportation', 'Economic', 'Language', 'Lack of Labour Force Attachment', 'Dependent Care', 'Physical, Emotional, or Mental Health', 'Other'
@@ -43,11 +44,6 @@ const FUNDING_DECISION_REASON_CODE_KEY = 'fundingDecisionReasonCode';
 const FUNDING_DECISION_REASON_LABEL_KEY = 'fundingDecisionReasonLabel';
 const FUNDING_DECISION_REASON_EXPLANATION_KEY = 'fundingDecisionReasonExplanation';
 const DENIAL_REASON_WORD_LIMIT = 100;
-const normalizeTemplateSentence = (value) => {
-  const normalized = String(value || '').trim().replace(/\s+/g, ' ');
-  if (!normalized) return '';
-  return /[.!?]$/.test(normalized) ? normalized : `${normalized}.`;
-};
 const buildDenialTemplateDraftForReason = ({
   reasonCode,
   requestedProgramName,
@@ -70,7 +66,7 @@ const buildDenialTemplateDraftForReason = ({
     `Thank you for your recent application to the Native Women's Association of Canada (NWAC), through its Indigenous Skills and Employment Training (ISET) Program ${programPhrase}.`,
     'We appreciate the time and effort you invested in the application process and the interest you have shown in pursuing higher education and training.'
   ].join(' ');
-  const detail = normalizeTemplateSentence(denialExplanation);
+  const detail = buildApplicantFacingReasonSentence(denialExplanation);
   const nextStepsText = Array.isArray(optionsForward) ? optionsForward.map(normalizeTemplateSentence).filter(Boolean).join(' ') : '';
   const partialServicesText = Array.isArray(partialServicesAvailable) && partialServicesAvailable.length
     ? `In the meantime, we can continue to offer limited supports including ${partialServicesAvailable.join(', ')}.`
@@ -7057,6 +7053,7 @@ Required output:
 Content rules:
 - Explicitly state the request is not approved at this time.
 - Ground rationale in denial_reason_code, denial_reason_label, denial_reason_explanation, and context facts.
+- Rewrite internal-case-note phrasing into applicant-facing prose. Do not copy wording like "Person is..." or "Client has..." verbatim.
 - Use options_going_forward and partial_services_available when present.
 - Do not add headings, bullets, legal citations, placeholders, or any fabricated facts.
 

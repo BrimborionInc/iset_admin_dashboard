@@ -23,7 +23,7 @@
 
 ## Backends & Auth
 - Admin backend (`isetadminserver.js`) still serves `/api/cases`, `/api/applications`, `/api/applicants/...` endpoints consumed by the widgets.
-- DemoNavigation toggle controls IAM; when IAM off, ensure dev bypass env vars are set to avoid missing-token errors.
+- Admin auth is Cognito-only. Do not assume local IAM-off or dev-bypass paths still exist when debugging missing-token errors.
 
 ## Sage Intacct AP Bills (XML Web Services)
 - Use the Sage Intacct XML Web Services API only for AP Bills, Vendors, and Attachments.

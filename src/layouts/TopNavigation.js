@@ -1,84 +1,31 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { TopNavigation } from '@cloudscape-design/components';
-import { buildLoginUrl, buildLogoutUrl, clearSession, hasValidSession, loadSession } from '../auth/cognito';
 import AdminConsoleIntroHelp from '../helpPanelContents/adminConsoleIntroHelp';
+import { useAuth } from '../context/AuthContext.js';
 
-function getEmailForRole(role) {
-  switch (role?.value || role) {
-    case 'Program Administrator':
-      return 'admin@nwac.ca';
-    case 'Regional Coordinator':
-      return 'coordinator@nwac.ca';
-    case 'System Administrator':
-      return 'admin@nwac.ca';
-    case 'Application Assessor':
-      return 'user@nwac.ca';
-    default:
-      return 'user@nwac.ca';
-  }
-}
-
-function isBypassEnabled() {
-  try { return sessionStorage.getItem('iamBypass') === 'off'; } catch { return false; }
-}
-function isSimSignedOut() {
-  try { return sessionStorage.getItem('simulateSignedOut') === 'true'; } catch { return false; }
-}
-
-const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole }) => {
-  const [signedIn, setSignedIn] = useState(() => hasValidSession());
-  const [bypass, setBypass] = useState(() => isBypassEnabled());
-  const [email, setEmail] = useState(() => {
-    const session = loadSession();
-    return session?.idToken && !isBypassEnabled()
-      ? (JSON.parse(atob(session.idToken.split('.')[1]))?.email || getEmailForRole(currentRole))
-      : getEmailForRole(currentRole);
-  });
-
-  useEffect(() => {
-    const recompute = () => {
-      const session = loadSession();
-      const bypassNow = isBypassEnabled();
-      setBypass(bypassNow);
-      const simOut = isSimSignedOut();
-      setSignedIn(bypassNow ? (!simOut && hasValidSession()) : hasValidSession());
-      const newEmail = session?.idToken && !bypassNow
-        ? (JSON.parse(atob(session.idToken.split('.')[1]))?.email || getEmailForRole(currentRole))
-        : getEmailForRole(currentRole);
-      setEmail(newEmail);
-    };
-    const onSessionChanged = () => recompute();
-    const onStorage = (event) => {
-      if (event.key === 'authSession' || event.key === 'iamBypass' || event.key === 'currentRole' || event.key === 'simulateSignedOut') {
-        recompute();
-      }
-    };
-    window.addEventListener('auth:session-changed', onSessionChanged);
-    window.addEventListener('storage', onStorage);
-    recompute();
-    return () => {
-      window.removeEventListener('auth:session-changed', onSessionChanged);
-      window.removeEventListener('storage', onStorage);
-    };
-  }, [currentRole]);
-
+const TopHeader = ({ currentLanguage = 'en', onLanguageChange }) => {
+  const { email, role, isAuthenticated, signIn, signOut } = useAuth();
   const languageLabel = currentLanguage === 'en' ? 'English' : 'French';
   const utilities = [{
     type: 'menu-dropdown',
     text: languageLabel,
     ariaLabel: 'Select Language',
     items: [{ id: 'en', text: 'English' }, { id: 'fr', text: 'French' }],
-    onItemClick: (event) => onLanguageChange(event.detail.id)
+    onItemClick: event => onLanguageChange(event.detail.id),
   }];
 
-  const roleValue = currentRole?.value || currentRole;
+  const handleAccountMenuClick = event => {
+    if (event.detail.id !== 'signout') return;
+    signOut();
+  };
+
   const openHelpPanel = () => {
     if (typeof window === 'undefined') return;
     try {
       const detail = {
         title: 'Admin Console Help',
         content: <AdminConsoleIntroHelp />,
-        context: AdminConsoleIntroHelp.aiContext || ''
+        context: AdminConsoleIntroHelp.aiContext || '',
       };
       window.dispatchEvent(new CustomEvent('help:open-topnav', { detail }));
     } catch (error) {
@@ -86,28 +33,20 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange, currentRole }) =>
     }
   };
 
-  const simSignedOut = isSimSignedOut();
-  if ((signedIn && !simSignedOut) || (bypass && !simSignedOut)) {
-    if (roleValue === 'System Administrator') {
+  if (isAuthenticated) {
+    if (role === 'System Administrator') {
       utilities.push({ type: 'button', iconName: 'settings', ariaLabel: 'Settings', onClick: () => console.log('Settings clicked') });
     }
     utilities.push({ type: 'button', iconName: 'support', ariaLabel: 'Support', onClick: openHelpPanel });
-    if (!bypass) {
-      utilities.push({
-        type: 'menu-dropdown',
-        text: email,
-        ariaLabel: 'Account Options',
-        items: [{ id: 'profile', text: 'My Profile' }, { id: 'signout', text: 'Sign Out' }],
-        onItemClick: (event) => {
-          if (event.detail.id === 'signout') {
-            clearSession();
-            window.location.href = buildLogoutUrl();
-          }
-        }
-      });
-    }
+    utilities.push({
+      type: 'menu-dropdown',
+      text: email || 'Account',
+      ariaLabel: 'Account Options',
+      items: [{ id: 'profile', text: 'My Profile' }, { id: 'signout', text: 'Sign Out' }],
+      onItemClick: handleAccountMenuClick,
+    });
   } else {
-    utilities.push({ type: 'button', text: 'Sign in', onClick: () => { window.location.href = buildLoginUrl(); } });
+    utilities.push({ type: 'button', text: 'Sign in', onClick: signIn });
   }
 
   return (

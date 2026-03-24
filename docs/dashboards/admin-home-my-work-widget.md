@@ -25,7 +25,6 @@
 
 ### Frontend Wiring
 - `src/pages/home/HomeDashboardPage.jsx` fetches the endpoint with `apiFetch` inside a `useEffect`.
-- When IAM is toggled off, dev-bypass headers (`X-Dev-Role`, `X-Dev-Bypass`, etc.) are attached so the call works without Cognito.
 - API results merge into the persona-specific mock array; tiles render counts in the returned order.
 
 ### Notes
@@ -37,4 +36,4 @@
 ### Recent Implementation Changes
 - Backend helpers now compute live counts for all Program Administrator buckets (new submissions, unassigned, in assessment, awaiting decision, on hold, overdue).
 - Overdue detection pulls SLA targets from `sla_stage_target` and compares elapsed hours in assignment/assessment/program decision stages.
-- Frontend uses `apiFetch` with IAM toggle support; dev bypass headers are appended automatically.
+- Frontend uses `apiFetch` with real Cognito bearer auth.

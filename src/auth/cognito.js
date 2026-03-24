@@ -209,7 +209,3 @@ function normalizeRole(r) {
   };
   return map[r] || r; // fall back to raw if unknown
 }
-
-export function isIamOn() {
-  try { return sessionStorage.getItem('iamBypass') !== 'off'; } catch { return true; }
-}

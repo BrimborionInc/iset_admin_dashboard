@@ -1,15 +1,13 @@
 import React from 'react';
 import { Button } from '@cloudscape-design/components';
 import { useTutorials } from '../context/TutorialsContext';
-import { getIdTokenClaims, getRoleFromClaims, hasValidSession, isIamOn } from '../auth/cognito';
+import { useAuth } from '../context/AuthContext.js';
 import { getHomeIntroTutorialIdForRole } from '../tutorials/tutorialPlatform';
 
-const HomeDashboardHelp = ({ currentRole }) => {
+const HomeDashboardHelp = () => {
+  const { role } = useAuth();
   const { tutorials } = useTutorials();
-  const fallbackRole = currentRole?.value || currentRole?.label || currentRole || null;
-  const claimsRole = (isIamOn() && hasValidSession()) ? getRoleFromClaims(getIdTokenClaims()) : null;
-  const effectiveRole = claimsRole || fallbackRole;
-  const homeIntroTutorialId = getHomeIntroTutorialIdForRole(effectiveRole);
+  const homeIntroTutorialId = getHomeIntroTutorialIdForRole(role);
   const homeTutorials = (tutorials || []).filter(
     tutorial => tutorial?.tutorialId === homeIntroTutorialId
   );
@@ -35,7 +33,7 @@ const HomeDashboardHelp = ({ currentRole }) => {
       <h3>What you can do here</h3>
       <ul>
         <li>Review the highest-priority queues for your role and open a file in one click.</li>
-        <li>Scan a weekly/monthly/quarterly/yearly metrics snapshot for workload and funding pace.</li>
+        <li>Scan a weekly/monthly/quarterly/yearly metrics snapshot for workload and funding pace, then open the matching record list from any count metric.</li>
         <li>Track recent updates across applications and cases.</li>
         <li>Keep a personal list of tagged applications that need follow-up.</li>
         <li>Handle queue-specific actions such as conflict reassignment, EI eligibility updates, approvals, and escalations.</li>
@@ -45,7 +43,7 @@ const HomeDashboardHelp = ({ currentRole }) => {
       <ul>
         <li><strong>Work Queue</strong> - queue counts that reflect your role. Select a queue card to drive the queue table.</li>
         <li><strong>Work Queue Items</strong> - table view of the selected queue with filters, flags, and direct workspace links.</li>
-        <li><strong>Metrics</strong> - activity totals for this week, month, quarter, and year.</li>
+        <li><strong>Metrics</strong> - activity totals for this week, month, quarter, and year; count values can open matching records in the Items table.</li>
         <li><strong>Recent Activity</strong> - newest assignments, status changes, and system events.</li>
         <li><strong>My Tagged Applications</strong> - cases you have tagged for follow-up; remove tags once resolved.</li>
         <li><strong>Development Tracker</strong> - internal development tasks (System Administrators only).</li>
@@ -88,7 +86,7 @@ const HomeDashboardHelp = ({ currentRole }) => {
 
 HomeDashboardHelp.aiContext = `You are assisting a user on the NWAC ISET homepage (route /). This dashboard is a role-based landing board that shows work queues, queue items, metrics, recent activity, and tagged applications. NWAC Administrators and Regional Managers see the consolidated Work Queue and Work Queue Items widgets plus Metrics. ISET Coordinators see the ISET-specific queue, Work Queue Items, and Metrics. System Administrators see the development tracker widget instead of Metrics.
 
-Guide users to select a work queue to populate the Work Queue Items table, use filters to find a record, and open the linked workspace. Mention queue-specific actions (for example conflict reassignment, EI eligibility updates, decision/escalation actions), Add widget and Reset layout actions, and remind them that layouts are stored per browser.
+Guide users to select a work queue to populate the Work Queue Items table, use filters to find a record, and open the linked workspace. Mention that count metrics can also populate the same table in a metric-results mode, queue-specific actions (for example conflict reassignment, EI eligibility updates, decision/escalation actions), Add widget and Reset layout actions, and remind them that layouts are stored per browser.
 `;
 
 export default HomeDashboardHelp;

@@ -1190,10 +1190,7 @@ function resolveAdminActorUserId(req) {
     req.auth?.staffProfileId,
     req.auth?.userId,
     req.auth?.id,
-    req.auth?.sub,
-    req.headers?.['x-dev-userid'],
-    req.headers?.['x-dev-user-id'],
-    req.headers?.['x-dev-user_id']
+    req.auth?.sub
   ];
   for (const candidate of candidates) {
     const normalised = normalisePositiveInteger(candidate);
@@ -12539,14 +12536,12 @@ function clonePayload(payload) {
 
 
 function resolveRequestActor(req) {
-  const actorId = req.auth?.sub || req.auth?.id || req.auth?.user_id || req.auth?.userId || req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
+  const actorId = req.auth?.sub || req.auth?.id || req.auth?.user_id || req.auth?.userId || null;
   const actorName = (
     req.auth?.name ||
     req.auth?.preferred_username ||
     [req.auth?.given_name, req.auth?.family_name].filter(Boolean).join(' ').trim() ||
     req.auth?.email ||
-    req.get('X-Dev-Username') ||
-    req.get('x-dev-username') ||
     null
   );
   return { actorId, actorName };
@@ -13131,10 +13126,6 @@ function resolveActiveStaffProfileId(req) {
   const candidateValues = [];
   if (req?.staffProfile?.id) candidateValues.push(req.staffProfile.id);
   if (req?.auth?.staffProfileId) candidateValues.push(req.auth.staffProfileId);
-  if (typeof req?.get === 'function') {
-    candidateValues.push(req.get('X-Dev-UserId'));
-    candidateValues.push(req.get('x-dev-userid'));
-  }
   for (const value of candidateValues) {
     if (value === null || typeof value === 'undefined') continue;
     const numeric = Number(value);
@@ -13225,8 +13216,7 @@ function canonicalEscalationRole(role) {
   return key;
 }
 function resolveStaffRole(req) {
-  const headerRole = req.get ? (req.get('X-Dev-Role') || req.get('x-dev-role')) : null;
-  const role = req?.auth?.role || req?.staffProfile?.primary_role || headerRole || null;
+  const role = req?.auth?.role || req?.staffProfile?.primary_role || null;
   return role || null;
 }
 
@@ -15280,9 +15270,9 @@ async function writeLockConfig(config) {
 
 function resolveLockIdentity(req) {
   const actor = resolveRequestActor(req) || {};
-  let userId = actor.actorId || req.auth?.sub || req.auth?.user_id || req.auth?.id || req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
-  let displayName = actor.actorName || req.auth?.name || req.staffProfile?.display_name || req.staffProfile?.name || req.get('X-Dev-Username') || req.get('x-dev-username') || null;
-  let email = req.auth?.email || req.staffProfile?.email || req.get('X-Dev-Email') || req.get('x-dev-email') || null;
+  let userId = actor.actorId || req.auth?.sub || req.auth?.user_id || req.auth?.id || null;
+  let displayName = actor.actorName || req.auth?.name || req.staffProfile?.display_name || req.staffProfile?.name || null;
+  let email = req.auth?.email || req.staffProfile?.email || null;
   if (typeof userId === 'number') userId = String(userId);
   return {
     userId: userId ? String(userId) : null,
@@ -15629,7 +15619,7 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
     const publishedBy = {
       id: actor?.actorId || null,
       name: actor?.actorName || null,
-      email: req.auth?.email || req.get?.('X-Dev-Email') || req.get?.('x-dev-email') || null
+      email: req.auth?.email || null
     };
     const schemaArray = Array.isArray(schema) ? schema : (Array.isArray(schema?.steps) ? schema.steps : []);
     const normalizedPayload = {
@@ -15907,16 +15897,6 @@ app.all(['/api/admin/upload-config'], async (req, res) => {
       return res.status(405).json({ error: 'method_not_allowed' });
     }
     const headers = { 'Content-Type': 'application/json' };
-    // Forward dev bypass + role headers for local auth simulation
-    const fwdHeaders = ['x-dev-bypass','x-dev-role','x-dev-userid'];
-    let devBypassActive = false;
-    for (const h of fwdHeaders) {
-      const v = req.headers[h];
-      if (v) {
-        headers[h] = v;
-        if (h === 'x-dev-bypass') devBypassActive = true;
-      }
-    }
     // Always forward bearer/cookie tokens so real Cognito sessions work even if dev bypass headers are present.
     // For this proxy, upstream intake expects an access token while this admin API validates ID tokens.
     // Prefer explicit access token header if provided by frontend, otherwise fall back to inbound Authorization.
@@ -16074,28 +16054,11 @@ async function staffProfileMiddleware(req, res, next) {
   }
 }
 
-// --- Authentication (Cognito) - feature flagged ---
-// New: allow local development bypass via DEV_DISABLE_AUTH=true (non-production only)
+// --- Authentication (Cognito) ---
 try {
-  const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-  const devDisableAuth = process.env.DEV_DISABLE_AUTH === 'true' && process.env.NODE_ENV !== 'production';
-  const devAuthBypass = (process.env.DEV_AUTH_BYPASS === 'true' || process.env.DEV_AUTH_BYPASS === '1') && process.env.NODE_ENV !== 'production';
-  if (authProvider === 'cognito' && devDisableAuth) {
-    console.warn('\n============================================================');
-    console.warn('[AUTH] DEV AUTH BYPASS ACTIVE (DEV_DISABLE_AUTH=true)');
-    console.warn('[AUTH] All /api requests are unauthenticated locally.');
-    console.warn('[AUTH] DO NOT USE THIS IN PROD. Remove DEV_DISABLE_AUTH to re-enable.');
-    console.warn('============================================================\n');
-    // Mark responses so calls are visibly unauthenticated in network inspector
-    app.use((req, res, next) => { res.setHeader('X-Auth-Bypassed', 'true'); next(); });
-  } else if (authProvider === 'cognito') {
-    const { authnMiddleware } = require('./src/middleware/authn');
-    // Attach auth first, then staff profile enrichment
-    app.use('/api', authnMiddleware(), staffProfileMiddleware);
-    if (devAuthBypass) {
-      console.warn('[AUTH] Cognito auth enabled but DEV_AUTH_BYPASS=true: X-Dev-Bypass header with matching token will short-circuit auth in middleware');
-    }
-  }
+  const { authnMiddleware } = require('./src/middleware/authn');
+  // Attach auth first, then staff profile enrichment.
+  app.use('/api', authnMiddleware(), staffProfileMiddleware);
 } catch (e) {
   console.warn('Auth middleware init failed:', e?.message);
 }
@@ -16118,8 +16081,6 @@ try {
 
 // Simple auth probe for smoke testing
 app.get('/api/auth/me', (req, res) => {
-  const enabled = String(process.env.AUTH_PROVIDER || 'none').toLowerCase() === 'cognito';
-  if (!enabled) return res.status(200).json({ provider: 'none', auth: null });
   if (!req.auth) return res.status(401).json({ error: 'Unauthenticated' });
   res.json({ provider: 'cognito', auth: req.auth });
 });
@@ -16132,12 +16093,6 @@ const ASSIGNABLE_COGNITO_GROUPS = [
 ];
 const ASSIGNABLE_GROUP_LABEL = new Map(ASSIGNABLE_COGNITO_GROUPS.map(entry => [entry.group, entry.label]));
 const ASSIGNABLE_GROUP_NAMES = ASSIGNABLE_COGNITO_GROUPS.map(entry => entry.group);
-const PLACEHOLDER_ASSIGNABLE_STAFF = [
-  { id: 'placeholder-program-admin', email: 'admin@nwac.ca', role: 'Program Administrator', display_name: 'Admin (NWAC Administrator)', region_id: null },
-  { id: 'placeholder-regional-coordinator', email: 'coordinator@nwac.ca', role: 'Regional Coordinator', display_name: 'Manager (Regional Manager)', region_id: 1 },
-  { id: 'placeholder-adjudicator', email: 'user@nwac.ca', role: 'Application Assessor', display_name: 'Coordinator (ISET Coordinator)', region_id: 1 }
-];
-const PLACEHOLDER_ASSIGNABLE_LOOKUP = new Map(PLACEHOLDER_ASSIGNABLE_STAFF.map(entry => [entry.email.toLowerCase(), entry]));
 
 const COGNITO_POOL_ID = process.env.COGNITO_USER_POOL_ID || process.env.USER_POOL_ID || process.env.AWS_USER_POOL_ID || null;
 const COGNITO_REGION = process.env.AWS_REGION || process.env.COGNITO_REGION || null;
@@ -16653,10 +16608,8 @@ async function fetchRegionCodesByIds(regionIds) {
 
 async function resolveRegionalCoordinatorContext(req) {
   if (!pool) return { valid: false, staffIds: [] };
-  const headerUserIdRaw = req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
-  const headerRegionIdRaw = req.get('X-Dev-RegionId') || req.get('x-dev-regionid') || null;
-  const candidateIdRaw = headerUserIdRaw ?? req.staffProfile?.id ?? null;
-  let regionIdRaw = headerRegionIdRaw ?? req.staffProfile?.region_id ?? req.auth?.regionId ?? null;
+  const candidateIdRaw = req.staffProfile?.id ?? null;
+  let regionIdRaw = req.staffProfile?.region_id ?? req.auth?.regionId ?? null;
 
   const collected = [];
   let coordinatorId = null;
@@ -16740,10 +16693,8 @@ async function resolveRegionalCoordinatorContext(req) {
 
 async function resolveApplicationAssessorContext(req) {
   if (!pool) return { valid: false, staffIds: [] };
-  const headerUserIdRaw = req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
-  const headerRegionIdRaw = req.get('X-Dev-RegionId') || req.get('x-dev-regionid') || null;
-  const candidateIdRaw = headerUserIdRaw ?? req.staffProfile?.id ?? null;
-  let regionIdRaw = headerRegionIdRaw ?? req.staffProfile?.region_id ?? req.auth?.regionId ?? null;
+  const candidateIdRaw = req.staffProfile?.id ?? null;
+  let regionIdRaw = req.staffProfile?.region_id ?? req.auth?.regionId ?? null;
 
   const matchesAssessorRole = (profile) => {
     const role = profile?.primary_role;
@@ -17485,12 +17436,25 @@ const applyMetricsScopeFilters = (filters, params, scope, options = {}) => {
   const caseAlias = options.caseAlias || 'c';
   const staffAlias = options.staffAlias || 'sp';
   const ownerId = scope?.ownerId;
+  const regionIds = Array.isArray(scope?.regionIds)
+    ? scope.regionIds.map(value => normalisePositiveInteger(value)).filter(Boolean)
+    : [];
   const regionId = scope?.regionId;
   if (Number.isInteger(ownerId) && ownerId > 0) {
     filters.push(`${caseAlias}.assigned_to_user_id = ?`);
     params.push(ownerId);
   }
-  if (Number.isInteger(regionId) && regionId > 0) {
+  if (regionIds.length > 0) {
+    filters.push(`${caseAlias}.assigned_to_user_id IS NOT NULL`);
+    if (regionIds.length === 1) {
+      filters.push(`${staffAlias}.region_id = ?`);
+      params.push(regionIds[0]);
+    } else {
+      const placeholders = regionIds.map(() => '?').join(',');
+      filters.push(`${staffAlias}.region_id IN (${placeholders})`);
+      params.push(...regionIds);
+    }
+  } else if (Number.isInteger(regionId) && regionId > 0) {
     filters.push(`${caseAlias}.assigned_to_user_id IS NOT NULL`);
     filters.push(`${staffAlias}.region_id = ?`);
     params.push(regionId);
@@ -17911,6 +17875,634 @@ async function resolveMetricsScope(req, role) {
     timeZoneRegionId: fallbackRegionId
   };
 }
+
+const METRICS_DETAIL_LIMIT = 500;
+const METRICS_DETAIL_FETCH_LIMIT = METRICS_DETAIL_LIMIT + 1;
+
+const truncateMetricDetailRows = rows => {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  return {
+    items: safeRows.slice(0, METRICS_DETAIL_LIMIT),
+    truncated: safeRows.length > METRICS_DETAIL_LIMIT
+  };
+};
+
+const buildMetricApplicantName = row => {
+  const preferred = normaliseString(row?.submission_preferred_name) || null;
+  const submissionFirst = normaliseString(row?.submission_first_name) || null;
+  const submissionLast = normaliseString(row?.submission_last_name) || null;
+  const clientFirst = normaliseString(row?.client_first_name) || null;
+  const clientLast = normaliseString(row?.client_last_name) || null;
+  const submissionFull = [submissionFirst, submissionLast].filter(Boolean).join(' ').trim();
+  const clientFull = [clientFirst, clientLast].filter(Boolean).join(' ').trim();
+  return (
+    submissionFull ||
+    preferred ||
+    clientFull ||
+    normaliseString(row?.applicant_name) ||
+    normaliseString(row?.tracking_id) ||
+    normaliseString(row?.case_number) ||
+    'Applicant'
+  );
+};
+
+const buildMetricOwnerLabel = row =>
+  normaliseString(row?.owner_display_name) ||
+  normaliseString(row?.owner_name) ||
+  normaliseString(row?.assigned_user_email) ||
+  'Unassigned';
+
+const buildMetricReference = row =>
+  normaliseString(row?.tracking_id) ||
+  normaliseString(row?.submission_reference_number) ||
+  normaliseString(row?.case_number) ||
+  null;
+
+const buildMetricSubtitle = (...parts) =>
+  parts
+    .map(value => normaliseString(value))
+    .filter(Boolean)
+    .join(' · ') || null;
+
+const buildMetricDateLabel = (value, prefix) => {
+  const dateText = toDateOnlyString(value);
+  if (!dateText) return null;
+  return prefix ? `${prefix} ${dateText}` : dateText;
+};
+
+const buildMetricProvince = row =>
+  normaliseString(row?.submission_address_province) ||
+  normaliseString(row?.client_address_province) ||
+  null;
+
+const buildMetricWorkspacePath = ({ caseId, mode = 'application' }) => {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  if (!normalizedCaseId) {
+    return '/case-assignment-dashboard';
+  }
+  if (mode === 'case' || mode === 'action-plan' || mode === 'intervention') {
+    return `/cases/${normalizedCaseId}`;
+  }
+  return `/application-case/${normalizedCaseId}`;
+};
+
+const mapMetricApplicationRows = (rows, { eventLabel = 'Updated' } = {}) => {
+  const mapped = (Array.isArray(rows) ? rows : []).map((row, index) => {
+    const caseId = normalisePositiveInteger(row?.case_id) || null;
+    const applicationId = normalisePositiveInteger(row?.application_id) || null;
+    const applicantName = buildMetricApplicantName(row);
+    const reference = buildMetricReference(row) || (applicationId ? `APP-${applicationId}` : null);
+    const metricEventDate = toIsoDateTime(row?.metric_event_at);
+    return {
+      id: `metric-application-${applicationId || caseId || index}`,
+      caseId,
+      case_id: caseId,
+      applicationId,
+      application_id: applicationId,
+      trackingId: reference,
+      applicantName,
+      applicant_name: applicantName,
+      address_province: buildMetricProvince(row),
+      owner: buildMetricOwnerLabel(row),
+      assigned_user_id: normalisePositiveInteger(row?.assigned_to_user_id) || null,
+      assigned_user_email: normaliseString(row?.assigned_user_email) || null,
+      assigned_user_role: normaliseString(row?.assigned_user_role) || null,
+      assigned_user_region_id: normalisePositiveInteger(row?.assigned_user_region_id) || null,
+      status: normaliseApplicationStatusValue(row?.application_status) || normaliseString(row?.application_status) || null,
+      type: 'Application',
+      submittedAt: metricEventDate,
+      metricEventDate,
+      titleSecondaryText: buildMetricSubtitle(reference, buildMetricDateLabel(row?.metric_event_at, eventLabel)),
+      workspacePath: buildMetricWorkspacePath({ caseId, mode: 'application' })
+    };
+  });
+  return truncateMetricDetailRows(mapped);
+};
+
+const mapMetricActionPlanRows = (rows, { eventLabel = 'Updated', subjectBuilder } = {}) => {
+  const mapped = (Array.isArray(rows) ? rows : []).map((row, index) => {
+    const caseId = normalisePositiveInteger(row?.case_id) || null;
+    const applicationId = normalisePositiveInteger(row?.application_id) || null;
+    const actionPlanId = normalisePositiveInteger(row?.action_plan_id) || null;
+    const applicantName = buildMetricApplicantName(row);
+    const reference =
+      normaliseString(row?.case_number) ||
+      buildMetricReference(row) ||
+      (caseId ? `CASE-${caseId}` : null);
+    const metricEventDate = toIsoDateTime(row?.metric_event_at);
+    const subject =
+      typeof subjectBuilder === 'function'
+        ? subjectBuilder(row)
+        : normaliseString(row?.action_plan_name) || (actionPlanId ? `Action plan ${actionPlanId}` : 'Action plan');
+    return {
+      id: `metric-action-plan-${actionPlanId || caseId || index}`,
+      caseId,
+      case_id: caseId,
+      applicationId,
+      application_id: applicationId,
+      actionPlanId,
+      action_plan_id: actionPlanId,
+      trackingId: buildMetricReference(row),
+      applicantName,
+      applicant_name: applicantName,
+      address_province: buildMetricProvince(row),
+      owner: buildMetricOwnerLabel(row),
+      assigned_user_id: normalisePositiveInteger(row?.assigned_to_user_id) || null,
+      assigned_user_email: normaliseString(row?.assigned_user_email) || null,
+      assigned_user_role: normaliseString(row?.assigned_user_role) || null,
+      assigned_user_region_id: normalisePositiveInteger(row?.assigned_user_region_id) || null,
+      status: normaliseString(row?.action_plan_status) || null,
+      type: 'ActionPlan',
+      metricSubject: subject,
+      metricEventDate,
+      titleSecondaryText: buildMetricSubtitle(reference, buildMetricDateLabel(row?.metric_event_at, eventLabel)),
+      workspacePath: buildMetricWorkspacePath({ caseId, mode: 'action-plan' })
+    };
+  });
+  return truncateMetricDetailRows(mapped);
+};
+
+const mapMetricInterventionRows = (rows, { eventLabel = 'Updated' } = {}) => {
+  const mapped = (Array.isArray(rows) ? rows : []).map((row, index) => {
+    const caseId = normalisePositiveInteger(row?.case_id) || null;
+    const applicationId = normalisePositiveInteger(row?.application_id) || null;
+    const interventionId = normalisePositiveInteger(row?.intervention_id) || null;
+    const applicantName = buildMetricApplicantName(row);
+    const reference =
+      normaliseString(row?.case_number) ||
+      buildMetricReference(row) ||
+      (caseId ? `CASE-${caseId}` : null);
+    const metricEventDate = toIsoDateTime(row?.metric_event_at);
+    return {
+      id: `metric-intervention-${interventionId || caseId || index}`,
+      caseId,
+      case_id: caseId,
+      applicationId,
+      application_id: applicationId,
+      interventionId,
+      intervention_id: interventionId,
+      trackingId: buildMetricReference(row),
+      applicantName,
+      applicant_name: applicantName,
+      address_province: buildMetricProvince(row),
+      owner: buildMetricOwnerLabel(row),
+      assigned_user_id: normalisePositiveInteger(row?.assigned_to_user_id) || null,
+      assigned_user_email: normaliseString(row?.assigned_user_email) || null,
+      assigned_user_role: normaliseString(row?.assigned_user_role) || null,
+      assigned_user_region_id: normalisePositiveInteger(row?.assigned_user_region_id) || null,
+      status: normaliseString(row?.intervention_status) || null,
+      type: 'Intervention',
+      intervention_code: normaliseString(row?.intervention_code) || null,
+      intervention_label:
+        normaliseString(row?.intervention_label) ||
+        normaliseString(row?.intervention_title) ||
+        (interventionId ? `Intervention ${interventionId}` : null),
+      intervention_start_date: row?.intervention_start_date || null,
+      submittedAt: metricEventDate,
+      metricEventDate,
+      titleSecondaryText: buildMetricSubtitle(reference, buildMetricDateLabel(row?.metric_event_at, eventLabel)),
+      workspacePath: buildMetricWorkspacePath({ caseId, mode: 'intervention' })
+    };
+  });
+  return truncateMetricDetailRows(mapped);
+};
+
+const mapMetricActiveCaseRows = rows => {
+  const mapped = (Array.isArray(rows) ? rows : []).map((row, index) => {
+    const caseId = normalisePositiveInteger(row?.case_id) || null;
+    const applicationId = normalisePositiveInteger(row?.application_id) || null;
+    const applicantName = buildMetricApplicantName(row);
+    const reference =
+      normaliseString(row?.case_number) ||
+      buildMetricReference(row) ||
+      (caseId ? `CASE-${caseId}` : null);
+    const openedAt = row?.opened_at || row?.created_at || null;
+    return {
+      id: `metric-case-${caseId || applicationId || index}`,
+      caseId,
+      case_id: caseId,
+      applicationId,
+      application_id: applicationId,
+      trackingId: buildMetricReference(row),
+      applicantName,
+      applicant_name: applicantName,
+      address_province: buildMetricProvince(row),
+      owner: buildMetricOwnerLabel(row),
+      assigned_user_id: normalisePositiveInteger(row?.assigned_to_user_id) || null,
+      assigned_user_email: normaliseString(row?.assigned_user_email) || null,
+      assigned_user_role: normaliseString(row?.assigned_user_role) || null,
+      assigned_user_region_id: normalisePositiveInteger(row?.assigned_user_region_id) || null,
+      status: normaliseCaseStatusValue(row?.case_status) || normaliseString(row?.case_status) || null,
+      type: 'Case',
+      metricEventDate: toIsoDateTime(openedAt),
+      titleSecondaryText: buildMetricSubtitle(
+        reference,
+        buildMetricDateLabel(openedAt, 'Opened'),
+        applicationId ? null : 'Client file case'
+      ),
+      workspacePath: buildMetricWorkspacePath({ caseId, mode: 'case' })
+    };
+  });
+  return truncateMetricDetailRows(mapped);
+};
+
+async function fetchMetricApplicationDetailRows(pool, { start, end, scope, statuses, dateExpr, eventLabel }) {
+  try {
+    const statusValues = normalizeStatusList(statuses);
+    const placeholders = statusValues.map(() => '?').join(',');
+    const statusExpr = `REPLACE(LOWER(TRIM(a.status)), ' ', '_')`;
+    const filters = [
+      `${dateExpr} >= ?`,
+      `${dateExpr} < ?`,
+      `${statusExpr} IN (${placeholders})`
+    ];
+    const params = [start, end, ...statusValues];
+    applyMetricsScopeFilters(filters, params, scope);
+    const sql = `
+      SELECT
+        a.id AS application_id,
+        a.status AS application_status,
+        ${dateExpr} AS metric_event_at,
+        c.id AS case_id,
+        c.case_number,
+        c.status AS case_status,
+        c.assigned_to_user_id,
+        cl.first_name AS client_first_name,
+        cl.last_name AS client_last_name,
+        COALESCE(
+          JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')),
+          s.reference_number
+        ) AS tracking_id,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."first-name"')) AS submission_first_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."last-name"')) AS submission_last_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."preferred-name"')) AS submission_preferred_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."address-province"')) AS submission_address_province,
+        sp.display_name AS owner_display_name,
+        sp.name AS owner_name,
+        sp.email AS assigned_user_email,
+        sp.primary_role AS assigned_user_role,
+        sp.region_id AS assigned_user_region_id
+      FROM iset_application a
+      LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+      LEFT JOIN iset_case c ON c.application_id = a.id
+      LEFT JOIN client cl ON cl.id = c.client_id
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      WHERE ${filters.join(' AND ')}
+      ORDER BY ${dateExpr} DESC, a.id DESC
+      LIMIT ${METRICS_DETAIL_FETCH_LIMIT}
+    `;
+    const [rows] = await pool.query(sql, params);
+    return mapMetricApplicationRows(rows, { eventLabel });
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || (err && err.code === 'ER_BAD_FIELD_ERROR')) {
+      return { items: [], truncated: false };
+    }
+    throw err;
+  }
+}
+
+async function fetchMetricActionPlanDetailRows(pool, { start, end, scope, mode = 'started', resultCode = null, eventLabel, subjectBuilder }) {
+  try {
+    const metricDateExpr =
+      mode === 'result'
+        ? 'ap.result_date'
+        : 'COALESCE(ap.effective_date, DATE(ap.activated_at), DATE(ap.created_at))';
+    const filters = [
+      `${metricDateExpr} >= ?`,
+      `${metricDateExpr} < ?`
+    ];
+    const params = [start, end];
+    if (mode === 'result' && resultCode) {
+      filters.push('ap.result_code = ?');
+      params.push(String(resultCode));
+    }
+    applyMetricsScopeFilters(filters, params, scope);
+    const sql = `
+      SELECT
+        ap.id AS action_plan_id,
+        ap.case_id,
+        ap.name AS action_plan_name,
+        ap.status AS action_plan_status,
+        ap.result_code,
+        ${metricDateExpr} AS metric_event_at,
+        c.case_number,
+        c.assigned_to_user_id,
+        a.id AS application_id,
+        cl.first_name AS client_first_name,
+        cl.last_name AS client_last_name,
+        COALESCE(
+          JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')),
+          s.reference_number
+        ) AS tracking_id,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."first-name"')) AS submission_first_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."last-name"')) AS submission_last_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."preferred-name"')) AS submission_preferred_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."address-province"')) AS submission_address_province,
+        sp.display_name AS owner_display_name,
+        sp.name AS owner_name,
+        sp.email AS assigned_user_email,
+        sp.primary_role AS assigned_user_role,
+        sp.region_id AS assigned_user_region_id
+      FROM iset_case_action_plan ap
+      JOIN iset_case c ON c.id = ap.case_id
+      LEFT JOIN iset_application a ON a.id = c.application_id
+      LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+      LEFT JOIN client cl ON cl.id = c.client_id
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      WHERE ${filters.join(' AND ')}
+      ORDER BY ${metricDateExpr} DESC, ap.id DESC
+      LIMIT ${METRICS_DETAIL_FETCH_LIMIT}
+    `;
+    const [rows] = await pool.query(sql, params);
+    return mapMetricActionPlanRows(rows, { eventLabel, subjectBuilder });
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || (err && err.code === 'ER_BAD_FIELD_ERROR')) {
+      return { items: [], truncated: false };
+    }
+    throw err;
+  }
+}
+
+async function fetchMetricInterventionDetailRows(pool, { start, end, scope, mode = 'created', eventLabel }) {
+  try {
+    const statusExpr = `REPLACE(LOWER(TRIM(ci.status)), ' ', '_')`;
+    const metricDateExpr =
+      mode === 'completed'
+        ? 'COALESCE(ci.end_date, DATE(ci.closed_at), DATE(ci.updated_at), DATE(ci.created_at))'
+        : 'COALESCE(ci.created_at, ci.updated_at)';
+    const filters = [
+      `${metricDateExpr} >= ?`,
+      `${metricDateExpr} < ?`
+    ];
+    const params = [start, end];
+    if (mode === 'completed') {
+      filters.unshift(`${statusExpr} = ?`);
+      params.unshift('completed');
+    } else {
+      filters.push(`${statusExpr} <> ?`);
+      params.push('draft');
+    }
+    applyMetricsScopeFilters(filters, params, scope, { caseAlias: 'c', staffAlias: 'sp' });
+    const sql = `
+      SELECT
+        ci.id AS intervention_id,
+        ci.case_id,
+        ci.status AS intervention_status,
+        ci.intervention_code,
+        ci.start_date AS intervention_start_date,
+        ${metricDateExpr} AS metric_event_at,
+        JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.title')) AS intervention_title,
+        ic.label AS intervention_label,
+        c.case_number,
+        c.assigned_to_user_id,
+        a.id AS application_id,
+        cl.first_name AS client_first_name,
+        cl.last_name AS client_last_name,
+        COALESCE(
+          JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')),
+          s.reference_number
+        ) AS tracking_id,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."first-name"')) AS submission_first_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."last-name"')) AS submission_last_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."preferred-name"')) AS submission_preferred_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."address-province"')) AS submission_address_province,
+        sp.display_name AS owner_display_name,
+        sp.name AS owner_name,
+        sp.email AS assigned_user_email,
+        sp.primary_role AS assigned_user_role,
+        sp.region_id AS assigned_user_region_id
+      FROM iset_case_intervention ci
+      JOIN iset_case c ON c.id = ci.case_id
+      LEFT JOIN iset_application a ON a.id = c.application_id
+      LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+      LEFT JOIN client cl ON cl.id = c.client_id
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
+      WHERE ${filters.join(' AND ')}
+      ORDER BY ${metricDateExpr} DESC, ci.id DESC
+      LIMIT ${METRICS_DETAIL_FETCH_LIMIT}
+    `;
+    const [rows] = await pool.query(sql, params);
+    return mapMetricInterventionRows(rows, { eventLabel });
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || (err && err.code === 'ER_BAD_FIELD_ERROR')) {
+      return { items: [], truncated: false };
+    }
+    throw err;
+  }
+}
+
+async function fetchMetricActiveCaseDetailRows(pool, { scope }) {
+  try {
+    const statuses = normalizeStatusList(METRICS_ACTIVE_CASE_STATUSES);
+    const placeholders = statuses.map(() => '?').join(',');
+    const statusExpr = `REPLACE(LOWER(TRIM(c.status)), ' ', '_')`;
+    const filters = [`${statusExpr} IN (${placeholders})`];
+    const params = [...statuses];
+    applyMetricsScopeFilters(filters, params, scope);
+    const clientProvinceExpr = `COALESCE(
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.address.province')), ''),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.address.provinceCode')), ''),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.province')), ''),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.provinceCode')), '')
+    )`;
+    const sql = `
+      SELECT
+        c.id AS case_id,
+        c.case_number,
+        c.status AS case_status,
+        c.opened_at,
+        c.created_at,
+        c.updated_at,
+        c.assigned_to_user_id,
+        a.id AS application_id,
+        cl.first_name AS client_first_name,
+        cl.last_name AS client_last_name,
+        ${clientProvinceExpr} AS client_address_province,
+        COALESCE(
+          JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')),
+          s.reference_number
+        ) AS tracking_id,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."first-name"')) AS submission_first_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."last-name"')) AS submission_last_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."preferred-name"')) AS submission_preferred_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."address-province"')) AS submission_address_province,
+        sp.display_name AS owner_display_name,
+        sp.name AS owner_name,
+        sp.email AS assigned_user_email,
+        sp.primary_role AS assigned_user_role,
+        sp.region_id AS assigned_user_region_id
+      FROM iset_case c
+      LEFT JOIN iset_application a ON a.id = c.application_id
+      LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+      LEFT JOIN client cl ON cl.id = c.client_id
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      WHERE ${filters.join(' AND ')}
+      ORDER BY COALESCE(c.updated_at, c.opened_at, c.created_at) DESC, c.id DESC
+      LIMIT ${METRICS_DETAIL_FETCH_LIMIT}
+    `;
+    const [rows] = await pool.query(sql, params);
+    return mapMetricActiveCaseRows(rows);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || (err && err.code === 'ER_BAD_FIELD_ERROR')) {
+      return { items: [], truncated: false };
+    }
+    throw err;
+  }
+}
+
+const METRICS_DRILLDOWN_DEFINITIONS = {
+  newApplications: {
+    label: 'New applications',
+    columnPreset: 'metric-applications',
+    eventDateLabel: 'Submitted',
+    load: ({ pool, start, end, scope }) =>
+      fetchMetricApplicationDetailRows(pool, {
+        start,
+        end,
+        scope,
+        statuses: METRICS_NON_LEGACY_APPLICATION_STATUSES,
+        dateExpr: 's.submitted_at',
+        eventLabel: 'Submitted'
+      })
+  },
+  inReview: {
+    label: 'In review',
+    columnPreset: 'metric-applications',
+    eventDateLabel: 'Status updated',
+    load: ({ pool, start, end, scope }) =>
+      fetchMetricApplicationDetailRows(pool, {
+        start,
+        end,
+        scope,
+        statuses: METRICS_IN_REVIEW_APPLICATION_STATUSES,
+        dateExpr: 'COALESCE(a.updated_at, a.created_at)',
+        eventLabel: 'Status updated'
+      })
+  },
+  awaitingApproval: {
+    label: 'Awaiting approval',
+    columnPreset: 'metric-applications',
+    eventDateLabel: 'Status updated',
+    load: ({ pool, start, end, scope }) =>
+      fetchMetricApplicationDetailRows(pool, {
+        start,
+        end,
+        scope,
+        statuses: METRICS_AWAITING_APPROVAL_APPLICATION_STATUSES,
+        dateExpr: 'COALESCE(a.updated_at, a.created_at)',
+        eventLabel: 'Status updated'
+      })
+  },
+  approved: {
+    label: 'Applications approved',
+    columnPreset: 'metric-applications',
+    eventDateLabel: 'Status updated',
+    load: ({ pool, start, end, scope }) =>
+      fetchMetricApplicationDetailRows(pool, {
+        start,
+        end,
+        scope,
+        statuses: METRICS_APPROVED_APPLICATION_STATUSES,
+        dateExpr: 'COALESCE(a.updated_at, a.created_at)',
+        eventLabel: 'Status updated'
+      })
+  },
+  denied: {
+    label: 'Applications denied',
+    columnPreset: 'metric-applications',
+    eventDateLabel: 'Status updated',
+    load: ({ pool, start, end, scope }) =>
+      fetchMetricApplicationDetailRows(pool, {
+        start,
+        end,
+        scope,
+        statuses: METRICS_DENIED_APPLICATION_STATUSES,
+        dateExpr: 'COALESCE(a.updated_at, a.created_at)',
+        eventLabel: 'Status updated'
+      })
+  },
+  actionPlansStarted: {
+    label: 'Action plans started',
+    columnPreset: 'metric-action-plans',
+    subjectLabel: 'Action plan',
+    eventDateLabel: 'Started',
+    load: ({ pool, start, end, scope }) =>
+      fetchMetricActionPlanDetailRows(pool, {
+        start,
+        end,
+        scope,
+        mode: 'started',
+        eventLabel: 'Started',
+        subjectBuilder: row => normaliseString(row?.action_plan_name) || 'Action plan'
+      })
+  },
+  activeCases: {
+    label: 'Active cases',
+    columnPreset: 'metric-cases',
+    periodIndependent: true,
+    scopeNote: 'Current snapshot of active cases in your scope. The period selector does not change this list.',
+    load: ({ pool, scope }) => fetchMetricActiveCaseDetailRows(pool, { scope })
+  },
+  newInterventionProposals: {
+    label: 'New intervention proposals',
+    columnPreset: 'metric-interventions',
+    eventDateLabel: 'Created',
+    load: ({ pool, start, end, scope }) =>
+      fetchMetricInterventionDetailRows(pool, {
+        start,
+        end,
+        scope,
+        mode: 'created',
+        eventLabel: 'Created'
+      })
+  },
+  interventionsCompleted: {
+    label: 'Interventions completed',
+    columnPreset: 'metric-interventions',
+    eventDateLabel: 'Completed',
+    load: ({ pool, start, end, scope }) =>
+      fetchMetricInterventionDetailRows(pool, {
+        start,
+        end,
+        scope,
+        mode: 'completed',
+        eventLabel: 'Completed'
+      })
+  },
+  employed: {
+    label: 'Employed',
+    columnPreset: 'metric-action-plans',
+    subjectLabel: 'Outcome',
+    eventDateLabel: 'Result date',
+    load: ({ pool, start, end, scope }) =>
+      fetchMetricActionPlanDetailRows(pool, {
+        start,
+        end,
+        scope,
+        mode: 'result',
+        resultCode: '2',
+        eventLabel: 'Result date',
+        subjectBuilder: () => 'Employed'
+      })
+  },
+  returnedToSchool: {
+    label: 'Returned to school',
+    columnPreset: 'metric-action-plans',
+    subjectLabel: 'Outcome',
+    eventDateLabel: 'Result date',
+    load: ({ pool, start, end, scope }) =>
+      fetchMetricActionPlanDetailRows(pool, {
+        start,
+        end,
+        scope,
+        mode: 'result',
+        resultCode: '4',
+        eventLabel: 'Result date',
+        subjectBuilder: () => 'Returned to school'
+      })
+  }
+};
 
 async function markCaseReadyToClose({ caseId, connection = null }) {
   const numericCaseId = Number(caseId);
@@ -18489,10 +19081,6 @@ async function countAssessorOverdue(pool, staffProfileId) {
 function inferUserRole(req) {
   if (req.staffProfile && req.staffProfile.primary_role) return req.staffProfile.primary_role;
   if (req.auth && req.auth.role) return req.auth.role;
-  if (req.get) {
-    const headerRole = req.get('X-Dev-Role') || req.get('x-dev-role');
-    if (headerRole) return headerRole;
-  }
   return null;
 }
 
@@ -18535,10 +19123,6 @@ function resolveActorLabel(req) {
   const { actorId, actorName } = resolveRequestActor(req) || {};
   if (actorName) return actorName;
   if (actorId) return actorId;
-  if (req.get) {
-    const headerUser = req.get('X-Dev-UserId') || req.get('x-dev-userid');
-    if (headerUser) return headerUser;
-  }
   return 'admin-dashboard';
 }
 
@@ -18658,25 +19242,10 @@ async function fetchAssignableFromCognito(pool) {
 
 // List assignable staff for case assignment
 // GET /api/staff/assignable
-// In dev bypass (IAM off) returns placeholder identities; otherwise queries staff_profiles by allowed roles.
 app.get('/api/staff/assignable', async (req, res) => {
   try {
-    const placeholderStaff = PLACEHOLDER_ASSIGNABLE_STAFF;
-    const iamModeHeader = (req.get('x-iam-mode') || req.get('X-Iam-Mode') || '').toLowerCase();
-    const bypassHeader = !!(req.get('x-dev-bypass') || req.get('X-Dev-Bypass'));
-    const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-    const envIamEnabled = authProvider === 'cognito';
-    const devBypassEnv = process.env.DEV_DISABLE_AUTH === 'true' || process.env.DEV_AUTH_BYPASS === 'true';
-    const isAuthenticated = !!req.auth && envIamEnabled;
-    const explicitOn = iamModeHeader === 'on';
-    const explicitOff = iamModeHeader === 'off';
-
-    if ((bypassHeader && !explicitOn) || explicitOff) {
-      return res.json(placeholderStaff);
-    }
-
-    if (!envIamEnabled || (!isAuthenticated && devBypassEnv && !explicitOn)) {
-      return res.json(placeholderStaff);
+    if (!req.auth || req.auth.subjectType !== 'staff') {
+      return res.status(401).json({ error: 'forbidden' });
     }
 
     const merged = new Map();
@@ -18689,11 +19258,9 @@ app.get('/api/staff/assignable', async (req, res) => {
       merged.set(normalizedKey, staff);
     };
 
-    if (envIamEnabled) {
-      const cognitoStaff = await fetchAssignableFromCognito(pool);
-      if (Array.isArray(cognitoStaff)) {
-        cognitoStaff.forEach(addStaff);
-      }
+    const cognitoStaff = await fetchAssignableFromCognito(pool);
+    if (Array.isArray(cognitoStaff)) {
+      cognitoStaff.forEach(addStaff);
     }
 
     // Merge staff_profiles results so partial Cognito group listings still include known staff.
@@ -18753,12 +19320,11 @@ app.get('/api/reference/indigenous-bands', async (req, res) => {
   }
 });
 
-// PATCH /api/cases/:id/assign { assignee_id | placeholder_email }
-// Accepts either a real staff_profiles id or a placeholder email when IAM off.
+// PATCH /api/cases/:id/assign { assignee_id }
 app.patch('/api/cases/:id/assign', async (req, res) => {
   const caseId = parseInt(req.params.id, 10);
   if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
-  const { assignee_id, placeholder_email } = req.body || {};
+  const { assignee_id } = req.body || {};
   try {
     const [[caseRow]] = await pool.query('SELECT id, application_id, assigned_to_user_id FROM iset_case WHERE id=? LIMIT 1', [caseId]);
     if (!caseRow) return res.status(404).json({ error: 'case_not_found' });
@@ -18773,24 +19339,6 @@ app.patch('/api/cases/:id/assign', async (req, res) => {
       const [[staff]] = await pool.query('SELECT id FROM staff_profiles WHERE id=? LIMIT 1', [assignee_id]);
       if (!staff) return res.status(400).json({ error: 'staff_not_found' });
       assignId = staff.id;
-    } else if (placeholder_email) {
-      const emailNorm = String(placeholder_email).toLowerCase();
-      const placeholderMeta = PLACEHOLDER_ASSIGNABLE_LOOKUP.get(emailNorm);
-      const inferredRole = placeholderMeta?.role || 'Application Assessor';
-      const subVal = `placeholder-${emailNorm}`;
-      try {
-        await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role) VALUES (?,?,?)
-          ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role)`, [ subVal, placeholder_email, inferredRole ]);
-      } catch (insErr) {
-        try {
-          await pool.query(`INSERT INTO staff_profiles (cognito_sub,email) VALUES (?,?) ON DUPLICATE KEY UPDATE email=VALUES(email)`, [ subVal, placeholder_email ]);
-          await pool.query(`UPDATE staff_profiles SET primary_role=? WHERE cognito_sub=? AND (primary_role IS NULL OR primary_role='')`, [ inferredRole, subVal ]);
-        } catch (fallbackErr) {
-          console.warn('Placeholder staff insert fallback failed:', fallbackErr.message);
-        }
-      }
-      const [[row]] = await pool.query('SELECT id FROM staff_profiles WHERE cognito_sub=? LIMIT 1', [ subVal ]);
-      assignId = row?.id || null;
     } else {
       return res.status(400).json({ error: 'assignee_required' });
     }
@@ -18823,7 +19371,7 @@ app.patch('/api/cases/:id/assign', async (req, res) => {
         from_assignee_email: previousAssigneeMeta?.email ?? null,
         from_assignee_name: previousAssigneeMeta?.display_name ?? null,
         to_assignee_id: newAssigneeMeta?.id ?? null,
-        to_assignee_email: newAssigneeMeta?.email ?? placeholder_email ?? null,
+        to_assignee_email: newAssigneeMeta?.email ?? null,
         to_assignee_name: newAssigneeMeta?.display_name ?? null,
       };
       const fromLabel = payload.from_assignee_name || payload.from_assignee_email || previousAssigneeId || 'previous assignee';
@@ -20301,6 +20849,26 @@ const REPORTING_ACTION_PLAN_STATUS_ROW_LABELS = [
   '8. Action Plans with an Unemployed Result',
 ];
 
+const REPORTING_APPLICATION_ACTIVITY_ROW_CODES = [
+  'AB',
+  'BC',
+  'MB',
+  'NB',
+  'NL',
+  'NT',
+  'NS',
+  'NU',
+  'ON',
+  'PE',
+  'QC',
+  'SK',
+  'YT',
+];
+
+const REPORTING_APPLICATION_ACTIVITY_ROW_CODE_SET = new Set(
+  REPORTING_APPLICATION_ACTIVITY_ROW_CODES
+);
+
 const REPORTING_SUMMARY_METRICS = [
   { metric: 'Clients Served', rowLabel: 'Clients Served - Total', targetKey: 'clientsServed' },
   { metric: 'Clients Employed', rowLabel: 'Employed - Total', targetKey: 'clientsEmployed' },
@@ -20318,6 +20886,12 @@ const REPORTING_ADDITIONAL_COMMENTS_SCOPE = 'reporting.dataAndResults';
 const REPORTING_ADDITIONAL_COMMENTS_MAX_LENGTH = 5000;
 const REPORTING_CASE_MANAGER_ROLE_KEYS = ['Application Assessor', 'Regional Coordinator'];
 const REPORTING_INTERVENTION_MEASURES = new Set(['count', 'cost']);
+const REPORTING_RESULTS_VIEW_MODES = new Set(['cumulative', 'monthly']);
+const REPORTING_APPLICATION_ACTIVITY_METRICS = new Set([
+  'newApplications',
+  'approvedApplications',
+  'deniedApplications',
+]);
 const REGIONAL_SNAPSHOT_PERIOD_TYPES = new Set(['month', 'quarter', 'year']);
 const REGIONAL_SNAPSHOT_SNAPSHOT_STATUSES = new Set(['draft', 'final']);
 const REGIONAL_SNAPSHOT_NAME_MAX_LENGTH = 255;
@@ -20376,6 +20950,20 @@ function resolveReportingFiscalYearStartValue(rawValue, fallbackDate = new Date(
 function buildReportingMatrixRows(labels, periods) {
   return labels.map(label => ({
     label,
+    values: buildReportingPeriodValues(periods),
+  }));
+}
+
+function resolveReportingApplicationActivityRowCodes(provinceCodes) {
+  const filteredCodes = Array.isArray(provinceCodes)
+    ? provinceCodes.filter(code => REPORTING_APPLICATION_ACTIVITY_ROW_CODE_SET.has(code))
+    : [];
+  return filteredCodes.length ? filteredCodes : REPORTING_APPLICATION_ACTIVITY_ROW_CODES;
+}
+
+function buildReportingApplicationActivityRows(periods, provinceCodes) {
+  return resolveReportingApplicationActivityRowCodes(provinceCodes).map(provinceCode => ({
+    provinceCode,
     values: buildReportingPeriodValues(periods),
   }));
 }
@@ -21260,6 +21848,16 @@ function normaliseReportingInterventionMeasure(rawValue) {
   return REPORTING_INTERVENTION_MEASURES.has(value) ? value : 'count';
 }
 
+function normaliseReportingResultsView(rawValue) {
+  const value = normaliseString(rawValue)?.toLowerCase() || '';
+  return REPORTING_RESULTS_VIEW_MODES.has(value) ? value : 'cumulative';
+}
+
+function normaliseReportingApplicationActivityMetric(rawValue) {
+  const value = normaliseString(rawValue) || '';
+  return REPORTING_APPLICATION_ACTIVITY_METRICS.has(value) ? value : 'newApplications';
+}
+
 function normaliseReportingInterventionDateBasis(rawValue) {
   const value = normaliseString(rawValue)?.toLowerCase() || '';
   if (value === 'payment' || value === 'payment_month' || value === 'bypaymentmonth') {
@@ -21284,6 +21882,53 @@ function resolveReportingInterventionBucketDate(row, dateBasis) {
     return toDateOnly(row?.started_on);
   }
   return toDateOnly(row?.ended_on);
+}
+
+function addDaysToDateOnlyValue(isoDate, days) {
+  const date = isoDate ? new Date(`${isoDate}T00:00:00Z`) : null;
+  if (!date || Number.isNaN(date.getTime())) return null;
+  date.setUTCDate(date.getUTCDate() + Number(days || 0));
+  return date.toISOString().slice(0, 10);
+}
+
+function resolveReportingSnapshotPeriod(snapshotPeriods, rawPeriodKey) {
+  const periodKey = normaliseString(rawPeriodKey) || '';
+  if (!periodKey) return null;
+  return (Array.isArray(snapshotPeriods) ? snapshotPeriods : []).find(
+    period => normaliseString(period?.key) === periodKey
+  ) || null;
+}
+
+function resolveReportingDrilldownRange({
+  snapshotPeriods,
+  fiscalYearStartDate,
+  rawPeriodKey,
+  resultsView,
+}) {
+  const period = resolveReportingSnapshotPeriod(snapshotPeriods, rawPeriodKey);
+  if (!period) return null;
+  const normalizedResultsView = normaliseReportingResultsView(resultsView);
+  if (normalizedResultsView === 'monthly' && period.key !== 'Final (p14)') {
+    const periodIndex = snapshotPeriods.findIndex(entry => entry?.key === period.key);
+    const previousPeriod = periodIndex > 0 ? snapshotPeriods[periodIndex - 1] : null;
+    return {
+      period,
+      startDate: previousPeriod ? addDaysToDateOnlyValue(previousPeriod.cutoff, 1) : fiscalYearStartDate,
+      endDate: period.cutoff,
+    };
+  }
+  return {
+    period,
+    startDate: fiscalYearStartDate,
+    endDate: period.cutoff,
+  };
+}
+
+function buildReportingDrilldownTitleSecondaryText(reference, eventDate, eventLabel) {
+  return buildMetricSubtitle(
+    reference,
+    buildMetricDateLabel(eventDate, eventLabel)
+  );
 }
 
 function scaleReportingCurrencyAmounts(amounts, targetTotal) {
@@ -21437,6 +22082,283 @@ function buildReportingInterventionAmountEntries(
   return entries;
 }
 
+async function fetchReportingApplicationActivityDrilldown({
+  executor = pool,
+  startDate,
+  endDate,
+  provinceCodes = [],
+  caseManagerIds = [],
+  metric = 'newApplications',
+  provinceCode,
+}) {
+  try {
+    const normalizedMetric = normaliseReportingApplicationActivityMetric(metric);
+    const normalizedProvinceCode = normaliseReportingProvinceCode(provinceCode);
+    if (!normalizedProvinceCode || !REPORTING_APPLICATION_ACTIVITY_ROW_CODE_SET.has(normalizedProvinceCode)) {
+      return {
+        truncated: false,
+        items: [],
+      };
+    }
+
+    const dateExpr =
+      normalizedMetric === 'newApplications'
+        ? 'ias.submitted_at'
+        : 'COALESCE(a.updated_at, a.created_at)';
+    const statusFilterSql =
+      normalizedMetric === 'approvedApplications'
+        ? `AND REPLACE(LOWER(TRIM(a.status)), ' ', '_') IN ('approved', 'completed')`
+        : normalizedMetric === 'deniedApplications'
+        ? `AND REPLACE(LOWER(TRIM(a.status)), ' ', '_') IN ('rejected', 'declined')`
+        : '';
+    const eventLabel = normalizedMetric === 'newApplications' ? 'Submitted' : 'Decision';
+
+    const [rows] = await executor.query(
+      `
+      SELECT
+        a.id AS application_id,
+        a.status AS application_status,
+        REPLACE(LOWER(TRIM(a.status)), ' ', '_') AS status_key,
+        ${dateExpr} AS metric_event_at,
+        c.id AS case_id,
+        c.case_number,
+        c.status AS case_status,
+        c.assigned_to_user_id,
+        cl.first_name AS client_first_name,
+        cl.last_name AS client_last_name,
+        COALESCE(
+          JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')),
+          ias.reference_number
+        ) AS tracking_id,
+        JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."first-name"')) AS submission_first_name,
+        JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."last-name"')) AS submission_last_name,
+        JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."preferred-name"')) AS submission_preferred_name,
+        ${REPORTING_ADDRESS_PROVINCE_EXPR} AS submission_address_province,
+        sp.display_name AS owner_display_name,
+        sp.name AS owner_name,
+        sp.email AS assigned_user_email,
+        sp.primary_role AS assigned_user_role,
+        sp.region_id AS assigned_user_region_id
+      FROM iset_application a
+      LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
+      LEFT JOIN iset_case c ON c.application_id = a.id
+      LEFT JOIN client cl ON cl.id = c.client_id
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      WHERE ${dateExpr} IS NOT NULL
+        AND DATE(${dateExpr}) BETWEEN ? AND ?
+        ${statusFilterSql}
+      ORDER BY ${dateExpr} DESC, a.id DESC
+      LIMIT ${METRICS_DETAIL_FETCH_LIMIT}
+      `,
+      [startDate, endDate]
+    );
+
+    const filteredRows = (Array.isArray(rows) ? rows : []).filter(row =>
+      matchesReportingProvinceFilter(row.submission_address_province, provinceCodes) &&
+      matchesReportingProvinceFilter(row.submission_address_province, [normalizedProvinceCode]) &&
+      matchesReportingCaseManagerFilter(row.assigned_to_user_id, caseManagerIds)
+    );
+
+    return mapMetricApplicationRows(filteredRows, { eventLabel });
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || isMissingColumnErrorLocal(err)) {
+      return { items: [], truncated: false };
+    }
+    throw err;
+  }
+}
+
+async function fetchReportingInterventionDrilldown({
+  executor = pool,
+  startDate,
+  endDate,
+  provinceCodes = [],
+  caseManagerIds = [],
+  rowLabel = 'TOTAL',
+  measure = 'count',
+  statusView = 'completed',
+  dateBasis = 'end',
+  paymentTypeMapping = null,
+  recurrencePolicyByType = null,
+}) {
+  try {
+    const normalizedMeasure = normaliseReportingInterventionMeasure(measure);
+    const normalizedRowLabel = normaliseString(rowLabel) || 'TOTAL';
+    const normalizedDateBasis = normalizedMeasure === 'cost'
+      ? 'payment'
+      : normaliseReportingInterventionDateBasis(dateBasis);
+    const eventLabel =
+      normalizedMeasure === 'cost'
+        ? 'Payment month'
+        : normalizedDateBasis === 'start'
+        ? 'Start date'
+        : 'End date';
+
+    const [rows] = await executor.query(
+      `
+      SELECT
+        ci.id AS intervention_id,
+        ci.case_id,
+        ci.status AS intervention_status,
+        ci.intervention_code,
+        ci.metadata_json,
+        ci.intervention_cost,
+        ci.budget_amount,
+        ci.approved_amount,
+        ci.actual_amount,
+        ci.start_date AS intervention_start_date,
+        ci.start_date AS started_on,
+        COALESCE(ci.end_date, DATE(ci.closed_at)) AS ended_on,
+        c.case_number,
+        c.assigned_to_user_id,
+        a.id AS application_id,
+        cl.first_name AS client_first_name,
+        cl.last_name AS client_last_name,
+        COALESCE(
+          JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')),
+          ias.reference_number
+        ) AS tracking_id,
+        JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."first-name"')) AS submission_first_name,
+        JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."last-name"')) AS submission_last_name,
+        JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."preferred-name"')) AS submission_preferred_name,
+        ${REPORTING_ADDRESS_PROVINCE_EXPR} AS submission_address_province,
+        sp.display_name AS owner_display_name,
+        sp.name AS owner_name,
+        sp.email AS assigned_user_email,
+        sp.primary_role AS assigned_user_role,
+        sp.region_id AS assigned_user_region_id,
+        ic.label AS intervention_label
+      FROM iset_case_intervention ci
+      JOIN iset_case c ON c.id = ci.case_id
+      LEFT JOIN iset_application a ON a.id = c.application_id
+      LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
+      LEFT JOIN client cl ON cl.id = c.client_id
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
+      WHERE ci.intervention_code IS NOT NULL
+        AND (
+          (ci.start_date IS NOT NULL AND ci.start_date <= ?)
+          OR (
+            COALESCE(ci.end_date, DATE(ci.closed_at)) IS NOT NULL
+            AND COALESCE(ci.end_date, DATE(ci.closed_at)) <= ?
+          )
+        )
+      ORDER BY COALESCE(ci.end_date, DATE(ci.closed_at), ci.start_date, DATE(ci.updated_at), DATE(ci.created_at)) DESC,
+        ci.id DESC
+      LIMIT ${METRICS_DETAIL_FETCH_LIMIT}
+      `,
+      [endDate, endDate]
+    );
+
+    const scopedRows = (Array.isArray(rows) ? rows : []).filter(row => {
+      if (!matchesReportingInterventionStatus(row.intervention_status, statusView)) {
+        return false;
+      }
+      if (!matchesReportingProvinceFilter(row.submission_address_province, provinceCodes)) {
+        return false;
+      }
+      if (!matchesReportingCaseManagerFilter(row.assigned_to_user_id, caseManagerIds)) {
+        return false;
+      }
+      if (normalizedRowLabel === 'TOTAL') {
+        return true;
+      }
+      const resolvedLabel = REPORTING_INTERVENTION_LABEL_BY_CODE[Number(row.intervention_code)] || null;
+      return resolvedLabel === normalizedRowLabel;
+    });
+
+    if (normalizedMeasure === 'count') {
+      const filteredRows = scopedRows
+        .map(row => ({
+          ...row,
+          metric_event_at: resolveReportingInterventionBucketDate(row, normalizedDateBasis),
+        }))
+        .filter(row =>
+          Boolean(
+            row.metric_event_at &&
+            row.metric_event_at >= startDate &&
+            row.metric_event_at <= endDate
+          )
+        );
+
+      return mapMetricInterventionRows(filteredRows, { eventLabel });
+    }
+
+    const submissionTimingByType = buildSubmissionTimingByTypeLookup(paymentTypeMapping);
+    const items = [];
+
+    scopedRows.forEach((row, rowIndex) => {
+      const amountEntries = buildReportingInterventionAmountEntries(row, {
+        paymentTypeMapping,
+        recurrencePolicyByType,
+        submissionTimingByType,
+        statusView,
+      }).filter(entry => entry.date >= startDate && entry.date <= endDate);
+
+      if (!amountEntries.length) {
+        return;
+      }
+
+      const caseId = normalisePositiveInteger(row?.case_id) || null;
+      const interventionId = normalisePositiveInteger(row?.intervention_id) || null;
+      const applicantName = buildMetricApplicantName(row);
+      const reference =
+        normaliseString(row?.case_number) ||
+        buildMetricReference(row) ||
+        (caseId ? `CASE-${caseId}` : null);
+      const resolvedInterventionLabel =
+        normaliseString(row?.intervention_label) ||
+        (interventionId ? `Intervention ${interventionId}` : null);
+
+      amountEntries.forEach((entry, entryIndex) => {
+        items.push({
+          id: `reporting-intervention-cost-${interventionId || rowIndex}-${entry.date}-${entryIndex}`,
+          caseId,
+          case_id: caseId,
+          applicationId: normalisePositiveInteger(row?.application_id) || null,
+          application_id: normalisePositiveInteger(row?.application_id) || null,
+          interventionId,
+          intervention_id: interventionId,
+          trackingId: buildMetricReference(row),
+          applicantName,
+          applicant_name: applicantName,
+          address_province: buildMetricProvince(row),
+          owner: buildMetricOwnerLabel(row),
+          assigned_user_id: normalisePositiveInteger(row?.assigned_to_user_id) || null,
+          assigned_user_email: normaliseString(row?.assigned_user_email) || null,
+          assigned_user_role: normaliseString(row?.assigned_user_role) || null,
+          assigned_user_region_id: normalisePositiveInteger(row?.assigned_user_region_id) || null,
+          status: normaliseString(row?.intervention_status) || null,
+          type: 'Intervention',
+          intervention_code: normaliseString(row?.intervention_code) || null,
+          intervention_label: resolvedInterventionLabel,
+          intervention_start_date: row?.intervention_start_date || null,
+          metricEventDate: toIsoDateTime(entry.date),
+          amount: Number(entry.amount || 0),
+          titleSecondaryText: buildReportingDrilldownTitleSecondaryText(reference, entry.date, eventLabel),
+          workspacePath: buildMetricWorkspacePath({ caseId, mode: 'intervention' }),
+        });
+      });
+    });
+
+    items.sort((left, right) => {
+      const rightDate = normaliseString(right?.metricEventDate) || '';
+      const leftDate = normaliseString(left?.metricEventDate) || '';
+      if (rightDate !== leftDate) {
+        return rightDate.localeCompare(leftDate);
+      }
+      return Number(right?.amount || 0) - Number(left?.amount || 0);
+    });
+
+    return truncateMetricDetailRows(items);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || isMissingColumnErrorLocal(err)) {
+      return { items: [], truncated: false };
+    }
+    throw err;
+  }
+}
+
 function mapReportingPackageStatus(status) {
   const key = normaliseString(status)?.toLowerCase() || '';
   if (key === 'accepted') return { statusKey: 'accepted', statusLabel: 'Accepted' };
@@ -21455,13 +22377,6 @@ app.get('/api/reporting/data-and-results/filter-options', async (req, res) => {
   const fiscalYearStart = resolveReportingFiscalYearStartValue(
     req.query.fiscalYearStart ?? req.query.fiscalYear
   );
-  const fallbackCaseManagers = PLACEHOLDER_ASSIGNABLE_STAFF
-    .filter(staff => REPORTING_CASE_MANAGER_ROLE_KEYS.includes(normaliseString(staff?.role) || ''))
-    .map(staff => ({
-      value: String(staff.id),
-      label: normaliseString(staff.display_name || staff.name || staff.email) || `Staff #${staff.id}`,
-      role: normaliseString(staff.role) || null,
-    }));
 
   try {
     const [rows] = await pool.query(
@@ -21484,7 +22399,7 @@ app.get('/api/reporting/data-and-results/filter-options', async (req, res) => {
           label: row.label,
           role: normaliseString(row.primary_role) || null,
         }))
-      : fallbackCaseManagers;
+      : [];
 
     res.set('Cache-Control', 'no-store, max-age=0');
     return res.json({
@@ -21702,11 +22617,21 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
     : requestedInterventionDateBasis;
   const snapshotPeriods = buildReportingSnapshotPeriods(fiscalYearStart);
 
+  const applicationActivity = {
+    newApplications: buildReportingApplicationActivityRows(snapshotPeriods, provinceCodes),
+    approvedApplications: buildReportingApplicationActivityRows(snapshotPeriods, provinceCodes),
+    deniedApplications: buildReportingApplicationActivityRows(snapshotPeriods, provinceCodes),
+  };
   const interventions = buildReportingMatrixRows(REPORTING_INTERVENTION_ROW_LABELS, snapshotPeriods);
   const clientResults = buildReportingMatrixRows(REPORTING_CLIENT_RESULT_ROW_LABELS, snapshotPeriods);
   const dataUploads = buildReportingMatrixRows(REPORTING_DATA_UPLOAD_ROW_LABELS, snapshotPeriods);
   const actionPlanStatuses = buildReportingMatrixRows(REPORTING_ACTION_PLAN_STATUS_ROW_LABELS, snapshotPeriods);
 
+  const applicationActivityByMetric = {
+    newApplications: new Map(applicationActivity.newApplications.map(row => [row.provinceCode, row])),
+    approvedApplications: new Map(applicationActivity.approvedApplications.map(row => [row.provinceCode, row])),
+    deniedApplications: new Map(applicationActivity.deniedApplications.map(row => [row.provinceCode, row])),
+  };
   const interventionsByLabel = new Map(interventions.map(row => [row.label, row]));
   const clientResultsByLabel = new Map(clientResults.map(row => [row.label, row]));
   const dataUploadsByLabel = new Map(dataUploads.map(row => [row.label, row]));
@@ -21714,6 +22639,7 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
 
   try {
     const [
+      applicationRows,
       interventionRows,
       actionPlanRows,
       participantSubmissionRows,
@@ -21722,6 +22648,28 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
       paymentTypeMapping,
       recurrencePolicyByType,
     ] = await Promise.all([
+      pool.query(
+        `
+        SELECT
+          a.id,
+          REPLACE(LOWER(TRIM(a.status)), ' ', '_') AS status_key,
+          ias.submitted_at,
+          COALESCE(a.updated_at, a.created_at) AS status_observed_at,
+          c.assigned_to_user_id,
+          ${REPORTING_ADDRESS_PROVINCE_EXPR} AS address_province
+        FROM iset_application a
+        LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
+        LEFT JOIN iset_case c ON c.application_id = a.id
+        WHERE (
+          (ias.submitted_at IS NOT NULL AND DATE(ias.submitted_at) BETWEEN ? AND ?)
+          OR (
+            REPLACE(LOWER(TRIM(a.status)), ' ', '_') IN ('approved', 'completed', 'rejected', 'declined')
+            AND DATE(COALESCE(a.updated_at, a.created_at)) BETWEEN ? AND ?
+          )
+        )
+        `,
+        [fiscalYearStartDate, fiscalYearEnd, fiscalYearStartDate, fiscalYearEnd]
+      ),
       pool.query(
         `
         SELECT
@@ -21816,10 +22764,64 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
       interventionMeasure === 'cost' ? readPaymentRecurrencePolicyByType(pool) : Promise.resolve(null),
     ]);
 
+    const applicationRowsRaw = Array.isArray(applicationRows?.[0]) ? applicationRows[0] : [];
     const interventionsRaw = Array.isArray(interventionRows?.[0]) ? interventionRows[0] : [];
     const actionPlansRaw = Array.isArray(actionPlanRows?.[0]) ? actionPlanRows[0] : [];
     const participantSubmissionsRaw = Array.isArray(participantSubmissionRows?.[0]) ? participantSubmissionRows[0] : [];
     const submissionHistoryRaw = Array.isArray(submissionHistoryRows?.[0]) ? submissionHistoryRows[0] : [];
+
+    const filteredApplicationRows = applicationRowsRaw.filter(row => (
+      matchesReportingProvinceFilter(row.address_province, provinceCodes) &&
+      matchesReportingCaseManagerFilter(row.assigned_to_user_id, caseManagerIds)
+    ));
+
+    filteredApplicationRows.forEach(row => {
+      const provinceCode = normaliseReportingProvinceCode(row.address_province);
+      if (!provinceCode || !applicationActivityByMetric.newApplications.has(provinceCode)) {
+        return;
+      }
+
+      const submittedAt = toDateOnly(row.submitted_at);
+      const statusObservedAt = toDateOnly(row.status_observed_at);
+      const statusKey = normaliseString(row.status_key)?.toLowerCase() || '';
+
+      if (submittedAt && submittedAt >= fiscalYearStartDate && submittedAt <= fiscalYearEnd) {
+        addReportingCumulativeValue(
+          applicationActivityByMetric.newApplications.get(provinceCode).values,
+          submittedAt,
+          snapshotPeriods,
+          1
+        );
+      }
+
+      if (
+        ['approved', 'completed'].includes(statusKey) &&
+        statusObservedAt &&
+        statusObservedAt >= fiscalYearStartDate &&
+        statusObservedAt <= fiscalYearEnd
+      ) {
+        addReportingCumulativeValue(
+          applicationActivityByMetric.approvedApplications.get(provinceCode).values,
+          statusObservedAt,
+          snapshotPeriods,
+          1
+        );
+      }
+
+      if (
+        ['rejected', 'declined'].includes(statusKey) &&
+        statusObservedAt &&
+        statusObservedAt >= fiscalYearStartDate &&
+        statusObservedAt <= fiscalYearEnd
+      ) {
+        addReportingCumulativeValue(
+          applicationActivityByMetric.deniedApplications.get(provinceCode).values,
+          statusObservedAt,
+          snapshotPeriods,
+          1
+        );
+      }
+    });
 
     const scopedInterventions = interventionsRaw.filter(row => (
       matchesReportingInterventionStatus(row.status, interventionStatusView) &&
@@ -22051,14 +23053,33 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
       };
     });
 
+    const applicationActivityRowCounts = {
+      newApplications: countReportingRowsWithValues(
+        applicationActivity.newApplications,
+        snapshotPeriods
+      ),
+      approvedApplications: countReportingRowsWithValues(
+        applicationActivity.approvedApplications,
+        snapshotPeriods
+      ),
+      deniedApplications: countReportingRowsWithValues(
+        applicationActivity.deniedApplications,
+        snapshotPeriods
+      ),
+    };
+    const hasApplicationActivityData = Object.values(applicationActivityRowCounts).some(
+      count => count > 0
+    );
     const hasTargetsConfigured = overallResults.some(item => item.target !== null);
     const hasAnyOperationalData =
+      hasApplicationActivityData ||
       filteredInterventions.length > 0 ||
       filteredActionPlans.length > 0 ||
       filteredSubmissionHistory.length > 0;
 
     const sectionStatus = {
       overall: hasAnyOperationalData ? (hasTargetsConfigured ? 'live' : 'partial') : 'no_records',
+      applicationActivity: hasApplicationActivityData ? 'live' : 'no_records',
       interventions: filteredInterventions.length ? 'live' : 'no_records',
       clientResults: filteredActionPlans.length ? 'live' : 'no_records',
       dataUploads: filteredSubmissionHistory.length ? 'live' : 'no_records',
@@ -22076,6 +23097,7 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
       interventionStatusView,
       interventionDateBasis,
       overallResults,
+      applicationActivity,
       interventions,
       clientResults,
       dataUploads,
@@ -22088,6 +23110,7 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
           overall: hasTargetsConfigured
             ? 'Year-end results and annual targets are shown below.'
             : 'Year-end results are shown below. Annual targets have not been entered for this fiscal year yet.',
+          applicationActivity: 'New applications use submission date. Approved and denied applications currently use the application record updated date as the decision-month proxy because PATH does not yet store a dedicated decision timestamp.',
           interventions: interventionMeasure === 'cost'
             ? `Intervention costs are shown cumulatively for ${interventionStatusView} interventions by payment month. Completed interventions use actual cost when available; other statuses use planned cost.`
             : `Intervention counts are shown cumulatively for ${interventionStatusView} interventions by ${interventionDateBasis} date.`,
@@ -22096,9 +23119,11 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
           actionPlanStatuses: 'Action plan status counts are shown cumulatively for the selected fiscal year.',
         },
         rowCounts: {
+          applications: filteredApplicationRows.length,
           filteredInterventions: filteredInterventions.length,
           actionPlans: filteredActionPlans.length,
           submissionEvents: filteredSubmissionHistory.length,
+          applicationActivityRowsWithValues: applicationActivityRowCounts,
           interventionRowsWithValues: countReportingRowsWithValues(interventions, snapshotPeriods),
           clientResultRowsWithValues: countReportingRowsWithValues(clientResults, snapshotPeriods),
           dataUploadRowsWithValues: countReportingRowsWithValues(dataUploads, snapshotPeriods),
@@ -22123,6 +23148,7 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
           target: null,
           result: 0,
         })),
+        applicationActivity,
         interventions,
         clientResults,
         dataUploads,
@@ -22132,6 +23158,7 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
           hasTargetsConfigured: false,
           sectionStatus: {
             overall: 'no_records',
+            applicationActivity: 'no_records',
             interventions: 'no_records',
             clientResults: 'no_records',
             dataUploads: 'no_records',
@@ -22139,15 +23166,22 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
           },
           notes: {
             overall: 'Reporting information is not available at the moment.',
+            applicationActivity: 'Reporting information is not available at the moment.',
             interventions: 'Reporting information is not available at the moment.',
             clientResults: 'Reporting information is not available at the moment.',
             dataUploads: 'Reporting information is not available at the moment.',
             actionPlanStatuses: 'Reporting information is not available at the moment.',
           },
           rowCounts: {
+            applications: 0,
             filteredInterventions: 0,
             actionPlans: 0,
             submissionEvents: 0,
+            applicationActivityRowsWithValues: {
+              newApplications: 0,
+              approvedApplications: 0,
+              deniedApplications: 0,
+            },
             interventionRowsWithValues: 0,
             clientResultRowsWithValues: 0,
             dataUploadRowsWithValues: 0,
@@ -22160,6 +23194,190 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
     return res.status(500).json({
       error: 'live_report_fetch_failed',
       message: err?.message || 'Live report fetch failed.',
+    });
+  }
+});
+
+app.get('/api/reporting/data-and-results/drilldown', async (req, res) => {
+  if (!hasOperationalReportingAccess(req)) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+
+  const sectionId = normaliseString(req.query.sectionId)?.toLowerCase() || '';
+  const rowKey = normaliseString(req.query.rowKey) || null;
+  const periodKey = normaliseString(req.query.periodKey) || null;
+  const resultsView = normaliseReportingResultsView(req.query.resultsView);
+  const fiscalYearStart = resolveReportingFiscalYearStartValue(
+    req.query.fiscalYearStart ?? req.query.fiscalYear
+  );
+  const fiscalYearStartDate = buildReportingIsoDate(fiscalYearStart, 4, 1);
+  const snapshotPeriods = buildReportingSnapshotPeriods(fiscalYearStart);
+  const drilldownRange = resolveReportingDrilldownRange({
+    snapshotPeriods,
+    fiscalYearStartDate,
+    rawPeriodKey: periodKey,
+    resultsView,
+  });
+  const provinceCodes = normaliseReportingProvinceCodes(req.query.provinces ?? req.query.province ?? []);
+  const caseManagerIds = normaliseReportingCaseManagerIds(
+    req.query.caseManagers ?? req.query.caseManager ?? req.query.manager ?? []
+  );
+
+  if (!rowKey) {
+    return res.status(400).json({
+      error: 'row_required',
+      message: 'Select a row to drill into.',
+    });
+  }
+
+  if (!drilldownRange) {
+    return res.status(400).json({
+      error: 'period_required',
+      message: 'Select a valid reporting period.',
+    });
+  }
+
+  try {
+    let payload = {
+      rowKey,
+      rowLabel: rowKey,
+      metric: null,
+      metricLabel: null,
+      eventDateLabel: null,
+      valueFormat: 'number',
+      items: [],
+      truncated: false,
+    };
+
+    if (sectionId === 'application-activity') {
+      const applicationMetric = normaliseReportingApplicationActivityMetric(
+        req.query.applicationMetric ?? req.query.metric
+      );
+      const provinceCode = normaliseReportingProvinceCode(rowKey);
+      if (!provinceCode || !REPORTING_APPLICATION_ACTIVITY_ROW_CODE_SET.has(provinceCode)) {
+        return res.status(400).json({
+          error: 'invalid_row',
+          message: 'Select a valid province or territory row.',
+        });
+      }
+
+      const result = await fetchReportingApplicationActivityDrilldown({
+        executor: pool,
+        startDate: drilldownRange.startDate,
+        endDate: drilldownRange.endDate,
+        provinceCodes,
+        caseManagerIds,
+        metric: applicationMetric,
+        provinceCode,
+      });
+
+      payload = {
+        ...payload,
+        rowKey: provinceCode,
+        rowLabel: PROVINCE_LABEL_MAP[provinceCode] || provinceCode,
+        metric: applicationMetric,
+        metricLabel:
+          applicationMetric === 'approvedApplications'
+            ? 'Approved applications'
+            : applicationMetric === 'deniedApplications'
+            ? 'Denied applications'
+            : 'New applications',
+        eventDateLabel: applicationMetric === 'newApplications' ? 'Submitted' : 'Decision',
+        items: Array.isArray(result?.items) ? result.items : [],
+        truncated: Boolean(result?.truncated),
+      };
+    } else if (sectionId === 'interventions') {
+      const interventionMeasure = normaliseReportingInterventionMeasure(
+        req.query.interventionMeasure ?? req.query.metric
+      );
+      const interventionStatusView = normaliseReportingInterventionStatusView(
+        req.query.interventionStatus ?? req.query.interventionView
+      );
+      const requestedInterventionDateBasis = normaliseReportingInterventionDateBasis(
+        req.query.interventionDateBasis ?? req.query.interventionDate
+      );
+      const interventionDateBasis = interventionMeasure === 'cost'
+        ? 'payment'
+        : requestedInterventionDateBasis;
+      const normalizedRowLabel = rowKey === 'TOTAL'
+        ? 'TOTAL'
+        : REPORTING_INTERVENTION_ROW_LABELS.find(label => label === rowKey) || null;
+      if (!normalizedRowLabel) {
+        return res.status(400).json({
+          error: 'invalid_row',
+          message: 'Select a valid intervention row.',
+        });
+      }
+
+      const [paymentTypeMapping, recurrencePolicyByType] = interventionMeasure === 'cost'
+        ? await Promise.all([
+            readPaymentInterventionMapping(pool),
+            readPaymentRecurrencePolicyByType(pool),
+          ])
+        : [null, null];
+
+      const result = await fetchReportingInterventionDrilldown({
+        executor: pool,
+        startDate: drilldownRange.startDate,
+        endDate: drilldownRange.endDate,
+        provinceCodes,
+        caseManagerIds,
+        rowLabel: normalizedRowLabel,
+        measure: interventionMeasure,
+        statusView: interventionStatusView,
+        dateBasis: interventionDateBasis,
+        paymentTypeMapping,
+        recurrencePolicyByType,
+      });
+
+      payload = {
+        ...payload,
+        rowKey: normalizedRowLabel,
+        rowLabel: normalizedRowLabel,
+        metric: interventionMeasure,
+        metricLabel: interventionMeasure === 'cost' ? 'Cost' : 'Count',
+        eventDateLabel:
+          interventionMeasure === 'cost'
+            ? 'Payment month'
+            : interventionDateBasis === 'start'
+            ? 'Start date'
+            : 'End date',
+        valueFormat: interventionMeasure === 'cost' ? 'currency' : 'number',
+        items: Array.isArray(result?.items) ? result.items : [],
+        truncated: Boolean(result?.truncated),
+      };
+    } else {
+      return res.status(400).json({
+        error: 'invalid_section',
+        message: 'Unsupported reporting drilldown requested.',
+      });
+    }
+
+    res.set('Cache-Control', 'no-store, max-age=0');
+    return res.json({
+      fiscalYearStart,
+      fiscalYear: formatReportingFiscalYearLabel(fiscalYearStart),
+      generatedAt: new Date().toISOString(),
+      sectionId,
+      rowKey: payload.rowKey,
+      rowLabel: payload.rowLabel,
+      periodKey: drilldownRange.period.key,
+      periodLabel: drilldownRange.period.key,
+      resultsView,
+      rangeStart: drilldownRange.startDate,
+      rangeEnd: drilldownRange.endDate,
+      metric: payload.metric,
+      metricLabel: payload.metricLabel,
+      eventDateLabel: payload.eventDateLabel,
+      valueFormat: payload.valueFormat,
+      truncated: payload.truncated,
+      items: payload.items,
+    });
+  } catch (err) {
+    console.error('[reporting:data-and-results] drilldown fetch failed:', err?.message || err);
+    return res.status(500).json({
+      error: 'reporting_drilldown_fetch_failed',
+      message: err?.message || 'Reporting drilldown fetch failed.',
     });
   }
 });
@@ -22756,23 +23974,8 @@ app.patch('/api/config/runtime/ai-model', async (req, res) => {
     if (!allowedPrefixes.some(p => nextModel.startsWith(p))) {
       return res.status(400).json({ error: 'unsupported_model', message: 'Model prefix not allowed in this environment.' });
     }
-    // Authorization: if auth provider enabled, require SysAdmin
-    const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-    const devAuthBypassed = authProvider === 'cognito' && process.env.DEV_DISABLE_AUTH === 'true' && process.env.NODE_ENV !== 'production';
-    let effectiveRole = req.auth?.role;
-    if ((!effectiveRole || devAuthBypassed) && !req.auth) {
-      // Attempt to derive role from dev bypass header (since auth middleware not attached in bypass mode)
-      const hdrRole = req.get('x-dev-role') || req.get('X-Dev-Role');
-      if (hdrRole) effectiveRole = hdrRole;
-    }
-    if (authProvider === 'cognito' && !devAuthBypassed) {
-      if (effectiveRole !== 'System Administrator') return res.status(403).json({ error: 'forbidden' });
-    } else {
-      // Non-cognito or bypass mode: still enforce role if header provided; allow if System Administrator else forbid
-      if (effectiveRole && effectiveRole !== 'System Administrator') {
-        return res.status(403).json({ error: 'forbidden' });
-      }
-    }
+    if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+    const effectiveRole = req.auth?.role || null;
     const prev = global.__AI_MODEL_OVERRIDE || process.env.OPENROUTER_MODEL || '';
     // Persist to .env file (atomic-ish replace). We retain previous lines & replace/append OPENROUTER_MODEL.
     let persisted = false;
@@ -22813,7 +24016,7 @@ app.patch('/api/config/runtime/ai-model', async (req, res) => {
       console.warn('[ai-model] DB persist failed (non-fatal):', dbErr.message);
     }
     // Lightweight audit log (stdout). Could be extended to DB later.
-    console.log('[audit] ai-model-change', JSON.stringify({ when: new Date().toISOString(), prev, next: nextModel, by: req.auth?.sub || 'dev-bypass', role: effectiveRole || null, persisted }));
+    console.log('[audit] ai-model-change', JSON.stringify({ when: new Date().toISOString(), prev, next: nextModel, by: req.auth?.sub || 'unknown', role: effectiveRole || null, persisted }));
     res.json({ ok: true, model: nextModel, persisted });
   } catch (e) {
     res.status(500).json({ error: 'ai_model_update_failed', message: e.message });
@@ -22877,14 +24080,8 @@ function persistEnvUpdates(updates) {
 app.patch('/api/config/runtime/ai-params', async (req, res) => {
   try {
     const body = req.body || {};
-    const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-    const devAuthBypassed = authProvider === 'cognito' && process.env.DEV_DISABLE_AUTH === 'true' && process.env.NODE_ENV !== 'production';
-    let role = req.auth?.role;
-    if ((!role || devAuthBypassed) && !req.auth) {
-      const hdrRole = req.get('x-dev-role') || req.get('X-Dev-Role');
-      if (hdrRole) role = hdrRole;
-    }
-    if (role !== 'System Administrator') return res.status(403).json({ error: 'forbidden' });
+    if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+    const role = req.auth?.role || null;
     const toNumberOrNull = (v) => (v === undefined || v === null || v === '' ? null : Number(v));
     const temperature = toNumberOrNull(body.temperature);
     const top_p = toNumberOrNull(body.top_p);
@@ -22917,7 +24114,7 @@ app.patch('/api/config/runtime/ai-params', async (req, res) => {
     } catch (dbErr) {
       console.warn('[ai-params] DB persist failed (non-fatal):', dbErr.message);
     }
-    console.log('[audit] ai-params-change', JSON.stringify({ when: new Date().toISOString(), updates, by: req.auth?.sub || 'dev-bypass', role }));
+    console.log('[audit] ai-params-change', JSON.stringify({ when: new Date().toISOString(), updates, by: req.auth?.sub || 'unknown', role }));
     res.json({ ok: true, updates });
   } catch (e) { res.status(500).json({ error: 'ai_params_update_failed', message: e.message }); }
 });
@@ -22926,13 +24123,8 @@ app.patch('/api/config/runtime/ai-params', async (req, res) => {
 app.patch('/api/config/runtime/ai-fallbacks', async (req, res) => {
   try {
     const body = req.body || {};
-    const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-    const devAuthBypassed = authProvider === 'cognito' && process.env.DEV_DISABLE_AUTH === 'true' && process.env.NODE_ENV !== 'production';
-    let role = req.auth?.role;
-    if ((!role || devAuthBypassed) && !req.auth) {
-      const hdrRole = req.get('x-dev-role') || req.get('X-Dev-Role'); if (hdrRole) role = hdrRole;
-    }
-    if (role !== 'System Administrator') return res.status(403).json({ error: 'forbidden' });
+    if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+    const role = req.auth?.role || null;
     const listRaw = body.fallbackModels || body.fallbacks || [];
     const list = Array.isArray(listRaw) ? listRaw : String(listRaw).split(',');
     const cleaned = list.map(s => String(s).trim()).filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i);
@@ -22944,7 +24136,7 @@ app.patch('/api/config/runtime/ai-fallbacks', async (req, res) => {
     } catch (dbErr) {
       console.warn('[ai-fallbacks] DB persist failed (non-fatal):', dbErr.message);
     }
-    console.log('[audit] ai-fallbacks-change', JSON.stringify({ when: new Date().toISOString(), fallbackModels: cleaned, by: req.auth?.sub || 'dev-bypass', role }));
+    console.log('[audit] ai-fallbacks-change', JSON.stringify({ when: new Date().toISOString(), fallbackModels: cleaned, by: req.auth?.sub || 'unknown', role }));
     res.json({ ok: true, fallbackModels: cleaned });
   } catch (e) { res.status(500).json({ error: 'ai_fallbacks_update_failed', message: e.message }); }
 });
@@ -23630,13 +24822,7 @@ async function hydrateAuthConfigFromDatabase() {
 }
 
 function sysAdminOnly(req) {
-  const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-  const devAuthBypassed = authProvider === 'cognito' && process.env.DEV_DISABLE_AUTH === 'true' && process.env.NODE_ENV !== 'production';
   let role = req.auth?.role;
-  if ((!role || devAuthBypassed) && !req.auth) {
-    const hdrRole = req.get('x-dev-role') || req.get('X-Dev-Role');
-    if (hdrRole) role = hdrRole;
-  }
   // Normalize legacy / short group codes (e.g., "SysAdmin") to canonical display roles
   const normalizeRole = (r) => {
     if (!r) return r;
@@ -23662,8 +24848,6 @@ app.get('/api/config/runtime', async (req, res) => {
       frequency_penalty: parseFloat(process.env.OPENROUTER_FREQUENCY_PENALTY || '0')
     };
     const fallbackModels = (process.env.OPENROUTER_FALLBACK_MODELS || '').split(',').map(s=>s.trim()).filter(Boolean);
-    const authProvider = String(process.env.AUTH_PROVIDER || 'none');
-    const devBypass = process.env.DEV_DISABLE_AUTH === 'true' && process.env.NODE_ENV !== 'production';
     const allowedOrigins = (process.env.ALLOWED_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
     const nodeEnv = process.env.NODE_ENV || 'development';
     const authAdmin = __authConfig.admin;
@@ -23680,8 +24864,7 @@ app.get('/api/config/runtime', async (req, res) => {
         passwordPolicy: authAdmin.policy.passwordPolicy,
         lockout: authAdmin.policy.lockout,
         pkceRequired: authAdmin.policy.pkceRequired,
-        devBypass,
-        provider: authProvider
+        provider: 'cognito'
       },
       authAdmin: {
         provider: 'cognito',
@@ -23760,7 +24943,7 @@ app.patch('/api/admin/event-capture-rules', async (req, res) => {
     if (Array.isArray(body.updates)) updates = body.updates;
     else if (Array.isArray(body)) updates = body;
     else if (body.categoryId || body.category) updates = [body];
-    const actorId = req.auth?.sub || req.auth?.id || req.auth?.user_id || req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
+    const actorId = req.auth?.sub || req.auth?.id || req.auth?.user_id || null;
     const state = await updateEventCaptureRules(updates, actorId);
     res.json(state);
   } catch (err) {
@@ -27079,14 +28262,7 @@ app.post('/api/config/runtime/auth-federation-sync', async (req, res) => {
 // GET /api/config/security -> secret presence + masked forms (never full secret values)
 app.get('/api/config/security', (req, res) => {
   try {
-    // Derive effective role (mirror logic used in ai-model PATCH for consistency)
-    const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-    const devAuthBypassed = authProvider === 'cognito' && process.env.DEV_DISABLE_AUTH === 'true' && process.env.NODE_ENV !== 'production';
     let effectiveRole = req.auth?.role || null;
-    if ((!effectiveRole || devAuthBypassed) && !req.auth) {
-      const hdrRole = req.get('x-dev-role') || req.get('X-Dev-Role');
-      if (hdrRole) effectiveRole = hdrRole;
-    }
     const MASK_LEVEL = (() => {
       if (effectiveRole === 'System Administrator') return 'admin'; // standard masked view
       if (effectiveRole === 'Program Administrator') return 'restricted'; // heavily masked
@@ -27475,13 +28651,6 @@ app.post('/api/config/sla-targets', async (req, res) => {
 
 app.get('/api/dashboard/case-work-queue', async (req, res) => {
   let role = inferUserRole(req) || 'Guest';
-  const iamModeHeader = (req.get('X-Iam-Mode') || req.get('x-iam-mode') || req.headers['x-iam-mode'] || '').toLowerCase();
-  if (iamModeHeader === 'off') {
-    const simRole = req.get('X-Dev-Role') || req.get('x-dev-role') || null;
-    if (simRole) {
-      role = simRole;
-    }
-  }
 
   try {
     if (role === 'Program Administrator') {
@@ -27665,14 +28834,7 @@ app.get('/api/dashboard/case-work-queue', async (req, res) => {
 
 
 app.get('/api/dashboard/application-work-queue', async (req, res) => {
-  let role = inferUserRole(req) || 'Guest';
-  const iamModeHeader = (req.get('X-Iam-Mode') || req.get('x-iam-mode') || req.headers['x-iam-mode'] || '').toLowerCase();
-  if (iamModeHeader === 'off') {
-    const simRole = req.get('X-Dev-Role') || req.get('x-dev-role') || null;
-    if (simRole) {
-      role = simRole;
-    }
-  }
+  const role = inferUserRole(req) || 'Guest';
 
   try {
     if (role === 'Program Administrator') {
@@ -28878,6 +30040,93 @@ app.get('/api/dashboard/metrics', async (req, res) => {
   }
 });
 
+app.get('/api/dashboard/metrics/details', async (req, res) => {
+  const role = inferUserRole(req) || 'Guest';
+  if (role === 'System Administrator') {
+    return res.json({ role, items: [] });
+  }
+
+  const metricId = normaliseString(req.query?.metricId) || null;
+  const periodKey = normaliseString(req.query?.period) || 'week';
+  const definition = metricId ? METRICS_DRILLDOWN_DEFINITIONS[metricId] : null;
+
+  if (!definition) {
+    return res.status(400).json({
+      error: 'invalid_metric_id',
+      message: 'Unsupported metric drilldown requested.'
+    });
+  }
+
+  try {
+    const context = await resolveMetricsScope(req, role);
+    const timeZone = await resolveMetricsTimezone(context.timeZoneRegionId);
+    const periods = buildMetricsPeriods(timeZone);
+    const period = periods[periodKey];
+
+    if (!period) {
+      return res.status(400).json({
+        error: 'invalid_period',
+        message: 'Unsupported metrics period requested.'
+      });
+    }
+
+    const responseBase = {
+      role,
+      timeZone,
+      scope: context.scope,
+      generatedAt: new Date().toISOString(),
+      metricId,
+      metricLabel: definition.label,
+      columnPreset: definition.columnPreset || 'metric-applications',
+      subjectLabel: definition.subjectLabel || null,
+      eventDateLabel: definition.eventDateLabel || null,
+      periodIndependent: Boolean(definition.periodIndependent),
+      scopeNote: definition.scopeNote || null,
+      period: {
+        key: periodKey,
+        label: period.label,
+        rangeLabel: period.rangeLabel,
+        startLocal: period.startLocal,
+        endLocal: period.endLocal
+      }
+    };
+
+    if (!context.valid) {
+      res.set('Cache-Control', 'no-store, max-age=0');
+      return res.json({
+        ...responseBase,
+        truncated: false,
+        items: []
+      });
+    }
+
+    const start = formatDateTimeForSql(period.startUtc);
+    const end = formatDateTimeForSql(period.endUtc);
+    const result = await definition.load({
+      pool,
+      start,
+      end,
+      scope: context.scope,
+      periodKey,
+      period,
+      timeZone
+    });
+
+    res.set('Cache-Control', 'no-store, max-age=0');
+    return res.json({
+      ...responseBase,
+      truncated: Boolean(result?.truncated),
+      items: Array.isArray(result?.items) ? result.items : []
+    });
+  } catch (err) {
+    console.error('[dashboard-metrics-details] fetch failed:', err.message);
+    return res.status(500).json({
+      error: 'dashboard_metrics_details_fetch_failed',
+      message: err.message
+    });
+  }
+});
+
 
 const eventService = createEventService({ pool, logger: console });
 registerNotificationHook(async (event) => {
@@ -29443,10 +30692,7 @@ app.get('/api/escalations', async (req, res) => {
       return res.status(403).json({ error: 'forbidden' });
     }
 
-    const headerRegionIdRaw = req.get('X-Dev-RegionId') || req.get('x-dev-regionid') || null;
-    const regionIds = headerRegionIdRaw != null
-      ? normalizeRegionIdInput(headerRegionIdRaw)
-      : resolveRequestRegionIds(req);
+    const regionIds = resolveRequestRegionIds(req);
     const regionId = regionIds.length ? regionIds[0] : null;
 
     const ownerRoleFilter = canonicalEscalationRole(firstQueryValue(req.query.ownerRole || req.query.owner_role)) || null;
@@ -29682,10 +30928,6 @@ const getAuthenticatedNumericUserId = (req) => {
     values.push(req.auth.userId);
     values.push(req.auth.user_id);
     values.push(req.auth.id);
-  }
-  if (typeof req.get === 'function') {
-    values.push(req.get('X-Dev-UserId'));
-    values.push(req.get('x-dev-userid'));
   }
   for (const value of values) {
     if (value == null) continue;
@@ -31591,19 +32833,6 @@ app.post('/api/component-templates/migrate/backfill-props', async (_req, res) =>
   }
 });
 
-// Admin routes (delegated user management) - feature flagged
-try {
-  const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-  if (authProvider === 'cognito') {
-    const adminUsers = require('./src/routes/admin/users');
-    app.use('/api/admin', adminUsers);
-    const adminApplicants = require('./src/routes/admin/applicants');
-    app.use('/api/admin', adminApplicants);
-  }
-} catch (e) {
-  console.warn('Admin routes init failed:', e?.message);
-}
-
 // --- DEV-ONLY DB Inspector (read-only) ------------------------------------
 // Enable with ENABLE_DEV_DB_INSPECTOR=true and optional DEV_DB_KEY as a simple shared secret.
 // Endpoints:
@@ -31613,7 +32842,7 @@ try {
 //   POST   /api/dev/db/query { sql, params? }      -> run a read-only SELECT (LIMIT enforced)
 // Security:
 // - Only active when ENABLE_DEV_DB_INSPECTOR=true
-// - Optional header auth via x-dev-key matching DEV_DB_KEY
+// - Requires authenticated System Administrator access
 // - Strictly read-only: only allows SQL starting with SELECT and blocks dangerous tokens
 // - Adds a default LIMIT if none provided
 // - Redacts sensitive-looking fields in results (password, token, sin/ssn, secret, etc.)
@@ -31621,8 +32850,7 @@ const ENABLE_DEV_DB_INSPECTOR = process.env.ENABLE_DEV_DB_INSPECTOR === 'true';
 
 function devInspectorGuard(req, res, next) {
   if (!ENABLE_DEV_DB_INSPECTOR) return res.status(404).json({ error: 'Not found' });
-  const key = process.env.DEV_DB_KEY || '';
-  if (key && req.get('x-dev-key') !== key) return res.status(403).json({ error: 'Forbidden' });
+  if (!sysAdminOnly(req)) return res.status(403).json({ error: 'Forbidden' });
   next();
 }
 
@@ -33162,12 +34390,7 @@ function normaliseJson(v) {
 const STEP_EDITOR_GROUPS = new Set(['System_Administrator', 'NWAC_Administrator', 'Regional_Manager']);
 const STEP_EDITOR_ROLES = new Set(['System Administrator', 'Program Administrator', 'Regional Coordinator']);
 
-function isAuthEnabled() {
-  return String(process.env.AUTH_PROVIDER || 'none').toLowerCase() === 'cognito';
-}
-
 function ensureStepEditor(req, res) {
-  if (!isAuthEnabled()) return true;
   const groups = Array.isArray(req.auth?.groups) ? req.auth.groups : [];
   const role = req.auth?.role || null;
   if (groups.some(g => STEP_EDITOR_GROUPS.has(g)) || (role && STEP_EDITOR_ROLES.has(role))) {
@@ -34525,7 +35748,7 @@ app.get('/api/case-assignment/unassigned-applications', async (req, res) => {
 /**
  * GET /api/tasks
  *
- * Returns all open tasks assigned to the authenticated caseworker (hard???coded to user_id = 18 for now).
+ * Returns all open tasks assigned to the authenticated staff profile.
  *
  * Response fields:
  * - id
@@ -34542,13 +35765,10 @@ app.get('/api/case-assignment/unassigned-applications', async (req, res) => {
  * - tracking_id
  */
 app.get('/api/tasks', async (req, res) => {
-  let userId = 18; // replace with req.user.id when auth is active
-  try {
-    const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-    if (authProvider === 'cognito') {
-      userId = Number(req.auth?.userId) || -1;
-    }
-  } catch (_) {}
+  const userId = Number(req.staffProfile?.id);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(403).json({ error: 'Staff profile not resolved' });
+  }
   try {
     let sql = `SELECT
          t.id,
@@ -34569,13 +35789,10 @@ app.get('/api/tasks', async (req, res) => {
        WHERE t.assigned_to_user_id = ?\n`;
     const params = [userId];
     try {
-      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-      if (authProvider === 'cognito') {
-        const { scopeCases } = require('./src/lib/dbScope');
-        const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
-        sql += ` AND ${scopeSql}\n`;
-        params.push(...scopeParams);
-      }
+      const { scopeCases } = require('./src/lib/dbScope');
+      const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
+      sql += ` AND ${scopeSql}\n`;
+      params.push(...scopeParams);
     } catch (_) {}
     sql += ` AND t.status IN ('open', 'in_progress')\n`;
     sql += ` ORDER BY 
@@ -47085,7 +48302,7 @@ function mapAllocationRow(row) {
 }
 
 function requireFinanceRole(req, res) {
-  const role = req.auth?.role || req.staffProfile?.primary_role || req.get('X-Dev-Role') || req.get('x-dev-role');
+  const role = req.auth?.role || req.staffProfile?.primary_role;
   const allowed = new Set(['System Administrator', 'Program Administrator']);
   if (role && allowed.has(role)) return null;
   res.status(403).json({ error: 'forbidden', message: 'Insufficient role for finance operations.' });
@@ -63283,23 +64500,20 @@ app.get('/api/applications/:id', async (req, res) => {
     let appSql = 'SELECT * FROM iset_application a WHERE a.id = ?';
     const appParams = [applicationId];
     try {
-      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-      if (authProvider === 'cognito') {
-        const { scopeApplications } = require('./src/lib/dbScope');
-        const { sql: scopeSql, params: scopeParams } = scopeApplications(req.auth || {}, 'a');
-        if (/\bregion_id\b/.test(scopeSql)) {
-          try {
-            // Detect if region_id column exists on iset_application; skip predicate if missing (legacy schema)
-            await pool.query('SELECT region_id FROM iset_application LIMIT 0');
-            appSql += ` AND ${scopeSql}`;
-            appParams.push(...scopeParams);
-          } catch (colErr) {
-            console.warn('[rbac] skipping application region scope (column missing):', colErr.code || colErr.message);
-          }
-        } else {
+      const { scopeApplications } = require('./src/lib/dbScope');
+      const { sql: scopeSql, params: scopeParams } = scopeApplications(req.auth || {}, 'a');
+      if (/\bregion_id\b/.test(scopeSql)) {
+        try {
+          // Detect if region_id column exists on iset_application; skip predicate if missing (legacy schema)
+          await pool.query('SELECT region_id FROM iset_application LIMIT 0');
           appSql += ` AND ${scopeSql}`;
           appParams.push(...scopeParams);
+        } catch (colErr) {
+          console.warn('[rbac] skipping application region scope (column missing):', colErr.code || colErr.message);
         }
+      } else {
+        appSql += ` AND ${scopeSql}`;
+        appParams.push(...scopeParams);
       }
     } catch (_) {}
     const archivedFilter = buildArchivedApplicationFilter(req, 'a');
@@ -63370,13 +64584,10 @@ app.get('/api/applications/:id', async (req, res) => {
     let caseSql = `SELECT ${caseCols.join(', ')} FROM iset_case c WHERE application_id = ?`;
     const caseParams = [applicationId];
     try {
-      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-      if (authProvider === 'cognito') {
-        const { scopeCases } = require('./src/lib/dbScope');
-        const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
-        caseSql += ` AND ${scopeSql}`;
-        caseParams.push(...scopeParams);
-      }
+      const { scopeCases } = require('./src/lib/dbScope');
+      const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
+      caseSql += ` AND ${scopeSql}`;
+      caseParams.push(...scopeParams);
     } catch (_) {}
     const [[caseRow]] = await pool.query(caseSql, caseParams);
 
@@ -63437,13 +64648,10 @@ app.put('/api/applications/:id/ptma-case-summary', async (req, res) => {
     let upd = 'UPDATE iset_case c SET case_summary = ? WHERE application_id = ?';
     const updParams = [case_summary, applicationId];
     try {
-      const authProvider = String(process.env.AUTH_PROVIDER || 'none').toLowerCase();
-      if (authProvider === 'cognito') {
-        const { scopeCases } = require('./src/lib/dbScope');
-        const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
-        upd += ` AND ${scopeSql}`;
-        updParams.push(...scopeParams);
-      }
+      const { scopeCases } = require('./src/lib/dbScope');
+      const { sql: scopeSql, params: scopeParams } = scopeCases(req.auth || {}, 'c');
+      upd += ` AND ${scopeSql}`;
+      updParams.push(...scopeParams);
     } catch (_) {}
     const [result] = await pool.query(upd, updParams);
     if (result.affectedRows === 0) {
@@ -65996,7 +67204,7 @@ app.put('/api/cases/:id', async (req, res) => {
           });
         }
         if (canonicalRoleForApproval === 'Program Administrator' && approvalCost >= PROGRAM_ADMIN_APPROVAL_THRESHOLD) {
-          const approvalEmail = req?.auth?.email || req?.staffProfile?.email || (typeof req.get === 'function' ? (req.get('X-Dev-Email') || req.get('x-dev-email')) : null);
+          const approvalEmail = req?.auth?.email || req?.staffProfile?.email || null;
           const normalizedApprovalEmail = (approvalEmail || '').trim().toLowerCase();
           if (normalizedApprovalEmail !== PROGRAM_ADMIN_APPROVER_EMAIL) {
             await conn.rollback();
@@ -67228,8 +68436,7 @@ app.get('/api/me/notifications', async (req, res) => {
   try {
     const { actorId } = resolveRequestActor(req);
     const staffProfileId = req.staffProfile?.id || null;
-    const headerUserId = req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
-    const candidateIds = [staffProfileId, actorId, headerUserId];
+    const candidateIds = [staffProfileId, actorId];
     let normalizedUserId = null;
     for (const value of candidateIds) {
       if (value === null || typeof value === 'undefined') continue;
@@ -67246,10 +68453,6 @@ app.get('/api/me/notifications', async (req, res) => {
     }
     if (!authContext.role && req.staffProfile?.primary_role) {
       authContext.role = req.staffProfile.primary_role;
-    }
-    if (!authContext.role) {
-      const headerRole = req.get('X-Dev-Role') || req.get('x-dev-role') || null;
-      if (headerRole) authContext.role = headerRole;
     }
 
     const notifications = await getInternalNotifications(pool, authContext);
@@ -67269,8 +68472,7 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
 
   const { actorId } = resolveRequestActor(req);
   const staffProfileId = req.staffProfile?.id || null;
-  const headerUserId = req.get('X-Dev-UserId') || req.get('x-dev-userid') || null;
-  const candidateIds = [staffProfileId, actorId, headerUserId];
+  const candidateIds = [staffProfileId, actorId];
   let normalizedUserId = null;
   for (const value of candidateIds) {
     if (value === null || typeof value === 'undefined') continue;
@@ -67290,10 +68492,6 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
   if (authContext) {
     if (!authContext.role && req.staffProfile?.primary_role) {
       authContext.role = req.staffProfile.primary_role;
-    }
-    if (!authContext.role) {
-      const headerRole = req.get('X-Dev-Role') || req.get('x-dev-role') || null;
-      if (headerRole) authContext.role = headerRole;
     }
   }
 

@@ -15,15 +15,11 @@ export default function AuthCallback() {
       setError('Missing authorization code');
       return;
     }
-  // Mark auth pending to suppress premature 401 redirects
-  try { sessionStorage.setItem('authPending', '1'); } catch {}
-  (async () => {
+    (async () => {
       try {
         const tokens = await exchangeCodeForTokens(code);
         saveSession(tokens);
-    try { sessionStorage.removeItem('authPending'); } catch {}
         // Optional auth probe before redirect (helps diagnose 401 loop)
-  // (optional) could probe API here if desired
         // If a valid state (same-origin absolute URL) is provided, navigate back there; otherwise home
         let target = '/';
         if (state) {
@@ -35,7 +31,6 @@ export default function AuthCallback() {
         }
         history.replace(target);
       } catch (e) {
-    try { sessionStorage.removeItem('authPending'); } catch {}
         setError(e.message || 'Sign-in failed');
       }
     })();

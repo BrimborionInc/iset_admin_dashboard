@@ -2,9 +2,9 @@
 
 Purpose: running capture of user-facing fixes/changes for the next "What's New" update on `src/pages/LandingPage.jsx`.
 
-Current public release in Landing Page: `v0.5.5` (`18th March 2026`)
-Target next release notes draft: `v0.5.6` (date TBD)
-Last Updated: 2026-03-19
+Current public release in Landing Page: `v0.5.7` (`21st March 2026`)
+Target next release notes draft: `v0.5.8` (date TBD)
+Last Updated: 2026-03-24
 
 ## How to use
 
@@ -18,6 +18,10 @@ Last Updated: 2026-03-19
 
 ## Entries
 
+- 2026-03-24 | Release v0.5.8 | UX/API/Reporting | Data and Results inline drilldown | Non-zero values in `Intake and Assessment` and `Interventions` on `Reporting > Data and Results` now open the contributing records inline directly beneath the clicked row. | Intake drilldowns link applicant names to Application Workspace when a linked case exists; Interventions drilldowns link participant names to Case Workspace. Monthly clicks show the clicked month only; cumulative clicks show fiscal-year-to-date records.
+- 2026-03-24 | Release v0.5.8 | UX/API/Reporting | Data and Results > Intake and Assessment | Added a new `Intake and Assessment` section above `Interventions` on `Reporting > Data and Results`, with province/territory rows, month columns, a `Show` selector for new/approved/denied applications, and a local province filter input. | New applications use submission month; approved and denied counts currently use the application record's latest status update as the decision-month proxy because PATH does not yet store a dedicated application decision timestamp.
+- 2026-03-24 | Release v0.5.8 | UX/API/Home | Homepage > Metrics drilldown | Count metrics on the homepage now open matching records in the shared `Work Queue Items` table instead of acting as static totals. | The Items widget switches into a dedicated metric-results mode with neutral columns and a `Back to work queue` action; currency metrics remain display-only.
+- 2026-03-24 | Release v0.5.8 | Fix/API/Home | Homepage > Metrics scope | Fixed homepage metrics scoping for Regional Coordinators so multi-region assignments honor all resolved `regionIds`. | This keeps tile totals and metric drilldown lists aligned for managers assigned to more than one region.
 - 2026-03-22 | Release v0.5.8 | UX/API/Finance | Budgets and Finance > Salaries | Added a new `Salaries` dashboard for recording annual salary totals by province or territory with explicit budget-pot assignment and derived monthly values for review. | Uses the new `finance_regional_salary_entry` table keyed by fiscal year and seeds the current dev fiscal year with logical salary-pot defaults for each region.
 - 2026-03-22 | Release v0.5.8 | UX/API/Reporting | Regional Snapshot salary wiring | `Regional Snapshot` now pulls `Coordinator Salary ($)` from `Budgets and Finance > Salaries` for the selected region and reporting period instead of storing a separate manual salary value. | Monthly snapshots use one-twelfth of the annual salary, quarterly snapshots use three-twelfths, and annual snapshots use the full annual total.
 - 2026-03-19 | Release v0.5.6 | UX/Reporting | Reporting navigation + dashboard scaffold | Renamed the reporting navigation sections to `ILMP Submissions` and `Reporting`, and added a new `Reporting > Data and Results` dashboard scaffold with standard board controls. | Default access is enabled for System Administrators and NWAC Administrators via the access-control matrix seed.
