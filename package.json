@@ -79,6 +79,9 @@
     "fixtures:workflows": "node scripts/generate-workflow-fixtures.js",
     "sync:portal-renderers": "node scripts/sync-portal-renderers.js",
     "deploy-admin-prod": "powershell -ExecutionPolicy Bypass -File scripts/deploy-admin-prod.ps1",
+    "deploy-admin-to-prod": "powershell -ExecutionPolicy Bypass -File scripts/deploy-admin-prod.ps1",
+    "deploy-shared-to-prod": "powershell -ExecutionPolicy Bypass -File scripts/deploy-shared-prod.ps1",
+    "refresh-prod": "powershell -ExecutionPolicy Bypass -File scripts/start-prod-instance-refresh.ps1",
     "deploy-admin-to-test": "powershell -ExecutionPolicy Bypass -File scripts/deploy-admin-test.ps1",
     "deploy:test-db": "powershell -ExecutionPolicy Bypass -File scripts/deploy-test-db.ps1"
   },

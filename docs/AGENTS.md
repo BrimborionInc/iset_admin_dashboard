@@ -100,10 +100,14 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 
 - Route: `/configuration/query-editor`
 - Default access: System Administrator only
-- Current input model: typed/pasted SQL text in the dashboard editor, plus single-file `.sql` / `.txt` upload that loads file contents into the editor
+- Current input model: `SQL Editor` tab for typed/pasted SQL text plus single-file `.sql` / `.txt` upload, and `Server Export` tab for DB/table selection and dump-file path entry
 - Current execution model: frontend posts `{ sql }` to `/api/admin/query-editor`; backend executes one or more semicolon-delimited statements against the active environment DB connection
+- Current server-export model: frontend loads DB/table metadata from `GET /api/admin/query-editor/export-metadata` and posts `{ database, tables, outputPath }` to `POST /api/admin/query-editor/export`
 - Current file-upload constraint: client-side upload limit is 900 KB so requests stay within the server's 1 MB JSON body limit
 - Current result handling: `SELECT` results are capped at 100 rows per statement; write statements return rows affected/status; multiple statements use a result-set selector
+- Current export rule: server export is fixed to `Dump Structure and Data`, `Export to a Self-Contained File`, and `Include Create Schema`; triggers/routines/events are intentionally not exposed
+- Current export-path rule: default dump path should be a date-stamped database-based `.sql` file under a Windows-style `Documents\\dumps` directory when the server can resolve a Windows user profile, with fallback to the local server home directory otherwise
+- Current WSL/dev rule: prefer the Windows `mysqldump.exe` client from WSL when available so Query Editor export matches the established Windows-from-WSL DB tooling guidance
 - Separate path to keep distinct: the startup migration runner executes `.sql` files from `/sql`, but that is not the Query Editor dashboard
 
 ## Client Batch Import status

@@ -9,6 +9,9 @@
 .PARAMETER Region
   AWS region for all CLI calls. Defaults to ca-central-1.
 
+.PARAMETER Profile
+  AWS CLI profile to use. Defaults to default.
+
 .PARAMETER Bucket
   S3 bucket used to stage deployment artefacts. Defaults to nwac-prod-artifacts.
 
@@ -23,6 +26,7 @@
 #>
 [CmdletBinding()]
 param(
+    [string]$Profile = "default",
     [string]$Region = "ca-central-1",
     [string]$Bucket = "nwac-prod-artifacts",
     [string]$KeyPrefix = "admin",
@@ -51,6 +55,18 @@ function Write-Section([string]$Message) {
 function Ensure-Tool([string]$Name) {
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
         throw "Required tool '$Name' was not found in PATH."
+    }
+}
+
+function Invoke-Aws {
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$Args
+    )
+
+    & aws @Args --profile $Profile
+    if ($LASTEXITCODE -ne 0) {
+        throw ("AWS CLI command failed with exit code {0}: aws {1}" -f $LASTEXITCODE, ($Args -join ' '))
     }
 }
 
@@ -176,7 +192,7 @@ try {
 
     Write-Section "Uploading artefact to S3"
     $s3Key = Join-S3Key -Prefix $KeyPrefix -Name $ArtifactName
-    aws s3 cp "`"$archivePath`"" ("s3://{0}/{1}" -f $Bucket, $s3Key) --region $Region | Out-Host
+    Invoke-Aws s3 cp "`"$archivePath`"" ("s3://{0}/{1}" -f $Bucket, $s3Key) --region $Region | Out-Host
 
     Write-Section "Upload complete"
     Write-Host ("Artefact uploaded to s3://{0}/{1}" -f $Bucket, $s3Key)

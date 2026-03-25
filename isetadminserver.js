@@ -1,6 +1,8 @@
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const crypto = require('crypto');
+const { spawn, spawnSync } = require('child_process');
 const archiver = require('archiver');
 const ExcelJS = require('exceljs');
 const multer = require('multer');
@@ -16126,7 +16128,7 @@ async function getCognitoTokenValidity() {
   if (cognitoTokenValidityCache.value && now < cognitoTokenValidityCache.expiresAt) {
     return cognitoTokenValidityCache.value;
   }
-  const clientId = process.env.COGNITO_PORTAL_CLIENT_ID || process.env.COGNITO_CLIENT_ID;
+  const clientId = process.env.COGNITO_CLIENT_ID || process.env.COGNITO_PORTAL_CLIENT_ID;
   if (!COGNITO_POOL_ID || !clientId) {
     return null;
   }
@@ -25071,6 +25073,566 @@ function splitSqlStatements(rawSql = '') {
   if (trimmed) statements.push(trimmed);
   return statements;
 }
+
+const QUERY_EDITOR_EXPORT_EXCLUDED_SCHEMAS = new Set(['information_schema', 'performance_schema']);
+let queryEditorDumpBinaryCache = Object.create(null);
+let queryEditorWindowsUserProfileCache = undefined;
+
+function createQueryEditorError(statusCode, code, message, extra = {}) {
+  const err = new Error(message);
+  err.statusCode = statusCode;
+  err.code = code;
+  Object.assign(err, extra);
+  return err;
+}
+
+function getQueryEditorDefaultDatabaseName() {
+  const configured = typeof process.env.DB_NAME === 'string' ? process.env.DB_NAME.trim() : '';
+  return configured || '';
+}
+
+function queryEditorFormatDateStamp(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}${month}${day}`;
+}
+
+function queryEditorSanitizeFileStem(value, fallback = 'database') {
+  const cleaned = String(value || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '');
+  return cleaned || fallback;
+}
+
+function queryEditorIsWindowsAbsolutePath(value) {
+  return /^[a-zA-Z]:[\\/]/.test(String(value || '').trim());
+}
+
+function queryEditorIsWslMountPath(value) {
+  return /^\/mnt\/[a-zA-Z](?:\/|$)/.test(String(value || '').trim());
+}
+
+function queryEditorWindowsPathToWslPath(value) {
+  const normalized = String(value || '').trim().replace(/\//g, '\\');
+  const match = /^([a-zA-Z]):\\?(.*)$/.exec(normalized);
+  if (!match) {
+    throw createQueryEditorError(
+      400,
+      'invalid_export_path',
+      'Windows network paths are not supported for server export.',
+    );
+  }
+  const drive = match[1].toLowerCase();
+  const remainder = match[2].split('\\').filter(Boolean).join('/');
+  return remainder ? `/mnt/${drive}/${remainder}` : `/mnt/${drive}`;
+}
+
+function queryEditorWslPathToWindowsPath(value) {
+  const normalized = path.posix.normalize(String(value || '').trim());
+  const match = /^\/mnt\/([a-zA-Z])(?:\/(.*))?$/.exec(normalized);
+  if (!match) {
+    throw createQueryEditorError(
+      400,
+      'invalid_export_path',
+      'Only /mnt/<drive>/... paths are supported for server export.',
+    );
+  }
+  const drive = match[1].toUpperCase();
+  const remainder = match[2] ? match[2].split('/').filter(Boolean).join('\\') : '';
+  return remainder ? `${drive}:\\${remainder}` : `${drive}:\\`;
+}
+
+function queryEditorNormalizeExportPath(rawPath) {
+  const trimmed = typeof rawPath === 'string' ? rawPath.trim() : '';
+  if (!trimmed) {
+    throw createQueryEditorError(400, 'output_path_required', 'Export file path is required.');
+  }
+
+  let windowsPath = null;
+  let posixPath = null;
+
+  if (queryEditorIsWindowsAbsolutePath(trimmed)) {
+    windowsPath = path.win32.normalize(trimmed.replace(/\//g, '\\'));
+  } else if (queryEditorIsWslMountPath(trimmed)) {
+    posixPath = path.posix.normalize(trimmed);
+    windowsPath = queryEditorWslPathToWindowsPath(posixPath);
+  } else if (process.platform === 'win32') {
+    throw createQueryEditorError(
+      400,
+      'invalid_export_path',
+      'Export file path must use an absolute Windows path.',
+    );
+  } else if (path.posix.isAbsolute(trimmed)) {
+    posixPath = path.posix.normalize(trimmed);
+  } else {
+    throw createQueryEditorError(400, 'invalid_export_path', 'Export file path must be absolute.');
+  }
+
+  if (windowsPath) {
+    const ext = String(path.win32.extname(windowsPath) || '').toLowerCase();
+    if (!ext) {
+      windowsPath = `${windowsPath}.sql`;
+    } else if (ext !== '.sql') {
+      throw createQueryEditorError(400, 'invalid_export_path', 'Export file path must end with .sql.');
+    }
+  }
+
+  if (posixPath) {
+    const ext = String(path.posix.extname(posixPath) || '').toLowerCase();
+    if (!ext) {
+      posixPath = `${posixPath}.sql`;
+    } else if (ext !== '.sql') {
+      throw createQueryEditorError(400, 'invalid_export_path', 'Export file path must end with .sql.');
+    }
+  }
+
+  if (!windowsPath && posixPath && queryEditorIsWslMountPath(posixPath)) {
+    windowsPath = queryEditorWslPathToWindowsPath(posixPath);
+  }
+
+  if (!posixPath && windowsPath && process.platform !== 'win32') {
+    posixPath = queryEditorWindowsPathToWslPath(windowsPath);
+  }
+
+  const fileSystemPath =
+    process.platform === 'win32'
+      ? (windowsPath || queryEditorWslPathToWindowsPath(posixPath))
+      : (posixPath || queryEditorWindowsPathToWslPath(windowsPath));
+
+  return {
+    displayPath: windowsPath || posixPath,
+    fileSystemPath,
+    windowsPath,
+    posixPath,
+  };
+}
+
+function queryEditorResolveWindowsUserProfile() {
+  if (queryEditorWindowsUserProfileCache !== undefined) {
+    return queryEditorWindowsUserProfileCache;
+  }
+
+  const directCandidates = [
+    typeof process.env.USERPROFILE === 'string' ? process.env.USERPROFILE.trim() : '',
+    process.platform === 'win32' ? os.homedir() : '',
+  ].filter(Boolean);
+
+  const matchedDirect = directCandidates.find(candidate => queryEditorIsWindowsAbsolutePath(candidate));
+  if (matchedDirect) {
+    queryEditorWindowsUserProfileCache = path.win32.normalize(matchedDirect);
+    return queryEditorWindowsUserProfileCache;
+  }
+
+  if (process.platform !== 'win32') {
+    try {
+      const result = spawnSync('cmd.exe', ['/d', '/s', '/c', 'echo %USERPROFILE%'], {
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 3000,
+      });
+      const candidate = String(result.stdout || '')
+        .split(/\r?\n/)
+        .map(value => value.trim())
+        .find(value => queryEditorIsWindowsAbsolutePath(value));
+      if (candidate) {
+        queryEditorWindowsUserProfileCache = path.win32.normalize(candidate);
+        return queryEditorWindowsUserProfileCache;
+      }
+    } catch (_) {
+      // ignore lookup failures and fall back to the local home directory
+    }
+  }
+
+  queryEditorWindowsUserProfileCache = '';
+  return queryEditorWindowsUserProfileCache;
+}
+
+function queryEditorResolveDefaultExportDirectoryDisplay() {
+  const windowsProfile = queryEditorResolveWindowsUserProfile();
+  if (windowsProfile) {
+    return path.win32.join(windowsProfile, 'Documents', 'dumps');
+  }
+  if (process.platform === 'win32') {
+    return path.win32.join(os.homedir(), 'Documents', 'dumps');
+  }
+  return path.posix.join(os.homedir(), 'dumps');
+}
+
+function queryEditorJoinDisplayPath(directoryPath, fileName) {
+  if (queryEditorIsWindowsAbsolutePath(directoryPath)) {
+    return path.win32.join(directoryPath, fileName);
+  }
+  return path.posix.join(directoryPath, fileName);
+}
+
+function queryEditorBuildDefaultOutputPath(databaseName) {
+  const displayDirectory = queryEditorResolveDefaultExportDirectoryDisplay();
+  const safeDatabaseName = queryEditorSanitizeFileStem(databaseName, 'database');
+  const dateStamp = queryEditorFormatDateStamp();
+
+  for (let index = 0; index < 1000; index += 1) {
+    const suffix = index === 0 ? '' : ` (${index})`;
+    const candidatePath = queryEditorJoinDisplayPath(
+      displayDirectory,
+      `${safeDatabaseName}-${dateStamp}${suffix}.sql`,
+    );
+    const normalized = queryEditorNormalizeExportPath(candidatePath);
+    if (!fs.existsSync(normalized.fileSystemPath)) {
+      return normalized.displayPath;
+    }
+  }
+
+  return queryEditorJoinDisplayPath(
+    displayDirectory,
+    `${safeDatabaseName}-${dateStamp}-${Date.now()}.sql`,
+  );
+}
+
+function queryEditorResolveDumpBinary(preferredPathFormat = 'any') {
+  const cacheKey = preferredPathFormat || 'any';
+  if (Object.prototype.hasOwnProperty.call(queryEditorDumpBinaryCache, cacheKey)) {
+    return queryEditorDumpBinaryCache[cacheKey];
+  }
+
+  const configured = typeof process.env.MYSQLDUMP_PATH === 'string' ? process.env.MYSQLDUMP_PATH.trim() : '';
+  const programFiles = typeof process.env.ProgramFiles === 'string' && process.env.ProgramFiles.trim()
+    ? process.env.ProgramFiles.trim()
+    : 'C:\\Program Files';
+  const candidateDefs = [
+    configured
+      ? {
+          command: configured,
+          pathFormat: process.platform === 'win32' || /\.exe$/i.test(configured) ? 'windows' : 'posix',
+        }
+      : null,
+    process.platform === 'win32'
+      ? {
+          command: path.win32.join(programFiles, 'MySQL', 'MySQL Server 8.0', 'bin', 'mysqldump.exe'),
+          pathFormat: 'windows',
+        }
+      : null,
+    process.platform === 'win32'
+      ? {
+          command: path.win32.join(programFiles, 'MySQL', 'MySQL Server 8.4', 'bin', 'mysqldump.exe'),
+          pathFormat: 'windows',
+        }
+      : null,
+    process.platform !== 'win32'
+      ? {
+          command: '/mnt/c/Program Files/MySQL/MySQL Server 8.0/bin/mysqldump.exe',
+          pathFormat: 'windows',
+        }
+      : null,
+    process.platform !== 'win32'
+      ? {
+          command: '/mnt/c/Program Files/MySQL/MySQL Server 8.4/bin/mysqldump.exe',
+          pathFormat: 'windows',
+        }
+      : null,
+    {
+      command: 'mysqldump',
+      pathFormat: process.platform === 'win32' ? 'windows' : 'posix',
+    },
+  ].filter(Boolean);
+
+  const orderedCandidates =
+    preferredPathFormat === 'windows' || preferredPathFormat === 'posix'
+      ? [
+          ...candidateDefs.filter(candidate => candidate.pathFormat === preferredPathFormat),
+          ...candidateDefs.filter(candidate => candidate.pathFormat !== preferredPathFormat),
+        ]
+      : candidateDefs;
+
+  const seen = new Set();
+  for (const candidate of orderedCandidates) {
+    if (!candidate?.command || seen.has(candidate.command)) continue;
+    seen.add(candidate.command);
+    try {
+      const probe = spawnSync(candidate.command, ['--version'], {
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 5000,
+      });
+      if (!probe.error && probe.status === 0) {
+        queryEditorDumpBinaryCache[cacheKey] = candidate;
+        return queryEditorDumpBinaryCache[cacheKey];
+      }
+    } catch (_) {
+      // continue searching
+    }
+  }
+
+  queryEditorDumpBinaryCache[cacheKey] = null;
+  return queryEditorDumpBinaryCache[cacheKey];
+}
+
+async function queryEditorListExportDatabases(executor = pool) {
+  const preferredDatabase = getQueryEditorDefaultDatabaseName();
+  const [rows] = await executor.query(
+    `SELECT schema_name AS name
+       FROM information_schema.schemata
+      WHERE schema_name NOT IN ('information_schema', 'performance_schema')
+      ORDER BY
+        CASE
+          WHEN schema_name = ? THEN 0
+          WHEN schema_name IN ('mysql', 'sys') THEN 2
+          ELSE 1
+        END,
+        schema_name ASC`,
+    [preferredDatabase],
+  );
+  return (rows || []).map(row => {
+    const name = String(row?.name || '').trim();
+    return {
+      name,
+      label: name,
+      isSystemSchema: QUERY_EDITOR_EXPORT_EXCLUDED_SCHEMAS.has(name) || name === 'mysql' || name === 'sys',
+    };
+  }).filter(entry => entry.name);
+}
+
+async function queryEditorListExportTables(databaseName, executor = pool) {
+  const schema = typeof databaseName === 'string' ? databaseName.trim() : '';
+  if (!schema) return [];
+  const [rows] = await executor.query(
+    `SELECT table_name AS name
+       FROM information_schema.tables
+      WHERE table_schema = ?
+        AND table_type = 'BASE TABLE'
+      ORDER BY table_name ASC`,
+    [schema],
+  );
+  return (rows || []).map(row => {
+    const name = String(row?.name || '').trim();
+    return {
+      name,
+      label: name,
+    };
+  }).filter(entry => entry.name);
+}
+
+async function queryEditorBuildExportMetadata(requestedDatabase, executor = pool) {
+  const databases = await queryEditorListExportDatabases(executor);
+  if (!databases.length) {
+    throw createQueryEditorError(404, 'databases_unavailable', 'No databases are available for server export.');
+  }
+
+  const preferredDatabase = getQueryEditorDefaultDatabaseName();
+  const requested = typeof requestedDatabase === 'string' ? requestedDatabase.trim() : '';
+  const selectedDatabase = requested || preferredDatabase || databases[0].name;
+  const matchedDatabase = databases.find(entry => entry.name === selectedDatabase);
+  if (!matchedDatabase) {
+    throw createQueryEditorError(400, 'database_not_found', `Database not found: ${selectedDatabase}`);
+  }
+
+  const tables = await queryEditorListExportTables(matchedDatabase.name, executor);
+  return {
+    defaultDatabase: preferredDatabase || matchedDatabase.name,
+    selectedDatabase: matchedDatabase.name,
+    databases,
+    tables,
+    defaultOutputPath: queryEditorBuildDefaultOutputPath(matchedDatabase.name),
+    exportMode: {
+      dumpContent: 'structure_and_data',
+      destination: 'self_contained_file',
+      includeCreateSchema: true,
+      includeTriggers: false,
+      includeRoutines: false,
+      includeEvents: false,
+    },
+  };
+}
+
+async function queryEditorValidateExportSelection(databaseName, rawTables, executor = pool) {
+  const metadata = await queryEditorBuildExportMetadata(databaseName, executor);
+  const requestedTables = Array.from(new Set(
+    (Array.isArray(rawTables) ? rawTables : [])
+      .map(value => String(value || '').trim())
+      .filter(Boolean),
+  ));
+
+  if (!requestedTables.length) {
+    throw createQueryEditorError(400, 'tables_required', 'Select at least one table to export.');
+  }
+
+  const availableTables = new Set(metadata.tables.map(entry => entry.name));
+  const missingTables = requestedTables.filter(name => !availableTables.has(name));
+  if (missingTables.length) {
+    throw createQueryEditorError(
+      400,
+      'tables_not_found',
+      `The selected table list is invalid for ${metadata.selectedDatabase}.`,
+      { missingTables },
+    );
+  }
+
+  return {
+    database: metadata.selectedDatabase,
+    tables: requestedTables,
+    exportMode: metadata.exportMode,
+  };
+}
+
+async function queryEditorRunServerExport({ database, tables, outputPath }) {
+  const normalizedOutputPath = queryEditorNormalizeExportPath(outputPath);
+  const preferredPathFormat = normalizedOutputPath.windowsPath ? 'windows' : 'posix';
+  const dumpBinary = queryEditorResolveDumpBinary(preferredPathFormat);
+  if (!dumpBinary) {
+    throw createQueryEditorError(503, 'mysqldump_unavailable', 'mysqldump is unavailable on the server.');
+  }
+  const outputDirectory = path.dirname(normalizedOutputPath.fileSystemPath);
+  fs.mkdirSync(outputDirectory, { recursive: true });
+
+  const dumpResultPath =
+    dumpBinary.pathFormat === 'windows'
+      ? (normalizedOutputPath.windowsPath || queryEditorWslPathToWindowsPath(normalizedOutputPath.fileSystemPath))
+      : normalizedOutputPath.fileSystemPath;
+
+  const args = [
+    `--host=${process.env.DB_HOST || 'localhost'}`,
+    `--port=${Number(process.env.DB_PORT || 3306) || 3306}`,
+    `--user=${process.env.DB_USER || 'root'}`,
+    '--protocol=tcp',
+    '--default-character-set=utf8mb4',
+    '--single-transaction',
+    '--skip-column-statistics',
+    '--skip-triggers',
+    '--set-gtid-purged=OFF',
+    '--result-file',
+    dumpResultPath,
+    '--databases',
+    database,
+    '--tables',
+    ...tables,
+  ];
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(dumpBinary.command, args, {
+      windowsHide: true,
+      env: {
+        ...process.env,
+        MYSQL_PWD: typeof process.env.DB_PASS === 'string' ? process.env.DB_PASS : '',
+      },
+    });
+
+    let stderr = '';
+    let stdout = '';
+
+    child.stdout.on('data', chunk => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', chunk => {
+      stderr += chunk.toString();
+    });
+    child.on('error', error => {
+      reject(
+        createQueryEditorError(
+          500,
+          'export_failed',
+          error?.message || 'Server export failed.',
+          { stderr, stdout },
+        ),
+      );
+    });
+    child.on('close', code => {
+      if (code !== 0) {
+        try {
+          if (fs.existsSync(normalizedOutputPath.fileSystemPath)) {
+            fs.unlinkSync(normalizedOutputPath.fileSystemPath);
+          }
+        } catch (_) {
+          // ignore cleanup failures after a dump error
+        }
+        reject(
+          createQueryEditorError(
+            500,
+            'export_failed',
+            String(stderr || stdout || `mysqldump exited with code ${code}`).trim(),
+            { stderr, stdout, exitCode: code },
+          ),
+        );
+        return;
+      }
+
+      let sizeBytes = 0;
+      try {
+        const stats = fs.statSync(normalizedOutputPath.fileSystemPath);
+        sizeBytes = Number(stats.size || 0);
+      } catch (_) {
+        sizeBytes = 0;
+      }
+
+      resolve({
+        normalizedOutputPath,
+        sizeBytes,
+        stderr: String(stderr || '').trim(),
+        stdout: String(stdout || '').trim(),
+      });
+    });
+  });
+}
+
+app.get('/api/admin/query-editor/export-metadata', async (req, res) => {
+  if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+  if (!pool) {
+    return res.status(503).json({ error: 'db_unavailable', message: 'Database connection is unavailable.' });
+  }
+
+  try {
+    const metadata = await queryEditorBuildExportMetadata(req.query?.database, pool);
+    return res.json(metadata);
+  } catch (err) {
+    const statusCode = Number.isInteger(err?.statusCode) ? err.statusCode : 500;
+    console.error('[query-editor] export metadata failed:', err?.message || err);
+    return res.status(statusCode).json({
+      error: err?.code || 'export_metadata_failed',
+      message: err?.message || 'Failed to load server export metadata.',
+    });
+  }
+});
+
+app.post('/api/admin/query-editor/export', async (req, res) => {
+  if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+  if (!pool) {
+    return res.status(503).json({ error: 'db_unavailable', message: 'Database connection is unavailable.' });
+  }
+
+  const outputPath = typeof req.body?.outputPath === 'string' ? req.body.outputPath : '';
+  const startedAt = new Date();
+
+  try {
+    const selection = await queryEditorValidateExportSelection(req.body?.database, req.body?.tables, pool);
+    const exportResult = await queryEditorRunServerExport({
+      database: selection.database,
+      tables: selection.tables,
+      outputPath,
+    });
+    const finishedAt = new Date();
+    return res.json({
+      database: selection.database,
+      tables: selection.tables,
+      tableCount: selection.tables.length,
+      outputPath: exportResult.normalizedOutputPath.displayPath,
+      sizeBytes: exportResult.sizeBytes,
+      startedAt: startedAt.toISOString(),
+      finishedAt: finishedAt.toISOString(),
+      durationMs: finishedAt.getTime() - startedAt.getTime(),
+      exportMode: selection.exportMode,
+    });
+  } catch (err) {
+    const statusCode = Number.isInteger(err?.statusCode) ? err.statusCode : 500;
+    console.error('[query-editor] export failed:', err?.message || err);
+    return res.status(statusCode).json({
+      error: err?.code || 'export_failed',
+      message: err?.message || 'Server export failed.',
+      missingTables: Array.isArray(err?.missingTables) ? err.missingTables : undefined,
+      outputPath: typeof outputPath === 'string' && outputPath.trim() ? outputPath.trim() : undefined,
+    });
+  }
+});
 
 app.post('/api/admin/query-editor', async (req, res) => {
   if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });

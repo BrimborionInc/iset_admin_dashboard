@@ -18,7 +18,7 @@ const widgetRegistry = {
     defaultColumnSpan: 4,
     component: QueryEditorInputWidget,
     title: "SQL query editor",
-    description: "Run one or more SQL statements against the active environment database, or load SQL from a file into the editor.",
+    description: "Run SQL statements, load SQL from a file, or create a server-side SQL dump for selected database tables.",
     helpComponent: QueryEditorInputHelp,
     helpTitle: "Query editor",
     aiContext: QueryEditorInputHelp.aiContext,
@@ -190,6 +190,16 @@ const QueryEditorDashboard = ({
   const [isRunning, setIsRunning] = useState(false);
   const [envLabel, setEnvLabel] = useState("Unknown");
   const [envLoading, setEnvLoading] = useState(false);
+  const [exportDatabases, setExportDatabases] = useState([]);
+  const [selectedExportDatabase, setSelectedExportDatabase] = useState("");
+  const [exportTables, setExportTables] = useState([]);
+  const [selectedExportTables, setSelectedExportTables] = useState([]);
+  const [exportOutputPath, setExportOutputPath] = useState("");
+  const [exportMetadataError, setExportMetadataError] = useState(null);
+  const [isExportMetadataLoading, setIsExportMetadataLoading] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportStatus, setExportStatus] = useState(null);
+  const exportLoadSequenceRef = useRef(0);
 
   const boardItems = useMemo(() => toBoardItems(layout), [layout]);
   const paletteItems = useMemo(() => computePaletteItems(boardItems), [boardItems]);
@@ -232,6 +242,64 @@ const QueryEditorDashboard = ({
       isMounted = false;
     };
   }, []);
+
+  const parseApiPayload = useCallback(async response => {
+    const text = await response.text();
+    if (!text) {
+      return null;
+    }
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { error: "invalid_response", message: text };
+    }
+  }, []);
+
+  const loadExportMetadata = useCallback(async databaseName => {
+    const requestId = exportLoadSequenceRef.current + 1;
+    exportLoadSequenceRef.current = requestId;
+    setIsExportMetadataLoading(true);
+    setExportMetadataError(null);
+
+    try {
+      const query = databaseName ? `?database=${encodeURIComponent(databaseName)}` : "";
+      const response = await apiFetch(`/api/admin/query-editor/export-metadata${query}`);
+      const payload = await parseApiPayload(response);
+      if (!response.ok) {
+        const message = payload?.message || payload?.error || `Request failed (${response.status})`;
+        throw new Error(message);
+      }
+      if (requestId !== exportLoadSequenceRef.current) {
+        return;
+      }
+
+      const databases = Array.isArray(payload?.databases) ? payload.databases : [];
+      const tables = Array.isArray(payload?.tables) ? payload.tables : [];
+      setExportDatabases(databases);
+      setSelectedExportDatabase(payload?.selectedDatabase || "");
+      setExportTables(tables);
+      setSelectedExportTables(tables.map(table => table.name).filter(Boolean));
+      setExportOutputPath(typeof payload?.defaultOutputPath === "string" ? payload.defaultOutputPath : "");
+    } catch (err) {
+      if (requestId !== exportLoadSequenceRef.current) {
+        return;
+      }
+      setExportDatabases([]);
+      setSelectedExportDatabase("");
+      setExportTables([]);
+      setSelectedExportTables([]);
+      setExportOutputPath("");
+      setExportMetadataError({ message: err?.message || "Failed to load server export options." });
+    } finally {
+      if (requestId === exportLoadSequenceRef.current) {
+        setIsExportMetadataLoading(false);
+      }
+    }
+  }, [parseApiPayload]);
+
+  useEffect(() => {
+    loadExportMetadata();
+  }, [loadExportMetadata]);
 
   useEffect(() => {
     const paletteSignature = JSON.stringify(paletteItems.map(item => item.id));
@@ -289,15 +357,7 @@ const QueryEditorDashboard = ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: trimmed }),
       });
-      const text = await response.text();
-      let payload = null;
-      if (text) {
-        try {
-          payload = JSON.parse(text);
-        } catch {
-          payload = { error: "invalid_response", message: text };
-        }
-      }
+      const payload = await parseApiPayload(response);
       if (!response.ok) {
         const message = payload?.message || payload?.error || `Request failed (${response.status})`;
         const details = payload && typeof payload === "object" ? payload : { message };
@@ -314,7 +374,55 @@ const QueryEditorDashboard = ({
     } finally {
       setIsRunning(false);
     }
-  }, [sql]);
+  }, [parseApiPayload, sql]);
+
+  const runExport = useCallback(async () => {
+    const outputPath = typeof exportOutputPath === "string" ? exportOutputPath.trim() : "";
+    if (!selectedExportDatabase || !selectedExportTables.length || !outputPath) {
+      return;
+    }
+
+    setIsExporting(true);
+    setExportStatus(null);
+
+    try {
+      const response = await apiFetch("/api/admin/query-editor/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          database: selectedExportDatabase,
+          tables: selectedExportTables,
+          outputPath,
+        }),
+      });
+      const payload = await parseApiPayload(response);
+      if (!response.ok) {
+        const message = payload?.message || payload?.error || `Request failed (${response.status})`;
+        setExportStatus({
+          type: "error",
+          message,
+          missingTables: Array.isArray(payload?.missingTables) ? payload.missingTables : [],
+          outputPath: payload?.outputPath || outputPath,
+        });
+        return;
+      }
+      setExportStatus({
+        type: "success",
+        ...(payload || {}),
+      });
+      if (typeof payload?.outputPath === "string" && payload.outputPath) {
+        setExportOutputPath(payload.outputPath);
+      }
+    } catch (err) {
+      setExportStatus({
+        type: "error",
+        message: err?.message || "Server export failed.",
+        outputPath,
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  }, [exportOutputPath, parseApiPayload, selectedExportDatabase, selectedExportTables]);
 
   const renderBoardItem = useCallback(
     (item, actions) => {
@@ -335,10 +443,50 @@ const QueryEditorDashboard = ({
           onRun={runQuery}
           envLabel={envLabel}
           envLoading={envLoading}
+          exportDatabases={exportDatabases}
+          selectedExportDatabase={selectedExportDatabase}
+          exportTables={exportTables}
+          selectedExportTables={selectedExportTables}
+          exportOutputPath={exportOutputPath}
+          exportMetadataError={exportMetadataError}
+          isExportMetadataLoading={isExportMetadataLoading}
+          isExporting={isExporting}
+          exportStatus={exportStatus}
+          onExportDatabaseChange={nextDatabase => {
+            setExportStatus(null);
+            loadExportMetadata(nextDatabase);
+          }}
+          onReloadExportMetadata={() => {
+            setExportStatus(null);
+            loadExportMetadata(selectedExportDatabase || undefined);
+          }}
+          onExportTableSelectionChange={setSelectedExportTables}
+          onExportOutputPathChange={setExportOutputPath}
+          onRunExport={runExport}
         />
       );
     },
-    [toggleHelpPanel, sql, resultSet, error, isRunning, runQuery, envLabel, envLoading],
+    [
+      toggleHelpPanel,
+      sql,
+      resultSet,
+      error,
+      isRunning,
+      runQuery,
+      envLabel,
+      envLoading,
+      exportDatabases,
+      selectedExportDatabase,
+      exportTables,
+      selectedExportTables,
+      exportOutputPath,
+      exportMetadataError,
+      isExportMetadataLoading,
+      isExporting,
+      exportStatus,
+      loadExportMetadata,
+      runExport,
+    ],
   );
 
   const openPalette = useCallback(() => {

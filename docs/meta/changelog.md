@@ -2,6 +2,10 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-03-25
+- UX/API/Configuration: Query Editor now includes a `Server Export` tab with a MySQL Workbench-style object-selection flow for choosing one database, selecting the tables to include, and writing a self-contained SQL dump file directly on the admin server.
+- Docs/Configuration: Updated the live Query Editor dashboard reference, help-panel copy, and `docs/AGENTS.md` for the new server export flow, hardwired dump options, and Windows/WSL dump-path behavior.
+
 ## 2026-03-24
 - UX/API/Reporting: Added inline drilldown on non-zero `Intake and Assessment` and `Interventions` values in `Reporting > Data and Results`, showing the contributing records directly beneath the clicked row with linked applicant/participant names that open the related application or case workspace.
 - Docs/Reporting: Updated the live `Data and Results` dashboard reference, help-panel copy, and `docs/AGENTS.md` with the new inline drilldown behavior, fiscal-window rules for monthly vs cumulative clicks, and the current demo-mode limitation.
