@@ -12,6 +12,10 @@ const { XMLValidator, XMLParser } = require('fast-xml-parser');
 const { maskName } = require('./src/utils/utils');
 const { getInternalNotifications, dismissInternalNotification } = require('./src/internalNotifications');
 const {
+  deleteApplicantCognitoUser,
+  ensureApplicantAccountForClient,
+} = require('./src/lib/applicantAccountService');
+const {
   createCaseWatch,
   deleteCaseWatch,
   listCaseWatchesForUser,
@@ -3661,28 +3665,23 @@ const SLA_STAGE_LABELS = SLA_STAGE_PLACEHOLDER.reduce((acc, item) => {
 
 const ACCESS_MATRIX_ROLE_ORDER = [
   'System Administrator',
-  'Program Administrator',
+  'NWAC Administrator',
   'Finance Approver',
   'Finance Reviewer',
   'Finance Ops',
   'AP/Ops',
-  'Regional Coordinator',
-  'Application Assessor',
+  'Regional Manager',
+  'ISET Coordinator',
 ];
 const ACCESS_MATRIX_ROLE_ALIASES = {
-  'Application Assessor': 'Application Assessor',
-  ApplicationAssessor: 'Application Assessor',
-  'PTMA Staff': 'Application Assessor',
-  PTMAStaff: 'Application Assessor',
-  Adjudicator: 'Application Assessor',
-  ISET_Coordinator: 'Application Assessor',
-  SysAdmin: 'System Administrator',
-  'System Admin': 'System Administrator',
+  'System Administrator': 'System Administrator',
   System_Administrator: 'System Administrator',
-  'Program Admin': 'Program Administrator',
-  NWAC_Administrator: 'Program Administrator',
-  ProgramAdministrator: 'Program Administrator',
-  Regional_Manager: 'Regional Coordinator',
+  'NWAC Administrator': 'NWAC Administrator',
+  NWAC_Administrator: 'NWAC Administrator',
+  'Regional Manager': 'Regional Manager',
+  Regional_Manager: 'Regional Manager',
+  'ISET Coordinator': 'ISET Coordinator',
+  ISET_Coordinator: 'ISET Coordinator',
   FinanceApprover: 'Finance Approver',
   FinanceReviewer: 'Finance Reviewer',
   FinanceProcessor: 'Finance Reviewer',
@@ -8579,6 +8578,27 @@ async function resolveStaffDisplayName(pool, req) {
       if (name) return name;
     } catch (_) { /* ignore lookup errors */ }
   }
+  const userSub = req?.auth?.sub || null;
+  if (userSub) {
+    try {
+      const [[row]] = await pool.query(
+        'SELECT name FROM user WHERE cognito_sub = ? LIMIT 1',
+        [userSub]
+      );
+      const name = normaliseString(row?.name || null);
+      if (name) return name;
+    } catch (_) { /* ignore lookup errors */ }
+  }
+  if (email) {
+    try {
+      const [[row]] = await pool.query(
+        'SELECT name FROM user WHERE LOWER(email) = LOWER(?) LIMIT 1',
+        [email]
+      );
+      const name = normaliseString(row?.name || null);
+      if (name) return name;
+    } catch (_) { /* ignore lookup errors */ }
+  }
   return normaliseString(req?.auth?.name || null) || null;
 }
 
@@ -12580,21 +12600,12 @@ async function resolveOrCreateUserIdFromAuth(req, runner = pool) {
 
 const ASSIGN_ROLE_ALLOWLIST = new Set([
   'System Administrator',
-  'Program Administrator',
-  'Regional Coordinator',
-  'SysAdmin',
-  'ProgramAdmin',
-  'RegionalCoordinator',
-  'System_Administrator',
-  'NWAC_Administrator',
-  'Regional_Manager',
+  'NWAC Administrator',
+  'Regional Manager',
 ]);
 
 const ASSIGN_FORBIDDEN_ROLES = new Set([
-  'Application Assessor',
-  'Adjudicator',
-  'ApplicationAssessor',
-  'ISET_Coordinator',
+  'ISET Coordinator',
 ]);
 
 function getRequesterIdentity(req) {
@@ -12886,13 +12897,13 @@ function validateCaseAccessForPlan(req, planRow) {
 
   const allowAll =
     role === 'System Administrator' ||
-    role === 'Program Administrator' ||
-    role === 'SysAdmin' ||
-    role === 'ProgramAdmin';
+    role === 'NWAC Administrator' ||
+    role === 'System_Administrator' ||
+    role === 'NWAC_Administrator';
 
   if (allowAll) return null;
 
-  if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
+  if (role === 'Regional Manager' || role === 'Regional_Manager') {
     const regionIds = resolveRequestRegionIds(req);
     if (!regionIds.length) {
       return { status: 403, body: { error: 'forbidden', detail: 'region_scope_missing' } };
@@ -12911,7 +12922,7 @@ function validateCaseAccessForPlan(req, planRow) {
     return null;
   }
 
-  if (role === 'Application Assessor' || role === 'Adjudicator') {
+  if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
     const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : Number.NaN;
     if (!Number.isFinite(requesterId)) {
       return { status: 403, body: { error: 'forbidden', detail: 'assessor_scope_missing' } };
@@ -12931,13 +12942,13 @@ function validateCaseAccessForIntervention(req, interventionRow) {
 
   const allowAll =
     role === 'System Administrator' ||
-    role === 'Program Administrator' ||
-    role === 'SysAdmin' ||
-    role === 'ProgramAdmin';
+    role === 'NWAC Administrator' ||
+    role === 'System_Administrator' ||
+    role === 'NWAC_Administrator';
 
   if (allowAll) return null;
 
-  if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
+  if (role === 'Regional Manager' || role === 'Regional_Manager') {
     const regionIds = resolveRequestRegionIds(req);
     if (!regionIds.length) {
       return { status: 403, body: { error: 'forbidden', detail: 'region_scope_missing' } };
@@ -12957,7 +12968,7 @@ function validateCaseAccessForIntervention(req, interventionRow) {
     return null;
   }
 
-  if (role === 'Application Assessor' || role === 'Adjudicator') {
+  if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
     const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : Number.NaN;
     if (!Number.isFinite(requesterId)) {
       return { status: 403, body: { error: 'forbidden', detail: 'assessor_scope_missing' } };
@@ -13064,7 +13075,7 @@ function ensureCanAssignCase(identity, targetStaff) {
     return false;
   }
   if (ASSIGN_ROLE_ALLOWLIST.has(role || '')) {
-    if (role === 'Regional Coordinator' || role === 'RegionalCoordinator' || role === 'Regional_Manager') {
+    if (role === 'Regional Manager' || role === 'Regional_Manager' || role === 'Regional_Manager') {
       const allowedRegions = Array.isArray(regionIds) && regionIds.length
         ? regionIds
         : (Number.isFinite(regionId) ? [Number(regionId)] : []);
@@ -13211,10 +13222,10 @@ function normaliseRoleValue(role) {
 function canonicalEscalationRole(role) {
   const key = normaliseRoleValue(role);
   if (!key) return null;
-  if (key === 'regional_coordinator' || key === 'regionalmanager' || key === 'regional_manager') return 'regional_manager';
-  if (key === 'program_admin' || key === 'programadministrator' || key === 'program_administrator') return 'program_administrator';
-  if (key === 'system_admin' || key === 'systemadministrator' || key === 'sys_admin') return 'system_administrator';
-  if (key === 'application_assessor') return 'coordinator';
+  if (key === 'regionalmanager' || key === 'regional_manager' || key === 'regionalcoordinator' || key === 'regional_coordinator') return 'regional_manager';
+  if (key === 'nwacadministrator' || key === 'nwac_administrator' || key === 'programadministrator' || key === 'program_administrator' || key === 'programadmin' || key === 'program_admin') return 'nwac_administrator';
+  if (key === 'systemadministrator' || key === 'system_administrator') return 'system_administrator';
+  if (key === 'isetcoordinator' || key === 'iset_coordinator' || key === 'applicationassessor' || key === 'application_assessor' || key === 'assessor' || key === 'adjudicator' || key === 'coordinator') return 'iset_coordinator';
   return key;
 }
 function resolveStaffRole(req) {
@@ -15808,7 +15819,7 @@ app.all(['/api/admin/upload-config'], async (req, res) => {
     };
     const canManageUploadConfig = (request) => {
       const role = canonicaliseAccessRole(inferUserRole(request));
-      return role === 'System Administrator' || role === 'Program Administrator';
+      return role === 'System Administrator' || role === 'NWAC Administrator';
     };
     const requestMethod = req.method.toUpperCase();
     const useLegacyProxy = String(process.env.UPLOAD_CONFIG_PROXY || 'false').toLowerCase() === 'true';
@@ -16033,7 +16044,7 @@ async function staffProfileMiddleware(req, res, next) {
     if (rows && rows[0]) {
       req.staffProfile = rows[0];
       const roleKey = typeof role === 'string' ? role.toLowerCase().replace(/[\s_-]+/g, '') : '';
-      if (roleKey === 'regionalcoordinator' || roleKey === 'regionalmanager') {
+      if (roleKey === 'regionalmanager') {
         try {
           const mapped = await fetchStaffRegionIdsByStaffProfileId(rows[0].id);
           const fallback = Number.isFinite(regionId) ? [Number(regionId)] : [];
@@ -16701,7 +16712,7 @@ async function resolveApplicationAssessorContext(req) {
   const matchesAssessorRole = (profile) => {
     const role = profile?.primary_role;
     if (typeof role !== 'string') return false;
-    return role.toLowerCase().replace(/\s+/g, '') === 'applicationassessor';
+    return role.toLowerCase().replace(/\s+/g, '') === 'isetcoordinator';
   };
 
   const tryResolveById = async (rawId) => {
@@ -16750,7 +16761,7 @@ async function resolveApplicationAssessorContext(req) {
 
   if (!resolvedId) {
     try {
-      const [[row]] = await pool.query('SELECT id, cognito_sub, email, primary_role, region_id FROM staff_profiles WHERE primary_role = ? ORDER BY id ASC LIMIT 1', ['Application Assessor']);
+      const [[row]] = await pool.query('SELECT id, cognito_sub, email, primary_role, region_id FROM staff_profiles WHERE primary_role = ? ORDER BY id ASC LIMIT 1', ['ISET Coordinator']);
       if (row && matchesAssessorRole(row)) {
         req.staffProfile = req.staffProfile || row;
         resolvedId = Number(row.id);
@@ -17853,7 +17864,7 @@ async function resolveMetricsScope(req, role) {
     Number.isInteger(Number(req?.staffProfile?.region_id)) ? Number(req.staffProfile.region_id) :
     null;
 
-  if (role === 'Regional Coordinator') {
+  if (role === 'Regional Manager') {
     const context = await resolveRegionalCoordinatorContext(req);
     return {
       valid: Boolean(context?.valid && context?.regionIds && context.regionIds.length),
@@ -17862,7 +17873,7 @@ async function resolveMetricsScope(req, role) {
     };
   }
 
-  if (role === 'Application Assessor') {
+  if (role === 'ISET Coordinator') {
     const context = await resolveApplicationAssessorContext(req);
     return {
       valid: Boolean(context?.valid && context?.staffProfileId),
@@ -19081,9 +19092,8 @@ async function countAssessorOverdue(pool, staffProfileId) {
 
 
 function inferUserRole(req) {
-  if (req.staffProfile && req.staffProfile.primary_role) return req.staffProfile.primary_role;
-  if (req.auth && req.auth.role) return req.auth.role;
-  return null;
+  const rawRole = req.staffProfile?.primary_role || req.auth?.role || null;
+  return canonicaliseAccessRole(rawRole);
 }
 
 const ARCHIVED_APPLICATION_STATUS = 'archived';
@@ -19118,7 +19128,7 @@ async function enforceApplicationVisibility(req, applicationId, connection = poo
 
 function hasSlaAdminAccess(req) {
   const role = inferUserRole(req);
-  return role === 'System Administrator' || role === 'Program Administrator';
+  return role === 'System Administrator' || role === 'NWAC Administrator';
 }
 
 function resolveActorLabel(req) {
@@ -19266,7 +19276,7 @@ app.get('/api/staff/assignable', async (req, res) => {
     }
 
     // Merge staff_profiles results so partial Cognito group listings still include known staff.
-    const roles = ['Program Administrator','Regional Coordinator','Application Assessor','System Administrator'];
+    const roles = ['NWAC Administrator','Regional Manager','ISET Coordinator','System Administrator'];
     const [rows] = await pool.query(
       `SELECT id, cognito_sub, email, primary_role AS role, email AS display_name, region_id
          FROM staff_profiles
@@ -19410,11 +19420,11 @@ app.post('/api/cases/:id/conflicts/revoke', async (req, res) => {
   const role = inferUserRole(req) || 'Guest';
   if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
   if (!Number.isInteger(staff_profile_id) || staff_profile_id < 1) return res.status(400).json({ error: 'invalid_staff_profile_id' });
-  if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
+  if (role !== 'NWAC Administrator' && role !== 'Regional Manager') {
     return res.status(403).json({ error: 'forbidden' });
   }
   try {
-    if (role === 'Regional Coordinator') {
+    if (role === 'Regional Manager') {
       const regionIds = resolveRequestRegionIds(req);
       if (!regionIds.length) {
         return res.status(403).json({ error: 'forbidden' });
@@ -19448,7 +19458,7 @@ app.post('/api/cases/:id/conflicts/resolve', async (req, res) => {
   const role = inferUserRole(req) || 'Guest';
   if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
   if (!Number.isInteger(staff_profile_id) || staff_profile_id < 1) return res.status(400).json({ error: 'invalid_staff_profile_id' });
-  if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
+  if (role !== 'NWAC Administrator' && role !== 'Regional Manager') {
     return res.status(403).json({ error: 'forbidden' });
   }
   try {
@@ -19480,7 +19490,7 @@ app.post('/api/cases/:id/conflicts/resolve', async (req, res) => {
       return res.json({ ok: true, note: 'conflict_not_found' });
     }
 
-    if (role === 'Regional Coordinator') {
+    if (role === 'Regional Manager') {
       const staffRegion = conflictRow?.staff_region_id != null ? Number(conflictRow.staff_region_id) : null;
       const regionIds = resolveRequestRegionIds(req);
       if (!regionIds.length || !Number.isFinite(staffRegion) || !regionIds.includes(staffRegion)) {
@@ -19547,7 +19557,7 @@ const CONTACT_MSG_PAGE_SIZE_MAX = 100;
 
 function resolveContactAdminRole(req) {
   const role = inferUserRole(req);
-  if (role === 'System Administrator' || role === 'Program Administrator') {
+  if (role === 'System Administrator' || role === 'NWAC Administrator') {
     return role;
   }
   return null;
@@ -20713,7 +20723,7 @@ esdcRouter.post('/participants/:id/history', async (req, res, next) => {
 // Mount under your existing API router:
 app.use('/api/esdc', esdcRouter);
 
-const REPORTING_DASHBOARD_ALLOWED_ROLES = new Set(['System Administrator', 'Program Administrator']);
+const REPORTING_DASHBOARD_ALLOWED_ROLES = new Set(['System Administrator', 'NWAC Administrator']);
 
 function hasOperationalReportingAccess(req) {
   const role = canonicaliseAccessRole(inferUserRole(req));
@@ -20886,7 +20896,7 @@ const REPORTING_TARGETS_CONFIG_LEGACY_CANDIDATES = [
 ];
 const REPORTING_ADDITIONAL_COMMENTS_SCOPE = 'reporting.dataAndResults';
 const REPORTING_ADDITIONAL_COMMENTS_MAX_LENGTH = 5000;
-const REPORTING_CASE_MANAGER_ROLE_KEYS = ['Application Assessor', 'Regional Coordinator'];
+const REPORTING_CASE_MANAGER_ROLE_KEYS = ['ISET Coordinator', 'Regional Manager'];
 const REPORTING_INTERVENTION_MEASURES = new Set(['count', 'cost']);
 const REPORTING_RESULTS_VIEW_MODES = new Set(['cumulative', 'monthly']);
 const REPORTING_APPLICATION_ACTIVITY_METRICS = new Set([
@@ -21547,13 +21557,13 @@ async function readRegionalSnapshotDefaults(regionId, executor = pool) {
     FROM staff_profiles
     WHERE status = 'active'
       AND region_id = ?
-      AND primary_role IN ('Regional Coordinator', 'Application Assessor')
+      AND primary_role IN ('Regional Manager', 'ISET Coordinator')
     ORDER BY label ASC
     `,
     [regionId]
   );
-  const manager = (rows || []).find(row => row.primary_role === 'Regional Coordinator');
-  const coordinator = (rows || []).find(row => row.primary_role === 'Application Assessor');
+  const manager = (rows || []).find(row => row.primary_role === 'Regional Manager');
+  const coordinator = (rows || []).find(row => row.primary_role === 'ISET Coordinator');
   return {
     regionalManagerName: manager?.label || null,
     regionalCoordinatorName: coordinator?.label || null,
@@ -24825,11 +24835,10 @@ async function hydrateAuthConfigFromDatabase() {
 
 function sysAdminOnly(req) {
   let role = req.auth?.role;
-  // Normalize legacy / short group codes (e.g., "SysAdmin") to canonical display roles
+  // Normalize approved Cognito group ids to canonical display roles.
   const normalizeRole = (r) => {
     if (!r) return r;
     const map = {
-      SysAdmin: 'System Administrator',
       System_Administrator: 'System Administrator',
       'System Administrator': 'System Administrator'
     };
@@ -24898,7 +24907,7 @@ app.get('/api/config/runtime', async (req, res) => {
   }
 });
 
-// --- Event capture configuration (SysAdmin only) ---
+// --- Event capture configuration (System_Administrator only) ---
 app.get('/api/admin/event-types', (req, res) => {
   try {
     if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
@@ -28827,7 +28836,7 @@ app.get('/api/config/security', (req, res) => {
     let effectiveRole = req.auth?.role || null;
     const MASK_LEVEL = (() => {
       if (effectiveRole === 'System Administrator') return 'admin'; // standard masked view
-      if (effectiveRole === 'Program Administrator') return 'restricted'; // heavily masked
+      if (effectiveRole === 'NWAC Administrator') return 'restricted'; // heavily masked
       return 'none'; // no visibility
     })();
     const baseMask = (val) => {
@@ -29215,7 +29224,7 @@ app.get('/api/dashboard/case-work-queue', async (req, res) => {
   let role = inferUserRole(req) || 'Guest';
 
   try {
-    if (role === 'Program Administrator') {
+    if (role === 'NWAC Administrator') {
       const [activeCount, inactiveCount, readyToCloseCount, newIntakesCount, followUpsDueCount, ilmpIssuesCount] = await Promise.all([
         countActiveCasesAll(pool),
         countInactiveCasesAll(pool),
@@ -29268,7 +29277,7 @@ app.get('/api/dashboard/case-work-queue', async (req, res) => {
       });
     }
 
-    if (role === 'Regional Coordinator') {
+    if (role === 'Regional Manager') {
       const context = await resolveRegionalCoordinatorContext(req);
       const [newIntakesCount, followUpsDueCount, ilmpIssuesCount, activeCount, inactiveCount, readyToCloseCount] = context?.valid && context.regionIds && context.regionIds.length
         ? await Promise.all([
@@ -29325,7 +29334,7 @@ app.get('/api/dashboard/case-work-queue', async (req, res) => {
       });
     }
 
-    if (role === 'Application Assessor') {
+    if (role === 'ISET Coordinator') {
       const context = await resolveApplicationAssessorContext(req);
       const staffId = context?.staffProfileId || null;
       const [newIntakesCount, followUpsDueCount, ilmpIssuesCount, activeCount, inactiveCount, readyToCloseCount] = context?.valid && staffId
@@ -29399,7 +29408,7 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
   const role = inferUserRole(req) || 'Guest';
 
   try {
-    if (role === 'Program Administrator') {
+    if (role === 'NWAC Administrator') {
       const [newSubmissionCount, awaitingEiCount, inAssessmentCount, awaitingDecisionCount, onHoldCount, overdueCount] = await Promise.all([
         countProgramAdminNewSubmissions(pool),
         countProgramAdminAwaitingEiValidation(pool),
@@ -29458,7 +29467,7 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
       });
     }
 
-    if (role === 'Regional Coordinator') {
+    if (role === 'Regional Manager') {
       const metaRegion = WORK_QUEUE_BUCKET_META['region-queue'];
       const metaNeeds = WORK_QUEUE_BUCKET_META['needs-reassignment'];
       const metaAwaitingApproval = WORK_QUEUE_BUCKET_META['awaiting-my-approval'];
@@ -29544,7 +29553,7 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
       });
     }
 
-    if (role === 'Application Assessor') {
+    if (role === 'ISET Coordinator') {
       const metaAssigned = WORK_QUEUE_BUCKET_META['assigned-to-me'];
       const metaDueToday = WORK_QUEUE_BUCKET_META['due-today'];
       const metaDueSoon = WORK_QUEUE_BUCKET_META['due-soon'];
@@ -29624,17 +29633,17 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
   }
 });
  
-// Conflict declarations visible to Program Admins (all) and Regional Coordinators (their region)
+// Conflict declarations visible to Program Admins (all) and Regional Managers (their region)
 app.get('/api/dashboard/conflict-declarations', async (req, res) => {
   const role = inferUserRole(req) || 'Guest';
-  if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
+  if (role !== 'NWAC Administrator' && role !== 'Regional Manager') {
     return res.json({ role, declarations: [] });
   }
   const regionIds = resolveRequestRegionIds(req);
   const regionId = regionIds.length ? regionIds[0] : null;
   const params = ['conflict'];
   const filters = ['cd.declaration_choice = ?', 'cd.revoked_at IS NULL'];
-  if (role === 'Regional Coordinator') {
+  if (role === 'Regional Manager') {
     if (!regionIds.length) {
       return res.json({ role, declarations: [] });
     }
@@ -29712,14 +29721,14 @@ app.get('/api/dashboard/conflict-declarations', async (req, res) => {
 // EI Eligibility items (applications needing EI status validation)
 app.get('/api/dashboard/ei-eligibility-items', async (req, res) => {
   const role = inferUserRole(req) || 'Guest';
-  if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
+  if (role !== 'NWAC Administrator' && role !== 'Regional Manager') {
     return res.json({ role, items: [] });
   }
   const regionIds = resolveRequestRegionIds(req);
   const regionId = regionIds.length ? regionIds[0] : null;
   const filters = ['(ca.esdc_eligibility IS NULL OR ca.esdc_eligibility = \'\')'];
   const params = [];
-  if (role === 'Regional Coordinator') {
+  if (role === 'Regional Manager') {
     if (!regionIds.length) {
       return res.json({ role, items: [] });
     }
@@ -29802,7 +29811,7 @@ app.get('/api/dashboard/ei-eligibility-items', async (req, res) => {
 // Applications awaiting program decision
 app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
   const role = inferUserRole(req) || 'Guest';
-  if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
+  if (role !== 'NWAC Administrator' && role !== 'Regional Manager') {
     return res.json({ role, items: [] });
   }
   const regionIds = resolveRequestRegionIds(req);
@@ -29810,7 +29819,7 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
   const statusExpr = `REPLACE(LOWER(TRIM(a.status)), ' ', '_')`;
   const filters = [`${statusExpr} = ?`];
   const params = ['pending_approval'];
-  if (role === 'Regional Coordinator') {
+  if (role === 'Regional Manager') {
     if (!regionIds.length) {
       return res.json({ role, items: [] });
     }
@@ -29902,7 +29911,7 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
 // Applications matching watchlist SIN entries
 app.get('/api/dashboard/watchlist-hit-items', async (req, res) => {
   const role = inferUserRole(req) || 'Guest';
-  if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
+  if (role !== 'NWAC Administrator' && role !== 'Regional Manager') {
     return res.json({ role, items: [] });
   }
   const regionIds = resolveRequestRegionIds(req);
@@ -29910,7 +29919,7 @@ app.get('/api/dashboard/watchlist-hit-items', async (req, res) => {
 
   const filters = [];
   const params = [];
-  if (role === 'Regional Coordinator') {
+  if (role === 'Regional Manager') {
     if (!regionIds.length) {
       return res.json({ role, items: [] });
     }
@@ -30027,7 +30036,7 @@ app.get('/api/dashboard/watchlist-hit-items', async (req, res) => {
 // Applications marked for closure
 app.get('/api/dashboard/marked-for-closure-items', async (req, res) => {
   const role = inferUserRole(req) || 'Guest';
-  if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
+  if (role !== 'NWAC Administrator' && role !== 'Regional Manager') {
     return res.json({ role, items: [] });
   }
   const regionIds = resolveRequestRegionIds(req);
@@ -30035,7 +30044,7 @@ app.get('/api/dashboard/marked-for-closure-items', async (req, res) => {
   const statusExpr = `REPLACE(LOWER(TRIM(a.status)), ' ', '_')`;
   const filters = [`${statusExpr} = ?`];
   const params = ['closure_notice'];
-  if (role === 'Regional Coordinator') {
+  if (role === 'Regional Manager') {
     if (!regionIds.length) {
       return res.json({ role, items: [] });
     }
@@ -30112,7 +30121,7 @@ app.get('/api/dashboard/marked-for-closure-items', async (req, res) => {
 // Intervention proposals awaiting approval
 app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
   const role = inferUserRole(req) || 'Guest';
-  if (role !== 'Program Administrator' && role !== 'Regional Coordinator') {
+  if (role !== 'NWAC Administrator' && role !== 'Regional Manager') {
     return res.json({ role, items: [] });
   }
   const regionIds = resolveRequestRegionIds(req);
@@ -30120,7 +30129,7 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
   const statusExpr = `REPLACE(LOWER(TRIM(ci.status)), ' ', '_')`;
   const filters = [`${statusExpr} IN (?, ?)`];
   const params = ['submitted', 'in_review'];
-  if (role === 'Regional Coordinator') {
+  if (role === 'Regional Manager') {
     if (!regionIds.length) {
       return res.json({ role, items: [] });
     }
@@ -30211,7 +30220,7 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
 // Active interventions with milestones due (for ISET Coordinators)
 app.get('/api/dashboard/intervention-milestone-items', async (req, res) => {
   const role = inferUserRole(req) || 'Guest';
-  if (role !== 'Application Assessor') {
+  if (role !== 'ISET Coordinator') {
     return res.json({ role, items: [] });
   }
   const context = await resolveApplicationAssessorContext(req);
@@ -30311,7 +30320,7 @@ app.get('/api/dashboard/intervention-milestone-items', async (req, res) => {
 // Payment packets/lines where evidence or payment proof is outstanding (for ISET Coordinators)
 app.get('/api/dashboard/payment-proof-due-items', async (req, res) => {
   const role = inferUserRole(req) || 'Guest';
-  if (role !== 'Application Assessor') {
+  if (role !== 'ISET Coordinator') {
     return res.json({ role, items: [] });
   }
   const context = await resolveApplicationAssessorContext(req);
@@ -30764,15 +30773,15 @@ async function insertEscalationCaseNote(connection, { caseId, body, staffProfile
 }
 
   function escalationRoleAllowedForCreation(roleKey) {
-  return roleKey === 'coordinator' || roleKey === 'regional_manager' || roleKey === 'system_administrator';
+  return roleKey === 'iset_coordinator' || roleKey === 'regional_manager' || roleKey === 'system_administrator';
 }
 
 function escalationRoleAllowedForAction(roleKey, ownerRoleKey) {
   if (!roleKey || !ownerRoleKey) return false;
   if (roleKey === 'system_administrator') return true;
-  if (roleKey === 'program_administrator' && ownerRoleKey === 'program_administrator') return true;
+  if (roleKey === 'nwac_administrator' && ownerRoleKey === 'nwac_administrator') return true;
   if (roleKey === 'regional_manager' && ownerRoleKey === 'regional_manager') return true;
-  if (roleKey === 'coordinator' && ownerRoleKey === 'coordinator') return true;
+  if (roleKey === 'iset_coordinator' && ownerRoleKey === 'iset_coordinator') return true;
   return false;
 }
 
@@ -30800,7 +30809,7 @@ app.post('/api/escalations', async (req, res) => {
     const staffProfileId = req.staffProfile?.id || null;
     const authorUserId = getAuthenticatedNumericUserId(req);
     const escalationNoteBody = buildEscalationCaseNoteBody(reason, details);
-    const targetRoleKey = canonicalEscalationRole(req.body?.targetRole || req.body?.target_role || (roleKey === 'regional_manager' ? 'program_administrator' : 'regional_manager'));
+    const targetRoleKey = canonicalEscalationRole(req.body?.targetRole || req.body?.target_role || (roleKey === 'regional_manager' ? 'nwac_administrator' : 'regional_manager'));
     if (!targetRoleKey) {
       return res.status(400).json({ error: 'target_role_required' });
     }
@@ -30843,13 +30852,13 @@ app.post('/api/escalations', async (req, res) => {
       const regionParam = requesterRegionId ? [requesterRegionId] : [];
       const regionClause = requesterRegionId ? 'AND region_id = ?' : '';
       const [targets] = await conn.query(
-        `SELECT email FROM staff_profiles WHERE primary_role = 'Regional Coordinator' ${regionClause} AND status = 'active' ORDER BY id ASC LIMIT 1`,
+        `SELECT email FROM staff_profiles WHERE primary_role = 'Regional Manager' ${regionClause} AND status = 'active' ORDER BY id ASC LIMIT 1`,
         regionParam
       );
       targetEmail = targets && targets[0] ? targets[0].email || null : null;
-    } else if (targetRoleKey === 'program_administrator') {
+    } else if (targetRoleKey === 'nwac_administrator') {
       const [targets] = await conn.query(
-        `SELECT email FROM staff_profiles WHERE primary_role = 'Program Administrator' AND status = 'active' ORDER BY id ASC LIMIT 1`
+        `SELECT email FROM staff_profiles WHERE primary_role = 'NWAC Administrator' AND status = 'active' ORDER BY id ASC LIMIT 1`
       );
       targetEmail = targets && targets[0] ? targets[0].email || null : null;
     }
@@ -31110,7 +31119,7 @@ app.post('/api/escalations/:id/respond', async (req, res) => {
 
     if (action === 'escalate') {
       nextState = ESCALATION_STATES.escalated;
-      nextOwnerRoleKey = escalateToRoleKey || 'program_administrator';
+      nextOwnerRoleKey = escalateToRoleKey || 'nwac_administrator';
       targetRoleKey = nextOwnerRoleKey;
     } else if (action === 'resolve') {
       nextState = ESCALATION_STATES.resolved;
@@ -31169,9 +31178,9 @@ app.post('/api/escalations/:id/respond', async (req, res) => {
       return 'escalation_responded';
     })();
     let targetEmail = null;
-    if (nextOwnerRoleKey === 'program_administrator') {
+    if (nextOwnerRoleKey === 'nwac_administrator') {
       const [targets] = await conn.query(
-        `SELECT email FROM staff_profiles WHERE primary_role = 'Program Administrator' AND status = 'active' ORDER BY id ASC LIMIT 1`
+        `SELECT email FROM staff_profiles WHERE primary_role = 'NWAC Administrator' AND status = 'active' ORDER BY id ASC LIMIT 1`
       );
       targetEmail = targets && targets[0] ? targets[0].email || null : null;
     } else if (nextOwnerRoleKey === 'regional_manager') {
@@ -31181,7 +31190,7 @@ app.post('/api/escalations/:id/respond', async (req, res) => {
         ? `AND region_id IN (${requesterRegionIds.map(() => '?').join(',')})`
         : '';
       const [targets] = await conn.query(
-        `SELECT email FROM staff_profiles WHERE primary_role = 'Regional Coordinator' ${regionClause} AND status = 'active' ORDER BY id ASC LIMIT 1`,
+        `SELECT email FROM staff_profiles WHERE primary_role = 'Regional Manager' ${regionClause} AND status = 'active' ORDER BY id ASC LIMIT 1`,
         regionParam
       );
       targetEmail = targets && targets[0] ? targets[0].email || null : null;
@@ -34950,7 +34959,7 @@ function normaliseJson(v) {
 }
 
 const STEP_EDITOR_GROUPS = new Set(['System_Administrator', 'NWAC_Administrator', 'Regional_Manager']);
-const STEP_EDITOR_ROLES = new Set(['System Administrator', 'Program Administrator', 'Regional Coordinator']);
+const STEP_EDITOR_ROLES = new Set(['System Administrator', 'NWAC Administrator', 'Regional Manager']);
 
 function ensureStepEditor(req, res) {
   const groups = Array.isArray(req.auth?.groups) ? req.auth.groups : [];
@@ -36457,11 +36466,7 @@ function handleAdminDocumentUpload({ requireApplicant = false, applicantIdHint =
     if (docType && docType.toLowerCase() === 'ei_verification') {
       const eligibilityRoleAllowlist = new Set([
         'systemadministrator',
-        'sysadmin',
-        'programadministrator',
-        'programadmin',
         'nwacadministrator',
-        'regionalcoordinator',
         'regionalmanager'
       ]);
       const identity = getRequesterIdentity(req);
@@ -37057,11 +37062,7 @@ app.post('/api/documents/:id/link-interventions', async (req, res) => {
 
   const eligibilityRoleAllowlist = new Set([
     'systemadministrator',
-    'sysadmin',
-    'programadministrator',
-    'programadmin',
     'nwacadministrator',
-    'regionalcoordinator',
     'regionalmanager'
   ]);
   const identity = getRequesterIdentity(req);
@@ -37473,6 +37474,47 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
     const disabilitySupportRequested = Boolean(applicationAnswerMeta.disabilitySupportRequested);
     const resolvedApplicationId = normalisePositiveInteger(applicationId || applicationAnswerMeta.applicationId);
     const resolvedCaseId = normalisePositiveInteger(applicationAnswerMeta.caseId);
+    const checklistCaseId = isIntervention
+      ? normalisePositiveInteger(interventionCaseId || resolvedCaseId)
+      : resolvedCaseId;
+    const checklistApplicationId = isIntervention
+      ? normalisePositiveInteger(interventionApplicationId || resolvedApplicationId)
+      : resolvedApplicationId;
+    const signedChecklistDocTypeCounts = new Map();
+    if (applicantId && (checklistCaseId || checklistApplicationId)) {
+      try {
+        const scopePredicates = [];
+        const scopeParams = [applicantId];
+        if (checklistCaseId) {
+          scopePredicates.push('sr.case_id = ?');
+          scopeParams.push(checklistCaseId);
+        }
+        if (checklistApplicationId) {
+          scopePredicates.push('(check_case.application_id = ? OR linked_message.application_id = ?)');
+          scopeParams.push(checklistApplicationId, checklistApplicationId);
+        }
+        const [signedRequestRows] = await pool.query(
+          `SELECT LOWER(COALESCE(sr.checklist_doc_type, '')) AS checklist_doc_type,
+                  COUNT(DISTINCT sr.id) AS signed_count
+             FROM signing_request sr
+             LEFT JOIN iset_case check_case ON check_case.id = sr.case_id
+             LEFT JOIN message_signing_request msr ON msr.signing_request_id = sr.id
+             LEFT JOIN messages linked_message ON linked_message.id = msr.message_id
+            WHERE sr.participant_user_id = ?
+              AND sr.status = 'signed'
+              AND (${scopePredicates.join(' OR ')})
+            GROUP BY LOWER(COALESCE(sr.checklist_doc_type, ''))`,
+          scopeParams
+        );
+        for (const row of signedRequestRows || []) {
+          const docTypeKey = String(row?.checklist_doc_type || '').trim().toLowerCase();
+          if (!docTypeKey) continue;
+          signedChecklistDocTypeCounts.set(docTypeKey, Number(row?.signed_count || 0));
+        }
+      } catch (signedErr) {
+        console.warn('[document-checklist] failed to load signed signing-request counts:', signedErr?.message || signedErr);
+      }
+    }
     const normalizedDocs = (docs || []).map(doc => {
       const meta = parseMetadata(doc.metadata);
       const docTypes = [];
@@ -37967,7 +38009,16 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
 
       if (normalizedId === 'funding-agreement') {
         effectiveRequired = hasFundingDisbursementCost;
-        const matchedCount = baseMatches.length;
+        const nonDraftMatches = baseMatches.filter(doc => {
+          const sourceLower = String(doc?.source || '').trim().toLowerCase();
+          if (sourceLower !== 'system_generated') {
+            return true;
+          }
+          const labelLower = String(doc?.label || '').trim().toLowerCase();
+          return labelLower.includes('signed');
+        });
+        const signedRequestCount = signedChecklistDocTypeCounts.get('funding_agreement') || 0;
+        const matchedCount = Math.max(nonDraftMatches.length, signedRequestCount);
         const status = computeStatus(effectiveRequired, matchedCount, 1);
         return {
           id: item.id,
@@ -38442,12 +38493,12 @@ app.get('/api/cases', async (req, res) => {
 
     const allowAll =
       role === 'System Administrator' ||
-      role === 'Program Administrator' ||
-      role === 'SysAdmin' ||
-      role === 'ProgramAdmin';
+      role === 'NWAC Administrator' ||
+      role === 'System_Administrator' ||
+      role === 'NWAC_Administrator';
 
     if (!allowAll) {
-      if (role === 'Regional Coordinator') {
+      if (role === 'Regional Manager') {
         if (!requesterRegionIds.length) {
           return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
         }
@@ -38459,7 +38510,7 @@ app.get('/api/cases', async (req, res) => {
           whereClauses.push(`(sp.region_id IN (${placeholders}) OR c.assigned_to_user_id IS NULL)`);
           params.push(...requesterRegionIds);
         }
-      } else if (role === 'Application Assessor' || role === 'Adjudicator') {
+      } else if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
         if (!Number.isFinite(requesterId)) {
           return res.status(403).json({ error: 'forbidden', detail: 'assessor_scope_missing' });
         }
@@ -39009,6 +39060,12 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
         cl.gender AS client_gender,
         cl.aboriginal_group AS client_aboriginal_group,
         cl.address_json AS client_address_json,
+        cl.applicant_cognito_sub AS client_applicant_cognito_sub,
+        cl.applicant_cognito_username AS client_applicant_cognito_username,
+        cl.applicant_account_status AS client_applicant_account_status,
+        cl.applicant_account_email AS client_applicant_account_email,
+        cl.applicant_invited_at AS client_applicant_invited_at,
+        cl.applicant_activated_at AS client_applicant_activated_at,
         sp.display_name AS owner_display_name,
         sp.name AS owner_name,
         sp.email AS owner_email,
@@ -39095,12 +39152,12 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
     const role = inferUserRole(req);
     const allowAll =
       role === 'System Administrator' ||
-      role === 'Program Administrator' ||
-      role === 'SysAdmin' ||
-      role === 'ProgramAdmin';
+      role === 'NWAC Administrator' ||
+      role === 'System_Administrator' ||
+      role === 'NWAC_Administrator';
 
     if (!allowAll) {
-      if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
+      if (role === 'Regional Manager' || role === 'Regional_Manager') {
         const regionIds = resolveRequestRegionIds(req);
         if (!regionIds.length) {
           return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
@@ -39113,7 +39170,7 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
         if (!isUnassigned && !portfolioRegionMatch && !ownerRegionMatch) {
           return res.status(403).json({ error: 'forbidden', detail: 'region_scope_mismatch' });
         }
-      } else if (role === 'Application Assessor' || role === 'Adjudicator') {
+      } else if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
         const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
         if (!Number.isFinite(requesterId)) {
           return res.status(403).json({ error: 'forbidden', detail: 'assessor_scope_missing' });
@@ -39550,6 +39607,26 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       [firstName, lastName].filter(Boolean).join(' ') ||
       (applicantNameValue && applicantNameValue.includes(' ') ? applicantNameValue : null);
     const applicantEmailValue = normaliseString(row.applicant_email) || null;
+    const pathAccountEmailValue =
+      normaliseString(row.client_applicant_account_email) ||
+      normaliseString(
+        parsedAddress?.contact?.emailNormalized ||
+        parsedAddress?.contact?.email ||
+        parsedAddress?.emailNormalized ||
+        parsedAddress?.email
+      ) ||
+      null;
+    const rawPathAccountStatus =
+      normaliseString(row.client_applicant_account_status) ||
+      (normaliseString(row.client_applicant_cognito_sub) || normaliseString(row.client_applicant_cognito_username)
+        ? 'created'
+        : 'no_account');
+    const pathAccountStatus =
+      rawPathAccountStatus === 'invitation_sent' ||
+      rawPathAccountStatus === 'activated' ||
+      rawPathAccountStatus === 'created'
+        ? rawPathAccountStatus
+        : 'no_account';
 
     const response = {
       id: row.id,
@@ -39595,6 +39672,14 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
         aboriginalGroup: row.client_aboriginal_group || null,
         region: clientRegionObject,
         regionLabel: clientRegionLabel,
+      },
+      pathAccount: {
+        status: pathAccountStatus,
+        email: pathAccountEmailValue,
+        cognitoSub: normaliseString(row.client_applicant_cognito_sub) || null,
+        cognitoUsername: normaliseString(row.client_applicant_cognito_username) || null,
+        invitedAt: toIsoDateTime(row.client_applicant_invited_at),
+        activatedAt: toIsoDateTime(row.client_applicant_activated_at),
       },
       owner: {
         id: row.assigned_to_user_id || null,
@@ -40027,12 +40112,12 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
     const identity = getRequesterIdentity(req);
     const allowAll =
       role === 'System Administrator' ||
-      role === 'Program Administrator' ||
-      role === 'SysAdmin' ||
-      role === 'ProgramAdmin';
+      role === 'NWAC Administrator' ||
+      role === 'System_Administrator' ||
+      role === 'NWAC_Administrator';
 
     if (!allowAll) {
-      if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
+      if (role === 'Regional Manager' || role === 'Regional_Manager') {
         const regionIds = resolveRequestRegionIds(req);
         if (!regionIds.length) {
           return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
@@ -40045,7 +40130,7 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
         if (!isUnassigned && !portfolioMatch && !ownerMatch) {
           return res.status(403).json({ error: 'forbidden', detail: 'region_scope_mismatch' });
         }
-      } else if (role === 'Application Assessor' || role === 'Adjudicator') {
+      } else if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
         const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
         if (!Number.isFinite(requesterId)) {
           return res.status(403).json({ error: 'forbidden', detail: 'assessor_scope_missing' });
@@ -40769,17 +40854,17 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
 
   const allowAll =
     role === 'System Administrator' ||
-    role === 'Program Administrator' ||
-    role === 'SysAdmin' ||
-    role === 'ProgramAdmin';
+    role === 'NWAC Administrator' ||
+    role === 'System_Administrator' ||
+    role === 'NWAC_Administrator';
 
   let postingContext = normalizePostingContext(req.body?.postingContext || req.body?.posting_context) || 'external';
-  if (role === 'Application Assessor' || role === 'Adjudicator') {
+  if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
     postingContext = 'external';
   }
 
   if (!allowAll) {
-    if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
+    if (role === 'Regional Manager' || role === 'Regional_Manager') {
       const regionIds = resolveRequestRegionIds(req);
       if (!regionIds.length) {
         return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
@@ -40792,7 +40877,7 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
       if (!isUnassigned && !portfolioMatch && !ownerMatch) {
         return res.status(403).json({ error: 'forbidden', detail: 'region_scope_mismatch' });
       }
-    } else if (role === 'Application Assessor' || role === 'Adjudicator') {
+    } else if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
       const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
       if (!Number.isFinite(requesterId)) {
         return res.status(403).json({ error: 'forbidden', detail: 'assessor_scope_missing' });
@@ -41597,7 +41682,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     const planPostingContext = normalizePostingContext(planMetadata.postingContext) || 'external';
     let postingContext =
       normalizePostingContext(req.body?.postingContext || req.body?.posting_context) || planPostingContext;
-    if (role === 'Application Assessor' || role === 'Adjudicator') {
+    if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
       postingContext = 'external';
     }
 
@@ -42438,11 +42523,11 @@ app.patch('/api/interventions/:id', async (req, res) => {
       const identity = getRequesterIdentity(req);
       const allowAll =
         role === 'System Administrator' ||
-        role === 'Program Administrator' ||
-        role === 'SysAdmin' ||
-        role === 'ProgramAdmin';
+        role === 'NWAC Administrator' ||
+        role === 'System_Administrator' ||
+        role === 'NWAC_Administrator';
       if (!allowAll) {
-        if (role === 'Regional Coordinator' || role === 'RegionalCoordinator') {
+        if (role === 'Regional Manager' || role === 'Regional_Manager') {
           const regionIds = resolveRequestRegionIds(req);
           if (!regionIds.length) {
             return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
@@ -42459,7 +42544,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
           if (!isUnassigned && !portfolioMatch && !ownerMatch) {
             return res.status(403).json({ error: 'forbidden', detail: 'region_scope_mismatch' });
           }
-        } else if (role === 'Application Assessor' || role === 'Adjudicator') {
+        } else if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
           const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
           if (!Number.isFinite(requesterId) || Number(caseRow.assigned_to_user_id) !== requesterId) {
             return res.status(403).json({ error: 'forbidden' });
@@ -42604,7 +42689,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
       }
       return existingPostingContext;
     })();
-    if (role === 'Application Assessor' || role === 'Adjudicator') {
+    if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
       postingContext = 'external';
     }
     if (metadata.postingContext !== postingContext) {
@@ -43849,7 +43934,7 @@ app.patch('/api/action-plans/:id', async (req, res) => {
       return existingPostingContext;
     })();
     const role = inferUserRole(req);
-    if (role === 'Application Assessor' || role === 'Adjudicator') {
+    if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
       postingContext = 'external';
     }
     metadata.postingContext = postingContext;
@@ -44545,10 +44630,10 @@ app.get('/api/events', async (req, res) => {
 app.get('/api/roles', (_req, res) => {
   // Keep in sync with navigation/feature flags as needed
   const roles = [
-    { id: 'SysAdmin', name: 'System Administrator', description: 'Full administrative access to the Admin Portal.' },
-    { id: 'ProgramAdmin', name: 'NWAC Administrator', description: 'Manage programs, templates, and reporting.' },
-    { id: 'RegionalCoordinator', name: 'Regional Manager', description: 'Coordinate case assignments and oversee regional workflows.' },
-    { id: 'ApplicationAssessor', name: 'ISET Coordinator', description: 'Coordinator-level view and updates for assigned cases.' },
+    { id: 'System Administrator', name: 'System Administrator', description: 'Full administrative access to the Admin Portal.' },
+    { id: 'NWAC Administrator', name: 'NWAC Administrator', description: 'Manage programs, templates, and reporting.' },
+    { id: 'Regional Manager', name: 'Regional Manager', description: 'Coordinate case assignments and oversee regional workflows.' },
+    { id: 'ISET Coordinator', name: 'ISET Coordinator', description: 'Coordinator-level view and updates for assigned cases.' },
   ];
   res.status(200).json(roles);
 });
@@ -48865,7 +48950,7 @@ function mapAllocationRow(row) {
 
 function requireFinanceRole(req, res) {
   const role = req.auth?.role || req.staffProfile?.primary_role;
-  const allowed = new Set(['System Administrator', 'Program Administrator']);
+  const allowed = new Set(['System Administrator', 'NWAC Administrator']);
   if (role && allowed.has(role)) return null;
   res.status(403).json({ error: 'forbidden', message: 'Insufficient role for finance operations.' });
   return { denied: true };
@@ -48873,9 +48958,9 @@ function requireFinanceRole(req, res) {
 
 const PAYMENTS_ROLE_ALLOWLIST = new Set([
   'System Administrator',
-  'Program Administrator',
-  'Regional Coordinator',
-  'Application Assessor',
+  'NWAC Administrator',
+  'Regional Manager',
+  'ISET Coordinator',
   'Finance Approver',
   'Finance Reviewer',
   'Finance Ops',
@@ -48884,7 +48969,7 @@ const PAYMENTS_ROLE_ALLOWLIST = new Set([
 
 const FINANCE_PAYMENTS_ROLE_ALLOWLIST = new Set([
   'System Administrator',
-  'Program Administrator',
+  'NWAC Administrator',
   'Finance Approver',
   'Finance Reviewer',
   'Finance Ops',
@@ -48993,6 +49078,9 @@ const PAYMENT_PACKET_BUNDLE_EXPIRY_DAYS = 7;
 const PAYMENT_PACKET_BUNDLE_EXPIRY_SECONDS = PAYMENT_PACKET_BUNDLE_EXPIRY_DAYS * 24 * 60 * 60;
 const INTACCT_INTEGRATION_SCOPE = 'finance';
 const INTACCT_INTEGRATION_KEY = 'intacct.integration';
+const NOTIFICATION_RUNTIME_SCOPE = 'notifications';
+const PATH_EMAIL_SETTINGS_KEY = 'path.email';
+const DEFAULT_NOTIFICATION_SENDER_EMAIL = 'ISET@awentech.ca';
 
 const normalizeEmailAddress = (value) => {
   if (!value) return null;
@@ -49897,7 +49985,7 @@ function normalizeClientFileImportEmail(value) {
       issue: {
         level: 'warning',
         code: 'email_multiple',
-        message: `Multiple email addresses were provided; "${valid[0]}" will be used as the primary email.`,
+        message: 'Multiple email addresses were provided. The client/case can still import, but no applicant account will be created for this row.',
       }
     };
   }
@@ -49908,7 +49996,7 @@ function normalizeClientFileImportEmail(value) {
       issue: {
         level: 'warning',
         code: 'email_partially_invalid',
-        message: `Some email values were not recognized; "${valid[0]}" will be used as the primary email.`,
+        message: 'Some email values were not recognized. The client/case can still import, but no applicant account will be created for this row.',
       }
     };
   }
@@ -50448,6 +50536,32 @@ function buildClientFileImportCaseContextPatch(normalized = {}, importMeta = {})
   }) || {};
 }
 
+function shouldCreateApplicantAccountForImportRow(row = {}) {
+  const normalizedEmail = normaliseString(row?.normalized?.emailNormalized || row?.normalized?.email);
+  if (!normalizedEmail) return false;
+  const issues = Array.isArray(row?.issues) ? row.issues : [];
+  return !issues.some(issue => ['email_invalid', 'email_multiple', 'email_partially_invalid'].includes(issue?.code));
+}
+
+async function ensureApplicantAccountForImportedClient(connection, clientId, row = {}, importMeta = {}) {
+  if (!shouldCreateApplicantAccountForImportRow(row)) {
+    return { createdApplicantUsername: null };
+  }
+
+  const applicantAccount = await ensureApplicantAccountForClient(connection, {
+    clientId,
+    actorStaffProfileId: Number.isFinite(Number(importMeta.actorStaffProfileId))
+      ? Number(importMeta.actorStaffProfileId)
+      : null,
+    preferredLanguage: 'en',
+    source: 'client_file_import',
+  });
+
+  return {
+    createdApplicantUsername: applicantAccount?.accountCreated ? applicantAccount?.cognitoUsername || applicantAccount?.email || null : null,
+  };
+}
+
 async function upsertClientForImport(connection, normalized = {}, importMeta = {}, existingClientId = null) {
   const clientAddressPatch = buildClientFileImportClientAddressPatch(normalized, importMeta);
   if (existingClientId) {
@@ -50571,73 +50685,91 @@ async function applyClientFileImportPlan(connection, planRows = [], importMeta =
   let createdClients = 0;
   let createdCases = 0;
   let updatedCases = 0;
+  const createdApplicantUsernames = [];
 
-  for (const row of planRows) {
-    const normalized = row.normalized || {};
-    const meta = {
-      ...importMeta,
-      rowNumber: row.rowNumber,
-      action: row.action,
-    };
+  try {
+    for (const row of planRows) {
+      const normalized = row.normalized || {};
+      const meta = {
+        ...importMeta,
+        rowNumber: row.rowNumber,
+        action: row.action,
+      };
 
-    if (row.action === 'manual_review' || !row.ready) {
-      const err = new Error('import_row_not_ready');
-      err.code = 'import_row_not_ready';
-      err.details = { rowNumber: row.rowNumber, displayName: row.displayName };
+      if (row.action === 'manual_review' || !row.ready) {
+        const err = new Error('import_row_not_ready');
+        err.code = 'import_row_not_ready';
+        err.details = { rowNumber: row.rowNumber, displayName: row.displayName };
+        throw err;
+      }
+
+      let clientId = row.matchedClient?.id ? Number(row.matchedClient.id) : null;
+      if (row.action === 'create_client_and_case') {
+        clientId = await upsertClientForImport(connection, normalized, meta, null);
+        createdClients += 1;
+        const { caseId, caseNumber } = await createCaseForImportedClient(connection, clientId, normalized, meta);
+        createdCases += 1;
+        const applicantAccountResult = await ensureApplicantAccountForImportedClient(connection, clientId, row, meta);
+        if (applicantAccountResult.createdApplicantUsername) {
+          createdApplicantUsernames.push(applicantAccountResult.createdApplicantUsername);
+        }
+        results.push({
+          rowNumber: row.rowNumber,
+          displayName: row.displayName,
+          action: row.action,
+          clientId,
+          caseId,
+          caseNumber,
+        });
+        continue;
+      }
+
+      clientId = await upsertClientForImport(connection, normalized, meta, clientId);
+      if (row.action === 'create_case_for_existing_client') {
+        const { caseId, caseNumber } = await createCaseForImportedClient(connection, clientId, normalized, meta);
+        createdCases += 1;
+        const applicantAccountResult = await ensureApplicantAccountForImportedClient(connection, clientId, row, meta);
+        if (applicantAccountResult.createdApplicantUsername) {
+          createdApplicantUsernames.push(applicantAccountResult.createdApplicantUsername);
+        }
+        results.push({
+          rowNumber: row.rowNumber,
+          displayName: row.displayName,
+          action: row.action,
+          clientId,
+          caseId,
+          caseNumber,
+        });
+        continue;
+      }
+
+      if (row.action === 'update_existing_case') {
+        const targetCaseId = row.matchedClient?.existingCaseId ? Number(row.matchedClient.existingCaseId) : null;
+        const { caseId, caseNumber } = await updateExistingImportedCase(connection, targetCaseId, normalized, meta);
+        updatedCases += 1;
+        const applicantAccountResult = await ensureApplicantAccountForImportedClient(connection, clientId, row, meta);
+        if (applicantAccountResult.createdApplicantUsername) {
+          createdApplicantUsernames.push(applicantAccountResult.createdApplicantUsername);
+        }
+        results.push({
+          rowNumber: row.rowNumber,
+          displayName: row.displayName,
+          action: row.action,
+          clientId,
+          caseId,
+          caseNumber,
+        });
+        continue;
+      }
+
+      const err = new Error('unsupported_import_action');
+      err.code = 'unsupported_import_action';
+      err.details = { rowNumber: row.rowNumber, action: row.action };
       throw err;
     }
-
-    let clientId = row.matchedClient?.id ? Number(row.matchedClient.id) : null;
-    if (row.action === 'create_client_and_case') {
-      clientId = await upsertClientForImport(connection, normalized, meta, null);
-      createdClients += 1;
-      const { caseId, caseNumber } = await createCaseForImportedClient(connection, clientId, normalized, meta);
-      createdCases += 1;
-      results.push({
-        rowNumber: row.rowNumber,
-        displayName: row.displayName,
-        action: row.action,
-        clientId,
-        caseId,
-        caseNumber,
-      });
-      continue;
-    }
-
-    clientId = await upsertClientForImport(connection, normalized, meta, clientId);
-    if (row.action === 'create_case_for_existing_client') {
-      const { caseId, caseNumber } = await createCaseForImportedClient(connection, clientId, normalized, meta);
-      createdCases += 1;
-      results.push({
-        rowNumber: row.rowNumber,
-        displayName: row.displayName,
-        action: row.action,
-        clientId,
-        caseId,
-        caseNumber,
-      });
-      continue;
-    }
-
-    if (row.action === 'update_existing_case') {
-      const targetCaseId = row.matchedClient?.existingCaseId ? Number(row.matchedClient.existingCaseId) : null;
-      const { caseId, caseNumber } = await updateExistingImportedCase(connection, targetCaseId, normalized, meta);
-      updatedCases += 1;
-      results.push({
-        rowNumber: row.rowNumber,
-        displayName: row.displayName,
-        action: row.action,
-        clientId,
-        caseId,
-        caseNumber,
-      });
-      continue;
-    }
-
-    const err = new Error('unsupported_import_action');
-    err.code = 'unsupported_import_action';
-    err.details = { rowNumber: row.rowNumber, action: row.action };
-    throw err;
+  } catch (error) {
+    error.createdApplicantUsernames = Array.from(new Set(createdApplicantUsernames.filter(Boolean)));
+    throw error;
   }
 
   return {
@@ -50648,6 +50780,7 @@ async function applyClientFileImportPlan(connection, planRows = [], importMeta =
       createdCases,
       updatedCases,
     },
+    createdApplicantUsernames,
   };
 }
 
@@ -50689,6 +50822,77 @@ async function writeFinanceEmailRouting(next, connection = null) {
     [FINANCE_EMAIL_ROUTING_SCOPE, FINANCE_EMAIL_ROUTING_KEY, JSON.stringify(sanitized)]
   );
   return sanitized;
+}
+
+function sanitizeNotificationEmailSettings(raw) {
+  const payload = raw && typeof raw === 'object' ? raw : {};
+  return {
+    senderEmail: normalizeEmailAddress(
+      payload.senderEmail || payload.sender_email || payload.fromEmail || ''
+    ),
+  };
+}
+
+async function readNotificationEmailSettings(connection = null) {
+  const runner = connection || pool;
+  const envSender = normalizeEmailAddress(process.env.SES_SENDER_EMAIL);
+  const fallbackSenderEmail = envSender || DEFAULT_NOTIFICATION_SENDER_EMAIL;
+  if (!runner) {
+    return { senderEmail: null, fallbackSenderEmail, updatedAt: null };
+  }
+  try {
+    await ensureRuntimeConfigTable();
+    const [rows] = await runner.query(
+      'SELECT v, updated_at FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
+      [NOTIFICATION_RUNTIME_SCOPE, PATH_EMAIL_SETTINGS_KEY],
+    );
+    if (!rows || rows.length === 0) {
+      return { senderEmail: null, fallbackSenderEmail, updatedAt: null };
+    }
+    let payload = rows[0].v;
+    if (payload && typeof payload === 'string') {
+      try {
+        payload = JSON.parse(payload);
+      } catch {
+        payload = null;
+      }
+    }
+    const sanitized = sanitizeNotificationEmailSettings(payload);
+    return {
+      ...sanitized,
+      fallbackSenderEmail,
+      updatedAt: rows[0].updated_at || null,
+    };
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err)) {
+      console.warn('[notification-email-settings] failed to read config:', err.message);
+    }
+    return { senderEmail: null, fallbackSenderEmail, updatedAt: null };
+  }
+}
+
+async function writeNotificationEmailSettings(next, connection = null) {
+  const runner = connection || pool;
+  const envSender = normalizeEmailAddress(process.env.SES_SENDER_EMAIL);
+  const fallbackSenderEmail = envSender || DEFAULT_NOTIFICATION_SENDER_EMAIL;
+  if (!runner) {
+    return { senderEmail: null, fallbackSenderEmail, updatedAt: null };
+  }
+  const sanitized = sanitizeNotificationEmailSettings(next);
+  await ensureRuntimeConfigTable();
+  await runner.query(
+    'INSERT INTO iset_runtime_config (scope,k,v) VALUES (?,?,CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP',
+    [NOTIFICATION_RUNTIME_SCOPE, PATH_EMAIL_SETTINGS_KEY, JSON.stringify(sanitized)],
+  );
+  const [[row]] = await runner.query(
+    'SELECT updated_at FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
+    [NOTIFICATION_RUNTIME_SCOPE, PATH_EMAIL_SETTINGS_KEY],
+  );
+  return {
+    ...sanitized,
+    fallbackSenderEmail,
+    updatedAt: row?.updated_at || null,
+  };
 }
 
 async function readIntacctIntegrationConfig(connection = null) {
@@ -52020,7 +52224,7 @@ const roleAllowedByApprovalRule = (role, rule) => {
 
 const canUsePaymentOverride = role => {
   const canonical = canonicaliseAccessRole(role) || role;
-  return canonical === 'System Administrator' || canonical === 'Program Administrator';
+  return canonical === 'System Administrator' || canonical === 'NWAC Administrator';
 };
 
 const normalizeOverrideReason = value => {
@@ -65004,6 +65208,7 @@ app.post('/api/imports/client-files/commit', async (req, res) => {
   }));
 
   const connection = await pool.getConnection();
+  let commitResult = null;
   try {
     const plan = await prepareClientFileImportPlan(connection, planInput);
     if (!plan.canCommit) {
@@ -65016,7 +65221,7 @@ app.post('/api/imports/client-files/commit', async (req, res) => {
     }
 
     await connection.beginTransaction();
-    const result = await applyClientFileImportPlan(connection, plan.rows, {
+    commitResult = await applyClientFileImportPlan(connection, plan.rows, {
       fileName,
       worksheetName,
       actorName: actor.actorName || null,
@@ -65027,14 +65232,27 @@ app.post('/api/imports/client-files/commit', async (req, res) => {
 
     return res.status(200).json({
       message: 'client_file_import_committed',
-      summary: result.summary,
-      results: result.results,
+      summary: commitResult.summary,
+      results: commitResult.results,
     });
   } catch (error) {
     try {
       await connection.rollback();
     } catch (_) {
       // ignore rollback failure
+    }
+    const cleanupUsernames = Array.from(new Set([
+      ...((Array.isArray(commitResult?.createdApplicantUsernames) ? commitResult.createdApplicantUsernames : []).filter(Boolean)),
+      ...((Array.isArray(error?.createdApplicantUsernames) ? error.createdApplicantUsernames : []).filter(Boolean)),
+    ]));
+    if (cleanupUsernames.length) {
+      for (const username of cleanupUsernames) {
+        try {
+          await deleteApplicantCognitoUser(username);
+        } catch (cleanupError) {
+          console.warn('[client-file-import] applicant account cleanup failed:', username, cleanupError?.message || cleanupError);
+        }
+      }
     }
     if (error?.code === 'import_row_not_ready') {
       return res.status(422).json({
@@ -66221,18 +66439,18 @@ app.get('/api/cases/:case_id/events', async (req, res) => {
 // --- Unified Applications Listing Endpoint ----------------------------------
 // GET /api/applications?status=Open,In%20Review&limit=50&offset=0
 // Role scoping rules (no client override):
-//   Program Administrator -> all cases
-//   Regional Coordinator  -> cases in their region(s)
-//   Application Assessor  -> only cases assigned to them
+//   NWAC Administrator -> all cases
+//   Regional Manager  -> cases in their region(s)
+//   ISET Coordinator  -> only cases assigned to them
 // If a submission exists with no case yet:
-//   - Visible only to Program Administrators (future) ??? currently excluded for simplicity
+//   - Visible only to NWAC Administrators (future) ??? currently excluded for simplicity
 // Response: { count, rows:[ { case_id, tracking_id, applicant_name, status, assigned_user_id, assigned_user_name, submitted_at, region, ptma_codes, sla_risk } ] }
 app.get('/api/applications', async (req, res) => {
   try {
     if (!req.auth || req.auth.subjectType !== 'staff') return res.status(403).json({ error: 'forbidden' });
     const { status, limit = 50, offset = 0, search } = req.query;
     const role = req.auth.role;
-    const regionIds = role === 'Regional Coordinator' ? resolveRequestRegionIds(req) : [];
+    const regionIds = role === 'Regional Manager' ? resolveRequestRegionIds(req) : [];
     const archivedFilter = buildArchivedApplicationFilter(req, 'a');
     const addressProvinceExpr = `COALESCE(
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."address-province"')),
@@ -66301,7 +66519,7 @@ app.get('/api/applications', async (req, res) => {
     }
 
     let regionCodes = [];
-    if (role === 'Regional Coordinator' && regionIds.length) {
+    if (role === 'Regional Manager' && regionIds.length) {
       try {
         regionCodes = await fetchRegionCodesByIds(regionIds);
       } catch (err) {
@@ -66311,10 +66529,10 @@ app.get('/api/applications', async (req, res) => {
       }
     }
 
-    if (role === 'Application Assessor') {
+    if (role === 'ISET Coordinator') {
       if (!req.staffProfile?.id) return res.json({ count: 0, rows: [] });
       where.push('c.assigned_to_user_id = ?'); params.push(req.staffProfile.id);
-    } else if (role === 'Regional Coordinator') {
+    } else if (role === 'Regional Manager') {
       // Filter by regions (multi) OR assignments directly to coordinator
       if (regionIds.length) {
         const coordinatorId = req.staffProfile?.id || 0;
@@ -66332,7 +66550,7 @@ app.get('/api/applications', async (req, res) => {
       } else {
         return res.json({ count: 0, rows: [] });
       }
-    } else if (role === 'System Administrator' || role === 'Program Administrator') {
+    } else if (role === 'System Administrator' || role === 'NWAC Administrator') {
       // full access
     } else {
       return res.status(403).json({ error: 'forbidden_role' });
@@ -66345,7 +66563,7 @@ app.get('/api/applications', async (req, res) => {
     const finalParams = [...params];
 
     // Add unassigned submissions (applications without case) for elevated roles.
-    if (role === 'Program Administrator' || role === 'System Administrator') {
+    if (role === 'NWAC Administrator' || role === 'System Administrator') {
       finalSql = `(${baseSql})\nUNION ALL\n(
         SELECT NULL AS case_id, a.id AS application_id, a.status AS application_status,
         a.docs_requested_active AS docs_requested_active,
@@ -66387,7 +66605,7 @@ app.get('/api/applications', async (req, res) => {
     // Count
     let count = rows.length;
     try {
-      if (role === 'Program Administrator' || role === 'System Administrator') {
+      if (role === 'NWAC Administrator' || role === 'System Administrator') {
         let countCaseSql = 'SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c JOIN iset_application a ON c.application_id = a.id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id';
         if (where.length) countCaseSql += ' WHERE ' + where.join(' AND ');
         const [[caseCnt]] = await pool.query(countCaseSql, params);
@@ -67498,11 +67716,7 @@ app.put('/api/cases/:id', async (req, res) => {
     if (eligibilityUpdateRequested) {
       const eligibilityRoleAllowlist = new Set([
         'systemadministrator',
-        'sysadmin',
-        'programadministrator',
-        'programadmin',
         'nwacadministrator',
-        'regionalcoordinator',
         'regionalmanager'
       ]);
       const roleKeyRaw = normaliseString(identity.role);
@@ -67741,7 +67955,7 @@ app.put('/api/cases/:id', async (req, res) => {
         : null;
       return statusNorm === 'approved' || appStatusNorm === 'approved' || reviewStatusNorm === 'approve';
     })();
-    if (approvalRequested && (canonicalRoleForApproval === 'Regional Coordinator' || canonicalRoleForApproval === 'Program Administrator')) {
+    if (approvalRequested && (canonicalRoleForApproval === 'Regional Manager' || canonicalRoleForApproval === 'NWAC Administrator')) {
       let approvalCost = parseCostValue(
         body.assessment_intervention_cost_total ??
         body.intervention_cost_total ??
@@ -67756,7 +67970,7 @@ app.put('/api/cases/:id', async (req, res) => {
         approvalCost = parseCostValue(costRow?.intervention_cost_total);
       }
       if (approvalCost !== null) {
-        if (canonicalRoleForApproval === 'Regional Coordinator' && approvalCost >= APPROVAL_COST_THRESHOLD) {
+        if (canonicalRoleForApproval === 'Regional Manager' && approvalCost >= APPROVAL_COST_THRESHOLD) {
           await conn.rollback();
           return res.status(403).json({
             success: false,
@@ -67765,7 +67979,7 @@ app.put('/api/cases/:id', async (req, res) => {
             lock: lockCheck.lock || null
           });
         }
-        if (canonicalRoleForApproval === 'Program Administrator' && approvalCost >= PROGRAM_ADMIN_APPROVAL_THRESHOLD) {
+        if (canonicalRoleForApproval === 'NWAC Administrator' && approvalCost >= PROGRAM_ADMIN_APPROVAL_THRESHOLD) {
           const approvalEmail = req?.auth?.email || req?.staffProfile?.email || null;
           const normalizedApprovalEmail = (approvalEmail || '').trim().toLowerCase();
           if (normalizedApprovalEmail !== PROGRAM_ADMIN_APPROVER_EMAIL) {
@@ -67785,10 +67999,10 @@ app.put('/api/cases/:id', async (req, res) => {
     const identity = getRequesterIdentity(req);
     const canonicalRole = canonicaliseAccessRole(identity.role);
     let postingContext = normalizePostingContext(body.postingContext || body.posting_context) || 'external';
-    if (canonicalRole === 'Application Assessor') {
+    if (canonicalRole === 'ISET Coordinator') {
       postingContext = 'external';
     }
-    if (canonicalRole === 'Application Assessor' && postingContext !== 'external') {
+    if (canonicalRole === 'ISET Coordinator' && postingContext !== 'external') {
       return res.status(400).json({
         error: 'posting_context_not_permitted',
         message: 'ISET Coordinators must use External posting.'
@@ -68891,6 +69105,33 @@ app.patch('/api/events/:eventId/read', async (req, res) => {
 });
 
 // Notification Settings Endpoints
+app.get('/api/config/notifications/email-settings', async (req, res) => {
+    try {
+        const settings = await readNotificationEmailSettings();
+        res.json(settings);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to fetch notification email settings' });
+    }
+});
+
+app.patch('/api/config/notifications/email-settings', async (req, res) => {
+    try {
+        const { senderEmail = null } = req.body || {};
+        const trimmedSenderEmail = senderEmail === null || senderEmail === undefined
+          ? null
+          : String(senderEmail).trim();
+        if (trimmedSenderEmail && !normalizeEmailAddress(trimmedSenderEmail)) {
+            return res.status(400).json({ error: 'Enter a valid sender email address.' });
+        }
+        const settings = await writeNotificationEmailSettings({ senderEmail: trimmedSenderEmail || null });
+        res.json(settings);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to save notification email settings' });
+    }
+});
+
 // GET all notification settings with template info
 app.get('/api/notifications', async (req, res) => {
     try {
@@ -68944,15 +69185,15 @@ app.delete('/api/notifications/:id', async (req, res) => {
     }
 });
 
-// GET all roles (legacy SQL directory)
-app.get('/api/roles', async (req, res) => {
-    try {
-        const [roles] = await pool.query('SELECT RoleID as id, RoleName as name, RoleDescription as description FROM role');
-        res.status(200).send(roles);
-    } catch (error) {
-        console.error('Error fetching roles:', error);
-        res.status(500).send({ message: 'Failed to fetch roles' });
-    }
+// GET all roles (canonical admin role labels for notification settings)
+app.get('/api/roles', async (_req, res) => {
+    const roles = [
+        { id: 'System Administrator', name: 'System Administrator', description: 'Full administrative access to the Admin Portal.' },
+        { id: 'NWAC Administrator', name: 'NWAC Administrator', description: 'Manage programs, templates, and reporting.' },
+        { id: 'Regional Manager', name: 'Regional Manager', description: 'Coordinate case assignments and oversee regional workflows.' },
+        { id: 'ISET Coordinator', name: 'ISET Coordinator', description: 'Coordinator-level view and updates for assigned cases.' },
+    ];
+    res.status(200).send(roles);
 });
 
 // New endpoints for users and roles

@@ -25,7 +25,7 @@ const RegionalSnapshotDashboardHelp = () => (
 
     <h3>Editing</h3>
     <ul>
-      <li>Admins can update the saved regional manager, regional coordinator, operating, compliance, and comments fields.</li>
+      <li>Admins can update the saved regional manager, regional manager, operating, compliance, and comments fields.</li>
       <li>Coordinator salary is pulled from the Salaries dashboard for the selected region and period.</li>
       <li>Totals and ratios are calculated automatically from the live and saved values on the snapshot.</li>
       <li>Live client activity counts remain read-only system values.</li>

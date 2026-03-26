@@ -20,14 +20,14 @@ const ClientFileImportDashboardHelp = () => (
     <Box>
       <strong>What this dashboard does not do</strong>
       <p>
-        This import path does not create applicant logins, historical applications, or case artefacts beyond the core
-        client and case profile records.
+        This import path does not recreate historical applications, assessments, interventions, or other placeholder
+        case artefacts beyond the core client and case profile records.
       </p>
     </Box>
   </SpaceBetween>
 );
 
 ClientFileImportDashboardHelp.aiContext =
-  "Explain the Client Batch Import dashboard for PATH staff. Focus on dry-run review, duplicate/client matching, and the fact that this path creates or updates client files without fabricating historical applications.";
+  "Explain the Client Batch Import dashboard for PATH staff. Focus on dry-run review, duplicate/client matching, and the fact that this path creates or updates client files without fabricating historical applications or downstream placeholder records.";
 
 export default ClientFileImportDashboardHelp;

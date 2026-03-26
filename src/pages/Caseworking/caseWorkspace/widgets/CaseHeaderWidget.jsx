@@ -78,11 +78,14 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const [existingInterventionModalOpen, setExistingInterventionModalOpen] = useState(false);
   const canonicalRole = toCanonicalRole(currentUser?.role || null);
   const isSystemAdmin = canonicalRole === "System Administrator";
-  const isProgramAdmin = canonicalRole === "Program Administrator";
-  const isRegionalManager = canonicalRole === "Regional Coordinator";
-  const currentRegionIds = Array.isArray(currentUser?.regionIds) && currentUser.regionIds.length
-    ? currentUser.regionIds.map(Number).filter(Number.isFinite)
-    : (Number.isFinite(Number(currentUser?.regionId)) ? [Number(currentUser.regionId)] : []);
+  const isProgramAdmin = canonicalRole === "NWAC Administrator";
+  const isRegionalManager = canonicalRole === "Regional Manager";
+  const currentRegionIds = useMemo(
+    () => (Array.isArray(currentUser?.regionIds) && currentUser.regionIds.length
+      ? currentUser.regionIds.map(Number).filter(Number.isFinite)
+      : (Number.isFinite(Number(currentUser?.regionId)) ? [Number(currentUser.regionId)] : [])),
+    [currentUser?.regionId, currentUser?.regionIds]
+  );
   const pendingManagePaymentsRef = useRef(false);
 
   const DetailItem = ({ label, value }) => (
@@ -117,7 +120,41 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     if (!Number.isFinite(numeric)) return "—";
     return `$${numeric.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
-
+  const pathAccount = caseData?.pathAccount || {};
+  const pathAccountStatusKey =
+    pathAccount?.status === "created" ||
+    pathAccount?.status === "invitation_sent" ||
+    pathAccount?.status === "activated"
+      ? pathAccount.status
+      : "no_account";
+  const pathAccountStatusLabel =
+    pathAccountStatusKey === "created"
+      ? "Ready to invite"
+      : pathAccountStatusKey === "invitation_sent"
+        ? "Invitation sent"
+        : pathAccountStatusKey === "activated"
+          ? "Activated"
+          : "No account";
+  const pathAccountStatusType =
+    pathAccountStatusKey === "activated"
+      ? "success"
+      : pathAccountStatusKey === "invitation_sent"
+        ? "info"
+        : pathAccountStatusKey === "created"
+          ? "warning"
+          : "pending";
+  const pathAccountTimestampLabel =
+    pathAccountStatusKey === "activated"
+      ? "Activated"
+      : pathAccountStatusKey === "invitation_sent"
+        ? "Invitation sent"
+        : null;
+  const pathAccountTimestampValue =
+    pathAccountStatusKey === "activated"
+      ? pathAccount?.activatedAt
+      : pathAccountStatusKey === "invitation_sent"
+        ? pathAccount?.invitedAt
+        : null;
   const rawStatus = typeof caseData?.status === "string" ? caseData.status.trim().toLowerCase() : "";
   const normalizedStatus = rawStatus.replace(/-/g, "_");
   const statusKey = normalizedStatus === "withdrawn" ? "closed" : normalizedStatus;
@@ -142,7 +179,6 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         return "info";
       case "cancelled":
       case "rejected":
-      case "closed":
         return "error";
       default:
         return "info";
@@ -461,6 +497,8 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     const canReopenArchived = hasCase && isArchived && isSystemAdmin;
     const canReopen = canReopenClosed || canReopenArchived;
     const isBackloadEligible = hasCase && !lockApplicationId && !isArchived;
+    const canManagePathAccount = hasCase && Boolean(caseData?.client?.id) && !isArchived;
+    const hasPathAccountEmail = Boolean(pathAccount?.email);
 
     if (canAssign) {
       items.push({ id: "assign", text: "Assign / reassign" });
@@ -472,6 +510,12 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       items.push({ id: "backload-action-plan", text: "Add existing action plan" });
       items.push({ id: "backload-intervention", text: "Add existing intervention" });
       items.push({ id: "backload-documents", text: "Upload existing documents" });
+    }
+    if (canManagePathAccount && hasPathAccountEmail && pathAccountStatusKey !== "activated") {
+      items.push({
+        id: "activate-path-account",
+        text: pathAccountStatusKey === "invitation_sent" ? "Resend PATH activation" : "Activate PATH account",
+      });
     }
     items.push({ id: "manage-plans-interventions", text: "View plans and interventions" });
     items.push({ id: "manage-payments", text: "View payments" });
@@ -507,6 +551,9 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     isProgramAdmin,
     isRegionalManager,
     canAddToWatchlist,
+    caseData?.client?.id,
+    pathAccount?.email,
+    pathAccountStatusKey,
   ]);
 
   const compliance = caseData?.compliance ?? {};
@@ -536,6 +583,21 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       return [];
     }
     const statusIndicator = <StatusIndicator type={statusType}>{statusLabel}</StatusIndicator>;
+    const pathAccountStatusValue = (
+      <Box>
+        <StatusIndicator type={pathAccountStatusType}>{pathAccountStatusLabel}</StatusIndicator>
+        {pathAccount?.email ? (
+          <Box fontSize="body-s" color="text-body-secondary">
+            {pathAccount.email}
+          </Box>
+        ) : null}
+        {pathAccountTimestampLabel && pathAccountTimestampValue ? (
+          <Box fontSize="body-s" color="text-body-secondary">
+            {pathAccountTimestampLabel}: {formatDateTime(pathAccountTimestampValue)}
+          </Box>
+        ) : null}
+      </Box>
+    );
     return [
       { label: "Client name", value: clientName },
       { label: "Case number", value: caseNumber },
@@ -561,6 +623,10 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         label: "Finance validation",
         value: <StatusIndicator type={financeStatusSummary.type}>{financeStatusSummary.label}</StatusIndicator>,
       },
+      {
+        label: "PATH Account Status",
+        value: pathAccountStatusValue,
+      },
     ];
   }, [
     caseData,
@@ -571,6 +637,11 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     ilmpStatusSummary,
     ilmpLastValidated,
     financeStatusSummary,
+    pathAccount?.email,
+    pathAccountStatusLabel,
+    pathAccountStatusType,
+    pathAccountTimestampLabel,
+    pathAccountTimestampValue,
     selectedPlanSummary,
     interventionRollupSummary,
     fundingSnapshotSummary,
@@ -1010,6 +1081,42 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         setWatchlistNotes("");
         setWatchlistModalOpen(true);
         setActionNotice(null);
+      } else if (detail.id === "activate-path-account") {
+        const clientId = caseData?.client?.id;
+        if (!clientId) {
+          setActionError("No client is linked to this case.");
+          return;
+        }
+        if (!pathAccount?.email) {
+          setActionError("This client does not have a valid email address on file for PATH activation.");
+          return;
+        }
+        setActionError(null);
+        setActionNotice(null);
+        setActionLoading(true);
+        try {
+          if (pathAccountStatusKey === "no_account") {
+            const createResponse = await apiFetch(`/api/admin/applicants/${clientId}/create-account`, { method: "POST" });
+            const createPayload = await createResponse.json().catch(() => null);
+            if (!createResponse.ok) {
+              throw new Error(createPayload?.message || createPayload?.error || "Unable to create the applicant account.");
+            }
+          }
+          const sendResponse = await apiFetch(`/api/admin/applicants/${clientId}/send-activation`, { method: "POST" });
+          const sendPayload = await sendResponse.json().catch(() => null);
+          if (!sendResponse.ok) {
+            throw new Error(sendPayload?.message || sendPayload?.error || "Unable to send the PATH activation email.");
+          }
+          setActionNotice({
+            type: "success",
+            text: pathAccountStatusKey === "invitation_sent" ? "PATH activation email resent." : "PATH activation email sent.",
+          });
+          await refresh();
+        } catch (err) {
+          setActionError(err?.message || "Unable to start PATH account activation.");
+        } finally {
+          setActionLoading(false);
+        }
       } else if (detail.id === "release-lock") {
         const lockApplicationId = caseData?.applicationId || caseData?.application_id || null;
         if (!lockApplicationId) {
@@ -1053,7 +1160,6 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     },
     [
       markReadyToClose,
-      closeCase,
       refresh,
       openValidationModal,
       buildValidationSummary,
@@ -1061,6 +1167,8 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       loadAssignable,
       selectedActionPlanId,
       caseData,
+      pathAccount?.email,
+      pathAccountStatusKey,
       requestLayoutSwitch,
       setActionNotice,
     ]

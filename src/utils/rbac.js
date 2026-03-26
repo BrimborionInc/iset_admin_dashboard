@@ -1,11 +1,11 @@
-const PROGRAM_ADMIN_ROLE_VALUES = Object.freeze(['program administrator']);
+const PROGRAM_ADMIN_ROLE_VALUES = Object.freeze(['nwac administrator']);
 const SYSTEM_ADMIN_ROLE_VALUES = Object.freeze(['system administrator']);
 const ADMIN_ROLE_VALUES = Object.freeze([...PROGRAM_ADMIN_ROLE_VALUES, ...SYSTEM_ADMIN_ROLE_VALUES]);
-const REGIONAL_COORDINATOR_ROLE_VALUES = Object.freeze(['regional coordinator']);
-const APPLICATION_ASSESSOR_ROLE_VALUES = Object.freeze(['application assessor']);
+const REGIONAL_COORDINATOR_ROLE_VALUES = Object.freeze(['regional manager']);
+const APPLICATION_ASSESSOR_ROLE_VALUES = Object.freeze(['iset coordinator']);
 const OUTCOME_REVIEW_ROLE_VALUES = Object.freeze([
   ...ADMIN_ROLE_VALUES,
-  'regional coordinator',
+  'regional manager',
   'nwac reviewer',
   'nwac assessment reviewer',
   'nwac outcome reviewer',

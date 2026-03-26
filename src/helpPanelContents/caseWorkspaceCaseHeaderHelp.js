@@ -11,9 +11,10 @@ const CaseWorkspaceCaseHeaderHelp = () => (
     <h3>What to check</h3>
     <ul>
       <li><strong>Client profile:</strong> Name, identifiers, region, and primary contact information.</li>
+      <li><strong>PATH account status:</strong> Whether the participant has no account yet, is ready to invite, has already been invited, or has activated portal access.</li>
       <li><strong>Agreement snapshot:</strong> Funding agreement number, status, start and end dates.</li>
       <li><strong>Ownership:</strong> Assigned staff member and escalation contacts. Reassign directly from this panel.</li>
-      <li><strong>Quick actions:</strong> Refresh data, lock the case, or mark it ready to close once all steps are complete.</li>
+      <li><strong>Quick actions:</strong> Reassign the case, start PATH account activation, or move the case forward once all steps are complete.</li>
     </ul>
 
     <h3>Best practice</h3>
@@ -25,6 +26,6 @@ const CaseWorkspaceCaseHeaderHelp = () => (
   </div>
 );
 
-CaseWorkspaceCaseHeaderHelp.aiContext = `You are helping a case manager using the case header widget in the Case Dashboard. It shows client details, agreement number, owner, and provides quick actions like reassign or mark ready to close.`;
+CaseWorkspaceCaseHeaderHelp.aiContext = `You are helping a case manager using the case header widget in the Case Dashboard. It shows client details, PATH account status, agreement context, ownership, and quick actions such as reassignment and PATH account activation.`;
 
 export default CaseWorkspaceCaseHeaderHelp;

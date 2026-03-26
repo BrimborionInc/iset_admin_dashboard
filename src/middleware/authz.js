@@ -1,21 +1,13 @@
 // Authorization middleware and helpers for RBAC and regional scoping
 
 function normalizeRole(role) {
-  if (!role) return role;
+  if (!role) return '';
   const trimmed = String(role).trim();
-  const compact = trimmed.replace(/\s+/g, '');
-  switch (compact) {
-    case 'SystemAdministrator': return 'SysAdmin';
-    case 'ProgramAdministrator': return 'ProgramAdmin';
-    case 'RegionalCoordinator': return 'RegionalCoordinator';
-    // Allow already canonical
-    case 'SysAdmin':
-    case 'ProgramAdmin':
-    case 'Adjudicator':
-      return compact;
-    default:
-      return compact; // fallthrough; may still match if allowed list normalized similarly
-  }
+  if (trimmed === 'System_Administrator') return 'SystemAdministrator';
+  if (trimmed === 'NWAC_Administrator') return 'NWACAdministrator';
+  if (trimmed === 'Regional_Manager') return 'RegionalManager';
+  if (trimmed === 'ISET_Coordinator') return 'ISETCoordinator';
+  return trimmed.replace(/\s+/g, '');
 }
 
 function requireRole(...allowed) {

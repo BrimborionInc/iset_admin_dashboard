@@ -317,6 +317,14 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
     updatedAt: payload.updatedAt ?? null,
     nextActionDueAt: payload.nextActionDueAt ?? null,
     agreementNumber: payload.agreementNumber ?? payload.trackingId ?? null,
+    pathAccount: {
+      status: payload.pathAccount?.status ?? "no_account",
+      email: payload.pathAccount?.email ?? null,
+      cognitoSub: payload.pathAccount?.cognitoSub ?? null,
+      cognitoUsername: payload.pathAccount?.cognitoUsername ?? null,
+      invitedAt: payload.pathAccount?.invitedAt ?? null,
+      activatedAt: payload.pathAccount?.activatedAt ?? null,
+    },
     client: {
       id: client.id ?? null,
       name: fullName || "Unknown client",

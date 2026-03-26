@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import Button from "@cloudscape-design/components/button";
 import Select from "@cloudscape-design/components/select";
 import Modal from "@cloudscape-design/components/modal";
@@ -241,12 +241,13 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange }) => {
       const opts = users.map((u) => {
         const dbEmail = (u?.email || '').trim();
         const cognitoUsername = (u?.username || '').trim();
+        const numericUserId = Number(u?.userId);
         const email = dbEmail && !/@placeholder\.local$/i.test(dbEmail)
           ? dbEmail
           : (cognitoUsername || dbEmail || '(unknown)');
         return {
           label: email,
-          value: String(u.userId),
+          value: Number.isFinite(numericUserId) && numericUserId > 0 ? String(numericUserId) : '',
         };
       }).filter((o) => o.value);
       setApplicantOptions(opts);

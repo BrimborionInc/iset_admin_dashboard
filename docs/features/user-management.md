@@ -1,12 +1,16 @@
 # User Management Overview
 
-_Last updated: 24 March 2026_
+_Last updated: 26 March 2026_
 
 ## High-level flow
 
-* The Manage Users dashboard (`src/pages/manageUsers.js`) is the single front-end surface for Cognito-backed staff management.
-* All CRUD actions call `/api/admin/users…` endpoints implemented in `src/routes/admin/users.js`.
+* The Manage Users dashboard (`src/pages/manageUsers.js`) now has two operational areas:
+  - `Administrative Users` for staff/admin Cognito group management
+  - `Applicant Accounts` for imported participant account creation, invitation, and activation tracking
+* Staff/admin CRUD actions call `/api/admin/users…` endpoints implemented in `src/routes/admin/users.js`.
+* Applicant-account actions call `/api/admin/applicants…` endpoints implemented in `src/routes/admin/applicants.js`.
 * Cognito remains the source of truth for authentication + group membership. MySQL tables (e.g. `staff_profiles`) hold the operational mapping and staff identity details (such as `display_name`) used throughout the admin experience.
+* For applicant accounts, `client` is the workflow anchor and the legacy `user` table remains the public-portal identity principal.
 
 ## Front-end behaviour
 
@@ -26,6 +30,18 @@ _Last updated: 24 March 2026_
 * **Resend invite** – `POST /api/admin/users/:username/resend-invite` (placeholder behaviour until SES hooks are wired up).
 * **Change role** – opens modal calling `PATCH /api/admin/users/:username/role`, removing the current group and adding the new one.
 * Role change and creation forms enforce entering a region for regional roles.
+
+### Applicant Accounts tab
+* Lists imported or linked applicants by client/case context instead of raw Cognito rows.
+* Visible workflow statuses are:
+  - `No account`
+  - `Ready to invite`
+  - `Invitation sent`
+  - `Activated`
+* **Create account** – silently creates or links the applicant Cognito account and local `user` row with no email sent.
+* **Send activation / Resend activation** – PATH sends a branded activation email; the portal then uses the forgot-password APIs behind an activation-specific UI.
+* `Application Assessor` users can access the dashboard for the `Applicant Accounts` tab even though they do not have access to staff-user administration.
+* The tab is currently the PATH management surface for imported applicant accounts; case-workspace quick actions are still a later extension, not part of the first implementation.
 
 ### UX affordances
 * The table reflects loading/pending states (`pendingRoutes`) while requests are in flight.
@@ -52,6 +68,24 @@ Adjudicator        → cannot create users
 * **DELETE /users/:username/role** – removes the user from their admin group (no new group added).
 * **PATCH /users/:username/force-reset** – triggers `AdminResetUserPassword`.
 * **POST /users/:username/resend-invite** – placeholder; returns a stub response while a custom email flow is pending.
+
+## Applicant account lifecycle (`src/routes/admin/applicants.js`)
+
+### Endpoints
+* **GET /applicants** – lists client-linked applicant accounts with case, region, case manager, and PATH activation status.
+* **POST /applicants/:clientId/create-account** – creates or links the applicant Cognito account silently and seeds/links the local `user` row.
+* **POST /applicants/:clientId/send-activation** – sends PATH’s activation email and moves the linked client to `invitation_sent`.
+
+### Import behavior
+* Client-file import now attempts silent applicant account creation only when the row has one clean email value.
+* PATH does **not** create an applicant account when the email is missing, invalid, ambiguous, or contains multiple values.
+* Import still creates the client/case when the row is otherwise valid, but the applicant account is left for later review/manual action.
+* Import creates/link the applicant account in the environment-specific applicant Cognito pool resolved from `COGNITO_TRUSTED_POOLS`; it does not send any Cognito welcome mail.
+
+### Portal activation behavior
+* PATH does not rely on Cognito welcome emails for imported applicants.
+* The invitation email points applicants to `/activate-account` in the public portal.
+* The portal wraps Cognito’s forgot-password flow in activation wording and marks the linked client as `activated` on the first successful authenticated session.
 ## Relationship to staff_profiles
 * Creating users seeds `staff_profiles` with identity details (`name`, `display_name`) at creation time, keyed by Cognito `sub`.
 * `staffProfileMiddleware` still upserts operational fields on authenticated requests (cognito `sub`, email, role, `region_id`) and does not need to overwrite `name`/`display_name`.

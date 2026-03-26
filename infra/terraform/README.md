@@ -2,7 +2,7 @@
 
 This module provisions:
 - Cognito User Pool, App Client, Hosted UI domain
-- Cognito Groups: SysAdmin, ProgramAdmin, RegionalCoordinator, Adjudicator
+- Cognito Groups: System_Administrator, NWAC_Administrator, Regional_Manager, ISET_Coordinator
 - Lambda (Node.js 20) for Pre-Token-Generation to inject custom claims (role, region_id, user_id)
 - IAM role + policy for the Lambda
 - Optional SES email identity for the sender

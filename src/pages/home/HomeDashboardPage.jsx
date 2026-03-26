@@ -171,14 +171,14 @@ const resolveInterventionMilestone = (startValue, endValue) => {
 
 const filterWidgetsForRole = (role) => {
     const allowed = { ...WIDGET_REGISTRY };
-    const isIsetCoordinator = role === 'Application Assessor';
+    const isIsetCoordinator = role === 'ISET Coordinator';
     if (role !== 'System Administrator') {
         delete allowed['dev-task-tracker'];
     }
     if (role === 'System Administrator') {
         delete allowed['metrics'];
     }
-    const isWorkQueueRole = role === 'Program Administrator' || role === 'Regional Coordinator';
+    const isWorkQueueRole = role === 'NWAC Administrator' || role === 'Regional Manager';
     if (!isWorkQueueRole) {
         delete allowed['program-admin-work-queue'];
         if (!isIsetCoordinator) {
@@ -201,9 +201,9 @@ const buildDefaultLayout = (role) => {
     }
 
     const layout = [];
-    if (role === 'Program Administrator' || role === 'Regional Coordinator') {
+    if (role === 'NWAC Administrator' || role === 'Regional Manager') {
         layout.push({ id: 'program-admin-work-queue', rowSpan: 16, columnSpan: 1 });
-    } else if (role === 'Application Assessor') {
+    } else if (role === 'ISET Coordinator') {
         layout.push({ id: 'iset-coordinator-work-queue', rowSpan: 16, columnSpan: 1 });
     }
 
@@ -314,9 +314,9 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         () => [role, currentUserId || '', currentUserEmail || ''].join(':'),
         [role, currentUserEmail, currentUserId]
     );
-    const isWorkQueueRole = role === 'Program Administrator' || role === 'Regional Coordinator';
-    const isIsetCoordinatorRole = role === 'Application Assessor';
-    const isRegionalCoordinatorRole = role === 'Regional Coordinator' || role === 'Regional Manager';
+    const isWorkQueueRole = role === 'NWAC Administrator' || role === 'Regional Manager';
+    const isIsetCoordinatorRole = role === 'ISET Coordinator';
+    const isRegionalCoordinatorRole = role === 'Regional Manager';
 
     const workQueueBuckets = useMemo(() => {
         if (!isWorkQueueRole) return [];

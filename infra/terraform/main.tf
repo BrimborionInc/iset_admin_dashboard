@@ -164,19 +164,19 @@ resource "aws_cognito_user_pool_domain" "hosted" {
 
 # Groups for roles
 resource "aws_cognito_user_group" "sysadmin" {
-  name         = "SysAdmin"
+  name         = "System_Administrator"
   user_pool_id = aws_cognito_user_pool.admin.id
 }
 resource "aws_cognito_user_group" "programadmin" {
-  name         = "ProgramAdmin"
+  name         = "NWAC_Administrator"
   user_pool_id = aws_cognito_user_pool.admin.id
 }
 resource "aws_cognito_user_group" "regionalcoordinator" {
-  name         = "RegionalCoordinator"
+  name         = "Regional_Manager"
   user_pool_id = aws_cognito_user_pool.admin.id
 }
 resource "aws_cognito_user_group" "adjudicator" {
-  name         = "Adjudicator"
+  name         = "ISET_Coordinator"
   user_pool_id = aws_cognito_user_pool.admin.id
 }
 

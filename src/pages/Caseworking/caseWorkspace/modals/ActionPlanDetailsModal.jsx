@@ -201,8 +201,8 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
   } = useCaseWorkspace();
   const currentUser = useCurrentUser();
   const role = currentUser?.role ? currentUser.role : null;
-  const canonicalRole = role === "Regional Manager" ? "Regional Coordinator" : role;
-  const isAssessor = canonicalRole === "Application Assessor";
+  const canonicalRole = role === "Regional Manager" ? "Regional Manager" : role;
+  const isAssessor = canonicalRole === "ISET Coordinator";
   const [form, setForm] = useState(defaultForm);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);

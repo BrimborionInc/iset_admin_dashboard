@@ -37,15 +37,13 @@ const SNAPSHOT_STATUS_OPTIONS = [
 ];
 
 const ROLE_ALIASES = {
-  SysAdmin: "System Administrator",
   System_Administrator: "System Administrator",
-  "System Admin": "System Administrator",
-  ProgramAdmin: "Program Administrator",
-  NWAC_Administrator: "Program Administrator",
-  "Program Admin": "Program Administrator",
+  NWAC_Administrator: "NWAC Administrator",
+  Regional_Manager: "Regional Manager",
+  ISET_Coordinator: "ISET Coordinator",
 };
 
-const EDITOR_ROLES = new Set(["System Administrator", "Program Administrator"]);
+const EDITOR_ROLES = new Set(["System Administrator", "NWAC Administrator"]);
 
 const padDatePart = value => String(value).padStart(2, "0");
 
@@ -875,7 +873,7 @@ const RegionalSnapshotDashboard = () => {
         { label: "Region", value: report.region?.name || "—" },
         { label: "Province / Territory", value: report.region?.code || "—" },
         { label: "Regional Manager", value: report.snapshot?.regionalManagerName || "—" },
-        { label: "Regional Coordinator", value: report.snapshot?.regionalCoordinatorName || "—" },
+        { label: "ISET Coordinator", value: report.snapshot?.regionalCoordinatorName || "—" },
       ]
     : [];
 
@@ -1117,7 +1115,7 @@ const RegionalSnapshotDashboard = () => {
                 }
               />
             </FormField>
-            <FormField label="Regional Coordinator">
+            <FormField label="Regional Manager">
               <Input
                 value={formState.regionalCoordinatorName}
                 onChange={({ detail }) =>

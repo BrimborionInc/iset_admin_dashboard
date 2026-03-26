@@ -222,7 +222,7 @@ const NOT_APPROVED_CASE_STATUS = 'in_review';
 const APPROVAL_COST_THRESHOLD = 15000;
 const PROGRAM_ADMIN_APPROVAL_THRESHOLD = 25000;
 const PROGRAM_ADMIN_APPROVER_EMAIL = 'sstacey@nwac.ca';
-const PROGRAM_ADMIN_ROLE_KEYS = new Set(['programadministrator', 'programadmin', 'nwacadministrator']);
+const PROGRAM_ADMIN_ROLE_KEYS = new Set(['nwacadministrator']);
 const ELIGIBILITY_ALLOWED_MIME_TYPES = [
   'application/pdf',
   'image/jpeg',
@@ -2190,8 +2190,8 @@ const CoordinatorAssessmentWidget = forwardRef(
   } = useCurrentUser();
   const userRole = currentUserRole || '';
   const normalizedRole = (userRole || '').toString().trim().toLowerCase();
-  const canonicalRole = normalizedRole === 'regional manager' ? 'regional coordinator' : normalizedRole;
-  const isAssessor = canonicalRole === 'application assessor';
+  const canonicalRole = normalizedRole === 'regional manager' ? 'regional manager' : normalizedRole;
+  const isAssessor = canonicalRole === 'iset coordinator';
   const { isOutcomeReviewerRole } = getRoleGroups(userRole);
   const groupKeys = Array.isArray(currentUserGroups)
     ? currentUserGroups.map(group => String(group || '').trim().toLowerCase().replace(/[\s-]+/g, '_'))
@@ -2203,11 +2203,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const canOverrideProgramAdminLimit = normalizedUserEmail === PROGRAM_ADMIN_APPROVER_EMAIL;
   const eligibilityRoleAllowlist = new Set([
     'systemadministrator',
-    'sysadmin',
-    'programadministrator',
-    'programadmin',
     'nwacadministrator',
-    'regionalcoordinator',
     'regionalmanager'
   ]);
   const canManageEiEligibility = eligibilityRoleAllowlist.has(roleKey);
@@ -2244,7 +2240,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     return Number.isFinite(overallCostTotal) && overallCostTotal > 0;
   }, [overallCostTotal, proposedInterventions]);
   const isRegionalHighCostBlocked =
-    canonicalRole === 'regional coordinator' &&
+    canonicalRole === 'regional manager' &&
     Number.isFinite(overallCostTotal) &&
     overallCostTotal >= APPROVAL_COST_THRESHOLD;
   const isProgramAdminHighCostBlocked =
@@ -3468,7 +3464,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     [checklistUploadDocTypes]
   );
   const canManageBudgetPotPending = useMemo(() => {
-    const allowed = new Set(['system administrator', 'program administrator', 'regional manager', 'regional coordinator']);
+    const allowed = new Set(['system administrator', 'nwac administrator', 'regional manager']);
     return allowed.has(normalizedRole);
   }, [normalizedRole]);
   const showChildcareFunding = assessment.childcareNeed === 'yes';

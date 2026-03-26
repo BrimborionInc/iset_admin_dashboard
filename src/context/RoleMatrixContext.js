@@ -3,25 +3,17 @@ import { apiFetch } from '../auth/apiClient';
 import roleMatrixData from '../config/roleMatrix.json';
 
 const API_ENDPOINT = '/api/access-control/matrix';
-const ROLE_ORDER = ['System Administrator', 'Program Administrator', 'Regional Coordinator', 'Application Assessor'];
+const ROLE_ORDER = ['System Administrator', 'NWAC Administrator', 'Regional Manager', 'ISET Coordinator'];
 
 const ROLE_ALIASES = {
-  'Application Assessor': 'Application Assessor',
-  ApplicationAssessor: 'Application Assessor',
-  'PTMA Staff': 'Application Assessor',
-  PTMAStaff: 'Application Assessor',
-  Adjudicator: 'Application Assessor',
-  ISET_Coordinator: 'Application Assessor',
-  SysAdmin: 'System Administrator',
-  'System Admin': 'System Administrator',
   System_Administrator: 'System Administrator',
-  'Program Admin': 'Program Administrator',
-  'Regional Manager': 'Regional Coordinator',
-  'ISET Coordinator': 'Application Assessor',
-  ISETCoordinator: 'Application Assessor',
-  Regional_Manager: 'Regional Coordinator',
-  NWAC_Administrator: 'Program Administrator',
-  ProgramAdministrator: 'Program Administrator',
+  Regional_Manager: 'Regional Manager',
+  NWAC_Administrator: 'NWAC Administrator',
+  ISET_Coordinator: 'ISET Coordinator',
+  'System Administrator': 'System Administrator',
+  'NWAC Administrator': 'NWAC Administrator',
+  'Regional Manager': 'Regional Manager',
+  'ISET Coordinator': 'ISET Coordinator',
 };
 
 export const toCanonicalRole = (role) => ROLE_ALIASES[role] || role;

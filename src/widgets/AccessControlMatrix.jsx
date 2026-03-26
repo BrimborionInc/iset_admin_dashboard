@@ -14,9 +14,9 @@ import { getRoleDisplayName } from '../utils/roleDisplay';
 
 const ROLE_COLUMNS = [
   { key: 'System Administrator', label: getRoleDisplayName('System Administrator'), editable: false },
-  { key: 'Program Administrator', label: getRoleDisplayName('Program Administrator'), editable: true },
-  { key: 'Regional Coordinator', label: getRoleDisplayName('Regional Coordinator'), editable: true },
-  { key: 'Application Assessor', label: getRoleDisplayName('Application Assessor'), editable: true }
+  { key: 'NWAC Administrator', label: getRoleDisplayName('NWAC Administrator'), editable: true },
+  { key: 'Regional Manager', label: getRoleDisplayName('Regional Manager'), editable: true },
+  { key: 'ISET Coordinator', label: getRoleDisplayName('ISET Coordinator'), editable: true }
 ];
 
 const NAV_SECTIONS = [

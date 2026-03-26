@@ -534,7 +534,7 @@ export default function ConfigurationSettings({
 
   const canEditAI = role === "System Administrator";
   const canEditAuth = role === "System Administrator";
-  const canEditSla = role === "System Administrator" || role === "Program Administrator";
+  const canEditSla = role === "System Administrator" || role === "NWAC Administrator";
   const canEditLocking = role === "System Administrator";
 
   const visibility = security?.visibility;

@@ -13,7 +13,7 @@ import { apiFetch } from '../../../auth/apiClient';
 
 const getBucketTemplate = role => {
   switch (role) {
-    case 'Program Administrator':
+    case 'NWAC Administrator':
       return [
         { id: 'new-submissions', label: 'Unassigned Applications', count: '-', description: 'Applications in submitted status without an assigned owner.' },
         { id: 'awaiting-ei-validation', label: 'Awaiting EI Validation', count: '-', description: 'Applications missing EI eligibility confirmation.' },
@@ -22,7 +22,7 @@ const getBucketTemplate = role => {
         { id: 'awaiting-decision', label: 'Assessed, awaiting approval', count: '-', description: 'Application assessments complete, but need program approval.' },
         { id: 'decisions-made', label: 'Decisions Made', count: '-', description: 'Applications approved or rejected this week.' }
       ];
-    case 'Regional Coordinator':
+    case 'Regional Manager':
       return [
         { id: 'region-queue', label: 'Assigned to my region', count: '-', description: 'Applications owned by me or assessors in my region.' },
         { id: 'needs-reassignment', label: 'Assigned to me', count: '-', description: 'Applications waiting for me to re-route or pick up.' },
@@ -31,7 +31,7 @@ const getBucketTemplate = role => {
         { id: 'due-this-week', label: 'Due this week', count: '-', description: 'Applications approaching SLA within 7 days.' },
         { id: 'overdue', label: 'Overdue', count: '-', description: 'Applications breaching SLA within my region.' }
       ];
-    case 'Application Assessor':
+    case 'ISET Coordinator':
       return [
         { id: 'assigned-to-me', label: 'Assigned to me', count: '-', description: 'Your active assessment queue.' },
         { id: 'due-today', label: 'Due today', count: '-', description: 'Assessments approaching their SLA window.' },
@@ -165,7 +165,7 @@ const ApplicationWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
     const statusFilter = STATUS_FILTERS[bucketId];
     const query = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
     if (
-      currentRole === 'Program Administrator' &&
+      currentRole === 'NWAC Administrator' &&
       (bucketId === 'new-submissions' ||
         bucketId === 'awaiting-ei-validation' ||
         bucketId === 'in-assessment' ||
@@ -175,11 +175,11 @@ const ApplicationWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
     ) {
       return `${basePath}${query}`;
     }
-    if (currentRole === 'Regional Coordinator') {
+    if (currentRole === 'Regional Manager') {
       return `${basePath}${query}`;
     }
     if (
-      currentRole === 'Application Assessor' &&
+      currentRole === 'ISET Coordinator' &&
       (bucketId === 'assigned-to-me' ||
         bucketId === 'due-today' ||
         bucketId === 'due-soon' ||

@@ -28,7 +28,7 @@ const AutoAssignmentConfigWidget = ({ actions, role }) => {
   const [savedSignature, setSavedSignature] = useState(null);
 
   const canConfigure = useMemo(
-    () => role === 'System Administrator' || role === 'Program Administrator',
+    () => role === 'System Administrator' || role === 'NWAC Administrator',
     [role]
   );
 

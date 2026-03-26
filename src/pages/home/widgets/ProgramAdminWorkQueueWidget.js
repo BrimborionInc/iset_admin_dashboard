@@ -212,8 +212,8 @@ const BUCKET_PREFERENCES_STORAGE_KEY_PREFIX = 'home-work-queue-preferences-v1';
 const normalizeRoleKey = role => {
   const raw = String(role || '').trim().toLowerCase();
   if (!raw) return 'unknown';
-  if (raw === 'regional manager') return 'regional coordinator';
-  if (raw === 'program admin') return 'program administrator';
+  if (raw === 'regional manager') return 'regional manager';
+  if (raw === 'program admin') return 'nwac administrator';
   return raw;
 };
 

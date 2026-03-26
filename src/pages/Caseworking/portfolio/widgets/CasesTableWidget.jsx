@@ -279,7 +279,7 @@ const persistPreferences = preferences => {
 const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const history = useHistory();
   const { role: currentRole } = useCurrentUser();
-  const isApplicationAssessor = currentRole === "Application Assessor";
+  const isApplicationAssessor = currentRole === "ISET Coordinator";
   const canManageAssignments = !isApplicationAssessor;
   const {
     searchText,

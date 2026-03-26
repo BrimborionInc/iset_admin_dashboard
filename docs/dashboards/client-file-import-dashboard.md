@@ -52,7 +52,7 @@ Date: 2026-03-23
 
 ## Intentional constraints
 
-- Does not create applicant `user` accounts.
+- May silently create/link an applicant account only when the import row resolves to one clean email value, but does not send any applicant email during import.
 - Does not create `iset_application`, `iset_application_submission`, assessment, action-plan, intervention, or document placeholder records.
 - Writes participant profile data into:
   - `client`

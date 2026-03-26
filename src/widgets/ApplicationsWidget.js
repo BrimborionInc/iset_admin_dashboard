@@ -319,7 +319,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
 
   const isStaffVisible = useCallback((staff) => {
     if (!staff) return false;
-    if (normalizedUserRole === 'Regional Coordinator') {
+    if (normalizedUserRole === 'Regional Manager') {
       if (currentUserId && String(staff.id) === String(currentUserId)) return true;
       const staffRegion = staff.region_id != null ? Number(staff.region_id) : (staff.regionId != null ? Number(staff.regionId) : null);
       return normalizedRegionIds.length && Number.isFinite(staffRegion) && normalizedRegionIds.includes(staffRegion);
@@ -878,7 +878,7 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
         item.case_id &&
         !item.assigned_user_id &&
         !COMPLETED_STATUSES.has(caseStatusLower);
-      const reassignRoles = ['Program Administrator','Regional Coordinator','System Administrator'];
+      const reassignRoles = ['NWAC Administrator','Regional Manager','System Administrator'];
       const canReassign = item.case_id && item.assigned_user_id && reassignRoles.includes(normalizedUserRole);
       const lockOwnerId = item.lock_owner_id ? String(item.lock_owner_id) : null;
       const lockOwnerName = item.lock_owner_name || item.lock_owner_email || (lockOwnerId ? `User ${lockOwnerId}` : null);

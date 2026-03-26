@@ -234,9 +234,9 @@ const InterventionModal = ({
 }) => {
   const currentUser = useCurrentUser();
   const role = currentUser?.role ? currentUser.role : null;
-  const canonicalRole = role === "Regional Manager" ? "Regional Coordinator" : role;
-  const isAssessor = canonicalRole === "Application Assessor";
-  const canSelectPostingContext = canonicalRole === "Regional Coordinator" || canonicalRole === "Program Administrator";
+  const canonicalRole = role === "Regional Manager" ? "Regional Manager" : role;
+  const isAssessor = canonicalRole === "ISET Coordinator";
+  const canSelectPostingContext = canonicalRole === "Regional Manager" || canonicalRole === "NWAC Administrator";
   const [form, setForm] = useState({ ...defaultForm });
   const initialFormRef = useRef({ ...defaultForm });
   const [loading, setLoading] = useState(false);

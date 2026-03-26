@@ -68,34 +68,20 @@ const POSTING_CONTEXT_OPTIONS = [
 
 const EI_ELIGIBILITY_ROLE_KEYS = new Set([
   "systemadministrator",
-  "sysadmin",
-  "programadministrator",
-  "programadmin",
   "nwacadministrator",
-  "regionalcoordinator",
   "regionalmanager",
 ]);
 
 const SUBMITTED_PROPOSAL_EDITOR_ROLE_KEYS = new Set([
   "systemadministrator",
-  "sysadmin",
-  "programadministrator",
-  "programadmin",
   "nwacadministrator",
-  "regionalcoordinator",
   "regionalmanager",
-  "applicationassessor",
-  "adjudicator",
   "isetcoordinator",
 ]);
 
 const SUBMITTED_PROPOSAL_DECIDER_ROLE_KEYS = new Set([
   "systemadministrator",
-  "sysadmin",
-  "programadministrator",
-  "programadmin",
   "nwacadministrator",
-  "regionalcoordinator",
   "regionalmanager",
 ]);
 
@@ -1831,9 +1817,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const showCommunicationStep = isSubmittedStatus && (isApprovedDecisionOutcome || isRejectedDecisionOutcome);
   const role = currentUser?.role || null;
   const roleKey = normalizeRoleKey(role);
-  const canonicalRole = role === "Regional Manager" ? "Regional Coordinator" : role;
+  const canonicalRole = role === "Regional Manager" ? "Regional Manager" : role;
   const canManageEiEligibility = EI_ELIGIBILITY_ROLE_KEYS.has(roleKey);
-  const isAssessor = canonicalRole === "Application Assessor";
+  const isAssessor = canonicalRole === "ISET Coordinator";
   const canEditSubmittedProposal = SUBMITTED_PROPOSAL_EDITOR_ROLE_KEYS.has(roleKey);
   const canDecideSubmittedProposal = SUBMITTED_PROPOSAL_DECIDER_ROLE_KEYS.has(roleKey);
 

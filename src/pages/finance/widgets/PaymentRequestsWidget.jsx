@@ -718,7 +718,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
   const currentUser = useCurrentUser();
   const canonicalRole = toCanonicalRole(currentUser?.role || "");
   const isAdminRole =
-    canonicalRole === "System Administrator" || canonicalRole === "Program Administrator";
+    canonicalRole === "System Administrator" || canonicalRole === "NWAC Administrator";
   const lockedCaseId = metadata?.caseId ? String(metadata.caseId) : "";
   const lockedCaseLabel =
     metadata?.caseLabel || (lockedCaseId ? `Case ${lockedCaseId}` : "");

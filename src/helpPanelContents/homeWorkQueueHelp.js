@@ -5,7 +5,7 @@ const HomeWorkQueueHelp = () => (
   <SpaceBetween size="s">
     <Box variant="h3">Work Queue</Box>
     <Box>
-      This widget groups your workload into role-scoped queues. For Program Administrators and Regional Managers,
+      This widget groups your workload into role-scoped queues. For NWAC Administrators and Regional Managers,
       queues can include both application and case/intervention work.
     </Box>
     <Box>

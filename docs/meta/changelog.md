@@ -6,6 +6,14 @@ Format: YYYY-MM-DD - Category: Short description
 - UX/API/Configuration: Query Editor now includes a `Server Export` tab with a MySQL Workbench-style object-selection flow for choosing one database, selecting the tables to include, and writing a self-contained SQL dump file directly on the admin server.
 - Docs/Configuration: Updated the live Query Editor dashboard reference, help-panel copy, and `docs/AGENTS.md` for the new server export flow, hardwired dump options, and Windows/WSL dump-path behavior.
 
+## 2026-03-26
+- UX/API/Auth: `Manage Users` now includes a new `Applicant Accounts` tab for imported participant accounts, with PATH-managed statuses, silent account creation, and manual `Send activation` / `Resend activation` actions.
+- API/Auth/Import: Client-file import now silently creates or links applicant Cognito accounts only when the imported row resolves to one clean email value, suppresses all account emails during import, and skips account creation for missing, invalid, or ambiguous email rows.
+- UX/Auth/Portal: Added a dedicated public-portal `Activate your account` page that wraps Cognito’s forgot-password mechanics in first-time activation wording, and the portal now marks linked applicant accounts as activated on first successful sign-in.
+- UX/API/Casework: Case Workspace `Case header` now shows `PATH Account Status` and includes a quick action to activate or resend activation for the participant account directly from the case.
+- Docs/Auth/Data: Added applicant-account activation workflow documentation, updated the user-management feature doc, and expanded `docs/AGENTS.md` with the client-anchored invitation/activation model and import rules.
+- Feature: Notification Settings now includes a configurable PATH sender email stored in `iset_runtime_config`, and PATH-generated SES mail from both the admin dashboard and portal reads that shared runtime value.
+
 ## 2026-03-24
 - UX/API/Reporting: Added inline drilldown on non-zero `Intake and Assessment` and `Interventions` values in `Reporting > Data and Results`, showing the contributing records directly beneath the clicked row with linked applicant/participant names that open the related application or case workspace.
 - Docs/Reporting: Updated the live `Data and Results` dashboard reference, help-panel copy, and `docs/AGENTS.md` with the new inline drilldown behavior, fiscal-window rules for monthly vs cumulative clicks, and the current demo-mode limitation.

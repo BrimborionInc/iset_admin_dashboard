@@ -32,7 +32,7 @@ const WATCHLIST_REFRESH_EVENT = 'watchlist:refresh';
 const APPROVAL_COST_THRESHOLD = 15000;
 const PROGRAM_ADMIN_APPROVAL_THRESHOLD = 25000;
 const PROGRAM_ADMIN_APPROVER_EMAIL = 'sstacey@nwac.ca';
-const PROGRAM_ADMIN_ROLE_KEYS = new Set(['programadministrator', 'programadmin', 'nwacadministrator']);
+const PROGRAM_ADMIN_ROLE_KEYS = new Set(['nwacadministrator']);
 const ESDC_OPTIONS = [
   { label: 'CRF', value: 'CRF' },
   { label: 'EI Active Claim', value: 'EI Active Claim' },
@@ -40,11 +40,7 @@ const ESDC_OPTIONS = [
 ];
 const EI_ELIGIBILITY_ROLE_KEYS = new Set([
   'systemadministrator',
-  'sysadmin',
-  'programadministrator',
-  'programadmin',
   'nwacadministrator',
-  'regionalcoordinator',
   'regionalmanager'
 ]);
 const normalizeRoleKey = value =>
@@ -163,23 +159,12 @@ const toBudgetPotOptions = list => {
 };
 
 const ROLE_DISPLAY_MAP = {
-  sysadmin: 'System Administrator',
   'system administrator': 'System Administrator',
   'system_admin': 'System Administrator',
   'systemadministrator': 'System Administrator',
-  'program admin': 'NWAC Administrator',
-  'program administrator': 'NWAC Administrator',
-  'program_admin': 'NWAC Administrator',
-  'programadministrator': 'NWAC Administrator',
-  'regional coordinator': 'Regional Manager',
+  'nwac administrator': 'NWAC Administrator',
   'regional manager': 'Regional Manager',
-  'regional_coordinator': 'Regional Manager',
   'regionalmanager': 'Regional Manager',
-  'regionalcoordinator': 'Regional Manager',
-  adjudicator: 'ISET Coordinator',
-  'application assessor': 'ISET Coordinator',
-  'application_assessor': 'ISET Coordinator',
-  'applicationassessor': 'ISET Coordinator',
   'iset coordinator': 'ISET Coordinator',
   'iset_coordinator': 'ISET Coordinator',
   'isetcoordinator': 'ISET Coordinator'
@@ -675,8 +660,8 @@ const WorkQueueItemsTableWidget = ({
   toggleHelpPanel
 }) => {
   const { email: currentUserEmail } = useCurrentUser();
-  const canonicalRole = role === 'Regional Manager' ? 'Regional Coordinator' : role;
-  const isAssessor = canonicalRole === 'Application Assessor';
+  const canonicalRole = role === 'Regional Manager' ? 'Regional Manager' : role;
+  const isAssessor = canonicalRole === 'ISET Coordinator';
   const roleKey = normalizeRoleKey(role);
   const isProgramAdminRole = PROGRAM_ADMIN_ROLE_KEYS.has(roleKey);
   const normalizedUserEmail = (currentUserEmail || '').trim().toLowerCase();
@@ -756,7 +741,7 @@ const WorkQueueItemsTableWidget = ({
   ) : undefined;
   const approvalBlockMessage = useMemo(() => {
     if (interventionCostValue === null) return null;
-    if (canonicalRole === 'Regional Coordinator' && interventionCostValue >= APPROVAL_COST_THRESHOLD) {
+    if (canonicalRole === 'Regional Manager' && interventionCostValue >= APPROVAL_COST_THRESHOLD) {
       return `Regional Managers cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to NWAC Administrators.`;
     }
     if (isProgramAdminRole && interventionCostValue >= PROGRAM_ADMIN_APPROVAL_THRESHOLD && !canOverrideProgramAdminLimit) {
@@ -916,7 +901,7 @@ const WorkQueueItemsTableWidget = ({
         disposition: actionId
       };
       if (actionId === 'escalate_up') {
-        payload.targetRole = 'program_administrator';
+        payload.targetRole = 'nwac_administrator';
       }
       const response = await apiFetch(`/api/escalations/${escalationId}/respond`, {
         method: 'POST',
@@ -1335,7 +1320,7 @@ const WorkQueueItemsTableWidget = ({
                   </Link>
                   {(() => {
                     const isEscalationBucket = item.bucketId === 'exceptions-escalations';
-                    const canEscalationActions = role === 'Program Administrator' || role === 'Regional Coordinator';
+                    const canEscalationActions = role === 'NWAC Administrator' || role === 'Regional Manager';
                     if (isEscalationBucket && canEscalationActions) {
                       return (
                         <SpaceBetween size="xxs" direction="horizontal">
@@ -1348,7 +1333,7 @@ const WorkQueueItemsTableWidget = ({
                           >
                             Respond
                           </Link>
-                          {role === 'Regional Coordinator' && (
+                          {role === 'Regional Manager' && (
                             <Link
                               href="#"
                               onFollow={event => {

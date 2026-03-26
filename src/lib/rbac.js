@@ -1,10 +1,10 @@
 // RBAC policy helpers
 
 const Roles = Object.freeze({
-  SysAdmin: 'SysAdmin',
-  ProgramAdmin: 'ProgramAdmin',
-  RegionalCoordinator: 'RegionalCoordinator',
-  Adjudicator: 'Adjudicator',
+  SystemAdministrator: 'System Administrator',
+  NWACAdministrator: 'NWAC Administrator',
+  RegionalManager: 'Regional Manager',
+  ISETCoordinator: 'ISET Coordinator',
 });
 
 function normalizeRoleKey(role) {
@@ -14,27 +14,21 @@ function normalizeRoleKey(role) {
 
 function canAccessAll(auth) {
   const key = normalizeRoleKey(auth?.role);
-  return (
-    key === 'sysadmin' ||
-    key === 'systemadministrator' ||
-    key === 'programadmin' ||
-    key === 'programadministrator' ||
-    key === 'nwacadministrator'
-  );
+  return key === 'systemadministrator' || key === 'nwacadministrator';
 }
 
-function isRegionalCoordinatorRole(role) {
+function isRegionalManagerRole(role) {
   const key = normalizeRoleKey(role);
-  return key === 'regionalcoordinator' || key === 'regionalmanager';
+  return key === 'regionalmanager';
 }
 
-function isAssessorRole(role) {
+function isIsetCoordinatorRole(role) {
   const key = normalizeRoleKey(role);
-  return key === 'adjudicator' || key === 'applicationassessor' || key === 'isetcoordinator';
+  return key === 'isetcoordinator';
 }
 
 function isRegionScoped(auth) {
-  return isRegionalCoordinatorRole(auth?.role) || isAssessorRole(auth?.role);
+  return isRegionalManagerRole(auth?.role) || isIsetCoordinatorRole(auth?.role);
 }
 
 function normalizeRegionIds(auth) {
@@ -51,13 +45,13 @@ function scopePredicate(tableAlias, auth, regionColumn = 'region_id') {
   if (!isRegionScoped(auth)) return { sql: '0=1', params: [] };
   const regionIds = normalizeRegionIds(auth);
   if (!regionIds.length) return { sql: '0=1', params: [] };
-  if (isRegionalCoordinatorRole(auth?.role)) {
+  if (isRegionalManagerRole(auth?.role)) {
     if (regionIds.length === 1) {
       return { sql: `${tableAlias}.${regionColumn} = ?`, params: [regionIds[0]] };
     }
     return { sql: `${tableAlias}.${regionColumn} IN (${regionIds.map(() => '?').join(',')})`, params: regionIds };
   }
-  if (isAssessorRole(auth?.role)) {
+  if (isIsetCoordinatorRole(auth?.role)) {
     // Both region and assignment constraints (assumes assigned_to_user_id column)
     return { sql: `${tableAlias}.${regionColumn} = ? AND ${tableAlias}.assigned_to_user_id = ?`, params: [regionIds[0], Number(auth.userId) || -1] };
   }

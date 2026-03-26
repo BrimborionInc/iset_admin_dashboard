@@ -15,7 +15,7 @@ function scopeApplications(auth, alias = 'a') {
   if (canAccessAll(auth)) return { sql: '1=1', params: [] };
   const regionIds = normalizeRegionIds(auth);
   if (!regionIds.length) return { sql: '0=1', params: [] };
-  // RC and Adjudicator: region only
+  // RC and ISET_Coordinator: region only
   if (regionIds.length === 1) {
     return { sql: `${alias}.region_id = ?`, params: [regionIds[0]] };
   }

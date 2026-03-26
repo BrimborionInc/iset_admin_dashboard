@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Header, ButtonDropdown, Link, Table, Toggle, Select, SpaceBetween, Button, Flashbar } from '@cloudscape-design/components';
+import { Box, Header, ButtonDropdown, Link, Table, Toggle, Select, SpaceBetween, Button, Flashbar, FormField, Input } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import NotificationSettingsWidgetHelp from '../helpPanelContents/notificationSettingsWidgetHelp';
 import { apiFetch } from '../auth/apiClient';
@@ -7,10 +7,8 @@ import { apiFetch } from '../auth/apiClient';
 const DEFAULT_LANGUAGE = 'en'; // Adjust as needed
 
 const NONE_TEMPLATE_OPTION = { label: 'No template', value: '__none__' };
+const EMAIL_SETTINGS_FALLBACK = 'ISET@awentech.ca';
 
-const APPLICATION_ASSESSOR_ROLE = 'ApplicationAssessor';
-const APPLICATION_ASSESSOR_LABEL = 'ISET Coordinator';
-const LEGACY_ROLE_VALUES = new Set(['PTMA Staff', 'PTMAStaff']);
 const APPLICANT_ROLE_VALUE = 'applicant';
 const APPLICANT_ROLE = Object.freeze({ value: APPLICANT_ROLE_VALUE, label: 'Applicant' });
 
@@ -35,13 +33,9 @@ const cloneEventRows = (rows = []) => rows.map(event => ({
 const normaliseRoleValue = (value) => {
   const key = toKey(value);
   if (!key) return key;
-  if (LEGACY_ROLE_VALUES.has(key)) return APPLICATION_ASSESSOR_ROLE;
   if (key.toLowerCase() === APPLICANT_ROLE_VALUE) return APPLICANT_ROLE_VALUE;
   return key;
 };
-
-const normaliseRoleLabel = (label) =>
-  label === 'PTMA Staff' ? APPLICATION_ASSESSOR_LABEL : label;
 
 const normaliseRolesList = (rolesData) => {
   const normalised = ensureArray(rolesData)
@@ -58,8 +52,7 @@ const normaliseRolesList = (rolesData) => {
 
       if (!value) return null;
 
-      const rawLabel = role?.label ?? role?.name ?? role?.RoleName ?? value;
-      const label = normaliseRoleLabel(rawLabel);
+      const label = role?.label ?? role?.name ?? role?.RoleName ?? value;
 
       return { ...role, value, label };
     })
@@ -168,36 +161,53 @@ const normaliseTemplateSelection = (option) => {
   return option;
 };
 
+const normaliseEmailInput = (value) => {
+  if (value === null || value === undefined) return '';
+  return String(value).trim().toLowerCase();
+};
+
+const isValidEmail = (value) =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normaliseEmailInput(value));
+
 const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
   const [expandedEventIds, setExpandedEventIds] = useState([]);
   const [events, setEvents] = useState([]);
   const [savedEvents, setSavedEvents] = useState([]);
   const [templates, setTemplates] = useState([]);
+  const [senderEmail, setSenderEmail] = useState('');
+  const [savedSenderEmail, setSavedSenderEmail] = useState('');
   const [loading, setLoading] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [flashMessages, setFlashMessages] = useState([]);
+  const [senderValidationError, setSenderValidationError] = useState('');
 
   const loadAllData = async () => {
-    const [eventsRes, rolesRes, templatesRes, settingsRes] = await Promise.all([
+    const [eventsRes, rolesRes, templatesRes, settingsRes, senderSettingsRes] = await Promise.all([
       apiFetch('/api/events'),
       apiFetch('/api/roles'),
       apiFetch('/api/templates'),
       apiFetch('/api/notifications'),
+      apiFetch('/api/config/notifications/email-settings'),
     ]);
 
-    const [eventsRaw, rolesRaw, templatesRaw, settingsRaw] = await Promise.all([
+    const [eventsRaw, rolesRaw, templatesRaw, settingsRaw, senderSettingsRaw] = await Promise.all([
       parseJsonOrThrow(eventsRes, 'Load notification events'),
       parseJsonOrThrow(rolesRes, 'Load available roles'),
       parseJsonOrThrow(templatesRes, 'Load notification templates'),
       parseJsonOrThrow(settingsRes, 'Load notification settings'),
+      parseJsonOrThrow(senderSettingsRes, 'Load notification email settings'),
     ]);
 
     const normalisedRoles = normaliseRolesList(rolesRaw);
     const templateOptions = buildTemplateOptions(templatesRaw);
     const eventRows = buildEventRows(eventsRaw, normalisedRoles, templateOptions, settingsRaw);
 
-    return { eventRows, templateOptions };
+    return {
+      eventRows,
+      templateOptions,
+      senderEmail: normaliseEmailInput(senderSettingsRaw?.senderEmail || ''),
+    };
   };
 
   // Fetch all reference data and settings
@@ -209,7 +219,7 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
       setFlashMessages([]);
 
       try {
-        const { eventRows, templateOptions } = await loadAllData();
+        const { eventRows, templateOptions, senderEmail: loadedSenderEmail } = await loadAllData();
 
         if (cancelled) return;
 
@@ -217,6 +227,9 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
         setEvents(preparedRows);
         setSavedEvents(cloneEventRows(preparedRows));
         setTemplates(templateOptions);
+        setSenderEmail(loadedSenderEmail);
+        setSavedSenderEmail(loadedSenderEmail);
+        setSenderValidationError('');
         setDirty(false);
       } catch (error) {
         if (cancelled) return;
@@ -249,6 +262,17 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
   }, []);
 
   const markDirty = () => setDirty(true);
+
+  const handleSenderEmailChange = ({ detail }) => {
+    const nextValue = normaliseEmailInput(detail.value);
+    setSenderEmail(nextValue);
+    if (!nextValue || isValidEmail(nextValue)) {
+      setSenderValidationError('');
+    } else {
+      setSenderValidationError('Enter a valid email address.');
+    }
+    markDirty();
+  };
 
   const handleToggle = (parentIdx, childIdx) => {
     setEvents((current) =>
@@ -322,6 +346,24 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
     setSaving(true);
     setFlashMessages([]);
 
+    const normalizedSenderEmail = normaliseEmailInput(senderEmail);
+    const senderChanged = normalizedSenderEmail !== savedSenderEmail;
+
+    if (normalizedSenderEmail && !isValidEmail(normalizedSenderEmail)) {
+      setSaving(false);
+      setSenderValidationError('Enter a valid email address.');
+      setFlashMessages([
+        {
+          type: 'error',
+          content: 'Enter a valid sender email address before saving.',
+          dismissible: true,
+          onDismiss: () => setFlashMessages([]),
+          id: 'notif-save-sender-invalid',
+        },
+      ]);
+      return;
+    }
+
     try {
       const changed = [];
 
@@ -356,7 +398,7 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
         });
       });
 
-      if (!changed.length) {
+      if (!changed.length && !senderChanged) {
         setSaving(false);
         setDirty(false);
         setFlashMessages([
@@ -371,39 +413,66 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
         return;
       }
 
-      await Promise.all(
-        changed.map(async (payload) => {
-          const response = await apiFetch('/api/notifications', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
+      if (changed.length) {
+        await Promise.all(
+          changed.map(async (payload) => {
+            const response = await apiFetch('/api/notifications', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
 
-          let body = null;
+            let body = null;
 
-          try {
-            body = await response.json();
-          } catch (err) {
-            body = null;
-          }
+            try {
+              body = await response.json();
+            } catch (err) {
+              body = null;
+            }
 
-          if (!response.ok || (body && body.error)) {
-            const detail = body && (body.error || body.message);
+            if (!response.ok || (body && body.error)) {
+              const detail = body && (body.error || body.message);
 
-            throw new Error(
-              detail ||
-                `Failed to save setting for ${payload.event} (${payload.role})`,
-            );
-          }
-        }),
-      );
+              throw new Error(
+                detail ||
+                  `Failed to save setting for ${payload.event} (${payload.role})`,
+              );
+            }
+          }),
+        );
+      }
 
-      const { eventRows, templateOptions } = await loadAllData();
+      if (senderChanged) {
+        const senderResponse = await apiFetch('/api/config/notifications/email-settings', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            senderEmail: normalizedSenderEmail || null,
+          }),
+        });
+
+        let senderBody = null;
+        try {
+          senderBody = await senderResponse.json();
+        } catch (err) {
+          senderBody = null;
+        }
+
+        if (!senderResponse.ok || (senderBody && senderBody.error)) {
+          const detail = senderBody && (senderBody.error || senderBody.message);
+          throw new Error(detail || 'Failed to save notification email sender.');
+        }
+      }
+
+      const { eventRows, templateOptions, senderEmail: loadedSenderEmail } = await loadAllData();
 
       const preparedRows = cloneEventRows(eventRows);
       setEvents(preparedRows);
       setSavedEvents(cloneEventRows(preparedRows));
       setTemplates(templateOptions);
+      setSenderEmail(loadedSenderEmail);
+      setSavedSenderEmail(loadedSenderEmail);
+      setSenderValidationError('');
       setDirty(false);
       setSaving(false);
 
@@ -433,6 +502,8 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
 
   const handleCancel = () => {
     setEvents(cloneEventRows(savedEvents));
+    setSenderEmail(savedSenderEmail);
+    setSenderValidationError('');
     setDirty(false);
     setFlashMessages([]);
   };
@@ -617,6 +688,21 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
       </p>
 
       {flashMessages.length > 0 && <Flashbar items={flashMessages} />}
+
+      <Box margin={{ bottom: 'l' }}>
+        <FormField
+          label="PATH sender email"
+          description={`Used as the From address for PATH-generated SES emails. Leave blank to fall back to ${EMAIL_SETTINGS_FALLBACK}.`}
+          errorText={senderValidationError || undefined}
+        >
+          <Input
+            type="email"
+            value={senderEmail}
+            onChange={handleSenderEmailChange}
+            placeholder={EMAIL_SETTINGS_FALLBACK}
+          />
+        </FormField>
+      </Box>
 
       <Box>
         <Table

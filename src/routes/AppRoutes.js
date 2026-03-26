@@ -707,7 +707,7 @@ const AppRoutes = ({
       </Route>
 
       <Route path="/esdc/overview">
-        <Guard roles={['System Administrator', 'Program Administrator']} path="/esdc/overview">
+        <Guard roles={['System Administrator', 'NWAC Administrator']} path="/esdc/overview">
           {renderContent(
             EsdcSubmissionsOverviewPage,
             [
@@ -742,7 +742,7 @@ const AppRoutes = ({
       </Route>
 
       <Route path="/esdc/participants" exact>
-        <Guard roles={['System Administrator', 'Program Administrator']} path="/esdc/participants">
+        <Guard roles={['System Administrator', 'NWAC Administrator']} path="/esdc/participants">
           {renderContent(
             EsdcParticipantSubmissionsPage,
             [
@@ -778,7 +778,7 @@ const AppRoutes = ({
       </Route>
 
       <Route path="/esdc/participants/:clientId">
-        <Guard roles={['System Administrator', 'Program Administrator']} path="/esdc/participants">
+        <Guard roles={['System Administrator', 'NWAC Administrator']} path="/esdc/participants">
           {renderContent(
             ParticipantWorkspacePage,
             [
@@ -814,7 +814,7 @@ const AppRoutes = ({
       </Route>
 
       <Route path="/esdc/reporting">
-        <Guard roles={['System Administrator', 'Program Administrator']} path="/esdc/reporting">
+        <Guard roles={['System Administrator', 'NWAC Administrator']} path="/esdc/reporting">
           {renderContent(
             EsdcReportingPackagesPage,
             [

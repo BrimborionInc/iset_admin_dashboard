@@ -3,171 +3,171 @@
   "routes": {
     "/access-control": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/admin/upload-config": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/application-case/:id": [
       "System Administrator",
-      "Program Administrator",
-      "Regional Coordinator",
-      "Application Assessor"
+      "NWAC Administrator",
+      "Regional Manager",
+      "ISET Coordinator"
     ],
     "/iset/applications/intake": [
       "System Administrator",
-      "Program Administrator",
-      "Regional Coordinator",
-      "Application Assessor"
+      "NWAC Administrator",
+      "Regional Manager",
+      "ISET Coordinator"
     ],
     "/audit-logs-dashboard": [
       "System Administrator"
     ],
     "/case-assignment-dashboard": [
       "System Administrator",
-      "Program Administrator",
-      "Regional Coordinator",
-      "Application Assessor"
+      "NWAC Administrator",
+      "Regional Manager",
+      "ISET Coordinator"
     ],
     "/iset/cases": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/iset/imports/client-files": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/iset/payments": [
       "System Administrator",
-      "Program Administrator",
-      "Regional Coordinator",
-      "Application Assessor"
+      "NWAC Administrator",
+      "Regional Manager",
+      "ISET Coordinator"
     ],
     "/cases/:caseId": [
       "System Administrator",
-      "Program Administrator",
-      "Regional Coordinator",
-      "Application Assessor"
+      "NWAC Administrator",
+      "Regional Manager",
+      "ISET Coordinator"
     ],
     "/contact-communications": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/messages": [
       "System Administrator",
-      "Program Administrator",
-      "Regional Coordinator",
-      "Application Assessor"
+      "NWAC Administrator",
+      "Regional Manager",
+      "ISET Coordinator"
     ],
     "/job-bank-search": [
       "System Administrator",
-      "Program Administrator",
-      "Regional Coordinator",
-      "Application Assessor"
+      "NWAC Administrator",
+      "Regional Manager",
+      "ISET Coordinator"
     ],
     "/case-assignment-dashboard?view=assignment": [
       "System Administrator"
     ],
     "/configuration/events": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/configuration/query-editor": [
       "System Administrator"
     ],
     "/configuration-settings": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/finance/overview": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/finance/budgets": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/finance/salaries": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/finance/allocations": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/finance/payments": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/finance/reconciliation": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/finance/reports": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/finance/monitoring": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/finance/forecasting": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/finance/settings": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/esdc/overview": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/esdc/participants": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/esdc/reporting": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/help-support-dashboard": [
       "System Administrator",
-      "Program Administrator",
-      "Regional Coordinator",
-      "Application Assessor"
+      "NWAC Administrator",
+      "Regional Manager",
+      "ISET Coordinator"
     ],
     "/language-settings-dashboard": [
       "System Administrator"
     ],
     "/manage-components": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/manage-notifications": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/template-editor": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/manage-security-options": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/manage-workflows": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/modify-component/:id": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/modify-workflow": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/nwac-hub-management": [
       "System Administrator"
@@ -180,38 +180,39 @@
     ],
     "/reporting/regional-snapshot": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/reporting/data-and-results": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ],
     "/reporting-and-monitoring-dashboard": [
       "System Administrator"
     ],
     "/documentation": [
       "System Administrator",
-      "Program Administrator",
-      "Regional Coordinator",
-      "Application Assessor"
+      "NWAC Administrator",
+      "Regional Manager",
+      "ISET Coordinator"
     ],
     "/tutorials-dashboard": [
       "System Administrator",
-      "Program Administrator",
-      "Regional Coordinator",
-      "Application Assessor"
+      "NWAC Administrator",
+      "Regional Manager",
+      "ISET Coordinator"
     ],
     "/user-management-dashboard": [
       "System Administrator",
-      "Program Administrator",
-      "Regional Coordinator"
+      "NWAC Administrator",
+      "Regional Manager",
+      "ISET Coordinator"
     ],
     "/visual-settings": [
       "System Administrator"
     ],
     "/iset/cases/new": [
       "System Administrator",
-      "Program Administrator"
+      "NWAC Administrator"
     ]
   }
 }

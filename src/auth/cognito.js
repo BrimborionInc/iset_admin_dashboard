@@ -182,30 +182,29 @@ export function getIdTokenClaims() {
 
 export function getRoleFromClaims(claims) {
   if (!claims) return undefined;
-  const raw = claims.role || (Array.isArray(claims['cognito:groups']) ? claims['cognito:groups'][0] : undefined);
-  if (!raw) return undefined;
-  const norm = normalizeRole(raw);
-  return norm;
+  const explicit = normalizeRole(claims.role);
+  if (explicit) return explicit;
+  const groups = Array.isArray(claims['cognito:groups']) ? claims['cognito:groups'] : [];
+  for (const group of ['System_Administrator', 'NWAC_Administrator', 'Regional_Manager', 'ISET_Coordinator']) {
+    if (groups.includes(group)) {
+      return normalizeRole(group);
+    }
+  }
+  return undefined;
 }
 
-// Map backend / Cognito group codes to UI display names used in roleMatrix & nav filtering
+// Map approved Cognito admin groups to canonical in-app role labels.
 function normalizeRole(r) {
+  if (!r) return undefined;
   const map = {
-    SysAdmin: 'System Administrator',
-    'System Administrator': 'System Administrator',
     System_Administrator: 'System Administrator',
-    ProgramAdmin: 'Program Administrator',
-    'Program Administrator': 'Program Administrator',
-    NWAC_Administrator: 'Program Administrator',
-    RegionalCoordinator: 'Regional Coordinator',
-    'Regional Coordinator': 'Regional Coordinator',
-    Regional_Manager: 'Regional Coordinator',
-    Adjudicator: 'Application Assessor',
-    Assessor: 'Application Assessor',
-    ISET_Coordinator: 'Application Assessor',
-    'ApplicationAssessor': 'Application Assessor',
-    'Application Assessor': 'Application Assessor',
-    PTMA: 'Application Assessor'
+    'System Administrator': 'System Administrator',
+    NWAC_Administrator: 'NWAC Administrator',
+    'NWAC Administrator': 'NWAC Administrator',
+    Regional_Manager: 'Regional Manager',
+    'Regional Manager': 'Regional Manager',
+    ISET_Coordinator: 'ISET Coordinator',
+    'ISET Coordinator': 'ISET Coordinator',
   };
-  return map[r] || r; // fall back to raw if unknown
+  return map[r];
 }

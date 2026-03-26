@@ -300,11 +300,6 @@ const ClientFileImportWidget = ({
           </Alert>
         ) : null}
 
-        <Alert type="info" header="Client batch import only">
-          This dashboard creates or updates core client files only. It does not create applicant accounts, historical
-          applications, assessments, or interventions.
-        </Alert>
-
         <FormField
           label="Spreadsheet"
           description="Upload one client backload spreadsheet for dry-run review."

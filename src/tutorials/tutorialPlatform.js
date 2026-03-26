@@ -141,7 +141,7 @@ const TUTORIAL_DEFINITIONS = [
   {
     tutorialId: PROGRAM_ADMIN_INTRO_TUTORIAL_ID,
     category: 'admin-console-intro',
-    title: 'Program Administrator intro tour',
+    title: 'NWAC Administrator intro tour',
     descriptionLines: [
       'Get oriented in the Admin Console home page, queue workflow, and navigation.',
       'Starts with your home page, then walks through key administrator widgets and tutorial controls.'
@@ -443,21 +443,21 @@ const getHomeIntroTutorialIdForRole = (role) => {
   if (!normalized) return null;
 
   if (
-    normalized === 'application assessor' ||
+    normalized === 'iset coordinator' ||
     normalized === 'iset coordinator'
   ) {
     return ISET_COORDINATOR_INTRO_TUTORIAL_ID;
   }
 
   if (
-    normalized === 'regional coordinator' ||
+    normalized === 'regional manager' ||
     normalized === 'regional manager'
   ) {
     return REGIONAL_MANAGER_INTRO_TUTORIAL_ID;
   }
 
   if (
-    normalized === 'program administrator' ||
+    normalized === 'nwac administrator' ||
     normalized === 'program admin' ||
     normalized === 'nwac administrator'
   ) {
@@ -478,12 +478,12 @@ const isHomeIntroTutorial = (tutorial) => {
 };
 
 const APPLICATION_WORKSPACE_ROLE_KEYS = new Set([
-  'application assessor',
   'iset coordinator',
-  'program administrator',
+  'iset coordinator',
+  'nwac administrator',
   'program admin',
   'nwac administrator',
-  'regional coordinator',
+  'regional manager',
   'regional manager'
 ]);
 
@@ -493,7 +493,7 @@ const CASE_WORKSPACE_ROLE_KEYS = new Set([
 ]);
 
 const NWAC_ASSESSMENT_ROLE_KEYS = new Set([
-  'program administrator',
+  'nwac administrator',
   'program admin',
   'nwac administrator',
   'system administrator'

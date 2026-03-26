@@ -5,7 +5,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-03-24
+Last Updated: 2026-03-26
 
 ## Working relationship (design dialog)
 
@@ -72,6 +72,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 ## High-value repo map
 
 - Docs base path: `X:\ISET\admin-dashboard\docs` (WSL: `/mnt/x/ISET/admin-dashboard/docs`)
+- Applicant-account activation data model: `docs/data/applicant-account-activation.md`
 - Client-file import guide: `docs/guides/client-file-imports.md`
 - Client Batch Import dashboard reference: `docs/dashboards/client-file-import-dashboard.md`
 - Data and Results dashboard reference: `docs/dashboards/data-and-results-dashboard.md`
@@ -177,6 +178,20 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Current finance tracking direction: keep `Reporting` read-only/report-oriented and put editable finance/admin tracking dashboards under `Budgets and Finance`.
 - Current `Budgets and Finance > Salaries` implementation: standard Cloudscape board dashboard backed by `finance_regional_salary_entry`, with a fiscal-year control, one editable annual salary row per province/territory, explicit budget-pot assignment, and derived monthly values shown for review.
 - `Budgets and Finance > Salaries` is monthly total tracking only. It is not payroll, not AP processing, and not the accounting system of record.
+- Current `Case Workspace > Case header` applicant-account rule: show `PATH Account Status` directly in the detail grid, and expose a quick action that creates/sends or resends applicant activation from the case itself so case managers do not need to leave the workspace for the common activation flow.
+
+## Applicant account activation context
+
+- Imported participant/applicant accounts now use a PATH-managed activation workflow anchored on `client`, not the legacy generic `user` admin model.
+- Current schema anchor: `client.applicant_cognito_sub`, `client.applicant_cognito_username`, `client.applicant_account_status`, `client.applicant_account_email`, `client.applicant_invited_at`, `client.applicant_invited_by_staff_profile_id`, and `client.applicant_activated_at`, plus audit table `client_applicant_account_event`.
+- Current visible PATH statuses are `No account`, `Ready to invite`, `Invitation sent`, and `Activated`.
+- Current import rule: client-file import may silently create/link an applicant Cognito account only when the row resolves to exactly one clean email. Missing, invalid, partially invalid, or multiple email values must suppress account creation while still allowing the client/case import path when otherwise valid.
+- Current no-cold-email rule: import must never send Cognito welcome mail or PATH activation mail. Account creation uses Cognito admin APIs with message suppression only.
+- Current activation rule: PATH sends its own branded `Activate your account` email later as a manual staff action; the public portal wraps Cognito forgot-password mechanics behind `/activate-account` and activation-specific copy so applicants are never told they have “forgotten” a password they never set.
+- Current identity-link rule: one client maps to one applicant account. Reuse an existing linked applicant Cognito user for repeat imports rather than creating duplicates.
+- Current workflow-anchor rule: PATH owns invitation state and timestamps on `client`; Cognito remains the identity store; the legacy `user` table is still seeded/linked so public-portal auth continues to work.
+- Current activation-complete rule: mark applicant accounts `Activated` on the first successful authenticated portal session, not when an invitation is sent and not merely when a reset code is requested.
+- Current user-management rule: `Manage Users` now has an `Applicant Accounts` tab for this workflow, and `Application Assessor` may access that tab even though staff-user administration remains restricted.
 
 ## Known pitfalls
 
@@ -267,3 +282,4 @@ Notes:
 - Admin dashboard and public portal are separate apps/repos.
 - Do not copy env files or code between apps without explicit approval.
 - Confirm which renderer you are editing before making intake-rendering changes.
+- PATH-generated SES sender email is now shared through `iset_runtime_config` (`scope='notifications'`, `k='path.email'`) and edited from the admin Notification Settings widget; keep admin and portal mailers aligned to that runtime value rather than hardcoded app-local defaults.

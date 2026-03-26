@@ -88,7 +88,7 @@ const buildRegionInfoRows = report => [
   { label: "Region", value: report?.region?.name || "—" },
   { label: "Province/Territory", value: report?.region?.code || "—" },
   { label: "Regional Manager", value: report?.snapshot?.regionalManagerName || "—" },
-  { label: "Regional Coordinator", value: report?.snapshot?.regionalCoordinatorName || "—" },
+  { label: "ISET Coordinator", value: report?.snapshot?.regionalCoordinatorName || "—" },
 ];
 
 const buildClientActivityRows = report => [
@@ -222,7 +222,7 @@ const writeSummaryWorksheet = (worksheet, reports, meta = {}) => {
     "Region",
     "Province/Territory",
     "Regional Manager",
-    "Regional Coordinator",
+    "Regional Manager",
     "Applications Received",
     "Funded",
     "Denied/Ineligible/Withdrawn/NC",

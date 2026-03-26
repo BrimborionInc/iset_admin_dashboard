@@ -23,6 +23,7 @@ import { apiFetch } from '../auth/apiClient';
 import Board from '@cloudscape-design/board-components/board';
 import BoardItem from '@cloudscape-design/board-components/board-item';
 import { getRoleDisplayName } from '../utils/roleDisplay';
+import { useAuth } from '../context/AuthContext';
 
 // Canonical (flexible) role keys – UI should adapt if list changes later
 const ROLE_OPTIONS = [
@@ -35,6 +36,10 @@ const ROLE_OPTIONS = [
 // Users loaded from backend (server fallback if provider disabled)
 
 export default function UserManagementDashboard() {
+  const { currentUser } = useAuth();
+  const currentRole = currentUser?.role || null;
+  const canManageAdminUsers = ['System Administrator', 'NWAC Administrator', 'Regional Manager'].includes(currentRole);
+  const canManageApplicantAccounts = canManageAdminUsers || currentRole === 'ISET Coordinator';
   const [items, setItems] = useState([
   { id: 'admin-users-table', rowSpan: 6, columnSpan: 4, data: { title: 'Administrative Users' } },
   { id: 'role-kpis', rowSpan: 3, columnSpan: 1, data: { title: 'Role Distribution' } },
@@ -42,11 +47,21 @@ export default function UserManagementDashboard() {
   { id: 'metrics-snapshot', rowSpan: 3, columnSpan: 1, data: { title: 'Metrics Snapshot' } },
   { id: 'audit-log', rowSpan: 3, columnSpan: 1, data: { title: 'Recent Admin Actions' } }
   ]);
+  const [pageTabId, setPageTabId] = useState(canManageAdminUsers ? 'admin-users' : 'applicant-accounts');
   const [users, setUsers] = useState([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
+  const [applicantAccounts, setApplicantAccounts] = useState([]);
+  const [loadingApplicantAccounts, setLoadingApplicantAccounts] = useState(false);
+  const [applicantFilteringText, setApplicantFilteringText] = useState('');
+  const [applicantActionClientId, setApplicantActionClientId] = useState(null);
   const [regionOptions, setRegionOptions] = useState([]);
   // Load users once
   useEffect(() => {
+    if (!canManageAdminUsers) {
+      setUsers([]);
+      setLoadingUsers(false);
+      return undefined;
+    }
     let cancelled = false;
     async function load() {
       setLoadingUsers(true);
@@ -66,8 +81,12 @@ export default function UserManagementDashboard() {
     }
     load();
     return () => { cancelled = true; };
-  }, []);
+  }, [canManageAdminUsers]);
   useEffect(() => {
+    if (!canManageAdminUsers) {
+      setRegionOptions([]);
+      return undefined;
+    }
     let cancelled = false;
     async function loadRegions() {
       try {
@@ -91,7 +110,7 @@ export default function UserManagementDashboard() {
     }
     loadRegions();
     return () => { cancelled = true; };
-  }, []);
+  }, [canManageAdminUsers]);
   const [filteringText, setFilteringText] = useState('');
   const [selected, setSelected] = useState([]); // can be multi
   const [showCreate, setShowCreate] = useState(false);
@@ -110,6 +129,17 @@ export default function UserManagementDashboard() {
   const [regionEditIds, setRegionEditIds] = useState([]);
   const [regionEditId, setRegionEditId] = useState('');
   const [regionEditBusy, setRegionEditBusy] = useState(false);
+
+  useEffect(() => {
+    if (canManageAdminUsers && pageTabId === 'applicant-accounts') return;
+    if (!canManageAdminUsers && canManageApplicantAccounts) {
+      setPageTabId('applicant-accounts');
+      return;
+    }
+    if (canManageAdminUsers) {
+      setPageTabId('admin-users');
+    }
+  }, [canManageAdminUsers, canManageApplicantAccounts, pageTabId]);
 
   const QUICK_FILTERS = useMemo(() => [
     { id: 'all', label: 'All', predicate: () => true },
@@ -137,6 +167,7 @@ export default function UserManagementDashboard() {
 
   // Debounced server search
   useEffect(() => {
+    if (!canManageAdminUsers) return undefined;
     const q = filteringText.trim();
     const handle = setTimeout(async () => {
       try {
@@ -148,7 +179,7 @@ export default function UserManagementDashboard() {
       } catch { /* silent */ }
     }, 550);
     return () => clearTimeout(handle);
-  }, [filteringText]);
+  }, [canManageAdminUsers, filteringText]);
 
   const regionCodeById = useMemo(() => {
     const map = new Map();
@@ -226,6 +257,118 @@ export default function UserManagementDashboard() {
   function recordAudit(evt) {
     setAudit(a => [{ id: Date.now().toString()+Math.random().toString(36).slice(2,6), time: new Date().toISOString(), ...evt }, ...a].slice(0,50));
   }
+
+  const loadApplicantAccounts = useCallback(async () => {
+    if (!canManageApplicantAccounts) {
+      setApplicantAccounts([]);
+      setLoadingApplicantAccounts(false);
+      return;
+    }
+    setLoadingApplicantAccounts(true);
+    try {
+      const q = applicantFilteringText.trim();
+      const resp = await apiFetch(`/api/admin/applicants${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const json = await resp.json().catch(() => ({ users: [] }));
+      setApplicantAccounts(Array.isArray(json.users) ? json.users : []);
+    } catch (error) {
+      pushFlash('error', `Failed to load applicant accounts (${error.message || 'network'})`);
+      setApplicantAccounts([]);
+    } finally {
+      setLoadingApplicantAccounts(false);
+    }
+  }, [applicantFilteringText, canManageApplicantAccounts]);
+
+  useEffect(() => {
+    if (!canManageApplicantAccounts) {
+      setApplicantAccounts([]);
+      setLoadingApplicantAccounts(false);
+      return undefined;
+    }
+    const handle = setTimeout(() => {
+      loadApplicantAccounts();
+    }, applicantFilteringText.trim() ? 350 : 0);
+    return () => clearTimeout(handle);
+  }, [applicantFilteringText, canManageApplicantAccounts, loadApplicantAccounts]);
+
+  const runApplicantAction = useCallback(async (clientId, action) => {
+    if (!clientId) return;
+    const label = action === 'create' ? 'Create account' : 'Send activation';
+    setApplicantActionClientId(clientId);
+    try {
+      const endpoint = action === 'create'
+        ? `/api/admin/applicants/${clientId}/create-account`
+        : `/api/admin/applicants/${clientId}/send-activation`;
+      const resp = await apiFetch(endpoint, { method: 'POST' });
+      const json = await resp.json().catch(() => null);
+      if (!resp.ok) {
+        throw new Error(json?.message || `HTTP ${resp.status}`);
+      }
+      pushFlash('success', action === 'create' ? 'Applicant account created.' : 'Activation email sent.');
+      recordAudit({
+        actor: currentUser?.displayName || currentUser?.email || 'Current user',
+        action: label,
+        detail: json?.user?.email || json?.user?.applicantName || 'Applicant',
+        target: json?.user?.caseNumber || `Client ${clientId}`,
+      });
+      await loadApplicantAccounts();
+    } catch (error) {
+      pushFlash('error', `${label} failed (${error.message || 'network'})`);
+    } finally {
+      setApplicantActionClientId(null);
+    }
+  }, [currentUser, loadApplicantAccounts]);
+
+  const applicantColumns = useMemo(() => ([
+    { id: 'applicant', header: 'Applicant', cell: item => item.applicantName },
+    { id: 'email', header: 'Email', cell: item => item.email || '—' },
+    { id: 'case', header: 'Case', cell: item => item.caseNumber || '—' },
+    { id: 'region', header: 'Region', cell: item => item.regionCode || '—' },
+    { id: 'manager', header: 'Case manager', cell: item => item.caseManagerName || '—' },
+    { id: 'status', header: 'Status', cell: item => <ApplicantAccountStatusPill status={item.accountStatus} label={item.accountStatusLabel} /> },
+    { id: 'invited', header: 'Invitation sent', cell: item => item.invitedAt ? new Date(item.invitedAt).toLocaleString() : '—' },
+    { id: 'activated', header: 'Activated', cell: item => item.activatedAt ? new Date(item.activatedAt).toLocaleString() : '—' },
+    {
+      id: 'actions',
+      header: 'Actions',
+      cell: item => (
+        <SpaceBetween direction="horizontal" size="xs">
+          {item.canCreateAccount ? (
+            <Button
+              size="small"
+              loading={applicantActionClientId === item.clientId}
+              onClick={() => runApplicantAction(item.clientId, 'create')}
+            >
+              Create account
+            </Button>
+          ) : null}
+          {item.canSendActivation ? (
+            <Button
+              size="small"
+              variant="primary"
+              loading={applicantActionClientId === item.clientId}
+              onClick={() => runApplicantAction(item.clientId, 'send')}
+            >
+              Send activation
+            </Button>
+          ) : null}
+          {item.canResendActivation ? (
+            <Button
+              size="small"
+              variant="primary"
+              loading={applicantActionClientId === item.clientId}
+              onClick={() => runApplicantAction(item.clientId, 'send')}
+            >
+              Resend activation
+            </Button>
+          ) : null}
+          {!item.canCreateAccount && !item.canSendActivation && !item.canResendActivation ? (
+            <Box variant="small" color="inherit">—</Box>
+          ) : null}
+        </SpaceBetween>
+      )
+    }
+  ]), [applicantActionClientId, runApplicantAction]);
 
   function openRegionEdit(user) {
     if (!user) return;
@@ -522,95 +665,158 @@ export default function UserManagementDashboard() {
     resizeHandleAriaDescription: 'Use Space or Enter to activate resize, arrow keys to adjust, Space/Enter to drop, Esc to cancel'
   };
 
+  const adminUsersBoard = (
+    <Board
+      items={items}
+      renderItem={item => (
+        <BoardItem
+          key={item.id}
+          {...item}
+          header={
+            <Header
+              variant="h2"
+              actions={
+                item.id === 'admin-users-table' ? (
+                  <SpaceBetween direction="horizontal" size="xs">
+                    <Button onClick={() => setShowCreate(true)} variant="primary" disabled={actionBusy}>Create user</Button>
+                    <Button disabled={!selected.length || actionBusy} onClick={bulkDisable}>{actionBusy ? 'Working…' : 'Disable'}</Button>
+                    <Button disabled={!selected.length || actionBusy} onClick={bulkEnable}>{actionBusy ? 'Working…' : 'Enable'}</Button>
+                    <Button disabled={!selected.length || actionBusy} onClick={bulkForceReset}>{actionBusy ? 'Working…' : 'Force reset'}</Button>
+                    <Button disabled={!selected.length || actionBusy} onClick={bulkRemoveRole}>Remove role</Button>
+                    <Button disabled={!selected.length || actionBusy} onClick={bulkResendInvite}>Resend invite</Button>
+                  </SpaceBetween>
+                ) : undefined
+              }
+            >
+              {item.data.title}
+            </Header>
+          }
+          i18nStrings={itemI18n}
+          dragHandleAriaLabel={itemI18n.dragHandleAriaLabel}
+          resizeHandleAriaLabel={itemI18n.resizeHandleAriaLabel}
+        >
+          {item.id === 'admin-users-table' && (
+            <Tabs
+              ariaLabel="Administrative user filters"
+              activeTabId={quickFilter}
+              onChange={({ detail }) => setQuickFilter(detail.activeTabId)}
+              disableContentPaddings
+              tabs={QUICK_FILTERS.map(opt => ({
+                id: opt.id,
+                label: `${opt.label} (${quickFilterCounts[opt.id] ?? 0})`,
+                content: (
+                  <SpaceBetween size="s">
+                    <Table
+                      selectionType="multi"
+                      onSelectionChange={({ detail }) => onSelectionChange(detail)}
+                      selectedItems={selected}
+                      trackBy="username"
+                      columnDefinitions={columns}
+                      items={filtered}
+                      loading={loadingUsers}
+                      loadingText="Loading administrative users"
+                      variant="embedded"
+                      filter={<TextFilter filteringText={filteringText} onChange={e => setFilteringText(e.detail.filteringText)} filteringPlaceholder="Search users" />}
+                      header={<Header counter={`(${filtered.length})${selected.length ? ` — ${selected.length} selected` : ''}`}>Administrative Users</Header>}
+                      empty={<Box textAlign="center" color="inherit"><SpaceBetween size="m"><b>No users</b><Button onClick={() => setShowCreate(true)} variant="primary">Create user</Button></SpaceBetween></Box>}
+                    />
+                    {inspectorOpen && selected.length === 1 && (
+                      <UserInspector
+                        user={selected[0]}
+                        onClose={() => { setInspectorOpen(false); setSelected([]); }}
+                        onChangeRole={(username, currentRole) => { setShowRoleChange(true); setRoleChangeTarget({ username, newRole: currentRole }); }}
+                        resolveRegionLabel={resolveUserRegionLabel}
+                        onEditRegions={openRegionEdit}
+                      />
+                    )}
+                  </SpaceBetween>
+                )
+              }))}
+            />
+          )}
+          {item.id === 'role-kpis' && (
+            <RoleKpisWidget counts={roleCounts} />
+          )}
+          {item.id === 'security-compliance' && (
+            <SecurityComplianceWidget metrics={securityMetrics} />
+          )}
+          {item.id === 'audit-log' && (
+            <AuditLogWidget audit={audit} />
+          )}
+          {item.id === 'metrics-snapshot' && (
+            <MetricsSnapshotWidget users={users} />
+          )}
+        </BoardItem>
+      )}
+      onItemsChange={e => setItems(e.detail.items)}
+      i18nStrings={boardI18n}
+    />
+  );
+
+  const applicantAccountsPanel = (
+    <Container
+      header={
+        <Header
+          variant="h2"
+          counter={`(${applicantAccounts.length})`}
+          actions={<Button onClick={loadApplicantAccounts} disabled={loadingApplicantAccounts}>Refresh</Button>}
+        >
+          Applicant Accounts
+        </Header>
+      }
+    >
+      <SpaceBetween size="m">
+        <Box variant="small" color="inherit">
+          Manage imported applicant accounts without sending portal emails at import time. Case managers can create missing accounts, send activation emails, and track who has activated PATH access.
+        </Box>
+        <Table
+          variant="embedded"
+          trackBy="clientId"
+          columnDefinitions={applicantColumns}
+          items={applicantAccounts}
+          loading={loadingApplicantAccounts}
+          loadingText="Loading applicant accounts"
+          filter={
+            <TextFilter
+              filteringText={applicantFilteringText}
+              onChange={event => setApplicantFilteringText(event.detail.filteringText)}
+              filteringPlaceholder="Search applicant accounts"
+            />
+          }
+          empty={
+            <Box textAlign="center" color="inherit">
+              <b>No applicant accounts found</b>
+            </Box>
+          }
+        />
+      </SpaceBetween>
+    </Container>
+  );
+
+  const dashboardTabs = [];
+  if (canManageAdminUsers) {
+    dashboardTabs.push({
+      id: 'admin-users',
+      label: 'Administrative Users',
+      content: adminUsersBoard,
+    });
+  }
+  if (canManageApplicantAccounts) {
+    dashboardTabs.push({
+      id: 'applicant-accounts',
+      label: 'Applicant Accounts',
+      content: applicantAccountsPanel,
+    });
+  }
+
   return (
     <>
-  {flashItems.length > 0 && <Box margin={{ bottom: 'm' }}><Flashbar items={flashItems} /></Box>}
-      <Board
-        items={items}
-        renderItem={item => (
-          <BoardItem
-            key={item.id}
-            {...item}
-            header={
-              <Header
-                variant="h2"
-                actions={
-                  item.id === 'admin-users-table' ? (
-                    <SpaceBetween direction="horizontal" size="xs">
-                      <Button onClick={() => setShowCreate(true)} variant="primary" disabled={actionBusy}>Create user</Button>
-                      <Button disabled={!selected.length || actionBusy} onClick={bulkDisable}>{actionBusy ? 'Working…' : 'Disable'}</Button>
-                      <Button disabled={!selected.length || actionBusy} onClick={bulkEnable}>{actionBusy ? 'Working…' : 'Enable'}</Button>
-                      <Button disabled={!selected.length || actionBusy} onClick={bulkForceReset}>{actionBusy ? 'Working…' : 'Force reset'}</Button>
-                      <Button disabled={!selected.length || actionBusy} onClick={bulkRemoveRole}>Remove role</Button>
-                      <Button disabled={!selected.length || actionBusy} onClick={bulkResendInvite}>Resend invite</Button>
-                    </SpaceBetween>
-                  ) : undefined
-                }
-              >
-                {item.data.title}
-              </Header>
-            }
-            i18nStrings={itemI18n}
-            dragHandleAriaLabel={itemI18n.dragHandleAriaLabel}
-            resizeHandleAriaLabel={itemI18n.resizeHandleAriaLabel}
-          >
-            {item.id === 'admin-users-table' && (
-              <Tabs
-                ariaLabel="Administrative user filters"
-                activeTabId={quickFilter}
-                onChange={({ detail }) => setQuickFilter(detail.activeTabId)}
-                disableContentPaddings
-                tabs={QUICK_FILTERS.map(opt => ({
-                  id: opt.id,
-                  label: `${opt.label} (${quickFilterCounts[opt.id] ?? 0})`,
-                  content: (
-                    <SpaceBetween size="s">
-                      <Table
-                        selectionType="multi"
-                        onSelectionChange={({ detail }) => onSelectionChange(detail)}
-                        selectedItems={selected}
-                        trackBy="username"
-                        columnDefinitions={columns}
-                        items={filtered}
-                        loading={loadingUsers}
-                        loadingText="Loading administrative users"
-                        variant="embedded"
-                        filter={<TextFilter filteringText={filteringText} onChange={e => setFilteringText(e.detail.filteringText)} filteringPlaceholder="Search users" />}
-                        header={<Header
-                          counter={`(${filtered.length})${selected.length ? ` — ${selected.length} selected` : ''}`}
-                        >Administrative Users</Header>}
-                        empty={<Box textAlign="center" color="inherit"><SpaceBetween size="m"><b>No users</b><Button onClick={() => setShowCreate(true)} variant="primary">Create user</Button></SpaceBetween></Box>}
-                      />
-                      {inspectorOpen && selected.length === 1 && (
-                        <UserInspector
-                          user={selected[0]}
-                          onClose={() => { setInspectorOpen(false); setSelected([]); }}
-                          onChangeRole={(username, currentRole) => { setShowRoleChange(true); setRoleChangeTarget({ username, newRole: currentRole }); }}
-                          resolveRegionLabel={resolveUserRegionLabel}
-                          onEditRegions={openRegionEdit}
-                        />
-                      )}
-                    </SpaceBetween>
-                  )
-                }))}
-              />
-            )}
-            {item.id === 'role-kpis' && (
-              <RoleKpisWidget counts={roleCounts} />
-            )}
-            {item.id === 'security-compliance' && (
-              <SecurityComplianceWidget metrics={securityMetrics} />
-            )}
-            {item.id === 'audit-log' && (
-              <AuditLogWidget audit={audit} />
-            )}
-            {item.id === 'metrics-snapshot' && (
-              <MetricsSnapshotWidget users={users} />
-            )}
-          </BoardItem>
-        )}
-  onItemsChange={e => setItems(e.detail.items)}
-  i18nStrings={boardI18n}
+      {flashItems.length > 0 && <Box margin={{ bottom: 'm' }}><Flashbar items={flashItems} /></Box>}
+      <Tabs
+        activeTabId={pageTabId}
+        onChange={({ detail }) => setPageTabId(detail.activeTabId)}
+        tabs={dashboardTabs}
+        ariaLabel="User management areas"
       />
 
       {showCreate && (
@@ -719,6 +925,17 @@ function StatusPill({ status }) {
     DISABLED: { color: 'red', text: 'Disabled' }
   };
   const cfg = map[status] || { color: 'grey', text: status || 'Unknown' };
+  return <Badge color={cfg.color}>{cfg.text}</Badge>;
+}
+
+function ApplicantAccountStatusPill({ status, label }) {
+  const map = {
+    no_account: { color: 'grey', text: label || 'No account' },
+    created: { color: 'blue', text: label || 'Ready to invite' },
+    invitation_sent: { color: 'green', text: label || 'Invitation sent' },
+    activated: { color: 'green', text: label || 'Activated' },
+  };
+  const cfg = map[status] || { color: 'grey', text: label || status || 'Unknown' };
   return <Badge color={cfg.color}>{cfg.text}</Badge>;
 }
 

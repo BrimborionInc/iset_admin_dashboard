@@ -167,14 +167,19 @@ const canonicalizeRole = (role) => {
 
 const normalizeEscalationRole = (roleKey) => {
   if (!roleKey) return '';
-  if (roleKey === 'application_assessor') return 'coordinator';
+  if (roleKey === 'application_assessor') return 'iset_coordinator';
   if (roleKey === 'regional_coordinator') return 'regional_manager';
-  if (roleKey === 'program_admin') return 'program_administrator';
+  if (roleKey === 'program_admin' || roleKey === 'program_administrator') return 'nwac_administrator';
   return roleKey;
 };
 
 const formatRoleLabel = (roleKey) => {
-  if (!roleKey) return 'reviewer';
+  const normalized = normalizeEscalationRole(roleKey);
+  if (!normalized) return 'reviewer';
+  if (normalized === 'nwac_administrator') return 'NWAC Administrator';
+  if (normalized === 'regional_manager') return 'Regional Manager';
+  if (normalized === 'iset_coordinator') return 'ISET Coordinator';
+  if (normalized === 'system_administrator') return 'System Administrator';
   return roleKey
     .split(/[_\s]+/)
     .filter(Boolean)
@@ -353,8 +358,8 @@ const ApplicationOverviewWidget = ({
   const canonicalRole = toCanonicalRole(userRole || '');
   const canonicalRoleKey = canonicalizeRole(canonicalRole || '');
   const isSystemAdminRole = canonicalRole === 'System Administrator';
-  const isProgramAdminRole = canonicalRole === 'Program Administrator';
-  const isRegionalManagerRole = canonicalRole === 'Regional Coordinator';
+  const isProgramAdminRole = canonicalRole === 'NWAC Administrator';
+  const isRegionalManagerRole = canonicalRole === 'Regional Manager';
   const [confirmStatusChange, setConfirmStatusChange] = useState(null);
   const {
     lockState,
@@ -1656,7 +1661,7 @@ const ApplicationOverviewWidget = ({
       let endpoint = '';
       let payload = {};
       if (isCreate) {
-        const targetRole = roleKey === 'regional_manager' ? 'program_administrator' : 'regional_manager';
+        const targetRole = roleKey === 'regional_manager' ? 'nwac_administrator' : 'regional_manager';
         endpoint = '/api/escalations';
         payload = {
           applicationId: application_id,
@@ -1666,7 +1671,7 @@ const ApplicationOverviewWidget = ({
           targetRole
         };
       } else {
-        const targetRole = actionId === 'escalate_up' ? 'program_administrator' : escalation?.target_role || escalation?.targetRole || null;
+        const targetRole = actionId === 'escalate_up' ? 'nwac_administrator' : escalation?.target_role || escalation?.targetRole || null;
         endpoint = `/api/escalations/${escalation.id}/respond`;
         payload = {
           action: actionId === 'escalate_up' ? 'escalate' : actionId,

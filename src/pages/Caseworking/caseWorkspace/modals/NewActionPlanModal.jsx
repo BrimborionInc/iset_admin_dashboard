@@ -204,8 +204,8 @@ const NewActionPlanModal = ({
   const fundingStreamRef = useRef("");
   const budgetPotRef = useRef("");
   const role = currentUser?.role ? currentUser.role : null;
-  const canonicalRole = role === "Regional Manager" ? "Regional Coordinator" : role;
-  const isAssessor = canonicalRole === "Application Assessor";
+  const canonicalRole = role === "Regional Manager" ? "Regional Manager" : role;
+  const isAssessor = canonicalRole === "ISET Coordinator";
   const postingOptions = [
     { value: "external", label: "External (region/PTMA)" },
     { value: "internal", label: "Internal (NWAC)" },

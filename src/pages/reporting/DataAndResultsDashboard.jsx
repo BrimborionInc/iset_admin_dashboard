@@ -100,17 +100,15 @@ const REPORTING_TARGET_FIELD_DEFINITIONS = [
 ];
 
 const REPORTING_ROLE_ALIASES = {
-  SysAdmin: "System Administrator",
   System_Administrator: "System Administrator",
-  "System Admin": "System Administrator",
-  ProgramAdmin: "Program Administrator",
-  NWAC_Administrator: "Program Administrator",
-  "Program Admin": "Program Administrator",
+  NWAC_Administrator: "NWAC Administrator",
+  Regional_Manager: "Regional Manager",
+  ISET_Coordinator: "ISET Coordinator",
 };
 
 const REPORTING_EDITOR_ROLES = new Set([
   "System Administrator",
-  "Program Administrator",
+  "NWAC Administrator",
 ]);
 
 const FISCAL_YEAR_OPTION_COUNT = 5;

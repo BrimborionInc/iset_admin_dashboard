@@ -55,17 +55,12 @@ function getJWKSForPool(pool) {
 }
 
 const groupRoleMap = {
-  SysAdmin: 'System Administrator',
   System_Administrator: 'System Administrator',
-  ProgramAdmin: 'Program Administrator',
-  NWAC_Administrator: 'Program Administrator',
-  RegionalCoordinator: 'Regional Coordinator',
-  Regional_Manager: 'Regional Coordinator',
-  Assessor: 'Application Assessor',
-  Adjudicator: 'Application Assessor',
-  ISET_Coordinator: 'Application Assessor',
-  ApplicationAssessor: 'Application Assessor'
+  NWAC_Administrator: 'NWAC Administrator',
+  Regional_Manager: 'Regional Manager',
+  ISET_Coordinator: 'ISET Coordinator',
 };
+const groupRolePriority = ['System_Administrator', 'NWAC_Administrator', 'Regional_Manager', 'ISET_Coordinator'];
 
 async function verifyAnyPool(token) {
   // Decode header.payload minimally to read issuer
@@ -86,7 +81,12 @@ function extractAuthFromClaims(claims, poolType) {
   const groups = Array.isArray(claims['cognito:groups']) ? claims['cognito:groups'] : [];
   let mappedRole;
   if (poolType === 'staff') {
-    for (const g of groups) { if (groupRoleMap[g]) { mappedRole = groupRoleMap[g]; break; } }
+    for (const group of groupRolePriority) {
+      if (groups.includes(group)) {
+        mappedRole = groupRoleMap[group];
+        break;
+      }
+    }
   }
   const regionId = claims.region_id != null ? Number(claims.region_id) : (claims['custom:region_id'] != null ? Number(claims['custom:region_id']) : null);
   const userId = claims.user_id != null ? String(claims.user_id) : (claims['custom:user_id'] != null ? String(claims['custom:user_id']) : null);

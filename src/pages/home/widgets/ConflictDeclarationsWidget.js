@@ -138,7 +138,7 @@ const ConflictDeclarationsWidget = ({ role, refreshKey, actions }) => {
     const userRole = (currentUserRole || '').trim();
     return (staff) => {
       if (!staff) return false;
-        if (userRole === 'Regional Coordinator') {
+        if (userRole === 'Regional Manager') {
           if (currentUserId && String(staff.id) === String(currentUserId)) return true;
           const staffRegion = staff.region_id != null ? Number(staff.region_id) : (staff.staff_region_id != null ? Number(staff.staff_region_id) : null);
           return Number.isFinite(staffRegion) && normalizedRegionIds.length && normalizedRegionIds.includes(staffRegion);

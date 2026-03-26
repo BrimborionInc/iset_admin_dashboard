@@ -3,9 +3,9 @@ const EVENT_NAME = 'demo-navigation-visibility';
 
 export const DEMO_NAVIGATION_ROLES = [
   'System Administrator',
-  'Program Administrator',
-  'Regional Coordinator',
-  'Application Assessor'
+  'NWAC Administrator',
+  'Regional Manager',
+  'ISET Coordinator'
 ];
 
 export const DEMO_NAVIGATION_DEFAULT_VISIBILITY = DEMO_NAVIGATION_ROLES.reduce((acc, role) => {

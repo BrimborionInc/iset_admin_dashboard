@@ -55,19 +55,12 @@ function normalizeRoleKey(role) {
   const cleaned = String(role).trim();
   const slug = cleaned.toLowerCase().replace(/[\s_-]+/g, '');
   switch (slug) {
-    case 'sysadmin':
     case 'systemadministrator':
-    case 'systemadmin':
       return 'System_Administrator';
-    case 'programadmin':
-    case 'programadministrator':
     case 'nwacadministrator':
       return 'NWAC_Administrator';
-    case 'regionalcoordinator':
     case 'regionalmanager':
       return 'Regional_Manager';
-    case 'adjudicator':
-    case 'applicationassessor':
     case 'isetcoordinator':
       return 'ISET_Coordinator';
     default:
@@ -127,11 +120,11 @@ function mapAdminRoleKeyToStaffPrimaryRole(roleKey) {
     case 'System_Administrator':
       return 'System Administrator';
     case 'NWAC_Administrator':
-      return 'Program Administrator';
+      return 'NWAC Administrator';
     case 'Regional_Manager':
-      return 'Regional Coordinator';
+      return 'Regional Manager';
     case 'ISET_Coordinator':
-      return 'Application Assessor';
+      return 'ISET Coordinator';
     default:
       return null;
   }
@@ -342,7 +335,7 @@ router.get('/users', async (req, res) => {
   }
 });
 
-router.post('/users', requireRole('System Administrator', 'Program Administrator', 'Regional Coordinator'), async (req, res) => {
+router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager'), async (req, res) => {
     try {
       const actor = req.auth;
       const { email, role, region_id, region_ids, user_id, suppressInvite, name, display_name } = req.body || {};
@@ -427,7 +420,7 @@ router.post('/users', requireRole('System Administrator', 'Program Administrator
     }
   });
 
-  router.patch('/users/:username/disable', requireRole('System Administrator', 'Program Administrator', 'Regional Coordinator'), async (req, res) => {
+  router.patch('/users/:username/disable', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager'), async (req, res) => {
     try {
       const actor = req.auth;
       const { role } = req.body || {};
@@ -445,7 +438,7 @@ router.post('/users', requireRole('System Administrator', 'Program Administrator
     }
   });
 
-  router.patch('/users/:username/enable', requireRole('System Administrator', 'Program Administrator'), async (req, res) => {
+  router.patch('/users/:username/enable', requireRole('System Administrator', 'NWAC Administrator'), async (req, res) => {
     try {
       const username = req.params.username;
       const client = getClient();
@@ -456,7 +449,7 @@ router.post('/users', requireRole('System Administrator', 'Program Administrator
     }
   });
 
-  router.patch('/users/:username/attributes', requireRole('System Administrator', 'Program Administrator', 'Regional Coordinator'), async (req, res) => {
+  router.patch('/users/:username/attributes', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager'), async (req, res) => {
     try {
       const { region_id, region_ids, user_id } = req.body || {};
       const username = req.params.username;
@@ -504,7 +497,7 @@ router.post('/users', requireRole('System Administrator', 'Program Administrator
   });
 
   // Change role (remove from current group, add to target)
-  router.patch('/users/:username/role', requireRole('System Administrator', 'Program Administrator', 'Regional Coordinator'), async (req, res) => {
+  router.patch('/users/:username/role', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager'), async (req, res) => {
     try {
       const actor = req.auth;
       const username = req.params.username;
@@ -528,7 +521,7 @@ router.post('/users', requireRole('System Administrator', 'Program Administrator
     }
   });
 
-  router.delete('/users/:username/role', requireRole('System Administrator', 'Program Administrator', 'Regional Coordinator'), async (req, res) => {
+  router.delete('/users/:username/role', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager'), async (req, res) => {
     try {
       const username = req.params.username;
       const { ListGroupsForUserCommand, AdminRemoveUserFromGroupCommand } = require('@aws-sdk/client-cognito-identity-provider');
@@ -543,7 +536,7 @@ router.post('/users', requireRole('System Administrator', 'Program Administrator
     }
   });
 
-  router.post('/users/:username/resend-invite', requireRole('System Administrator', 'Program Administrator', 'Regional Coordinator'), async (req, res) => {
+  router.post('/users/:username/resend-invite', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager'), async (req, res) => {
     try {
       // There is no direct "resend invite" if MessageAction SUPPRESS was used; placeholder for integration with custom email flow.
       res.json({ message: 'Invite resend placeholder (configure SES/Lambda trigger)' });
@@ -553,7 +546,7 @@ router.post('/users', requireRole('System Administrator', 'Program Administrator
   });
 
   // Force password reset (sets status to FORCE_CHANGE_PASSWORD)
-  router.patch('/users/:username/force-reset', requireRole('System Administrator', 'Program Administrator', 'Regional Coordinator'), async (req, res) => {
+  router.patch('/users/:username/force-reset', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager'), async (req, res) => {
     try {
       const { AdminResetUserPasswordCommand } = require('@aws-sdk/client-cognito-identity-provider');
       const username = req.params.username;

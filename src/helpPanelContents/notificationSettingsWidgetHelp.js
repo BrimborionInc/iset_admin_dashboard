@@ -10,9 +10,15 @@ const NotificationSettingsWidgetHelp = () => (
       on email or bell alerts as needed.
     </p>
     <p>
+      The widget also stores the PATH sender email used for PATH-generated SES
+      emails. That address is shared through runtime configuration so the admin
+      dashboard and portal mailers stay aligned.
+    </p>
+    <p>
       Saved changes update the <code>notification_setting</code> table that the
-      intake service reads before dispatching SES or secure-message copies. Only
-      rows you modify are posted back to the API, so flip the Save and Cancel
+      intake service reads before dispatching SES or secure-message copies, and
+      the sender email persists in <code>iset_runtime_config</code>. Only rows
+      you modify are posted back to the API, so flip the Save and Cancel
       buttons to control when new settings take effect.
     </p>
   </div>

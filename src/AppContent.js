@@ -50,16 +50,16 @@ const TUTORIAL_APP_LAYOUT_RESET_FLAG = 'iset.tutorial.resetApplicationLayout';
 const TUTORIAL_CASE_LAYOUT_RESET_FLAG = 'iset.tutorial.resetCaseWorkspaceLayout';
 const normalizeRoleKey = value => String(value ?? '').trim().toLowerCase();
 const APPLICATION_WORKSPACE_PROMPT_ROLE_KEYS = new Set([
-  'application assessor',
   'iset coordinator',
-  'program administrator',
+  'iset coordinator',
+  'nwac administrator',
   'program admin',
   'nwac administrator',
-  'regional coordinator',
+  'regional manager',
   'regional manager'
 ]);
 const NWAC_DECISION_PROMPT_ROLE_KEYS = new Set([
-  'program administrator',
+  'nwac administrator',
   'program admin',
   'nwac administrator',
   'system administrator'
