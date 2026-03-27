@@ -82,9 +82,10 @@ module "security" {
 module "acm" {
   source = "../../modules/acm"
 
-  admin_domain_name  = var.admin_domain_name
-  portal_domain_name = var.portal_domain_name
-  tags               = local.tags
+  admin_domain_name             = var.admin_domain_name
+  portal_domain_name            = var.portal_domain_name
+  portal_additional_domain_names = var.portal_additional_domain_names
+  tags                          = local.tags
 }
 
 module "data" {
@@ -145,7 +146,8 @@ module "compute" {
   alb_certificate_arn   = var.alb_certificate_arn
   allowed_ingress_cidrs = var.alb_allowed_ingress_cidrs
   user_data_render      = var.app_user_data
-  admin_domain_name     = var.admin_domain_name
-  portal_domain_name    = var.portal_domain_name
-  tags                  = local.tags
+  admin_domain_name             = var.admin_domain_name
+  portal_domain_name            = var.portal_domain_name
+  portal_additional_domain_names = var.portal_additional_domain_names
+  tags                          = local.tags
 }

@@ -46,8 +46,8 @@ const SEVERITY_LABEL = {
 
 const deriveReminderSeverity = (reminder, todayMidnight) => {
   if (!reminder || !reminder.dueAt) return 'info';
-  const due = new Date(reminder.dueAt);
-  if (Number.isNaN(due.getTime())) return 'info';
+  const due = parseCalendarDate(reminder.dueAt);
+  if (!due) return 'info';
   const dueMidnight = new Date(due);
   dueMidnight.setHours(0, 0, 0, 0);
   const diffMs = dueMidnight.getTime() - todayMidnight;
@@ -74,10 +74,30 @@ const resolveReminderSource = (reminder = {}) => {
 };
 
 const CELL_SIZE = 44;
+const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+const parseCalendarDate = value => {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : new Date(value);
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const match = trimmed.match(DATE_ONLY_PATTERN);
+    if (match) {
+      const [, year, month, day] = match;
+      const date = new Date(Number(year), Number(month) - 1, Number(day), 12, 0, 0, 0);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
 
 const getWeekdayLabels = () => {
   const formatter = new Intl.DateTimeFormat(undefined, { weekday: 'short' });
-  const start = new Date(Date.UTC(2024, 0, 7));
+  const start = new Date(2024, 0, 7, 12, 0, 0, 0);
   return Array.from({ length: 7 }, (_, index) => {
     const date = new Date(start);
     date.setDate(start.getDate() + index);
@@ -101,11 +121,12 @@ const buildMonthGrid = anchorDate => {
   return Array.from({ length: 42 }, (_, index) => {
     const date = new Date(gridStart);
     date.setDate(gridStart.getDate() + index);
+    const dateKey = normalizeDateKey(date);
     const today = new Date();
     return {
-      key: date.toISOString(),
+      key: dateKey,
       date,
-      dateKey: normalizeDateKey(date),
+      dateKey,
       dayNumber: date.getDate(),
       isCurrentMonth: date.getMonth() === anchorDate.getMonth(),
       isToday:
@@ -244,8 +265,8 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
 
     const addEvent = (dateValue, event) => {
       if (!dateValue) return;
-      const date = new Date(dateValue);
-      if (Number.isNaN(date.getTime())) return;
+      const date = parseCalendarDate(dateValue);
+      if (!date) return;
       const key = normalizeDateKey(date);
       if (!map.has(key)) map.set(key, []);
       map.get(key).push({ ...event, date });
@@ -257,14 +278,15 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
         const planName = plan.title || 'Action plan';
         const startSeverity = (() => {
           if (!plan.startDate) return 'info';
-          const ts = new Date(plan.startDate).getTime();
-          if (Number.isNaN(ts)) return 'info';
-          return ts <= todayMidnight ? 'success' : 'info';
+          const date = parseCalendarDate(plan.startDate);
+          if (!date) return 'info';
+          return date.getTime() <= todayMidnight ? 'success' : 'info';
         })();
         const endSeverity = (() => {
           if (!plan.endDate) return 'info';
-          const ts = new Date(plan.endDate).getTime();
-          if (Number.isNaN(ts)) return 'info';
+          const date = parseCalendarDate(plan.endDate);
+          if (!date) return 'info';
+          const ts = date.getTime();
           if (ts < todayMidnight) return 'error';
           const diffDays = Math.floor((ts - todayMidnight) / 86400000);
           return diffDays <= 7 ? 'warning' : 'info';
@@ -292,14 +314,15 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
           const interventionName = intervention.title || 'Intervention';
           const startSeverityIntervention = (() => {
             if (!intervention.startDate) return 'info';
-            const ts = new Date(intervention.startDate).getTime();
-            if (Number.isNaN(ts)) return 'info';
-            return ts <= todayMidnight ? 'success' : 'info';
+            const date = parseCalendarDate(intervention.startDate);
+            if (!date) return 'info';
+            return date.getTime() <= todayMidnight ? 'success' : 'info';
           })();
           const endSeverityIntervention = (() => {
             if (!intervention.endDate) return 'info';
-            const ts = new Date(intervention.endDate).getTime();
-            if (Number.isNaN(ts)) return 'info';
+            const date = parseCalendarDate(intervention.endDate);
+            if (!date) return 'info';
+            const ts = date.getTime();
             if (ts < todayMidnight) return 'error';
             const diffDays = Math.floor((ts - todayMidnight) / 86400000);
             return diffDays <= 7 ? 'warning' : 'info';

@@ -8,6 +8,12 @@ variable "portal_domain_name" {
   type        = string
 }
 
+variable "portal_additional_domain_names" {
+  description = "Additional domain names for the public portal certificate."
+  type        = list(string)
+  default     = []
+}
+
 variable "tags" {
   description = "Base tags."
   type        = map(string)

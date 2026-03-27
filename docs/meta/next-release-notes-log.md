@@ -2,9 +2,9 @@
 
 Purpose: running capture of user-facing fixes/changes for the next "What's New" update on `src/pages/LandingPage.jsx`.
 
-Current public release in Landing Page: `v0.5.7` (`21st March 2026`)
-Target next release notes draft: `v0.5.8` (date TBD)
-Last Updated: 2026-03-24
+Current public release in Landing Page: `v0.5.8` (`26th March 2026`)
+Target next release notes draft: `v0.5.9` (date TBD)
+Last Updated: 2026-03-27
 
 ## How to use
 
@@ -18,6 +18,7 @@ Last Updated: 2026-03-24
 
 ## Entries
 
+- 2026-03-27 | Release v0.5.9 | Fix/Calendar | Case Workspace + Application Workspace > Case Calendar | Fixed the shared case calendar so weekday headers and event dates now stay aligned in Canadian time zones. | The widget now treats date-only `YYYY-MM-DD` reminder, action-plan, and intervention dates as local calendar days instead of shifting them through UTC parsing.
 - 2026-03-26 | Release v0.5.8 | UX/API/Auth | User Management > Applicant Accounts | Added a new `Applicant Accounts` tab to `Manage Users` for imported participant account creation, invitation sending, and activation tracking. | Uses PATH-managed statuses `No account`, `Ready to invite`, `Invitation sent`, and `Activated`; `Application Assessor` can access this tab without gaining staff-user administration.
 - 2026-03-26 | Release v0.5.8 | API/Auth/Import | Client Batch Import + Applicant Accounts | Imported client rows with one clean email now silently create or link an applicant Cognito account with no email sent at import time. | Missing, invalid, partially invalid, or multiple email values suppress applicant-account creation while still allowing valid client/case import work.
 - 2026-03-26 | Release v0.5.8 | UX/Auth/Portal | Applicant activation flow | Added a dedicated `Activate your account` portal page so PATH invitations can start first-time password setup without telling applicants they have forgotten a password. | The portal marks the linked applicant account `Activated` on first successful authenticated sign-in.

@@ -76,6 +76,12 @@ variable "portal_domain_name" {
   default     = ""
 }
 
+variable "portal_additional_domain_names" {
+  description = "Additional hostnames for the public portal (used for ALB routing)."
+  type        = list(string)
+  default     = []
+}
+
 variable "app_min_size" {
   description = "Minimum number of application instances in the ASG."
   type        = number

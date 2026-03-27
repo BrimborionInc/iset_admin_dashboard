@@ -4,6 +4,7 @@ locals {
   })
 
   ssm_parameter_path_prefix = "/${replace(var.name_prefix, "-", "/")}"
+  portal_domain_names       = distinct(compact(concat([var.portal_domain_name], var.portal_additional_domain_names)))
 }
 
 data "aws_caller_identity" "current" {}
@@ -199,7 +200,7 @@ resource "aws_lb_listener_rule" "https_admin" {
 }
 
 resource "aws_lb_listener_rule" "https_portal" {
-  count        = var.alb_certificate_arn != "" && var.portal_domain_name != "" ? 1 : 0
+  count        = var.alb_certificate_arn != "" && length(local.portal_domain_names) > 0 ? 1 : 0
   listener_arn = aws_lb_listener.https[0].arn
   priority     = 20
 
@@ -210,7 +211,7 @@ resource "aws_lb_listener_rule" "https_portal" {
 
   condition {
     host_header {
-      values = [var.portal_domain_name]
+      values = local.portal_domain_names
     }
   }
 }
@@ -233,7 +234,7 @@ resource "aws_lb_listener_rule" "http_admin" {
 }
 
 resource "aws_lb_listener_rule" "http_portal" {
-  count        = var.alb_certificate_arn == "" && var.portal_domain_name != "" ? 1 : 0
+  count        = var.alb_certificate_arn == "" && length(local.portal_domain_names) > 0 ? 1 : 0
   listener_arn = aws_lb_listener.http_forward[0].arn
   priority     = 20
 
@@ -244,7 +245,7 @@ resource "aws_lb_listener_rule" "http_portal" {
 
   condition {
     host_header {
-      values = [var.portal_domain_name]
+      values = local.portal_domain_names
     }
   }
 }
@@ -309,6 +310,14 @@ resource "aws_iam_role_policy" "app_runtime" {
           "arn:aws:s3:::${var.name_prefix}-*",
           "arn:aws:s3:::${var.name_prefix}-*/*"
         ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ses:SendEmail",
+          "ses:SendRawEmail"
+        ]
+        Resource = "*"
       }
     ]
   })

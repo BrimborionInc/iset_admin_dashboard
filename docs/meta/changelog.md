@@ -639,6 +639,10 @@ Format: YYYY-MM-DD - Category: Short description
 - Feature: Implemented Tutorials dashboard (`/tutorials-dashboard`) under Support to run hands-on tutorials and view per-staff completion state.
 - Feature: Added self-service reset endpoint to clear tutorial completion/dismissal state (`POST /api/me/tutorial-progress/reset`), used by the Tutorials dashboard Actions widget.
 
+## 2026-03-27
+- Fix: Case Calendar weekday headers now align with the actual calendar grid in Canadian time zones.
+- Fix: Case and application workspace calendar events now keep `YYYY-MM-DD` reminder/action-plan/intervention dates on the intended local calendar day instead of drifting through UTC parsing.
+
 ## 2026-02-11
 - Fix: Versioned case workspace tutorial to `case-workspace-overview-v2` so updated hotspot mappings (including final step return-to-header) are applied cleanly after prior persisted state.
 - Fix: Home intro tour restart now always re-enters through the canonical `tutorials:start` event path, avoiding stale in-memory tutorial state.

@@ -82,6 +82,7 @@
     "deploy-admin-prod": "powershell -ExecutionPolicy Bypass -File scripts/deploy-admin-prod.ps1",
     "deploy-admin-to-prod": "powershell -ExecutionPolicy Bypass -File scripts/deploy-admin-prod.ps1",
     "deploy-shared-to-prod": "powershell -ExecutionPolicy Bypass -File scripts/deploy-shared-prod.ps1",
+    "configure-prod-portal-hosts": "powershell -ExecutionPolicy Bypass -File scripts/configure-prod-portal-hosts.ps1",
     "refresh-prod": "powershell -ExecutionPolicy Bypass -File scripts/start-prod-instance-refresh.ps1",
     "deploy-admin-to-test": "powershell -ExecutionPolicy Bypass -File scripts/deploy-admin-test.ps1",
     "deploy:test-db": "powershell -ExecutionPolicy Bypass -File scripts/deploy-test-db.ps1"

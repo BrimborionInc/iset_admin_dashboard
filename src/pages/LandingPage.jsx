@@ -44,65 +44,25 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Release Notes - v0.5.7 (21st March 2026)',
-      description: 'Release 0.5.7 expands NWAC reporting in PATH with a new Regional Snapshot dashboard and continues to strengthen management and operational reporting tools.',
+      sectionTitle: 'Release Notes - v0.5.8 (26th March 2026)',
+      description: 'Release 0.5.8 focuses on broad bug fixes and user activation improvements to support smoother day-to-day administration in PATH.',
       features: {
         heading: 'What’s New',
         sections: [
           {
-            title: 'New Regional Snapshot reporting dashboard',
+            title: 'Bug fixes across core workflows',
             paragraphs: [
-              'PATH now includes a new Regional Snapshot dashboard under Reporting, designed to give NWAC a concise board-style regional summary for the selected reporting period.',
-              'The dashboard presents region information, client activity, funding, admin and operating values, key metrics, compliance status, and comments in a format that closely follows the regional report structure already used by NWAC.',
-              'It also supports demo data and Excel download, including a multi-sheet workbook export with a summary tab and one regional snapshot tab per region.'
+              'This release includes a broad set of fixes across intake, case management, and reporting workflows to improve consistency and reduce day-to-day friction for staff.',
+              'Updates in this version address smaller workflow issues, validation gaps, and general usability problems reported during routine use.',
+              'The overall result is a more stable PATH experience with fewer interruptions during common administrative tasks.'
             ]
           },
           {
-            title: 'New Data and Results reporting dashboard',
+            title: 'User activation improvements',
             paragraphs: [
-              'NWAC management and administrators can now review annual results, quarterly submission tracking, interventions, client results, data uploads, and reporting notes directly inside PATH.',
-              'The dashboard follows the familiar NWAC report structure while adding shared filters, demo mode, cumulative or monthly views, and intervention-specific controls for count, cost, status, and date basis.',
-              'Admin users can also maintain annual AOP targets and fiscal-year Additional Comments directly from the dashboard.'
-            ]
-          },
-          {
-            title: 'Funding forms now begin earlier in intake',
-            paragraphs: [
-              'The Client Acknowledgement of Funding Source is now collected during intake as part of the application process, rather than being requested later after approval.',
-              'Other Funding Sources now include Student Loan / Canada aid, with a required student loan statement upload when that option is selected.',
-              'This brings key funding evidence forward and reduces document follow-up later in the workflow.'
-            ]
-          },
-          {
-            title: 'Student loan coordination is more detailed',
-            paragraphs: [
-              'Student-loan documentation and lender-facing letters now support a more detailed breakdown of debt, improving coordination with loan providers and funders.',
-              'PATH also captures loan-provider / servicer details more cleanly so account-specific information can flow through to the right documents and follow-up steps.',
-              'This makes student-loan support easier to review, approve, and communicate accurately.'
-            ]
-          },
-          {
-            title: 'Action plans and ineligible reporting are clearer',
-            paragraphs: [
-              'The first Action Plan now uses a clearer, more appropriate name so the participant journey reads more naturally from the start of service delivery.',
-              'When an application is deemed ineligible, PATH still creates the Action Plan and Career Assessment intervention needed for ESDC reporting, then closes them automatically with the appropriate reporting status.',
-              'This keeps operational records clearer while preserving the reporting trail NWAC needs.'
-            ]
-          },
-          {
-            title: 'Approved interventions can now return to assessment',
-            paragraphs: [
-              'Case managers can now start Revise approved intervention from Case Workspace and move approved intervention work back into assessment-style review.',
-              'The approved record stays in place until the revision is approved, while the new revision draft moves through the gated workflow again with supporting document and checklist controls.',
-              'Where funding changes are approved, PATH can issue revised participant documents, including red-line funding agreements that show what changed.'
-            ]
-          },
-          {
-            title: 'Public portal language and presentation have been softened',
-            paragraphs: [
-              'Applicant-facing wording and presentation have been reviewed to feel warmer, clearer, and less transactional.',
-              'The portal now presents participant documents more formally, including a more visible My documents experience once documents are available.',
-              'This helps participants understand what is needed from them without the portal feeling abrupt or overly administrative.'
+              'User activation steps have been improved to make account setup and access readiness easier for administrators and newly enabled users.',
+              'These changes help reduce activation delays and make it clearer when users are ready to sign in and begin working in PATH.',
+              'The activation flow is now better aligned with operational onboarding needs, especially for routine staff access management.'
             ]
           },
         ]
@@ -113,7 +73,7 @@ const copy = {
           {
             title: 'No major release blockers logged',
             paragraphs: [
-              'No major release-blocking issues are currently logged for v0.5.7.',
+              'No major release-blocking issues are currently logged for v0.5.8.',
               'If staff identify workflow, document, or reporting issues during day-to-day use, they should continue to log them with the NWAC PATH support team for review.'
             ]
           }
@@ -182,65 +142,25 @@ const copy = {
       ]
     },
     releaseNotes: {
-      sectionTitle: 'Notes de version - v0.5.7 (21 mars 2026)',
-      description: 'La version 0.5.7 élargit les rapports NWAC dans PATH avec un nouveau tableau de bord d’instantané régional et poursuit les améliorations des outils de gestion et de reddition de comptes.',
+      sectionTitle: 'Notes de version - v0.5.8 (26 mars 2026)',
+      description: 'La version 0.5.8 met l’accent sur des correctifs généraux et des améliorations liées à l’activation des utilisatrices afin de soutenir un fonctionnement quotidien plus fluide dans PATH.',
       features: {
         heading: 'Quoi de neuf',
         sections: [
           {
-            title: 'Nouveau tableau de bord Instantané régional',
+            title: 'Correctifs dans les flux de travail principaux',
             paragraphs: [
-              'PATH comprend maintenant un nouveau tableau de bord Instantané régional dans la section Rapports, conçu pour offrir à l’AFAC un résumé régional concis de style conseil d’administration pour la période sélectionnée.',
-              'Le tableau de bord présente les renseignements sur la région, l’activité client, le financement, les coûts administratifs et opérationnels, les indicateurs clés, le statut de conformité et les commentaires dans une présentation qui reprend de près la structure du rapport régional déjà utilisée par l’AFAC.',
-              'Il prend aussi en charge des données de démonstration ainsi qu’un téléchargement Excel, y compris un classeur à plusieurs onglets avec un onglet sommaire et un onglet d’instantané par région.'
+              'Cette version comprend un ensemble général de correctifs dans les flux d’accueil, de gestion de dossier et de rapports afin d’améliorer la cohérence et de réduire les irritants au quotidien pour le personnel.',
+              'Les mises à jour de cette version corrigent divers problèmes mineurs de flux, certaines lacunes de validation et des enjeux généraux de convivialité signalés dans l’utilisation courante.',
+              'Le résultat est une expérience PATH plus stable, avec moins d’interruptions dans les tâches administratives les plus fréquentes.'
             ]
           },
           {
-            title: 'Nouveau tableau de bord Rapports et résultats',
+            title: 'Améliorations de l’activation des utilisatrices',
             paragraphs: [
-              'La direction et les administratrices de l’AFAC peuvent maintenant consulter directement dans PATH les résultats annuels, le suivi des soumissions trimestrielles, les interventions, les résultats clients, les téléversements de données et les notes de rapport.',
-              'Le tableau de bord reprend la structure familière du rapport NWAC tout en ajoutant des filtres communs, un mode démo, une vue cumulative ou mensuelle, ainsi que des contrôles propres aux interventions pour le nombre, le coût, le statut et la base de date.',
-              'Les utilisatrices administratrices peuvent aussi gérer directement dans le tableau de bord les cibles annuelles de l’AOP et les commentaires supplémentaires par année financière.'
-            ]
-          },
-          {
-            title: 'Les formulaires de financement commencent maintenant dès l’accueil',
-            paragraphs: [
-              'L’Accusé de financement est maintenant recueilli dès le processus d’accueil, au lieu d’être demandé plus tard après l’approbation.',
-              'Les autres sources de financement incluent maintenant Prêt étudiant / aide canadienne, avec téléversement obligatoire du relevé de prêt lorsque cette option est sélectionnée.',
-              'Les pièces justificatives de financement sont ainsi recueillies plus tôt et nécessitent moins de suivi par la suite.'
-            ]
-          },
-          {
-            title: 'La coordination des prêts étudiants est plus détaillée',
-            paragraphs: [
-              'La documentation liée aux prêts étudiants et les lettres destinées aux prêteurs prennent maintenant en charge une ventilation plus détaillée de la dette.',
-              'PATH saisit aussi plus clairement les renseignements sur le prêteur ou le service de prêt afin que ces détails soient repris correctement dans les documents et suivis.',
-              'Cela facilite l’examen, l’approbation et la communication des soutiens liés aux prêts étudiants.'
-            ]
-          },
-          {
-            title: 'Les plans d’action et le suivi des inéligibilités sont plus clairs',
-            paragraphs: [
-              'Le premier plan d’action porte maintenant un nom plus clair et plus approprié pour mieux refléter le début du parcours de la participante.',
-              'Lorsqu’une demande est jugée inadmissible, PATH crée quand même le plan d’action et l’intervention d’évaluation de carrière requis pour les rapports ESDC, puis les ferme automatiquement avec le bon statut de rapport.',
-              'Les dossiers demeurent ainsi cohérents sur le plan opérationnel tout en répondant aux besoins de reddition de comptes de l’AFAC.'
-            ]
-          },
-          {
-            title: 'Les interventions approuvées peuvent maintenant retourner en évaluation',
-            paragraphs: [
-              'Les gestionnaires de cas peuvent maintenant utiliser Réviser l’intervention approuvée dans l’espace de travail du dossier afin de renvoyer une intervention approuvée dans un flux de réévaluation.',
-              'Le dossier approuvé demeure en place jusqu’à l’approbation de la révision, pendant que le brouillon révisé repasse par les étapes contrôlées et les vérifications documentaires.',
-              'Lorsque des changements de financement sont approuvés, PATH peut aussi produire des documents révisés pour la participante, y compris des ententes de financement en mode révision annotée.'
-            ]
-          },
-          {
-            title: 'Le langage et la présentation du portail public ont été adoucis',
-            paragraphs: [
-              'Le texte et la présentation destinés aux participantes ont été revus pour être plus chaleureux, plus clairs et moins transactionnels.',
-              'Le portail présente maintenant les documents de façon plus formelle, notamment avec une expérience Mes documents plus visible lorsque des documents sont disponibles.',
-              'Les participantes comprennent ainsi plus facilement ce qui est attendu d’elles, sans que le portail paraisse brusque ou trop administratif.'
+              'Les étapes d’activation des utilisatrices ont été améliorées afin de faciliter la préparation des comptes et l’accès pour les administratrices et les nouvelles utilisatrices.',
+              'Ces changements contribuent à réduire les délais d’activation et à mieux indiquer quand une utilisatrice est prête à se connecter et à commencer son travail dans PATH.',
+              'Le flux d’activation répond maintenant plus clairement aux besoins opérationnels liés à l’intégration courante du personnel et à la gestion des accès.'
             ]
           }
         ]
@@ -251,7 +171,7 @@ const copy = {
           {
             title: 'Aucun bloqueur majeur consigné',
             paragraphs: [
-              'Aucun problème bloquant majeur n’est actuellement consigné pour la version 0.5.7.',
+              'Aucun problème bloquant majeur n’est actuellement consigné pour la version 0.5.8.',
               'Si le personnel constate des problèmes de flux de travail, de documents ou de rapports, ils doivent continuer de les signaler à l’équipe de soutien PATH de l’AFAC.'
             ]
           }

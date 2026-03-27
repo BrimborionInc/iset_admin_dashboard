@@ -58,16 +58,97 @@ function Ensure-Tool([string]$Name) {
     }
 }
 
+function Resolve-NpmCli {
+    $candidates = @(@(
+        (Join-Path ${env:ProgramFiles} "nodejs\npm.cmd"),
+        (Join-Path ${env:ProgramFiles} "nodejs\npm"),
+        ((Get-Command npm -ErrorAction SilentlyContinue).Source)
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) })
+
+    if ($candidates.Count -gt 0) {
+        return $candidates[0]
+    }
+
+    throw "npm was not found in PATH or the standard installation locations."
+}
+
+function Resolve-CmdExe {
+    $candidates = @(@(
+        ${env:ComSpec},
+        "C:\Windows\System32\cmd.exe"
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) })
+
+    if ($candidates.Count -gt 0) {
+        return $candidates[0]
+    }
+
+    throw "cmd.exe was not found."
+}
+
+function Resolve-AwsCli {
+    $cmd = Get-Command aws -ErrorAction SilentlyContinue
+    if ($cmd) {
+        return $cmd.Source
+    }
+
+    $candidates = @(@(
+        (Join-Path ${env:ProgramFiles} "Amazon\AWSCLIV2\aws.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "Amazon\AWSCLIV2\aws.exe")
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) })
+
+    if ($candidates.Count -gt 0) {
+        return $candidates[0]
+    }
+
+    throw "AWS CLI was not found in PATH or the standard installation locations."
+}
+
 function Invoke-Aws {
     param(
         [Parameter(ValueFromRemainingArguments = $true)]
         [string[]]$Args
     )
 
-    & aws @Args --profile $Profile
-    if ($LASTEXITCODE -ne 0) {
-        throw ("AWS CLI command failed with exit code {0}: aws {1}" -f $LASTEXITCODE, ($Args -join ' '))
+    $awsCli = Resolve-AwsCli
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $process.StartInfo.FileName = $awsCli
+    $normalizedArgs = @($Args | ForEach-Object {
+            if ($_ -match '^".*"$') {
+                $_.Substring(1, $_.Length - 2)
+            }
+            else {
+                $_
+            }
+        })
+    $allArgs = @($normalizedArgs + @("--profile", $Profile, "--no-cli-pager"))
+    $process.StartInfo.Arguments = [string]::Join(' ', ($allArgs | ForEach-Object {
+                if ($_ -match '[\s"]') {
+                    '"' + ($_ -replace '"', '\"') + '"'
+                }
+                else {
+                    $_
+                }
+            }))
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.RedirectStandardOutput = $true
+    $process.StartInfo.RedirectStandardError = $true
+    $process.StartInfo.CreateNoWindow = $true
+
+    [void]$process.Start()
+    $stdout = $process.StandardOutput.ReadToEnd()
+    $stderr = $process.StandardError.ReadToEnd()
+    $process.WaitForExit()
+
+    if ($process.ExitCode -ne 0) {
+        $message = ("AWS CLI command failed with exit code {0}: aws {1}" -f $process.ExitCode, ($Args -join ' '))
+        if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+            $message = "$message`n$stderr"
+        }
+        throw $message
     }
+
+    return $stdout.TrimEnd("`r", "`n")
 }
 
 function New-PosixZip {
@@ -134,8 +215,8 @@ try {
     Push-Location $repoRoot
 
     Write-Section "Pre-flight checks"
-    Ensure-Tool "npm"
-    Ensure-Tool "aws"
+    [void](Resolve-NpmCli)
+    [void](Resolve-AwsCli)
 
     $buildPath = Join-Path $repoRoot "build"
 
@@ -144,9 +225,11 @@ try {
         if (Test-Path -LiteralPath $buildPath) {
             Remove-Item -LiteralPath $buildPath -Recurse -Force -ErrorAction SilentlyContinue
         }
-        npm run build:production | Out-Host
-        if ($LASTEXITCODE -ne 0) {
-            throw "Build failed with exit code $LASTEXITCODE. Deployment aborted."
+        & (Resolve-CmdExe) /c ('"{0}" run build:production' -f (Resolve-NpmCli))
+        $lastExitVar = Get-Variable -Name LASTEXITCODE -ErrorAction SilentlyContinue
+        $exitCode = if ($null -ne $lastExitVar) { [int]$lastExitVar.Value } else { 0 }
+        if ($exitCode -ne 0) {
+            throw "Build failed with exit code $exitCode. Deployment aborted."
         }
     } else {
         Write-Section "Skipping build step (per flag)"

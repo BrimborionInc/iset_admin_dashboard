@@ -36,7 +36,25 @@ function Ensure-Tool([string]$Name) {
     }
 }
 
-Ensure-Tool "aws"
+function Resolve-AwsCli {
+    $cmd = Get-Command aws -ErrorAction SilentlyContinue
+    if ($cmd) {
+        return $cmd.Source
+    }
+
+    $candidates = @(@(
+        (Join-Path ${env:ProgramFiles} "Amazon\AWSCLIV2\aws.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "Amazon\AWSCLIV2\aws.exe")
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) })
+
+    if ($candidates.Count -gt 0) {
+        return $candidates[0]
+    }
+
+    throw "AWS CLI was not found in PATH or the standard installation locations."
+}
+
+[void](Resolve-AwsCli)
 
 function Invoke-Aws {
     param(
@@ -44,10 +62,38 @@ function Invoke-Aws {
         [string[]]$Args
     )
 
-    & aws @Args --profile $Profile
-    if ($LASTEXITCODE -ne 0) {
-        throw ("AWS CLI command failed with exit code {0}: aws {1}" -f $LASTEXITCODE, ($Args -join ' '))
+    $awsCli = Resolve-AwsCli
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $process.StartInfo.FileName = $awsCli
+    $allArgs = @($Args + @("--profile", $Profile, "--no-cli-pager"))
+    $process.StartInfo.Arguments = [string]::Join(' ', ($allArgs | ForEach-Object {
+                if ($_ -match '[\s"]') {
+                    '"' + ($_ -replace '"', '\"') + '"'
+                }
+                else {
+                    $_
+                }
+            }))
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.RedirectStandardOutput = $true
+    $process.StartInfo.RedirectStandardError = $true
+    $process.StartInfo.CreateNoWindow = $true
+
+    [void]$process.Start()
+    $stdout = $process.StandardOutput.ReadToEnd()
+    $stderr = $process.StandardError.ReadToEnd()
+    $process.WaitForExit()
+
+    if ($process.ExitCode -ne 0) {
+        $message = ("AWS CLI command failed with exit code {0}: aws {1}" -f $process.ExitCode, ($Args -join ' '))
+        if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+            $message = "$message`n$stderr"
+        }
+        throw $message
     }
+
+    return $stdout.TrimEnd("`r", "`n")
 }
 
 $refreshId = Invoke-Aws autoscaling start-instance-refresh `

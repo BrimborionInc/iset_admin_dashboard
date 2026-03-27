@@ -200,6 +200,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Supporting Documents now has a case-based mode for application-less client files: it reads from `GET /api/cases/:id/documents`, uploads through `POST /api/cases/:id/documents/upload`, hides the checklist tab, and allows `client`, `case`, `action_plan`, plus application-type document categories. When no linked application exists, application-type uploads fall back to action-plan or case storage instead of requiring a fake application record.
 - Secure Messaging still depends on applicant/application linkage today; imported client-file cases without a participant account can manage documents, plans, and interventions but still cannot message the client until a participant account exists.
 - Case Header now exposes explicit backload quick actions on application-less cases: `Add existing action plan`, `Add existing intervention`, and `Upload existing documents`.
+- `src/widgets/CaseCalendarWidget.js` is shared by the case workspace and application workspace. Treat date-only values (`YYYY-MM-DD`) as local Canadian calendar dates; UTC-based parsing/weekday anchors will shift headers or event days backward.
 - Tutorial updates must be validated end-to-end (including `Next` progression on every step) so no step dead-ends due to missing hotspots.
 - If a change introduces new deployment artifacts, update the relevant deploy script(s) so files are staged.
 

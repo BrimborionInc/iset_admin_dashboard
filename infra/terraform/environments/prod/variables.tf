@@ -233,3 +233,9 @@ variable "portal_domain_name" {
   type        = string
   default     = "nwac-public.awentech.ca"
 }
+
+variable "portal_additional_domain_names" {
+  description = "Additional public portal hostnames."
+  type        = list(string)
+  default     = []
+}

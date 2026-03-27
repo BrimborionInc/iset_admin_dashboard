@@ -31650,6 +31650,18 @@ const parseReminderDateInput = (value, fieldName = null) => {
   if (typeof value === 'undefined') return undefined;
   if (value === null) return null;
   if (typeof value === 'string' && value.trim() === '') return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (match) {
+      const [, year, month, day] = match;
+      const utcMs = Date.UTC(Number(year), Number(month) - 1, Number(day), 12, 0, 0, 0);
+      const date = new Date(utcMs);
+      if (!Number.isNaN(date.getTime())) {
+        return date;
+      }
+    }
+  }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     const err = new Error('invalid_date');
