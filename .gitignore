@@ -47,3 +47,6 @@ Thumbs.db
 
 # Database structure dumps
 docs/data/DB-Structure-Dump/
+
+# Temporary local artifacts, snapshots, logs, and env captures
+/tmp/

@@ -642,6 +642,8 @@ Format: YYYY-MM-DD - Category: Short description
 ## 2026-03-27
 - Fix: Case Calendar weekday headers now align with the actual calendar grid in Canadian time zones.
 - Fix: Case and application workspace calendar events now keep `YYYY-MM-DD` reminder/action-plan/intervention dates on the intended local calendar day instead of drifting through UTC parsing.
+- Fix: Template editor now offers a dedicated environment-aware portal sign-in link insert option instead of only the raw `{portal_dashboard_url}` token, reducing hardcoded portal URL mistakes in applicant notification templates.
+- Ops: Reduced the default prod ASG instance-refresh warmup from 900 seconds to 180 seconds in the refresh script and deployment docs so normal rollouts do not pause for an unnecessary 15-minute warmup.
 
 ## 2026-02-11
 - Fix: Versioned case workspace tutorial to `case-workspace-overview-v2` so updated hotspot mappings (including final step return-to-header) are applied cleanly after prior persisted state.

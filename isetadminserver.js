@@ -12571,7 +12571,8 @@ function resolveRequestActor(req) {
 
 async function resolveOrCreateUserIdFromAuth(req, runner = pool) {
   const sub = req?.auth?.sub || null;
-  const email = req?.auth?.email || null;
+  const email = req?.auth?.email ? String(req.auth.email).trim().toLowerCase() : null;
+  const subjectType = req?.auth?.subjectType === 'staff' ? 'staff' : 'applicant';
   if (!sub && !email) return null;
   const db = runner || pool;
   try {
@@ -12579,19 +12580,48 @@ async function resolveOrCreateUserIdFromAuth(req, runner = pool) {
     if (sub) {
       [[row]] = await db.query('SELECT id FROM user WHERE cognito_sub = ? LIMIT 1', [sub]);
     }
-    if (!row && email) {
+    if (!row && email && subjectType !== 'staff') {
       [[row]] = await db.query('SELECT id FROM user WHERE email = ? LIMIT 1', [email]);
     }
     if (row && row.id) return row.id;
     const preferredLanguage = req?.auth?.locale || req?.auth?.preferredLanguage || 'en';
-    const name = req?.auth?.name || email || sub || 'User';
-    const safeEmail = email || `${sub || Date.now()}@placeholder.local`;
-    const [ins] = await db.query(
-      `INSERT INTO user (name,email,cognito_sub,email_verified,suspended,preferred_language)
-       VALUES (?,?,?,?,0,?)`,
-      [name, safeEmail, sub || null, 1, preferredLanguage]
-    );
-    return ins.insertId;
+    const name =
+      req?.staffProfile?.display_name ||
+      req?.staffProfile?.name ||
+      req?.auth?.name ||
+      email ||
+      sub ||
+      'User';
+    const syntheticStaffEmail = sub ? `staff-${sub}@placeholder.local` : `staff-${Date.now()}@placeholder.local`;
+    const safeEmail = (subjectType === 'staff' ? null : email) || email || syntheticStaffEmail;
+    try {
+      const [ins] = await db.query(
+        `INSERT INTO user (name,email,cognito_sub,email_verified,suspended,preferred_language)
+         VALUES (?,?,?,?,0,?)`,
+        [name, safeEmail, sub || null, 1, preferredLanguage]
+      );
+      return ins.insertId;
+    } catch (insertErr) {
+      if (insertErr?.code === 'ER_DUP_ENTRY') {
+        if (sub) {
+          [[row]] = await db.query('SELECT id FROM user WHERE cognito_sub = ? LIMIT 1', [sub]);
+          if (row?.id) return row.id;
+        }
+        if (subjectType !== 'staff' && email) {
+          [[row]] = await db.query('SELECT id FROM user WHERE email = ? LIMIT 1', [email]);
+          if (row?.id) return row.id;
+        }
+        if (subjectType === 'staff' && safeEmail !== syntheticStaffEmail) {
+          const [ins] = await db.query(
+            `INSERT INTO user (name,email,cognito_sub,email_verified,suspended,preferred_language)
+             VALUES (?,?,?,?,0,?)`,
+            [name, syntheticStaffEmail, sub || null, 1, preferredLanguage]
+          );
+          return ins.insertId;
+        }
+      }
+      throw insertErr;
+    }
   } catch (err) {
     console.error('[auth] resolveOrCreateUserIdFromAuth failed', err?.message || err);
     return null;
@@ -47214,26 +47244,18 @@ const handlePostCaseSecureMessage = async (req, res) => {
       normaliseString(caseRow?.case_number) ||
       (caseId ? `CASE-${caseId}` : null);
 
-    // Resolve sender user id from Cognito auth context (create if missing)
-    const email = req?.auth?.email || null;
-    const sub = req?.auth?.sub || null;
-    if (!email && !sub) return res.status(401).json({ error: 'unauthorized' });
-    let senderId = null;
-    let row;
-    if (sub) { [[row]] = await pool.query('SELECT id FROM user WHERE cognito_sub = ? LIMIT 1', [sub]); }
-    if (!row && email) { [[row]] = await pool.query('SELECT id FROM user WHERE email = ? LIMIT 1', [email]); }
-    if (!row) {
-      const safeEmail = email || `${sub}@placeholder.local`;
-      const preferredLanguage = 'en';
-      const name = req?.auth?.name || safeEmail;
-      const [ins] = await pool.query(
-        `INSERT INTO user (name,email,cognito_sub,email_verified,suspended,preferred_language)
-         VALUES (?,?,?,1,0,?)`,
-        [name, safeEmail, sub || null, preferredLanguage]
+    const senderId = await resolveOrCreateUserIdFromAuth(req);
+    if (!senderId) return res.status(401).json({ error: 'unauthorized' });
+    if (req?.auth?.subjectType === 'staff' && Number(senderId) === Number(recipientId)) {
+      console.error(
+        '[messages] refusing staff/applicant identity collision for case %s (user_id=%s)',
+        caseId,
+        senderId
       );
-      senderId = ins.insertId;
-    } else {
-      senderId = row.id;
+      return res.status(409).json({
+        error: 'staff_sender_identity_conflict',
+        message: 'Staff sender identity resolved to the applicant account. Sign in with a distinct staff account or repair the account mapping before sending secure messages.'
+      });
     }
 
     // Resolve eligible workflow attachments (consent forms only)

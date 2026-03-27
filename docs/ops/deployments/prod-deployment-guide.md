@@ -36,6 +36,14 @@ If you want the refresh script to wait and print progress:
 npm run refresh-prod -- -Profile nwac-prod-direct -Wait
 ```
 
+Current default refresh preferences:
+
+```text
+MinHealthyPercentage=100,InstanceWarmup=180,SkipMatching=false
+```
+
+The warmup is intentionally short because the real gate is ALB health; prod instances have been reaching healthy state well before 15 minutes.
+
 ## Partial Deploys
 
 Admin only:

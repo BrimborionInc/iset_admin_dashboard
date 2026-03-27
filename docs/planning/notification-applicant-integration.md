@@ -48,7 +48,7 @@ Authoring guidance is now standardised so admins know exactly which placeholders
 | `{tracking_id}` | Public-facing tracking/reference number | Common to all applicant events |
 | `{submission_date}` | Human-readable timestamp | Submission confirmations |
 | `{assessor_name}` | Assigned assessor/coordinator | Optional (populated when known) |
-| `{portal_dashboard_url}` | Applicant portal login link | Derived from `APPLICANT_PORTAL_*` env vars |
+| `{portal_dashboard_url}` | Applicant portal login link | Derived from `APPLICANT_PORTAL_*` env vars; use inside `[link url="{portal_dashboard_url}"]...[/link]` for clickable links |
 | `{support_email}` | Support mailbox | `NOTIFICATION_SUPPORT_EMAIL` → `SUPPORT_EMAIL` → `DEFAULT_SUPPORT_EMAIL` |
 | `{message_subject}` | Secure message subject line | Secure message alerts |
 | `{message_to_name}` | Display name shown in the secure message “To” field | Captured from the compose modal (default “Applicant”) |
@@ -85,6 +85,7 @@ Until the cache layer lands, the structured logs plus Jest coverage help us dete
   3. Expand coverage to other events after submission flow is proven.
 - Template editor upgrade goals:
   - First pass implemented: toolbar buttons for bold/italic/underline, list helpers, link insertion, portal link shortcut, expanded placeholder palette (`{tracking_id}`, `{portal_dashboard_url}`, `{support_email}`, `{assessor_name}`), inline Flashbar feedback, and save validation. Link prompts presently use `window.prompt`; plan a richer dialog later.
+  - Prefer the dedicated portal sign-in link insert helper over the raw `{portal_dashboard_url}` token so templates remain environment-portable and render as clickable links.
   - Session-backed draft cache added so in-progress edits survive dashboard refreshes (even without a recurring notification poll).
   - Add rich-text controls (bold, italic, underline, lists, link insertion) to make HTML authoring practical.
   - Expand "Insert Field" palette (tracking ID, applicant name, portal link, submission date, etc.) and ensure tokens align with the rendering engine.

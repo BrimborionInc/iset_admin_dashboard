@@ -11,7 +11,8 @@
   Prod Auto Scaling Group name. Defaults to nwac-prod-asg.
 
 .PARAMETER Preferences
-  Instance refresh preferences passed straight to AWS CLI.
+  Instance refresh preferences passed straight to AWS CLI. Default warmup is 180 seconds
+  because the prod portal/admin instances typically pass ALB health well before that.
 
 .PARAMETER Wait
   Poll until the refresh reaches a terminal state.
@@ -21,7 +22,7 @@ param(
     [string]$Profile = "default",
     [string]$Region = "ca-central-1",
     [string]$AsgName = "nwac-prod-asg",
-    [string]$Preferences = "MinHealthyPercentage=100,InstanceWarmup=900,SkipMatching=false",
+    [string]$Preferences = "MinHealthyPercentage=100,InstanceWarmup=180,SkipMatching=false",
     [switch]$Wait
 )
 

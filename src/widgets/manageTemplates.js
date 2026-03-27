@@ -31,7 +31,11 @@ const tokenOptions = [
   { label: 'Tracking ID', value: '{tracking_id}' },
   { label: 'Submission Date', value: '{submission_date}' },
   { label: 'Assessor Name', value: '{assessor_name}' },
-  { label: 'Portal Dashboard URL', value: '{portal_dashboard_url}' },
+  {
+    label: 'Portal Sign-in Link',
+    value: '[link url="{portal_dashboard_url}"]Sign in to your account[/link]'
+  },
+  { label: 'Portal Dashboard URL (raw)', value: '{portal_dashboard_url}' },
   { label: 'Support Email', value: '{support_email}' },
   { label: 'Message Subject', value: '{message_subject}' },
   { label: 'Decision Outcome', value: '{decision_outcome}' },
@@ -679,7 +683,7 @@ const TemplateEditorProvider = ({ children, toggleHelpPanel }) => {
     }
 
     const linkMatches = [];
-    const withLinks = body.replace(/\[link\s+url="([^"]+)"\](.*?)\[\/link\]/gis, (_, href, text) => {
+    const withLinks = body.replace(/\[link\s+url="([^"]*)"\](.*?)\[\/link\]/gis, (_, href, text) => {
       const sentinel = `__LINK_${linkMatches.length}__`;
       linkMatches.push({ sentinel, href, text });
       return sentinel;
