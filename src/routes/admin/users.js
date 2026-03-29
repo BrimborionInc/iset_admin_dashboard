@@ -160,7 +160,7 @@ async function upsertStaffProfile(pool, { cognitoSub, email, name, displayName, 
 
 // GET /admin/users - list administrative users (Cognito groups)
 // Response: [{ username, email, role, status, regionId, mfa, lastSignIn }]
-router.get('/users', async (req, res) => {
+router.get('/users', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager', 'ISET Coordinator'), async (req, res) => {
   try {
     const q = (req.query.q || '').toString().toLowerCase();
     const client = getClient();
@@ -226,7 +226,7 @@ router.get('/users', async (req, res) => {
         // Silently ignore missing ListUsers permission (now optional)
       } else {
         // Non-authorization errors in enrichment phase are logged but not fatal.
-        console.warn('[admin-users] Optional ListUsers enrichment failed:', enrichErr.message, 'AWS_ACCESS_KEY_ID=' + (process.env.AWS_ACCESS_KEY_ID || 'missing'), 'AWS_SECRET_ACCESS_KEY=' + (process.env.AWS_SECRET_ACCESS_KEY || 'missing'));
+        console.warn('[admin-users] Optional ListUsers enrichment failed:', enrichErr.message);
       }
     }
 

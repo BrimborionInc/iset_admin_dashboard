@@ -3,6 +3,7 @@ import { apiFetch } from '../auth/apiClient';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { Header, ButtonDropdown, Table, StatusIndicator, Box, Spinner, TextFilter, SpaceBetween, Link, Button, Badge, Hotspot } from '@cloudscape-design/components';
 import ApplicationEventsHelp from '../helpPanelContents/applicationEventsHelp';
+import { formatReminderBusinessDate, getReminderBusinessDayDiffDays } from '../lib/reminderBusinessDay';
 
 const STATUS_LABELS = {
   draft: 'Draft',
@@ -55,20 +56,6 @@ const ensureSentence = (text) => {
   return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 };
 
-const toUtcStartOfDay = (value) => {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
-};
-
-const daysBetweenUtc = (earlier, later) => {
-  const startA = toUtcStartOfDay(earlier);
-  const startB = toUtcStartOfDay(later);
-  if (startA === null || startB === null) return null;
-  return Math.floor((startB - startA) / (24 * 60 * 60 * 1000));
-};
-
 const truncate = (text, limit = 160) => {
   const value = trimValue(text);
   if (!value) return '';
@@ -97,7 +84,7 @@ const formatDateTime = (value) => {
 
 const formatReminderDetails = (payload = {}, fallbackTitle) => {
   const title = trimValue(payload.title) || fallbackTitle || 'Reminder';
-  const due = payload.due_at ? new Date(payload.due_at).toLocaleDateString() : null;
+  const due = formatReminderBusinessDate(payload.due_at || payload.dueAt);
   const trackingId = payload.tracking_id || payload.application_id || '';
   const caseId = payload.case_id || '';
   const category = trimValue(payload.category);
@@ -211,7 +198,7 @@ const formatEventMessage = (event, actorDisplay) => {
     }
     case 'reminder_created': {
       const title = trimValue(payload.title) || 'Reminder';
-      const due = payload.due_at ? new Date(payload.due_at).toLocaleDateString() : '';
+      const due = formatReminderBusinessDate(payload.due_at || payload.dueAt);
       const base = due ? `${title} (due ${due})` : title;
       return ensureSentence(actorSuffix ? `${base}${actorSuffix}` : base);
     }
@@ -223,10 +210,11 @@ const formatEventMessage = (event, actorDisplay) => {
     }
     case 'reminder_overdue': {
       const title = trimValue(payload.title) || 'Reminder';
-      const due = payload.due_at ? new Date(payload.due_at).toLocaleDateString() : 'previously';
+      const due = formatReminderBusinessDate(payload.due_at || payload.dueAt) || 'previously';
       const daysOverdue = (() => {
         if (Number.isFinite(payload.overdue_days) && payload.overdue_days > 0) return Math.floor(payload.overdue_days);
-        const diff = daysBetweenUtc(payload.due_at, new Date());
+        if (Number.isFinite(payload.overdueDays) && payload.overdueDays > 0) return Math.floor(payload.overdueDays);
+        const diff = getReminderBusinessDayDiffDays(payload.due_at || payload.dueAt, new Date());
         if (diff === null) return null;
         return diff > 0 ? diff : null;
       })();

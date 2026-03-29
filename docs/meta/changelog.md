@@ -2,6 +2,12 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-03-29
+- UX/Notifications: The admin-shell `Notifications` footer control is now visible to all signed-in roles and continues to refresh bell alerts in place instead of acting like a Notification Settings permission-gated link.
+- UX/API/Reminders: Reminder due/overdue events and case reminder badges now classify by the PATH business day in `America/Toronto` instead of UTC/browser-local day boundaries, and reminder reschedules/reopens now clear prior due/overdue emit flags so future reminder bells can fire again.
+- UX/Notifications: Staff bell alerts now append a date/time in the heading, using the notification delivery/creation timestamp rendered in the viewer browser timezone with an `America/Toronto` fallback.
+- Docs/Notifications: Updated the notification dashboard reference, reminder runtime notes, help-panel copy, and `docs/AGENTS.md` with the current bell-alert timestamp rule, the reminder business-day rule, and the fact that PATH does not yet persist per-user timezone preferences.
+
 ## 2026-03-25
 - UX/API/Configuration: Query Editor now includes a `Server Export` tab with a MySQL Workbench-style object-selection flow for choosing one database, selecting the tables to include, and writing a self-contained SQL dump file directly on the admin server.
 - Docs/Configuration: Updated the live Query Editor dashboard reference, help-panel copy, and `docs/AGENTS.md` for the new server export flow, hardwired dump options, and Windows/WSL dump-path behavior.

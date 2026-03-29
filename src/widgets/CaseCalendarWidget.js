@@ -17,6 +17,11 @@ import {
 import CaseCalendarHelp from '../helpPanelContents/caseCalendarHelp';
 import { useCaseWorkspace } from '../pages/Caseworking/caseWorkspace/CaseWorkspaceContext.jsx';
 import { apiFetch } from '../auth/apiClient';
+import {
+  getReminderBusinessDate,
+  getReminderBusinessDayDiffDays,
+  getReminderBusinessDayKey,
+} from '../lib/reminderBusinessDay';
 
 const EVENT_STYLE = {
   success: {
@@ -44,14 +49,10 @@ const SEVERITY_LABEL = {
   info: 'Info'
 };
 
-const deriveReminderSeverity = (reminder, todayMidnight) => {
+const deriveReminderSeverity = reminder => {
   if (!reminder || !reminder.dueAt) return 'info';
-  const due = parseCalendarDate(reminder.dueAt);
-  if (!due) return 'info';
-  const dueMidnight = new Date(due);
-  dueMidnight.setHours(0, 0, 0, 0);
-  const diffMs = dueMidnight.getTime() - todayMidnight;
-  const diffDays = Math.floor(diffMs / 86400000);
+  const diffDays = getReminderBusinessDayDiffDays(reminder.dueAt, new Date());
+  if (diffDays === null) return 'info';
   if (diffDays < 0) return 'error';
   if (diffDays <= 7) return 'warning';
   return 'success';
@@ -352,7 +353,7 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
     const reminders = Array.isArray(remindersState.items) ? remindersState.items : [];
     reminders.forEach(reminder => {
       if (!reminder?.dueAt || reminder.status === 'cancelled') return;
-      const severity = deriveReminderSeverity(reminder, todayMidnight);
+      const severity = deriveReminderSeverity(reminder);
       const metadata = reminder.metadata || reminder.metadata_json || reminder.metadataJson || {};
       const noteId =
         metadata?.case_note_id ||
@@ -360,13 +361,18 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
         metadata?.noteId ||
         metadata?.note_id ||
         null;
-      addEvent(reminder.dueAt, {
+      const reminderDateKey = getReminderBusinessDayKey(reminder.dueAt);
+      const reminderDate = getReminderBusinessDate(reminder.dueAt);
+      if (!reminderDateKey || !reminderDate) return;
+      if (!map.has(reminderDateKey)) map.set(reminderDateKey, []);
+      map.get(reminderDateKey).push({
         id: `reminder-${reminder.id}`,
         title: reminder.title || 'Reminder',
         category: reminder.category || 'Reminder',
         description: reminder.description || '',
         severity,
         source: resolveReminderSource(reminder),
+        date: reminderDate,
         reminderId: reminder.id,
         reminderStatus: reminder.status || null,
         noteId
@@ -374,7 +380,7 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
     });
 
     return map;
-  }, [caseData, todayMidnight, remindersState.items]);
+  }, [caseData, remindersState.items, todayMidnight]);
 
   const days = useMemo(() => {
     return buildMonthGrid(monthAnchor).map(day => ({
@@ -430,7 +436,7 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
         setAcknowledgingId(null);
       }
     },
-    [acknowledgingId, apiFetch, caseId]
+    [acknowledgingId, caseId]
   );
 
   const adjustMonth = useCallback(delta => {

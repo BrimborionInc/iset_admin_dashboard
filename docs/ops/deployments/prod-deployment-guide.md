@@ -8,6 +8,7 @@ This is the shortest safe path to deploy the current prod stack.
 - If `shared` code changed, deploy `shared` before admin or portal.
 - Uploading artifacts does not update the live instance by itself. You must trigger a prod instance refresh after the uploads.
 - These examples use the working prod AWS CLI profile name `nwac-prod-direct`. Replace it only if your local prod profile uses a different name.
+- Do not use `-SkipBuild` unless you have already inspected the current `build/` output and confirmed it was compiled for prod. React bundles bake environment-specific Cognito domains, client IDs, and external links, so a stale test build can be uploaded to prod unchanged.
 
 ## Full Prod Deploy
 

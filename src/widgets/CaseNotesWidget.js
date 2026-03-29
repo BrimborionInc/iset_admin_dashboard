@@ -20,6 +20,7 @@ import {
 import { apiFetch } from '../auth/apiClient';
 import CaseNotesHelp from '../helpPanelContents/caseNotesHelp';
 import { useCaseWorkspace } from '../pages/Caseworking/caseWorkspace/CaseWorkspaceContext.jsx';
+import { formatReminderBusinessDate, getReminderBusinessDayDiffDays } from '../lib/reminderBusinessDay';
 
 const NOTE_LENGTH_LIMIT = 5000;
 
@@ -69,24 +70,14 @@ const toIsoUtcFromDateInput = (value) => {
 };
 
 const formatFollowUpDate = (value) => {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric'
-  });
+  const label = formatReminderBusinessDate(value);
+  return label || null;
 };
 
 const classifyFollowUpStatus = (value) => {
   if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const diffMs = date.getTime() - today.getTime();
-  const diffDays = Math.floor(diffMs / 86400000);
+  const diffDays = getReminderBusinessDayDiffDays(value, new Date());
+  if (diffDays === null) return null;
   if (diffDays < 0) {
     return { color: 'red', label: 'Overdue follow-up' };
   }

@@ -229,13 +229,11 @@ const SideNavigation = ({ showTutorialHotspots = false, notificationCount = 0, r
       external: false,
     };
 
-    if (notificationCount > 0) {
-      item.info = (
-        <span style={{ display: 'inline-flex', pointerEvents: 'none' }} aria-hidden="true">
-          <Badge color="red">{notificationCount}</Badge>
-        </span>
-      );
-    }
+    item.info = (
+      <span style={{ display: 'inline-flex', pointerEvents: 'none' }} aria-hidden="true">
+        <Badge color={notificationCount > 0 ? 'red' : 'grey'}>{notificationCount}</Badge>
+      </span>
+    );
 
     return item;
   }, [notificationCount]);
@@ -309,12 +307,10 @@ const SideNavigation = ({ showTutorialHotspots = false, notificationCount = 0, r
       footerItems.push(contactLink);
     }
 
-    if (isAllowed('/manage-notifications', canonicalRole)) {
-      ensureDivider();
-      const existingContactIndex = footerItems.findIndex(item => item?.href === '/contact-communications');
-      const insertAt = existingContactIndex >= 0 ? existingContactIndex + 1 : footerItems.length;
-      footerItems.splice(insertAt, 0, notificationsFooterItem);
-    }
+    ensureDivider();
+    const existingContactIndex = footerItems.findIndex(item => item?.href === '/contact-communications');
+    const insertAt = existingContactIndex >= 0 ? existingContactIndex + 1 : footerItems.length;
+    footerItems.splice(insertAt, 0, notificationsFooterItem);
 
     if (isAllowed('/messages', canonicalRole)) {
       ensureDivider();

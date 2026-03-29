@@ -4,7 +4,7 @@ Purpose: running capture of user-facing fixes/changes for the next "What's New" 
 
 Current public release in Landing Page: `v0.5.8` (`26th March 2026`)
 Target next release notes draft: `v0.5.9` (date TBD)
-Last Updated: 2026-03-27
+Last Updated: 2026-03-29
 
 ## How to use
 
@@ -18,6 +18,9 @@ Last Updated: 2026-03-27
 
 ## Entries
 
+- 2026-03-29 | Release v0.5.9 | UX/Notifications | Admin shell footer | The side-navigation `Notifications` footer control is now visible to all signed-in roles. | It still refreshes the current user's bell alerts in place and is no longer implicitly tied to access for `Manage Notifications`.
+- 2026-03-29 | Release v0.5.9 | UX/API/Reminders | Case reminders + bell alerts | Reminder due/overdue status now follows the PATH business day in `America/Toronto`, so reminder bells, the events timeline, and case reminder badges classify dates the same way. | Reminder reschedules/reopens also clear prior due/overdue emit flags so later reminder bells can fire again after the date changes.
+- 2026-03-29 | Release v0.5.9 | UX/Notifications | Admin shell bell alerts | Bell alerts in the admin shell now show the notification date/time directly in the heading. | The timestamp uses the notification delivery time when available, otherwise creation time, and is formatted in the viewer browser timezone with `America/Toronto` as fallback.
 - 2026-03-27 | Release v0.5.9 | Fix/Calendar | Case Workspace + Application Workspace > Case Calendar | Fixed the shared case calendar so weekday headers and event dates now stay aligned in Canadian time zones. | The widget now treats date-only `YYYY-MM-DD` reminder, action-plan, and intervention dates as local calendar days instead of shifting them through UTC parsing.
 - 2026-03-26 | Release v0.5.8 | UX/API/Auth | User Management > Applicant Accounts | Added a new `Applicant Accounts` tab to `Manage Users` for imported participant account creation, invitation sending, and activation tracking. | Uses PATH-managed statuses `No account`, `Ready to invite`, `Invitation sent`, and `Activated`; `Application Assessor` can access this tab without gaining staff-user administration.
 - 2026-03-26 | Release v0.5.8 | API/Auth/Import | Client Batch Import + Applicant Accounts | Imported client rows with one clean email now silently create or link an applicant Cognito account with no email sent at import time. | Missing, invalid, partially invalid, or multiple email values suppress applicant-account creation while still allowing valid client/case import work.

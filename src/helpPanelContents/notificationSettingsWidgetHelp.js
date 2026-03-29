@@ -12,7 +12,9 @@ const NotificationSettingsWidgetHelp = () => (
     <p>
       The widget also stores the PATH sender email used for PATH-generated SES
       emails. That address is shared through runtime configuration so the admin
-      dashboard and portal mailers stay aligned.
+      dashboard and portal mailers stay aligned. Bell alerts raised from these
+      settings appear in the admin shell and now show a heading timestamp in
+      the viewer&apos;s browser timezone.
     </p>
     <p>
       Saved changes update the <code>notification_setting</code> table that the

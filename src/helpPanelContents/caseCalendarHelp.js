@@ -20,12 +20,13 @@ const CaseCalendarHelp = () => (
       <li>Click a date to view the events in the right-hand panel and see next steps or owners.</li>
       <li>Use <em>List view</em> to filter by title, category, or severity when the month view gets busy.</li>
       <li>Color badges indicate urgency: <em>Overdue</em>, <em>Due soon</em>, and <em>On track</em>.</li>
+      <li>Reminder due/overdue badges follow the PATH business day in <code>America/Toronto</code> so calendar urgency matches bell alerts and the events timeline.</li>
       <li>If the calendar looks empty, confirm reminders exist or use demo mode to view sample events.</li>
     </ul>
   </div>
 );
 
 CaseCalendarHelp.aiContext = `
-You are assisting with the Case Calendar widget. It shows reminders and key dates from action plans, interventions, and follow-up tasks. Explain the calendar vs. list views, color coding, and how to drill into events or acknowledge reminders.`;
+You are assisting with the Case Calendar widget. It shows reminders and key dates from action plans, interventions, and follow-up tasks. Explain the calendar vs. list views, color coding, and how to drill into events or acknowledge reminders. Reminder due/overdue status follows the PATH business day in America/Toronto so the calendar stays aligned with bell alerts and the events timeline.`;
 
 export default CaseCalendarHelp;

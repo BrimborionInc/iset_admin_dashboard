@@ -25,7 +25,8 @@ import { useAuth } from './context/AuthContext.js';
 import { LocationProvider } from './context/LocationContext';
 import { TutorialsContext } from './context/TutorialsContext';
 import AdminDashboardHelp from './helpPanelContents/adminDashboardHelp.js';
-	import AdminConsoleIntroHelp from './helpPanelContents/adminConsoleIntroHelp.js';
+import { getReminderBusinessDayDiffDays } from './lib/reminderBusinessDay.js';
+		import AdminConsoleIntroHelp from './helpPanelContents/adminConsoleIntroHelp.js';
 	import IsetCoordinatorIntroTourHelp from './helpPanelContents/isetCoordinatorIntroTourHelp.js';
 	import ApplicationCaseDashboardHelp from './helpPanelContents/applicationCaseDashboardHelp.js';
 	import ApplicationAssessmentHelp, { NwacAssessmentHelp } from './helpPanelContents/applicationAssessmentHelp.js';
@@ -48,6 +49,7 @@ const MAX_PROMPT_CHARS = 1000;
 const TUTORIAL_COMPLETION_STORAGE_KEY = 'iset-tutorials.completed.v1';
 const TUTORIAL_APP_LAYOUT_RESET_FLAG = 'iset.tutorial.resetApplicationLayout';
 const TUTORIAL_CASE_LAYOUT_RESET_FLAG = 'iset.tutorial.resetCaseWorkspaceLayout';
+const NOTIFICATION_TIMEZONE_FALLBACK = 'America/Toronto';
 const normalizeRoleKey = value => String(value ?? '').trim().toLowerCase();
 const APPLICATION_WORKSPACE_PROMPT_ROLE_KEYS = new Set([
   'iset coordinator',
@@ -117,6 +119,82 @@ const buildSystemPrompt = ({ focusTitle, aiContext }) => {
   );
 
   return sections.join('\n');
+};
+
+const parseNotificationMetadata = (value) => {
+  try {
+    if (!value) return {};
+    if (typeof value === 'string') return JSON.parse(value) || {};
+    if (typeof value === 'object') return value || {};
+  } catch (_) {}
+  return {};
+};
+
+const getNotificationViewerTimeZone = () => {
+  if (typeof Intl === 'undefined' || typeof Intl.DateTimeFormat !== 'function') {
+    return NOTIFICATION_TIMEZONE_FALLBACK;
+  }
+  try {
+    const resolved = Intl.DateTimeFormat().resolvedOptions?.();
+    const candidate = typeof resolved?.timeZone === 'string' ? resolved.timeZone.trim() : '';
+    return candidate || NOTIFICATION_TIMEZONE_FALLBACK;
+  } catch (_) {
+    return NOTIFICATION_TIMEZONE_FALLBACK;
+  }
+};
+
+const formatNotificationTimestamp = (value, timeZone = NOTIFICATION_TIMEZONE_FALLBACK) => {
+  if (!value) return '';
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      weekday: 'short',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+      timeZoneName: 'short',
+    });
+    const parts = formatter.formatToParts(date);
+    const lookup = {};
+    for (const part of parts) {
+      if (part.type === 'literal') continue;
+      lookup[part.type] = lookup[part.type] ? `${lookup[part.type]}${part.value}` : part.value;
+    }
+
+    const weekday = lookup.weekday || '';
+    const month = lookup.month || '';
+    const day = lookup.day || '';
+    const year = lookup.year || '';
+    const hour = lookup.hour || '';
+    const minute = lookup.minute || '';
+    const timeZoneName = lookup.timeZoneName || '';
+    const dayPeriod = String(lookup.dayPeriod || '').replace(/\./g, '').toLowerCase();
+    const core = `${weekday} ${month} ${day}, ${year} ${hour}:${minute}${dayPeriod}`.replace(/\s+/g, ' ').trim();
+
+    return timeZoneName ? `${core} ${timeZoneName}` : core;
+  } catch (_) {
+    try {
+      return date.toLocaleString('en-CA', {
+        timeZone,
+        weekday: 'short',
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+        timeZoneName: 'short',
+      });
+    } catch (_) {
+      return date.toLocaleString('en-CA');
+    }
+  }
 };
 
 const loadTutorialCompletionMapFromLocalStorage = () => {
@@ -841,6 +919,7 @@ const AppContent = () => {
   const [notifications, setNotifications] = useState([]);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const flashbarRef = useRef(null);
+  const notificationViewerTimeZone = useMemo(() => getNotificationViewerTimeZone(), []);
 
   const notificationScope = useMemo(() => {
     const path = location?.pathname || '/';
@@ -862,18 +941,9 @@ const AppContent = () => {
     const id = String(notificationScope.id);
     const isNumericId = /^\d+$/.test(id);
 
-    const parseMetadata = (value) => {
-      try {
-        if (!value) return {};
-        if (typeof value === 'string') return JSON.parse(value) || {};
-        if (typeof value === 'object') return value || {};
-      } catch (_) {}
-      return {};
-    };
-
     return notifications.filter((n) => {
       if (!n) return false;
-      const metadata = parseMetadata(n.metadata);
+      const metadata = parseNotificationMetadata(n.metadata);
       const metaCaseId = metadata.caseId != null ? String(metadata.caseId) : null;
       const metaTrackingId = metadata.trackingId != null ? String(metadata.trackingId) : null;
       const metaAppRef = metadata.applicationReference != null ? String(metadata.applicationReference) : null;
@@ -959,36 +1029,22 @@ const AppContent = () => {
     return 'info';
   }, []);
 
-  const daysSinceUtc = useCallback((from) => {
-    if (!from) return null;
-    const start = (value) => {
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime())) return null;
-      return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
-    };
-    const fromStart = start(from);
-    const todayStart = start(new Date());
-    if (fromStart === null || todayStart === null) return null;
-    const diff = Math.floor((todayStart - fromStart) / (24 * 60 * 60 * 1000));
-    return diff >= 0 ? diff : null;
-  }, []);
-
   const notificationFlashbarItems = useMemo(() =>
     scopedNotifications
       .filter(n => n && n.dismissible !== false)
       .map(n => {
-        let metadata = {};
-        try {
-          metadata = typeof n.metadata === 'string' ? JSON.parse(n.metadata) : (n.metadata || {});
-        } catch (_) {
-          metadata = {};
-        }
+        const metadata = parseNotificationMetadata(n.metadata);
         const eventKey = n.event_key || metadata.event_key || metadata.eventKey || null;
         const typeFromSeverity = mapSeverityToType(n.severity);
         const flashType = eventKey === 'reminder_overdue' ? 'error' : typeFromSeverity;
+        const timestampLabel = formatNotificationTimestamp(
+          n.delivered_at || n.created_at,
+          notificationViewerTimeZone
+        );
         const daysOverdue = (() => {
           if (Number.isFinite(metadata.overdue_days) && metadata.overdue_days > 0) return Math.floor(metadata.overdue_days);
-          const days = daysSinceUtc(metadata.due_at || metadata.dueAt);
+          if (Number.isFinite(metadata.overdueDays) && metadata.overdueDays > 0) return Math.floor(metadata.overdueDays);
+          const days = getReminderBusinessDayDiffDays(metadata.due_at || metadata.dueAt, new Date());
           return days && days > 0 ? days : null;
         })();
         const caseId = metadata.caseId || null;
@@ -1022,16 +1078,28 @@ const AppContent = () => {
             <Link href={href} color={linkColor}>{linkLabel}</Link>
           </div>
         ) : `${n.message || ''}${overdueSuffix}`;
+        const header = n.title
+          ? (
+            timestampLabel
+              ? (
+                <span>
+                  {n.title}
+                  <span style={{ fontWeight: 'normal' }}>{` (${timestampLabel})`}</span>
+                </span>
+              )
+              : n.title
+          )
+          : undefined;
         return {
           type: flashType,
-          header: n.title || undefined,
+          header,
           content,
           dismissible: true,
           onDismiss: () => handleDismissNotification(n.id),
           id: `notification-${n.id}`,
         };
       }),
-  [scopedNotifications, handleDismissNotification, mapSeverityToType, daysSinceUtc]);
+  [scopedNotifications, handleDismissNotification, mapSeverityToType, notificationViewerTimeZone]);
 
   const refreshNotifications = useCallback(() => loadNotifications({ scrollIntoView: true }), [loadNotifications]);
 

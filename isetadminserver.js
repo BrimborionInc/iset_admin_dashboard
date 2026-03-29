@@ -26,6 +26,10 @@ let pool; // Initialized after DB config loads
 const { getRenderer: getComponentRenderer } = require('./src/server/componentRenderRegistry');
 const { createEventService, EventValidationError, registerNotificationHook } = require('../shared/events');
 const events = require('events');
+const {
+  getReminderBusinessDayDiffDays,
+  getReminderBusinessDayStamp,
+} = require('../shared/events/reminderBusinessDay');
 
 // Increase default listener cap to avoid noisy warnings when wiring shared buses.
 events.EventEmitter.defaultMaxListeners = 20;
@@ -15619,8 +15623,78 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
+let authnMiddlewareFactory = null;
+try {
+  ({ authnMiddleware: authnMiddlewareFactory } = require('./src/middleware/authn'));
+} catch (e) {
+  console.warn('Auth middleware init failed:', e?.message);
+}
+
+function requireAuthenticatedStaff(req, res, next) {
+  if (!req.auth) {
+    return res.status(401).json({ error: 'Unauthenticated' });
+  }
+  if (req.auth.subjectType !== 'staff') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  return next();
+}
+
+function hasSystemOrNwacAdminAccess(req) {
+  const role = canonicaliseAccessRole(inferUserRole(req));
+  return role === 'System Administrator' || role === 'NWAC Administrator';
+}
+
+function requireSystemOrNwacAdmin(req, res, next) {
+  if (!hasSystemOrNwacAdminAccess(req)) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  return next();
+}
+
+const UNSAFE_ADMIN_DEBUG_ROUTES_ENABLED = ['1', 'true', 'yes', 'on'].includes(
+  String(process.env.ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES || '').trim().toLowerCase()
+);
+
+function requireUnsafeAdminDebugAccess(req, res, next) {
+  if (!UNSAFE_ADMIN_DEBUG_ROUTES_ENABLED) {
+    return res.status(404).json({ error: 'not_found' });
+  }
+  if (!sysAdminOnly(req)) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  return next();
+}
+
+function resolveSafeRepoRelativePath(rawPath) {
+  const trimmed = typeof rawPath === 'string' ? rawPath.trim() : '';
+  if (!trimmed) {
+    const error = new Error('path_required');
+    error.statusCode = 400;
+    throw error;
+  }
+  const normalized = path.posix.normalize(trimmed.replace(/\\/g, '/'));
+  if (!normalized || normalized === '.' || normalized.startsWith('../') || normalized === '..' || path.posix.isAbsolute(normalized)) {
+    const error = new Error('invalid_path');
+    error.statusCode = 400;
+    throw error;
+  }
+  const repoRoot = path.resolve(__dirname);
+  const resolved = path.resolve(repoRoot, normalized);
+  if (resolved !== repoRoot && !resolved.startsWith(`${repoRoot}${path.sep}`)) {
+    const error = new Error('invalid_path');
+    error.statusCode = 400;
+    throw error;
+  }
+  return resolved;
+}
+
+const authenticatedStaffRouteMiddleware = authnMiddlewareFactory
+  ? [authnMiddlewareFactory(), requireAuthenticatedStaff, staffProfileMiddleware]
+  : [(_req, res) => res.status(503).json({ error: 'auth_unavailable' })];
+
 // Publish endpoint for workflows (dev/internal) - writes normalized schema to legacy & new portals
-app.post('/api/workflows/:id/publish', async (req, res) => {
+app.post('/api/workflows/:id/publish', authenticatedStaffRouteMiddleware, requireSystemOrNwacAdmin, async (req, res) => {
   const idRaw = req.params.id;
   const workflowId = Number(idRaw);
   if (!Number.isFinite(workflowId) || workflowId <= 0) {
@@ -15709,19 +15783,18 @@ app.post('/api/workflows/:id/publish', async (req, res) => {
   }
 });
 
-// --- Public Linkage Coverage Proxy (moved before auth middleware) ---------
-// Returns aggregate, non-sensitive linkage stats from the intake service WITHOUT requiring admin auth.
-// Placed here (before Cognito auth mounting) so /api/admin/linkage-stats is publicly reachable.
+// --- Linkage Coverage Proxy ------------------------------------------------
+// Returns aggregate linkage stats from the intake service for admin reporting.
 // Caching: 10s in-memory to reduce upstream load during dashboard refreshes.
 let __linkageStatsCache = { ts: 0, ttlMs: 10_000, data: null };
-app.get('/api/admin/linkage-stats', async (req, res) => {
+app.get('/api/admin/linkage-stats', authenticatedStaffRouteMiddleware, requireSystemOrNwacAdmin, async (req, res) => {
   try {
     const baseRaw = process.env.LINKAGE_STATS_URL || process.env.INTAKE_BASE_URL || 'http://localhost:5000';
     const base = /^https?:\/\//i.test(baseRaw) ? baseRaw : `http://${baseRaw}`;
     const url = base.replace(/\/$/, '') + '/api/admin/linkage-stats';
 
     if (__linkageStatsCache.data && (Date.now() - __linkageStatsCache.ts) < __linkageStatsCache.ttlMs) {
-      return res.json({ ...(__linkageStatsCache.data || {}), _cache: true, _source: 'cache', _public: true });
+      return res.json({ ...(__linkageStatsCache.data || {}), _cache: true, _source: 'cache' });
     }
 
     const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
@@ -15741,7 +15814,7 @@ app.get('/api/admin/linkage-stats', async (req, res) => {
       return res.status(502).json({ error: 'linkage_stats_failed', category: 'parse', upstreamBase: base, body: text.slice(0,500) });
     }
     __linkageStatsCache = { ts: Date.now(), ttlMs: __linkageStatsCache.ttlMs, data: json };
-    res.json({ ...json, _cache: false, _source: 'upstream', _public: true });
+    res.json({ ...json, _cache: false, _source: 'upstream' });
   } catch (e) {
     res.status(500).json({ error: 'linkage_stats_proxy_failed', message: e.message });
   }
@@ -15750,7 +15823,7 @@ app.get('/api/admin/linkage-stats', async (req, res) => {
 // --- Upload Config (admin-local by default; optional legacy proxy mode) ---
 // GET  /api/admin/upload-config  -> returns { policy, infra, loadedAt, audit }
 // PATCH /api/admin/upload-config -> updates runtime policy in iset_runtime_config
-app.all(['/api/admin/upload-config'], async (req, res) => {
+app.all(['/api/admin/upload-config'], authenticatedStaffRouteMiddleware, requireSystemOrNwacAdmin, async (req, res) => {
   try {
     const UPLOAD_SCOPE = 'admin';
     const UPLOAD_POLICY_KEY = 'upload.config.policy';
@@ -16098,12 +16171,9 @@ async function staffProfileMiddleware(req, res, next) {
 }
 
 // --- Authentication (Cognito) ---
-try {
-  const { authnMiddleware } = require('./src/middleware/authn');
-  // Attach auth first, then staff profile enrichment.
-  app.use('/api', authnMiddleware(), staffProfileMiddleware);
-} catch (e) {
-  console.warn('Auth middleware init failed:', e?.message);
+if (authnMiddlewareFactory) {
+  // All authenticated admin-dashboard API traffic must come from staff identities.
+  app.use('/api', authnMiddlewareFactory(), requireAuthenticatedStaff, staffProfileMiddleware);
 }
 
 // Mount admin users router (Cognito administrative user lifecycle)
@@ -23794,7 +23864,7 @@ app.get('/api/admin/contact-messages/:id/notes', async (req, res) => {
 });
 
 
-app.post('/api/clear-iset-test-data', async (_req, res) => {
+app.post('/api/clear-iset-test-data', requireUnsafeAdminDebugAccess, async (_req, res) => {
   let connection;
   const report = [];
   const startedAt = Date.now();
@@ -23848,7 +23918,7 @@ app.post('/api/clear-iset-test-data', async (_req, res) => {
   }
 });
 
-// (Removed duplicate linkage-stats route; public version defined earlier before auth.)
+// (Removed duplicate linkage-stats route; canonical route is defined earlier.)
 
 
 // --- AI Chat proxy & status (server-side, avoids exposing API keys in browser) -----
@@ -31879,26 +31949,24 @@ const mapReminderMetadata = (row) => {
   return meta && typeof meta === 'object' ? meta : {};
 };
 
-const MS_PER_HOUR = 60 * 60 * 1000;
-const MS_PER_DAY = 24 * MS_PER_HOUR;
-const startOfUtcDay = (value) => {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+const clearReminderEmissionMetadata = (metadata) => {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return metadata ?? null;
+  }
+  const next = { ...metadata };
+  delete next.due_emitted;
+  delete next.overdue_emitted;
+  delete next.overdue_days_on_emit;
+  return next;
 };
 
-const isSameDay = (a, b) => {
-  const startA = startOfUtcDay(a);
-  const startB = startOfUtcDay(b);
-  if (startA === null || startB === null) return false;
-  return startA === startB;
-};
+const MS_PER_HOUR = 60 * 60 * 1000;
+const MS_PER_DAY = 24 * MS_PER_HOUR;
 
 function pollRemindersForDue() {
   return (async () => {
   const now = new Date();
-  const todayUtc = startOfUtcDay(now);
+  const todayBusinessDay = getReminderBusinessDayStamp(now);
   let rows = [];
   try {
     const [result] = await pool.query(
@@ -31933,13 +32001,13 @@ function pollRemindersForDue() {
     const meta = reminder.metadata || {};
     const dueAt = reminder.dueAt ? new Date(reminder.dueAt) : null;
     if (!dueAt || Number.isNaN(dueAt.getTime())) continue;
-    const dueUtc = startOfUtcDay(dueAt);
-    if (dueUtc === null || todayUtc === null) continue;
+    const dueBusinessDay = getReminderBusinessDayStamp(dueAt);
+    if (dueBusinessDay === null || todayBusinessDay === null) continue;
 
     const dueEmitted = meta.due_emitted === true;
     const overdueEmitted = meta.overdue_emitted === true;
 
-    if (!dueEmitted && dueUtc === todayUtc) {
+    if (!dueEmitted && dueBusinessDay === todayBusinessDay) {
       try {
         await emitReminderEvent({ type: 'reminder_due', reminder, actorId: null, actorName: null });
         meta.due_emitted = true;
@@ -31950,8 +32018,8 @@ function pollRemindersForDue() {
       continue;
     }
 
-    if (!overdueEmitted && dueUtc < todayUtc) {
-      const daysOverdue = Math.max(1, Math.floor((todayUtc - dueUtc) / MS_PER_DAY));
+    if (!overdueEmitted && dueBusinessDay < todayBusinessDay) {
+      const daysOverdue = Math.max(1, getReminderBusinessDayDiffDays(dueAt, now) || 0);
       reminder.daysOverdue = daysOverdue;
       try {
         await emitReminderEvent({ type: 'reminder_overdue', reminder, actorId: null, actorName: null });
@@ -32932,6 +33000,8 @@ syncWarningTextTemplateFromFile();
 // Signature-ack template sync (reuse generic helper)
 async function syncSignatureAckTemplateFromFile() { return syncTemplateFromFile('signature-ack'); }
 syncSignatureAckTemplateFromFile();
+
+app.use('/api/dev', requireUnsafeAdminDebugAccess);
 
 // Dev helper endpoint to force re-sync of radio template from filesystem (no versioning bump)
 app.post('/api/dev/sync/radio-template', async (_req, res) => {
@@ -44834,7 +44904,7 @@ app.delete('/api/blocksteps/:id', async (req, res) => {
   }
 });
 
-app.get('/api/render-nunjucks', (req, res) => {
+app.get('/api/render-nunjucks', requireUnsafeAdminDebugAccess, (req, res) => {
   const { template_path } = req.query;
 
   if (!template_path) {
@@ -44842,7 +44912,12 @@ app.get('/api/render-nunjucks', (req, res) => {
     return res.status(400).json({ error: 'template_path query parameter is required' });
   }
 
-  const filePath = path.join(__dirname, template_path);
+  let filePath;
+  try {
+    filePath = resolveSafeRepoRelativePath(template_path);
+  } catch (err) {
+    return res.status(err?.statusCode || 400).json({ error: err?.message || 'invalid_path' });
+  }
   console.log('Reading Nunjucks template from:', filePath);
 
   fs.readFile(filePath, 'utf8', (err, template) => {
@@ -44877,7 +44952,7 @@ app.get('/api/render-nunjucks', (req, res) => {
 //   400 if `path` is missing
 //   500 if the file cannot be read
 
-app.get('/api/load-njk-template', (req, res) => {
+app.get('/api/load-njk-template', requireUnsafeAdminDebugAccess, (req, res) => {
   const { path: templatePath } = req.query;
 
   if (!templatePath) {
@@ -44885,7 +44960,12 @@ app.get('/api/load-njk-template', (req, res) => {
     return res.status(400).send('Missing template path');
   }
 
-  const fullPath = path.join(__dirname, templatePath);
+  let fullPath;
+  try {
+    fullPath = resolveSafeRepoRelativePath(templatePath);
+  } catch (err) {
+    return res.status(err?.statusCode || 400).json({ error: err?.message || 'invalid_path' });
+  }
   console.log('Loading Nunjucks template from:', fullPath);
 
   try {
@@ -46320,18 +46400,23 @@ app.put('/api/reminders/:reminderId', async (req, res) => {
     }
   }
 
+  let metadataShouldWrite = false;
+  let metadataJsonValue;
+  let metadataValue = existing.metadata ?? null;
   if (hasOwn(body, 'metadata') || hasOwn(body, 'metadataJson')) {
-    let metadataJsonValue;
     try {
       metadataJsonValue = resolveReminderMetadataInput(body);
+      metadataValue = metadataJsonValue === null ? null : safeJsonParse(metadataJsonValue, null);
+      if (metadataJsonValue !== null && typeof metadataValue === 'undefined') {
+        metadataValue = null;
+      }
     } catch (err) {
       if (err.code === REMINDER_METADATA_ERROR) {
         return res.status(400).json({ error: 'invalid_metadata' });
       }
       throw err;
     }
-    updates.push('metadata_json = ?');
-    params.push(metadataJsonValue ?? null);
+    metadataShouldWrite = true;
   }
 
   const statusProvided = hasOwn(body, 'status');
@@ -46386,6 +46471,20 @@ app.put('/api/reminders/:reminderId', async (req, res) => {
   if (completedByProvided) {
     updates.push('completed_by_staff_profile_id = ?');
     params.push(Number.isInteger(completedByValue) ? completedByValue : null);
+  }
+
+  const dueBusinessDayChanged = dueAtProvided
+    ? getReminderBusinessDayStamp(existing.dueAt || null) !== getReminderBusinessDayStamp(dueAtValue ?? null)
+    : false;
+  const reminderReopened = statusProvided && existing.status !== 'open' && statusValue === 'open';
+  if (dueBusinessDayChanged || reminderReopened) {
+    metadataValue = clearReminderEmissionMetadata(metadataValue);
+    metadataJsonValue = encodeReminderMetadataValue(metadataValue);
+    metadataShouldWrite = true;
+  }
+  if (metadataShouldWrite) {
+    updates.push('metadata_json = ?');
+    params.push(metadataJsonValue ?? null);
   }
 
   if (!updates.length) {
@@ -66734,7 +66833,7 @@ app.get('/api/applications', async (req, res) => {
  * Clears case-related tables (documents, notes, tasks) and wipes the event store before removing cases.
  * Used for demo reset purposes only.
  */
-app.post('/api/purge-cases', async (req, res) => {
+app.post('/api/purge-cases', requireUnsafeAdminDebugAccess, async (req, res) => {
   try {
     // Delete from child tables first due to foreign key constraints
     await deleteTableIfExists('iset_case_document');
@@ -66752,7 +66851,7 @@ app.post('/api/purge-cases', async (req, res) => {
 });
 
 // Purge all applications, drafts, and files (for demo reset)
-app.post('/api/purge-applications', async (req, res) => {
+app.post('/api/purge-applications', requireUnsafeAdminDebugAccess, async (req, res) => {
   try {
     // Delete from child tables first to avoid FK constraint errors
     await pool.query('DELETE FROM iset_application_file');
@@ -66767,9 +66866,14 @@ app.post('/api/purge-applications', async (req, res) => {
 
 
 // Endpoint to get the content of a .njk file
-app.get('/api/get-njk-file', (req, res) => {
+app.get('/api/get-njk-file', requireUnsafeAdminDebugAccess, (req, res) => {
   const templatePath = req.query.template_path;
-  const filePath = path.join(__dirname, templatePath); // Corrected path
+  let filePath;
+  try {
+    filePath = resolveSafeRepoRelativePath(templatePath);
+  } catch (err) {
+    return res.status(err?.statusCode || 400).json({ error: err?.message || 'invalid_path' });
+  }
 
   fs.readFile(filePath, 'utf8', (err, data) => {
     if (err) {
@@ -66781,7 +66885,7 @@ app.get('/api/get-njk-file', (req, res) => {
 });
 
 //This is probably safe to remove. It was from when I stoed jsons, not nunjucks.
-app.get('/api/blockstep-json', (req, res) => {
+app.get('/api/blockstep-json', requireUnsafeAdminDebugAccess, (req, res) => {
   const { config_path } = req.query;
 
   if (!config_path) {
@@ -66789,7 +66893,12 @@ app.get('/api/blockstep-json', (req, res) => {
     return res.status(400).json({ error: 'config_path query parameter is required' });
   }
 
-  const filePath = path.join(__dirname, config_path);
+  let filePath;
+  try {
+    filePath = resolveSafeRepoRelativePath(config_path);
+  } catch (err) {
+    return res.status(err?.statusCode || 400).json({ error: err?.message || 'invalid_path' });
+  }
   console.log('Reading BlockStep JSON from:', filePath); // Add logging
 
   fs.readFile(filePath, 'utf8', (err, data) => {
@@ -66898,14 +67007,19 @@ app.post('/api/generate-static-njk-template', (req, res) => {
   }
 });
 
-app.post('/api/save-blockstep-json', (req, res) => {
+app.post('/api/save-blockstep-json', requireUnsafeAdminDebugAccess, (req, res) => {
   const { json_path, content } = req.body;
 
   if (!json_path || !content) {
     return res.status(400).json({ message: 'Missing json_path or content' });
   }
 
-  const fullPath = path.join(__dirname, json_path);
+  let fullPath;
+  try {
+    fullPath = resolveSafeRepoRelativePath(json_path);
+  } catch (err) {
+    return res.status(err?.statusCode || 400).json({ error: err?.message || 'invalid_path' });
+  }
 
   fs.writeFile(fullPath, content, 'utf8', (err) => {
     if (err) {
@@ -66919,10 +67033,15 @@ app.post('/api/save-blockstep-json', (req, res) => {
 
 
 // Endpoint to save the content of a .njk file
-app.post('/api/save-njk-file', (req, res) => {
+app.post('/api/save-njk-file', requireUnsafeAdminDebugAccess, (req, res) => {
   const templatePath = req.body.template_path;
   const content = req.body.content;
-  const filePath = path.join(__dirname, templatePath); // Corrected path
+  let filePath;
+  try {
+    filePath = resolveSafeRepoRelativePath(templatePath);
+  } catch (err) {
+    return res.status(err?.statusCode || 400).json({ error: err?.message || 'invalid_path' });
+  }
 
   fs.writeFile(filePath, content, 'utf8', (err) => {
     if (err) {
@@ -66996,14 +67115,19 @@ app.delete('/api/govuk-components/:id', async (req, res) => {
   }
 });
 
-app.get('/api/load-blockstep-json', (req, res) => {
+app.get('/api/load-blockstep-json', requireUnsafeAdminDebugAccess, (req, res) => {
   const { path: jsonPath } = req.query;
 
   if (!jsonPath) {
     return res.status(400).json({ message: 'Missing path parameter' });
   }
 
-  const fullPath = path.join(__dirname, jsonPath);
+  let fullPath;
+  try {
+    fullPath = resolveSafeRepoRelativePath(jsonPath);
+  } catch (err) {
+    return res.status(err?.statusCode || 400).json({ error: err?.message || 'invalid_path' });
+  }
 
   fs.readFile(fullPath, 'utf8', (err, data) => {
     if (err) {

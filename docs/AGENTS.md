@@ -5,7 +5,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-03-26
+Last Updated: 2026-03-29
 
 ## Working relationship (design dialog)
 
@@ -58,9 +58,11 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 ## Auth model
 
 - Admin sign-in now uses real Cognito/IAM only. Do not reintroduce simulated-user flows, IAM on/off toggles, dev-bypass headers, or header-driven role impersonation in admin code.
+- The admin-dashboard backend is staff-only. Applicant-pool tokens must be rejected by this service; do not treat shared Cognito verification as permission to expose admin API routes to applicants.
 - Frontend auth state is centralized in `src/context/AuthContext.js`. Prefer `useAuth()` and `useCurrentUser()` over direct token/session reads in page or widget code.
 - The OAuth callback is handled as a shell-less bootstrapping route. If sign-in behavior changes, inspect `src/App.js`, `src/pages/AuthCallback.js`, `src/auth/cognito.js`, and `src/auth/apiClient.js` together.
 - Server middleware and admin-user routes no longer support `AUTH_PROVIDER=none`, mock admin users, or auth-disabled mutation fallbacks. If auth is misconfigured, fail explicitly instead of inventing local placeholder behavior.
+- Raw debug/file-maintenance endpoints must stay behind explicit server-side enablement (for example `ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES=true`) plus System Administrator access. Do not leave purge or direct file read/write helpers broadly reachable.
 
 ## Development data policy (no legacy fallbacks)
 
@@ -78,12 +80,14 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Data and Results dashboard reference: `docs/dashboards/data-and-results-dashboard.md`
 - Homepage Metrics dashboard reference: `docs/dashboards/admin-home-metrics-widget.md`
 - Query Editor dashboard reference: `docs/dashboards/query-editor-dashboard.md`
+- Test DB access from Codex/WSL: `docs/guides/test-db-access-from-codex.md`
 - Operational reporting workbook reference: `docs/data/NWAC - data info 2025-26.xlsx`
 - Admin intake preview renderer: `apps/web/src/features/intake/ComponentRenderer.tsx`
 - Public portal renderer (other repo): `../ISET-intake/src/renderer/renderers.js`
 - Help panel content: `src/helpPanelContents/*`
 - Admin test deploy staging script: `scripts/deploy-admin-test.ps1`
 - Portal test deploy staging script: `../ISET-intake/scripts/deploy-portal-test.ps1`
+- Test DB SQL helper for Codex/WSL: `scripts/run-test-sql-via-ssm.sh`
 
 ## Documentation gateway
 
@@ -236,7 +240,15 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
   - Confirm table/columns with `SHOW CREATE TABLE`.
   - Wrap writes in `START TRANSACTION; ...; COMMIT;` (or `ROLLBACK;`).
   - Use clearly tagged dummy values like `DUMMY_` and `TEST_`.
-  - Never run destructive broad statements unless explicitly requested.
+
+### Test DB interaction from Codex/WSL
+
+- Verified on 2026-03-28: the Codex sandbox can run SQL against TEST indirectly through SSM on a live `nwac-test-app` EC2 instance using AWS profile `nwac-test`.
+- Do not assume direct network access from the sandbox to the Aurora cluster. The test DB security group only allows MySQL from the app security group, so the normal Codex path is remote execution on the app host.
+- Preferred helper for future chats: `scripts/run-test-sql-via-ssm.sh`
+- Supporting guide: `docs/guides/test-db-access-from-codex.md`
+- Current caveat: older scripts such as `scripts/deploy-test-db.ps1` reference retired test instance IDs; re-check live AWS resources before trusting those IDs.
+- Never run destructive broad statements unless explicitly requested.
 - If host DB access fails from WSL, run `npm run dump:dev-schema` and continue with read-only analysis from docs.
 
 ## Prod start/stop reference (NWAC, ca-central-1)
@@ -267,6 +279,7 @@ Notes:
 - This stops compute + database, but ALB/NAT/EIP/VPC endpoint costs may remain.
 - Confirm target AWS account before running commands:
   `aws sts get-caller-identity`
+- Do not use deploy-script `-SkipBuild` for admin or portal unless you have already inspected the current `build/` output and confirmed it was compiled for the target environment. The compiled React bundle bakes Cognito domains, client IDs, and portal/admin links, so a stale test build can ship test sign-in targets to prod even when prod SSM/runtime env is correct.
 
 ### AWS CLI profile/account mapping (Codex sandbox)
 
@@ -284,3 +297,7 @@ Notes:
 - Do not copy env files or code between apps without explicit approval.
 - Confirm which renderer you are editing before making intake-rendering changes.
 - PATH-generated SES sender email is now shared through `iset_runtime_config` (`scope='notifications'`, `k='path.email'`) and edited from the admin Notification Settings widget; keep admin and portal mailers aligned to that runtime value rather than hardcoded app-local defaults.
+- Staff bell alerts are fetched from `/api/me/notifications`, backed by `iset_internal_notification`, and rendered in the app shell `Flashbar` from `src/AppContent.js`.
+- Current bell-alert timestamp rule: the heading uses `delivered_at` when populated and otherwise `created_at`, formatted in the viewer browser's IANA timezone via `Intl.DateTimeFormat().resolvedOptions().timeZone`, with `America/Toronto` as the fallback display timezone.
+- Current timezone limitation: no staff/applicant timezone preference is persisted in the database yet. Treat the stored notification row timestamp as the audit/source-of-truth value, and do not infer a person's timezone from province/region alone.
+- Reminder due/overdue classification is intentionally not viewer-local. Reminder events, Case Calendar reminder badges, and note follow-up badges all use the PATH business day in `America/Toronto`, ignoring time-of-day when deciding whether a reminder is due today or overdue.
