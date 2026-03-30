@@ -156,6 +156,19 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange }) => {
         extraDetails = details || summary || (Object.keys(rest).length ? rest : null);
       }
 
+      const debugRoutesDisabled =
+        response.status === 404 &&
+        (error === 'not_found' || message === 'not_found');
+      if (debugRoutesDisabled) {
+        setClearResult({
+          type: 'error',
+          header: 'Failed to clear ISET test data',
+          message: 'The admin backend has unsafe debug routes disabled. Restart `isetadminserver.js` with `ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES=true` to use Clear ISET test data.',
+          details: extraDetails,
+        });
+        return;
+      }
+
       if (response.ok) {
         setClearResult({
           type: 'success',

@@ -47,7 +47,7 @@ $tasks = @(
     @{
         label = 'Admin Backend'
         type = 'shell'
-        command = 'nodemon isetadminserver.js'
+        command = '$env:ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES=''true''; nodemon isetadminserver.js'
         options = @{ cwd = (Join-Path $root 'admin-dashboard') }
         presentation = @{ panel = 'new'; reveal = 'always' }
         problemMatcher = @()
@@ -106,7 +106,7 @@ $processes = @(
     @{
         Title    = 'admin-dashboard | nodemon isetadminserver.js'
         Dir      = Join-Path $root 'admin-dashboard'
-        Command  = 'nodemon isetadminserver.js'
+        Command  = '$env:ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES=''true''; nodemon isetadminserver.js'
     }
 )
 

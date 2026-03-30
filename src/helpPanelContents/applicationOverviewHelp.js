@@ -44,8 +44,9 @@ const ApplicationOverviewHelp = () => (
     <ul>
       <li>Status changes are recorded in the Events Timeline, so confirm the update there after saving.</li>
       <li>Escalations block some actions until resolved; respond or resolve before closing or archiving.</li>
-      <li>If a field is missing, open the ISET Application Form widget to review the full submission.</li>
+      <li>If a field or detail is missing, open the ISET Application Form widget to review the full submission.</li>
       <li>Denied-ineligible ILMP issues do not belong to normal casework queues; use the ESDC reporting status panel to see whether the record is blocked, pending, or ready.</li>
+      <li>Use this widget to orient yourself quickly, but do the real review in the form, documents, notes, messaging, and assessment widgets.</li>
     </ul>
   </div>
 );
@@ -53,7 +54,7 @@ const ApplicationOverviewHelp = () => (
 ApplicationOverviewHelp.aiContext = `
 You are assisting an ISET program coordinator using the Application Overview widget. Explain the status badge and
 selector, SLA timing, assignment and escalation quick actions, document checklist summary, the ESDC/ILMP reporting status shown for denied-ineligible records, and where to confirm identifiers and contact details.
-Keep guidance operational and aligned with the visible controls.
+Keep guidance operational and aligned with the visible controls. Treat this widget as the first orientation point in the file, not as a substitute for reviewing the underlying application, documents, notes, and assessment.
 `;
 
 export default ApplicationOverviewHelp;

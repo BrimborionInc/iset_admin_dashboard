@@ -19,11 +19,11 @@ Status: Active (refactored to centralized platform on 2026-02-11).
 
 ## Tutorial IDs (current)
 
-- `iset-coordinator-intro-v1`
+- `iset-coordinator-intro-v2`
 - `regional-manager-intro-v1`
 - `program-admin-intro-v1`
-- `application-workspace-overview-v2`
-- `case-workspace-overview-v2`
+- `application-workspace-overview-v3`
+- `case-workspace-overview-v3`
 - `nwac-assessment-decision`
 
 ## Home intro hotspot contract
@@ -60,7 +60,7 @@ These IDs must exist for the case workspace walkthrough:
 
 - Progress is DB-backed via `/api/me/tutorial-progress` (`completed` / `dismissed`).
 - Home intro auto-prompt is role-specific and mapped via `getHomeIntroTutorialIdForRole`.
-- Case workspace auto-prompt appears on first visit to `/cases/:id` when `case-workspace-overview-v2` is not `completed` or `dismissed`.
+- Case workspace auto-prompt appears on first visit to `/cases/:id` when `case-workspace-overview-v3` is not `completed` or `dismissed`.
 - `Not now` and `End` persist `dismissed`.
 - `Finish` persists `completed`.
 - Tutorials dashboard reset emits `tutorials:refresh`; app resets in-memory prompt guards and reloads DB progress.
@@ -75,6 +75,8 @@ These IDs must exist for the case workspace walkthrough:
 
 - Prefer content-only edits in `tutorialPlatform.js`.
 - Do not change runtime logic in `AppContent.js` for copy-only requests.
+- For coordinator-facing tutorials, write the copy as PATH onboarding for staff who are learning how to do their work in the system. Bias toward task flow, what to record, and what happens next rather than generic dashboard mechanics.
+- If the onboarding purpose changes materially and existing staff should see the revised walkthrough automatically, bump the tutorial ID version intentionally even when the hotspot structure still works.
 - Keep role mapping in one place (`tutorialPlatform.js`) and import it where needed.
 - When hotspot placement changes, verify all steps in order for each affected tutorial.
 - If hotspot structure changes incompatibly, bump tutorial ID version (`*-v2`) to avoid stale progress collisions.

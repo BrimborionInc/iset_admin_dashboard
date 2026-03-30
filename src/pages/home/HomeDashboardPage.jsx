@@ -95,6 +95,26 @@ const ISET_COORDINATOR_MISSING_DOCS_FILTER = [
     'on hold',
     'on_hold'
 ].join(',');
+const NWAC_ADMIN_OPEN_APPLICATIONS_BUCKET = {
+    id: 'all-applications',
+    label: 'All Applications',
+    description: 'All non-terminal applications across the portfolio.'
+};
+const NWAC_ADMIN_CLIENT_CASES_BUCKET = {
+    id: 'all-client-cases',
+    label: 'All Cases',
+    description: 'All open client cases across the portfolio, including dormant files.'
+};
+const REGIONAL_MANAGER_OPEN_APPLICATIONS_BUCKET = {
+    id: 'regional-open-applications',
+    label: 'Applications in My Region',
+    description: 'All non-terminal applications in your assigned provinces and territories.'
+};
+const REGIONAL_MANAGER_CLIENT_CASES_BUCKET = {
+    id: 'regional-client-cases',
+    label: 'Clients in My Region',
+    description: 'Open client cases in your regional portfolio, including dormant files.'
+};
 
 const buildDevHeaders = (role) => {
     return { Accept: 'application/json' };
@@ -316,16 +336,29 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
     );
     const isWorkQueueRole = role === 'NWAC Administrator' || role === 'Regional Manager';
     const isIsetCoordinatorRole = role === 'ISET Coordinator';
+    const isNwacAdminRole = role === 'NWAC Administrator';
     const isRegionalCoordinatorRole = role === 'Regional Manager';
 
     const workQueueBuckets = useMemo(() => {
         if (!isWorkQueueRole) return [];
         if (isRegionalCoordinatorRole) {
             const myBucket = ISET_COORDINATOR_BUCKETS.find(bucket => bucket.id === 'my-new-applications') || null;
-            return myBucket ? [myBucket, ...PROGRAM_ADMIN_BUCKETS] : PROGRAM_ADMIN_BUCKETS;
+            return [
+                REGIONAL_MANAGER_OPEN_APPLICATIONS_BUCKET,
+                REGIONAL_MANAGER_CLIENT_CASES_BUCKET,
+                ...(myBucket ? [myBucket] : []),
+                ...PROGRAM_ADMIN_BUCKETS
+            ];
+        }
+        if (isNwacAdminRole) {
+            return [
+                NWAC_ADMIN_OPEN_APPLICATIONS_BUCKET,
+                NWAC_ADMIN_CLIENT_CASES_BUCKET,
+                ...PROGRAM_ADMIN_BUCKETS
+            ];
         }
         return PROGRAM_ADMIN_BUCKETS;
-    }, [isWorkQueueRole, isRegionalCoordinatorRole]);
+    }, [isWorkQueueRole, isNwacAdminRole, isRegionalCoordinatorRole]);
 
     const initialItems =
         isIsetCoordinatorRole ? ISET_COORDINATOR_SAMPLE_ITEMS : PROGRAM_ADMIN_SAMPLE_ITEMS;
@@ -661,7 +694,10 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                             nextCounts[mappedId] = Number.isFinite(parsed) ? parsed : 0;
                         }
                     });
-                    setProgramAdminCounts(nextCounts);
+                    setProgramAdminCounts(current => ({
+                        ...current,
+                        ...nextCounts
+                    }));
                 }
             } catch (_) {
                 // keep existing counts on failure
@@ -670,6 +706,326 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         loadProgramAdminCounts();
         return () => { ignore = true; };
     }, [role, programAdminRefresh, isWorkQueueRole]);
+
+    useEffect(() => {
+        if (!isNwacAdminRole) {
+            return;
+        }
+        let ignore = false;
+        const loadAllOpenApplications = async () => {
+            try {
+                const response = await apiFetch('/api/applications?excludeTerminal=1&limit=200&offset=0', {
+                    headers: buildDevHeaders(role)
+                });
+                if (!response.ok) {
+                    throw new Error(`Request failed: ${response.status}`);
+                }
+                const payload = await response.json();
+                if (ignore) return;
+                if (!payload || !Array.isArray(payload.rows)) {
+                    throw new Error('Unexpected response format while loading all applications.');
+                }
+                const mapped = payload.rows.map((row, idx) => {
+                    const id = row.tracking_id || row.case_id || row.application_id || `all-open-${idx}`;
+                    const applicantName =
+                        row.applicant_name ||
+                        row.applicantName ||
+                        row.client?.displayName ||
+                        row.client?.name ||
+                        [row.client?.firstName, row.client?.lastName].filter(Boolean).join(' ') ||
+                        row.client?.firstName ||
+                        row.client?.lastName ||
+                        [row.client?.first_name, row.client?.last_name].filter(Boolean).join(' ') ||
+                        row.client?.first_name ||
+                        row.client?.last_name ||
+                        row.tracking_id ||
+                        'Applicant';
+                    const submitted = row.submitted_at || row.created_at || null;
+                    return {
+                        id,
+                        title: applicantName,
+                        trackingId: row.tracking_id || row.trackingId || null,
+                        application_id: row.application_id || row.applicationId || null,
+                        case_id: row.case_id || row.caseId || null,
+                        bucketId: 'all-applications',
+                        type: 'Application',
+                        applicant: applicantName,
+                        applicant_name: applicantName,
+                        region: row.region || row.address_province || '—',
+                        address_province: row.address_province || row.region || null,
+                        owner: row.assigned_user_email || 'Unassigned',
+                        assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
+                        status: row.application_status || row.status || 'Submitted',
+                        docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
+                        docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
+                        docs_requested_cleared_at: row.docs_requested_cleared_at ?? row.docsRequestedClearedAt ?? null,
+                        docs_requested_source: row.docs_requested_source ?? row.docsRequestedSource ?? null,
+                        dueDate: null,
+                        submittedAt: submitted,
+                        updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
+                        summary: 'Non-terminal application across the national portfolio.',
+                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                        workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
+                    };
+                });
+                const totalCount = Number(payload.count);
+                setProgramAdminItems(current => {
+                    const nonAllApplications = current.filter(item => item.bucketId !== 'all-applications');
+                    return [...mapped, ...nonAllApplications];
+                });
+                setProgramAdminCounts(current => ({
+                    ...current,
+                    'all-applications': Number.isFinite(totalCount) ? totalCount : mapped.length
+                }));
+                if (mapped.length) {
+                    setProgramAdminBucketId(bucket => bucket || 'all-applications');
+                }
+            } catch (_) {
+                // keep existing items on failure
+            }
+        };
+        loadAllOpenApplications();
+        return () => { ignore = true; };
+    }, [role, programAdminRefresh, isNwacAdminRole]);
+
+    useEffect(() => {
+        if (!isNwacAdminRole) {
+            return;
+        }
+        let ignore = false;
+        const loadAllClientCases = async () => {
+            try {
+                const response = await apiFetch('/api/dashboard/all-client-cases?limit=200&offset=0', {
+                    headers: buildDevHeaders(role)
+                });
+                if (!response.ok) {
+                    throw new Error(`Request failed: ${response.status}`);
+                }
+                const payload = await response.json();
+                if (ignore) return;
+                if (!payload || !Array.isArray(payload.items)) {
+                    throw new Error('Unexpected response format while loading all client cases.');
+                }
+                const mapped = payload.items.map((row, idx) => {
+                    const caseId = row.case_id || row.caseId || row.id || null;
+                    const clientName =
+                        row.client_name ||
+                        row.clientName ||
+                        [row.client?.firstName, row.client?.lastName].filter(Boolean).join(' ') ||
+                        row.applicant_name ||
+                        row.applicantName ||
+                        row.tracking_id ||
+                        (caseId ? `Case ${caseId}` : `Client ${idx + 1}`);
+                    const nextActionDueAt = row.next_action_due_at || row.nextActionDueAt || null;
+                    return {
+                        id: caseId ? `all-client-case-${caseId}` : `all-client-case-${idx}`,
+                        title: clientName,
+                        trackingId: row.tracking_id || row.trackingId || row.case_number || row.caseNumber || null,
+                        application_id: row.application_id || row.applicationId || null,
+                        case_id: caseId,
+                        bucketId: 'all-client-cases',
+                        type: 'Case',
+                        applicant: clientName,
+                        applicant_name: clientName,
+                        region:
+                            row.region_name ||
+                            row.regionName ||
+                            row.region_code ||
+                            row.regionCode ||
+                            row.owner_region_name ||
+                            row.ownerRegionName ||
+                            row.owner_region_code ||
+                            row.ownerRegionCode ||
+                            '—',
+                        owner: row.owner_email || row.owner_name || row.ownerName || 'Unassigned',
+                        assigned_user_id: row.assigned_to_user_id || row.assignedToUserId || null,
+                        status: row.status || 'Initiated',
+                        dueDate: nextActionDueAt,
+                        submittedAt: row.opened_at || row.openedAt || row.created_at || row.createdAt || null,
+                        updatedAt: row.updated_at || row.updatedAt || row.last_activity_at || row.lastActivityAt || null,
+                        summary: 'Open client case across the national portfolio.',
+                        workspacePath: caseId ? `/cases/${caseId}` : '/case-assignment-dashboard'
+                    };
+                });
+                const totalCount = Number(payload.totalCount);
+                setProgramAdminItems(current => {
+                    const nonAllCases = current.filter(item => item.bucketId !== 'all-client-cases');
+                    return [...mapped, ...nonAllCases];
+                });
+                setProgramAdminCounts(current => ({
+                    ...current,
+                    'all-client-cases': Number.isFinite(totalCount) ? totalCount : mapped.length
+                }));
+                if (mapped.length) {
+                    setProgramAdminBucketId(bucket => bucket || 'all-client-cases');
+                }
+            } catch (_) {
+                // keep existing items on failure
+            }
+        };
+        loadAllClientCases();
+        return () => { ignore = true; };
+    }, [role, programAdminRefresh, isNwacAdminRole]);
+
+    useEffect(() => {
+        if (!isRegionalCoordinatorRole) {
+            return;
+        }
+        let ignore = false;
+        const loadRegionalManagerOpenApplications = async () => {
+            try {
+                const response = await apiFetch('/api/applications?excludeTerminal=1&limit=200&offset=0', {
+                    headers: buildDevHeaders(role)
+                });
+                if (!response.ok) {
+                    throw new Error(`Request failed: ${response.status}`);
+                }
+                const payload = await response.json();
+                if (ignore) return;
+                if (!payload || !Array.isArray(payload.rows)) {
+                    throw new Error('Unexpected response format while loading regional applications.');
+                }
+                const mapped = payload.rows.map((row, idx) => {
+                    const id = row.tracking_id || row.case_id || row.application_id || `regional-open-${idx}`;
+                    const applicantName =
+                        row.applicant_name ||
+                        row.applicantName ||
+                        row.client?.displayName ||
+                        row.client?.name ||
+                        [row.client?.firstName, row.client?.lastName].filter(Boolean).join(' ') ||
+                        row.client?.firstName ||
+                        row.client?.lastName ||
+                        [row.client?.first_name, row.client?.last_name].filter(Boolean).join(' ') ||
+                        row.client?.first_name ||
+                        row.client?.last_name ||
+                        row.tracking_id ||
+                        'Applicant';
+                    const submitted = row.submitted_at || row.created_at || null;
+                    return {
+                        id,
+                        title: applicantName,
+                        trackingId: row.tracking_id || row.trackingId || null,
+                        application_id: row.application_id || row.applicationId || null,
+                        case_id: row.case_id || row.caseId || null,
+                        bucketId: 'regional-open-applications',
+                        type: 'Application',
+                        applicant: applicantName,
+                        applicant_name: applicantName,
+                        region: row.region || row.address_province || '—',
+                        address_province: row.address_province || row.region || null,
+                        owner: row.assigned_user_email || 'Unassigned',
+                        assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
+                        status: row.application_status || row.status || 'Submitted',
+                        docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
+                        docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
+                        docs_requested_cleared_at: row.docs_requested_cleared_at ?? row.docsRequestedClearedAt ?? null,
+                        docs_requested_source: row.docs_requested_source ?? row.docsRequestedSource ?? null,
+                        dueDate: null,
+                        submittedAt: submitted,
+                        updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
+                        summary: 'Non-terminal application in your regional portfolio.',
+                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                        workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
+                    };
+                });
+                const totalCount = Number(payload.count);
+                setProgramAdminItems(current => {
+                    const nonRegional = current.filter(item => item.bucketId !== 'regional-open-applications');
+                    return [...mapped, ...nonRegional];
+                });
+                setProgramAdminCounts(current => ({
+                    ...current,
+                    'regional-open-applications': Number.isFinite(totalCount) ? totalCount : mapped.length
+                }));
+                if (mapped.length) {
+                    setProgramAdminBucketId(bucket => bucket || 'regional-open-applications');
+                }
+            } catch (_) {
+                // keep existing items on failure
+            }
+        };
+        loadRegionalManagerOpenApplications();
+        return () => { ignore = true; };
+    }, [role, programAdminRefresh, isRegionalCoordinatorRole]);
+
+    useEffect(() => {
+        if (!isRegionalCoordinatorRole) {
+            return;
+        }
+        let ignore = false;
+        const loadRegionalManagerClientCases = async () => {
+            try {
+                const response = await apiFetch('/api/dashboard/regional-client-cases?limit=200&offset=0', {
+                    headers: buildDevHeaders(role)
+                });
+                if (!response.ok) {
+                    throw new Error(`Request failed: ${response.status}`);
+                }
+                const payload = await response.json();
+                if (ignore) return;
+                if (!payload || !Array.isArray(payload.items)) {
+                    throw new Error('Unexpected response format while loading regional client cases.');
+                }
+                const mapped = payload.items.map((row, idx) => {
+                    const caseId = row.case_id || row.caseId || row.id || null;
+                    const clientName =
+                        row.client_name ||
+                        row.clientName ||
+                        [row.client?.firstName, row.client?.lastName].filter(Boolean).join(' ') ||
+                        row.applicant_name ||
+                        row.applicantName ||
+                        row.tracking_id ||
+                        (caseId ? `Case ${caseId}` : `Client ${idx + 1}`);
+                    const nextActionDueAt = row.next_action_due_at || row.nextActionDueAt || null;
+                    return {
+                        id: caseId ? `regional-client-case-${caseId}` : `regional-client-case-${idx}`,
+                        title: clientName,
+                        trackingId: row.tracking_id || row.trackingId || row.case_number || row.caseNumber || null,
+                        application_id: row.application_id || row.applicationId || null,
+                        case_id: caseId,
+                        bucketId: 'regional-client-cases',
+                        type: 'Case',
+                        applicant: clientName,
+                        applicant_name: clientName,
+                        region:
+                            row.region_name ||
+                            row.regionName ||
+                            row.region_code ||
+                            row.regionCode ||
+                            row.owner_region_name ||
+                            row.ownerRegionName ||
+                            row.owner_region_code ||
+                            row.ownerRegionCode ||
+                            '—',
+                        owner: row.owner_email || row.owner_name || row.ownerName || 'Unassigned',
+                        assigned_user_id: row.assigned_to_user_id || row.assignedToUserId || null,
+                        status: row.status || 'Initiated',
+                        dueDate: nextActionDueAt,
+                        submittedAt: row.opened_at || row.openedAt || row.created_at || row.createdAt || null,
+                        updatedAt: row.updated_at || row.updatedAt || row.last_activity_at || row.lastActivityAt || null,
+                        summary: 'Open client case in your regional portfolio.',
+                        workspacePath: caseId ? `/cases/${caseId}` : '/case-assignment-dashboard'
+                    };
+                });
+                const totalCount = Number(payload.totalCount);
+                setProgramAdminItems(current => {
+                    const nonRegionalCases = current.filter(item => item.bucketId !== 'regional-client-cases');
+                    return [...mapped, ...nonRegionalCases];
+                });
+                setProgramAdminCounts(current => ({
+                    ...current,
+                    'regional-client-cases': Number.isFinite(totalCount) ? totalCount : mapped.length
+                }));
+                if (mapped.length) {
+                    setProgramAdminBucketId(bucket => bucket || 'regional-client-cases');
+                }
+            } catch (_) {
+                // keep existing items on failure
+            }
+        };
+        loadRegionalManagerClientCases();
+        return () => { ignore = true; };
+    }, [role, programAdminRefresh, isRegionalCoordinatorRole]);
 
     useEffect(() => {
         if (!isRegionalCoordinatorRole) {

@@ -131,19 +131,34 @@ const AppRoutes = ({
     actions = null,
     context = "",
     headerDescription = "",
-    headerHotspotId = null
+    headerHotspotId = null,
+    headerInfoHotspotId = null
   ) => (
     <ContentLayout
       header={
         <div style={{ position: 'relative' }}>
+          {(() => {
+            const infoLink = (
+              <Link variant="info" onClick={() => toggleHelpPanel(helpKey, headerText, context)}>Info</Link>
+            );
+            const headerInfo = headerInfoHotspotId ? (
+              <span style={{ display: 'inline-flex' }}>
+                <Hotspot hotspotId={headerInfoHotspotId} direction="bottom">
+                  <span style={{ display: 'inline-flex' }}>{infoLink}</span>
+                </Hotspot>
+              </span>
+            ) : infoLink;
+            return (
           <Header
             variant="h1"
             description={headerDescription || undefined}
-            info={<Link variant="info" onClick={() => toggleHelpPanel(helpKey, headerText, context)}>Info</Link>}
+                info={headerInfo}
             actions={actions} // Attach actions here
           >
             {headerText}
           </Header>
+            );
+          })()}
           {headerHotspotId ? (
             <div style={{ position: 'absolute', left: '-12px', top: '22px' }}>
               <Hotspot hotspotId={headerHotspotId} direction="bottom">
@@ -1473,7 +1488,8 @@ const AppRoutes = ({
           ),
           HomeDashboardHelp.aiContext,
           '',
-          'home-overview'
+          'home-overview',
+          'home-info-link'
         )}
       </Route>
     </Switch>

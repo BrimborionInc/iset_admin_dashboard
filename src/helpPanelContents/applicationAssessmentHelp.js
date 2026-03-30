@@ -22,91 +22,90 @@ const ApplicationAssessmentHelp = () => {
 
   return (
     <div>
-    <h2>Application assessment workflow</h2>
-    <p>
-      Use this form to document the assessment, confirm eligibility, and capture the funding recommendation. Required
-      fields must be completed before you can submit for NWAC review. Editing requires an assessment lock and becomes
-      read-only once a final decision is recorded.
-    </p>
+      <h2>Application assessment workflow</h2>
+      <p>
+        Use this widget to record the coordinator&apos;s assessment and recommendation. This is where you
+        explain why the requested intervention should or should not move forward, based on the
+        application, documents, research, and conversations with the client.
+      </p>
 
-    <h3>Before you start</h3>
-    <ul>
-      <li>Review the <strong>ISET Application Form</strong> for intake answers, signatures, and background details.</li>
-      <li>Check <strong>Supporting Documents</strong> and confirm the checklist reflects the required evidence.</li>
-      <li>Complete the conflict of interest declaration if it is still required; the assessment stays locked until it is signed.</li>
-      <li>Set EI eligibility if your role permits it; sections remain locked until eligibility is recorded.</li>
-    </ul>
+      <h3>Before you start</h3>
+      <ul>
+        <li>Review the <strong>ISET Application Form</strong> for intake answers, signatures, employment goal, and client background.</li>
+        <li>Check <strong>Supporting Documents</strong> so you know which required items are present and which still need follow-up.</li>
+        <li>Confirm EI consent and EI verification requirements before moving forward with EI-related decisions.</li>
+        <li>For living allowance requests, make sure the financial overview and income or expense verification support what you plan to recommend before you submit the assessment.</li>
+      </ul>
 
-    <h3>Completing the form</h3>
-    <ol>
-      <li>Select <em>Edit</em> and confirm to acquire the lock.</li>
-      <li>Record EI eligibility and upload verification if required.</li>
-      <li>Complete the assessment overview, employment goals, barriers, priorities, other funding, and previous ISET details.</li>
-      <li>In <em>Other funding</em>, record whether other funding exists, add each non-NWAC funder, and capture what NWAC will cover to prevent overlap.</li>
-      <li>Capture intervention details (dates, provider, delivery mode, NOC code/version when required, childcare needs).</li>
-      <li>Enter costs using the ITP and/or wage subsidy breakdowns and confirm totals.</li>
-      <li>When adding or editing cost items, capture payee details in the same modal when available (payee is encouraged here but not required to advance this step).</li>
-      <li>For Student Loan Repayment lines, enter the loan provider/servicer name and loan account number in the cost-item modal so the approval-letter pack can draft the lender letter correctly.</li>
-      <li>Review the checklist step and upload missing documents as needed.</li>
-      <li>Set the recommendation and justification on the Review step.</li>
-      <li>Click <em>Save</em> to keep a draft, or <em>Submit assessment</em> to move the application to <strong>pending approval</strong>.</li>
-    </ol>
+      <h3>Completing the assessment</h3>
+      <ol>
+        <li>Select <em>Edit</em> and confirm to acquire the lock.</li>
+        <li>Record EI eligibility and upload verification if required.</li>
+        <li>Complete the overview so it explains the client, their background, prior education or work, and why the proposed direction fits.</li>
+        <li>Record other funding carefully so the file shows what NWAC is covering and what another funder is covering.</li>
+        <li>Capture the intervention details, provider, timing, and cost information clearly enough for review and later follow-through.</li>
+        <li>Use the checklist step to confirm the evidence is complete or to identify what still needs follow-up.</li>
+        <li>Write the recommendation and justification in plain language. The recommendation should explain why you are recommending support, a different intervention, a referral, or no funding.</li>
+        <li>Use <em>Save</em> for a draft, or <em>Submit assessment</em> when the file is ready for NWAC review.</li>
+      </ol>
 
-    <h3>Outcome notice</h3>
-    <p>
-      After submission, the NWAC section unlocks for reviewers to record the decision and assurance outcome. Approved
-      or Not Approved moves the application to decision ready; Push back returns it to in review. The Communication step
-      then appears to draft and send the approval or denial letter. For approvals, the client letter remains editable
-      while institution, loan-provider (when Student Loan Repayment is funded), and other-funding-source letters are
-      available as admin-only read-only tabs for preview/download. Approved cases with funded cost lines continue to
-      Funding forms and signatures to monitor form completion. If the approved intervention does not include funded cost
-      lines, the client letter should focus on the approved intervention dates and no funding package forms are
-      required. Mark the application complete only when all required items show Complete. Denial letters complete the
-      application.
-    </p>
+      <h3>After submission</h3>
+      <p>
+        All coordinator recommendations go to NWAC for decision. Once NWAC records the outcome, PATH
+        unlocks the communication step so the approval or denial can be sent properly. Approved files
+        may still need Funding Agreement completion and signatures before the file is truly complete.
+      </p>
 
-    <h3>Need to revise?</h3>
-    <p>
-      If adjustments are required after submission and policy allows, choose <em>Edit</em> to re-open the form (lock
-      required). Save or re-submit to persist changes; edits are blocked once a final decision exists unless reopening
-      is permitted.
-    </p>
+      <h3>Good assessment practice</h3>
+      <ul>
+        <li>Make the recommendation understandable to someone who did not speak with the client directly.</li>
+        <li>Keep numbers, dates, and file details consistent across the form and supporting documents.</li>
+        <li>Do not treat &quot;fund&quot; as the default outcome. The assessment can recommend an alternate intervention, referral, or no funding when that better fits the client and program rules.</li>
+      </ul>
 
-    {workspaceTutorial ? (
-      <div
-        style={{
-          border: '1px solid var(--color-border-container-default, #d5dbdb)',
-          borderRadius: '12px',
-          padding: '16px',
-          marginTop: '20px'
-        }}
-      >
-        <p style={{ marginTop: 0, marginBottom: '8px', fontSize: '1.4rem', fontWeight: 700 }}>
-          {workspaceTutorial.title}
-        </p>
-        <div style={{ marginBottom: '12px' }}>{workspaceTutorial.description}</div>
-        {workspaceTutorial.completed ? (
-          <p style={{ marginTop: 0, marginBottom: '12px', color: 'var(--color-text-status-success, #037f0c)' }}>
-            Tutorial completed
+      {workspaceTutorial ? (
+        <div
+          style={{
+            border: '1px solid var(--color-border-container-default, #d5dbdb)',
+            borderRadius: '12px',
+            padding: '16px',
+            marginTop: '20px'
+          }}
+        >
+          <p style={{ marginTop: 0, marginBottom: '8px', fontSize: '1.4rem', fontWeight: 700 }}>
+            {workspaceTutorial.title}
           </p>
-        ) : null}
-        <Button variant="primary" onClick={handleStartWorkspaceTutorial}>
-          {workspaceTutorial.completed ? 'Restart tutorial' : 'Start tutorial'}
-        </Button>
-      </div>
-    ) : null}
-  </div>
+          <div style={{ marginBottom: '12px' }}>{workspaceTutorial.description}</div>
+          {workspaceTutorial.completed ? (
+            <p style={{ marginTop: 0, marginBottom: '12px', color: 'var(--color-text-status-success, #037f0c)' }}>
+              Tutorial completed
+            </p>
+          ) : null}
+          <Button variant="primary" onClick={handleStartWorkspaceTutorial}>
+            {workspaceTutorial.completed ? 'Restart tutorial' : 'Start tutorial'}
+          </Button>
+        </div>
+      ) : null}
+    </div>
   );
 };
 
 ApplicationAssessmentHelp.aiContext = `
-You are assisting a coordinator filling out the Application Assessment widget. Key behaviors and constraints:
+You are assisting a coordinator filling out the Application Assessment widget. Answer like a case-management coach and file-quality reviewer, not a technical form guide.
+
+Key behaviors and constraints:
 - Edit requires acquiring an assessment lock; editing is blocked after a final decision or when another user holds the lock.
-- Sections include EI eligibility, overview/employment goals, barriers and local priorities, previous ISET, structured other funding (involved yes/no/unknown, repeatable funders, NWAC coverage, notes), intervention details (provider, dates, program name, NOC + version as needed, childcare need), costs (ITP and/or wage breakdowns plus optional early payee capture in cost-item modals, including loan provider plus loan account number for Student Loan Repayment), recommendation, justification, and the document checklist.
+- Sections include EI eligibility, assessment overview, barriers/priorities, previous ISET, other funding, intervention details, costs, recommendation, justification, and the document checklist.
 - Save keeps a draft without changing status; Submit assessment moves the application to pending approval and unlocks NWAC review.
-- Use related widgets for context: Application Overview (status/owner), ISET Application Form (applicant data/version history), Supporting Documents (evidence/checklist), Notes and Tasks (audit trail), Secure Messaging (doc requests).
-- In approved outcomes, treat Communication as a letter pack: edit/send only the client letter; institution, loan-provider (when Student Loan Repayment exists), and other funding source letters are admin-only preview/download tabs.
-- If the approved intervention does not include funded cost lines, the client approval letter should focus on the approved intervention(s) and dates, and no funding package forms are required.
+- Use related widgets for context: Application Overview, ISET Application Form, Supporting Documents, Notes and Tasks, and Secure Messaging.
+
+Training-aligned guidance to surface:
+- The assessment should explain the client background, prior education/work, employment goal, and why the recommendation makes sense.
+- Keep numbers, dates, and facts consistent across the application and documents.
+- EI consent and verification matter before EI-related decisions can proceed.
+- Living allowance recommendations should be supported by financial overview and verification. If those are missing and living allowance is still being considered, tell the user not to submit yet: save a draft, document what is outstanding, and follow up for the missing evidence.
+- A coordinator does not have to recommend funding; alternate interventions, referrals, job-search support, or no funding may be the correct outcome.
+- All coordinator recommendations go to NWAC for approval, and approved files may still require Funding Agreement follow-through before completion.
 `;
 
 export const NwacAssessmentHelp = ({ onRestartTutorial, onEndTutorial }) => {
@@ -156,8 +155,8 @@ export const NwacAssessmentHelp = ({ onRestartTutorial, onEndTutorial }) => {
         <li>Click <em>Commit</em> to save the outcome, update status, and unlock the Communication step.</li>
       </ol>
 
-      <h3>Hands-on tutorial</h3>
-      <p>Follow the guided walkthrough to record the NWAC decision and communicate the outcome.</p>
+      <h3>Quick start walkthrough</h3>
+      <p>Use the guided walkthrough if you want a focused pass through recording the NWAC decision, checking consistency, and moving the outcome into communication.</p>
       {nwacTutorials.length ? (
         <TutorialPanel
           tutorials={nwacTutorials}

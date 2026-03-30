@@ -77,11 +77,33 @@ const CONTEXT_FACTS = {
 `
 };
 
+const COORDINATOR_PATH_PROMPT_HINTS = [
+  'work queue',
+  'manage iset applications',
+  'manual application intake',
+  'application workspace',
+  'application assessment',
+  'case workspace',
+  'participant details',
+  'action plans',
+  'interventions',
+  'supporting documents',
+  'secure messaging',
+  'case notes',
+  'case calendar',
+  'application overview'
+];
+
 const normaliseKey = (value = '') => value
   .toLowerCase()
   .replace(/&amp;/g, 'and')
   .replace(/[^a-z0-9]+/g, '-')
   .replace(/^-+|-+$/g, '');
+
+const isCoordinatorPathWorkflowContext = ({ focusTitle, aiContext }) => {
+  const combined = `${focusTitle || ''} ${aiContext || ''}`.toLowerCase();
+  return COORDINATOR_PATH_PROMPT_HINTS.some(hint => combined.includes(hint));
+};
 
 const buildSystemPrompt = ({ focusTitle, aiContext }) => {
   const safeContext = (aiContext || '').trim();
@@ -106,15 +128,29 @@ const buildSystemPrompt = ({ focusTitle, aiContext }) => {
     sections.push('', 'Workflow specifics:', matchedHints.trim());
   }
 
+  if (isCoordinatorPathWorkflowContext({ focusTitle, aiContext: safeContext })) {
+    sections.push(
+      '',
+      'PATH staff-support lens:',
+      '- Answer like a PATH job aid for staff, not like a product tour or technical architecture note.',
+      '- When the user asks what to do next, structure the answer around: immediate next action, where in PATH to do it, what to document, and any important timing or policy reminder.',
+      '- Prefer specific PATH areas and actions such as Work Queue, Manage ISET Applications, Application Workspace, Case Workspace, Supporting Documents, Secure Messaging, and Notes rather than vague phrases like "use the appropriate channel".',
+      '- If the question is yes/no or can/cannot, lead with the direct answer first and then explain the condition.',
+      '- Reinforce training-aligned habits when relevant: prompt acknowledgement, documenting interactions, tracking missing-document follow-up attempts, supporting living-allowance decisions with financial evidence, and completing required post-intervention follow-up, including 12-week follow-up where applicable, before closure.',
+      '- Do not invent controls, workflow steps, or permissions that are not in the current help context.'
+    );
+  }
+
   sections.push(
     '',
     'Guidelines:',
     '1. Stay on topic—only address the admin dashboard, its workflows, or related operations.',
-    '2. Ask clarifying questions when the goal or data is unclear before proposing a solution.',
+    '2. Ask clarifying questions only when the goal or data is genuinely unclear; if the current help context is enough to answer a standard workflow question, answer directly.',
     '3. Provide actionable, step-by-step guidance or concise bullet points. Reference UI labels, routes, or file names when possible.',
     '4. Format lists, tables, and code samples using GitHub-flavored Markdown.',
     '5. Keep responses focused and under roughly eight sentences unless additional depth is requested.',
     '6. Never fabricate data, credentials, or system behavior. If uncertain, say so and suggest next steps.',
+    '7. End cleanly once the answer is complete. Do not append generic offers like "I can help draft that" or an extra follow-up question unless the user explicitly asked for wording help or the next action truly depends on it.',
     `Current date: ${new Date().toISOString().split('T')[0]}.`
   );
 
@@ -1149,7 +1185,7 @@ const AppContent = () => {
 	        }}
 	        onEndTutorial={() => endTutorial(runnableTutorial)}
 	      />,
-	      'Take a tour'
+	      'PATH quick start'
 	    );
 	    if (runnableTutorial) {
 	      setCurrentTutorial(runnableTutorial);
@@ -1240,7 +1276,7 @@ const AppContent = () => {
 	          onRestartTutorial={() => handleRestartTutorial(tutorial)}
 	          onEndTutorial={() => endTutorial(tutorial)}
 	        />,
-	        'Take a tour'
+	        'PATH quick start'
 	      );
 	      return;
 	    }
@@ -1251,7 +1287,7 @@ const AppContent = () => {
 	          onRestartTutorial={() => handleRestartTutorial(tutorial)}
 	          onEndTutorial={() => endTutorial(tutorial)}
 	        />,
-	        'Application workspace tour',
+	        'Application workspace quick start',
 	        ApplicationCaseDashboardHelp.aiContext || ''
 	      );
 	      return;
@@ -1263,7 +1299,7 @@ const AppContent = () => {
 	          onRestartTutorial={() => handleRestartTutorial(tutorial)}
 	          onEndTutorial={() => endTutorial(tutorial)}
 	        />,
-	        'Case workspace tour',
+	        'Case workspace quick start',
 	        CaseWorkspaceHelp.aiContext || ''
 	      );
 	      return;
@@ -1275,7 +1311,7 @@ const AppContent = () => {
 	          onRestartTutorial={() => handleRestartTutorial(tutorial)}
 	          onEndTutorial={() => endTutorial(tutorial)}
 	        />,
-	        'NWAC assessment tour',
+	        'NWAC decision quick start',
 	        NwacAssessmentHelp.aiContext || ''
 	      );
 	      return;
@@ -1522,8 +1558,8 @@ const AppContent = () => {
 	            {introPromptVisible && (
 	              <Modal
 	                visible={introPromptVisible}
-	                header="Take a tour"
-	                closeAriaLabel="Close tour prompt"
+	                header="PATH quick start"
+	                closeAriaLabel="Close quick start prompt"
 	                onDismiss={handleIntroNotNow}
                 footer={
                   <SpaceBetween size="xs" direction="horizontal">
@@ -1534,10 +1570,10 @@ const AppContent = () => {
               >
                 <SpaceBetween size="m">
                   <Box>
-                    Welcome to PATH. This quick tour will walk you through the home page, the main widgets, and how to find help. You can reset tutorial progress from the "Tutorials" dashboard under "Support" in the side navigation.
+                    Welcome to PATH. This short intro is for staff who are still getting used to the system. It will show you how to decide what to work on first, open the right file, and find help when you are unsure.
                   </Box>
                   <Box>
-                    You can also replay tutorials from the help panel, which you can open by clicking dashboard and widget "Info" links.
+                    You can replay tutorials later from dashboard and widget Info links, or reset tutorial progress from the Tutorials page under Support.
                   </Box>
                 </SpaceBetween>
 	              </Modal>
@@ -1545,7 +1581,7 @@ const AppContent = () => {
 	            {pageTutorialPrompt.visible && activePagePromptTutorial && (
 	              <Modal
 	                visible={pageTutorialPrompt.visible}
-	                header={activePagePromptTutorial.title || 'Take a tour'}
+	                header={activePagePromptTutorial.title || 'PATH quick start'}
 	                closeAriaLabel="Close tutorial prompt"
 	                onDismiss={handlePageTutorialSkip}
 	                footer={
@@ -1557,10 +1593,10 @@ const AppContent = () => {
 	              >
 	                <SpaceBetween size="m">
 	                  <Box variant="p">
-	                    Welcome to this workspace tour. It will walk you through the main widgets, where to complete key actions, and how to move through this page efficiently.
+	                    This workspace tour is meant to help you understand what PATH expects you to do on this page, where the main work happens, and what should be recorded before you move on.
 	                  </Box>
 	                  <Box variant="p">
-	                    You can replay tutorials from dashboard and widget Info links in the help panel, and reset tutorial progress from the Tutorials dashboard under Support.
+	                    You can replay tutorials from dashboard and widget Info links in the help panel, and reset tutorial progress from the Tutorials page under Support.
 	                  </Box>
 	                </SpaceBetween>
 	              </Modal>

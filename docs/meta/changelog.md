@@ -2,6 +2,22 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-03-30
+- UX/Integration: Replaced the broken in-page Job Bank iframe with an explicit launch panel because Job Bank now returns `X-Frame-Options: SAMEORIGIN` on the search and summary URLs PATH uses, so browsers refuse to display those pages inside PATH.
+- UX/Help: Updated Job Bank Search guidance to explain that PATH still builds the correct Job Bank destination URL, but staff now continue on Job Bank in a separate tab instead of an embedded frame.
+- Docs/UX/Casework: Rewrote the coordinator-facing PATH help panels and AI chat context for Home, Manage ISET Applications, Manual Application Intake, Application Workspace, and Case Workspace to align guidance with NWAC staff training expectations around acknowledgement, documentation, assessment, active case management, and closure.
+- UX/AI/Casework: Tightened the shared help-panel AI system prompt so coordinator-facing PATH chats answer more like a staff job aid, including direct yes/no answers when appropriate, stronger PATH-specific next-step guidance, and explicit reminders around financial evidence for living allowance and post-intervention follow-up before closure.
+- UX/Tutorials/Casework: Reworked the coordinator-facing PATH tutorials and first-run tutorial prompts so they explain how staff should actually use PATH in their daily work, not just where widgets are. The home intro, application workspace, case workspace, and NWAC decision walkthroughs now emphasize choosing priorities, opening the right file, recording follow-up, supporting recommendations with evidence, and not closing cases before required post-intervention follow-up.
+- UX/Tutorials/Casework: Versioned the coordinator home intro to `iset-coordinator-intro-v2` and the application/case workspace walkthroughs to `application-workspace-overview-v3` and `case-workspace-overview-v3` so the rewritten PATH quick-start guidance can reprompt for staff who had already completed the older generic tours.
+- UX/Tutorials/Home: Added the missing homepage `home-info-link` tutorial hotspot to the header `Info` link so tutorial steps can point directly at the help-panel entry point for contextual guidance and AI support.
+- UX/Casework: Added missing widget-level `Info` access for the main ISET Applications table and the Manual Intake form, and fixed the ISET Application Form widget so its help panel now opens with its own AI context instead of the generic fallback.
+- Ops/Dev/Home: Restored local-dev `Clear ISET test data` behavior by starting the Admin Backend from `start-dev.ps1` with `ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES=true`, and updated the Demo Controls error copy to explain the missing env flag instead of showing a misleading bare `not_found`.
+- UX/API/Home: NWAC Administrators now see new first-position `All Applications` and second-position `All Cases` cards in the homepage Work Queue, exposing the full non-terminal application portfolio and the full open case portfolio from the same widget.
+- UX/API/Home: Regional Managers now see a new first-position `Applications in My Region` card in the homepage Work Queue, showing all non-terminal applications in their assigned provinces and territories while leaving `My Applications` as a separate queue.
+- UX/API/Home: Regional Managers now also see a new second-position `Clients in My Region` card in the homepage Work Queue, counting open case files in their regional portfolio while keeping `dormant` and `ready_to_close` in scope and excluding only `closed`/`archived`.
+- Fix/API/Home: `/api/applications` now supports `excludeTerminal=1` for staff-scoped open-application queues, and terminal-application normalization was tightened to treat withdrawn/denied-style terminal values consistently.
+- Docs/Home: Updated the homepage Work Queue reference, help-panel copy, and `docs/AGENTS.md` with the live Regional Manager queue order, regional scoping rules, and the new case-based `Clients in My Region` semantics.
+
 ## 2026-03-29
 - UX/Notifications: The admin-shell `Notifications` footer control is now visible to all signed-in roles and continues to refresh bell alerts in place instead of acting like a Notification Settings permission-gated link.
 - UX/API/Reminders: Reminder due/overdue events and case reminder badges now classify by the PATH business day in `America/Toronto` instead of UTC/browser-local day boundaries, and reminder reschedules/reopens now clear prior due/overdue emit flags so future reminder bells can fire again.

@@ -1,7 +1,7 @@
 const tutorialPanelI18nStrings = {
   loadingText: 'Loading tutorials',
   tutorialListTitle: 'Hands-on tutorials',
-  tutorialListDescription: 'Guided walkthroughs with on-screen highlights.',
+  tutorialListDescription: 'Short guided walkthroughs for getting work done in PATH.',
   tutorialListDownloadLinkText: 'Download tutorial guide',
   tutorialCompletedText: 'Tutorial completed',
   learnMoreLinkText: 'Learn more',

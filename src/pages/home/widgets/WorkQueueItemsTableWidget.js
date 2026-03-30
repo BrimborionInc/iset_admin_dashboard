@@ -564,6 +564,7 @@ const columnDefinitionsByKey = {
 
 const columnKeysByType = {
   Application: ['title', 'region', 'owner', 'status', 'dueDate', 'actions'],
+  Case: ['title', 'region', 'owner', 'status', 'dueDate', 'actions'],
   Intervention: ['title', 'region', 'owner', 'status', 'dueDate', 'actions'],
   InterventionMilestone: ['title', 'intervention', 'region', 'status', 'dueDate', 'actions'],
   Agreement: ['title', 'owner', 'status', 'dueDate', 'actions'],
@@ -1239,6 +1240,14 @@ const WorkQueueItemsTableWidget = ({
                 const color = item.milestoneStatus || 'grey';
                 return <Badge color={color}>{label}</Badge>;
               }
+            };
+          }
+          if (selectedBucketId === 'regional-client-cases' || selectedBucketId === 'all-client-cases') {
+            return {
+              ...base,
+              header: 'Next action',
+              width: widthOverride,
+              cell: item => formatDateOnly(item.dueDate) || '—'
             };
           }
           if (selectedBucketId === 'overdue' || selectedBucketId === 'payments-proof-due') {

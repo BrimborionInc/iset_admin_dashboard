@@ -9,6 +9,7 @@ import {
   ButtonDropdown,
   FormField,
   Header,
+  Link,
   Select,
   SpaceBetween,
   Spinner,
@@ -17,6 +18,7 @@ import {
 import jsonLogic from 'json-logic-js';
 import { apiFetch } from '../../auth/apiClient';
 import PortalRegistry from '../../portalRendererRegistry';
+import ManualApplicationIntakeHelp from '../../helpPanelContents/manualApplicationIntakeHelp';
 
 const STORAGE_KEY = 'manual-application-intake-runtime.v2';
 const DASHBOARD_STORAGE_KEY = 'manual-intake-dashboard-layout-v1';
@@ -607,7 +609,7 @@ function loadDraft() {
   }
 }
 
-const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen }) => {
+const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, toggleHelpPanel }) => {
   const history = useHistory();
   const [layout, setLayout] = useState(() => loadDashboardLayoutFromStorage() ?? defaultLayout);
   const boardItems = useMemo(() => toBoardItems(layout), [layout]);
@@ -978,7 +980,28 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen }) =
     if (!item?.id || item.id !== INTAKE_WIDGET_ID) return null;
     return (
       <BoardItem
-        header={<Header variant="h2">Intake Form</Header>}
+        header={
+          <Header
+            variant="h2"
+            info={
+              <Link
+                variant="info"
+                onFollow={() =>
+                  toggleHelpPanel &&
+                  toggleHelpPanel(
+                    <ManualApplicationIntakeHelp />,
+                    'Manual Intake Form',
+                    ManualApplicationIntakeHelp.aiContext || ''
+                  )
+                }
+              >
+                Info
+              </Link>
+            }
+          >
+            Intake Form
+          </Header>
+        }
         settings={
           actions?.removeItem ? (
             <ButtonDropdown

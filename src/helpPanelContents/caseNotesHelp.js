@@ -36,6 +36,7 @@ const CaseNotesHelp = () => (
     <ul>
       <li>Lead with the outcome or decision, then add relevant details.</li>
       <li>Record dates, follow-up owners, and deadlines where possible.</li>
+      <li>Use notes to record applicant contact, missing-document follow-up, and key case-management decisions when those details matter to the audit trail.</li>
       <li>Avoid sensitive personal data - store documents in the Supporting Documents widget instead.</li>
     </ul>
 
@@ -50,7 +51,8 @@ const CaseNotesHelp = () => (
 CaseNotesHelp.aiContext = `
 You are assisting an ISET program coordinator using the Case Notes widget. Explain how to add, edit, and pin notes,
 how follow-up dates create reminders, and when to refresh. Emphasise collaborative record-keeping and avoiding
-sensitive data, and remind them they can acknowledge reminders once the task is complete.
+sensitive data, and remind them they can acknowledge reminders once the task is complete. When relevant, encourage the
+user to record applicant contact, follow-up attempts, and key decisions so the file maintains a clear audit trail.
 `;
 
 export default CaseNotesHelp;

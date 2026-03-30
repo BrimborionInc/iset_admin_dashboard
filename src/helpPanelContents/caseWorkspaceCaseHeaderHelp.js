@@ -3,29 +3,29 @@ import React from "react";
 const CaseWorkspaceCaseHeaderHelp = () => (
   <div>
     <p>
-      Use the case header as your quick briefing. It highlights who the case belongs to, which agreement is in play,
-      and which teammate is currently responsible. Review it before making changes so every update lands on the right
-      record.
+      Use the case header as your quick briefing before you do anything else. It confirms whose file
+      you are in, what agreement or case context is active, and who currently owns the case.
     </p>
 
     <h3>What to check</h3>
     <ul>
-      <li><strong>Client profile:</strong> Name, identifiers, region, and primary contact information.</li>
-      <li><strong>PATH account status:</strong> Whether the participant has no account yet, is ready to invite, has already been invited, or has activated portal access.</li>
-      <li><strong>Agreement snapshot:</strong> Funding agreement number, status, start and end dates.</li>
-      <li><strong>Ownership:</strong> Assigned staff member and escalation contacts. Reassign directly from this panel.</li>
-      <li><strong>Quick actions:</strong> Reassign the case, start PATH account activation, or move the case forward once all steps are complete.</li>
+      <li><strong>Client profile:</strong> name, identifiers, region, and main contact information.</li>
+      <li><strong>PATH account status:</strong> whether the participant can already use PATH or still needs activation support.</li>
+      <li><strong>Agreement snapshot:</strong> agreement number, status, and key dates.</li>
+      <li><strong>Ownership:</strong> who is responsible for the case right now.</li>
+      <li><strong>Quick actions:</strong> actions such as reassignment or PATH account activation, depending on the file and your role.</li>
     </ul>
 
     <h3>Best practice</h3>
     <ul>
       <li>Confirm you have the correct case before editing plans or finances.</li>
       <li>Update ownership after hand-offs so reminders and dashboards stay accurate.</li>
+      <li>Use the PATH account status to decide whether secure online interaction with the participant is available yet.</li>
       <li>Refresh if another teammate has made changes elsewhere in the workspace.</li>
     </ul>
   </div>
 );
 
-CaseWorkspaceCaseHeaderHelp.aiContext = `You are helping a case manager using the case header widget in the Case Dashboard. It shows client details, PATH account status, agreement context, ownership, and quick actions such as reassignment and PATH account activation.`;
+CaseWorkspaceCaseHeaderHelp.aiContext = `You are helping a case manager using the case header widget in the Case Workspace. Explain it as the quick orientation panel for confirming the right participant, agreement context, ownership, and PATH account status before deeper casework begins. Mention reassignment and PATH account activation only when they are relevant to the visible controls.`;
 
 export default CaseWorkspaceCaseHeaderHelp;

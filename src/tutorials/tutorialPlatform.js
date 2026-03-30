@@ -1,72 +1,67 @@
 import React from 'react';
 
-const ISET_COORDINATOR_INTRO_TUTORIAL_ID = 'iset-coordinator-intro-v1';
+const ISET_COORDINATOR_INTRO_TUTORIAL_ID = 'iset-coordinator-intro-v2';
 const REGIONAL_MANAGER_INTRO_TUTORIAL_ID = 'regional-manager-intro-v1';
 const PROGRAM_ADMIN_INTRO_TUTORIAL_ID = 'program-admin-intro-v1';
-const APPLICATION_WORKSPACE_TUTORIAL_ID = 'application-workspace-overview-v2';
-const CASE_WORKSPACE_TUTORIAL_ID = 'case-workspace-overview-v2';
+const APPLICATION_WORKSPACE_TUTORIAL_ID = 'application-workspace-overview-v3';
+const CASE_WORKSPACE_TUTORIAL_ID = 'case-workspace-overview-v3';
 const NWAC_ASSESSMENT_TUTORIAL_ID = 'nwac-assessment-decision';
 
 const TUTORIAL_DEFINITIONS = [
   {
     tutorialId: ISET_COORDINATOR_INTRO_TUTORIAL_ID,
     category: 'admin-console-intro',
-    title: 'ISET Coordinator intro tour',
+    title: 'PATH coordinator quick start',
     descriptionLines: [
-      'Get oriented in the Admin Console home page, widgets, and navigation.',
-      'Starts with your home page, then walks through key areas and where to manage tutorials.'
+      'Start here if PATH is new to you. This tour shows how to decide what needs attention first, open the right file, and find help when you are unsure.',
+      'It begins on your home page because that is where most coordinators should start the day.'
     ],
     completedLines: [
-      'Tour complete. You are ready to work from your home page.',
-      'You can always run tutorials later from the Tutorials page under Support.'
+      'Quick start complete. You know where to start your day in PATH and where to get help when you need it.',
+      'You can replay this tour later from the help panel or the Tutorials page under Support.'
     ],
     tasks: [
       {
-        title: 'Homepage walkthrough',
+        title: 'Home page quick start',
         steps: [
           {
-            title: 'Your home page',
-            content: 'When you first sign in, you will land on the home page. It pulls together your queues, widgets, and quick entry points.',
+            title: 'Start your day here',
+            content: 'When you sign in, PATH brings you to the home page. Treat this as your daily starting point: use it to decide what needs attention first, then open the right file and do the real work there.',
             hotspotId: 'home-overview'
-          },
-          {
-            title: 'How this page is structured',
-            content: 'Your homepage is a dashboard. A dashboard is made up of widgets that you can move, resize, remove and add to suit your preferences.',
-            hotspotId: 'home-overview'
-          },
-          {
-            title: 'Customize your layout',
-            content: 'Use + Add widget to open the palette and add panels back. Use each widget menu to remove it. Drag widgets to rearrange, drag edges/corners to resize, and use Reset layout to restore the default setup.',
-            hotspotId: 'home-layout-controls'
           },
           {
             title: 'Work Queue',
-            content: 'Use these queues to focus on the next actions that are assigned to you.',
+            content: 'Start with the coordinator Work Queue. This is where PATH groups the things that need action first, such as new applications, missing-document follow-up, approvals, active-client check-ins, and overdue work.',
             hotspotId: 'home-coordinator-work-queue'
           },
           {
             title: 'Queue Items',
-            content: 'This table lists items for the selected queue. Use it to open workspaces and keep files moving.',
+            content: 'Once you choose a queue, use Queue Items to open the actual application or case record. The home page helps you choose the next file; the detailed work happens in the Application Workspace or Case Workspace.',
             hotspotId: 'home-work-queue-items'
           },
           {
             title: 'My Tagged Applications',
-            content: 'Tag important files so they stay visible here for quick access later.',
+            content: 'Use tags as your personal watchlist for files you know you need to come back to. This is helpful for follow-up work, but your queue remains the main source of what is due next.',
             hotspotId: 'home-my-tagged-applications'
           },
           {
-            title: 'Info links',
-            content: 'Most widgets include an Info link. Use it to open help that matches what you are looking at.',
-            hotspotId: 'home-work-queue-items'
+            title: 'Layout controls',
+            content: 'If the page feels cluttered, use Add widget and Reset layout to bring it back to something manageable. This is optional support for your workflow, not the main point of the page.',
+            hotspotId: 'home-layout-controls'
+          },
+          {
+            title: 'Info links and Ask the AI',
+            content: 'When PATH feels unfamiliar, use the page or widget Info links to open focused guidance in the help panel. From there, Ask the AI stays on the current topic and can help you with what to do next on that page.',
+            hotspotId: 'home-info-link'
           },
           {
             title: 'Side navigation',
-            content: 'Use the left navigation to switch areas like Applications, Cases, Budgets and Payments, Configuration, and Support.',
+            content: 'Use the left navigation to move to the main places you will work in PATH, such as Manual Application Intake, Application Assessment, Guidance, and Help and Support.',
             hotspotId: 'intro-side-navigation'
           },
           {
-            title: 'Tutorials and help',
-            content: 'You can reset tutorial progress from the Tutorials dashboard under Support.',
+            title: 'Tutorials',
+            content: 'If you need the walkthroughs to prompt again for you or for training, use the Tutorials page under Support to reset progress and replay them.',
             hotspotId: 'intro-tutorials-link'
           }
         ]
@@ -122,7 +117,7 @@ const TUTORIAL_DEFINITIONS = [
           {
             title: 'Info links',
             content: 'Most widgets include an Info link for context-aware guidance.',
-            hotspotId: 'home-work-queue-items'
+            hotspotId: 'home-info-link'
           },
           {
             title: 'Side navigation',
@@ -187,7 +182,7 @@ const TUTORIAL_DEFINITIONS = [
           {
             title: 'Info links',
             content: 'Most widgets include an Info link for context-aware guidance.',
-            hotspotId: 'home-work-queue-items'
+            hotspotId: 'home-info-link'
           },
           {
             title: 'Side navigation',
@@ -206,62 +201,62 @@ const TUTORIAL_DEFINITIONS = [
   {
     tutorialId: APPLICATION_WORKSPACE_TUTORIAL_ID,
     category: 'application-workspace',
-    title: 'Application workspace overview',
+    title: 'Application workspace quick start',
     descriptionLines: [
-      'Get oriented in the assessment workspace and learn where each widget lives.',
-      'Starts with Application Overview and Quick actions, then walks through the rest of the board.'
+      'Use this workspace to review the application, chase missing information, complete the assessment, and keep the file record together.',
+      'This tour follows the normal coordinator workflow from orientation through assessment and audit trail.'
     ],
     completedLines: [
-      'You are ready to work applications in the assessment workspace.',
-      'Return here anytime to replay the tour or onboard new staff.'
+      'Quick start complete. You know where to review the file, request information, complete the assessment, and record your work in PATH.',
+      'Return here anytime to replay the tour or help onboard new staff.'
     ],
     tasks: [
       {
-        title: 'Application workspace walkthrough',
+        title: 'Application file walkthrough',
         steps: [
           {
             title: 'Application Overview',
-            content: 'Start here to orient yourself. Confirm which file you are in, check current status and owner, review checklist progress, and note any lock or escalation context before editing anything.',
+            content: 'Start here to orient yourself. Confirm which file you are in, check status and assignment, review checklist progress, and see whether the application is waiting on documents, review, approval, or follow-through.',
             hotspotId: 'app-workspace-application-overview'
           },
           {
             title: 'Quick actions',
-            content: 'Use Quick actions to switch between focused dashboard layouts (review, documents/messages, notes/calendar, audit trail) and, when your role allows, run assignment, escalation, and closure actions.',
+            content: 'Use Quick actions to switch into the layout that matches the job in front of you, such as review, documents and messages, notes and calendar, or audit trail.',
             hotspotId: 'app-workspace-quick-actions'
           },
           {
             title: 'ISET Application Form',
-            content: 'Review the original intake submission and signatures here. Use Edit only when permitted, then save updates and check version history if you need to compare or restore prior values.',
+            content: 'Review the original intake submission, signatures, and client background here. If a factual correction is needed, edit carefully, save a new version, and make sure the change is reflected in your notes or follow-up where appropriate.',
             hotspotId: 'app-workspace-application-form'
           },
           {
-            title: 'Application Assessment',
-            content: 'Complete the assessment workflow in order: declaration, eligibility, recommendation, and review. Save progress as you work, then submit to move the file into the NWAC decision stage.',
-            hotspotId: 'app-workspace-assessment'
-          },
-          {
             title: 'Supporting Documents',
-            content: 'Use this widget to validate evidence and checklist requirements, upload or relabel files, and confirm the application has the required supporting documents before final decisions.',
+            content: 'Use this widget to confirm the evidence is complete. This is where you check what is still missing, validate living-allowance or program evidence, and keep the document checklist moving toward complete.',
             hotspotId: 'app-workspace-supporting-documents'
           },
           {
             title: 'Secure Messaging',
-            content: 'Communicate directly with the applicant from here. Use threads to request missing information, send updates, and track message history; attachments are available in Supporting Documents.',
+            content: 'Use Secure Messaging to request missing information, acknowledge receipt, and communicate updates to the applicant without leaving the file. Attachments from messages are available in Supporting Documents.',
             hotspotId: 'app-workspace-secure-messaging'
           },
           {
             title: 'Notes and tasks',
-            content: 'Capture internal case notes, rationale, and follow-up tasks for staff. Use this for your operational record and handoffs that should stay inside the admin workspace.',
+            content: 'Use Notes and Tasks for the staff-side record: contact attempts, rationale, internal follow-up, and anything another staff member would need to understand the file later.',
             hotspotId: 'app-workspace-notes-tasks'
           },
           {
+            title: 'Application Assessment',
+            content: 'Complete the assessment only once the file supports your recommendation. If living allowance is still being considered, make sure the Financial Overview and verification are in the file before you submit to NWAC.',
+            hotspotId: 'app-workspace-assessment'
+          },
+          {
             title: 'Case calendar',
-            content: 'Review upcoming deadlines and reminders in calendar or list view so follow-ups, milestone dates, and due items are not missed.',
+            content: 'Use the calendar to stay on top of reminders, deadlines, and follow-up dates so no document request or next step gets lost.',
             hotspotId: 'app-workspace-case-calendar'
           },
           {
             title: 'Events timeline',
-            content: 'Use the Events Timeline as your audit trail for status changes, assignment updates, reminders, and key case activity. Filter to investigate what changed and when.',
+            content: 'Use the Events Timeline as the running audit trail for the application. It helps you confirm what changed, when it changed, and who moved the file forward.',
             hotspotId: 'app-workspace-events-timeline'
           }
         ]
@@ -271,63 +266,63 @@ const TUTORIAL_DEFINITIONS = [
   {
     tutorialId: CASE_WORKSPACE_TUTORIAL_ID,
     category: 'case-workspace',
-    title: 'Case workspace overview',
+    title: 'Case workspace quick start',
     descriptionLines: [
-      'Get oriented in the case workspace and learn where to manage plans, interventions, documents, and client communications.',
-      'Starts with the case header and quick actions, then walks through the key operational widgets.'
+      'Use this workspace to manage the client after application approval: keep participant details current, run plans and interventions, record follow-up, and close the case properly.',
+      'This tour follows the casework flow rather than just the board layout.'
     ],
     completedLines: [
-      'You are ready to work cases in the case workspace.',
+      'Quick start complete. You know where to manage active casework, record follow-up, and prepare a case for proper closure in PATH.',
       'Return here anytime from the help panel to replay this walkthrough.'
     ],
     tasks: [
       {
-        title: 'Case workspace walkthrough',
+        title: 'Casework walkthrough',
         steps: [
           {
             title: 'Case header',
-            content: 'Start here to confirm which case you are in, current lifecycle status, assigned owner, and key dates before making updates.',
+            content: 'Start here to confirm you are in the right case, see who owns it, check agreement context, and orient yourself before making changes.',
             hotspotId: 'case-workspace-header'
           },
           {
             title: 'Quick actions and layouts',
-            content: 'Use Quick actions to switch focused layouts (plans, notes/calendar, documents/messages, payments, and compliance) and to run key case actions when your role allows.',
+            content: 'Use Quick actions when you want a focused working view, such as plans, notes and calendar, or documents and messages. This helps you stay on the task in front of you.',
             hotspotId: 'case-workspace-quick-actions'
           },
           {
             title: 'Participant details',
-            content: 'Keep participant details current here as circumstances change. This case-level profile supports case operations and should stay aligned with verified updates.',
+            content: 'Keep participant details current as circumstances change. This is the active case record for contact details and key participant information, and it should stay aligned with verified updates.',
             hotspotId: 'case-workspace-participant-details'
           },
           {
             title: 'Action plans',
-            content: 'Create and manage action plans, then select the active plan to control which interventions are in scope for day-to-day delivery.',
+            content: 'Action plans are the client’s working pathway. Use them to organize the goal, timing, and direction of support, and keep only the current plan active.',
             hotspotId: 'case-workspace-action-plans'
           },
           {
             title: 'Interventions',
-            content: 'Manage interventions under the selected action plan, track status and costs, and progress each intervention through its lifecycle.',
+            content: 'Interventions are the actual supports being delivered. Keep dates, status, and outcomes current so the case record reflects what the client is really doing.',
             hotspotId: 'case-workspace-interventions'
           },
           {
             title: 'Supporting documents',
-            content: 'Review evidence and uploaded files for this case. Use filters to focus context and confirm required documentation is available.',
+            content: 'Use Supporting Documents for the file evidence that belongs with the case, such as proof, supporting records, or later documents that matter to the case history.',
             hotspotId: 'app-workspace-supporting-documents'
           },
           {
             title: 'Secure messaging',
-            content: 'Communicate with the participant and maintain message history. Use this for requests, updates, and documented follow-up communications.',
+            content: 'Use Secure Messaging for participant communication that should stay attached to the file, such as requests, updates, and documented follow-up.',
             hotspotId: 'app-workspace-secure-messaging'
           },
           {
             title: 'Notes and calendar',
-            content: 'Use Notes and Tasks for internal context, then track upcoming obligations in the Case Calendar so follow-ups and milestones are not missed.',
-            hotspotId: 'app-workspace-notes-tasks'
+            content: 'Use Notes and Tasks for internal context and follow-up records, and use the Case Calendar to make sure milestones, reminders, and next steps are not missed.',
+            hotspotId: 'app-workspace-case-calendar'
           },
           {
-            title: 'Tutorials and help',
-            content: 'You can replay tutorials from dashboard and widget Info links in the help panel, and reset tutorial progress from the Tutorials dashboard under Support.',
-            hotspotId: 'case-workspace-header'
+            title: 'Before closure',
+            content: 'Do not close a case just because training or an intervention has ended. First capture outcomes, document the required follow-up, including the 12-week follow-up where it applies, and make sure the file shows why it is ready to close.',
+            hotspotId: 'app-workspace-notes-tasks'
           }
         ]
       }
@@ -336,13 +331,13 @@ const TUTORIAL_DEFINITIONS = [
   {
     tutorialId: NWAC_ASSESSMENT_TUTORIAL_ID,
     category: 'nwac-assessment',
-    title: 'NWAC assessment decision',
+    title: 'NWAC decision quick start',
     descriptionLines: [
-      'Record the NWAC decision, confirm assurance, and communicate the outcome.',
-      'Guidance highlights consistency checks and approval requirements from Module 9.'
+      'Use this tutorial when reviewing a coordinator recommendation and recording the NWAC decision.',
+      'It focuses on consistency, approval requirements, and communicating the outcome clearly.'
     ],
     completedLines: [
-      'NWAC decision recorded. You can return here to review communication steps or restart the tutorial.'
+      'Quick start complete. You know where to record the NWAC decision, check the file quality, and move the outcome into communication.'
     ],
     tasks: [
       {
@@ -350,27 +345,27 @@ const TUTORIAL_DEFINITIONS = [
         steps: [
           {
             title: 'Funding decision',
-            content: 'Select Approved, Not Approved, or Push back. Use Push back if the assessment needs corrections. NWAC guidance expects a response within about 5 business days of submission. Use Commit at the bottom to record the decision and unlock Communication.',
+            content: 'Choose Approved, Not Approved, or Push back. Use Push back when the coordinator needs to correct the file before a final decision. Use Commit to record the decision and unlock the communication step.',
             hotspotId: 'nwac-decision-status'
           },
           {
             title: 'Assessment assurance',
-            content: 'Record whether you agree or disagree with the coordinator recommendation. Confirm the assessment tells the story of the file, includes clear justification, and that amounts, dates, and program details match supporting documents and prior ISET history.',
+            content: 'Record whether the coordinator recommendation is sound. Before approving, make sure the assessment tells the story of the file clearly and that amounts, dates, prior ISET history, and program details are consistent with the evidence.',
             hotspotId: 'nwac-assessment-assurance'
           },
           {
             title: 'Decision reason',
-            content: 'If not approving or pushing back, enter a clear reason that ties to evidence. This text feeds the denial letter, so do not introduce new reasons later.',
+            content: 'If you are not approving or you are pushing the file back, record a clear reason tied to the evidence. This reason should stay consistent with what is later communicated to the client.',
             hotspotId: 'nwac-decision-reason'
           },
           {
             title: 'Budget pot and paid from',
-            content: 'For approvals with costs, assign the budget pot and paid-from context. Amounts must match the NWAC-approved recommendation; changes require re-approval before issuing the funding agreement.',
+            content: 'For approvals with funded costs, assign the budget pot and paid-from context carefully. Amounts must match the approved recommendation; if they change, the file should be corrected before moving on.',
             hotspotId: 'nwac-budget-pot'
           },
           {
             title: 'Decision letter',
-            content: 'Use Decision letter to draft and send the approval or denial. Ensure the decision and reason are consistent with what you recorded. Communicate the outcome to the client and document it in the case record.',
+            content: 'Use the decision letter step to communicate the outcome clearly. The letter should match the recorded decision and reason, and the case record should show that the client was informed.',
             hotspotId: 'nwac-decision-letter'
           }
         ]

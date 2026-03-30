@@ -6,33 +6,58 @@ const ManualApplicationIntakeHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Use this page to create applications received outside the portal, such as paper or PDF forms.
+        Use this page to enter an application that did not arrive through the public portal, such as a
+        paper form, PDF, phone intake, or in-person intake.
       </p>
     </Box>
     <Box>
-      <strong>When to use this page</strong>
+      <strong>Before you start</strong>
       <p>
-        Use Manual Intake when an applicant did not submit through the public portal and staff need to key in the
-        form details. It is also appropriate for offline data-entry backlog work.
+        Work from the source document or notes in front of you. Enter the applicant&apos;s information as
+        accurately as possible, choose the correct intake source, and use source notes when the origin
+        needs explanation.
       </p>
     </Box>
     <Box>
-      <strong>After creating an application</strong>
+      <strong>How the intake flow behaves</strong>
       <p>
-        The new record is added to the Applications list, and PATH opens the Application Workspace for that file.
-        If supporting documents were received separately, staff must upload them manually in the workspace.
+        PATH validates each step before moving forward. If you leave and come back in the same browser,
+        the page can restore your in-progress draft. Use <em>Reset</em> only when you want to clear the
+        local draft and start over.
       </p>
     </Box>
     <Box>
-      <strong>Activity history</strong>
+      <strong>After creating the application</strong>
       <p>
-        PATH records that the application was submitted through Manual Intake and captures the staff user who created it.
+        PATH creates the application record and opens the Application Workspace for that file. Upload any
+        supporting documents that were received separately, and record any applicant follow-up in notes or
+        secure messaging once the file is open.
+      </p>
+    </Box>
+    <Box>
+      <strong>Training-aligned reminders</strong>
+      <p>
+        Manual Intake should support the same staff expectations used in training: enter the file promptly,
+        keep the record complete, acknowledge missing information quickly, and make sure documents and staff
+        interactions are captured in PATH.
       </p>
     </Box>
   </SpaceBetween>
 );
 
 ManualApplicationIntakeHelp.aiContext =
-  'Explain manual intake in plain language for staff users. Focus on what they do on this page, when create is allowed, what happens after create, and where to find the resulting application. Mention Add widget and Reset layout only as simple page controls.';
+  `You are assisting staff using the Manual Application Intake page in PATH.
+
+Explain the page as a staff data-entry workflow, not a technical feature:
+- Use it for applications received outside the public portal.
+- Tell the user to work from the paper/PDF/phone/in-person source and enter the information accurately.
+- Explain that each step validates before Next, drafts can be restored in the same browser session, and Reset clears the local draft.
+- After Create Application, PATH opens the new Application Workspace where documents, notes, and applicant follow-up continue.
+
+Training-aligned reminders to mention when relevant:
+- Enter new applications promptly.
+- Missing information should be followed up and documented.
+- Keep documents and staff interactions recorded in PATH.
+- All files should remain tracked even if they are later not funded.`;
 
 export default ManualApplicationIntakeHelp;

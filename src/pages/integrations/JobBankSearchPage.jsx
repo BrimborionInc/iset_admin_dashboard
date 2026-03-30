@@ -15,6 +15,7 @@ import { apiFetch } from '../../auth/apiClient';
 
 const JOB_BANK_BASE_URL = 'https://www.jobbank.gc.ca/jobsearch/jobsearch';
 const JOB_BANK_OCCUPATION_SEARCH_URL = 'https://www.jobbank.gc.ca/trend-analysis/search-occupations';
+const JOB_BANK_EMBED_NOTICE = 'Job Bank currently blocks other sites from displaying its pages inside an embedded frame. PATH can still build the correct search link for you, but the results must open on Job Bank itself in a separate tab.';
 const NOC_VERSION_CODE = '2021';
 const TAB_IDS = {
   FIND_JOB: 'find-job',
@@ -83,7 +84,6 @@ const JobBankSearchPage = () => {
   const [professionError, setProfessionError] = useState('');
   const [professionLookupLoading, setProfessionLookupLoading] = useState(false);
   const [iframeSrc, setIframeSrc] = useState(JOB_BANK_BASE_URL);
-  const [isLoading, setIsLoading] = useState(true);
 
   const currentSearchUrl = useMemo(
     () => buildSearchUrl(jobSearch),
@@ -121,7 +121,6 @@ const JobBankSearchPage = () => {
   }, []);
 
   const runSearch = () => {
-    setIsLoading(true);
     setIframeSrc(currentSearchUrl);
   };
 
@@ -163,7 +162,6 @@ const JobBankSearchPage = () => {
         throw new Error('Job Bank did not return an occupation summary URL.');
       }
 
-      setIsLoading(true);
       setIframeSrc(payload.summaryUrl);
     } catch (error) {
       setProfessionError(error?.message || 'Unable to resolve the Job Bank profession summary.');
@@ -174,7 +172,6 @@ const JobBankSearchPage = () => {
 
   const clearJobSearch = () => {
     setJobSearch({ keyword: '', location: '' });
-    setIsLoading(true);
     setIframeSrc(JOB_BANK_BASE_URL);
   };
 
@@ -186,7 +183,6 @@ const JobBankSearchPage = () => {
     });
     setProfessionSuggestions([]);
     setProfessionError('');
-    setIsLoading(true);
     setIframeSrc(JOB_BANK_OCCUPATION_SEARCH_URL);
   };
 
@@ -359,8 +355,8 @@ const JobBankSearchPage = () => {
   ];
 
   const activeTabNote = activeTabId === TAB_IDS.FIND_JOB
-    ? 'Use Find a Job for direct Job Bank posting searches.'
-    : 'Explore a Profession resolves the selected PATH profession and location to the matching Job Bank summary page before loading it below.';
+    ? 'Use Find a Job to build the Job Bank search URL, then open the results on Job Bank.'
+    : 'Explore a Profession resolves the selected PATH profession and location to the matching Job Bank summary page, then opens it on Job Bank.';
 
   return (
     <SpaceBetween size="m">
@@ -382,26 +378,26 @@ const JobBankSearchPage = () => {
       </Container>
 
       <Container>
-        <div style={{ position: 'relative', minHeight: '70vh' }}>
-          {isLoading ? (
-            <Box
-              color="text-body-secondary"
-              style={{ position: 'absolute', top: '8px', left: '8px', zIndex: 1, background: 'var(--color-background-container-content, #fff)' }}
+        <SpaceBetween size="m">
+          <Alert type="warning" header="Job Bank must open in a new tab">
+            {JOB_BANK_EMBED_NOTICE}
+          </Alert>
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button
+              variant="primary"
+              iconName="external"
+              onClick={() => window.open(iframeSrc, '_blank', 'noopener,noreferrer')}
             >
-              Loading Job Bank results...
-            </Box>
-          ) : null}
-          <iframe
-            key={iframeSrc}
-            title="Job Bank search results"
-            src={iframeSrc}
-            width="100%"
-            height="900"
-            frameBorder="0"
-            style={{ border: '1px solid var(--color-border-container-top, #d5dbdb)', borderRadius: '8px' }}
-            onLoad={() => setIsLoading(false)}
-          />
-        </div>
+              Open current Job Bank page
+            </Button>
+          </SpaceBetween>
+          <Box variant="small">
+            Current destination: <Link external href={iframeSrc}>{iframeSrc}</Link>
+          </Box>
+          <Box variant="small" color="text-body-secondary">
+            If Job Bank changes its framing policy in the future, PATH could show the external page in-line again. For now, browsers block the embedded view because Job Bank sends a same-origin frame policy.
+          </Box>
+        </SpaceBetween>
       </Container>
     </SpaceBetween>
   );

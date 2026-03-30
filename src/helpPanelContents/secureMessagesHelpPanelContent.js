@@ -4,9 +4,9 @@ const SecureMessagesHelpPanelContent = () => (
   <div>
     <h2>Secure messaging workspace</h2>
     <p>
-      Keep all conversation with the applicant inside this encrypted inbox. Each tab mirrors a familiar
-      email workflow so you can focus on responses, attachments, and follow-up actions without leaving the
-      case file.
+      Keep applicant communication inside this secure inbox whenever PATH messaging is available. It
+      keeps the conversation attached to the file and makes it easier to follow requests, responses,
+      and attachments in one place.
     </p>
 
     <h3>Tabs explained</h3>
@@ -27,7 +27,8 @@ const SecureMessagesHelpPanelContent = () => (
     <h3>Common actions</h3>
     <ul>
       <li>
-        Use <em>New Message</em> to start a conversation or reply in a thread to keep context together.
+        Use <em>New Message</em> to acknowledge an application, request missing documents, or continue a
+        thread without leaving the file.
       </li>
       <li>
         Mark a message as urgent when you need the applicant's immediate attention.
@@ -46,6 +47,7 @@ const SecureMessagesHelpPanelContent = () => (
     <h3>Working safely</h3>
     <ul>
       <li>Keep messaging professional - conversations are part of the auditable case history.</li>
+      <li>If the message leads to an important decision or missed deadline, capture that outcome in Notes as well.</li>
       <li>Use Deleted &gt; Empty Items to permanently clear sensitive information once downstream tasks are done (type <strong>delete</strong> to confirm).</li>
       <li>If attachments fail to open, ask the applicant to resend or notify support for recovery.</li>
     </ul>
@@ -55,6 +57,8 @@ const SecureMessagesHelpPanelContent = () => (
 SecureMessagesHelpPanelContent.aiContext = `
 You are assisting an ISET staff member using the Secure Messaging widget. Explain the purpose of each tab, how to
 compose and manage messages, search/filter the inbox, and what happens to attachments. Clarify that attachments are adopted into Supporting Documents (labels can be edited there). Highlight best practices for urgency flags and for emptying deleted items (type "delete" to confirm).
+
+When relevant, frame messaging as part of staff workflow: acknowledge applications, request missing information, follow up with applicants, and keep important outcomes reflected in the case notes as well.
 `;
 
 export default SecureMessagesHelpPanelContent;

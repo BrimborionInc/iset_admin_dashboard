@@ -17,6 +17,7 @@ import {
   FormField,
   Select,
   Alert,
+  Link,
 } from '@cloudscape-design/components';
 import Icon from '@cloudscape-design/components/icon';
 import { BoardItem } from '@cloudscape-design/board-components';
@@ -24,6 +25,7 @@ import { useHistory, useLocation } from 'react-router-dom';
 import { apiFetch } from '../auth/apiClient';
 import useCurrentUser from '../hooks/useCurrentUser';
 import { getRoleDisplayName } from '../utils/roleDisplay';
+import ApplicationsWidgetHelp from '../helpPanelContents/applicationsWidgetHelp';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 const DEFAULT_VISIBLE_COLUMNS = ['watch','applicant_name','address_province','tracking_id','status','sla_risk','assigned_user_email','submitted_at','lock_state','actions'];
@@ -258,7 +260,7 @@ const computeSlaMeta = (row, slaTargets, rawStatus, isAssigned) => {
   return { ageDays, due: effectiveDue, status, deltaDays: diffDays, label, stage: targetKey };
 };
 
-const ApplicationsWidget = ({ actions, refreshKey }) => {
+const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
   const history = useHistory();
   const location = useLocation();
   const [items, setItems] = useState([]);
@@ -1143,6 +1145,21 @@ const ApplicationsWidget = ({ actions, refreshKey }) => {
   const headerContent = (
     <Header
       variant="h2"
+      info={
+        <Link
+          variant="info"
+          onFollow={() =>
+            toggleHelpPanel &&
+            toggleHelpPanel(
+              <ApplicationsWidgetHelp />,
+              'ISET Applications',
+              ApplicationsWidgetHelp.aiContext || ''
+            )
+          }
+        >
+          Info
+        </Link>
+      }
       actions={
         <SpaceBetween direction="horizontal" size="xs">
           {autoAssignBadge}

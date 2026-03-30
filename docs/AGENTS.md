@@ -5,7 +5,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-03-29
+Last Updated: 2026-03-30
 
 ## Working relationship (design dialog)
 
@@ -40,6 +40,7 @@ Last Updated: 2026-03-29
 - Confirm real behavior from code/API payloads before changing UI.
 - For dashboard/widget work, read `docs/guides/configurable-dashboard-notes.md` first.
 - For homepage Metrics or Items work, read `docs/dashboards/admin-home-metrics-widget.md`.
+- For coordinator-facing PATH help-panel or AI-context work, use `docs/training/TRAINING_MODULES_September_2025_extracted.md` as the baseline for staff workflow expectations and write guidance as a job aid, not a product tour.
 - Keep doc updates in the same change when behavior or structure changes.
 - If blocked by tooling, permissions, or environment access, call it out immediately.
 
@@ -63,6 +64,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - The OAuth callback is handled as a shell-less bootstrapping route. If sign-in behavior changes, inspect `src/App.js`, `src/pages/AuthCallback.js`, `src/auth/cognito.js`, and `src/auth/apiClient.js` together.
 - Server middleware and admin-user routes no longer support `AUTH_PROVIDER=none`, mock admin users, or auth-disabled mutation fallbacks. If auth is misconfigured, fail explicitly instead of inventing local placeholder behavior.
 - Raw debug/file-maintenance endpoints must stay behind explicit server-side enablement (for example `ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES=true`) plus System Administrator access. Do not leave purge or direct file read/write helpers broadly reachable.
+- Local repo dev launcher note: `start-dev.ps1` now starts the Admin Backend with `ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES=true` so Demo Controls like `Clear ISET test data` and `/api/dev/*` work in local dev. Manual admin-backend starts still need that env var set explicitly.
 
 ## Development data policy (no legacy fallbacks)
 
@@ -82,6 +84,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Query Editor dashboard reference: `docs/dashboards/query-editor-dashboard.md`
 - Test DB access from Codex/WSL: `docs/guides/test-db-access-from-codex.md`
 - Operational reporting workbook reference: `docs/data/NWAC - data info 2025-26.xlsx`
+- NWAC staff training extract for PATH-aligned help content: `docs/training/TRAINING_MODULES_September_2025_extracted.md`
 - Admin intake preview renderer: `apps/web/src/features/intake/ComponentRenderer.tsx`
 - Public portal renderer (other repo): `../ISET-intake/src/renderer/renderers.js`
 - Help panel content: `src/helpPanelContents/*`
@@ -138,10 +141,21 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 
 - Homepage route: `/`
 - Current homepage Metrics widget behavior is documented in `docs/dashboards/admin-home-metrics-widget.md`.
+- Current homepage Work Queue widget behavior is documented in `docs/dashboards/admin-home-my-work-widget.md`.
+- Shared help-panel AI chat prompt is built in `src/AppContent.js` (`buildSystemPrompt`). For coordinator-facing PATH workflows, treat that prompt as a staff job-aid layer and keep it aligned with NWAC training expectations, not just with page mechanics.
 - Frontend files to inspect together:
   - `src/pages/home/HomeDashboardPage.jsx`
+  - `src/pages/home/widgets/ProgramAdminWorkQueueWidget.js`
+  - `src/pages/home/widgets/IsetCoordinatorWorkQueueWidget.js`
   - `src/pages/home/widgets/MetricsWidget.js`
   - `src/pages/home/widgets/WorkQueueItemsTableWidget.js`
+- Current NWAC Administrator work-queue rule: the first queue card is `All Applications`, the second is `All Cases`, and the shared admin/manager queues follow them.
+- Current NWAC Administrator open-application rule: `All Applications` is sourced from `/api/applications?excludeTerminal=1`, so the count/list excludes terminal application statuses rather than relying on a partial status list in the frontend.
+- Current NWAC Administrator client-case rule: `All Cases` is sourced from `/api/dashboard/all-client-cases`, counts case rows rather than deduped clients, and excludes only `closed` and `archived` so `dormant` and `ready_to_close` stay visible.
+- Current Regional Manager work-queue rule: the first queue card is `Applications in My Region`, the second is `Clients in My Region`, and `My Applications` follows them.
+- Current Regional Manager application-queue region-scope rule: use all resolved `regionIds` from the current staff context (including `staff_region` mappings when present), include direct assignments to the manager, and include unassigned applications whose applicant address province/territory code matches one of those region codes.
+- Current Regional Manager open-application rule: `Applications in My Region` is sourced from `/api/applications?excludeTerminal=1`, so the count/list excludes terminal application statuses rather than relying on a partial status list in the frontend.
+- Current Regional Manager client-case rule: `Clients in My Region` is sourced from `/api/dashboard/regional-client-cases`, counts case rows rather than deduped clients, uses direct assignment plus owner-region/portfolio-region scope, and excludes only `closed` and `archived` so `dormant` and `ready_to_close` stay visible.
 - Current drilldown rule: count metrics in the Metrics widget open the existing `Work Queue Items` widget in a dedicated metric-results mode; currency metrics do not open a row list.
 - Current implementation rule: do not fake metric drilldown as another queue bucket. `Work Queue Items` now has separate queue mode and metric-results mode.
 - Current scoping rule: Program Administrators see global metrics, Regional Coordinators must honor all resolved `regionIds`, and Application Assessors are owner-scoped.
@@ -200,6 +214,8 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 ## Known pitfalls
 
 - Program Admin "Unassigned Applications" must use `/api/applications`, not `/api/cases`, or applicant names are missing.
+- NWAC Administrator homepage `All Cases` must use `/api/dashboard/all-client-cases`, not the generic `/api/cases` list, because the homepage queue is case-based and must exclude only `closed` and `archived` while keeping global scope.
+- Regional Manager homepage `Clients in My Region` must use `/api/dashboard/regional-client-cases`, not the generic `/api/cases` list, because the homepage queue is case-based and must respect owner-region/portfolio-region scope with only `closed` and `archived` excluded.
 - Schema allows `iset_case.application_id = NULL`, and core case create/update/list flows now support client-file cases.
 - Supporting Documents now has a case-based mode for application-less client files: it reads from `GET /api/cases/:id/documents`, uploads through `POST /api/cases/:id/documents/upload`, hides the checklist tab, and allows `client`, `case`, `action_plan`, plus application-type document categories. When no linked application exists, application-type uploads fall back to action-plan or case storage instead of requiring a fake application record.
 - Secure Messaging still depends on applicant/application linkage today; imported client-file cases without a participant account can manage documents, plans, and interventions but still cannot message the client until a participant account exists.
@@ -216,6 +232,8 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Keep release-note entries tagged with an explicit target release number (for example `v0.5.4`) and verify the current public version from `src/pages/LandingPage.jsx` before drafting or updating entries.
 - Keep credentials and environment-specific secrets out of docs.
 - When refactoring dashboards/widgets, update matching help panel content (`src/helpPanelContents/*`) and related `aiContext` strings in the same change.
+- Coordinator-facing PATH help content should bias toward staff workflow, compliance reminders, timelines, documentation expectations, and next-step coaching instead of frontend implementation detail.
+- When AI help output quality is part of the task, validate both layers: the page/widget `aiContext` in `src/helpPanelContents/*` and the shared help-chat system prompt in `src/AppContent.js`.
 
 ## Database documentation and access
 

@@ -13237,7 +13237,18 @@ function firstQueryValue(raw) {
   return raw;
 }
 
-const TERMINAL_APPLICATION_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived']);
+const TERMINAL_APPLICATION_STATUSES = new Set([
+  'approved',
+  'completed',
+  'complete',
+  'rejected',
+  'declined',
+  'denied',
+  'withdrawn',
+  'cancelled',
+  'closed',
+  'archived'
+]);
 const APPROVAL_COST_THRESHOLD = 15000;
 const PROGRAM_ADMIN_APPROVAL_THRESHOLD = 25000;
 const PROGRAM_ADMIN_APPROVER_EMAIL = 'sstacey@nwac.ca';
@@ -13885,6 +13896,10 @@ const CASE_STATUS_TERMINAL_VALUES = [
   'rejected',
   'completed',
 ];
+const REGIONAL_MANAGER_CLIENT_QUEUE_EXCLUDED_CASE_STATUSES = [
+  CASE_STATUS_DERIVED_VALUES.closed,
+  CASE_STATUS_DERIVED_VALUES.archived,
+];
 const CASE_STATUS_HOLD_VALUES = [
   'docs_requested',
   'docs requested',
@@ -13961,7 +13976,7 @@ const APPLICATION_STATUS_HOLD_VALUES = [
   'on_hold',
 ];
 const APPLICATION_STATUS_HOLD_VALUES_LOWER = APPLICATION_STATUS_HOLD_VALUES.map(v => v.toLowerCase());
-const APPLICATION_COMPLETE_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'withdrawn', 'cancelled', 'closed', 'archived']);
+const APPLICATION_COMPLETE_STATUSES = new Set(TERMINAL_APPLICATION_STATUSES);
 const APPLICATION_DECISION_STATUSES = new Set(['pending_approval', 'decision_ready']);
 const APPLICATION_ASSESSMENT_STATUSES = new Set([
   'in_review',
@@ -29503,6 +29518,228 @@ app.get('/api/dashboard/case-work-queue', async (req, res) => {
   }
 });
 
+async function fetchDashboardOpenClientCases({ regionIds = [], assignedStaffProfileId = null, limit = 200, offset = 0 } = {}) {
+  const normalizedRegionIds = normalizeRegionIdList(regionIds);
+  const numericAssignedStaffProfileId = Number(assignedStaffProfileId);
+  const hasAssignedScope = Number.isInteger(numericAssignedStaffProfileId) && numericAssignedStaffProfileId > 0;
+  const excludedStatuses = REGIONAL_MANAGER_CLIENT_QUEUE_EXCLUDED_CASE_STATUSES.map(status => status.toLowerCase());
+  const excludedStatusPlaceholders = excludedStatuses.map(() => '?').join(',');
+
+  const baseFrom = `
+    FROM iset_case c
+    LEFT JOIN client cl ON cl.id = c.client_id
+    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+    LEFT JOIN canada_region portfolio_region ON portfolio_region.region_id = c.portfolio_region_id
+    LEFT JOIN canada_region owner_region ON owner_region.region_id = sp.region_id
+    LEFT JOIN iset_application a ON a.id = c.application_id
+    LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+    LEFT JOIN (
+      SELECT
+        case_id,
+        MIN(due_at) AS next_reminder_due_at
+      FROM iset_case_reminder
+      WHERE deleted_at IS NULL
+        AND status = 'open'
+        AND due_at IS NOT NULL
+      GROUP BY case_id
+    ) reminder_next ON reminder_next.case_id = c.id
+  `;
+
+  const whereClauses = [
+    `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.excludeFromCaseworkQueues')), 'false') <> 'true'`,
+    `LOWER(TRIM(COALESCE(c.status, ''))) NOT IN (${excludedStatusPlaceholders})`,
+  ];
+  const queryParams = [...excludedStatuses];
+
+  if (normalizedRegionIds.length) {
+    const regionPlaceholders = normalizedRegionIds.map(() => '?').join(',');
+    const scopeClauses = [
+      `sp.region_id IN (${regionPlaceholders})`,
+      `c.portfolio_region_id IN (${regionPlaceholders})`,
+    ];
+    if (hasAssignedScope) {
+      scopeClauses.unshift('c.assigned_to_user_id = ?');
+      queryParams.push(numericAssignedStaffProfileId);
+    }
+    whereClauses.push(`(${scopeClauses.join(' OR ')})`);
+    queryParams.push(...normalizedRegionIds, ...normalizedRegionIds);
+  } else if (hasAssignedScope) {
+    whereClauses.push('c.assigned_to_user_id = ?');
+    queryParams.push(numericAssignedStaffProfileId);
+  }
+
+  const whereSql = `WHERE ${whereClauses.join(' AND ')}`;
+  const selectSql = `
+    SELECT
+      c.id AS case_id,
+      c.application_id,
+      c.client_id,
+      c.case_number,
+      c.assigned_to_user_id,
+      c.status,
+      c.portfolio_region_id,
+      COALESCE(c.next_action_due_at, reminder_next.next_reminder_due_at) AS next_action_due_at,
+      c.opened_at,
+      c.created_at,
+      c.updated_at,
+      COALESCE(sp.display_name, sp.name) AS owner_name,
+      sp.email AS owner_email,
+      sp.region_id AS owner_region_id,
+      portfolio_region.code AS region_code,
+      portfolio_region.name_en AS region_name,
+      owner_region.code AS owner_region_code,
+      owner_region.name_en AS owner_region_name,
+      cl.first_name AS client_first_name,
+      cl.last_name AS client_last_name,
+      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
+      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.full_name')) AS application_full_name,
+      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."preferred-name"')) AS application_preferred_name,
+      s.reference_number AS submission_reference_number,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."first-name"')) AS submission_first_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."last-name"')) AS submission_last_name,
+      JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."preferred-name"')) AS submission_preferred_name
+    ${baseFrom}
+    ${whereSql}
+    ORDER BY
+      CASE WHEN COALESCE(c.next_action_due_at, reminder_next.next_reminder_due_at) IS NULL THEN 1 ELSE 0 END,
+      COALESCE(c.next_action_due_at, reminder_next.next_reminder_due_at) ASC,
+      c.updated_at DESC,
+      c.id DESC
+    LIMIT ? OFFSET ?
+  `;
+  const countSql = `
+    SELECT COUNT(*) AS total
+    ${baseFrom}
+    ${whereSql}
+  `;
+
+  const [rows] = await pool.query(selectSql, [...queryParams, limit, offset]);
+  const [[countRow] = []] = await pool.query(countSql, queryParams);
+
+  const items = (Array.isArray(rows) ? rows : []).map((row, index) => {
+    const firstName = normaliseString(row?.client_first_name) || normaliseString(row?.submission_first_name);
+    const lastName = normaliseString(row?.client_last_name) || normaliseString(row?.submission_last_name);
+    const combinedName = [firstName, lastName].filter(Boolean).join(' ').trim();
+    const clientName =
+      combinedName ||
+      normaliseString(row?.application_full_name) ||
+      normaliseString(row?.submission_preferred_name) ||
+      normaliseString(row?.application_preferred_name) ||
+      normaliseString(row?.tracking_id) ||
+      normaliseString(row?.submission_reference_number) ||
+      (row?.case_id ? `Case ${row.case_id}` : `Client ${index + 1}`);
+    return {
+      case_id: row?.case_id || null,
+      application_id: row?.application_id || null,
+      client_id: row?.client_id || null,
+      case_number: row?.case_number || null,
+      tracking_id:
+        normaliseString(row?.tracking_id) ||
+        normaliseString(row?.submission_reference_number) ||
+        normaliseString(row?.case_number) ||
+        (row?.case_id ? `CASE-${row.case_id}` : null),
+      client_name: clientName,
+      assigned_to_user_id: row?.assigned_to_user_id || null,
+      owner_name: normaliseString(row?.owner_name) || null,
+      owner_email: normaliseString(row?.owner_email) || null,
+      status: normaliseCaseStatusValue(row?.status) || null,
+      next_action_due_at: toIsoDateTime(row?.next_action_due_at),
+      opened_at: toIsoDateTime(row?.opened_at || row?.created_at),
+      created_at: toIsoDateTime(row?.created_at),
+      updated_at: toIsoDateTime(row?.updated_at),
+      region_code: normaliseString(row?.region_code) || null,
+      region_name: normaliseString(row?.region_name) || null,
+      owner_region_code: normaliseString(row?.owner_region_code) || null,
+      owner_region_name: normaliseString(row?.owner_region_name) || null,
+    };
+  });
+
+  return {
+    items,
+    totalCount: Number(countRow?.total ?? 0),
+  };
+}
+
+function parseDashboardQueueWindow(req, { defaultLimit = 200, maxLimit = 200 } = {}) {
+  const limitRaw = Number.parseInt(firstQueryValue(req.query.limit) ?? String(defaultLimit), 10);
+  const offsetRaw = Number.parseInt(firstQueryValue(req.query.offset) ?? '0', 10);
+  return {
+    limit: Math.min(Math.max(Number.isFinite(limitRaw) ? limitRaw : defaultLimit, 1), maxLimit),
+    offset: Math.max(Number.isFinite(offsetRaw) ? offsetRaw : 0, 0),
+  };
+}
+
+app.get('/api/dashboard/all-client-cases', async (req, res) => {
+  const role = inferUserRole(req) || 'Guest';
+  if (role !== 'NWAC Administrator') {
+    return res.json({
+      role,
+      generatedAt: new Date().toISOString(),
+      items: [],
+      totalCount: 0,
+    });
+  }
+
+  try {
+    const { limit, offset } = parseDashboardQueueWindow(req);
+    const payload = await fetchDashboardOpenClientCases({ limit, offset });
+    return res.json({
+      role,
+      generatedAt: new Date().toISOString(),
+      ...payload,
+    });
+  } catch (e) {
+    console.error('[all-client-cases] fetch failed:', e.message);
+    return res.status(500).json({ error: 'all_client_cases_fetch_failed', message: e.message });
+  }
+});
+
+app.get('/api/dashboard/regional-client-cases', async (req, res) => {
+  const role = inferUserRole(req) || 'Guest';
+  if (role !== 'Regional Manager') {
+    return res.json({
+      role,
+      generatedAt: new Date().toISOString(),
+      regionIds: [],
+      items: [],
+      totalCount: 0,
+    });
+  }
+
+  try {
+    const context = await resolveRegionalCoordinatorContext(req);
+    const regionIds = normalizeRegionIdList(context?.regionIds);
+    const managerStaffProfileId = Number(context?.staffProfileId);
+    if (!context?.valid || !regionIds.length || !Number.isInteger(managerStaffProfileId) || managerStaffProfileId <= 0) {
+      return res.json({
+        role,
+        generatedAt: new Date().toISOString(),
+        regionIds: [],
+        items: [],
+        totalCount: 0,
+      });
+    }
+
+    const { limit, offset } = parseDashboardQueueWindow(req);
+    const payload = await fetchDashboardOpenClientCases({
+      regionIds,
+      assignedStaffProfileId: managerStaffProfileId,
+      limit,
+      offset,
+    });
+
+    return res.json({
+      role,
+      generatedAt: new Date().toISOString(),
+      regionIds,
+      ...payload,
+    });
+  } catch (e) {
+    console.error('[regional-client-cases] fetch failed:', e.message);
+    return res.status(500).json({ error: 'regional_client_cases_fetch_failed', message: e.message });
+  }
+});
+
 
 app.get('/api/dashboard/application-work-queue', async (req, res) => {
   const role = inferUserRole(req) || 'Guest';
@@ -29642,12 +29879,6 @@ app.get('/api/dashboard/application-work-queue', async (req, res) => {
             label: metaOverdue?.label || 'Overdue',
             description: metaOverdue?.description || null,
             count: overdueCount
-          },
-          {
-            id: 'awaiting-my-approval',
-            label: metaAwaitingApproval?.label || 'Awaiting my approval',
-            description: metaAwaitingApproval?.description || null,
-            count: awaitingMyApprovalCount
           }
         ]
       });
@@ -66582,9 +66813,16 @@ app.get('/api/applications', async (req, res) => {
   try {
     if (!req.auth || req.auth.subjectType !== 'staff') return res.status(403).json({ error: 'forbidden' });
     const { status, limit = 50, offset = 0, search } = req.query;
+    const excludeTerminalRaw = firstQueryValue(req.query.excludeTerminal);
+    const excludeTerminal = ['1', 'true', 'yes'].includes(String(excludeTerminalRaw || '').trim().toLowerCase());
     const role = req.auth.role;
     const regionIds = role === 'Regional Manager' ? resolveRequestRegionIds(req) : [];
     const archivedFilter = buildArchivedApplicationFilter(req, 'a');
+    const applicationStatusExpr = `REPLACE(LOWER(TRIM(a.status)), ' ', '_')`;
+    const terminalStatuses = excludeTerminal && TERMINAL_APPLICATION_STATUSES.size
+      ? Array.from(TERMINAL_APPLICATION_STATUSES)
+      : [];
+    const terminalStatusPlaceholders = terminalStatuses.map(() => '?').join(',');
     const addressProvinceExpr = `COALESCE(
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."address-province"')),
       JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."address-province"'))
@@ -66650,6 +66888,10 @@ app.get('/api/applications', async (req, res) => {
     if (archivedFilter) {
       where.push(archivedFilter);
     }
+    if (terminalStatuses.length) {
+      where.push(`(a.status IS NULL OR ${applicationStatusExpr} NOT IN (${terminalStatusPlaceholders}))`);
+      params.push(...terminalStatuses);
+    }
 
     let regionCodes = [];
     if (role === 'Regional Manager' && regionIds.length) {
@@ -66697,6 +66939,16 @@ app.get('/api/applications', async (req, res) => {
 
     // Add unassigned submissions (applications without case) for elevated roles.
     if (role === 'NWAC Administrator' || role === 'System Administrator') {
+      const unassignedWhereClauses = ['c2.id IS NULL'];
+      if (archivedFilter) {
+        unassignedWhereClauses.push(archivedFilter);
+      }
+      if (terminalStatuses.length) {
+        unassignedWhereClauses.push(`(a.status IS NULL OR ${applicationStatusExpr} NOT IN (${terminalStatusPlaceholders}))`);
+      }
+      const unassignedWhereSql = unassignedWhereClauses.length
+        ? `WHERE ${unassignedWhereClauses.join(' AND ')}`
+        : '';
       finalSql = `(${baseSql})\nUNION ALL\n(
         SELECT NULL AS case_id, a.id AS application_id, a.status AS application_status,
         a.docs_requested_active AS docs_requested_active,
@@ -66726,8 +66978,11 @@ app.get('/api/applications', async (req, res) => {
         FROM iset_application a
         LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
         LEFT JOIN iset_case c2 ON c2.application_id = a.id
-        WHERE c2.id IS NULL${archivedFilter ? ` AND ${archivedFilter}` : ''}
+        ${unassignedWhereSql}
       )`;
+      if (terminalStatuses.length) {
+        finalParams.push(...terminalStatuses);
+      }
     }
 
     finalSql += `\nORDER BY submitted_at DESC\nLIMIT ? OFFSET ?`;
@@ -66742,9 +66997,18 @@ app.get('/api/applications', async (req, res) => {
         let countCaseSql = 'SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c JOIN iset_application a ON c.application_id = a.id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id';
         if (where.length) countCaseSql += ' WHERE ' + where.join(' AND ');
         const [[caseCnt]] = await pool.query(countCaseSql, params);
+        const unassignedWhereClauses = ['c2.id IS NULL'];
+        const unassignedParams = [];
+        if (archivedFilter) {
+          unassignedWhereClauses.push(archivedFilter);
+        }
+        if (terminalStatuses.length) {
+          unassignedWhereClauses.push(`(a.status IS NULL OR ${applicationStatusExpr} NOT IN (${terminalStatusPlaceholders}))`);
+          unassignedParams.push(...terminalStatuses);
+        }
         const unassignedSql =
-          `SELECT COUNT(*) AS cnt FROM iset_application a LEFT JOIN iset_case c2 ON c2.application_id = a.id WHERE c2.id IS NULL${archivedFilter ? ` AND ${archivedFilter}` : ''}`;
-        const [[unassignedCnt]] = await pool.query(unassignedSql);
+          `SELECT COUNT(*) AS cnt FROM iset_application a LEFT JOIN iset_case c2 ON c2.application_id = a.id WHERE ${unassignedWhereClauses.join(' AND ')}`;
+        const [[unassignedCnt]] = await pool.query(unassignedSql, unassignedParams);
         count = (caseCnt?.cnt || 0) + (unassignedCnt?.cnt || 0);
       } else {
         let countSql = 'SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c JOIN iset_application a ON c.application_id = a.id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id';

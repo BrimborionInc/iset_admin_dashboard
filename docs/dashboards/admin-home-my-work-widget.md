@@ -1,39 +1,63 @@
-# Admin Home - "Application Work Queue" Widget Design
+# Admin Home - Work Queue Widget
+
+Purpose: document the live homepage Work Queue widget and the queues that drive the shared `Work Queue Items` table.
+Audience: admin dashboard engineers, product owners, and operators.
+Last Updated: 2026-03-30
 
 ## Scope
-- Surface the work queue for ISET applications that a signed-in user is responsible for.
-- Role-aware counts and descriptions; single shared widget used across personas.
 
-## Roles & Buckets
-- **Program Administrator**: New submissions, Unassigned backlog, In assessment, Awaiting program decision, On hold / info requested, Overdue.
-- **Regional Coordinator**: Assigned to my region, Assigned to me, Awaiting applicant info, Due this week, Overdue.
-- **Application Assessor**: Assigned to me, Due today, Awaiting applicant response, Overdue.
-- **System Administrator**: Workflow drafts, Release prep tasks, Platform alerts.
+- Route: `/`
+- Widget title: `Work Queue`
+- Shared items table: `Work Queue Items`
+- Frontend implementation:
+  - `src/pages/home/HomeDashboardPage.jsx`
+  - `src/pages/home/widgets/ProgramAdminWorkQueueWidget.js`
+  - `src/pages/home/widgets/IsetCoordinatorWorkQueueWidget.js`
+  - `src/pages/home/widgets/WorkQueueItemsTableWidget.js`
+- Backend implementation: `isetadminserver.js`
 
-## Implementation
-### Backend Endpoint
-- `/api/dashboard/application-work-queue` fetches all Program Administrator buckets in one request.
-- Helpers in `isetadminserver.js` compute each count:
-  - **New submissions**: submissions in the last 24 hours with no linked case.
-  - **Unassigned backlog**: cases missing an assignee and not in a terminal status.
-  - **In assessment**: active cases with an assignee whose stage is not `assessment_submitted`/`review_complete`.
-  - **Awaiting program decision**: cases with stage `assessment_submitted` or `review_complete` still awaiting outcome.
-  - **On hold / info requested**: cases whose status matches on-hold values (`docs_requested`, `action required`, etc.).
-  - **Overdue**: compares elapsed hours since `COALESCE(last_activity_at, updated_at, created_at)` against SLA targets from `sla_stage_target` for assignment, assessment, and program decision stages.
-- SLA targets are loaded via `fetchActiveSlaTargets` with placeholder defaults if the table is missing.
-- Helper constants manage status/stage normalization and guard against missing schema.
+## Current role behavior
 
-### Frontend Wiring
-- `src/pages/home/HomeDashboardPage.jsx` fetches the endpoint with `apiFetch` inside a `useEffect`.
-- API results merge into the persona-specific mock array; tiles render counts in the returned order.
+- `NWAC Administrator`
+  - sees `All Applications` first
+  - then sees `All Cases`
+  - then sees the shared admin/manager queue set (`Unassigned Applications`, `Unresolved Conflicts`, `EI Eligibility Checks`, `Exceptions & Escalations`, `Approvals`, `Payments Issues`, `Watchlist Hits`, `Marked for Closure`, `Overdue`)
+- `Regional Manager`
+  - sees `Applications in My Region` first
+  - then sees `Clients in My Region`
+  - then sees `My Applications`
+  - then sees the shared admin/manager queue set
+- `ISET Coordinator`
+  - sees the coordinator-specific queue set from `IsetCoordinatorWorkQueueWidget`
 
-### Notes
-- Queries default to zero when `stage`, `last_activity_at`, or `sla_stage_target` are absent.
-- Status comparisons are case-insensitive.
-- Overdue numbers reflect current SLA targets and will be zero until cases exceed those thresholds.
-- Regional Coordinator / Application Assessor buckets remain placeholders until wired to data.
+## NWAC Administrator scope rule
 
-### Recent Implementation Changes
-- Backend helpers now compute live counts for all Program Administrator buckets (new submissions, unassigned, in assessment, awaiting decision, on hold, overdue).
-- Overdue detection pulls SLA targets from `sla_stage_target` and compares elapsed hours in assignment/assessment/program decision stages.
-- Frontend uses `apiFetch` with real Cognito bearer auth.
+- `All Applications` includes all non-terminal applications visible through `/api/applications?excludeTerminal=1`.
+- `All Cases` includes open client cases visible through `/api/dashboard/all-client-cases`.
+- `All Cases` is case-based, not deduped by client, so multiple open files for one client count separately.
+- The case queue excludes only `closed` and `archived` statuses. `Dormant` and `ready_to_close` remain in scope.
+- The applications queue excludes terminal application statuses, including normalized terminal variants such as `approved`, `completed`, `withdrawn`, `cancelled`, `closed`, and `archived`.
+
+## Regional Manager scope rule
+
+- `Applications in My Region` includes all non-terminal applications visible to the Regional Manager through `/api/applications?excludeTerminal=1`.
+- `Clients in My Region` includes non-terminal client cases visible through `/api/dashboard/regional-client-cases`.
+- Region scope is resolved from all assigned `regionIds`, including `staff_region` mappings when present.
+- For Regional Managers, `/api/applications` includes:
+  - applications assigned to staff whose `staff_profiles.region_id` is in the manager's resolved region set
+  - applications assigned directly to the Regional Manager
+  - unassigned applications whose applicant address province/territory code matches one of the manager's resolved region codes
+- For Regional Managers, `/api/dashboard/regional-client-cases` includes:
+  - cases assigned directly to the Regional Manager
+  - cases assigned to staff whose `staff_profiles.region_id` is in the manager's resolved region set
+  - cases whose `iset_case.portfolio_region_id` is in the manager's resolved region set
+- `Clients in My Region` is case-based, not deduped by client, so multiple open files for one client count separately.
+- The client-case queue excludes only `closed` and `archived` statuses. `Dormant` and `ready_to_close` remain in scope.
+- The applications queue excludes terminal application statuses, including normalized terminal variants such as `approved`, `completed`, `withdrawn`, `cancelled`, `closed`, and `archived`.
+
+## Widget settings behavior
+
+- Queue cards are removable from the homepage board like other widgets.
+- Within the widget, `Work queue preferences` controls which queue cards are visible.
+- The current bucket preference storage key is `home-work-queue-preferences-v4`.
+- The version was bumped when `All Applications` and `All Cases` were added so the new NWAC Administrator queues are visible by default in existing browsers, while Regional Manager browsers also pick up the new default ordering.

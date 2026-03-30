@@ -2461,7 +2461,14 @@ const IsetApplicationFormWidget = ({
           info={
             <Link
               variant="info"
-              onFollow={() => toggleHelpPanel && toggleHelpPanel(<IsetApplicationFormHelpPanelContent />, 'ISET Application Form Help')}
+              onFollow={() =>
+                toggleHelpPanel &&
+                toggleHelpPanel(
+                  <IsetApplicationFormHelpPanelContent />,
+                  'ISET Application Form Help',
+                  IsetApplicationFormHelpPanelContent.aiContext || ''
+                )
+              }
             >
               Info
             </Link>

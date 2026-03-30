@@ -12,6 +12,10 @@ const HomeDashboardHelp = () => {
     tutorial => tutorial?.tutorialId === homeIntroTutorialId
   );
   const homeTutorial = homeTutorials[0] || null;
+  const isCoordinator = role === 'ISET Coordinator';
+  const isSystemAdmin = role === 'System Administrator';
+  const isRegionalManager = role === 'Regional Manager';
+  const isNwacAdmin = role === 'NWAC Administrator';
 
   const handleStartTutorial = () => {
     if (!homeTutorial?.tutorialId) return;
@@ -26,35 +30,62 @@ const HomeDashboardHelp = () => {
     <div>
       <h2>NWAC ISET homepage</h2>
       <p>
-        This is the landing dashboard for day-to-day ISET work. It surfaces role-specific work queues,
-        a quick metrics snapshot, recent activity, and your tagged applications so you can jump into priority files quickly.
+        This is the day-to-day starting point for staff work in PATH. Use it to see what needs
+        attention now, open the right workspace quickly, and keep track of follow-up items without
+        hunting through multiple menus.
       </p>
 
       <h3>What you can do here</h3>
       <ul>
-        <li>Review the highest-priority queues for your role and open a file in one click.</li>
-        <li>Scan a weekly/monthly/quarterly/yearly metrics snapshot for workload and funding pace, then open the matching record list from any count metric.</li>
-        <li>Track recent updates across applications and cases.</li>
-        <li>Keep a personal list of tagged applications that need follow-up.</li>
-        <li>Handle queue-specific actions such as conflict reassignment, EI eligibility updates, approvals, and escalations.</li>
+        <li>Review the highest-priority work queues for your role and open the related record immediately.</li>
+        <li>Track recent updates across applications and active cases.</li>
+        <li>Use metrics as a workload snapshot, then drill into the matching record list from any count.</li>
+        <li>Keep a personal list of tagged files that need follow-up.</li>
+        {isCoordinator ? (
+          <li>For coordinators, this is the quickest way to spot applications needing EI follow-up, missing documents, approval follow-through, check-ins, or case closure work.</li>
+        ) : null}
       </ul>
 
       <h3>Key widgets</h3>
       <ul>
-        <li><strong>Work Queue</strong> - queue counts that reflect your role. Select a queue card to drive the queue table.</li>
-        <li><strong>Work Queue Items</strong> - table view of the selected queue with filters, flags, and direct workspace links.</li>
-        <li><strong>Metrics</strong> - activity totals for this week, month, quarter, and year; count values can open matching records in the Items table.</li>
+        <li><strong>{isCoordinator ? 'Work Queue (ISET Coordinator)' : 'Work Queue'}</strong> - the role-based list of things that need action first.</li>
+        <li><strong>Work Queue Items</strong> - the detailed table for the selected queue, with direct links into the correct workspace.</li>
+        {!isSystemAdmin ? (
+          <li><strong>Metrics</strong> - activity totals for the selected period; count values open the contributing records below.</li>
+        ) : null}
         <li><strong>Recent Activity</strong> - newest assignments, status changes, and system events.</li>
-        <li><strong>My Tagged Applications</strong> - cases you have tagged for follow-up; remove tags once resolved.</li>
-        <li><strong>Development Tracker</strong> - internal development tasks (System Administrators only).</li>
+        <li><strong>My Tagged Applications</strong> - your personal follow-up list.</li>
+        {isSystemAdmin ? (
+          <li><strong>Development Tracker</strong> - internal development work, shown only to System Administrators.</li>
+        ) : null}
       </ul>
 
-      <h3>Layout tips</h3>
+      {isCoordinator ? (
+        <>
+          <h3>How coordinators usually use this page</h3>
+          <ol>
+            <li>Start in the Work Queue and open the queue that matches today&apos;s priority.</li>
+            <li>Use Work Queue Items to open the application or case you need to work on.</li>
+            <li>Do the actual review, messaging, notes, and assessment in the Application Workspace or Case Workspace.</li>
+            <li>Return here to pick the next item or check whether anything has become overdue.</li>
+          </ol>
+          <p>
+            NWAC training expectations still apply even if the dashboard only shows counts: acknowledge
+            new applications promptly, document follow-up attempts, keep all files tracked, and use
+            notes/messages in the workspace to maintain the audit trail.
+          </p>
+        </>
+      ) : null}
+
+      <h3>Layout and usage tips</h3>
       <ul>
         <li>Use <em>Add widget</em> to bring back removed panels; <em>Reset layout</em> restores the default layout.</li>
         <li>Drag and resize widgets to fit your workflow. The layout saves per browser.</li>
-        <li>Use Work queue preferences in the Work Queue widget to choose which queues are visible for your role.</li>
+        <li>Use Work queue preferences to choose which queue cards are visible for your role.</li>
         <li>Use the tag icon in Work Queue Items to add or remove tagged items from your list.</li>
+        {(isRegionalManager || isNwacAdmin) ? (
+          <li>Queue actions vary by role. If you see assignment, decision, or escalation actions, use them only after reviewing the full record context.</li>
+        ) : null}
       </ul>
 
       {homeTutorial ? (
@@ -84,9 +115,18 @@ const HomeDashboardHelp = () => {
   );
 };
 
-HomeDashboardHelp.aiContext = `You are assisting a user on the NWAC ISET homepage (route /). This dashboard is a role-based landing board that shows work queues, queue items, metrics, recent activity, and tagged applications. NWAC Administrators and Regional Managers see the consolidated Work Queue and Work Queue Items widgets plus Metrics. ISET Coordinators see the ISET-specific queue, Work Queue Items, and Metrics. System Administrators see the development tracker widget instead of Metrics.
+HomeDashboardHelp.aiContext = `You are assisting a user on the NWAC ISET homepage (route /). Treat this page as the daily workboard for PATH staff, not as a technical dashboard tour.
 
-Guide users to select a work queue to populate the Work Queue Items table, use filters to find a record, and open the linked workspace. Mention that count metrics can also populate the same table in a metric-results mode, queue-specific actions (for example conflict reassignment, EI eligibility updates, decision/escalation actions), Add widget and Reset layout actions, and remind them that layouts are stored per browser.
-`;
+Role-aware guidance:
+- ISET Coordinators use the coordinator work queue, queue items table, metrics, recent activity, and tagged applications.
+- Regional Managers and NWAC Administrators use the consolidated work queue plus queue items and metrics.
+- System Administrators see the development tracker instead of metrics.
+
+How to answer:
+- Start from the staff task: identify today’s priority, select the right queue, open the matching workspace, then do the real work in the application or case record.
+- When helping coordinators, connect queue names to training expectations such as prompt acknowledgement of new applications, documented follow-up attempts for missing information, keeping all files tracked, and following active cases through check-ins and closure.
+- Explain that metrics can drill into the same Work Queue Items table, while tagging is a personal follow-up tool.
+- Mention Add widget and Reset layout only as secondary page controls, not the main purpose of the page.
+- Avoid product-tour language unless the user specifically asks about layout or mechanics.`;
 
 export default HomeDashboardHelp;

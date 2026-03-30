@@ -103,7 +103,7 @@ const TutorialsDashboardPage = () => {
         header={
           <Header
             variant="h2"
-            description="Tutorials auto-prompt the first time you visit a page that supports a tour. Use toggles to mark tutorials complete/incomplete."
+            description="Tutorials can help staff who are still learning PATH. Use toggles to mark tutorials complete or incomplete, or reset them so they will prompt again."
             actions={
               <Button
                 variant="primary"
@@ -129,7 +129,7 @@ const TutorialsDashboardPage = () => {
           ) : null}
 
           <Box variant="p">
-            Toggle each tutorial to set completion state. Turning a tutorial off marks it incomplete and allows first-run prompts again.
+            Toggle each tutorial to set completion state. Turning a tutorial off marks it incomplete and allows first-run prompts again, which can be useful for onboarding or refresher training.
           </Box>
 
           {tutorialRows.length ? (
@@ -194,7 +194,7 @@ const TutorialsDashboardPage = () => {
       >
         <SpaceBetween size="m">
           <Box variant="p">This will clear your tutorial completion and dismissal state.</Box>
-          <Box variant="p">Tutorial prompts may appear again when you revisit supported pages.</Box>
+          <Box variant="p">Tutorial prompts may appear again when you revisit supported pages, which is useful if you want staff to re-run the PATH walkthroughs from the beginning.</Box>
         </SpaceBetween>
       </Modal>
     </SpaceBetween>

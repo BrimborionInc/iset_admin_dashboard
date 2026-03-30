@@ -8,7 +8,7 @@ Use: Per-staff tutorial state so progress follows the staff member across browse
 
 Columns (key fields):
 - `staff_profile_id` (INT, required): Links to the staff identity (`staff_profiles.id`) used by `/api/me/*` endpoints.
-- `tutorial_id` (VARCHAR(128), required): Stable string ID for a tutorial (example: `iset-coordinator-intro-v1`).
+- `tutorial_id` (VARCHAR(128), required): Stable string ID for a tutorial (example: `iset-coordinator-intro-v2`).
 - `status` (VARCHAR(32), required): One of:
   - `completed` (user finished the tutorial)
   - `dismissed` (user chose "Not now" or exited early; suppress auto-prompt)
@@ -48,12 +48,13 @@ Migration runner:
   - `src/tutorials/nwacAssessmentTutorials.js`
 
 Current IDs:
-- `iset-coordinator-intro-v1`
+- `iset-coordinator-intro-v2`
 - `regional-manager-intro-v1`
 - `program-admin-intro-v1`
-- `application-workspace-overview-v2`
-- `case-workspace-overview-v2`
+- `application-workspace-overview-v3`
+- `case-workspace-overview-v3`
 - `nwac-assessment-decision`
 
 Operational note:
 - Cloudscape step progression depends on the *next* step hotspot existing. If a next hotspot is missing, `Next` may be disabled on the current step.
+- When a tutorial is materially reworked for onboarding or workflow support, intentionally bump its version so the updated walkthrough can reprompt and track separately from the older one.

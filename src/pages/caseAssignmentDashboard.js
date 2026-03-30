@@ -113,7 +113,15 @@ const CaseAssignmentDashboard = ({
           if (item.id === 'blank-template') {
             return <BlankTemplate actions={actions} />;
           }
-          if (item.id === 'applications-unified') return <ApplicationsWidget actions={actions} refreshKey={refreshKey} />;
+          if (item.id === 'applications-unified') {
+            return (
+              <ApplicationsWidget
+                actions={actions}
+                refreshKey={refreshKey}
+                toggleHelpPanel={toggleHelpPanel}
+              />
+            );
+          }
           return null;
         }}
         items={boardItems}

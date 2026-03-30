@@ -37,38 +37,47 @@ const ApplicationCaseDashboardHelp = ({ onRestartTutorial, onEndTutorial }) => {
     <div>
       <h2>ISET application assessment dashboard</h2>
       <p>
-        This board is the main workspace for a single application. It brings together intake data, the assessment
-        workflow, documents, messaging, reminders, and the audit trail. Layout changes are saved per browser.
+        This is the full application file while the applicant is being assessed. Use it to review the
+        intake, request or verify documents, complete the assessment, communicate with the applicant,
+        and keep the audit trail together in one place.
       </p>
       <SpaceBetween direction="horizontal" size="xs">
         <Button onClick={handleRestart}>Restart tour</Button>
         <Button onClick={handleEnd}>End</Button>
       </SpaceBetween>
 
-      <h3>Current widgets</h3>
+      <h3>What is on this workspace</h3>
       <ul>
-        <li><strong>Application Overview</strong> - status, SLA, assignment, escalation, checklist summary, and quick actions.</li>
-        <li><strong>ISET Application Form</strong> - full intake submission with signatures, edit mode, and version history.</li>
-        <li><strong>Application Assessment</strong> - conflict declaration, EI eligibility check, assessment steps, recommendation, and NWAC decision.</li>
-        <li><strong>Supporting Documents</strong> - document list and checklist with upload, labeling, and duplicate tools.</li>
-        <li><strong>Secure Messaging</strong> - inbox/sent/deleted threads with compose, urgent flags, and attachments.</li>
-        <li><strong>Notes and Tasks</strong> - case notes with pinning and follow-up dates that create reminders.</li>
-        <li><strong>Case Calendar</strong> - calendar and list views for reminders and key dates.</li>
-        <li><strong>Events Timeline</strong> - status changes, assignments, reminders, and CSV export.</li>
+        <li><strong>Application Overview</strong> - your quick status check before you start work.</li>
+        <li><strong>ISET Application Form</strong> - the original intake details, signatures, and any corrected versions.</li>
+        <li><strong>Application Assessment</strong> - where the coordinator records the assessment and recommendation.</li>
+        <li><strong>Supporting Documents</strong> - the evidence file and checklist.</li>
+        <li><strong>Secure Messaging</strong> - applicant communication kept inside the file.</li>
+        <li><strong>Notes and Tasks</strong> - internal notes, call records, and follow-up reminders.</li>
+        <li><strong>Case Calendar</strong> - reminders and key dates.</li>
+        <li><strong>Events Timeline</strong> - the running history of status and workflow activity.</li>
       </ul>
 
-      <h3>Typical workflow</h3>
+      <h3>Typical coordinator workflow</h3>
       <ol>
-        <li>Start with <em>Application Overview</em> to confirm status, SLA, assignment, and any escalations or alerts.</li>
-        <li>Review the <em>ISET Application Form</em> for intake details and signatures; edit only if permitted.</li>
-        <li>Complete the <em>Application Assessment</em> steps, saving progress as needed, then submit for NWAC review.</li>
-        <li>Use <em>Supporting Documents</em> and the checklist to confirm required evidence; request missing items via <em>Secure Messaging</em>.</li>
-        <li>After a decision is recorded, use the Communication step to draft/send the letter; approved cases continue to Funding forms and signatures and should only be completed when all required checklist items show Complete.</li>
-        <li>Capture context in <em>Notes and Tasks</em> and monitor updates in the <em>Events Timeline</em>.</li>
+        <li>Start with <em>Application Overview</em> to confirm status, ownership, checklist summary, and urgency.</li>
+        <li>Review the <em>ISET Application Form</em> and <em>Supporting Documents</em> together so you understand the applicant&apos;s request, background, and missing evidence.</li>
+        <li>Check whether EI consent and EI verification requirements are satisfied before moving the assessment forward.</li>
+        <li>If documents or clarification are missing, contact the applicant through <em>Secure Messaging</em> and record the contact in <em>Notes and Tasks</em>.</li>
+        <li>Complete the <em>Application Assessment</em> with a clear recommendation and justification, then submit it to NWAC for decision.</li>
+        <li>After the decision, use the communication and funding-agreement steps to finish the file properly instead of treating the decision alone as the end of the work.</li>
       </ol>
 
-      <h3>Hands-on tutorial</h3>
-      <p>Follow the guided walkthrough to see where each widget lives and what it does.</p>
+      <h3>Training-aligned reminders</h3>
+      <ul>
+        <li>Contact new applicants promptly and document requests for missing information.</li>
+        <li>All documents received and all meaningful staff interactions should be captured in the file.</li>
+        <li>A file is still pending until documents, coordinator assessment, NWAC approval, and the signed Funding Agreement are complete.</li>
+        <li>If a living allowance is being considered, the financial overview and verification need to support the recommendation.</li>
+      </ul>
+
+      <h3>Quick start walkthrough</h3>
+      <p>Use the guided walkthrough if you want a practical pass through the application file, what each area is for, and what should be recorded as you work it.</p>
       {workspaceTutorials.length ? (
         <TutorialPanel
           tutorials={workspaceTutorials}
@@ -92,9 +101,12 @@ const ApplicationCaseDashboardHelp = ({ onRestartTutorial, onEndTutorial }) => {
 
 ApplicationCaseDashboardHelp.aiContext = `You are assisting a coordinator in the ISET Application Assessment dashboard. The board includes Application Overview, ISET Application Form, Application Assessment, Supporting Documents, Secure Messaging, Notes and Tasks, Case Calendar, and Events Timeline.
 
-When the coordinator needs to correct applicant data, direct them to open the ISET Application Form widget, press Edit, confirm the modal, adjust the fields, then choose Save. Saving creates a new version that can be reviewed under View versions; the original submission stays available. Editing is disabled once a final decision is recorded or another user holds the lock.
+Guide the user like a trained coordinator working a file, not like a product demo:
+- Start from what they need to do next in the assessment process.
+- Use Application Overview to orient, Application Form plus Supporting Documents to review evidence, Secure Messaging plus Notes for follow-up, and Application Assessment for the recommendation.
+- Remind them that missing information requests and significant staff contact should be documented.
 
-Remind them to document coordinator-made edits in Notes and Tasks and, when the applicant must be notified, send a Secure Message from the same workspace. After updates, refresh Application Overview or Events Timeline to confirm the change propagated.
+When the coordinator needs to correct applicant data, direct them to the ISET Application Form widget: press Edit, confirm the modal, adjust the fields, then Save. Saving creates a new version visible under View versions. Editing is disabled once a final decision is recorded or another user holds the lock.
 
 Use program guidance: contact new applicants within five days; make up to three attempts for missing information before closure. Required evidence includes Status/Treaty card or two Nation letters plus self-declaration, two IDs, acceptance letter and fee statement, band funding denial where applicable, and income or expense proofs for living allowance. An application remains pending until documents are complete, the coordinator recommendation is recorded, the NWAC decision is set, and the Funding Agreement is signed.`;
 

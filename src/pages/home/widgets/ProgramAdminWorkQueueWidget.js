@@ -207,7 +207,7 @@ const DISABLED_BUCKET_IDS = new Set([
   'payments-issues'
 ]);
 
-const BUCKET_PREFERENCES_STORAGE_KEY_PREFIX = 'home-work-queue-preferences-v1';
+const BUCKET_PREFERENCES_STORAGE_KEY_PREFIX = 'home-work-queue-preferences-v4';
 
 const normalizeRoleKey = role => {
   const raw = String(role || '').trim().toLowerCase();

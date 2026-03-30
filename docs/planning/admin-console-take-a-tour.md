@@ -9,6 +9,7 @@ Last Updated: 2026-02-10
 ## Status
 
 - Implemented (2026-02-10): ISET Coordinator intro tour + one-time sign-in prompt + DB-backed progress tracking.
+- Current live coordinator intro tutorial ID: `iset-coordinator-intro-v2` after the PATH onboarding rewrite on 2026-03-30.
 - Deferred: Tutorials dashboard (`/tutorials-dashboard`) and additional role-specific tours (Program Admin, Regional Manager).
 
 ## Implementation Summary (2026-02-10)
