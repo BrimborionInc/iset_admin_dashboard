@@ -4,7 +4,7 @@ Purpose: running capture of user-facing fixes/changes for the next "What's New" 
 
 Current public release in Landing Page: `v0.5.8` (`26th March 2026`)
 Target next release notes draft: `v0.5.9` (date TBD)
-Last Updated: 2026-04-01
+Last Updated: 2026-04-02
 
 ## How to use
 
@@ -18,6 +18,7 @@ Last Updated: 2026-04-01
 
 ## Entries
 
+- 2026-04-02 | Release v0.5.9 | Fix/Notifications | Applicant secure-message emails | Fixed applicant email portal links so secure-message and reminder emails keep a clickable sign-in link in TEST/prod-style envs even when explicit `APPLICANT_PORTAL_*` values are missing. | Notification link resolution now falls back to the portal host envs already present in deployment (`REACT_APP_PORTAL_URL`, `REACT_APP_API_BASE_URL`, `PORTAL_DOMAIN`) instead of dropping the anchor.
 - 2026-04-01 | Release v0.5.9 | Intake/PDF | ISET Intake declaration records | Updated the downloadable signed declaration PDFs and the generated application-form PDF to reflect the current published intake wording. | Covers the signed consent/declaration records plus the application-form record sections affected by recent intake changes such as gender, social-assistance follow-up, target-program choices, and support/student-aid questions.
 - 2026-04-01 | Release v0.5.9 | Intake/Workflow | ISET Intake > Step 24 uploads | Removed the generic mandatory `Other support documents` upload from the final document-upload step. | Selecting `Other` support no longer blocks submission on an unspecified catch-all document request in the DEV intake publish.
 - 2026-04-01 | Release v0.5.9 | UX/Translation | ISET Intake > French copy pass | Completed the French translation pass for the newly updated intake areas, including consent/funding forms, social-assistance and childcare follow-up questions, and support-driven upload requests. | The DEV intake publish now includes current French wording instead of placeholder or English-only text in those updated sections.

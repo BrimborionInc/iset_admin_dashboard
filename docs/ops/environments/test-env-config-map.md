@@ -50,6 +50,7 @@ This guide documents every environment variable and secret the test environment 
 |----------|----------|---------|--------|
 | Server | `NODE_ENV=production` | Express server mode | Static |
 | Server | `REACT_APP_API_BASE_URL` | Browser→portal API base | Portal ALB DNS |
+| Notifications | `APPLICANT_PORTAL_BASE` | Absolute applicant-portal root used in outbound email links (`{portal_dashboard_url}`) | Same portal public URL as `REACT_APP_API_BASE_URL` |
 | Database | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`, `DB_NAME` | Same Aurora cluster as admin | Same sources as admin (shared Secrets Manager values) |
 | CORS | `ALLOWED_ORIGIN` | Allowed origins (portal UI) | Portal ALB/CloudFront URLs |
 | Cognito (applicant) | `COGNITO_USER_POOL_ID` | Applicant pool | `module.identity.applicant_user_pool_id` |
@@ -65,6 +66,8 @@ This guide documents every environment variable and secret the test environment 
 | Messaging | `DEV_CONFIRM_SECRET` | Turn off local bypass; leave empty in test | Static (blank) |
 | DNS | `ADMIN_DOMAIN` / `PORTAL_DOMAIN` | External hostnames (`nwac-console-test.awentech.ca`, `nwac-public-test.awentech.ca`) | Terraform tfvars (`admin_domain_name`, `portal_domain_name`) |
 | AWS creds | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Use instance profile; leave unset | N/A |
+
+`APPLICANT_PORTAL_BASE` should be populated even when the portal frontend already knows its own host. Applicant email notifications read that value first when expanding `{portal_dashboard_url}`; runtime fallback now also checks `REACT_APP_PORTAL_URL`, `REACT_APP_API_BASE_URL`, and `PORTAL_DOMAIN`, but keeping the explicit portal-base variable in test/prod env files is the safer deployment contract.
 
 ---
 

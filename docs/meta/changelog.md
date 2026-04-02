@@ -2,6 +2,11 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-04-02
+- Fix/Notifications: Applicant secure-message and reminder emails now recover the public-portal link from standard portal host env vars (`REACT_APP_PORTAL_URL`, `REACT_APP_API_BASE_URL`, `PORTAL_DOMAIN`) when explicit `APPLICANT_PORTAL_*` settings are missing, preventing TEST emails from degrading the sign-in call to plain text with no hyperlink.
+- Docs/Ops: Updated the TEST portal env template, runtime notification doc, and environment config map to make the applicant-portal email-link dependency explicit for future deployments.
+- Docs/Auth: Added a TEST staff Cognito recovery guide and thread-index entry covering `staff_profiles.cognito_sub` drift, why `Administrative Users` can fall back to primary-region-only display, and the correct recovery paths for legacy `FORCE_CHANGE_PASSWORD` staff accounts when Cognito mail is missing or fails.
+
 ## 2026-04-01
 - Intake/PDF: Updated the signed intake declaration PDFs and the generated application-form PDF so their English record output matches the current published workflow-21 intake wording for consent/declarations, gender, social-assistance follow-up, target-program options, and support/student-aid sections.
 - Intake/Workflow: Removed the generic Step 24 `Other support documents` upload from DEV workflow `21` and republished the intake so selecting `Other` support no longer creates a mandatory catch-all document blocker at submission time.

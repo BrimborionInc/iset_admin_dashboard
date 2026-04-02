@@ -2,6 +2,11 @@
 
 Goal: serve the prod public portal on `https://iset.nwac.ca` while keeping `https://nwac-public.awentech.ca` working.
 
+Current live state as of 2026-04-02:
+- Prod ALB listener certificate ARN: `arn:aws:acm:ca-central-1:468278742295:certificate/70e5fe66-19b8-4715-bc0f-5dd8fe300b0b`
+- `iset.nwac.ca` host-header rule is present on the prod ALB and forwards to the portal target group
+- Prod SSM env values for `/nwac/prod/portal/env` and `/nwac/prod/admin/env` are aligned to `iset.nwac.ca`
+
 As of March 27, 2026:
 - Prod ALB DNS is `nwac-prod-alb-1905620738.ca-central-1.elb.amazonaws.com`
 - Current prod cert covers `nwac-console.awentech.ca` and `nwac-public.awentech.ca`

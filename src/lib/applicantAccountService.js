@@ -143,13 +143,18 @@ function buildDisplayName({ firstName, lastName, preferredName, email }) {
 }
 
 function buildPortalBaseUrl() {
-  const raw = (
+  let raw = (
     process.env.APPLICANT_PORTAL_URL ||
     process.env.APPLICANT_PORTAL_BASE ||
     process.env.PUBLIC_PORTAL_BASE_URL ||
     process.env.REACT_APP_PORTAL_URL ||
+    process.env.REACT_APP_API_BASE_URL ||
+    process.env.PORTAL_DOMAIN ||
     'http://localhost:3000/'
   ).trim();
+  if (!/^https?:\/\//i.test(raw)) {
+    raw = `https://${raw}`;
+  }
   return raw.endsWith('/') ? raw.slice(0, -1) : raw;
 }
 
