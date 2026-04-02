@@ -21,6 +21,7 @@ Top-level case identity, status, ownership, and quick actions.
 - Open and inspect widget state for current case/submission/packet context.
 - Use widget controls to progress work for the owning workflow.
 - Navigate to linked records or execute relevant operational actions.
+- Switch the board to focused layouts such as `View audit trail`.
 - For application-less imported client files, the quick actions menu also exposes:
   - `Add existing action plan`
   - `Add existing intervention`
@@ -42,4 +43,5 @@ Top-level case identity, status, ownership, and quick actions.
 
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
 - Imported/application-less cases use these quick actions as silent backload entry points. They record current-state action plans, interventions, and documents without starting approvals, checklist progression, or applicant notifications.
+- `View audit trail` now reconfigures the case workspace to show `Case header`, `Participant details`, and `Events timeline`.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.

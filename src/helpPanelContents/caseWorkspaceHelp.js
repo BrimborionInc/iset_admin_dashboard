@@ -45,6 +45,7 @@ const CaseWorkspaceHelp = ({ tutorial, onRestartTutorial, onEndTutorial }) => {
         <li>Use <strong>Action plans</strong> and <strong>Interventions</strong> to manage the client&apos;s active path toward employment or training goals.</li>
         <li>Record follow-up, conversations, and decisions in <strong>Notes</strong>, and keep evidence in <strong>Supporting documents</strong>.</li>
         <li>Use <strong>Secure messaging</strong> and the <strong>Case calendar</strong> to manage ongoing communication and reminders.</li>
+        <li>Use <strong>Events timeline</strong> when you need the running audit trail of what happened on the case and when.</li>
         <li>When an intervention ends, capture outcomes, complete required follow-up, and close the file properly instead of letting it drift.</li>
       </ol>
 
@@ -59,6 +60,7 @@ const CaseWorkspaceHelp = ({ tutorial, onRestartTutorial, onEndTutorial }) => {
       <h3>Layout tips</h3>
       <ul>
         <li>Use <em>Add widget</em> if you need optional panels such as Finance or Compliance.</li>
+        <li>Use the Case Header quick action <em>View audit trail</em> when you want a focused case-header + events view.</li>
         <li>Use <em>Reset layout</em> if you want to return to the default case view.</li>
         <li>The workspace refreshes after edits, and individual widgets also have refresh actions when you need to pull teammate updates.</li>
       </ul>
@@ -99,6 +101,7 @@ Focus on the staff workflow:
 - manage action plans and interventions against the client's goals;
 - record notes, documents, and client contact;
 - use reminders and calendar dates to stay on top of check-ins and milestones;
+- use the events timeline when you need the case audit trail or need to confirm what changed and who changed it;
 - capture outcomes, complete the required post-intervention follow-up, including the 12-week follow-up where applicable, and then close the file properly.
 
 Mention Add widget, Reset layout, and board movement only as secondary mechanics. When relevant, remind the user that PATH should support the same training expectations around documentation, audit trail, ongoing follow-up, and post-intervention outcome tracking.`;

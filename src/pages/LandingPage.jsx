@@ -13,41 +13,57 @@ const copy = {
   en: {
     navItems: [
       { id: 'hero', label: 'Overview' },
-      { id: 'release-notes', label: 'Release Notes' },
-      { id: 'resources', label: 'Resources' },
-      { id: 'contact', label: 'Support' },
+      { id: 'support', label: 'Access & Support' },
     ],
-    alert: {
-      header: 'Scheduled maintenance',
-      body: 'The PATH case management system will be unavailable today from 7:00–8:00 p.m. ET for maintenance. Service will resume once the window is complete.'
-    },
     header: {
-      signIn: 'Sign in',
+      brandTitle: 'NWAC PATH',
+      signIn: 'Staff sign in',
       languageLabel: 'Switch language'
     },
     hero: {
       eyebrow: "Native Women’s Association of Canada (NWAC)",
       title: 'PATH',
-      lead: "Sign in with your NWAC credentials to work in the ISET case management system. Need help? Contact the NWAC ISET program admin team. Installed modules are listed below.",
-      primaryCta: 'Sign in to PATH',
-      secondaryCta: "View the applicants' portal",
+      lead: 'PATH is the NWAC staff system for reviewing ISET applications, managing participant cases, recording services, and completing program reporting.',
+      support: 'Sign in with your NWAC staff credentials to continue. If you need access or support, contact the NWAC ISET program admin team.',
+      primaryCta: 'Staff sign in',
+      secondaryCta: 'Applicant portal',
       meta: [
-        'Digital Intake',
-        'Application Assessment',
-        'Case Management',
-        'Secure Messaging',
-        'ILMP Reporting',
-        'Payments Processing',
-        'Budget Management',
-        'Financial Reporting',
-        'Workflow Studio'
+        'Review applications',
+        'Manage participant cases',
+        'Record supports and services',
+        'Complete NWAC reporting'
       ]
     },
+    support: {
+      title: 'Access and support',
+      description: 'Use the links below to sign in, open the applicant portal, or find the right PATH support path.',
+      cards: [
+        {
+          title: 'Staff sign-in',
+          description: 'Sign in with your NWAC staff credentials to continue PATH case-management, reporting, and day-to-day administration work.',
+          actionLabel: 'Staff sign in',
+          actionType: 'signin'
+        },
+        {
+          title: 'Applicant portal',
+          description: 'Open the participant-facing portal when you need the applicant entry point or want to direct applicants to the correct URL.',
+          actionLabel: 'Open applicant portal',
+          actionType: 'portal'
+        },
+        {
+          title: 'Need help?',
+          description: 'For onboarding, access changes, or PATH support, contact the NWAC ISET program admin team.'
+        }
+      ],
+      updatesPrompt: 'Looking for recent changes?',
+      updatesAction: 'View release notes'
+    },
     releaseNotes: {
+      sectionEyebrow: 'Optional reading',
       sectionTitle: 'Release Notes - v0.5.8 (26th March 2026)',
-      description: 'Release 0.5.8 focuses on broad bug fixes and user activation improvements to support smoother day-to-day administration in PATH.',
+      description: 'Recent PATH changes are summarized here for staff who want them before signing in.',
       features: {
-        heading: 'What’s New',
+        heading: 'What changed',
         sections: [
           {
             title: 'Bug fixes across core workflows',
@@ -68,7 +84,7 @@ const copy = {
         ]
       },
       knownBugs: {
-        heading: 'Known Bugs',
+        heading: 'Known issues',
         sections: [
           {
             title: 'No major release blockers logged',
@@ -80,7 +96,7 @@ const copy = {
         ]
       },
       comingNext: {
-        heading: 'Coming Soon',
+        heading: 'Coming next',
         sections: [
           {
             title: 'Further reporting refinements',
@@ -92,60 +108,68 @@ const copy = {
         ]
       }
     },
-    resources: {
-      title: 'Built for collaborative delivery',
-      description: 'The admin console reuses the same primitives that power the public applicant portal, ensuring parity between what applicants submit and how administrators action requests.',
-      cards: [
-        { title: 'Environment aware', description: 'Toggle between sandbox and production data sources without code changes. Session state persists across deployments for smooth demonstrations.' },
-        { title: 'Secure by design', description: 'AWS Cognito backed authentication, fine-grained role enforcement, and event capture hooks keep program data auditable and access-controlled.' },
-        { title: 'Extensible platform', description: 'Compose new widgets, automate notifications, or plug in analytics sources using the existing Cloudscape component library and API clients.' }
-      ]
-    },
     footer: {
-      heading: 'Need access?',
-      body: 'Contact the NWAC program administration team to request credentials or onboarding support.',
-      primary: 'Sign in',
-      secondary: "View the applicants' portal"
+      heading: 'Need access or support?',
+      body: 'Contact the NWAC ISET program admin team for sign-in help, onboarding support, or access changes.',
+      primary: 'Staff sign in',
+      secondary: 'Applicant portal',
+      releaseNotes: 'Release notes'
     }
   },
   fr: {
     navItems: [
       { id: 'hero', label: 'Aperçu' },
-      { id: 'release-notes', label: 'Notes de version' },
-      { id: 'resources', label: 'Ressources' },
-      { id: 'contact', label: 'Soutien' },
+      { id: 'support', label: 'Accès et soutien' },
     ],
-    alert: {
-      header: 'Maintenance planifiée',
-      body: 'Le système PATH sera indisponible aujourd’hui de 19 h à 20 h (HE) pour entretien. Le service reprendra après la fenêtre de maintenance.'
-    },
     header: {
-      signIn: 'Se connecter',
+      brandTitle: 'PATH AFAC',
+      signIn: 'Connexion du personnel',
       languageLabel: 'Changer de langue'
     },
     hero: {
       eyebrow: 'Association des Femmes Autochtones du Canada (AFAC)',
       title: 'PATH',
-      lead: "Bienvenue dans le système de gestion des dossiers ISET de l’AFAC. Connectez-vous avec vos identifiants AFAC pour travailler en toute sécurité sur les demandes et dossiers. Besoin d’aide? Communiquez avec l’équipe d’administration du programme ISET de l’AFAC.",
-      primaryCta: 'Se connecter pour gérer les programmes de l’AFAC',
-      secondaryCta: 'Voir le portail des candidates',
+      lead: 'PATH est le système du personnel de l’AFAC pour examiner les demandes ISET, gérer les dossiers des participantes, consigner les services et préparer les rapports du programme.',
+      support: 'Connectez-vous avec vos identifiants du personnel de l’AFAC pour continuer. Pour l’accès ou le soutien, communiquez avec l’équipe d’administration du programme ISET de l’AFAC.',
+      primaryCta: 'Connexion du personnel',
+      secondaryCta: 'Portail des candidates',
       meta: [
-        'Accueil numérique',
-        'Évaluation des demandes',
-        'Gestion des dossiers',
-        'Messagerie sécurisée',
-        'Rapports ILMP',
-        'Traitement des paiements',
-        'Gestion budgétaire',
-        'Rapports financiers',
-        'Studio des flux de travail'
+        'Examiner les demandes',
+        'Gérer les dossiers des participantes',
+        'Consigner les services et soutiens',
+        'Préparer les rapports de l’AFAC'
       ]
     },
+    support: {
+      title: 'Accès et soutien',
+      description: 'Utilisez les liens ci-dessous pour vous connecter, ouvrir le portail des candidates ou trouver le bon point de soutien PATH.',
+      cards: [
+        {
+          title: 'Connexion du personnel',
+          description: 'Connectez-vous avec vos identifiants du personnel de l’AFAC pour poursuivre le travail quotidien dans PATH, y compris la gestion des dossiers et les rapports.',
+          actionLabel: 'Connexion du personnel',
+          actionType: 'signin'
+        },
+        {
+          title: 'Portail des candidates',
+          description: 'Ouvrez le portail destiné aux participantes lorsque vous avez besoin du point d’entrée des candidates ou pour les diriger vers la bonne URL.',
+          actionLabel: 'Ouvrir le portail des candidates',
+          actionType: 'portal'
+        },
+        {
+          title: 'Besoin d’aide?',
+          description: 'Pour l’accueil, les changements d’accès ou le soutien PATH, communiquez avec l’équipe d’administration du programme ISET de l’AFAC.'
+        }
+      ],
+      updatesPrompt: 'Vous cherchez les changements récents?',
+      updatesAction: 'Voir les notes de version'
+    },
     releaseNotes: {
+      sectionEyebrow: 'Lecture optionnelle',
       sectionTitle: 'Notes de version - v0.5.8 (26 mars 2026)',
-      description: 'La version 0.5.8 met l’accent sur des correctifs généraux et des améliorations liées à l’activation des utilisatrices afin de soutenir un fonctionnement quotidien plus fluide dans PATH.',
+      description: 'Les changements récents à PATH sont résumés ici pour le personnel qui souhaite les consulter avant de se connecter.',
       features: {
-        heading: 'Quoi de neuf',
+        heading: 'Ce qui a changé',
         sections: [
           {
             title: 'Correctifs dans les flux de travail principaux',
@@ -166,7 +190,7 @@ const copy = {
         ]
       },
       knownBugs: {
-        heading: 'Bugs connus',
+        heading: 'Points connus',
         sections: [
           {
             title: 'Aucun bloqueur majeur consigné',
@@ -178,7 +202,7 @@ const copy = {
         ]
       },
       comingNext: {
-        heading: 'À venir bientôt',
+        heading: 'À venir',
         sections: [
           {
             title: 'Autres améliorations des rapports',
@@ -190,20 +214,12 @@ const copy = {
         ]
       }
     },
-    resources: {
-      title: 'Conçu pour une prestation collaborative',
-      description: 'La console admin réutilise les mêmes primitives que le portail des candidates, assurant la parité entre les dépôts et leur traitement.',
-      cards: [
-        { title: 'Sensibilité à l’environnement', description: 'Basculer entre données bac à sable et production sans modification de code. L’état de session persiste pour les démonstrations.' },
-        { title: 'Sécurité intégrée', description: 'L’authentification Cognito, le contrôle fin des rôles et la capture d’événements gardent les données auditables et protégées.' },
-        { title: 'Plateforme extensible', description: 'Composer de nouveaux widgets, automatiser les notifications ou brancher des sources analytiques avec la bibliothèque Cloudscape existante.' }
-      ]
-    },
     footer: {
-      heading: 'Besoin d’accès?',
-      body: 'Communiquez avec l’équipe d’administration du programme de l’AFAC pour obtenir des accès ou du soutien d’intégration.',
-      primary: 'Se connecter',
-      secondary: 'Voir le portail des candidates'
+      heading: 'Besoin d’accès ou de soutien?',
+      body: 'Communiquez avec l’équipe d’administration du programme ISET de l’AFAC pour obtenir de l’aide à la connexion, au démarrage ou aux changements d’accès.',
+      primary: 'Connexion du personnel',
+      secondary: 'Portail des candidates',
+      releaseNotes: 'Notes de version'
     }
   }
 };
@@ -216,6 +232,7 @@ const languageOptions = [
 const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
   const lang = currentLanguage === 'fr' ? 'fr' : 'en';
   const content = copy[lang];
+  const [releaseNotesExpanded, setReleaseNotesExpanded] = React.useState(false);
   const pathLogo = `${process.env.PUBLIC_URL || ''}/PATH-Logo.png`;
   const handleLanguageToggle = targetLang => {
     if (targetLang !== lang && typeof onLanguageChange === 'function') {
@@ -242,13 +259,31 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
     window.location.assign(buildLoginUrl());
   };
 
+  const handleSupportAction = actionType => {
+    if (actionType === 'signin') {
+      handleSignIn();
+      return;
+    }
+
+    if (actionType === 'portal') {
+      openPublicPortal();
+    }
+  };
+
+  const openReleaseNotes = () => {
+    setReleaseNotesExpanded(true);
+    window.requestAnimationFrame(() => {
+      scrollToSection('release-notes');
+    });
+  };
+
   return (
     <div className="awentech-landing">
       <header className="landing-header">
         <div className="landing-header__bar" style={{ display: 'flex', alignItems: 'center', gap: '2rem', padding: '0.75rem 2rem', boxShadow: '0 1px 0 rgba(255,255,255,0.05), 0 1px 4px rgba(0,0,0,0.25)' }}>
           <a href="#hero" onClick={e => { e.preventDefault(); scrollToSection('hero'); }} style={{ display: 'flex', alignItems: 'center', textDecoration: 'none', color: 'inherit' }}>
             <img src={brandLogo} alt={lang === 'fr' ? "Logo de l’Association des Femmes Autochtones du Canada" : "Native Women's Association of Canada logo"} style={{ height: 40, width: 'auto', marginRight: '0.75rem' }} />
-            <span style={{ fontSize: '1.05rem', fontWeight: 600 }}>{lang === 'fr' ? 'Tableau de bord NWAC' : 'NWAC Admin Dashboard'}</span>
+            <span style={{ fontSize: '1.05rem', fontWeight: 600 }}>{content.header.brandTitle}</span>
           </a>
           <style>{`
             .landing-header__nav a { 
@@ -310,21 +345,24 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
           style={{ backgroundImage: `url(${heroBackground})` }}
         >
           <div className="landing-hero__overlay" />
-          <div className="landing-hero__banner">
-            <Alert
-              type="warning"
-              header={content.alert.header}
-              statusIconAriaLabel="Warning"
-            >
-              {content.alert.body}
-            </Alert>
-          </div>
+          {content.alert ? (
+            <div className="landing-hero__banner">
+              <Alert
+                type="warning"
+                header={content.alert.header}
+                statusIconAriaLabel="Warning"
+              >
+                {content.alert.body}
+              </Alert>
+            </div>
+          ) : null}
           <div className="landing-hero__content">
             <p className="eyebrow">{content.hero.eyebrow}</p>
             <h1>
               <img className="landing-hero__logo" src={pathLogo} alt={content.hero.title} />
             </h1>
             <p className="lead">{content.hero.lead}</p>
+            <p className="support-note">{content.hero.support}</p>
             <div className="landing-hero__actions">
               <button type="button" className="primary" onClick={handleSignIn}>
                 {content.hero.primaryCta}
@@ -341,84 +379,106 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
           </div>
         </section>
 
-        <section id="release-notes" className="landing-implementations landing-section">
-          <h2>{content.releaseNotes.sectionTitle}</h2>
-          <p className="description">
-            {content.releaseNotes.description}
-          </p>
-          <div className="landing-card-grid">
-            <article className="landing-card">
-              <h3 className="release-notes-heading">{content.releaseNotes.features.heading}</h3>
-              <div className="release-notes-sections">
-                {content.releaseNotes.features.sections.map((section, idx) => (
-                  <ExpandableSection
-                    key={section.title}
-                    headerText={section.title}
-                    defaultExpanded={idx === 0}
-                    variant="container"
-                  >
-                    {section.paragraphs.map((text, index) => {
-                      const t = typeof text === 'string' ? text.trim() : '';
-                      const isSubheading = typeof text === 'string' && t.endsWith(':') && !t.startsWith('-');
-                      return (
-                        <p key={index}>{isSubheading ? <strong>{text}</strong> : text}</p>
-                      );
-                    })}
-                  </ExpandableSection>
-                ))}
-              </div>
-            </article>
-            <article className="landing-card">
-              <h3 className="release-notes-heading">{content.releaseNotes.knownBugs.heading}</h3>
-              <div className="release-notes-sections">
-                {content.releaseNotes.knownBugs.sections.map(section => (
-                  <section key={section.title}>
-                    <h4>{section.title}</h4>
-                    {section.paragraphs.map((text, idx) => {
-                      const t = typeof text === 'string' ? text.trim() : '';
-                      const isSubheading = typeof text === 'string' && t.endsWith(':') && !t.startsWith('-');
-                      return (
-                        <p key={idx}>{isSubheading ? <strong>{text}</strong> : text}</p>
-                      );
-                    })}
-                  </section>
-                ))}
-              </div>
-            </article>
-            <article className="landing-card">
-              <h3 className="release-notes-heading">{content.releaseNotes.comingNext.heading}</h3>
-              <div className="release-notes-sections">
-                {content.releaseNotes.comingNext.sections.map(section => (
-                  <section key={section.title}>
-                    <h4>{section.title}</h4>
-                    {section.paragraphs.map((text, idx) => {
-                      const t = typeof text === 'string' ? text.trim() : '';
-                      const isSubheading = typeof text === 'string' && t.endsWith(':') && !t.startsWith('-');
-                      return (
-                        <p key={idx}>{isSubheading ? <strong>{text}</strong> : text}</p>
-                      );
-                    })}
-                  </section>
-                ))}
-              </div>
-            </article>
+        <section id="support" className="landing-section">
+          <div className="landing-section__inner landing-section__inner--wide">
+            <h2>{content.support.title}</h2>
+            <p>
+              {content.support.description}
+            </p>
+            <div className="landing-card-grid">
+              {content.support.cards.map(card => (
+                <article key={card.title} className="landing-card">
+                  <h3>{card.title}</h3>
+                  <p>{card.description}</p>
+                  {card.actionType ? (
+                    <div className="landing-card__actions">
+                      <Button variant={card.actionType === 'signin' ? 'primary' : 'normal'} onClick={() => handleSupportAction(card.actionType)}>
+                        {card.actionLabel}
+                      </Button>
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+            <div className="landing-inline-actions">
+              <span>{content.support.updatesPrompt}</span>
+              <Button variant="link" onClick={openReleaseNotes}>
+                {content.support.updatesAction}
+              </Button>
+            </div>
           </div>
         </section>
 
-        <section id="resources" className="landing-section landing-section--alt">
-          <div className="landing-section__inner">
-            <h2>{content.resources.title}</h2>
-            <p>
-              {content.resources.description}
-            </p>
-            <div className="landing-resource-grid">
-              {content.resources.cards.map(card => (
-                <div key={card.title} className="landing-resource-card">
-                  <h4>{card.title}</h4>
-                  <p>{card.description}</p>
-                </div>
-              ))}
-            </div>
+        <section id="release-notes" className="landing-section landing-section--subtle">
+          <div className="landing-section__inner landing-section__inner--wide">
+            <p className="landing-section__eyebrow">{content.releaseNotes.sectionEyebrow}</p>
+            <ExpandableSection
+              headerText={content.releaseNotes.sectionTitle}
+              expanded={releaseNotesExpanded}
+              onChange={({ detail }) => setReleaseNotesExpanded(detail.expanded)}
+              variant="container"
+            >
+              <p className="landing-release-notes__description">
+                {content.releaseNotes.description}
+              </p>
+              <div className="landing-card-grid">
+                <article className="landing-card">
+                  <h3 className="release-notes-heading">{content.releaseNotes.features.heading}</h3>
+                  <div className="release-notes-sections">
+                    {content.releaseNotes.features.sections.map((section, idx) => (
+                      <ExpandableSection
+                        key={section.title}
+                        headerText={section.title}
+                        defaultExpanded={idx === 0}
+                        variant="container"
+                      >
+                        {section.paragraphs.map((text, index) => {
+                          const t = typeof text === 'string' ? text.trim() : '';
+                          const isSubheading = typeof text === 'string' && t.endsWith(':') && !t.startsWith('-');
+                          return (
+                            <p key={index}>{isSubheading ? <strong>{text}</strong> : text}</p>
+                          );
+                        })}
+                      </ExpandableSection>
+                    ))}
+                  </div>
+                </article>
+                <article className="landing-card">
+                  <h3 className="release-notes-heading">{content.releaseNotes.knownBugs.heading}</h3>
+                  <div className="release-notes-sections">
+                    {content.releaseNotes.knownBugs.sections.map(section => (
+                      <section key={section.title}>
+                        <h4>{section.title}</h4>
+                        {section.paragraphs.map((text, idx) => {
+                          const t = typeof text === 'string' ? text.trim() : '';
+                          const isSubheading = typeof text === 'string' && t.endsWith(':') && !t.startsWith('-');
+                          return (
+                            <p key={idx}>{isSubheading ? <strong>{text}</strong> : text}</p>
+                          );
+                        })}
+                      </section>
+                    ))}
+                  </div>
+                </article>
+                <article className="landing-card">
+                  <h3 className="release-notes-heading">{content.releaseNotes.comingNext.heading}</h3>
+                  <div className="release-notes-sections">
+                    {content.releaseNotes.comingNext.sections.map(section => (
+                      <section key={section.title}>
+                        <h4>{section.title}</h4>
+                        {section.paragraphs.map((text, idx) => {
+                          const t = typeof text === 'string' ? text.trim() : '';
+                          const isSubheading = typeof text === 'string' && t.endsWith(':') && !t.startsWith('-');
+                          return (
+                            <p key={idx}>{isSubheading ? <strong>{text}</strong> : text}</p>
+                          );
+                        })}
+                      </section>
+                    ))}
+                  </div>
+                </article>
+              </div>
+            </ExpandableSection>
           </div>
         </section>
       </main>
@@ -439,8 +499,11 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
           </div>
         </div>
         <small>
-          &copy; {new Date().getFullYear()} Powered by the{' '}
-          <a href="https://www.awentech.ca" target="_blank" rel="noopener noreferrer">Awentech</a> nForm Engine for NWAC. Cloudscape Design interface.
+          &copy; {new Date().getFullYear()} NWAC PATH.
+          {' '}
+          <button type="button" className="landing-footer__link" onClick={openReleaseNotes}>
+            {content.footer.releaseNotes}
+          </button>
         </small>
       </footer>
     </div>

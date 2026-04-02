@@ -56,66 +56,73 @@ try {
 }
 
 async function main() {
-  // buildWorkflowSchema signature sniff: we will attempt with (workflowId) first
-  let schema;
-  try {
-    schema = await buildWorkflowSchema(workflowId);
-  } catch (err) {
-    console.warn('Direct buildWorkflowSchema(workflowId) failed, retrying with object param:', err.message);
-    try {
-      schema = await buildWorkflowSchema({ workflowId });
-    } catch (err2) {
-      console.error('Failed to build workflow schema with both invocation styles:', err2.message);
-      process.exit(1);
-    }
-  }
-
-  if (!schema) {
-    console.error('No schema returned for workflowId=' + workflowId);
+  if (!process.env.DB_HOST || !process.env.DB_NAME) {
+    console.error('[publish-workflow] DB_HOST/DB_NAME are required to build workflow schema.');
     process.exit(1);
   }
-
-  const publishedAt = new Date().toISOString();
-  const legacyJson = Array.isArray(schema) ? JSON.stringify(schema, null, 2) : JSON.stringify(schema.steps || [], null, 2);
-  const schemaMeta = schema && typeof schema === 'object' && schema.meta && typeof schema.meta === 'object' ? schema.meta : null;
-  const meta = {
-    workflowId,
-    generatedAt: publishedAt
-  };
-  if (schemaMeta) meta.schemaMeta = schemaMeta;
-  const schemaArray = Array.isArray(schema) ? schema : (Array.isArray(schema?.steps) ? schema.steps : []);
-  const normalizedPayload = {
-    meta,
-    schema: schemaArray,
-    version: `${publishedAt}#${workflowId}`,
-    publishedAt,
-    publishedBy: null
-  };
-  if (!Array.isArray(schema)) {
-    normalizedPayload.schemaEnvelope = schema;
-    if (!normalizedPayload.meta.schemaMeta && schema?.meta && typeof schema.meta === 'object') {
-      normalizedPayload.meta.schemaMeta = schema.meta;
-    }
+  if (!mysql) {
+    mysql = require('mysql2/promise');
   }
-  const payloadPreChecksum = JSON.stringify(normalizedPayload);
-  const runtimeChecksum = sha256(payloadPreChecksum);
-  normalizedPayload.checksum = runtimeChecksum;
-  meta.checksum = runtimeChecksum;
-  const payloadJson = JSON.stringify(normalizedPayload);
+  let pool;
+  try {
+    pool = await mysql.createPool({
+      host: process.env.DB_HOST,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASS,
+      database: process.env.DB_NAME,
+      charset: 'utf8mb4_general_ci'
+    });
+    const schema = await buildWorkflowSchema({ pool, workflowId: Number(workflowId) || workflowId });
 
-  const legacyTarget = {
-    label: 'legacy',
-    file: path.resolve(__dirname, '../../ISET-intake/src/intakeFormSchema.json'),
-    meta: path.resolve(__dirname, '../../ISET-intake/src/intakeFormSchema.meta.json')
-  };
-  ensureDir(path.dirname(legacyTarget.file));
-  const changed = writeIfChanged(legacyTarget.file, legacyJson);
-  const metaChanged = writeIfChanged(legacyTarget.meta, JSON.stringify(meta, null, 2));
-  console.log(`[publish-workflow] ${legacyTarget.label} -> ${relativeCwd(legacyTarget.file)} ${changed ? 'UPDATED' : 'unchanged'} (meta ${metaChanged ? 'UPDATED' : 'unchanged'})`);
+    if (!schema) {
+      console.error('No schema returned for workflowId=' + workflowId);
+      process.exit(1);
+    }
 
-  console.log('\nPublish complete.');
+    const publishedAt = new Date().toISOString();
+    const legacyJson = Array.isArray(schema) ? JSON.stringify(schema, null, 2) : JSON.stringify(schema.steps || [], null, 2);
+    const schemaMeta = schema && typeof schema === 'object' && schema.meta && typeof schema.meta === 'object' ? schema.meta : null;
+    const meta = {
+      workflowId,
+      generatedAt: publishedAt
+    };
+    if (schemaMeta) meta.schemaMeta = schemaMeta;
+    const schemaArray = Array.isArray(schema) ? schema : (Array.isArray(schema?.steps) ? schema.steps : []);
+    const normalizedPayload = {
+      meta,
+      schema: schemaArray,
+      version: `${publishedAt}#${workflowId}`,
+      publishedAt,
+      publishedBy: null
+    };
+    if (!Array.isArray(schema)) {
+      normalizedPayload.schemaEnvelope = schema;
+      if (!normalizedPayload.meta.schemaMeta && schema?.meta && typeof schema.meta === 'object') {
+        normalizedPayload.meta.schemaMeta = schema.meta;
+      }
+    }
+    const payloadPreChecksum = JSON.stringify(normalizedPayload);
+    const runtimeChecksum = sha256(payloadPreChecksum);
+    normalizedPayload.checksum = runtimeChecksum;
+    meta.checksum = runtimeChecksum;
+    const payloadJson = JSON.stringify(normalizedPayload);
 
-  await upsertRuntimeConfig(payloadJson, normalizedPayload.version);
+    const legacyTarget = {
+      label: 'legacy',
+      file: path.resolve(__dirname, '../../ISET-intake/src/intakeFormSchema.json'),
+      meta: path.resolve(__dirname, '../../ISET-intake/src/intakeFormSchema.meta.json')
+    };
+    ensureDir(path.dirname(legacyTarget.file));
+    const changed = writeIfChanged(legacyTarget.file, legacyJson);
+    const metaChanged = writeIfChanged(legacyTarget.meta, JSON.stringify(meta, null, 2));
+    console.log(`[publish-workflow] ${legacyTarget.label} -> ${relativeCwd(legacyTarget.file)} ${changed ? 'UPDATED' : 'unchanged'} (meta ${metaChanged ? 'UPDATED' : 'unchanged'})`);
+
+    console.log('\nPublish complete.');
+
+    await upsertRuntimeConfig(pool, payloadJson, normalizedPayload.version);
+  } finally {
+    if (pool) await pool.end();
+  }
 }
 
 function writeIfChanged(file, content) {
@@ -139,23 +146,12 @@ function printHelp() {
   console.log(`Publish normalized workflow schema to legacy portal output and runtime config.\n\nUsage:\n  node scripts/publish-workflow.js --id <workflowId>\n\nOptions:\n  --id <workflowId>   Required workflow identifier used by normalization layer\n  -h, --help          Show this help\n`);
 }
 
-async function upsertRuntimeConfig(payloadJson, version) {
-  if (!process.env.DB_HOST || !process.env.DB_NAME) {
-    console.warn('[publish-workflow] DB_HOST/DB_NAME not set; skipping runtime-config update.');
-    return;
-  }
-  if (!mysql) {
-    mysql = require('mysql2/promise');
-  }
-  let pool;
+function relativeCwd(file) {
+  return path.relative(process.cwd(), file) || '.';
+}
+
+async function upsertRuntimeConfig(pool, payloadJson, version) {
   try {
-    pool = await mysql.createPool({
-      host: process.env.DB_HOST,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASS,
-      database: process.env.DB_NAME,
-      charset: 'utf8mb4_general_ci'
-    });
     await pool.query(
       "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('publish', 'workflow.schema.intake', CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP",
       [payloadJson]
@@ -163,8 +159,6 @@ async function upsertRuntimeConfig(payloadJson, version) {
     console.log(`[publish-workflow] runtime-config -> publish/workflow.schema.intake UPDATED (version ${version})`);
   } catch (err) {
     console.error('[publish-workflow] Failed to upsert runtime-config:', err.message);
-  } finally {
-    if (pool) await pool.end();
   }
 }
 

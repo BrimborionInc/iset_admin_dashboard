@@ -2,6 +2,27 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-04-01
+- Intake/PDF: Updated the signed intake declaration PDFs and the generated application-form PDF so their English record output matches the current published workflow-21 intake wording for consent/declarations, gender, social-assistance follow-up, target-program options, and support/student-aid sections.
+- Intake/Workflow: Removed the generic Step 24 `Other support documents` upload from DEV workflow `21` and republished the intake so selecting `Other` support no longer creates a mandatory catch-all document blocker at submission time.
+- Intake/Portal: Completed a French-copy pass on the current DEV intake publish for recently edited consent/funding forms, the new social-assistance and childcare follow-up questions, and the Step 24 support-driven upload requests so the public intake no longer falls back to placeholder or English-only text in those updated areas.
+- Portal/Landing Page: Updated the public ISET landing-page French copy to mirror the latest English eligibility/support wording, including the publicly funded institution bullet, the moved support note, and the revised NWAC ISET case-manager wording. This code change still requires a portal deploy to become visible.
+- Intake/Portal: Added public-portal checkbox-array conditional operators (`contains`, `notContains`, `containsAny`, `notContainsAny`, `containsAll`) so Step 19 support selections can drive later workflow-21 questions and document uploads without refactoring `Supports Requested` into separate yes/no fields.
+- Intake/Portal: Public intake runtime now auto-skips steps whose authored components all hide after conditional evaluation and renumbers visible progress accordingly, allowing irrelevant Step 21/22 support-driven steps to disappear entirely instead of showing placeholder notices.
+- Intake/Workflow: Updated DEV workflow `21` authoring so Step 19 `requested-supports` now drives Living Allowance income/expense follow-up, Transportation/Childcare/Other expense questions, and new support-specific Step 24 upload requests for tuition statements, books/materials proof, transportation proof, childcare cost proof, and other support evidence.
+- Intake/Workflow: Split workflow `21` Step 19 into two branched variants after Step `93`, so applicants who answered `No` to `dependent-children` are routed to a no-childcare copy of `Financial Supports Requested` and are no longer offered `Childcare` in the public intake.
+- Docs/Meta: Added `docs/meta/codex-thread-index.md` as the searchable cross-thread recovery index for durable handoff notes and prior-thread findings, and updated `docs/AGENTS.md` to require future chats to use and maintain it.
+- Docs/Ops: Updated the TEST DB access guide and thread index with the 2026-04-01 intake-import finding that large JSON exports through SSM stdout truncate, so future TEST form pulls should export large authoring rows component-by-component with base64 wrapping before reconstructing them locally.
+- Docs/Planning: Added `docs/planning/step19-checkbox-conditionality-followup.md` to capture the remaining parity work for Manual Intake, Workflow Preview, and the intake-step editor after the new public-portal-only Step 19 checkbox conditionality landed.
+
+## 2026-03-31
+- UX/Casework: Case Workspace now includes an `Events timeline` widget on the default board and a new `View audit trail` quick action that switches to a focused audit layout using the same case-event feed as Application Workspace.
+- UX/Landing Page: Reframed the public PATH landing page as a staff access/support entry point, removed development/marketing-oriented content from the default view, and moved release notes behind an optional expandable section so sign-in/help content leads the page.
+- Docs/Landing Page: Updated the landing-page feature doc and `docs/AGENTS.md` to reflect that the public landing page is pre-sign-in, not role-aware, and that role-specific home dashboards begin after authentication.
+- Fix/API/Casework: Case Workspace secure messaging now works for imported application-less client files when the case is linked to a participant PATH account, resolving the recipient through the client applicant account when no application submission exists.
+- UX/Casework: The shared Secure Messaging widget now shows a disabled/unavailable state for cases that do not yet have a linked participant account instead of surfacing a generic load failure.
+- Fix/API/Finance: Payment packet list/detail hydration now resolves applicant user IDs for imported application-less cases through the linked client PATH account when no application submission exists, preventing imported-case finance evidence flows from losing applicant document access.
+
 ## 2026-03-30
 - UX/Integration: Replaced the broken in-page Job Bank iframe with an explicit launch panel because Job Bank now returns `X-Frame-Options: SAMEORIGIN` on the search and summary URLs PATH uses, so browsers refuse to display those pages inside PATH.
 - UX/Help: Updated Job Bank Search guidance to explain that PATH still builds the correct Job Bank destination URL, but staff now continue on Job Bank in a separate tab instead of an embedded frame.

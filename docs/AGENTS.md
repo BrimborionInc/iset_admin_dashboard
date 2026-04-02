@@ -5,7 +5,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-03-30
+Last Updated: 2026-04-01
 
 ## Working relationship (design dialog)
 
@@ -37,6 +37,7 @@ Last Updated: 2026-03-30
 ## Thread-start checklist
 
 - Clarify requirements if business behavior is ambiguous.
+- If the user references a previous chat, prior note, or missing historical context, search `docs/meta/codex-thread-index.md` first and then open the linked canonical doc(s).
 - Confirm real behavior from code/API payloads before changing UI.
 - For dashboard/widget work, read `docs/guides/configurable-dashboard-notes.md` first.
 - For homepage Metrics or Items work, read `docs/dashboards/admin-home-metrics-widget.md`.
@@ -46,13 +47,14 @@ Last Updated: 2026-03-30
 
 ## For future Codex threads
 
-Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current project context for this repo. As you work, keep the docbase current: update [AGENTS.md](./AGENTS.md) with durable context pointers, guardrails, and architecture notes that would help future chats; update affected live docs under [`docs/`](./) when behavior changes; and record notable shipped changes in [changelog.md](./meta/changelog.md) and [next-release-notes-log.md](./meta/next-release-notes-log.md). The goal is that a new thread can recover the current state of the system from the repo docs without depending on prior chat history.
+Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current project context for this repo. If the user references prior-thread work, notes, or "something we already figured out", check [codex-thread-index.md](./meta/codex-thread-index.md) before searching blindly. As you work, keep the docbase current: update [AGENTS.md](./AGENTS.md) with durable context pointers, guardrails, and architecture notes that would help future chats; update [codex-thread-index.md](./meta/codex-thread-index.md) whenever you add or materially revise a durable handoff/how-to note that a future thread may need to rediscover; update affected live docs under [`docs/`](./) when behavior changes; and record notable shipped changes in [changelog.md](./meta/changelog.md) and [next-release-notes-log.md](./meta/next-release-notes-log.md). The goal is that a new thread can recover the current state of the system from the repo docs without depending on prior chat history.
 
 ## Core conventions
 
 - Prefer Cloudscape components over native HTML. Use `Link` from `@cloudscape-design/components` instead of raw `<a>` unless there is no Cloudscape equivalent.
 - Do not assume parity with the public portal. Verify the full chain:
   schema -> runtime config JSON -> API payload -> renderer/template.
+- Current intake-conditionality caveat: the public portal runtime now supports checkbox-array condition operators (`contains`, `notContains`, `containsAny`, `notContainsAny`, `containsAll`) and auto-skips steps whose authored components all hide, and DEV workflow `21` uses that for Step 19 support-driven follow-up questions/uploads. DEV workflow `21` also currently splits Step 19 into two variants after Step `93`, routing `dependent-children = 0` applicants to a no-childcare copy of `Financial Supports Requested`. Manual Intake, Workflow Preview, and the intake-step editor do not yet support those operators or the same whole-step skip behavior. See `docs/planning/step19-checkbox-conditionality-followup.md` before editing those rules.
 - When adding/changing UI fields, confirm the backend actually returns the data.
 - Fix root causes instead of layering workarounds.
 
@@ -76,6 +78,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 ## High-value repo map
 
 - Docs base path: `X:\ISET\admin-dashboard\docs` (WSL: `/mnt/x/ISET/admin-dashboard/docs`)
+- Codex thread/context recovery index: `docs/meta/codex-thread-index.md`
 - Applicant-account activation data model: `docs/data/applicant-account-activation.md`
 - Client-file import guide: `docs/guides/client-file-imports.md`
 - Client Batch Import dashboard reference: `docs/dashboards/client-file-import-dashboard.md`
@@ -95,6 +98,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 ## Documentation gateway
 
 - Start here for current orientation, then go deeper into the docs below rather than relying on planning notes alone.
+- Cross-thread context recovery index: `docs/meta/codex-thread-index.md`
 - Live dashboard behavior: `docs/dashboards/*`
 - Import and data-backload constraints: `docs/guides/client-file-imports.md`
 - Client Batch Import dashboard: `docs/dashboards/client-file-import-dashboard.md`
@@ -139,6 +143,9 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 
 ## Homepage dashboard context
 
+- Public landing-page route: signed-out `/`
+- Public landing-page rule: this page is a pre-sign-in NWAC staff access/support entry point, not a role-aware dashboard. Role-aware behavior starts after authentication on the signed-in home dashboards.
+- Public landing-page UX rule: keep release notes secondary/opt-in on this page; do not let them dominate the initial staff sign-in experience.
 - Homepage route: `/`
 - Current homepage Metrics widget behavior is documented in `docs/dashboards/admin-home-metrics-widget.md`.
 - Current homepage Work Queue widget behavior is documented in `docs/dashboards/admin-home-my-work-widget.md`.
@@ -197,6 +204,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Current `Budgets and Finance > Salaries` implementation: standard Cloudscape board dashboard backed by `finance_regional_salary_entry`, with a fiscal-year control, one editable annual salary row per province/territory, explicit budget-pot assignment, and derived monthly values shown for review.
 - `Budgets and Finance > Salaries` is monthly total tracking only. It is not payroll, not AP processing, and not the accounting system of record.
 - Current `Case Workspace > Case header` applicant-account rule: show `PATH Account Status` directly in the detail grid, and expose a quick action that creates/sends or resends applicant activation from the case itself so case managers do not need to leave the workspace for the common activation flow.
+- Current `Case Workspace > Events timeline` rule: the case workspace now exposes the same case-event audit feed used in Application Workspace, both as an optional widget and through a `View audit trail` quick action that switches the board to a focused header + participant-details + events layout.
 
 ## Applicant account activation context
 
@@ -218,7 +226,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Regional Manager homepage `Clients in My Region` must use `/api/dashboard/regional-client-cases`, not the generic `/api/cases` list, because the homepage queue is case-based and must respect owner-region/portfolio-region scope with only `closed` and `archived` excluded.
 - Schema allows `iset_case.application_id = NULL`, and core case create/update/list flows now support client-file cases.
 - Supporting Documents now has a case-based mode for application-less client files: it reads from `GET /api/cases/:id/documents`, uploads through `POST /api/cases/:id/documents/upload`, hides the checklist tab, and allows `client`, `case`, `action_plan`, plus application-type document categories. When no linked application exists, application-type uploads fall back to action-plan or case storage instead of requiring a fake application record.
-- Secure Messaging still depends on applicant/application linkage today; imported client-file cases without a participant account can manage documents, plans, and interventions but still cannot message the client until a participant account exists.
+- Secure Messaging now supports application-less client-file cases when the case is linked to a participant PATH account; imported cases without a participant account can still manage documents, plans, and interventions, but messaging remains unavailable until that account exists.
 - Case Header now exposes explicit backload quick actions on application-less cases: `Add existing action plan`, `Add existing intervention`, and `Upload existing documents`.
 - `src/widgets/CaseCalendarWidget.js` is shared by the case workspace and application workspace. Treat date-only values (`YYYY-MM-DD`) as local Canadian calendar dates; UTC-based parsing/weekday anchors will shift headers or event days backward.
 - Tutorial updates must be validated end-to-end (including `Next` progression on every step) so no step dead-ends due to missing hotspots.

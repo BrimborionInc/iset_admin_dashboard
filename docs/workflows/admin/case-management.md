@@ -20,6 +20,7 @@ Run active client cases after approval, including plan management, intervention 
 - Case calendar
 - Supporting documents
 - Secure messaging
+- Events timeline
 - Compliance
 - Export preview
 - Finance panel
@@ -36,6 +37,7 @@ Widget references:
 - `docs/widgets/admin/case-calendar-widget.md`
 - `docs/widgets/admin/supporting-documents-widget.md`
 - `docs/widgets/admin/secure-messaging-widget.md`
+- `docs/widgets/admin/case-events-timeline-widget.md`
 - `docs/widgets/admin/case-compliance-widget.md`
 - `docs/widgets/admin/case-export-preview-widget.md`
 - `docs/widgets/admin/case-finance-panel-widget.md`
@@ -49,9 +51,10 @@ Widget references:
 3. For imported/application-less client files, use the Case Header backload actions to add existing action plans, existing interventions, and existing documents without fabricating intake history.
 4. Maintain or activate action plan.
 5. Create/update interventions and track status/cost progression.
-5. Validate compliance/export readiness as needed.
-6. Draft and refine case-linked payment packets.
-7. Communicate and store supporting evidence/messages.
+6. Use the Events Timeline when you need to confirm the audit trail, reminder activity, or who changed the file.
+7. Validate compliance/export readiness as needed.
+8. Draft and refine case-linked payment packets.
+9. Communicate and store supporting evidence/messages.
 
 ## Data & Integration Touchpoints
 

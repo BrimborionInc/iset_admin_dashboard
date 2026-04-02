@@ -83,7 +83,8 @@ const OPTION_LABELS = {
   },
   biological_sex: {
     female: 'Female',
-    male: 'Male'
+    male: 'Male',
+    other: 'Other'
   },
   gender_identity: {
     female: 'Female',
@@ -335,6 +336,12 @@ const renderTextBlock = (value) => {
 };
 
 const renderMailingAddress = (value) => renderTextBlock(value);
+
+const shouldShowBiologicalSexOtherField = (answers = {}) => {
+  const sex = String(answers?.biological_sex ?? '').trim().toLowerCase();
+  const detail = String(answers?.biological_sex_other ?? '').trim();
+  return sex === 'other' || detail.length > 0;
+};
 
 const signatureStatus = (value) => {
   if (!value || typeof value !== 'object') {
@@ -592,12 +599,12 @@ const buildSectionDefinitions = ({
         label: (
           <Box display="inline-flex" alignItems="center">
             <Box as="span" display="inline" fontWeight="bold" margin={{ right: 'xxs' }}>
-              Client EI consent
+              Consent
             </Box>
             <Button
               variant="icon"
               iconName="external"
-              ariaLabel="View client EI consent form"
+              ariaLabel="View consent form"
               onClick={event => {
                 event?.preventDefault();
                 event?.stopPropagation();
@@ -699,6 +706,13 @@ const buildSectionDefinitions = ({
         controlType: 'select',
         optionsKey: 'biological_sex',
         renderValue: answers => formatOption('biological_sex', answers['biological_sex'])
+      },
+      {
+        label: `If "Other", please specify`,
+        field: 'biological_sex_other',
+        controlType: 'input',
+        isVisible: shouldShowBiologicalSexOtherField,
+        renderValue: answers => renderPlainText(answers['biological_sex_other'])
       },
       {
         label: 'Gender identity',
@@ -1037,8 +1051,17 @@ const Section = ({
   saving
 }) => {
   const displaySource = isEditing && editable ? editableAnswers : answers;
-  const editableItems = isEditing && editable ? items.filter(item => item.editable !== false && item.field) : [];
-  const staticItems = !isEditing || !editable ? items : items.filter(item => item.editable === false || !item.field);
+  const isItemVisible = (item) => {
+    if (typeof item?.isVisible === 'function') {
+      return item.isVisible(displaySource);
+    }
+    return item?.isVisible !== false;
+  };
+  const editableItems = isEditing && editable
+    ? items.filter(item => item.editable !== false && item.field && isItemVisible(item))
+    : [];
+  const staticItems = (!isEditing || !editable ? items : items.filter(item => item.editable === false || !item.field))
+    .filter(isItemVisible);
   const preparedStaticItems = staticItems.map(item => ({
     label: item.label,
     value: item.renderValue(displaySource)
@@ -1369,6 +1392,17 @@ const IsetApplicationFormWidget = ({
         const targetKey = getRegistrationTargetKey({ ...answers, ...prev });
         return { ...prev, [field]: value, [targetKey]: value };
       });
+      return;
+    }
+    if (field === 'biological_sex') {
+      const nextValue = value ?? '';
+      setEditableAnswers(prev => ({
+        ...prev,
+        [field]: nextValue,
+        biological_sex_other: String(nextValue).trim().toLowerCase() === 'other'
+          ? (prev.biological_sex_other ?? '')
+          : null
+      }));
       return;
     }
     setEditableAnswers(prev => ({ ...prev, [field]: value }));
@@ -2187,7 +2221,7 @@ const IsetApplicationFormWidget = ({
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      const fileName = `client-ei-consent-${application.id}.pdf`;
+      const fileName = `consent-${application.id}.pdf`;
       link.download = fileName;
       document.body.appendChild(link);
       link.click();

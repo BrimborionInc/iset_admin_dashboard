@@ -174,6 +174,7 @@ const SecureMessagingWidget = ({
     rawApplicantUserId == null || rawApplicantUserId === '' || Number.isNaN(applicantUserIdNum)
       ? null
       : applicantUserIdNum;
+  const messagingAvailable = Boolean(applicantUserId);
 
   const selectedInterventionNum = Number(selectedInterventionId);
   const interventionId =
@@ -364,7 +365,13 @@ const SecureMessagingWidget = ({
 
   const loadMessages = useCallback(
     async (options = {}) => {
-      if (!caseId) return;
+      if (!caseId || !messagingAvailable) {
+        setMessages([]);
+        setLoadError(null);
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
       const { silent = false } = options;
       if (silent) {
         setRefreshing(true);
@@ -407,18 +414,19 @@ const SecureMessagingWidget = ({
         }
       }
     },
-    [caseId, updateStatusToInReview]
+    [caseId, messagingAvailable, updateStatusToInReview]
   );
 
   useEffect(() => {
-    if (!caseId) {
+    if (!caseId || !messagingAvailable) {
       setMessages([]);
+      setLoadError(null);
       setLoading(false);
       setRefreshing(false);
       return;
     }
     loadMessages();
-  }, [caseId, loadMessages]);
+  }, [caseId, loadMessages, messagingAvailable]);
 
   // Load eligible workflows for attachments
   const loadWorkflows = useCallback(async () => {
@@ -714,6 +722,7 @@ const SecureMessagingWidget = ({
   };
 
   const handleNewMessage = () => {
+    if (!caseId || !messagingAvailable) return;
     setComposeSubject('');
     setComposeBody('');
     setComposeUrgent(false);
@@ -803,13 +812,6 @@ const SecureMessagingWidget = ({
     } finally {
       setComposeSending(false);
     }
-  };
-
-  const toggleWorkflowSelection = (id) => {
-    setSelectedWorkflowIds(prev => {
-      if (prev.includes(id)) return prev.filter(x => x !== id);
-      return [...prev, id];
-    });
   };
 
   const handleDeleteMessage = async () => {
@@ -1069,9 +1071,9 @@ const SecureMessagingWidget = ({
                 iconName="refresh"
                 ariaLabel="Refresh"
                 onClick={handleRefresh}
-                disabled={loading || refreshing || !caseId}
+                disabled={loading || refreshing || !caseId || !messagingAvailable}
               />
-              <Button variant="primary" onClick={handleNewMessage} disabled={!caseId}>
+              <Button variant="primary" onClick={handleNewMessage} disabled={!caseId || !messagingAvailable}>
                 New Message
               </Button>
             </SpaceBetween>
@@ -1116,6 +1118,10 @@ const SecureMessagingWidget = ({
         </Box>
         {!caseId ? (
           <Box color="text-status-warning">Messages will be available once the case is fully loaded.</Box>
+        ) : !messagingAvailable ? (
+          <Box color="text-body-secondary">
+            Secure messaging becomes available after a participant applicant account is linked to this case.
+          </Box>
         ) : (
           <Tabs
             activeTabId={activeTabId}

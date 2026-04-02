@@ -215,6 +215,36 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
   // Global alias -> storageKey map so summary-list rows referencing original authoring keys (id/name)
   // still resolve after normalization may have substituted a slug.
   const aliasToStorageKey = new Map();
+  const CONDITIONAL_VISIBILITY_SUPPORTED_TYPES = new Set([
+    'file-upload',
+    'radio',
+    'checkboxes',
+    'input',
+    'textarea',
+    'character-count',
+    'inset-text',
+    'warning-text',
+    'paragraph',
+  ]);
+  const sanitizeConditions = (props, normalisedType) => {
+    if (!CONDITIONAL_VISIBILITY_SUPPORTED_TYPES.has(normalisedType)) return undefined;
+    try {
+      const conds = props && props.conditions;
+      if (!conds || typeof conds !== 'object' || !Array.isArray(conds.all) || !conds.all.length) return undefined;
+      const sanitized = conds.all
+        .filter(r => r && typeof r === 'object' && r.ref && r.op)
+        .map(r => {
+          const out = { ref: String(r.ref), op: String(r.op) };
+          if (!['exists', 'notExists', 'emptyOrZero'].includes(r.op) && r.value !== undefined && r.value !== null && r.value !== '') {
+            out.value = String(r.value);
+          }
+          return out;
+        });
+      return sanitized.length ? { all: sanitized } : undefined;
+    } catch {
+      return undefined;
+    }
+  };
 
   for (const stepId of order) {
     const row = stepRows.find(s => s.step_id === stepId);
@@ -264,6 +294,30 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
   const authoringIdIndex = new Map();
   // Track which component indices become embedded children (to prune later)
   const consumedChildIndices = new Set();
+    const pushComponent = (component, { props, idProp, nameProp, fieldNameProp, labelSlug } = {}) => {
+      out.components.push(component);
+      try {
+        const aliases = new Set();
+        if (idProp) aliases.add(idProp);
+        if (nameProp) aliases.add(nameProp);
+        if (fieldNameProp) aliases.add(fieldNameProp);
+        if (labelSlug) aliases.add(labelSlug);
+        for (const a of aliases) {
+          if (!a || !component.storageKey) continue;
+          if (!aliasToStorageKey.has(a)) aliasToStorageKey.set(a, component.storageKey);
+        }
+        if (component.storageKey && !aliasToStorageKey.has(component.storageKey)) {
+          aliasToStorageKey.set(component.storageKey, component.storageKey);
+        }
+      } catch { /* ignore alias registration errors */ }
+      if (!props) return component;
+      const componentIndex = out.components.length - 1;
+      const origId = props.id != null ? String(props.id).trim() : '';
+      if (origId) authoringIdIndex.set(origId, componentIndex);
+      const nameKey = props.name != null ? String(props.name).trim() : '';
+      if (nameKey && !authoringIdIndex.has(nameKey)) authoringIdIndex.set(nameKey, componentIndex);
+      return component;
+    };
     for (let i = 0; i < compRows.length; i++) {
       const c = compRows[i];
       const defaults = safeParse(c.default_props, {});
@@ -331,12 +385,14 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
   if (!labelSlugBase) labelSlugBase = (typeof labelText === 'string' ? labelText : '') || `${tplType || 'field'}-${i+1}`;
   let labelSlug = slugify(labelSlugBase) || `${tplType || 'field'}-${i+1}`;
   if (labelSlug === 'object-object') labelSlug = `${tplType || 'field'}-${i+1}`;
-      const routeField = route && route.mode === 'by_option' ? (route.field_key || '').trim() : '';
       const fieldNameProp = (props?.fieldName || props?.field_name || props?.fieldname || '').toString().trim();
       const nameProp = (props?.name || '').toString().trim();
       const idProp = (props?.id || '').toString().trim();
       let chosenKey = '';
-      if (routeField) chosenKey = routeField; else if (fieldNameProp) chosenKey = fieldNameProp; else if (nameProp) chosenKey = nameProp; else if (idProp && !placeholderNames.has(idProp.toLowerCase())) chosenKey = idProp; else chosenKey = labelSlug;
+      if (fieldNameProp) chosenKey = fieldNameProp;
+      else if (nameProp) chosenKey = nameProp;
+      else if (idProp && !placeholderNames.has(idProp.toLowerCase())) chosenKey = idProp;
+      else chosenKey = labelSlug;
       if (!chosenKey || placeholderNames.has(chosenKey.toLowerCase())) chosenKey = labelSlug;
       const id = toIdSlug(chosenKey || labelSlug, tplType || 'field', i, usedIds);
 
@@ -347,31 +403,40 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
         const paraHtml = props?.html ?? (typeof paraText === 'object' ? paraText.html : undefined);
         const textObj = toI18nObject(paraText, '');
         const htmlObj = toI18nObject(paraHtml, undefined);
-        out.components.push({
+        const component = {
           id: toIdSlug('paragraph', 'paragraph', i, usedIds),
           type: 'paragraph',
           ...(textObj ? { text: textObj } : {}),
           ...(htmlObj ? { html: htmlObj } : {}),
           class: props?.classes || undefined,
-        });
+        };
+        const conditions = sanitizeConditions(props, component.type);
+        if (conditions) component.conditions = conditions;
+        pushComponent(component, { props, idProp, nameProp, fieldNameProp, labelSlug });
         continue;
       }
       if (tplType === 'inset-text') {
         const txt = props?.text ?? hintText ?? labelText ?? '';
-        out.components.push({
+        const component = {
           id: toIdSlug('inset-text', 'inset-text', i, usedIds),
           type: 'inset-text',
           text: { en: asLang(txt, 'en'), fr: asLang(txt, 'fr') },
-        });
+        };
+        const conditions = sanitizeConditions(props, component.type);
+        if (conditions) component.conditions = conditions;
+        pushComponent(component, { props, idProp, nameProp, fieldNameProp, labelSlug });
         continue;
       }
       if (tplType === 'warning-text') {
         const txt = props?.text ?? hintText ?? labelText ?? '';
-        out.components.push({
+        const component = {
           id: toIdSlug('warning-text', 'warning-text', i, usedIds),
           type: 'warning-text',
           text: { en: asLang(txt, 'en'), fr: asLang(txt, 'fr') },
-        });
+        };
+        const conditions = sanitizeConditions(props, component.type);
+        if (conditions) component.conditions = conditions;
+        pushComponent(component, { props, idProp, nameProp, fieldNameProp, labelSlug });
         continue;
       }
 
@@ -401,13 +466,13 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
           if (resolvedKey !== r.key) rowObj.originalKey = r.key;
           rows.push(rowObj);
         }
-        out.components.push({
+        pushComponent({
           id: toIdSlug('summary-list', 'summary-list', i, usedIds),
           type: 'summary-list',
           rows,
           hideEmpty: props.hideEmpty !== false,
           emptyFallback: (props.emptyFallback && typeof props.emptyFallback === 'object') ? props.emptyFallback : { en: 'Not provided', fr: 'Non fourni' }
-        });
+        }, { props, idProp, nameProp, fieldNameProp, labelSlug });
         continue;
       }
 
@@ -496,21 +561,8 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
         if (typeof props?.disabled !== 'undefined') component.disabled = !!props.disabled;
       }
       // Conditional visibility (v1): emit props.conditions for supported component types ({ all: [] })
-      if (['file-upload', 'radio', 'input'].includes(normalisedType)) {
-        try {
-          const conds = props && props.conditions;
-          if (conds && typeof conds === 'object' && Array.isArray(conds.all) && conds.all.length) {
-            const sanitized = conds.all
-              .filter(r => r && typeof r === 'object' && r.ref && r.op)
-              .map(r => {
-                const out = { ref: String(r.ref), op: String(r.op) };
-                if (!['exists', 'notExists', 'emptyOrZero'].includes(r.op) && r.value !== undefined && r.value !== null && r.value !== '') out.value = String(r.value);
-                return out;
-              });
-            if (sanitized.length) component.conditions = { all: sanitized };
-          }
-        } catch { /* swallow condition extraction errors */ }
-      }
+      const conditions = sanitizeConditions(props, normalisedType);
+      if (conditions) component.conditions = conditions;
       if (tplType === 'date-input') {
         if (props?.namePrefix) component.namePrefix = props.namePrefix;
         if (Array.isArray(props?.items)) component.dateFields = props.items.map(f => ({ name: f?.name, classes: f?.classes })).filter(f => f.name);
@@ -594,31 +646,7 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
         if (typeof v.required === 'boolean' && v.required && !component.required) component.required = true;
       }
 
-      out.components.push(component);
-      // Register alias mappings (original authoring identifiers) -> final storageKey
-      try {
-        const aliases = new Set();
-        if (idProp) aliases.add(idProp);
-        if (nameProp) aliases.add(nameProp);
-        if (fieldNameProp) aliases.add(fieldNameProp);
-        aliases.add(labelSlug); // label-derived slug used earlier; harmless if same
-        for (const a of aliases) {
-          if (!a) continue;
-          if (!aliasToStorageKey.has(a)) aliasToStorageKey.set(a, component.storageKey);
-        }
-        // Always map storageKey to itself
-        if (component.storageKey && !aliasToStorageKey.has(component.storageKey)) aliasToStorageKey.set(component.storageKey, component.storageKey);
-      } catch { /* ignore alias registration errors */ }
-      // Record mapping from authoring identifiers to component index for later conditional embedding
-      if (props) {
-        const origId = props.id != null ? String(props.id).trim() : '';
-        if (origId) authoringIdIndex.set(origId, out.components.length - 1);
-        // Also index by props.name (data key) because conditionalChildId currently stores the data key, not the DOM id
-        const nameKey = props.name != null ? String(props.name).trim() : '';
-        if (nameKey && !authoringIdIndex.has(nameKey)) {
-          authoringIdIndex.set(nameKey, out.components.length - 1);
-        }
-      }
+      pushComponent(component, { props, idProp, nameProp, fieldNameProp, labelSlug });
     }
 
     // Second pass: embed conditional children for radios / checkboxes

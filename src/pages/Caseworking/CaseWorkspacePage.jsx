@@ -28,11 +28,13 @@ import CaseWorkspaceFinancePanelHelp from "../../helpPanelContents/caseWorkspace
 import CaseWorkspaceCompliancePanelHelp from "../../helpPanelContents/caseWorkspaceCompliancePanelHelp.js";
 import CaseWorkspaceParticipantDetailsHelp from "../../helpPanelContents/caseWorkspaceParticipantDetailsHelp.js";
 import CaseWorkspaceExportPreviewHelp from "../../helpPanelContents/caseWorkspaceExportPreviewHelp.js";
+import CaseWorkspaceTimelineHelp from "../../helpPanelContents/caseWorkspaceTimelineHelp.js";
 import CaseWorkspaceHelp from "../../helpPanelContents/caseWorkspaceHelp.js";
 import { CaseWorkspaceProvider } from "./caseWorkspace/CaseWorkspaceContext.jsx";
 import { PaymentsDataProvider } from "../finance/widgets/PaymentsDataContext.jsx";
+import CaseApplicationEventsWidget from "./caseWorkspace/widgets/CaseApplicationEventsWidget.jsx";
 
-const STORAGE_KEY = "iset-case-workspace-layout-v13";
+const STORAGE_KEY = "iset-case-workspace-layout-v14";
 const TUTORIAL_CASE_LAYOUT_RESET_FLAG = "iset.tutorial.resetCaseWorkspaceLayout";
 
 const widgetRegistry = {
@@ -157,6 +159,17 @@ const widgetRegistry = {
     helpTitle: "Export preview",
     aiContext: CaseWorkspaceExportPreviewHelp.aiContext,
   },
+  "case-events": {
+    id: "case-events",
+    defaultRowSpan: 5,
+    defaultColumnSpan: 4,
+    component: CaseApplicationEventsWidget,
+    title: "Events timeline",
+    description: "Audit trail of case activity, status changes, reminders, and related actions.",
+    helpComponent: CaseWorkspaceTimelineHelp,
+    helpTitle: "Events timeline",
+    aiContext: CaseWorkspaceTimelineHelp.aiContext,
+  },
   participantDetails: {
     id: "participantDetails",
     defaultRowSpan: 4,
@@ -196,6 +209,7 @@ const defaultLayout = [
   { id: "case-notes", rowSpan: 5, columnSpan: 2 },
   { id: "supporting-documents", rowSpan: 3, columnSpan: 2 },
   { id: "secure-messaging", rowSpan: 4, columnSpan: 2 },
+  { id: "case-events", rowSpan: 5, columnSpan: 4 },
 ];
 
 const interventionWorkflowLayout = [
@@ -223,6 +237,12 @@ const documentsMessagesLayout = [
   { id: "secure-messaging", rowSpan: 6, columnSpan: 2 },
 ];
 
+const auditTrailLayout = [
+  { id: "caseHeader", rowSpan: 3, columnSpan: 4 },
+  { id: "participantDetails", rowSpan: 6, columnSpan: 2 },
+  { id: "case-events", rowSpan: 6, columnSpan: 2 },
+];
+
 const managePaymentsLayout = [
   { id: "caseHeader", rowSpan: 3, columnSpan: 4 },
   { id: "payments-queue", rowSpan: 5, columnSpan: 4 },
@@ -241,6 +261,7 @@ const QUICK_ACTION_LAYOUTS = {
   managePlans: managePlansLayout,
   notesCalendar: notesCalendarLayout,
   documentsMessages: documentsMessagesLayout,
+  auditTrail: auditTrailLayout,
   managePayments: managePaymentsLayout,
   esdcValidation: esdcValidationLayout,
   proposeIntervention: interventionWorkflowLayout,

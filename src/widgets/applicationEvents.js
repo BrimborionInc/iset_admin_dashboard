@@ -282,7 +282,7 @@ const decorateEvent = (event) => {
   };
 };
 
-const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
+const ApplicationEvents = ({ actions, caseData, toggleHelpPanel, metadata = {} }) => {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -293,6 +293,16 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
   const [csvGenerating, setCsvGenerating] = useState(false);
 
   const caseId = caseData?.id || caseData?.case_id || null;
+  const HelpComponent = metadata?.helpComponent || ApplicationEventsHelp;
+  const helpTitle = metadata?.helpTitle || metadata?.title || 'Events Timeline';
+  const helpAiContext =
+    Object.prototype.hasOwnProperty.call(metadata || {}, 'aiContext')
+      ? metadata.aiContext
+      : HelpComponent.aiContext;
+  const widgetTitle = metadata?.title || 'Events Timeline';
+  const widgetDescription =
+    metadata?.description ||
+    "This widget displays a timeline of key events and actions related to the applicant's case, including status changes, messages, and other important updates.";
 
   const loadEvents = useCallback(async (options = {}) => {
     const { silent = false } = options;
@@ -511,9 +521,9 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
                 variant="info"
                 onFollow={() =>
                   toggleHelpPanel(
-                    <ApplicationEventsHelp />,
-                    'Events Help',
-                    ApplicationEventsHelp.aiContext
+                    <HelpComponent />,
+                    helpTitle,
+                    helpAiContext
                   )
                 }
               >
@@ -540,7 +550,7 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
           }
         >
           <Hotspot hotspotId="app-workspace-events-timeline" direction="right" />
-          Events Timeline
+          {widgetTitle}
         </Header>
       }
       i18nStrings={{
@@ -559,7 +569,7 @@ const ApplicationEvents = ({ actions, caseData, toggleHelpPanel }) => {
       }
     >
       <Box variant="small" margin={{ bottom: 's' }}>
-        This widget displays a timeline of key events and actions related to the applicant's case, including status changes, messages, and other important updates.
+        {widgetDescription}
       </Box>
       {loading ? (
         <Box textAlign="center" padding="m"><Spinner /> Loading events...</Box>

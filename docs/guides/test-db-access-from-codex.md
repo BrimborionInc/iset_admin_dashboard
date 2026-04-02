@@ -55,6 +55,15 @@ Notes:
 - If the target app host is missing `mysql`, the script installs a client package through the instance's package manager before executing the query
 - Output is streamed back from SSM command invocation stdout/stderr
 
+## Large JSON export caveat
+
+- On 2026-04-01, large JSON/hex exports through `aws ssm send-command` were observed truncating in `StandardOutputContent` at roughly 24 KB.
+- Do not assume a multi-row export is complete just because the SQL itself succeeded on the remote host; verify the returned payload size/content locally.
+- For large intake-form authoring pulls, prefer exporting one `step_component` row at a time and wrapping the JSON with:
+  `REPLACE(TO_BASE64(CAST(JSON_OBJECT(...) AS CHAR(1000000) CHARACTER SET utf8mb4)), CHAR(10), '')`
+- Reconstruct the rows locally after download instead of trying to stream a large JSON/hex blob back in one command.
+- When the goal is to move TEST intake edits into DEV so DEV becomes the editing source of truth, pull authoring rows (`step`, `step_component`) in addition to any published runtime JSON you want as a reference snapshot.
+
 ## Verification performed
 
 End-to-end execution was verified by running read-only SQL through SSM on `i-09fe8c219a4564040` and getting a successful result from the `iset_intake` database.

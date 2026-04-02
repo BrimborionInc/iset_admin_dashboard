@@ -11,6 +11,7 @@ Application Assessment
 ## Primary Route Context
 
 - /application-case/:id
+- /cases/:caseId (shared timeline, via case workspace wrapper)
 
 ## Purpose
 
@@ -38,3 +39,4 @@ Chronological event history for case/application actions.
 
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.
+- The same underlying timeline/feed is now also exposed in Case Workspace.

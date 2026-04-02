@@ -2,7 +2,7 @@
 
 Purpose: Capture the design decisions, rules, and implementation notes for Case Workspace quick actions.
 Audience: Caseworking feature owners, frontend engineers, and QA.
-Last Updated: 2025-12-26
+Last Updated: 2026-03-31
 Status: Complete
 
 ## Scope
@@ -21,6 +21,7 @@ Display/conversation roles (Cognito group names are inconsistent; map to these l
 - Manage plans and interventions
 - View notes and case calendar
 - Documents and messages
+- View audit trail
 - ESDC validation (show Compliance + Export Preview widgets)
 - Mark ready to close
 - Close case
@@ -45,6 +46,8 @@ Display/conversation roles (Cognito group names are inconsistent; map to these l
 - View notes and case calendar status gating: all statuses (layout-only action).
 - Documents and messages visibility: all roles (board layout action).
 - Documents and messages status gating: all statuses (layout-only action).
+- View audit trail visibility: all roles (board layout action).
+- View audit trail status gating: all statuses (layout-only action).
 - ESDC validation visibility: all roles (board layout action).
 - ESDC validation status gating: all statuses (layout-only action).
 - Mark ready to close visibility: all roles.
@@ -65,6 +68,9 @@ Display/conversation roles (Cognito group names are inconsistent; map to these l
 - Documents and messages layout:
   - Widgets: `caseHeader` (colSpan 4, rowSpan 3), `supporting-documents` (colSpan 2, rowSpan 6), `secure-messaging` (colSpan 2, rowSpan 6).
   - Order: Supporting Documents and Secure Messaging side-by-side below the header.
+- View audit trail layout:
+  - Widgets: `caseHeader` (colSpan 4, rowSpan 3), `participantDetails` (colSpan 2, rowSpan 6), `case-events` (colSpan 2, rowSpan 6).
+  - Order: Participant Details and Events Timeline side-by-side below the header.
 - ESDC validation layout:
   - Widgets: `caseHeader` (colSpan 4, rowSpan 3), `compliancePanel` (colSpan 2, rowSpan 6), `exportPreview` (colSpan 2, rowSpan 6).
   - Order: Compliance and Export Preview side-by-side below the header.
@@ -79,7 +85,7 @@ Display/conversation roles (Cognito group names are inconsistent; map to these l
 - Reopen case target status: `dormant`.
 - Quick actions visibility behavior: hide actions that are not allowed for the current role/status (no disabled menu items).
 - Ready-to-close behavior: layout-only quick actions remain available.
-- Quick actions ordering: use the master list order (Assign/Reassign → Propose → Manage Plans/Interventions → Notes/Calendar → Documents/Messages → ESDC Validation → Mark Ready to Close → Close → Archive → Reopen).
+- Quick actions ordering: use the master list order (Assign/Reassign → Propose → Manage Plans/Interventions → Notes/Calendar → Documents/Messages → View Audit Trail → ESDC Validation → Mark Ready to Close → Close → Archive → Reopen).
 - Archive case confirmation: yes (confirm modal required).
 - Reopen case confirmation: yes (confirm modal).
 

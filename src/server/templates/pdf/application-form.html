@@ -235,11 +235,24 @@
             <input type="text" data-field="dob_day" />
           </div>
         </td>
-        <td class="label">Gender</td>
+        <td class="label">Sex assigned at birth</td>
         <td>
           <div class="check-grid small">
-            <label class="check"><input type="checkbox" data-field="gender_female" />Female</label>
-            <label class="check"><input type="checkbox" data-field="gender_diverse" />Gender diverse</label>
+            <label class="check"><input type="checkbox" data-field="biological_sex_female" />Female</label>
+            <label class="check"><input type="checkbox" data-field="biological_sex_male" />Male</label>
+            <label class="check"><input type="checkbox" data-field="biological_sex_other" />Other</label>
+          </div>
+          <div class="subtle">If other, specify:</div>
+          <input type="text" data-field="biological_sex_other_detail" />
+        </td>
+      </tr>
+      <tr>
+        <td class="label">Gender identity</td>
+        <td colspan="3">
+          <div class="check-grid small">
+            <label class="check"><input type="checkbox" data-field="gender_identity_woman" />Woman</label>
+            <label class="check"><input type="checkbox" data-field="gender_identity_man" />Man</label>
+            <label class="check"><input type="checkbox" data-field="gender_identity_other" />Other</label>
           </div>
         </td>
       </tr>
@@ -367,21 +380,33 @@
             <label class="check"><input type="checkbox" data-field="social_assistance_yes" />Yes</label>
           </div>
         </td>
-        <td class="label">Top-up amount (if applicable)</td>
+        <td class="label">Allowable top-up amount (if known)</td>
         <td><input type="text" data-field="top_up_amount" /></td>
+      </tr>
+      <tr>
+        <td class="label">Is your case worker aware of you going back to school?</td>
+        <td>
+          <div class="check-grid small">
+            <label class="check"><input type="checkbox" data-field="case_worker_aware_no" />No</label>
+            <label class="check"><input type="checkbox" data-field="case_worker_aware_yes" />Yes</label>
+          </div>
+        </td>
+        <td class="label"></td>
+        <td></td>
       </tr>
     </table>
 
     <div class="section-title">LABOUR FORCE ATTACHMENT</div>
     <table class="form-table">
       <tr>
-        <td class="label">Current status</td>
+        <td class="label">What best describes your current work or study situation?</td>
         <td colspan="3">
           <div class="check-grid">
             <label class="check"><input type="checkbox" data-field="labour_unemployed" />Unemployed</label>
             <label class="check"><input type="checkbox" data-field="labour_underemployed" />Under-employed</label>
             <label class="check"><input type="checkbox" data-field="labour_employed_full" />Employed full-time</label>
             <label class="check"><input type="checkbox" data-field="labour_employed_part" />Employed part-time</label>
+            <label class="check"><input type="checkbox" data-field="labour_employed_leave" />Employed on approved leave</label>
             <label class="check"><input type="checkbox" data-field="labour_self_employed" />Self-employed</label>
             <label class="check"><input type="checkbox" data-field="labour_student" />Student</label>
             <label class="check"><input type="checkbox" data-field="labour_other" />Other</label>
@@ -393,7 +418,7 @@
     <div class="section-title">EDUCATION</div>
     <table class="form-table">
       <tr>
-        <td class="label">Education (select all that apply)</td>
+        <td class="label">Highest level of education completed</td>
         <td colspan="3">
           <div class="check-grid">
             <label class="check"><input type="checkbox" data-field="education_no_formal" />No formal education</label>
@@ -440,12 +465,15 @@
         </td>
       </tr>
       <tr>
-        <td class="label">Identified program or employer (select one)</td>
+        <td class="label">What program or support are you considering?</td>
         <td colspan="3">
-          <div class="check-grid small">
+          <div class="check-grid">
             <label class="check"><input type="checkbox" data-field="target_program_skills" />Skills Development (Education)</label>
             <label class="check"><input type="checkbox" data-field="target_program_tws" />Targeted Wage Subsidy</label>
             <label class="check"><input type="checkbox" data-field="target_program_jcp" />Job Creation Partnership</label>
+            <label class="check"><input type="checkbox" data-field="target_program_group" />Group Training</label>
+            <label class="check"><input type="checkbox" data-field="target_program_self_support" />Self-employment supports</label>
+            <label class="check"><input type="checkbox" data-field="target_program_not_yet" />Not yet chosen</label>
           </div>
         </td>
       </tr>
@@ -458,47 +486,59 @@
         <td colspan="3">
           <div class="check-grid">
             <label class="check"><input type="checkbox" data-field="support_tuition" />Tuition</label>
-            <label class="check"><input type="checkbox" data-field="support_books" />Books/Program materials</label>
+            <label class="check"><input type="checkbox" data-field="support_books" />Books and program materials</label>
             <label class="check"><input type="checkbox" data-field="support_living" />Living allowance</label>
             <label class="check"><input type="checkbox" data-field="support_transportation" />Transportation</label>
             <label class="check"><input type="checkbox" data-field="support_childcare" />Childcare</label>
-            <label class="check"><input type="checkbox" data-field="support_other" />Other (specify)</label>
+            <label class="check"><input type="checkbox" data-field="support_other" />Other</label>
           </div>
-          <input type="text" data-field="support_other_details" />
         </td>
       </tr>
       <tr>
-        <td class="label">Childcare (is a childcare subsidy being requested?)</td>
+        <td class="label">Other support requested</td>
+        <td><input type="text" data-field="support_other_details" /></td>
+        <td class="label">Disability-related supports requested</td>
+        <td>
+          <div class="check-grid small">
+            <label class="check"><input type="checkbox" data-field="disability_support_no" />No</label>
+            <label class="check"><input type="checkbox" data-field="disability_support_yes" />Yes</label>
+          </div>
+          <div class="subtle">If yes, specify:</div>
+          <input type="text" data-field="disability_support_details" />
+        </td>
+      </tr>
+      <tr>
+        <td class="label">Childcare support requested?</td>
         <td>
           <div class="check-grid small">
             <label class="check"><input type="checkbox" data-field="childcare_no" />No</label>
             <label class="check"><input type="checkbox" data-field="childcare_yes" />Yes</label>
           </div>
         </td>
-        <td class="label">Childcare funded (support currently received)</td>
+        <td class="label">Current childcare arrangement</td>
         <td>
           <div class="check-grid">
             <label class="check"><input type="checkbox" data-field="childcare_not_applicable" />Not applicable</label>
             <label class="check"><input type="checkbox" data-field="childcare_ei_crf" />EI/CRF</label>
             <label class="check"><input type="checkbox" data-field="childcare_provincial" />Provincial funding/subsidy</label>
             <label class="check"><input type="checkbox" data-field="childcare_fnicci" />FNICCI</label>
-            <label class="check"><input type="checkbox" data-field="childcare_no_funding" />No funding received</label>
-            <label class="check"><input type="checkbox" data-field="childcare_daycare_unavailable" />Daycare not available</label>
-            <label class="check"><input type="checkbox" data-field="childcare_family" />Assisted by family</label>
+            <label class="check"><input type="checkbox" data-field="childcare_no_funding" />No childcare funding received</label>
+            <label class="check"><input type="checkbox" data-field="childcare_daycare_unavailable" />No childcare spaces available</label>
+            <label class="check"><input type="checkbox" data-field="childcare_family" />Supported by family</label>
             <label class="check"><input type="checkbox" data-field="childcare_self_funded" />Self-funded</label>
           </div>
         </td>
       </tr>
       <tr>
-        <td class="label">Other funding sources (Band funding, loans, grants, etc.)</td>
+        <td class="label">Student financial assistance</td>
         <td>
           <div class="check-grid small">
-            <label class="check"><input type="checkbox" data-field="other_funding_no" />No</label>
-            <label class="check"><input type="checkbox" data-field="other_funding_yes" />Yes</label>
+            <label class="check"><input type="checkbox" data-field="student_financial_assistance_no" />No</label>
+            <label class="check"><input type="checkbox" data-field="student_financial_assistance_yes" />Yes</label>
           </div>
         </td>
-        <td class="label">If yes, specify program and amount</td>
-        <td><input type="text" data-field="other_funding_details" /></td>
+        <td class="label">If yes, provide details</td>
+        <td><input type="text" data-field="student_financial_assistance_details" /></td>
       </tr>
     </table>
   </div>

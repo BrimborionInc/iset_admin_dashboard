@@ -31,6 +31,7 @@ const genderOptions = [
   { value: "", label: "Not set" },
   { value: "female", label: "Female" },
   { value: "male", label: "Male" },
+  { value: "other", label: "Other" },
 ];
 
 const yesNoOptions = [
@@ -317,6 +318,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
     gender: "",
     genderIdentity: "",
     sex: "",
+    sexOther: "",
     pronouns: "",
     sin: "",
     dateOfBirth: "",
@@ -494,6 +496,14 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
       readAnswer("pronouns") ||
       "";
     const derivedSex = caseContext.sex || personal.sex || readAnswer("sex") || readAnswer("biological_sex") || "";
+    const derivedSexOther =
+      caseContext.sexOther ||
+      caseContext.sex_other ||
+      personal.sex_other ||
+      personal.sexOther ||
+      readAnswer("sex_other") ||
+      readAnswer("biological_sex_other") ||
+      "";
     const derivedSin =
       caseContext.sin ||
       personal.sin ||
@@ -515,6 +525,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
       genderIdentity: derivedGenderIdentity,
       pronouns: derivedPronouns,
       sex: derivedSex,
+      sexOther: derivedSexOther,
       sin: derivedSin,
       dateOfBirth: derivedDob,
       addressLine1: address.line1 || address.address1 || address.address_line_1 || addressFromAnswers.line1 || "",
@@ -662,6 +673,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
       genderIdentity: derivedGenderIdentity,
       pronouns: derivedPronouns,
       sex: derivedSex,
+      sexOther: derivedSexOther,
       sin: derivedSin,
       dateOfBirth: derivedDob,
       addressLine1: address.line1 || address.address1 || address.address_line_1 || addressFromAnswers.line1 || "",
@@ -887,9 +899,9 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
     }
   }, [form.programNocVersion]);
 
-  const selectedGender = useMemo(
-    () => genderOptions.find(opt => opt.value === (form.gender || "")) || genderOptions[0],
-    [form.gender]
+  const selectedSex = useMemo(
+    () => genderOptions.find(opt => opt.value === (form.sex || "")) || genderOptions[0],
+    [form.sex]
   );
   const selectedProvince = useMemo(
     () => provinceOptions.find(opt => opt.value === (form.addressProvince || "")) || null,
@@ -1082,6 +1094,10 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
     setError(null);
     setSuccess(null);
     const cleanedSin = cleanSin(form.sin || "");
+    const normalizedSexOther =
+      form.sex === "other" && String(form.sexOther || "").trim()
+        ? String(form.sexOther).trim()
+        : null;
     const normalizedVisibleMinority = normalizeYesNo(form.visibleMinority);
     const normalizedHasDisability = normalizeYesNo(form.hasDisability);
     const normalizedSocialAssistance = normalizeYesNo(form.socialAssistance);
@@ -1107,6 +1123,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
         genderIdentity: form.genderIdentity || null,
         pronouns: form.pronouns || null,
         sex: form.sex || null,
+        sexOther: normalizedSexOther,
         sin: cleanedSin || null,
         dateOfBirth: form.dateOfBirth || null,
         address: {
@@ -1201,6 +1218,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
           gender_identity: form.genderIdentity || null,
           pronouns: form.pronouns || null,
           sex: form.sex || null,
+          sex_other: normalizedSexOther,
           sin: cleanedSin || null,
           date_of_birth: form.dateOfBirth || null,
           email: form.emailPrimary || null,
@@ -1232,6 +1250,9 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
           "gender_identity": form.genderIdentity || null,
           "pronouns": form.pronouns || null,
           "sex": form.sex || null,
+          "sex_other": normalizedSexOther,
+          "biological_sex": form.sex || null,
+          "biological_sex_other": normalizedSexOther,
           "dob": form.dateOfBirth || null,
           "social-insurance-number": cleanedSin || null,
           "address-street-address": form.addressLine1 || null,
@@ -1499,16 +1520,33 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
                 {editing ? (
                   <Select
                     options={genderOptions}
-                    selectedOption={selectedGender}
+                    selectedOption={selectedSex}
                     onChange={({ detail }) =>
-                      setForm(current => ({ ...current, gender: detail.selectedOption?.value || "" }))
+                      setForm(current => {
+                        const nextSex = detail.selectedOption?.value || "";
+                        return {
+                          ...current,
+                          sex: nextSex,
+                          sexOther: nextSex === "other" ? current.sexOther : ""
+                        };
+                      })
                     }
-                    placeholder="Select gender"
+                    placeholder="Select biological sex"
                   />
                 ) : (
-                  <Input value={selectedGender?.label || "Not set"} readOnly />
+                  <Input value={selectedSex?.label || "Not set"} readOnly />
                 )}
               </FormField>
+              {(editing ? form.sex === "other" || Boolean(form.sexOther) : Boolean(form.sexOther)) ? (
+                <FormField label={`If "Other", please specify`} description="Optional detail provided by the applicant or case manager.">
+                  <Input
+                    value={form.sexOther}
+                    onChange={({ detail }) => setForm(current => ({ ...current, sexOther: detail.value }))}
+                    readOnly={!editing}
+                    placeholder="Add a brief description"
+                  />
+                </FormField>
+              ) : null}
             </ColumnLayout>
           </ExpandableSection>
 

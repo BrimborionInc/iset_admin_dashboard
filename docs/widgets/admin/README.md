@@ -20,6 +20,7 @@ Purpose: Index of widget-level docs for the initial workflow tranche.
 - `docs/widgets/admin/action-plans-widget.md`
 - `docs/widgets/admin/interventions-widget.md`
 - `docs/widgets/admin/intervention-assessment-widget.md`
+- `docs/widgets/admin/case-events-timeline-widget.md`
 - `docs/widgets/admin/case-finance-panel-widget.md`
 - `docs/widgets/admin/case-compliance-widget.md`
 - `docs/widgets/admin/case-export-preview-widget.md`

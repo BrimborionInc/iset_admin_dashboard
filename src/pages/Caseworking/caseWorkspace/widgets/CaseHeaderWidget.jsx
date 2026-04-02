@@ -521,6 +521,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     items.push({ id: "manage-payments", text: "View payments" });
     items.push({ id: "view-notes-calendar", text: "View notes and calendar" });
     items.push({ id: "documents-messages", text: "View documents and messages" });
+    items.push({ id: "audit-trail", text: "View audit trail" });
     items.push({ id: "esdc-validation", text: "ILMP Validation and Export" });
     if (canAddToWatchlist) {
       items.push({ id: "add-watchlist", text: "Add client SIN to watchlist" });
@@ -1074,6 +1075,8 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         requestLayoutSwitch("notesCalendar");
       } else if (detail.id === "documents-messages") {
         requestLayoutSwitch("documentsMessages");
+      } else if (detail.id === "audit-trail") {
+        requestLayoutSwitch("auditTrail");
       } else if (detail.id === "esdc-validation") {
         requestLayoutSwitch("esdcValidation");
       } else if (detail.id === "add-watchlist") {

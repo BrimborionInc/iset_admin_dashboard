@@ -1885,45 +1885,52 @@ const buildZipBuffer = async ({ entries = [] }) => {
   return result;
 };
 
+const CONSENT_PDF_TITLE = 'Consent';
+const CONSENT_PDF_HEADING = 'How we use your information';
 const CONSENT_PARAGRAPHS = [
-  "I, the undersigned, give my expressed and informed consent to the Native Women's Association of Canada and/or its sub-agreement holders to the Indigenous Skills and Employment Training Program (hereinafter referred to as ISET), to collect personal or sensitive information as it relates to my request for funding under the ISET program funded by Employment and Social Development Canada (ESDC). My consent extends to providing my Social Insurance Number (SIN), to determine my eligibility for interventions such as skills training and wage subsidies as part of the Labour Market Development Agreements (LMDA) program.",
-  'I acknowledge that the information is collected and administered in accordance with the Privacy Act (R.S.C. 1985, c P-21), the Department Employment and Social Development Canada Act (S.C. 2005, c.34), and the Access to Information Act (R.S.C., 1985, c.A-1). Information collected is to be used to determine eligibility for the ISET program; to measure results of this Agreement and evaluate its success; evaluate the effectiveness of the Program in achieving its objective; and, to meet its obligations of accountability by reporting on the results of the Program.',
-  "All information referred to above shall be treated as confidential, and the Native Women's Association of Canada and its sub-agreement holders will take all security measures reasonably necessary for the protection of such information against unauthorized release or disclosure.",
-  'Further, I understand that my personal information shall not be used or disclosed for purposes other than those for which it was collected, except with the expressed consent of you, as the client, or as required by law. Personal information shall be retained only as long as necessary for the fulfilment of those purposes.'
+  'By signing below, you give the Native Women’s Association of Canada (NWAC) and its ISET partners permission to collect and use the information you provide to review your application and determine eligibility for supports. This includes your Social Insurance Number (SIN), which we use to confirm your eligibility.',
+  'Your information is collected and administered in accordance with the Privacy Act (R.S.C. 1985, c P-21), the Department Employment and Social Development Canada Act (S.C. 2005, c.34), and the Access to Information Act (R.S.C., 1985, c.A-1).',
+  'Your personal information will not be used or disclosed for purposes other than those for which it was collected, except with your expressed consent, as the client, or as required by law.'
 ];
+const CONSENT_ACKNOWLEDGEMENT_STATEMENT =
+  'I have read how my information will be used and I agree to continue with my application.';
+const INDIGENOUS_DECLARATION_PDF_TITLE = 'Indigenous Declaration';
+const INDIGENOUS_DECLARATION_HEADING = 'Indigenous identity declaration';
 const INDIGENOUS_DECLARATION_PARAGRAPHS = [
-  'I, the undersigned, understand that the funding opportunity under the Indigenous Skills and Employment Training (ISET) program for which I am being assessed is intended to increase Indigenous participation in the Canadian labour market and support First Nations, Metis and Inuit peoples’ access to sustainable and meaningful employment. The ISET program provides access to training and employment supports to eligible Canadian Indigenous women in their diversities, including status and non-status First Nations, Metis and Inuit peoples whether residing on or off-reserve, in urban centres and in rural, remote communities.',
-  'Further, I understand that providing false or misleading information and/or omission of information by me about my Indigenous identity may result in an investigation. If an investigation is founded, it will be grounds for immediate suspension of any funding provided or promised to me and further, revocation of any Funding Agreement signed between me and the Native Women’s Association of Canada and/or its sub-agreement holders, and will result in a repayment of funds to Employment and Social Development Canada (ESDC), for monies I received to which I was not entitled.'
+  'I understand that the funding opportunity under the Indigenous Skills and Employment Training (ISET) program for which I am being assessed is intended to increase Indigenous participation in the Canadian labour market and support First Nations, Metis and Inuit peoples’ access to sustainable and meaningful employment. The ISET program provides access to training and employment supports to eligible Canadian Indigenous women in their diversities, including status and non-status First Nations, Metis and Inuit peoples whether residing on or off-reserve, in urban centres and in rural, remote communities.',
+  'I also understand that providing false or misleading information and/or omission of information by me about my Indigenous identity may result in an investigation. If an investigation is founded, it will be grounds for immediate suspension of any funding provided or promised to me and further, revocation of any Funding Agreement signed between me and the Native Women’s Association of Canada and/or its partners, and will result in a repayment of funds to Employment and Social Development Canada (ESDC), for monies I received to which I was not entitled.'
 ];
+const INDIGENOUS_DECLARATION_AFFILIATION_LABEL = 'My Nation, community, or treaty area';
 const CONFLICT_DECLARATION_PARAGRAPHS = [
-  "The Indigenous Skills and Employment Training (ISET) program is committed to fairness, transparency, and accountability in all funding decisions.",
-  "To protect the integrity of the program, all applicants must declare any actual, potential, or perceived conflicts of interest or biases related to their ISET application.",
-  "I do not have any personal, family, financial, or other relationship with any staff member of the Native Women's Association of Canada (NWAC) or any regional Provincial/Territorial Member Association (PTMA) that could influence or appear to influence the assessment or approval of my ISET application.",
-  "I have not attempted to influence or put pressure on any NWAC or regional PTMA staff involved in assessing or approving my ISET application.",
-  "I have not requested that my application be given priority ahead of other applicants, as I understand my application will be assessed in the order in which it was received by NWAC and/or the regional PTMA.",
-  "I have disclosed below any relationships, positive or negative biases, or circumstances that may create a real or perceived conflict of interest."
+  'The Indigenous Skills and Employment Training (ISET) program is committed to fair, transparent, and accountable funding decisions.',
+  'To support fairness, please tell us about any actual, potential, or perceived conflict of interest related to your application.',
+  '1. I am not aware of any personal, family, financial, or other relationship with NWAC staff or partner association staff that could influence, or appear to influence, the review of my ISET application.',
+  '2. I have not tried to influence or pressure anyone involved in reviewing my ISET application.',
+  '3. I understand that applications are reviewed according to program processes, and I have not asked for my application to be prioritized ahead of others.',
+  '4. If there is any actual, potential, or perceived conflict of interest or bias, I have described it below.'
 ];
+const CONFLICT_DECLARATION_PDF_TITLE = 'Conflict of Interest';
+const CONFLICT_DECLARATION_HEADING = 'Conflict of interest declaration';
 const AUTHORIZATION_RELEASE_PARAGRAPHS = [
-  "I, the undersigned, give my expressed and informed consent to the educational/training institute or my Employer (under a TWS or JCP), to release information to the Native Women's Association of Canada and/or its sub-agreement holders to the Indigenous Skills and Employment Training Program (hereinafter referred to as ISET).",
-  'I understand that my consent and authorization is valid in perpetuity for all information related to the program, classes, attendance, or wage subsidy that are funded by Employment and Social Development Canada (ESDC) under the ISET program and delivered by NWAC and/or its sub-agreement holders.',
-  "I understand that it is my personal responsibility to inform the Registrar's Office, my Employer and the NWAC and/or its sub-agreement holder in writing should I decide to withdraw my consent to release student information.",
+  'I give my consent to my educational institution, or my employer if my ISET support includes a work placement or wage subsidy, to release information to the Indigenous Skills and Employment Training (ISET) program provider. This authorization includes, but is not limited to, confirmation of enrollment, program details, course registration, attendance, academic standing, and any other information necessary to administer ISET funding.',
+  'This authorization also permits the institution to disclose information related to my student financial account, including tuition amounts, mandatory fees, residence or housing charges, payment status, outstanding balances, and any refunds, credits, or adjustments associated with my student account, where such information is required to determine or administer funding provided under the ISET program funded by Employment and Social Development Canada. I understand that where NWAC ISET funding has been provided for tuition or related educational expenses, any refunds or credits issued by the institution are be returned to the ISET program administrator in accordance with program requirements.',
+  'If I decide to withdraw this authorization, I understand that I must notify the Registrar’s Office, my employer, and NWAC or its ISET delivery partner in writing.',
   'Under the Freedom of Information and Protection of Individual Privacy Act, I have the right to privacy of personal information held by government institutions, including institutions of learning.',
-  'My signature denotes my consent and authorization for the training/educational institution or Employer for which I received funding or wage subsidy through the ISET program to release personal information as described above to NWAC and/or its designate.'
+  'My signature confirms that I authorize the institution or employer that received ISET funding or a wage subsidy on my behalf to share the information described above with NWAC or its designate.'
 ];
 const CLIENT_ACKNOWLEDGEMENT_PARAGRAPHS = [
-  'I, the undersigned, acknowledge that I have been advised by the Native Women’s Association of Canada and/or its sub-agreement holders to the Indigenous Skills and Employment Training Program (hereinafter referred to as ISET) that funding for skills and employment training, living allowance, wage subsidies or other sources of funding are Government of Canada resources advanced through Employment and Social Development Canada (ESDC) to fund the ISET program.',
-  'I give my consent to the Native Women’s Association of Canada and/or its sub-agreement holders and their designated authorized representatives, to contact other service agencies, funding providers, educational and training institutions to verify information regarding my application and for verification of household income sources.',
-  'Requests for supporting documentation may include but is not limited to: acceptance letter from training institution, letter of decision by Band; ID (Status/Treaty Card, driver’s license, Passport, Health Card or other Government-issued identification); tax assessments; child tax benefit (CTB) statement; Social Assistance statement or letter from agency/caseworker; Record of Employment (ROE); paystubs; letter of employment, bank statements, and other documentation as may be required for verification purposes.',
-  'I understand and acknowledge that any false or misleading statements and/or omission of information by me, may be grounds for immediate suspension of any funding and further, revocation of any funding arrangement between me and the Native Women’s Association of Canada and/or its sub-agreement holders, and may result in a repayment of funds to Employment and Social Development Canada (ESDC), for monies I received to which I was not entitled.'
+  'I acknowledge that funding for the Indigenous Skills and Employment Training Program (hereinafter referred to as ISET) are Government of Canada resources advanced through Employment and Social Development Canada (ESDC) to fund the NWAC ISET program.',
+  'I give my consent to the Native Women’s Association of Canada and/or its designated authorized representatives, to contact other service agencies, funding providers, educational and training institutions to verify information regarding my application.',
+  'Requests for supporting documentation may include but is not limited to: acceptance letter from training institution, letter of decision by Band; ID (Status/Treaty Card, driver’s license, Passport, Health Card or other Government-issued identification); tax assessments; child tax benefit (CTB) statement; Social Assistance statement or letter from agency/caseworker; Record of Employment (ROE); paystubs; letter of employment, bank statements, and other documentation as may be required for verification purposes.'
 ];
 
 const INDIGENOUS_DECLARATION_STATEMENT =
-  'I hereby declare that I am an Indigenous person in Canada, which for the purposes of the Indigenous Skills and Employment Training (ISET) Program is inclusive of persons who are First Nations, Inuit, or Metis.';
+  'I declare that I am an Indigenous person in Canada, which for the purposes of the Indigenous Skills and Employment Training (ISET) Program is inclusive of persons who are First Nations, Inuit, or Metis.';
 const CONFLICT_DECLARATION_STATEMENT =
-  'Are you declaring a conflict of interest or bias in relation to your ISET application?';
+  'I confirm that one of the following applies:';
 const CONFLICT_OPTION_LABELS = {
-  no_conflict: 'I have no conflicts of interest or biases to declare',
-  conflict: 'I wish to declare the following potential conflicts or biases'
+  no_conflict: 'I have no conflict of interest or bias to declare',
+  conflict: 'I want to declare a possible conflict of interest or bias'
 };
 
 const NWAC_LOGO_PATH = path.join(__dirname, 'public', 'nwac-logo.png');
@@ -2812,9 +2819,22 @@ const APPLICATION_FORM_LABOUR_FIELDS = {
   underemployed: 'labour_underemployed',
   employed_full_time: 'labour_employed_full',
   employed_part_time: 'labour_employed_part',
+  employed_on_approved_leave: 'labour_employed_leave',
   self_employed: 'labour_self_employed',
   student: 'labour_student',
   other: 'labour_other'
+};
+
+const APPLICATION_FORM_BIOLOGICAL_SEX_FIELDS = {
+  female: 'biological_sex_female',
+  male: 'biological_sex_male',
+  other: 'biological_sex_other'
+};
+
+const APPLICATION_FORM_GENDER_IDENTITY_FIELDS = {
+  female: 'gender_identity_woman',
+  male: 'gender_identity_man',
+  other: 'gender_identity_other'
 };
 
 const APPLICATION_FORM_EDUCATION_FIELDS = {
@@ -2844,7 +2864,10 @@ const APPLICATION_FORM_BARRIER_FIELDS = {
 const APPLICATION_FORM_TARGET_PROGRAM_FIELDS = {
   skills_development: 'target_program_skills',
   tws: 'target_program_tws',
-  jcp: 'target_program_jcp'
+  jcp: 'target_program_jcp',
+  group: 'target_program_group',
+  self_support: 'target_program_self_support',
+  not_yet: 'target_program_not_yet'
 };
 
 const APPLICATION_FORM_SUPPORT_FIELDS = {
@@ -3007,15 +3030,24 @@ function buildApplicationFormPdfFields({
   const resolvedReceivedAt = formatPdfDateTime(receivedAt || applicationRow?.created_at);
   const dobParts = formatPdfDateParts(readAnswer('dob') || readAnswer('date-of-birth'));
 
-  const genderValue = normaliseEnumKey(
+  const biologicalSexKey = normaliseEnumKey(
+    readAnswer('biological_sex') ||
+    readAnswer('biological-sex')
+  );
+  const biologicalSexFields = mapSelectionToFields(
+    biologicalSexKey,
+    APPLICATION_FORM_BIOLOGICAL_SEX_FIELDS
+  );
+
+  const genderIdentityKey = normaliseEnumKey(
     readAnswer('gender_identity') ||
     readAnswer('gender-identity') ||
-    readAnswer('gender') ||
-    readAnswer('biological_sex')
+    readAnswer('gender')
   );
-  const genderFemale = genderValue === 'female';
-  const genderMale = genderValue === 'male';
-  const genderDiverse = Boolean(genderValue && !genderFemale && !genderMale);
+  const genderIdentityFields = mapSelectionToFields(
+    genderIdentityKey,
+    APPLICATION_FORM_GENDER_IDENTITY_FIELDS
+  );
 
   const indigenousKey = normaliseEnumKey(readAnswer('legal-indigenous-identity'));
   const indigenousFields = mapSelectionToFields(indigenousKey, APPLICATION_FORM_INDIGENOUS_FIELDS);
@@ -3038,6 +3070,9 @@ function buildApplicationFormPdfFields({
   const socialAssistance = coerceBoolean(readAnswer('social-assistance'));
   const socialYes = socialAssistance === true;
   const socialNo = socialAssistance === false;
+  const caseWorkerAware = coerceBoolean(readAnswer('case-worker-aware-school-work'));
+  const caseWorkerAwareYes = caseWorkerAware === true;
+  const caseWorkerAwareNo = caseWorkerAware === false;
 
   const labourKey = normaliseEnumKey(readAnswer('labour-force-status'));
   const labourFields = mapSelectionToFields(labourKey, APPLICATION_FORM_LABOUR_FIELDS);
@@ -3062,9 +3097,12 @@ function buildApplicationFormPdfFields({
   const childcareStatusFields = mapSetToFields(childcareStatusSet, APPLICATION_FORM_CHILDCARE_STATUS_FIELDS);
   const childcareNotApplicable = hasSupports && !childcareRequested;
 
-  const otherFunding = coerceBoolean(readAnswer('loan-grant'));
-  const otherFundingYes = otherFunding === true;
-  const otherFundingNo = otherFunding === false;
+  const studentFinancialAssistance = coerceBoolean(readAnswer('loan-grant'));
+  const studentFinancialAssistanceYes = studentFinancialAssistance === true;
+  const studentFinancialAssistanceNo = studentFinancialAssistance === false;
+  const disabilitySupport = coerceBoolean(readAnswer('disability-support'));
+  const disabilitySupportYes = disabilitySupport === true;
+  const disabilitySupportNo = disabilitySupport === false;
 
   const languageKey = normaliseEnumKey(readAnswer('preferred-language'));
   const preferredLanguageLabel = APPLICATION_FORM_LANGUAGE_LABELS[languageKey] || safeText(readAnswer('preferred-language'));
@@ -3098,11 +3136,12 @@ function buildApplicationFormPdfFields({
     dob_year: dobParts.year,
     dob_month: dobParts.month,
     dob_day: dobParts.day,
-    gender_female: genderFemale,
-    gender_diverse: genderDiverse,
+    ...biologicalSexFields,
+    biological_sex_other_detail: safeText(readAnswer('biological_sex_other')),
+    ...genderIdentityFields,
     ...indigenousFields,
     registration_number: extractRegistrationNumber(answers),
-    home_community: safeText(readAnswer('home-comminuty')),
+    home_community: safeText(readAnswer('home-community') || readAnswer('home-comminuty')),
     address_unit: '',
     address_line1: safeText(readAnswer('address-street-address')),
     address_city: safeText(readAnswer('address-city')),
@@ -3129,6 +3168,8 @@ function buildApplicationFormPdfFields({
     social_assistance_yes: socialYes,
     social_assistance_no: socialNo,
     top_up_amount: safeText(readAnswer('top-up-amount')),
+    case_worker_aware_yes: caseWorkerAwareYes,
+    case_worker_aware_no: caseWorkerAwareNo,
     ...labourFields,
     ...educationFields,
     education_year: safeText(readAnswer('education-year')),
@@ -3139,13 +3180,16 @@ function buildApplicationFormPdfFields({
     ...targetProgramFields,
     ...supportFields,
     support_other_details: safeText(readAnswer('other-requested-support')),
+    disability_support_yes: disabilitySupportYes,
+    disability_support_no: disabilitySupportNo,
+    disability_support_details: safeText(readAnswer('disability-support_yes_follow')),
     childcare_yes: childcareYes,
     childcare_no: childcareNo,
     childcare_not_applicable: childcareNotApplicable,
     ...childcareStatusFields,
-    other_funding_yes: otherFundingYes,
-    other_funding_no: otherFundingNo,
-    other_funding_details: safeText(readAnswer('loan-grant-details'))
+    student_financial_assistance_yes: studentFinancialAssistanceYes,
+    student_financial_assistance_no: studentFinancialAssistanceNo,
+    student_financial_assistance_details: safeText(readAnswer('loan-grant-details'))
   };
 }
 
@@ -39365,6 +39409,69 @@ app.post('/api/cases/:case_id/application/versions', async (req, res) => {
 });
 
 
+async function resolveCaseApplicantMessagingContext(caseId) {
+  const numericCaseId = Number.parseInt(caseId, 10);
+  if (!Number.isInteger(numericCaseId) || numericCaseId < 1) {
+    return null;
+  }
+
+  const [[row] = []] = await pool.query(
+    `SELECT
+       c.id AS case_id,
+       c.application_id,
+       c.case_number,
+       c.case_context_json,
+       c.status AS case_status,
+       a.status AS application_status,
+       s.reference_number AS submission_reference,
+       COALESCE(
+         applicant_submission.id,
+         applicant_client_sub.id,
+         applicant_client_email.id,
+         NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.user_id')), '')
+       ) AS applicant_user_id,
+       COALESCE(
+         applicant_submission.name,
+         applicant_client_sub.name,
+         applicant_client_email.name,
+         JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.full_name')),
+         NULLIF(CONCAT_WS(' ', NULLIF(TRIM(cl.first_name), ''), NULLIF(TRIM(cl.last_name), '')), '')
+       ) AS applicant_name,
+       COALESCE(
+         applicant_submission.email,
+         applicant_client_sub.email,
+         applicant_client_email.email,
+         NULLIF(TRIM(cl.applicant_account_email), '')
+       ) AS applicant_email
+     FROM iset_case c
+     LEFT JOIN client cl ON cl.id = c.client_id
+     LEFT JOIN iset_application a ON a.id = c.application_id
+     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+     LEFT JOIN user applicant_submission ON applicant_submission.id = s.user_id
+     LEFT JOIN user applicant_client_sub ON applicant_client_sub.cognito_sub = cl.applicant_cognito_sub
+     LEFT JOIN user applicant_client_email ON applicant_client_email.email = cl.applicant_account_email
+     WHERE c.id = ?
+     LIMIT 1`,
+    [numericCaseId]
+  );
+
+  if (!row) {
+    return null;
+  }
+
+  const applicantUserId = Number(row.applicant_user_id);
+
+  return {
+    ...row,
+    applicant_user_id: Number.isFinite(applicantUserId) ? applicantUserId : null,
+    applicant_name: normaliseString(row.applicant_name) || null,
+    applicant_email: normaliseString(row.applicant_email) || null,
+    submission_reference: normaliseString(row.submission_reference) || null,
+    case_number: normaliseString(row.case_number) || null,
+  };
+}
+
+
 // Get a single case by case id
 app.get('/api/cases/:id/workspace', async (req, res) => {
   const caseId = Number.parseInt(req.params.id, 10);
@@ -39524,6 +39631,18 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       } else {
         return res.status(403).json({ error: 'forbidden' });
       }
+    }
+
+    let applicantMessagingContext = null;
+    try {
+      applicantMessagingContext = await resolveCaseApplicantMessagingContext(caseId);
+    } catch (err) {
+      const noTable = err && err.code === 'ER_NO_SUCH_TABLE';
+      const badField = err && err.code === 'ER_BAD_FIELD_ERROR';
+      if (!noTable && !badField) {
+        throw err;
+      }
+      console.warn('[workspace] applicant messaging context unavailable for case %s (%s)', caseId, err?.code || err);
     }
 
     let clientRegionObject = null;
@@ -39944,12 +40063,20 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       return Number.isFinite(numeric) ? numeric : null;
     };
 
-    const applicantUserIdValue = resolveApplicantUserId(row.applicant_user_id);
-    const applicantNameValue = normaliseString(row.applicant_name) || null;
+    const applicantUserIdValue = resolveApplicantUserId(
+      applicantMessagingContext?.applicant_user_id ?? row.applicant_user_id
+    );
+    const applicantNameValue =
+      normaliseString(applicantMessagingContext?.applicant_name) ||
+      normaliseString(row.applicant_name) ||
+      null;
     const applicantLegalNameValue =
       [firstName, lastName].filter(Boolean).join(' ') ||
       (applicantNameValue && applicantNameValue.includes(' ') ? applicantNameValue : null);
-    const applicantEmailValue = normaliseString(row.applicant_email) || null;
+    const applicantEmailValue =
+      normaliseString(applicantMessagingContext?.applicant_email) ||
+      normaliseString(row.applicant_email) ||
+      null;
     const pathAccountEmailValue =
       normaliseString(row.client_applicant_account_email) ||
       normaliseString(
@@ -47366,18 +47493,9 @@ app.get('/api/cases/:id/messages', async (req, res) => {
     await ensureCaseMessageItemTable();
 
     // Resolve applicant user id for this case
-    let caseRow;
+    let applicantContext;
     try {
-      [[caseRow]] = await pool.query(
-        `SELECT COALESCE(applicant.id, s.user_id) AS applicant_user_id
-         FROM iset_case c
-         JOIN iset_application a ON c.application_id = a.id
-         LEFT JOIN iset_application_submission s ON a.submission_id = s.id
-         LEFT JOIN user applicant ON s.user_id = applicant.id
-         WHERE c.id = ?
-         LIMIT 1`,
-        [caseId]
-      );
+      applicantContext = await resolveCaseApplicantMessagingContext(caseId);
     } catch (e) {
       const noTable = e && e.code === 'ER_NO_SUCH_TABLE';
       const badField = e && e.code === 'ER_BAD_FIELD_ERROR';
@@ -47387,10 +47505,18 @@ app.get('/api/cases/:id/messages', async (req, res) => {
       }
       throw e;
     }
-    const applicantId = caseRow?.applicant_user_id || null;
-    if (!applicantId) return res.status(404).json({ error: 'applicant_not_found' });
+    if (!applicantContext) {
+      return res.status(404).json({ error: 'case_not_found' });
+    }
+    const applicantId = applicantContext?.applicant_user_id || null;
     const requesterRole = canonicaliseAccessRole(inferUserRole(req));
     const isStaffRequester = Boolean(requesterRole);
+    if (!applicantId) {
+      if (!isStaffRequester) {
+        return res.status(403).json({ error: 'forbidden_case_access' });
+      }
+      return res.json({ applicant_user_id: null, items: [] });
+    }
     if (!isStaffRequester && Number(ownerUserId) !== Number(applicantId)) {
       return res.status(403).json({ error: 'forbidden_case_access' });
     }
@@ -47532,23 +47658,8 @@ const handlePostCaseSecureMessage = async (req, res) => {
   }
   try {
     // Resolve applicant user id
-    const [[caseRow]] = await pool.query(
-      `SELECT c.application_id,
-              c.status AS case_status,
-              a.status AS application_status,
-              s.user_id AS applicant_user_id,
-              s.reference_number AS submission_reference,
-              c.case_number,
-              c.case_context_json,
-              applicant.email AS applicant_email
-         FROM iset_case c
-         LEFT JOIN iset_application a ON c.application_id = a.id
-         LEFT JOIN iset_application_submission s ON a.submission_id = s.id
-         LEFT JOIN user applicant ON s.user_id = applicant.id
-        WHERE c.id = ?
-        LIMIT 1`,
-      [caseId]
-    );
+    const caseRow = await resolveCaseApplicantMessagingContext(caseId);
+    if (!caseRow) return res.status(404).json({ error: 'case_not_found' });
     const recipientId = caseRow?.applicant_user_id || null;
     if (!recipientId) return res.status(404).json({ error: 'applicant_not_found' });
     const caseContext = safeJsonParse(caseRow?.case_context_json, null) || {};
@@ -56670,12 +56781,14 @@ async function fetchPaymentPacketById(packetId, connection = null) {
             prog.email AS program_approver_email,
             fin.name AS finance_approver_name,
             fin.email AS finance_approver_email,
-            s.user_id AS applicant_user_id
+            COALESCE(s.user_id, applicant_client_sub.id, applicant_client_email.id) AS applicant_user_id
        FROM payment_packet pp
        LEFT JOIN iset_case c ON c.id = pp.case_id
+       LEFT JOIN client cl ON cl.id = pp.client_id
        LEFT JOIN iset_application a ON a.id = c.application_id
        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-       LEFT JOIN client cl ON cl.id = pp.client_id
+       LEFT JOIN user applicant_client_sub ON applicant_client_sub.cognito_sub = cl.applicant_cognito_sub
+       LEFT JOIN user applicant_client_email ON applicant_client_email.email = cl.applicant_account_email
        LEFT JOIN iset_case_intervention ci ON ci.id = pp.intervention_id
        LEFT JOIN user req ON req.id = pp.requester_user_id
        LEFT JOIN user prog ON prog.id = pp.program_approved_by_user_id
@@ -61193,12 +61306,14 @@ app.get('/api/finance/payment-packets', async (req, res) => {
               prog.email AS program_approver_email,
               fin.name AS finance_approver_name,
               fin.email AS finance_approver_email,
-            s.user_id AS applicant_user_id
+              COALESCE(s.user_id, applicant_client_sub.id, applicant_client_email.id) AS applicant_user_id
          FROM payment_packet pp
          LEFT JOIN iset_case c ON c.id = pp.case_id
+         LEFT JOIN client cl ON cl.id = pp.client_id
          LEFT JOIN iset_application a ON a.id = c.application_id
          LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-         LEFT JOIN client cl ON cl.id = pp.client_id
+         LEFT JOIN user applicant_client_sub ON applicant_client_sub.cognito_sub = cl.applicant_cognito_sub
+         LEFT JOIN user applicant_client_email ON applicant_client_email.email = cl.applicant_account_email
          LEFT JOIN iset_case_intervention ci ON ci.id = pp.intervention_id
          LEFT JOIN user req ON req.id = pp.requester_user_id
          LEFT JOIN user prog ON prog.id = pp.program_approved_by_user_id
@@ -66050,7 +66165,7 @@ app.post('/api/consent-letter/pdf', async (req, res) => {
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Client EI Consent</title>
+  <title>${escapeHtml(CONSENT_PDF_TITLE)}</title>
   <style>
     body { font-family: Arial, Helvetica, sans-serif; color: #1b1b1b; margin: 40px; line-height: 1.5; }
     h1 { text-align: center; font-size: 24px; margin-bottom: 12px; }
@@ -66070,10 +66185,11 @@ app.post('/api/consent-letter/pdf', async (req, res) => {
   <div class="logo">
     ${logoDataUri ? `<img src="${logoDataUri}" alt="Native Women's Association of Canada logo" />` : ''}
   </div>
-  <h1>CLIENT CONSENT FOR EI VERIFICATION</h1>
+  <h1>${escapeHtml(CONSENT_PDF_TITLE)}</h1>
+  <h2>${escapeHtml(CONSENT_PDF_HEADING)}</h2>
   ${CONSENT_PARAGRAPHS.map(paragraph => `<p class="paragraph">${escapeHtml(paragraph)}</p>`).join('')}
-  <h2>Client acknowledgement</h2>
-  <p>I confirm that I have read and understood the above consent and agree to proceed with my application.</p>
+  <h2>Applicant acknowledgement</h2>
+  <p>${escapeHtml(CONSENT_ACKNOWLEDGEMENT_STATEMENT)}</p>
   <table style="margin-top: 24px;">
     <tr>
       <td style="width: 50%;">
@@ -66107,7 +66223,7 @@ app.post('/api/consent-letter/pdf', async (req, res) => {
     });
     await page.close();
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="client-ei-consent-${applicationId}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="consent-${applicationId}.pdf"`);
     return res.end(pdfBuffer);
   } catch (err) {
     console.error('[consent-pdf] failed to generate PDF:', err);
@@ -66140,6 +66256,7 @@ app.post('/api/authorization-release/pdf', async (req, res) => {
   <style>
     body { font-family: Arial, Helvetica, sans-serif; color: #1b1b1b; margin: 40px; line-height: 1.5; }
     h1 { text-align: center; font-size: 24px; margin-bottom: 12px; }
+    h2 { font-size: 18px; margin-top: 0; margin-bottom: 16px; }
     .logo { text-align: center; margin-bottom: 24px; }
     .logo img { max-height: 80px; width: auto; }
     .signature-box { border: 1px solid #9ba7b6; border-radius: 6px; padding: 16px; min-height: 80px; display: flex; align-items: center; font-size: 22px; font-family: 'Segoe Script', 'Lucida Handwriting', cursive; }
@@ -66156,6 +66273,7 @@ app.post('/api/authorization-release/pdf', async (req, res) => {
     ${logoDataUri ? `<img src="${logoDataUri}" alt="Native Women's Association of Canada logo" />` : ''}
   </div>
   <h1>Authorization for Release of ISET Client Information</h1>
+  <h2>Release of ISET client information</h2>
   ${AUTHORIZATION_RELEASE_PARAGRAPHS.map(paragraph => `<p class="paragraph">${escapeHtml(paragraph)}</p>`).join('')}
   <table style="margin-top: 24px;">
     <tr>
@@ -66306,7 +66424,7 @@ app.post('/api/indigenous-declaration/pdf', async (req, res) => {
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Indigenous Declaration</title>
+  <title>${escapeHtml(INDIGENOUS_DECLARATION_PDF_TITLE)}</title>
   <style>
     body { font-family: Arial, Helvetica, sans-serif; color: #1b1b1b; margin: 40px; line-height: 1.5; }
     h1 { text-align: center; font-size: 24px; margin-bottom: 12px; }
@@ -66330,10 +66448,11 @@ app.post('/api/indigenous-declaration/pdf', async (req, res) => {
   <div class="logo">
     ${logoDataUri ? `<img src="${logoDataUri}" alt="Native Women's Association of Canada logo" />` : ''}
   </div>
-  <h1>Indigenous Declaration</h1>
+  <h1>${escapeHtml(INDIGENOUS_DECLARATION_PDF_TITLE)}</h1>
+  <h2>${escapeHtml(INDIGENOUS_DECLARATION_HEADING)}</h2>
   ${INDIGENOUS_DECLARATION_PARAGRAPHS.map(paragraph => `<p class="paragraph">${escapeHtml(paragraph)}</p>`).join('')}
   <div class="affiliation-block">
-    <div class="meta"><strong>My Nation/Community/Treaty Area affiliation</strong></div>
+    <div class="meta"><strong>${escapeHtml(INDIGENOUS_DECLARATION_AFFILIATION_LABEL)}</strong></div>
     <div class="meta">${affiliationHtml}</div>
   </div>
   <div class="statement">
@@ -66430,6 +66549,7 @@ app.post('/api/conflict-declaration/pdf', async (req, res) => {
   <style>
     body { font-family: Arial, Helvetica, sans-serif; color: #1b1b1b; margin: 40px; line-height: 1.5; }
     h1 { text-align: center; font-size: 24px; margin-bottom: 12px; }
+    h2 { font-size: 18px; margin-top: 0; margin-bottom: 16px; }
     .logo { text-align: center; margin-bottom: 24px; }
     .logo img { max-height: 80px; width: auto; }
     .signature-box { border: 1px solid #9ba7b6; border-radius: 6px; padding: 16px; min-height: 80px; display: flex; align-items: center; font-size: 22px; font-family: 'Segoe Script', 'Lucida Handwriting', cursive; }
@@ -66452,15 +66572,16 @@ app.post('/api/conflict-declaration/pdf', async (req, res) => {
   <div class="logo">
     ${logoDataUri ? `<img src="${logoDataUri}" alt="Native Women's Association of Canada logo" />` : ''}
   </div>
-  <h1>Conflict of Interest and Bias Declaration</h1>
+  <h1>${escapeHtml(CONFLICT_DECLARATION_PDF_TITLE)}</h1>
+  <h2>${escapeHtml(CONFLICT_DECLARATION_HEADING)}</h2>
   ${CONFLICT_DECLARATION_PARAGRAPHS.map(paragraph => `<p class="paragraph">${escapeHtml(paragraph)}</p>`).join('')}
   <div class="selection">
-    <div class="selection-title">Declaration selection</div>
+    <div class="selection-title">Selected option</div>
     <div>${optionLabelHtml}</div>
     ${isConflict ? `<div class="explanation">${explanationBlock}</div>` : ''}
   </div>
   <div class="statement">
-    <div class="meta"><strong>Declaration statement</strong></div>
+    <div class="meta"><strong>Confirmation prompt</strong></div>
     <div class="meta">${escapeHtml(CONFLICT_DECLARATION_STATEMENT)}</div>
   </div>
   <p class="status ${statusClass}">${statusHtml}</p>

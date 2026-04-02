@@ -7,7 +7,7 @@ Date: 2026-03-23
 - The schema can represent a client file without a historical application.
 - Do not create placeholder application, submission, assessment, action-plan, or intervention rows just to satisfy referential integrity.
 - A true client-file import should be modeled as `client` + `iset_case` + seeded `case_context_json`.
-- Core case creation, case updates, and case listing now support that model, but some participant-facing features still depend on an applicant account / application link.
+- Core case creation, case updates, and case listing now support that model, but some participant-facing features still depend on an applicant account even when no historical application exists.
 
 ## Current source of truth
 
@@ -31,7 +31,7 @@ This means the database does not require a fake intake history just to preserve 
 - `POST /api/cases` now supports a client-file case with `client_id` only.
 - `PUT /api/cases/:id` now works for application-less cases when the change is truly case-level (`case_context_json`, assessment, case status). Application-specific fields still require an application link.
 - `GET /api/cases` now includes application-less cases in the main cases dashboard list.
-- Secure messaging still resolves the participant recipient from `case -> application -> submission -> user`, so it does not currently support a case that only has client/profile data. The workspace now suppresses message actions when no participant account is linked.
+- Secure messaging now resolves the participant recipient from either the normal `case -> application -> submission -> user` chain or the imported client's linked applicant account (`client.applicant_cognito_sub` / `client.applicant_account_email`). The workspace suppresses message actions when no participant account is linked.
 - Supporting Documents now has a real case-based mode for client-file-only cases:
   - reads from `GET /api/cases/:id/documents`
   - uploads through `POST /api/cases/:id/documents/upload`

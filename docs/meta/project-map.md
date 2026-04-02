@@ -146,6 +146,7 @@ Risk Mitigations:
 - Documentation: `docs/planning/dev-tasks-migration.md` covers persistence approach.
 
 ## Docs & Specs
+- `docs/meta/codex-thread-index.md`: Searchable cross-thread recovery index for durable handoff notes, runbooks, and prior-thread findings that future chats may need to rediscover quickly.
 - `docs/features/landing-page.md`: Iterative change log for dashboard/landing-page evolution.
 - `docs/features/file-uploads/conditional-rules.md`: Spec for expanded file-upload conditional rule logic.
 - `docs/dashboards/client-file-import-dashboard.md`: Current Client Batch Import dashboard behavior and constraints.
