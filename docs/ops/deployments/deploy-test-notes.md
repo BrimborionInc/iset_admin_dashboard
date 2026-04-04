@@ -1,22 +1,36 @@
 # Test Environment Deployment Notes
 
+For the shortest operator commands, start with `docs/ops/deployments/deployment-quick-guide.md`.
+
 ## One-command deploy (recommended)
 
-Run the automated script:
+Run the PATH orchestrator from `X:\ISET\admin-dashboard`:
 
 ```powershell
-npm run deploy-admin-to-test
+npm run path:deploy -- --env test --dataset intake-release --workflow-id 21
 ```
 
 What it does:
-- Builds the React app with `.env.test`
-- Packages the build plus server assets into a zip
-- Uploads the zip to `s3://nwac-test-artifacts/admin-dashboard/`
-- Uses SSM to roll the update out to every instance in the `nwac-test-asg` Auto Scaling Group
-- Installs dependencies, refreshes `/opt/nwac/admin-dashboard`, sets `NODE_ENV=production`, and restarts PM2
-- Waits for the SSM command to finish and surfaces any errors it encounters
+- Verifies the TEST AWS identity/profile before doing anything
+- Plans/applies canonical shared-schema migrations through SSM on a TEST app host
+- Optionally promotes an allowlisted config dataset from DEV (`intake-release` shown above)
+- Runs the existing admin and portal TEST app deploy scripts
+- Verifies TEST health through the ALB target groups (`nwac-test-admin-tg`, `nwac-test-portal-tg`)
+- Writes a release manifest under `tmp/path-deploy/test/`
 
-If the script fails it will print the AWS CLI error output so you can forward it for troubleshooting.
+For a non-destructive preflight first:
+
+```powershell
+npm run path:deploy:plan -- --env test --dataset intake-release --workflow-id 21
+```
+
+If you only need the legacy component rollout primitives:
+
+```powershell
+npm run deploy-admin-to-test -- -AwsProfile nwac-test
+cd X:\ISET\ISET-intake
+npm run deploy-portal-to-test -- -AwsProfile nwac-test
+```
 
 ## Manual fall-back (legacy process)
 
@@ -30,4 +44,4 @@ These steps are kept for reference in case you ever need to perform the deployme
 5. Execute `aws ssm send-command` against each instance in the fleet and poll until the status is `Success`
 6. Perform a quick smoke test and clean up the temporary zip once verified
 
-> **Reminder:** Avoid the legacy `deploy.ps1` workflow; use the automated script above or the manual SSM approach if you need absolute control.
+> **Reminder:** Avoid the legacy `deploy.ps1` workflow; use `path:deploy` for the supported PATH flow, or the component scripts/manual SSM path only as a lower-level fallback.

@@ -13,7 +13,7 @@
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [string]$Profile = "nwac-prod-direct",
+    [string]$Profile = "nwac-prod",
     [string]$Region = "ca-central-1",
     [string]$PrimaryPortalUrl = "https://iset.nwac.ca",
     [string]$LegacyPortalUrl = "https://nwac-public.awentech.ca",

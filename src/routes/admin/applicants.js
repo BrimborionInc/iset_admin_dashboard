@@ -6,6 +6,7 @@ const {
   ensureApplicantAccountForClient,
   fetchActorStaffProfileId,
   fetchApplicantAccountRows,
+  fetchApplicantAccountSummary,
   sendApplicantActivationInvitation,
 } = require('../../lib/applicantAccountService');
 
@@ -43,11 +44,31 @@ router.get(
       }
 
       const q = typeof req.query?.q === 'string' ? req.query.q : '';
-      const rows = await fetchApplicantAccountRows(pool, { q });
+      const status = typeof req.query?.status === 'string' ? req.query.status : '';
+      const rows = await fetchApplicantAccountRows(pool, { q, status });
       return res.json({ source: 'client+cases', users: rows });
     } catch (err) {
       console.warn('[admin-applicants] list failed:', err?.message || err);
       return sendRouteError(res, err, 'admin_applicants_failed');
+    }
+  }
+);
+
+router.get(
+  '/applicants/summary',
+  requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager', 'ISET Coordinator'),
+  async (req, res) => {
+    try {
+      const pool = getDbPoolFromRequest(req);
+      if (!pool) {
+        return res.status(500).json({ error: 'db_unavailable', message: 'Database pool unavailable.' });
+      }
+
+      const metrics = await fetchApplicantAccountSummary(pool);
+      return res.json({ source: 'client', metrics });
+    } catch (err) {
+      console.warn('[admin-applicants] summary failed:', err?.message || err);
+      return sendRouteError(res, err, 'admin_applicant_summary_failed');
     }
   }
 );

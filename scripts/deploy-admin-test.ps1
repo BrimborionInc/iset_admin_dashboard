@@ -14,7 +14,7 @@
   AWS region for all CLI calls. Defaults to ca-central-1.
 
 .PARAMETER AwsProfile
-  AWS CLI profile for local AWS calls. Defaults to nwac.
+  AWS CLI profile for local AWS calls. Defaults to nwac-test.
 
 .PARAMETER AutoScalingGroup
   Name of the Auto Scaling Group hosting the admin app. Defaults to nwac-test-asg.
@@ -27,14 +27,18 @@
 
 .PARAMETER SkipBuild
   Skips the `npm run build:test` step (useful when re-deploying an existing build artefact).
+
+.PARAMETER ReleaseId
+  Optional release/build identifier to stamp into the frontend bundle.
 #>
 [CmdletBinding()]
 param(
     [string]$Region = "ca-central-1",
-    [string]$AwsProfile = "nwac",
+    [string]$AwsProfile = "nwac-test",
     [string]$AutoScalingGroup = "nwac-test-asg",
     [string]$Bucket = "nwac-test-artifacts",
     [string]$KeyPrefix = "admin-dashboard",
+    [string]$ReleaseId = "",
     [switch]$SkipBuild,
     [switch]$ShowRemoteLogs
 )
@@ -270,6 +274,12 @@ try {
 
     if (-not $SkipBuild) {
         Write-Section "Building React app for test"
+        $env:PATH_DEPLOY_ENV = "test"
+        if ([string]::IsNullOrWhiteSpace($ReleaseId)) {
+            Remove-Item Env:PATH_RELEASE_ID -ErrorAction SilentlyContinue
+        } else {
+            $env:PATH_RELEASE_ID = $ReleaseId
+        }
         npm run build:test | Out-Host
     } else {
         Write-Section "Skipping build step (per flag)"
@@ -400,6 +410,12 @@ try {
     $commandsList.Add('else')
     $commandsList.Add('  echo "WARNING: Secret $SECRET_NAME not found or empty; AI will remain disabled."')
     $commandsList.Add('fi')
+    $commandsList.Add('for target in /home/ec2-user/admin-dashboard/.env /opt/nwac/admin-dashboard/.env /opt/nwac/admin-dashboard/.env.test; do')
+    $commandsList.Add('  if [ -f "$target" ]; then')
+    $commandsList.Add('    grep -v "^DISABLE_AUTO_MIGRATIONS=" "$target" > "$target.tmp" && mv "$target.tmp" "$target"')
+    $commandsList.Add('  fi')
+    $commandsList.Add('  echo "DISABLE_AUTO_MIGRATIONS=true" >> "$target"')
+    $commandsList.Add('done')
 
     if ($stagedDirectories -contains 'src') {
         $commandsList.Add('rm -rf /opt/nwac/admin-dashboard/src')

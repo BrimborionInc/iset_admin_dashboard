@@ -4,7 +4,13 @@ Purpose: Quick map for Codex and developers. Use this for first-pass answers, th
 
 ## Orientation
 - Admin dashboard and public portal share the `iset_intake` MySQL schema.
-- Admin dashboard schema changes are applied via the admin server migration runner reading `sql/` (tracked by `iset_migration`; see `docs/ops/migration-runner.md`). `db/migrations/` exists but is not applied by the admin server runner.
+- Canonical shared-schema migrations now live in `admin-dashboard/sql/migrations/` and are tracked in `iset_migration`; see `docs/ops/migration-runner.md`.
+- `admin-dashboard/sql/ops/` is for one-off/manual SQL and is not auto-applied by the server.
+- Deployed admin environments now force `DISABLE_AUTO_MIGRATIONS=true`, so TEST/PROD schema changes should come through the explicit deploy/migration commands rather than app startup.
+- `admin-dashboard/db/migrations/` is a legacy archive/reference path, not the live canonical runner.
+- `../ISET-intake/db/migrations/` is currently empty and should stay inactive for PATH shared-schema work.
+- Deployed portal environments now force `AUTO_MIGRATE=false`, so the public portal should not mutate the shared schema in test/prod.
+- `../ISET-intake/scripts/run-migrations.js` still exists as a legacy/manual helper and writes to `schema_migrations`; do not use it as the normal PATH deployment path.
 - Dev DB runs on the Windows host. From WSL, use the Windows MySQL client as described in `docs/AGENTS.md`.
 
 ## Logical relationships (from current docs)

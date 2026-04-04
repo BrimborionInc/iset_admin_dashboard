@@ -5,7 +5,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-04-01
+Last Updated: 2026-04-04
 
 ## Working relationship (design dialog)
 
@@ -55,6 +55,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Do not assume parity with the public portal. Verify the full chain:
   schema -> runtime config JSON -> API payload -> renderer/template.
 - Current intake-conditionality caveat: the public portal runtime now supports checkbox-array condition operators (`contains`, `notContains`, `containsAny`, `notContainsAny`, `containsAll`) and auto-skips steps whose authored components all hide, and DEV workflow `21` uses that for Step 19 support-driven follow-up questions/uploads. DEV workflow `21` also currently splits Step 19 into two variants after Step `93`, routing `dependent-children = 0` applicants to a no-childcare copy of `Financial Supports Requested`. Manual Intake, Workflow Preview, and the intake-step editor do not yet support those operators or the same whole-step skip behavior. See `docs/planning/step19-checkbox-conditionality-followup.md` before editing those rules.
+- Current intake deployment caveat (2026-04-02): additional last-minute public-portal/runtime-schema fixes now live in DEV runtime data that the admin-side workflow authoring, editing, preview, and Manual Intake paths cannot yet reproduce correctly. For prod rollout of intake changes, treat the DEV runtime row `iset_runtime_config(scope='publish', k='workflow.schema.intake')` as the deployment source of truth for portal behavior; do not assume a fresh admin-side republish from the current authoring tables will generate the correct runtime schema, and do not assume Manual Intake can safely render the newest runtime schema yet.
 - When adding/changing UI fields, confirm the backend actually returns the data.
 - Fix root causes instead of layering workarounds.
 
@@ -93,7 +94,20 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Help panel content: `src/helpPanelContents/*`
 - Admin test deploy staging script: `scripts/deploy-admin-test.ps1`
 - Portal test deploy staging script: `../ISET-intake/scripts/deploy-portal-test.ps1`
+- PATH deploy orchestrator guide: `docs/ops/deployments/path-deploy-orchestrator.md`
+- PATH deployment quick guide: `docs/ops/deployments/deployment-quick-guide.md`
+- PATH deploy orchestrator CLI: `scripts/path-deploy.js`
 - Test DB SQL helper for Codex/WSL: `scripts/run-test-sql-via-ssm.sh`
+- Prod deploy guide: `docs/ops/deployments/prod-deployment-guide.md`
+- Prod environment guide: `docs/ops/environments/prod-env-guide.md`
+- Test deployment notes: `docs/ops/deployments/deploy-test-notes.md`
+- Test DB refresh planning note: `docs/ops/environments/test-env-db-refresh.md`
+- TEST DB refresh CLI: `scripts/path-test-db-refresh.js`
+- TEST DB restore helper: `scripts/run-test-db-restore-via-ssm.sh`
+- Legacy reference only: `scripts/deploy-test-db.ps1` (the npm alias `deploy:test-db` now routes to `scripts/path-test-db-refresh.js run`)
+- Prod DB SQL helper: `scripts/run-prod-sql.ps1`
+- PATH data promotion catalog: `docs/ops/deployments/data-promotion-catalog.md`
+- PATH data sync CLI: `scripts/path-data-sync.js`
 
 ## Documentation gateway
 
@@ -120,7 +134,33 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Current export rule: server export is fixed to `Dump Structure and Data`, `Export to a Self-Contained File`, and `Include Create Schema`; triggers/routines/events are intentionally not exposed
 - Current export-path rule: default dump path should be a date-stamped database-based `.sql` file under a Windows-style `Documents\\dumps` directory when the server can resolve a Windows user profile, with fallback to the local server home directory otherwise
 - Current WSL/dev rule: prefer the Windows `mysqldump.exe` client from WSL when available so Query Editor export matches the established Windows-from-WSL DB tooling guidance
-- Separate path to keep distinct: the startup migration runner executes `.sql` files from `/sql`, but that is not the Query Editor dashboard
+- Separate path to keep distinct: the admin startup migration runner executes canonical `.sql` files from `/sql/migrations`, but that is not the Query Editor dashboard
+- Current shared-schema rule: PATH canonical migrations live in `admin-dashboard/sql/migrations/`; one-off/manual SQL belongs in `admin-dashboard/sql/ops/`
+- Current promotion rule: treat cross-environment DB promotion as allowlisted config/reference sync only. Full DB overwrite/reset is acceptable for TEST, but PROD may receive only canonical schema migrations plus explicit datasets from `docs/ops/deployments/data-promotion-catalog.md`.
+
+## PATH deployment control plane
+
+- Preferred operator entry point: `npm run path:deploy -- --env test|prod ...` from `admin-dashboard`.
+- Planning entry point: `npm run path:deploy:plan -- --env test|prod ...`.
+- Smoke-only entry point: `npm run path:deploy:smoke -- --env test|prod`.
+- TEST destructive reset entry points: `npm run test:db:refresh:plan -- --source-env dev` and `npm run test:db:refresh -- --source-env dev --yes`. Manual `--snapshot-file` / `--snapshot-key` inputs still work when needed.
+- Canonical schema preflight/apply now supports remote targets: `npm run db:migrate:plan -- --target-env test|prod` and `npm run db:migrate:apply -- --target-env test|prod`.
+- Current deploy orchestration order is: AWS identity preflight -> optional TEST DB refresh/reset -> prod restore point when DB mutation is planned -> canonical schema apply -> optional allowlisted data sync -> app rollout primitives -> smoke checks -> local release manifest under `tmp/path-deploy/<env>/`.
+- Deployed admin environments now force `DISABLE_AUTO_MIGRATIONS=true`, so TEST/PROD schema changes should come through the explicit deploy/migration commands, not server startup.
+- TEST app rollout still uses the existing in-place SSM deploy scripts for admin and portal. PROD still uses artifact upload plus ASG instance refresh.
+- TEST DB reset now has an explicit Codex/operator path: either upload/reference a prepared scrubbed dump or have Codex generate a DEV-derived baseline snapshot automatically, restore it through SSM on a live TEST app host, then run canonical schema apply and TEST smoke. The DEV-derived baseline snapshot contains full schema plus only allowlisted safe/reference data and the published intake runtime row; applicant, case, message, payment, and identity-link data are intentionally excluded. The command is destructive and requires `--yes`.
+- Preferred one-command TEST release path when a reset is desired: `npm run path:deploy -- --env test --refresh-test-db --dataset intake-release --workflow-id 21 --yes`.
+- TEST smoke should use target-group health, not public `/healthz`, because the current TEST ALB/Nginx layer returns `403` to unauthenticated public requests from Codex even when both target groups are healthy.
+- Current TEST smoke target groups: `nwac-test-admin-tg` on port `5001` and `nwac-test-portal-tg` on port `5000`.
+- Current prod smoke path in the orchestrator remains the public `/healthz` URLs (`nwac-console.awentech.ca`, `iset.nwac.ca`, `nwac-public.awentech.ca`).
+- Current prod control-plane default profile is `nwac-prod`.
+- Prod DB-affecting deploy runs now auto-capture an Aurora cluster snapshot restore point for `nwac-prod-db` before schema/data mutation starts.
+- Current deployed build marker rule: app deploys do not auto-increment `package.json` semver, but admin/portal frontend builds now embed a visible release/build stamp (package version + release ID + git SHA). Read it on the admin landing-page footer or the public portal Help page.
+- Current TEST deploy-script default profile is `nwac-test` in both admin and portal scripts; stop relying on the old `nwac` default.
+- Sandbox/runtime caveat: `npm` commands in this workspace run under Windows Node (`HOME=C:\Users\Wilson`), but the Codex-controlled AWS profiles used for operator work live in the bash/WSL-side CLI config. The PATH deploy orchestrator now exports credentials from the working bash-side profile into the Windows-side PowerShell deploy subprocesses before app rollout, so prod app deploys no longer depend on the stale Windows `aws.exe` profile state.
+- Current prod DB helper rule: Secrets Manager secret `nwac-prod-db-credentials` currently supplies credentials only (`username`, `password`). `scripts/run-prod-sql-via-ssm.sh` therefore provides the default host/name/port (`nwac-prod-db.cluster-c3g4iamg8j38.ca-central-1.rds.amazonaws.com`, `iset_intake`, `3306`) unless explicitly overridden.
+- Current TEST DB helper rule: Secrets Manager secret `nwac-test-db-credentials` also supplies credentials only (`username`, `password`). `scripts/run-test-db-restore-via-ssm.sh` therefore provides the default host/name/port (`nwac-test-db.cluster-cn4yoy2s4w5t.ca-central-1.rds.amazonaws.com`, `iset_intake`, `3306`) unless explicitly overridden.
+- Current SSM SQL helper rule: when `--sql-file` is used, both test/prod helpers stage the SQL file through the environment artifact bucket (`nwac-test-artifacts` / `nwac-prod-artifacts`) first so larger migration/data-sync bundles do not hit SSM document size limits.
 
 ## Client Batch Import status
 
@@ -149,6 +189,8 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Homepage route: `/`
 - Current homepage Metrics widget behavior is documented in `docs/dashboards/admin-home-metrics-widget.md`.
 - Current homepage Work Queue widget behavior is documented in `docs/dashboards/admin-home-my-work-widget.md`.
+- Current System Administrator homepage behavior is documented in `docs/dashboards/admin-home-system-admin-homepage.md`.
+- Current System Administrator homepage rule: the default board now includes `Operations Snapshot`, `AWS Environment Status`, `Users & Access Alerts`, and `Recent Admin Activity`; the AWS widget is a read-only live check of staff/applicant Cognito plus SES mail for the active environment, not a generic infrastructure monitor.
 - Shared help-panel AI chat prompt is built in `src/AppContent.js` (`buildSystemPrompt`). For coordinator-facing PATH workflows, treat that prompt as a staff job-aid layer and keep it aligned with NWAC training expectations, not just with page mechanics.
 - Frontend files to inspect together:
   - `src/pages/home/HomeDashboardPage.jsx`
@@ -240,6 +282,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Maintain `docs/meta/next-release-notes-log.md` as a standing running log for the next Landing Page "What's New" update.
 - Keep release-note entries tagged with an explicit target release number (for example `v0.5.4`) and verify the current public version from `src/pages/LandingPage.jsx` before drafting or updating entries.
 - Keep credentials and environment-specific secrets out of docs.
+- When updating `docs/meta/codex-thread-index.md`, record the exact Codex plugin task title verbatim when it is visible; if it was not captured, say `exact original task title not preserved` explicitly instead of inventing a label that looks like a UI title.
 - When refactoring dashboards/widgets, update matching help panel content (`src/helpPanelContents/*`) and related `aiContext` strings in the same change.
 - Coordinator-facing PATH help content should bias toward staff workflow, compliance reminders, timelines, documentation expectations, and next-step coaching instead of frontend implementation detail.
 - When AI help output quality is part of the task, validate both layers: the page/widget `aiContext` in `src/helpPanelContents/*` and the shared help-chat system prompt in `src/AppContent.js`.
@@ -254,6 +297,8 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 ### DB interaction from WSL (dev)
 
 - MySQL runs on the Windows host and accepts local connections.
+- Verified on 2026-04-04: the new shared-schema CLI can reach DEV from the sandbox via the repo `.env` when invoked through the Windows Node runtime:
+  `"/mnt/c/Program Files/nodejs/node.exe" scripts/path-schema-migrate.js plan`
 - Use Windows MySQL client from WSL (not Linux `mysql`):
   `"/mnt/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe" -h localhost -P 3306 -u root -p"<from .env>" -D iset_intake -e "SELECT 1;"`
 - Read credentials from `.env`: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`, `DB_NAME`.
@@ -273,8 +318,11 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Verified on 2026-03-28: the Codex sandbox can run SQL against TEST indirectly through SSM on a live `nwac-test-app` EC2 instance using AWS profile `nwac-test`.
 - Do not assume direct network access from the sandbox to the Aurora cluster. The test DB security group only allows MySQL from the app security group, so the normal Codex path is remote execution on the app host.
 - Preferred helper for future chats: `scripts/run-test-sql-via-ssm.sh`
+- Preferred config/data promotion entry point: `npm run data:sync:plan -- --dataset <name> ...` followed by `npm run data:sync:apply -- --target-env test ...`
+- Preferred full TEST reset entry points: `npm run test:db:refresh:plan -- --source-env dev` and `npm run test:db:refresh -- --source-env dev --yes`
 - Supporting guide: `docs/guides/test-db-access-from-codex.md`
 - Current caveat: older scripts such as `scripts/deploy-test-db.ps1` reference retired test instance IDs; re-check live AWS resources before trusting those IDs.
+- Current schema rule: treat `admin-dashboard/sql/migrations/` -> `iset_migration` as the canonical PATH shared-schema path. Treat `admin-dashboard/sql/ops/` as manual-only SQL, `admin-dashboard/db/migrations/` as legacy archive, and the portal-side `__migrations` / `schema_migrations` paths as retired for deployed PATH schema work unless a thread explicitly proves otherwise.
 - Never run destructive broad statements unless explicitly requested.
 - If host DB access fails from WSL, run `npm run dump:dev-schema` and continue with read-only analysis from docs.
 
@@ -311,12 +359,14 @@ Notes:
 ### AWS CLI profile/account mapping (Codex sandbox)
 
 - Keep prod and test identities as separate AWS CLI profiles; never rely on implicit defaults.
-- Current known mappings in this Codex environment (verified 2026-03-09):
+- Current known mappings in this Codex environment (re-verified 2026-04-04):
   - `default` -> `arn:aws:iam::468278742295:user/nwac-prod-automation` (prod account `468278742295`)
+  - `nwac-prod` -> `arn:aws:iam::468278742295:user/nwac-prod-automation` (dedicated prod alias for Codex/operator use)
   - `nwac-test` -> `arn:aws:iam::124355655255:user/CODEX_CLI_Admin` (test account `124355655255`)
+- `npm`-spawned Windows processes do not share the same AWS config home as the bash/WSL sandbox. If an operator script needs AWS access from inside a Node/npm process, route the AWS CLI call through `bash` so it reads the Codex-managed profile set under `/root/.aws`.
 - Always pass `--profile` for AWS commands in threads that touch infra or storage:
   - Test example: `aws s3api get-bucket-encryption --bucket nwac-test-uploads-20251014 --region ca-central-1 --profile nwac-test`
-  - Prod example: `aws sts get-caller-identity --profile default`
+  - Prod example: `aws sts get-caller-identity --profile nwac-prod`
 
 ## Cross-app boundaries
 

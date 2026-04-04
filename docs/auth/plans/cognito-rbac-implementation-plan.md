@@ -40,7 +40,7 @@ Backend (Admin)
 - `admin-dashboard/src/lib/rbac.(js|ts)`: role/region policy helpers.
 - `admin-dashboard/src/lib/dbScope.(js|ts)`: inject mandatory WHERE clauses for region/assignment.
 - `admin-dashboard/src/routes/admin/users.(js|ts)`: delegated user management (Cognito + DB).
-- `admin-dashboard/db/migrations/*`: schema changes.
+- `admin-dashboard/sql/migrations/*`: schema changes.
 
 Frontend (Admin)
 - `admin-dashboard/src/auth/AuthProvider.(tsx|jsx)`, `auth/cognitoClient.(ts|js)`: Hosted UI integration, PKCE, token lifecycle, idle-timeout.

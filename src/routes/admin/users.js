@@ -135,6 +135,206 @@ function getDbPoolFromRequest(req) {
   return pool && typeof pool.query === 'function' ? pool : null;
 }
 
+async function listUsersInGroupAll(client, groupName) {
+  const users = [];
+  let nextToken = null;
+
+  do {
+    const response = await client.send(
+      new ListUsersInGroupCommand({
+        UserPoolId: POOL_ID,
+        GroupName: groupName,
+        ...(nextToken ? { NextToken: nextToken } : {}),
+      })
+    );
+    users.push(...(response?.Users || []));
+    nextToken = response?.NextToken || null;
+  } while (nextToken);
+
+  return users;
+}
+
+async function listUserPoolUsersAll(client) {
+  const users = [];
+  let paginationToken = null;
+
+  do {
+    const response = await client.send(
+      new ListUsersCommand({
+        UserPoolId: POOL_ID,
+        ...(paginationToken ? { PaginationToken: paginationToken } : {}),
+      })
+    );
+    users.push(...(response?.Users || []));
+    paginationToken = response?.PaginationToken || null;
+  } while (paginationToken);
+
+  return users;
+}
+
+async function loadAdminUsers({ pool = null, q = '' } = {}) {
+  const query = (q || '').toString().toLowerCase();
+  const client = getClient();
+  const groups = ['System_Administrator', 'NWAC_Administrator', 'Regional_Manager', 'ISET_Coordinator'];
+  const roleRank = { System_Administrator: 4, NWAC_Administrator: 3, Regional_Manager: 2, ISET_Coordinator: 1 };
+  const userMap = new Map();
+
+  for (const groupName of groups) {
+    try {
+      const groupUsers = await listUsersInGroupAll(client, groupName);
+      for (const user of groupUsers) {
+        const attr = Object.fromEntries((user.Attributes || []).map(a => [a.Name, a.Value]));
+        const cognitoSub = attr.sub || attr['sub'] || null;
+        const existing = userMap.get(user.Username);
+        const candidate = {
+          username: user.Username,
+          email: attr.email || user.Username,
+          role: groupName,
+          status: user.UserStatus || 'UNKNOWN',
+          regionId: attr['custom:region_id'] ? Number(attr['custom:region_id']) : null,
+          regionIds: null,
+          cognitoSub,
+          mfa: hasMfaEnabled(user),
+          lastSignIn: user.UserLastModifiedDate ? new Date(user.UserLastModifiedDate).toISOString() : null,
+          createdAt: user.UserCreateDate ? new Date(user.UserCreateDate).toISOString() : null,
+        };
+
+        if (!existing) {
+          userMap.set(user.Username, candidate);
+          continue;
+        }
+
+        if ((roleRank[candidate.role] || 0) > (roleRank[existing.role] || 0)) {
+          userMap.set(user.Username, { ...existing, role: candidate.role });
+        }
+      }
+    } catch (_) {
+      // Ignore per-group permission or missing-group issues.
+    }
+  }
+
+  let users = Array.from(userMap.values());
+
+  try {
+    const allUsers = await listUserPoolUsersAll(client);
+    for (const user of allUsers) {
+      if (!userMap.has(user.Username)) continue;
+      const attr = Object.fromEntries((user.Attributes || []).map(a => [a.Name, a.Value]));
+      const existing = userMap.get(user.Username);
+      const cognitoSub = attr.sub || attr['sub'] || existing.cognitoSub || null;
+      userMap.set(user.Username, {
+        ...existing,
+        email: attr.email || existing.email,
+        status: user.UserStatus || existing.status,
+        regionId: attr['custom:region_id'] ? Number(attr['custom:region_id']) : existing.regionId,
+        cognitoSub,
+        mfa: hasMfaEnabled(user),
+        lastSignIn: user.UserLastModifiedDate ? new Date(user.UserLastModifiedDate).toISOString() : existing.lastSignIn,
+        createdAt: user.UserCreateDate ? new Date(user.UserCreateDate).toISOString() : existing.createdAt,
+      });
+    }
+    users = Array.from(userMap.values());
+  } catch (enrichErr) {
+    if (!/not authorized to perform: cognito-idp:ListUsers/i.test(enrichErr?.message || '')) {
+      console.warn('[admin-users] Optional ListUsers enrichment failed:', enrichErr.message);
+    }
+  }
+
+  if (users.length) {
+    try {
+      for (const user of users) {
+        if (user.mfa || !user.username) continue;
+        const detail = await client.send(new AdminGetUserCommand({ UserPoolId: POOL_ID, Username: user.username }));
+        if (detail && hasMfaEnabled(detail)) {
+          user.mfa = true;
+        }
+      }
+    } catch (detailErr) {
+      if (!/not authorized to perform: cognito-idp:AdminGetUser/i.test(detailErr?.message || '')) {
+        console.warn('[admin-users] MFA enrichment failed:', detailErr?.message || detailErr);
+      }
+    }
+  }
+
+  if (pool && users.length) {
+    try {
+      const subs = users.map(user => user.cognitoSub).filter(Boolean);
+      let profiles = [];
+      if (subs.length) {
+        const placeholders = subs.map(() => '?').join(',');
+        [profiles] = await pool.query(
+          `SELECT id, cognito_sub, email, region_id FROM staff_profiles WHERE cognito_sub IN (${placeholders})`,
+          subs
+        );
+      }
+      const profileBySub = new Map((profiles || []).map(row => [row.cognito_sub, row]));
+      const profileIds = (profiles || []).map(row => row.id).filter(Boolean);
+      let regionRows = [];
+      if (profileIds.length) {
+        const placeholders = profileIds.map(() => '?').join(',');
+        try {
+          [regionRows] = await pool.query(
+            `SELECT staff_profile_id, region_id FROM staff_region WHERE staff_profile_id IN (${placeholders})`,
+            profileIds
+          );
+        } catch (err) {
+          if (!/ER_NO_SUCH_TABLE|ER_BAD_FIELD_ERROR/i.test(err?.code || err?.message || '')) throw err;
+        }
+      }
+      const regionMap = new Map();
+      (regionRows || []).forEach(row => {
+        if (!row) return;
+        const staffId = row.staff_profile_id;
+        const list = regionMap.get(staffId) || [];
+        list.push(row.region_id);
+        regionMap.set(staffId, list);
+      });
+
+      users = users.map(user => {
+        const profile = user.cognitoSub ? profileBySub.get(user.cognitoSub) : null;
+        const staffId = profile?.id || null;
+        const regionIds = staffId && regionMap.has(staffId)
+          ? normalizeRegionIdList(regionMap.get(staffId))
+          : [];
+        const regionId = Number.isFinite(user.regionId)
+          ? user.regionId
+          : (Number.isFinite(profile?.region_id) ? Number(profile.region_id) : (regionIds[0] || null));
+        return {
+          username: user.username,
+          email: user.email,
+          role: user.role,
+          status: user.status,
+          regionId,
+          regionIds: regionIds.length ? regionIds : null,
+          mfa: user.mfa,
+          lastSignIn: user.lastSignIn,
+          createdAt: user.createdAt,
+        };
+      });
+    } catch (err) {
+      console.warn('[admin-users] staff region enrichment failed:', err?.message || err);
+    }
+  } else {
+    users = users.map(user => ({
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      status: user.status,
+      regionId: user.regionId ?? null,
+      regionIds: user.regionIds ?? null,
+      mfa: user.mfa,
+      lastSignIn: user.lastSignIn,
+      createdAt: user.createdAt,
+    }));
+  }
+
+  if (!query) {
+    return users;
+  }
+
+  return users.filter(user => [user.username, user.email, user.role].some(value => value && value.toLowerCase().includes(query)));
+}
+
 async function upsertStaffProfile(pool, { cognitoSub, email, name, displayName, primaryRole, regionId }) {
   if (!pool) return;
   if (!cognitoSub || !email) return;
@@ -162,165 +362,11 @@ async function upsertStaffProfile(pool, { cognitoSub, email, name, displayName, 
 // Response: [{ username, email, role, status, regionId, mfa, lastSignIn }]
 router.get('/users', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager', 'ISET Coordinator'), async (req, res) => {
   try {
-    const q = (req.query.q || '').toString().toLowerCase();
-    const client = getClient();
-    // New approach: build user list ONLY from ListUsersInGroup (avoids needing cognito-idp:ListUsers permission).
-    // If ListUsers is permitted we can optionally enrich, but it's no longer required.
-    const groups = ['System_Administrator','NWAC_Administrator','Regional_Manager','ISET_Coordinator'];
-    const ROLE_RANK = { System_Administrator: 4, NWAC_Administrator: 3, Regional_Manager: 2, ISET_Coordinator: 1 };
-    const userMap = new Map(); // username -> user object
-    for (const g of groups) {
-      try {
-        const resp = await client.send(new ListUsersInGroupCommand({ UserPoolId: POOL_ID, GroupName: g }));
-        for (const u of resp.Users || []) {
-          const attr = Object.fromEntries((u.Attributes||[]).map(a => [a.Name, a.Value]));
-          const cognitoSub = attr.sub || attr['sub'] || null;
-          const existing = userMap.get(u.Username);
-            const candidate = {
-              username: u.Username,
-              email: attr.email || u.Username,
-              role: g,
-              status: u.UserStatus || 'UNKNOWN',
-              regionId: attr['custom:region_id'] ? Number(attr['custom:region_id']) : null,
-              regionIds: null,
-              cognitoSub,
-              mfa: hasMfaEnabled(u),
-              lastSignIn: u.UserLastModifiedDate ? new Date(u.UserLastModifiedDate).toISOString() : null,
-              createdAt: u.UserCreateDate ? new Date(u.UserCreateDate).toISOString() : null
-            };
-            if (!existing) {
-              userMap.set(u.Username, candidate);
-            } else {
-              // If user appears in multiple admin groups, keep the highest-ranked role.
-              if ((ROLE_RANK[candidate.role]||0) > (ROLE_RANK[existing.role]||0)) {
-                userMap.set(u.Username, { ...existing, role: candidate.role });
-              }
-            }
-        }
-      } catch (e) { /* ignore missing group or permission issues per-group */ }
-    }
-    let users = Array.from(userMap.values());
-
-    // Optional enrichment if ListUsers allowed (adds any users that might have a role assigned but not returned above â€“ rare) / or refresh attributes.
-    try {
-      const listResp = await client.send(new ListUsersCommand({ UserPoolId: POOL_ID, Limit: 60 }));
-      for (const u of listResp.Users || []) {
-        if (!userMap.has(u.Username)) continue; // only update known admin users
-        const attr = Object.fromEntries((u.Attributes||[]).map(a => [a.Name, a.Value]));
-        const existing = userMap.get(u.Username);
-        const cognitoSub = attr.sub || attr['sub'] || existing.cognitoSub || null;
-        userMap.set(u.Username, {
-          ...existing,
-          email: attr.email || existing.email,
-          status: u.UserStatus || existing.status,
-          regionId: attr['custom:region_id'] ? Number(attr['custom:region_id']) : existing.regionId,
-          cognitoSub,
-          mfa: hasMfaEnabled(u),
-          lastSignIn: u.UserLastModifiedDate ? new Date(u.UserLastModifiedDate).toISOString() : existing.lastSignIn,
-          createdAt: u.UserCreateDate ? new Date(u.UserCreateDate).toISOString() : existing.createdAt
-        });
-      }
-      users = Array.from(userMap.values());
-    } catch (enrichErr) {
-      if (/not authorized to perform: cognito-idp:ListUsers/i.test(enrichErr?.message || '')) {
-        // Silently ignore missing ListUsers permission (now optional)
-      } else {
-        // Non-authorization errors in enrichment phase are logged but not fatal.
-        console.warn('[admin-users] Optional ListUsers enrichment failed:', enrichErr.message);
-      }
-    }
-
-    if (users.length) {
-      try {
-        for (const u of users) {
-          if (u.mfa) continue;
-          if (!u.username) continue;
-          const detail = await client.send(new AdminGetUserCommand({ UserPoolId: POOL_ID, Username: u.username }));
-          if (detail && hasMfaEnabled(detail)) {
-            u.mfa = true;
-          }
-        }
-      } catch (detailErr) {
-        if (!/not authorized to perform: cognito-idp:AdminGetUser/i.test(detailErr?.message || '')) {
-          console.warn('[admin-users] MFA enrichment failed:', detailErr?.message || detailErr);
-        }
-      }
-    }
-
-    const pool = getDbPoolFromRequest(req);
-    if (pool && users.length) {
-      try {
-        const subs = users.map(u => u.cognitoSub).filter(Boolean);
-        let profiles = [];
-        if (subs.length) {
-          const placeholders = subs.map(() => '?').join(',');
-          [profiles] = await pool.query(
-            `SELECT id, cognito_sub, email, region_id FROM staff_profiles WHERE cognito_sub IN (${placeholders})`,
-            subs
-          );
-        }
-        const profileBySub = new Map((profiles || []).map(row => [row.cognito_sub, row]));
-        const profileIds = (profiles || []).map(row => row.id).filter(Boolean);
-        let regionRows = [];
-        if (profileIds.length) {
-          const placeholders = profileIds.map(() => '?').join(',');
-          try {
-            [regionRows] = await pool.query(
-              `SELECT staff_profile_id, region_id FROM staff_region WHERE staff_profile_id IN (${placeholders})`,
-              profileIds
-            );
-          } catch (err) {
-            if (!/ER_NO_SUCH_TABLE|ER_BAD_FIELD_ERROR/i.test(err?.code || err?.message || '')) throw err;
-          }
-        }
-        const regionMap = new Map();
-        (regionRows || []).forEach(row => {
-          if (!row) return;
-          const staffId = row.staff_profile_id;
-          const list = regionMap.get(staffId) || [];
-          list.push(row.region_id);
-          regionMap.set(staffId, list);
-        });
-        users = users.map(u => {
-          const profile = u.cognitoSub ? profileBySub.get(u.cognitoSub) : null;
-          const staffId = profile?.id || null;
-          const regionIds = staffId && regionMap.has(staffId)
-            ? normalizeRegionIdList(regionMap.get(staffId))
-            : [];
-          const regionId = Number.isFinite(u.regionId)
-            ? u.regionId
-            : (Number.isFinite(profile?.region_id) ? Number(profile.region_id) : (regionIds[0] || null));
-          return {
-            username: u.username,
-            email: u.email,
-            role: u.role,
-            status: u.status,
-            regionId,
-            regionIds: regionIds.length ? regionIds : null,
-            mfa: u.mfa,
-            lastSignIn: u.lastSignIn,
-            createdAt: u.createdAt,
-          };
-        });
-      } catch (err) {
-        console.warn('[admin-users] staff region enrichment failed:', err?.message || err);
-      }
-    } else {
-      users = users.map(u => ({
-        username: u.username,
-        email: u.email,
-        role: u.role,
-        status: u.status,
-        regionId: u.regionId ?? null,
-        regionIds: u.regionIds ?? null,
-        mfa: u.mfa,
-        lastSignIn: u.lastSignIn,
-        createdAt: u.createdAt,
-      }));
-    }
-
-    const filtered = q ? users.filter(u => [u.username, u.email, u.role].some(v => v && v.toLowerCase().includes(q))) : users;
-    return res.json({ source: 'cognito', enriched: filtered.length === users.length, users: filtered });
+    const users = await loadAdminUsers({
+      pool: getDbPoolFromRequest(req),
+      q: req.query.q || '',
+    });
+    return res.json({ source: 'cognito', users });
   } catch (e) {
     const msg = e?.message || '';
     if (/not authorized to perform: cognito-idp:ListUsers/i.test(msg)) {
@@ -332,6 +378,43 @@ router.get('/users', requireRole('System Administrator', 'NWAC Administrator', '
       });
     }
     return sendRouteError(res, e, 'Failed to list users');
+  }
+});
+
+router.get('/users/summary', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager', 'ISET Coordinator'), async (req, res) => {
+  try {
+    const users = await loadAdminUsers({
+      pool: getDbPoolFromRequest(req),
+    });
+    const total = users.length || 0;
+    const disabled = users.filter(user => user.status === 'DISABLED').length;
+    const pending = users.filter(user => user.status === 'FORCE_CHANGE_PASSWORD').length;
+    const mfaEnabled = users.filter(user => user.mfa).length;
+    const mfaMissing = total - mfaEnabled;
+    const neverLoggedIn = users.filter(user => !user.lastSignIn).length;
+
+    return res.json({
+      source: 'cognito',
+      metrics: {
+        total,
+        disabled,
+        pending,
+        mfaEnabled,
+        mfaMissing,
+        neverLoggedIn,
+      },
+    });
+  } catch (e) {
+    const msg = e?.message || '';
+    if (/not authorized to perform: cognito-idp:ListUsers/i.test(msg)) {
+      return res.status(503).json({
+        error: 'cognito_access_denied',
+        detail: 'Backend AWS credentials lack permission cognito-idp:ListUsers (now optional) or ListUsersInGroup (required).',
+        hint: 'Grant cognito-idp:ListUsersInGroup and related admin actions to see users.',
+        metrics: null,
+      });
+    }
+    return sendRouteError(res, e, 'Failed to summarize users');
   }
 });
 
@@ -557,6 +640,8 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
       return sendRouteError(res, e, 'Failed to force password reset');
     }
   });
+
+router.loadAdminUsers = loadAdminUsers;
 
 module.exports = router;
 

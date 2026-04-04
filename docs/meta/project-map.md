@@ -15,7 +15,9 @@ Purpose: Living reference of structure, core modules, and cross-cutting concerns
 - `infra/`: Deployment or infra configuration (nginx, etc.).
 - `infra/terraform/environments/`: Terraform environment roots (test and prod).
 - `infra/terraform/modules/`: Terraform building blocks (bootstrap, networking, logging, artifacts, etc.).
-- `db/` / `sql/`: Database related scripts (if present in this project; some lives in intake repo).
+- `db/`: Legacy DB archive/reference files.
+- `sql/migrations/`: Canonical PATH shared-schema migrations executed by the admin runner.
+- `sql/ops/`: One-off/manual SQL that is intentionally not auto-applied.
 
 ## Key Source Areas (`src/`)
 (Continuously expanded; every newly learned architectural fact must be reflected here immediately – standing directive.)
@@ -29,7 +31,7 @@ Purpose: Living reference of structure, core modules, and cross-cutting concerns
 - Query Editor widgets live under `src/pages/configuration/widgets/` and currently cover SQL input, multi-statement results, and environment display.
 - Query Editor backend execution path is `POST /api/admin/query-editor` in `isetadminserver.js`; it accepts `{ sql }`, splits semicolon-delimited SQL text, and caps `SELECT` results to 100 rows per statement.
 - Query Editor supports typed/pasted SQL plus single-file `.sql` / `.txt` upload that loads file contents into the editor before execution; the client-side upload limit is 900 KB to stay within the server's 1 MB JSON body limit.
-- Keep Query Editor distinct from the startup migration runner in `isetadminserver.js`, which auto-applies `.sql` files from `/sql`.
+- Keep Query Editor distinct from the startup migration runner in `isetadminserver.js`, which auto-applies canonical `.sql` files from `/sql/migrations` only.
 ### Import dashboards
 - Client Batch Import route: `src/pages/imports/ClientFileImportDashboard.jsx` mounted at `/iset/imports/client-files` and surfaced in navigation under `Configuration`.
 - Client Batch Import widget lives under `src/pages/imports/widgets/` and provides spreadsheet upload, dry-run preview, blocked-row review, and commit actions.

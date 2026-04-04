@@ -19,7 +19,7 @@ Run from any PowerShell window with prod AWS access:
 
 ```powershell
 aws wafv2 create-api-key `
-  --profile nwac-prod-direct `
+  --profile nwac-prod `
   --region ca-central-1 `
   --scope REGIONAL `
   --token-domains nwac-console.awentech.ca iset.nwac.ca nwac-public.awentech.ca
@@ -32,7 +32,7 @@ Copy the returned `APIKey` and replace `REACT_APP_WAF_CAPTCHA_API_KEY` in [ISET-
 From `X:\ISET\admin-dashboard`:
 
 ```powershell
-npm run configure-prod-portal-hosts -- -Profile nwac-prod-direct
+npm run configure-prod-portal-hosts -- -Profile nwac-prod
 ```
 
 This updates:
@@ -45,14 +45,14 @@ This updates:
 From `X:\ISET\admin-dashboard`:
 
 ```powershell
-npm run deploy-admin-to-prod -- -Profile nwac-prod-direct
+npm run deploy-admin-to-prod -- -Profile nwac-prod
 ```
 
 From `X:\ISET\ISET-intake`:
 
 ```powershell
-npm run deploy-portal-to-prod -- -Profile nwac-prod-direct
-npm run refresh-prod -- -Profile nwac-prod-direct -Wait
+npm run deploy-portal-to-prod -- -Profile nwac-prod
+npm run refresh-prod -- -Profile nwac-prod -Wait
 ```
 
 ## 4. Request the new ACM certificate
@@ -137,7 +137,7 @@ After cutover is stable, you can remove the old CAPTCHA API key:
 
 ```powershell
 aws wafv2 delete-api-key `
-  --profile nwac-prod-direct `
+  --profile nwac-prod `
   --region ca-central-1 `
   --scope REGIONAL `
   --api-key <old-api-key>

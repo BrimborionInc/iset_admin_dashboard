@@ -5,7 +5,7 @@
   AWS region for all CLI calls. Defaults to ca-central-1.
 
 .PARAMETER Profile
-  AWS CLI profile to use. Defaults to default.
+  AWS CLI profile to use. Defaults to nwac-prod.
 
 .PARAMETER Bucket
   S3 bucket used to stage deployment artefacts. Defaults to nwac-prod-artifacts.
@@ -18,7 +18,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Profile = "default",
+    [string]$Profile = "nwac-prod",
     [string]$Region = "ca-central-1",
     [string]$Bucket = "nwac-prod-artifacts",
     [string]$KeyPrefix = "shared",
@@ -78,7 +78,11 @@ function Invoke-Aws {
                 $_
             }
         })
-    $allArgs = @($normalizedArgs + @("--profile", $Profile, "--no-cli-pager"))
+    $allArgs = @($normalizedArgs)
+    if ([string]::IsNullOrWhiteSpace($env:AWS_ACCESS_KEY_ID)) {
+        $allArgs += @("--profile", $Profile)
+    }
+    $allArgs += @("--no-cli-pager")
     $process.StartInfo.Arguments = [string]::Join(' ', ($allArgs | ForEach-Object {
                 if ($_ -match '[\s"]') {
                     '"' + ($_ -replace '"', '\"') + '"'

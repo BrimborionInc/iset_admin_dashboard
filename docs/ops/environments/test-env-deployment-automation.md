@@ -27,7 +27,7 @@ This note describes how the refreshed `deploy-test.ps1` scripts will render envi
    - Trigger CodeDeploy / SSM automation document to pull artifact onto EC2 Auto Scaling group.
    - Alternative (single host): `scp` to bastion if maintained.
 6. **Configure Instance:**
-   - User data or post-deploy hook places `.env.test.rendered` as `.env`.
+   - User data or post-deploy hook places `.env.test.rendered` as `.env`, then forces `DISABLE_AUTO_MIGRATIONS=true` for admin and `AUTO_MIGRATE=false` for portal.
    - Retrieve htpasswd secret and update `/etc/nginx/.htpasswd`.
    - Restart services (`pm2`, `nginx`).
 7. **Clean Up:** Remove local rendered file; log deployment metadata (Git commit, artifact version, timestamp) to CloudWatch Logs or DynamoDB audit table.
@@ -53,6 +53,7 @@ Before attempting another instance refresh, codify the exact work userdata (or a
    - Retrieve Secrets Manager credentials (`arn:aws:secretsmanager:ca-central-1:124355655255:secret:nwac-test-db-credentials-rzri4o`) and merge password/username into the env map.
 3. **Materialize configuration**
    - Render the env JSON into `.env` files under `/opt/nwac/admin-dashboard/.env` and `/opt/nwac/portal/.env` (matching the templates committed in Git).
+   - Force `DISABLE_AUTO_MIGRATIONS=true` in the admin env and `AUTO_MIGRATE=false` in the portal env so deployed instances do not mutate the shared schema on startup.
    - Write redacted copies to `/opt/nwac/config/` for troubleshooting.
 4. **Deploy application artifacts**
    - Download the pre-built admin dashboard bundle (to be published to `s3://nwac-test-artifacts/admin/<version>.zip`) and extract under `/opt/nwac/admin-dashboard`.

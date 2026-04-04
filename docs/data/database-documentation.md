@@ -16,9 +16,12 @@ Purpose: Single entrypoint for database documentation across the admin dashboard
 - `../ISET-intake/docs/data/key-tables.md` - Portal-focused key tables and notes.
 
 ## Schema source of truth
-- Admin dashboard schema changes are applied via the admin server migration runner reading `sql/` (tracked by `iset_migration`). See `docs/ops/migration-runner.md`.
-- `db/migrations/` exists but is not applied by the admin server migration runner (treat as legacy/historical unless you have a separate runner).
-- Portal DB artifacts live in `../ISET-intake/database/` (procedures) and `../ISET-intake/local_db_dump.sql` (historical dump).
+- Canonical PATH shared-schema migrations live in `sql/migrations/` and are tracked in `iset_migration`. In deployed TEST/PROD environments they should be applied through the explicit deploy/migration commands, not relied on via app startup. See `docs/ops/migration-runner.md`.
+- `sql/ops/` is reserved for one-off/manual SQL and is intentionally excluded from the auto-runner.
+- `db/migrations/` in this repo is a legacy archive/reference path.
+- `../ISET-intake/db/migrations/` is no longer the deploy path for PATH shared-schema work; deployed portal environments now force `AUTO_MIGRATE=false`.
+- `../ISET-intake/scripts/run-migrations.js` remains a legacy/manual script that writes to `schema_migrations`; treat it as historical tooling, not the normal deploy path.
+- Portal DB artifacts also live in `../ISET-intake/database/` (procedures) and `../ISET-intake/local_db_dump.sql` (historical dump).
 
 ## Schema snapshots (dev)
 - Local schema dumps live in `docs/data/DB-Structure-Dump/` (not committed).

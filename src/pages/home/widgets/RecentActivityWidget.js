@@ -11,16 +11,65 @@ import {
 import { apiFetch } from '../../../auth/apiClient';
 import HomeRecentActivityHelp from '../../../helpPanelContents/homeRecentActivityHelp';
 
+const isSystemAdministrator = role => role === 'System Administrator';
+
+const getWidgetTitle = role => (isSystemAdministrator(role) ? 'Recent Admin Activity' : 'Recent Activity');
+
+const getRequestUrl = role => (
+  isSystemAdministrator(role)
+    ? '/api/dashboard/system-admin-recent-activity?limit=6'
+    : '/api/events/feed?limit=5'
+);
+
+const getFallbackErrorMessage = role => (
+  isSystemAdministrator(role)
+    ? 'Showing sample admin activity (live feed unavailable).'
+    : 'Showing sample activity (live feed unavailable).'
+);
+
+const getEmptyStateMessage = role => (
+  isSystemAdministrator(role)
+    ? 'No recent admin activity.'
+    : 'No recent activity.'
+);
+
 const getMockRecentActivity = role => {
   const now = Date.now();
-  const base = [
-    { id: 'a1', title: 'Case 2457 updated', ts: now - 1000 * 60 * 14 },
-    { id: 'a2', title: 'New workflow version published', ts: now - 1000 * 60 * 42 }
-  ];
-  if (role === 'System Administrator') {
-    base.push({ id: 'a3', title: 'Config setting changed', ts: now - 1000 * 60 * 90 });
+  if (isSystemAdministrator(role)) {
+    return [
+      {
+        id: 'sa1',
+        title: 'Main intake workflow published',
+        message: 'Workflow 1 schema published.',
+        actor_name: 'System Administrator',
+        ts: now - 1000 * 60 * 18,
+        link_href: '/manage-workflows',
+        link_label: 'Manage Workflows',
+      },
+      {
+        id: 'sa2',
+        title: 'Event capture updated',
+        message: 'Assessments & Reviews capture enabled.',
+        actor_name: 'System Administrator',
+        ts: now - 1000 * 60 * 47,
+        link_href: '/configuration/events',
+        link_label: 'Event Capture',
+      },
+      {
+        id: 'sa3',
+        title: 'File upload configuration updated',
+        message: 'Changed: maxSizeMB, allowedMime',
+        actor_name: 'System Administrator',
+        ts: now - 1000 * 60 * 92,
+        link_href: '/admin/upload-config',
+        link_label: 'File Upload Config',
+      },
+    ];
   }
-  return base;
+  return [
+    { id: 'a1', title: 'Case 2457 updated', ts: now - 1000 * 60 * 14 },
+    { id: 'a2', title: 'New workflow version published', ts: now - 1000 * 60 * 42 },
+  ];
 };
 
 const relativeTime = ts => {
@@ -98,10 +147,42 @@ const buildRequestHeaders = role => {
   return { Accept: 'application/json' };
 };
 
+const normalizeText = value => (typeof value === 'string' ? value.trim().toLowerCase() : '');
+
+const resolveActivityLink = (item, caseId, trackingId) => {
+  const explicitHref = pickFirstText(item?.link_href, item?.linkHref, item?.href);
+  const explicitLabel = pickFirstText(item?.link_label, item?.linkLabel);
+  if (explicitHref) {
+    return {
+      href: explicitHref,
+      label: explicitLabel || 'Open',
+    };
+  }
+
+  if (caseId) {
+    return {
+      href: `/cases/${caseId}`,
+      label: trackingId || `Case ${caseId}`,
+    };
+  }
+
+  const subjectType = pickFirstText(item?.subject_type, item?.subjectType);
+  const subjectId = pickFirstText(item?.subject_id, item?.subjectId);
+  if (subjectType === 'application' && subjectId) {
+    return {
+      href: `/application-case/${subjectId}`,
+      label: explicitLabel || `Application ${subjectId}`,
+    };
+  }
+
+  return null;
+};
+
 const RecentActivityWidget = ({ role, refreshKey = 0, actions, toggleHelpPanel }) => {
   const [activityItems, setActivityItems] = useState(() => getMockRecentActivity(role));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const widgetTitle = getWidgetTitle(role);
 
   useEffect(() => {
     setActivityItems(getMockRecentActivity(role));
@@ -119,7 +200,7 @@ const RecentActivityWidget = ({ role, refreshKey = 0, actions, toggleHelpPanel }
         return;
       }
       try {
-        const response = await apiFetch('/api/events/feed?limit=5', {
+        const response = await apiFetch(getRequestUrl(role), {
           headers: buildRequestHeaders(role)
         });
         if (!response.ok) {
@@ -138,7 +219,7 @@ const RecentActivityWidget = ({ role, refreshKey = 0, actions, toggleHelpPanel }
         }
       } catch (err) {
         if (!ignore) {
-          setError('Showing sample activity (live feed unavailable).');
+          setError(getFallbackErrorMessage(role));
           setActivityItems(getMockRecentActivity(role));
         }
         if (process.env.NODE_ENV !== 'production') {
@@ -159,7 +240,7 @@ const RecentActivityWidget = ({ role, refreshKey = 0, actions, toggleHelpPanel }
 
   const renderedItems = useMemo(() => {
     if (!Array.isArray(activityItems) || !activityItems.length) {
-      return <Box variant="p">No recent activity.</Box>;
+      return <Box variant="p">{getEmptyStateMessage(role)}</Box>;
     }
 
     return activityItems.map((item, idx) => {
@@ -235,6 +316,8 @@ const RecentActivityWidget = ({ role, refreshKey = 0, actions, toggleHelpPanel }
         eventData && eventData.tracking_id,
         eventData && eventData.reference_number
       );
+      const activityLink = resolveActivityLink(item, caseId, trackingId);
+      const showMessage = message && normalizeText(message) !== normalizeText(title);
 
       return (
         <Box key={key} title={tooltip} margin={{ bottom: 'xxs' }}>
@@ -242,12 +325,12 @@ const RecentActivityWidget = ({ role, refreshKey = 0, actions, toggleHelpPanel }
           {actorName && (
             <Box display="inline" margin={{ right: 'xs' }} color="text-status-inactive">by {actorName}</Box>
           )}
-          {caseId && (
+          {activityLink && (
             <Box display="inline" margin={{ right: 'xs' }}>
-              <Link href={`/case/${caseId}`}>{trackingId || `Case ${caseId}`}</Link>
+              <Link href={activityLink.href}>{activityLink.label}</Link>
             </Box>
           )}
-          {message && (
+          {showMessage && (
             <Box display="inline" margin={{ right: 'xs' }}>{message}</Box>
           )}
           {timeLabel && (
@@ -256,14 +339,14 @@ const RecentActivityWidget = ({ role, refreshKey = 0, actions, toggleHelpPanel }
         </Box>
       );
     });
-  }, [activityItems]);
+  }, [activityItems, role]);
 
   const infoLink = toggleHelpPanel ? (
     <Link
       variant="info"
       onFollow={event => {
         event.preventDefault();
-        toggleHelpPanel(<HomeRecentActivityHelp />, 'Recent Activity', HomeRecentActivityHelp.aiContext || '');
+        toggleHelpPanel(<HomeRecentActivityHelp role={role} />, widgetTitle, HomeRecentActivityHelp.aiContext || '');
       }}
     >
       Info
@@ -272,7 +355,7 @@ const RecentActivityWidget = ({ role, refreshKey = 0, actions, toggleHelpPanel }
 
   return (
     <BoardItem
-      header={<Header variant="h2" info={infoLink}>Recent Activity</Header>}
+      header={<Header variant="h2" info={infoLink}>{widgetTitle}</Header>}
       settings={actions?.removeItem ? (
         <ButtonDropdown
           ariaLabel="Board item settings"

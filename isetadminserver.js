@@ -14,7 +14,10 @@ const { getInternalNotifications, dismissInternalNotification } = require('./src
 const {
   deleteApplicantCognitoUser,
   ensureApplicantAccountForClient,
+  fetchApplicantAccountSummary,
+  resolveApplicantPoolId,
 } = require('./src/lib/applicantAccountService');
+const { runStartupSharedSchemaMigrations } = require('./src/lib/sharedSchemaMigrationRunner');
 const {
   createCaseWatch,
   deleteCaseWatch,
@@ -15615,6 +15618,7 @@ if (process.env.NODE_ENV !== 'production' && !process.env.ALLOWED_ORIGIN) {
 
 const express = require('express');
 const { CognitoIdentityProviderClient, ListUsersInGroupCommand, DescribeUserPoolClientCommand, DescribeUserPoolCommand } = require('@aws-sdk/client-cognito-identity-provider');
+const { SESClient, GetAccountSendingEnabledCommand, GetSendQuotaCommand, GetIdentityVerificationAttributesCommand } = require('@aws-sdk/client-ses');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
@@ -16268,13 +16272,28 @@ const ASSIGNABLE_GROUP_NAMES = ASSIGNABLE_COGNITO_GROUPS.map(entry => entry.grou
 
 const COGNITO_POOL_ID = process.env.COGNITO_USER_POOL_ID || process.env.USER_POOL_ID || process.env.AWS_USER_POOL_ID || null;
 const COGNITO_REGION = process.env.AWS_REGION || process.env.COGNITO_REGION || null;
-let cognitoIdpClient = null;
-function getCognitoIdpClient() {
-  if (!COGNITO_REGION) throw new Error('Missing AWS region for Cognito');
-  if (!cognitoIdpClient) {
-    cognitoIdpClient = new CognitoIdentityProviderClient({ region: COGNITO_REGION });
+const SES_REGION = process.env.AWS_SES_REGION || process.env.AWS_REGION || process.env.COGNITO_REGION || null;
+const cognitoIdpClientsByRegion = new Map();
+const sesClientsByRegion = new Map();
+
+function getAwsSdkConfig(region) {
+  return { region };
+}
+
+function getCognitoIdpClient(region = COGNITO_REGION) {
+  if (!region) throw new Error('Missing AWS region for Cognito');
+  if (!cognitoIdpClientsByRegion.has(region)) {
+    cognitoIdpClientsByRegion.set(region, new CognitoIdentityProviderClient(getAwsSdkConfig(region)));
   }
-  return cognitoIdpClient;
+  return cognitoIdpClientsByRegion.get(region);
+}
+
+function getSesClient(region = SES_REGION) {
+  if (!region) throw new Error('Missing AWS region for SES');
+  if (!sesClientsByRegion.has(region)) {
+    sesClientsByRegion.set(region, new SESClient(getAwsSdkConfig(region)));
+  }
+  return sesClientsByRegion.get(region);
 }
 
 const TOKEN_UNIT_MULTIPLIERS = {
@@ -32956,95 +32975,13 @@ const cancelReminderForCaseNote = async (connection, reminderId, staffProfileId)
   );
 };
 
-// --- Simple SQL Migration Runner (auto-executes .sql files in /sql once) -----------------
-// Strategy:
-// 1. Ensure tracking table `iset_migration` (id, filename, checksum, applied_at, duration_ms, success, error_snippet).
-// 2. Read all *.sql files in ./sql (non-recursive), sort by filename asc.
-// 3. For each file, compute SHA256 checksum. If filename+checksum already recorded with success=1, skip.
-// 4. Execute file contents via single multi-statement split on /;\n/ boundaries (basic splitter ignoring inside strings is overkill here; assume migration scripts are simple). If any statement fails, record failure (first 500 chars of error) and stop further execution to avoid partial ordering surprises.
-// 5. Log summary.
-// ENV Controls:
-//   DISABLE_AUTO_MIGRATIONS=true -> skip runner.
-//   AUTO_MIGRATIONS_DRY_RUN=true -> report pending without executing.
-// Notes: idempotency encouraged inside scripts; runner only executes once per checksum.
+// --- Shared-schema SQL Migration Runner ------------------------------------
+// Canonical shared-schema migrations now live in ./sql/migrations and are
+// tracked in iset_migration by filename + checksum. One-off operational SQL
+// belongs under ./sql/ops and is not auto-executed by the server.
 (async () => {
   try {
-    if (String(process.env.DISABLE_AUTO_MIGRATIONS || 'false').toLowerCase() === 'true') {
-      console.log('[migrations] Auto migration runner disabled via DISABLE_AUTO_MIGRATIONS');
-      return;
-    }
-    const sqlDir = path.join(__dirname, 'sql');
-    if (!fs.existsSync(sqlDir)) {
-      console.log('[migrations] No sql directory present, skipping');
-      return;
-    }
-    await pool.query(`CREATE TABLE IF NOT EXISTS iset_migration (\n      id INT AUTO_INCREMENT PRIMARY KEY,\n      filename VARCHAR(255) NOT NULL,\n      checksum CHAR(64) NOT NULL,\n      applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n      duration_ms INT NOT NULL,\n      success TINYINT(1) NOT NULL DEFAULT 1,\n      error_snippet TEXT NULL,\n      UNIQUE KEY uniq_filename_checksum (filename, checksum)\n    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`);
-    const [appliedRows] = await pool.query('SELECT filename, checksum, success FROM iset_migration');
-    const appliedMap = new Map(appliedRows.map(r => [r.filename + '|' + r.checksum, r]));
-    const files = fs.readdirSync(sqlDir).filter(f => f.endsWith('.sql')).sort();
-    if (!files.length) { console.log('[migrations] No .sql files found'); return; }
-    const crypto = require('crypto');
-    const pending = [];
-    for (const file of files) {
-      const full = path.join(sqlDir, file);
-      const content = fs.readFileSync(full, 'utf8');
-      const checksum = crypto.createHash('sha256').update(content).digest('hex');
-      if (appliedMap.has(file + '|' + checksum)) continue; // already applied this exact content
-      pending.push({ file, full, content, checksum });
-    }
-    if (!pending.length) { console.log('[migrations] No pending migrations'); return; }
-    const dryRun = String(process.env.AUTO_MIGRATIONS_DRY_RUN || 'false').toLowerCase() === 'true';
-    if (dryRun) {
-      console.log('[migrations] DRY RUN pending migrations:', pending.map(p => p.file));
-      return;
-    }
-    console.log('[migrations] Applying', pending.length, 'migration(s):', pending.map(p => p.file).join(', '));
-    for (const m of pending) {
-      const start = Date.now();
-      let success = 0; let errorSnippet = null;
-      const connection = await pool.getConnection();
-      try {
-        await connection.beginTransaction();
-        const statements = m.content
-          .split(/;\s*(?:\n|$)/) // split on semicolon followed by newline or EOF
-          .map(s => s.trim())
-          .filter(s => s.length);
-        for (const stmt of statements) {
-          try {
-            await connection.query(stmt);
-          } catch (inner) {
-            if (inner && /Duplicate column name/i.test(inner.message || '')) {
-              console.warn(`[migrations] Skipping duplicate column statement in ${m.file}`);
-              continue;
-            }
-            if (inner && /Duplicate key name/i.test(inner.message || '')) {
-              console.warn(`[migrations] Skipping duplicate index statement in ${m.file}`);
-              continue;
-            }
-            if (inner && /ER_NO_SUCH_TABLE/.test(inner.code || '') ) {
-              console.warn(`[migrations] Missing table for statement in ${m.file}: ${inner.message}`);
-              continue;
-            }
-            throw inner;
-          }
-        }
-        await connection.commit();
-        success = 1;
-        console.log(`[migrations] Applied ${m.file} (${statements.length} statements)`);
-      } catch (e) {
-        errorSnippet = (e && e.message ? e.message : String(e)).slice(0, 500);
-        try { await connection.rollback(); } catch (_) {}
-        console.error(`[migrations] FAILED ${m.file}:`, errorSnippet);
-      } finally {
-        connection.release();
-      }
-      const duration = Date.now() - start;
-      await pool.query('INSERT INTO iset_migration (filename, checksum, duration_ms, success, error_snippet) VALUES (?,?,?,?,?)', [m.file, m.checksum, duration, success, errorSnippet]);
-      if (!success) {
-        console.error('[migrations] Halting further migrations due to failure');
-        break;
-      }
-    }
+    await runStartupSharedSchemaMigrations(pool, { logger: console });
   } catch (err) {
     console.error('[migrations] Runner unexpected error:', err.message);
   }
@@ -69538,6 +69475,850 @@ app.put('/api/cases/:id', async (req, res) => {
 
 
 // --- Event timeline endpoints (new pipeline) ---
+
+const SYSTEM_ADMIN_ACTIVITY_EVENT_TYPES = Object.freeze([
+  'status_changed',
+  'case_assigned',
+  'case_unassigned',
+  'assessment_submitted',
+  'nwac_review_submitted',
+  'document_request_set',
+  'document_request_cleared',
+  'escalation_created',
+  'escalation_escalated',
+  'escalation_responded',
+  'escalation_resolved',
+  'system_error',
+]);
+
+function parseDashboardActivityDate(value) {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (value === null || typeof value === 'undefined' || value === '') {
+    return null;
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function compareDashboardActivityItemsDesc(a, b) {
+  const aDate = parseDashboardActivityDate(a?.created_at);
+  const bDate = parseDashboardActivityDate(b?.created_at);
+  const aTime = aDate ? aDate.getTime() : 0;
+  const bTime = bDate ? bDate.getTime() : 0;
+  return bTime - aTime;
+}
+
+async function resolveDashboardActorLabels(actorIds = []) {
+  const normalizedIds = Array.from(
+    new Set(
+      (Array.isArray(actorIds) ? actorIds : [])
+        .map(value => (value === null || typeof value === 'undefined' ? '' : String(value).trim()))
+        .filter(Boolean)
+    )
+  );
+  if (!normalizedIds.length) {
+    return new Map();
+  }
+  return resolveVersionSavedByLabels(
+    pool,
+    normalizedIds.map(id => ({ created_by_id: id }))
+  );
+}
+
+async function loadSystemAdminConfigActivityItems() {
+  try {
+    const [rows] = await pool.query(
+      `SELECT scope, k, v, updated_at
+         FROM iset_runtime_config
+        WHERE (scope = 'publish' AND k = 'workflow.schema.intake')
+           OR (scope = 'admin' AND k = 'upload.config.audit')
+           OR scope = 'events_capture'
+        ORDER BY updated_at DESC`
+    );
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return [];
+    }
+
+    const catalog = Array.isArray(getEventCatalog?.()) ? getEventCatalog() : [];
+    const categoryIndex = new Map();
+    const typeIndex = new Map();
+    catalog.forEach(category => {
+      if (!category?.id) return;
+      categoryIndex.set(String(category.id), category);
+      (Array.isArray(category.types) ? category.types : []).forEach(type => {
+        if (!type?.id) return;
+        typeIndex.set(`${category.id}.${type.id}`, { category, type });
+      });
+    });
+
+    const captureRows = rows.filter(row => row?.scope === 'events_capture');
+    const captureActorIds = captureRows
+      .map(row => safeJsonParse(row?.v, {})?.updated_by)
+      .filter(Boolean);
+    const actorLabels = await resolveDashboardActorLabels(captureActorIds);
+
+    const items = [];
+
+    const publishRow = rows.find(row => row?.scope === 'publish' && row?.k === 'workflow.schema.intake');
+    if (publishRow) {
+      const payload = safeJsonParse(publishRow.v, {}) || {};
+      const publishedAt = parseDashboardActivityDate(payload?.publishedAt || publishRow.updated_at);
+      if (publishedAt) {
+        const publishedBy = payload?.publishedBy && typeof payload.publishedBy === 'object' ? payload.publishedBy : {};
+        const workflowId = payload?.meta?.workflowId || payload?.workflowId || null;
+        items.push({
+          id: `workflow-publish-${publishedAt.toISOString()}`,
+          title: 'Main intake workflow published',
+          message: workflowId ? `Workflow ${workflowId} schema published.` : 'Normalized intake schema published.',
+          actor_name: publishedBy.name || publishedBy.email || null,
+          created_at: publishedAt.toISOString(),
+          link_href: '/manage-workflows',
+          link_label: 'Manage Workflows',
+        });
+      }
+    }
+
+    const uploadAuditRow = rows.find(row => row?.scope === 'admin' && row?.k === 'upload.config.audit');
+    const uploadAuditEntries = safeJsonParse(uploadAuditRow?.v, []);
+    if (Array.isArray(uploadAuditEntries)) {
+      uploadAuditEntries.slice(0, 4).forEach((entry, index) => {
+        const createdAt = parseDashboardActivityDate(entry?.created_at || uploadAuditRow?.updated_at);
+        if (!createdAt) {
+          return;
+        }
+        const diffSummary = typeof entry?.diff_summary === 'string' ? entry.diff_summary.trim() : '';
+        items.push({
+          id: `upload-config-${createdAt.toISOString()}-${index}`,
+          title: 'File upload configuration updated',
+          message: diffSummary && diffSummary !== 'no_changes' ? `Changed: ${diffSummary}` : 'Upload policy saved.',
+          actor_name: entry?.actor || null,
+          created_at: createdAt.toISOString(),
+          link_href: '/admin/upload-config',
+          link_label: 'File Upload Config',
+        });
+      });
+    }
+
+    captureRows.slice(0, 10).forEach(row => {
+      const payload = safeJsonParse(row?.v, {}) || {};
+      if (typeof payload.enabled !== 'boolean') {
+        return;
+      }
+      const createdAt = parseDashboardActivityDate(payload.updated_at || row.updated_at);
+      if (!createdAt) {
+        return;
+      }
+
+      const key = String(row?.k || '').trim();
+      if (!key) {
+        return;
+      }
+
+      const parts = key.split('.');
+      const categoryId = parts.shift();
+      const category = categoryId ? categoryIndex.get(categoryId) : null;
+      if (!category) {
+        return;
+      }
+
+      let message;
+      if (parts.length > 0) {
+        const typeId = parts.join('.');
+        const descriptor = typeIndex.get(`${category.id}.${typeId}`);
+        if (!descriptor?.type) {
+          return;
+        }
+        message = `${descriptor.type.label} ${payload.enabled ? 'enabled' : 'disabled'} in ${category.label}.`;
+      } else {
+        message = `${category.label} capture ${payload.enabled ? 'enabled' : 'disabled'}.`;
+      }
+
+      const actorId = payload.updated_by ? String(payload.updated_by).trim() : '';
+      items.push({
+        id: `event-capture-${key}`,
+        title: 'Event capture updated',
+        message,
+        actor_name: actorLabels.get(actorId) || actorId || null,
+        created_at: createdAt.toISOString(),
+        link_href: '/configuration/events',
+        link_label: 'Event Capture',
+      });
+    });
+
+    return items.sort(compareDashboardActivityItemsDesc);
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err)) {
+      console.warn('[dashboard] failed to load system admin config activity', err?.message || err);
+    }
+    return [];
+  }
+}
+
+async function loadSystemAdminEventActivityItems(requesterId, limit) {
+  try {
+    const events = await getEventFeed({
+      limit: Math.max(limit * 2, 10),
+      requesterId,
+      types: SYSTEM_ADMIN_ACTIVITY_EVENT_TYPES,
+      subjectType: ['case', 'category'],
+    });
+
+    if (!Array.isArray(events) || events.length === 0) {
+      return [];
+    }
+
+    return events.map(event => {
+      const eventData = event?.event_data && typeof event.event_data === 'object' ? event.event_data : {};
+      const caseIdRaw = event?.case_id != null
+        ? event.case_id
+        : event?.subject_type === 'case'
+          ? event?.subject_id
+          : null;
+      const caseId = caseIdRaw != null ? String(caseIdRaw) : null;
+      const message = [
+        eventData?.message,
+        eventData?.summary,
+        eventData?.description,
+      ].find(value => typeof value === 'string' && value.trim());
+
+      return {
+        id: event?.id || event?.event_id || `event-${event?.event_type || 'activity'}-${event?.created_at || Date.now()}`,
+        title: event?.event_type_label || event?.event_type || 'Activity update',
+        message: message || null,
+        actor_name: event?.user_name || event?.actor?.displayName || null,
+        created_at: event?.created_at || null,
+        link_href: caseId ? `/cases/${caseId}` : null,
+        link_label: caseId ? (event?.tracking_id || `Case ${caseId}`) : null,
+        subject_type: event?.subject_type || null,
+        subject_id: event?.subject_id || null,
+      };
+    });
+  } catch (err) {
+    console.warn('[dashboard] failed to load system admin event activity', err?.message || err);
+    return [];
+  }
+}
+
+function formatSystemAdminMfaMode(mode) {
+  const normalized = String(mode || '').trim().toLowerCase();
+  if (normalized === 'on') return 'required';
+  if (normalized === 'optional') return 'optional';
+  if (normalized === 'off') return 'off';
+  return 'unknown';
+}
+
+function buildSystemAdminUsersAccessAlerts({ userMetrics, applicantMetrics, policy }) {
+  const mfaMode = formatSystemAdminMfaMode(policy?.mfa?.mode);
+  const temporaryPasswordValidityDays = Number(policy?.passwordPolicy?.temporaryPasswordValidityDays || 0) || null;
+
+  return [
+    {
+      id: 'staffMfaMissing',
+      label: 'Staff without MFA',
+      count: Number(userMetrics?.mfaMissing || 0),
+      tone: Number(userMetrics?.mfaMissing || 0) === 0 ? 'success' : (mfaMode === 'required' ? 'error' : 'warning'),
+      href: '/user-management-dashboard?tab=admin-users&filter=noMfa',
+      description: 'Administrative users who do not have MFA enrolled.',
+      context: `Staff pool MFA: ${mfaMode}.`,
+    },
+    {
+      id: 'staffPendingReset',
+      label: 'Pending first sign-in / reset',
+      count: Number(userMetrics?.pendingReset || 0),
+      tone: Number(userMetrics?.pendingReset || 0) === 0 ? 'success' : 'warning',
+      href: '/user-management-dashboard?tab=admin-users&filter=pending',
+      description: 'Administrative users in FORCE_CHANGE_PASSWORD state.',
+      context: temporaryPasswordValidityDays
+        ? `Temporary passwords valid for ${temporaryPasswordValidityDays} day(s).`
+        : 'Temporary password validity unavailable.',
+    },
+    {
+      id: 'staffDisabled',
+      label: 'Disabled staff accounts',
+      count: Number(userMetrics?.disabled || 0),
+      tone: Number(userMetrics?.disabled || 0) === 0 ? 'success' : 'info',
+      href: '/user-management-dashboard?tab=admin-users&filter=disabled',
+      description: 'Administrative users currently blocked from sign-in.',
+      context: 'Review whether the disabled state is intentional.',
+    },
+    {
+      id: 'staffNeverLoggedIn',
+      label: 'Never logged in',
+      count: Number(userMetrics?.neverLoggedIn || 0),
+      tone: Number(userMetrics?.neverLoggedIn || 0) === 0 ? 'success' : 'info',
+      href: '/user-management-dashboard?tab=admin-users&filter=never',
+      description: 'Administrative users with no observed sign-in activity.',
+      context: 'Often indicates a new account or invite follow-up gap.',
+    },
+    {
+      id: 'applicantReadyToInvite',
+      label: 'Applicant ready to invite',
+      count: Number(applicantMetrics?.readyToInvite || 0),
+      tone: Number(applicantMetrics?.readyToInvite || 0) === 0 ? 'success' : 'warning',
+      href: '/user-management-dashboard?tab=applicant-accounts&status=created',
+      description: 'Applicant accounts created but not yet sent an activation email.',
+      context: 'Send PATH activation invitations from User Management.',
+    },
+    {
+      id: 'applicantInvitationSent',
+      label: 'Applicant activation pending',
+      count: Number(applicantMetrics?.invitationSent || 0),
+      tone: Number(applicantMetrics?.invitationSent || 0) === 0 ? 'success' : 'warning',
+      href: '/user-management-dashboard?tab=applicant-accounts&status=invitation_sent',
+      description: 'Applicants invited but not yet activated in PATH.',
+      context: 'Use this to monitor activation follow-through.',
+    },
+  ];
+}
+
+const SYSTEM_ADMIN_AWS_STATUS_CACHE_TTL_MS = 60 * 1000;
+let systemAdminAwsStatusCache = { value: null, expiresAt: 0 };
+
+function detectSystemAdminEnvironmentLabelFromValue(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text) return null;
+  if (/localhost|127\.0\.0\.1/.test(text)) return 'Development';
+  if (/(^|[^a-z])dev(elopment)?([^a-z]|$)/.test(text)) return 'Development';
+  if (/(^|[^a-z])test([^a-z]|$)/.test(text)) return 'Test';
+  if (
+    /(^|[^a-z])prod(uction)?([^a-z]|$)/.test(text) ||
+    /iset\.nwac\.ca|nwac-console\.awentech\.ca|nwac-public\.awentech\.ca/.test(text)
+  ) {
+    return 'Production';
+  }
+  return null;
+}
+
+function resolveSystemAdminEnvironmentLabel() {
+  const explicit = [
+    process.env.APP_ENV,
+    process.env.DEPLOY_ENV,
+    process.env.ENV_NAME,
+  ]
+    .map(detectSystemAdminEnvironmentLabelFromValue)
+    .find(Boolean);
+  if (explicit) {
+    return explicit;
+  }
+
+  const inferred = [
+    process.env.API_BASE,
+    process.env.REACT_APP_API_BASE_URL,
+    process.env.ALLOWED_ORIGIN,
+    process.env.COGNITO_DOMAIN,
+    process.env.OBJECT_BUCKET,
+    process.env.DB_HOST,
+    process.env.COGNITO_USER_POOL_ID,
+    process.env.COGNITO_STAFF_USER_POOL_ID,
+  ]
+    .map(detectSystemAdminEnvironmentLabelFromValue)
+    .find(Boolean);
+  if (inferred) {
+    return inferred;
+  }
+
+  return detectSystemAdminEnvironmentLabelFromValue(process.env.NODE_ENV) || 'Unknown';
+}
+
+function resolveCognitoRegionFromPoolId(poolId, fallbackRegion = COGNITO_REGION) {
+  const value = String(poolId || '').trim();
+  if (!value) return fallbackRegion || null;
+  const separatorIndex = value.indexOf('_');
+  if (separatorIndex > 0) {
+    return value.slice(0, separatorIndex);
+  }
+  return fallbackRegion || null;
+}
+
+function formatSystemAdminAwsError(error) {
+  const message = String(error?.message || '').trim();
+  const code = String(error?.name || error?.code || '').trim();
+  const combined = `${code} ${message}`.toLowerCase();
+  if (combined.includes('accessdenied')) {
+    return 'Read permission for this AWS check was denied.';
+  }
+  if (combined.includes('credential') || combined.includes('token')) {
+    return 'AWS credentials were unavailable or invalid for this check.';
+  }
+  if (code === 'ResourceNotFoundException') {
+    return 'The configured AWS resource was not found.';
+  }
+  return message || code || 'AWS request failed.';
+}
+
+function formatSystemAdminTokenValidity(rawValue, unit, defaultUnit) {
+  if (typeof rawValue !== 'number' || Number.isNaN(rawValue)) return null;
+  const normalizedUnit = String(unit || defaultUnit || '').trim().toLowerCase() || defaultUnit || 'minutes';
+  return `${rawValue} ${normalizedUnit}`;
+}
+
+function countSystemAdminAwsStatusTones(services = []) {
+  return services.reduce(
+    (acc, service) => {
+      const tone = service?.tone;
+      if (tone === 'success') acc.success += 1;
+      else if (tone === 'warning') acc.warning += 1;
+      else if (tone === 'error') acc.error += 1;
+      return acc;
+    },
+    { success: 0, warning: 0, error: 0 }
+  );
+}
+
+async function loadSystemAdminCognitoServiceStatus({
+  id,
+  label,
+  poolId,
+  clientId = null,
+  href,
+  requireClient = false,
+}) {
+  const resolvedPoolId = String(poolId || '').trim();
+  if (!resolvedPoolId) {
+    return {
+      id,
+      label,
+      tone: requireClient ? 'error' : 'warning',
+      summary: `${label} is not configured.`,
+      details: ['User pool id is missing from the environment.'],
+      href,
+    };
+  }
+
+  const region = resolveCognitoRegionFromPoolId(resolvedPoolId, COGNITO_REGION || process.env.AWS_REGION || null);
+  if (!region) {
+    return {
+      id,
+      label,
+      tone: 'error',
+      summary: `${label} check failed.`,
+      details: ['AWS region for this Cognito pool could not be resolved.', `Pool: ${resolvedPoolId}`],
+      href,
+    };
+  }
+
+  try {
+    const client = getCognitoIdpClient(region);
+    const checks = [client.send(new DescribeUserPoolCommand({ UserPoolId: resolvedPoolId }))];
+    if (clientId) {
+      checks.push(
+        client.send(
+          new DescribeUserPoolClientCommand({
+            UserPoolId: resolvedPoolId,
+            ClientId: clientId,
+          })
+        )
+      );
+    }
+
+    const results = await Promise.allSettled(checks);
+    const poolResult = results[0];
+    if (poolResult.status !== 'fulfilled') {
+      return {
+        id,
+        label,
+        tone: 'error',
+        summary: `${label} check failed.`,
+        details: [
+          formatSystemAdminAwsError(poolResult.reason),
+          `Pool: ${resolvedPoolId}`,
+          `Region: ${region}`,
+        ],
+        href,
+      };
+    }
+
+    const pool = poolResult.value?.UserPool || {};
+    const passwordPolicy = pool.Policies?.PasswordPolicy || {};
+    const details = [
+      `Pool: ${resolvedPoolId}`,
+      `Region: ${region}`,
+      `MFA: ${formatSystemAdminMfaMode(pool.MfaConfiguration || 'OFF')}`,
+    ];
+    if (passwordPolicy.TemporaryPasswordValidityDays) {
+      details.push(`Temp passwords: ${passwordPolicy.TemporaryPasswordValidityDays} day(s)`);
+    }
+
+    if (!clientId && requireClient) {
+      details.push('Client id is missing from the environment.');
+      return {
+        id,
+        label,
+        tone: 'warning',
+        summary: `${label} pool reachable, but client configuration needs review.`,
+        details,
+        href,
+      };
+    }
+
+    if (clientId) {
+      const clientResult = results[1];
+      if (clientResult?.status === 'fulfilled') {
+        const clientConfig = clientResult.value?.UserPoolClient || {};
+        const accessValidity = formatSystemAdminTokenValidity(
+          clientConfig.AccessTokenValidity,
+          clientConfig.TokenValidityUnits?.AccessToken,
+          'minutes'
+        );
+        details.push(`Client: ${clientId}`);
+        if (accessValidity) {
+          details.push(`Access token TTL: ${accessValidity}`);
+        }
+      } else {
+        details.push(`Client: ${clientId}`);
+        details.push(`Client check: ${formatSystemAdminAwsError(clientResult?.reason)}`);
+        return {
+          id,
+          label,
+          tone: 'error',
+          summary: `${label} pool reachable, but client check failed.`,
+          details,
+          href,
+        };
+      }
+    }
+
+    return {
+      id,
+      label,
+      tone: 'success',
+      summary: clientId ? `${label} pool and client reachable.` : `${label} pool reachable.`,
+      details,
+      href,
+    };
+  } catch (error) {
+    return {
+      id,
+      label,
+      tone: 'error',
+      summary: `${label} check failed.`,
+      details: [
+        formatSystemAdminAwsError(error),
+        `Pool: ${resolvedPoolId}`,
+        `Region: ${region}`,
+      ],
+      href,
+    };
+  }
+}
+
+function buildSystemAdminSesIdentityCandidates(senderEmail) {
+  const normalizedSender = normalizeEmailAddress(senderEmail);
+  if (!normalizedSender) return [];
+  const candidates = [normalizedSender];
+  const domain = normalizedSender.split('@')[1];
+  if (domain) {
+    candidates.push(domain);
+  }
+  return Array.from(new Set(candidates));
+}
+
+function formatSystemAdminSesVerificationStatus(status) {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === 'success') return 'verified';
+  if (normalized === 'pending') return 'pending';
+  if (normalized === 'temporaryfailure') return 'temporary failure';
+  if (normalized === 'notstarted') return 'not started';
+  if (normalized === 'failed') return 'failed';
+  return normalized;
+}
+
+async function loadSystemAdminSesMailStatus() {
+  const settings = await readNotificationEmailSettings();
+  const configuredSender = normalizeEmailAddress(settings?.senderEmail);
+  const fallbackSender = normalizeEmailAddress(settings?.fallbackSenderEmail);
+  const activeSender = configuredSender || fallbackSender || null;
+  const senderSource = configuredSender ? 'runtime config' : (fallbackSender ? 'fallback sender' : 'missing');
+  const region = SES_REGION || process.env.AWS_REGION || process.env.COGNITO_REGION || null;
+
+  if (!region) {
+    return {
+      id: 'sesMail',
+      label: 'SES Mail',
+      tone: 'error',
+      summary: 'SES is not configured.',
+      details: ['AWS SES region is missing from the environment.'],
+      href: '/manage-notifications',
+    };
+  }
+
+  try {
+    const client = getSesClient(region);
+    const identityCandidates = buildSystemAdminSesIdentityCandidates(activeSender);
+    const identityCheckRan = identityCandidates.length > 0;
+    const [sendingResult, quotaResult, identityResult] = await Promise.allSettled([
+      client.send(new GetAccountSendingEnabledCommand({})),
+      client.send(new GetSendQuotaCommand({})),
+      identityCheckRan
+        ? client.send(new GetIdentityVerificationAttributesCommand({ Identities: identityCandidates }))
+        : Promise.resolve(null),
+    ]);
+
+    const details = [`Region: ${region}`];
+    if (activeSender) {
+      details.push(`Sender: ${activeSender}`);
+      details.push(`Source: ${senderSource}`);
+    } else {
+      details.push('Sender email is not configured.');
+    }
+
+    const sendingEnabled =
+      sendingResult.status === 'fulfilled' ? sendingResult.value?.Enabled !== false : null;
+    if (sendingEnabled !== null) {
+      details.push(`Account sending: ${sendingEnabled ? 'enabled' : 'disabled'}`);
+    }
+
+    const apiReachable =
+      sendingResult.status === 'fulfilled' ||
+      quotaResult.status === 'fulfilled' ||
+      (identityCheckRan && identityResult.status === 'fulfilled');
+
+    let verificationStatus = null;
+    if (identityCheckRan && identityResult.status === 'fulfilled') {
+      const attributes = identityResult.value?.VerificationAttributes || {};
+      const matchedIdentity = identityCandidates.find(candidate => attributes[candidate]);
+      verificationStatus = formatSystemAdminSesVerificationStatus(
+        matchedIdentity ? attributes[matchedIdentity]?.VerificationStatus : null
+      );
+      if (verificationStatus) {
+        details.push(`Identity status: ${verificationStatus}`);
+      } else if (activeSender) {
+        details.push('Identity status unavailable in this region.');
+      }
+    }
+
+    if (!apiReachable) {
+      const failures = [sendingResult, quotaResult, identityCheckRan ? identityResult : null]
+        .filter(result => result?.status === 'rejected')
+        .map(result => formatSystemAdminAwsError(result.reason));
+      return {
+        id: 'sesMail',
+        label: 'SES Mail',
+        tone: 'error',
+        summary: 'SES check failed.',
+        details: Array.from(new Set([...details, ...failures])).filter(Boolean),
+        href: '/manage-notifications',
+      };
+    }
+
+    if (sendingEnabled === false) {
+      return {
+        id: 'sesMail',
+        label: 'SES Mail',
+        tone: 'error',
+        summary: 'SES reachable, but account sending is disabled.',
+        details,
+        href: '/manage-notifications',
+      };
+    }
+
+    if (!activeSender) {
+      return {
+        id: 'sesMail',
+        label: 'SES Mail',
+        tone: 'warning',
+        summary: 'SES reachable, but sender configuration needs review.',
+        details,
+        href: '/manage-notifications',
+      };
+    }
+
+    if (verificationStatus === 'verified') {
+      return {
+        id: 'sesMail',
+        label: 'SES Mail',
+        tone: 'success',
+        summary: 'SES reachable and PATH sender is verified.',
+        details,
+        href: '/manage-notifications',
+      };
+    }
+
+    return {
+      id: 'sesMail',
+      label: 'SES Mail',
+      tone: 'warning',
+      summary: verificationStatus
+        ? `SES reachable; sender verification is ${verificationStatus}.`
+        : 'SES reachable; sender verification status needs review.',
+      details,
+      href: '/manage-notifications',
+    };
+  } catch (error) {
+    return {
+      id: 'sesMail',
+      label: 'SES Mail',
+      tone: 'error',
+      summary: 'SES check failed.',
+      details: [
+        `Region: ${region}`,
+        activeSender ? `Sender: ${activeSender}` : 'Sender email is not configured.',
+        formatSystemAdminAwsError(error),
+      ],
+      href: '/manage-notifications',
+    };
+  }
+}
+
+async function loadSystemAdminAwsEnvironmentStatus() {
+  const staffPoolId = process.env.COGNITO_STAFF_USER_POOL_ID || COGNITO_POOL_ID || null;
+  const staffClientId = process.env.COGNITO_STAFF_CLIENT_ID || process.env.COGNITO_CLIENT_ID || process.env.COGNITO_PORTAL_CLIENT_ID || null;
+  const applicantPoolId = resolveApplicantPoolId();
+
+  const services = await Promise.all([
+    loadSystemAdminCognitoServiceStatus({
+      id: 'staffCognito',
+      label: 'Staff Cognito',
+      poolId: staffPoolId,
+      clientId: staffClientId,
+      href: '/user-management-dashboard?tab=admin-users',
+      requireClient: true,
+    }),
+    loadSystemAdminCognitoServiceStatus({
+      id: 'applicantCognito',
+      label: 'Applicant Cognito',
+      poolId: applicantPoolId,
+      href: '/user-management-dashboard?tab=applicant-accounts',
+      requireClient: false,
+    }),
+    loadSystemAdminSesMailStatus(),
+  ]);
+
+  return {
+    environment: {
+      label: resolveSystemAdminEnvironmentLabel(),
+      cognitoRegion: COGNITO_REGION || process.env.AWS_REGION || null,
+      sesRegion: SES_REGION || null,
+      nodeEnv: process.env.NODE_ENV || null,
+    },
+    statusCounts: countSystemAdminAwsStatusTones(services),
+    services,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+async function getSystemAdminAwsEnvironmentStatus({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && systemAdminAwsStatusCache.value && now < systemAdminAwsStatusCache.expiresAt) {
+    return systemAdminAwsStatusCache.value;
+  }
+  const value = await loadSystemAdminAwsEnvironmentStatus();
+  systemAdminAwsStatusCache = {
+    value,
+    expiresAt: now + SYSTEM_ADMIN_AWS_STATUS_CACHE_TTL_MS,
+  };
+  return value;
+}
+
+function getAdminUsersLoader() {
+  try {
+    const adminUsersRouter = require('./src/routes/admin/users');
+    return typeof adminUsersRouter?.loadAdminUsers === 'function' ? adminUsersRouter.loadAdminUsers : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+app.get('/api/dashboard/system-admin-users-access-alerts', async (req, res) => {
+  if (inferUserRole(req) !== 'System Administrator') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+
+  const adminUsersLoader = getAdminUsersLoader();
+  if (typeof adminUsersLoader !== 'function') {
+    return res.status(500).json({ error: 'users_loader_unavailable' });
+  }
+
+  try {
+    const [users, applicantMetrics, policy] = await Promise.all([
+      adminUsersLoader({ pool }),
+      fetchApplicantAccountSummary(pool),
+      getCognitoAuthPolicy(),
+    ]);
+
+    const userMetrics = {
+      total: users.length || 0,
+      disabled: users.filter(user => user.status === 'DISABLED').length,
+      pendingReset: users.filter(user => user.status === 'FORCE_CHANGE_PASSWORD').length,
+      mfaEnabled: users.filter(user => user.mfa).length,
+      mfaMissing: users.filter(user => !user.mfa).length,
+      neverLoggedIn: users.filter(user => !user.lastSignIn).length,
+    };
+
+    res.json({
+      metrics: {
+        ...userMetrics,
+        applicantReadyToInvite: Number(applicantMetrics?.readyToInvite || 0),
+        applicantInvitationSent: Number(applicantMetrics?.invitationSent || 0),
+      },
+      policy: {
+        mfaMode: formatSystemAdminMfaMode(policy?.mfa?.mode),
+        smsEnabled: Boolean(policy?.mfa?.smsEnabled),
+        softwareTokenEnabled: Boolean(policy?.mfa?.softwareTokenEnabled),
+        temporaryPasswordValidityDays: Number(policy?.passwordPolicy?.temporaryPasswordValidityDays || 0) || null,
+      },
+      alerts: buildSystemAdminUsersAccessAlerts({ userMetrics, applicantMetrics, policy }),
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[dashboard] failed to load system admin users/access alerts', err);
+    res.status(500).json({
+      error: 'system_admin_users_access_alerts_failed',
+      message: err?.message || 'Unable to load users and access alerts',
+    });
+  }
+});
+
+app.get('/api/dashboard/system-admin-aws-environment-status', async (req, res) => {
+  if (inferUserRole(req) !== 'System Administrator') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+
+  try {
+    const refreshParam = String(req.query.refresh || '').trim().toLowerCase();
+    const forceRefresh = refreshParam === '1' || refreshParam === 'true' || refreshParam === 'yes';
+    const payload = await getSystemAdminAwsEnvironmentStatus({ force: forceRefresh });
+    res.json(payload);
+  } catch (err) {
+    console.error('[dashboard] failed to load system admin AWS environment status', err);
+    res.status(500).json({
+      error: 'system_admin_aws_environment_status_failed',
+      message: err?.message || 'Unable to load AWS environment status',
+    });
+  }
+});
+
+app.get('/api/dashboard/system-admin-recent-activity', async (req, res) => {
+  if (inferUserRole(req) !== 'System Administrator') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+
+  const limitParam = Number(req.query.limit);
+  const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 20) : 8;
+
+  try {
+    const { actorId } = resolveRequestActor(req);
+    const [configItems, eventItems] = await Promise.all([
+      loadSystemAdminConfigActivityItems(),
+      loadSystemAdminEventActivityItems(actorId, limit),
+    ]);
+
+    const items = [...configItems, ...eventItems]
+      .sort(compareDashboardActivityItemsDesc)
+      .slice(0, limit);
+
+    res.json(items);
+  } catch (err) {
+    console.error('[dashboard] failed to load system admin recent activity', err);
+    res.status(500).json({
+      error: 'system_admin_recent_activity_fetch_failed',
+      message: err?.message || 'Unable to load recent admin activity',
+    });
+  }
+});
 
 app.get('/api/events/feed', async (req, res) => {
   const limitParam = Number(req.query.limit);

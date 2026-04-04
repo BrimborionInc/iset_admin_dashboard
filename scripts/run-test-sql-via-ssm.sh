@@ -13,6 +13,8 @@ Usage:
 Options:
   --sql TEXT          SQL text to execute.
   --sql-file PATH     Path to a SQL file to execute.
+  --s3-bucket NAME    Temporary S3 bucket for large SQL files. Default: nwac-test-artifacts
+  --s3-key-prefix KEY Temporary S3 key prefix for large SQL files. Default: ssm-sql
   --instance-id ID    Override the auto-discovered SSM target instance.
   --profile NAME      AWS profile to use. Default: nwac-test
   --region REGION     AWS region to use. Default: ca-central-1
@@ -25,6 +27,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AWS_PROFILE="nwac-test"
 AWS_REGION="ca-central-1"
 ENV_FILE="$ROOT_DIR/.env.test"
+S3_BUCKET="nwac-test-artifacts"
+S3_KEY_PREFIX="ssm-sql"
 INSTANCE_ID=""
 SQL_FILE=""
 SQL_TEXT=""
@@ -95,6 +99,16 @@ while [[ $# -gt 0 ]]; do
       SQL_FILE="$2"
       shift 2
       ;;
+    --s3-bucket)
+      [[ $# -ge 2 ]] || fail "--s3-bucket requires a value"
+      S3_BUCKET="$2"
+      shift 2
+      ;;
+    --s3-key-prefix)
+      [[ $# -ge 2 ]] || fail "--s3-key-prefix requires a value"
+      S3_KEY_PREFIX="$2"
+      shift 2
+      ;;
     --instance-id)
       [[ $# -ge 2 ]] || fail "--instance-id requires a value"
       INSTANCE_ID="$2"
@@ -132,14 +146,19 @@ if [[ -n "$SQL_TEXT" && -n "$SQL_FILE" ]]; then
   fail "Use either --sql or --sql-file, not both"
 fi
 
+SQL_SOURCE_MODE="inline"
+TEMP_SQL_S3_KEY=""
+
 if [[ -n "$SQL_FILE" ]]; then
   [[ -f "$SQL_FILE" ]] || fail "SQL file not found: $SQL_FILE"
-  SQL_TEXT="$(cat "$SQL_FILE")"
+  SQL_SOURCE_MODE="s3-file"
 elif [[ -z "$SQL_TEXT" && ! -t 0 ]]; then
   SQL_TEXT="$(cat)"
 fi
 
-[[ -n "$SQL_TEXT" ]] || fail "No SQL provided. Use --sql, --sql-file, or stdin."
+if [[ "$SQL_SOURCE_MODE" == "inline" ]]; then
+  [[ -n "$SQL_TEXT" ]] || fail "No SQL provided. Use --sql, --sql-file, or stdin."
+fi
 
 DB_HOST="$(read_env_value DB_HOST "$ENV_FILE")"
 DB_PORT="$(read_env_value_optional DB_PORT "$ENV_FILE")"
@@ -152,12 +171,30 @@ if [[ -z "$INSTANCE_ID" ]]; then
   INSTANCE_ID="$(discover_instance_id)" || fail "Unable to find an online SSM-managed nwac-test-app instance"
 fi
 
-SQL_B64="$(printf '%s' "$SQL_TEXT" | base64 | tr -d '\n')"
 REMOTE_SQL="/tmp/codex-test-sql-$(date +%s)-$$.sql"
 PARAMS_FILE="$(mktemp)"
-trap 'rm -f "$PARAMS_FILE"' EXIT
+cleanup() {
+  rm -f "$PARAMS_FILE"
+  if [[ -n "$TEMP_SQL_S3_KEY" ]]; then
+    aws s3 rm "s3://$S3_BUCKET/$TEMP_SQL_S3_KEY" \
+      --region "$AWS_REGION" \
+      --profile "$AWS_PROFILE" \
+      --only-show-errors >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
 
-cat > "$PARAMS_FILE" <<JSON
+if [[ "$SQL_SOURCE_MODE" == "s3-file" ]]; then
+  TEMP_SQL_S3_KEY="$S3_KEY_PREFIX/$(date +%Y%m%d-%H%M%S)-$$-$(basename "$SQL_FILE")"
+  aws s3 cp "$SQL_FILE" "s3://$S3_BUCKET/$TEMP_SQL_S3_KEY" \
+    --region "$AWS_REGION" \
+    --profile "$AWS_PROFILE" \
+    --only-show-errors >/dev/null
+fi
+
+if [[ "$SQL_SOURCE_MODE" == "inline" ]]; then
+  SQL_B64="$(printf '%s' "$SQL_TEXT" | base64 | tr -d '\n')"
+  cat > "$PARAMS_FILE" <<JSON
 {"commands":[
 "set -euo pipefail",
 "if ! command -v mysql >/dev/null 2>&1; then if command -v dnf >/dev/null 2>&1; then dnf install -y mariadb105 >/dev/null 2>&1 || dnf install -y mariadb >/dev/null 2>&1; elif command -v yum >/dev/null 2>&1; then yum install -y mariadb >/dev/null 2>&1; else echo 'mysql client not found on target host and no supported package manager is available' >&2; exit 127; fi; fi",
@@ -166,6 +203,18 @@ cat > "$PARAMS_FILE" <<JSON
 "rm -f $(shell_quote "$REMOTE_SQL")"
 ]}
 JSON
+else
+  cat > "$PARAMS_FILE" <<JSON
+{"commands":[
+"set -euo pipefail",
+"command -v aws >/dev/null 2>&1 || { echo 'aws CLI not found on target host' >&2; exit 127; }",
+"if ! command -v mysql >/dev/null 2>&1; then if command -v dnf >/dev/null 2>&1; then dnf install -y mariadb105 >/dev/null 2>&1 || dnf install -y mariadb >/dev/null 2>&1; elif command -v yum >/dev/null 2>&1; then yum install -y mariadb >/dev/null 2>&1; else echo 'mysql client not found on target host and no supported package manager is available' >&2; exit 127; fi; fi",
+"aws s3 cp s3://$S3_BUCKET/$TEMP_SQL_S3_KEY $(shell_quote "$REMOTE_SQL") --region $(shell_quote "$AWS_REGION") --only-show-errors",
+"MYSQL_PWD=$(shell_quote "$DB_PASS") mysql -h $(shell_quote "$DB_HOST") -P $(shell_quote "$DB_PORT") -u $(shell_quote "$DB_USER") $(shell_quote "$DB_NAME") < $(shell_quote "$REMOTE_SQL")",
+"rm -f $(shell_quote "$REMOTE_SQL")"
+]}
+JSON
+fi
 
 export AWS_PAGER=""
 export AWS_CLI_AUTO_PROMPT="off"

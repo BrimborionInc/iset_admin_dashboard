@@ -10,7 +10,7 @@
   AWS region for all CLI calls. Defaults to ca-central-1.
 
 .PARAMETER Profile
-  AWS CLI profile to use. Defaults to default.
+  AWS CLI profile to use. Defaults to nwac-prod.
 
 .PARAMETER Bucket
   S3 bucket used to stage deployment artefacts. Defaults to nwac-prod-artifacts.
@@ -23,14 +23,18 @@
 
 .PARAMETER SkipBuild
   Skips the build step (useful when re-uploading an existing build artefact).
+
+.PARAMETER ReleaseId
+  Optional release/build identifier to stamp into the frontend bundle.
 #>
 [CmdletBinding()]
 param(
-    [string]$Profile = "default",
+    [string]$Profile = "nwac-prod",
     [string]$Region = "ca-central-1",
     [string]$Bucket = "nwac-prod-artifacts",
     [string]$KeyPrefix = "admin",
     [string]$ArtifactName = "admin-dashboard-latest.zip",
+    [string]$ReleaseId = "",
     [switch]$SkipBuild
 )
 
@@ -121,7 +125,11 @@ function Invoke-Aws {
                 $_
             }
         })
-    $allArgs = @($normalizedArgs + @("--profile", $Profile, "--no-cli-pager"))
+    $allArgs = @($normalizedArgs)
+    if ([string]::IsNullOrWhiteSpace($env:AWS_ACCESS_KEY_ID)) {
+        $allArgs += @("--profile", $Profile)
+    }
+    $allArgs += @("--no-cli-pager")
     $process.StartInfo.Arguments = [string]::Join(' ', ($allArgs | ForEach-Object {
                 if ($_ -match '[\s"]') {
                     '"' + ($_ -replace '"', '\"') + '"'
@@ -224,6 +232,12 @@ try {
         Write-Section "Building React app for prod"
         if (Test-Path -LiteralPath $buildPath) {
             Remove-Item -LiteralPath $buildPath -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        $env:PATH_DEPLOY_ENV = "prod"
+        if ([string]::IsNullOrWhiteSpace($ReleaseId)) {
+            Remove-Item Env:PATH_RELEASE_ID -ErrorAction SilentlyContinue
+        } else {
+            $env:PATH_RELEASE_ID = $ReleaseId
         }
         & (Resolve-CmdExe) /c ('"{0}" run build:production' -f (Resolve-NpmCli))
         $lastExitVar = Get-Variable -Name LASTEXITCODE -ErrorAction SilentlyContinue

@@ -6,6 +6,7 @@ import Button from '@cloudscape-design/components/button';
 import ExpandableSection from '@cloudscape-design/components/expandable-section';
 import SegmentedControl from '@cloudscape-design/components/segmented-control';
 import heroBackground from '../assets/images/awentech/nwac-hero.png';
+import buildInfo from '../generated/buildInfo';
 
 const portalUrl = process.env.REACT_APP_PORTAL_URL || 'http://localhost:3000/';
 
@@ -234,6 +235,17 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
   const content = copy[lang];
   const [releaseNotesExpanded, setReleaseNotesExpanded] = React.useState(false);
   const pathLogo = `${process.env.PUBLIC_URL || ''}/PATH-Logo.png`;
+  const buildStampLabel = React.useMemo(() => {
+    if (buildInfo?.releaseId) {
+      const gitLabel = buildInfo.gitDirty ? `${buildInfo.gitShort}-dirty` : (buildInfo.gitShort || 'no-git');
+      return `Version ${buildInfo.packageVersion} | Release ${buildInfo.releaseId} | ${gitLabel}`;
+    }
+    if (buildInfo?.gitShort) {
+      const gitLabel = buildInfo.gitDirty ? `${buildInfo.gitShort}-dirty` : buildInfo.gitShort;
+      return `Version ${buildInfo.packageVersion} | ${gitLabel}`;
+    }
+    return `Version ${buildInfo?.packageVersion || 'unknown'}`;
+  }, []);
   const handleLanguageToggle = targetLang => {
     if (targetLang !== lang && typeof onLanguageChange === 'function') {
       onLanguageChange(targetLang);
@@ -505,6 +517,7 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
             {content.footer.releaseNotes}
           </button>
         </small>
+        <small className="landing-footer__version">{buildStampLabel}</small>
       </footer>
     </div>
   );

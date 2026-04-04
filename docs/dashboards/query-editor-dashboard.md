@@ -35,7 +35,7 @@ Provide System Administrators with a focused workspace for running ad hoc SQL te
 - Client-side upload size is limited to 900 KB so the request stays within the server's 1 MB JSON body limit.
 - Ordinary multi-statement SQL scripts should work once loaded into the editor.
 - Scripts that depend on MySQL client commands such as `SOURCE`, `DELIMITER`, or other file-oriented client behavior are not supported by this endpoint.
-- The repo does have a separate startup migration runner that reads `.sql` files from `/sql`, but that is not a user-driven Query Editor feature.
+- The repo does have a separate startup migration runner that reads canonical `.sql` files from `/sql/migrations`, but that is not a user-driven Query Editor feature.
 
 ## Server export support
 - The server export tab is intended to mimic the core MySQL Workbench `Data Export` object-selection flow with a reduced option set.

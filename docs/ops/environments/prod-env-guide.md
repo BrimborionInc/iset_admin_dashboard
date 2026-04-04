@@ -75,7 +75,7 @@ Technical details
   - `/nwac/prod/portal/env`  
 - Database credentials are stored in Secrets Manager:  
   - Secret name: `nwac-prod-db-credentials`  
-- The bootstrap script renders `.env` files from SSM and merges DB credentials from Secrets Manager.
+- The bootstrap script renders `.env` files from SSM, merges DB credentials from Secrets Manager, forces `DISABLE_AUTO_MIGRATIONS=true` for admin, and forces `AUTO_MIGRATE=false` for portal so schema mutation happens through the explicit deploy path instead of app startup.
 
 ## 7) Database
 
@@ -158,6 +158,8 @@ Technical details
 - User access: add users to Cognito groups for admin roles.  
 - Migrations: run SQL inside the VPC using SSM on the instance (not from the public internet).  
   - Helper: `scripts/run-prod-sql.ps1` runs ad-hoc SQL against prod via SSM and prints results.
+  - Bash helper for Codex/WSL automation: `scripts/run-prod-sql-via-ssm.sh`
+  - Higher-level allowlisted config promotion: `npm run data:sync:apply -- --dataset <name> --target-env prod --yes`
   - Legacy cleanup: run `db/migrations/20260127_0002_drop_evaluator_tables.sql` to drop unused evaluator/PTMA assignment tables if present.
 
 ## 14) Known Gaps / Future Work

@@ -36,7 +36,7 @@ Server routes (for the current signed-in staff member):
 - `POST /api/me/tutorial-progress/reset` (reset all, or reset one when `{ tutorialId }` is provided)
 
 Migration runner:
-- The admin server auto-runs `admin-dashboard/sql/*.sql` once per checksum (tracked in `iset_migration`). See `docs/ops/migration-runner.md`.
+- The canonical PATH migration runner tracks `admin-dashboard/sql/migrations/*.sql` in `iset_migration`. Deployed TEST/PROD admin environments now force `DISABLE_AUTO_MIGRATIONS=true`, so schema work should come through the explicit deploy/migration commands instead of startup. See `docs/ops/migration-runner.md`.
 
 ## Platform source of truth
 

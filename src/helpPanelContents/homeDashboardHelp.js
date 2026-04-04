@@ -41,6 +41,15 @@ const HomeDashboardHelp = () => {
         <li>Track recent updates across applications and active cases.</li>
         <li>Use metrics as a workload snapshot, then drill into the matching record list from any count.</li>
         <li>Keep a personal list of tagged files that need follow-up.</li>
+        {isSystemAdmin ? (
+          <li>Use the operations snapshot to triage reporting blockers, applicant-account backlog, and staff access hygiene before opening deeper admin tools.</li>
+        ) : null}
+        {isSystemAdmin ? (
+          <li>Check AWS environment status to confirm whether staff sign-in, applicant sign-in, and PATH notification mail are healthy in the active environment.</li>
+        ) : null}
+        {isSystemAdmin ? (
+          <li>Review users and access alerts to catch staff sign-in risk and applicant activation follow-up before it becomes a support issue.</li>
+        ) : null}
         {isCoordinator ? (
           <li>For coordinators, this is the quickest way to spot applications needing EI follow-up, missing documents, approval follow-through, check-ins, or case closure work.</li>
         ) : null}
@@ -53,11 +62,17 @@ const HomeDashboardHelp = () => {
         {!isSystemAdmin ? (
           <li><strong>Metrics</strong> - activity totals for the selected period; count values open the contributing records below.</li>
         ) : null}
-        <li><strong>Recent Activity</strong> - newest assignments, status changes, and system events.</li>
-        <li><strong>My Tagged Applications</strong> - your personal follow-up list.</li>
         {isSystemAdmin ? (
-          <li><strong>Development Tracker</strong> - internal development work, shown only to System Administrators.</li>
+          <li><strong>Operations Snapshot</strong> - current System Administrator counts for ILMP submission blockers, applicant activation backlog, and staff access follow-up.</li>
         ) : null}
+        {isSystemAdmin ? (
+          <li><strong>AWS Environment Status</strong> - live read-only checks for staff/applicant Cognito and SES mail in the active environment.</li>
+        ) : null}
+        {isSystemAdmin ? (
+          <li><strong>Users &amp; Access Alerts</strong> - staff MFA/reset/disabled-account follow-up plus applicant activation queue visibility.</li>
+        ) : null}
+        <li><strong>{isSystemAdmin ? 'Recent Admin Activity' : 'Recent Activity'}</strong> - {isSystemAdmin ? 'recent workflow publishes, configuration changes, and relevant admin/system events.' : 'newest assignments, status changes, and system events.'}</li>
+        <li><strong>My Tagged Applications</strong> - your personal follow-up list.</li>
       </ul>
 
       {isCoordinator ? (
@@ -120,7 +135,7 @@ HomeDashboardHelp.aiContext = `You are assisting a user on the NWAC ISET homepag
 Role-aware guidance:
 - ISET Coordinators use the coordinator work queue, queue items table, metrics, recent activity, and tagged applications.
 - Regional Managers and NWAC Administrators use the consolidated work queue plus queue items and metrics.
-- System Administrators see the development tracker instead of metrics.
+- System Administrators see an operations snapshot, AWS environment status, and users/access alerts instead of the standard metrics widget.
 
 How to answer:
 - Start from the staff task: identify today’s priority, select the right queue, open the matching workspace, then do the real work in the application or case record.

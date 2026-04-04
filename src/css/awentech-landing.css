@@ -68,6 +68,12 @@
   gap: 0.75rem;
 }
 
+.landing-footer__version {
+  display: block;
+  margin-top: 0.35rem;
+  color: rgba(15, 23, 42, 0.62);
+}
+
 .landing-language-toggle {
   display: flex;
   align-items: center;

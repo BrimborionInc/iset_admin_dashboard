@@ -36,7 +36,8 @@ This guide documents every environment variable and secret the test environment 
 | AWS creds | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | **Not used** in test; rely on instance profile. Leave unset. | N/A |
 | SES | `AWS_SES_REGION=ca-central-1` | SES API region | Terraform var |
 | AI (optional) | `OPENROUTER_*` | Only if needed in test | Skip unless explicitly approved |
-| Migrations | `MIGRATION_STRICT=true` | Block startup if migrations fail | Static |
+| Migrations | `DISABLE_AUTO_MIGRATIONS=true` | Deployed admin instances do not mutate schema on startup; use the explicit deploy/migration runner instead | Deployment script/bootstrap enforced |
+| Migrations | `AUTO_MIGRATE=false` | Deployed portal instances do not mutate schema on startup | Deployment script/bootstrap enforced |
 
 > **Note:** Store sensitive values (`DB_PASS`, Cognito client secrets if any) in AWS Secrets Manager or SSM Parameter Store SecureStrings. Deployment scripts should pull them at runtime rather than committing plaintext `.env.test`.
 >

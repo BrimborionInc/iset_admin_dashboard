@@ -5,7 +5,7 @@
   AWS region for the Auto Scaling Group. Defaults to ca-central-1.
 
 .PARAMETER Profile
-  AWS CLI profile to use. Defaults to default.
+  AWS CLI profile to use. Defaults to nwac-prod.
 
 .PARAMETER AsgName
   Prod Auto Scaling Group name. Defaults to nwac-prod-asg.
@@ -19,7 +19,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Profile = "default",
+    [string]$Profile = "nwac-prod",
     [string]$Region = "ca-central-1",
     [string]$AsgName = "nwac-prod-asg",
     [string]$Preferences = "MinHealthyPercentage=100,InstanceWarmup=180,SkipMatching=false",
@@ -67,7 +67,11 @@ function Invoke-Aws {
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = New-Object System.Diagnostics.ProcessStartInfo
     $process.StartInfo.FileName = $awsCli
-    $allArgs = @($Args + @("--profile", $Profile, "--no-cli-pager"))
+    $allArgs = @($Args)
+    if ([string]::IsNullOrWhiteSpace($env:AWS_ACCESS_KEY_ID)) {
+        $allArgs += @("--profile", $Profile)
+    }
+    $allArgs += @("--no-cli-pager")
     $process.StartInfo.Arguments = [string]::Join(' ', ($allArgs | ForEach-Object {
                 if ($_ -match '[\s"]') {
                     '"' + ($_ -replace '"', '\"') + '"'

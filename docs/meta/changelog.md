@@ -2,6 +2,26 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-04-04
+- Ops/Deployments: Established `sql/migrations/` as the canonical PATH shared-schema migration path, moved one-off SQL into `sql/ops/`, added the explicit `path-schema-migrate` CLI (`db:migrate:inventory|plan|apply`), and updated deployed portal paths to force `AUTO_MIGRATE=false`.
+- Ops/Deployments: Added an allowlisted PATH data-sync CLI (`data:sync:*`) and prod/test SSM SQL helpers so intake runtime config and workflow-authoring graph promotion can be planned, bundled, and applied without ad hoc copy/paste SQL.
+- Ops/Deployments: Added a non-destructive TEST DB refresh planner command (`test:db:refresh:plan`) so Codex can validate the current test account/ASG/instance state before the full refresh implementation lands.
+- Ops/Deployments: Added the `path:deploy` control-plane command and runbook so PATH deploys now have a single orchestrated entry point for AWS identity preflight, remote canonical schema apply, optional allowlisted data sync, app rollout, TEST target-group smoke checks, and local release-manifest capture.
+- Ops/Deployments: Hardened deployed schema ownership by forcing `DISABLE_AUTO_MIGRATIONS=true` in deployed admin env render paths, standardised the Codex/operator prod profile alias to `nwac-prod`, and aligned the prod-facing deploy helpers/docs to that explicit profile name.
+- Ops/Deployments: Verified the prod control plane end to end for read-only preflight, hardened AWS-backed Node/npm operator scripts to route through bash/WSL so they use the Codex-managed AWS profiles correctly, and fixed the prod SSM SQL helper to use explicit DB host/name/port defaults because the prod secret currently holds credentials only.
+- Ops/Deployments: Replaced the TEST DB refresh planner-only gap with an executable `test:db:refresh` operator command that uploads or references a scrubbed dump, restores it over SSM on a live TEST app host, reapplies canonical schema, runs TEST smoke, and records a local manifest.
+- Ops/Deployments: Prod deploy plans/runs now model restore points explicitly; DB-affecting prod runs auto-capture an Aurora cluster snapshot restore point for `nwac-prod-db` before schema/data mutation begins.
+- Ops/Deployments: Closed the last manual TEST-reset gap by teaching `test:db:refresh` to generate its own DEV-derived baseline snapshot (full schema plus allowlisted safe/reference data only) and by adding `--refresh-test-db` to `path:deploy` so TEST can be reset and redeployed from one command with no manual dump step.
+
+## 2026-04-03
+- UX/API/Home: System Administrators now see a new `Operations Snapshot` widget on the homepage with live counts for ILMP submission blockers, applicant activation backlog, and staff access follow-up, replacing the default Development Tracker tile.
+- UX/API/Home: The new System Administrator snapshot links now open filtered `ILMP Submissions & Exports` and `Manage Users` views, and the ESDC participant queue now honors `readiness` / legacy `filter` URL params so blocked and needs-review links land on the correct queue state.
+- UX/API/Home: System Administrators now see a role-aware `Recent Admin Activity` widget that mixes workflow publishes, upload-config changes, event-capture updates, and relevant admin/system case events without a schema change.
+- Fix/Home: Homepage activity links now open case workspace records via `/cases/:caseId` instead of the stale `/case/:id` path.
+- UX/API/Home: Added a new full-width `AWS Environment Status` widget for System Administrators, showing live read-only checks for staff Cognito, applicant Cognito, and SES mail in the active environment with direct links into User Management and Notification Settings.
+- UX/API/Home: Added a new full-width `Users & Access Alerts` widget for System Administrators, showing staff MFA/reset/disabled-account follow-up plus applicant activation backlog with direct filtered links into User Management.
+- UX/Home: System Administrator homepage layout storage now rolls to `admin-home-layout-v9` so the new `AWS Environment Status` widget is included by default without resetting other roles' saved homepage layouts.
+
 ## 2026-04-02
 - Fix/Notifications: Applicant secure-message and reminder emails now recover the public-portal link from standard portal host env vars (`REACT_APP_PORTAL_URL`, `REACT_APP_API_BASE_URL`, `PORTAL_DOMAIN`) when explicit `APPLICANT_PORTAL_*` settings are missing, preventing TEST emails from degrading the sign-in call to plain text with no hyperlink.
 - Docs/Ops: Updated the TEST portal env template, runtime notification doc, and environment config map to make the applicant-portal email-link dependency explicit for future deployments.

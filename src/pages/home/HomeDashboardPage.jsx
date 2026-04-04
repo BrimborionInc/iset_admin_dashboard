@@ -13,6 +13,10 @@ import RecentActivityWidget from './widgets/RecentActivityWidget';
 import MyWatchlistWidget from './widgets/MyWatchlistWidget';
 import DevTaskTrackerWidget from './widgets/DevTaskTrackerWidget';
 import MetricsWidget from './widgets/MetricsWidget';
+import SystemAdminOperationsSnapshotWidget from './widgets/SystemAdminOperationsSnapshotWidget';
+import SystemAdminAwsEnvironmentStatusWidget from './widgets/SystemAdminAwsEnvironmentStatusWidget';
+import SystemAdminUsersAccessAlertsWidget from './widgets/SystemAdminUsersAccessAlertsWidget';
+import buildInfo from '../../generated/buildInfo';
 
 const WIDGET_REGISTRY = {
     'program-admin-work-queue': {
@@ -63,6 +67,30 @@ const WIDGET_REGISTRY = {
         defaultRowSpan: 6,
         defaultColumnSpan: 1
     },
+    'system-admin-operations-snapshot': {
+        id: 'system-admin-operations-snapshot',
+        component: SystemAdminOperationsSnapshotWidget,
+        title: 'Operations Snapshot',
+        description: 'System Administrator operational backlog and exception counts.',
+        defaultRowSpan: 5,
+        defaultColumnSpan: 4
+    },
+    'system-admin-aws-environment-status': {
+        id: 'system-admin-aws-environment-status',
+        component: SystemAdminAwsEnvironmentStatusWidget,
+        title: 'AWS Environment Status',
+        description: 'System Administrator live AWS service checks for the active environment.',
+        defaultRowSpan: 5,
+        defaultColumnSpan: 4
+    },
+    'system-admin-users-access-alerts': {
+        id: 'system-admin-users-access-alerts',
+        component: SystemAdminUsersAccessAlertsWidget,
+        title: 'Users & Access Alerts',
+        description: 'System Administrator user-access risks and applicant activation backlog.',
+        defaultRowSpan: 6,
+        defaultColumnSpan: 4
+    },
     'dev-task-tracker': {
         id: 'dev-task-tracker',
         component: DevTaskTrackerWidget,
@@ -73,7 +101,8 @@ const WIDGET_REGISTRY = {
     },
 };
 
-const STORAGE_PREFIX = 'admin-home-layout-v6';
+const STORAGE_PREFIX = 'admin-home-layout-v7';
+const SYSTEM_ADMIN_STORAGE_PREFIX = 'admin-home-layout-v9';
 const ISET_COORDINATOR_STATUS_FILTER = ['submitted', 'in_review', 'docs_requested', 'closure_notice', 'pending_approval', 'decision_ready'].join(',');
 const ISET_COORDINATOR_EI_ELIGIBILITY_FILTER = ISET_COORDINATOR_STATUS_FILTER;
 const ISET_COORDINATOR_READY_TO_ASSESS_FILTER = ['submitted', 'in_review'].join(',');
@@ -192,8 +221,11 @@ const resolveInterventionMilestone = (startValue, endValue) => {
 const filterWidgetsForRole = (role) => {
     const allowed = { ...WIDGET_REGISTRY };
     const isIsetCoordinator = role === 'ISET Coordinator';
+    delete allowed['dev-task-tracker'];
     if (role !== 'System Administrator') {
-        delete allowed['dev-task-tracker'];
+        delete allowed['system-admin-operations-snapshot'];
+        delete allowed['system-admin-aws-environment-status'];
+        delete allowed['system-admin-users-access-alerts'];
     }
     if (role === 'System Administrator') {
         delete allowed['metrics'];
@@ -214,9 +246,11 @@ const filterWidgetsForRole = (role) => {
 const buildDefaultLayout = (role) => {
     if (role === 'System Administrator') {
         return [
+            { id: 'system-admin-operations-snapshot', rowSpan: 5, columnSpan: 4 },
+            { id: 'system-admin-aws-environment-status', rowSpan: 5, columnSpan: 4 },
+            { id: 'system-admin-users-access-alerts', rowSpan: 6, columnSpan: 4 },
             { id: 'recent-activity', rowSpan: 4, columnSpan: 2 },
-            { id: 'my-watchlist', rowSpan: 4, columnSpan: 2 },
-            { id: 'dev-task-tracker', rowSpan: 6, columnSpan: 4 }
+            { id: 'my-watchlist', rowSpan: 4, columnSpan: 2 }
         ];
     }
 
@@ -326,6 +360,19 @@ const boardI18nStrings = {
     navigationItemAriaLabel: item => (item ? item.data?.title || 'Board item' : 'Empty slot')
 };
 
+const buildStampLabel = (() => {
+    if (!buildInfo) {
+        return '';
+    }
+    if (buildInfo.releaseId) {
+        return `Version ${buildInfo.packageVersion} | Release ${buildInfo.releaseId} | ${buildInfo.gitDirty ? `${buildInfo.gitShort}-dirty` : buildInfo.gitShort || 'no-git'}`;
+    }
+    if (buildInfo.gitShort) {
+        return `Version ${buildInfo.packageVersion} | ${buildInfo.gitDirty ? `${buildInfo.gitShort}-dirty` : buildInfo.gitShort}`;
+    }
+    return `Version ${buildInfo.packageVersion}`;
+})();
+
 const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel }) => {
     const { isAuthenticated, role: authenticatedRole, signIn } = useAuth();
     const role = authenticatedRole || 'Guest';
@@ -403,7 +450,10 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
     }, [isWorkQueueRole, isIsetCoordinatorRole, workQueueBuckets]);
 
     const allowedWidgets = useMemo(() => filterWidgetsForRole(role), [role]);
-    const storageKey = useMemo(() => `${STORAGE_PREFIX}.${role || 'guest'}`, [role]);
+    const storageKey = useMemo(() => {
+        const prefix = role === 'System Administrator' ? SYSTEM_ADMIN_STORAGE_PREFIX : STORAGE_PREFIX;
+        return `${prefix}.${role || 'guest'}`;
+    }, [role]);
     const defaultLayout = useMemo(() => buildDefaultLayout(role), [role]);
     const [layout, setLayout] = useState(() => loadLayoutFromStorage(storageKey, allowedWidgets) ?? defaultLayout);
     const metricDrilldownAbortRef = useRef(null);
@@ -2872,6 +2922,9 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                 i18nStrings={boardI18nStrings}
                 empty={<Box padding="m">No widgets on the dashboard.</Box>}
             />
+            <Box fontSize="body-s" color="text-body-secondary" textAlign="right">
+                {buildStampLabel}
+            </Box>
         </SpaceBetween>
     );
 };

@@ -51,9 +51,32 @@ Notes:
 
 - The script reads `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`, and `DB_NAME` from repo-root `.env.test`
 - The script uses AWS profile `nwac-test` and region `ca-central-1` by default
+- `--sql-file` now stages the file through `s3://nwac-test-artifacts/ssm-sql/...` before execution so larger bundles do not exceed SSM document size limits
 - Override the target instance with `--instance-id` if needed
 - If the target app host is missing `mysql`, the script installs a client package through the instance's package manager before executing the query
 - Output is streamed back from SSM command invocation stdout/stderr
+- The higher-level config promotion entry point now lives in `scripts/path-data-sync.js`; that CLI uses this helper when the target environment is `test`
+
+## Destructive TEST reset path
+
+There is now a dedicated destructive reset command for TEST:
+
+```bash
+npm run test:db:refresh:plan -- --source-env dev
+npm run test:db:refresh -- --source-env dev --yes
+```
+
+Notes:
+
+- `scripts/path-test-db-refresh.js` is the operator entry point.
+- `scripts/run-test-db-restore-via-ssm.sh` is the lower-level restore helper.
+- The current implementation uses `nwac-test-artifacts/db-refresh/...` for uploaded dumps.
+- `--source-env dev` now removes the old manual-dump prerequisite by having Codex generate the TEST baseline snapshot automatically from DEV.
+- That DEV-derived snapshot is schema + allowlisted safe/reference data only, plus the published intake runtime row; applicant, case, message, payment, and identity-link rows are excluded by design.
+- The helper reads DB credentials from `nwac-test-db-credentials`, but supplies the TEST host/name/port itself because the secret currently contains only `username` and `password`.
+- The run is destructive: it drops and recreates `iset_intake`, restores the dump, runs canonical schema apply, and then runs TEST smoke unless skipped.
+- Do not run it casually; TEST is disposable, but this still overwrites the live shared TEST database immediately.
+- The same flow is available as part of the one-command TEST deploy path: `npm run path:deploy -- --env test --refresh-test-db --dataset intake-release --workflow-id 21 --yes`
 
 ## Large JSON export caveat
 

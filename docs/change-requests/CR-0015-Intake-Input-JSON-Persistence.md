@@ -42,7 +42,7 @@ _These decisions may evolve; update this section as the work progresses._
   - `version` INT NOT NULL DEFAULT 1.
   - `created_at` / `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3).
   - `expires_at` DATETIME(3) NOT NULL (set to `NOW() + TTL`; indexed for purges).
-- Land migrations/scripts via the **admin-dashboard migration runner** (`admin-dashboard/sql/*`, tracked by `iset_migration`) so schema changes remain centralized. Portal repo will not run its standalone runner for this table.
+- Land migrations/scripts via the **admin-dashboard migration runner** (`admin-dashboard/sql/migrations/*`, tracked by `iset_migration`) so schema changes remain centralized. Portal repo will not run its standalone runner for this table.
 - Document schema in both docbases once approved.
 
 **Increment 2 — Server Abstraction**

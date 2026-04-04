@@ -1,40 +1,73 @@
 # Prod Deployment Guide
 
+For the shortest operator commands, start with `docs/ops/deployments/deployment-quick-guide.md`.
+
 This is the shortest safe path to deploy the current prod stack.
 
 ## Before You Start
 
 - Work from the repo roots on the same machine that has AWS prod access.
-- If `shared` code changed, deploy `shared` before admin or portal.
-- Uploading artifacts does not update the live instance by itself. You must trigger a prod instance refresh after the uploads.
-- These examples use the working prod AWS CLI profile name `nwac-prod-direct`. Replace it only if your local prod profile uses a different name.
+- Prefer the PATH orchestrator from `admin-dashboard`; it wraps schema/data/app rollout/smoke into one release command.
+- Uploading artifacts does not update the live instance by itself. The orchestrator and the low-level manual flow both trigger a prod instance refresh after uploads.
+- The dedicated prod profile name is now `nwac-prod`. Override with `--profile` or `-Profile` only if your local prod credentials live under a different profile name.
+- In the current Codex sandbox, `npm` runs under Windows Node while the trusted operator AWS profiles live in the bash/WSL-side AWS CLI config. The PATH control-plane scripts already route AWS-backed checks through `bash`; if you write new operator helpers, follow the same pattern instead of assuming `npm` -> `aws.exe` will see the same profiles.
+- Current prod DB helper assumption: `nwac-prod-db-credentials` currently contains only `username` and `password`, so `scripts/run-prod-sql-via-ssm.sh` defaults the host/database/port to `nwac-prod-db.cluster-c3g4iamg8j38.ca-central-1.rds.amazonaws.com`, `iset_intake`, and `3306`.
 - Do not use `-SkipBuild` unless you have already inspected the current `build/` output and confirmed it was compiled for prod. React bundles bake environment-specific Cognito domains, client IDs, and external links, so a stale test build can be uploaded to prod unchanged.
 
 ## Full Prod Deploy
 
+Recommended:
+
+```powershell
+cd X:\ISET\admin-dashboard
+npm run path:deploy -- --env prod --dataset intake-release --workflow-id 21 --yes
+```
+
+Preflight only:
+
+```powershell
+cd X:\ISET\admin-dashboard
+npm run path:deploy:plan -- --env prod --dataset intake-release --workflow-id 21
+```
+
+The orchestrator performs:
+
+- AWS identity preflight
+- automatic Aurora cluster snapshot restore point when schema or allowlisted data will change
+- canonical shared-schema plan/apply through SSM
+- optional allowlisted data/config promotion
+- `shared` + `admin` + `portal` artifact upload
+- waited prod ASG instance refresh
+- post-refresh smoke checks
+- release manifest capture under `tmp/path-deploy/prod/`
+
+## Low-Level Component Flow
+
+Use this only when you need the underlying primitives directly.
+
 From `X:\ISET\admin-dashboard`:
 
 ```powershell
-npm run deploy-shared-to-prod -- -Profile nwac-prod-direct
-npm run deploy-admin-to-prod -- -Profile nwac-prod-direct
+npm run deploy-shared-to-prod -- -Profile nwac-prod
+npm run deploy-admin-to-prod -- -Profile nwac-prod
 ```
 
 From `X:\ISET\ISET-intake`:
 
 ```powershell
-npm run deploy-portal-to-prod -- -Profile nwac-prod-direct
+npm run deploy-portal-to-prod -- -Profile nwac-prod
 ```
 
 Then trigger the prod rollout from either repo:
 
 ```powershell
-npm run refresh-prod -- -Profile nwac-prod-direct
+npm run refresh-prod -- -Profile nwac-prod
 ```
 
 If you want the refresh script to wait and print progress:
 
 ```powershell
-npm run refresh-prod -- -Profile nwac-prod-direct -Wait
+npm run refresh-prod -- -Profile nwac-prod -Wait
 ```
 
 Current default refresh preferences:
@@ -51,24 +84,24 @@ Admin only:
 
 ```powershell
 cd X:\ISET\admin-dashboard
-npm run deploy-admin-to-prod -- -Profile nwac-prod-direct
-npm run refresh-prod -- -Profile nwac-prod-direct
+npm run deploy-admin-to-prod -- -Profile nwac-prod
+npm run refresh-prod -- -Profile nwac-prod
 ```
 
 Portal only:
 
 ```powershell
 cd X:\ISET\ISET-intake
-npm run deploy-portal-to-prod -- -Profile nwac-prod-direct
-npm run refresh-prod -- -Profile nwac-prod-direct
+npm run deploy-portal-to-prod -- -Profile nwac-prod
+npm run refresh-prod -- -Profile nwac-prod
 ```
 
 Shared only:
 
 ```powershell
 cd X:\ISET\admin-dashboard
-npm run deploy-shared-to-prod -- -Profile nwac-prod-direct
-npm run refresh-prod -- -Profile nwac-prod-direct
+npm run deploy-shared-to-prod -- -Profile nwac-prod
+npm run refresh-prod -- -Profile nwac-prod
 ```
 
 ## Verify Prod
@@ -76,13 +109,14 @@ npm run refresh-prod -- -Profile nwac-prod-direct
 Check refresh status:
 
 ```powershell
-aws autoscaling describe-instance-refreshes --region ca-central-1 --auto-scaling-group-name nwac-prod-asg --profile nwac-prod-direct --output table
+aws autoscaling describe-instance-refreshes --region ca-central-1 --auto-scaling-group-name nwac-prod-asg --profile nwac-prod --output table
 ```
 
 Check health:
 
 ```powershell
 curl https://nwac-console.awentech.ca/healthz
+curl https://iset.nwac.ca/healthz
 curl https://nwac-public.awentech.ca/healthz
 ```
 
@@ -91,3 +125,5 @@ Expected result for each health URL:
 ```json
 {"status":"ok"}
 ```
+
+If the run included prod schema or allowlisted data mutation, the manifest under `tmp/path-deploy/prod/` will also record the captured restore-point snapshot identifier for `nwac-prod-db`.

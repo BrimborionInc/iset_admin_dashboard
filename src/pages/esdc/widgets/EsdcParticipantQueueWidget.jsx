@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { BoardItem } from '@cloudscape-design/board-components';
 import {
   Header,
@@ -66,6 +67,7 @@ const EsdcParticipantQueueWidget = ({
   metadata = {},
   toggleHelpPanel
 }) => {
+  const location = useLocation();
   const [refreshTick, setRefreshTick] = useState(0);
   const [preferences, setPreferences] = useState(() => {
     try {
@@ -81,6 +83,14 @@ const EsdcParticipantQueueWidget = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [expandedItems, setExpandedItems] = useState([]);
+  const requestedReadiness = useMemo(() => {
+    const params = new URLSearchParams(location.search || '');
+    const requested = (params.get('readiness') || params.get('filter') || '').trim().toLowerCase();
+    if (requested === 'blocked') return 'blocked';
+    if (requested === 'needs_review' || requested === 'needs-review' || requested === 'needs review') return 'needs_review';
+    if (requested === 'ready') return 'ready';
+    return '';
+  }, [location.search]);
 
   const handleSettingsClick = ({ detail }) => {
     if (detail?.id === 'remove' && typeof actions.removeItem === 'function') {
@@ -122,6 +132,9 @@ const EsdcParticipantQueueWidget = ({
           offset: String((currentPageIndex - 1) * preferences.pageSize)
         });
         params.set('groupByClient', 'true');
+        if (requestedReadiness) {
+          params.set('readiness', requestedReadiness);
+        }
         const resp = await apiFetch(`/api/esdc/participants?${params}`, {
           signal: controller.signal
         });
@@ -152,7 +165,7 @@ const EsdcParticipantQueueWidget = ({
       cancelled = true;
       controller.abort();
     };
-  }, [currentPageIndex, preferences.pageSize, refreshTick]);
+  }, [currentPageIndex, preferences.pageSize, refreshTick, requestedReadiness]);
 
   useEffect(() => {
     const handler = () => setRefreshTick(tick => tick + 1);

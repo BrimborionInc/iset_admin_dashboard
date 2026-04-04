@@ -51,7 +51,7 @@ This log captures the state of the infrastructure setup so work can resume quick
 - Auto Scaling instance refresh started (ID `3e70ebde-d6b3-4924-8cb5-1b4ce18a9e7c`): new instances now come up with Node 20, pm2, env render, artifacts, and the `/opt/nwac/ISET-intake` symlink without manual SSM intervention. Health checks are stabilising while the refresh completes.
 
 ### Validation
-- `/healthz` returns 200 for both `nwac-console-test.awentech.ca` and `nwac-public-test.awentech.ca` once new targets pass ALB health checks (expect temporary 502s during the rolling refresh).
+- ALB target-group health is the reliable operator signal for TEST (`nwac-test-admin-tg` on `5001`, `nwac-test-portal-tg` on `5000`). As re-verified on 2026-04-04, unauthenticated public requests to `nwac-console-test.awentech.ca/healthz` and `nwac-public-test.awentech.ca/healthz` currently return `403`, so Codex/operator smoke checks should use target-group health instead of public curl.
 - pm2 on refreshed nodes shows `nwac-admin` and `nwac-portal` online with no MODULE_NOT_FOUND errors; admin error log down to the AI-key warning only.
 
 ### Outstanding Follow-ups

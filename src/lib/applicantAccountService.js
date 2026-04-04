@@ -465,9 +465,28 @@ function mapApplicantAccountRow(row) {
   };
 }
 
-async function fetchApplicantAccountRows(dbPool, { q = '', clientId = null, limit = 500 } = {}) {
+async function fetchApplicantAccountRows(dbPool, { q = '', clientId = null, limit = 500, status = null } = {}) {
   const search = normaliseString(q);
+  const statusKey = normaliseString(status);
   const params = [];
+  const activatedCondition = `
+    (
+      cl.applicant_account_status = '${APPLICANT_STATUS_ACTIVATED}'
+      OR cl.applicant_activated_at IS NOT NULL
+    )
+  `;
+  const invitationCondition = `
+    (
+      cl.applicant_account_status = '${APPLICANT_STATUS_INVITATION_SENT}'
+      OR cl.applicant_invited_at IS NOT NULL
+    )
+  `;
+  const createdCondition = `
+    (
+      cl.applicant_cognito_sub IS NOT NULL
+      OR cl.applicant_cognito_username IS NOT NULL
+    )
+  `;
   let whereSql = `
     WHERE (
       lc.id IS NOT NULL
@@ -496,6 +515,16 @@ async function fetchApplicantAccountRows(dbPool, { q = '', clientId = null, limi
       )
     `;
     params.push(like, like, like, like, like, like);
+  }
+
+  if (statusKey === APPLICANT_STATUS_ACTIVATED) {
+    whereSql += ` AND ${activatedCondition}`;
+  } else if (statusKey === APPLICANT_STATUS_INVITATION_SENT) {
+    whereSql += ` AND NOT ${activatedCondition} AND ${invitationCondition}`;
+  } else if (statusKey === APPLICANT_STATUS_CREATED) {
+    whereSql += ` AND NOT ${activatedCondition} AND NOT ${invitationCondition} AND ${createdCondition}`;
+  } else if (statusKey === 'no_account') {
+    whereSql += ` AND NOT ${activatedCondition} AND NOT ${invitationCondition} AND NOT ${createdCondition}`;
   }
 
   params.push(Math.max(1, Math.min(Number(limit) || 500, 1000)));
@@ -568,6 +597,45 @@ async function fetchApplicantAccountRows(dbPool, { q = '', clientId = null, limi
     params
   );
   return (rows || []).map(mapApplicantAccountRow);
+}
+
+async function fetchApplicantAccountSummary(dbPool) {
+  const activatedCondition = `
+    (
+      cl.applicant_account_status = '${APPLICANT_STATUS_ACTIVATED}'
+      OR cl.applicant_activated_at IS NOT NULL
+    )
+  `;
+  const invitationCondition = `
+    (
+      cl.applicant_account_status = '${APPLICANT_STATUS_INVITATION_SENT}'
+      OR cl.applicant_invited_at IS NOT NULL
+    )
+  `;
+  const createdCondition = `
+    (
+      cl.applicant_cognito_sub IS NOT NULL
+      OR cl.applicant_cognito_username IS NOT NULL
+    )
+  `;
+
+  const [[row]] = await dbPool.query(
+    `
+      SELECT
+        SUM(CASE WHEN ${activatedCondition} THEN 1 ELSE 0 END) AS activated,
+        SUM(CASE WHEN NOT ${activatedCondition} AND ${invitationCondition} THEN 1 ELSE 0 END) AS invitation_sent,
+        SUM(CASE WHEN NOT ${activatedCondition} AND NOT ${invitationCondition} AND ${createdCondition} THEN 1 ELSE 0 END) AS created,
+        SUM(CASE WHEN NOT ${activatedCondition} AND NOT ${invitationCondition} AND NOT ${createdCondition} THEN 1 ELSE 0 END) AS no_account
+      FROM client cl
+    `
+  );
+
+  return {
+    activated: Number(row?.activated || 0),
+    invitationSent: Number(row?.invitation_sent || 0),
+    readyToInvite: Number(row?.created || 0),
+    noAccount: Number(row?.no_account || 0),
+  };
 }
 
 async function loadApplicantAccountRow(dbPool, clientId) {
@@ -881,6 +949,7 @@ module.exports = {
   extractClientEmail,
   fetchActorStaffProfileId,
   fetchApplicantAccountRows,
+  fetchApplicantAccountSummary,
   loadApplicantAccountRow,
   normalizeEmail,
   parseTrustedPools,

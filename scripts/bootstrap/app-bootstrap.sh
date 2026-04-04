@@ -111,6 +111,18 @@ DB_PASS=$pass
 EOF
 }
 
+upsert_env_value() {
+  local env_path="$1"
+  local key="$2"
+  local value="$3"
+
+  sudo touch "$env_path"
+  sudo sed -i "/^${key}=/d" "$env_path"
+  sudo tee -a "$env_path" >/dev/null <<EOF
+${key}=${value}
+EOF
+}
+
 download_artifact() {
   local s3_uri="$1"
   local dest_dir="$2"
@@ -121,7 +133,18 @@ download_artifact() {
   retry 5 5 aws s3 cp "$s3_uri" "$tmp_zip" --region "$AWS_REGION"
   sudo rm -rf "$dest_dir"
   sudo mkdir -p "$dest_dir"
-  sudo unzip -q "$tmp_zip" -d "$dest_dir"
+  # unzip returns 1 for some non-fatal archive warnings (for example, backslash
+  # path separators from workstation-created zip files). Treat that as usable.
+  if sudo unzip -q "$tmp_zip" -d "$dest_dir"; then
+    :
+  else
+    local unzip_exit=$?
+    if [ "$unzip_exit" -ne 1 ]; then
+      rm -f "$tmp_zip"
+      return "$unzip_exit"
+    fi
+    log "Continuing after unzip warning for $s3_uri (exit code 1)."
+  fi
   rm -f "$tmp_zip"
 }
 
@@ -133,7 +156,16 @@ download_shared() {
   tmp_zip="$(mktemp)"
   log "Downloading shared artifact $s3_uri..."
   retry 5 5 aws s3 cp "$s3_uri" "$tmp_zip" --region "$AWS_REGION"
-  unzip -q "$tmp_zip" -d "$tmp_dir"
+  if unzip -q "$tmp_zip" -d "$tmp_dir"; then
+    :
+  else
+    local unzip_exit=$?
+    if [ "$unzip_exit" -ne 1 ]; then
+      rm -rf "$tmp_dir" "$tmp_zip"
+      return "$unzip_exit"
+    fi
+    log "Continuing after unzip warning for $s3_uri (exit code 1)."
+  fi
   sudo rm -rf "$dest_dir"
   if [ -d "$tmp_dir/shared" ]; then
     sudo mv "$tmp_dir/shared" "$dest_dir"
@@ -188,6 +220,8 @@ main() {
 
   merge_db_credentials "$ADMIN_ROOT/.env" "$db_secret_json"
   merge_db_credentials "$PORTAL_ROOT/.env" "$db_secret_json"
+  upsert_env_value "$ADMIN_ROOT/.env" "DISABLE_AUTO_MIGRATIONS" "true"
+  upsert_env_value "$PORTAL_ROOT/.env" "AUTO_MIGRATE" "false"
 
   if [ -f "$ADMIN_ROOT/package.json" ]; then
     sudo rm -rf "$ADMIN_ROOT/node_modules"

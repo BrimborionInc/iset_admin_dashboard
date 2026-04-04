@@ -19,6 +19,7 @@ import {
   ColumnLayout
 } from '@cloudscape-design/components';
 import Tabs from '@cloudscape-design/components/tabs';
+import { useLocation } from 'react-router-dom';
 import { apiFetch } from '../auth/apiClient';
 import Board from '@cloudscape-design/board-components/board';
 import BoardItem from '@cloudscape-design/board-components/board-item';
@@ -33,13 +34,35 @@ const ROLE_OPTIONS = [
   { value: 'ISET_Coordinator', label: getRoleDisplayName('ISET_Coordinator') }
 ];
 
+const ADMIN_USER_FILTER_IDS = new Set(['all', 'disabled', 'pending', 'noMfa', 'admins', 'recent', 'never']);
+const APPLICANT_ACCOUNT_STATUS_IDS = new Set(['no_account', 'created', 'invitation_sent', 'activated']);
+
 // Users loaded from backend (server fallback if provider disabled)
 
 export default function UserManagementDashboard() {
+  const location = useLocation();
   const { currentUser } = useAuth();
   const currentRole = currentUser?.role || null;
   const canManageAdminUsers = ['System Administrator', 'NWAC Administrator', 'Regional Manager'].includes(currentRole);
   const canManageApplicantAccounts = canManageAdminUsers || currentRole === 'ISET Coordinator';
+  const initialUrlState = useMemo(() => {
+    const params = new URLSearchParams(location.search || '');
+    const requestedTab = params.get('tab');
+    const requestedFilter = params.get('filter');
+    const requestedApplicantStatus = params.get('status');
+
+    const pageTabId = requestedTab === 'applicant-accounts' && canManageApplicantAccounts
+      ? 'applicant-accounts'
+      : (requestedTab === 'admin-users' && canManageAdminUsers
+        ? 'admin-users'
+        : (canManageAdminUsers ? 'admin-users' : 'applicant-accounts'));
+
+    return {
+      pageTabId,
+      quickFilter: ADMIN_USER_FILTER_IDS.has(requestedFilter) ? requestedFilter : 'all',
+      applicantStatusFilter: APPLICANT_ACCOUNT_STATUS_IDS.has(requestedApplicantStatus) ? requestedApplicantStatus : '',
+    };
+  }, [location.search, canManageAdminUsers, canManageApplicantAccounts]);
   const [items, setItems] = useState([
   { id: 'admin-users-table', rowSpan: 6, columnSpan: 4, data: { title: 'Administrative Users' } },
   { id: 'role-kpis', rowSpan: 3, columnSpan: 1, data: { title: 'Role Distribution' } },
@@ -47,7 +70,7 @@ export default function UserManagementDashboard() {
   { id: 'metrics-snapshot', rowSpan: 3, columnSpan: 1, data: { title: 'Metrics Snapshot' } },
   { id: 'audit-log', rowSpan: 3, columnSpan: 1, data: { title: 'Recent Admin Actions' } }
   ]);
-  const [pageTabId, setPageTabId] = useState(canManageAdminUsers ? 'admin-users' : 'applicant-accounts');
+  const [pageTabId, setPageTabId] = useState(initialUrlState.pageTabId);
   const [users, setUsers] = useState([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [applicantAccounts, setApplicantAccounts] = useState([]);
@@ -118,7 +141,8 @@ export default function UserManagementDashboard() {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ email: '', name: '', displayName: '', role: null, regionId: '', regionIds: [] });
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [quickFilter, setQuickFilter] = useState('all');
+  const [quickFilter, setQuickFilter] = useState(initialUrlState.quickFilter);
+  const [applicantStatusFilter, setApplicantStatusFilter] = useState(initialUrlState.applicantStatusFilter);
   const [actionBusy, setActionBusy] = useState(false);
   const [showRoleChange, setShowRoleChange] = useState(false);
   const [roleChangeTarget, setRoleChangeTarget] = useState(null);
@@ -140,6 +164,12 @@ export default function UserManagementDashboard() {
       setPageTabId('admin-users');
     }
   }, [canManageAdminUsers, canManageApplicantAccounts, pageTabId]);
+
+  useEffect(() => {
+    setPageTabId(initialUrlState.pageTabId);
+    setQuickFilter(initialUrlState.quickFilter);
+    setApplicantStatusFilter(initialUrlState.applicantStatusFilter);
+  }, [initialUrlState]);
 
   const QUICK_FILTERS = useMemo(() => [
     { id: 'all', label: 'All', predicate: () => true },
@@ -267,7 +297,15 @@ export default function UserManagementDashboard() {
     setLoadingApplicantAccounts(true);
     try {
       const q = applicantFilteringText.trim();
-      const resp = await apiFetch(`/api/admin/applicants${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+      const params = new URLSearchParams();
+      if (q) {
+        params.set('q', q);
+      }
+      if (applicantStatusFilter) {
+        params.set('status', applicantStatusFilter);
+      }
+      const query = params.toString();
+      const resp = await apiFetch(`/api/admin/applicants${query ? `?${query}` : ''}`);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const json = await resp.json().catch(() => ({ users: [] }));
       setApplicantAccounts(Array.isArray(json.users) ? json.users : []);
@@ -277,7 +315,7 @@ export default function UserManagementDashboard() {
     } finally {
       setLoadingApplicantAccounts(false);
     }
-  }, [applicantFilteringText, canManageApplicantAccounts]);
+  }, [applicantFilteringText, applicantStatusFilter, canManageApplicantAccounts]);
 
   useEffect(() => {
     if (!canManageApplicantAccounts) {
@@ -289,7 +327,7 @@ export default function UserManagementDashboard() {
       loadApplicantAccounts();
     }, applicantFilteringText.trim() ? 350 : 0);
     return () => clearTimeout(handle);
-  }, [applicantFilteringText, canManageApplicantAccounts, loadApplicantAccounts]);
+  }, [applicantFilteringText, applicantStatusFilter, canManageApplicantAccounts, loadApplicantAccounts]);
 
   const runApplicantAction = useCallback(async (clientId, action) => {
     if (!clientId) return;
