@@ -23,6 +23,7 @@ The admin server can execute canonical migrations automatically at startup when 
 5. For each file:
    - Compute a SHA-256 checksum of the file contents.
    - If `iset_migration` already stores the same `filename+checksum` with `success=1`, skip it.
+   - A failed row for the same `filename+checksum` does not count as applied; the file remains pending until a successful run records `success=1`.
 6. If `AUTO_MIGRATIONS_DRY_RUN=true`, log the pending filenames and stop (useful in preflight checks).
 7. Otherwise, execute each pending file inside a transaction, splitting on `;` followed by newline/EOF. Duplicate column/index errors are logged and skipped; other errors abort the file and mark the migration as failed.
 8. Record the outcome in `iset_migration`. On failure the runner stops further files.
@@ -60,6 +61,7 @@ The admin server can execute canonical migrations automatically at startup when 
 - Errors are logged as `[migrations] FAILED <file>: <message>` and stop subsequent migrations.
 - The runner still records the failure row in `iset_migration` (with `success=0` and error snippet) so you have an audit trail.
 - Fix the SQL, edit/re-save the file, and restart. The checksum change triggers a new attempt.
+- Retrying the exact same `filename+checksum` now updates the existing tracking row instead of failing on the unique key, so local/dev recovery from a failed migration does not require manual tracker cleanup.
 
 ## Operational tips
 

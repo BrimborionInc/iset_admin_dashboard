@@ -16,6 +16,7 @@ import MetricsWidget from './widgets/MetricsWidget';
 import SystemAdminOperationsSnapshotWidget from './widgets/SystemAdminOperationsSnapshotWidget';
 import SystemAdminAwsEnvironmentStatusWidget from './widgets/SystemAdminAwsEnvironmentStatusWidget';
 import SystemAdminUsersAccessAlertsWidget from './widgets/SystemAdminUsersAccessAlertsWidget';
+import SystemAdminFeedbackQueueWidget from './widgets/SystemAdminFeedbackQueueWidget.jsx';
 import buildInfo from '../../generated/buildInfo';
 
 const WIDGET_REGISTRY = {
@@ -91,6 +92,14 @@ const WIDGET_REGISTRY = {
         defaultRowSpan: 6,
         defaultColumnSpan: 4
     },
+    'system-admin-feedback-queue': {
+        id: 'system-admin-feedback-queue',
+        component: SystemAdminFeedbackQueueWidget,
+        title: 'Bug & Change Requests',
+        description: 'System Administrator triage queue for internal bug reports and change requests.',
+        defaultRowSpan: 8,
+        defaultColumnSpan: 4
+    },
     'dev-task-tracker': {
         id: 'dev-task-tracker',
         component: DevTaskTrackerWidget,
@@ -102,7 +111,7 @@ const WIDGET_REGISTRY = {
 };
 
 const STORAGE_PREFIX = 'admin-home-layout-v7';
-const SYSTEM_ADMIN_STORAGE_PREFIX = 'admin-home-layout-v9';
+const SYSTEM_ADMIN_STORAGE_PREFIX = 'admin-home-layout-v10';
 const ISET_COORDINATOR_STATUS_FILTER = ['submitted', 'in_review', 'docs_requested', 'closure_notice', 'pending_approval', 'decision_ready'].join(',');
 const ISET_COORDINATOR_EI_ELIGIBILITY_FILTER = ISET_COORDINATOR_STATUS_FILTER;
 const ISET_COORDINATOR_READY_TO_ASSESS_FILTER = ['submitted', 'in_review'].join(',');
@@ -226,6 +235,7 @@ const filterWidgetsForRole = (role) => {
         delete allowed['system-admin-operations-snapshot'];
         delete allowed['system-admin-aws-environment-status'];
         delete allowed['system-admin-users-access-alerts'];
+        delete allowed['system-admin-feedback-queue'];
     }
     if (role === 'System Administrator') {
         delete allowed['metrics'];
@@ -247,6 +257,7 @@ const buildDefaultLayout = (role) => {
     if (role === 'System Administrator') {
         return [
             { id: 'system-admin-operations-snapshot', rowSpan: 5, columnSpan: 4 },
+            { id: 'system-admin-feedback-queue', rowSpan: 8, columnSpan: 4 },
             { id: 'system-admin-aws-environment-status', rowSpan: 5, columnSpan: 4 },
             { id: 'system-admin-users-access-alerts', rowSpan: 6, columnSpan: 4 },
             { id: 'recent-activity', rowSpan: 4, columnSpan: 2 },

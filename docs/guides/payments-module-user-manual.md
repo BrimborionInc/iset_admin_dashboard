@@ -2,7 +2,7 @@
 
 Purpose: Provide a plain-language guide for using the Payments module dashboards from draft through submission to Finance (email).  
 Audience: Program staff and admin operators; Finance receives email submissions (no sign-in).  
-Last Updated: 2026-03-02
+Last Updated: 2026-04-05
 
 ## 1) Introduction (for new users)
 The Payments module is where payment requests are created and submitted to Finance by email. A request starts as a **payment packet** with one or more payment lines; evidence must be attached before submission. The goal is to ensure submissions are compliant, auditable, and easy to report.
@@ -55,6 +55,7 @@ Notes:
 When the initial intervention is created from an approved assessment, the system auto-creates a **draft** packet. The same happens later if an intervention is approved:
 - If the intervention has a pot and approved amount, a draft **line** is created.
 - If pot or amount is missing, the packet is created **without a line** and flagged in risk flags.
+- Historical `manual_backload` interventions are excluded from this workflow. Their `actual amount` is treated as imported finance history only and they cannot create payment packets.
 
 What you should do:
 1. Open **Program Payments** and find the packet in the queue.

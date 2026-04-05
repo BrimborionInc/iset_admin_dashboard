@@ -105,9 +105,13 @@ async function planPendingSharedSchemaMigrations(pool, options = {}) {
   await ensureTrackingTable(pool, { trackingTable });
 
   const appliedRows = await fetchAppliedMigrationRows(pool, { trackingTable });
-  const appliedMap = new Map(appliedRows.map(row => [`${row.filename}|${row.checksum}`, row]));
+  const successfulAppliedMap = new Map(
+    appliedRows
+      .filter(row => Number(row.success) === 1)
+      .map(row => [`${row.filename}|${row.checksum}`, row])
+  );
   const migrations = getCanonicalMigrationFiles({ migrationsDir });
-  const pending = migrations.filter(migration => !appliedMap.has(`${migration.file}|${migration.checksum}`));
+  const pending = migrations.filter(migration => !successfulAppliedMap.has(`${migration.file}|${migration.checksum}`));
 
   return {
     trackingTable,
@@ -199,7 +203,12 @@ async function applyPendingSharedSchemaMigrations(pool, options = {}) {
     const duration = Date.now() - start;
     await pool.query(
       `INSERT INTO ${plan.trackingTable} (filename, checksum, duration_ms, success, error_snippet)
-       VALUES (?,?,?,?,?)`,
+       VALUES (?,?,?,?,?)
+       ON DUPLICATE KEY UPDATE
+         applied_at = CURRENT_TIMESTAMP,
+         duration_ms = VALUES(duration_ms),
+         success = VALUES(success),
+         error_snippet = VALUES(error_snippet)`,
       [migration.file, migration.checksum, duration, success, errorSnippet]
     );
 

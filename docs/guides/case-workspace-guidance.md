@@ -57,6 +57,8 @@ Use this note when spinning up a fresh chat so the LLM has the context it needs 
 - Workspace alerts: all Cloudscape `Alert` instances in the action plan/intervention widgets and modals are now dismissible so users can clear success/error banners after reviewing them.
 - Payment packet creation in the Case Workspace now derives reporting unit, pot, and amount from the selected intervention (partial payments unlock amount entry), hides service period fields unless the payment type requires them, and the Manage Payments quick action focuses the first intervention with a draft/returned packet.
 - Payment type options now filter by intervention code using runtime config `payment.intervention.payment_type_map`, and the backend blocks disallowed types.
+- Existing-intervention backload now enforces lifecycle compatibility with the selected action plan: archived plans are blocked, closed plans accept only completed/cancelled interventions, in-progress/suspended interventions require an active plan, and historical start/result/end dates seed the stored lifecycle timestamps for backloaded plans/interventions.
+- Backloaded intervention finance is now history-only: `actual_amount` on a `manual_backload` intervention writes a posted historical finance ledger entry for reporting/budget burn, but those interventions cannot generate payment packets or be submitted through the live payments workflow.
 
 ## 6. Handy Reminders When Picking Up Work
 - Confirm the dev servers are running before testing UI changes.

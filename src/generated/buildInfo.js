@@ -1,12 +1,12 @@
 const buildInfo = {
   "packageVersion": "0.1.0",
-  "releaseId": "20260404-144835",
-  "buildTarget": "test",
-  "builtAt": "2026-04-04T15:00:17.359Z",
-  "gitCommit": "eadff37f6dd16db7c48a1143900033aa5cd8e21f",
-  "gitShort": "eadff37f",
-  "gitDirty": true,
-  "displayLabel": "v0.1.0 | 20260404-144835 | eadff37f-dirty | test"
+  "releaseId": "",
+  "buildTarget": "local-start",
+  "builtAt": "2026-04-05T12:07:48.008Z",
+  "gitCommit": "2649bb71863ddefa623df7bdaf3131577a98a097",
+  "gitShort": "2649bb71",
+  "gitDirty": false,
+  "displayLabel": "v0.1.0 | 2649bb71 | local-start"
 };
 
 export default buildInfo;

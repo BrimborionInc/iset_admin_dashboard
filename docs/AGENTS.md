@@ -5,7 +5,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-04-04
+Last Updated: 2026-04-05
 
 ## Working relationship (design dialog)
 
@@ -84,6 +84,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Client-file import guide: `docs/guides/client-file-imports.md`
 - Client Batch Import dashboard reference: `docs/dashboards/client-file-import-dashboard.md`
 - Data and Results dashboard reference: `docs/dashboards/data-and-results-dashboard.md`
+- Admin feedback reporting reference: `docs/features/admin-feedback-reporting.md`
 - Homepage Metrics dashboard reference: `docs/dashboards/admin-home-metrics-widget.md`
 - Query Editor dashboard reference: `docs/dashboards/query-editor-dashboard.md`
 - Test DB access from Codex/WSL: `docs/guides/test-db-access-from-codex.md`
@@ -138,6 +139,23 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Current shared-schema rule: PATH canonical migrations live in `admin-dashboard/sql/migrations/`; one-off/manual SQL belongs in `admin-dashboard/sql/ops/`
 - Current promotion rule: treat cross-environment DB promotion as allowlisted config/reference sync only. Full DB overwrite/reset is acceptable for TEST, but PROD may receive only canonical schema migrations plus explicit datasets from `docs/ops/deployments/data-promotion-catalog.md`.
 
+## Admin feedback reporting status
+
+- Top-header report button now lives beside the existing `Admin Console Help` utility and opens a help panel titled `Bug reporting and change requests`.
+- Help-panel content lives in `src/helpPanelContents/adminFeedbackHelp.js`; the floating report window lives in `src/features/adminFeedback/FloatingFeedbackReporter.jsx`; the floating review window lives in `src/features/adminFeedback/FloatingFeedbackReviewPanel.jsx`; shell state/event wiring lives in `src/AppContent.js`.
+- The current launcher flow is: top-nav button -> help panel instructions -> `Report a bug` / `Request a change` -> floating non-modal report window.
+- The floating report window captures page context when opened (path, URL, title, breadcrumbs, browser metadata, viewport, timezone) so staff can keep navigating while they write.
+- System Administrators now also get a homepage triage widget (`src/pages/home/widgets/SystemAdminFeedbackQueueWidget.jsx`) that opens the floating review window via the `admin-feedback:open-review` shell event.
+- Backend routes now include:
+  - `POST /api/admin/feedback-reports`
+  - `GET /api/dashboard/system-admin-feedback-reports`
+  - `GET /api/admin/feedback-reports/:id`
+  - `PATCH /api/admin/feedback-reports/:id/status`
+  - `POST /api/admin/feedback-reports/:id/notes`
+- Canonical schema migrations: `sql/migrations/20260405_0001_create_admin_feedback_reporting.sql` and `sql/migrations/20260405_0002_create_admin_feedback_management_tables.sql`.
+- DEV recovery note from 2026-04-05: the original feedback attachment DDL used `storage_key VARCHAR(1024) UNIQUE`, which exceeds MySQL/InnoDB's 3072-byte utf8mb4 index limit. The canonical migration now uses `storage_key VARCHAR(512)`, and the shared-schema runner now treats failed tracking rows as still pending and upserts retries into `iset_migration`.
+- Persistence is intentionally separate from `iset_document`: use `admin_feedback_report`, `admin_feedback_attachment`, `admin_feedback_status_history`, and `admin_feedback_note`, because bug/change evidence is not a client/application/case supporting document and must not appear in Supporting Documents.
+
 ## PATH deployment control plane
 
 - Preferred operator entry point: `npm run path:deploy -- --env test|prod ...` from `admin-dashboard`.
@@ -190,7 +208,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Current homepage Metrics widget behavior is documented in `docs/dashboards/admin-home-metrics-widget.md`.
 - Current homepage Work Queue widget behavior is documented in `docs/dashboards/admin-home-my-work-widget.md`.
 - Current System Administrator homepage behavior is documented in `docs/dashboards/admin-home-system-admin-homepage.md`.
-- Current System Administrator homepage rule: the default board now includes `Operations Snapshot`, `AWS Environment Status`, `Users & Access Alerts`, and `Recent Admin Activity`; the AWS widget is a read-only live check of staff/applicant Cognito plus SES mail for the active environment, not a generic infrastructure monitor.
+- Current System Administrator homepage rule: the default board now includes `Operations Snapshot`, `Bug & Change Requests`, `AWS Environment Status`, `Users & Access Alerts`, and `Recent Admin Activity`; the AWS widget is a read-only live check of staff/applicant Cognito plus SES mail for the active environment, not a generic infrastructure monitor.
 - Shared help-panel AI chat prompt is built in `src/AppContent.js` (`buildSystemPrompt`). For coordinator-facing PATH workflows, treat that prompt as a staff job-aid layer and keep it aligned with NWAC training expectations, not just with page mechanics.
 - Frontend files to inspect together:
   - `src/pages/home/HomeDashboardPage.jsx`
@@ -271,6 +289,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Secure Messaging now supports application-less client-file cases when the case is linked to a participant PATH account; imported cases without a participant account can still manage documents, plans, and interventions, but messaging remains unavailable until that account exists.
 - Applicant-facing secure-message/document-reminder emails only render clickable portal links when the public-portal runtime can resolve a portal URL. Preferred envs are `APPLICANT_PORTAL_URL` / `APPLICANT_PORTAL_BASE`; runtime fallback also checks `PUBLIC_PORTAL_BASE_URL`, `REACT_APP_PORTAL_URL`, `REACT_APP_API_BASE_URL`, and `PORTAL_DOMAIN`. If none resolve in production, `[link url="{portal_dashboard_url}"]...[/link]` degrades to plain text with no anchor.
 - Case Header now exposes explicit backload quick actions on application-less cases: `Add existing action plan`, `Add existing intervention`, and `Upload existing documents`.
+- Current backload integrity rule: `Add existing intervention` must preserve real plan/intervention lifecycle state. Archived plans are read-only, closed plans can receive only `completed`/`cancelled` interventions, `in_progress`/`suspended` interventions require an active plan, closed backloaded interventions must carry an end date, and `manual_backload` interventions must stay silent on later edit/close flows instead of auto-creating payment-packet, finance-email, or CFA side effects. Their `actual amount` now writes historical posted finance ledger history only; unpaid remainder should move into a new live intervention.
 - `src/widgets/CaseCalendarWidget.js` is shared by the case workspace and application workspace. Treat date-only values (`YYYY-MM-DD`) as local Canadian calendar dates; UTC-based parsing/weekday anchors will shift headers or event days backward.
 - Tutorial updates must be validated end-to-end (including `Next` progression on every step) so no step dead-ends due to missing hotspots.
 - If a change introduces new deployment artifacts, update the relevant deploy script(s) so files are staged.

@@ -2,7 +2,7 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-04-04
+Last Updated: 2026-04-05
 
 ## How to use
 
@@ -28,6 +28,32 @@ For each indexed thread/topic, keep:
 
 ## Indexed Topics
 
+### Admin-console bug reporting and change requests
+
+- Codex task title: `This task is to create an in-app bug reporting and change request function on the admin-console side.`
+- Topic: in-app staff bug-reporting / change-request flow plus System Administrator homepage triage
+- Keywords: `bug reporting`, `change request`, `admin console help`, `top header bug button`, `floating report window`, `floating review window`, `system administrator homepage`, `Bug & Change Requests widget`, `admin_feedback_report`, `admin_feedback_attachment`, `admin_feedback_status_history`, `admin_feedback_note`
+- When to open: the user asks how internal PATH staff are supposed to report admin-console issues from inside the app, asks where the floating report or review windows are wired, asks how Sysadmins triage those reports from the homepage, or asks whether those uploads use Supporting Documents or their own storage model
+- Primary docs:
+  - `docs/features/admin-feedback-reporting.md`
+  - `docs/AGENTS.md`
+  - `docs/meta/project-map.md`
+- Status: current as of 2026-04-05
+- Notes: durable decisions from this thread: the report entry point is a dedicated top-header button beside `Admin Console Help`; the launcher flow is top-nav button -> help panel instructions -> floating non-modal report window; page context is captured when the window opens so staff can keep navigating while writing; and persistence is intentionally separate from `iset_document` because bug/change evidence is not a client/application/case document. A later pass in the same feature added System Administrator homepage triage via the `Bug & Change Requests` widget plus a floating review panel with status changes and internal notes. The canonical schema migrations are `sql/migrations/20260405_0001_create_admin_feedback_reporting.sql` and `sql/migrations/20260405_0002_create_admin_feedback_management_tables.sql`, and the backend routes now include `POST /api/admin/feedback-reports`, `GET /api/dashboard/system-admin-feedback-reports`, `GET /api/admin/feedback-reports/:id`, `PATCH /api/admin/feedback-reports/:id/status`, and `POST /api/admin/feedback-reports/:id/notes`.
+
+### Client-file backload action-plan and intervention rules
+
+- Codex task title: `Improve back-loaded case flow`
+- Topic: imported/application-less case backload rules for existing action plans and existing interventions
+- Keywords: `Improve back-loaded case flow`, `back-loaded case flow`, `client-file backload`, `existing action plan`, `existing intervention`, `manual_backload`, `application-less case`, `closed plan`, `in progress intervention`, `archived plan`
+- When to open: the user asks how imported pre-PATH clients are supposed to add historical plans/interventions, asks whether backload actions are allowed to create open interventions on closed plans, or asks what lifecycle constraints apply to the Case Header backload actions
+- Primary docs:
+  - `docs/guides/client-file-imports.md`
+  - `docs/widgets/admin/case-header-widget.md`
+  - `docs/AGENTS.md`
+- Status: current as of 2026-04-05
+- Notes: the current operating rule is that client-file import creates only the client plus application-less case, while historical plans/interventions are added later through Case Header backload actions. Those backload actions stay silent, and `manual_backload` interventions stay silent on later edit/close flows too: no approval routing, checklist progression, notifications, payment-packet generation, or finance-email side effects. They must still preserve real lifecycle state: archived plans are read-only, closed plans can receive only completed/cancelled interventions, in-progress or suspended interventions require an active plan, and historical start/result/end dates now seed the stored lifecycle timestamps used by the workspace. Finance handling is now history-only: `actual amount` on a backloaded intervention writes a posted historical ledger entry for reporting/budget burn, while unpaid remainder should move into a new live intervention.
+
 ### PATH deployment model and canonical shared-schema migrations
 
 - Codex task title: `Plan deployment strategy`
@@ -51,14 +77,14 @@ For each indexed thread/topic, keep:
 
 - Codex task title: `Suggest admin homepage widgets`
 - Topic: redesigning the System Administrator homepage away from the old stub/development-tracker layout into an operations board with actionable admin widgets
-- Keywords: `Suggest admin homepage widgets`, `System Administrator homepage`, `Operations Snapshot`, `AWS Environment Status`, `Users & Access Alerts`, `Recent Admin Activity`, `admin-home-layout-v9`
+- Keywords: `Suggest admin homepage widgets`, `System Administrator homepage`, `Operations Snapshot`, `Bug & Change Requests`, `AWS Environment Status`, `Users & Access Alerts`, `Recent Admin Activity`, `admin-home-layout-v10`
 - When to open: the user references the chat where the System Administrator homepage was redesigned, asks why `Metrics` is hidden for System Administrators, asks what widgets belong on the admin homepage, or asks where the AWS/Cognito/SES status tile came from
 - Primary docs:
   - `docs/dashboards/admin-home-system-admin-homepage.md`
   - `docs/AGENTS.md`
   - `docs/meta/changelog.md`
 - Status: current as of 2026-04-03
-- Notes: this thread replaced the prior System Administrator homepage direction with an exception-driven operational board. Durable outcomes include the live `Operations Snapshot`, `Recent Admin Activity`, `Users & Access Alerts`, and `AWS Environment Status` widgets; the rule that these widgets should prefer schema-free aggregate endpoints; the rule that the AWS widget stays read-only and focused on PATH-backed services rather than generic infrastructure monitoring; and the current System Administrator default layout storage key `admin-home-layout-v9`.
+- Notes: this thread replaced the prior System Administrator homepage direction with an exception-driven operational board. Durable outcomes include the live `Operations Snapshot`, `Recent Admin Activity`, `Users & Access Alerts`, and `AWS Environment Status` widgets; the rule that these widgets should prefer schema-free aggregate endpoints; the rule that the AWS widget stays read-only and focused on PATH-backed services rather than generic infrastructure monitoring; and the current System Administrator default layout storage key `admin-home-layout-v9`. A later follow-up added the `Bug & Change Requests` widget plus floating review-panel integration and moved the layout storage key to `admin-home-layout-v10`.
 
 ### Prod portal hostname cutover
 

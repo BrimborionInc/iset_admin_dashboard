@@ -1,6 +1,6 @@
 # Client File Imports
 
-Date: 2026-03-23
+Date: 2026-04-05
 
 ## Summary
 
@@ -52,6 +52,20 @@ This means the database does not require a fake intake history just to preserve 
   - no approval routing
   - no checklist progression
   - no client-notification side effects
+  - no payment-packet, validation, finance-email, or CFA side effects for `manual_backload` interventions when they are later edited or closed in the workspace
+- Backloaded intervention finance handling is now explicitly historical-only:
+  - `actual amount` on a `manual_backload` intervention writes a posted historical `finance_transaction` so budget burn and finance reporting can reflect legacy spend
+  - that historical record is read-only finance history, not a live payment request
+  - `manual_backload` interventions are blocked from payment-packet creation in Program Payments
+  - if there is unpaid work that must now be managed in PATH, staff should create a new live intervention for the remaining amount instead of sending the backloaded intervention through the live payments workflow
+- Backloaded action plans now carry the entered historical dates into the lifecycle timestamps the workspace reads:
+  - active plans seed `activated_at` from the entered start date
+  - closed plans seed `activated_at` from the entered start date and `closed_at` from the entered result date
+- Backloaded interventions are now lifecycle-validated against their parent plan:
+  - archived plans cannot receive existing interventions
+  - closed plans can receive only `completed` or `cancelled` interventions
+  - `in_progress` and `suspended` interventions require an `active` plan
+  - `completed` and `cancelled` interventions must include an end date, which is also stored as `closed_at`
 - New post-go-live activity should still use the normal PATH workflow, for example `Propose new intervention`.
 
 ## Recommendation
@@ -112,6 +126,8 @@ This means the database does not require a fake intake history just to preserve 
 - `src/pages/Caseworking/caseWorkspace/widgets/CaseHeaderWidget.jsx`
 - `src/pages/Caseworking/caseWorkspace/modals/ExistingActionPlanModal.jsx`
 - `src/pages/Caseworking/caseWorkspace/modals/ExistingInterventionModal.jsx`
+- `src/pages/finance/widgets/PaymentRequestsWidget.jsx`
+- `src/utils/backloadInterventionRules.js`
 - `src/widgets/SupportingDocumentsWidget.js`
 - `src/widgets/caseWorkspace/SecureMessagingWidget.js`
 - `docs/dashboards/client-file-import-dashboard.md`

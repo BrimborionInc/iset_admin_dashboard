@@ -30,10 +30,13 @@ import { getReminderBusinessDayDiffDays } from './lib/reminderBusinessDay.js';
 	import IsetCoordinatorIntroTourHelp from './helpPanelContents/isetCoordinatorIntroTourHelp.js';
 	import ApplicationCaseDashboardHelp from './helpPanelContents/applicationCaseDashboardHelp.js';
 	import ApplicationAssessmentHelp, { NwacAssessmentHelp } from './helpPanelContents/applicationAssessmentHelp.js';
-	import CaseWorkspaceHelp from './helpPanelContents/caseWorkspaceHelp.js';
-	import { MessagingProvider } from './pages/messages/MessagingContext.js';
-	import FloatingMessageWindow from './pages/messages/FloatingMessageWindow.jsx';
-	import { buildApplicationWorkspaceTutorials, APPLICATION_WORKSPACE_TUTORIAL_ID } from './tutorials/applicationWorkspaceTutorials';
+import CaseWorkspaceHelp from './helpPanelContents/caseWorkspaceHelp.js';
+import { MessagingProvider } from './pages/messages/MessagingContext.js';
+import FloatingMessageWindow from './pages/messages/FloatingMessageWindow.jsx';
+import FloatingFeedbackReporter from './features/adminFeedback/FloatingFeedbackReporter.jsx';
+import FloatingFeedbackReviewPanel from './features/adminFeedback/FloatingFeedbackReviewPanel.jsx';
+import { getReportTypeLabel, getSeverityLabel } from './features/adminFeedback/constants.js';
+import { buildApplicationWorkspaceTutorials, APPLICATION_WORKSPACE_TUTORIAL_ID } from './tutorials/applicationWorkspaceTutorials';
 	import { buildCaseWorkspaceTutorials, CASE_WORKSPACE_TUTORIAL_ID } from './tutorials/caseWorkspaceTutorials';
 	import {
 	  buildIsetCoordinatorIntroTutorials,
@@ -694,6 +697,14 @@ const AppContent = () => {
 	  const introPromptShownRef = useRef(false);
 	  const [pageTutorialPrompt, setPageTutorialPrompt] = useState({ visible: false, tutorialId: null });
 	  const pageTutorialPromptShownRef = useRef(new Set());
+  const [feedbackVisible, setFeedbackVisible] = useState(false);
+  const [feedbackOpenRequestId, setFeedbackOpenRequestId] = useState(0);
+  const [feedbackRequestedType, setFeedbackRequestedType] = useState('bug');
+  const [feedbackRequestedContextSnapshot, setFeedbackRequestedContextSnapshot] = useState(null);
+  const [feedbackReviewVisible, setFeedbackReviewVisible] = useState(false);
+  const [feedbackReviewOpenRequestId, setFeedbackReviewOpenRequestId] = useState(0);
+  const [feedbackReviewReportId, setFeedbackReviewReportId] = useState(null);
+  const [feedbackSubmissionConfirmation, setFeedbackSubmissionConfirmation] = useState(null);
 
   const effectiveRole = role || '';
   const normalizedEffectiveRole = useMemo(
@@ -1502,6 +1513,72 @@ const AppContent = () => {
 
   const [chatVisible, setChatVisible] = useState(false);
 
+  const captureFeedbackContextSnapshot = useCallback(() => {
+    const breadcrumbItems = Array.isArray(breadcrumbs)
+      ? breadcrumbs.map(item => ({
+          text: typeof item?.text === 'string' ? item.text : '',
+          href: typeof item?.href === 'string' ? item.href : '',
+        }))
+      : [];
+    const pathValue = `${location?.pathname || ''}${location?.search || ''}${location?.hash || ''}`;
+    let urlValue = pathValue;
+    let viewport = null;
+    let browser = null;
+    if (typeof window !== 'undefined') {
+      urlValue = window.location?.href || pathValue;
+      viewport = {
+        width: window.innerWidth || null,
+        height: window.innerHeight || null,
+      };
+    }
+    if (typeof navigator !== 'undefined') {
+      browser = {
+        userAgent: navigator.userAgent || null,
+        language: navigator.language || null,
+        languages: Array.isArray(navigator.languages) ? navigator.languages : [],
+      };
+    }
+    let timeZone = null;
+    try {
+      timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+    } catch (_) {
+      timeZone = null;
+    }
+    return {
+      capturedAt: new Date().toISOString(),
+      pageTitle:
+        (typeof document !== 'undefined' && document.title ? document.title : null) ||
+        breadcrumbItems[breadcrumbItems.length - 1]?.text ||
+        'PATH',
+      path: pathValue || '/',
+      url: urlValue || pathValue || '/',
+      breadcrumbs: breadcrumbItems,
+      viewport,
+      browser,
+      timeZone,
+    };
+  }, [breadcrumbs, location?.hash, location?.pathname, location?.search]);
+
+  const openFeedbackComposer = useCallback((requestedType = 'bug') => {
+    setFeedbackRequestedType(requestedType === 'change_request' ? 'change_request' : 'bug');
+    setFeedbackRequestedContextSnapshot(captureFeedbackContextSnapshot());
+    setFeedbackOpenRequestId(currentValue => currentValue + 1);
+    setFeedbackVisible(true);
+  }, [captureFeedbackContextSnapshot]);
+
+  const openFeedbackReview = useCallback((reportId) => {
+    const numericId = Number(reportId);
+    if (!Number.isFinite(numericId) || numericId <= 0) return;
+    setFeedbackReviewReportId(numericId);
+    setFeedbackReviewOpenRequestId(currentValue => currentValue + 1);
+    setFeedbackReviewVisible(true);
+  }, []);
+
+  const handleFeedbackSubmitSuccess = useCallback((report) => {
+    setFeedbackVisible(false);
+    setFeedbackSubmissionConfirmation(report || {});
+  }, []);
+
   useEffect(() => {
     setIsHelpPanelOpen(false);
     setChatVisible(false);
@@ -1523,6 +1600,23 @@ const AppContent = () => {
     window.addEventListener('help:open-topnav', handleTopNavHelp);
     return () => window.removeEventListener('help:open-topnav', handleTopNavHelp);
   }, [toggleHelpPanel]);
+
+  useEffect(() => {
+    const handleOpenFeedbackComposer = event => {
+      const requestedType = event?.detail?.reportType;
+      openFeedbackComposer(requestedType);
+    };
+    window.addEventListener('admin-feedback:open-composer', handleOpenFeedbackComposer);
+    return () => window.removeEventListener('admin-feedback:open-composer', handleOpenFeedbackComposer);
+  }, [openFeedbackComposer]);
+
+  useEffect(() => {
+    const handleOpenFeedbackReview = event => {
+      openFeedbackReview(event?.detail?.reportId);
+    };
+    window.addEventListener('admin-feedback:open-review', handleOpenFeedbackReview);
+    return () => window.removeEventListener('admin-feedback:open-review', handleOpenFeedbackReview);
+  }, [openFeedbackReview]);
 
   // Listen for page requests to open the tools palette (avoids prop drilling)
   useEffect(() => {
@@ -1547,6 +1641,67 @@ const AppContent = () => {
           onClose={() => setChatVisible(false)}
           title={helpPanelTitle}
         />
+        <FloatingFeedbackReporter
+          visible={feedbackVisible}
+          chatVisible={chatVisible}
+          reviewVisible={feedbackReviewVisible}
+          openRequestId={feedbackOpenRequestId}
+          requestedReportType={feedbackRequestedType}
+          requestedContextSnapshot={feedbackRequestedContextSnapshot}
+          onSubmitSuccess={handleFeedbackSubmitSuccess}
+          onClose={() => setFeedbackVisible(false)}
+        />
+        <FloatingFeedbackReviewPanel
+          visible={feedbackReviewVisible}
+          chatVisible={chatVisible}
+          reporterVisible={feedbackVisible}
+          reportId={feedbackReviewReportId}
+          openRequestId={feedbackReviewOpenRequestId}
+          onClose={() => setFeedbackReviewVisible(false)}
+        />
+        <Modal
+          visible={Boolean(feedbackSubmissionConfirmation)}
+          header={`${getReportTypeLabel(feedbackSubmissionConfirmation?.reportType || 'bug')} submitted`}
+          closeAriaLabel="Close submission confirmation"
+          onDismiss={() => setFeedbackSubmissionConfirmation(null)}
+          footer={(
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button onClick={() => setFeedbackSubmissionConfirmation(null)}>
+                Close
+              </Button>
+              {normalizedEffectiveRole === 'system administrator' && Number(feedbackSubmissionConfirmation?.id) > 0 ? (
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    const reportId = Number(feedbackSubmissionConfirmation?.id);
+                    setFeedbackSubmissionConfirmation(null);
+                    openFeedbackReview(reportId);
+                  }}
+                >
+                  Open report
+                </Button>
+              ) : null}
+            </SpaceBetween>
+          )}
+        >
+          <SpaceBetween size="m">
+            <Box variant="p">
+              {`${getReportTypeLabel(feedbackSubmissionConfirmation?.reportType || 'bug')} #${feedbackSubmissionConfirmation?.id || 'new'} was submitted successfully.`}
+            </Box>
+            <Container header={<Header variant="h3">Submission summary</Header>}>
+              <SpaceBetween size="s">
+                <Box>
+                  <Box variant="awsui-key-label">Severity</Box>
+                  <Box>{getSeverityLabel(feedbackSubmissionConfirmation?.severity)}</Box>
+                </Box>
+                <Box>
+                  <Box variant="awsui-key-label">Attachments</Box>
+                  <Box>{Number(feedbackSubmissionConfirmation?.attachmentCount || 0)}</Box>
+                </Box>
+              </SpaceBetween>
+            </Container>
+          </SpaceBetween>
+        </Modal>
         <TutorialsContext.Provider value={{ tutorials }}>
           <AnnotationContext
             currentTutorial={currentTutorial}

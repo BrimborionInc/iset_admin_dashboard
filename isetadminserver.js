@@ -63,6 +63,37 @@ const ADMIN_UPLOAD_ALLOWED_MIME_TYPES = new Set([
   'image/tiff'
 ]);
 const ADMIN_UPLOAD_MAX_BYTES = Number(process.env.ADMIN_UPLOAD_MAX_BYTES || 10 * 1024 * 1024);
+const ADMIN_FEEDBACK_ALLOWED_MIME_TYPES = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/csv',
+  'text/plain',
+  'image/png',
+  'image/jpeg'
+]);
+const ADMIN_FEEDBACK_MAX_BYTES = Number(process.env.ADMIN_FEEDBACK_MAX_BYTES || 10 * 1024 * 1024);
+const ADMIN_FEEDBACK_MAX_FILES = Number(process.env.ADMIN_FEEDBACK_MAX_FILES || 5);
+const ADMIN_FEEDBACK_CONTEXT_MAX_CHARS = Number(process.env.ADMIN_FEEDBACK_CONTEXT_MAX_CHARS || 20000);
+const ADMIN_FEEDBACK_SUMMARY_MAX_CHARS = 200;
+const ADMIN_FEEDBACK_DESCRIPTION_MAX_CHARS = 8000;
+const ADMIN_FEEDBACK_NOTE_MAX_CHARS = 4000;
+const ADMIN_FEEDBACK_ATTACHMENT_DOWNLOAD_EXPIRES_SECONDS = Number(
+  process.env.ADMIN_FEEDBACK_ATTACHMENT_DOWNLOAD_EXPIRES_SECONDS || 300
+);
+const ADMIN_FEEDBACK_REPORT_TYPES = new Set(['bug', 'change_request']);
+const ADMIN_FEEDBACK_SEVERITIES = new Set(['critical', 'high', 'medium', 'low']);
+const ADMIN_FEEDBACK_STATUSES = new Set([
+  'submitted',
+  'triaging',
+  'planned',
+  'in_progress',
+  'resolved',
+  'closed',
+]);
+const ADMIN_FEEDBACK_OPEN_STATUSES = ['submitted', 'triaging', 'planned', 'in_progress'];
 const CLIENT_FILE_IMPORT_MAX_BYTES = Number(process.env.CLIENT_FILE_IMPORT_MAX_BYTES || 5 * 1024 * 1024);
 const CLIENT_FILE_IMPORT_MAX_ROWS = Number(process.env.CLIENT_FILE_IMPORT_MAX_ROWS || 500);
 const CLIENT_FILE_IMPORT_ALLOWED_EXTENSIONS = new Set(['.xlsx', '.xlsm', '.csv']);
@@ -1144,6 +1175,212 @@ const adminDocumentUpload = multer({
   limits: { fileSize: ADMIN_UPLOAD_MAX_BYTES },
   fileFilter: adminUploadFileFilter
 });
+
+const adminFeedbackUploadFileFilter = (_req, file, cb) => {
+  if (ADMIN_FEEDBACK_ALLOWED_MIME_TYPES.has(file.mimetype)) {
+    cb(null, true);
+  } else {
+    const error = new Error('unsupported_file_type');
+    error.code = 'UNSUPPORTED_FILE_TYPE';
+    cb(error);
+  }
+};
+
+const adminFeedbackUpload = multer({
+  storage: adminUploadStorage,
+  limits: {
+    fileSize: ADMIN_FEEDBACK_MAX_BYTES,
+    files: ADMIN_FEEDBACK_MAX_FILES,
+  },
+  fileFilter: adminFeedbackUploadFileFilter,
+});
+
+function cleanupUploadedFiles(files) {
+  const fileList = Array.isArray(files) ? files : [];
+  fileList.forEach(file => {
+    if (!file?.path) return;
+    fs.unlink(file.path, unlinkErr => {
+      if (unlinkErr && unlinkErr.code !== 'ENOENT') {
+        console.warn('[admin:uploads] cleanup failed for %s: %s', file.path, unlinkErr.message);
+      }
+    });
+  });
+}
+
+function sanitizeFeedbackSummary(summary, description) {
+  const explicit = typeof summary === 'string' ? summary.trim().replace(/\s+/g, ' ') : '';
+  if (explicit) {
+    return explicit.slice(0, ADMIN_FEEDBACK_SUMMARY_MAX_CHARS);
+  }
+  const rawDescription = typeof description === 'string' ? description.trim() : '';
+  if (!rawDescription) return 'Untitled report';
+  const firstLine = rawDescription.split(/\r?\n/).find(line => line && line.trim()) || rawDescription;
+  return firstLine.replace(/\s+/g, ' ').slice(0, ADMIN_FEEDBACK_SUMMARY_MAX_CHARS) || 'Untitled report';
+}
+
+function sanitizeFeedbackContextSnapshot(rawValue) {
+  if (rawValue === null || typeof rawValue === 'undefined' || rawValue === '') {
+    return null;
+  }
+  let parsed = rawValue;
+  if (typeof rawValue === 'string') {
+    if (rawValue.length > ADMIN_FEEDBACK_CONTEXT_MAX_CHARS) {
+      const err = new Error('invalid_context_payload');
+      err.code = 'invalid_context_payload';
+      throw err;
+    }
+    try {
+      parsed = JSON.parse(rawValue);
+    } catch (_) {
+      const err = new Error('invalid_context_payload');
+      err.code = 'invalid_context_payload';
+      throw err;
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    const err = new Error('invalid_context_payload');
+    err.code = 'invalid_context_payload';
+    throw err;
+  }
+
+  const cleanString = (value, maxLength) => {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    return trimmed.slice(0, maxLength);
+  };
+
+  const cleanInt = value => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return null;
+    return Math.max(0, Math.trunc(number));
+  };
+
+  const breadcrumbs = Array.isArray(parsed.breadcrumbs)
+    ? parsed.breadcrumbs
+        .map(item => {
+          if (!item || typeof item !== 'object') return null;
+          const text = cleanString(item.text, 160);
+          const href = cleanString(item.href, 1024);
+          if (!text && !href) return null;
+          return { text, href };
+        })
+        .filter(Boolean)
+        .slice(0, 12)
+    : [];
+
+  const languages = Array.isArray(parsed?.browser?.languages)
+    ? parsed.browser.languages
+        .map(value => cleanString(value, 32))
+        .filter(Boolean)
+        .slice(0, 10)
+    : [];
+
+  const viewport = parsed.viewport && typeof parsed.viewport === 'object'
+    ? {
+        width: cleanInt(parsed.viewport.width),
+        height: cleanInt(parsed.viewport.height),
+      }
+    : null;
+
+  const browser = parsed.browser && typeof parsed.browser === 'object'
+    ? {
+        userAgent: cleanString(parsed.browser.userAgent, 2000),
+        language: cleanString(parsed.browser.language, 32),
+        languages,
+      }
+    : null;
+
+  return {
+    capturedAt: cleanString(parsed.capturedAt, 64),
+    pageTitle: cleanString(parsed.pageTitle, 255),
+    path: cleanString(parsed.path, 1024),
+    url: cleanString(parsed.url, 2048),
+    timeZone: cleanString(parsed.timeZone, 64),
+    breadcrumbs,
+    viewport,
+    browser,
+  };
+}
+
+async function uploadTempFileToObjectStore({ ownerKey, originalName, mimeType, sizeBytes, tempPath }) {
+  const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+  if (DRIVER !== 's3') {
+    throw new Error('s3 driver not configured');
+  }
+  const key = generateKey(ownerKey || 'admin-feedback', originalName || 'attachment');
+  const contentType = mimeType || 'application/octet-stream';
+  const presigned = await presignPut({ key, contentType });
+  await axios.put(presigned.url, fs.createReadStream(tempPath), {
+    headers: {
+      ...(presigned.headers || {}),
+      'Content-Type': contentType,
+      ...(sizeBytes ? { 'Content-Length': sizeBytes } : {}),
+    },
+  });
+  return key;
+}
+
+function sanitizeAdminFeedbackStatus(rawValue, fallback = null) {
+  if (rawValue === null || typeof rawValue === 'undefined') return fallback;
+  const normalized = String(rawValue).trim().toLowerCase();
+  if (!normalized) return fallback;
+  return ADMIN_FEEDBACK_STATUSES.has(normalized) ? normalized : fallback;
+}
+
+function sanitizeAdminFeedbackNote(rawValue) {
+  const trimmed = typeof rawValue === 'string' ? rawValue.trim() : '';
+  if (!trimmed) return '';
+  return trimmed.slice(0, ADMIN_FEEDBACK_NOTE_MAX_CHARS);
+}
+
+function sanitizeAdminFeedbackDashboardStatusFilter(rawValue) {
+  const normalized = typeof rawValue === 'string' ? rawValue.trim().toLowerCase() : '';
+  if (!normalized || normalized === 'open') return 'open';
+  if (normalized === 'all') return 'all';
+  return sanitizeAdminFeedbackStatus(normalized, 'open');
+}
+
+function sanitizeAdminFeedbackDashboardTypeFilter(rawValue) {
+  const normalized = typeof rawValue === 'string' ? rawValue.trim().toLowerCase() : '';
+  if (!normalized || normalized === 'all') return 'all';
+  return ADMIN_FEEDBACK_REPORT_TYPES.has(normalized) ? normalized : 'all';
+}
+
+function buildAdminFeedbackActorSnapshot(req) {
+  const staffProfileId = resolveActiveStaffProfileId(req) || null;
+  const name = (
+    req?.auth?.name ||
+    req?.staffProfile?.display_name ||
+    req?.staffProfile?.name ||
+    req?.auth?.preferred_username ||
+    req?.auth?.email ||
+    req?.staffProfile?.email ||
+    null
+  );
+  const email = (
+    typeof req?.auth?.email === 'string' && req.auth.email.trim()
+      ? req.auth.email.trim()
+      : (typeof req?.staffProfile?.email === 'string' && req.staffProfile.email.trim()
+          ? req.staffProfile.email.trim()
+          : null)
+  );
+  return {
+    staffProfileId,
+    name: name ? String(name).trim().slice(0, 255) : null,
+    email: email ? String(email).trim().slice(0, 320) : null,
+  };
+}
+
+async function presignObjectStoreDownloadUrl(key, expiresIn = ADMIN_FEEDBACK_ATTACHMENT_DOWNLOAD_EXPIRES_SECONDS) {
+  if (!key) return null;
+  const { presignGet, DRIVER } = require('../ISET-intake/s3Provider');
+  if (DRIVER !== 's3' || typeof presignGet !== 'function') {
+    return null;
+  }
+  const presigned = await presignGet({ key, expiresIn });
+  return presigned?.url || null;
+}
 
 function computeFileSha256(filePath) {
   return new Promise((resolve, reject) => {
@@ -13692,6 +13929,20 @@ function normaliseInterventionStatus(status, fallback = null) {
   return CANONICAL_INTERVENTION_STATUSES.has(value) ? value : null;
 }
 
+const CANONICAL_ACTION_PLAN_STATUSES = new Set([
+  'draft',
+  'active',
+  'closed',
+  'archived',
+]);
+
+function normaliseActionPlanStatus(status, fallback = null) {
+  if (status === null || typeof status === 'undefined') return fallback;
+  const value = String(status).trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (!value) return fallback;
+  return CANONICAL_ACTION_PLAN_STATUSES.has(value) ? value : fallback;
+}
+
 const PAYMENT_BLOCKED_INTERVENTION_STATUSES = new Set([
   'draft',
   'submitted',
@@ -13706,6 +13957,37 @@ const isPaymentBlockedInterventionStatus = status =>
 function isInterventionClosedStatus(status) {
   const value = normaliseInterventionStatus(status);
   return value === 'completed' || value === 'cancelled';
+}
+
+function validateBackloadInterventionPlanPlacement({ planStatus, interventionStatus }) {
+  const normalizedPlanStatus = normaliseActionPlanStatus(planStatus, null);
+  const normalizedInterventionStatus = normaliseInterventionStatus(interventionStatus, null);
+  if (normalizedPlanStatus === 'archived') {
+    return {
+      status: 409,
+      error: 'plan_not_editable',
+      message: 'Archived action plans cannot receive existing interventions.',
+    };
+  }
+  if (normalizedPlanStatus === 'closed' && !isInterventionClosedStatus(normalizedInterventionStatus)) {
+    return {
+      status: 422,
+      error: 'status_plan_mismatch',
+      message: 'Closed action plans can only receive completed or cancelled existing interventions.',
+    };
+  }
+  if (
+    (normalizedInterventionStatus === 'in_progress' || normalizedInterventionStatus === 'suspended') &&
+    normalizedPlanStatus &&
+    normalizedPlanStatus !== 'active'
+  ) {
+    return {
+      status: 422,
+      error: 'status_plan_mismatch',
+      message: 'In-progress or suspended existing interventions require an active action plan.',
+    };
+  }
+  return null;
 }
 
 function normaliseRecurringNumber(value) {
@@ -23939,6 +24221,647 @@ app.get('/api/admin/contact-messages/:id/notes', async (req, res) => {
     console.error('[contact-admin] notes fetch failed', err);
     res.status(500).json({ error: 'internal_error' });
   }
+});
+
+async function loadAdminFeedbackReportDetail(reportId) {
+  const numericReportId = Number.parseInt(reportId, 10);
+  if (!Number.isFinite(numericReportId) || numericReportId <= 0) return null;
+
+  const [[reportRow]] = await pool.query(
+    `SELECT
+       id,
+       report_type AS reportType,
+       severity,
+       status,
+       summary,
+       description,
+       submitted_by_staff_profile_id AS submittedByStaffProfileId,
+       submitted_by_name AS submittedByName,
+       submitted_by_email AS submittedByEmail,
+       submitted_by_role AS submittedByRole,
+       page_title AS pageTitle,
+       page_path AS pagePath,
+       page_url AS pageUrl,
+       context_json AS contextJson,
+       submitted_at AS submittedAt,
+       updated_at AS updatedAt
+     FROM admin_feedback_report
+     WHERE id = ?
+     LIMIT 1`,
+    [numericReportId]
+  );
+  if (!reportRow) return null;
+
+  const [attachmentRows] = await pool.query(
+    `SELECT
+       id,
+       file_name AS fileName,
+       storage_key AS storageKey,
+       mime_type AS mimeType,
+       size_bytes AS sizeBytes,
+       checksum_sha256 AS checksumSha256,
+       uploaded_by_staff_profile_id AS uploadedByStaffProfileId,
+       uploaded_at AS uploadedAt
+     FROM admin_feedback_attachment
+     WHERE report_id = ?
+     ORDER BY uploaded_at ASC, id ASC`,
+    [numericReportId]
+  );
+
+  let historyRows = [];
+  try {
+    const [rows] = await pool.query(
+      `SELECT
+         id,
+         previous_status AS previousStatus,
+         new_status AS newStatus,
+         changed_by_staff_profile_id AS changedByStaffProfileId,
+         changed_by_name AS changedByName,
+         changed_by_email AS changedByEmail,
+         changed_at AS changedAt
+       FROM admin_feedback_status_history
+       WHERE report_id = ?
+       ORDER BY changed_at DESC, id DESC`,
+      [numericReportId]
+    );
+    historyRows = rows || [];
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err)) throw err;
+  }
+
+  let noteRows = [];
+  try {
+    const [rows] = await pool.query(
+      `SELECT
+         id,
+         author_staff_profile_id AS authorStaffProfileId,
+         author_name AS authorName,
+         author_email AS authorEmail,
+         note_text AS noteText,
+         created_at AS createdAt
+       FROM admin_feedback_note
+       WHERE report_id = ?
+       ORDER BY created_at DESC, id DESC`,
+      [numericReportId]
+    );
+    noteRows = rows || [];
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err)) throw err;
+  }
+
+  const attachments = await Promise.all(
+    (attachmentRows || []).map(async row => {
+      let downloadUrl = null;
+      try {
+        downloadUrl = await presignObjectStoreDownloadUrl(row.storageKey);
+      } catch (err) {
+        console.warn('[admin:feedback] failed to sign attachment %s: %s', row.storageKey, err?.message || err);
+      }
+      return {
+        id: row.id,
+        fileName: row.fileName,
+        mimeType: row.mimeType || null,
+        sizeBytes: row.sizeBytes != null ? Number(row.sizeBytes) : null,
+        checksumSha256: row.checksumSha256 || null,
+        uploadedByStaffProfileId: row.uploadedByStaffProfileId || null,
+        uploadedAt: row.uploadedAt,
+        downloadUrl,
+      };
+    })
+  );
+
+  return {
+    report: {
+      id: reportRow.id,
+      reportType: reportRow.reportType,
+      severity: reportRow.severity,
+      status: reportRow.status,
+      summary: reportRow.summary,
+      description: reportRow.description,
+      submittedByStaffProfileId: reportRow.submittedByStaffProfileId || null,
+      submittedByName: reportRow.submittedByName || null,
+      submittedByEmail: reportRow.submittedByEmail || null,
+      submittedByRole: reportRow.submittedByRole || null,
+      pageTitle: reportRow.pageTitle || null,
+      pagePath: reportRow.pagePath || null,
+      pageUrl: reportRow.pageUrl || null,
+      contextSnapshot: safeJsonParse(reportRow.contextJson, null),
+      submittedAt: reportRow.submittedAt,
+      updatedAt: reportRow.updatedAt,
+      attachmentCount: attachments.length,
+      attachments,
+      history: historyRows,
+      notes: noteRows,
+    },
+  };
+}
+
+app.get('/api/dashboard/system-admin-feedback-reports', async (req, res) => {
+  if (inferUserRole(req) !== 'System Administrator') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+
+  const limitParam = Number(req.query.limit);
+  const offsetParam = Number(req.query.offset);
+  const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(Math.trunc(limitParam), 50) : 8;
+  const offset = Number.isFinite(offsetParam) && offsetParam >= 0 ? Math.trunc(offsetParam) : 0;
+  const statusFilter = sanitizeAdminFeedbackDashboardStatusFilter(req.query.status);
+  const reportTypeFilter = sanitizeAdminFeedbackDashboardTypeFilter(req.query.reportType ?? req.query.type);
+  const search = typeof req.query.search === 'string' ? req.query.search.trim().slice(0, 200) : '';
+
+  const where = [];
+  const params = [];
+  if (statusFilter === 'open') {
+    where.push(`r.status IN (${ADMIN_FEEDBACK_OPEN_STATUSES.map(() => '?').join(', ')})`);
+    params.push(...ADMIN_FEEDBACK_OPEN_STATUSES);
+  } else if (statusFilter !== 'all') {
+    where.push('r.status = ?');
+    params.push(statusFilter);
+  }
+  if (reportTypeFilter !== 'all') {
+    where.push('r.report_type = ?');
+    params.push(reportTypeFilter);
+  }
+  if (search) {
+    const searchValue = `%${search}%`;
+    where.push(`(
+      r.summary LIKE ?
+      OR r.description LIKE ?
+      OR r.submitted_by_name LIKE ?
+      OR r.submitted_by_email LIKE ?
+      OR r.page_title LIKE ?
+      OR r.page_path LIKE ?
+    )`);
+    params.push(searchValue, searchValue, searchValue, searchValue, searchValue, searchValue);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  try {
+    const [[summaryRow]] = await pool.query(
+      `SELECT
+         SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END) AS awaitingTriage,
+         SUM(CASE WHEN status IN ('triaging', 'planned', 'in_progress') THEN 1 ELSE 0 END) AS inProgress,
+         SUM(CASE WHEN status IN ('submitted', 'triaging', 'planned', 'in_progress') AND severity IN ('critical', 'high') THEN 1 ELSE 0 END) AS highPriorityOpen,
+         SUM(CASE WHEN status IN ('submitted', 'triaging', 'planned', 'in_progress') AND report_type = 'change_request' THEN 1 ELSE 0 END) AS openChangeRequests
+       FROM admin_feedback_report`
+    );
+
+    const [[countRow]] = await pool.query(
+      `SELECT COUNT(*) AS total
+       FROM admin_feedback_report r
+       ${whereSql}`,
+      params
+    );
+
+    const [rows] = await pool.query(
+      `SELECT
+         r.id,
+         r.report_type AS reportType,
+         r.severity,
+         r.status,
+         r.summary,
+         r.submitted_by_name AS submittedByName,
+         r.submitted_by_email AS submittedByEmail,
+         r.page_title AS pageTitle,
+         r.page_path AS pagePath,
+         r.submitted_at AS submittedAt,
+         r.updated_at AS updatedAt,
+         COALESCE(att.attachmentCount, 0) AS attachmentCount
+       FROM admin_feedback_report r
+       LEFT JOIN (
+         SELECT report_id, COUNT(*) AS attachmentCount
+         FROM admin_feedback_attachment
+         GROUP BY report_id
+       ) att ON att.report_id = r.id
+       ${whereSql}
+       ORDER BY
+         FIELD(r.status, 'submitted', 'triaging', 'planned', 'in_progress', 'resolved', 'closed'),
+         FIELD(r.severity, 'critical', 'high', 'medium', 'low'),
+         r.submitted_at DESC,
+         r.id DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
+
+    return res.json({
+      metrics: {
+        awaitingTriage: Number(summaryRow?.awaitingTriage || 0),
+        inProgress: Number(summaryRow?.inProgress || 0),
+        highPriorityOpen: Number(summaryRow?.highPriorityOpen || 0),
+        openChangeRequests: Number(summaryRow?.openChangeRequests || 0),
+      },
+      total: Number(countRow?.total || 0),
+      limit,
+      offset,
+      statusFilter,
+      reportTypeFilter,
+      search,
+      items: (rows || []).map(row => ({
+        id: row.id,
+        reportType: row.reportType,
+        severity: row.severity,
+        status: row.status,
+        summary: row.summary,
+        submittedByName: row.submittedByName || null,
+        submittedByEmail: row.submittedByEmail || null,
+        pageTitle: row.pageTitle || null,
+        pagePath: row.pagePath || null,
+        submittedAt: row.submittedAt,
+        updatedAt: row.updatedAt,
+        attachmentCount: Number(row.attachmentCount || 0),
+      })),
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(503).json({
+        error: 'feedback_storage_unavailable',
+        message: 'Admin feedback storage is not available in this environment.',
+      });
+    }
+    console.error('[dashboard] failed to load system admin feedback reports', err);
+    return res.status(500).json({
+      error: 'system_admin_feedback_reports_failed',
+      message: err?.message || 'Unable to load admin feedback reports.',
+    });
+  }
+});
+
+app.get('/api/admin/feedback-reports/:id', async (req, res) => {
+  if (inferUserRole(req) !== 'System Administrator') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+
+  const reportId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(reportId) || reportId <= 0) {
+    return res.status(400).json({ error: 'invalid_id' });
+  }
+
+  try {
+    const detail = await loadAdminFeedbackReportDetail(reportId);
+    if (!detail) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+    return res.json(detail);
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(503).json({
+        error: 'feedback_storage_unavailable',
+        message: 'Admin feedback storage is not available in this environment.',
+      });
+    }
+    console.error('[admin:feedback] detail failed', err);
+    return res.status(500).json({
+      error: 'feedback_report_detail_failed',
+      message: err?.message || 'Unable to load the feedback report.',
+    });
+  }
+});
+
+app.patch('/api/admin/feedback-reports/:id/status', async (req, res) => {
+  if (inferUserRole(req) !== 'System Administrator') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+
+  const reportId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(reportId) || reportId <= 0) {
+    return res.status(400).json({ error: 'invalid_id' });
+  }
+
+  const nextStatus = sanitizeAdminFeedbackStatus(req.body?.status, null);
+  if (!nextStatus) {
+    return res.status(400).json({ error: 'invalid_status' });
+  }
+
+  const actor = buildAdminFeedbackActorSnapshot(req);
+
+  let connection;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [[current]] = await connection.query(
+      'SELECT status FROM admin_feedback_report WHERE id = ? LIMIT 1',
+      [reportId]
+    );
+    if (!current) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'not_found' });
+    }
+
+    if (current.status !== nextStatus) {
+      await connection.query(
+        `UPDATE admin_feedback_report
+            SET status = ?, updated_at = NOW()
+          WHERE id = ?`,
+        [nextStatus, reportId]
+      );
+
+      try {
+        await connection.query(
+          `INSERT INTO admin_feedback_status_history
+             (report_id, previous_status, new_status, changed_by_staff_profile_id, changed_by_name, changed_by_email, changed_at)
+           VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+          [
+            reportId,
+            current.status,
+            nextStatus,
+            actor.staffProfileId,
+            actor.name,
+            actor.email,
+          ]
+        );
+      } catch (err) {
+        if (!isMissingTableErrorLocal(err)) throw err;
+      }
+    }
+
+    await connection.commit();
+    return res.json({ success: true, status: nextStatus });
+  } catch (err) {
+    if (connection) {
+      try { await connection.rollback(); } catch (_) {}
+    }
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(503).json({
+        error: 'feedback_storage_unavailable',
+        message: 'Admin feedback storage is not available in this environment.',
+      });
+    }
+    console.error('[admin:feedback] status update failed', err);
+    return res.status(500).json({
+      error: 'feedback_report_status_update_failed',
+      message: err?.message || 'Unable to update the feedback report status.',
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post('/api/admin/feedback-reports/:id/notes', async (req, res) => {
+  if (inferUserRole(req) !== 'System Administrator') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+
+  const reportId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(reportId) || reportId <= 0) {
+    return res.status(400).json({ error: 'invalid_id' });
+  }
+
+  const noteText = sanitizeAdminFeedbackNote(req.body?.noteText);
+  if (!noteText) {
+    return res.status(400).json({ error: 'invalid_note' });
+  }
+
+  const actor = buildAdminFeedbackActorSnapshot(req);
+
+  try {
+    const [[existing]] = await pool.query(
+      'SELECT id FROM admin_feedback_report WHERE id = ? LIMIT 1',
+      [reportId]
+    );
+    if (!existing) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+
+    await pool.query(
+      `INSERT INTO admin_feedback_note
+         (report_id, author_staff_profile_id, author_name, author_email, note_text, created_at)
+       VALUES (?, ?, ?, ?, ?, NOW())`,
+      [
+        reportId,
+        actor.staffProfileId,
+        actor.name,
+        actor.email,
+        noteText,
+      ]
+    );
+
+    return res.status(201).json({ success: true });
+  } catch (err) {
+    if (isMissingTableErrorLocal(err)) {
+      return res.status(503).json({
+        error: 'feedback_storage_unavailable',
+        message: 'Admin feedback storage is not available in this environment.',
+      });
+    }
+    console.error('[admin:feedback] add note failed', err);
+    return res.status(500).json({
+      error: 'feedback_report_note_create_failed',
+      message: err?.message || 'Unable to add the internal note.',
+    });
+  }
+});
+
+app.post('/api/admin/feedback-reports', (req, res) => {
+  adminFeedbackUpload.array('attachments', ADMIN_FEEDBACK_MAX_FILES)(req, res, async err => {
+    const files = Array.isArray(req.files) ? req.files : [];
+    const cleanupTempFiles = () => cleanupUploadedFiles(files);
+
+    if (err) {
+      const isMulterError = err instanceof multer.MulterError;
+      cleanupTempFiles();
+      if (err.code === 'LIMIT_FILE_SIZE' || (isMulterError && err.code === 'LIMIT_FILE_SIZE')) {
+        return res.status(400).json({
+          error: 'file_too_large',
+          maxBytes: ADMIN_FEEDBACK_MAX_BYTES,
+        });
+      }
+      if (err.code === 'LIMIT_FILE_COUNT' || (isMulterError && err.code === 'LIMIT_FILE_COUNT')) {
+        return res.status(400).json({
+          error: 'attachments_limit_exceeded',
+          maxFiles: ADMIN_FEEDBACK_MAX_FILES,
+        });
+      }
+      if (err.code === 'UNSUPPORTED_FILE_TYPE' || err.message === 'unsupported_file_type') {
+        return res.status(400).json({ error: 'unsupported_file_type' });
+      }
+      console.error('[admin:feedback] multer error', err);
+      return res.status(400).json({ error: 'upload_failed', message: err.message || 'Upload failed' });
+    }
+
+    const reportTypeRaw = typeof req.body?.reportType === 'string' ? req.body.reportType.trim() : '';
+    const reportType = ADMIN_FEEDBACK_REPORT_TYPES.has(reportTypeRaw) ? reportTypeRaw : null;
+    if (!reportType) {
+      cleanupTempFiles();
+      return res.status(400).json({ error: 'invalid_report_type' });
+    }
+
+    const severityRaw = typeof req.body?.severity === 'string' ? req.body.severity.trim().toLowerCase() : '';
+    const severity = ADMIN_FEEDBACK_SEVERITIES.has(severityRaw) ? severityRaw : null;
+    if (!severity) {
+      cleanupTempFiles();
+      return res.status(400).json({ error: 'invalid_severity' });
+    }
+
+    const descriptionRaw = typeof req.body?.description === 'string' ? req.body.description.trim() : '';
+    const description = descriptionRaw.slice(0, ADMIN_FEEDBACK_DESCRIPTION_MAX_CHARS);
+    if (!description) {
+      cleanupTempFiles();
+      return res.status(400).json({ error: 'description_required' });
+    }
+
+    const summary = sanitizeFeedbackSummary(req.body?.summary, description);
+    let contextSnapshot = null;
+    try {
+      contextSnapshot = sanitizeFeedbackContextSnapshot(req.body?.contextSnapshot);
+    } catch (contextError) {
+      cleanupTempFiles();
+      return res.status(400).json({ error: contextError?.code || 'invalid_context_payload' });
+    }
+
+    const reporterStaffProfileId = normalisePositiveInteger(req.staffProfile?.id);
+    const reporterName = (
+      req.auth?.name ||
+      req.staffProfile?.display_name ||
+      req.staffProfile?.name ||
+      req.auth?.preferred_username ||
+      req.auth?.email ||
+      null
+    );
+    const reporterEmail = (
+      typeof req.auth?.email === 'string' && req.auth.email.trim()
+        ? req.auth.email.trim()
+        : (typeof req.staffProfile?.email === 'string' && req.staffProfile.email.trim()
+            ? req.staffProfile.email.trim()
+            : null)
+    );
+    const reporterRole = inferUserRole(req) || null;
+    const pageTitle = typeof contextSnapshot?.pageTitle === 'string' ? contextSnapshot.pageTitle : null;
+    const pagePath = typeof contextSnapshot?.path === 'string' ? contextSnapshot.path : null;
+    const pageUrl = typeof contextSnapshot?.url === 'string' ? contextSnapshot.url : null;
+    const contextJson = contextSnapshot ? JSON.stringify(contextSnapshot) : 'null';
+
+    let connection;
+    const uploadedKeys = [];
+    let reportId = null;
+    try {
+      connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+      const [reportInsert] = await connection.query(
+        `INSERT INTO admin_feedback_report
+           (report_type, severity, status, summary, description, submitted_by_staff_profile_id, submitted_by_name, submitted_by_email, submitted_by_role, page_title, page_path, page_url, context_json, submitted_at, updated_at)
+         VALUES (?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), NOW(), NOW())`,
+        [
+          reportType,
+          severity,
+          summary,
+          description,
+          reporterStaffProfileId,
+          reporterName ? String(reporterName).trim().slice(0, 255) : null,
+          reporterEmail ? String(reporterEmail).trim().slice(0, 320) : null,
+          reporterRole ? String(reporterRole).trim().slice(0, 64) : null,
+          pageTitle,
+          pagePath,
+          pageUrl,
+          contextJson,
+        ]
+      );
+      reportId = normalisePositiveInteger(reportInsert?.insertId);
+
+      try {
+        await connection.query(
+          `INSERT INTO admin_feedback_status_history
+             (report_id, previous_status, new_status, changed_by_staff_profile_id, changed_by_name, changed_by_email, changed_at)
+           VALUES (?, NULL, 'submitted', ?, ?, ?, NOW())`,
+          [
+            reportId,
+            reporterStaffProfileId,
+            reporterName ? String(reporterName).trim().slice(0, 255) : null,
+            reporterEmail ? String(reporterEmail).trim().slice(0, 320) : null,
+          ]
+        );
+      } catch (historyErr) {
+        if (!isMissingTableErrorLocal(historyErr)) {
+          throw historyErr;
+        }
+      }
+
+      for (const file of files) {
+        const checksum = await computeFileSha256(file.path);
+        const originalNameRaw = typeof file.originalname === 'string' ? file.originalname.trim() : '';
+        const fileName = (originalNameRaw || file.filename || 'attachment').slice(0, 255);
+        const mimeType = file.mimetype || null;
+        const sizeBytes = Number.isFinite(Number(file.size)) ? Number(file.size) : null;
+        const storageKey = await uploadTempFileToObjectStore({
+          ownerKey: reportId ? `admin-feedback-${reportId}` : 'admin-feedback',
+          originalName: fileName,
+          mimeType,
+          sizeBytes,
+          tempPath: file.path,
+        });
+        uploadedKeys.push(storageKey);
+        await connection.query(
+          `INSERT INTO admin_feedback_attachment
+             (report_id, file_name, storage_key, mime_type, size_bytes, checksum_sha256, uploaded_by_staff_profile_id, uploaded_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
+          [
+            reportId,
+            fileName,
+            storageKey,
+            mimeType,
+            sizeBytes,
+            checksum,
+            reporterStaffProfileId,
+          ]
+        );
+      }
+
+      await connection.commit();
+      cleanupTempFiles();
+
+      return res.status(201).json({
+        report: {
+          id: reportId,
+          reportType,
+          severity,
+          status: 'submitted',
+          attachmentCount: files.length,
+          submittedAt: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      if (connection) {
+        try {
+          await connection.rollback();
+        } catch (_) {}
+      }
+      cleanupTempFiles();
+
+      if (uploadedKeys.length) {
+        try {
+          const { deleteObject, DRIVER } = require('../ISET-intake/s3Provider');
+          if (DRIVER === 's3' && typeof deleteObject === 'function') {
+            await Promise.all(
+              uploadedKeys.map(key =>
+                deleteObject({ key }).catch(deleteError => {
+                  console.warn('[admin:feedback] object cleanup failed for %s: %s', key, deleteError?.message || deleteError);
+                })
+              )
+            );
+          }
+        } catch (cleanupError) {
+          console.warn('[admin:feedback] object cleanup failed', cleanupError?.message || cleanupError);
+        }
+      }
+
+      if (isMissingTableErrorLocal(error)) {
+        return res.status(503).json({
+          error: 'feedback_storage_unavailable',
+          message: 'Admin feedback storage is not available in this environment.',
+        });
+      }
+
+      console.error('[admin:feedback] create failed', error);
+      return res.status(500).json({
+        error: 'feedback_report_create_failed',
+        message: 'Failed to save the report.',
+      });
+    } finally {
+      if (connection) connection.release();
+    }
+  });
 });
 
 
@@ -41617,15 +42540,16 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
       ]
     );
 
+    const activatedAtValue = startDate ? `${startDate} 00:00:00` : new Date();
     if (isBackloadMode && planStatus === 'active') {
       await connection.query(
         `UPDATE iset_case_action_plan
-            SET activated_at = COALESCE(activated_at, NOW()),
+            SET activated_at = COALESCE(activated_at, ?),
                 closed_at = NULL,
                 archived_at = NULL,
                 updated_at = NOW()
           WHERE id = ?`,
-        [result.insertId]
+        [activatedAtValue, result.insertId]
       );
     }
     if (isBackloadMode && planStatus === 'closed') {
@@ -41633,9 +42557,11 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
         typeof outcomeSummary === 'string' ? outcomeSummary.trim() || null : null;
       const closureNotesValue =
         typeof closureNotes === 'string' ? closureNotes.trim() || null : null;
+      const closedAtValue = resultDateValue ? `${resultDateValue} 00:00:00` : new Date();
       await connection.query(
         `UPDATE iset_case_action_plan
-            SET closed_at = COALESCE(closed_at, NOW()),
+            SET activated_at = COALESCE(activated_at, ?),
+                closed_at = COALESCE(closed_at, ?),
                 archived_at = NULL,
                 result_code = ?,
                 result_date = ?,
@@ -41643,7 +42569,7 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
                 closure_notes = ?,
                 updated_at = NOW()
           WHERE id = ?`,
-        [resultCodeValue, resultDateValue, summaryValue, closureNotesValue, result.insertId]
+        [activatedAtValue, closedAtValue, resultCodeValue, resultDateValue, summaryValue, closureNotesValue, result.insertId]
       );
     }
 
@@ -42079,9 +43005,21 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       return res.status(accessError.status).json(accessError.body);
     }
 
-    const planStatus = String(planRow.status || '').trim().toLowerCase();
+    const planStatus = normaliseActionPlanStatus(planRow.status, null);
     if (!isBackloadMode && (planStatus === 'archived' || planStatus === 'closed')) {
       return res.status(409).json({ error: 'plan_not_editable', message: 'Cannot add interventions to a closed or archived plan.' });
+    }
+    if (isBackloadMode) {
+      const backloadPlacementError = validateBackloadInterventionPlanPlacement({
+        planStatus,
+        interventionStatus: statusValue,
+      });
+      if (backloadPlacementError) {
+        return res.status(backloadPlacementError.status).json({
+          error: backloadPlacementError.error,
+          message: backloadPlacementError.message,
+        });
+      }
     }
 
     const role = inferUserRole(req);
@@ -42196,6 +43134,12 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       }
     }
     const isClosedStatusCreate = ['completed', 'cancelled'].includes(statusValue);
+    if (isClosedStatusCreate && !endDateValue) {
+      return res.status(422).json({
+        error: 'end_date_required',
+        message: 'End date is required when recording a completed or cancelled intervention.'
+      });
+    }
     if (isClosedStatusCreate && !trimmedOutcomeCreate) {
       return res.status(422).json({
         error: 'outcome_required',
@@ -42308,6 +43252,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
 
     const shouldStampReviewDecision = !isBackloadMode && ['approved', 'changes_requested', 'rejected'].includes(statusValue);
     const reviewedByStaffProfileId = shouldStampReviewDecision ? (resolveActiveStaffProfileId(req) || null) : null;
+    const closedAtValue = isClosedStatusCreate && endDateValue ? `${endDateValue} 00:00:00` : null;
 
     const [result] = await pool.query(
       `INSERT INTO iset_case_intervention
@@ -42328,6 +43273,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
           notes,
           metadata_json,
           esdc_intervention_json,
+          closed_at,
           created_by_staff_profile_id,
           reviewed_by_staff_profile_id,
           reviewed_at)
@@ -42352,6 +43298,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         trimmedNotes || null,
         Object.keys(metadataClean).length ? JSON.stringify(metadataClean) : null,
         Object.keys(esdcPayload).length ? JSON.stringify(esdcPayload) : null,
+        closedAtValue,
         createdBy,
         reviewedByStaffProfileId,
       ]
@@ -42370,7 +43317,22 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         : Number.isFinite(plannedCostInt)
         ? plannedCostInt
         : null;
-    if (!isBackloadMode && trimmedPotId && amountForFinance !== null) {
+    if (isBackloadMode) {
+      try {
+        const actorUserId = await resolveOrCreateUserIdFromAuth(req);
+        await syncManualBackloadHistoricalFinanceTransaction({
+          interventionRow,
+          actorUserId,
+          potId: trimmedPotId || normalisePositiveInteger(planRow.budget_pot) || null,
+          actualAmount: actualAmountValue,
+          postingContext,
+          transactionDate: endDateValue || startDateValue || null,
+          interventionTitle: trimmedTitle,
+        });
+      } catch (err) {
+        console.warn('[finance] backload historical transaction sync failed', err?.message || err);
+      }
+    } else if (trimmedPotId && amountForFinance !== null) {
       await upsertFinanceTransactionForIntervention({
         caseId: planRow.case_id,
         interventionId,
@@ -42974,6 +43936,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
     const wasIncludedInCfa = shouldIncludeInterventionForCfa(previousStatus);
 
     const parsedInterventionMetadata = safeJsonParse(interventionRow.metadata_json, {}) || {};
+    const isManualBackloadRecord = parsedInterventionMetadata?.source === 'manual_backload';
 
     const nextCodeRaw = Object.prototype.hasOwnProperty.call(body, 'code')
       ? (normalizeInterventionCodeValue(body.code) || '')
@@ -43492,7 +44455,24 @@ app.patch('/api/interventions/:id', async (req, res) => {
         return res.status(err.status || 400).json({ error: err.code || 'invalid_pot', message: err.message });
       }
     }
-    if (potFromBody && amountForFinance !== null) {
+    const historicalBackloadPotId =
+      potFromBody ||
+      normalisePositiveInteger(planRow?.budget_pot) ||
+      null;
+    if (isManualBackloadRecord) {
+      try {
+        const actorUserId = await resolveOrCreateUserIdFromAuth(req);
+        await syncManualBackloadHistoricalFinanceTransaction({
+          interventionRow: updatedRow,
+          actorUserId,
+          potId: historicalBackloadPotId,
+          postingContext,
+          interventionTitle: payload?.title || metadata?.title || null,
+        });
+      } catch (err) {
+        console.warn('[finance] backload historical transaction sync failed', err?.message || err);
+      }
+    } else if (potFromBody && amountForFinance !== null) {
       await upsertFinanceTransactionForIntervention({
         caseId: payload.caseId || planRow?.case_id || interventionRow.case_id || null,
         interventionId,
@@ -43507,7 +44487,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
         connection: null,
       });
     }
-    if (isApplyingApprovedRevision) {
+    if (!isManualBackloadRecord && isApplyingApprovedRevision) {
       try {
         const actorUserId = await resolveOrCreateUserIdFromAuth(req);
         const actorRole = canonicaliseAccessRole(role) || role;
@@ -43526,7 +44506,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
       } catch (err) {
         console.error('[payments] revision packet regeneration failed', err);
       }
-    } else if (previousStatus !== 'approved' && nextStatus === 'approved') {
+    } else if (!isManualBackloadRecord && previousStatus !== 'approved' && nextStatus === 'approved') {
       try {
         const actorUserId = await resolveOrCreateUserIdFromAuth(req);
         const actorRole = canonicaliseAccessRole(role) || role;
@@ -43541,7 +44521,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
       }
     }
     await markIlmpNeedsReviewForCase(interventionRow.case_id || planRow?.case_id || null);
-    if (cfaTargets.length) {
+    if (!isManualBackloadRecord && cfaTargets.length) {
       const actorUserId = await resolveOrCreateUserIdFromAuth(req);
       const staffProfileId = resolveActiveStaffProfileId(req);
       const caseManagerName = await resolveStaffDisplayName(pool, req);
@@ -43656,6 +44636,7 @@ app.post('/api/interventions/:id/close', async (req, res) => {
     }
 
     const metadata = safeJsonParse(interventionRow.metadata_json, null) || {};
+    const isManualBackloadRecord = metadata?.source === 'manual_backload';
     if (!metadata.compliance || typeof metadata.compliance !== 'object') {
       metadata.compliance = { ilmp: 'pending', finance: 'pending' };
     }
@@ -43732,7 +44713,26 @@ app.post('/api/interventions/:id/close', async (req, res) => {
       Number.isFinite(actualAmountValue) && actualAmountValue !== null
         ? Math.round(actualAmountValue)
         : payload.cost || null;
-    if (payload.potId && amountForFinance !== null) {
+    const historicalBackloadPotId =
+      payload.potId ||
+      normalisePositiveInteger(planRow?.budget_pot) ||
+      null;
+    if (isManualBackloadRecord) {
+      try {
+        const actorUserId = await resolveOrCreateUserIdFromAuth(req);
+        await syncManualBackloadHistoricalFinanceTransaction({
+          interventionRow: updatedRow,
+          actorUserId,
+          potId: historicalBackloadPotId,
+          actualAmount: Number.isFinite(actualAmountValue) ? Math.round(actualAmountValue) : null,
+          postingContext: payload.postingContext || metadata.postingContext || null,
+          transactionDate: completionDateValue || payload.endDate || payload.startDate || null,
+          interventionTitle: payload.title || metadata.title || null,
+        });
+      } catch (err) {
+        console.warn('[finance] backload historical transaction sync failed', err?.message || err);
+      }
+    } else if (payload.potId && amountForFinance !== null) {
       await updateFinanceTransactionStatusForIntervention({
         interventionId,
         amount: amountForFinance,
@@ -43774,6 +44774,8 @@ app.post('/api/interventions/:id/delete', async (req, res) => {
     }
 
     const status = normaliseInterventionStatus(interventionRow.status);
+    const interventionMetadata = safeJsonParse(interventionRow.metadata_json, {}) || {};
+    const isManualBackloadRecord = interventionMetadata?.source === 'manual_backload';
     const wasIncludedInCfa = shouldIncludeInterventionForCfa(status);
     if (!OPEN_INTERVENTION_PROPOSAL_STATUSES.has(status) && !['approved', 'rejected'].includes(status)) {
       return res.status(409).json({
@@ -43827,7 +44829,7 @@ app.post('/api/interventions/:id/delete', async (req, res) => {
       await recomputeCaseStatus(interventionRow.case_id, null, { allowReopenFinal: true });
     }
     await markIlmpNeedsReviewForCase(interventionRow.case_id || null);
-    if (wasIncludedInCfa && interventionRow.action_plan_id) {
+    if (wasIncludedInCfa && !isManualBackloadRecord && interventionRow.action_plan_id) {
       try {
         const actorUserId = await resolveOrCreateUserIdFromAuth(req);
         const staffProfileId = resolveActiveStaffProfileId(req);
@@ -54371,6 +55373,12 @@ const fetchInterventionsById = async ({ ids, connection }) => {
   return map;
 };
 
+const isManualBackloadInterventionRow = interventionRow => {
+  if (!interventionRow) return false;
+  const metadata = safeJsonParse(interventionRow.metadata_json, {}) || {};
+  return metadata?.source === 'manual_backload';
+};
+
 const FUNDING_CAP_CATEGORY_KEYS = [
   'tuition',
   'books',
@@ -56945,6 +57953,7 @@ async function fetchPaymentLedgerExportRows(connection = null) {
   if (!runner) return [];
   const [rows] = await runner.query(
     `SELECT ft.id AS transaction_id,
+            ft.case_intervention_id,
             ft.transaction_date,
             ft.posted_at,
             ft.amount,
@@ -56961,7 +57970,9 @@ async function fetchPaymentLedgerExportRows(connection = null) {
        LEFT JOIN payment_packet pp ON pp.id = ppl.payment_packet_id
        LEFT JOIN budget_pot bp ON bp.id = ft.budget_pot_id
       WHERE plt.payment_packet_line_id IS NOT NULL
-      ORDER BY ft.id ASC`
+         OR JSON_UNQUOTE(JSON_EXTRACT(ft.metadata, '$.source')) = ?
+      ORDER BY ft.id ASC`,
+    [MANUAL_BACKLOAD_FINANCE_SOURCE]
   );
   return (rows || []).map(row => {
     const meta = safeJsonParse(row.metadata, {}) || {};
@@ -56979,9 +57990,19 @@ async function fetchPaymentLedgerExportRows(connection = null) {
       postingDate: toDateOnlyString(row.transaction_date || row.posted_at),
       amount: Number(row.amount || 0),
       potId: row.budget_pot_id ? String(row.budget_pot_id) : null,
-      fundingStream: row.funding_stream || row.pot_funding_source || null,
-      interventionId: row.intervention_id ? String(row.intervention_id) : null,
-      reportingUnit: row.reporting_unit || null,
+      fundingStream:
+        row.funding_stream ||
+        meta.fundingStream ||
+        meta.funding_stream ||
+        row.pot_funding_source ||
+        null,
+      interventionId:
+        row.intervention_id
+          ? String(row.intervention_id)
+          : row.case_intervention_id
+          ? String(row.case_intervention_id)
+          : null,
+      reportingUnit: row.reporting_unit || meta.reportingUnit || meta.reporting_unit || null,
       evidenceDocumentIds,
     };
   });
@@ -58519,6 +59540,241 @@ async function refreshFinancePotSums(connection = null) {
   } catch (err) {
     console.warn('[finance] failed to refresh pot sums', err?.message || err);
   }
+}
+
+const MANUAL_BACKLOAD_FINANCE_SOURCE = 'manual_backload_history';
+
+async function resolveReportingUnitForHistoricalBackload({
+  interventionRow,
+  connection = null,
+}) {
+  const runner = connection || pool;
+  if (!runner || !interventionRow) return null;
+  let regionId =
+    Number(interventionRow.portfolio_region_id) ||
+    Number(interventionRow.owner_region_id) ||
+    null;
+  if (!regionId && interventionRow.case_id) {
+    const [[caseRow]] = await runner.query(
+      'SELECT portfolio_region_id FROM iset_case WHERE id = ? LIMIT 1',
+      [Number(interventionRow.case_id)]
+    );
+    regionId = Number(caseRow?.portfolio_region_id) || null;
+  }
+  if (!regionId) return null;
+  const [[regionRow]] = await runner.query(
+    'SELECT code FROM canada_region WHERE region_id = ? LIMIT 1',
+    [regionId]
+  );
+  return regionRow?.code ? String(regionRow.code).trim().toUpperCase() : null;
+}
+
+async function syncManualBackloadHistoricalFinanceTransaction({
+  interventionRow,
+  actorUserId = null,
+  potId = null,
+  actualAmount = undefined,
+  postingContext = null,
+  transactionDate = null,
+  interventionTitle = null,
+  connection = null,
+} = {}) {
+  const runner = connection || pool;
+  if (!runner || !interventionRow) return { updated: false };
+  if (!isManualBackloadInterventionRow(interventionRow)) return { updated: false };
+  const interventionId = Number(interventionRow.id);
+  const caseId = Number(interventionRow.case_id) || null;
+  if (!Number.isFinite(interventionId) || !caseId) return { updated: false };
+
+  const metadata = safeJsonParse(interventionRow.metadata_json, {}) || {};
+  const resolvedPotId =
+    normalisePositiveInteger(
+      potId ||
+      metadata.potId ||
+      metadata.budgetPotId
+    ) || null;
+  const resolvedAmountRaw =
+    actualAmount !== undefined ? actualAmount : interventionRow.actual_amount;
+  const resolvedAmountNumeric = Number(resolvedAmountRaw);
+  const resolvedAmount = Number.isFinite(resolvedAmountNumeric)
+    ? Math.round(resolvedAmountNumeric * 100) / 100
+    : null;
+
+  const [existingRows] = await runner.query(
+    `SELECT id, metadata
+       FROM finance_transaction
+      WHERE case_intervention_id = ?
+        AND JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.source')) = ?`,
+    [interventionId, MANUAL_BACKLOAD_FINANCE_SOURCE]
+  );
+  const existingIds = (existingRows || [])
+    .map(row => Number(row.id))
+    .filter(Number.isFinite);
+
+  if (!resolvedPotId || !Number.isFinite(resolvedAmount) || resolvedAmount <= 0) {
+    if (existingIds.length) {
+      await runner.query(
+        `DELETE FROM finance_transaction
+          WHERE id IN (${existingIds.map(() => '?').join(',')})`,
+        existingIds
+      );
+      await refreshFinancePotSums(connection);
+      return { updated: true, deleted: true };
+    }
+    return { updated: false, deleted: false };
+  }
+
+  const [[potRow]] = await runner.query(
+    `SELECT id, funding_source, pot_type, metadata, gl_project_code_external, gl_project_code_internal
+       FROM budget_pot
+      WHERE id = ?
+      LIMIT 1`,
+    [resolvedPotId]
+  );
+  if (!potRow) {
+    if (existingIds.length) {
+      await runner.query(
+        `DELETE FROM finance_transaction
+          WHERE id IN (${existingIds.map(() => '?').join(',')})`,
+        existingIds
+      );
+      await refreshFinancePotSums(connection);
+      return { updated: true, deleted: true, reason: 'missing_budget_pot' };
+    }
+    return { updated: false, deleted: false, reason: 'missing_budget_pot' };
+  }
+  const potMeta = safeJsonParse(potRow.metadata, {}) || {};
+  const potTypeRaw = potRow.pot_type || potMeta.nodeType || potMeta.pot_type || '';
+  const potTypeNorm = potTypeRaw
+    ? String(potTypeRaw).trim().toLowerCase().replace(/[_\s]+/g, ' ')
+    : '';
+  if (potTypeNorm !== 'funding stream') {
+    if (existingIds.length) {
+      await runner.query(
+        `DELETE FROM finance_transaction
+          WHERE id IN (${existingIds.map(() => '?').join(',')})`,
+        existingIds
+      );
+      await refreshFinancePotSums(connection);
+      return { updated: true, deleted: true, reason: 'invalid_budget_pot_type' };
+    }
+    return { updated: false, deleted: false, reason: 'invalid_budget_pot_type' };
+  }
+
+  let resolvedActorUserId = Number.isFinite(Number(actorUserId)) ? Number(actorUserId) : null;
+  if (resolvedActorUserId) {
+    resolvedActorUserId = await ensureUserExists(runner, resolvedActorUserId);
+  }
+
+  const resolvedPostingContext =
+    normalizePostingContext(postingContext || metadata.postingContext) || 'external';
+  const glProjectCodeUsed =
+    resolvedPostingContext === 'internal'
+      ? (potRow.gl_project_code_internal || '').trim() || null
+      : (potRow.gl_project_code_external || '').trim() || null;
+  const reportingUnit = await resolveReportingUnitForHistoricalBackload({
+    interventionRow,
+    connection: runner,
+  });
+  const resolvedTitle =
+    interventionTitle ||
+    metadata.title ||
+    metadata.description ||
+    interventionRow.notes ||
+    (interventionRow.intervention_code ? `Intervention ${interventionRow.intervention_code}` : 'Historical intervention');
+  const resolvedTransactionDate =
+    toDateOnly(transactionDate || null) ||
+    toDateOnly(interventionRow.end_date || null) ||
+    toDateOnly(interventionRow.start_date || null) ||
+    null;
+  const fundingStream =
+    metadata.fundingStream ||
+    metadata.funding_stream ||
+    interventionRow.funding_stream_decision ||
+    potRow.funding_source ||
+    null;
+
+  const existingMeta = safeJsonParse(existingRows?.[0]?.metadata, {}) || {};
+  const txMetadata = pruneNullish({
+    ...(existingMeta && typeof existingMeta === 'object' ? existingMeta : {}),
+    source: MANUAL_BACKLOAD_FINANCE_SOURCE,
+    backloadSource: metadata.source || 'manual_backload',
+    entryMode: metadata.entryMode || 'existing',
+    workflow: 'historical_only',
+    liveWorkflowEligible: false,
+    reportingUnit,
+    fundingStream,
+    interventionTitle: resolvedTitle || null,
+    historical: pruneNullish({
+      interventionId: String(interventionId),
+      interventionStatus: normaliseInterventionStatus(interventionRow.status, null),
+      startDate: toDateOnly(interventionRow.start_date || null),
+      endDate: toDateOnly(interventionRow.end_date || null),
+      actualAmount: resolvedAmount,
+    }),
+  });
+
+  if (existingIds.length) {
+    await runner.query(
+      `UPDATE finance_transaction
+          SET case_id = ?,
+              budget_pot_id = ?,
+              posting_context = ?,
+              gl_project_code_used = ?,
+              amount = ?,
+              currency = 'CAD',
+              status = 'posted',
+              transaction_date = ?,
+              posted_at = COALESCE(posted_at, NOW()),
+              description = ?,
+              metadata = ?,
+              created_by_user_id = COALESCE(created_by_user_id, ?),
+              updated_at = NOW()
+        WHERE id = ?`,
+      [
+        caseId,
+        resolvedPotId,
+        resolvedPostingContext,
+        glProjectCodeUsed,
+        resolvedAmount,
+        resolvedTransactionDate,
+        resolvedTitle || null,
+        JSON.stringify(txMetadata),
+        resolvedActorUserId,
+        existingIds[0],
+      ]
+    );
+    if (existingIds.length > 1) {
+      const duplicateIds = existingIds.slice(1);
+      await runner.query(
+        `DELETE FROM finance_transaction
+          WHERE id IN (${duplicateIds.map(() => '?').join(',')})`,
+        duplicateIds
+      );
+    }
+  } else {
+    await runner.query(
+      `INSERT INTO finance_transaction
+         (case_id, case_intervention_id, budget_pot_id, posting_context, gl_project_code_used, amount, currency, status,
+          transaction_date, posted_at, description, metadata, created_by_user_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'CAD', 'posted', ?, NOW(), ?, ?, ?, NOW(), NOW())`,
+      [
+        caseId,
+        interventionId,
+        resolvedPotId,
+        resolvedPostingContext,
+        glProjectCodeUsed,
+        resolvedAmount,
+        resolvedTransactionDate,
+        resolvedTitle || null,
+        JSON.stringify(txMetadata),
+        resolvedActorUserId,
+      ]
+    );
+  }
+
+  await refreshFinancePotSums(connection);
+  return { updated: true, deleted: false };
 }
 
 async function upsertFinanceTransactionForIntervention({
@@ -60199,9 +61455,10 @@ app.get('/api/finance/reconciliation/transactions', async (req, res) => {
          LEFT JOIN user u ON u.id = ft.created_by_user_id
          LEFT JOIN payment_line_transaction plt ON plt.finance_transaction_id = ft.id
          LEFT JOIN payment_packet_line ppl ON ppl.id = plt.payment_packet_line_id
+        WHERE COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ft.metadata, '$.source')), '') <> ?
         ORDER BY ft.updated_at DESC
         LIMIT ? OFFSET ?`,
-      [limit, offset]
+      [MANUAL_BACKLOAD_FINANCE_SOURCE, limit, offset]
     );
     res.status(200).json({ items: (rows || []).map(buildReconciliationTransaction) });
   } catch (err) {
@@ -61671,6 +62928,18 @@ app.post('/api/finance/payment-packets', async (req, res) => {
         return res.status(409).json({
           error: 'payment_packet_already_exists',
           interventionIds: Array.from(new Set(existingPackets.map(row => Number(row.intervention_id)).filter(Boolean))),
+        });
+      }
+      const packetInterventionMap = await fetchInterventionsById({ ids, connection: conn });
+      const historicalOnlyInterventionIds = ids.filter(id =>
+        isManualBackloadInterventionRow(packetInterventionMap.get(Number(id)))
+      );
+      if (historicalOnlyInterventionIds.length) {
+        await conn.rollback();
+        return res.status(409).json({
+          error: 'intervention_finance_history_only',
+          message: 'Historical backloaded interventions cannot create payment packets. Create a new live intervention for any unpaid remainder.',
+          interventionIds: historicalOnlyInterventionIds.map(id => Number(id)),
         });
       }
     }

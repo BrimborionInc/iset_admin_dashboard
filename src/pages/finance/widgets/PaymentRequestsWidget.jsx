@@ -103,6 +103,9 @@ const EMPTY_CREATE_FORM = {
 const isBlockedInterventionStatus = status =>
   BLOCKED_INTERVENTION_STATUSES.has(normalizeInterventionStatus(status));
 
+const isHistoricalBackloadIntervention = option =>
+  String(option?.metadata?.source || "").trim().toLowerCase() === "manual_backload";
+
 const formatInterventionDisplay = item => {
   if (!item) return "-";
   const code = normalizeInterventionCodeValue(item.interventionCode);
@@ -1100,6 +1103,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
               label: title,
               description: planLabel || undefined,
               planId: plan?.id || null,
+              metadata: item?.metadata || null,
               status: item?.status || item?.statusRaw || null,
               interventionCode:
                 item?.interventionCode ||
@@ -1123,7 +1127,11 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
             });
           });
         });
-        const eligible = options.filter(option => !isBlockedInterventionStatus(option.status));
+        const eligible = options.filter(
+          option =>
+            !isBlockedInterventionStatus(option.status) &&
+            !isHistoricalBackloadIntervention(option)
+        );
         setInterventionOptions(eligible);
         setInterventionsBlockedCount(Math.max(0, options.length - eligible.length));
       }
@@ -1977,7 +1985,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
             </ColumnLayout>
             {isProgramView && interventionsBlockedCount > 0 ? (
               <Box variant="p">
-                {interventionsBlockedCount} interventions are not eligible for payments.
+                {interventionsBlockedCount} interventions are not eligible for payments or are history-only backloads.
               </Box>
             ) : null}
             <FormField label="Notes (optional)">

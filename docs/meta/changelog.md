@@ -2,6 +2,16 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-04-05
+- UX/API/Admin shell: Added in-app bug reporting and change requests from the admin-console top header. Staff can now open a dedicated help panel, launch a floating non-modal report window, capture severity plus description, and attach supporting files without leaving PATH.
+- Data/Storage/Admin shell: Added the dedicated `admin_feedback_report` and `admin_feedback_attachment` schema plus `POST /api/admin/feedback-reports`, keeping internal bug/change evidence out of `iset_document` while reusing the shared object-store upload path.
+- UX/API/Home: System Administrators now see a new `Bug & Change Requests` widget on the homepage, with live filters/search plus a floating review panel for internal bug/change triage without leaving the shell.
+- Data/Storage/Admin shell: Added dedicated feedback-management routes plus `admin_feedback_status_history` and `admin_feedback_note` so System Administrators can persist status changes and internal notes on internal feedback reports.
+- Fix/API/Finance: `manual_backload` interventions now write historical posted finance ledger entries from their `actual amount`, stay blocked from payment-packet creation, and appear in the payment-ledger export without entering the live finance submission workflow.
+- Fix/API/Casework: Backloaded existing interventions now enforce plan-lifecycle compatibility, blocking archived-plan placement, limiting closed plans to completed/cancelled interventions, requiring an active plan for in-progress or suspended interventions, and suppressing retroactive finance/CFA/payment side effects when `manual_backload` interventions are later edited or closed.
+- Fix/Data/Casework: Backloaded action plans and closed interventions now seed their lifecycle timestamps from the entered historical dates so `activated_at`, `closed_at`, result dates, and end dates stay internally consistent.
+- Docs/Casework: Updated the client-file import and case-header references plus `docs/AGENTS.md` to document the enforced backload rules for imported/application-less cases.
+
 ## 2026-04-04
 - Ops/Deployments: Established `sql/migrations/` as the canonical PATH shared-schema migration path, moved one-off SQL into `sql/ops/`, added the explicit `path-schema-migrate` CLI (`db:migrate:inventory|plan|apply`), and updated deployed portal paths to force `AUTO_MIGRATE=false`.
 - Ops/Deployments: Added an allowlisted PATH data-sync CLI (`data:sync:*`) and prod/test SSM SQL helpers so intake runtime config and workflow-authoring graph promotion can be planned, bundled, and applied without ad hoc copy/paste SQL.

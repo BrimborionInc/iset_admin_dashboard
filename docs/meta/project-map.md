@@ -24,6 +24,7 @@ Purpose: Living reference of structure, core modules, and cross-cutting concerns
 - `layouts/`: Navigation & global layout components (e.g., `DemoNavigation.js`, `TopNavigation.js`). Handles global admin controls, top-level navigation, and session-aware layout state.
 - `pages/`: Page-level screens & dashboards (all dashboards, editors, management consoles live here). Examples: `home/HomeDashboardPage.jsx` (landing dashboard), `templateEditorDashboard.js` (standalone notification template authoring), `modifyIntakeStep.js` (intake step/component authoring working area), workflow management pages, code tables, messaging, notifications.
 - `widgets/`: Reusable complex UI building blocks embedded within pages (e.g., `WorkflowPreviewWidget.js` – interactive workflow step preview mirroring portal runtime logic for file upload visibility & messaging). Pages compose multiple widgets; widgets should not own routing.
+- `features/`: Feature-scoped UI modules that are broader than a widget but narrower than a full page. Current example: `src/features/adminFeedback/` for the shell-level bug/change reporting and System Administrator feedback-review windows.
 - `auth/`: Cognito helpers for session storage, token parsing, Hosted UI redirects, and bearer-auth API calls.
 - (Future) `components/`: Smaller presentational or configuration components (to catalog as added).
 ### Configuration dashboards
@@ -63,6 +64,7 @@ Purpose: Living reference of structure, core modules, and cross-cutting concerns
 ## Landing Dashboard
 - File: `src/pages/home/HomeDashboardPage.jsx`.
 - Features: role-aware welcome copy, quick actions, alerts (mock), My Work metrics (mock), recent activity (mock), resources, Development Tracker (System Administrator only).
+- System Administrator operational widgets now include `Operations Snapshot`, `Bug & Change Requests`, `AWS Environment Status`, `Users & Access Alerts`, and `Recent Admin Activity`.
 - Development Tracker widget: `src/pages/home/widgets/DevTaskTrackerWidget.jsx` (Cloudscape `SegmentedControl`, modal task detail, status persistence in `sessionStorage.devTasks` with enrichment merge when new tasks shipped).
 - Dev task metadata central source: `src/devTasksData.js`.
 
@@ -150,6 +152,7 @@ Risk Mitigations:
 ## Docs & Specs
 - `docs/meta/codex-thread-index.md`: Searchable cross-thread recovery index for durable handoff notes, runbooks, and prior-thread findings that future chats may need to rediscover quickly.
 - `docs/features/landing-page.md`: Iterative change log for dashboard/landing-page evolution.
+- `docs/features/admin-feedback-reporting.md`: Current in-app bug-reporting and change-request flow, API, storage model, and shell entry points.
 - `docs/features/file-uploads/conditional-rules.md`: Spec for expanded file-upload conditional rule logic.
 - `docs/dashboards/client-file-import-dashboard.md`: Current Client Batch Import dashboard behavior and constraints.
 - `docs/dashboards/data-and-results-dashboard.md`: Current `Reporting > Data and Results` behavior, section order, and live/demo data rules.
@@ -158,6 +161,9 @@ Risk Mitigations:
 
 ## Cross-Cutting Events & State
 - Custom DOM event `auth:session-changed` triggers re-render for simulation or session updates.
+- Custom DOM event `admin-feedback:open-composer` opens the floating admin-feedback report window from help-panel actions.
+- Custom DOM event `admin-feedback:open-review` opens the floating System Administrator feedback-review window from the homepage widget.
+- Custom DOM event `admin-feedback:changed` lets the report composer and review panel tell homepage widgets to refresh feedback counts/lists after create/status/note changes.
 - `sessionStorage` keys: `devTasks`, `currentRole`, `simulateSignedOut`.
 
 ## Styling & UI Frameworks

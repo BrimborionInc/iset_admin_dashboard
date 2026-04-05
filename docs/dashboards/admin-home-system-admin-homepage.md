@@ -2,7 +2,7 @@
 
 Purpose: document the live System Administrator homepage board and the operational widgets that replaced the old development-tracker direction.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-04-03
+Last Updated: 2026-04-05
 
 ## Scope
 
@@ -14,6 +14,7 @@ Last Updated: 2026-04-03
   - `src/pages/home/widgets/SystemAdminOperationsSnapshotWidget.js`
   - `src/pages/home/widgets/SystemAdminAwsEnvironmentStatusWidget.js`
   - `src/pages/home/widgets/SystemAdminUsersAccessAlertsWidget.js`
+  - `src/pages/home/widgets/SystemAdminFeedbackQueueWidget.jsx`
   - `src/pages/home/widgets/RecentActivityWidget.js`
 - Backend implementation: `isetadminserver.js`
 
@@ -37,6 +38,14 @@ Last Updated: 2026-04-03
 - `Users & Access Alerts`
   - shows staff MFA gaps, pending first sign-in/reset state, disabled accounts, never-signed-in accounts, and applicant activation backlog
   - backed by `GET /api/dashboard/system-admin-users-access-alerts`
+- `Bug & Change Requests`
+  - shows the internal triage queue for admin-console bug reports and change requests
+  - backed by `GET /api/dashboard/system-admin-feedback-reports`
+  - opens a floating review panel backed by:
+    - `GET /api/admin/feedback-reports/:id`
+    - `PATCH /api/admin/feedback-reports/:id/status`
+    - `POST /api/admin/feedback-reports/:id/notes`
+  - current review surface exposes report details, captured page context, supporting files, status history, and internal notes without leaving the homepage shell
 - `Recent Admin Activity`
   - shows workflow publishes, upload-config changes, event-capture changes, and relevant admin/system case events
   - backed by `GET /api/dashboard/system-admin-recent-activity`
@@ -45,12 +54,13 @@ Last Updated: 2026-04-03
 
 ## Current layout and storage rule
 
-- The current System Administrator homepage storage key is `admin-home-layout-v9`.
+- The current System Administrator homepage storage key is `admin-home-layout-v10`.
 - Bump the System Administrator storage key whenever the default System Administrator widget set changes, so new operational widgets appear by default without resetting other roles.
 
 ## Current implementation guardrails
 
 - Prefer schema-free aggregate endpoints for System Administrator homepage widgets unless a schema change is clearly necessary.
+- The feedback queue is the current exception: interactive triage required persistent status history and internal notes, so it uses dedicated feedback-management tables instead of a schema-free aggregate-only model.
 - Keep the AWS widget read-only. Do not send test mail, mutate Cognito state, or run expensive/destructive probes on normal homepage refresh.
 - `AWS Environment Status` should answer whether PATH's AWS-backed services are usable in the current environment, not expose a generic dump of environment data.
 - Keep drill-ins actionable. Every System Administrator homepage count or status should open an existing admin surface that can actually be used for follow-up.

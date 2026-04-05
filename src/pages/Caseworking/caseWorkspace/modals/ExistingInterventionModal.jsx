@@ -23,15 +23,15 @@ import {
   requiresExternalPartnerForInterventionCode,
   requiresNocForInterventionCode,
 } from "../../../../utils/interventionCodeRules.js";
+import {
+  getAllowedBackloadInterventionStatuses,
+  getBackloadInterventionPlanStatusError,
+  getBackloadInterventionPlanStatusNotice,
+  getBackloadInterventionStatusOptions,
+  getDefaultBackloadInterventionStatus,
+  normalizeActionPlanLifecycleStatus,
+} from "../../../../utils/backloadInterventionRules.js";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
-
-const STATUS_OPTIONS = [
-  { value: "approved", label: "Approved" },
-  { value: "in_progress", label: "In progress" },
-  { value: "suspended", label: "Suspended" },
-  { value: "completed", label: "Completed" },
-  { value: "cancelled", label: "Cancelled" },
-];
 
 const POSTING_CONTEXT_OPTIONS = [
   { value: "external", label: "External (region/PTMA)" },
@@ -234,16 +234,23 @@ const ExistingInterventionModal = ({
     loadNocVersions().catch(() => {});
   }, [visible, initialActionPlanId, loadInterventionCodes, loadInterventionOutcomes, loadNocVersions]);
 
+  const selectableActionPlans = useMemo(
+    () =>
+      (caseData?.actionPlans || []).filter(plan => {
+        if (!plan?.id) return false;
+        return normalizeActionPlanLifecycleStatus(plan.status, null) !== "archived";
+      }),
+    [caseData?.actionPlans]
+  );
+
   const actionPlanOptions = useMemo(
     () =>
-      (caseData?.actionPlans || [])
-        .filter(plan => plan?.id)
-        .map(plan => ({
-          value: String(plan.id),
-          label: plan.title || plan.name || `Action plan ${plan.id}`,
-          description: plan.status ? String(plan.status).replace(/_/g, " ") : undefined,
-        })),
-    [caseData?.actionPlans]
+      selectableActionPlans.map(plan => ({
+        value: String(plan.id),
+        label: plan.title || plan.name || `Action plan ${plan.id}`,
+        description: plan.status ? String(plan.status).replace(/_/g, " ") : undefined,
+      })),
+    [selectableActionPlans]
   );
 
   const codeOptions = useMemo(
@@ -287,12 +294,19 @@ const ExistingInterventionModal = ({
     [nocVersions]
   );
 
+  const selectedPlan =
+    selectableActionPlans.find(plan => String(plan.id) === String(form.actionPlanId || "")) || null;
   const selectedPlanOption =
     actionPlanOptions.find(option => option.value === form.actionPlanId) || null;
+  const selectedPlanStatus = normalizeActionPlanLifecycleStatus(selectedPlan?.status, null);
+  const statusOptions = useMemo(
+    () => getBackloadInterventionStatusOptions(selectedPlanStatus),
+    [selectedPlanStatus]
+  );
   const selectedCodeOption =
     codeOptions.find(option => option.value === form.code) || null;
   const selectedStatusOption =
-    STATUS_OPTIONS.find(option => option.value === form.status) || STATUS_OPTIONS[0];
+    statusOptions.find(option => option.value === form.status) || statusOptions[0] || null;
   const selectedOutcomeOption =
     outcomeOptions.find(option => option.value === form.outcome) || null;
   const selectedPostingContext =
@@ -314,6 +328,37 @@ const ExistingInterventionModal = ({
   const requiresNoc = useMemo(() => requiresNocForInterventionCode(form.code), [form.code]);
 
   const isClosed = form.status === "completed" || form.status === "cancelled";
+  const planStatusNotice = getBackloadInterventionPlanStatusNotice(selectedPlanStatus);
+
+  useEffect(() => {
+    if (!visible) return;
+    const initialPlanId = initialActionPlanId ? String(initialActionPlanId) : "";
+    const currentPlanId = String(form.actionPlanId || "");
+    const hasCurrentPlan = currentPlanId && selectableActionPlans.some(plan => String(plan.id) === currentPlanId);
+    const resolvedPlanId = hasCurrentPlan
+      ? currentPlanId
+      : (initialPlanId && selectableActionPlans.some(plan => String(plan.id) === initialPlanId)
+          ? initialPlanId
+          : (actionPlanOptions[0]?.value || ""));
+    const resolvedPlan = selectableActionPlans.find(plan => String(plan.id) === resolvedPlanId) || null;
+    const resolvedPlanStatus = normalizeActionPlanLifecycleStatus(resolvedPlan?.status, null);
+    const allowedStatuses = getAllowedBackloadInterventionStatuses(resolvedPlanStatus);
+    const nextStatus = allowedStatuses.includes(form.status)
+      ? form.status
+      : getDefaultBackloadInterventionStatus(resolvedPlanStatus);
+    if (resolvedPlanId === currentPlanId && nextStatus === form.status) {
+      return;
+    }
+    setForm(current => ({
+      ...current,
+      actionPlanId: resolvedPlanId,
+      status: nextStatus || current.status,
+      outcome:
+        nextStatus && !["completed", "cancelled"].includes(nextStatus)
+          ? ""
+          : current.outcome,
+    }));
+  }, [actionPlanOptions, form.actionPlanId, form.status, form.outcome, initialActionPlanId, selectableActionPlans, visible]);
 
   const costLinesTotal = useMemo(() => {
     return form.costLines.reduce((sum, line) => {
@@ -405,6 +450,15 @@ const ExistingInterventionModal = ({
           next.institution = "";
         }
       }
+      if (field === "actionPlanId") {
+        const nextPlan =
+          selectableActionPlans.find(plan => String(plan.id) === String(value || "")) || null;
+        const nextPlanStatus = normalizeActionPlanLifecycleStatus(nextPlan?.status, null);
+        const allowedStatuses = getAllowedBackloadInterventionStatuses(nextPlanStatus);
+        if (allowedStatuses.length && !allowedStatuses.includes(next.status)) {
+          next.status = getDefaultBackloadInterventionStatus(nextPlanStatus);
+        }
+      }
       if (field === "nocVersion") {
         next.noc = "";
       }
@@ -423,9 +477,12 @@ const ExistingInterventionModal = ({
       return next;
     });
     setFieldErrors(current => {
-      if (!current[field]) return current;
+      if (!current[field] && field !== "actionPlanId") return current;
       const next = { ...current };
       delete next[field];
+      if (field === "actionPlanId") {
+        delete next.status;
+      }
       return next;
     });
     setError(null);
@@ -656,6 +713,13 @@ const ExistingInterventionModal = ({
     if (isClosed && !form.outcome) {
       nextErrors.outcome = "Select an outcome for a completed or cancelled intervention.";
     }
+    const planStatusError = getBackloadInterventionPlanStatusError({
+      planStatus: selectedPlanStatus,
+      interventionStatus: form.status,
+    });
+    if (planStatusError) {
+      nextErrors.status = planStatusError;
+    }
     if (isEducationIntervention) {
       if (!form.institution.trim()) {
         nextErrors.institution = "Training institution is required for this intervention code.";
@@ -839,9 +903,10 @@ const ExistingInterventionModal = ({
           )}
           {!actionPlanOptions.length ? (
             <Alert type="warning">
-              Add an action plan first. Existing interventions must be attached to a real action plan.
+              Add an action plan first. Existing interventions must be attached to a non-archived action plan.
             </Alert>
           ) : null}
+          {planStatusNotice ? <Alert type="info">{planStatusNotice}</Alert> : null}
           <SpaceBetween size="m">
             <ColumnLayout columns={2} variant="text-grid">
             <FormField label="Action plan" errorText={fieldErrors.actionPlanId}>
@@ -852,11 +917,13 @@ const ExistingInterventionModal = ({
                 placeholder="Select action plan"
               />
             </FormField>
-            <FormField label="Current status">
+            <FormField label="Current status" errorText={fieldErrors.status}>
               <Select
                 selectedOption={selectedStatusOption}
                 onChange={({ detail }) => handleFieldChange("status", detail.selectedOption?.value || "approved")}
-                options={STATUS_OPTIONS}
+                options={statusOptions}
+                placeholder={statusOptions.length ? "Select status" : "No valid statuses"}
+                disabled={!statusOptions.length}
               />
             </FormField>
             <FormField label="Intervention code" errorText={fieldErrors.code}>
@@ -1069,7 +1136,7 @@ const ExistingInterventionModal = ({
               </FormField>
               </ColumnLayout>
               <Box color="text-body-secondary" fontSize="body-s">
-                If you add payment lines below, PATH will use their total as the intervention planned cost.
+                Backloaded actual amounts are historical spend only. They do not create payment packets, validation work, or finance submissions. If you add payment lines below, PATH will use their total as the intervention planned cost.
               </Box>
               <Box fontSize="body-s" fontWeight="bold">
                 Payment line total: $

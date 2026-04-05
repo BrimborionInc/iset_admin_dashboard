@@ -1,0 +1,119 @@
+# Admin Feedback Reporting
+
+Status: implemented in admin shell on 2026-04-05, with System Administrator homepage triage added on 2026-04-05
+
+## Purpose
+
+Provide an in-app way for signed-in PATH staff to report admin-console bugs and request changes without leaving the current workflow.
+
+## Current UX
+
+- Top header now includes a dedicated report button beside the existing `Admin Console Help` utility.
+- Clicking that button opens a help panel titled `Bug reporting and change requests`.
+- The help panel explains what to include and exposes two launch actions:
+  - `Report a bug`
+  - `Request a change`
+- Those actions open a non-modal floating report window, similar in spirit to `Ask the AI`, so staff can keep interacting with PATH while they write.
+- The floating window captures the current page context when it is opened. The captured context includes:
+  - current path and URL
+  - document title
+  - current breadcrumbs
+  - browser language / user agent
+  - viewport size
+  - browser timezone
+- Successful submission now closes the floating report window and opens a shell-level confirmation modal.
+- Submission failures remain inline in the floating report window so staff can correct and resubmit without reopening it.
+
+## System Administrator triage surface
+
+- The System Administrator homepage now includes a `Bug & Change Requests` widget.
+- The widget is backed by `GET /api/dashboard/system-admin-feedback-reports`.
+- Opening a report from that widget launches a second non-modal floating panel for triage/review.
+- The review panel is backed by:
+  - `GET /api/admin/feedback-reports/:id`
+  - `PATCH /api/admin/feedback-reports/:id/status`
+  - `POST /api/admin/feedback-reports/:id/notes`
+- The review panel exposes:
+  - report details
+  - captured page context
+  - supporting-file links
+  - status history
+  - internal admin notes
+
+## Current form model
+
+- Report type: `bug` or `change_request`
+- Severity: `critical`, `high`, `medium`, `low`
+- Short summary: optional in UI; backend derives one from the description if blank
+- Description: required
+- Supporting files: optional, up to 5 files per report
+
+## Attachment rules
+
+- Accepted types:
+  - PDF
+  - Word (`.doc`, `.docx`)
+  - Excel (`.xls`, `.xlsx`)
+  - CSV / text
+  - PNG / JPG
+- Current per-file size limit: 10 MB
+- Storage path uses the shared object-store layer already used by PATH uploads:
+  - DEV: MinIO-backed S3-compatible path when configured
+  - TEST / PROD: S3
+
+## Backend contract
+
+- Create report: `POST /api/admin/feedback-reports`
+  - Multipart form-data
+  - Fields:
+    - `reportType`
+    - `severity`
+    - `summary` (optional)
+    - `description`
+    - `contextSnapshot` (optional JSON string)
+    - `attachments` (0..5 files)
+
+## Persistence model
+
+Canonical migrations:
+
+- `sql/migrations/20260405_0001_create_admin_feedback_reporting.sql`
+- `sql/migrations/20260405_0002_create_admin_feedback_management_tables.sql`
+
+Tables:
+
+- `admin_feedback_report`
+  - one row per submitted bug report or change request
+  - stores type, severity, status, summary, description, reporter snapshot, and captured page context
+- `admin_feedback_attachment`
+  - one row per uploaded supporting file
+  - stores object-storage key, mime type, size, checksum, and uploader snapshot
+- `admin_feedback_status_history`
+  - one row per persisted status change
+  - stores previous/new status and the admin actor snapshot at the time of change
+- `admin_feedback_note`
+  - one row per internal admin note
+  - stores note text plus the admin actor snapshot at the time of entry
+
+Deliberate design choice:
+
+- These reports do **not** use `iset_document`.
+- Internal bug/change evidence is not a client/application/case document, so mixing it into Supporting Documents would pollute the case-document domain and create false document records.
+
+## Shell wiring
+
+- Help-panel launcher event: `help:open-topnav`
+- Report-window launcher event: `admin-feedback:open-composer`
+- Review-window launcher event: `admin-feedback:open-review`
+- Floating report window component: `src/features/adminFeedback/FloatingFeedbackReporter.jsx`
+- Floating review window component: `src/features/adminFeedback/FloatingFeedbackReviewPanel.jsx`
+- Help content entry point: `src/helpPanelContents/adminFeedbackHelp.js`
+- Top-nav integration: `src/layouts/TopNavigation.js`
+- Shell state/event listener: `src/AppContent.js`
+- System Administrator homepage widget: `src/pages/home/widgets/SystemAdminFeedbackQueueWidget.jsx`
+
+## Follow-on work
+
+- Add an admin review/triage dashboard for submitted reports if PATH staff need to manage them in-app.
+- Decide whether report-status changes should emit internal notifications.
+- Add presigned download endpoints and review UI for stored attachments when a triage surface is built.
