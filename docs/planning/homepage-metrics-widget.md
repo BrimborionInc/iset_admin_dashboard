@@ -56,7 +56,7 @@ Last Updated: 2026-03-24
 - `Active Cases` drilldown must include application-less client-file cases because the count is case-based.
 - If homepage geography scoping is added later, it should be a shared page-level filter that drives both Metrics and the Items drilldown; do not add a Metrics-only region filter.
 - Regional Coordinator metrics must honor all resolved `regionIds`, not only a single primary region id.
-- Funds Committed sums `finance_transaction.amount` where status is `submitted` or `approved` and `transaction_date` (fallback `created_at`) falls in the selected period.
+- Funds Committed sums `finance_transaction.amount` where status is `submitted` and `transaction_date` (fallback `created_at`) falls in the selected period.
 - Funds Spent sums `finance_transaction.amount` where status is `posted` and `transaction_date` (fallback `created_at`) falls in the selected period.
 - Non-legacy application statuses include: `submitted`, `in_review`, `docs_requested`, `closure_notice`, `pending_approval`, `decision_ready`, `completed`, `closed`, `archived`.
 

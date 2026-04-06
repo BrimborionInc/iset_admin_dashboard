@@ -1,49 +1,53 @@
 import React from "react";
-import { SpaceBetween, Box } from "@cloudscape-design/components";
+import { Box, SpaceBetween } from "@cloudscape-design/components";
 
 const FinanceReportsHelp = () => (
   <SpaceBetween size="m">
     <Box>
       <strong>Purpose</strong>
       <p>
-        Hub for generating interim and year-end submissions, validating results, managing certification, and producing export packages that satisfy agreement and funder requirements.
+        Review the annual ISET Advances and Active Clients report in the Budgets and Finance area,
+        with fiscal year, region, and optional carry-over filtering plus Excel export for finance
+        users who still rely on workbook-style reporting.
       </p>
     </Box>
     <Box>
-      <strong>Concept</strong>
+      <strong>Current view</strong>
       <p>
-        Guide finance teams through preparation, validation, certification, and submission of compliant reports with clear visibility into status, blockers, and outstanding tasks.
+        The report shows annual intervention funding by fiscal year and adds payment status on each
+        row so staff can see whether related packets are still draft, ready to send, sent to
+        finance, or confirmed. An optional carry-over estimate uses payment-line dates first and the
+        intervention schedule as a fallback.
       </p>
     </Box>
     <Box>
-      <strong>Key user goals</strong>
+      <strong>Filters</strong>
       <ul>
-        <li>Run draft reports that reconcile budgets, transactions, and eligibility rules before certification.</li>
-        <li>Resolve validation findings with navigation back to Budgets, Allocations, or Reconciliation as needed.</li>
-        <li>Manage certification workflow, lock statements, and monitor XML/CSV export acknowledgements from ESDC.</li>
+        <li>Fiscal year.</li>
+        <li>Region (one or more provinces or territories).</li>
+        <li>Include carry-over (best-effort estimate).</li>
       </ul>
     </Box>
     <Box>
-      <strong>Widgets in this dashboard</strong>
+      <strong>Outputs</strong>
       <ul>
-        <li>Lifecycle tracker showing progress from Draft → Validation → Certification → Submission.</li>
-        <li>Validation summary grouped by severity with deep links to remediation workflows.</li>
-        <li>Certification card covering signatory status, locks, and telemetry.</li>
-        <li>Export history table with XML hash, envelope version, channel, and acknowledgement timestamps.</li>
+        <li>Summary cards for CRF advances, EI advances, participants, and interventions.</li>
+        <li>Region totals table showing CRF, EI, and overall advances.</li>
+        <li>Intervention-level detail with funding category amounts, payment status, and optional carry-over notes.</li>
+        <li>Excel export with a summary tab plus separate CRF and EI detail tabs.</li>
       </ul>
     </Box>
     <Box>
-      <strong>Dependencies &amp; notes</strong>
-      <ul>
-        <li>Requires reporting engine calculations plus administrative flat-rate and eligibility rules configured in Finance Settings.</li>
-        <li>Should ingest monitoring feedback so corrective actions surface alongside submissions.</li>
-        <li>Must emit telemetry (`agreement_id`, `report_id`, `validation_status`) for observability pipelines.</li>
-      </ul>
+      <strong>Important note</strong>
+      <p>
+        This page is an annual funding report with payment follow-up beside each row. It is not a
+        full payment-history ledger.
+      </p>
     </Box>
   </SpaceBetween>
 );
 
 FinanceReportsHelp.aiContext =
-  "Explain the Financial Reports dashboard: lifecycle tracking, validation handling, certification workflow, export monitoring, and the telemetry finance teams rely on to prove submissions.";
+  "Explain the Financial Reports page: the annual ISET Advances and Active Clients report, fiscal year and region filters, optional carry-over estimate, intervention-level detail, payment status, and Excel export.";
 
 export default FinanceReportsHelp;

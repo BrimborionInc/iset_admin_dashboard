@@ -27,6 +27,12 @@ export const formatSinDisplay = value => {
   return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6, 9)}`;
 };
 
+export const maskSinForDisplay = value => {
+  const digits = cleanSin(value);
+  if (!digits) return null;
+  return `*** *** ${digits.slice(-3).padStart(3, '*')}`;
+};
+
 export const toDateOnlyString = value => {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(value);

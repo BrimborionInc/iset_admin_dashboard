@@ -1,7 +1,7 @@
 # Finance Payments Module and Dashboard (NWAC ISET → NWAC Finance)
 **Purpose:** Canonical design + requirements spec for the Payments module/dashboard in the admin codebase, supporting **evidence-gated** payment submissions to Finance (email delivery) with a complete audit trail and clean downstream reporting.  
 **Audience:** Finance staff, program staff, product owners, engineers, ops, audit/compliance.  
-**Last Updated:** 2026-01-04  
+**Last Updated:** 2026-04-06  
 **Version:** 2.0 (supersedes prior “hypotheses” draft)
 
 ## 0. Sources and authority levels
@@ -17,7 +17,7 @@ Primary sources:
 - Annual Reporting module spec alignment (Annual Report consumes posted transactions by pots/streams/reporting unit).
 
 ## 1. Context (current codebase)
-- Finance dashboards exist for budgets; the Payments board exists as a scaffold with mock data in `src/pages/finance/FinancePaymentsPage.jsx`.
+- Finance dashboards exist for budgets, and the Payments dashboard is live in `src/pages/finance/FinancePaymentsPage.jsx`.
 - Core finance objects already exist:
   - **Budget pots**: `budget_pot` (funding source/stream), and region tagging via `budget_pot_region`.
   - **Transactions**: `finance_transaction` remains the ledger-of-record for actuals and annual reporting.
@@ -26,6 +26,8 @@ Primary sources:
 ## 2. Design stance (updated)
 - This module **does not treat requirements as hypotheses** where NWAC training/checklists are explicit.
 - The canonical record is the **Payment Packet**, but the ledger-of-record for annual reporting remains `finance_transaction`.
+- Approved interventions authorize future funding but do not auto-create live payment packets.
+- Multiple packets may exist for one intervention over time; recurring supports should be packeted by the payable period or receipt cycle.
 - The module is intentionally “light automation” in release 1, but **hard evidence gates** are enforced to prevent non-compliant payments.
 
 ## 3. Goals
@@ -55,11 +57,11 @@ Primary sources:
 
 ## 7. Workflow and statuses
 ### 7.1 Packet status (canonical)
-**Draft** -> **Submitted**  
+**Draft** -> **Ready to send** -> **Submitted** -> **Confirmed**  
 **Cancelled** is terminal.
 
 ### 7.2 Line status (derived)
-**Needs Evidence** | **Ready to Submit** | **Submitted** | **Cancelled**
+**Needs Evidence** | **Ready to send** | **Submitted** | **Paid** | **Held** | **Cancelled**
 
 ### 7.3 Validation gates (MUST)
 A packet cannot be submitted unless:
@@ -72,11 +74,12 @@ A packet cannot be submitted unless:
 ## 8. Core module surfaces (UI)
 ### 8.1 Program dashboard
 - Drafts (needs evidence)
+- Ready to send
 - Submitted to Finance
 
 ### 8.2 Finance dashboard
 - Finance receives email submissions (no sign-in required).
-- Optional: an internal read-only queue showing Draft vs Submitted for staff oversight.
+- Optional: an internal queue showing Draft, Sent to finance, and Payment confirmed for staff oversight.
 
 Each row shows:
 - client (if applicable), intervention, amount, stream (CRF/EI), region/reporting unit, pot, requester, ageing, evidence completeness indicator, risk flags.
@@ -105,7 +108,7 @@ Implementation: the dashboard shows **baseline compliance** as a badge and block
 
 ### 9.2 Living allowance (MUST)
 - Must have **Client Monthly Attendance Report** for that month received before submission.
-- Backdating is not permitted: system blocks living allowance lines whose service period ends before intervention start or violates configured “no backdating” rule.
+- Limited backdating is allowed for operations: system blocks living allowance lines whose service period ends before intervention start, and blocks submission when the service period end falls outside the configured backdating window (default `60` days).
 - Financial overview + income/expense verification must be present before a living allowance line can be submitted.
 
 ### 9.3 Tuition / training provider (MUST)
@@ -142,7 +145,7 @@ Implementation: the dashboard shows **baseline compliance** as a badge and block
 - payment_type, amount, service_period (required for recurring supports), payee (type + reference),
 - `pot_id` (required for ISET-funded lines), derived `funding_stream` (CRF/EI)
 - `intervention_id` (required for intervention-linked costs)
-- status (needs evidence / ready to submit / submitted / cancelled)
+- status (needs evidence / ready to send / submitted / paid / held / cancelled)
 
 **PaymentPacketDocument**
 - document_id (FK to `iset_document`), evidence_type, required flag, received_at
@@ -153,13 +156,13 @@ Implementation: the dashboard shows **baseline compliance** as a badge and block
 ### 10.3 Mapping to existing tables
 - Pots: `budget_pot`, `budget_pot_region`
 - Evidence: `iset_document` + staging `pending_uploads`
-- Ledger posting (future): when a line reaches **Confirmed**, create a `finance_transaction` record (see §11).
+- Ledger posting: when a payment is confirmed in PATH, create or finalize the corresponding `finance_transaction` record (see §11).
 
 ## 11. Alignment with Annual Reporting (MUST)
 Annual Reporting consumes posted transactions rolled up by stream/pot/reporting unit/intervention.
 Therefore:
-- In the simplified workflow, Finance executes payments outside the admin system and posts transactions through Finance tooling.
-- If in-app confirmation is reinstated later, **Confirmed Payment Line ⇒ Posted `finance_transaction` exists** with:
+- In the simplified workflow, Finance executes payments outside the admin system and PATH records the finance follow-up.
+- **Paid line / confirmed packet ⇒ Posted `finance_transaction` exists** with:
   - posting_date (paid date), amount, pot_id, intervention_id (when applicable),
   - derived funding stream,
   - region/reporting unit,
@@ -193,13 +196,13 @@ Therefore:
 ### MVP (include compliance-critical features)
 - Packet + line creation
 - Evidence engine with living allowance/tuition/equipment/TWS hard gates
-- Submit to Finance via email (no sign-in)
+- Validate, mark ready, and submit to Finance via email
+- Record paid / confirmed follow-up in PATH
 - Audit trail and basic duplicate warnings
 
 ### Later
+- Optional batch exports and deeper finance grouping
 - Email send/reply tracking integrations
-- Batching and confirmation tracking (if reinstated)
-- Auto-post `finance_transaction` on confirmation (future)
 - Deeper disbursement/payment table chain (`commitment`→`disbursement`→`payment`)
 - Automated SLA alerts
 - Finance system imports for confirmations

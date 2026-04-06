@@ -13,7 +13,7 @@ const FinancePaymentCommsHelp = () => (
     <Box>
       <strong>What shows up here</strong>
       <ul>
-        <li>Emails sent when packets are submitted to finance.</li>
+        <li>Emails sent when packets are sent to finance.</li>
         <li>Manually logged outbound or inbound communications.</li>
         <li>Attachment counts for evidence bundles.</li>
       </ul>
@@ -36,6 +36,6 @@ const FinancePaymentCommsHelp = () => (
 );
 
 FinancePaymentCommsHelp.aiContext =
-  "Explain the payment communications log: automatic email entries from packet submission, manual log entries, filtering by packet/subject/recipient, and how attachments support audit trails.";
+  "Explain the payment communications log: automatic email entries from packets sent to finance, manual log entries, filtering by packet or recipient, and how attachments support audit trails.";
 
 export default FinancePaymentCommsHelp;

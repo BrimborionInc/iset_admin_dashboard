@@ -1496,12 +1496,12 @@ const AppContent = () => {
   }, [endTutorial]);
 
   const updateBreadcrumbs = useCallback((newBreadcrumbs) => {
-    const breadcrumbsChanged = JSON.stringify(newBreadcrumbs) !== JSON.stringify(breadcrumbs);
-    if (breadcrumbsChanged) {
-      console.log('Updating breadcrumbs:', newBreadcrumbs);
-      setBreadcrumbs(newBreadcrumbs);
-    }
-  }, [breadcrumbs]);
+    setBreadcrumbs((currentBreadcrumbs) => {
+      const breadcrumbsChanged =
+        JSON.stringify(newBreadcrumbs) !== JSON.stringify(currentBreadcrumbs);
+      return breadcrumbsChanged ? newBreadcrumbs : currentBreadcrumbs;
+    });
+  }, []);
 
   const handleSplitPanelPreferencesChange = (newPreferences) => {
     setSplitPanelPreferences(newPreferences);

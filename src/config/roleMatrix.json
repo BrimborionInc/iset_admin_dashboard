@@ -73,6 +73,10 @@
       "System Administrator",
       "NWAC Administrator"
     ],
+    "/configuration/applicant-watchlist": [
+      "System Administrator",
+      "NWAC Administrator"
+    ],
     "/configuration/query-editor": [
       "System Administrator"
     ],

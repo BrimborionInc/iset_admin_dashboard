@@ -599,6 +599,62 @@ async function fetchApplicantAccountRows(dbPool, { q = '', clientId = null, limi
   return (rows || []).map(mapApplicantAccountRow);
 }
 
+async function fetchPortalApplicantUsers(dbPool, { q = '', limit = 500 } = {}) {
+  const search = normaliseString(q);
+  const params = [];
+  let whereSql = `
+    WHERE u.cognito_sub IS NOT NULL
+      AND staff_by_sub.id IS NULL
+      AND staff_by_email.id IS NULL
+      AND (
+        NULLIF(TRIM(COALESCE(u.email, '')), '') IS NOT NULL
+        OR NULLIF(TRIM(COALESCE(u.name, '')), '') IS NOT NULL
+      )
+  `;
+
+  if (search) {
+    const like = `%${search.toLowerCase()}%`;
+    whereSql += `
+      AND (
+        LOWER(COALESCE(u.email, '')) LIKE ?
+        OR LOWER(COALESCE(u.name, '')) LIKE ?
+      )
+    `;
+    params.push(like, like);
+  }
+
+  params.push(Math.max(1, Math.min(Number(limit) || 500, 1000)));
+
+  const [rows] = await dbPool.query(
+    `
+      SELECT
+        u.id AS user_id,
+        u.name AS user_name,
+        u.email AS user_email
+      FROM user u
+      LEFT JOIN staff_profiles staff_by_sub
+        ON staff_by_sub.cognito_sub COLLATE utf8mb4_0900_ai_ci =
+           u.cognito_sub COLLATE utf8mb4_0900_ai_ci
+      LEFT JOIN staff_profiles staff_by_email
+        ON LOWER(TRIM(COALESCE(staff_by_email.email, ''))) COLLATE utf8mb4_0900_ai_ci =
+           LOWER(TRIM(COALESCE(u.email, ''))) COLLATE utf8mb4_0900_ai_ci
+      ${whereSql}
+      ORDER BY
+        LOWER(COALESCE(NULLIF(TRIM(u.email), ''), NULLIF(TRIM(u.name), ''), CONCAT('user-', u.id))) ASC,
+        u.id ASC
+      LIMIT ?
+    `,
+    params
+  );
+
+  return (rows || []).map(row => ({
+    userId: row?.user_id ? Number(row.user_id) : null,
+    name: normaliseString(row?.user_name) || null,
+    email: normalizeEmail(row?.user_email) || normaliseString(row?.user_email) || null,
+    username: normalizeEmail(row?.user_email) || normaliseString(row?.user_email) || null,
+  }));
+}
+
 async function fetchApplicantAccountSummary(dbPool) {
   const activatedCondition = `
     (
@@ -950,6 +1006,7 @@ module.exports = {
   fetchActorStaffProfileId,
   fetchApplicantAccountRows,
   fetchApplicantAccountSummary,
+  fetchPortalApplicantUsers,
   loadApplicantAccountRow,
   normalizeEmail,
   parseTrustedPools,

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Board from "@cloudscape-design/board-components/board";
 import { SpaceBetween, Box, Link } from "@cloudscape-design/components";
 
@@ -19,10 +19,10 @@ const widgetRegistry = {
   requests: {
     id: "requests",
     component: PaymentRequestsWidget,
-    title: "Batch payments queue",
-    description: "Draft packets due for submission to finance.",
+    title: "Payment packet queue",
+    description: "Draft packets created as needed before they are sent to finance.",
     helpComponent: FinancePaymentRequestsHelp,
-    helpTitle: "Batch payments queue",
+    helpTitle: "Payment packet queue",
     aiContext: FinancePaymentRequestsHelp.aiContext,
     defaultRowSpan: 4,
     defaultColumnSpan: 4,
@@ -30,8 +30,8 @@ const widgetRegistry = {
   detail: {
     id: "detail",
     component: PaymentDetailWidget,
-    title: "Batch payment detail",
-    description: "Payment lines and evidence checklist for the selected packet.",
+    title: "Payment packet detail",
+    description: "Payment lines and evidence for the packet currently being sent to finance.",
     helpComponent: FinancePaymentDetailHelp,
     helpTitle: "Payment detail",
     aiContext: FinancePaymentDetailHelp.aiContext,
@@ -41,8 +41,8 @@ const widgetRegistry = {
   comms: {
     id: "comms",
     component: PaymentCommunicationWidget,
-    title: "Batch payment communications",
-    description: "Email log for submitted payment packets.",
+    title: "Payment communications",
+    description: "Email log for packets already sent to finance.",
     helpComponent: FinancePaymentCommsHelp,
     helpTitle: "Payment communications",
     aiContext: FinancePaymentCommsHelp.aiContext,
@@ -170,8 +170,8 @@ const boardI18nStrings = {
   liveAnnouncementDndCommitted: operation => `${operation} committed`,
   liveAnnouncementDndDiscarded: operation => `${operation} discarded`,
   liveAnnouncementItemRemoved: op => `Removed item ${op.item.data.title}.`,
-  navigationAriaLabel: "Batch Payments dashboard navigation",
-  navigationAriaDescription: "Use arrow keys to move between widgets on the Batch Payments dashboard.",
+  navigationAriaLabel: "Payments dashboard navigation",
+  navigationAriaDescription: "Use arrow keys to move between widgets on the Payments dashboard.",
   navigationItemAriaLabel: item => (item ? item.data.title : "Empty"),
 };
 
@@ -193,7 +193,7 @@ const FinancePaymentsPage = ({
       updateBreadcrumbs([
         { text: "Home", href: "/" },
         { text: "Financial Management", href: "/finance/overview" },
-        { text: "Batch Payments", href: "/finance/payments" },
+        { text: "Payments", href: "/finance/payments" },
       ]);
     }
   }, [updateBreadcrumbs]);
@@ -272,24 +272,6 @@ const FinancePaymentsPage = ({
     );
   };
 
-  const resetLayout = useCallback(() => {
-    setLayout(current => (areLayoutsEqual(current, defaultLayout) ? current : defaultLayout));
-    try {
-      window.localStorage.removeItem(STORAGE_KEY);
-    } catch (error) {
-      console.error("[FinancePayments] failed to clear layout", error);
-    }
-  }, []);
-
-  const openPalette = useCallback(() => {
-    if (typeof setAvailableItems === "function") {
-      setAvailableItems(paletteItems);
-    }
-    if (typeof setSplitPanelOpen === "function") {
-      setSplitPanelOpen(true);
-    }
-  }, [paletteItems, setAvailableItems, setSplitPanelOpen]);
-
   return (
     <PaymentsDataProvider>
       <SpaceBetween size="l">
@@ -298,17 +280,17 @@ const FinancePaymentsPage = ({
           items={boardItems}
           onItemsChange={handleItemsChange}
           renderItem={renderBoardItem}
-          empty={<Box padding="m">No widgets on the Batch Payments dashboard.</Box>}
+          empty={<Box padding="m">No widgets on the Payments dashboard.</Box>}
         />
         <Box variant="awsui-key-label">
-          Need to revisit the Batch Payments workflow description?{" "}
+          Need to revisit the Payments workflow description?{" "}
           <Link
             href="#"
             onFollow={event => {
               event.preventDefault();
               if (typeof toggleHelpPanel === "function") {
                 const helpContent = React.createElement(FinancePaymentsHelp);
-                toggleHelpPanel(helpContent, "Batch Payments", FinancePaymentsHelp.aiContext);
+                toggleHelpPanel(helpContent, "Payments", FinancePaymentsHelp.aiContext);
               }
             }}
           >

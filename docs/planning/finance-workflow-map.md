@@ -25,7 +25,7 @@ Context: Finance dashboards/widgets are scaffolded with mock data. This map name
 ## Request / Pay (Payments)
 - Inputs: payment packets (EFT/invoice), pot link, documents, requester notes, approval refs.
 - Validations: required fields (banking, invoice metadata), pot/commitment match, SLA/routing, evidence presence.
-- States: submitted → under review → approved → sent → confirmed/failed.
+- States: draft → awaiting release → ready to send → sent to finance → payment confirmed → closed/cancelled.
 - Outputs: payment queue, packet detail, comms log, SLA metrics, confirmations.
 - Ownership: Program submits; Finance reviews/approves; Ops/AP sends; requester receives confirmation.
 - UI scaffold: `src/pages/finance/FinancePaymentsPage.jsx`; widgets `PaymentRequestsWidget.jsx`, `PaymentDetailWidget.jsx`, `PaymentCommunicationWidget.jsx`, `PaymentSlaWidget.jsx`; `PaymentsDataContext.jsx` (mock).

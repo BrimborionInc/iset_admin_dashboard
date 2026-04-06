@@ -242,10 +242,10 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange }) => {
     setIsLoadingApplicants(true);
     setApplicantLoadError(null);
     try {
-      const resp = await apiFetch('/api/admin/applicants');
+      const resp = await apiFetch('/api/admin/applicants/portal-users');
       const data = await resp.json().catch(() => null);
       if (!resp.ok) {
-        setApplicantLoadError(data?.message || 'Failed to load applicant accounts');
+        setApplicantLoadError(data?.message || 'Failed to load portal applicants');
         setApplicantOptions([]);
         setSelectedApplicant(null);
         return;
@@ -254,19 +254,26 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange }) => {
       const opts = users.map((u) => {
         const dbEmail = (u?.email || '').trim();
         const cognitoUsername = (u?.username || '').trim();
+        const displayName = (u?.name || '').trim();
         const numericUserId = Number(u?.userId);
         const email = dbEmail && !/@placeholder\.local$/i.test(dbEmail)
           ? dbEmail
           : (cognitoUsername || dbEmail || '(unknown)');
+        const label = displayName && email && displayName.toLowerCase() !== email.toLowerCase()
+          ? `${displayName} (${email})`
+          : (displayName || email);
         return {
-          label: email,
+          label,
           value: Number.isFinite(numericUserId) && numericUserId > 0 ? String(numericUserId) : '',
         };
       }).filter((o) => o.value);
       setApplicantOptions(opts);
+      if (!opts.length) {
+        setApplicantLoadError('No portal applicant users were found in this environment.');
+      }
       if (!selectedApplicant && opts.length) setSelectedApplicant(opts[0]);
     } catch (err) {
-      setApplicantLoadError(err?.message || 'Failed to load applicant accounts');
+      setApplicantLoadError(err?.message || 'Failed to load portal applicants');
       setApplicantOptions([]);
       setSelectedApplicant(null);
     } finally {
@@ -509,7 +516,7 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange }) => {
             <Box>Select the province or territory for the simulated applicant's address. The AI will auto-generate the rest of the draft.</Box>
             <FormField
               label="Applicant account"
-              description="Draft will be inserted/updated for this applicant (must exist in Cognito applicant pool and DB user table)."
+              description="Draft will be inserted or updated for this portal applicant in the current environment."
               errorText={applicantLoadError || undefined}
             >
               <Select
@@ -518,7 +525,7 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange }) => {
                 selectedOption={selectedApplicant}
                 onChange={({ detail }) => setSelectedApplicant(detail.selectedOption)}
                 options={applicantOptions}
-                placeholder="Select applicant"
+                placeholder="Select portal applicant"
               />
             </FormField>
             <FormField label="Province / Territory" description="Used for address fields">

@@ -63,16 +63,13 @@ const allowsRecurrence = (paymentType, recurrencePolicyLookup) =>
 const normalizePacketStatusKey = status => {
   if (!status) return "draft";
   const normalized = String(status).trim().toLowerCase();
-  if (
-    normalized === "draft" ||
-    normalized === "returned" ||
-    normalized === "awaiting_trigger" ||
-    normalized === "released"
-  ) {
+  if (normalized === "draft" || normalized === "ready_to_send") {
     return "draft";
   }
+  if (normalized === "submitted") return "submitted";
   if (normalized === "cancelled") return "cancelled";
-  return "submitted";
+  if (normalized === "confirmed") return "confirmed";
+  return "draft";
 };
 
 const parsePacketMetadata = packet => {
@@ -130,23 +127,41 @@ const resolveIntacctOutcome = attempt => {
 
 const packetStatusMeta = {
   draft: { label: "Draft", indicator: "pending" },
-  awaiting_trigger: { label: "Awaiting trigger", indicator: "warning" },
-  released: { label: "Ready to send", indicator: "success" },
-  submitted: { label: "Submitted to finance", indicator: "info" },
-  confirmed: { label: "Confirmed paid", indicator: "success" },
-  closed: { label: "Closed", indicator: "success" },
+  ready_to_send: { label: "Ready to send", indicator: "success" },
+  submitted: { label: "Sent to finance", indicator: "info" },
+  confirmed: { label: "Payment confirmed", indicator: "success" },
   cancelled: { label: "Cancelled", indicator: "error" },
+};
+
+const resolvePacketStatusMeta = packet => {
+  const statusValue = String(packet?.status || "").trim().toLowerCase();
+  if (statusValue && statusValue !== "submitted" && packetStatusMeta[statusValue]) {
+    return packetStatusMeta[statusValue];
+  }
+  const attempt = resolveLatestIntacctAttempt(packet);
+  const outcome = resolveIntacctOutcome(attempt);
+  if (outcome === "success") {
+    return { label: "Accepted in Sage Intacct", indicator: "success" };
+  }
+  if (outcome === "partial") {
+    return { label: "Sage Intacct exceptions", indicator: "warning" };
+  }
+  if (outcome === "failed") {
+    return { label: "Sage Intacct exceptions", indicator: "error" };
+  }
+  if (statusValue === "submitted") {
+    return packetStatusMeta.submitted;
+  }
+  const statusKey = normalizePacketStatusKey(packet?.status);
+  return packetStatusMeta[statusKey] || { label: statusKey, indicator: "info" };
 };
 
 const lineStatusMeta = {
   needs_evidence: { label: "Needs evidence", indicator: "warning" },
-  ready_for_program: { label: "Ready for program review", indicator: "success" },
-  ready_for_finance: { label: "Ready for finance review", indicator: "success" },
-  approved: { label: "Approved", indicator: "success" },
+  ready_to_send: { label: "Ready to send", indicator: "success" },
   held: { label: "Held", indicator: "warning" },
-  batched: { label: "Batched", indicator: "info" },
   paid: { label: "Paid", indicator: "success" },
-  submitted: { label: "Submitted", indicator: "info" },
+  submitted: { label: "Sent to finance", indicator: "info" },
   cancelled: { label: "Cancelled", indicator: "error" },
 };
 
@@ -159,7 +174,7 @@ const resolveLineStatusMeta = (line, packetStatusKey) => {
   if ((line?.evidenceSummary?.missing ?? 0) > 0) {
     return lineStatusMeta.needs_evidence;
   }
-  return lineStatusMeta.ready_for_program;
+  return lineStatusMeta.ready_to_send;
 };
 
 const editableLineStatusOptions = [
@@ -169,19 +184,9 @@ const editableLineStatusOptions = [
     description: "Line is not ready for review yet.",
   },
   {
-    value: "ready_for_program",
-    label: "Ready for program review",
-    description: "Line is ready for program review.",
-  },
-  {
-    value: "ready_for_finance",
-    label: "Ready for finance review",
-    description: "Line is ready for finance review.",
-  },
-  {
-    value: "approved",
-    label: "Approved",
-    description: "Line is approved for downstream finance processing.",
+    value: "ready_to_send",
+    label: "Ready to send",
+    description: "Line is ready to be included in a finance packet.",
   },
   {
     value: "held",
@@ -868,7 +873,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     setLineError(null);
     setReopenModalOpen(false);
     setReopenSubmitting(false);
-  }, [selectedRequest?.id]);
+  }, [selectedRequest?.id, selectedRequest?.lines]);
 
   useEffect(() => {
     if (replaceMode && linkModalOpen) {
@@ -894,7 +899,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     requiresLinePeriod,
   ]);
 
-  const packetLines = selectedRequest?.lines ?? [];
+  const packetLines = useMemo(() => selectedRequest?.lines ?? [], [selectedRequest?.lines]);
   const packetStatusKey = normalizePacketStatusKey(selectedRequest?.status);
   const packetStatusValue = String(selectedRequest?.status || "").trim().toLowerCase();
   const packetValidation =
@@ -1542,7 +1547,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       ].filter(Boolean);
       if (blockerSummaries.length) {
         const statusKey = normalizePacketStatusKey(status);
-        const heading = statusKey === "submitted" ? "Submission blocked" : "Update blocked";
+        const heading = statusKey === "submitted" ? "Send blocked" : "Update blocked";
         setActionStatus({
           type: "error",
           message: (
@@ -1584,7 +1589,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       if (status === "passed") {
         setActionStatus({
           type: "success",
-          message: "Validation passed. You can submit this packet to finance.",
+          message: "Validation passed. You can send this packet to finance.",
         });
         return;
       }
@@ -2112,9 +2117,8 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   );
 
   const canValidatePacket = packetStatusKey === "draft";
-  const canReleasePacket = packetStatusValue === "awaiting_trigger" && isValidated;
-  const canSubmitPacket =
-    packetStatusValue !== "awaiting_trigger" && packetStatusKey === "draft" && isValidated;
+  const canReadyPacket = packetStatusKey === "draft" && packetStatusValue !== "ready_to_send" && isValidated;
+  const canSubmitPacket = packetStatusValue === "ready_to_send" && isValidated;
   const latestIntacctAttempt = useMemo(
     () => resolveLatestIntacctAttempt(selectedRequest),
     [selectedRequest]
@@ -2128,15 +2132,14 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const activeEvidenceContext = activeEvidenceRow
     ? [activeEvidenceRow.evidence, activeEvidenceRow.scope].filter(Boolean).join(" • ")
     : "";
+  const activePacketStatusMeta = resolvePacketStatusMeta(selectedRequest);
   const linkableDocumentsEmptyText = supportingDocuments.length
     ? "No linkable documents available for this evidence requirement."
     : "No supporting documents found for this applicant.";
   const headerActions = selectedRequest ? (
     <SpaceBetween direction="horizontal" size="xs">
-      <StatusIndicator
-        type={(packetStatusMeta[packetStatusValue] || packetStatusMeta[packetStatusKey]).indicator}
-      >
-        {(packetStatusMeta[packetStatusValue] || packetStatusMeta[packetStatusKey]).label}
+      <StatusIndicator type={activePacketStatusMeta.indicator}>
+        {activePacketStatusMeta.label}
       </StatusIndicator>
       {canValidatePacket ? (
         <Button
@@ -2148,14 +2151,14 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           {validationSubmitting ? "Validating" : "Validate"}
         </Button>
       ) : null}
-      {canReleasePacket ? (
+      {canReadyPacket ? (
         <Button
           variant="primary"
-          onClick={() => handlePacketStatusChange("released")}
+          onClick={() => handlePacketStatusChange("ready_to_send")}
           disabled={!selectedRequest?.id || submitSubmitting}
           loading={submitSubmitting}
         >
-          {submitSubmitting ? "Releasing" : "Release for submission"}
+          {submitSubmitting ? "Updating" : "Mark ready to send"}
         </Button>
       ) : null}
       {canSubmitPacket ? (
@@ -2165,22 +2168,22 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           disabled={!selectedRequest?.id || submitSubmitting}
           loading={submitSubmitting}
         >
-          {submitSubmitting ? "Submitting" : "Submit to finance"}
+          {submitSubmitting ? "Sending" : "Send to finance"}
         </Button>
       ) : null}
       {canReopenPacket ? (
-        <Button
+      <Button
           variant="normal"
           onClick={() => setReopenModalOpen(true)}
           disabled={!selectedRequest?.id || reopenSubmitting}
         >
-          Reopen for resubmission
+          Reopen for resend
         </Button>
       ) : null}
     </SpaceBetween>
   ) : undefined;
   const detailDescription =
-    "Add payment lines, attach evidence, validate, then submit to finance (submission emails finance or sends to Intacct and locks edits).";
+    "Add payment lines, attach evidence, validate, then send to finance. Sending emails finance or submits to Intacct and locks edits.";
   return (
     <BoardItem
       header={
@@ -2344,7 +2347,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                     </Alert>
                   ) : null}
                   {intacctMissingFieldsUnique.length ? (
-                      <Alert type="warning" header="Missing fields to complete submission">
+                      <Alert type="warning" header="Missing fields to complete send">
                         <SpaceBetween size="xs">
                           <Box variant="small">
                             Placeholders are marked as MISSING_* in the XML.
@@ -2454,7 +2457,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         onDismiss={() => {
           if (!reopenSubmitting) setReopenModalOpen(false);
         }}
-        header="Reopen packet for resubmission"
+        header="Reopen packet for resend"
         footer={
           <SpaceBetween direction="horizontal" size="xs">
             <Button
@@ -2472,7 +2475,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                 setReopenSubmitting(true);
                 try {
                   await handlePacketStatusChange("draft", {
-                    notes: "Reopened for Intacct resubmission.",
+                    notes: "Reopened for Intacct resend.",
                   });
                   setReopenModalOpen(false);
                 } finally {
@@ -2487,11 +2490,11 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       >
         <SpaceBetween size="s">
           <Box variant="p">
-            This will unlock the packet so you can correct errors and resubmit to Sage Intacct.
-            The previous submission remains in the audit history.
+            This will unlock the packet so you can correct errors and resend it to Sage Intacct.
+            The previous send remains in the audit history.
           </Box>
           <Box variant="p">
-            Reopen is only available when the latest Intacct submission failed or partially
+            Reopen is only available when the latest Intacct send failed or partially
             completed.
           </Box>
         </SpaceBetween>

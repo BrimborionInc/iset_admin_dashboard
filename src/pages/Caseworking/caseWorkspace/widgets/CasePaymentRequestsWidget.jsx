@@ -58,7 +58,6 @@ const CasePaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPane
       metadata={{
         ...metadata,
         mode: "program",
-        hideCreatePacketAction: true,
         caseId: resolvedCaseId,
         caseLabel,
         caseRegionCode,

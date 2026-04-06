@@ -1,66 +1,68 @@
 # Payments Module User Manual
 
-Purpose: Provide a plain-language guide for using the Payments module dashboards from draft through submission to Finance (email).  
-Audience: Program staff and admin operators; Finance receives email submissions (no sign-in).  
-Last Updated: 2026-04-05
+Purpose: Provide a plain-language guide for using the Payments module dashboards from draft through sending to Finance (email).  
+Audience: Program staff and admin operators; Finance receives emailed payment requests (no sign-in).  
+Last Updated: 2026-04-06
 
 ## 1) Introduction (for new users)
-The Payments module is where payment requests are created and submitted to Finance by email. A request starts as a **payment packet** with one or more payment lines; evidence must be attached before submission. The goal is to ensure submissions are compliant, auditable, and easy to report.
+The Payments module is where payment requests are created and sent to Finance by email. A request starts as a **payment packet** with one or more payment lines; evidence must be attached before it can be sent. The goal is to ensure requests are compliant, auditable, and easy to report.
 
 You will primarily use:
-- **Program Payments** (`/iset/payments`) to create packets, attach evidence, and submit to Finance.
+- **Program Payments** (`/iset/payments`) to create packets, attach evidence, and send requests to Finance.
 - **Finance Payments** (`/finance/payments`) is optional for internal oversight; Finance does not sign in.
 
 ## 2) Key concepts
 - **Payment packet**: A workflow container for one or more payment lines.
 - **Payment line**: One payable item (e.g., living allowance for a month, tuition invoice).
 - **Evidence**: Documents required to justify payment (e.g., invoices, attendance reports).
-- **Batch (future)**: A group of lines for EFT processing.
-- **Confirmation (future)**: Proof that the payment was sent and recorded.
+- **Batch**: Optional internal finance grouping of already-submitted lines.
+- **Confirmation**: Recording in PATH that payment was completed.
 
 ## 3) Roles and access (high level)
 Access is role-based. If you do not see a button or action, your role likely does not allow it.
-- **Program users** create packets, upload evidence, and submit to Finance.
-- **Finance** receives the submission email and processes payment outside the admin system.
+- **Program users** create packets, upload evidence, and send requests to Finance.
+- **Finance** receives the payment email and processes payment outside the admin system.
 - **Admins** configure finance email routing and evidence rules.
 
 ## 4) Dashboard overview
 ### Program Payments (`/iset/payments`)
 Widgets:
-- **Payment packet queue**: List of packets and filters (Draft, Submitted to Finance).
-- **Payment packet detail**: Packet lines, evidence checklist, submit action, and an Intacct XML (Draft) preview tab.
+- **Payment packet queue**: List of packets and filters (`Draft`, `Ready to send`, `Sent to finance`).
+- **Payment packet detail**: Packet lines, evidence checklist, send action, and an Intacct XML (Draft) preview tab.
 
 ### Finance Payments (`/finance/payments`)
 Widgets:
-- **Payment packet queue**: Draft vs submitted filters for oversight.
+- **Payment packet queue**: Draft, sent, and confirmed filters for oversight.
 - **Payment packet detail**: Read-only view of lines, evidence, and the Intacct XML (Draft) preview tab.
-- **Payment communications**: Email log for submissions.
-- **SLA snapshot**: Drafts needing evidence and submission age metrics.
+- **Payment communications**: Email log for sent packets.
+- **SLA snapshot**: Drafts needing evidence and sent-packet age metrics.
 
 ## 5) Status lifecycle (packet + line)
 Packet statuses (typical path):
-Draft -> Submitted  
+Draft -> Ready to send -> Sent to finance -> Payment confirmed  
 Other paths: Cancelled.
 
 Line statuses (derived):
-Needs Evidence -> Ready to Submit -> Submitted  
-Other: Cancelled.
+Needs evidence -> Ready to send -> Sent to finance -> Paid  
+Other: Held, Cancelled.
 
 Notes:
 - Changing the **packet** status updates line status for all non-cancelled lines.
-- Evidence must be **received** before submission.
+- Evidence must be **received** before a packet can be sent.
 
 ## 6) Program Payments: step-by-step
-### A0) Auto-generated packets (from initial approval)
-When the initial intervention is created from an approved assessment, the system auto-creates a **draft** packet. The same happens later if an intervention is approved:
-- If the intervention has a pot and approved amount, a draft **line** is created.
-- If pot or amount is missing, the packet is created **without a line** and flagged in risk flags.
-- Historical `manual_backload` interventions are excluded from this workflow. Their `actual amount` is treated as imported finance history only and they cannot create payment packets.
+### A0) Approved funding is not a payment packet
+Approving an intervention does **not** create a payment packet automatically.
 
-What you should do:
-1. Open **Program Payments** and find the packet in the queue.
-2. Add or edit the payment line to confirm payee, amount, pot, and service period.
-3. Upload evidence and submit to Finance.
+Use the approved intervention amount as the funding ceiling, then create packets only when a specific month, receipt, invoice, or claim period is actually ready to send to Finance.
+
+Examples:
+- `Erica - Mileage Jan`
+- `Erica - Mileage Feb`
+- `Erica - Mileage Mar`
+- `Erica - Mileage Apr`
+
+This keeps evidence, claim amounts, and fiscal-year reporting clean. Historical `manual_backload` interventions remain finance-history only and cannot create live payment packets.
 
 ### A) Create a payment packet
 1. Go to **Program Payments**.
@@ -86,10 +88,10 @@ What you should do:
 2. Click **Upload evidence**.
 3. Select whether the evidence is **baseline** (packet) or a **specific line**.
 4. Choose an evidence type and upload the file.
-5. Note: Uploading sets evidence to **Received**. Submission is blocked until required evidence is received.
+5. Note: Uploading sets evidence to **Received**. Sending is blocked until required evidence is received.
 
-### D) Submit to Finance
-1. Click **Submit to finance** once required evidence is received.
+### D) Send to Finance
+1. Click **Send to finance** once required evidence is received.
 2. The system emails the configured finance address and locks edits on the packet.
 
 ### E) Intacct XML preview (Draft)
@@ -99,15 +101,24 @@ What you should do:
 4. Note: The preview is read-only and is not transmitted to Intacct.
 
 ## 7) Finance (email-only)
-Finance receives the submission email containing the packet summary, evidence list, and line details. No in-app review or confirmation steps are required.
+Finance receives the payment email containing the packet summary, evidence list, and line details. Finance still processes payment outside PATH; PATH is then used to record follow-up such as `Sent to finance` and, when known, `Payment confirmed`.
+
+Main packet statuses shown to staff:
+- Draft
+- Ready to send
+- Sent to finance
+- Payment confirmed
+- Cancelled
+
+If Sage Intacct integration is enabled, a packet that has been sent may also show `Accepted in Sage Intacct` or `Sage Intacct exceptions`.
 
 ## 8) Communications log (email)
 Use **Payment communications** to:
-- See submission emails sent to finance.
+- See payment emails sent to finance.
 - Log a manual email if a message was sent outside the system.
 
 Notes:
-- The system only auto-logs submission emails; there is no inbound sync.
+- The system only auto-logs payment emails; there is no inbound sync.
 
 ## 9) Notes & requests (internal)
 Use **Notes & requests** in the packet detail view to:
@@ -117,24 +128,24 @@ Use **Notes & requests** in the packet detail view to:
 ## 10) SLA snapshot
 The SLA widget summarizes:
 - Drafts needing evidence
-- Submitted to finance
+- Sent to finance
 - Overdue evidence tasks
 - Average submission age (days)
 
-Use this to spot evidence gaps and stalled submissions.
+Use this to spot evidence gaps and stalled sends.
 
 ## 11) Evidence and compliance rules (practical)
-Evidence gates are enforced when submitting. Evidence must be **received**. Common requirements include:
+Evidence gates are enforced when sending a packet to finance. Evidence must be **received**. Common requirements include:
 - **Baseline**: signed client application, funding agreement, case manager assessment, identity documents, band funding confirmation/denial.
-- **Living allowance**: attendance report, financial overview, income/expense verification.
+- **Living allowance**: attendance report, financial overview, income/expense verification, and a service period that still falls inside the living-allowance backdating window when the packet is sent to finance (default `60` days from period end).
 - **Tuition**: invoice or statement of account.
 - **Specialized equipment**: institution letter + quote (advance), receipt after payment (if required by policy).
 - **TWS (wage subsidy)**: employer letters and subsidy documents.
 
-If required evidence is missing, submission is blocked.
+If required evidence is missing, sending is blocked.
 
-## 12) When submission is blocked (no overrides)
-This workflow has no overrides. To submit, you must:
+## 12) When sending is blocked (no overrides)
+This workflow has no overrides. To send a packet, you must:
 - Upload the required evidence, or
 - Adjust the line/payment type so the evidence rules match, or
 - Resolve funding authorization issues on the intervention.
@@ -164,9 +175,9 @@ Staff can export the ledger extract required for Annual Reporting (if enabled):
 
 ## 15) Troubleshooting
 - **No packets in the queue**: Use the status filter or create a new packet in Program Payments.
-- **Cannot submit**: Check evidence checklist, funding caps, or payment-type policy violations.
+- **Cannot send**: Check evidence checklist, funding caps, or payment-type policy violations.
 - **Email send failed**: Finance routing not configured or email provider not available.
-- **Packet locked**: The packet is already submitted; edits are not allowed.
+- **Packet locked**: The packet has already been sent to finance; edits are not allowed.
 - **Evidence upload error**: Case or applicant context is missing, or the file type/size is invalid.
 
 ## 16) Testing script (manual)
@@ -176,19 +187,23 @@ Prerequisites:
 - Finance email routing configured (optional for email tests).
 
 Test steps:
-1. **Trigger auto packet**: Approve an intervention in the case workspace.
-   - Expected: A new draft packet appears in **Program Payments**. If pot/amount exist, a draft line is present.
-2. **Program edits**: Open the packet, add or edit the line to confirm payment type, payee, amount, pot, and service period.
+1. **Create packet manually**: Open **Program Payments** and create a packet against an approved intervention.
+   - Expected: A new draft packet appears in **Program Payments** with the initial line you entered.
+2. **Program edits**: Open the packet, add or edit lines to confirm payment type, payee, amount, pot, and service period.
    - Expected: Line saves with updated values and evidence checklist updates.
 3. **Evidence upload**: Upload baseline and line evidence.
    - Expected: Evidence shows as **Received** and listed in the checklist.
-4. **Submit to finance**: Click **Submit to finance**.
-   - Expected: Status changes to Submitted, email log entry created, and the packet locks.
-5. **Queue/SLA check**: Confirm the queue and SLA snapshot reflect the submission.
-   - Expected: Draft counts drop; submitted counts increase.
-6. **Internal notes**: Add a note in **Notes & requests**.
+4. **Validate and mark ready**: Validate the packet, then mark it ready to send.
+   - Expected: Validation passes and the packet moves to `Ready to send`.
+5. **Send to finance**: Click **Send to finance**.
+   - Expected: Status changes to `Sent to finance`, an email log entry is created, and the packet locks.
+6. **Record payment**: Mark one line as paid or confirm the packet through the finance follow-up flow.
+   - Expected: Paid lines update finance transactions; once all lines are paid, the packet moves to `Payment confirmed`.
+7. **Queue/SLA check**: Confirm the queue and SLA snapshot reflect the send.
+   - Expected: Draft counts drop; sent-to-finance counts increase.
+8. **Internal notes**: Add a note in **Notes & requests**.
    - Expected: Note appears with timestamp and sender.
-7. **Ledger export** (optional): Click **Export ledger** in Finance Payments.
+9. **Ledger export** (optional): Click **Export ledger** in Finance Payments.
    - Expected: CSV downloads with transaction ID, posting date, amount, pot, funding stream, intervention ID, reporting unit, evidence doc IDs.
 
 Record any failures with packet ID, line ID, and the exact error message.

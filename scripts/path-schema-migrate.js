@@ -346,6 +346,14 @@ function summarizeApplyForJson(result) {
   };
 }
 
+function createQuietLogger() {
+  return {
+    log() {},
+    warn() {},
+    error() {},
+  };
+}
+
 function printInventory(inventory) {
   console.log(`Tracking table: ${inventory.trackingTable}`);
   console.log(`Canonical migrations: ${inventory.canonical.count} file(s) in ${inventory.canonical.dir}`);
@@ -443,8 +451,12 @@ function planPendingRemoteSharedSchemaMigrations(remoteConfig, options = {}) {
   const trackingTable = options.trackingTable || DEFAULT_TRACKING_TABLE;
   const migrations = getCanonicalMigrationFiles({ migrationsDir: options.migrationsDir });
   const { trackingTableExists, rows: appliedRows } = fetchRemoteAppliedMigrationRows(remoteConfig, { trackingTable });
-  const appliedMap = new Map(appliedRows.map(row => [`${row.filename}|${row.checksum}`, row]));
-  const pending = migrations.filter(migration => !appliedMap.has(`${migration.file}|${migration.checksum}`));
+  const successfulAppliedMap = new Map(
+    appliedRows
+      .filter(row => Number(row.success) === 1)
+      .map(row => [`${row.filename}|${row.checksum}`, row])
+  );
+  const pending = migrations.filter(migration => !successfulAppliedMap.has(`${migration.file}|${migration.checksum}`));
 
   return {
     trackingTable,
@@ -475,7 +487,12 @@ function insertRemoteTrackingRow(remoteConfig, trackingTable, payload) {
     `  ${payload.durationMs},`,
     `  ${payload.success ? 1 : 0},`,
     `  ${payload.errorSnippet ? sqlStringLiteral(payload.errorSnippet) : 'NULL'}`,
-    ');',
+    ')',
+    'ON DUPLICATE KEY UPDATE',
+    '  applied_at = CURRENT_TIMESTAMP,',
+    '  duration_ms = VALUES(duration_ms),',
+    '  success = VALUES(success),',
+    '  error_snippet = VALUES(error_snippet);',
   ].join('\n');
   runRemoteSql(remoteConfig, sql);
 }
@@ -588,6 +605,7 @@ async function main() {
 
   if (isRemoteTarget(args.targetEnv)) {
     const remoteConfig = getRemoteTargetConfig(args);
+    const logger = args.json ? createQuietLogger() : console;
     if (args.command === 'plan') {
       const plan = planPendingRemoteSharedSchemaMigrations(remoteConfig);
       const payload = {
@@ -604,7 +622,7 @@ async function main() {
       return;
     }
 
-    const result = applyPendingRemoteSharedSchemaMigrations(remoteConfig);
+    const result = applyPendingRemoteSharedSchemaMigrations(remoteConfig, { logger });
     const payload = {
       command: 'apply',
       loadedEnvFile: null,
@@ -633,6 +651,7 @@ async function main() {
   const pool = await openPool();
   try {
     const inventory = getSharedSchemaInventory();
+    const logger = args.json ? createQuietLogger() : console;
     if (args.command === 'plan') {
       const plan = await planPendingSharedSchemaMigrations(pool);
       const payload = {
@@ -652,7 +671,7 @@ async function main() {
       return;
     }
 
-    const result = await applyPendingSharedSchemaMigrations(pool);
+    const result = await applyPendingSharedSchemaMigrations(pool, { logger });
     const payload = {
       command: 'apply',
       loadedEnvFile,

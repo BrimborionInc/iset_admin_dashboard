@@ -281,6 +281,9 @@ try {
             $env:PATH_RELEASE_ID = $ReleaseId
         }
         npm run build:test | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "npm run build:test failed with exit code $LASTEXITCODE."
+        }
     } else {
         Write-Section "Skipping build step (per flag)"
     }
@@ -446,8 +449,9 @@ try {
     $commandsList.Add('  exit 1')
     $commandsList.Add('fi')
     $commandsList.Add('cd /opt/nwac/admin-dashboard')
-    $commandsList.Add('if [ -d node_modules ]; then rm -rf node_modules; fi')
+    $commandsList.Add('if [ -d node_modules ]; then chmod -R u+w node_modules || true; fi')
     $commandsList.Add('"$NPM_BIN" install --production')
+    $commandsList.Add('"$NPM_BIN" prune --production || true')
     $commandsList.Add('PM2_BIN="$(command -v pm2 2>/dev/null || true)"')
     $commandsList.Add('if [ -z "$PM2_BIN" ]; then')
     $commandsList.Add('  echo "pm2 not found on PATH; installing globally"')

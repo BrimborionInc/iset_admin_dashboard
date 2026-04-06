@@ -185,6 +185,7 @@ const SideNavigation = ({ showTutorialHotspots = false, notificationCount = 0, r
         { type: 'link', text: 'Template Editor', href: '/template-editor' },
         { type: 'link', text: 'Language Settings', href: '/language-settings-dashboard' },
         { type: 'link', text: 'Event Logging', href: '/configuration/events' },
+        { type: 'link', text: 'Applicant Watchlist', href: '/configuration/applicant-watchlist' },
         { type: 'link', text: 'Configuration Settings', href: '/configuration-settings' },
         { type: 'link', text: 'Client Batch Import', href: '/iset/imports/client-files' },
         { type: 'link', text: 'Query Editor', href: '/configuration/query-editor' },

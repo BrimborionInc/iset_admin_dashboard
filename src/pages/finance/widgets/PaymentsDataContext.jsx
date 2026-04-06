@@ -195,6 +195,24 @@ const normalizeRecurrenceMode = value => {
   return RECURRENCE_MODE_NOT_ALLOWED;
 };
 
+const normalizePacketStatusValue = value => {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  return ["draft", "ready_to_send", "submitted", "confirmed", "cancelled"].includes(normalized)
+    ? normalized
+    : null;
+};
+
+const normalizeLineStatusValue = value => {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  return ["needs_evidence", "ready_to_send", "submitted", "paid", "held", "cancelled"].includes(normalized)
+    ? normalized
+    : null;
+};
+
 const normalizeRecurrencePolicies = raw => {
   const map = new Map();
   const add = (codeRaw, modeRaw) => {
@@ -256,6 +274,7 @@ const normalizeLine = raw => {
     servicePeriodEnd: raw.servicePeriodEnd || raw.service_period_end || null,
     requestedPaymentDate: raw.requestedPaymentDate || raw.requested_payment_date || null,
     invoiceReferenceNumber: raw.invoiceReferenceNumber || raw.invoice_reference_number || null,
+    status: normalizeLineStatusValue(raw.status) || "needs_evidence",
     paidAt: raw.paidAt || raw.paid_at || null,
     paymentReference: raw.paymentReference || raw.payment_reference || null,
     paymentProofDocumentId: raw.paymentProofDocumentId || raw.payment_proof_document_id || null,
@@ -322,7 +341,7 @@ const normalizePacket = packet => {
     potName: packet?.potName || packet?.pot_name || null,
     requester: packet?.requester || packet?.requester_name || null,
     requesterRole: packet?.requesterRole || packet?.requester_role || null,
-    status: packet?.status || "draft",
+    status: normalizePacketStatusValue(packet?.status) || "draft",
     submittedOn: packet?.submittedOn || packet?.submitted_on || null,
     dueBy: packet?.dueBy || packet?.due_by || null,
     notes: packet?.notes || packet?.notes_internal || null,
@@ -458,12 +477,9 @@ const computeSlaSnapshot = requests => {
   const submissionAges = [];
 
   requests.forEach(packet => {
-    const statusValue = String(packet.status || "").trim().toLowerCase();
+    const statusValue = normalizePacketStatusValue(packet.status) || "draft";
     const statusKey =
-      statusValue === "draft" ||
-      statusValue === "returned" ||
-      statusValue === "awaiting_trigger" ||
-      statusValue === "released"
+      statusValue === "draft" || statusValue === "ready_to_send"
         ? "draft"
         : statusValue === "cancelled"
           ? "cancelled"
@@ -914,7 +930,12 @@ export const PaymentsDataProvider = ({ children, filters = {} }) => {
       console.error("[Payments] failed to create payment packet", err);
       const message = err.message || "Failed to create payment packet";
       setError(message);
-      throw new Error(message);
+      const wrappedError = new Error(message);
+      wrappedError.code = err?.code || null;
+      wrappedError.details = err?.details || err?.payload?.details || null;
+      wrappedError.status = err?.status || null;
+      wrappedError.payload = err?.payload || null;
+      throw wrappedError;
     }
   }, []);
 

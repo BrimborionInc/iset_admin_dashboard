@@ -101,7 +101,7 @@ Last Updated: 2026-03-18
 - 2026-03-18: Locked baseline outcome rule: once approved, the intervention funding snapshot updates to the approved amendment and a new Client Funding Agreement must be generated.
 - 2026-03-18: Locked baseline downstream rule: required downstream letters/documents for third parties must also be generated from the approved amendment.
 - 2026-03-18: Revised baseline trigger rule: amendment control is based on whether approved funding exists, not whether the intervention is `active`.
-- 2026-03-18: Locked payment boundary for the email-package workflow: once a payment package has been sent, treat its lines as effectively paid/immutable because PATH has no downstream visibility into actual finance disbursement.
+- 2026-03-18: Locked payment boundary for the email-package workflow: once a payment package has been sent, treat its lines as operationally handed off and immutable for amendment purposes even though PATH actuals still depend on later paid/posted confirmation.
 - 2026-03-18: Locked prospective-change rule: funding amendments may change future funding and unsent payment packages, but must not rewrite historical sent payment packages.
 - 2026-03-18: Locked amendment accounting model: each approved funding amendment becomes a full replacement funding snapshot for future funding authority, not a delta patch against the prior approved version.
 - 2026-03-18: Revised scope decision: do not introduce a separate amendment dashboard in v1; prefer reusing existing gated workflow surfaces.

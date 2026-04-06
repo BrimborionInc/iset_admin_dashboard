@@ -2,6 +2,21 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-04-06
+- Workflow/API/Finance: Stopped auto-creating payment packets from intervention approval or auto-generated assessment interventions, and now treat approved intervention funding as authorization only until staff create a packet for a specific claim period or receipt.
+- Fix/API/Finance: Payment packet creation now allows multiple packets over time for the same intervention, while validating the initial line against remaining authorized funding and adding duplicate warnings at create time.
+- UX/Finance: Updated the Payments queue, detail help, and create-packet form to reflect period-based claims, including separate-packet guidance and amount entry against the approved funding ceiling instead of defaulting to the full approved total.
+- UX/API/Finance: Added an `Include carry-over` option to `Budgets and Finance > Financial Reports`, surfacing best-effort carry-in/carry-out estimates plus row-level carry-over adjustments derived from payment-line dates when available and intervention schedules otherwise.
+- UX/API/Finance: Replaced the old Financial Reports demo dashboard with a live annual `Budgets and Finance > Financial Reports` page for CRF/EI approved intervention funding, including province/territory and case-manager slice-and-dice filters, province totals, intervention-level detail, and finance follow-up on each intervention row.
+- UX/Export/Finance: Added workbook-style Excel export for the Financial Reports page, producing a summary worksheet plus separate CRF and EI detail worksheets from the current filtered report view, with finance follow-up fields beside the approved funding amounts.
+- UX/Finance: Simplified the top controls on `Budgets and Finance > Financial Reports` by renaming the page to `ISET Advances and Active Clients`, keeping only fiscal-year and region filters in the header, and moving `Reset Filters` into the header actions beside Excel export.
+- Fix/API/Finance: Retired the legacy intervention-ledger shortcut so approved interventions no longer create live `finance_transaction` rows. Live commitments now start when a payment packet is sent to finance, and actuals start only when PATH records a posted/confirmed payment.
+- Workflow/Schema/Finance: Simplified the payment workflow to a packet-first canonical status set: packet statuses are now `Draft`, `Ready to send`, `Sent to finance`, `Payment confirmed`, and `Cancelled`; line statuses are `Needs evidence`, `Ready to send`, `Sent to finance`, `Paid`, `Held`, and `Cancelled`; optional finance batches no longer act as packet/line statuses.
+- UX/API/Configuration: Added the restricted `Configuration > Applicant Watchlist` manager page so NWAC and System Administrators can search, view, add, edit, deactivate, and reactivate SIN-based watchlist entries directly.
+- Data/Schema/Watchlist: Rebuilt `iset_applicant_watchlist` to the clean active/inactive model with canonical 9-digit SIN storage plus update/deactivation audit fields, intentionally using a destructive migration because the feature was not yet live in production.
+- Events/Admin+Portal: Added shared applicant-watchlist lifecycle events (`added`, `updated`, `removed`, `hit`) and now emit watchlist-hit events from both admin manual intake and the public intake completion path using masked SIN payloads only.
+- Security/Home: Homepage watchlist-hit matching now ignores inactive entries, and generic event-feed responses now filter watchlist events for users who do not have access to the Applicant Watchlist dashboard.
+
 ## 2026-04-05
 - UX/API/Admin shell: Added in-app bug reporting and change requests from the admin-console top header. Staff can now open a dedicated help panel, launch a floating non-modal report window, capture severity plus description, and attach supporting files without leaving PATH.
 - Data/Storage/Admin shell: Added the dedicated `admin_feedback_report` and `admin_feedback_attachment` schema plus `POST /api/admin/feedback-reports`, keeping internal bug/change evidence out of `iset_document` while reusing the shared object-store upload path.

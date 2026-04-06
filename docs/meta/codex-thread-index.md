@@ -2,7 +2,7 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-04-05
+Last Updated: 2026-04-06
 
 ## How to use
 
@@ -28,18 +28,30 @@ For each indexed thread/topic, keep:
 
 ## Indexed Topics
 
+### Financial reports approved CRF/EI dashboard
+
+- Codex task title: `implement CRF and EI reports within the Budgets module`
+- Topic: live Budgets and Finance financial-reporting surface for annual approved CRF/EI intervention funding plus workbook-style Excel export
+- Keywords: `CRF EI reports`, `Budgets module reports`, `Financial Reports`, `Approved funding`, `Shelley workbook`, `province territory intervention report`, `finance reports export`, `intervention funding`
+- When to open: the user asks where the new CRF/EI finance report lives, asks what the annual approved-funding view means, asks how finance follow-up is shown on that page, or asks how the Excel export and current filters are supposed to behave
+- Primary docs:
+  - `docs/dashboards/financial-reports-dashboard.md`
+  - `docs/AGENTS.md`
+- Status: current as of 2026-04-06
+- Notes: durable outcomes from this thread: the route is `/finance/reports`; the finance-reporting demo/widget board was replaced by a fixed reporting page; the live report is now an annual approved-funding view based on `COALESCE(intervention.reviewed_at, intervention.created_at)`; participant geography is home province/territory with submission-address province first and client-address province fallback; the grain is one row per intervention; only CRF/EI rows are included; intervention rows now include finance follow-up derived from payment-packet and finance-transaction state; the current finance endpoints are `/api/finance/reports/intervention-funding/filter-options` and `/api/finance/reports/intervention-funding`; and Excel export now emits `Summary`, `CRF Detail`, and `EI Detail` worksheets from the current filtered dataset. The user-provided workbook (`CURRENT BC 2025-26 - ISET Advance and Active Client Spreadsheet.xlsx`) should be treated as a layout/business reference, not as the literal transactional spec.
+
 ### Admin-console bug reporting and change requests
 
-- Codex task title: `This task is to create an in-app bug reporting and change request function on the admin-console side.`
+- Codex task title: `Add issue reporting flow`
 - Topic: in-app staff bug-reporting / change-request flow plus System Administrator homepage triage
-- Keywords: `bug reporting`, `change request`, `admin console help`, `top header bug button`, `floating report window`, `floating review window`, `system administrator homepage`, `Bug & Change Requests widget`, `admin_feedback_report`, `admin_feedback_attachment`, `admin_feedback_status_history`, `admin_feedback_note`
+- Keywords: `Add issue reporting flow`, `bug reporting`, `change request`, `admin console help`, `top header bug button`, `floating report window`, `floating review window`, `system administrator homepage`, `Bug & Change Requests widget`, `admin_feedback_report`, `admin_feedback_attachment`, `admin_feedback_status_history`, `admin_feedback_note`
 - When to open: the user asks how internal PATH staff are supposed to report admin-console issues from inside the app, asks where the floating report or review windows are wired, asks how Sysadmins triage those reports from the homepage, or asks whether those uploads use Supporting Documents or their own storage model
 - Primary docs:
   - `docs/features/admin-feedback-reporting.md`
   - `docs/AGENTS.md`
   - `docs/meta/project-map.md`
 - Status: current as of 2026-04-05
-- Notes: durable decisions from this thread: the report entry point is a dedicated top-header button beside `Admin Console Help`; the launcher flow is top-nav button -> help panel instructions -> floating non-modal report window; page context is captured when the window opens so staff can keep navigating while writing; and persistence is intentionally separate from `iset_document` because bug/change evidence is not a client/application/case document. A later pass in the same feature added System Administrator homepage triage via the `Bug & Change Requests` widget plus a floating review panel with status changes and internal notes. The canonical schema migrations are `sql/migrations/20260405_0001_create_admin_feedback_reporting.sql` and `sql/migrations/20260405_0002_create_admin_feedback_management_tables.sql`, and the backend routes now include `POST /api/admin/feedback-reports`, `GET /api/dashboard/system-admin-feedback-reports`, `GET /api/admin/feedback-reports/:id`, `PATCH /api/admin/feedback-reports/:id/status`, and `POST /api/admin/feedback-reports/:id/notes`.
+- Notes: durable decisions from this thread: the report entry point is a dedicated top-header button beside `Admin Console Help`; the launcher flow is top-nav button -> help panel instructions -> floating non-modal report window; page context is captured when the window opens so staff can keep navigating while writing; and persistence is intentionally separate from `iset_document` because bug/change evidence is not a client/application/case document. A later pass in the same feature added System Administrator homepage triage via the `Bug & Change Requests` widget plus a floating review panel with status changes and internal notes. The canonical schema migrations are `sql/migrations/20260405_0001_create_admin_feedback_reporting.sql` and `sql/migrations/20260405_0002_create_admin_feedback_management_tables.sql`, and the backend routes now include `POST /api/admin/feedback-reports`, `GET /api/dashboard/system-admin-feedback-reports`, `GET /api/admin/feedback-reports/:id`, `PATCH /api/admin/feedback-reports/:id/status`, and `POST /api/admin/feedback-reports/:id/notes`. Original plugin prompt title for this thread was `This task is to create an in-app bug reporting and change request function on the admin-console side.`
 
 ### Client-file backload action-plan and intervention rules
 
@@ -174,6 +186,20 @@ For each indexed thread/topic, keep:
   - `docs/planning/payment-packet-scheduling-design.md`
 - Status: current durable handoff baseline
 
+### Payments status-set cleanup
+
+- Topic: canonical payment packet/line status model, packet-first claim workflow, and removal of legacy review-stage statuses
+- Keywords: `payment statuses`, `ready_to_send`, `submitted`, `confirmed`, `committed vs actual`, `packet first`, `manual packet creation`, `batch is not a status`
+- When to open: the user asks why PATH no longer uses `awaiting_trigger`, `released`, `program_review`, `finance_review`, `batched`, or `closed`, or asks how committed/actual are distinguished in the finance module
+- Primary docs:
+  - `docs/AGENTS.md`
+  - `docs/guides/payments-module-user-manual.md`
+  - `docs/features/payments-module.md`
+  - `docs/requirements/payments-module.v2.md`
+  - `sql/migrations/20260406_0003_simplify_payment_packet_statuses.sql`
+- Status: current as of 2026-04-06
+- Notes: durable decisions from this thread: approved interventions are funding authority only and do not auto-create live packets; staff create payment packets for specific months, receipts, invoices, or claim periods; canonical packet statuses are `draft`, `ready_to_send`, `submitted`, `confirmed`, `cancelled`; canonical line statuses are `needs_evidence`, `ready_to_send`, `submitted`, `paid`, `held`, `cancelled`; `committed` begins when a packet is sent to finance; `actual` begins only when PATH records confirmed/posted payment; optional `payment_batch` records may group submitted lines but batching is not itself a packet or line status.
+
 ### Sage Intacct mock dashboard handoff
 
 - Topic: durable handoff for the separate Intacct mock-dashboard and AP-bills design work
@@ -205,6 +231,19 @@ For each indexed thread/topic, keep:
   - `src/routes/admin/users.js`
 - Status: current as of 2026-04-02
 - Notes: the durable findings from this thread are: `Administrative Users` multi-region display depends on matching Cognito `sub` to `staff_profiles.cognito_sub`; stale DB `cognito_sub` values make the UI fall back to the single Cognito `custom:region_id` primary region. The TEST staff pool currently uses `COGNITO_DEFAULT` mail with `verified_email` account recovery only, so legacy users missing `email` / `email_verified` cannot receive recovery mail until those attributes are repaired. For existing `FORCE_CHANGE_PASSWORD` users, prefer `admin-create-user --message-action RESEND`; if email delivery still fails, use `admin-set-user-password --no-permanent` and send the temporary password out-of-band.
+
+### Applicant watchlist manager
+
+- Codex task title: `Add watchlist editor`
+- Topic: restricted direct-management dashboard for the SIN-based applicant watchlist, plus cross-app watchlist-hit event emission
+- Keywords: `watchlist editor`, `applicant watchlist`, `configuration applicant watchlist`, `watchlist hits`, `inactive watchlist`, `applicant_watchlist_hit`, `SIN watchlist`
+- When to open: the user asks where the direct watchlist UI lives, how access is controlled, why quick-add remains broader than the dashboard, or how watchlist-hit events are emitted and filtered
+- Primary docs:
+  - `docs/dashboards/applicant-watchlist-dashboard.md`
+  - `docs/AGENTS.md`
+  - `sql/migrations/20260406_0001_rebuild_applicant_watchlist.sql`
+- Status: current as of 2026-04-06
+- Notes: durable decisions from this thread: the direct manager route is `/configuration/applicant-watchlist`; default access is `System Administrator` plus `NWAC Administrator` through the standard access-control matrix; the contextual case/application quick actions remain broadly available; removal is `inactive`, not hard delete; the canonical schema now stores 9-digit SIN values plus `status`, `updated_by_staff_profile_id`, `deactivated_at`, and `deactivated_by_staff_profile_id`; homepage watchlist-hit matching now uses active entries only; watchlist events are shared events (`added`, `updated`, `removed`, `hit`); hit events are emitted from both admin manual intake and the public intake completion path; and generic event-feed access is filtered so users without dashboard access cannot retrieve watchlist activity by probing the event feed.
 
 ## Future improvements
 

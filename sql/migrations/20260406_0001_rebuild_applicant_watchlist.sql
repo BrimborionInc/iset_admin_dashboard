@@ -1,4 +1,6 @@
-CREATE TABLE IF NOT EXISTS iset_applicant_watchlist (
+DROP TABLE IF EXISTS iset_applicant_watchlist;
+
+CREATE TABLE iset_applicant_watchlist (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   full_name VARCHAR(255) NOT NULL,
   first_name VARCHAR(100) DEFAULT NULL,

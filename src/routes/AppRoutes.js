@@ -57,6 +57,7 @@ import ClientFileImportDashboardHelp from '../helpPanelContents/clientFileImport
 import NWACHubManagementDashboard from '../pages/nwacHubManagement.js'; // Import the NWAC Hub Management dashboard
 import UploadConfigDashboard from '../pages/uploadConfigDashboard.js';
 import EventCaptureDashboard from '../pages/configuration/EventCaptureDashboard.js';
+import ApplicantWatchlistPage from '../pages/configuration/ApplicantWatchlistPage.jsx';
 import QueryEditorDashboard from '../pages/configuration/QueryEditorDashboard.js';
 import FinanceOverviewPage from '../pages/finance/FinanceOverviewPage.jsx';
 import FinanceSalariesPage from '../pages/finance/FinanceSalariesPage.jsx';
@@ -79,6 +80,7 @@ import FinanceForecastingHelp from '../helpPanelContents/financeForecastingHelp.
 import FinancePaymentsHelp from '../helpPanelContents/financePaymentsHelp.js';
 import ContactCommunicationsDashboard from '../pages/contact/ContactCommunicationsDashboard.jsx';
 import ContactCommunicationsHelp from '../helpPanelContents/contactCommunicationsHelp.js';
+import ApplicantWatchlistHelp from '../helpPanelContents/applicantWatchlistHelp.js';
 import QueryEditorHelp from '../helpPanelContents/queryEditorHelp.js';
 import MessagesDashboardPage from '../pages/messages/MessagesDashboardPage.jsx';
 import PortfolioDashboardPage from '../pages/Caseworking/PortfolioDashboardPage.jsx';
@@ -102,6 +104,63 @@ import HomeDashboardHelp from '../helpPanelContents/homeDashboardHelp.js';
 import TutorialsDashboardPage from '../pages/support/TutorialsDashboardPage.jsx';
 import TutorialsDashboardHelp from '../helpPanelContents/tutorialsDashboardHelp.js';
 
+function Guard({
+  children,
+  roles,
+  path,
+  renderContent,
+}) {
+  const { isAuthenticated, role, signIn } = useAuth();
+  const { roleMatrix, isLoading: roleMatrixLoading } = useRoleMatrix();
+
+  const renderGuardContent = (Component, breadcrumbs, headerText) => {
+    if (typeof renderContent === 'function') {
+      return renderContent(Component, breadcrumbs, headerText);
+    }
+    return (
+      <ContentLayout
+        header={<Header variant="h1">{headerText}</Header>}
+      >
+        <BreadcrumbGroup items={breadcrumbs} />
+        <Box padding={{ bottom: 'm' }} />
+        <Component />
+      </ContentLayout>
+    );
+  };
+
+  if (!isAuthenticated) {
+    const AuthRequired = () => (
+      <div style={{ padding: 24 }}>
+        <p style={{ marginBottom: 12 }}>Please sign in to access this page.</p>
+        <Button variant="primary" onClick={signIn}>Sign in</Button>
+      </div>
+    );
+    return renderGuardContent(AuthRequired, [{ text: 'Home', href: '/' }], 'Authentication required');
+  }
+  if (!roles && (roleMatrixLoading || !roleMatrix)) {
+    return children;
+  }
+  const canonicalRole = toCanonicalRole(role);
+  const allowed = (() => {
+    if (Array.isArray(roles) && roles.length) return roles;
+    if (path && roleMatrix?.routes) {
+      const direct = roleMatrix.routes[path];
+      if (direct) return direct;
+    }
+    return null;
+  })();
+  if (allowed) {
+    if (!canonicalRole || !allowed.includes(canonicalRole)) {
+      const AccessDenied = () => (<div style={{ padding: 24 }}>You do not have permission to view this page.</div>);
+      return renderGuardContent(AccessDenied, [{ text: 'Home', href: '/' }], 'Access denied');
+    }
+  } else if (roleMatrix?.default === 'deny') {
+    const AccessDenied = () => (<div style={{ padding: 24 }}>You do not have permission to view this page.</div>);
+    return renderGuardContent(AccessDenied, [{ text: 'Home', href: '/' }], 'Access denied');
+  }
+  return children;
+}
+
 const AppRoutes = ({
   toggleHelpPanel,
   updateBreadcrumbs,
@@ -113,9 +172,6 @@ const AppRoutes = ({
   breadcrumbs,
   helpMessages,
 }) => {
-  const { isAuthenticated, role, signIn } = useAuth();
-  const { roleMatrix, isLoading: roleMatrixLoading } = useRoleMatrix();
-
   const resetToDefaultLayout = () => {
     // Logic to reset the layout to default
     console.log('Resetting to default layout');
@@ -183,45 +239,10 @@ const AppRoutes = ({
     </ContentLayout>
   );
 
-  function Guard({ children, roles, path }) {
-    if (!isAuthenticated) {
-      const AuthRequired = () => (
-        <div style={{ padding: 24 }}>
-          <p style={{ marginBottom: 12 }}>Please sign in to access this page.</p>
-          <Button variant="primary" onClick={signIn}>Sign in</Button>
-        </div>
-      );
-      return renderContent(AuthRequired, [{ text: 'Home', href: '/' }], 'Authentication required');
-    }
-    if (!roles && (roleMatrixLoading || !roleMatrix)) {
-      return children;
-    }
-    const canonicalRole = toCanonicalRole(role);
-    const allowed = (() => {
-      if (Array.isArray(roles) && roles.length) return roles;
-      if (path && roleMatrix?.routes) {
-        // Try exact match, then match by removing params (e.g., :id)
-        const direct = roleMatrix.routes[path];
-        if (direct) return direct;
-      }
-      return null;
-    })();
-    if (allowed) {
-      if (!canonicalRole || !allowed.includes(canonicalRole)) {
-        const AccessDenied = () => (<div style={{ padding: 24 }}>You do not have permission to view this page.</div>);
-        return renderContent(AccessDenied, [{ text: 'Home', href: '/' }], 'Access denied');
-      }
-    } else if (roleMatrix?.default === 'deny') {
-      const AccessDenied = () => (<div style={{ padding: 24 }}>You do not have permission to view this page.</div>);
-      return renderContent(AccessDenied, [{ text: 'Home', href: '/' }], 'Access denied');
-    }
-    return children;
-  }
-
   return (
     <Switch>
       <Route path="/manage-workflows">
-        <Guard path="/manage-workflows">
+        <Guard path="/manage-workflows" renderContent={renderContent}>
           {renderContent(
             ManageWorkflows,
             [
@@ -445,6 +466,24 @@ const AppRoutes = ({
             ],
             'Event Capture Configuration',
             'eventCapture'
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/configuration/applicant-watchlist">
+        <Guard path="/configuration/applicant-watchlist">
+          {renderContent(
+            ApplicantWatchlistPage,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Configuration', href: '/configuration-settings' },
+              { text: 'Applicant Watchlist', href: '/configuration/applicant-watchlist' }
+            ],
+            'Applicant Watchlist',
+            <ApplicantWatchlistHelp />,
+            null,
+            ApplicantWatchlistHelp.aiContext,
+            'Review and maintain the SIN-based applicant watchlist used to flag new applications.'
           )}
         </Guard>
       </Route>
@@ -1291,26 +1330,7 @@ const AppRoutes = ({
             ],
             'Financial Reports',
             <FinanceReportsHelp />,
-            (
-              <SpaceBetween size="xs" direction="horizontal">
-                <Button
-                  iconName="add-plus"
-                  onClick={() =>
-                    window.dispatchEvent(new CustomEvent("financeReports:openPalette"))
-                  }
-                >
-                  Add widget
-                </Button>
-                <Button
-                  iconName="refresh"
-                  onClick={() =>
-                    window.dispatchEvent(new CustomEvent("financeReports:resetLayout"))
-                  }
-                >
-                  Reset layout
-                </Button>
-              </SpaceBetween>
-            ),
+            null,
             FinanceReportsHelp.aiContext
           )}
         </Guard>

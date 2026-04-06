@@ -16,12 +16,14 @@ Last Updated: 2026-01-30
 - M4 — Settings (hierarchy/approvals/mapping) editable in-app; roles finalized.
 
 ## Decision Log
+- 2026-04-06: Retired the legacy intervention-level `finance_transaction` shortcut for live PATH workflows. Approved interventions now represent funding authority only; committed finance starts when a payment packet is sent to finance, and actuals start when PATH records a posted/confirmed payment.
+- 2026-04-06: Settled finance-facing packet language on `Draft`, `Awaiting release`, `Ready to send`, `Sent to finance`, `Payment confirmed`, `Closed`, and `Cancelled`, with Sage Intacct overlays such as `Accepted in Sage Intacct` and `Sage Intacct exceptions` when the integration is enabled.
 - 2026-02-03: Reconciliation source-of-truth is the case-management transaction feed ingested into finance; exceptions are derived from mapping, evidence, and policy checks. UI copy and help text aligned to this model.
 - 2026-02-03: Reconciliation dashboard now reads live `finance_transaction` data and stores resolution/request state in transaction metadata (until dedicated reconciliation tables are added).
 - 2025-02-06: Core entities to add — `budget_pot`, `budget_snapshot`, `budget_allocation` (transfer), `finance_transaction` (case-linked), optional pot lookup view. Start Budgets wiring first with real pot API, plus case→pot picker reuse.
 - 2025-02-06: Migration added `budget_pot`, `budget_snapshot`, `budget_snapshot_pot`, `budget_allocation`, `finance_transaction` with full dummy hierarchy seed (files: `db/migrations/20250206_0007_create_finance_budget_tables.sql` for reference; active runner uses `sql/20250206_create_finance_budget_tables.sql`).
 - 2025-02-06: Finance pot API live (list/get/create/update + lookup); Budgets UI now consumes API instead of demo data; case Intervention modal uses lookup.
-- 2025-02-06: Intervention create/update now upserts `finance_transaction` for selected pot (amount from actual→approved→cost) and refreshes pot committed/actual rollups. Lookup route ordering fixed (was shadowed by `/:id`).
+- 2025-02-06: Lookup route ordering for finance pot assignment was fixed after an early shadowing issue on `/:id`.
 - 2025-02-06: Structure Manager wired to live pot API; snapshots backed by `budget_snapshot`/`budget_snapshot_pot` with list/create/read endpoints; Budgets loads snapshots.
 - 2025-12-05: Draft workflows live in Budgets: Draft Budgets tab shows/controls drafts; Structure manager edits selected draft only; publish replaces Active after taking a safety snapshot; restore snapshot creates a new draft. Snapshots and drafts have delete/restore modals; draft labels inline-editable. Pot parent guard prevents self-parenting. Admin % column now reads `adminTargetPct`.
 - 2025-12-05: Roles for finance endpoints limited to `System Administrator` and `Program Administrator`. Snapshot creator stored as NULL to avoid FK issues.
@@ -32,7 +34,7 @@ Last Updated: 2026-01-30
 - 2025-12-07: Payments board scaffolded (queue/detail/comms/SLA widgets) on mock data per addendum; waiting on services/GL/evidence wiring.
 
 ## Current Focus
-- Budgets dashboard now runs live: pot CRUD, draft/publish, snapshots, pot selection for case interventions. Case-linked finance transactions roll into committed/actual. Draft/snapshot UX refined; saved views and pot detail widgets now backed by API + CSV export; burn-rate widget uses live metrics with risk tagging.
+- Budgets dashboard now runs live: pot CRUD, draft/publish, snapshots, and pot selection for case interventions. Draft/snapshot UX refined; saved views and pot detail widgets now backed by API + CSV export; burn-rate widget uses live metrics with risk tagging. Live commitments now come from payment packets sent to finance, while actuals come from posted/confirmed payments.
 
 ## Payments — Remaining MUSTs
 - None. All current MUST items completed for payments enablement.

@@ -2,7 +2,7 @@
 
 **Purpose:** Canonical design and planning for the Payments module/dashboard, aligned to `docs/requirements/payments-module.v2.md`.  
 **Audience:** Finance staff, program staff, product owners, engineers, ops, audit/compliance.  
-**Last Updated:** 2026-01-03
+**Last Updated:** 2026-04-06
 
 ## Sources and authority levels
 - **MUST (source-derived):** From NWAC training modules, compliant checklist, and ISET agreement context.
@@ -10,7 +10,7 @@
 - **MAY (configurable/later):** Optional capabilities not required for initial compliance.
 
 ## Context (current codebase)
-- Payments board exists as scaffold with mock data in `src/pages/finance/FinancePaymentsPage.jsx`.
+- Payments dashboard is live in `src/pages/finance/FinancePaymentsPage.jsx` with queue, detail, communications, and SLA widgets.
 - Core finance objects already exist: `budget_pot`, `budget_pot_region`, `finance_transaction`, `iset_document`, `pending_uploads`.
 - The Payments module is internal to NWAC (ISET team to Finance team), not GoC disbursement.
 
@@ -18,11 +18,13 @@
 - Requirements explicitly stated in training/checklists are not treated as hypotheses.
 - The **Payment Packet** is the canonical workflow record.
 - The ledger-of-record for annual reporting remains `finance_transaction`.
+- Approved interventions authorize future funding but do not auto-create live payment packets.
+- Multiple packets may exist for one intervention over time; recurring supports should be packeted by the payable period or receipt cycle.
 - Release 1 favors compliance gates and auditability over automation.
 
 ## Goals
 - Evidence-gated payment workflow that can pass audit.
-- Program and finance approvals, batching, and confirmation tracking with full audit trail.
+- Clear packet-first claims workflow with full audit trail from draft through finance handoff and payment confirmation.
 - Traceability to case/client, intervention, reporting unit, and pot.
 - Posted transactions compatible with Annual Report rollups (CRF/EI separation).
 
@@ -39,11 +41,8 @@
 - **Evidence:** Supporting documents tied to packet/line (invoice, attendance report, receipts).
 
 ## Roles and permissions (RBAC)
-- **Program requester:** Creates packets, attaches evidence, submits.
-- **Program approver:** Validates eligibility and completeness; approves or returns.
-- **Finance reviewer:** Checks payee details, duplicates, pot linkage, evidence.
-- **Finance approver:** Maker-checker for batch approval and high-risk overrides.
-- **AP/Ops:** Executes EFT, attaches confirmation.
+- **Program requester:** Creates packets, attaches evidence, validates, and submits to Finance.
+- **Finance ops:** Records payment confirmation and optional batch/export handling when used.
 - **Audit/Compliance:** Read-only; export audit bundles.
 - **Admin:** Configures evidence rules, thresholds, pot mappings, reporting units.
 
@@ -53,11 +52,11 @@ Segregation of duties (SHOULD):
 
 ## Workflow and statuses
 Packet status (canonical):
-- Draft → Submitted → Program Review → (Returned | Program Approved) → Finance Review → (On Hold | Finance Approved) → Batched → Sent → Confirmed → Closed
+- Draft → Ready to send → Sent to finance → Payment confirmed
 - Cancelled is terminal.
 
 Line status (derived):
-- Needs Evidence | Ready for Program | Ready for Finance | Approved | Batched | Paid | Held | Cancelled
+- Needs evidence | Ready to send | Sent to finance | Paid | Held | Cancelled
 
 Validation gates (MUST):
 - Required fields present.
@@ -78,7 +77,7 @@ Baseline client file compliance (MUST for client-linked payments):
 - Required consents/authorizations.
 
 Payment-type gates (minimum):
-- **Living allowance (MUST):** Monthly attendance report signed/verified; no backdating; financial overview + income/expense verification before program approval.
+- **Living allowance (MUST):** Monthly attendance report signed/verified; submission must fall within the configured backdating window (default `60` days from service period end); financial overview + income/expense verification before program approval.
 - **Tuition provider (MUST):** Statement/invoice required; payee must match institution unless alternate-payee letter exists.
 - **Reimbursements (MUST):** Paid receipts required and aligned to authorization.
 - **Specialized equipment (MUST):** Institution letter + quote before advance; receipt within configured deadline (default 14 days) or hold/recovery.
@@ -118,10 +117,10 @@ Confirmed payment line must produce a posted `finance_transaction` with:
 
 ## Dashboard requirements (functional)
 Program dashboard:
-- My Drafts / Needs Evidence, Submitted / In Program Review, Returned, Approved (awaiting finance).
+- Drafts / Needs Evidence, Ready to send, Sent to finance.
 
 Finance dashboard:
-- Ready for Finance Review, Ready for Batching, On Hold, Sent awaiting Confirmation, Recently Confirmed/Closed.
+- Drafts needing evidence, Sent to finance, Payment confirmed, overdue evidence tasks.
 
 Row fields:
 - client (if applicable), intervention, payment type, amount, stream (CRF/EI), reporting unit, pot, requester, ageing, evidence completeness, risk flags, status.
@@ -137,7 +136,7 @@ Payment detail view:
 - Mark paid + attach confirmation (AP/Ops only).
 
 Batch UI:
-- Batch creation from finance-approved lines.
+- Optional internal grouping of already-submitted lines.
 - Totals by stream and reporting unit.
 - Export artifacts: EFT sheet (CSV/XLSX) and optional PDF packet.
 
@@ -159,13 +158,13 @@ Batch UI:
 MVP (compliance-critical):
 - Packet + line creation.
 - Evidence engine with living allowance/tuition/equipment/TWS hard gates.
-- Program and finance review.
-- Batch creation + export.
-- Mark paid + attach confirmation.
+- Validate, mark ready, and send to finance.
+- Mark paid / confirm payment in PATH.
 - Auto-create `finance_transaction` on confirmation.
 - Audit trail and basic duplicate warnings.
 
 Later:
+- Optional batch exports and finance-side grouping workflows.
 - Email send/reply tracking integrations.
 - Deeper disbursement/payment chain (`commitment` → `disbursement` → `payment`).
 - Automated SLA alerts.

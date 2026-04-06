@@ -6,7 +6,7 @@ const FinancePaymentDetailHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Provide program staff with a single view of payment lines and evidence before submission to finance.
+        Provide program staff with a single view of the payment lines and evidence for the packet being sent to finance.
       </p>
     </Box>
     <Box>
@@ -20,18 +20,19 @@ const FinancePaymentDetailHelp = () => (
       <strong>Lines and evidence</strong>
       <ul>
         <li>Each line carries payee, amount, service period, pot, and line status.</li>
+        <li>Use the packet for the specific claim being sent now; future months or later receipts should usually be separate packets.</li>
         <li>Service period and recurrence are enforced from Finance Settings recurrence policy per payment type.</li>
         <li>Evidence checklist shows required vs received items per line.</li>
-        <li>Missing required evidence blocks submission.</li>
-        <li>Missing payee details also block submission and are flagged by line after validation.</li>
+        <li>Missing required evidence blocks sending.</li>
+        <li>Missing payee details also block sending and are flagged by line after validation.</li>
       </ul>
     </Box>
     <Box>
       <strong>Actions</strong>
       <ul>
-        <li>Validate checks policy, evidence, and funding before submission.</li>
-        <li>Submit to finance emails the configured region address.</li>
-        <li>Submission locks edits to lines and evidence.</li>
+        <li>Validate checks policy, evidence, and funding before sending.</li>
+        <li>Send to finance emails the configured region address.</li>
+        <li>Sending locks edits to lines and evidence.</li>
       </ul>
     </Box>
     <Box>
@@ -45,13 +46,13 @@ const FinancePaymentDetailHelp = () => (
     <Box>
       <strong>Notes</strong>
       <p>
-        Actions here update the audit trail. Confirm required evidence is received before submitting a packet.
+        Actions here update the audit trail. Confirm required evidence is received before sending a packet.
       </p>
     </Box>
   </SpaceBetween>
 );
 
 FinancePaymentDetailHelp.aiContext =
-  "Explain the payment detail widget: line items, recurrence/service-period policy by payment type, evidence checklist, validate step, submit-to-finance action, and the Intacct XML (Draft) preview tab. Mention evidence and payee completeness gates, that submission emails finance and locks edits, and the XML preview is read-only and not transmitted.";
+  "Explain the payment detail widget: line items, recurrence and service-period policy by payment type, evidence checklist, validate step, send-to-finance action, and the Intacct XML draft preview. Mention evidence and payee completeness gates, that packets should reflect the specific claim being sent now, that sending emails finance and locks edits, and that the XML preview is read-only and not transmitted.";
 
 export default FinancePaymentDetailHelp;

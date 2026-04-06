@@ -28,6 +28,7 @@ const nunjucks = require("nunjucks");
 let pool; // Initialized after DB config loads
 const { getRenderer: getComponentRenderer } = require('./src/server/componentRenderRegistry');
 const { createEventService, EventValidationError, registerNotificationHook } = require('../shared/events');
+const { emitApplicantWatchlistHitEvents } = require('../shared/applicantWatchlist');
 const events = require('events');
 const {
   getReminderBusinessDayDiffDays,
@@ -4033,6 +4034,20 @@ function normaliseAccessControlMatrix(matrix) {
   return { default: defaultPolicy, routes };
 }
 
+function mergeAccessControlMatrixWithDefaults(matrix) {
+  const base = DEFAULT_ACCESS_CONTROL_MATRIX && typeof DEFAULT_ACCESS_CONTROL_MATRIX === 'object'
+    ? DEFAULT_ACCESS_CONTROL_MATRIX
+    : { default: 'deny', routes: {} };
+  const candidate = matrix && typeof matrix === 'object' ? matrix : {};
+  return normaliseAccessControlMatrix({
+    default: typeof candidate.default === 'string' ? candidate.default : base.default,
+    routes: {
+      ...(base.routes || {}),
+      ...(candidate.routes || {}),
+    },
+  });
+}
+
 
 async function ensureEsdcPreparedHistoryEventType(connection) {
   if (ENSURED_HISTORY_EVENT_TYPE_ENUM.prepared) return;
@@ -4900,6 +4915,285 @@ function resolveApplicantWatchlistIdentity({ payload = {}, answers = {}, caseCon
     preferredName,
     dob,
     sinDigits,
+  };
+}
+
+function normaliseApplicantWatchlistStatus(value, fallback = APPLICANT_WATCHLIST_STATUS_ACTIVE) {
+  const normalised = normaliseString(value)?.toLowerCase();
+  if (normalised === APPLICANT_WATCHLIST_STATUS_ACTIVE || normalised === APPLICANT_WATCHLIST_STATUS_INACTIVE) {
+    return normalised;
+  }
+  return fallback;
+}
+
+function clampApplicantWatchlistText(value, limit) {
+  const normalised = normaliseString(value);
+  if (!normalised) return null;
+  return normalised.length > limit ? normalised.slice(0, limit) : normalised;
+}
+
+function normaliseApplicantWatchlistNotes(value, { allowUndefined = false } = {}) {
+  if (typeof value === 'undefined') {
+    return allowUndefined ? undefined : null;
+  }
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text) return null;
+  const maxNotes = 2000;
+  if (text.length > maxNotes) {
+    const error = new Error('notes_too_long');
+    error.code = 'notes_too_long';
+    error.max = maxNotes;
+    throw error;
+  }
+  return text;
+}
+
+function toIsoOrNull(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function buildApplicantWatchlistSourceLabel(row) {
+  const trackingId = normaliseString(row?.source_tracking_id) || null;
+  const caseNumber = normaliseString(row?.source_case_number) || null;
+  if (trackingId && caseNumber && trackingId !== caseNumber) {
+    return `${trackingId} · ${caseNumber}`;
+  }
+  return trackingId || caseNumber || null;
+}
+
+function mapApplicantWatchlistRow(row) {
+  if (!row) return null;
+  const fullName = normaliseString(row.full_name) || null;
+  return {
+    id: Number(row.id),
+    fullName,
+    firstName: normaliseString(row.first_name) || null,
+    lastName: normaliseString(row.last_name) || null,
+    dob: toDateOnlyString(row.dob) || null,
+    sin: cleanSin(row.sin) || null,
+    sinMasked: maskSinForDisplay(row.sin) || null,
+    notes: normaliseString(row.notes) || null,
+    status: normaliseApplicantWatchlistStatus(row.status, APPLICANT_WATCHLIST_STATUS_ACTIVE),
+    sourceCaseId: row.source_case_id == null ? null : Number(row.source_case_id),
+    sourceCaseNumber: normaliseString(row.source_case_number) || null,
+    sourceApplicationId: row.source_application_id == null ? null : Number(row.source_application_id),
+    sourceTrackingId: normaliseString(row.source_tracking_id) || null,
+    sourceLabel: buildApplicantWatchlistSourceLabel(row),
+    createdByStaffProfileId: row.created_by_staff_profile_id == null ? null : Number(row.created_by_staff_profile_id),
+    createdByLabel: normaliseString(row.created_by_label) || null,
+    updatedByStaffProfileId: row.updated_by_staff_profile_id == null ? null : Number(row.updated_by_staff_profile_id),
+    updatedByLabel: normaliseString(row.updated_by_label) || null,
+    deactivatedByStaffProfileId: row.deactivated_by_staff_profile_id == null ? null : Number(row.deactivated_by_staff_profile_id),
+    deactivatedByLabel: normaliseString(row.deactivated_by_label) || null,
+    createdAt: toIsoOrNull(row.created_at),
+    updatedAt: toIsoOrNull(row.updated_at),
+    deactivatedAt: toIsoOrNull(row.deactivated_at),
+  };
+}
+
+async function loadApplicantWatchlistRows({ connection = pool, whereSql = '', params = [] } = {}) {
+  const sql = `
+    SELECT
+      w.id,
+      w.full_name,
+      w.first_name,
+      w.last_name,
+      w.dob,
+      w.sin,
+      w.notes,
+      w.status,
+      w.source_case_id,
+      w.source_application_id,
+      w.created_by_staff_profile_id,
+      w.updated_by_staff_profile_id,
+      w.deactivated_by_staff_profile_id,
+      w.created_at,
+      w.updated_at,
+      w.deactivated_at,
+      source_case.case_number AS source_case_number,
+      COALESCE(
+        JSON_UNQUOTE(JSON_EXTRACT(source_application.payload_json, '$.submission_snapshot.reference_number')),
+        source_submission.reference_number
+      ) AS source_tracking_id,
+      COALESCE(created_by.display_name, created_by.email, CASE WHEN created_by.id IS NULL THEN NULL ELSE CONCAT('Staff #', created_by.id) END) AS created_by_label,
+      COALESCE(updated_by.display_name, updated_by.email, CASE WHEN updated_by.id IS NULL THEN NULL ELSE CONCAT('Staff #', updated_by.id) END) AS updated_by_label,
+      COALESCE(deactivated_by.display_name, deactivated_by.email, CASE WHEN deactivated_by.id IS NULL THEN NULL ELSE CONCAT('Staff #', deactivated_by.id) END) AS deactivated_by_label
+    FROM iset_applicant_watchlist w
+    LEFT JOIN iset_case source_case ON source_case.id = w.source_case_id
+    LEFT JOIN iset_application source_application ON source_application.id = w.source_application_id
+    LEFT JOIN iset_application_submission source_submission ON source_submission.id = source_application.submission_id
+    LEFT JOIN staff_profiles created_by ON created_by.id = w.created_by_staff_profile_id
+    LEFT JOIN staff_profiles updated_by ON updated_by.id = w.updated_by_staff_profile_id
+    LEFT JOIN staff_profiles deactivated_by ON deactivated_by.id = w.deactivated_by_staff_profile_id
+    ${whereSql}
+    ORDER BY
+      CASE WHEN w.status = '${APPLICANT_WATCHLIST_STATUS_ACTIVE}' THEN 0 ELSE 1 END,
+      w.updated_at DESC,
+      w.id DESC
+  `;
+  const [rows] = await connection.query(sql, params);
+  return Array.isArray(rows) ? rows.map(mapApplicantWatchlistRow).filter(Boolean) : [];
+}
+
+async function loadApplicantWatchlistEntryById(entryId, connection = pool) {
+  const numericEntryId = Number(entryId);
+  if (!Number.isInteger(numericEntryId) || numericEntryId <= 0) return null;
+  const items = await loadApplicantWatchlistRows({
+    connection,
+    whereSql: 'WHERE w.id = ?',
+    params: [numericEntryId],
+  });
+  return items[0] || null;
+}
+
+function buildApplicantWatchlistEventPayload(type, entry) {
+  const applicantName = entry?.fullName || 'Applicant';
+  const sinMasked = entry?.sinMasked || maskSinForDisplay(entry?.sin) || 'Unavailable';
+  let message = `Applicant watchlist entry updated for ${applicantName}.`;
+  if (type === 'applicant_watchlist_added') {
+    message = `Applicant watchlist entry added for ${applicantName}.`;
+  } else if (type === 'applicant_watchlist_removed') {
+    message = `Applicant watchlist entry removed for ${applicantName}.`;
+  }
+  return {
+    watchlist_entry_id: entry?.id || null,
+    applicant_name: applicantName,
+    sin_masked: sinMasked,
+    status: entry?.status || null,
+    source_case_id: entry?.sourceCaseId || null,
+    source_application_id: entry?.sourceApplicationId || null,
+    tracking_id: entry?.sourceTrackingId || null,
+    message,
+  };
+}
+
+async function emitApplicantWatchlistLifecycleEvent({ type, entry, req }) {
+  if (!type || !entry?.id) return null;
+  const { actorId, actorName } = resolveRequestActor(req) || {};
+  const actor = {
+    type: 'staff',
+    id: actorId || null,
+    displayName: actorName || null,
+  };
+  return emitEvent({
+    type,
+    subject: { type: 'watchlist', id: entry.id },
+    actor,
+    trackingId: entry.sourceTrackingId || null,
+    payload: buildApplicantWatchlistEventPayload(type, entry),
+  });
+}
+
+async function createOrReactivateApplicantWatchlistEntry({
+  connection = pool,
+  identity,
+  notes,
+  sourceCaseId = null,
+  sourceApplicationId = null,
+  staffProfileId,
+}) {
+  const fullName = clampApplicantWatchlistText(identity?.fullName, 255);
+  const firstName = clampApplicantWatchlistText(identity?.firstName, 100);
+  const lastName = clampApplicantWatchlistText(identity?.lastName, 100);
+  const dob = toDateOnlyString(identity?.dob);
+  const sinDigits = cleanSin(identity?.sinDigits);
+  const missing = [];
+  if (!fullName) missing.push('name');
+  if (!dob) missing.push('dob');
+  if (!sinDigits || sinDigits.length !== 9) missing.push('sin');
+  if (missing.length) {
+    const error = new Error('identity_missing');
+    error.code = 'identity_missing';
+    error.missing = missing;
+    throw error;
+  }
+
+  const sinHash = hashSin(sinDigits);
+  if (!sinHash) {
+    const error = new Error('sin_hash_failed');
+    error.code = 'sin_hash_failed';
+    throw error;
+  }
+
+  const [[existing]] = await connection.query(
+    `SELECT id, status, notes, source_case_id, source_application_id
+       FROM iset_applicant_watchlist
+      WHERE sin_hash = ?
+      LIMIT 1`,
+    [sinHash]
+  );
+
+  if (existing && normaliseApplicantWatchlistStatus(existing.status, APPLICANT_WATCHLIST_STATUS_ACTIVE) === APPLICANT_WATCHLIST_STATUS_ACTIVE) {
+    const error = new Error('already_watchlisted');
+    error.code = 'already_watchlisted';
+    error.entryId = Number(existing.id);
+    throw error;
+  }
+
+  if (existing) {
+    const nextNotes = notes !== null ? notes : (normaliseString(existing.notes) || null);
+    await connection.query(
+      `UPDATE iset_applicant_watchlist
+          SET full_name = ?,
+              first_name = ?,
+              last_name = ?,
+              dob = ?,
+              sin = ?,
+              sin_hash = ?,
+              notes = ?,
+              status = ?,
+              source_case_id = ?,
+              source_application_id = ?,
+              updated_by_staff_profile_id = ?,
+              deactivated_at = NULL,
+              deactivated_by_staff_profile_id = NULL
+        WHERE id = ?`,
+      [
+        fullName,
+        firstName,
+        lastName,
+        dob,
+        sinDigits,
+        sinHash,
+        nextNotes,
+        APPLICANT_WATCHLIST_STATUS_ACTIVE,
+        sourceCaseId || existing.source_case_id || null,
+        sourceApplicationId || existing.source_application_id || null,
+        staffProfileId || null,
+        existing.id,
+      ]
+    );
+    return {
+      mode: 'reactivated',
+      entry: await loadApplicantWatchlistEntryById(existing.id, connection),
+    };
+  }
+
+  const [result] = await connection.query(
+    `INSERT INTO iset_applicant_watchlist
+      (full_name, first_name, last_name, dob, sin, sin_hash, notes, status, source_case_id, source_application_id, created_by_staff_profile_id, updated_by_staff_profile_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      fullName,
+      firstName,
+      lastName,
+      dob,
+      sinDigits,
+      sinHash,
+      notes,
+      APPLICANT_WATCHLIST_STATUS_ACTIVE,
+      sourceCaseId || null,
+      sourceApplicationId || null,
+      staffProfileId || null,
+      staffProfileId || null,
+    ]
+  );
+
+  return {
+    mode: 'created',
+    entry: await loadApplicantWatchlistEntryById(result.insertId, connection),
   };
 }
 
@@ -11272,7 +11566,6 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   };
 
   const interventionIds = [];
-  const financeRows = [];
   let movedDocuments = 0;
 
   for (let index = 0; index < interventionsToCreate.length; index += 1) {
@@ -11413,74 +11706,6 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
       }
     }
 
-    if (validatedBudgetPotId && interventionId) {
-      const transactionDate = interventionStartDate || null;
-      const baseMeta = pruneNullish({
-        source: AUTO_PLAN_METADATA_SOURCE,
-        proposedInterventionId: proposed.id || null,
-        proposedInterventionIndex: index + 1,
-        interventionCode,
-        interventionTitle,
-      });
-      const costLines = Array.isArray(proposed.costLines) ? proposed.costLines : [];
-      const lineRows = costLines
-        .map(line => {
-          const amount = Number(line?.amount);
-          if (!Number.isFinite(amount) || amount <= 0) return null;
-          const rounded = Math.round(amount * 100) / 100;
-          const lineMeta = pruneNullish({
-            ...(baseMeta || {}),
-            line: pruneNullish({
-              id: line.id || null,
-              type: line.type || null,
-              notes: line.notes || null,
-              recurrence: line.recurrence || null,
-            })
-          });
-          return [
-            caseId,
-            interventionId,
-            validatedBudgetPotId,
-            postingContext || null,
-            glProjectCodeUsed || null,
-            rounded,
-            'CAD',
-            'submitted',
-            transactionDate,
-            truncateDescription(line.type || interventionTitle),
-            lineMeta ? JSON.stringify(lineMeta) : null,
-          ];
-        })
-        .filter(Boolean);
-      if (lineRows.length) {
-        financeRows.push(...lineRows);
-      } else if (Number.isFinite(budgetAmount) && budgetAmount > 0) {
-        const meta = baseMeta ? { ...baseMeta } : null;
-        financeRows.push([
-          caseId,
-          interventionId,
-          validatedBudgetPotId,
-          postingContext || null,
-          glProjectCodeUsed || null,
-          budgetAmount,
-          'CAD',
-          'submitted',
-          transactionDate,
-          truncateDescription(`${interventionTitle} total`),
-          meta ? JSON.stringify(meta) : null,
-        ]);
-      }
-    }
-  }
-
-  if (financeRows.length) {
-    await connection.query(
-      `INSERT INTO finance_transaction
-         (case_id, case_intervention_id, budget_pot_id, posting_context, gl_project_code_used, amount, currency, status, transaction_date, description, metadata)
-       VALUES ?`,
-      [financeRows]
-    );
-    await refreshFinancePotSums(connection);
   }
 
   return {
@@ -12653,7 +12878,7 @@ async function readAccessControlMatrix() {
   try {
     const [rows] = await pool.query("SELECT v, updated_at FROM iset_runtime_config WHERE scope='admin' AND k='accessControlMatrix' LIMIT 1");
     if (!rows || rows.length === 0) {
-      return { ...DEFAULT_ACCESS_CONTROL_MATRIX, source: 'default', updatedAt: null };
+      return { ...mergeAccessControlMatrixWithDefaults(DEFAULT_ACCESS_CONTROL_MATRIX), source: 'default', updatedAt: null };
     }
     const row = rows[0];
     let payload = row.v;
@@ -12665,19 +12890,19 @@ async function readAccessControlMatrix() {
         payload = null;
       }
     }
-    const matrix = normaliseAccessControlMatrix(payload || DEFAULT_ACCESS_CONTROL_MATRIX);
+    const matrix = mergeAccessControlMatrixWithDefaults(payload || DEFAULT_ACCESS_CONTROL_MATRIX);
     const updatedAt = row.updated_at ? new Date(row.updated_at).toISOString() : null;
     return { ...matrix, source: payload ? 'db' : 'default', updatedAt };
   } catch (err) {
     if (!isMissingTableErrorLocal(err)) {
       console.error('[access-control] failed to read persisted matrix:', err.message);
     }
-    return { ...DEFAULT_ACCESS_CONTROL_MATRIX, source: 'default', updatedAt: null };
+    return { ...mergeAccessControlMatrixWithDefaults(DEFAULT_ACCESS_CONTROL_MATRIX), source: 'default', updatedAt: null };
   }
 }
 
 async function writeAccessControlMatrix(nextMatrix) {
-  const normalised = normaliseAccessControlMatrix(nextMatrix);
+  const normalised = mergeAccessControlMatrixWithDefaults(nextMatrix);
   await pool.query("CREATE TABLE IF NOT EXISTS iset_runtime_config (id INT AUTO_INCREMENT PRIMARY KEY, scope VARCHAR(32) NOT NULL, k VARCHAR(128) NOT NULL, v JSON NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_scope_key (scope,k)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
   await pool.query(
     "INSERT INTO iset_runtime_config (scope,k,v) VALUES ('admin','accessControlMatrix', CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP",
@@ -12685,6 +12910,54 @@ async function writeAccessControlMatrix(nextMatrix) {
   );
   const saved = await readAccessControlMatrix();
   return saved;
+}
+
+const APPLICANT_WATCHLIST_MANAGER_ROUTE = '/configuration/applicant-watchlist';
+const APPLICANT_WATCHLIST_STATUS_ACTIVE = 'active';
+const APPLICANT_WATCHLIST_STATUS_INACTIVE = 'inactive';
+const APPLICANT_WATCHLIST_EVENT_TYPES = new Set([
+  'applicant_watchlist_added',
+  'applicant_watchlist_updated',
+  'applicant_watchlist_removed',
+  'applicant_watchlist_hit',
+]);
+
+function isApplicantWatchlistEventRestricted(event) {
+  if (!event || typeof event !== 'object') return false;
+  if (APPLICANT_WATCHLIST_EVENT_TYPES.has(String(event.event_type || ''))) return true;
+  return String(event.category || '') === 'watchlist';
+}
+
+async function requestHasRouteMatrixAccess(req, routePath) {
+  const role = canonicaliseAccessRole(inferUserRole(req));
+  if (!role || !routePath) return false;
+  const matrix = await readAccessControlMatrix();
+  const allowed = Array.isArray(matrix?.routes?.[routePath]) ? matrix.routes[routePath] : null;
+  if (allowed) {
+    return allowed.includes(role);
+  }
+  return matrix?.default !== 'deny';
+}
+
+function requireRouteMatrixAccess(routePath) {
+  return async (req, res, next) => {
+    try {
+      if (!req.auth) {
+        return res.status(401).json({ error: 'Unauthenticated' });
+      }
+      if (req.auth.subjectType !== 'staff') {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const allowed = await requestHasRouteMatrixAccess(req, routePath);
+      if (!allowed) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      return next();
+    } catch (err) {
+      console.error('[access-control] route access check failed:', err?.message || err);
+      return res.status(500).json({ error: 'route_access_check_failed' });
+    }
+  };
 }
 
 const isMissingTableErrorLocal = (err) => {
@@ -13042,7 +13315,11 @@ async function fetchInterventionWithCase(interventionId) {
 
 const REVISION_ELIGIBLE_INTERVENTION_STATUSES = new Set(['approved', 'in_progress', 'suspended']);
 const OPEN_INTERVENTION_PROPOSAL_STATUSES = new Set(['draft', 'submitted', 'in_review', 'changes_requested']);
-const HISTORICAL_PAYMENT_PACKET_STATUSES = new Set(['sent', 'confirmed', 'closed', 'cancelled']);
+const HISTORICAL_PAYMENT_PACKET_STATUSES = new Set([
+  'submitted',
+  'confirmed',
+  'cancelled',
+]);
 
 function buildInterventionRevisionDraftMetadata(sourceRow) {
   const sourcePayload = mapInterventionRow(sourceRow) || {};
@@ -31308,6 +31585,7 @@ app.get('/api/dashboard/watchlist-hit-items', async (req, res) => {
       ${where}
     ) q
     JOIN iset_applicant_watchlist w ON w.sin_hash = SHA2(q.sin_digits, 256)
+      AND w.status = '${APPLICANT_WATCHLIST_STATUS_ACTIVE}'
     WHERE q.sin_digits IS NOT NULL AND LENGTH(q.sin_digits) = 9
     ORDER BY q.submitted_at DESC
     LIMIT 200
@@ -31649,7 +31927,7 @@ app.get('/api/dashboard/payment-proof-due-items', async (req, res) => {
   const normaliseStatusKey = (value) =>
     String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
 
-  const excludedPacketStatuses = new Set(['cancelled', 'canceled', 'closed']);
+  const excludedPacketStatuses = new Set(['cancelled', 'confirmed']);
   const sql = `
     SELECT
       pp.id AS payment_packet_id,
@@ -43309,14 +43587,6 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     const interventionId = result.insertId;
     const interventionRow = await fetchInterventionWithCase(interventionId);
     const payload = mapInterventionRow(interventionRow);
-    const amountForFinance =
-      Number.isFinite(actualAmountValue) && actualAmountValue !== null
-        ? actualAmountValue
-        : Number.isFinite(approvedAmountValue) && approvedAmountValue !== null
-        ? approvedAmountValue
-        : Number.isFinite(plannedCostInt)
-        ? plannedCostInt
-        : null;
     if (isBackloadMode) {
       try {
         const actorUserId = await resolveOrCreateUserIdFromAuth(req);
@@ -43332,21 +43602,8 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       } catch (err) {
         console.warn('[finance] backload historical transaction sync failed', err?.message || err);
       }
-    } else if (trimmedPotId && amountForFinance !== null) {
-      await upsertFinanceTransactionForIntervention({
-        caseId: planRow.case_id,
-        interventionId,
-        potId: trimmedPotId,
-        amount: amountForFinance,
-        costLines: metadataClean.costLines,
-        interventionTitle: trimmedTitle,
-        status: 'submitted',
-        transactionDate: startDateValue || null,
-        postingContext,
-        glProjectCodeUsed,
-        connection: null,
-      });
     }
+    await refreshFinancePotSums();
     await markIlmpNeedsReviewForCase(planRow.case_id);
     if (!isBackloadMode && shouldIncludeInterventionForCfa(statusValue)) {
       try {
@@ -43365,20 +43622,6 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         });
       } catch (err) {
         console.warn('[cfa] create draft failed after intervention create', err?.message || err);
-      }
-    }
-    if (!isBackloadMode && statusValue === 'approved') {
-      try {
-        const actorUserId = await resolveOrCreateUserIdFromAuth(req);
-        const actorRole = canonicaliseAccessRole(role) || role;
-        await createAutoPaymentPacketFromIntervention({
-          interventionRow,
-          actorUserId,
-          actorRole,
-          requireCostLines: true,
-        });
-      } catch (err) {
-        console.warn('[payments] auto-generate packet failed', err?.message || err);
       }
     }
     res.status(201).json(payload);
@@ -44425,14 +44668,6 @@ app.patch('/api/interventions/:id', async (req, res) => {
         await recomputeCaseStatus(planRow.case_id, null, { allowReopenFinal: true });
       }
     }
-    const amountForFinance =
-      Number.isFinite(actualAmountValue) && actualAmountValue !== null
-        ? actualAmountValue
-        : Number.isFinite(approvedAmountValue) && approvedAmountValue !== null
-        ? approvedAmountValue
-        : Number.isFinite(plannedCostInt)
-        ? plannedCostInt
-        : null;
     const potFromBody =
       (() => {
         if (Object.prototype.hasOwnProperty.call(body, 'potId')) {
@@ -44472,54 +44707,26 @@ app.patch('/api/interventions/:id', async (req, res) => {
       } catch (err) {
         console.warn('[finance] backload historical transaction sync failed', err?.message || err);
       }
-    } else if (potFromBody && amountForFinance !== null) {
-      await upsertFinanceTransactionForIntervention({
-        caseId: payload.caseId || planRow?.case_id || interventionRow.case_id || null,
+    } else if (potFromBody) {
+      await deleteUnlinkedFinanceTransactionsForIntervention({
         interventionId,
-        potId: potFromBody,
-        amount: amountForFinance,
-        costLines: metadata.costLines,
-        interventionTitle: payload?.title || metadata?.title || null,
-        status: 'submitted',
-        transactionDate: payload.startDate || null,
-        postingContext,
-        glProjectCodeUsed,
-        connection: null,
+        connection: pool,
       });
     }
     if (!isManualBackloadRecord && isApplyingApprovedRevision) {
       try {
         const actorUserId = await resolveOrCreateUserIdFromAuth(req);
-        const actorRole = canonicaliseAccessRole(role) || role;
         await cancelMutablePaymentPacketsForIntervention({
           interventionId,
           actorUserId,
           connection: pool,
-        });
-        await createAutoPaymentPacketFromIntervention({
-          interventionRow: updatedRow,
-          actorUserId,
-          actorRole,
-          requireCostLines: true,
-          allowExistingHistoricalPackets: true,
+          reason: 'Cancelled after approved intervention revision. Create a new payment packet from the updated approval when ready.',
         });
       } catch (err) {
-        console.error('[payments] revision packet regeneration failed', err);
-      }
-    } else if (!isManualBackloadRecord && previousStatus !== 'approved' && nextStatus === 'approved') {
-      try {
-        const actorUserId = await resolveOrCreateUserIdFromAuth(req);
-        const actorRole = canonicaliseAccessRole(role) || role;
-        await createAutoPaymentPacketFromIntervention({
-          interventionRow: updatedRow,
-          actorUserId,
-          actorRole,
-          requireCostLines: true,
-        });
-      } catch (err) {
-        console.error('[payments] auto-generate packet failed', err);
+        console.error('[payments] approved revision packet cleanup failed', err);
       }
     }
+    await refreshFinancePotSums();
     await markIlmpNeedsReviewForCase(interventionRow.case_id || planRow?.case_id || null);
     if (!isManualBackloadRecord && cfaTargets.length) {
       const actorUserId = await resolveOrCreateUserIdFromAuth(req);
@@ -44708,11 +44915,8 @@ app.post('/api/interventions/:id/close', async (req, res) => {
 
     const updatedRow = await fetchInterventionWithCase(interventionId);
     const payload = mapInterventionRow(updatedRow);
+    await refreshFinancePotSums();
     await markIlmpNeedsReviewForCase(interventionRow.case_id);
-    const amountForFinance =
-      Number.isFinite(actualAmountValue) && actualAmountValue !== null
-        ? Math.round(actualAmountValue)
-        : payload.cost || null;
     const historicalBackloadPotId =
       payload.potId ||
       normalisePositiveInteger(planRow?.budget_pot) ||
@@ -44732,12 +44936,10 @@ app.post('/api/interventions/:id/close', async (req, res) => {
       } catch (err) {
         console.warn('[finance] backload historical transaction sync failed', err?.message || err);
       }
-    } else if (payload.potId && amountForFinance !== null) {
-      await updateFinanceTransactionStatusForIntervention({
+    } else if (payload.potId) {
+      await deleteUnlinkedFinanceTransactionsForIntervention({
         interventionId,
-        amount: amountForFinance,
-        status: 'posted',
-        transactionDate: completionDateValue || payload.endDate || payload.startDate || null,
+        connection: pool,
       });
     }
     res.status(200).json(payload);
@@ -44786,7 +44988,7 @@ app.post('/api/interventions/:id/delete', async (req, res) => {
     }
 
     const [draftPacketRows] = await pool.query(
-      "SELECT id FROM payment_packet WHERE intervention_id = ? AND status IN ('draft','awaiting_trigger','released')",
+      "SELECT id FROM payment_packet WHERE intervention_id = ? AND status IN ('draft','ready_to_send')",
       [interventionId]
     );
     const draftPacketIds = draftPacketRows.map(row => row.id).filter(Boolean);
@@ -49885,6 +50087,242 @@ app.delete('/api/cases/:caseId/watch', async (req, res) => {
   }
 });
 
+app.get(
+  '/api/admin/applicant-watchlist',
+  authenticatedStaffRouteMiddleware,
+  requireRouteMatrixAccess(APPLICANT_WATCHLIST_MANAGER_ROUTE),
+  async (req, res) => {
+    try {
+      const items = await loadApplicantWatchlistRows();
+      const counts = items.reduce(
+        (acc, item) => {
+          acc.total += 1;
+          if (item.status === APPLICANT_WATCHLIST_STATUS_ACTIVE) acc.active += 1;
+          if (item.status === APPLICANT_WATCHLIST_STATUS_INACTIVE) acc.inactive += 1;
+          return acc;
+        },
+        { total: 0, active: 0, inactive: 0 }
+      );
+      res.json({ items, counts });
+    } catch (error) {
+      console.error('[applicant-watchlist] list failed', error);
+      res.status(500).json({ error: 'failed_to_list_watchlist_entries' });
+    }
+  }
+);
+
+app.post(
+  '/api/admin/applicant-watchlist',
+  authenticatedStaffRouteMiddleware,
+  requireRouteMatrixAccess(APPLICANT_WATCHLIST_MANAGER_ROUTE),
+  async (req, res) => {
+    const body = req.body || {};
+    const staffProfileId = resolveActiveStaffProfileId(req);
+    if (!staffProfileId) {
+      return res.status(401).json({ error: 'staff_profile_required' });
+    }
+
+    try {
+      const notes = normaliseApplicantWatchlistNotes(body.notes);
+      const result = await createOrReactivateApplicantWatchlistEntry({
+        identity: {
+          fullName: body.fullName || body.full_name || null,
+          firstName: body.firstName || body.first_name || null,
+          lastName: body.lastName || body.last_name || null,
+          dob: body.dob || body.dateOfBirth || body.date_of_birth || null,
+          sinDigits: body.sin || body.sin_number || body.socialInsuranceNumber || null,
+        },
+        notes,
+        sourceCaseId: Number.isFinite(Number(body.caseId || body.case_id)) ? Number(body.caseId || body.case_id) : null,
+        sourceApplicationId: Number.isFinite(Number(body.applicationId || body.application_id)) ? Number(body.applicationId || body.application_id) : null,
+        staffProfileId,
+      });
+
+      try {
+        await emitApplicantWatchlistLifecycleEvent({
+          type: 'applicant_watchlist_added',
+          entry: result.entry,
+          req,
+        });
+      } catch (eventErr) {
+        console.warn('[applicant-watchlist] failed to emit add event', eventErr?.message || eventErr);
+      }
+
+      return res.status(result.mode === 'created' ? 201 : 200).json({
+        mode: result.mode,
+        entry: result.entry,
+      });
+    } catch (error) {
+      if (error?.code === 'identity_missing') {
+        return res.status(400).json({ error: 'identity_missing', missing: error.missing || [] });
+      }
+      if (error?.code === 'notes_too_long') {
+        return res.status(400).json({ error: 'notes_too_long', max: error.max || 2000 });
+      }
+      if (error?.code === 'already_watchlisted') {
+        return res.status(409).json({ error: 'already_watchlisted', entryId: error.entryId || null });
+      }
+      if (error?.code === 'sin_hash_failed') {
+        return res.status(400).json({ error: 'sin_hash_failed' });
+      }
+      console.error('[applicant-watchlist] admin create failed', error);
+      return res.status(500).json({ error: 'failed_to_create_watchlist_entry' });
+    }
+  }
+);
+
+app.patch(
+  '/api/admin/applicant-watchlist/:id',
+  authenticatedStaffRouteMiddleware,
+  requireRouteMatrixAccess(APPLICANT_WATCHLIST_MANAGER_ROUTE),
+  async (req, res) => {
+    const entryId = Number(req.params.id);
+    if (!Number.isInteger(entryId) || entryId <= 0) {
+      return res.status(400).json({ error: 'invalid_watchlist_entry_id' });
+    }
+
+    const staffProfileId = resolveActiveStaffProfileId(req);
+    if (!staffProfileId) {
+      return res.status(401).json({ error: 'staff_profile_required' });
+    }
+
+    try {
+      const existing = await loadApplicantWatchlistEntryById(entryId);
+      if (!existing) {
+        return res.status(404).json({ error: 'watchlist_entry_not_found' });
+      }
+
+      const body = req.body || {};
+      const hasStatus = Object.prototype.hasOwnProperty.call(body, 'status');
+      const hasNotes = Object.prototype.hasOwnProperty.call(body, 'notes');
+      const hasFullName = Object.prototype.hasOwnProperty.call(body, 'fullName') || Object.prototype.hasOwnProperty.call(body, 'full_name');
+      const hasFirstName = Object.prototype.hasOwnProperty.call(body, 'firstName') || Object.prototype.hasOwnProperty.call(body, 'first_name');
+      const hasLastName = Object.prototype.hasOwnProperty.call(body, 'lastName') || Object.prototype.hasOwnProperty.call(body, 'last_name');
+      const hasDob =
+        Object.prototype.hasOwnProperty.call(body, 'dob') ||
+        Object.prototype.hasOwnProperty.call(body, 'dateOfBirth') ||
+        Object.prototype.hasOwnProperty.call(body, 'date_of_birth');
+      const hasSin =
+        Object.prototype.hasOwnProperty.call(body, 'sin') ||
+        Object.prototype.hasOwnProperty.call(body, 'sin_number') ||
+        Object.prototype.hasOwnProperty.call(body, 'socialInsuranceNumber');
+
+      const nextStatus = hasStatus
+        ? normaliseApplicantWatchlistStatus(body.status, null)
+        : existing.status;
+      if (!nextStatus) {
+        return res.status(400).json({ error: 'invalid_status' });
+      }
+
+      const fullName = clampApplicantWatchlistText(
+        hasFullName ? (body.fullName || body.full_name || null) : existing.fullName,
+        255
+      );
+      const firstName = clampApplicantWatchlistText(
+        hasFirstName ? (body.firstName || body.first_name || null) : existing.firstName,
+        100
+      );
+      const lastName = clampApplicantWatchlistText(
+        hasLastName ? (body.lastName || body.last_name || null) : existing.lastName,
+        100
+      );
+      const dob = toDateOnlyString(
+        hasDob ? (body.dob || body.dateOfBirth || body.date_of_birth || null) : existing.dob
+      );
+      const sinDigits = cleanSin(
+        hasSin ? (body.sin || body.sin_number || body.socialInsuranceNumber || null) : existing.sin
+      );
+      const notes = hasNotes ? normaliseApplicantWatchlistNotes(body.notes) : existing.notes;
+
+      const missing = [];
+      if (!fullName) missing.push('name');
+      if (!dob) missing.push('dob');
+      if (!sinDigits || sinDigits.length !== 9) missing.push('sin');
+      if (missing.length) {
+        return res.status(400).json({ error: 'identity_missing', missing });
+      }
+
+      const sinHash = hashSin(sinDigits);
+      if (!sinHash) {
+        return res.status(400).json({ error: 'sin_hash_failed' });
+      }
+
+      const [[duplicate]] = await pool.query(
+        'SELECT id FROM iset_applicant_watchlist WHERE sin_hash = ? AND id <> ? LIMIT 1',
+        [sinHash, entryId]
+      );
+      if (duplicate?.id) {
+        return res.status(409).json({ error: 'already_watchlisted', entryId: Number(duplicate.id) });
+      }
+
+      const deactivatedAt =
+        nextStatus === APPLICANT_WATCHLIST_STATUS_INACTIVE
+          ? (existing.status === APPLICANT_WATCHLIST_STATUS_INACTIVE && existing.deactivatedAt
+              ? new Date(existing.deactivatedAt)
+              : new Date())
+          : null;
+      const deactivatedByStaffProfileId =
+        nextStatus === APPLICANT_WATCHLIST_STATUS_INACTIVE
+          ? (existing.status === APPLICANT_WATCHLIST_STATUS_INACTIVE
+              ? existing.deactivatedByStaffProfileId
+              : staffProfileId)
+          : null;
+
+      await pool.query(
+        `UPDATE iset_applicant_watchlist
+            SET full_name = ?,
+                first_name = ?,
+                last_name = ?,
+                dob = ?,
+                sin = ?,
+                sin_hash = ?,
+                notes = ?,
+                status = ?,
+                updated_by_staff_profile_id = ?,
+                deactivated_at = ?,
+                deactivated_by_staff_profile_id = ?
+          WHERE id = ?`,
+        [
+          fullName,
+          firstName,
+          lastName,
+          dob,
+          sinDigits,
+          sinHash,
+          notes,
+          nextStatus,
+          staffProfileId,
+          deactivatedAt,
+          deactivatedByStaffProfileId,
+          entryId,
+        ]
+      );
+
+      const entry = await loadApplicantWatchlistEntryById(entryId);
+      const eventType =
+        existing.status !== APPLICANT_WATCHLIST_STATUS_ACTIVE && nextStatus === APPLICANT_WATCHLIST_STATUS_ACTIVE
+          ? 'applicant_watchlist_added'
+          : existing.status === APPLICANT_WATCHLIST_STATUS_ACTIVE && nextStatus !== APPLICANT_WATCHLIST_STATUS_ACTIVE
+            ? 'applicant_watchlist_removed'
+            : 'applicant_watchlist_updated';
+
+      try {
+        await emitApplicantWatchlistLifecycleEvent({ type: eventType, entry, req });
+      } catch (eventErr) {
+        console.warn('[applicant-watchlist] failed to emit update event', eventErr?.message || eventErr);
+      }
+
+      return res.json({ entry, eventType });
+    } catch (error) {
+      if (error?.code === 'notes_too_long') {
+        return res.status(400).json({ error: 'notes_too_long', max: error.max || 2000 });
+      }
+      console.error('[applicant-watchlist] update failed', error);
+      return res.status(500).json({ error: 'failed_to_update_watchlist_entry' });
+    }
+  }
+);
+
 app.post('/api/applicant-watchlist', async (req, res) => {
   const body = req.body || {};
   const toId = (value) => {
@@ -49915,12 +50353,6 @@ app.post('/api/applicant-watchlist', async (req, res) => {
     } catch (_) {
       return {};
     }
-  };
-
-  const clamp = (value, limit) => {
-    const normalised = normaliseString(value);
-    if (!normalised) return null;
-    return normalised.length > limit ? normalised.slice(0, limit) : normalised;
   };
 
   try {
@@ -49955,7 +50387,6 @@ app.post('/api/applicant-watchlist', async (req, res) => {
     const payload = parsePayload(payloadJson);
     const rawAnswers = payload.answers || payload.intake_answers || payload;
     const answers = rawAnswers && typeof rawAnswers === 'object' ? rawAnswers : {};
-
     const providedIdentity = {
       fullName: normaliseString(body.fullName || body.full_name || null),
       firstName: normaliseString(body.firstName || body.first_name || null),
@@ -49963,75 +50394,56 @@ app.post('/api/applicant-watchlist', async (req, res) => {
       dob: toDateOnlyString(body.dob || body.dateOfBirth || body.date_of_birth || null),
       sinDigits: cleanSin(body.sin || body.sin_number || body.socialInsuranceNumber || null),
     };
-
     const resolvedIdentity = resolveApplicantWatchlistIdentity({
       payload,
       answers,
       caseContext,
       applicantName: providedIdentity.fullName,
     });
-
-    const fullName = clamp(providedIdentity.fullName || resolvedIdentity.fullName, 255);
-    const firstName = clamp(providedIdentity.firstName || resolvedIdentity.firstName, 100);
-    const lastName = clamp(providedIdentity.lastName || resolvedIdentity.lastName, 100);
-    const dob = providedIdentity.dob || resolvedIdentity.dob;
-    const sinDigits = providedIdentity.sinDigits || resolvedIdentity.sinDigits;
-
-    const missing = [];
-    if (!fullName) missing.push('name');
-    if (!dob) missing.push('dob');
-    if (!sinDigits || sinDigits.length !== 9) missing.push('sin');
-    if (missing.length) {
-      return res.status(400).json({ error: 'identity_missing', missing });
-    }
-
-    const sinHash = hashSin(sinDigits);
-    if (!sinHash) {
-      return res.status(400).json({ error: 'sin_hash_failed' });
-    }
-
-    const notesRaw = typeof body.notes === 'string' ? body.notes.trim() : '';
-    const maxNotes = 2000;
-    if (notesRaw && notesRaw.length > maxNotes) {
-      return res.status(400).json({ error: 'notes_too_long', max: maxNotes });
-    }
-    const notes = notesRaw ? notesRaw : null;
+    const notes = normaliseApplicantWatchlistNotes(body.notes);
+    const result = await createOrReactivateApplicantWatchlistEntry({
+      identity: {
+        fullName: providedIdentity.fullName || resolvedIdentity.fullName,
+        firstName: providedIdentity.firstName || resolvedIdentity.firstName,
+        lastName: providedIdentity.lastName || resolvedIdentity.lastName,
+        dob: providedIdentity.dob || resolvedIdentity.dob,
+        sinDigits: providedIdentity.sinDigits || resolvedIdentity.sinDigits,
+      },
+      notes,
+      sourceCaseId: caseId,
+      sourceApplicationId: applicationId,
+      staffProfileId,
+    });
 
     try {
-      const [result] = await pool.query(
-        `INSERT INTO iset_applicant_watchlist
-          (full_name, first_name, last_name, dob, sin, sin_hash, notes, source_case_id, source_application_id, created_by_staff_profile_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          fullName,
-          firstName,
-          lastName,
-          dob,
-          sinDigits,
-          sinHash,
-          notes,
-          caseId || null,
-          applicationId || null,
-          staffProfileId || null,
-        ]
-      );
-      return res.status(201).json({
-        id: result.insertId,
-        fullName,
-        firstName,
-        lastName,
-        dob,
-        sin: sinDigits,
+      await emitApplicantWatchlistLifecycleEvent({
+        type: 'applicant_watchlist_added',
+        entry: result.entry,
+        req,
       });
-    } catch (error) {
-      if (error && error.code === 'ER_DUP_ENTRY') {
-        return res.status(409).json({ error: 'already_watchlisted' });
-      }
-      throw error;
+    } catch (eventErr) {
+      console.warn('[applicant-watchlist] failed to emit contextual add event', eventErr?.message || eventErr);
     }
+
+    return res.status(result.mode === 'created' ? 201 : 200).json({
+      mode: result.mode,
+      entry: result.entry,
+    });
   } catch (error) {
+    if (error?.code === 'identity_missing') {
+      return res.status(400).json({ error: 'identity_missing', missing: error.missing || [] });
+    }
+    if (error?.code === 'notes_too_long') {
+      return res.status(400).json({ error: 'notes_too_long', max: error.max || 2000 });
+    }
+    if (error?.code === 'already_watchlisted') {
+      return res.status(409).json({ error: 'already_watchlisted', entryId: error.entryId || null });
+    }
+    if (error?.code === 'sin_hash_failed') {
+      return res.status(400).json({ error: 'sin_hash_failed' });
+    }
     console.error('[applicant-watchlist] create failed', error);
-    res.status(500).json({ error: 'failed_to_create_watchlist_entry' });
+    return res.status(500).json({ error: 'failed_to_create_watchlist_entry' });
   }
 });
 
@@ -50399,36 +50811,24 @@ const isFinancePaymentsRole = role => {
 const SIMPLE_PAYMENT_WORKFLOW = true;
 const SIMPLE_PAYMENT_PACKET_STATUSES = new Set([
   'draft',
-  'awaiting_trigger',
-  'released',
+  'ready_to_send',
   'submitted',
+  'confirmed',
   'cancelled',
 ]);
 
 const PAYMENT_PACKET_STATUSES = new Set([
   'draft',
-  'awaiting_trigger',
-  'released',
+  'ready_to_send',
   'submitted',
-  'program_review',
-  'returned',
-  'program_approved',
-  'finance_review',
-  'finance_approved',
-  'on_hold',
-  'batched',
-  'sent',
   'confirmed',
-  'closed',
   'cancelled',
 ]);
 
 const PAYMENT_LINE_STATUSES = new Set([
   'needs_evidence',
-  'ready_for_program',
-  'ready_for_finance',
-  'approved',
-  'batched',
+  'ready_to_send',
+  'submitted',
   'paid',
   'held',
   'cancelled',
@@ -50438,41 +50838,37 @@ const PAYMENT_BATCH_STATUSES = new Set(['draft', 'approved', 'exported', 'closed
 
 const PACKET_STATUS_TO_LINE_STATUS = {
   draft: 'needs_evidence',
-  awaiting_trigger: 'needs_evidence',
-  released: 'needs_evidence',
-  submitted: 'ready_for_program',
+  ready_to_send: 'ready_to_send',
+  submitted: 'submitted',
   cancelled: 'cancelled',
 };
 
 const EVIDENCE_GATE_PACKET_STATUSES = new Set(['submitted']);
 
-const EVIDENCE_GATE_LINE_STATUSES = new Set(['ready_for_program']);
+const EVIDENCE_GATE_LINE_STATUSES = new Set(['ready_to_send']);
 
 const DUPLICATE_GATE_PACKET_STATUSES = new Set([
-  'finance_approved',
-  'batched',
-  'sent',
+  'submitted',
   'confirmed',
-  'closed',
 ]);
 
 const DUPLICATE_GATE_LINE_STATUSES = new Set([
-  'approved',
-  'batched',
+  'submitted',
   'paid',
 ]);
 
 const EI_GATE_PACKET_STATUSES = new Set(['submitted']);
-const EI_GATE_LINE_STATUSES = new Set(['ready_for_finance', 'approved', 'batched', 'paid']);
+const EI_GATE_LINE_STATUSES = new Set(['ready_to_send', 'submitted', 'paid']);
 
 const RECURRING_PERIOD_OPTIONS = new Set(['weekly', 'bi_weekly', 'monthly', 'quarterly']);
 
 const normalizePacketWorkflowStage = status => {
-  if (!status) return 'draft';
-  if (status === 'draft' || status === 'returned' || status === 'awaiting_trigger' || status === 'released') {
+  const normalized = normalizePaymentStatus(status);
+  if (!normalized) return 'draft';
+  if (normalized === 'draft' || normalized === 'ready_to_send') {
     return 'draft';
   }
-  if (status === 'cancelled') return 'cancelled';
+  if (normalized === 'cancelled') return 'cancelled';
   return 'submitted';
 };
 
@@ -52420,7 +52816,7 @@ const DEFAULT_PAYMENT_APPROVAL_RULES = {
 };
 
 const DEFAULT_PAYMENT_POLICY_RULES = {
-  noBackdatingDays: 0,
+  noBackdatingDays: 60,
   amountCaps: {},
   receiptDeadlineDays: 14,
 };
@@ -54675,6 +55071,19 @@ const computeBackdatingCutoff = (days) => {
   return cutoff;
 };
 
+const buildLivingAllowanceBackdatingMessage = ({
+  servicePeriodEnd,
+  cutoff,
+  allowedDays,
+}) => {
+  const endLabel = toDateOnlyString(servicePeriodEnd) || "the selected service period end date";
+  const cutoffLabel = toDateOnlyString(cutoff) || "the current cutoff date";
+  if (Number.isFinite(allowedDays) && allowedDays > 0) {
+    return `This living allowance period ends on ${endLabel}. Living allowance can only be sent to finance within ${allowedDays} days of the service period end, and the current cutoff is ${cutoffLabel}.`;
+  }
+  return `This living allowance period ends on ${endLabel}. Living allowance can only be sent to finance for the current period, and the current cutoff is ${cutoffLabel}.`;
+};
+
 const parseDateOnly = value => {
   const date = parseDate(value);
   if (!date) return null;
@@ -55130,8 +55539,12 @@ const validatePaymentLinePolicy = ({
   policyRules,
   interventionPaymentTypeMap,
   recurrencePolicyByType,
+  validationStage = 'draft',
 }) => {
   const errors = [];
+  const normalizedValidationStage =
+    typeof validationStage === 'string' ? validationStage.trim().toLowerCase() : 'draft';
+  const enforceBackdatingRule = normalizedValidationStage !== 'draft';
   const paymentTypeRaw = line?.payment_type || line?.paymentType;
   const paymentTypeKey = normalizePaymentTypeKey(paymentTypeRaw);
   const paymentTypeCode = normalizePaymentTypeCode(paymentTypeRaw);
@@ -55240,7 +55653,7 @@ const validatePaymentLinePolicy = ({
         message: 'Service period end must be on or after start.',
       });
     }
-    if (recurrenceMode === RECURRENCE_MODE_REQUIRED && !recurrenceEnabled) {
+    if (recurrenceMode === RECURRENCE_MODE_REQUIRED && !recurrenceEnabled && !hasAnyServicePeriod) {
       errors.push({
         field: 'recurrence',
         code: 'recurrence_required',
@@ -55255,15 +55668,22 @@ const validatePaymentLinePolicy = ({
       errors.push({
         field: 'servicePeriodEnd',
         code: 'backdating_before_intervention',
-        message: 'Service period ends before intervention start.',
+        message: `This living allowance period ends on ${toDateOnlyString(end)}, before the intervention starts on ${toDateOnlyString(interventionStart)}.`,
       });
     }
     const cutoff = computeBackdatingCutoff(policyRules?.noBackdatingDays);
-    if (end && cutoff && end < cutoff) {
+    const allowedBackdatingDays = Number.isFinite(Number(policyRules?.noBackdatingDays))
+      ? Number(policyRules.noBackdatingDays)
+      : DEFAULT_PAYMENT_POLICY_RULES.noBackdatingDays;
+    if (enforceBackdatingRule && end && cutoff && end < cutoff) {
       errors.push({
         field: 'servicePeriodEnd',
         code: 'backdating_not_allowed',
-        message: 'Living allowance backdating exceeds policy.',
+        message: buildLivingAllowanceBackdatingMessage({
+          servicePeriodEnd: end,
+          cutoff,
+          allowedDays: allowedBackdatingDays,
+        }),
       });
     }
   }
@@ -55773,8 +56193,6 @@ const applyPostPayEvidenceHolds = async ({ packets, connection }) => {
   const now = new Date();
   for (const packet of packets) {
     if (!packet) continue;
-    let packetOnHold = false;
-    const packetId = Number(packet.id);
     for (const line of packet.lines || []) {
       const postPayTypes = extractPostPayEvidenceTypes(line, evidenceRules);
       if (!postPayTypes.length) continue;
@@ -55852,20 +56270,7 @@ const applyPostPayEvidenceHolds = async ({ packets, connection }) => {
         });
         line.status = 'held';
         line.holdReason = 'Post-payment receipt overdue';
-        packetOnHold = true;
-      } else if (line.status === 'held') {
-        packetOnHold = true;
       }
-    }
-    if (packetOnHold && packet.status !== 'on_hold' && packet.status !== 'closed' && packet.status !== 'cancelled') {
-      await updatePaymentPacketStatus({
-        packetId,
-        status: 'on_hold',
-        actorUserId: null,
-        notes: 'Auto-hold: post-payment evidence overdue',
-        connection: runner,
-      });
-      packet.status = 'on_hold';
     }
   }
 };
@@ -55873,12 +56278,14 @@ const applyPostPayEvidenceHolds = async ({ packets, connection }) => {
 const normalizePaymentStatus = value => {
   if (typeof value !== 'string') return null;
   const status = value.trim().toLowerCase();
+  if (!status) return null;
   return PAYMENT_PACKET_STATUSES.has(status) ? status : null;
 };
 
 const normalizePaymentLineStatus = value => {
   if (typeof value !== 'string') return null;
   const status = value.trim().toLowerCase();
+  if (!status) return null;
   return PAYMENT_LINE_STATUSES.has(status) ? status : null;
 };
 
@@ -55930,7 +56337,7 @@ const deletePaymentPacket = async ({ packetId, connection }) => {
     return { deleted: false, missing: true };
   }
   const status = packetRow.status || null;
-  if (!['draft', 'awaiting_trigger', 'released'].includes(status)) {
+  if (normalizePacketWorkflowStage(status) !== 'draft') {
     return { deleted: false, notDraft: true, status };
   }
 
@@ -56089,7 +56496,7 @@ const mapPaymentPacketRow = row => {
     reportingUnit: row.reporting_unit || metadata.reportingUnit || metadata.reporting_unit || null,
     potId: null,
     potName: null,
-    status: row.status || 'draft',
+    status: normalizePaymentStatus(row.status) || 'draft',
     requester,
     requesterRole: metadata.requesterRole || metadata.requester_role || null,
     submittedOn: toDateOnlyString(row.submitted_at),
@@ -56124,7 +56531,7 @@ const mapPaymentLineRow = row => {
     potId: row.budget_pot_id ? String(row.budget_pot_id) : null,
     potName: row.pot_name || null,
     fundingStream: row.funding_stream || row.pot_funding_source || null,
-    status: row.status,
+    status: normalizePaymentLineStatus(row.status),
     holdReason: row.hold_reason || null,
     paidAt: row.paid_at || null,
     paymentReference: row.payment_reference || null,
@@ -56588,6 +56995,7 @@ const runPaymentPacketValidation = async ({ packetRow, lineRows, connection }) =
       policyRules,
       interventionPaymentTypeMap: paymentTypeMap,
       recurrencePolicyByType,
+      validationStage: 'submission',
     });
     validationErrors.forEach(err => {
       details.push({
@@ -57515,7 +57923,7 @@ async function createAutoPaymentPacketFromIntervention({
 
   const createdPacketIds = [];
   for (const group of groups) {
-    const packetStatus = group.manualTrigger ? 'awaiting_trigger' : 'draft';
+    const packetStatus = 'draft';
     const packetMeta = {
       autoGeneratedFromInterventionId: String(interventionId),
       autoGeneratedAt: new Date().toISOString(),
@@ -59501,42 +59909,127 @@ function evaluateTransferPolicies(sourcePot, destPot) {
 
 async function refreshFinancePotSums(connection = null) {
   const runner = connection || pool;
+  const committedInterventionStatuses = normalizeStatusList(METRICS_COMMITTED_INTERVENTION_STATUSES);
   try {
-    await runner.query(
-      `WITH RECURSIVE pot_base AS (
-         SELECT
-           bp.id AS pot_id,
-           bp.parent_id,
-           COALESCE(SUM(CASE WHEN ft.status IN ('draft','submitted','approved') THEN ft.amount ELSE 0 END), 0) AS committed,
-           COALESCE(SUM(CASE WHEN ft.status = 'posted' THEN ft.amount ELSE 0 END), 0) AS actual
-         FROM budget_pot bp
-         LEFT JOIN finance_transaction ft ON ft.budget_pot_id = bp.id
-         GROUP BY bp.id, bp.parent_id
-       ),
-       rollup AS (
-         SELECT pot_id, parent_id, committed, actual
-         FROM pot_base
-         UNION ALL
-         SELECT parent.pot_id AS pot_id,
-                parent.parent_id,
-                r.committed,
-                r.actual
-         FROM rollup r
-         JOIN pot_base parent ON parent.pot_id = r.parent_id
-         WHERE r.parent_id IS NOT NULL
-       ),
-       agg AS (
-         SELECT pot_id,
-                SUM(committed) AS committed,
-                SUM(actual) AS actual
-         FROM rollup
-         GROUP BY pot_id
-       )
-       UPDATE budget_pot bp
-       LEFT JOIN agg ON agg.pot_id = bp.id
-       SET bp.committed_amount = COALESCE(agg.committed, 0),
-           bp.actual_amount = COALESCE(agg.actual, 0)`
+    const [potRows] = await runner.query(
+      `SELECT id, parent_id
+         FROM budget_pot`
     );
+    const pots = Array.isArray(potRows) ? potRows : [];
+    if (!pots.length) {
+      return;
+    }
+
+    const potTotals = new Map();
+    const parentByPotId = new Map();
+    pots.forEach(row => {
+      const potId = normalisePositiveInteger(row?.id);
+      if (!potId) return;
+      potTotals.set(potId, { committed: 0, actual: 0 });
+      parentByPotId.set(potId, normalisePositiveInteger(row?.parent_id) || null);
+    });
+
+    if (committedInterventionStatuses.length) {
+      const [interventionRows] = await runner.query(
+        `SELECT
+           ci.id,
+           ci.status,
+           ci.approved_amount,
+           ci.budget_amount,
+           ci.intervention_cost,
+           ci.metadata_json,
+           ap.budget_pot AS plan_budget_pot
+         FROM iset_case_intervention ci
+         LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
+         WHERE REPLACE(LOWER(TRIM(COALESCE(ci.status, ''))), ' ', '_') IN (${committedInterventionStatuses.map(() => '?').join(',')})`,
+        committedInterventionStatuses
+      );
+
+      (Array.isArray(interventionRows) ? interventionRows : []).forEach(row => {
+        const metadata = safeJsonParse(row?.metadata_json, {}) || {};
+        const potId =
+          normalisePositiveInteger(metadata?.budgetPotId) ||
+          normalisePositiveInteger(metadata?.potId) ||
+          normalisePositiveInteger(row?.plan_budget_pot) ||
+          null;
+        if (!potId || !potTotals.has(potId)) return;
+
+        const amountCandidates = [
+          row?.approved_amount,
+          row?.budget_amount,
+          row?.intervention_cost,
+          metadata?.cost,
+        ];
+        let committedAmount = 0;
+        amountCandidates.some(candidate => {
+          if (candidate === null || typeof candidate === 'undefined' || candidate === '') {
+            return false;
+          }
+          const numeric = Number(candidate);
+          if (!Number.isFinite(numeric)) return false;
+          committedAmount = numeric;
+          return true;
+        });
+        if (!Number.isFinite(committedAmount) || committedAmount === 0) return;
+
+        const bucket = potTotals.get(potId);
+        bucket.committed += committedAmount;
+      });
+    }
+
+    const [actualRows] = await runner.query(
+      `SELECT
+         budget_pot_id,
+         COALESCE(SUM(CASE WHEN status = 'posted' THEN amount ELSE 0 END), 0) AS actual
+       FROM finance_transaction
+       GROUP BY budget_pot_id`
+    );
+    (Array.isArray(actualRows) ? actualRows : []).forEach(row => {
+      const potId = normalisePositiveInteger(row?.budget_pot_id);
+      if (!potId || !potTotals.has(potId)) return;
+      const bucket = potTotals.get(potId);
+      bucket.actual += Number(row?.actual || 0);
+    });
+
+    const rolledUpTotals = new Map();
+    potTotals.forEach((values, potId) => {
+      const committed = Number(values?.committed || 0);
+      const actual = Number(values?.actual || 0);
+      if ((!committed || committed === 0) && (!actual || actual === 0)) {
+        if (!rolledUpTotals.has(potId)) {
+          rolledUpTotals.set(potId, { committed: 0, actual: 0 });
+        }
+      }
+      let cursor = potId;
+      const visited = new Set();
+      while (cursor && !visited.has(cursor)) {
+        visited.add(cursor);
+        if (!rolledUpTotals.has(cursor)) {
+          rolledUpTotals.set(cursor, { committed: 0, actual: 0 });
+        }
+        const current = rolledUpTotals.get(cursor);
+        current.committed += committed;
+        current.actual += actual;
+        cursor = parentByPotId.get(cursor) || null;
+      }
+    });
+
+    for (const row of pots) {
+      const potId = normalisePositiveInteger(row?.id);
+      if (!potId) continue;
+      const totals = rolledUpTotals.get(potId) || { committed: 0, actual: 0 };
+      await runner.query(
+        `UPDATE budget_pot
+            SET committed_amount = ?,
+                actual_amount = ?
+          WHERE id = ?`,
+        [
+          roundFinanceCurrencyAmount(totals.committed || 0),
+          roundFinanceCurrencyAmount(totals.actual || 0),
+          potId,
+        ]
+      );
+    }
   } catch (err) {
     console.warn('[finance] failed to refresh pot sums', err?.message || err);
   }
@@ -59777,107 +60270,32 @@ async function syncManualBackloadHistoricalFinanceTransaction({
   return { updated: true, deleted: false };
 }
 
-async function upsertFinanceTransactionForIntervention({
-  caseId,
+// Remove legacy intervention-linked ledger rows that predate the packet-driven payments path.
+async function deleteUnlinkedFinanceTransactionsForIntervention({
   interventionId,
-  potId,
-  amount,
-  costLines = null,
-  interventionTitle = null,
-  status = 'submitted',
-  transactionDate = null,
-  postingContext = 'external',
-  glProjectCodeUsed = null,
-  connection = null
-}) {
+  connection = null,
+} = {}) {
   const runner = connection || pool;
   try {
-    const potNumeric = Number(potId);
-    if (!Number.isFinite(potNumeric)) return;
-    const [[potExists] = []] = await runner.query('SELECT id FROM budget_pot WHERE id = ? LIMIT 1', [potNumeric]);
-    if (!potExists) return;
-    const amt = Number(amount);
-    const normalizedAmount = Number.isFinite(amt) ? amt : 0;
-    const txDate = transactionDate || null;
-    const lineItems = Array.isArray(costLines) ? costLines : [];
-    const lineRows = lineItems
-      .map(line => {
-        const lineAmount = Number(line?.amount);
-        if (!Number.isFinite(lineAmount) || lineAmount <= 0) return null;
-        const lineMeta = pruneNullish({
-          source: 'intervention',
-          interventionTitle: interventionTitle || null,
-          line: pruneNullish({
-            id: line?.id || null,
-            type: line?.type || null,
-            notes: line?.notes || null,
-            recurrence: line?.recurrence || null,
-          })
-        });
-        return [
-          caseId,
-          interventionId,
-          potNumeric,
-          postingContext,
-          glProjectCodeUsed,
-          Math.round(lineAmount * 100) / 100,
-          'CAD',
-          status,
-          txDate,
-          line?.type || interventionTitle || null,
-          lineMeta ? JSON.stringify(lineMeta) : null,
-        ];
-      })
-      .filter(Boolean);
-
-    await runner.query(
-      `DELETE FROM finance_transaction
-        WHERE case_intervention_id = ?
-          AND status IN ('draft','submitted','approved')`,
-      [interventionId]
+    const numericInterventionId = Number(interventionId);
+    if (!Number.isFinite(numericInterventionId)) return { deleted: false, count: 0 };
+    const [result] = await runner.query(
+      `DELETE ft
+         FROM finance_transaction ft
+         LEFT JOIN payment_line_transaction plt ON plt.finance_transaction_id = ft.id
+        WHERE ft.case_intervention_id = ?
+          AND plt.finance_transaction_id IS NULL
+          AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ft.metadata, '$.source')), '') <> ?`,
+      [numericInterventionId, MANUAL_BACKLOAD_FINANCE_SOURCE]
     );
-
-    if (lineRows.length) {
-      await runner.query(
-        `INSERT INTO finance_transaction
-           (case_id, case_intervention_id, budget_pot_id, posting_context, gl_project_code_used, amount, currency, status, transaction_date, description, metadata)
-         VALUES ?`,
-        [lineRows]
-      );
-    } else {
-      await runner.query(
-        `INSERT INTO finance_transaction
-           (case_id, case_intervention_id, budget_pot_id, posting_context, gl_project_code_used, amount, currency, status, transaction_date, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'CAD', ?, ?, NOW(), NOW())`,
-        [caseId, interventionId, potNumeric, postingContext, glProjectCodeUsed, normalizedAmount, status, txDate]
-      );
+    const deletedCount = Number(result?.affectedRows || 0);
+    if (deletedCount > 0) {
+      await refreshFinancePotSums(connection);
     }
-    await refreshFinancePotSums(connection);
+    return { deleted: deletedCount > 0, count: deletedCount };
   } catch (err) {
-    console.warn('[finance] upsert transaction failed', err?.message || err);
-  }
-}
-
-async function updateFinanceTransactionStatusForIntervention({ interventionId, amount, status, transactionDate = null }) {
-  try {
-    const amt = Number(amount);
-    const normalizedAmount = Number.isFinite(amt) ? amt : null;
-    const [[countRow] = []] = await pool.query(
-      'SELECT COUNT(*) AS total FROM finance_transaction WHERE case_intervention_id = ?',
-      [interventionId]
-    );
-    const totalRows = Number(countRow?.total || 0);
-    if (!totalRows) return;
-    const amountToUse = totalRows === 1 ? normalizedAmount : null;
-    await pool.query(
-      `UPDATE finance_transaction
-       SET status = ?, amount = COALESCE(?, amount), transaction_date = ?, updated_at = NOW()
-       WHERE case_intervention_id = ?`,
-      [status, amountToUse, transactionDate || null, interventionId]
-    );
-    await refreshFinancePotSums();
-  } catch (err) {
-    console.warn('[finance] update transaction status failed', err?.message || err);
+    console.warn('[finance] failed to delete legacy intervention transactions', err?.message || err);
+    return { deleted: false, count: 0 };
   }
 }
 
@@ -59995,12 +60413,11 @@ const deriveReconciliationStatus = ({ metaStatus, financeStatus }) => {
   switch ((financeStatus || '').toLowerCase()) {
     case 'posted':
       return 'resolved';
-    case 'approved':
-      return 'in_review';
     case 'submitted':
       return 'open';
     case 'draft':
       return 'pending';
+    case 'cancelled':
     case 'rejected':
       return 'resolved';
     default:
@@ -60210,6 +60627,1475 @@ async function readFinanceSalaryPotOptionsByRegion(regionCodes = [], executor = 
   return map;
 }
 
+const FINANCE_INTERVENTION_REPORT_PERIOD_TYPES = new Set(['week', 'month', 'quarter', 'year']);
+const FINANCE_INTERVENTION_REPORT_MODE_OPTIONS = Object.freeze([
+  {
+    value: 'approved',
+    label: 'Approved funding',
+    description: 'Approved intervention funding for the selected fiscal year.',
+    disabled: false,
+  },
+]);
+const FINANCE_INTERVENTION_REPORT_INCLUDED_STATUSES = METRICS_COMMITTED_INTERVENTION_STATUSES;
+const FINANCE_INTERVENTION_REPORT_FUNDING_SOURCES = new Set(['CRF', 'EI']);
+const FINANCE_INTERVENTION_REPORT_MONTH_DEFINITIONS = Object.freeze([
+  { key: 'apr', label: 'April', yearOffset: 0, month: 4 },
+  { key: 'may', label: 'May', yearOffset: 0, month: 5 },
+  { key: 'jun', label: 'June', yearOffset: 0, month: 6 },
+  { key: 'jul', label: 'July', yearOffset: 0, month: 7 },
+  { key: 'aug', label: 'August', yearOffset: 0, month: 8 },
+  { key: 'sep', label: 'September', yearOffset: 0, month: 9 },
+  { key: 'oct', label: 'October', yearOffset: 0, month: 10 },
+  { key: 'nov', label: 'November', yearOffset: 0, month: 11 },
+  { key: 'dec', label: 'December', yearOffset: 0, month: 12 },
+  { key: 'jan', label: 'January', yearOffset: 1, month: 1 },
+  { key: 'feb', label: 'February', yearOffset: 1, month: 2 },
+  { key: 'mar', label: 'March', yearOffset: 1, month: 3 },
+]);
+
+function normaliseFinanceInterventionReportMode(rawValue) {
+  const value = normaliseString(rawValue)?.toLowerCase() || '';
+  if (!value) return 'approved';
+  if (value === 'approved') return 'approved';
+  if (value === 'actual') return 'actual';
+  return null;
+}
+
+function normaliseFinanceInterventionReportPeriodType(rawValue) {
+  const value = normaliseString(rawValue)?.toLowerCase() || '';
+  if (value === 'weekly') return 'week';
+  if (value === 'monthly') return 'month';
+  if (value === 'quarterly') return 'quarter';
+  if (value === 'annual' || value === 'annually') return 'year';
+  return FINANCE_INTERVENTION_REPORT_PERIOD_TYPES.has(value) ? value : 'year';
+}
+
+function parseFinanceInterventionReportUtcDate(value) {
+  const isoDate = toDateOnlyString(value);
+  if (!isoDate) return null;
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatFinanceInterventionReportUtcDate(date) {
+  return date instanceof Date && !Number.isNaN(date.getTime())
+    ? date.toISOString().slice(0, 10)
+    : null;
+}
+
+function shiftFinanceInterventionReportUtcDate(date, days) {
+  const base =
+    date instanceof Date
+      ? new Date(date.getTime())
+      : parseFinanceInterventionReportUtcDate(date);
+  if (!base) return null;
+  base.setUTCDate(base.getUTCDate() + Number(days || 0));
+  return base;
+}
+
+function buildFinanceInterventionReportMonthPeriods(fiscalYearStart) {
+  return FINANCE_INTERVENTION_REPORT_MONTH_DEFINITIONS.map(definition => {
+    const year = fiscalYearStart + definition.yearOffset;
+    return {
+      key: definition.key,
+      label: `${definition.label} ${year}`,
+      shortLabel: definition.label,
+      start: buildReportingIsoDate(year, definition.month, 1),
+      end: buildReportingMonthEndDate(year, definition.month),
+    };
+  });
+}
+
+function buildFinanceInterventionReportQuarterPeriods(fiscalYearStart) {
+  return buildReportingQuarterSchedule(fiscalYearStart).map((entry, index) => ({
+    key: `q${index + 1}`,
+    label: `${entry.period} (${entry.periodStart} to ${entry.periodEnd})`,
+    shortLabel: entry.period,
+    start: entry.periodStart,
+    end: entry.periodEnd,
+  }));
+}
+
+function buildFinanceInterventionReportYearPeriods(fiscalYearStart) {
+  return [
+    {
+      key: 'annual',
+      label: `FY ${formatReportingFiscalYearLabel(fiscalYearStart)} (${buildReportingIsoDate(fiscalYearStart, 4, 1)} to ${buildReportingIsoDate(fiscalYearStart + 1, 3, 31)})`,
+      shortLabel: `FY ${formatReportingFiscalYearLabel(fiscalYearStart)}`,
+      start: buildReportingIsoDate(fiscalYearStart, 4, 1),
+      end: buildReportingIsoDate(fiscalYearStart + 1, 3, 31),
+    },
+  ];
+}
+
+function buildFinanceInterventionReportWeekPeriods(fiscalYearStart) {
+  const fiscalStart = parseFinanceInterventionReportUtcDate(
+    buildReportingIsoDate(fiscalYearStart, 4, 1)
+  );
+  const fiscalEnd = parseFinanceInterventionReportUtcDate(
+    buildReportingIsoDate(fiscalYearStart + 1, 3, 31)
+  );
+  if (!fiscalStart || !fiscalEnd) {
+    return [];
+  }
+  const startWeekday = fiscalStart.getUTCDay();
+  const diffToMonday = (startWeekday + 6) % 7;
+  let weekStart = shiftFinanceInterventionReportUtcDate(fiscalStart, -diffToMonday);
+  const periods = [];
+  let index = 1;
+  while (weekStart && weekStart.getTime() <= fiscalEnd.getTime()) {
+    const weekEnd = shiftFinanceInterventionReportUtcDate(weekStart, 6);
+    const boundedStart = weekStart.getTime() < fiscalStart.getTime() ? fiscalStart : weekStart;
+    const boundedEnd = weekEnd.getTime() > fiscalEnd.getTime() ? fiscalEnd : weekEnd;
+    const startText = formatFinanceInterventionReportUtcDate(boundedStart);
+    const endText = formatFinanceInterventionReportUtcDate(boundedEnd);
+    periods.push({
+      key: `w${String(index).padStart(2, '0')}`,
+      label: `Week ${index} (${startText} to ${endText})`,
+      shortLabel: `Week ${index}`,
+      start: startText,
+      end: endText,
+    });
+    weekStart = shiftFinanceInterventionReportUtcDate(weekStart, 7);
+    index += 1;
+  }
+  return periods;
+}
+
+function buildFinanceInterventionReportPeriods(fiscalYearStart, periodType) {
+  const normalizedPeriodType = normaliseFinanceInterventionReportPeriodType(periodType);
+  if (normalizedPeriodType === 'week') {
+    return buildFinanceInterventionReportWeekPeriods(fiscalYearStart);
+  }
+  if (normalizedPeriodType === 'month') {
+    return buildFinanceInterventionReportMonthPeriods(fiscalYearStart);
+  }
+  if (normalizedPeriodType === 'quarter') {
+    return buildFinanceInterventionReportQuarterPeriods(fiscalYearStart);
+  }
+  return buildFinanceInterventionReportYearPeriods(fiscalYearStart);
+}
+
+function resolveFinanceInterventionReportDefaultPeriodKey(
+  fiscalYearStart,
+  periodType,
+  referenceDate = new Date()
+) {
+  const periods = buildFinanceInterventionReportPeriods(fiscalYearStart, periodType);
+  if (!periods.length) return null;
+  const currentFiscalYearStart = resolveReportingFiscalYearStartYear(referenceDate);
+  if (fiscalYearStart < currentFiscalYearStart) {
+    return periods[periods.length - 1]?.key || periods[0]?.key || null;
+  }
+  if (fiscalYearStart > currentFiscalYearStart) {
+    return periods[0]?.key || null;
+  }
+  const today = toDateOnlyString(referenceDate);
+  const matchingPeriod = periods.find(period => today && today >= period.start && today <= period.end);
+  return matchingPeriod?.key || periods[0]?.key || null;
+}
+
+function resolveFinanceInterventionReportPeriodSelection(
+  fiscalYearStart,
+  periodType,
+  rawPeriodKey
+) {
+  const normalizedPeriodType = normaliseFinanceInterventionReportPeriodType(periodType);
+  const periods = buildFinanceInterventionReportPeriods(fiscalYearStart, normalizedPeriodType);
+  const requestedKey = normaliseString(rawPeriodKey)?.toLowerCase() || '';
+  const defaultPeriodKey = resolveFinanceInterventionReportDefaultPeriodKey(
+    fiscalYearStart,
+    normalizedPeriodType
+  );
+  const period =
+    periods.find(entry => entry.key === requestedKey) ||
+    periods.find(entry => entry.key === defaultPeriodKey) ||
+    periods[0] ||
+    null;
+  return {
+    periodType: normalizedPeriodType,
+    periods,
+    defaultPeriodKey,
+    period,
+  };
+}
+
+function buildFinanceInterventionReportParticipantProvince(row) {
+  return normaliseReportingProvinceCode(buildMetricProvince(row));
+}
+
+function buildFinanceInterventionReportParticipantProvinceName(provinceCode) {
+  if (!provinceCode) return null;
+  return PROVINCE_LABEL_MAP[provinceCode] || provinceCode;
+}
+
+const FINANCE_INTERVENTION_REPORT_PACKET_STATUS_LABELS = Object.freeze({
+  draft: 'Draft',
+  ready_to_send: 'Ready to send',
+  submitted: 'Sent to finance',
+  confirmed: 'Payment confirmed',
+  cancelled: 'Cancelled',
+});
+
+const FINANCE_INTERVENTION_REPORT_FOLLOW_UP_META = Object.freeze({
+  noPaymentRequest: { key: 'noPaymentRequest', label: 'No payment packet yet' },
+  draftPaymentRequest: { key: 'draftPaymentRequest', label: 'Draft' },
+  readyToSend: { key: 'readyToSend', label: 'Ready to send' },
+  sentToFinance: { key: 'sentToFinance', label: 'Sent to finance' },
+  partiallyPaid: { key: 'partiallyPaid', label: 'Partially paid' },
+  paidInFull: { key: 'paidInFull', label: 'Paid in full' },
+  cancelled: { key: 'cancelled', label: 'Cancelled' },
+});
+
+function formatFinanceInterventionReportPacketStatusLabel(status) {
+  const normalized = normalizePaymentStatus(status) || '';
+  if (!normalized) return null;
+  return (
+    FINANCE_INTERVENTION_REPORT_PACKET_STATUS_LABELS[normalized] ||
+    normalized
+      .replace(/[_-]+/g, ' ')
+      .replace(/\b\w/g, character => character.toUpperCase())
+  );
+}
+
+function createEmptyFinanceInterventionReportFollowUp() {
+  return {
+    packetCount: 0,
+    hasDraftPacket: false,
+    latestPacketStatus: null,
+    latestPacketStatusLabel: null,
+    financeSentAmount: 0,
+    financePaidAmount: 0,
+    financeSentDate: null,
+    financePaidDate: null,
+    followUpStatusKey: FINANCE_INTERVENTION_REPORT_FOLLOW_UP_META.noPaymentRequest.key,
+    followUpStatusLabel: FINANCE_INTERVENTION_REPORT_FOLLOW_UP_META.noPaymentRequest.label,
+  };
+}
+
+function resolveFinanceInterventionReportFollowUpStatus({
+  approvedTotal = 0,
+  financeSentAmount = 0,
+  financePaidAmount = 0,
+  latestPacketStatus = null,
+  hasDraftPacket = false,
+} = {}) {
+  const approvedNumeric = Number(approvedTotal);
+  const sentNumeric = Number(financeSentAmount);
+  const paidNumeric = Number(financePaidAmount);
+  const packetStatus = normalizePaymentStatus(latestPacketStatus) || '';
+  const epsilon = 0.009;
+
+  if (Number.isFinite(paidNumeric) && paidNumeric > 0) {
+    if (
+      Number.isFinite(approvedNumeric) &&
+      approvedNumeric > 0 &&
+      paidNumeric + epsilon >= approvedNumeric
+    ) {
+      return FINANCE_INTERVENTION_REPORT_FOLLOW_UP_META.paidInFull;
+    }
+    return FINANCE_INTERVENTION_REPORT_FOLLOW_UP_META.partiallyPaid;
+  }
+  if (Number.isFinite(sentNumeric) && sentNumeric > 0) {
+    return FINANCE_INTERVENTION_REPORT_FOLLOW_UP_META.sentToFinance;
+  }
+  if (packetStatus === 'cancelled') {
+    return FINANCE_INTERVENTION_REPORT_FOLLOW_UP_META.cancelled;
+  }
+  if (packetStatus === 'ready_to_send') {
+    return FINANCE_INTERVENTION_REPORT_FOLLOW_UP_META.readyToSend;
+  }
+  if (packetStatus && !['draft', 'ready_to_send', 'cancelled'].includes(packetStatus)) {
+    return FINANCE_INTERVENTION_REPORT_FOLLOW_UP_META.sentToFinance;
+  }
+  if (hasDraftPacket || packetStatus === 'draft') {
+    return FINANCE_INTERVENTION_REPORT_FOLLOW_UP_META.draftPaymentRequest;
+  }
+  return FINANCE_INTERVENTION_REPORT_FOLLOW_UP_META.noPaymentRequest;
+}
+
+const FINANCE_INTERVENTION_REPORT_CARRY_OVER_SOURCE_META = Object.freeze({
+  none: { key: 'none', label: 'No estimate available' },
+  paymentLines: { key: 'paymentLines', label: 'Payment-line dates' },
+  interventionSchedule: { key: 'interventionSchedule', label: 'Intervention payment schedule' },
+  interventionDates: { key: 'interventionDates', label: 'Intervention dates' },
+});
+
+function createEmptyFinanceInterventionReportCarryOver() {
+  return {
+    currentFiscalAmount: 0,
+    carryOutAmount: 0,
+    adjustmentAmount: 0,
+    sourceKey: FINANCE_INTERVENTION_REPORT_CARRY_OVER_SOURCE_META.none.key,
+    sourceLabel: FINANCE_INTERVENTION_REPORT_CARRY_OVER_SOURCE_META.none.label,
+    note: null,
+    hasCarryOver: false,
+    spansFiscalBoundary: false,
+    entryCount: 0,
+  };
+}
+
+function createEmptyFinanceInterventionReportCarryOverSummary(enabled = false) {
+  return {
+    enabled: Boolean(enabled),
+    carryInAmount: 0,
+    carryInInterventionCount: 0,
+    carryOutAmount: 0,
+    carryOutInterventionCount: 0,
+    currentFiscalEstimatedAmount: 0,
+    sourceNote: enabled
+      ? 'Best-effort estimate uses payment-line dates when available, otherwise the intervention schedule.'
+      : null,
+  };
+}
+
+function normaliseFinanceInterventionReportBoolean(rawValue) {
+  if (rawValue === true || rawValue === 1) return true;
+  const normalized = normaliseString(rawValue)?.toLowerCase() || '';
+  return ['1', 'true', 'yes', 'on'].includes(normalized);
+}
+
+function resolveFinanceInterventionReportCarryOverEntryDate(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  return (
+    toDateOnlyString(entry.requestedPaymentDate || entry.requested_payment_date || null) ||
+    toDateOnlyString(entry.servicePeriodStart || entry.service_period_start || null) ||
+    toDateOnlyString(entry.servicePeriodEnd || entry.service_period_end || null) ||
+    toDateOnlyString(entry.paidAt || entry.paid_at || null) ||
+    toDateOnlyString(entry.postedTransactionDate || entry.posted_transaction_date || null) ||
+    toDateOnlyString(entry.submittedTransactionDate || entry.submitted_transaction_date || null) ||
+    toDateOnlyString(entry.confirmedAt || entry.confirmed_at || null) ||
+    toDateOnlyString(entry.sentAt || entry.sent_at || null) ||
+    toDateOnlyString(entry.submittedAt || entry.submitted_at || null) ||
+    null
+  );
+}
+
+function buildFinanceInterventionReportCarryOverNote({
+  carryOutAmount = 0,
+  sourceLabel = null,
+} = {}) {
+  const sourceText = sourceLabel ? ` using ${String(sourceLabel).toLowerCase()}` : '';
+  if (Number(carryOutAmount) > 0) {
+    return `Scheduled beyond the selected fiscal year${sourceText}.`;
+  }
+  if (sourceLabel) {
+    return `Estimated from ${String(sourceLabel).toLowerCase()}.`;
+  }
+  return null;
+}
+
+function summarizeFinanceInterventionReportCarryOverEntries(
+  entries,
+  {
+    periodStart,
+    periodEnd,
+    sourceMeta = FINANCE_INTERVENTION_REPORT_CARRY_OVER_SOURCE_META.none,
+  } = {}
+) {
+  const summary = createEmptyFinanceInterventionReportCarryOver();
+  const normalizedStart = toDateOnlyString(periodStart);
+  const normalizedEnd = toDateOnlyString(periodEnd);
+  const list = Array.isArray(entries) ? entries : [];
+  if (!normalizedStart || !normalizedEnd || !list.length) {
+    return summary;
+  }
+
+  let preFiscalAmount = 0;
+  let currentFiscalAmount = 0;
+  let postFiscalAmount = 0;
+  let entryCount = 0;
+
+  list.forEach(entry => {
+    const date = resolveFinanceInterventionReportCarryOverEntryDate(entry);
+    const amount = Number(entry?.amount || 0);
+    if (!date || !Number.isFinite(amount) || amount <= 0) return;
+    entryCount += 1;
+    if (date < normalizedStart) {
+      preFiscalAmount += amount;
+      return;
+    }
+    if (date > normalizedEnd) {
+      postFiscalAmount += amount;
+      return;
+    }
+    currentFiscalAmount += amount;
+  });
+
+  const normalizedCurrentFiscalAmount = roundFinanceCurrencyAmount(currentFiscalAmount);
+  const normalizedCarryOutAmount = roundFinanceCurrencyAmount(postFiscalAmount);
+  const spansFiscalBoundary =
+    roundFinanceCurrencyAmount(preFiscalAmount) > 0 || normalizedCarryOutAmount > 0;
+
+  return {
+    currentFiscalAmount: normalizedCurrentFiscalAmount,
+    carryOutAmount: normalizedCarryOutAmount,
+    adjustmentAmount: normalizedCarryOutAmount > 0 ? roundFinanceCurrencyAmount(0 - normalizedCarryOutAmount) : 0,
+    sourceKey: sourceMeta?.key || FINANCE_INTERVENTION_REPORT_CARRY_OVER_SOURCE_META.none.key,
+    sourceLabel: sourceMeta?.label || FINANCE_INTERVENTION_REPORT_CARRY_OVER_SOURCE_META.none.label,
+    note: buildFinanceInterventionReportCarryOverNote({
+      carryOutAmount: normalizedCarryOutAmount,
+      sourceLabel: sourceMeta?.label || null,
+    }),
+    hasCarryOver: spansFiscalBoundary,
+    spansFiscalBoundary,
+    entryCount,
+  };
+}
+
+function createEmptyFinanceInterventionReportBreakdown() {
+  return {
+    tuition: 0,
+    booksMaterials: 0,
+    living: 0,
+    childcare: 0,
+    wage: 0,
+    other: 0,
+  };
+}
+
+function resolveFinanceInterventionReportCostLineCategory(line) {
+  if (!line || typeof line !== 'object') return null;
+  const explicitCategory = normalizeFundingCategoryKey(
+    line.fundingCategory ??
+      line.funding_category ??
+      line.categoryKey ??
+      line.category_key ??
+      line.category ??
+      null
+  );
+  if (explicitCategory) return explicitCategory;
+  const paymentType = resolveAutoPacketPaymentType(
+    line.type ?? line.paymentType ?? line.payment_type ?? null
+  );
+  return paymentType ? (PAYMENT_TYPE_FUNDING_CATEGORY_MAP[paymentType] || null) : null;
+}
+
+function buildFinanceInterventionReportAmountBreakdown(intervention) {
+  const breakdown = createEmptyFinanceInterventionReportBreakdown();
+  const metadata =
+    intervention?.metadata && typeof intervention.metadata === 'object'
+      ? intervention.metadata
+      : {};
+  const snapshotSource =
+    metadata?.snapshot && typeof metadata.snapshot === 'object'
+      ? metadata.snapshot
+      : {};
+  const costLinesRaw = Array.isArray(metadata.costLines)
+    ? metadata.costLines
+    : Array.isArray(metadata.cost_lines)
+      ? metadata.cost_lines
+      : Array.isArray(snapshotSource.costLines)
+        ? snapshotSource.costLines
+        : [];
+  const costLines = costLinesRaw.map(normalizeProposedCostLine).filter(Boolean);
+
+  costLines.forEach(line => {
+    const amount = Number(line?.amount);
+    if (!Number.isFinite(amount)) return;
+    const category = resolveFinanceInterventionReportCostLineCategory(line);
+    if (category === 'tuition') {
+      breakdown.tuition += amount;
+      return;
+    }
+    if (category === 'books' || category === 'materials') {
+      breakdown.booksMaterials += amount;
+      return;
+    }
+    if (category === 'living') {
+      breakdown.living += amount;
+      return;
+    }
+    if (category === 'childcare') {
+      breakdown.childcare += amount;
+      return;
+    }
+    if (
+      category === 'wage_total' ||
+      category === 'wage_wages' ||
+      category === 'wage_mercs' ||
+      category === 'wage_nonwages' ||
+      category === 'wage_other'
+    ) {
+      breakdown.wage += amount;
+      return;
+    }
+    breakdown.other += amount;
+  });
+
+  const rawAmounts = [
+    breakdown.tuition,
+    breakdown.booksMaterials,
+    breakdown.living,
+    breakdown.childcare,
+    breakdown.wage,
+    breakdown.other,
+  ];
+  const rawTotal = rawAmounts.reduce((sum, value) => sum + Number(value || 0), 0);
+  const targetCandidates = [
+    intervention?.approvedAmount,
+    intervention?.budgetAmount,
+    intervention?.cost,
+    computeCostLinesTotal(costLines),
+  ];
+  let targetTotal = null;
+  targetCandidates.some(candidate => {
+    if (candidate === null || typeof candidate === 'undefined' || candidate === '') {
+      return false;
+    }
+    const numeric = Number(candidate);
+    if (!Number.isFinite(numeric)) return false;
+    targetTotal = numeric;
+    return true;
+  });
+
+  if (Number.isFinite(targetTotal) && targetTotal > 0) {
+    if (rawTotal > 0) {
+      const scaled = scaleReportingCurrencyAmounts(rawAmounts, targetTotal);
+      breakdown.tuition = scaled[0] || 0;
+      breakdown.booksMaterials = scaled[1] || 0;
+      breakdown.living = scaled[2] || 0;
+      breakdown.childcare = scaled[3] || 0;
+      breakdown.wage = scaled[4] || 0;
+      breakdown.other = scaled[5] || 0;
+    } else {
+      breakdown.other = targetTotal;
+    }
+  }
+
+  breakdown.tuition = roundFinanceCurrencyAmount(breakdown.tuition);
+  breakdown.booksMaterials = roundFinanceCurrencyAmount(breakdown.booksMaterials);
+  breakdown.living = roundFinanceCurrencyAmount(breakdown.living);
+  breakdown.childcare = roundFinanceCurrencyAmount(breakdown.childcare);
+  breakdown.wage = roundFinanceCurrencyAmount(breakdown.wage);
+  breakdown.other = roundFinanceCurrencyAmount(breakdown.other);
+
+  const total = Number.isFinite(targetTotal)
+    ? roundFinanceCurrencyAmount(targetTotal)
+    : roundFinanceCurrencyAmount(
+        breakdown.tuition +
+          breakdown.booksMaterials +
+          breakdown.living +
+          breakdown.childcare +
+          breakdown.wage +
+          breakdown.other
+      );
+
+  return {
+    ...breakdown,
+    total,
+  };
+}
+
+function resolveFinanceInterventionReportFundingSource(row, intervention) {
+  const candidates = [
+    row?.pot_funding_source,
+    intervention?.fundingStream,
+    row?.funding_stream_decision,
+    row?.plan_funding_stream,
+  ];
+  for (const candidate of candidates) {
+    const normalized = normalizeFundingSource(candidate);
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
+async function readFinanceInterventionReportFollowUpMap(interventionIds, executor = pool) {
+  const ids = Array.from(
+    new Set(
+      (Array.isArray(interventionIds) ? interventionIds : [])
+        .map(value => normalisePositiveInteger(value))
+        .filter(Boolean)
+    )
+  );
+  const result = new Map();
+  ids.forEach(id => {
+    result.set(id, createEmptyFinanceInterventionReportFollowUp());
+  });
+  if (!ids.length) {
+    return result;
+  }
+
+  try {
+    const [packetRows] = await executor.query(
+      `
+      SELECT
+        id,
+        intervention_id,
+        status,
+        submitted_at,
+        sent_at,
+        confirmed_at,
+        updated_at,
+        created_at
+      FROM payment_packet
+      WHERE intervention_id IN (${ids.map(() => '?').join(', ')})
+      ORDER BY intervention_id ASC, COALESCE(updated_at, created_at) DESC, id DESC
+      `,
+      ids
+    );
+    (packetRows || []).forEach(row => {
+      const interventionId = normalisePositiveInteger(row.intervention_id);
+      if (!interventionId || !result.has(interventionId)) return;
+      const current = result.get(interventionId);
+      const packetStatus = normalizePaymentStatus(row.status) || null;
+      current.packetCount += 1;
+      if (normalizePacketWorkflowStage(packetStatus) === 'draft') {
+        current.hasDraftPacket = true;
+      }
+      if (!current.latestPacketStatus) {
+        current.latestPacketStatus = packetStatus;
+        current.latestPacketStatusLabel = formatFinanceInterventionReportPacketStatusLabel(packetStatus);
+      }
+      const handoffDate = toDateOnlyString(row.sent_at || row.submitted_at || null);
+      if (handoffDate && (!current.financeSentDate || handoffDate > current.financeSentDate)) {
+        current.financeSentDate = handoffDate;
+      }
+      const paidDate = toDateOnlyString(row.confirmed_at || null);
+      if (paidDate && (!current.financePaidDate || paidDate > current.financePaidDate)) {
+        current.financePaidDate = paidDate;
+      }
+    });
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err) && !isMissingColumnErrorLocal(err)) {
+      throw err;
+    }
+  }
+
+  try {
+    const [txRows] = await executor.query(
+      `
+      SELECT
+        case_intervention_id AS intervention_id,
+        COALESCE(SUM(CASE WHEN status = 'submitted' THEN amount ELSE 0 END), 0) AS finance_sent_amount,
+        COALESCE(SUM(CASE WHEN status = 'posted' THEN amount ELSE 0 END), 0) AS finance_paid_amount,
+        MAX(CASE WHEN status = 'submitted' THEN transaction_date END) AS finance_sent_date,
+        MAX(CASE WHEN status = 'posted' THEN transaction_date END) AS finance_paid_date
+      FROM finance_transaction
+      WHERE case_intervention_id IN (${ids.map(() => '?').join(', ')})
+      GROUP BY case_intervention_id
+      `,
+      ids
+    );
+    (txRows || []).forEach(row => {
+      const interventionId = normalisePositiveInteger(row.intervention_id);
+      if (!interventionId || !result.has(interventionId)) return;
+      const current = result.get(interventionId);
+      current.financeSentAmount = roundFinanceCurrencyAmount(row.finance_sent_amount || 0);
+      current.financePaidAmount = roundFinanceCurrencyAmount(row.finance_paid_amount || 0);
+      const sentDate = toDateOnlyString(row.finance_sent_date || null);
+      if (sentDate && (!current.financeSentDate || sentDate > current.financeSentDate)) {
+        current.financeSentDate = sentDate;
+      }
+      const paidDate = toDateOnlyString(row.finance_paid_date || null);
+      if (paidDate && (!current.financePaidDate || paidDate > current.financePaidDate)) {
+        current.financePaidDate = paidDate;
+      }
+    });
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err) && !isMissingColumnErrorLocal(err)) {
+      throw err;
+    }
+  }
+
+  return result;
+}
+
+function buildFinanceInterventionReportRow(
+  row,
+  financeFollowUpMap = new Map(),
+  carryOverMap = new Map()
+) {
+  if (!row) return null;
+  const intervention = mapInterventionRow({
+    ...row,
+    plan_funding_stream: row.plan_funding_stream,
+  });
+  if (!intervention) return null;
+  const fundingSource = resolveFinanceInterventionReportFundingSource(row, intervention);
+  if (!FINANCE_INTERVENTION_REPORT_FUNDING_SOURCES.has(fundingSource)) {
+    return null;
+  }
+  const participantProvince = buildFinanceInterventionReportParticipantProvince(row);
+  const caseId = normalisePositiveInteger(row.case_id) || null;
+  const interventionId = normalisePositiveInteger(row.id) || null;
+  const breakdown = buildFinanceInterventionReportAmountBreakdown(intervention);
+  const followUpSeed =
+    (interventionId && financeFollowUpMap.get(interventionId)) ||
+    createEmptyFinanceInterventionReportFollowUp();
+  const carryOverSeed =
+    (interventionId && carryOverMap.get(interventionId)) ||
+    createEmptyFinanceInterventionReportCarryOver();
+  const followUpStatus = resolveFinanceInterventionReportFollowUpStatus({
+    approvedTotal: breakdown.total,
+    financeSentAmount: followUpSeed.financeSentAmount,
+    financePaidAmount: followUpSeed.financePaidAmount,
+    latestPacketStatus: followUpSeed.latestPacketStatus,
+    hasDraftPacket: followUpSeed.hasDraftPacket,
+  });
+  return {
+    id: `intervention-${row.id}`,
+    interventionId,
+    caseId,
+    actionPlanId: normalisePositiveInteger(row.action_plan_id) || null,
+    participantKey:
+      normaliseString(row.participant_key) ||
+      (caseId ? `case-${caseId}` : `intervention-${row.id}`),
+    participantName: buildMetricApplicantName(row),
+    participantProvince,
+    participantProvinceName: buildFinanceInterventionReportParticipantProvinceName(participantProvince),
+    caseNumber: normaliseString(row.case_number) || null,
+    trackingId: buildMetricReference(row),
+    caseManagerId: normalisePositiveInteger(row.assigned_to_user_id) || null,
+    caseManagerName: buildMetricOwnerLabel(row),
+    fundingSource,
+    commitmentDate: toDateOnlyString(row.reviewed_at || row.created_at || null),
+    approvedDate: toDateOnlyString(row.reviewed_at || row.created_at || null),
+    status: intervention.status || null,
+    interventionCode: intervention.code ? String(intervention.code) : null,
+    interventionLabel:
+      normaliseString(row.intervention_label) ||
+      (intervention.code ? REPORTING_INTERVENTION_LABEL_BY_CODE[intervention.code] : null) ||
+      intervention.title ||
+      null,
+    interventionTitle: intervention.title || null,
+    interventionStartDate: intervention.startDate || null,
+    interventionEndDate: intervention.endDate || null,
+    institution: intervention.institution || null,
+    programName: intervention.programName || null,
+    actionPlanName: normaliseString(row.action_plan_name) || null,
+    budgetPotId:
+      normalisePositiveInteger(row.budget_pot_id) ||
+      normalisePositiveInteger(row.plan_budget_pot) ||
+      null,
+    budgetPotCode: normaliseString(row.budget_pot_code) || null,
+    budgetPotName: normaliseString(row.budget_pot_name) || null,
+    tuitionAmount: breakdown.tuition,
+    booksMaterialsAmount: breakdown.booksMaterials,
+    livingAmount: breakdown.living,
+    childcareAmount: breakdown.childcare,
+    wageAmount: breakdown.wage,
+    otherAmount: breakdown.other,
+    totalAmount: breakdown.total,
+    financeFollowUpStatusKey: followUpStatus.key,
+    financeFollowUpStatusLabel: followUpStatus.label,
+    financeSentAmount: roundFinanceCurrencyAmount(followUpSeed.financeSentAmount || 0),
+    financePaidAmount: roundFinanceCurrencyAmount(followUpSeed.financePaidAmount || 0),
+    financeSentDate: followUpSeed.financeSentDate || null,
+    financePaidDate: followUpSeed.financePaidDate || null,
+    latestPacketStatus: followUpSeed.latestPacketStatus || null,
+    latestPacketStatusLabel: followUpSeed.latestPacketStatusLabel || null,
+    paymentPacketCount: Number(followUpSeed.packetCount || 0),
+    carryOverCurrentFiscalAmount: roundFinanceCurrencyAmount(carryOverSeed.currentFiscalAmount || 0),
+    carryOverOutAmount: roundFinanceCurrencyAmount(carryOverSeed.carryOutAmount || 0),
+    carryOverAdjustmentAmount: roundFinanceCurrencyAmount(carryOverSeed.adjustmentAmount || 0),
+    carryOverSourceKey: carryOverSeed.sourceKey || FINANCE_INTERVENTION_REPORT_CARRY_OVER_SOURCE_META.none.key,
+    carryOverSourceLabel:
+      carryOverSeed.sourceLabel || FINANCE_INTERVENTION_REPORT_CARRY_OVER_SOURCE_META.none.label,
+    carryOverNote: carryOverSeed.note || null,
+    carryOverHasAdjustment: Boolean(carryOverSeed.hasCarryOver),
+    carryOverSpansFiscalBoundary: Boolean(carryOverSeed.spansFiscalBoundary),
+    workspacePath: caseId ? `/cases/${caseId}` : null,
+  };
+}
+
+function sortFinanceInterventionReportRows(rows) {
+  return (Array.isArray(rows) ? rows.slice() : []).sort((left, right) => {
+    const leftProvince = left?.participantProvinceName || left?.participantProvince || 'ZZZ';
+    const rightProvince = right?.participantProvinceName || right?.participantProvince || 'ZZZ';
+    if (leftProvince !== rightProvince) {
+      return String(leftProvince).localeCompare(String(rightProvince));
+    }
+    const leftFunding = left?.fundingSource || '';
+    const rightFunding = right?.fundingSource || '';
+    if (leftFunding !== rightFunding) {
+      return String(leftFunding).localeCompare(String(rightFunding));
+    }
+    const leftParticipant = left?.participantName || '';
+    const rightParticipant = right?.participantName || '';
+    if (leftParticipant !== rightParticipant) {
+      return String(leftParticipant).localeCompare(String(rightParticipant));
+    }
+    const leftDate = left?.commitmentDate || '';
+    const rightDate = right?.commitmentDate || '';
+    if (leftDate !== rightDate) {
+      return String(leftDate).localeCompare(String(rightDate));
+    }
+    return Number(left?.interventionId || 0) - Number(right?.interventionId || 0);
+  });
+}
+
+function buildFinanceInterventionReportSummary(
+  rows,
+  {
+    includeCarryOver = false,
+    carryInAmount = 0,
+    carryInInterventionCount = 0,
+  } = {}
+) {
+  const items = Array.isArray(rows) ? rows : [];
+  const fundingTotals = { CRF: 0, EI: 0 };
+  const categoryTotals = createEmptyFinanceInterventionReportBreakdown();
+  const financeTotals = {
+    sentAmount: 0,
+    paidAmount: 0,
+    notYetSentAmount: 0,
+  };
+  const financeStatusCounts = {
+    noPaymentRequest: 0,
+    draftPaymentRequest: 0,
+    awaitingRelease: 0,
+    readyToSend: 0,
+    sentToFinance: 0,
+    partiallyPaid: 0,
+    paidInFull: 0,
+    cancelled: 0,
+  };
+  const participantKeys = new Set();
+  const provinceCodes = new Set();
+  const provinceSummary = new Map();
+  const carryOver = createEmptyFinanceInterventionReportCarryOverSummary(includeCarryOver);
+
+  items.forEach(row => {
+    const totalAmount = Number(row?.totalAmount || 0);
+    const financeSentAmount = Number(row?.financeSentAmount || 0);
+    const financePaidAmount = Number(row?.financePaidAmount || 0);
+    const carryOverCurrentFiscalAmount = Number(row?.carryOverCurrentFiscalAmount || 0);
+    const carryOverOutAmount = Number(row?.carryOverOutAmount || 0);
+    const fundingSource = row?.fundingSource;
+    if (fundingSource && Object.prototype.hasOwnProperty.call(fundingTotals, fundingSource)) {
+      fundingTotals[fundingSource] += totalAmount;
+    }
+    categoryTotals.tuition += Number(row?.tuitionAmount || 0);
+    categoryTotals.booksMaterials += Number(row?.booksMaterialsAmount || 0);
+    categoryTotals.living += Number(row?.livingAmount || 0);
+    categoryTotals.childcare += Number(row?.childcareAmount || 0);
+    categoryTotals.wage += Number(row?.wageAmount || 0);
+    categoryTotals.other += Number(row?.otherAmount || 0);
+    financeTotals.sentAmount += financeSentAmount;
+    financeTotals.paidAmount += financePaidAmount;
+    financeTotals.notYetSentAmount += Math.max(
+      0,
+      roundFinanceCurrencyAmount(totalAmount - financeSentAmount - financePaidAmount)
+    );
+    if (
+      row?.financeFollowUpStatusKey &&
+      Object.prototype.hasOwnProperty.call(financeStatusCounts, row.financeFollowUpStatusKey)
+    ) {
+      financeStatusCounts[row.financeFollowUpStatusKey] += 1;
+    }
+    if (includeCarryOver) {
+      carryOver.currentFiscalEstimatedAmount += carryOverCurrentFiscalAmount;
+      carryOver.carryOutAmount += carryOverOutAmount;
+      if (carryOverOutAmount > 0) {
+        carryOver.carryOutInterventionCount += 1;
+      }
+    }
+
+    if (row?.participantKey) {
+      participantKeys.add(String(row.participantKey));
+    }
+    if (row?.participantProvince) {
+      provinceCodes.add(row.participantProvince);
+    }
+
+    const provinceKey = row?.participantProvince || 'UNSPECIFIED';
+    if (!provinceSummary.has(provinceKey)) {
+      provinceSummary.set(provinceKey, {
+        provinceCode: row?.participantProvince || null,
+        provinceName: row?.participantProvinceName || 'Unspecified',
+        crfAmount: 0,
+        eiAmount: 0,
+        totalAmount: 0,
+        interventionCount: 0,
+        participants: new Set(),
+      });
+    }
+    const provinceEntry = provinceSummary.get(provinceKey);
+    provinceEntry.interventionCount += 1;
+    provinceEntry.totalAmount += totalAmount;
+    if (row?.fundingSource === 'CRF') {
+      provinceEntry.crfAmount += totalAmount;
+    } else if (row?.fundingSource === 'EI') {
+      provinceEntry.eiAmount += totalAmount;
+    }
+    if (row?.participantKey) {
+      provinceEntry.participants.add(String(row.participantKey));
+    }
+  });
+
+  const provinceRows = Array.from(provinceSummary.values())
+    .map(entry => ({
+      provinceCode: entry.provinceCode,
+      provinceName: entry.provinceName,
+      crfAmount: roundFinanceCurrencyAmount(entry.crfAmount),
+      eiAmount: roundFinanceCurrencyAmount(entry.eiAmount),
+      totalAmount: roundFinanceCurrencyAmount(entry.totalAmount),
+      interventionCount: entry.interventionCount,
+      participantCount: entry.participants.size,
+    }))
+    .sort((left, right) =>
+      String(left?.provinceName || 'Unspecified').localeCompare(
+        String(right?.provinceName || 'Unspecified')
+      )
+    );
+
+  categoryTotals.tuition = roundFinanceCurrencyAmount(categoryTotals.tuition);
+  categoryTotals.booksMaterials = roundFinanceCurrencyAmount(categoryTotals.booksMaterials);
+  categoryTotals.living = roundFinanceCurrencyAmount(categoryTotals.living);
+  categoryTotals.childcare = roundFinanceCurrencyAmount(categoryTotals.childcare);
+  categoryTotals.wage = roundFinanceCurrencyAmount(categoryTotals.wage);
+  categoryTotals.other = roundFinanceCurrencyAmount(categoryTotals.other);
+  financeTotals.sentAmount = roundFinanceCurrencyAmount(financeTotals.sentAmount);
+  financeTotals.paidAmount = roundFinanceCurrencyAmount(financeTotals.paidAmount);
+  financeTotals.notYetSentAmount = roundFinanceCurrencyAmount(financeTotals.notYetSentAmount);
+  carryOver.carryInAmount = roundFinanceCurrencyAmount(carryInAmount);
+  carryOver.carryInInterventionCount = Number(carryInInterventionCount || 0);
+  carryOver.carryOutAmount = roundFinanceCurrencyAmount(carryOver.carryOutAmount);
+  carryOver.currentFiscalEstimatedAmount = roundFinanceCurrencyAmount(
+    carryOver.currentFiscalEstimatedAmount + carryOver.carryInAmount
+  );
+
+  return {
+    totalAmount: roundFinanceCurrencyAmount(
+      items.reduce((sum, row) => sum + Number(row?.totalAmount || 0), 0)
+    ),
+    fundingTotals: {
+      CRF: roundFinanceCurrencyAmount(fundingTotals.CRF),
+      EI: roundFinanceCurrencyAmount(fundingTotals.EI),
+    },
+    categoryTotals,
+    financeTotals,
+    financeStatusCounts,
+    carryOver,
+    interventionCount: items.length,
+    participantCount: participantKeys.size,
+    provinceCount: provinceCodes.size,
+    provinceRows,
+  };
+}
+
+async function readFinanceInterventionReportRawRows(
+  {
+    approvedStartDate = null,
+    approvedEndDate = null,
+    approvedBeforeDate = null,
+    activityWindowStart = null,
+    activityWindowEnd = null,
+  } = {},
+  executor = pool
+) {
+  const runner = executor || pool;
+  const where = [
+    `REPLACE(LOWER(TRIM(ci.status)), ' ', '_') IN (${FINANCE_INTERVENTION_REPORT_INCLUDED_STATUSES.map(() => '?').join(', ')})`,
+  ];
+  const params = [...FINANCE_INTERVENTION_REPORT_INCLUDED_STATUSES];
+  const clientProvinceExpr = `COALESCE(
+    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.address.province')), ''),
+    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.address.provinceCode')), ''),
+    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.province')), ''),
+    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.provinceCode')), '')
+  )`;
+
+  if (approvedStartDate && approvedEndDate) {
+    where.push(`DATE(COALESCE(ci.reviewed_at, ci.created_at)) BETWEEN ? AND ?`);
+    params.push(approvedStartDate, approvedEndDate);
+  } else if (approvedBeforeDate) {
+    where.push(`DATE(COALESCE(ci.reviewed_at, ci.created_at)) < ?`);
+    params.push(approvedBeforeDate);
+  }
+
+  if (activityWindowStart && activityWindowEnd) {
+    where.push(
+      `(
+        (
+          ci.start_date IS NOT NULL
+          AND DATE(ci.start_date) <= ?
+          AND (ci.end_date IS NULL OR DATE(ci.end_date) >= ?)
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM payment_packet_line ppl
+          JOIN payment_packet pp2 ON pp2.id = ppl.payment_packet_id
+          WHERE ppl.intervention_id = ci.id
+            AND ppl.status <> 'cancelled'
+            AND DATE(
+              COALESCE(
+                ppl.requested_payment_date,
+                ppl.service_period_start,
+                ppl.service_period_end,
+                ppl.paid_at,
+                pp2.confirmed_at,
+                pp2.sent_at,
+                pp2.submitted_at
+              )
+            ) BETWEEN ? AND ?
+        )
+      )`
+    );
+    params.push(activityWindowEnd, activityWindowStart, activityWindowStart, activityWindowEnd);
+  }
+
+  try {
+    const [rows] = await runner.query(
+      `
+      SELECT
+        ci.*,
+        c.case_number,
+        c.client_id,
+        c.assigned_to_user_id,
+        COALESCE(CAST(c.client_id AS CHAR), CONCAT('case-', c.id)) AS participant_key,
+        cl.first_name AS client_first_name,
+        cl.last_name AS client_last_name,
+        ${clientProvinceExpr} AS client_address_province,
+        COALESCE(
+          JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')),
+          ias.reference_number
+        ) AS tracking_id,
+        JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."first-name"')) AS submission_first_name,
+        JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."last-name"')) AS submission_last_name,
+        JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."preferred-name"')) AS submission_preferred_name,
+        ${REPORTING_ADDRESS_PROVINCE_EXPR} AS submission_address_province,
+        sp.display_name AS owner_display_name,
+        sp.name AS owner_name,
+        sp.email AS assigned_user_email,
+        ap.name AS action_plan_name,
+        ap.funding_stream AS plan_funding_stream,
+        ap.budget_pot AS plan_budget_pot,
+        bp.id AS budget_pot_id,
+        bp.code AS budget_pot_code,
+        bp.name AS budget_pot_name,
+        bp.funding_source AS pot_funding_source,
+        ic.label AS intervention_label
+      FROM iset_case_intervention ci
+      JOIN iset_case c ON c.id = ci.case_id
+      LEFT JOIN client cl ON cl.id = c.client_id
+      LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
+      LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      LEFT JOIN iset_application a ON a.id = c.application_id
+      LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
+      LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
+      WHERE ${where.join('\n        AND ')}
+      `,
+      params
+    );
+    return Array.isArray(rows) ? rows : [];
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err) && !isMissingColumnErrorLocal(err)) {
+      throw err;
+    }
+    return [];
+  }
+}
+
+async function readFinanceInterventionReportCarryOverMap(
+  interventionRows,
+  { periodStart, periodEnd } = {},
+  executor = pool
+) {
+  const rows = Array.isArray(interventionRows) ? interventionRows : [];
+  const ids = Array.from(
+    new Set(
+      rows
+        .map(row => normalisePositiveInteger(row?.id))
+        .filter(Boolean)
+    )
+  );
+  const result = new Map();
+  ids.forEach(id => {
+    result.set(id, createEmptyFinanceInterventionReportCarryOver());
+  });
+  if (!ids.length || !periodStart || !periodEnd) {
+    return result;
+  }
+
+  const paymentEntriesByIntervention = new Map();
+  ids.forEach(id => {
+    paymentEntriesByIntervention.set(id, []);
+  });
+
+  try {
+    const [lineRows] = await executor.query(
+      `
+      SELECT
+        ppl.id,
+        ppl.intervention_id,
+        ppl.amount,
+        ppl.requested_payment_date,
+        ppl.service_period_start,
+        ppl.service_period_end,
+        ppl.paid_at,
+        pp.submitted_at,
+        pp.sent_at,
+        pp.confirmed_at,
+        MAX(CASE WHEN ft.status = 'submitted' THEN ft.transaction_date END) AS submitted_transaction_date,
+        MAX(CASE WHEN ft.status = 'posted' THEN ft.transaction_date END) AS posted_transaction_date
+      FROM payment_packet_line ppl
+      JOIN payment_packet pp ON pp.id = ppl.payment_packet_id
+      LEFT JOIN payment_line_transaction plt ON plt.payment_packet_line_id = ppl.id
+      LEFT JOIN finance_transaction ft ON ft.id = plt.finance_transaction_id
+      WHERE ppl.intervention_id IN (${ids.map(() => '?').join(', ')})
+        AND ppl.status <> 'cancelled'
+      GROUP BY
+        ppl.id,
+        ppl.intervention_id,
+        ppl.amount,
+        ppl.requested_payment_date,
+        ppl.service_period_start,
+        ppl.service_period_end,
+        ppl.paid_at,
+        pp.submitted_at,
+        pp.sent_at,
+        pp.confirmed_at
+      `,
+      ids
+    );
+    (lineRows || []).forEach(row => {
+      const interventionId = normalisePositiveInteger(row?.intervention_id);
+      if (!interventionId || !paymentEntriesByIntervention.has(interventionId)) return;
+      const entries = paymentEntriesByIntervention.get(interventionId) || [];
+      entries.push({
+        amount: Number(row?.amount || 0),
+        requestedPaymentDate: toDateOnlyString(row?.requested_payment_date || null),
+        servicePeriodStart: toDateOnlyString(row?.service_period_start || null),
+        servicePeriodEnd: toDateOnlyString(row?.service_period_end || null),
+        paidAt: toDateOnlyString(row?.paid_at || null),
+        submittedAt: toDateOnlyString(row?.submitted_at || null),
+        sentAt: toDateOnlyString(row?.sent_at || null),
+        confirmedAt: toDateOnlyString(row?.confirmed_at || null),
+        submittedTransactionDate: toDateOnlyString(row?.submitted_transaction_date || null),
+        postedTransactionDate: toDateOnlyString(row?.posted_transaction_date || null),
+      });
+      paymentEntriesByIntervention.set(interventionId, entries);
+    });
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err) && !isMissingColumnErrorLocal(err)) {
+      throw err;
+    }
+  }
+
+  rows.forEach(row => {
+    const interventionId = normalisePositiveInteger(row?.id);
+    if (!interventionId) return;
+    const paymentEntries = paymentEntriesByIntervention.get(interventionId) || [];
+    let entries = paymentEntries;
+    let sourceMeta = paymentEntries.length
+      ? FINANCE_INTERVENTION_REPORT_CARRY_OVER_SOURCE_META.paymentLines
+      : FINANCE_INTERVENTION_REPORT_CARRY_OVER_SOURCE_META.none;
+
+    if (!entries.length) {
+      const derivedEntries = buildReportingInterventionAmountEntries(row, { statusView: 'planned' })
+        .map(entry => ({
+          amount: Number(entry?.amount || 0),
+          requestedPaymentDate: toDateOnlyString(entry?.date || null),
+        }))
+        .filter(entry => {
+          const amount = Number(entry?.amount || 0);
+          return entry?.requestedPaymentDate && Number.isFinite(amount) && amount > 0;
+        });
+      entries = derivedEntries;
+      sourceMeta = derivedEntries.length > 1
+        ? FINANCE_INTERVENTION_REPORT_CARRY_OVER_SOURCE_META.interventionSchedule
+        : derivedEntries.length === 1
+          ? FINANCE_INTERVENTION_REPORT_CARRY_OVER_SOURCE_META.interventionDates
+          : FINANCE_INTERVENTION_REPORT_CARRY_OVER_SOURCE_META.none;
+    }
+
+    result.set(
+      interventionId,
+      summarizeFinanceInterventionReportCarryOverEntries(entries, {
+        periodStart,
+        periodEnd,
+        sourceMeta,
+      })
+    );
+  });
+
+  return result;
+}
+
+function buildFinanceInterventionReportCarryInSummary(
+  rows,
+  carryOverMap = new Map(),
+  provinceCodes = []
+) {
+  const normalizedProvinceCodes = normaliseReportingProvinceCodes(provinceCodes);
+  let carryInAmount = 0;
+  let carryInInterventionCount = 0;
+
+  (Array.isArray(rows) ? rows : []).forEach(row => {
+    const intervention = mapInterventionRow({
+      ...row,
+      plan_funding_stream: row?.plan_funding_stream,
+    });
+    if (!intervention) return;
+    const fundingSource = resolveFinanceInterventionReportFundingSource(row, intervention);
+    if (!FINANCE_INTERVENTION_REPORT_FUNDING_SOURCES.has(fundingSource)) {
+      return;
+    }
+    const participantProvince = buildFinanceInterventionReportParticipantProvince(row);
+    if (!matchesReportingProvinceFilter(participantProvince, normalizedProvinceCodes)) {
+      return;
+    }
+    const interventionId = normalisePositiveInteger(row?.id);
+    if (!interventionId) return;
+    const carryOver = carryOverMap.get(interventionId) || createEmptyFinanceInterventionReportCarryOver();
+    const amount = Number(carryOver?.currentFiscalAmount || 0);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    carryInAmount += amount;
+    carryInInterventionCount += 1;
+  });
+
+  return {
+    carryInAmount: roundFinanceCurrencyAmount(carryInAmount),
+    carryInInterventionCount,
+  };
+}
+
+async function readFinanceInterventionReportFilterOptions(
+  { fiscalYearStart, periodType },
+  executor = pool
+) {
+  const normalizedFiscalYearStart = resolveReportingFiscalYearStartValue(fiscalYearStart);
+  const { periodType: normalizedPeriodType, periods, defaultPeriodKey } =
+    resolveFinanceInterventionReportPeriodSelection(normalizedFiscalYearStart, periodType);
+
+  let caseManagers = [];
+  try {
+    const [rows] = await executor.query(
+      `
+      SELECT
+        sp.id,
+        COALESCE(
+          NULLIF(TRIM(sp.display_name), ''),
+          NULLIF(TRIM(sp.name), ''),
+          NULLIF(TRIM(sp.email), ''),
+          CONCAT('Staff #', sp.id)
+        ) AS label,
+        sp.primary_role
+      FROM staff_profiles sp
+      WHERE sp.status = 'active'
+        AND sp.primary_role IN (${REPORTING_CASE_MANAGER_ROLE_KEYS.map(() => '?').join(', ')})
+      ORDER BY label ASC
+      `,
+      REPORTING_CASE_MANAGER_ROLE_KEYS
+    );
+    caseManagers = (rows || []).map(row => ({
+      value: String(row.id),
+      label: row.label,
+      role: normaliseString(row.primary_role) || null,
+    }));
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err) && !isMissingColumnErrorLocal(err)) {
+      throw err;
+    }
+  }
+
+  let provinces = [];
+  try {
+    const [rows] = await executor.query(
+      `
+      SELECT region_id, code, name_en
+      FROM canada_region
+      WHERE code <> ?
+      ORDER BY name_en ASC
+      `,
+      ['XX']
+    );
+    provinces = (rows || []).map(row => ({
+      value: String(row.code || '').toUpperCase(),
+      label: `${String(row.code || '').toUpperCase()} - ${row.name_en || row.code}`,
+      provinceCode: String(row.code || '').toUpperCase(),
+      provinceName: row.name_en || null,
+    }));
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err) && !isMissingColumnErrorLocal(err)) {
+      throw err;
+    }
+    provinces = PROVINCE_CODES
+      .filter(entry => entry?.code && entry.code !== 'XX')
+      .map(entry => ({
+        value: entry.code,
+        label: `${entry.code} - ${entry.name}`,
+        provinceCode: entry.code,
+        provinceName: entry.name,
+      }));
+  }
+
+  return {
+    fiscalYearStart: normalizedFiscalYearStart,
+    fiscalYear: formatReportingFiscalYearLabel(normalizedFiscalYearStart),
+    periodType: normalizedPeriodType,
+    periodOptions: periods.map(period => ({
+      value: period.key,
+      label: period.label,
+      shortLabel: period.shortLabel || period.label,
+      start: period.start,
+      end: period.end,
+    })),
+    defaultPeriodKey,
+    modeOptions: FINANCE_INTERVENTION_REPORT_MODE_OPTIONS.map(entry => ({ ...entry })),
+    fundingSourceOptions: [
+      { value: 'all', label: 'All funding sources' },
+      { value: 'CRF', label: 'CRF' },
+      { value: 'EI', label: 'EI' },
+    ],
+    caseManagers,
+    provinces,
+  };
+}
+
+async function readFinanceInterventionReportPayload(input = {}, executor = pool) {
+  const mode = normaliseFinanceInterventionReportMode(input.mode);
+  if (!mode) {
+    const err = new Error('Invalid financial report mode.');
+    err.statusCode = 400;
+    err.code = 'invalid_finance_intervention_report_mode';
+    throw err;
+  }
+  if (mode === 'actual') {
+    const err = new Error('Actual paid reporting is not available yet. Use the approved-funding report for now.');
+    err.statusCode = 501;
+    err.code = 'finance_intervention_report_actual_unavailable';
+    throw err;
+  }
+
+  const fiscalYearStart = resolveReportingFiscalYearStartValue(
+    input.fiscalYearStart ?? input.fiscalYear
+  );
+  const { periodType, periods, defaultPeriodKey, period } =
+    resolveFinanceInterventionReportPeriodSelection(
+      fiscalYearStart,
+      input.periodType,
+      input.periodKey ?? input.period
+    );
+  const periodOptions = periods.map(entry => ({
+    value: entry.key,
+    label: entry.label,
+    shortLabel: entry.shortLabel || entry.label,
+    start: entry.start,
+    end: entry.end,
+  }));
+  if (!period) {
+    const includeCarryOver = normaliseFinanceInterventionReportBoolean(
+      input.includeCarryOver ?? input.include_carry_over
+    );
+    return {
+      mode,
+      fiscalYearStart,
+      fiscalYear: formatReportingFiscalYearLabel(fiscalYearStart),
+      periodType,
+      period: null,
+      periodOptions,
+      defaultPeriodKey,
+      filters: {
+        provinceCodes: [],
+        caseManagerIds: [],
+        fundingSource: 'all',
+        includeCarryOver,
+      },
+      rows: [],
+      summary: buildFinanceInterventionReportSummary([], { includeCarryOver }),
+    };
+  }
+
+  const provinceCodes = normaliseReportingProvinceCodes(input.provinces ?? input.province ?? []);
+  const caseManagerIds = normaliseReportingCaseManagerIds(
+    input.caseManagers ?? input.caseManager ?? input.manager ?? []
+  );
+  const fundingSourceFilter = normalizeFundingSource(
+    input.fundingSource ?? input.funding ?? null
+  );
+  const includeCarryOver = normaliseFinanceInterventionReportBoolean(
+    input.includeCarryOver ?? input.include_carry_over
+  );
+  const interventionIds = [];
+  const rawRows = await readFinanceInterventionReportRawRows(
+    {
+      approvedStartDate: period.start,
+      approvedEndDate: period.end,
+    },
+    executor
+  );
+
+  rawRows.forEach(row => {
+    const interventionId = normalisePositiveInteger(row?.id);
+    if (interventionId) {
+      interventionIds.push(interventionId);
+    }
+  });
+  const financeFollowUpMap = await readFinanceInterventionReportFollowUpMap(interventionIds, executor);
+  const carryOverMap = includeCarryOver
+    ? await readFinanceInterventionReportCarryOverMap(rawRows, {
+        periodStart: period.start,
+        periodEnd: period.end,
+      }, executor)
+    : new Map();
+
+  const rows = sortFinanceInterventionReportRows(
+    rawRows
+      .map(row => buildFinanceInterventionReportRow(row, financeFollowUpMap, carryOverMap))
+      .filter(Boolean)
+      .filter(row => matchesReportingProvinceFilter(row.participantProvince, provinceCodes))
+      .filter(row => matchesReportingCaseManagerFilter(row.caseManagerId, caseManagerIds))
+      .filter(row => !fundingSourceFilter || row.fundingSource === fundingSourceFilter)
+  );
+
+  let carryInSummary = createEmptyFinanceInterventionReportCarryOverSummary(true);
+  if (includeCarryOver) {
+    const priorRows = await readFinanceInterventionReportRawRows(
+      {
+        approvedBeforeDate: period.start,
+        activityWindowStart: period.start,
+        activityWindowEnd: period.end,
+      },
+      executor
+    );
+    const priorCarryOverMap = await readFinanceInterventionReportCarryOverMap(
+      priorRows,
+      {
+        periodStart: period.start,
+        periodEnd: period.end,
+      },
+      executor
+    );
+    carryInSummary = {
+      ...carryInSummary,
+      ...buildFinanceInterventionReportCarryInSummary(priorRows, priorCarryOverMap, provinceCodes),
+    };
+  }
+
+  return {
+    mode,
+    fiscalYearStart,
+    fiscalYear: formatReportingFiscalYearLabel(fiscalYearStart),
+    periodType,
+    period: {
+      value: period.key,
+      label: period.label,
+      shortLabel: period.shortLabel || period.label,
+      start: period.start,
+      end: period.end,
+    },
+    periodOptions,
+    defaultPeriodKey,
+    filters: {
+      provinceCodes,
+      caseManagerIds,
+      fundingSource: fundingSourceFilter || 'all',
+      includeCarryOver,
+    },
+    rows,
+    summary: buildFinanceInterventionReportSummary(rows, {
+      includeCarryOver,
+      carryInAmount: carryInSummary.carryInAmount,
+      carryInInterventionCount: carryInSummary.carryInInterventionCount,
+    }),
+  };
+}
+
 async function readFinanceSalaryDashboardPayload(
   { fiscalYearStart },
   executor = pool
@@ -60302,6 +62188,49 @@ async function readFinanceSalaryDashboardPayload(
     },
   };
 }
+
+app.get('/api/finance/reports/intervention-funding/filter-options', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  const fiscalYearStart = resolveReportingFiscalYearStartValue(
+    req.query?.fiscalYearStart ?? req.query?.fiscalYear
+  );
+  const periodType = normaliseFinanceInterventionReportPeriodType(req.query?.periodType);
+  try {
+    const payload = await readFinanceInterventionReportFilterOptions(
+      { fiscalYearStart, periodType },
+      pool
+    );
+    res.set('Cache-Control', 'no-store, max-age=0');
+    return res.json(payload);
+  } catch (err) {
+    console.error('[finance:intervention-report] filter options fetch failed:', err?.message || err);
+    return res.status(500).json({
+      error: 'finance_intervention_report_filter_options_failed',
+      message: err?.message || 'Finance intervention report filter options fetch failed.',
+    });
+  }
+});
+
+app.get('/api/finance/reports/intervention-funding', async (req, res) => {
+  if (requireFinanceRole(req, res)) return;
+  try {
+    const payload = await readFinanceInterventionReportPayload(req.query || {}, pool);
+    res.set('Cache-Control', 'no-store, max-age=0');
+    return res.json(payload);
+  } catch (err) {
+    if (err?.statusCode) {
+      return res.status(err.statusCode).json({
+        error: err.code || 'finance_intervention_report_fetch_failed',
+        message: err.message,
+      });
+    }
+    console.error('[finance:intervention-report] fetch failed:', err?.message || err);
+    return res.status(500).json({
+      error: 'finance_intervention_report_fetch_failed',
+      message: err?.message || 'Finance intervention report fetch failed.',
+    });
+  }
+});
 
 app.get('/api/finance/salaries', async (req, res) => {
   if (requireFinanceRole(req, res)) return;
@@ -62800,7 +64729,11 @@ app.post('/api/finance/payment-communications', async (req, res) => {
 app.post('/api/finance/payment-packets', async (req, res) => {
   if (requirePaymentsRole(req, res)) return;
   const body = req.body || {};
-  const status = normalizePaymentStatus(body.status) || 'draft';
+  const rawPacketStatus = normaliseString(body.status);
+  const status = rawPacketStatus ? normalizePaymentStatus(rawPacketStatus) : 'draft';
+  if (rawPacketStatus && !status) {
+    return res.status(400).json({ error: 'invalid_status' });
+  }
   const linesPayload = Array.isArray(body.lines)
     ? body.lines
     : Array.isArray(body.lineItems)
@@ -62859,42 +64792,13 @@ app.post('/api/finance/payment-packets', async (req, res) => {
   );
 
   const now = new Date();
-  const submittedStages = new Set([
-    'submitted',
-    'program_review',
-    'returned',
-    'program_approved',
-    'finance_review',
-    'finance_approved',
-    'on_hold',
-    'batched',
-    'sent',
-    'confirmed',
-    'closed',
-  ]);
-  const programApprovedStages = new Set([
-    'program_approved',
-    'finance_review',
-    'finance_approved',
-    'on_hold',
-    'batched',
-    'sent',
-    'confirmed',
-    'closed',
-  ]);
-  const financeApprovedStages = new Set([
-    'finance_approved',
-    'batched',
-    'sent',
-    'confirmed',
-    'closed',
-  ]);
-  const sentStages = new Set(['sent', 'confirmed', 'closed']);
-  const confirmedStages = new Set(['confirmed', 'closed']);
+  const submittedStages = new Set(['submitted', 'confirmed']);
+  const sentStages = new Set(['submitted', 'confirmed']);
+  const confirmedStages = new Set(['confirmed']);
 
   const submittedAt = submittedStages.has(status) ? now : null;
-  const programApprovedAt = programApprovedStages.has(status) ? now : null;
-  const financeApprovedAt = financeApprovedStages.has(status) ? now : null;
+  const programApprovedAt = null;
+  const financeApprovedAt = null;
   const sentAt = sentStages.has(status) ? now : null;
   const confirmedAt = confirmedStages.has(status) ? now : null;
 
@@ -62916,20 +64820,6 @@ app.post('/api/finance/payment-packets', async (req, res) => {
     await conn.beginTransaction();
     if (interventionIdsForPacket.size) {
       const ids = Array.from(interventionIdsForPacket);
-      const [existingPackets] = await conn.query(
-        `SELECT id, intervention_id, status
-           FROM payment_packet
-          WHERE intervention_id IN (${ids.map(() => '?').join(',')})
-            AND (status IS NULL OR status <> 'cancelled')`,
-        ids
-      );
-      if (existingPackets.length) {
-        await conn.rollback();
-        return res.status(409).json({
-          error: 'payment_packet_already_exists',
-          interventionIds: Array.from(new Set(existingPackets.map(row => Number(row.intervention_id)).filter(Boolean))),
-        });
-      }
       const packetInterventionMap = await fetchInterventionsById({ ids, connection: conn });
       const historicalOnlyInterventionIds = ids.filter(id =>
         isManualBackloadInterventionRow(packetInterventionMap.get(Number(id)))
@@ -63012,7 +64902,11 @@ app.post('/api/finance/payment-packets', async (req, res) => {
         if (!potId) {
           lineErrors.push({ index, field: 'budgetPotId', error: 'required', message: 'Budget pot is required.' });
         }
-        const lineStatus = normalizePaymentLineStatus(line.status) || 'needs_evidence';
+        const rawLineStatus = normaliseString(line.status);
+        const lineStatus = rawLineStatus ? normalizePaymentLineStatus(rawLineStatus) : 'needs_evidence';
+        if (rawLineStatus && !lineStatus) {
+          lineErrors.push({ index, field: 'status', error: 'invalid', message: 'Payment line status is invalid.' });
+        }
         return {
           paymentType,
           payeeType,
@@ -63078,6 +64972,7 @@ app.post('/api/finance/payment-packets', async (req, res) => {
         const validationErrors = validatePaymentLinePolicy({
           line: {
             payment_type: line.paymentType,
+            payee_type: line.payeeType,
             amount: line.amount,
             service_period_start: line.servicePeriodStart,
             service_period_end: line.servicePeriodEnd,
@@ -63089,6 +64984,7 @@ app.post('/api/finance/payment-packets', async (req, res) => {
           policyRules,
           interventionPaymentTypeMap: paymentTypeMap,
           recurrencePolicyByType,
+          validationStage: 'draft',
         });
         if (validationErrors.length) {
           validationErrors.forEach(err => {
@@ -63099,6 +64995,17 @@ app.post('/api/finance/payment-packets', async (req, res) => {
       if (lineErrors.length) {
         await conn.rollback();
         return res.status(400).json({ error: 'invalid_line_items', message: 'One or more payment line items are invalid.', details: lineErrors });
+      }
+
+      const fundingErrors = await validateFundingAuthorizationForNewLines({
+        lineInputs,
+        packetRow: { case_id: caseId, intervention_id: interventionId },
+        interventionMap,
+        connection: conn,
+      });
+      if (fundingErrors.length) {
+        await conn.rollback();
+        return res.status(400).json({ error: 'invalid_line_items', message: 'One or more payment line items exceed available funding.', details: fundingErrors });
       }
 
       const lineValues = lineInputs.map(line => {
@@ -63127,7 +65034,7 @@ app.post('/api/finance/payment-packets', async (req, res) => {
         ];
       });
 
-      await conn.query(
+      const [insertResult] = await conn.query(
         `INSERT INTO payment_packet_line
           (payment_packet_id, intervention_id, payment_type, payee_type, payee_name, payee_profile_id, payee_reference,
            amount, currency, service_period_start, service_period_end, invoice_reference_number, requested_payment_date,
@@ -63135,6 +65042,41 @@ app.post('/api/finance/payment-packets', async (req, res) => {
          VALUES ?`,
         [lineValues]
       );
+
+      const insertIdBase = Number(insertResult?.insertId);
+      const insertedIds = lineInputs.map((_, index) =>
+        Number.isFinite(insertIdBase) ? insertIdBase + index : null
+      );
+      const candidateLines = lineInputs.map((line, index) => ({
+        id: insertedIds[index],
+        payment_packet_id: packetId,
+        intervention_id: line.interventionId || interventionId || null,
+        payment_type: line.paymentType,
+        payee_name: line.payeeName,
+        payee_reference: line.payeeReference || null,
+        amount: line.amount,
+        service_period_start: line.servicePeriodStart,
+        service_period_end: line.servicePeriodEnd,
+        invoice_reference_number: line.invoiceReferenceNumber,
+        requested_payment_date: line.requestedPaymentDate,
+      }));
+      const duplicateScan = await collectDuplicatePaymentMatches({
+        lines: candidateLines,
+        packetRow: {
+          id: packetId,
+          case_id: caseId,
+          client_id: clientId,
+          intervention_id: interventionId,
+        },
+        connection: conn,
+      });
+      if (duplicateScan.warnings.length) {
+        await appendPacketDuplicateWarnings({
+          packetId,
+          warnings: duplicateScan.warnings,
+          connection: conn,
+        });
+      }
 
       lineInputs.forEach(line => {
         if (line.interventionId) {
@@ -63509,6 +65451,7 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
           policyRules,
           interventionPaymentTypeMap: paymentTypeMap,
           recurrencePolicyByType,
+          validationStage: 'submission',
         });
         validationErrors.forEach(err => {
           policyErrors.push({
@@ -63545,7 +65488,7 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
       }
     }
 
-    const requiresFundingCheck = ['submitted', 'program_approved', 'finance_approved', 'confirmed', 'closed'].includes(nextStatus);
+    const requiresFundingCheck = ['submitted', 'confirmed'].includes(nextStatus);
     if (requiresFundingCheck) {
       const interventionIds = new Set();
       activeLines.forEach(line => {
@@ -63639,7 +65582,7 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
       }
     }
 
-    if (nextStatus === 'confirmed' || nextStatus === 'closed') {
+    if (nextStatus === 'confirmed') {
       if (!isFinancePaymentsRole(actorRole)) {
         await conn.rollback();
         return res.status(403).json({ error: 'finance_role_required' });
@@ -63664,7 +65607,7 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
       }
     }
 
-    if (nextStatus === 'finance_approved' || nextStatus === 'sent' || nextStatus === 'confirmed' || nextStatus === 'closed') {
+    if (nextStatus === 'submitted' || nextStatus === 'confirmed') {
       if (!actorUserId) {
         await conn.rollback();
         return res.status(400).json({ error: 'actor_user_required' });
@@ -63675,31 +65618,6 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
       }
     }
 
-    if (nextStatus === 'program_approved' || nextStatus === 'finance_approved') {
-      const approvalRules = await readPaymentApprovalRules(conn);
-      const ruleSet = nextStatus === 'program_approved' ? approvalRules.program : approvalRules.finance;
-      const requirement = resolveApprovalRequirement(ruleSet, { totalAmount, maxLineAmount });
-      if (requirement && !roleAllowedByApprovalRule(actorRole, requirement)) {
-        if (!overrideRequested || !overrideReason || !canUsePaymentOverride(actorRole)) {
-          await conn.rollback();
-          return res.status(403).json({
-            error: 'approval_threshold_requires_role',
-            requiredRoles: requirement.roles || [],
-          });
-        }
-        await recordPaymentOverride({
-          packetId,
-          lineId: null,
-          overrideType: overrideType || 'approval_threshold',
-          reason: overrideReason,
-          actorUserId,
-          actorRole,
-          fromStatus,
-          toStatus: nextStatus,
-          connection: conn,
-        });
-      }
-    }
     if (EVIDENCE_GATE_PACKET_STATUSES.has(nextStatus)) {
       const missing = await fetchMissingRequiredEvidence({ packetId, connection: conn });
       if (missing.length) {
@@ -63780,7 +65698,7 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
 
     const fields = ['status = ?', 'updated_at = NOW()'];
     const params = [nextStatus];
-    if (nextStatus === 'draft' && fromStatus && fromStatus !== 'draft') {
+    if (nextStatus === 'draft' && fromStatus && normalizePaymentStatus(fromStatus) !== 'draft') {
       fields.push('submitted_at = NULL');
       fields.push('program_approved_at = NULL');
       fields.push('finance_approved_at = NULL');
@@ -63789,34 +65707,20 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
       fields.push('program_approved_by_user_id = NULL');
       fields.push('finance_approved_by_user_id = NULL');
     }
-    if (!packetRow.submitted_at && nextStatus !== 'draft') {
+    if (!packetRow.submitted_at && (nextStatus === 'submitted' || nextStatus === 'confirmed')) {
       fields.push('submitted_at = NOW()');
     }
-    if (!packetRow.program_approved_at && nextStatus === 'program_approved') {
-      fields.push('program_approved_at = NOW()');
-    }
-    if (!packetRow.finance_approved_at && nextStatus === 'finance_approved') {
-      fields.push('finance_approved_at = NOW()');
-    }
-    if (!packetRow.sent_at && nextStatus === 'sent') {
+    if (!packetRow.sent_at && (nextStatus === 'submitted' || nextStatus === 'confirmed')) {
       fields.push('sent_at = NOW()');
     }
-    if (!packetRow.confirmed_at && (nextStatus === 'confirmed' || nextStatus === 'closed')) {
+    if (!packetRow.confirmed_at && nextStatus === 'confirmed') {
       fields.push('confirmed_at = NOW()');
-    }
-    if (nextStatus === 'program_approved' && actorUserId) {
-      fields.push('program_approved_by_user_id = ?');
-      params.push(actorUserId);
-    }
-    if (nextStatus === 'finance_approved' && actorUserId) {
-      fields.push('finance_approved_by_user_id = ?');
-      params.push(actorUserId);
     }
     params.push(packetId);
     await conn.query(`UPDATE payment_packet SET ${fields.join(', ')} WHERE id = ?`, params);
 
     const lineStatus = PACKET_STATUS_TO_LINE_STATUS[nextStatus];
-    if (lineStatus && nextStatus !== 'confirmed' && nextStatus !== 'closed') {
+    if (lineStatus && nextStatus !== 'confirmed') {
       const [lineRows] = await conn.query(
         'SELECT id, status FROM payment_packet_line WHERE payment_packet_id = ?',
         [packetId]
@@ -63889,7 +65793,7 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
       [packetId, fromStatus, nextStatus, actorUserId, notes]
     );
 
-    if (nextStatus === 'confirmed' || nextStatus === 'closed') {
+    if (nextStatus === 'confirmed') {
       const [lineRows] = await conn.query(
         'SELECT * FROM payment_packet_line WHERE payment_packet_id = ?',
         [packetId]
@@ -64042,7 +65946,11 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
       if (!potId) {
         lineErrors.push({ index, field: 'budgetPotId', error: 'required', message: 'Budget pot is required.' });
       }
-      const lineStatus = normalizePaymentLineStatus(line.status) || 'needs_evidence';
+      const rawLineStatus = normaliseString(line.status);
+      const lineStatus = rawLineStatus ? normalizePaymentLineStatus(rawLineStatus) : 'needs_evidence';
+      if (rawLineStatus && !lineStatus) {
+        lineErrors.push({ index, field: 'status', error: 'invalid', message: 'Payment line status is invalid.' });
+      }
       return {
         paymentType,
         payeeType,
@@ -64108,6 +66016,7 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
       const validationErrors = validatePaymentLinePolicy({
         line: {
           payment_type: line.paymentType,
+          payee_type: line.payeeType,
           amount: line.amount,
           service_period_start: line.servicePeriodStart,
           service_period_end: line.servicePeriodEnd,
@@ -64119,6 +66028,7 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
         policyRules,
         interventionPaymentTypeMap: paymentTypeMap,
         recurrencePolicyByType,
+        validationStage: 'draft',
       });
       if (validationErrors.length) {
         validationErrors.forEach(err => {
@@ -64478,6 +66388,7 @@ app.post('/api/finance/payment-packets/:id/lines/recurring', async (req, res) =>
       const errors = validatePaymentLinePolicy({
         line: {
           payment_type: line.paymentType,
+          payee_type: line.payeeType,
           amount: line.amount,
           service_period_start: line.servicePeriodStart,
           service_period_end: line.servicePeriodEnd,
@@ -64489,6 +66400,7 @@ app.post('/api/finance/payment-packets/:id/lines/recurring', async (req, res) =>
         policyRules,
         interventionPaymentTypeMap: paymentTypeMap,
         recurrencePolicyByType,
+        validationStage: 'draft',
       });
       if (errors.length) {
         errors.forEach(err => {
@@ -64792,6 +66704,7 @@ app.put('/api/finance/payment-lines/:id', async (req, res) => {
       policyRules,
       interventionPaymentTypeMap: paymentTypeMap,
       recurrencePolicyByType,
+      validationStage: 'draft',
     });
     if (validationErrors.length) {
       return res.status(400).json({
@@ -64960,9 +66873,9 @@ app.post('/api/finance/payment-lines/:id/status', async (req, res) => {
             return res.status(400).json({ error: 'payment_proof_checksum_missing' });
           }
         }
-        if (lineRow.status !== 'batched') {
+        if (normalizePaymentLineStatus(lineRow.status) !== 'submitted') {
           await conn.rollback();
-          return res.status(409).json({ error: 'line_not_batched' });
+          return res.status(409).json({ error: 'line_not_submitted' });
         }
         const [[batchRow]] = await conn.query(
           `SELECT pb.id, pb.status
@@ -65010,6 +66923,7 @@ app.post('/api/finance/payment-lines/:id/status', async (req, res) => {
         policyRules,
         interventionPaymentTypeMap: paymentTypeMap,
         recurrencePolicyByType,
+        validationStage: 'submission',
       });
       if (validationErrors.length) {
         await conn.rollback();
@@ -65023,7 +66937,7 @@ app.post('/api/finance/payment-lines/:id/status', async (req, res) => {
         });
       }
     }
-    if (nextStatus === 'paid' || nextStatus === 'approved') {
+    if (nextStatus === 'paid') {
       const primaryInterventionId = lineRow.intervention_id || lineRow.interventionId || null;
       if (primaryInterventionId) {
         const interventionMap = await fetchInterventionsById({
@@ -65244,7 +67158,7 @@ app.post('/api/finance/payment-lines/:id/status', async (req, res) => {
           'SELECT status, confirmed_at FROM payment_packet WHERE id = ? LIMIT 1',
           [lineRow.payment_packet_id]
         );
-        if (packetRow && packetRow.status !== 'confirmed' && packetRow.status !== 'closed' && packetRow.status !== 'cancelled') {
+        if (packetRow && packetRow.status !== 'confirmed' && packetRow.status !== 'cancelled') {
           await conn.query(
             'UPDATE payment_packet SET status = ?, confirmed_at = COALESCE(confirmed_at, NOW()), updated_at = NOW() WHERE id = ?',
             ['confirmed', lineRow.payment_packet_id]
@@ -65594,86 +67508,6 @@ app.post('/api/finance/payment-batches', async (req, res) => {
       'INSERT INTO payment_batch_line (payment_batch_id, payment_packet_line_id) VALUES ?',
       [batchLineValues]
     );
-
-    await conn.query(
-      `UPDATE payment_packet_line
-          SET status = 'batched', updated_at = NOW()
-        WHERE id IN (${normalizedLineIds.map(() => '?').join(',')})
-          AND status NOT IN ('paid','cancelled')`,
-      normalizedLineIds
-    );
-
-    const statusEventTimestamp = new Date();
-    const statusEventValues = lineRows
-      .filter(row => !['paid', 'cancelled', 'batched'].includes(row.status))
-      .map(row => [
-        row.payment_packet_id,
-        row.id,
-        row.status || null,
-        'batched',
-        createdByUserId,
-        null,
-        null,
-        statusEventTimestamp,
-      ]);
-    if (statusEventValues.length) {
-      await conn.query(
-        `INSERT INTO payment_status_event
-          (payment_packet_id, payment_packet_line_id, from_status, to_status, actor_user_id, notes, metadata, created_at)
-         VALUES ?`,
-        [statusEventValues]
-      );
-    }
-
-    const packetIds = Array.from(new Set(lineRows.map(row => Number(row.payment_packet_id)).filter(Number.isFinite)));
-    if (packetIds.length) {
-      const [counts] = await conn.query(
-        `SELECT payment_packet_id,
-                SUM(status IN ('batched','paid','cancelled')) AS ready_count,
-                COUNT(*) AS total_count
-           FROM payment_packet_line
-          WHERE payment_packet_id IN (${packetIds.map(() => '?').join(',')})
-          GROUP BY payment_packet_id`,
-        packetIds
-      );
-      const readyPacketIds = counts
-        .filter(row => Number(row.total_count) > 0 && Number(row.ready_count) === Number(row.total_count))
-        .map(row => Number(row.payment_packet_id));
-      if (readyPacketIds.length) {
-        const [packetRows] = await conn.query(
-          `SELECT id, status FROM payment_packet WHERE id IN (${readyPacketIds.map(() => '?').join(',')})`,
-          readyPacketIds
-        );
-        await conn.query(
-          `UPDATE payment_packet
-              SET status = 'batched', updated_at = NOW()
-            WHERE id IN (${readyPacketIds.map(() => '?').join(',')})
-              AND status NOT IN ('sent','confirmed','closed','cancelled')`,
-          readyPacketIds
-        );
-        const packetEventTimestamp = new Date();
-        const packetEventValues = packetRows
-          .filter(row => !['sent', 'confirmed', 'closed', 'cancelled', 'batched'].includes(row.status))
-          .map(row => [
-            row.id,
-            null,
-            row.status || null,
-            'batched',
-            createdByUserId,
-            null,
-            null,
-            packetEventTimestamp,
-          ]);
-        if (packetEventValues.length) {
-          await conn.query(
-            `INSERT INTO payment_status_event
-              (payment_packet_id, payment_packet_line_id, from_status, to_status, actor_user_id, notes, metadata, created_at)
-             VALUES ?`,
-            [packetEventValues]
-          );
-        }
-      }
-    }
 
     await conn.commit();
     const batch = await fetchPaymentBatchById(batchId);
@@ -66730,6 +68564,22 @@ app.post('/api/applications/manual-intake', async (req, res) => {
         manual_entry_timestamp: manualMetadata.manual_entry_timestamp,
       },
     });
+
+    try {
+      await emitApplicantWatchlistHitEvents({
+        pool,
+        emitEvent,
+        applicationId,
+        actor: {
+          type: 'staff',
+          id: actor.actorId || null,
+          displayName: actor.actorName || null,
+        },
+        logger: console,
+      });
+    } catch (watchlistErr) {
+      console.warn('[watchlist] failed to emit manual-intake hit event', watchlistErr?.message || watchlistErr);
+    }
 
     return res.status(201).json({
       message: 'manual_application_created',
@@ -70053,30 +71903,6 @@ app.put('/api/cases/:id', async (req, res) => {
       : autoPlanSuggestion?.interventionId
       ? [autoPlanSuggestion.interventionId]
       : [];
-    if (autoPlanSuggestion?.createdIntervention && autoPlanInterventionIds.length) {
-      try {
-        const actorRole = canonicaliseAccessRole(identity.role) || identity.role || null;
-        const actorUserId = Number.isFinite(autoPlanApprovalUserId)
-          ? autoPlanApprovalUserId
-          : null;
-        for (const interventionId of autoPlanInterventionIds) {
-          const [[interventionRow]] = await conn.query(
-            'SELECT * FROM iset_case_intervention WHERE id = ? LIMIT 1',
-            [Number(interventionId)]
-          );
-          if (!interventionRow) continue;
-          await createAutoPaymentPacketFromIntervention({
-            interventionRow,
-            actorUserId,
-            actorRole,
-            connection: conn,
-          });
-        }
-      } catch (err) {
-        console.warn('[payments] auto-generate packet from assessment failed', err?.message || err);
-      }
-    }
-
     if (hasAssessmentPayload && targetStatus === CASE_STATUS_DERIVED_VALUES.initiated) {
       shouldMarkSubmissionNeedsReview = true;
     }
@@ -71612,17 +73438,63 @@ app.get('/api/events/feed', async (req, res) => {
 
   try {
     const { actorId } = resolveRequestActor(req);
-    const items = await getEventFeed({
-      limit,
-      offset,
-      requesterId: actorId,
-      types: typeFilter,
-      categories: categoryFilter,
-      subjectType: subjectTypeFilter,
-      subjectId: normalizedSubjectId,
-      since: sinceMeta.value,
-      until: untilMeta.value,
-    });
+    const canAccessApplicantWatchlist = await requestHasRouteMatrixAccess(req, APPLICANT_WATCHLIST_MANAGER_ROUTE);
+    let items = [];
+
+    if (canAccessApplicantWatchlist) {
+      items = await getEventFeed({
+        limit,
+        offset,
+        requesterId: actorId,
+        types: typeFilter,
+        categories: categoryFilter,
+        subjectType: subjectTypeFilter,
+        subjectId: normalizedSubjectId,
+        since: sinceMeta.value,
+        until: untilMeta.value,
+      });
+    } else {
+      const batchSize = 200;
+      let rawOffset = 0;
+      let skippedVisible = 0;
+
+      while (items.length < limit) {
+        const batch = await getEventFeed({
+          limit: batchSize,
+          offset: rawOffset,
+          requesterId: actorId,
+          types: typeFilter,
+          categories: categoryFilter,
+          subjectType: subjectTypeFilter,
+          subjectId: normalizedSubjectId,
+          since: sinceMeta.value,
+          until: untilMeta.value,
+        });
+        if (!Array.isArray(batch) || batch.length === 0) {
+          break;
+        }
+
+        for (const item of batch) {
+          if (isApplicantWatchlistEventRestricted(item)) {
+            continue;
+          }
+          if (skippedVisible < offset) {
+            skippedVisible += 1;
+            continue;
+          }
+          items.push(item);
+          if (items.length >= limit) {
+            break;
+          }
+        }
+
+        rawOffset += batch.length;
+        if (batch.length < batchSize) {
+          break;
+        }
+      }
+    }
+
     res.json(items);
   } catch (err) {
     console.error('[events] failed to load feed', err);

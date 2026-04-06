@@ -5,7 +5,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-04-05
+Last Updated: 2026-04-06
 
 ## Working relationship (design dialog)
 
@@ -68,6 +68,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Server middleware and admin-user routes no longer support `AUTH_PROVIDER=none`, mock admin users, or auth-disabled mutation fallbacks. If auth is misconfigured, fail explicitly instead of inventing local placeholder behavior.
 - Raw debug/file-maintenance endpoints must stay behind explicit server-side enablement (for example `ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES=true`) plus System Administrator access. Do not leave purge or direct file read/write helpers broadly reachable.
 - Local repo dev launcher note: `start-dev.ps1` now starts the Admin Backend with `ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES=true` so Demo Controls like `Clear ISET test data` and `/api/dev/*` work in local dev. Manual admin-backend starts still need that env var set explicitly.
+- Current Demo Controls rule: `Create Dummy Draft` should list portal-sign-in applicant users from the local `user` table, excluding staff identities, rather than relying only on client-linked applicant-account rows.
 
 ## Development data policy (no legacy fallbacks)
 
@@ -84,6 +85,8 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Client-file import guide: `docs/guides/client-file-imports.md`
 - Client Batch Import dashboard reference: `docs/dashboards/client-file-import-dashboard.md`
 - Data and Results dashboard reference: `docs/dashboards/data-and-results-dashboard.md`
+- Financial Reports dashboard reference: `docs/dashboards/financial-reports-dashboard.md`
+- Applicant Watchlist dashboard reference: `docs/dashboards/applicant-watchlist-dashboard.md`
 - Admin feedback reporting reference: `docs/features/admin-feedback-reporting.md`
 - Homepage Metrics dashboard reference: `docs/dashboards/admin-home-metrics-widget.md`
 - Query Editor dashboard reference: `docs/dashboards/query-editor-dashboard.md`
@@ -138,6 +141,19 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Separate path to keep distinct: the admin startup migration runner executes canonical `.sql` files from `/sql/migrations`, but that is not the Query Editor dashboard
 - Current shared-schema rule: PATH canonical migrations live in `admin-dashboard/sql/migrations/`; one-off/manual SQL belongs in `admin-dashboard/sql/ops/`
 - Current promotion rule: treat cross-environment DB promotion as allowlisted config/reference sync only. Full DB overwrite/reset is acceptable for TEST, but PROD may receive only canonical schema migrations plus explicit datasets from `docs/ops/deployments/data-promotion-catalog.md`.
+
+## Applicant watchlist manager status
+
+- Route: `/configuration/applicant-watchlist`
+- Current navigation path: `Configuration > Applicant Watchlist`
+- Default access: `System Administrator` and `NWAC Administrator`, controlled through the standard access-control matrix and enforced server-side through the same route key.
+- Current contextual-add rule: case/application quick actions that add a client or applicant to the watchlist remain broadly available; only the aggregated manager page is restricted.
+- Current data/privacy rule: the dashboard table masks SIN values by default, while the modal editor shows the full SIN only to authorized roles.
+- Current lifecycle rule: watchlist removal is implemented as `inactive`, not hard delete. Re-adding an inactive SIN reactivates the same row.
+- Current homepage rule: the `Watchlist Hits` queue matches only active watchlist entries.
+- Current event rule: shared event types are `applicant_watchlist_added`, `applicant_watchlist_updated`, `applicant_watchlist_removed`, and `applicant_watchlist_hit`.
+- Current cross-app rule: `applicant_watchlist_hit` is emitted from both admin manual-intake submissions and the public-portal intake completion flow, using masked SIN in the payload only.
+- Current feed-safety rule: users without access to `/configuration/applicant-watchlist` must not receive watchlist events from the generic `/api/events/feed` endpoint even if they probe alternate filters.
 
 ## Admin feedback reporting status
 
@@ -233,10 +249,12 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 
 - For PATH/NWAC operational reporting work, inspect workbook references in `docs/data` before designing report schemas or dashboard widgets.
 - Verified reference workbook on 2026-03-19: `docs/data/NWAC - data info 2025-26.xlsx`.
+- Current `Budgets and Finance > Financial Reports` implementation detail: route `/finance/reports` now presents the annual `ISET Advances and Active Clients` report with fiscal-year and region filtering, optional carry-over estimation, payment status, and Excel export. The current live backend endpoints are `/api/finance/reports/intervention-funding*`.
+- Current `Budgets and Finance > Financial Reports` implementation detail: approved funding currently means approved intervention expense by `COALESCE(intervention.reviewed_at, intervention.created_at)`, reported one row per intervention and grouped/exportable by CRF vs EI. The same rows also expose payment follow-up based on payment-packet and finance-transaction state.
 - Current workbook structure: `Sheet1` contains the working content and `Sheet2` is empty.
 - The verified workbook includes sections for overall results targets vs year-end results, quarterly data uploads, and interventions, with instructions pointing to Data Gateway and ILMP workflows.
 - Current management-reporting direction: keep dashboard naming, ordering, and layout closely aligned to the workbook so NWAC users can map the UI directly to the existing report.
-- For reporting filters, use a shared report-controls block rather than per-section filters. Current page-level controls are participant home province/territory, case manager, fiscal year, and a results-view segmented control for cumulative vs monthly values; demo mode currently lives in the report-controls header actions.
+- For reporting filters, use a shared report-controls block rather than per-section filters. Current `Budgets and Finance > Financial Reports` page-level controls are fiscal year, region (participant home province/territory), and the optional `Include carry-over` toggle.
 - Current `Reporting > Data and Results` implementation detail: the `Intake and Assessment` section now leads the default layout and shows participant home province/territory rows with month columns. Its section header controls switch between `New applications`, `Approved applications`, and `Denied applications`, and include a text filter for the province rows.
 - Current `Reporting > Data and Results` implementation detail: `New applications` use `iset_application_submission.submitted_at` for month bucketing. `Approved applications` and `Denied applications` currently use `iset_application.updated_at` as the best available decision-month proxy because PATH does not yet persist dedicated application decision timestamps/history.
 - Current `Reporting > Data and Results` implementation detail: the `Interventions` section now also has section-level controls for show mode (`Count`, `Cost`), intervention status (`Completed`, `Planned`, `Active`, `Cancelled`), and date basis. The default workbook-aligned view is `Count` for `Completed` interventions by `By end date`; when `Cost` is selected, values are shown by payment month and completed interventions use actual cost when available.
@@ -261,6 +279,10 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 
 - `Budgets and Finance` is the current navigation label for the finance area.
 - Current finance tracking direction: keep `Reporting` read-only/report-oriented and put editable finance/admin tracking dashboards under `Budgets and Finance`.
+- Current finance-semantics rule: approved interventions are funding authority only. Live `committed` finance starts when a payment packet is sent to finance, and live `actual` finance starts only when PATH records a posted/confirmed payment.
+- Current payments-workflow rule: approved interventions do not auto-create live payment packets. Staff create payment packets over time for the specific month, receipt, or claim period being sent to finance, and multiple packets may exist for the same intervention as long as total authorized funding is not exceeded.
+- Current payments-status rule: canonical packet statuses are `draft`, `ready_to_send`, `submitted`, `confirmed`, and `cancelled`; canonical line statuses are `needs_evidence`, `ready_to_send`, `submitted`, `paid`, `held`, and `cancelled`. Optional `payment_batch` records may still group submitted lines, but batching is not itself a packet or line status.
+- Current `Budgets and Finance > Financial Reports` implementation: fixed annual approved-funding page for CRF/EI intervention funding with slice-and-dice filters, province summary, intervention detail, finance follow-up, and workbook-style Excel export. It is not a configurable widget board anymore.
 - Current `Budgets and Finance > Salaries` implementation: standard Cloudscape board dashboard backed by `finance_regional_salary_entry`, with a fiscal-year control, one editable annual salary row per province/territory, explicit budget-pot assignment, and derived monthly values shown for review.
 - `Budgets and Finance > Salaries` is monthly total tracking only. It is not payroll, not AP processing, and not the accounting system of record.
 - Current `Case Workspace > Case header` applicant-account rule: show `PATH Account Status` directly in the detail grid, and expose a quick action that creates/sends or resends applicant activation from the case itself so case managers do not need to leave the workspace for the common activation flow.

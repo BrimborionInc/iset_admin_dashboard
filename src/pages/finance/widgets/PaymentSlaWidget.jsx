@@ -42,10 +42,10 @@ const PaymentSlaWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       helper: "Draft packets blocked by missing evidence.",
     },
     {
-      label: "Submitted to finance",
+      label: "Sent to finance",
       value: slaSnapshot.submitted,
       indicator: slaSnapshot.submitted > 0 ? "info" : "success",
-      helper: "Packets emailed to finance.",
+      helper: "Packets already sent to finance.",
     },
     {
       label: "Overdue evidence tasks",
@@ -57,7 +57,7 @@ const PaymentSlaWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       label: "Avg. submission age (days)",
       value: slaSnapshot.avgSubmissionAgeDays.toFixed(1),
       indicator: "info",
-      helper: "Average days since submission to finance.",
+      helper: "Average days since packets were sent to finance.",
     },
   ];
 

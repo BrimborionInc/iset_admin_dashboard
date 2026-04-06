@@ -7,6 +7,7 @@ const {
   fetchActorStaffProfileId,
   fetchApplicantAccountRows,
   fetchApplicantAccountSummary,
+  fetchPortalApplicantUsers,
   sendApplicantActivationInvitation,
 } = require('../../lib/applicantAccountService');
 
@@ -50,6 +51,26 @@ router.get(
     } catch (err) {
       console.warn('[admin-applicants] list failed:', err?.message || err);
       return sendRouteError(res, err, 'admin_applicants_failed');
+    }
+  }
+);
+
+router.get(
+  '/applicants/portal-users',
+  requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager', 'ISET Coordinator'),
+  async (req, res) => {
+    try {
+      const pool = getDbPoolFromRequest(req);
+      if (!pool) {
+        return res.status(500).json({ error: 'db_unavailable', message: 'Database pool unavailable.' });
+      }
+
+      const q = typeof req.query?.q === 'string' ? req.query.q : '';
+      const rows = await fetchPortalApplicantUsers(pool, { q });
+      return res.json({ source: 'user', users: rows });
+    } catch (err) {
+      console.warn('[admin-applicants] portal-user list failed:', err?.message || err);
+      return sendRouteError(res, err, 'admin_portal_applicants_failed');
     }
   }
 );
