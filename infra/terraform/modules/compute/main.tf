@@ -315,7 +315,10 @@ resource "aws_iam_role_policy" "app_runtime" {
         Effect = "Allow"
         Action = [
           "ses:SendEmail",
-          "ses:SendRawEmail"
+          "ses:SendRawEmail",
+          "ses:GetAccountSendingEnabled",
+          "ses:GetSendQuota",
+          "ses:GetIdentityVerificationAttributes"
         ]
         Resource = "*"
       }

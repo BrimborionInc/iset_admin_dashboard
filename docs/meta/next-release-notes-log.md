@@ -4,7 +4,7 @@ Purpose: running capture of user-facing fixes/changes for the next "What's New" 
 
 Current public release in Landing Page: `v0.5.8` (`26th March 2026`)
 Target next release notes draft: `v0.5.9` (date TBD)
-Last Updated: 2026-04-06
+Last Updated: 2026-04-07
 
 ## How to use
 
@@ -18,6 +18,10 @@ Last Updated: 2026-04-06
 
 ## Entries
 
+- 2026-04-07 | Release v0.5.9 | UX/AI/Casework | Case Workspace help + AI chat | Expanded the Case Workspace info panels and embedded AI guidance to coach staff through backloading historical action plans, interventions, and documents on imported/application-less files. | The help text now points staff to the Case Header backload quick actions, explains the silent historical workflow, calls out intervention lifecycle guardrails, and reinforces case-based document fallback when there is no linked application.
+- 2026-04-07 | Release v0.5.9 | Fix/UX/Casework | Case Workspace > Supporting Documents | Imported client files without a linked application now stay in case-based document mode even when the participant already has a PATH account. | This fixes `Upload existing documents` for application-scoped document types on batch-imported files by using the existing action-plan/case fallback instead of asking staff to select a nonexistent application.
+- 2026-04-07 | Release v0.5.9 | Fix/API/Admin users | Manage Users > Administrative Users | Replaced the `Resend invite` stub with a real Cognito resend for staff accounts still in pending first-sign-in state. | The button now uses Cognito `AdminCreateUser` with `MessageAction: RESEND`; active users should use `Force reset` instead.
+- 2026-04-07 | Release v0.5.9 | Security/UX/Admin users | Manage Users > Administrative Users | Tightened staff account-management permissions so actions resolve the target user's actual Cognito role server-side and the dashboard only lists roles the actor can manage. | Also aligned the toolbar buttons to account state and now show clear route `detail` messages on failure instead of generic HTTP codes.
 - 2026-04-06 | Release v0.5.9 | Workflow/API/Finance | Payments packet creation | Approved interventions no longer auto-create payment packets, and staff can now create multiple packets over time for the same intervention. | PATH now treats approved intervention funding as the authorization ceiling only; recurring or receipt-driven supports can be packeted month by month or claim by claim without the old one-packet-per-intervention restriction.
 - 2026-04-06 | Release v0.5.9 | UX/Finance | Payments guidance | Updated the Payments create form and help text to frame packets as specific claims being sent now rather than the full approved intervention by default. | The amount field now stays user-entered against the approved funding ceiling, and the help content explicitly guides staff to create separate packets for separate months, receipts, or claim periods where needed.
 - 2026-04-06 | Release v0.5.9 | Workflow/Schema/Finance | Payments status model | Simplified PATH payments to a canonical packet-first status set with `Draft`, `Ready to send`, `Sent to finance`, `Payment confirmed`, and `Cancelled` as the packet states. | Line states are now `Needs evidence`, `Ready to send`, `Sent to finance`, `Paid`, `Held`, and `Cancelled`; optional finance batches remain separate records and no longer appear as packet or line statuses.

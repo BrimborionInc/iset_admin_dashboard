@@ -263,10 +263,11 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     workspace?.application_id ??
     workspace?.applicationId ??
     null;
-  const canUseApplicantDocumentMode = Boolean(applicantUserId);
-  const isCaseDocumentMode = Boolean(isCaseWorkspace && caseId && !applicantUserId);
-  const canUploadDocuments = canUseApplicantDocumentMode || isCaseDocumentMode;
   const caseWorkspaceApplicationId = applicationId ? String(applicationId) : '';
+  const isApplicationLessCaseWorkspace = Boolean(isCaseWorkspace && caseId && !caseWorkspaceApplicationId);
+  const canUseApplicantDocumentMode = Boolean(applicantUserId) && !isApplicationLessCaseWorkspace;
+  const isCaseDocumentMode = Boolean(isCaseWorkspace && caseId && isApplicationLessCaseWorkspace);
+  const canUploadDocuments = canUseApplicantDocumentMode || isCaseDocumentMode;
   const usesApplicationScopeFallback = useCallback(
     scope => scope === 'application' && isCaseDocumentMode && !caseWorkspaceApplicationId,
     [isCaseDocumentMode, caseWorkspaceApplicationId]

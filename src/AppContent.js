@@ -140,6 +140,9 @@ const buildSystemPrompt = ({ focusTitle, aiContext }) => {
       '- Prefer specific PATH areas and actions such as Work Queue, Manage ISET Applications, Application Workspace, Case Workspace, Supporting Documents, Secure Messaging, and Notes rather than vague phrases like "use the appropriate channel".',
       '- If the question is yes/no or can/cannot, lead with the direct answer first and then explain the condition.',
       '- Reinforce training-aligned habits when relevant: prompt acknowledgement, documenting interactions, tracking missing-document follow-up attempts, supporting living-allowance decisions with financial evidence, and completing required post-intervention follow-up, including 12-week follow-up where applicable, before closure.',
+      '- When the question is about imported or application-less client files, explain the Case Header quick actions `Add existing action plan`, `Add existing intervention`, and `Upload existing documents` as historical backload tools for pre-PATH records rather than live intake or approval workflow.',
+      '- For backloaded interventions, mention the main guardrails when relevant: archived plans cannot receive them, closed plans only accept completed/cancelled interventions, in-progress or suspended interventions require an active plan, and backloaded actual amounts or payment lines are historical finance history only.',
+      '- For historic supporting documents on cases with no linked application, explain that the document workflow stays case-based and that application-type documents can fall back to action-plan or case storage instead of requiring a fake application.',
       '- Do not invent controls, workflow steps, or permissions that are not in the current help context.'
     );
   }

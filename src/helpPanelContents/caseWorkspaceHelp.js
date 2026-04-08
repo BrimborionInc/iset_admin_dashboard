@@ -38,6 +38,12 @@ const CaseWorkspaceHelp = ({ tutorial, onRestartTutorial, onEndTutorial }) => {
         to keep the participant record current, manage action plans and interventions, record notes and
         documents, communicate with the client, and track follow-up through completion and closure.
       </p>
+      <p>
+        For imported or application-less client files, this workspace is also where staff backload pre-PATH
+        history. Use the <strong>Case header</strong> quick actions <strong>Add existing action plan</strong>,{" "}
+        <strong>Add existing intervention</strong>, and <strong>Upload existing documents</strong> to record
+        historical plans, supports, and evidence without fabricating intake or approval records.
+      </p>
 
       <h3>Typical coordinator flow</h3>
       <ol>
@@ -48,6 +54,14 @@ const CaseWorkspaceHelp = ({ tutorial, onRestartTutorial, onEndTutorial }) => {
         <li>Use <strong>Events timeline</strong> when you need the running audit trail of what happened on the case and when.</li>
         <li>When an intervention ends, capture outcomes, complete required follow-up, and close the file properly instead of letting it drift.</li>
       </ol>
+
+      <h3>Imported client-file backloads</h3>
+      <ul>
+        <li>Use the Case Header backload quick actions only when the plan, intervention, or document already existed before PATH go-live or before the client had a real PATH application.</li>
+        <li>These backload actions are silent historical entry points: they do not start approval routing, checklist progression, payment packets, or applicant notifications.</li>
+        <li>Backloaded interventions still have to match the action-plan lifecycle. Archived plans are blocked, closed plans only accept completed or cancelled interventions, and in-progress or suspended interventions require an active plan.</li>
+        <li>Historic supporting documents stay case-based when no linked application exists. Application-type documents can still be stored against the action plan or case instead of creating a fake application.</li>
+      </ul>
 
       <h3>What matters most</h3>
       <ul>
@@ -100,6 +114,8 @@ Focus on the staff workflow:
 - confirm the right case and current participant details;
 - manage action plans and interventions against the client's goals;
 - record notes, documents, and client contact;
+- for imported or application-less client files, explain that the Case Header quick actions \`Add existing action plan\`, \`Add existing intervention\`, and \`Upload existing documents\` are the approved way to backload pre-PATH history without inventing intake or approval records;
+- when backload questions come up, mention the key guardrails: archived plans cannot receive existing interventions, closed plans only accept completed/cancelled interventions, in-progress or suspended interventions require an active plan, and historic documents stay case-based when there is no linked application;
 - use reminders and calendar dates to stay on top of check-ins and milestones;
 - use the events timeline when you need the case audit trail or need to confirm what changed and who changed it;
 - capture outcomes, complete the required post-intervention follow-up, including the 12-week follow-up where applicable, and then close the file properly.

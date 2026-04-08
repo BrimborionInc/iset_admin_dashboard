@@ -41,6 +41,7 @@ Related tables:
 - `POST /api/applicants/:id/documents/upload` enforces `document_type.scope` rules, requires `client_id`, and accepts action plan + intervention links.
 - `GET /api/cases/:id/documents` now supports application-less case workspaces by returning client/case/action-plan documents keyed from the case.
 - `POST /api/cases/:id/documents/upload` now supports manual staff uploads for application-less client-file cases without requiring an applicant-user chain, including application-type documents that fall back to action-plan or case storage when no real application exists.
+- In Case Workspace, "application-less" means no linked `iset_case.application_id`. If an imported client later gets a participant PATH account, the workspace should still use this case-based document mode until a real application exists.
 - `PUT /api/documents/:id` and `/api/documents/:id/duplicate` update action plan + intervention associations (no `linked_intervention_id`) and preserve the same application-scope fallback rules in case-based mode.
 - `GET /api/admin/messages/:id/attachments` upserts attachments into `iset_document` with `client_id` + case/application context when a `case_id` query param is provided.
 - `POST /api/finance/payment-packets/:id/documents` validates `iset_document.client_id` matches the packet.

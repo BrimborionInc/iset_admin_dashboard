@@ -5,7 +5,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-04-06
+Last Updated: 2026-04-07
 
 ## Working relationship (design dialog)
 
@@ -52,6 +52,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 ## Core conventions
 
 - Prefer Cloudscape components over native HTML. Use `Link` from `@cloudscape-design/components` instead of raw `<a>` unless there is no Cloudscape equivalent.
+- Cloudscape `Input` does not provide built-in currency formatting. For money-entry fields, use the shared helper in `src/utils/currencyFormat.js` (`getCurrencyInputDisplayValue`) with focus/blur state so the form keeps the raw value while the blurred field shows formatted currency. Do not hand-roll one-off currency formatting per widget or modal.
 - Do not assume parity with the public portal. Verify the full chain:
   schema -> runtime config JSON -> API payload -> renderer/template.
 - Current intake-conditionality caveat: the public portal runtime now supports checkbox-array condition operators (`contains`, `notContains`, `containsAny`, `notContainsAny`, `containsAll`) and auto-skips steps whose authored components all hide, and DEV workflow `21` uses that for Step 19 support-driven follow-up questions/uploads. DEV workflow `21` also currently splits Step 19 into two variants after Step `93`, routing `dependent-children = 0` applicants to a no-childcare copy of `Financial Supports Requested`. Manual Intake, Workflow Preview, and the intake-step editor do not yet support those operators or the same whole-step skip behavior. See `docs/planning/step19-checkbox-conditionality-followup.md` before editing those rules.
@@ -307,11 +308,12 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - NWAC Administrator homepage `All Cases` must use `/api/dashboard/all-client-cases`, not the generic `/api/cases` list, because the homepage queue is case-based and must exclude only `closed` and `archived` while keeping global scope.
 - Regional Manager homepage `Clients in My Region` must use `/api/dashboard/regional-client-cases`, not the generic `/api/cases` list, because the homepage queue is case-based and must respect owner-region/portfolio-region scope with only `closed` and `archived` excluded.
 - Schema allows `iset_case.application_id = NULL`, and core case create/update/list flows now support client-file cases.
-- Supporting Documents now has a case-based mode for application-less client files: it reads from `GET /api/cases/:id/documents`, uploads through `POST /api/cases/:id/documents/upload`, hides the checklist tab, and allows `client`, `case`, `action_plan`, plus application-type document categories. When no linked application exists, application-type uploads fall back to action-plan or case storage instead of requiring a fake application record.
+- Supporting Documents now has a case-based mode for application-less client files: it reads from `GET /api/cases/:id/documents`, uploads through `POST /api/cases/:id/documents/upload`, hides the checklist tab, and allows `client`, `case`, `action_plan`, plus application-type document categories. When no linked application exists, application-type uploads fall back to action-plan or case storage instead of requiring a fake application record. This rule is keyed to the case having no linked `application_id`, not to whether the client happens to have a linked PATH account.
 - Secure Messaging now supports application-less client-file cases when the case is linked to a participant PATH account; imported cases without a participant account can still manage documents, plans, and interventions, but messaging remains unavailable until that account exists.
 - Applicant-facing secure-message/document-reminder emails only render clickable portal links when the public-portal runtime can resolve a portal URL. Preferred envs are `APPLICANT_PORTAL_URL` / `APPLICANT_PORTAL_BASE`; runtime fallback also checks `PUBLIC_PORTAL_BASE_URL`, `REACT_APP_PORTAL_URL`, `REACT_APP_API_BASE_URL`, and `PORTAL_DOMAIN`. If none resolve in production, `[link url="{portal_dashboard_url}"]...[/link]` degrades to plain text with no anchor.
 - Case Header now exposes explicit backload quick actions on application-less cases: `Add existing action plan`, `Add existing intervention`, and `Upload existing documents`.
 - Current backload integrity rule: `Add existing intervention` must preserve real plan/intervention lifecycle state. Archived plans are read-only, closed plans can receive only `completed`/`cancelled` interventions, `in_progress`/`suspended` interventions require an active plan, closed backloaded interventions must carry an end date, and `manual_backload` interventions must stay silent on later edit/close flows instead of auto-creating payment-packet, finance-email, or CFA side effects. Their `actual amount` now writes historical posted finance ledger history only; unpaid remainder should move into a new live intervention.
+- Coordinator-facing Case Workspace help panels and embedded AI guidance should explicitly support imported/application-less backload work. When relevant, explain the Case Header quick actions, the silent historical nature of those actions, the intervention lifecycle guardrails, and the case-based document fallback when no linked `application_id` exists.
 - `src/widgets/CaseCalendarWidget.js` is shared by the case workspace and application workspace. Treat date-only values (`YYYY-MM-DD`) as local Canadian calendar dates; UTC-based parsing/weekday anchors will shift headers or event days backward.
 - Tutorial updates must be validated end-to-end (including `Next` progression on every step) so no step dead-ends due to missing hotspots.
 - If a change introduces new deployment artifacts, update the relevant deploy script(s) so files are staged.
@@ -323,10 +325,15 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Maintain `docs/meta/next-release-notes-log.md` as a standing running log for the next Landing Page "What's New" update.
 - Keep release-note entries tagged with an explicit target release number (for example `v0.5.4`) and verify the current public version from `src/pages/LandingPage.jsx` before drafting or updating entries.
 - Keep credentials and environment-specific secrets out of docs.
-- When updating `docs/meta/codex-thread-index.md`, record the exact Codex plugin task title verbatim when it is visible; if it was not captured, say `exact original task title not preserved` explicitly instead of inventing a label that looks like a UI title.
+- The thread index exists to recover the exact item in Codex Task History. The Task History label is the point of the index; topic labels are only fallback search aids.
+- When updating `docs/meta/codex-thread-index.md` for the current thread, record the exact Codex Task History label verbatim. If the user gives you the label, store that exact string even if the thread later covers additional topics.
+- Do not substitute a descriptive topic label for the Task History label. A human-written summary heading is not an acceptable replacement for the recovery key.
+- Do not create or finalize a new thread-index entry for the current thread unless the exact Task History label is known. If it is not visible in the current session, ask the user for it first.
+- Only use `exact original task title not preserved` for true historical backfills where the original Task History label cannot be recovered. Those entries should be treated as incomplete recovery records, not first-class indexed threads.
 - When refactoring dashboards/widgets, update matching help panel content (`src/helpPanelContents/*`) and related `aiContext` strings in the same change.
 - Coordinator-facing PATH help content should bias toward staff workflow, compliance reminders, timelines, documentation expectations, and next-step coaching instead of frontend implementation detail.
 - When AI help output quality is part of the task, validate both layers: the page/widget `aiContext` in `src/helpPanelContents/*` and the shared help-chat system prompt in `src/AppContent.js`.
+- For Case Workspace backload flows, validate both layers against imported/application-less use cases: page/widget help should mention historical action plans, interventions, and supporting documents, and the shared AI prompt should reinforce the same silent-workflow and no-fake-application rules.
 
 ## Database documentation and access
 

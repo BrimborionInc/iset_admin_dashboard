@@ -1,6 +1,6 @@
 # User Management Overview
 
-_Last updated: 26 March 2026_
+_Last updated: 7 April 2026_
 
 ## High-level flow
 
@@ -16,7 +16,8 @@ _Last updated: 26 March 2026_
 
 ### Data loading
 * On mount the dashboard calls `GET /api/admin/users`.
-* Results come directly from Cognito groups. The UI applies local filtering, searching (debounced), quick filters, and renders a board with metrics/audit log panels.
+* Results come directly from Cognito groups, but the server now scopes the list to the admin roles the current actor is allowed to manage. For example, Regional Managers see only ISET Coordinators in this dashboard.
+* The UI applies local filtering, searching (debounced), quick filters, and renders a board with metrics/audit log panels.
 
 ### Actions available from the page
 * **Create user** – opens a modal requiring email + name + role (display name optional), optional region (for regional roles). On submit:
@@ -24,12 +25,13 @@ _Last updated: 26 March 2026_
   - Creates Cognito user with `email_verified=true`, optional `custom:region_id` and `custom:user_id`, adds to the requested group.
   - Seeds `staff_profiles` with `name`/`display_name` at creation time (keyed by Cognito `sub`) to avoid NULL identity fields before first sign-in.
   - The grid is optimistically updated, and an audit entry is appended.
-* **Disable / Enable** – calls `PATCH /api/admin/users/:username/disable|enable`.
-* **Remove role** – `DELETE /api/admin/users/:username/role` (only available when we can determine the current admin group).
-* **Force password reset** – `PATCH /api/admin/users/:username/force-reset`.
-* **Resend invite** – `POST /api/admin/users/:username/resend-invite` (placeholder behaviour until SES hooks are wired up).
-* **Change role** – opens modal calling `PATCH /api/admin/users/:username/role`, removing the current group and adding the new one.
+* **Disable / Enable** – calls `PATCH /api/admin/users/:username/disable|enable`. The toolbar now enables these buttons only for rows in a matching state (`Enable` for disabled accounts, `Disable` for active/pending ones).
+* **Remove role** – `DELETE /api/admin/users/:username/role`. The backend removes all admin-role groups currently attached to the user so stray multi-group states are cleaned up.
+* **Force password reset** – `PATCH /api/admin/users/:username/force-reset`. This is intended for active accounts; users already in `FORCE_CHANGE_PASSWORD` should use `Resend invite` instead.
+* **Resend invite** – `POST /api/admin/users/:username/resend-invite`. This now performs a real Cognito resend for users still in `FORCE_CHANGE_PASSWORD`, using Cognito `AdminCreateUser` with `MessageAction: RESEND`.
+* **Change role** – opens a modal calling `PATCH /api/admin/users/:username/role`, removing all current admin-role groups and adding the selected new one.
 * Role change and creation forms enforce entering a region for regional roles.
+* Flashbar errors now show the route `detail` message returned by the API instead of generic HTTP-only failures.
 
 ### Applicant Accounts tab
 * Lists imported or linked applicants by client/case context instead of raw Cognito rows.
@@ -51,23 +53,23 @@ _Last updated: 26 March 2026_
 
 ### Guard matrix
 ```
-SysAdmin           → may create SysAdmin, ProgramAdmin, RegionalCoordinator, Adjudicator
-ProgramAdmin       → may create ProgramAdmin, RegionalCoordinator, Adjudicator
-RegionalCoordinator→ may create Adjudicator only
-Adjudicator        → cannot create users
+System Administrator → may manage System Administrator, NWAC Administrator, Regional Manager, ISET Coordinator
+NWAC Administrator   → may manage NWAC Administrator, Regional Manager, ISET Coordinator
+Regional Manager     → may manage ISET Coordinator only
+ISET Coordinator     → cannot manage administrative users
 ```
 * `normalizeRoleKey` canonicalises friendly labels ("Program Administrator", "System Admin", etc.) before applying the guard.
-* Guarding is applied consistently to create, disable (when role provided), and role-change endpoints.
+* The server now resolves the target user's actual Cognito admin group with `ListGroupsForUser` before applying guards. Administrative routes no longer trust `role` or `currentRole` values sent from the browser.
 
 ### Endpoints
-* **GET /users** – lists Cognito users, enriched with role, status, MFA flag, last sign-in, region (from `custom:region_id`). If Cognito admin configuration is missing, the endpoint now fails explicitly instead of returning mock users.
+* **GET /users** – lists Cognito users, enriched with role, status, MFA flag, last sign-in, region (from `custom:region_id`). The response is scoped to roles the current actor is allowed to manage. If Cognito admin configuration is missing, the endpoint fails explicitly instead of returning mock users.
 * **POST /users** – uses `AdminCreateUser`, sets `custom:region_id`, and adds the user to the requested admin group. Region is mandatory for regional roles.
-* **PATCH /users/:username/attributes** – updates `custom:region_id` and/or `custom:user_id` via `AdminUpdateUserAttributes`.
-* **PATCH /users/:username/role** – removes the user from the existing admin group and adds them to the target group (normalised keys).
-* **PATCH /users/:username/disable|enable** – toggles Cognito user status.
-* **DELETE /users/:username/role** – removes the user from their admin group (no new group added).
-* **PATCH /users/:username/force-reset** – triggers `AdminResetUserPassword`.
-* **POST /users/:username/resend-invite** – placeholder; returns a stub response while a custom email flow is pending.
+* **PATCH /users/:username/attributes** – updates `custom:region_id` and/or `custom:user_id` via `AdminUpdateUserAttributes`, with target-role authorization resolved server-side.
+* **PATCH /users/:username/role** – removes all existing admin-role groups from the user and adds the target group (normalised keys).
+* **PATCH /users/:username/disable|enable** – toggles Cognito user status, with state checks to reject already-disabled or already-enabled rows.
+* **DELETE /users/:username/role** – removes all admin-role groups from the user (no new group added).
+* **PATCH /users/:username/force-reset** – triggers `AdminResetUserPassword` for active accounts; pending first-sign-in users are redirected to `Resend invite`.
+* **POST /users/:username/resend-invite** – resends the Cognito invitation for users still in `FORCE_CHANGE_PASSWORD`.
 
 ## Applicant account lifecycle (`src/routes/admin/applicants.js`)
 
@@ -107,6 +109,6 @@ Adjudicator        → cannot create users
 4. If assignments look wrong, verify there are no stale duplicate `staff_profiles` rows keyed by email instead of Cognito `sub`, then have each user sign in again.
 
 ## Open considerations
-* New-user invitations still rely on Cognito’s default email; the resend endpoint returns a placeholder response until SES is wired up.
-* Role change currently assumes only one admin group per user. If multi-role admin support is required later, the guard and UI need updating.
-* Regional coordinators require `custom:region_id`. Make sure to capture that in the create modal and sync it back to Cognito if changed elsewhere.
+* New-user invitations and invite resends still rely on Cognito's default email delivery. If PATH later moves to branded SES/Lambda invite mail, this route should be revisited.
+* The current account-management model remains single-role. The backend now cleans up stray multi-group state, but deliberate multi-role admin support would still require a new UX and policy model.
+* Regional coordinators require `custom:region_id`. Capture that in the create modal and keep it in sync with Cognito if changed elsewhere.

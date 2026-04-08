@@ -24,9 +24,17 @@ const CaseWorkspaceInterventionsHelp = () => (
       <li>For employer-based interventions such as wage subsidy, make sure required employer information is in the file before treating the intervention as ready to move forward.</li>
       <li>Review completed interventions before closing the related action plan, and make sure any required post-intervention follow-up, including the 12-week follow-up where applicable, is recorded before closing the case.</li>
     </ul>
+
+    <h3>Imported client-file backloads</h3>
+    <ul>
+      <li>Use <strong>Case header &gt; Add existing intervention</strong> when the service already existed before PATH go-live or belongs to an imported/application-less file.</li>
+      <li>Attach the historical intervention to the real action plan. Archived plans cannot receive backloaded interventions, closed plans only accept completed or cancelled interventions, and in-progress or suspended interventions require an active plan.</li>
+      <li>Completed or cancelled historical interventions need the real end date and outcome.</li>
+      <li><strong>Actual amount</strong> and payment lines entered during backload are historical only. They do not create live payment packets, finance submissions, or applicant notifications.</li>
+    </ul>
   </div>
 );
 
-CaseWorkspaceInterventionsHelp.aiContext = `You are helping with the Interventions widget on the Case Workspace. Explain interventions as the actual client activities or supports being delivered. Emphasize accurate dates, status, outcome details, and clear linkage to the client's employment goal. Mention that multiple interventions can exist when justified, and remind the user to keep employer or provider requirements and other supporting details documented in the file. When the intervention ends, remind the user to capture the outcome and complete any required post-intervention follow-up, including the 12-week follow-up where applicable, before the case is closed.`;
+CaseWorkspaceInterventionsHelp.aiContext = `You are helping with the Interventions widget on the Case Workspace. Explain interventions as the actual client activities or supports being delivered. Emphasize accurate dates, status, outcome details, and clear linkage to the client's employment goal. Mention that multiple interventions can exist when justified, and remind the user to keep employer or provider requirements and other supporting details documented in the file. When the intervention ends, remind the user to capture the outcome and complete any required post-intervention follow-up, including the 12-week follow-up where applicable, before the case is closed. If the question is about imported or application-less cases, explain that historical interventions should be entered from \`Case header > Add existing intervention\`, that archived plans are blocked, closed plans only accept completed/cancelled interventions, in-progress or suspended interventions require an active plan, and that backloaded actual amounts or payment lines are historical only rather than live payment workflow.`;
 
 export default CaseWorkspaceInterventionsHelp;

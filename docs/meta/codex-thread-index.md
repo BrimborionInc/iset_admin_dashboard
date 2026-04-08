@@ -2,14 +2,18 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-04-06
+Last Updated: 2026-04-08
 
 ## How to use
 
 - Start here when the user references "another chat", "previous thread", "there should be a note", or asks for context that is not visible in the current session.
+- Use the `Codex task title` as the primary bridge back to the user's Task History list. Topic labels and keywords are secondary lookup aids.
+- The Task History label is the reason this index exists. Do not treat the `Topic` line as an acceptable substitute for the recovery key.
 - Search this file using the user's own words first, then open the linked canonical doc instead of relying on the short index summary.
 - Keep entries focused on cross-thread recovery value. This is not a changelog and should not duplicate normal release-note logging.
 - When a thread produces durable context that a future chat is likely to need, either update an existing canonical doc and add it here, or create a short handoff note and index it here in the same change.
+- For the current thread, do not finalize a new entry until you have the exact Task History title. If the user supplied it, copy it verbatim even if the thread later drifts into other work.
+- If the exact Task History title is missing for a historical backfill, mark the entry with `Codex task title: exact original task title not preserved` and treat it as an incomplete index record.
 - Prefer canonical docs by type:
   - operational/how-to guidance -> `docs/guides/*`
   - design or decision handoffs -> `docs/planning/*`
@@ -19,26 +23,80 @@ Last Updated: 2026-04-06
 
 For each indexed thread/topic, keep:
 
-- `Codex task title`: exact task/chat title from the Codex plugin history when known; if it was not captured, say so explicitly
+- `Codex task title`: exact task/chat title from the Codex plugin history; this is the primary recovery key back to Task History. Do not replace it with a human-written summary. Only use `exact original task title not preserved` for legacy backfills where the title truly cannot be recovered, and treat those entries as incomplete
 - `Topic`: short human-readable label
 - `Keywords`: terms a future chat is likely to search
 - `When to open`: concrete trigger conditions
 - `Primary docs`: canonical docs/scripts to open next
-- `Status`: whether the note is current, partial, or superseded
+- `Status`: whether the note is current, partial, incomplete-title, or superseded
 
 ## Indexed Topics
 
+### PATH hosting requirements and scope framing
+
+- Codex task title: `Clarify PATH hosting requirements`
+- Topic: concise, business-facing wording for PATH hosting requirements plus slide framing for core scope, transition/business-change scope, integrations, configuration/customization, security/access, and support placement
+- Keywords: `Clarify PATH hosting requirements`, `PATH hosting requirements`, `AWS hosting`, `move off AWS`, `on prem`, `core scope`, `supporting scope`, `business change scope`, `transition scope`, `integrations bullet`, `configuration and customization bullet`, `security and access bullet`
+- When to open: the user asks whether PATH requires AWS-hosted servers, wants short slide-ready wording about hosting or AWS portability, asks what belongs under core-vs-supporting/transition scope, or asks where support belongs in the scope framing
+- Primary docs:
+  - `docs/AGENTS.md`
+  - `docs/ops/environments/prod-env-guide.md`
+  - `docs/ops/deployments/deployment-quick-guide.md`
+  - `docs/ops/deployments/path-deploy-orchestrator.md`
+- Status: current as of 2026-04-08
+- Notes: durable conclusions from this thread: PATH requires an application server, a MySQL-compatible database, and supporting services for authentication/file storage, but it does not inherently require AWS-hosted compute. The current implementation is AWS-centric and presently uses EC2-hosted app servers, Aurora MySQL, Cognito, S3-style object storage/presigned URLs, SES, and AWS ops tooling; however, compute/database could move off AWS while still using AWS services. A full move away from AWS would require replacing AWS-based authentication, storage, email, and operations/deployment dependencies. For slide framing, the recommended split was `Core Scope` (`PATH solution`, `Hosting and infrastructure`, `Integrations`, `Configuration and customization`, `Security and access`) versus a second slide framed as `Transition Scope` (or similar) covering `Data and migration`, `Governance and decision-making`, `Training and readiness`, `Support and operations`, and `Testing and cutover`. Support belongs with transition/operational readiness, not with core product scope.
+
+### Mixed backload/admin follow-up thread
+
+- Codex task title: `Write training scripts`
+- Topic: mixed thread that started with the `PATH Training Shorts - Backloading Interventions` script and later covered case-workspace backload fixes, admin-user account-management fixes, and imported-case document-mode debugging
+- Keywords: `Write training scripts`, `Backloading Interventions`, `add existing intervention`, `add existing action plan`, `upload existing documents`, `create_intervention_failed`, `currency helper`, `resend invite`, `application-less documents`
+- When to open: the user references the misleading `Write training scripts` chat title, asks for the thread where the backloading-interventions training script was written, or remembers a single mixed thread that also fixed the existing-intervention modal, `Administrative Users`, and imported-case document uploads
+- Primary docs:
+  - `docs/guides/client-file-imports.md`
+  - `docs/features/user-management.md`
+  - `docs/widgets/admin/supporting-documents-widget.md`
+  - `docs/AGENTS.md`
+- Status: current as of 2026-04-07
+- Notes: this thread began with the training-video script for the Case Workspace backload quick actions `Add existing action plan`, `Add existing intervention`, and `Upload existing documents`. The same thread later produced durable notes now indexed separately under `Cloudscape currency input helper`, `Administrative user resend-invite and role-scoped management`, and `Application-less case documents with linked PATH accounts`. It also included two implementation fixes that are useful search anchors even though they do not have their own standalone index entries: the `create_intervention_failed` SQL placeholder mismatch in `POST /api/action-plans/:id/interventions`, and the System Administrator homepage config-activity query that hit MySQL `Out of sort memory` when sorting the large published intake JSON row. A later pass in the same thread also aligned the Case Workspace help panels and embedded AI chat context so staff asking about imported/application-less backloads get guidance on the quick actions, silent historical behavior, intervention guardrails, and historic-document handling. The closing SES question in this thread was only a thread-index lookup; the actual SES setup work lives under `Prod intake sync and deploy recovery`.
+
+### Administrative user resend-invite and role-scoped management
+
+- Codex task title: `exact original task title not preserved`
+- Topic: real Cognito resend-invite behavior plus server-side role resolution and role-scoped visibility for `Manage Users > Administrative Users`
+- Keywords: `resend invite`, `Administrative Users`, `Cognito RESEND`, `FORCE_CHANGE_PASSWORD`, `admin users placeholder`, `role-scoped user list`, `ListGroupsForUser`, `force reset vs resend invite`
+- When to open: the user asks whether `Resend invite` works, reports that admin-user actions seem to allow or block the wrong roles, asks why a Regional Manager only sees ISET Coordinators in Administrative Users, or asks which action to use for pending-vs-active staff accounts
+- Primary docs:
+  - `docs/features/user-management.md`
+  - `docs/guides/test-staff-cognito-recovery.md`
+  - `src/routes/admin/users.js`
+- Status: current as of 2026-04-07
+- Notes: durable outcomes from this thread: `Resend invite` is no longer a stub and now uses Cognito `AdminCreateUser` with `MessageAction: RESEND` for staff accounts still in `FORCE_CHANGE_PASSWORD`; `Force reset` is for active accounts instead. Administrative-user routes now resolve the target user's actual admin group with `ListGroupsForUser` before authorizing disable, enable, region updates, role changes, role removal, resend invite, and force-reset actions, so the backend no longer trusts `role` or `currentRole` from the browser. The Administrative Users list is now scoped to the roles the actor is allowed to manage, which means Regional Managers see only ISET Coordinators in that dashboard.
+
+### Cloudscape currency input helper
+
+- Codex task title: `exact original task title not preserved`
+- Topic: shared currency-input display helper for Cloudscape `Input` fields
+- Keywords: `currency helper`, `Cloudscape currency input`, `getCurrencyInputDisplayValue`, `currencyFormat.js`, `formatted amount input`, `money input formatting`
+- When to open: the user asks why a money field is not formatting on blur, asks how PATH is supposed to handle currency entry in a Cloudscape `Input`, or asks whether there is already a shared helper for currency-input display
+- Primary docs:
+  - `docs/AGENTS.md`
+  - `src/utils/currencyFormat.js`
+- Status: current as of 2026-04-07
+- Notes: durable rule from this thread: Cloudscape does not provide built-in currency formatting for `Input` components in this repo, so currency-entry fields should use the shared `getCurrencyInputDisplayValue` helper from `src/utils/currencyFormat.js` together with local focus/blur state. Keep the raw amount in component state while focused, and show formatted currency only for the blurred display state. Do not add ad hoc currency-formatting logic per screen.
+
 ### Financial reports approved CRF/EI dashboard
 
-- Codex task title: `implement CRF and EI reports within the Budgets module`
-- Topic: live Budgets and Finance financial-reporting surface for annual approved CRF/EI intervention funding plus workbook-style Excel export
-- Keywords: `CRF EI reports`, `Budgets module reports`, `Financial Reports`, `Approved funding`, `Shelley workbook`, `province territory intervention report`, `finance reports export`, `intervention funding`
-- When to open: the user asks where the new CRF/EI finance report lives, asks what the annual approved-funding view means, asks how finance follow-up is shown on that page, or asks how the Excel export and current filters are supposed to behave
+- Codex task title: `Add CRF and EI reports`
+- Topic: live Budgets and Finance financial-reporting surface for annual approved CRF/EI intervention funding, cleaned-up payment workflow semantics, and workbook-style Excel export
+- Keywords: `Add CRF and EI reports`, `CRF EI reports`, `Budgets module reports`, `ISET Advances and Active Clients`, `Approved funding`, `Shelley workbook`, `province territory intervention report`, `finance reports export`, `intervention funding`, `carry over`, `budget committed`
+- When to open: the user asks where the CRF/EI finance report lives, asks what the annual approved-funding view means, asks how payment status is shown on that page, asks why carry-over is only best-effort, asks how the Excel export and current filters are supposed to behave, or asks why budget-pot `Committed` does or does not move after intervention approval
 - Primary docs:
   - `docs/dashboards/financial-reports-dashboard.md`
+  - `docs/guides/payments-module-user-manual.md`
   - `docs/AGENTS.md`
 - Status: current as of 2026-04-06
-- Notes: durable outcomes from this thread: the route is `/finance/reports`; the finance-reporting demo/widget board was replaced by a fixed reporting page; the live report is now an annual approved-funding view based on `COALESCE(intervention.reviewed_at, intervention.created_at)`; participant geography is home province/territory with submission-address province first and client-address province fallback; the grain is one row per intervention; only CRF/EI rows are included; intervention rows now include finance follow-up derived from payment-packet and finance-transaction state; the current finance endpoints are `/api/finance/reports/intervention-funding/filter-options` and `/api/finance/reports/intervention-funding`; and Excel export now emits `Summary`, `CRF Detail`, and `EI Detail` worksheets from the current filtered dataset. The user-provided workbook (`CURRENT BC 2025-26 - ISET Advance and Active Client Spreadsheet.xlsx`) should be treated as a layout/business reference, not as the literal transactional spec.
+- Notes: durable outcomes from this thread: the route is `/finance/reports`; the page title is now `ISET Advances and Active Clients`; the finance-reporting demo/widget board was replaced by a fixed reporting page; the live report is now an annual approved-funding view based on `COALESCE(intervention.reviewed_at, intervention.created_at)` with fiscal year, region, and optional carry-over only; participant geography is home province/territory with submission-address province first and client-address province fallback; the grain is one row per intervention; only CRF/EI rows are included; intervention rows include payment follow-up derived from payment-packet and finance-transaction state; and Excel export emits `Summary`, `CRF Detail`, and `EI Detail` worksheets from the current filtered dataset. The workbook `CURRENT BC 2025-26 - ISET Advance and Active Client Spreadsheet.xlsx` is a business/layout reference only, not the literal transactional spec. This same thread also settled the current finance semantics used around the report: approved intervention funding is authority only; payment packets are created manually for real claim periods; packet statuses are `draft`, `ready_to_send`, `submitted`, `confirmed`, `cancelled`; line statuses are `needs_evidence`, `ready_to_send`, `submitted`, `paid`, `held`, `cancelled`; carry-over is only exact when PATH has dated line-level packet data; and the Budgets dashboard `Committed` column was restored to its original pot-control meaning of approved intervention funding reserved against the budget pot, while `Actual` remains posted finance spend.
 
 ### Admin-console bug reporting and change requests
 
@@ -64,7 +122,20 @@ For each indexed thread/topic, keep:
   - `docs/widgets/admin/case-header-widget.md`
   - `docs/AGENTS.md`
 - Status: current as of 2026-04-05
-- Notes: the current operating rule is that client-file import creates only the client plus application-less case, while historical plans/interventions are added later through Case Header backload actions. Those backload actions stay silent, and `manual_backload` interventions stay silent on later edit/close flows too: no approval routing, checklist progression, notifications, payment-packet generation, or finance-email side effects. They must still preserve real lifecycle state: archived plans are read-only, closed plans can receive only completed/cancelled interventions, in-progress or suspended interventions require an active plan, and historical start/result/end dates now seed the stored lifecycle timestamps used by the workspace. Finance handling is now history-only: `actual amount` on a backloaded intervention writes a posted historical ledger entry for reporting/budget burn, while unpaid remainder should move into a new live intervention.
+- Notes: the current operating rule is that client-file import creates only the client plus application-less case, while historical plans/interventions are added later through Case Header backload actions. Those backload actions stay silent, and `manual_backload` interventions stay silent on later edit/close flows too: no approval routing, checklist progression, notifications, payment-packet generation, or finance-email side effects. They must still preserve real lifecycle state: archived plans are read-only, closed plans can receive only completed/cancelled interventions, in-progress or suspended interventions require an active plan, and historical start/result/end dates now seed the stored lifecycle timestamps used by the workspace. Finance handling is now history-only: `actual amount` on a backloaded intervention writes a posted historical ledger entry for reporting/budget burn, while unpaid remainder should move into a new live intervention. Coordinator-facing Case Workspace help panels and embedded AI chat context now explicitly coach staff through these backload actions instead of assuming only normal post-approval casework.
+
+### Application-less case documents with linked PATH accounts
+
+- Codex task title: `exact original task title not preserved`
+- Topic: Supporting Documents case-mode rule for imported cases that have a participant PATH account but no linked application
+- Keywords: `add existing document`, `upload existing documents`, `application-scoped document`, `imported client`, `application-less`, `PATH account`, `checklist hidden`, `case-based documents`
+- When to open: the user reports that `Upload existing documents` is asking for an application on an imported file, says a batch-imported client has a PATH account but no application, or asks why the Supporting Documents widget is or is not in case-based mode
+- Primary docs:
+  - `docs/guides/client-file-imports.md`
+  - `docs/widgets/admin/supporting-documents-widget.md`
+  - `docs/data/documents-model.md`
+- Status: current as of 2026-04-07
+- Notes: durable rule from this thread: in Case Workspace, document mode is keyed to whether the case has a linked `application_id`, not whether the client has a linked PATH account. Imported cases without an application must stay in case-based document mode even after applicant-account activation or silent account linking. In that mode, application-scoped document types still work by falling back to action-plan or case storage instead of forcing staff to select a nonexistent application.
 
 ### PATH deployment model and canonical shared-schema migrations
 
@@ -113,16 +184,16 @@ For each indexed thread/topic, keep:
 
 ### Prod intake sync and deploy recovery
 
-- Codex task title: `Review prod deploy guide`
+- Codex task title: `Review prod deply guide`
 - Topic: selective prod intake/runtime database patch from DEV, followed by prod `shared` + `admin` + `portal` deploy, bootstrap recovery, and prod SES sandbox-exit setup
-- Keywords: `prod deploy`, `prod database patch`, `workflow.schema.intake`, `iset_runtime_config`, `staff_profiles cognito_sub`, `nwac-prod-direct`, `app-bootstrap.sh`, `unzip exit code 1`, `instance refresh recovery`, `SES sandbox`, `noreply@nwac.ca`, `nwac.ca DKIM`, `production access`
-- When to open: the user asks whether prod intake/runtime data was safely copied from DEV without touching live case records, asks how the 2026-04-02 prod rollout was recovered after temporary `502` health failures during refresh, asks for the thread that compared prod `staff_profiles` against the prod Cognito pool before deployment, or asks how prod SES was prepared to move out of sandbox for `noreply@nwac.ca`
+- Keywords: `prod deploy`, `prod database patch`, `workflow.schema.intake`, `iset_runtime_config`, `staff_profiles cognito_sub`, `nwac-prod-direct`, `app-bootstrap.sh`, `unzip exit code 1`, `instance refresh recovery`, `SES sandbox`, `noreply@nwac.ca`, `nwac.ca DKIM`, `production access`, `temporary password`, `NEW_PASSWORD_REQUIRED`, `AWS Environment Status`, `nwac-prod-app-role`
+- When to open: the user asks whether prod intake/runtime data was safely copied from DEV without touching live case records, asks how the 2026-04-02 prod rollout was recovered after temporary `502` health failures during refresh, asks for the thread that compared prod `staff_profiles` against the prod Cognito pool before deployment, asks how prod SES was prepared and approved to move out of sandbox for `noreply@nwac.ca`, or asks why the System Administrator `AWS Environment Status` widget still showed SES warnings after AWS granted production access
 - Primary docs:
   - `docs/AGENTS.md`
   - `docs/ops/deployments/prod-deployment-guide.md`
   - `scripts/bootstrap/app-bootstrap.sh`
-- Status: current as of 2026-04-02
-- Notes: this thread first verified that prod `staff_profiles` was aligned with the prod staff Cognito pool (`10/10` email-to-`sub` matches, `0` mismatches), so the feared DEV-to-prod `cognito_sub` contamination was not present. For the intake rollout, prod was patched selectively from DEV by replacing only the workflow authoring graph tables (`workflow`, `step`, `step_component`, `workflow_step`, `workflow_route`, `workflow_route_option`) and upserting only `iset_runtime_config(scope='publish', k='workflow.schema.intake')`; broader `iset_runtime_config` keys and prod case/application data were left untouched. The subsequent prod rollout uploaded `shared`, `admin`, and `portal` artifacts using the Windows AWS profile `nwac-prod-direct`, then started prod ASG instance refresh `473dcd64-0939-4b78-ae7f-700fe890c6e8`. The replacement instance initially failed bootstrap because `scripts/bootstrap/app-bootstrap.sh` treated `unzip` warning exit code `1` as fatal, and the uploaded archives emitted a backslash-path warning. The instance was repaired in place, both target groups became healthy (`admin` on `5001`, `portal` on `5000`), public health checks returned `{"status":"ok"}`, and the refresh completed successfully on replacement instance `i-06366bbbbd9c17cc6`. The durable repo fix from this thread is that `scripts/bootstrap/app-bootstrap.sh` now tolerates `unzip` exit code `1` for non-fatal archive warnings, and the corrected bootstrap script was uploaded to `s3://nwac-prod-artifacts/bootstrap/app-bootstrap.sh` for future replacements. The same task later covered prod SES setup in `ca-central-1`: account `468278742295` was confirmed still in sandbox, the app's PATH sender was confirmed to be `noreply@nwac.ca` via runtime config, prod SES was found to have only `ISET@awentech.ca` verified, and a new SES domain identity for `nwac.ca` was created with Easy DKIM (`RSA_2048_BIT`). SES generated three required DNS CNAME records for `nwac.ca`, and the handoff was prepared for the NWAC webmaster so DNS can be updated and production-access can then be requested for transactional mail.
+- Status: current as of 2026-04-08
+- Notes: this thread first verified that prod `staff_profiles` was aligned with the prod staff Cognito pool (`10/10` email-to-`sub` matches, `0` mismatches), so the feared DEV-to-prod `cognito_sub` contamination was not present. For the intake rollout, prod was patched selectively from DEV by replacing only the workflow authoring graph tables (`workflow`, `step`, `step_component`, `workflow_step`, `workflow_route`, `workflow_route_option`) and upserting only `iset_runtime_config(scope='publish', k='workflow.schema.intake')`; broader `iset_runtime_config` keys and prod case/application data were left untouched. The subsequent prod rollout uploaded `shared`, `admin`, and `portal` artifacts using the Windows AWS profile `nwac-prod-direct`, then started prod ASG instance refresh `473dcd64-0939-4b78-ae7f-700fe890c6e8`. The replacement instance initially failed bootstrap because `scripts/bootstrap/app-bootstrap.sh` treated `unzip` warning exit code `1` as fatal, and the uploaded archives emitted a backslash-path warning. The instance was repaired in place, both target groups became healthy (`admin` on `5001`, `portal` on `5000`), public health checks returned `{"status":"ok"}`, and the refresh completed successfully on replacement instance `i-06366bbbbd9c17cc6`. The durable repo fix from this thread is that `scripts/bootstrap/app-bootstrap.sh` now tolerates `unzip` exit code `1` for non-fatal archive warnings, and the corrected bootstrap script was uploaded to `s3://nwac-prod-artifacts/bootstrap/app-bootstrap.sh` for future replacements. The same task later covered prod SES setup in `ca-central-1`: account `468278742295` was confirmed initially still in sandbox, the applicant-activation flow was confirmed to be hybrid rather than pure Cognito (PATH/SES-branded invitation email first, then Cognito forgot-password / `NEW_PASSWORD_REQUIRED` handling in the public portal), and `nwac.ca` was created and verified as the prod SES domain identity with Easy DKIM (`RSA_2048_BIT`). After AWS approved case `177558183000529`, prod SES production access became `GRANTED` with quota `50,000/day` and `14/sec`. The same thread also captured two operational follow-ups: a one-off temporary-password workaround for Molly Hink using the portal's supported `NEW_PASSWORD_REQUIRED` challenge flow, and the root cause of the lingering red `AWS Environment Status` SES card after SES approval. That widget failure was not an SES outage; it was an IAM gap on the prod EC2 app role `nwac-prod-app-role`, which had send permissions but lacked the SES read actions used by the widget (`ses:GetAccountSendingEnabled`, `ses:GetSendQuota`, `ses:GetIdentityVerificationAttributes`). Those permissions were added live and also to `infra/terraform/modules/compute/main.tf`, after which the prod instance could read SES status successfully. One final gotcha from this thread: if the widget still shows `Needs attention`, confirm the runtime sender is exactly `noreply@nwac.ca`; mismatched senders such as `noreply@iset.ca` will still produce a sender-verification warning even though the SES account itself is healthy.
 
 ### Public portal prelaunch review and rich-HTML regression
 
@@ -163,6 +234,19 @@ For each indexed thread/topic, keep:
   - `docs/planning/notification-applicant-integration.md`
 - Status: current as of 2026-04-02
 - Notes: the template syntax is not the root cause. The renderer supports `[link url="..."]...[/link]`, but if `{portal_dashboard_url}` resolves empty or invalid the runtime intentionally degrades to plain text with no anchor. For admin-triggered secure-message emails, the send is initiated by `admin-dashboard` but uses shared notification code from `ISET-intake`, so the effective runtime env is the admin backend process. Current durable rule: prefer `APPLICANT_PORTAL_URL` / `APPLICANT_PORTAL_BASE`; fallback also checks `PUBLIC_PORTAL_BASE_URL`, `REACT_APP_PORTAL_URL`, `REACT_APP_API_BASE_URL`, and `PORTAL_DOMAIN`. For current TEST env-only mitigation before code deploy, set `APPLICANT_PORTAL_BASE=https://nwac-public-test.awentech.ca` in `admin-dashboard/.env.test` and redeploy the admin backend.
+
+### Duplicate registration handling for existing applicant accounts
+
+- Codex task title: `Investigate duplicate registration`
+- Topic: public-portal self-registration behavior when the email already belongs to an applicant account, including the confirmed-vs-unconfirmed split and the resulting TEST/PROD hotfix rollout
+- Keywords: `Investigate duplicate registration`, `duplicate registration`, `existing account registration`, `An account with this email already exists`, `confirmation modal`, `confirm your email to finish signing up`, `sign in instead`, `reset or set password`, `bill@sillery.co.uk`
+- When to open: the user reports that an existing applicant is being asked for a confirmation code during registration, asks what should happen when someone tries to register twice, asks whether the portal should direct existing users to sign in instead, or asks whether the duplicate-registration hotfix reached TEST or PROD
+- Primary docs:
+  - `../ISET-intake/docs/system/auth/public-portal-auth.md`
+  - `../ISET-intake/docs/portal/accounts/registration.md`
+  - `docs/data/applicant-account-activation.md`
+- Status: current as of 2026-04-08
+- Notes: durable outcomes from this thread: the old registration flow treated Cognito `UsernameExistsException` as if the account might always be unconfirmed, so the UI opened the email-confirmation modal even for already confirmed applicant accounts. The hotfix changed the backend to inspect the applicant-pool user status and split duplicate-registration handling into two cases: unconfirmed existing accounts still open the confirmation/resend flow, while confirmed existing accounts now stay out of the modal and are directed to sign in or reset/set their password. The thread verified in TEST that `bill@sillery.co.uk` was already `CONFIRMED` in the applicant pool and therefore should not have seen the confirmation-code path. The hotfix was then rolled out portal-only to TEST (`20260408-175356`) and PROD (`20260408-175834`). During the prod rollout there was a brief transient `502` while the ASG replacement instance completed warm-up and ELB health evaluation, but the final public smoke checks for `https://iset.nwac.ca/healthz` and `https://nwac-public.awentech.ca/healthz` both passed. One follow-up observation from the same thread: some older linked applicant accounts can have a valid Cognito/user linkage while the PATH activation fields on `client` remain null, so if future chats touch applicant-account lifecycle reporting or status displays, inspect `client.applicant_account_status`, `applicant_invited_at`, and `applicant_activated_at` directly rather than assuming linkage implies activation bookkeeping is complete.
 
 ### Test-environment form/data pull path
 
@@ -222,9 +306,10 @@ For each indexed thread/topic, keep:
 
 ### TEST staff Cognito recovery
 
+- Codex task title: `exact original task title not preserved`
 - Topic: recovering TEST admin/staff accounts when region display is wrong or Cognito invitation/reset email flows fail
-- Keywords: `mcoppola`, `acurtis`, `emarion`, `Administrative Users regions`, `primary region only`, `staff_profiles cognito_sub`, `FORCE_CHANGE_PASSWORD`, `resend invite`, `admin-set-user-password`, `forgot password email not received`
-- When to open: the user reports that TEST admin users only show one region in `Administrative Users`, or a staff user cannot receive a Cognito password/invitation email, or a TEST DB refresh may have copied the wrong `staff_profiles` data
+- Keywords: `mcoppola`, `acurtis`, `emarion`, `sstacey`, `Administrative Users regions`, `primary region only`, `staff_profiles cognito_sub`, `FORCE_CHANGE_PASSWORD`, `resend invite`, `admin-set-user-password`, `admin-update-user-attributes`, `admin-get-user`, `AWS CLI`, `nwac-test`, `forgot password email not received`
+- When to open: the user reports that TEST admin users only show one region in `Administrative Users`, or a staff user cannot receive a Cognito password/invitation email, or the user remembers a thread where AWS CLI commands were used to inspect/fix a TEST staff Cognito profile, or a TEST DB refresh may have copied the wrong `staff_profiles` data
 - Primary docs:
   - `docs/guides/test-staff-cognito-recovery.md`
   - `docs/AGENTS.md`

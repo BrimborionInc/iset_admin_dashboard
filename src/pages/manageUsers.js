@@ -37,6 +37,29 @@ const ROLE_OPTIONS = [
 const ADMIN_USER_FILTER_IDS = new Set(['all', 'disabled', 'pending', 'noMfa', 'admins', 'recent', 'never']);
 const APPLICANT_ACCOUNT_STATUS_IDS = new Set(['no_account', 'created', 'invitation_sent', 'activated']);
 
+async function readResponseJson(resp) {
+  try {
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+async function getResponseErrorMessage(resp) {
+  const json = await readResponseJson(resp);
+  return json?.detail || json?.message || json?.error || `HTTP ${resp.status}`;
+}
+
+function buildBulkFailureMessage(prefix, failures) {
+  if (!failures.length) return prefix;
+  const sample = failures
+    .slice(0, 2)
+    .map((failure) => `${failure.username}: ${failure.error}`)
+    .join('; ');
+  const remainder = failures.length > 2 ? ` (+${failures.length - 2} more)` : '';
+  return `${prefix} ${sample}${remainder}`;
+}
+
 // Users loaded from backend (server fallback if provider disabled)
 
 export default function UserManagementDashboard() {
@@ -89,8 +112,8 @@ export default function UserManagementDashboard() {
     async function load() {
       setLoadingUsers(true);
       try {
-  const resp = await apiFetch('/api/admin/users');
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const resp = await apiFetch('/api/admin/users');
+        if (!resp.ok) throw new Error(await getResponseErrorMessage(resp));
         const json = await resp.json().catch(() => ({ users: [] }));
         if (!cancelled) setUsers(Array.isArray(json.users) ? json.users : []);
       } catch (e) {
@@ -114,7 +137,7 @@ export default function UserManagementDashboard() {
     async function loadRegions() {
       try {
         const resp = await apiFetch('/api/regions/canada');
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (!resp.ok) throw new Error(await getResponseErrorMessage(resp));
         const data = await resp.json().catch(() => []);
         if (cancelled) return;
         const options = (Array.isArray(data) ? data : [])
@@ -202,10 +225,9 @@ export default function UserManagementDashboard() {
     const handle = setTimeout(async () => {
       try {
         const resp = await apiFetch(`/api/admin/users${q ? `?q=${encodeURIComponent(q)}` : ''}`);
-        if (resp.ok) {
-          const json = await resp.json();
-          if (Array.isArray(json.users)) setUsers(json.users);
-        }
+        if (!resp.ok) return;
+        const json = await resp.json();
+        if (Array.isArray(json.users)) setUsers(json.users);
       } catch { /* silent */ }
     }, 550);
     return () => clearTimeout(handle);
@@ -288,6 +310,32 @@ export default function UserManagementDashboard() {
     setAudit(a => [{ id: Date.now().toString()+Math.random().toString(36).slice(2,6), time: new Date().toISOString(), ...evt }, ...a].slice(0,50));
   }
 
+  const updateUsersByUsername = useCallback((usernames, updater) => {
+    const targetSet = usernames instanceof Set ? usernames : new Set(usernames);
+    setUsers(cur => cur.map(user => (targetSet.has(user.username) ? updater(user) : user)));
+    setSelected(cur => cur.map(user => (targetSet.has(user.username) ? updater(user) : user)));
+  }, []);
+
+  const runBulkUserAction = useCallback(async (targets, requestFactory) => {
+    return Promise.all(targets.map(async (target) => {
+      try {
+        const resp = await requestFactory(target);
+        const payload = await readResponseJson(resp);
+        if (!resp.ok) {
+          return {
+            ok: false,
+            username: target.username,
+            error: payload?.detail || payload?.message || payload?.error || `HTTP ${resp.status}`,
+            target
+          };
+        }
+        return { ok: true, username: target.username, payload, target };
+      } catch (error) {
+        return { ok: false, username: target.username, error: error.message || 'network', target };
+      }
+    }));
+  }, []);
+
   const loadApplicantAccounts = useCallback(async () => {
     if (!canManageApplicantAccounts) {
       setApplicantAccounts([]);
@@ -306,7 +354,7 @@ export default function UserManagementDashboard() {
       }
       const query = params.toString();
       const resp = await apiFetch(`/api/admin/applicants${query ? `?${query}` : ''}`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw new Error(await getResponseErrorMessage(resp));
       const json = await resp.json().catch(() => ({ users: [] }));
       setApplicantAccounts(Array.isArray(json.users) ? json.users : []);
     } catch (error) {
@@ -340,7 +388,7 @@ export default function UserManagementDashboard() {
       const resp = await apiFetch(endpoint, { method: 'POST' });
       const json = await resp.json().catch(() => null);
       if (!resp.ok) {
-        throw new Error(json?.message || `HTTP ${resp.status}`);
+        throw new Error(json?.detail || json?.message || json?.error || `HTTP ${resp.status}`);
       }
       pushFlash('success', action === 'create' ? 'Applicant account created.' : 'Activation email sent.');
       recordAudit({
@@ -358,17 +406,17 @@ export default function UserManagementDashboard() {
   }, [currentUser, loadApplicantAccounts]);
 
   const applicantColumns = useMemo(() => ([
-    { id: 'applicant', header: 'Applicant', cell: item => item.applicantName },
-    { id: 'email', header: 'Email', cell: item => item.email || '—' },
-    { id: 'case', header: 'Case', cell: item => item.caseNumber || '—' },
-    { id: 'region', header: 'Region', cell: item => item.regionCode || '—' },
-    { id: 'manager', header: 'Case manager', cell: item => item.caseManagerName || '—' },
-    { id: 'status', header: 'Status', cell: item => <ApplicantAccountStatusPill status={item.accountStatus} label={item.accountStatusLabel} /> },
-    { id: 'invited', header: 'Invitation sent', cell: item => item.invitedAt ? new Date(item.invitedAt).toLocaleString() : '—' },
-    { id: 'activated', header: 'Activated', cell: item => item.activatedAt ? new Date(item.activatedAt).toLocaleString() : '—' },
+    { id: 'applicant', header: 'Applicant', cell: item => item.applicantName, minWidth: 180 },
+    { id: 'email', header: 'Email', cell: item => item.email || '—', minWidth: 220 },
+    { id: 'region', header: 'Region', cell: item => item.regionCode || '—', width: 90 },
+    { id: 'manager', header: 'Case manager', cell: item => item.caseManagerName || '—', minWidth: 180 },
+    { id: 'status', header: 'Status', cell: item => <ApplicantAccountStatusPill status={item.accountStatus} label={item.accountStatusLabel} />, minWidth: 140 },
+    { id: 'invited', header: 'Invitation sent', cell: item => item.invitedAt ? new Date(item.invitedAt).toLocaleDateString() : '—', minWidth: 130 },
+    { id: 'activated', header: 'Activated', cell: item => item.activatedAt ? new Date(item.activatedAt).toLocaleDateString() : '—', minWidth: 110 },
     {
       id: 'actions',
       header: 'Actions',
+      minWidth: 180,
       cell: item => (
         <SpaceBetween direction="horizontal" size="xs">
           {item.canCreateAccount ? (
@@ -465,7 +513,7 @@ export default function UserManagementDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw new Error(await getResponseErrorMessage(resp));
 
       setUsers(cur => cur.map(u => u.username === username
         ? { ...u, regionId: nextRegionId, regionIds: nextRegionIds.length ? nextRegionIds : null }
@@ -492,10 +540,11 @@ export default function UserManagementDashboard() {
       const resp = await apiFetch(`/api/admin/users/${encodeURIComponent(username)}/role`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newRole: roleChangeTarget.newRole, currentRole })
+        body: JSON.stringify({ newRole: roleChangeTarget.newRole })
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      setUsers(cur => cur.map(u => u.username === username ? { ...u, role: roleChangeTarget.newRole } : u));
+      if (!resp.ok) throw new Error(await getResponseErrorMessage(resp));
+      const json = await resp.json().catch(() => null);
+      updateUsersByUsername([username], user => ({ ...user, role: json?.role || roleChangeTarget.newRole }));
       pushFlash('success', `Updated role for ${username} to ${roleChangeTarget.newRole}`);
       recordAudit({ action: 'role-change', actor: 'you', detail: `${currentRole} -> ${roleChangeTarget.newRole}`, target: username });
       setShowRoleChange(false); setRoleChangeTarget(null);
@@ -544,7 +593,7 @@ export default function UserManagementDashboard() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     }).then(async resp => {
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw new Error(await getResponseErrorMessage(resp));
       // Optimistically add user for immediate feedback
       const primaryRegionId = regionIds.length ? regionIds[0] : (Number.isFinite(regionId) ? regionId : null);
       setUsers(cur => ([...cur, { username: email, email, role: form.role, status: 'FORCE_CHANGE_PASSWORD', regionId: primaryRegionId, regionIds: regionIds.length ? regionIds : null, mfa: false, lastSignIn: null }]));
@@ -563,31 +612,23 @@ export default function UserManagementDashboard() {
     setInspectorOpen(sel.length === 1);
   }
 
-  function updateSelectedUsers(mapper) {
-    const usernames = new Set(selected.map(s => s.username));
-    setUsers(cur => cur.map(u => usernames.has(u.username) ? mapper(u) : u));
-    // refresh selected references after mutation
-    setSelected(cur => cur.map(s => ({ ...users.find(u => u.username === s.username), ...s }))); // shallow refresh
-  }
-
   async function bulkDisable() {
     if (!selected.length || actionBusy) return;
     setActionBusy(true);
     const targets = [...selected];
-    // optimistic
-    updateSelectedUsers(u => ({ ...u, status: 'DISABLED' }));
     try {
-      const results = await Promise.all(targets.map(t => apiFetch(`/api/admin/users/${encodeURIComponent(t.username)}/disable`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: t.role })
-      }).then(r => r.ok ? null : r.status)));
-      const failed = results.filter(r => r);
+      const results = await runBulkUserAction(targets, (target) => apiFetch(`/api/admin/users/${encodeURIComponent(target.username)}/disable`, {
+        method: 'PATCH'
+      }));
+      const succeeded = results.filter(result => result.ok);
+      const failed = results.filter(result => !result.ok);
+      if (succeeded.length) {
+        updateUsersByUsername(succeeded.map(result => result.username), user => ({ ...user, status: 'DISABLED' }));
+        pushFlash('success', `Disabled ${succeeded.length} user(s)`);
+        succeeded.forEach(result => recordAudit({ action: 'disable', actor: 'you', detail: 'Disabled account', target: result.username }));
+      }
       if (failed.length) {
-        pushFlash('error', `Disable failed for ${failed.length} user(s)`);
-      } else {
-        pushFlash('success', `Disabled ${targets.length} user(s)`);
-  targets.forEach(t => recordAudit({ action: 'disable', actor: 'you', detail: 'Disabled account', target: t.username }));
+        pushFlash('error', buildBulkFailureMessage('Disable failed for', failed));
       }
     } catch (e) {
       pushFlash('error', `Disable error: ${e.message}`);
@@ -600,18 +641,19 @@ export default function UserManagementDashboard() {
     if (!selected.length || actionBusy) return;
     setActionBusy(true);
     const targets = [...selected];
-    // optimistic
-    updateSelectedUsers(u => ({ ...u, status: u.status === 'FORCE_CHANGE_PASSWORD' ? 'FORCE_CHANGE_PASSWORD' : 'CONFIRMED' }));
     try {
-      const results = await Promise.all(targets.map(t => apiFetch(`/api/admin/users/${encodeURIComponent(t.username)}/enable`, {
+      const results = await runBulkUserAction(targets, (target) => apiFetch(`/api/admin/users/${encodeURIComponent(target.username)}/enable`, {
         method: 'PATCH'
-      }).then(r => r.ok ? null : r.status)));
-      const failed = results.filter(r => r);
+      }));
+      const succeeded = results.filter(result => result.ok);
+      const failed = results.filter(result => !result.ok);
+      if (succeeded.length) {
+        updateUsersByUsername(succeeded.map(result => result.username), user => ({ ...user, status: 'CONFIRMED' }));
+        pushFlash('success', `Enabled ${succeeded.length} user(s)`);
+        succeeded.forEach(result => recordAudit({ action: 'enable', actor: 'you', detail: 'Enabled account', target: result.username }));
+      }
       if (failed.length) {
-        pushFlash('error', `Enable failed for ${failed.length} user(s)`);
-      } else {
-        pushFlash('success', `Enabled ${targets.length} user(s)`);
-  targets.forEach(t => recordAudit({ action: 'enable', actor: 'you', detail: 'Enabled account', target: t.username }));
+        pushFlash('error', buildBulkFailureMessage('Enable failed for', failed));
       }
     } catch (e) {
       pushFlash('error', `Enable error: ${e.message}`);
@@ -625,12 +667,16 @@ export default function UserManagementDashboard() {
     setActionBusy(true);
     const targets = [...selected];
     try {
-      const results = await Promise.all(targets.map(t => apiFetch(`/api/admin/users/${encodeURIComponent(t.username)}/role`, { method: 'DELETE' }).then(r => r.ok ? null : r.status)));
-      const failed = results.filter(r => r);
-      if (failed.length) pushFlash('error', `Remove role failed for ${failed.length}`); else {
-        pushFlash('success', `Removed role for ${targets.length} user(s)`);
-        setUsers(cur => cur.map(u => targets.find(t => t.username === u.username) ? { ...u, role: '—' } : u));
-        targets.forEach(t => recordAudit({ action: 'role-remove', actor: 'you', detail: 'Removed role', target: t.username }));
+      const results = await runBulkUserAction(targets, (target) => apiFetch(`/api/admin/users/${encodeURIComponent(target.username)}/role`, { method: 'DELETE' }));
+      const succeeded = results.filter(result => result.ok);
+      const failed = results.filter(result => !result.ok);
+      if (succeeded.length) {
+        updateUsersByUsername(succeeded.map(result => result.username), user => ({ ...user, role: '—' }));
+        pushFlash('success', `Removed role for ${succeeded.length} user(s)`);
+        succeeded.forEach(result => recordAudit({ action: 'role-remove', actor: 'you', detail: 'Removed role', target: result.username }));
+      }
+      if (failed.length) {
+        pushFlash('error', buildBulkFailureMessage('Remove role failed for', failed));
       }
     } catch (e) {
       pushFlash('error', `Remove role error: ${e.message}`);
@@ -642,11 +688,15 @@ export default function UserManagementDashboard() {
     setActionBusy(true);
     const targets = [...selected];
     try {
-      const results = await Promise.all(targets.map(t => apiFetch(`/api/admin/users/${encodeURIComponent(t.username)}/resend-invite`, { method: 'POST' }).then(r => r.ok ? null : r.status)));
-      const failed = results.filter(r => r);
-      if (failed.length) pushFlash('error', `Resend invite failed for ${failed.length}`); else {
-        pushFlash('success', `Resent invite for ${targets.length} user(s)`);
-        targets.forEach(t => recordAudit({ action: 'resend-invite', actor: 'you', detail: 'Resent invite', target: t.username }));
+      const results = await runBulkUserAction(targets, (target) => apiFetch(`/api/admin/users/${encodeURIComponent(target.username)}/resend-invite`, { method: 'POST' }));
+      const succeeded = results.filter(result => result.ok);
+      const failed = results.filter(result => !result.ok);
+      if (succeeded.length) {
+        pushFlash('success', `Resent invite for ${succeeded.length} user(s)`);
+        succeeded.forEach(result => recordAudit({ action: 'resend-invite', actor: 'you', detail: 'Resent invite', target: result.username }));
+      }
+      if (failed.length) {
+        pushFlash('error', buildBulkFailureMessage('Resend invite failed for', failed));
       }
     } catch (e) { pushFlash('error', `Resend invite error: ${e.message}`); }
     finally { setActionBusy(false); setSelected([]); setInspectorOpen(false); }
@@ -655,15 +705,17 @@ export default function UserManagementDashboard() {
     if (!selected.length || actionBusy) return;
     setActionBusy(true);
     const targets = [...selected];
-    updateSelectedUsers(u => ({ ...u, status: 'FORCE_CHANGE_PASSWORD' }));
     try {
-      const results = await Promise.all(targets.map(t => apiFetch(`/api/admin/users/${encodeURIComponent(t.username)}/force-reset`, { method: 'PATCH' }).then(r => r.ok ? null : r.status)));
-      const failed = results.filter(r => r);
+      const results = await runBulkUserAction(targets, (target) => apiFetch(`/api/admin/users/${encodeURIComponent(target.username)}/force-reset`, { method: 'PATCH' }));
+      const succeeded = results.filter(result => result.ok);
+      const failed = results.filter(result => !result.ok);
+      if (succeeded.length) {
+        updateUsersByUsername(succeeded.map(result => result.username), user => ({ ...user, status: 'FORCE_CHANGE_PASSWORD' }));
+        pushFlash('success', `Forced password reset for ${succeeded.length} user(s)`);
+        succeeded.forEach(result => recordAudit({ action: 'force-reset', actor: 'you', detail: 'Password reset required', target: result.username }));
+      }
       if (failed.length) {
-        pushFlash('error', `Force reset failed for ${failed.length} user(s)`);
-      } else {
-        pushFlash('success', `Forced password reset for ${targets.length} user(s)`);
-        targets.forEach(t => recordAudit({ action: 'force-reset', actor: 'you', detail: 'Password reset required', target: t.username }));
+        pushFlash('error', buildBulkFailureMessage('Force reset failed for', failed));
       }
     } catch (e) {
       pushFlash('error', `Force reset error: ${e.message}`);
@@ -672,6 +724,12 @@ export default function UserManagementDashboard() {
       setSelected([]); setInspectorOpen(false);
     }
   }
+
+  const selectedCanDisable = selected.length > 0 && selected.every(user => user.status !== 'DISABLED');
+  const selectedCanEnable = selected.length > 0 && selected.every(user => user.status === 'DISABLED');
+  const selectedCanForceReset = selected.length > 0 && selected.every(user => !['DISABLED', 'FORCE_CHANGE_PASSWORD'].includes(user.status));
+  const selectedCanRemoveRole = selected.length > 0 && selected.every(user => user.role && user.role !== '—');
+  const selectedCanResendInvite = selected.length > 0 && selected.every(user => user.status === 'FORCE_CHANGE_PASSWORD');
 
   const roleCounts = useMemo(() => {
     return ROLE_OPTIONS.map(r => ({ role: r.value, label: r.label, count: users.filter(u => u.role === r.value).length }));
@@ -717,11 +775,11 @@ export default function UserManagementDashboard() {
                 item.id === 'admin-users-table' ? (
                   <SpaceBetween direction="horizontal" size="xs">
                     <Button onClick={() => setShowCreate(true)} variant="primary" disabled={actionBusy}>Create user</Button>
-                    <Button disabled={!selected.length || actionBusy} onClick={bulkDisable}>{actionBusy ? 'Working…' : 'Disable'}</Button>
-                    <Button disabled={!selected.length || actionBusy} onClick={bulkEnable}>{actionBusy ? 'Working…' : 'Enable'}</Button>
-                    <Button disabled={!selected.length || actionBusy} onClick={bulkForceReset}>{actionBusy ? 'Working…' : 'Force reset'}</Button>
-                    <Button disabled={!selected.length || actionBusy} onClick={bulkRemoveRole}>Remove role</Button>
-                    <Button disabled={!selected.length || actionBusy} onClick={bulkResendInvite}>Resend invite</Button>
+                    <Button disabled={!selectedCanDisable || actionBusy} onClick={bulkDisable}>{actionBusy ? 'Working…' : 'Disable'}</Button>
+                    <Button disabled={!selectedCanEnable || actionBusy} onClick={bulkEnable}>{actionBusy ? 'Working…' : 'Enable'}</Button>
+                    <Button disabled={!selectedCanForceReset || actionBusy} onClick={bulkForceReset}>{actionBusy ? 'Working…' : 'Force reset'}</Button>
+                    <Button disabled={!selectedCanRemoveRole || actionBusy} onClick={bulkRemoveRole}>Remove role</Button>
+                    <Button disabled={!selectedCanResendInvite || actionBusy} onClick={bulkResendInvite}>Resend invite</Button>
                   </SpaceBetween>
                 ) : undefined
               }
@@ -948,7 +1006,7 @@ export default function UserManagementDashboard() {
                 placeholder="Select new role"
               />
             </FormField>
-            <Box variant="small" color="inherit">Will remove user from current role group and add to the selected role. Region-specific attributes not yet updated here.</Box>
+            <Box variant="small" color="inherit">This replaces the user&apos;s current admin role. If the new role is Regional Manager or ISET Coordinator, use Edit regions after saving to confirm province or territory access.</Box>
           </SpaceBetween>
         </Modal>
   )}
@@ -1060,7 +1118,7 @@ function UserInspector({ user, onClose, onChangeRole, resolveRegionLabel, onEdit
       header={<Header variant="h2" actions={<Button onClick={onClose}>Close</Button>}>{user.username}</Header>}
     >
       <Tabs tabs={tabs} ariaLabel="User detail tabs" />
-      <Box margin={{ top: 'm' }} variant="small" color="inherit">Future actions: reset password, change role, enable/disable, force password reset.</Box>
+      <Box margin={{ top: 'm' }} variant="small" color="inherit">Use the bulk toolbar for account actions. Resend invite applies only while the user is still in the pending first sign-in state.</Box>
     </Container>
   );
 }

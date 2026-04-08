@@ -25,9 +25,16 @@ const CaseWorkspaceActionPlansHelp = () => (
       <li>Only keep one plan active, and close or archive the others cleanly.</li>
       <li>Consider archiving instead of deleting so past decisions remain available for audit or reference.</li>
     </ul>
+
+    <h3>Imported client-file backloads</h3>
+    <ul>
+      <li>When a plan already existed before PATH go-live, start from <strong>Case header &gt; Add existing action plan</strong> instead of inventing intake or approval history.</li>
+      <li>Backloaded plans should reflect the real historical or current state, including the real start date, status, and summary.</li>
+      <li>If the historical plan is already closed, record the real close/result details so reporting and later intervention rules stay accurate.</li>
+    </ul>
   </div>
 );
 
-CaseWorkspaceActionPlansHelp.aiContext = `You are assisting with the Action Plans widget in the Case Workspace. Explain action plans as the client's working roadmap, not just a data object. Emphasize keeping goals, dates, and shared client context accurate, using review dates for follow-up, and the rule that only one plan per case may be active at a time. Mention activate, close, archive, and create-new actions when relevant.`;
+CaseWorkspaceActionPlansHelp.aiContext = `You are assisting with the Action Plans widget in the Case Workspace. Explain action plans as the client's working roadmap, not just a data object. Emphasize keeping goals, dates, and shared client context accurate, using review dates for follow-up, and the rule that only one plan per case may be active at a time. Mention activate, close, archive, and create-new actions when relevant. If the question is about imported or application-less cases, explain that historical plans should be entered from \`Case header > Add existing action plan\` as a backload step, and that closed historical plans need their real result details recorded.`;
 
 export default CaseWorkspaceActionPlansHelp;

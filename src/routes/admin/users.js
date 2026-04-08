@@ -3,7 +3,20 @@ const express = require('express');
 const router = express.Router();
 const { requireRole } = require('../../middleware/authz');
 const { resolveAwsCredentials } = require('../../lib/awsCredentials');
-const { CognitoIdentityProviderClient, ListUsersCommand, ListUsersInGroupCommand, AdminCreateUserCommand, AdminAddUserToGroupCommand, AdminDisableUserCommand, AdminEnableUserCommand, AdminUpdateUserAttributesCommand, AdminGetUserCommand } = require('@aws-sdk/client-cognito-identity-provider');
+const {
+  CognitoIdentityProviderClient,
+  ListUsersCommand,
+  ListUsersInGroupCommand,
+  ListGroupsForUserCommand,
+  AdminCreateUserCommand,
+  AdminAddUserToGroupCommand,
+  AdminRemoveUserFromGroupCommand,
+  AdminDisableUserCommand,
+  AdminEnableUserCommand,
+  AdminUpdateUserAttributesCommand,
+  AdminGetUserCommand,
+  AdminResetUserPasswordCommand
+} = require('@aws-sdk/client-cognito-identity-provider');
 
 const POOL_ID = process.env.COGNITO_STAFF_USER_POOL_ID || process.env.COGNITO_USER_POOL_ID;
 const REGION = process.env.AWS_REGION || process.env.COGNITO_REGION;
@@ -49,6 +62,8 @@ const CAN_CREATE = {
   Regional_Manager: new Set(['ISET_Coordinator']),
   ISET_Coordinator: new Set(),
 };
+const ADMIN_ROLE_KEYS = ['System_Administrator', 'NWAC_Administrator', 'Regional_Manager', 'ISET_Coordinator'];
+const ROLE_RANK = { System_Administrator: 4, NWAC_Administrator: 3, Regional_Manager: 2, ISET_Coordinator: 1 };
 
 function normalizeRoleKey(role) {
   if (!role) return null;
@@ -66,6 +81,13 @@ function normalizeRoleKey(role) {
     default:
       return cleaned;
   }
+}
+
+function buildHttpError(statusCode, code, message) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
 }
 
 function normalizeRegionIdList(list) {
@@ -115,6 +137,30 @@ function canCreateRole(actorKey, targetKey) {
   return !!set && set.has(targetKey);
 }
 
+function sortRoleKeysDescending(roleKeys) {
+  return [...roleKeys].sort((left, right) => (ROLE_RANK[right] || 0) - (ROLE_RANK[left] || 0));
+}
+
+function pickHighestRoleKey(roleKeys) {
+  return sortRoleKeysDescending(roleKeys).find(Boolean) || null;
+}
+
+function getManageableRoleKeys(actorKey) {
+  return sortRoleKeysDescending(Array.from(CAN_CREATE[actorKey] || []));
+}
+
+function ensureActorCanManageTarget(actorKey, targetRoleKey) {
+  if (!actorKey) {
+    throw buildHttpError(403, 'forbidden', 'Forbidden');
+  }
+  if (!targetRoleKey) {
+    throw buildHttpError(404, 'admin_role_not_found', 'No administrative role group found for this user');
+  }
+  if (!canCreateRole(actorKey, targetRoleKey)) {
+    throw buildHttpError(403, 'forbidden', 'You are not allowed to manage this administrative user');
+  }
+}
+
 function mapAdminRoleKeyToStaffPrimaryRole(roleKey) {
   switch (roleKey) {
     case 'System_Administrator':
@@ -133,6 +179,56 @@ function mapAdminRoleKeyToStaffPrimaryRole(roleKey) {
 function getDbPoolFromRequest(req) {
   const pool = req?.app?.locals?.pool;
   return pool && typeof pool.query === 'function' ? pool : null;
+}
+
+function mapUserAttributes(attributes) {
+  return Object.fromEntries((attributes || []).map(attribute => [attribute.Name, attribute.Value]));
+}
+
+async function listAdminRoleGroupsForUser(client, username) {
+  const response = await client.send(new ListGroupsForUserCommand({
+    Username: username,
+    UserPoolId: POOL_ID
+  }));
+  return sortRoleKeysDescending(
+    (response?.Groups || [])
+      .map(group => group?.GroupName)
+      .filter(groupName => ADMIN_ROLE_KEYS.includes(groupName))
+  );
+}
+
+async function resolveTargetAdminUser(client, username) {
+  const [adminGroups, detail] = await Promise.all([
+    listAdminRoleGroupsForUser(client, username),
+    client.send(new AdminGetUserCommand({ UserPoolId: POOL_ID, Username: username }))
+  ]);
+  const roleKey = pickHighestRoleKey(adminGroups);
+  if (!roleKey) {
+    throw buildHttpError(404, 'admin_role_not_found', 'No administrative role group found for this user');
+  }
+  const attributes = mapUserAttributes(detail?.UserAttributes);
+  return {
+    username,
+    roleKey,
+    adminGroups,
+    status: detail?.UserStatus || 'UNKNOWN',
+    email: attributes.email || username,
+    cognitoSub: attributes.sub || null,
+    emailVerified: String(attributes.email_verified || '').toLowerCase() === 'true',
+    attributes
+  };
+}
+
+async function syncStaffProfilePrimaryRole(pool, cognitoSub, roleKey) {
+  if (!pool || !cognitoSub) return;
+  try {
+    await pool.query(
+      'UPDATE staff_profiles SET primary_role = ? WHERE cognito_sub = ?',
+      [mapAdminRoleKeyToStaffPrimaryRole(roleKey), cognitoSub]
+    );
+  } catch (err) {
+    console.warn('[admin-users] staff primary role sync failed (non-fatal):', err?.message || err);
+  }
 }
 
 async function listUsersInGroupAll(client, groupName) {
@@ -172,11 +268,11 @@ async function listUserPoolUsersAll(client) {
   return users;
 }
 
-async function loadAdminUsers({ pool = null, q = '' } = {}) {
+async function loadAdminUsers({ pool = null, q = '', actorRoleKey = null } = {}) {
   const query = (q || '').toString().toLowerCase();
   const client = getClient();
-  const groups = ['System_Administrator', 'NWAC_Administrator', 'Regional_Manager', 'ISET_Coordinator'];
-  const roleRank = { System_Administrator: 4, NWAC_Administrator: 3, Regional_Manager: 2, ISET_Coordinator: 1 };
+  const groups = actorRoleKey ? getManageableRoleKeys(actorRoleKey) : ADMIN_ROLE_KEYS;
+  if (!groups.length) return [];
   const userMap = new Map();
 
   for (const groupName of groups) {
@@ -204,7 +300,7 @@ async function loadAdminUsers({ pool = null, q = '' } = {}) {
           continue;
         }
 
-        if ((roleRank[candidate.role] || 0) > (roleRank[existing.role] || 0)) {
+        if ((ROLE_RANK[candidate.role] || 0) > (ROLE_RANK[existing.role] || 0)) {
           userMap.set(user.Username, { ...existing, role: candidate.role });
         }
       }
@@ -360,11 +456,13 @@ async function upsertStaffProfile(pool, { cognitoSub, email, name, displayName, 
 
 // GET /admin/users - list administrative users (Cognito groups)
 // Response: [{ username, email, role, status, regionId, mfa, lastSignIn }]
-router.get('/users', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager', 'ISET Coordinator'), async (req, res) => {
+router.get('/users', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager'), async (req, res) => {
   try {
+    const actorKey = normalizeRoleKey(req?.auth?.role);
     const users = await loadAdminUsers({
       pool: getDbPoolFromRequest(req),
       q: req.query.q || '',
+      actorRoleKey: actorKey,
     });
     return res.json({ source: 'cognito', users });
   } catch (e) {
@@ -381,10 +479,12 @@ router.get('/users', requireRole('System Administrator', 'NWAC Administrator', '
   }
 });
 
-router.get('/users/summary', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager', 'ISET Coordinator'), async (req, res) => {
+router.get('/users/summary', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager'), async (req, res) => {
   try {
+    const actorKey = normalizeRoleKey(req?.auth?.role);
     const users = await loadAdminUsers({
       pool: getDbPoolFromRequest(req),
+      actorRoleKey: actorKey,
     });
     const total = users.length || 0;
     const disabled = users.filter(user => user.status === 'DISABLED').length;
@@ -506,14 +606,14 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
   router.patch('/users/:username/disable', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager'), async (req, res) => {
     try {
       const actor = req.auth;
-      const { role } = req.body || {};
       const username = req.params.username;
       const actorKey = normalizeRoleKey(actor?.role);
-      const targetKey = normalizeRoleKey(role);
-      if (!targetKey) return res.status(400).json({ error: 'role required' });
-      if (!actorKey) return res.status(403).json({ error: 'Forbidden' });
-      if (!canCreateRole(actorKey, targetKey) && actorKey !== 'System_Administrator') return res.status(403).json({ error: 'Forbidden' });
       const client = getClient();
+      const targetUser = await resolveTargetAdminUser(client, username);
+      ensureActorCanManageTarget(actorKey, targetUser.roleKey);
+      if (targetUser.status === 'DISABLED') {
+        throw buildHttpError(409, 'user_already_disabled', 'User is already disabled');
+      }
       await client.send(new AdminDisableUserCommand({ UserPoolId: POOL_ID, Username: username }));
       res.json({ message: 'User disabled' });
     } catch (e) {
@@ -521,10 +621,16 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
     }
   });
 
-  router.patch('/users/:username/enable', requireRole('System Administrator', 'NWAC Administrator'), async (req, res) => {
+  router.patch('/users/:username/enable', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager'), async (req, res) => {
     try {
+      const actorKey = normalizeRoleKey(req?.auth?.role);
       const username = req.params.username;
       const client = getClient();
+      const targetUser = await resolveTargetAdminUser(client, username);
+      ensureActorCanManageTarget(actorKey, targetUser.roleKey);
+      if (targetUser.status !== 'DISABLED') {
+        throw buildHttpError(409, 'user_not_disabled', 'Only disabled accounts can be enabled');
+      }
       await client.send(new AdminEnableUserCommand({ UserPoolId: POOL_ID, Username: username }));
       res.json({ message: 'User enabled' });
     } catch (e) {
@@ -536,6 +642,7 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
     try {
       const { region_id, region_ids, user_id } = req.body || {};
       const username = req.params.username;
+      const actorKey = normalizeRoleKey(req?.auth?.role);
       let regionIds = normalizeRegionIdList(region_ids);
       const primaryRegionId = resolvePrimaryRegionId(regionIds, region_id);
       if (!regionIds.length && Number.isFinite(primaryRegionId)) regionIds = [primaryRegionId];
@@ -547,6 +654,8 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
       if (!attrs.length && !regionIds.length) return res.status(400).json({ error: 'No attributes to update' });
 
       const client = getClient();
+      const targetUser = await resolveTargetAdminUser(client, username);
+      ensureActorCanManageTarget(actorKey, targetUser.roleKey);
       if (attrs.length) {
         await client.send(new AdminUpdateUserAttributesCommand({ UserPoolId: POOL_ID, Username: username, UserAttributes: attrs }));
       }
@@ -584,21 +693,28 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
     try {
       const actor = req.auth;
       const username = req.params.username;
-      const { newRole, currentRole } = req.body || {};
+      const { newRole } = req.body || {};
       const actorKey = normalizeRoleKey(actor?.role);
       const newRoleKey = normalizeRoleKey(newRole);
-      const currentRoleKey = normalizeRoleKey(currentRole);
-      if (!newRoleKey || !currentRoleKey) return res.status(400).json({ error: 'newRole and currentRole required' });
+      if (!newRoleKey) return res.status(400).json({ error: 'newRole required' });
       if (!actorKey) return res.status(403).json({ error: 'Forbidden' });
-      if (!canCreateRole(actorKey, newRoleKey) && actorKey !== 'System_Administrator') return res.status(403).json({ error: 'Forbidden' });
-      // NOTE: For full correctness we would call AdminRemoveUserFromGroup for current role and AdminAddUserToGroup for new role.
-      const { AdminRemoveUserFromGroupCommand } = require('@aws-sdk/client-cognito-identity-provider');
+      if (!canCreateRole(actorKey, newRoleKey)) return res.status(403).json({ error: 'Forbidden' });
       const client = getClient();
-      try {
-        await client.send(new AdminRemoveUserFromGroupCommand({ UserPoolId: POOL_ID, Username: username, GroupName: currentRoleKey }));
-      } catch (e) { /* ignore removal failures */ }
+      const targetUser = await resolveTargetAdminUser(client, username);
+      ensureActorCanManageTarget(actorKey, targetUser.roleKey);
+      if (targetUser.roleKey === newRoleKey && targetUser.adminGroups.length === 1) {
+        return res.json({ message: 'Role unchanged', previousRole: targetUser.roleKey, role: newRoleKey });
+      }
+      for (const groupName of targetUser.adminGroups) {
+        try {
+          await client.send(new AdminRemoveUserFromGroupCommand({ UserPoolId: POOL_ID, Username: username, GroupName: groupName }));
+        } catch (e) {
+          // Ignore per-group removal failures and continue so we can normalize the target role.
+        }
+      }
       await client.send(new AdminAddUserToGroupCommand({ UserPoolId: POOL_ID, Username: username, GroupName: newRoleKey }));
-      res.json({ message: 'Role updated' });
+      await syncStaffProfilePrimaryRole(getDbPoolFromRequest(req), targetUser.cognitoSub, newRoleKey);
+      res.json({ message: 'Role updated', previousRole: targetUser.roleKey, role: newRoleKey });
     } catch (e) {
       return sendRouteError(res, e, 'Failed to change role');
     }
@@ -606,14 +722,16 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
 
   router.delete('/users/:username/role', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager'), async (req, res) => {
     try {
+      const actorKey = normalizeRoleKey(req?.auth?.role);
       const username = req.params.username;
-      const { ListGroupsForUserCommand, AdminRemoveUserFromGroupCommand } = require('@aws-sdk/client-cognito-identity-provider');
       const client = getClient();
-      const groupsResp = await client.send(new ListGroupsForUserCommand({ Username: username, UserPoolId: POOL_ID }));
-      const targetGroup = (groupsResp.Groups||[]).find(g => ['System_Administrator','NWAC_Administrator','Regional_Manager','ISET_Coordinator'].includes(g.GroupName));
-      if (!targetGroup) return res.status(404).json({ error: 'No admin role group to remove' });
-      await client.send(new AdminRemoveUserFromGroupCommand({ UserPoolId: POOL_ID, Username: username, GroupName: targetGroup.GroupName }));
-      res.json({ message: 'Role removed' });
+      const targetUser = await resolveTargetAdminUser(client, username);
+      ensureActorCanManageTarget(actorKey, targetUser.roleKey);
+      for (const groupName of targetUser.adminGroups) {
+        await client.send(new AdminRemoveUserFromGroupCommand({ UserPoolId: POOL_ID, Username: username, GroupName: groupName }));
+      }
+      await syncStaffProfilePrimaryRole(getDbPoolFromRequest(req), targetUser.cognitoSub, null);
+      res.json({ message: 'Role removed', removedGroups: targetUser.adminGroups });
     } catch (e) {
       return sendRouteError(res, e, 'Failed to remove role');
     }
@@ -621,8 +739,29 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
 
   router.post('/users/:username/resend-invite', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager'), async (req, res) => {
     try {
-      // There is no direct "resend invite" if MessageAction SUPPRESS was used; placeholder for integration with custom email flow.
-      res.json({ message: 'Invite resend placeholder (configure SES/Lambda trigger)' });
+      const actorKey = normalizeRoleKey(req?.auth?.role);
+      const username = req.params.username;
+      const client = getClient();
+      const targetUser = await resolveTargetAdminUser(client, username);
+      ensureActorCanManageTarget(actorKey, targetUser.roleKey);
+      if (targetUser.status === 'DISABLED') {
+        throw buildHttpError(409, 'user_disabled', 'Enable the account before resending the invite');
+      }
+      if (targetUser.status !== 'FORCE_CHANGE_PASSWORD') {
+        throw buildHttpError(409, 'invite_resend_not_applicable', 'Resend invite is only available for users still in the pending first sign-in state. Use Force reset for active accounts.');
+      }
+      const inviteEmail = targetUser.email || username;
+      await client.send(new AdminCreateUserCommand({
+        UserPoolId: POOL_ID,
+        Username: username,
+        MessageAction: 'RESEND',
+        DesiredDeliveryMediums: ['EMAIL'],
+        UserAttributes: [
+          { Name: 'email', Value: inviteEmail },
+          { Name: 'email_verified', Value: 'true' }
+        ]
+      }));
+      res.json({ message: 'Invitation email resent', delivery: 'EMAIL' });
     } catch (e) {
       return sendRouteError(res, e, 'Failed to resend invite');
     }
@@ -631,9 +770,17 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
   // Force password reset (sets status to FORCE_CHANGE_PASSWORD)
   router.patch('/users/:username/force-reset', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager'), async (req, res) => {
     try {
-      const { AdminResetUserPasswordCommand } = require('@aws-sdk/client-cognito-identity-provider');
+      const actorKey = normalizeRoleKey(req?.auth?.role);
       const username = req.params.username;
       const client = getClient();
+      const targetUser = await resolveTargetAdminUser(client, username);
+      ensureActorCanManageTarget(actorKey, targetUser.roleKey);
+      if (targetUser.status === 'DISABLED') {
+        throw buildHttpError(409, 'user_disabled', 'Enable the account before forcing a password reset');
+      }
+      if (targetUser.status === 'FORCE_CHANGE_PASSWORD') {
+        throw buildHttpError(409, 'already_pending_reset', 'User is already in the pending first sign-in state. Use Resend invite instead.');
+      }
       await client.send(new AdminResetUserPasswordCommand({ UserPoolId: POOL_ID, Username: username }));
       res.json({ message: 'Password reset forced' });
     } catch (e) {

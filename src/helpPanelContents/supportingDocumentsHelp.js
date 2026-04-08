@@ -20,7 +20,8 @@ const SupportingDocumentsHelp = () => (
       <li>
         <strong>Switch tabs:</strong> The <em>Documents</em> tab shows the file list; the <em>Checklist</em> tab shows
         required items and whether each is complete, missing, or in progress. Imported or application-less client files
-        do not show the checklist tab because there is no applicant/application checklist to drive yet.
+        do not show the checklist tab because there is no linked application checklist to drive yet, even if the
+        client already has a PATH account.
       </li>
       <li>
         <strong>Refresh:</strong> Use the refresh button after new uploads or signed forms arrive to pull in the latest files.
@@ -64,9 +65,10 @@ const SupportingDocumentsHelp = () => (
       <li>
         <strong>Upload:</strong> Choose a label and document type, then attach it to the correct record. In normal
         application workflows that usually means an application, client file, case, or action plan. In
-        imported/application-less client files, uploads can attach to the client, case, or action plan directly.
-        Application-type documents can still be uploaded there; PATH stores them against an action plan when selected,
-        or the case file if there is no linked application.
+        imported/application-less client files, uploads can attach to the client, case, or action plan directly. The
+        <strong>Case header &gt; Upload existing documents</strong> quick action opens this same workflow as the intended
+        backload path for historic records. Application-type documents can still be uploaded there; PATH stores them
+        against an action plan when selected, or the case file if there is no linked application.
       </li>
       <li>
         <strong>Duplicate:</strong> Use this to reuse the same file across applications or interventions. The option
@@ -93,7 +95,8 @@ const SupportingDocumentsHelp = () => (
     <ul>
       <li>
         <strong>No checklist tab:</strong> Imported or application-less client files use case-based documents and do not
-        currently participate in applicant checklist workflow.
+        currently participate in applicant checklist workflow. This remains true even when the imported client has a
+        linked PATH account but no historical application.
       </li>
       <li>
         <strong>Silent uploads:</strong> For imported/application-less client files, uploads here are casework backload
@@ -119,8 +122,11 @@ only appears when reuse is possible and delete requires typing "delete". Mention
 Clarify the two modes: normal applicant/application document management versus case-based documents for imported or
 application-less client files. In case-based mode, uploads can attach to the client, case, or action plan, and
 application-type documents can still be uploaded by storing them against an action plan or the case when no linked
-application exists. The checklist tab is intentionally hidden there, and uploads are silent backload actions that do not
-trigger applicant notifications or approvals. Offer troubleshooting for missing checklist counts and unavailable files.
+application exists. Mention that in Case Workspace the \`Case header > Upload existing documents\` quick action is the
+intended backload entry point for historic records. This case-based mode still applies when an imported client has a
+linked PATH account but no linked application. The checklist tab is intentionally hidden there, and uploads are silent
+backload actions that do not trigger applicant notifications or approvals. Offer troubleshooting for missing checklist
+counts and unavailable files.
 `;
 
 export default SupportingDocumentsHelp;

@@ -839,6 +839,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
         }
         const message =
           details?.message ||
+          details?.detail ||
           details?.error ||
           `Failed to create intervention (${response.status})`;
         const error = new Error(message);

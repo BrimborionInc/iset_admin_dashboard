@@ -2,6 +2,13 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-04-07
+- UX/AI/Casework: Expanded the Case Workspace help panels and embedded AI help context so staff get explicit guidance for backloading historical action plans, interventions, and supporting documents on imported/application-less cases.
+- Fix/UX/Casework: Supporting Documents now keeps imported/application-less cases in case-based document mode whenever the case has no linked application, even if the client already has a PATH account, so `Upload existing documents` no longer asks staff to attach application-scoped document types to a nonexistent application.
+- Fix/API/Admin users: Replaced the `Administrative Users > Resend invite` placeholder with a real Cognito `RESEND` flow for staff accounts still in `FORCE_CHANGE_PASSWORD`, and now return clear guidance to use `Force reset` only for active accounts.
+- Fix/Security/Admin users: Hardened admin-user management routes so they resolve the target user's actual Cognito admin group server-side instead of trusting role labels sent from the browser, closing gaps across disable, enable, role change, role removal, region update, resend invite, and force-reset actions.
+- UX/Admin users: Scoped the Administrative Users dashboard to the roles the current actor is allowed to manage, tightened toolbar button enablement to match account state, and surfaced route `detail` messages in flash errors instead of generic HTTP failures.
+
 ## 2026-04-06
 - Workflow/API/Finance: Stopped auto-creating payment packets from intervention approval or auto-generated assessment interventions, and now treat approved intervention funding as authorization only until staff create a packet for a specific claim period or receipt.
 - Fix/API/Finance: Payment packet creation now allows multiple packets over time for the same intervention, while validating the initial line against remaining authorized funding and adding duplicate warnings at create time.

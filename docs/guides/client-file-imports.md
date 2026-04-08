@@ -36,7 +36,8 @@ This means the database does not require a fake intake history just to preserve 
   - reads from `GET /api/cases/:id/documents`
   - uploads through `POST /api/cases/:id/documents/upload`
   - allows `client`, `case`, and `action_plan` document types without fabricating applicant/application rows
-  - intentionally hides the checklist tab when there is no applicant/application chain
+  - intentionally hides the checklist tab when there is no linked application checklist context
+- If an imported client later gets a linked PATH account but still has no linked application, Supporting Documents must stay in that same case-based mode. A participant account does not imply historical application context.
 - This means missing assessments, action plans, or interventions are not what governs document upload. The widget now distinguishes between applicant-driven checklist mode and case-based document mode.
 - Application-form/version widgets are inherently not available for a client-file-only case, because there is no original intake payload to show.
 

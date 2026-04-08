@@ -43310,7 +43310,9 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     }
 
     const identity = getRequesterIdentity(req);
-    const createdBy = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
+    const createdBy =
+      resolveActiveStaffProfileId(req) ||
+      (Number.isFinite(identity.userId) ? Number(identity.userId) : null);
 
     const trimmedOutcomeCreate =
       typeof outcome === 'string' && outcome.trim()
@@ -43555,7 +43557,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
           created_by_staff_profile_id,
           reviewed_by_staff_profile_id,
           reviewed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${
          shouldStampReviewDecision ? 'NOW()' : 'NULL'
        })`,
       [
@@ -72624,15 +72626,29 @@ async function resolveDashboardActorLabels(actorIds = []) {
 
 async function loadSystemAdminConfigActivityItems() {
   try {
-    const [rows] = await pool.query(
+    const [[publishRow]] = await pool.query(
       `SELECT scope, k, v, updated_at
          FROM iset_runtime_config
-        WHERE (scope = 'publish' AND k = 'workflow.schema.intake')
-           OR (scope = 'admin' AND k = 'upload.config.audit')
-           OR scope = 'events_capture'
-        ORDER BY updated_at DESC`
+        WHERE scope = 'publish'
+          AND k = 'workflow.schema.intake'
+        LIMIT 1`
     );
-    if (!Array.isArray(rows) || rows.length === 0) {
+    const [[uploadAuditRow]] = await pool.query(
+      `SELECT scope, k, v, updated_at
+         FROM iset_runtime_config
+        WHERE scope = 'admin'
+          AND k = 'upload.config.audit'
+        LIMIT 1`
+    );
+    const [captureRows] = await pool.query(
+      `SELECT scope, k, v, updated_at
+         FROM iset_runtime_config
+        WHERE scope = 'events_capture'
+        ORDER BY updated_at DESC
+        LIMIT 10`
+    );
+
+    if (!publishRow && !uploadAuditRow && (!Array.isArray(captureRows) || captureRows.length === 0)) {
       return [];
     }
 
@@ -72648,15 +72664,14 @@ async function loadSystemAdminConfigActivityItems() {
       });
     });
 
-    const captureRows = rows.filter(row => row?.scope === 'events_capture');
-    const captureActorIds = captureRows
+    const normalizedCaptureRows = Array.isArray(captureRows) ? captureRows : [];
+    const captureActorIds = normalizedCaptureRows
       .map(row => safeJsonParse(row?.v, {})?.updated_by)
       .filter(Boolean);
     const actorLabels = await resolveDashboardActorLabels(captureActorIds);
 
     const items = [];
 
-    const publishRow = rows.find(row => row?.scope === 'publish' && row?.k === 'workflow.schema.intake');
     if (publishRow) {
       const payload = safeJsonParse(publishRow.v, {}) || {};
       const publishedAt = parseDashboardActivityDate(payload?.publishedAt || publishRow.updated_at);
@@ -72675,7 +72690,6 @@ async function loadSystemAdminConfigActivityItems() {
       }
     }
 
-    const uploadAuditRow = rows.find(row => row?.scope === 'admin' && row?.k === 'upload.config.audit');
     const uploadAuditEntries = safeJsonParse(uploadAuditRow?.v, []);
     if (Array.isArray(uploadAuditEntries)) {
       uploadAuditEntries.slice(0, 4).forEach((entry, index) => {
@@ -72696,7 +72710,7 @@ async function loadSystemAdminConfigActivityItems() {
       });
     }
 
-    captureRows.slice(0, 10).forEach(row => {
+    normalizedCaptureRows.forEach(row => {
       const payload = safeJsonParse(row?.v, {}) || {};
       if (typeof payload.enabled !== 'boolean') {
         return;

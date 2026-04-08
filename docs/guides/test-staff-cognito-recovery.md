@@ -2,7 +2,7 @@
 
 Purpose: recover TEST admin/staff accounts when the Admin Users widget shows only a primary region, when Cognito invitation/reset emails do not arrive, or when a staff account is stuck in `FORCE_CHANGE_PASSWORD`.
 
-Last Updated: 2026-04-02
+Last Updated: 2026-04-07
 
 ## When to use this
 
@@ -109,6 +109,8 @@ AWS_PROFILE=nwac-test aws cognito-idp admin-create-user \
 ```
 
 This keeps the user in `FORCE_CHANGE_PASSWORD` and sends a fresh temporary-password email.
+
+The `Manage Users > Administrative Users > Resend invite` button now uses this same Cognito `RESEND` path in-app for staff users who are still in `FORCE_CHANGE_PASSWORD`.
 
 ### Fallback: set a temporary password manually
 

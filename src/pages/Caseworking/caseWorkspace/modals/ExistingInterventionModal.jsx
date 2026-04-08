@@ -31,6 +31,7 @@ import {
   getDefaultBackloadInterventionStatus,
   normalizeActionPlanLifecycleStatus,
 } from "../../../../utils/backloadInterventionRules.js";
+import { getCurrencyInputDisplayValue } from "../../../../utils/currencyFormat.js";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
 
 const POSTING_CONTEXT_OPTIONS = [
@@ -145,6 +146,14 @@ const DEFAULT_COST_LINE_WIDTHS = [
   { id: "actions", width: 110 },
 ];
 
+const DEFAULT_FOCUSED_CURRENCY_FIELDS = Object.freeze({
+  plannedCost: false,
+  approvedAmount: false,
+  actualAmount: false,
+  costLineAmount: false,
+  recurrenceAmountPerPeriod: false,
+});
+
 const defaultForm = actionPlanId => ({
   actionPlanId: actionPlanId ? String(actionPlanId) : "",
   code: "",
@@ -212,6 +221,7 @@ const ExistingInterventionModal = ({
   const [costLineColumnWidths, setCostLineColumnWidths] = useState(DEFAULT_COST_LINE_WIDTHS);
   const [nocSuggestions, setNocSuggestions] = useState([]);
   const [nocSuggestionsLoading, setNocSuggestionsLoading] = useState(false);
+  const [focusedCurrencyFields, setFocusedCurrencyFields] = useState(DEFAULT_FOCUSED_CURRENCY_FIELDS);
 
   useEffect(() => {
     if (!visible) {
@@ -226,6 +236,7 @@ const ExistingInterventionModal = ({
       setCostLineColumnWidths(DEFAULT_COST_LINE_WIDTHS);
       setNocSuggestions([]);
       setNocSuggestionsLoading(false);
+      setFocusedCurrencyFields(DEFAULT_FOCUSED_CURRENCY_FIELDS);
       return;
     }
     setForm(defaultForm(initialActionPlanId));
@@ -329,6 +340,15 @@ const ExistingInterventionModal = ({
 
   const isClosed = form.status === "completed" || form.status === "cancelled";
   const planStatusNotice = getBackloadInterventionPlanStatusNotice(selectedPlanStatus);
+
+  const setCurrencyFieldFocused = (field, focused) => {
+    setFocusedCurrencyFields(current => {
+      if (current[field] === focused) {
+        return current;
+      }
+      return { ...current, [field]: focused };
+    });
+  };
 
   useEffect(() => {
     if (!visible) return;
@@ -532,6 +552,11 @@ const ExistingInterventionModal = ({
     setEditingCostLineId(null);
     setCostLineDraft(createCostLineDraft());
     setCostLineDraftErrors({});
+    setFocusedCurrencyFields(current => ({
+      ...current,
+      costLineAmount: false,
+      recurrenceAmountPerPeriod: false,
+    }));
   };
 
   const saveCostLineDraft = () => {
@@ -1115,22 +1140,31 @@ const ExistingInterventionModal = ({
               <ColumnLayout columns={3} variant="text-grid">
               <FormField label="Planned cost (optional)">
                 <Input
-                  value={form.plannedCost}
+                  value={getCurrencyInputDisplayValue(form.plannedCost, focusedCurrencyFields.plannedCost)}
                   onChange={({ detail }) => handleFieldChange("plannedCost", detail.value)}
+                  onFocus={() => setCurrencyFieldFocused("plannedCost", true)}
+                  onBlur={() => setCurrencyFieldFocused("plannedCost", false)}
+                  inputMode="decimal"
                   placeholder="Whole dollars"
                 />
               </FormField>
               <FormField label="Approved amount (optional)">
                 <Input
-                  value={form.approvedAmount}
+                  value={getCurrencyInputDisplayValue(form.approvedAmount, focusedCurrencyFields.approvedAmount)}
                   onChange={({ detail }) => handleFieldChange("approvedAmount", detail.value)}
+                  onFocus={() => setCurrencyFieldFocused("approvedAmount", true)}
+                  onBlur={() => setCurrencyFieldFocused("approvedAmount", false)}
+                  inputMode="decimal"
                   placeholder="Whole dollars"
                 />
               </FormField>
               <FormField label="Actual amount (optional)">
                 <Input
-                  value={form.actualAmount}
+                  value={getCurrencyInputDisplayValue(form.actualAmount, focusedCurrencyFields.actualAmount)}
                   onChange={({ detail }) => handleFieldChange("actualAmount", detail.value)}
+                  onFocus={() => setCurrencyFieldFocused("actualAmount", true)}
+                  onBlur={() => setCurrencyFieldFocused("actualAmount", false)}
+                  inputMode="decimal"
                   placeholder="Whole dollars"
                 />
               </FormField>
@@ -1208,8 +1242,11 @@ const ExistingInterventionModal = ({
             </FormField>
             <FormField label="Amount" errorText={costLineDraftErrors.amount}>
               <Input
-                value={costLineDraft.amount}
+                value={getCurrencyInputDisplayValue(costLineDraft.amount, focusedCurrencyFields.costLineAmount)}
                 onChange={({ detail }) => handleCostLineDraftChange("amount", detail.value)}
+                onFocus={() => setCurrencyFieldFocused("costLineAmount", true)}
+                onBlur={() => setCurrencyFieldFocused("costLineAmount", false)}
+                inputMode="decimal"
                 placeholder="Whole dollars"
               />
             </FormField>
@@ -1289,8 +1326,14 @@ const ExistingInterventionModal = ({
               </FormField>
               <FormField label="Amount per period" errorText={costLineDraftErrors.recurrenceAmountPerPeriod}>
                 <Input
-                  value={costLineDraft.recurrenceAmountPerPeriod}
+                  value={getCurrencyInputDisplayValue(
+                    costLineDraft.recurrenceAmountPerPeriod,
+                    focusedCurrencyFields.recurrenceAmountPerPeriod
+                  )}
                   onChange={({ detail }) => handleCostLineDraftChange("recurrenceAmountPerPeriod", detail.value)}
+                  onFocus={() => setCurrencyFieldFocused("recurrenceAmountPerPeriod", true)}
+                  onBlur={() => setCurrencyFieldFocused("recurrenceAmountPerPeriod", false)}
+                  inputMode="decimal"
                   placeholder="Optional"
                 />
               </FormField>
