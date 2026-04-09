@@ -2,7 +2,7 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-04-08
+Last Updated: 2026-04-09
 
 ## How to use
 
@@ -72,6 +72,21 @@ For each indexed thread/topic, keep:
   - `src/routes/admin/users.js`
 - Status: current as of 2026-04-07
 - Notes: durable outcomes from this thread: `Resend invite` is no longer a stub and now uses Cognito `AdminCreateUser` with `MessageAction: RESEND` for staff accounts still in `FORCE_CHANGE_PASSWORD`; `Force reset` is for active accounts instead. Administrative-user routes now resolve the target user's actual admin group with `ListGroupsForUser` before authorizing disable, enable, region updates, role changes, role removal, resend invite, and force-reset actions, so the backend no longer trusts `role` or `currentRole` from the browser. The Administrative Users list is now scoped to the roles the actor is allowed to manage, which means Regional Managers see only ISET Coordinators in that dashboard.
+
+### PROD user-management regression, TEST rollout, and Sillery cleanup
+
+- Codex task title: `Find PROD AWS CLI access`
+- Topic: prod AWS access path from the sandbox, diagnosis of production bug report `#2` for admin-user management, TEST deployment of the fix, and the one-off prod purge of Jackie/William Sillery test applicant data
+- Keywords: `Find PROD AWS CLI access`, `nwac-prod`, `run-prod-sql-via-ssm.sh`, `Administrative Users`, `bug #2`, `ListGroupsForUserCommand is not a constructor`, `AdminListGroupsForUserCommand`, `lkuzma@nwac.ca`, `nwac-test`, `20260409-user-mgmt-fix`, `Sillery`, `Jackie Sillery`, `William Sillery`, `prod bug log`
+- When to open: the user asks how prod AWS/DB access works from Codex, references the chat that diagnosed the prod admin-user 500s, asks whether the user-management fix already went to TEST, asks what report `#2` in the prod bug log was actually caused by, or asks about the prod cleanup that removed the Sillery test records from dashboard counts
+- Primary docs:
+  - `docs/ops/environments/prod-env-guide.md`
+  - `docs/ops/deployments/deploy-test-notes.md`
+  - `docs/features/user-management.md`
+  - `scripts/run-prod-sql-via-ssm.sh`
+  - `scripts/deploy-admin-test.ps1`
+- Status: current as of 2026-04-09
+- Notes: durable outcomes from this thread: sandbox prod access works through AWS CLI profile `nwac-prod` in account `468278742295` / region `ca-central-1`, and prod SQL access is through `scripts/run-prod-sql-via-ssm.sh` against the live admin instance discovered from `nwac-prod-asg`. The critical prod user-management failure reported in bug `#2` was confirmed as a newly deployed backend regression, not a permissions issue: the code imported `ListGroupsForUserCommand`, but the installed AWS SDK only exports `AdminListGroupsForUserCommand`, which caused target-user admin actions such as disable and region edit to fail at runtime with `ListGroupsForUserCommand is not a constructor`. The same thread also confirmed a separate disabled-state logic bug where Cognito `Enabled=false` users like `lkuzma@nwac.ca` could still show `UserStatus=FORCE_CHANGE_PASSWORD`; the API/UI fix now normalizes those rows to `DISABLED`. The code fix set was deployed to TEST as release `20260409-user-mgmt-fix`, with both TEST admin instances updated successfully and the admin target group healthy. The prod bug log on 2026-04-09 contained four submitted reports, with report `#2` (`Administrative Users`) being the confirmed software defect and reports `#3` and `#4` being dashboard/reporting skew caused by Sillery test data in prod. A later prod hotfix in the same thread purged Jackie Sillery's full applicant/application/case footprint and William Sillery's imported client/case footprint from prod, while deliberately leaving Bill Sillery's real prod System Administrator staff account intact. A prod Aurora restore point was started first as snapshot `nwac-prod-pre-sillery-purge-20260409-144152`.
 
 ### Cloudscape currency input helper
 

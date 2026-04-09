@@ -37,6 +37,12 @@ const ROLE_OPTIONS = [
 const ADMIN_USER_FILTER_IDS = new Set(['all', 'disabled', 'pending', 'noMfa', 'admins', 'recent', 'never']);
 const APPLICANT_ACCOUNT_STATUS_IDS = new Set(['no_account', 'created', 'invitation_sent', 'activated']);
 
+const MANAGEABLE_ROLE_VALUES_BY_ROLE = {
+  'System Administrator': ['System_Administrator', 'NWAC_Administrator', 'Regional_Manager', 'ISET_Coordinator'],
+  'NWAC Administrator': ['NWAC_Administrator', 'Regional_Manager', 'ISET_Coordinator'],
+  'Regional Manager': ['ISET_Coordinator'],
+};
+
 async function readResponseJson(resp) {
   try {
     return await resp.json();
@@ -177,6 +183,14 @@ export default function UserManagementDashboard() {
   const [regionEditId, setRegionEditId] = useState('');
   const [regionEditBusy, setRegionEditBusy] = useState(false);
 
+  const manageableRoleValues = useMemo(() => (
+    MANAGEABLE_ROLE_VALUES_BY_ROLE[currentRole] || []
+  ), [currentRole]);
+
+  const manageableRoleOptions = useMemo(() => (
+    ROLE_OPTIONS.filter((option) => manageableRoleValues.includes(option.value))
+  ), [manageableRoleValues]);
+
   useEffect(() => {
     if (canManageAdminUsers && pageTabId === 'applicant-accounts') return;
     if (!canManageAdminUsers && canManageApplicantAccounts) {
@@ -314,6 +328,21 @@ export default function UserManagementDashboard() {
     const targetSet = usernames instanceof Set ? usernames : new Set(usernames);
     setUsers(cur => cur.map(user => (targetSet.has(user.username) ? updater(user) : user)));
     setSelected(cur => cur.map(user => (targetSet.has(user.username) ? updater(user) : user)));
+  }, []);
+
+  const mergeBulkUserPayload = useCallback((resultMap, fallbackUpdater) => {
+    return (user) => {
+      const payload = resultMap.get(user.username)?.payload || null;
+      const nextStatus = payload?.status || fallbackUpdater(user).status;
+      const nextEnabled = typeof payload?.enabled === 'boolean'
+        ? payload.enabled
+        : (nextStatus === 'DISABLED' ? false : true);
+      return {
+        ...user,
+        status: nextStatus,
+        enabled: nextEnabled,
+      };
+    };
   }, []);
 
   const runBulkUserAction = useCallback(async (targets, requestFactory) => {
@@ -623,7 +652,11 @@ export default function UserManagementDashboard() {
       const succeeded = results.filter(result => result.ok);
       const failed = results.filter(result => !result.ok);
       if (succeeded.length) {
-        updateUsersByUsername(succeeded.map(result => result.username), user => ({ ...user, status: 'DISABLED' }));
+        const resultMap = new Map(succeeded.map(result => [result.username, result]));
+        updateUsersByUsername(
+          succeeded.map(result => result.username),
+          mergeBulkUserPayload(resultMap, user => ({ ...user, status: 'DISABLED' }))
+        );
         pushFlash('success', `Disabled ${succeeded.length} user(s)`);
         succeeded.forEach(result => recordAudit({ action: 'disable', actor: 'you', detail: 'Disabled account', target: result.username }));
       }
@@ -648,7 +681,11 @@ export default function UserManagementDashboard() {
       const succeeded = results.filter(result => result.ok);
       const failed = results.filter(result => !result.ok);
       if (succeeded.length) {
-        updateUsersByUsername(succeeded.map(result => result.username), user => ({ ...user, status: 'CONFIRMED' }));
+        const resultMap = new Map(succeeded.map(result => [result.username, result]));
+        updateUsersByUsername(
+          succeeded.map(result => result.username),
+          mergeBulkUserPayload(resultMap, user => ({ ...user, status: user.status === 'DISABLED' ? 'CONFIRMED' : user.status }))
+        );
         pushFlash('success', `Enabled ${succeeded.length} user(s)`);
         succeeded.forEach(result => recordAudit({ action: 'enable', actor: 'you', detail: 'Enabled account', target: result.username }));
       }
@@ -926,7 +963,7 @@ export default function UserManagementDashboard() {
             <FormField label="Email" stretch><Input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.detail.value }))} placeholder="user@example.org" /></FormField>
             <FormField label="Name" stretch><Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.detail.value }))} placeholder="e.g. Jane Doe" /></FormField>
             <FormField label="Display name" stretch description="Shown in assignments and audit trails. Defaults to Name."><Input value={form.displayName} onChange={e => setForm(f => ({ ...f, displayName: e.detail.value }))} placeholder="e.g. Jane D." /></FormField>
-            <FormField label="Role"><Select selectedOption={form.role ? ROLE_OPTIONS.find(r => r.value === form.role) : null} onChange={e => setForm(f => ({ ...f, role: e.detail.selectedOption.value, regionId: '', regionIds: [] }))} options={ROLE_OPTIONS} placeholder="Select role" /></FormField>
+            <FormField label="Role"><Select selectedOption={form.role ? manageableRoleOptions.find(r => r.value === form.role) : null} onChange={e => setForm(f => ({ ...f, role: e.detail.selectedOption.value, regionId: '', regionIds: [] }))} options={manageableRoleOptions} placeholder="Select role" /></FormField>
             {form.role === 'Regional_Manager' && (
               <FormField label="Regions">
                 <Multiselect
@@ -1002,7 +1039,7 @@ export default function UserManagementDashboard() {
               <Select
                 selectedOption={roleChangeTarget?.newRole ? ROLE_OPTIONS.find(r => r.value === roleChangeTarget.newRole) : null}
                 onChange={e => setRoleChangeTarget(t => ({ ...t, newRole: e.detail.selectedOption.value }))}
-                options={ROLE_OPTIONS}
+                options={manageableRoleOptions}
                 placeholder="Select new role"
               />
             </FormField>

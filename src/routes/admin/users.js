@@ -7,7 +7,7 @@ const {
   CognitoIdentityProviderClient,
   ListUsersCommand,
   ListUsersInGroupCommand,
-  ListGroupsForUserCommand,
+  AdminListGroupsForUserCommand,
   AdminCreateUserCommand,
   AdminAddUserToGroupCommand,
   AdminRemoveUserFromGroupCommand,
@@ -185,8 +185,16 @@ function mapUserAttributes(attributes) {
   return Object.fromEntries((attributes || []).map(attribute => [attribute.Name, attribute.Value]));
 }
 
+function isCognitoUserEnabled(enabled) {
+  return enabled !== false;
+}
+
+function getOperationalUserStatus(userStatus, enabled) {
+  return isCognitoUserEnabled(enabled) ? (userStatus || 'UNKNOWN') : 'DISABLED';
+}
+
 async function listAdminRoleGroupsForUser(client, username) {
-  const response = await client.send(new ListGroupsForUserCommand({
+  const response = await client.send(new AdminListGroupsForUserCommand({
     Username: username,
     UserPoolId: POOL_ID
   }));
@@ -207,11 +215,15 @@ async function resolveTargetAdminUser(client, username) {
     throw buildHttpError(404, 'admin_role_not_found', 'No administrative role group found for this user');
   }
   const attributes = mapUserAttributes(detail?.UserAttributes);
+  const rawStatus = detail?.UserStatus || 'UNKNOWN';
+  const enabled = isCognitoUserEnabled(detail?.Enabled);
   return {
     username,
     roleKey,
     adminGroups,
-    status: detail?.UserStatus || 'UNKNOWN',
+    status: getOperationalUserStatus(rawStatus, enabled),
+    rawStatus,
+    enabled,
     email: attributes.email || username,
     cognitoSub: attributes.sub || null,
     emailVerified: String(attributes.email_verified || '').toLowerCase() === 'true',
@@ -282,11 +294,15 @@ async function loadAdminUsers({ pool = null, q = '', actorRoleKey = null } = {})
         const attr = Object.fromEntries((user.Attributes || []).map(a => [a.Name, a.Value]));
         const cognitoSub = attr.sub || attr['sub'] || null;
         const existing = userMap.get(user.Username);
+        const rawStatus = user.UserStatus || 'UNKNOWN';
+        const enabled = isCognitoUserEnabled(user.Enabled);
         const candidate = {
           username: user.Username,
           email: attr.email || user.Username,
           role: groupName,
-          status: user.UserStatus || 'UNKNOWN',
+          status: getOperationalUserStatus(rawStatus, enabled),
+          rawStatus,
+          enabled,
           regionId: attr['custom:region_id'] ? Number(attr['custom:region_id']) : null,
           regionIds: null,
           cognitoSub,
@@ -318,10 +334,14 @@ async function loadAdminUsers({ pool = null, q = '', actorRoleKey = null } = {})
       const attr = Object.fromEntries((user.Attributes || []).map(a => [a.Name, a.Value]));
       const existing = userMap.get(user.Username);
       const cognitoSub = attr.sub || attr['sub'] || existing.cognitoSub || null;
+      const rawStatus = user.UserStatus || existing.rawStatus || existing.status;
+      const enabled = isCognitoUserEnabled(user.Enabled);
       userMap.set(user.Username, {
         ...existing,
         email: attr.email || existing.email,
-        status: user.UserStatus || existing.status,
+        status: getOperationalUserStatus(rawStatus, enabled),
+        rawStatus,
+        enabled,
         regionId: attr['custom:region_id'] ? Number(attr['custom:region_id']) : existing.regionId,
         cognitoSub,
         mfa: hasMfaEnabled(user),
@@ -400,6 +420,7 @@ async function loadAdminUsers({ pool = null, q = '', actorRoleKey = null } = {})
           email: user.email,
           role: user.role,
           status: user.status,
+          enabled: user.enabled,
           regionId,
           regionIds: regionIds.length ? regionIds : null,
           mfa: user.mfa,
@@ -416,6 +437,7 @@ async function loadAdminUsers({ pool = null, q = '', actorRoleKey = null } = {})
       email: user.email,
       role: user.role,
       status: user.status,
+      enabled: user.enabled,
       regionId: user.regionId ?? null,
       regionIds: user.regionIds ?? null,
       mfa: user.mfa,
@@ -611,11 +633,11 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
       const client = getClient();
       const targetUser = await resolveTargetAdminUser(client, username);
       ensureActorCanManageTarget(actorKey, targetUser.roleKey);
-      if (targetUser.status === 'DISABLED') {
+      if (!targetUser.enabled) {
         throw buildHttpError(409, 'user_already_disabled', 'User is already disabled');
       }
       await client.send(new AdminDisableUserCommand({ UserPoolId: POOL_ID, Username: username }));
-      res.json({ message: 'User disabled' });
+      res.json({ message: 'User disabled', status: 'DISABLED', enabled: false });
     } catch (e) {
       return sendRouteError(res, e, 'Failed to disable user');
     }
@@ -628,11 +650,15 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
       const client = getClient();
       const targetUser = await resolveTargetAdminUser(client, username);
       ensureActorCanManageTarget(actorKey, targetUser.roleKey);
-      if (targetUser.status !== 'DISABLED') {
+      if (targetUser.enabled) {
         throw buildHttpError(409, 'user_not_disabled', 'Only disabled accounts can be enabled');
       }
       await client.send(new AdminEnableUserCommand({ UserPoolId: POOL_ID, Username: username }));
-      res.json({ message: 'User enabled' });
+      res.json({
+        message: 'User enabled',
+        status: targetUser.rawStatus || 'UNKNOWN',
+        enabled: true
+      });
     } catch (e) {
       return sendRouteError(res, e, 'Failed to enable user');
     }
@@ -744,10 +770,10 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
       const client = getClient();
       const targetUser = await resolveTargetAdminUser(client, username);
       ensureActorCanManageTarget(actorKey, targetUser.roleKey);
-      if (targetUser.status === 'DISABLED') {
+      if (!targetUser.enabled) {
         throw buildHttpError(409, 'user_disabled', 'Enable the account before resending the invite');
       }
-      if (targetUser.status !== 'FORCE_CHANGE_PASSWORD') {
+      if (targetUser.rawStatus !== 'FORCE_CHANGE_PASSWORD') {
         throw buildHttpError(409, 'invite_resend_not_applicable', 'Resend invite is only available for users still in the pending first sign-in state. Use Force reset for active accounts.');
       }
       const inviteEmail = targetUser.email || username;
@@ -775,10 +801,10 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
       const client = getClient();
       const targetUser = await resolveTargetAdminUser(client, username);
       ensureActorCanManageTarget(actorKey, targetUser.roleKey);
-      if (targetUser.status === 'DISABLED') {
+      if (!targetUser.enabled) {
         throw buildHttpError(409, 'user_disabled', 'Enable the account before forcing a password reset');
       }
-      if (targetUser.status === 'FORCE_CHANGE_PASSWORD') {
+      if (targetUser.rawStatus === 'FORCE_CHANGE_PASSWORD') {
         throw buildHttpError(409, 'already_pending_reset', 'User is already in the pending first sign-in state. Use Resend invite instead.');
       }
       await client.send(new AdminResetUserPasswordCommand({ UserPoolId: POOL_ID, Username: username }));

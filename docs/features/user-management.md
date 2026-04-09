@@ -30,7 +30,7 @@ _Last updated: 7 April 2026_
 * **Force password reset** – `PATCH /api/admin/users/:username/force-reset`. This is intended for active accounts; users already in `FORCE_CHANGE_PASSWORD` should use `Resend invite` instead.
 * **Resend invite** – `POST /api/admin/users/:username/resend-invite`. This now performs a real Cognito resend for users still in `FORCE_CHANGE_PASSWORD`, using Cognito `AdminCreateUser` with `MessageAction: RESEND`.
 * **Change role** – opens a modal calling `PATCH /api/admin/users/:username/role`, removing all current admin-role groups and adding the selected new one.
-* Role change and creation forms enforce entering a region for regional roles.
+* Role change and creation forms show only the roles the current actor is allowed to manage, and enforce entering a region for regional roles.
 * Flashbar errors now show the route `detail` message returned by the API instead of generic HTTP-only failures.
 
 ### Applicant Accounts tab
@@ -59,10 +59,11 @@ Regional Manager     → may manage ISET Coordinator only
 ISET Coordinator     → cannot manage administrative users
 ```
 * `normalizeRoleKey` canonicalises friendly labels ("Program Administrator", "System Admin", etc.) before applying the guard.
-* The server now resolves the target user's actual Cognito admin group with `ListGroupsForUser` before applying guards. Administrative routes no longer trust `role` or `currentRole` values sent from the browser.
+* The server now resolves the target user's actual Cognito admin group with Cognito `AdminListGroupsForUser` before applying guards. Administrative routes no longer trust `role` or `currentRole` values sent from the browser.
 
 ### Endpoints
 * **GET /users** – lists Cognito users, enriched with role, status, MFA flag, last sign-in, region (from `custom:region_id`). The response is scoped to roles the current actor is allowed to manage. If Cognito admin configuration is missing, the endpoint fails explicitly instead of returning mock users.
+  * Disabled-state note: Cognito models disabled accounts with `Enabled=false` while `UserStatus` may still read `CONFIRMED` or `FORCE_CHANGE_PASSWORD`. The admin API now normalizes those rows to `status = DISABLED` so the dashboard filters/actions stay correct.
 * **POST /users** – uses `AdminCreateUser`, sets `custom:region_id`, and adds the user to the requested admin group. Region is mandatory for regional roles.
 * **PATCH /users/:username/attributes** – updates `custom:region_id` and/or `custom:user_id` via `AdminUpdateUserAttributes`, with target-role authorization resolved server-side.
 * **PATCH /users/:username/role** – removes all existing admin-role groups from the user and adds the target group (normalised keys).
