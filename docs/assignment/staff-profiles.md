@@ -4,7 +4,7 @@ This document summarizes the current behavior of `staff_profiles` and the relate
 
 ## When `staff_profiles` rows are created
 - When an admin creates a staff user via the Manage Users dashboard, the backend seeds `staff_profiles` with `name` / `display_name` keyed by Cognito `sub` so identity fields exist before first sign-in.
-- Every authenticated staff request passes through `staffProfileMiddleware`. That middleware upserts the staff row from the real Cognito token context, keeping `cognito_sub`, email, primary role, and `custom:region_id` aligned with the signed-in user.
+- Every authenticated staff request passes through `staffProfileMiddleware`. That middleware upserts the staff row from the real Cognito token context, keeps `cognito_sub`, email, and primary role aligned with the signed-in user, preserves existing DB-backed region assignments when tokens lack legacy region claims, and resolves effective `userId`, `region_id`, and `regionIds` from `staff_profiles` / `staff_region`.
 - There is no longer an IAM-off or dev-bypass path for admin users. Placeholder identities should not be created or relied on.
 
 ## Why duplicate rows appeared previously
@@ -20,7 +20,7 @@ This document summarizes the current behavior of `staff_profiles` and the relate
 - **Regional Coordinator**: sees cases assigned to their region or directly assigned to their staff profile (`sp.region_id = regionId OR assigned_to_user_id = staffProfileId`).
 - **Application Assessor**: sees only cases assigned to their `staff_profiles.id`.
 
-Because the API depends on accurate `staff_profiles.region_id`, ensure each coordinator signs in through Cognito at least once after account creation.
+Because the API depends on accurate `staff_profiles.region_id` and `staff_region` mappings, ensure each coordinator signs in through Cognito at least once after account creation so the local operational row is present.
 
 ## Tips for testing
 - After adding a new Cognito user, confirm the `staff_profiles` row exists and sign in once to verify the auth context + assignment flows.

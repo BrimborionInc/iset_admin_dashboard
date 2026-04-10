@@ -27,6 +27,7 @@ const { dispatchInternalNotifications } = require('../shared/events/notification
 const nunjucks = require("nunjucks");
 let pool; // Initialized after DB config loads
 const { getRenderer: getComponentRenderer } = require('./src/server/componentRenderRegistry');
+const { buildHelpPanelGuidanceSystemPrompt } = require('./src/server/adminAiGuidanceService');
 const { createEventService, EventValidationError, registerNotificationHook } = require('../shared/events');
 const { emitApplicantWatchlistHitEvents } = require('../shared/applicantWatchlist');
 const events = require('events');
@@ -16725,7 +16726,9 @@ async function staffProfileMiddleware(req, res, next) {
       attempts++;
     }
     if (!pool) return next();
-    const { sub, email, role, regionId } = req.auth;
+    const { sub, email, role } = req.auth;
+    const authRegionId = Number(req.auth?.regionId);
+    const persistedRegionId = Number.isInteger(authRegionId) && authRegionId > 0 ? authRegionId : null;
     await pool.query(`CREATE TABLE IF NOT EXISTS staff_profiles (
       id INT AUTO_INCREMENT PRIMARY KEY,
       cognito_sub VARCHAR(64) NOT NULL UNIQUE,
@@ -16751,8 +16754,8 @@ async function staffProfileMiddleware(req, res, next) {
     const safeEmail = derivedEmail || (sub ? `${sub}@placeholder.local` : 'unknown@placeholder.local');
     if (global.__HAS_REGION_ID_COL) {
       await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role,region_id) VALUES (?,?,?,?)
-        ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role), region_id=VALUES(region_id)`,
-        [sub, safeEmail, role || null, Number.isFinite(regionId) ? regionId : null]);
+        ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role), region_id=COALESCE(VALUES(region_id), region_id)`,
+        [sub, safeEmail, role || null, persistedRegionId]);
     } else {
       await pool.query(`INSERT INTO staff_profiles (cognito_sub,email,primary_role) VALUES (?,?,?)
         ON DUPLICATE KEY UPDATE email=VALUES(email), primary_role=VALUES(primary_role)`,
@@ -16768,20 +16771,37 @@ async function staffProfileMiddleware(req, res, next) {
     }
     if (rows && rows[0]) {
       req.staffProfile = rows[0];
-      const roleKey = typeof role === 'string' ? role.toLowerCase().replace(/[\s_-]+/g, '') : '';
-      if (roleKey === 'regionalmanager') {
-        try {
-          const mapped = await fetchStaffRegionIdsByStaffProfileId(rows[0].id);
-          const fallback = Number.isFinite(regionId) ? [Number(regionId)] : [];
-          const regionIds = mapped.length ? mapped : fallback;
-          if (regionIds.length) {
-            req.auth.regionIds = regionIds;
-            req.staffProfile.regionIds = regionIds;
+      const numericStaffId = Number(rows[0].id);
+      if (Number.isInteger(numericStaffId) && numericStaffId > 0) {
+        req.auth.userId = numericStaffId;
+      }
+      const rowRegionId = Number(rows[0].region_id);
+      if (Number.isInteger(rowRegionId) && rowRegionId > 0) {
+        req.auth.regionId = rowRegionId;
+        req.staffProfile.region_id = rowRegionId;
+      }
+      try {
+        const mapped = await fetchStaffRegionIdsByStaffProfileId(rows[0].id);
+        const fallback = normalizeRegionIdList([
+          Number.isInteger(rowRegionId) && rowRegionId > 0 ? rowRegionId : null,
+          persistedRegionId,
+        ]);
+        const regionIds = mapped.length
+          ? normalizeRegionIdList([...mapped, ...fallback])
+          : fallback;
+        if (regionIds.length) {
+          req.auth.regionIds = regionIds;
+          req.staffProfile.regionIds = regionIds;
+          if (!Number.isInteger(Number(req.auth.regionId)) || Number(req.auth.regionId) <= 0) {
+            req.auth.regionId = regionIds[0];
           }
-        } catch (err) {
-          if (!isMissingTableErrorLocal(err)) {
-            console.warn('[staff_profiles] region mapping lookup failed:', err?.message || err);
+          if (!Number.isInteger(Number(req.staffProfile.region_id)) || Number(req.staffProfile.region_id) <= 0) {
+            req.staffProfile.region_id = regionIds[0];
           }
+        }
+      } catch (err) {
+        if (!isMissingTableErrorLocal(err)) {
+          console.warn('[staff_profiles] region mapping lookup failed:', err?.message || err);
         }
       }
     }
@@ -16817,7 +16837,7 @@ try {
 // Simple auth probe for smoke testing
 app.get('/api/auth/me', (req, res) => {
   if (!req.auth) return res.status(401).json({ error: 'Unauthenticated' });
-  res.json({ provider: 'cognito', auth: req.auth });
+  res.json({ provider: 'cognito', auth: req.auth, profile: req.staffProfile || null });
 });
 
 const ASSIGNABLE_COGNITO_GROUPS = [
@@ -19964,11 +19984,9 @@ async function fetchAssignableFromCognito(pool) {
           if (seen.has(username)) continue;
           const attr = Object.fromEntries((user.Attributes || []).map(a => [a.Name, a.Value]));
           const email = attr.email || username;
-          const regionIdAttr = attr['custom:region_id'];
-          const regionId = regionIdAttr != null ? Number(regionIdAttr) : null;
           if (!email) continue;
           const canonicalSub = attr.sub || username;
-          const staffId = await ensureStaffProfile(pool, canonicalSub, email, ASSIGNABLE_GROUP_LABEL.get(groupName) || groupName, username, Number.isFinite(regionId) ? regionId : null);
+          const staffId = await ensureStaffProfile(pool, canonicalSub, email, ASSIGNABLE_GROUP_LABEL.get(groupName) || groupName, username, null);
           if (!staffId) continue;
           const displayName = attr.name || attr['custom:display_name'] || email;
           seen.set(username, {
@@ -19976,7 +19994,7 @@ async function fetchAssignableFromCognito(pool) {
             email,
             role: ASSIGNABLE_GROUP_LABEL.get(groupName) || groupName,
             display_name: displayName,
-            region_id: Number.isFinite(regionId) ? regionId : null
+            region_id: null
           });
         }
         nextToken = resp.NextToken;
@@ -20003,8 +20021,19 @@ app.get('/api/staff/assignable', async (req, res) => {
       const key = staff.id ?? staff.email ?? staff.display_name ?? null;
       if (!key) return;
       const normalizedKey = String(key);
-      if (merged.has(normalizedKey)) return;
-      merged.set(normalizedKey, staff);
+      if (!merged.has(normalizedKey)) {
+        merged.set(normalizedKey, staff);
+        return;
+      }
+      const existing = merged.get(normalizedKey) || {};
+      merged.set(normalizedKey, {
+        ...existing,
+        ...Object.fromEntries(
+          Object.entries(staff).filter(([, value]) => value !== null && typeof value !== 'undefined' && value !== '')
+        ),
+        region_id: staff.region_id ?? existing.region_id ?? null,
+        display_name: staff.display_name || existing.display_name || staff.email || existing.email || null,
+      });
     };
 
     const cognitoStaff = await fetchAssignableFromCognito(pool);
@@ -25203,6 +25232,7 @@ app.post('/api/clear-iset-test-data', requireUnsafeAdminDebugAccess, async (_req
 // GET  /api/ai/status -> { enabled: boolean, provider: string|null }
 // POST /api/ai/chat   -> OpenRouter streaming/standard chat completion
 const AI_KEY = process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_KEY || '';
+const DEFAULT_OPENROUTER_MODEL = 'openai/gpt-5.4-mini';
 if (!AI_KEY) {
   console.warn('[AI] No OPENROUTER_API_KEY / OPENROUTER_KEY set. /api/ai/chat will return 501 (disabled).');
 } else {
@@ -25274,7 +25304,7 @@ app.get('/api/ai/status', (_req, res) => {
     frequency_penalty: parseFloat(process.env.OPENROUTER_FREQUENCY_PENALTY || '0')
   };
   const fallbacks = (process.env.OPENROUTER_FALLBACK_MODELS || '').split(',').map(s => s.trim()).filter(Boolean);
-  res.json({ enabled, provider: enabled ? 'openrouter' : null, model: (global.__AI_MODEL_OVERRIDE || configuredModel || 'mistralai/mistral-7b-instruct'), params, fallbacks });
+  res.json({ enabled, provider: enabled ? 'openrouter' : null, model: (global.__AI_MODEL_OVERRIDE || configuredModel || DEFAULT_OPENROUTER_MODEL), params, fallbacks });
 });
 // Body: { messages: [{ role, content }], model? }
 app.post('/api/ai/chat', async (req, res) => {
@@ -25283,7 +25313,7 @@ app.post('/api/ai/chat', async (req, res) => {
     if (!key) {
       return res.status(501).json({ error: 'ai_disabled', message: 'AI assistant disabled (missing API key).' });
     }
-    const { messages, model } = req.body || {};
+    const { messages, model, chatContext } = req.body || {};
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: 'messages_required' });
     }
@@ -25294,8 +25324,30 @@ app.post('/api/ai/chat', async (req, res) => {
         role: ['system','user','assistant'].includes(String(m.role).toLowerCase()) ? String(m.role).toLowerCase() : 'user',
         content: String(m.content ?? '').slice(0, 8000)
       }));
-    const FALLBACK_MODEL = 'mistralai/mistral-7b-instruct';
-  const defaultModel = (global.__AI_MODEL_OVERRIDE || process.env.OPENROUTER_MODEL || '').trim() || FALLBACK_MODEL;
+    let effectiveMessages = safeMessages;
+    if (chatContext && pool) {
+      try {
+        const guidancePrompt = await buildHelpPanelGuidanceSystemPrompt({
+          pool,
+          chatContext,
+          messages: safeMessages,
+        });
+        if (guidancePrompt) {
+          const guidanceMessage = { role: 'system', content: guidancePrompt.slice(0, 12000) };
+          const firstNonSystemIndex = safeMessages.findIndex(message => message.role !== 'system');
+          effectiveMessages = firstNonSystemIndex === -1
+            ? [...safeMessages, guidanceMessage]
+            : [
+              ...safeMessages.slice(0, firstNonSystemIndex),
+              guidanceMessage,
+              ...safeMessages.slice(firstNonSystemIndex),
+            ];
+        }
+      } catch (guidanceError) {
+        console.warn('[AI] guidance retrieval failed:', guidanceError.message);
+      }
+    }
+    const defaultModel = (global.__AI_MODEL_OVERRIDE || process.env.OPENROUTER_MODEL || '').trim() || DEFAULT_OPENROUTER_MODEL;
     const requestedModel = (typeof model === 'string' && model.trim()) ? model.trim() : null;
     const mdl = requestedModel || defaultModel;
     const headers = {
@@ -25318,7 +25370,7 @@ app.post('/api/ai/chat', async (req, res) => {
     const attempted = [];
     async function tryModel(modelId) {
       attempted.push(modelId);
-      const payload = { model: modelId, messages: safeMessages, ...params };
+      const payload = { model: modelId, messages: effectiveMessages, ...params };
       if (max_tokens) payload.max_tokens = max_tokens;
       return axios.post('https://openrouter.ai/api/v1/chat/completions', payload, { headers });
     }
@@ -26228,7 +26280,7 @@ function sysAdminOnly(req) {
 app.get('/api/config/runtime', async (req, res) => {
   try {
     const enabled = !!AI_KEY;
-    const aiModel = (process.env.OPENROUTER_MODEL || '').trim() || 'mistralai/mistral-7b-instruct';
+    const aiModel = (process.env.OPENROUTER_MODEL || '').trim() || DEFAULT_OPENROUTER_MODEL;
     const aiParams = {
       temperature: parseFloat(process.env.OPENROUTER_TEMPERATURE || '0.7'),
       top_p: parseFloat(process.env.OPENROUTER_TOP_P || '1'),
@@ -27569,7 +27621,7 @@ async function seedDummyDraftUploadMetadata({ schemaSteps, payloadData, userId }
 }
 
 // --- AI-generated dummy draft helpers --------------------------------------
-const AI_DUMMY_DEFAULT_MODEL = (global.__AI_MODEL_OVERRIDE || process.env.OPENROUTER_MODEL || '').trim() || 'mistralai/mistral-7b-instruct';
+const AI_DUMMY_DEFAULT_MODEL = (global.__AI_MODEL_OVERRIDE || process.env.OPENROUTER_MODEL || '').trim() || DEFAULT_OPENROUTER_MODEL;
 const AI_DUMMY_MAX_TOKENS = Math.max(400, Math.min(1600, parseInt(process.env.AI_DUMMY_MAX_TOKENS || '900', 10) || 900));
 const AI_DUMMY_TEMP = Math.min(1, Math.max(0.1, parseFloat(process.env.AI_DUMMY_TEMPERATURE || '0.55')));
 const AI_DUMMY_TOP_P = Math.min(1, Math.max(0.1, parseFloat(process.env.AI_DUMMY_TOP_P || '0.9')));

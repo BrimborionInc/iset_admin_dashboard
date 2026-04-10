@@ -1,6 +1,6 @@
 # User Management Overview
 
-_Last updated: 7 April 2026_
+_Last updated: 10 April 2026_
 
 ## High-level flow
 
@@ -9,7 +9,7 @@ _Last updated: 7 April 2026_
   - `Applicant Accounts` for imported participant account creation, invitation, and activation tracking
 * Staff/admin CRUD actions call `/api/admin/users…` endpoints implemented in `src/routes/admin/users.js`.
 * Applicant-account actions call `/api/admin/applicants…` endpoints implemented in `src/routes/admin/applicants.js`.
-* Cognito remains the source of truth for authentication + group membership. MySQL tables (e.g. `staff_profiles`) hold the operational mapping and staff identity details (such as `display_name`) used throughout the admin experience.
+* Cognito remains the source of truth for authentication + group membership. MySQL tables (e.g. `staff_profiles`, `staff_region`) hold the operational mapping, staff identity details, and staff-region access used throughout the admin experience.
 * For applicant accounts, `client` is the workflow anchor and the legacy `user` table remains the public-portal identity principal.
 
 ## Front-end behaviour
@@ -22,7 +22,7 @@ _Last updated: 7 April 2026_
 ### Actions available from the page
 * **Create user** – opens a modal requiring email + name + role (display name optional), optional region (for regional roles). On submit:
   - POST `/api/admin/users`
-  - Creates Cognito user with `email_verified=true`, optional `custom:region_id` and `custom:user_id`, adds to the requested group.
+  - Creates the Cognito user with `email_verified=true`, adds the user to the requested group, and persists staff-region access in the database-backed staff profile model.
   - Seeds `staff_profiles` with `name`/`display_name` at creation time (keyed by Cognito `sub`) to avoid NULL identity fields before first sign-in.
   - The grid is optimistically updated, and an audit entry is appended.
 * **Disable / Enable** – calls `PATCH /api/admin/users/:username/disable|enable`. The toolbar now enables these buttons only for rows in a matching state (`Enable` for disabled accounts, `Disable` for active/pending ones).
@@ -60,12 +60,13 @@ ISET Coordinator     → cannot manage administrative users
 ```
 * `normalizeRoleKey` canonicalises friendly labels ("Program Administrator", "System Admin", etc.) before applying the guard.
 * The server now resolves the target user's actual Cognito admin group with Cognito `AdminListGroupsForUser` before applying guards. Administrative routes no longer trust `role` or `currentRole` values sent from the browser.
+* Staff region access for admin users is DB-backed. For staff/admin accounts, treat `staff_profiles.region_id` plus `staff_region` as the operational source of truth; do not rely on Cognito `custom:region_id`.
 
 ### Endpoints
-* **GET /users** – lists Cognito users, enriched with role, status, MFA flag, last sign-in, region (from `custom:region_id`). The response is scoped to roles the current actor is allowed to manage. If Cognito admin configuration is missing, the endpoint fails explicitly instead of returning mock users.
+* **GET /users** – lists Cognito users, enriched with role, status, MFA flag, last sign-in, and region access from `staff_profiles` / `staff_region`. The response is scoped to roles the current actor is allowed to manage. If Cognito admin configuration is missing, the endpoint fails explicitly instead of returning mock users.
   * Disabled-state note: Cognito models disabled accounts with `Enabled=false` while `UserStatus` may still read `CONFIRMED` or `FORCE_CHANGE_PASSWORD`. The admin API now normalizes those rows to `status = DISABLED` so the dashboard filters/actions stay correct.
-* **POST /users** – uses `AdminCreateUser`, sets `custom:region_id`, and adds the user to the requested admin group. Region is mandatory for regional roles.
-* **PATCH /users/:username/attributes** – updates `custom:region_id` and/or `custom:user_id` via `AdminUpdateUserAttributes`, with target-role authorization resolved server-side.
+* **POST /users** – uses `AdminCreateUser`, adds the user to the requested admin group, and persists the user's region access in `staff_profiles` / `staff_region`. Region is mandatory for regional roles.
+* **PATCH /users/:username/attributes** – updates DB-backed region access for Regional Managers and ISET Coordinators, with target-role authorization resolved server-side.
 * **PATCH /users/:username/role** – removes all existing admin-role groups from the user and adds the target group (normalised keys).
 * **PATCH /users/:username/disable|enable** – toggles Cognito user status, with state checks to reject already-disabled or already-enabled rows.
 * **DELETE /users/:username/role** – removes all admin-role groups from the user (no new group added).
@@ -91,7 +92,7 @@ ISET Coordinator     → cannot manage administrative users
 * The portal wraps Cognito’s forgot-password flow in activation wording and marks the linked client as `activated` on the first successful authenticated session.
 ## Relationship to staff_profiles
 * Creating users seeds `staff_profiles` with identity details (`name`, `display_name`) at creation time, keyed by Cognito `sub`.
-* `staffProfileMiddleware` still upserts operational fields on authenticated requests (cognito `sub`, email, role, `region_id`) and does not need to overwrite `name`/`display_name`.
+* `staffProfileMiddleware` still upserts operational fields on authenticated requests (cognito `sub`, email, role) and resolves the effective `staff_profiles.id`, `region_id`, and `regionIds` from the database-backed staff model without nulling existing region assignments when tokens lack legacy region claims.
 * `/api/staff/assignable` also ensures staff profiles exist when listing assignable users. Recent fixes ensure we merge into the existing row instead of creating duplicates and prefer the Cognito GUID for `cognito_sub`.
 
 ## Testing tips
@@ -112,4 +113,4 @@ ISET Coordinator     → cannot manage administrative users
 ## Open considerations
 * New-user invitations and invite resends still rely on Cognito's default email delivery. If PATH later moves to branded SES/Lambda invite mail, this route should be revisited.
 * The current account-management model remains single-role. The backend now cleans up stray multi-group state, but deliberate multi-role admin support would still require a new UX and policy model.
-* Regional coordinators require `custom:region_id`. Capture that in the create modal and keep it in sync with Cognito if changed elsewhere.
+* Region-backed staff roles must have database-backed region access. Regional Managers can have multiple `staff_region` assignments; ISET Coordinators keep a single primary `staff_profiles.region_id` and may also be mirrored into `staff_region` for consistent reads.

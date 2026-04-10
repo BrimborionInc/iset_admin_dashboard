@@ -436,6 +436,10 @@ Format: YYYY-MM-DD - Category: Short description
 - Fix: CFA draft generation now uses application submission ownership fields to match the current schema.
 - Fix: CFA draft generation now selects the intervention funding stream from the current schema to avoid SQL errors and allow plan-based CFA drafts to generate.
 
+## 2026-04-10
+- Fix: Staff/admin user management no longer writes legacy Cognito `custom:region_id` / `custom:user_id` attributes for staff-region changes and now persists region access through `staff_profiles` / `staff_region`.
+- Fix: Staff auth enrichment now preserves DB-backed region assignments on sign-in and resolves effective `userId`, `regionId`, and `regionIds` from the staff profile model instead of depending on legacy token claims.
+
 ## 2026-01-29
 - Fix: Application assessment no longer blocks submissions with a "Reason for not approving" error when the recommendation is not "Do not recommend funding".
 - Fix: Case workspace cost item installment counts now handle dates entered with slashes.

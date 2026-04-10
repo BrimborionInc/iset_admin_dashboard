@@ -163,6 +163,14 @@ const buildSystemPrompt = ({ focusTitle, aiContext }) => {
   return sections.join('\n');
 };
 
+const getAiAssistantErrorMessage = data => {
+  const nestedMessage = data?.details?.message || data?.details?.error?.message || '';
+  if (typeof nestedMessage === 'string' && /No endpoints found for /i.test(nestedMessage)) {
+    return 'The configured AI model is no longer available. Go to Configuration Settings > AI / LLM Configuration, choose a current model, and save.';
+  }
+  return data?.message || nestedMessage || 'AI assistant is disabled or unavailable.';
+};
+
 const parseNotificationMetadata = (value) => {
   try {
     if (!value) return {};
@@ -333,7 +341,9 @@ const sanitizeAssistantText = (rawText) => {
 const FloatingChat = React.memo(function FloatingChat({
   visible,
   aiContext,
+  pathname,
   onClose,
+  role,
   title
 }) {
   const [chatMessages, setChatMessages] = useState([]);
@@ -446,7 +456,13 @@ const FloatingChat = React.memo(function FloatingChat({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'mistralai/mistral-7b-instruct',
+          chatContext: {
+            surface: 'help-panel',
+            pathname,
+            helpTitle: title,
+            aiContext,
+            role
+          },
           temperature: 0.4,
           messages: payloadMessages
         })
@@ -455,7 +471,7 @@ const FloatingChat = React.memo(function FloatingChat({
       const data = await response.json();
       const messageText = response.ok
         ? data.choices?.[0]?.message?.content || 'Sorry, I didn’t understand that.'
-        : data?.message || data?.details?.message || 'AI assistant is disabled or unavailable.';
+        : getAiAssistantErrorMessage(data);
 
       appendMessage(createChatMessage('incoming', sanitizeAssistantText(messageText)));
     } catch (error) {
@@ -464,7 +480,7 @@ const FloatingChat = React.memo(function FloatingChat({
     } finally {
       setLoading(false);
     }
-  }, [promptValue, loading, chatMessages, aiContext, title, appendMessage]);
+  }, [promptValue, loading, chatMessages, aiContext, pathname, role, title, appendMessage]);
 
   useEffect(() => {
     if (visible && chatInputRef.current) {
@@ -1641,7 +1657,9 @@ const AppContent = () => {
         <FloatingChat
           visible={chatVisible}
           aiContext={aiContext}
+          pathname={location.pathname}
           onClose={() => setChatVisible(false)}
+          role={effectiveRole}
           title={helpPanelTitle}
         />
         <FloatingFeedbackReporter

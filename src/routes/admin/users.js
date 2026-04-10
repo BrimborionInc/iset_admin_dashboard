@@ -13,7 +13,6 @@ const {
   AdminRemoveUserFromGroupCommand,
   AdminDisableUserCommand,
   AdminEnableUserCommand,
-  AdminUpdateUserAttributesCommand,
   AdminGetUserCommand,
   AdminResetUserPasswordCommand
 } = require('@aws-sdk/client-cognito-identity-provider');
@@ -107,6 +106,10 @@ function resolvePrimaryRegionId(regionIds, regionId) {
   return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
 }
 
+function isRegionScopedAdminRole(roleKey) {
+  return roleKey === 'Regional_Manager' || roleKey === 'ISET_Coordinator';
+}
+
 async function fetchStaffProfileIdBySub(pool, cognitoSub) {
   if (!pool || !cognitoSub) return null;
   try {
@@ -130,6 +133,58 @@ async function replaceStaffRegionAssignments(pool, staffProfileId, regionIds) {
     if (/ER_NO_SUCH_TABLE|ER_BAD_FIELD_ERROR/i.test(err?.code || err?.message || '')) return;
     throw err;
   }
+}
+
+async function syncAdminUserRegionAssignments(pool, { cognitoSub, email, roleKey, regionIds, name = '', displayName = '' }) {
+  if (!pool || typeof pool.query !== 'function') {
+    throw buildHttpError(503, 'db_unavailable', 'Database connection is required to manage staff regions');
+  }
+  if (!cognitoSub) {
+    throw buildHttpError(409, 'staff_profile_sync_failed', 'Cannot map this Cognito user to a staff profile');
+  }
+  const normalizedRegionIds = normalizeRegionIdList(regionIds);
+  const primaryRegionId = normalizedRegionIds[0] || null;
+  let staffProfileId = await fetchStaffProfileIdBySub(pool, cognitoSub);
+  const primaryRole = mapAdminRoleKeyToStaffPrimaryRole(roleKey);
+
+  if (!staffProfileId) {
+    await upsertStaffProfile(pool, {
+      cognitoSub,
+      email,
+      name,
+      displayName,
+      primaryRole,
+      regionId: primaryRegionId,
+    });
+    staffProfileId = await fetchStaffProfileIdBySub(pool, cognitoSub);
+  } else {
+    const clauses = ['email = ?', 'primary_role = ?', 'region_id = ?'];
+    const values = [email, primaryRole, primaryRegionId];
+    const safeName = typeof name === 'string' ? name.trim() : '';
+    const safeDisplayName = typeof displayName === 'string' ? displayName.trim() : '';
+    if (safeName) {
+      clauses.push('name = ?');
+      values.push(safeName);
+    }
+    if (safeDisplayName) {
+      clauses.push('display_name = ?');
+      values.push(safeDisplayName);
+    }
+    await pool.query(
+      `UPDATE staff_profiles SET ${clauses.join(', ')} WHERE id = ?`,
+      [...values, staffProfileId],
+    );
+  }
+
+  if (!staffProfileId) {
+    throw buildHttpError(409, 'staff_profile_sync_failed', 'Cannot map this Cognito user to a staff profile');
+  }
+  await replaceStaffRegionAssignments(pool, staffProfileId, normalizedRegionIds);
+
+  return {
+    primaryRegionId,
+    regionIds: normalizedRegionIds,
+  };
 }
 
 function canCreateRole(actorKey, targetKey) {
@@ -303,7 +358,7 @@ async function loadAdminUsers({ pool = null, q = '', actorRoleKey = null } = {})
           status: getOperationalUserStatus(rawStatus, enabled),
           rawStatus,
           enabled,
-          regionId: attr['custom:region_id'] ? Number(attr['custom:region_id']) : null,
+          regionId: null,
           regionIds: null,
           cognitoSub,
           mfa: hasMfaEnabled(user),
@@ -342,7 +397,7 @@ async function loadAdminUsers({ pool = null, q = '', actorRoleKey = null } = {})
         status: getOperationalUserStatus(rawStatus, enabled),
         rawStatus,
         enabled,
-        regionId: attr['custom:region_id'] ? Number(attr['custom:region_id']) : existing.regionId,
+        regionId: existing.regionId,
         cognitoSub,
         mfa: hasMfaEnabled(user),
         lastSignIn: user.UserLastModifiedDate ? new Date(user.UserLastModifiedDate).toISOString() : existing.lastSignIn,
@@ -412,9 +467,10 @@ async function loadAdminUsers({ pool = null, q = '', actorRoleKey = null } = {})
         const regionIds = staffId && regionMap.has(staffId)
           ? normalizeRegionIdList(regionMap.get(staffId))
           : [];
-        const regionId = Number.isFinite(user.regionId)
-          ? user.regionId
-          : (Number.isFinite(profile?.region_id) ? Number(profile.region_id) : (regionIds[0] || null));
+        const profileRegionId = Number(profile?.region_id);
+        const regionId = Number.isInteger(profileRegionId) && profileRegionId > 0
+          ? profileRegionId
+          : (regionIds[0] || null);
         return {
           username: user.username,
           email: user.email,
@@ -543,7 +599,7 @@ router.get('/users/summary', requireRole('System Administrator', 'NWAC Administr
 router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager'), async (req, res) => {
     try {
       const actor = req.auth;
-      const { email, role, region_id, region_ids, user_id, suppressInvite, name, display_name } = req.body || {};
+      const { email, role, region_id, region_ids, suppressInvite, name, display_name } = req.body || {};
       const actorKey = normalizeRoleKey(actor?.role);
       const targetKey = normalizeRoleKey(role);
       if (!email || !targetKey) return res.status(400).json({ error: 'email and role are required' });
@@ -563,8 +619,6 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
         UserAttributes: [
           { Name: 'email', Value: email },
           { Name: 'email_verified', Value: 'true' },
-          ...(Number.isFinite(primaryRegionId) ? [{ Name: 'custom:region_id', Value: String(primaryRegionId) }] : []),
-          ...(user_id ? [{ Name: 'custom:user_id', Value: String(user_id) }] : []),
         ],
         // If suppressInvite is true we keep legacy behavior (no Cognito email). Otherwise allow
         // Cognito to send its standard invitation email with a temporary password.
@@ -595,18 +649,14 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
 
         if (cognitoSub) {
           try {
-            await upsertStaffProfile(pool, {
+            await syncAdminUserRegionAssignments(pool, {
               cognitoSub,
               email,
+              roleKey: targetKey,
+              regionIds,
               name,
               displayName: display_name,
-              primaryRole,
-              regionId: Number.isFinite(primaryRegionId) ? Number(primaryRegionId) : null
             });
-            const staffProfileId = await fetchStaffProfileIdBySub(pool, cognitoSub);
-            if (staffProfileId && regionIds.length) {
-              await replaceStaffRegionAssignments(pool, staffProfileId, regionIds);
-            }
           } catch (e) {
             console.warn('[admin-users] staff_profiles upsert failed (non-fatal):', e?.message || e);
           }
@@ -666,48 +716,50 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
 
   router.patch('/users/:username/attributes', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager'), async (req, res) => {
     try {
-      const { region_id, region_ids, user_id } = req.body || {};
+      const { region_id, region_ids } = req.body || {};
       const username = req.params.username;
       const actorKey = normalizeRoleKey(req?.auth?.role);
       let regionIds = normalizeRegionIdList(region_ids);
       const primaryRegionId = resolvePrimaryRegionId(regionIds, region_id);
       if (!regionIds.length && Number.isFinite(primaryRegionId)) regionIds = [primaryRegionId];
-
-      const attrs = [];
-      if (Number.isFinite(primaryRegionId)) attrs.push({ Name: 'custom:region_id', Value: String(primaryRegionId) });
-      if (user_id) attrs.push({ Name: 'custom:user_id', Value: String(user_id) });
-
-      if (!attrs.length && !regionIds.length) return res.status(400).json({ error: 'No attributes to update' });
+      if (!regionIds.length && !Number.isFinite(primaryRegionId)) {
+        return res.status(400).json({ error: 'No supported region changes provided' });
+      }
 
       const client = getClient();
       const targetUser = await resolveTargetAdminUser(client, username);
       ensureActorCanManageTarget(actorKey, targetUser.roleKey);
-      if (attrs.length) {
-        await client.send(new AdminUpdateUserAttributesCommand({ UserPoolId: POOL_ID, Username: username, UserAttributes: attrs }));
+      if (!isRegionScopedAdminRole(targetUser.roleKey)) {
+        throw buildHttpError(400, 'region_not_applicable', 'Regions apply only to Regional Managers and ISET Coordinators');
+      }
+      const pool = getDbPoolFromRequest(req);
+      if (!pool) {
+        throw buildHttpError(503, 'db_unavailable', 'Database connection is required to manage staff regions');
+      }
+      if (targetUser.roleKey === 'Regional_Manager' && !regionIds.length) {
+        throw buildHttpError(400, 'region_required', 'Select at least one region for a Regional Manager');
+      }
+      if (targetUser.roleKey === 'ISET_Coordinator') {
+        if (!Number.isFinite(primaryRegionId)) {
+          throw buildHttpError(400, 'region_required', 'Select a region for an ISET Coordinator');
+        }
+        if (regionIds.length > 1) {
+          throw buildHttpError(400, 'single_region_required', 'ISET Coordinators can only have one region');
+        }
+        regionIds = [Number(primaryRegionId)];
       }
 
-      const pool = getDbPoolFromRequest(req);
-      if (pool && (Number.isFinite(primaryRegionId) || regionIds.length)) {
-        try {
-          const getResp = await client.send(new AdminGetUserCommand({ UserPoolId: POOL_ID, Username: username }));
-          const attr = Object.fromEntries((getResp?.UserAttributes || []).map(a => [a.Name, a.Value]));
-          const cognitoSub = attr?.sub || null;
-          if (cognitoSub) {
-            await pool.query('UPDATE staff_profiles SET region_id = ? WHERE cognito_sub = ?', [Number.isFinite(primaryRegionId) ? Number(primaryRegionId) : null, cognitoSub]);
-            const staffProfileId = await fetchStaffProfileIdBySub(pool, cognitoSub);
-            if (staffProfileId && regionIds.length) {
-              await replaceStaffRegionAssignments(pool, staffProfileId, regionIds);
-            }
-          }
-        } catch (err) {
-          console.warn('[admin-users] staff region update failed (non-fatal):', err?.message || err);
-        }
-      }
+      const syncedRegions = await syncAdminUserRegionAssignments(pool, {
+        cognitoSub: targetUser.cognitoSub,
+        email: targetUser.email || username,
+        roleKey: targetUser.roleKey,
+        regionIds,
+      });
 
       res.json({
-        message: 'User attributes updated',
-        regionId: Number.isFinite(primaryRegionId) ? Number(primaryRegionId) : null,
-        regionIds: regionIds.length ? regionIds : null
+        message: 'User regions updated',
+        regionId: syncedRegions.primaryRegionId,
+        regionIds: syncedRegions.regionIds.length ? syncedRegions.regionIds : null
       });
     } catch (e) {
       return sendRouteError(res, e, 'Failed to update attributes');

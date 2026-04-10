@@ -448,6 +448,7 @@ export default function ConfigurationSettings({
   const [aiModelValue, setAiModelValue] = useState(null);
   const [modelOptions, setModelOptions] = useState([]);
   const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState(null);
   const [savingModel, setSavingModel] = useState(false);
   const [savingParams, setSavingParams] = useState(false);
   const [savingFallbacks, setSavingFallbacks] = useState(false);
@@ -468,6 +469,21 @@ export default function ConfigurationSettings({
     () => toOptionList(fallbackValues, modelOptions),
     [fallbackValues, modelOptions],
   );
+  const availableModelValues = useMemo(
+    () => new Set(modelOptions.map(option => option.value)),
+    [modelOptions],
+  );
+  const unavailableDefaultModel = useMemo(() => {
+    if (!aiModelValue || modelsLoading || modelsError) return null;
+    return availableModelValues.has(aiModelValue) ? null : aiModelValue;
+  }, [aiModelValue, availableModelValues, modelsError, modelsLoading]);
+  const unavailableFallbackModels = useMemo(() => {
+    if (modelsLoading || modelsError) return [];
+    return fallbackValues.filter(value => !availableModelValues.has(value));
+  }, [availableModelValues, fallbackValues, modelsError, modelsLoading]);
+  const canSaveSelectedModel = Boolean(selectedAiModel) && (!unavailableDefaultModel || Boolean(modelsError));
+  const canSaveSelectedFallbacks =
+    !unavailableFallbackModels.length || Boolean(modelsError);
 
   useEffect(() => {
     if (typeof updateBreadcrumbs === "function") {
@@ -863,6 +879,7 @@ export default function ConfigurationSettings({
 
   const loadModelOptions = useCallback(async () => {
     setModelsLoading(true);
+    setModelsError(null);
     try {
       const data = await fetchJSON("/api/ai/models");
       const options = Array.isArray(data?.models)
@@ -874,6 +891,7 @@ export default function ConfigurationSettings({
         : [];
       setModelOptions(options);
     } catch (err) {
+      setModelsError(err.message);
       console.error("[configuration] Failed to load AI model catalogue:", err);
     } finally {
       setModelsLoading(false);
@@ -1580,7 +1598,11 @@ export default function ConfigurationSettings({
               canEditAI={canEditAI}
               modelOptions={modelOptions}
               modelsLoading={modelsLoading}
+              modelsError={modelsError}
+              unavailableDefaultModel={unavailableDefaultModel}
+              unavailableFallbackModels={unavailableFallbackModels}
               savingModel={savingModel}
+              canSaveModel={canSaveSelectedModel}
               saveModel={saveModel}
               params={params}
               setParams={setParams}
@@ -1590,6 +1612,7 @@ export default function ConfigurationSettings({
               savingParams={savingParams}
               saveParams={saveParams}
               savingFallbacks={savingFallbacks}
+              canSaveFallbacks={canSaveSelectedFallbacks}
               saveFallbacks={saveFallbacks}
             />
           );
@@ -1781,6 +1804,7 @@ export default function ConfigurationSettings({
       lockingUi,
       modelOptions,
       modelsLoading,
+      modelsError,
       numberInput,
       params,
       policyDirty,
@@ -1795,6 +1819,8 @@ export default function ConfigurationSettings({
       saveModel,
       saveParams,
       security,
+      canSaveSelectedFallbacks,
+      canSaveSelectedModel,
       selectedAiModel,
       selectedFallbackOptions,
       sessionDirty,
@@ -1804,6 +1830,8 @@ export default function ConfigurationSettings({
       slaLoading,
       syncingFederationScope,
       toggleHelpPanel,
+      unavailableDefaultModel,
+      unavailableFallbackModels,
     ],
   );
 

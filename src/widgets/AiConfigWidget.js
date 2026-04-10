@@ -1,6 +1,7 @@
 import React from 'react';
 import { BoardItem } from '@cloudscape-design/board-components';
 import {
+  Alert,
   SpaceBetween,
   FormField,
   Select,
@@ -24,7 +25,11 @@ export default function AiConfigWidget({
   canEditAI,
   modelOptions,
   modelsLoading,
+  modelsError,
+  unavailableDefaultModel,
+  unavailableFallbackModels,
   savingModel,
+  canSaveModel,
   saveModel,
   params,
   setParams,
@@ -34,6 +39,7 @@ export default function AiConfigWidget({
   savingParams,
   saveParams,
   savingFallbacks,
+  canSaveFallbacks,
   saveFallbacks
 }) {
   const handleOpenHelp = () => {
@@ -66,6 +72,8 @@ export default function AiConfigWidget({
       />
     ) : undefined;
 
+  const fallbackListText = unavailableFallbackModels.join(', ');
+
   return (
     <BoardItem
       header={
@@ -82,7 +90,21 @@ export default function AiConfigWidget({
       i18nStrings={boardItemI18nStrings}
     >
       <SpaceBetween size="s">
-        <FormField label="Default Model" description="Primary model used when no per-request override is provided.">
+        {modelsError && (
+          <Alert type="warning" header="Live model catalog unavailable">
+            The widget could not verify model availability. Existing selections are still shown, but
+            availability guidance is temporarily unavailable until the catalog loads again.
+          </Alert>
+        )}
+        <FormField
+          label="Default Model"
+          description="Primary model used when no per-request override is provided."
+          errorText={
+            unavailableDefaultModel
+              ? `Saved model "${unavailableDefaultModel}" is no longer offered in the live catalog. Choose a currently listed model and save it.`
+              : undefined
+          }
+        >
           <Select
             selectedOption={aiModel}
             onChange={e => canEditAI && setAiModel(e.detail.selectedOption)}
@@ -94,7 +116,7 @@ export default function AiConfigWidget({
           />
         </FormField>
         {canEditAI && (
-          <Button loading={savingModel} onClick={saveModel} disabled={!aiModel}>
+          <Button loading={savingModel} onClick={saveModel} disabled={!canSaveModel}>
             Save Model
           </Button>
         )}
@@ -124,7 +146,15 @@ export default function AiConfigWidget({
           <FormField label="Frequency Penalty" description="Reduce repetition">
             {numberInput('frequency_penalty', -2, 2, 0.1)}
           </FormField>
-          <FormField label="Fallback Models" description="Tried in order if primary returns an error (4xx).">
+          <FormField
+            label="Fallback Models"
+            description="Tried in order if primary returns an error (4xx)."
+            errorText={
+              unavailableFallbackModels.length
+                ? `These saved fallback models are no longer offered in the live catalog: ${fallbackListText}. Remove or replace them and save the list.`
+                : undefined
+            }
+          >
             <Multiselect
               selectedOptions={fallbacks}
               onChange={e => canEditAI && setFallbacks(e.detail.selectedOptions)}
@@ -140,7 +170,12 @@ export default function AiConfigWidget({
             <Button key="ai-save-params" loading={savingParams} onClick={saveParams}>
               Save Parameters
             </Button>
-            <Button key="ai-save-fallbacks" loading={savingFallbacks} onClick={saveFallbacks}>
+            <Button
+              key="ai-save-fallbacks"
+              loading={savingFallbacks}
+              onClick={saveFallbacks}
+              disabled={!canSaveFallbacks}
+            >
               Save Fallbacks
             </Button>
           </SpaceBetween>

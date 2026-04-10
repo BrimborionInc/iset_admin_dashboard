@@ -2,7 +2,7 @@
 
 Purpose: recover TEST admin/staff accounts when the Admin Users widget shows only a primary region, when Cognito invitation/reset emails do not arrive, or when a staff account is stuck in `FORCE_CHANGE_PASSWORD`.
 
-Last Updated: 2026-04-07
+Last Updated: 2026-04-10
 
 ## When to use this
 
@@ -26,7 +26,7 @@ Implication: a staff user must have `email` plus `email_verified=true` in Cognit
 
 ## Root cause 1: `staff_profiles.cognito_sub` drift
 
-The Admin Users API enriches multi-region access by matching Cognito users to `staff_profiles` on `cognito_sub`, then loading `staff_region` memberships. If the `cognito_sub` in `staff_profiles` is stale, the UI falls back to the single Cognito `custom:region_id` value and shows only the primary region.
+The Admin Users API enriches multi-region access by matching Cognito users to `staff_profiles` on `cognito_sub`, then loading `staff_region` memberships. If the `cognito_sub` in `staff_profiles` is stale, the UI can miss the DB-backed region mappings and show incomplete region access.
 
 Relevant code:
 

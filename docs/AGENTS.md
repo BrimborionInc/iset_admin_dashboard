@@ -64,6 +64,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 
 - Admin sign-in now uses real Cognito/IAM only. Do not reintroduce simulated-user flows, IAM on/off toggles, dev-bypass headers, or header-driven role impersonation in admin code.
 - The admin-dashboard backend is staff-only. Applicant-pool tokens must be rejected by this service; do not treat shared Cognito verification as permission to expose admin API routes to applicants.
+- Staff/admin region scope and staff identity IDs must resolve from `staff_profiles` and `staff_region` on the server. Do not make staff authorization or admin-user management depend on Cognito `custom:region_id` or `custom:user_id`.
 - Frontend auth state is centralized in `src/context/AuthContext.js`. Prefer `useAuth()` and `useCurrentUser()` over direct token/session reads in page or widget code.
 - The OAuth callback is handled as a shell-less bootstrapping route. If sign-in behavior changes, inspect `src/App.js`, `src/pages/AuthCallback.js`, `src/auth/cognito.js`, and `src/auth/apiClient.js` together.
 - Server middleware and admin-user routes no longer support `AUTH_PROVIDER=none`, mock admin users, or auth-disabled mutation fallbacks. If auth is misconfigured, fail explicitly instead of inventing local placeholder behavior.
