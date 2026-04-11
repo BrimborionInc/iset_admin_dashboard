@@ -24,8 +24,8 @@ const CaseAssignmentDashboardHelp = () => (
         response from the applicant.
       </li>
       <li>
-        <strong>SLA Health:</strong> shows whether the file is on time or overdue against PATH&apos;s
-        service timing.
+        <strong>Timeline status:</strong> shows whether the file is on time or overdue against PATH&apos;s
+        workflow timing target.
       </li>
       <li>
         <strong>Owner:</strong> confirms who is responsible for the file.
@@ -39,7 +39,7 @@ const CaseAssignmentDashboardHelp = () => (
     <h3>Typical coordinator flow</h3>
     <ol>
       <li>Search or sort the table to find the assigned application you need to work on.</li>
-      <li>Check status, docs age, and SLA health to understand what kind of follow-up is required.</li>
+      <li>Check status, docs age, and timeline status to understand what kind of follow-up is required.</li>
       <li>Use <em>View</em> to open the Application Workspace and review the form, documents, notes, and secure messages.</li>
       <li>Complete applicant follow-up, document review, and assessment in the workspace, then return here to move to the next file.</li>
       <li>Refresh the table when assignments or statuses have changed and you need the current list.</li>
@@ -66,7 +66,7 @@ CaseAssignmentDashboardHelp.aiContext = `You are assisting staff on the "Manage 
 
 How to guide users:
 - Treat the table as a list for finding the right application and opening the full Application Workspace.
-- Explain the practical meaning of status, Docs Requested age, SLA health, owner, and received date.
+- Explain the practical meaning of status, Docs Requested age, timeline status, owner, and received date.
 - Use View to send the user to /application-case/{case_id} when they need to review the form, documents, messages, notes, or assessment.
 - If the user cannot find a case, explain role visibility: coordinators only see assigned applications; regional managers and NWAC admins have broader scope.
 - Mention Assign/Reassign only when relevant to the user’s role. Reassign is not the normal coordinator path here.

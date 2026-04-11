@@ -6,6 +6,7 @@ This document captures the end-to-end status model in the ISET admin dashboard a
 
 ## 1. Overview
 - **Applications** track the intake lifecycle (`iset_application.status`). These reflect program decisions and remain separate from casework.
+- **Application SLA stages** are derived, not stored. PATH currently chooses the active SLA milestone from application status, assignment state, and `assessment_esdc_eligibility`.
 - **Document requests** are tracked independently on `iset_application` so they can overlap any application status (e.g., `decision_ready` + docs requested).
 - **Cases** represent the ongoing service relationship (`iset_case.status`). The status is derived from application state and action plan activity via `recomputeCaseStatus`.
 - **Action plans** and **interventions** retain their own lifecycle fields; the case status derives from the aggregate state of action plans.
@@ -53,6 +54,22 @@ Document requests are recorded on `iset_application` to allow "docs requested" t
 **Events**
 - `document_request_set` and `document_request_cleared` emitted on toggle/set/clear.
 - `document_request_reminder_due` and `document_request_closure_due` reserved for background jobs (thresholds configured via SLA settings).
+
+### 2.2A Application SLA Stages
+PATH currently derives the active application SLA stage from live record state rather than storing a separate SLA-stage column.
+
+| SLA Stage | Derived When | Current Helper |
+| --------- | ------------ | -------------- |
+| `assignment` | File is still unassigned. | `getApplicationSlaStageKey()` / `src/utils/applicationSla.js` |
+| `ei_status_verification` | File is assigned and `assessment_esdc_eligibility` is still blank while the application remains in pre-decision review. | same |
+| `assessment` | EI status has been recorded and the file is still in active assessment/hold review. | same |
+| `program_decision` | Application status is `pending_approval` or `decision_ready`. | same |
+
+Current implementation note:
+- Due/overdue milestones are still anchored to the original application submission/creation timestamp.
+- The stage can change as assignment and EI status change, but PATH does not yet persist dedicated per-stage start timestamps.
+- Frontend source of truth: `src/utils/applicationSla.js`
+- Backend source of truth: `getApplicationSlaStageKey()` and `computeApplicationSlaTiming()` in `isetadminserver.js`
 
 ### 2.3 Case Statuses
 Stored in `iset_case.status`. Canonical set defined in `CASE_STATUS_DERIVED_VALUES` (see `isetadminserver.js`):

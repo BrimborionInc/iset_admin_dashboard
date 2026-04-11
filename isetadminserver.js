@@ -35,6 +35,12 @@ const {
   getReminderBusinessDayDiffDays,
   getReminderBusinessDayStamp,
 } = require('../shared/events/reminderBusinessDay');
+const {
+  SERVICE_ANNOUNCEMENT_SCOPE,
+  SERVICE_ANNOUNCEMENT_KEY,
+  parseJsonValue,
+  normaliseServiceAnnouncement,
+} = require('../shared/serviceAnnouncement');
 
 // Increase default listener cap to avoid noisy warnings when wiring shared buses.
 events.EventEmitter.defaultMaxListeners = 20;
@@ -59,6 +65,8 @@ const CFA_CHANGE_REASONS = new Set([
 ]);
 const ADMIN_UPLOAD_ALLOWED_MIME_TYPES = new Set([
   'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'image/jpeg',
   'image/png',
   'image/bmp',
@@ -82,6 +90,14 @@ const ADMIN_FEEDBACK_CONTEXT_MAX_CHARS = Number(process.env.ADMIN_FEEDBACK_CONTE
 const ADMIN_FEEDBACK_SUMMARY_MAX_CHARS = 200;
 const ADMIN_FEEDBACK_DESCRIPTION_MAX_CHARS = 8000;
 const ADMIN_FEEDBACK_NOTE_MAX_CHARS = 4000;
+const WORD_PREVIEW_MIME_TYPES = new Set([
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+]);
+const WORD_PREVIEW_EXTENSIONS = new Set(['.doc', '.docx']);
+const WORD_PREVIEW_OBJECT_PREFIX = String(process.env.WORD_PREVIEW_OBJECT_PREFIX || 'previews/word')
+  .replace(/^\/+/, '')
+  .replace(/\/+$/, '');
 const ADMIN_FEEDBACK_ATTACHMENT_DOWNLOAD_EXPIRES_SECONDS = Number(
   process.env.ADMIN_FEEDBACK_ATTACHMENT_DOWNLOAD_EXPIRES_SECONDS || 300
 );
@@ -1323,6 +1339,26 @@ async function uploadTempFileToObjectStore({ ownerKey, originalName, mimeType, s
   return key;
 }
 
+async function uploadBufferToObjectStore({ key, buffer, contentType }) {
+  if (!key || !buffer || !contentType) {
+    throw new Error('missing_object_upload_payload');
+  }
+  const { presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+  if (DRIVER !== 's3') {
+    throw new Error('s3 driver not configured');
+  }
+  const sizeBytes = Number.isFinite(Number(buffer?.length)) ? Number(buffer.length) : null;
+  const presigned = await presignPut({ key, contentType });
+  await axios.put(presigned.url, buffer, {
+    headers: {
+      ...(presigned.headers || {}),
+      'Content-Type': contentType,
+      ...(sizeBytes ? { 'Content-Length': sizeBytes } : {}),
+    },
+  });
+  return key;
+}
+
 function sanitizeAdminFeedbackStatus(rawValue, fallback = null) {
   if (rawValue === null || typeof rawValue === 'undefined') return fallback;
   const normalized = String(rawValue).trim().toLowerCase();
@@ -2077,6 +2113,17 @@ const sanitizeArchiveName = name => {
   return `${base || 'document'}${ext}`;
 };
 
+const encodeContentDispositionValue = value =>
+  encodeURIComponent(String(value || ''))
+    .replace(/[!'()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+
+function buildAttachmentContentDisposition(fileName) {
+  const normalizedName = path.basename(String(fileName || 'document')).trim() || 'document';
+  const fallbackName = sanitizeArchiveName(normalizedName).replace(/["\\]/g, '_') || 'document';
+  const encodedName = encodeContentDispositionValue(normalizedName);
+  return `attachment; filename="${fallbackName}"; filename*=UTF-8''${encodedName}`;
+}
+
 const loadDocumentBuffer = async docRow => {
   if (!docRow?.file_path) return null;
   const { presignGet, DRIVER } = require('../ISET-intake/s3Provider');
@@ -2091,6 +2138,264 @@ const loadDocumentBuffer = async docRow => {
   const response = await axios.get(url, { responseType: 'arraybuffer' });
   return Buffer.from(response.data);
 };
+
+function isWordPreviewCandidate(docRow) {
+  const mimeType = typeof docRow?.mime_type === 'string' ? docRow.mime_type.trim().toLowerCase() : '';
+  if (mimeType && WORD_PREVIEW_MIME_TYPES.has(mimeType)) {
+    return true;
+  }
+  const extension = String(path.extname(docRow?.file_name || '') || '').trim().toLowerCase();
+  return WORD_PREVIEW_EXTENSIONS.has(extension);
+}
+
+function buildWordPreviewVersionToken(docRow) {
+  const checksum = typeof docRow?.checksum_sha256 === 'string' ? docRow.checksum_sha256.trim().toLowerCase() : '';
+  if (/^[a-f0-9]{64}$/.test(checksum)) {
+    return checksum;
+  }
+  return crypto
+    .createHash('sha1')
+    .update([
+      docRow?.id || '',
+      docRow?.file_path || '',
+      docRow?.file_name || '',
+      docRow?.mime_type || '',
+    ].join('|'))
+    .digest('hex');
+}
+
+function buildWordPreviewFileName(fileName) {
+  const parsed = path.parse(String(fileName || 'document'));
+  const safeBase = (parsed.name || 'document').replace(/[^a-z0-9_\-]+/gi, '_').slice(0, 80) || 'document';
+  return `${safeBase}-preview.pdf`;
+}
+
+function buildWordPreviewObjectKey(docRow) {
+  const fileName = buildWordPreviewFileName(docRow?.file_name);
+  const token = buildWordPreviewVersionToken(docRow);
+  return `${WORD_PREVIEW_OBJECT_PREFIX}/${docRow?.id || 'document'}/${token}-${fileName}`;
+}
+
+function buildWordPreviewParagraphsFromText(value) {
+  const normalized = String(value || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\u0000/g, '')
+    .trim();
+  if (!normalized) {
+    return '<p class="empty-state">No readable text could be extracted from this Word document.</p>';
+  }
+  return normalized
+    .split(/\n{2,}/)
+    .map(paragraph => paragraph.trim())
+    .filter(Boolean)
+    .map(paragraph => `<p>${escapeHtml(paragraph).replace(/\n/g, '<br />')}</p>`)
+    .join('\n');
+}
+
+function sanitizeWordPreviewHtml(fragment) {
+  const cheerio = require('cheerio');
+  const allowedTags = new Set([
+    'p', 'br', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'ul', 'ol', 'li', 'strong', 'b', 'em', 'i', 'u',
+    'table', 'thead', 'tbody', 'tr', 'th', 'td',
+    'blockquote', 'hr', 'sup', 'sub', 'img'
+  ]);
+  const allowedAttrs = new Map([
+    ['img', new Set(['src', 'alt'])],
+    ['td', new Set(['colspan', 'rowspan'])],
+    ['th', new Set(['colspan', 'rowspan'])]
+  ]);
+
+  const $ = cheerio.load(`<div data-word-preview-root="1">${fragment || ''}</div>`, null, false);
+  const root = $('[data-word-preview-root="1"]');
+  root.find('script,style,iframe,object,embed,link,meta,form,input,button,select,textarea,svg,math').remove();
+  root.find('*').each((_, element) => {
+    const tag = String(element.tagName || element.name || '').toLowerCase();
+    if (!allowedTags.has(tag)) {
+      $(element).replaceWith($(element).contents());
+      return;
+    }
+    const allowedForTag = allowedAttrs.get(tag) || new Set();
+    Object.keys(element.attribs || {}).forEach(attrName => {
+      const lower = String(attrName || '').toLowerCase();
+      if (!allowedForTag.has(lower)) {
+        $(element).removeAttr(attrName);
+        return;
+      }
+      const value = String(element.attribs[attrName] || '').trim();
+      if (!value) {
+        $(element).removeAttr(attrName);
+        return;
+      }
+      if (tag === 'img' && lower === 'src' && !/^data:image\//i.test(value)) {
+        $(element).removeAttr(attrName);
+        return;
+      }
+      if ((tag === 'td' || tag === 'th') && (lower === 'colspan' || lower === 'rowspan')) {
+        const numberValue = Number.parseInt(value, 10);
+        if (!Number.isFinite(numberValue) || numberValue <= 0) {
+          $(element).removeAttr(attrName);
+        } else {
+          $(element).attr(attrName, String(numberValue));
+        }
+      }
+    });
+  });
+  return root.html() || '';
+}
+
+function buildWordPreviewHtmlDocument({ title, fileName, bodyHtml, usedFallbackText = false }) {
+  const previewTitle = escapeHtml(title || 'Word document preview');
+  const displayName = escapeHtml(fileName || 'Document');
+  const modeLabel = usedFallbackText ? 'Text-only preview' : 'Preview generated from Word document';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>${previewTitle}</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; color: #1b1b1b; margin: 24px; line-height: 1.5; }
+    .shell { max-width: 900px; margin: 0 auto; }
+    .meta { margin-bottom: 24px; padding: 16px 18px; border: 1px solid #d5dbdb; border-radius: 8px; background: #f8fafc; }
+    .meta h1 { margin: 0 0 8px; font-size: 24px; }
+    .meta p { margin: 4px 0; color: #425466; }
+    .content img { max-width: 100%; height: auto; }
+    .content table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    .content th, .content td { border: 1px solid #cbd5e1; padding: 8px 10px; vertical-align: top; }
+    .content h1, .content h2, .content h3, .content h4, .content h5, .content h6 { margin-top: 24px; margin-bottom: 8px; }
+    .content p, .content ul, .content ol, .content blockquote { margin-top: 0; margin-bottom: 12px; }
+    .empty-state { color: #5f6b7a; font-style: italic; }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="meta">
+      <h1>${previewTitle}</h1>
+      <p><strong>Source file:</strong> ${displayName}</p>
+      <p><strong>Preview mode:</strong> ${escapeHtml(modeLabel)}</p>
+      <p>This preview is generated inside PATH from the stored Word document. Formatting may differ from the original.</p>
+    </section>
+    <section class="content">
+      ${bodyHtml || '<p class="empty-state">No preview is available for this document.</p>'}
+    </section>
+  </main>
+</body>
+</html>`;
+}
+
+async function extractWordPreviewHtml({ buffer, fileName, mimeType }) {
+  const extension = String(path.extname(fileName || '') || '').trim().toLowerCase();
+  const normalizedMime = typeof mimeType === 'string' ? mimeType.trim().toLowerCase() : '';
+  const useMammoth = normalizedMime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || extension === '.docx';
+
+  if (useMammoth) {
+    try {
+      const mammoth = require('mammoth');
+      const result = await mammoth.convertToHtml({ buffer });
+      const sanitized = sanitizeWordPreviewHtml(result?.value || '');
+      const readable = sanitized.replace(/<[^>]*>/g, ' ').trim();
+      if (readable) {
+        return { bodyHtml: sanitized, usedFallbackText: false };
+      }
+    } catch (err) {
+      console.warn('[documents] mammoth preview conversion failed for %s: %s', fileName || 'document', err?.message || err);
+    }
+  }
+
+  const WordExtractor = require('word-extractor');
+  const extractor = new WordExtractor();
+  const extracted = await extractor.extract(buffer);
+  const sections = [];
+  const bodyText = typeof extracted?.getBody === 'function' ? extracted.getBody() : '';
+  const footnotes = typeof extracted?.getFootnotes === 'function' ? extracted.getFootnotes() : '';
+  const endnotes = typeof extracted?.getEndnotes === 'function' ? extracted.getEndnotes() : '';
+  const textboxes = typeof extracted?.getTextboxes === 'function'
+    ? extracted.getTextboxes({ includeHeadersAndFooters: false })
+    : '';
+
+  sections.push(buildWordPreviewParagraphsFromText(bodyText));
+  if (footnotes && String(footnotes).trim()) {
+    sections.push('<h2>Footnotes</h2>');
+    sections.push(buildWordPreviewParagraphsFromText(footnotes));
+  }
+  if (endnotes && String(endnotes).trim()) {
+    sections.push('<h2>Endnotes</h2>');
+    sections.push(buildWordPreviewParagraphsFromText(endnotes));
+  }
+  if (textboxes && String(textboxes).trim()) {
+    sections.push('<h2>Text Boxes</h2>');
+    sections.push(buildWordPreviewParagraphsFromText(textboxes));
+  }
+
+  return { bodyHtml: sections.filter(Boolean).join('\n'), usedFallbackText: true };
+}
+
+async function renderHtmlToPdfBuffer({
+  html,
+  format = 'Letter',
+  margin = { top: '12mm', bottom: '12mm', left: '10mm', right: '10mm' }
+}) {
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdfBuffer = await page.pdf({
+      format,
+      printBackground: true,
+      margin
+    });
+    await page.close();
+    return pdfBuffer;
+  } finally {
+    if (browser) {
+      try { await browser.close(); } catch (_) {}
+    }
+  }
+}
+
+async function ensureWordDocumentPreview({ docRow }) {
+  if (!docRow?.id || !docRow?.file_path) {
+    throw new Error('missing_word_document_context');
+  }
+  const { headObject, DRIVER } = require('../ISET-intake/s3Provider');
+  if (DRIVER !== 's3' || typeof headObject !== 'function') {
+    throw new Error('s3_preview_unavailable');
+  }
+
+  const previewKey = buildWordPreviewObjectKey(docRow);
+  const previewFileName = buildWordPreviewFileName(docRow.file_name);
+  const existing = await headObject({ key: previewKey });
+  if (existing?.exists) {
+    return { key: previewKey, fileName: previewFileName, cached: true };
+  }
+
+  const sourceBuffer = await loadDocumentBuffer(docRow);
+  if (!sourceBuffer) {
+    throw new Error('word_document_buffer_missing');
+  }
+  const { bodyHtml, usedFallbackText } = await extractWordPreviewHtml({
+    buffer: sourceBuffer,
+    fileName: docRow.file_name,
+    mimeType: docRow.mime_type
+  });
+  const html = buildWordPreviewHtmlDocument({
+    title: 'Supporting Document Preview',
+    fileName: docRow.file_name,
+    bodyHtml,
+    usedFallbackText
+  });
+  const pdfBuffer = await renderHtmlToPdfBuffer({ html });
+  await uploadBufferToObjectStore({
+    key: previewKey,
+    buffer: pdfBuffer,
+    contentType: 'application/pdf'
+  });
+  return { key: previewKey, fileName: previewFileName, cached: false };
+}
 
 const normalizeArchiveEntryBuffer = value => {
   if (!value) return null;
@@ -3942,6 +4247,7 @@ const ISET_TEST_DATA_TABLE_ORDER = [
 const SLA_STAGE_PLACEHOLDER = [
   { stage_key: 'intake_triage', display_name: 'Intake triage', target_hours: 24, description: 'Time to first open and triage new application.' },
   { stage_key: 'assignment', display_name: 'Assignment', target_hours: 72, description: 'Time to assign a coordinator or assessor after triage.' },
+  { stage_key: 'ei_status_verification', display_name: 'EI Status Verification', target_hours: 72, description: 'Time from assignment to confirm EI status or eligibility.' },
   { stage_key: 'assessment', display_name: 'Assessment', target_hours: 240, description: 'Working time for assessors to complete review (10 days).' },
   { stage_key: 'program_decision', display_name: 'Program decision', target_hours: 48, description: 'Decision turnaround once assessment is complete.' },
   { stage_key: 'docs_request_reminder', display_name: 'Docs requested reminder', target_hours: 168, description: 'Emit the reminder-due event X days after documents are requested.' },
@@ -14603,6 +14909,82 @@ const APPLICATION_ASSESSMENT_STATUSES = new Set([
   'on_hold'
 ]);
 
+function isAssessmentEligibilityPending(value) {
+  return !normaliseString(value);
+}
+
+function isAssignedStaffProfileId(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0;
+}
+
+function getApplicationSlaStageKey({ applicationStatus, assignedToUserId, assessmentEligibility }) {
+  const statusKey = normaliseApplicationStatusValue(applicationStatus);
+  if (statusKey && TERMINAL_APPLICATION_STATUSES.has(statusKey)) {
+    return null;
+  }
+  if (statusKey && APPLICATION_DECISION_STATUSES.has(statusKey)) {
+    return 'program_decision';
+  }
+  const assigned = isAssignedStaffProfileId(assignedToUserId);
+  if (
+    assigned &&
+    isAssessmentEligibilityPending(assessmentEligibility) &&
+    (statusKey === 'submitted' || APPLICATION_ASSESSMENT_STATUSES.has(statusKey))
+  ) {
+    return 'ei_status_verification';
+  }
+  if (statusKey && (APPLICATION_ASSESSMENT_STATUSES.has(statusKey) || (statusKey === 'submitted' && assigned))) {
+    return 'assessment';
+  }
+  return 'assignment';
+}
+
+function buildSlaStageTargetHoursMap(targets = []) {
+  const stageTargets = new Map();
+  for (const row of targets) {
+    if (!row || row.applies_to_role) continue;
+    stageTargets.set(row.stage_key, Number(row.target_hours) || 0);
+  }
+  return stageTargets;
+}
+
+function getSlaTargetHours(stageKey, stageTargets) {
+  if (stageTargets && stageTargets.has(stageKey)) return stageTargets.get(stageKey);
+  const fallback = SLA_STAGE_PLACEHOLDER.find(item => item.stage_key === stageKey);
+  return fallback ? Number(fallback.target_hours) || 0 : 0;
+}
+
+function computeApplicationSlaTiming({
+  applicationStatus,
+  assignedToUserId,
+  assessmentEligibility,
+  submittedAt,
+  createdAt,
+}, stageTargets, nowMs = Date.now()) {
+  const stageKey = getApplicationSlaStageKey({
+    applicationStatus,
+    assignedToUserId,
+    assessmentEligibility,
+  });
+  if (!stageKey) {
+    return { stageKey: null, targetHours: 0, diffHours: null, diffDays: null, dueAt: null };
+  }
+  const targetHours = getSlaTargetHours(stageKey, stageTargets);
+  if (!targetHours || Number.isNaN(targetHours)) {
+    return { stageKey, targetHours: 0, diffHours: null, diffDays: null, dueAt: null };
+  }
+  const baseValue = submittedAt || createdAt;
+  const baseDate = baseValue ? new Date(baseValue) : null;
+  if (!baseDate || Number.isNaN(baseDate.getTime())) {
+    return { stageKey, targetHours, diffHours: null, diffDays: null, dueAt: null };
+  }
+  const dueAt = new Date(baseDate.getTime() + targetHours * 3600000);
+  const diffHours = (dueAt.getTime() - nowMs) / 3600000;
+  const diffDays = Math.floor((dueAt.getTime() - nowMs) / 86400000);
+  return { stageKey, targetHours, diffHours, diffDays, dueAt };
+}
+
 
 const normaliseCaseStatusValue = value => {
   if (value === null || typeof value === 'undefined') {
@@ -15927,6 +16309,46 @@ async function readLockConfig() {
   }
 }
 
+async function readServiceAnnouncementConfig() {
+  try {
+    const [[row]] = await pool.query(
+      'SELECT v, updated_at FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
+      [SERVICE_ANNOUNCEMENT_SCOPE, SERVICE_ANNOUNCEMENT_KEY]
+    );
+    if (!row) {
+      return { ...normaliseServiceAnnouncement(null), source: 'default' };
+    }
+    const normalised = normaliseServiceAnnouncement(parseJsonValue(row.v));
+    return {
+      ...normalised,
+      updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : normalised.updatedAt,
+      source: 'stored',
+    };
+  } catch (err) {
+    console.warn('[service-announcement] read config failed:', err.message);
+    return { ...normaliseServiceAnnouncement(null), source: 'error' };
+  }
+}
+
+async function writeServiceAnnouncementConfig(payload) {
+  const normalised = normaliseServiceAnnouncement(payload);
+  await ensureRuntimeConfigTable();
+  await pool.query(
+    'INSERT INTO iset_runtime_config (scope,k,v) VALUES (?,?,CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP',
+    [SERVICE_ANNOUNCEMENT_SCOPE, SERVICE_ANNOUNCEMENT_KEY, JSON.stringify(normalised)]
+  );
+  return normalised;
+}
+
+async function clearServiceAnnouncementConfig() {
+  await ensureRuntimeConfigTable();
+  await pool.query(
+    'DELETE FROM iset_runtime_config WHERE scope = ? AND k = ?',
+    [SERVICE_ANNOUNCEMENT_SCOPE, SERVICE_ANNOUNCEMENT_KEY]
+  );
+  return { ...normaliseServiceAnnouncement(null), source: 'default' };
+}
+
 async function writeLockConfig(config) {
   const normalised = normaliseLockConfig(config);
   await pool.query("CREATE TABLE IF NOT EXISTS iset_runtime_config (id INT AUTO_INCREMENT PRIMARY KEY, scope VARCHAR(32) NOT NULL, k VARCHAR(128) NOT NULL, v JSON NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_scope_key (scope,k)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
@@ -17069,7 +17491,7 @@ const WORK_QUEUE_BUCKET_META = {
   },
   'due-soon': {
     label: 'Due soon',
-    description: 'Applications approaching their SLA.'
+    description: 'Applications approaching their target date.'
   },
   'awaiting-info': {
     label: 'Awaiting info',
@@ -17081,11 +17503,11 @@ const WORK_QUEUE_BUCKET_META = {
   },
   'due-this-week': {
     label: 'Due this week',
-    description: 'Applications approaching SLA within 7 days.'
+    description: 'Applications approaching their target date within 7 days.'
   },
   'due-today': {
     label: 'Due today',
-    description: 'Cases approaching their SLA deadline within the next working day.'
+    description: 'Cases reaching their target date within the next working day.'
   },
   'awaiting-decision': {
     label: 'Assessed, awaiting approval',
@@ -17152,53 +17574,19 @@ async function countProgramAdminUnassignedBacklog(pool) {
 }
 
 async function countProgramAdminAwaitingEiValidation(pool) {
-  try {
-    const statuses = ['submitted', 'in_review', 'docs_requested', 'pending_approval'];
-    const placeholders = statuses.map(() => '?').join(',');
-    const sql = `SELECT COUNT(*) AS total
-         FROM iset_case c
-         JOIN iset_application a ON a.id = c.application_id
-         LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
-        WHERE a.status IS NOT NULL
-          AND LOWER(a.status) IN (${placeholders})
-          AND (
-            (c.assigned_to_user_id IS NOT NULL AND c.assigned_to_user_id <> 0)
-            OR LOWER(a.status) = 'submitted'
-          )
-          AND (ca.esdc_eligibility IS NULL OR ca.esdc_eligibility = '')`;
-    const [[row]] = await pool.query(sql, statuses);
-    return Number(row?.total ?? 0);
-  } catch (err) {
-    if (err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')) {
-      return 0;
-    }
-    if (isMissingTableErrorLocal(err)) {
-      return 0;
-    }
-    throw err;
-  }
+  const [rows, stageTargets] = await Promise.all([
+    fetchAllAssignedApplicationSlaRows(pool),
+    buildActiveSlaTargetHours(pool),
+  ]);
+  return countRowsBySlaWindow(rows, stageTargets, timing => timing.stageKey === 'ei_status_verification');
 }
 
 async function countProgramAdminInAssessment(pool) {
-  try {
-    const params = ['in_review'];
-    const sql = `SELECT COUNT(*) AS total
-         FROM iset_case c
-         JOIN iset_application a ON a.id = c.application_id
-        WHERE c.assigned_to_user_id IS NOT NULL
-          AND a.status IS NOT NULL
-          AND LOWER(a.status) = ?`;
-    const [[row]] = await pool.query(sql, params);
-    return Number(row?.total ?? 0);
-  } catch (err) {
-    if (err && err.code === 'ER_BAD_FIELD_ERROR') {
-      return 0;
-    }
-    if (isMissingTableErrorLocal(err)) {
-      return 0;
-    }
-    throw err;
-  }
+  const [rows, stageTargets] = await Promise.all([
+    fetchAllAssignedApplicationSlaRows(pool),
+    buildActiveSlaTargetHours(pool),
+  ]);
+  return countRowsBySlaWindow(rows, stageTargets, timing => timing.stageKey === 'assessment');
 }
 
 
@@ -19487,151 +19875,103 @@ async function countRegionalAwaitingApplicantInfo(pool, staffIds) {
   return Number(row?.total ?? 0);
 }
 
+async function fetchApplicationSlaRowsForAssignedStaff(pool, staffIds) {
+  const ids = normalizeStaffIdList(staffIds);
+  if (!ids.length) return [];
+  const placeholders = ids.map(() => '?').join(',');
+  const sql = `SELECT
+         c.id AS case_id,
+         c.assigned_to_user_id,
+         a.status AS application_status,
+         COALESCE(s.created_at, a.created_at) AS submitted_at,
+         a.created_at,
+         ca.esdc_eligibility AS assessment_esdc_eligibility
+       FROM iset_case c
+       JOIN iset_application a ON a.id = c.application_id
+       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+       LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
+      WHERE c.assigned_to_user_id IN (${placeholders})`;
+  try {
+    const [rows] = await pool.query(sql, ids);
+    return Array.isArray(rows) ? rows : [];
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || (err && err.code === 'ER_BAD_FIELD_ERROR')) {
+      return [];
+    }
+    throw err;
+  }
+}
+
+async function fetchAllAssignedApplicationSlaRows(pool) {
+  const sql = `SELECT
+         c.id AS case_id,
+         c.assigned_to_user_id,
+         a.status AS application_status,
+         COALESCE(s.created_at, a.created_at) AS submitted_at,
+         a.created_at,
+         ca.esdc_eligibility AS assessment_esdc_eligibility
+       FROM iset_case c
+       JOIN iset_application a ON a.id = c.application_id
+       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+       LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
+      WHERE c.assigned_to_user_id IS NOT NULL
+        AND c.assigned_to_user_id <> 0`;
+  try {
+    const [rows] = await pool.query(sql);
+    return Array.isArray(rows) ? rows : [];
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || (err && err.code === 'ER_BAD_FIELD_ERROR')) {
+      return [];
+    }
+    throw err;
+  }
+}
+
+async function buildActiveSlaTargetHours(pool) {
+  const targets = await fetchActiveSlaTargets(pool);
+  return buildSlaStageTargetHoursMap(targets);
+}
+
+function countRowsBySlaWindow(rows, stageTargets, predicate, nowMs = Date.now()) {
+  if (!Array.isArray(rows) || !rows.length) return 0;
+  let total = 0;
+  for (const row of rows) {
+    const timing = computeApplicationSlaTiming({
+      applicationStatus: row?.application_status,
+      assignedToUserId: row?.assigned_to_user_id,
+      assessmentEligibility: row?.assessment_esdc_eligibility,
+      submittedAt: row?.submitted_at,
+      createdAt: row?.created_at,
+    }, stageTargets, nowMs);
+    if (predicate(timing, row)) {
+      total += 1;
+    }
+  }
+  return total;
+}
+
 async function countRegionalDueThisWeek(pool, staffIds) {
   const ids = normalizeStaffIdList(staffIds);
   if (!ids.length) return 0;
-  const targets = await fetchActiveSlaTargets(pool);
-  const stageTargets = new Map();
-  for (const row of targets) {
-    if (!row || row.applies_to_role) continue;
-    stageTargets.set(row.stage_key, Number(row.target_hours) || 0);
-  }
-  const getTarget = stageKey => {
-    if (stageTargets.has(stageKey)) return stageTargets.get(stageKey);
-    const fallback = SLA_STAGE_PLACEHOLDER.find(item => item.stage_key === stageKey);
-    return fallback ? fallback.target_hours : 0;
-  };
-
-  const assessmentHours = getTarget('assessment');
-  const decisionHours = getTarget('program_decision');
-  const stageValues = CASE_STATUS_AWAITING_DECISION_LOWER;
-  const excludedValues = CASE_STATUS_EXCLUDED_FOR_ASSESSMENT_LOWER;
-  const terminalValues = CASE_STATUS_TERMINAL_VALUES_LOWER;
-  const staffPlaceholders = ids.map(() => '?').join(',');
-  const elapsedExpr = 'TIMESTAMPDIFF(HOUR, COALESCE(a.updated_at, a.created_at), NOW())';
-
-  let total = 0;
-
-  if (assessmentHours > 0) {
-    const params = [...ids];
-    let statusExcludingPendingCondition = 'a.status IS NULL';
-    if (stageValues.length) {
-      const placeholders = stageValues.map(() => '?').join(',');
-      statusExcludingPendingCondition = `(a.status IS NULL OR LOWER(a.status) NOT IN (${placeholders}))`;
-      params.push(...stageValues);
-    }
-    let statusCondition = 'a.status IS NULL';
-    if (excludedValues.length) {
-      const placeholders = excludedValues.map(() => '?').join(',');
-      statusCondition = `(a.status IS NULL OR LOWER(a.status) NOT IN (${placeholders}))`;
-      params.push(...excludedValues);
-    }
-    const lowerBound = Math.max(assessmentHours - DUE_SOON_THRESHOLD_HOURS, 0);
-    const upperBound = assessmentHours;
-    const sql = `SELECT COUNT(*) AS total
-       FROM iset_case c
-       JOIN iset_application a ON a.id = c.application_id
-      WHERE c.assigned_to_user_id IN (${staffPlaceholders})
-        AND ${statusExcludingPendingCondition}
-        AND ${statusCondition}
-        AND ${elapsedExpr} >= ?
-        AND ${elapsedExpr} < ?`;
-    params.push(lowerBound, upperBound);
-    try {
-      const [[row]] = await pool.query(sql, params);
-      total += Number(row?.total ?? 0);
-    } catch (err) {
-      if (!(err && err.code === 'ER_BAD_FIELD_ERROR') && !isMissingTableErrorLocal(err)) {
-        throw err;
-      }
-    }
-  }
-
-  if (decisionHours > 0 && stageValues.length) {
-    const stagePlaceholders = stageValues.map(() => '?').join(',');
-    const params = [...ids, ...stageValues];
-    let statusCondition = 'c.status IS NULL';
-    if (terminalValues.length) {
-      const placeholders = terminalValues.map(() => '?').join(',');
-      statusCondition = `(a.status IS NULL OR LOWER(a.status) NOT IN (${placeholders}))`;
-      params.push(...terminalValues);
-    }
-    const lowerBound = Math.max(decisionHours - DUE_SOON_THRESHOLD_HOURS, 0);
-    const upperBound = decisionHours;
-    const sql = `SELECT COUNT(*) AS total
-           FROM iset_case c
-           JOIN iset_application a ON a.id = c.application_id
-           WHERE c.assigned_to_user_id IN (${staffPlaceholders})
-            AND a.status IS NOT NULL
-            AND LOWER(a.status) IN (${stagePlaceholders})
-            AND ${statusCondition}
-            AND ${elapsedExpr} >= ?
-            AND ${elapsedExpr} < ?`;
-    params.push(lowerBound, upperBound);
-    try {
-      const [[row]] = await pool.query(sql, params);
-      total += Number(row?.total ?? 0);
-    } catch (err) {
-      if (!(err && err.code === 'ER_BAD_FIELD_ERROR') && !isMissingTableErrorLocal(err)) {
-        throw err;
-      }
-    }
-  }
-
-  return total;
+  const [rows, stageTargets] = await Promise.all([
+    fetchApplicationSlaRowsForAssignedStaff(pool, ids),
+    buildActiveSlaTargetHours(pool),
+  ]);
+  return countRowsBySlaWindow(
+    rows,
+    stageTargets,
+    timing => timing.diffHours !== null && timing.diffHours >= 0 && timing.diffHours < DUE_SOON_THRESHOLD_HOURS
+  );
 }
 
 async function countRegionalOverdue(pool, staffIds) {
   const ids = normalizeStaffIdList(staffIds);
   if (!ids.length) return 0;
-  const targets = await fetchActiveSlaTargets(pool);
-  const stageTargets = new Map();
-  for (const row of targets) {
-    if (!row || row.applies_to_role) continue;
-    stageTargets.set(row.stage_key, Number(row.target_hours) || 0);
-  }
-  const getTargetHours = stageKey => {
-    if (stageTargets.has(stageKey)) return stageTargets.get(stageKey);
-    const fallback = SLA_STAGE_PLACEHOLDER.find(item => item.stage_key === stageKey);
-    return fallback ? Number(fallback.target_hours) || 0 : 0;
-  };
-
-  const staffPlaceholders = ids.map(() => '?').join(',');
-  const sql = `SELECT a.status AS application_status, a.updated_at, a.created_at
-       FROM iset_case c
-       JOIN iset_application a ON a.id = c.application_id
-      WHERE c.assigned_to_user_id IN (${staffPlaceholders})`;
-
-  try {
-    const [rows] = await pool.query(sql, ids);
-    const nowMs = Date.now();
-    let total = 0;
-    for (const row of rows) {
-      const status = (row?.application_status || '').toLowerCase();
-      if (APPLICATION_COMPLETE_STATUSES.has(status)) continue;
-      let targetKey = 'assignment';
-      if (APPLICATION_DECISION_STATUSES.has(status)) {
-        targetKey = 'program_decision';
-      } else if (APPLICATION_ASSESSMENT_STATUSES.has(status)) {
-        targetKey = 'assessment';
-      }
-      const targetHours = getTargetHours(targetKey);
-      if (!targetHours || Number.isNaN(targetHours)) continue;
-      const start = row?.updated_at || row?.created_at;
-      const startDate = start ? new Date(start) : null;
-      if (!startDate || Number.isNaN(startDate.getTime())) continue;
-      const elapsedHours = (nowMs - startDate.getTime()) / 3600000;
-      if (elapsedHours > targetHours) {
-        total += 1;
-      }
-    }
-    return total;
-  } catch (err) {
-    if (isMissingTableErrorLocal(err)) {
-      return 0;
-    }
-    throw err;
-  }
+  const [rows, stageTargets] = await Promise.all([
+    fetchApplicationSlaRowsForAssignedStaff(pool, ids),
+    buildActiveSlaTargetHours(pool),
+  ]);
+  return countRowsBySlaWindow(rows, stageTargets, timing => timing.diffHours !== null && timing.diffHours < 0);
 }
 
 async function countRegionalPendingApproval(pool, staffIds) {
@@ -19688,55 +20028,15 @@ async function countAssessorAwaitingApplicantResponse(pool, staffProfileId) {
 async function countAssessorDueToday(pool, staffProfileId) {
   const ids = normalizeStaffIdList([staffProfileId]);
   if (!ids.length) return 0;
-  const targets = await fetchActiveSlaTargets(pool);
-  const stageTargets = new Map();
-  for (const row of targets) {
-    if (!row || row.applies_to_role) continue;
-    stageTargets.set(row.stage_key, Number(row.target_hours) || 0);
-  }
-  const getTargetHours = stageKey => {
-    if (stageTargets.has(stageKey)) return stageTargets.get(stageKey);
-    const fallback = SLA_STAGE_PLACEHOLDER.find(item => item.stage_key === stageKey);
-    return fallback ? Number(fallback.target_hours) || 0 : 0;
-  };
-
-  const staffPlaceholders = ids.map(() => '?').join(',');
-  const sql = `SELECT a.status AS application_status, a.updated_at, a.created_at
-         FROM iset_case c
-         JOIN iset_application a ON a.id = c.application_id
-        WHERE c.assigned_to_user_id IN (${staffPlaceholders})`;
-
-  try {
-    const [rows] = await pool.query(sql, ids);
-    const nowMs = Date.now();
-    const todayThresholdHours = DUE_TODAY_THRESHOLD_HOURS;
-    let total = 0;
-    for (const row of rows) {
-      const status = (row?.application_status || '').toLowerCase();
-      if (APPLICATION_COMPLETE_STATUSES.has(status)) continue;
-      let targetKey = 'assignment';
-      if (APPLICATION_DECISION_STATUSES.has(status)) {
-        targetKey = 'program_decision';
-      } else if (APPLICATION_ASSESSMENT_STATUSES.has(status)) {
-        targetKey = 'assessment';
-      }
-      const targetHours = getTargetHours(targetKey);
-      if (!targetHours || Number.isNaN(targetHours)) continue;
-      const start = row?.updated_at || row?.created_at;
-      const startDate = start ? new Date(start) : null;
-      if (!startDate || Number.isNaN(startDate.getTime())) continue;
-      const elapsedHours = (nowMs - startDate.getTime()) / 3600000;
-      if (elapsedHours >= Math.max(targetHours - todayThresholdHours, 0) && elapsedHours < targetHours) {
-        total += 1;
-      }
-    }
-    return total;
-  } catch (err) {
-    if (isMissingTableErrorLocal(err)) {
-      return 0;
-    }
-    throw err;
-  }
+  const [rows, stageTargets] = await Promise.all([
+    fetchApplicationSlaRowsForAssignedStaff(pool, ids),
+    buildActiveSlaTargetHours(pool),
+  ]);
+  return countRowsBySlaWindow(
+    rows,
+    stageTargets,
+    timing => timing.diffHours !== null && timing.diffHours >= 0 && timing.diffHours < DUE_TODAY_THRESHOLD_HOURS
+  );
 }
 
 
@@ -19744,106 +20044,25 @@ async function countAssessorDueToday(pool, staffProfileId) {
 async function countAssessorDueSoon(pool, staffProfileId) {
   const ids = normalizeStaffIdList([staffProfileId]);
   if (!ids.length) return 0;
-  const targets = await fetchActiveSlaTargets(pool);
-  const stageTargets = new Map();
-  for (const row of targets) {
-    if (!row || row.applies_to_role) continue;
-    stageTargets.set(row.stage_key, Number(row.target_hours) || 0);
-  }
-  const getTargetHours = stageKey => {
-    if (stageTargets.has(stageKey)) return stageTargets.get(stageKey);
-    const fallback = SLA_STAGE_PLACEHOLDER.find(item => item.stage_key === stageKey);
-    return fallback ? Number(fallback.target_hours) || 0 : 0;
-  };
-  const staffPlaceholders = ids.map(() => '?').join(',');
-  const sql = `SELECT a.status AS application_status, a.updated_at, a.created_at
-         FROM iset_case c
-         JOIN iset_application a ON a.id = c.application_id
-        WHERE c.assigned_to_user_id IN (${staffPlaceholders})`;
-  try {
-    const [rows] = await pool.query(sql, ids);
-    const nowMs = Date.now();
-    let total = 0;
-    for (const row of rows) {
-      const status = (row?.application_status || '').toLowerCase();
-      if (APPLICATION_COMPLETE_STATUSES.has(status)) continue;
-      let targetKey = 'assignment';
-      if (APPLICATION_DECISION_STATUSES.has(status)) {
-        targetKey = 'program_decision';
-      } else if (APPLICATION_ASSESSMENT_STATUSES.has(status)) {
-        targetKey = 'assessment';
-      }
-      const targetHours = getTargetHours(targetKey);
-      if (!targetHours || Number.isNaN(targetHours)) continue;
-      const start = row?.updated_at || row?.created_at;
-      const startDate = start ? new Date(start) : null;
-      if (!startDate || Number.isNaN(startDate.getTime())) continue;
-      const elapsedHours = (nowMs - startDate.getTime()) / 3600000;
-      const lowerBound = Math.max(targetHours - DUE_SOON_THRESHOLD_HOURS, 0);
-      if (elapsedHours >= lowerBound && elapsedHours < targetHours) {
-        total += 1;
-      }
-    }
-    return total;
-  } catch (err) {
-    if (isMissingTableErrorLocal(err)) {
-      return 0;
-    }
-    throw err;
-  }
+  const [rows, stageTargets] = await Promise.all([
+    fetchApplicationSlaRowsForAssignedStaff(pool, ids),
+    buildActiveSlaTargetHours(pool),
+  ]);
+  return countRowsBySlaWindow(
+    rows,
+    stageTargets,
+    timing => timing.diffHours !== null && timing.diffHours >= 0 && timing.diffHours < DUE_SOON_THRESHOLD_HOURS
+  );
 }
 
 async function countAssessorOverdue(pool, staffProfileId) {
   const ids = normalizeStaffIdList([staffProfileId]);
   if (!ids.length) return 0;
-  const targets = await fetchActiveSlaTargets(pool);
-  const stageTargets = new Map();
-  for (const row of targets) {
-    if (!row || row.applies_to_role) continue;
-    stageTargets.set(row.stage_key, Number(row.target_hours) || 0);
-  }
-  const getTargetHours = stageKey => {
-    if (stageTargets.has(stageKey)) return stageTargets.get(stageKey);
-    const fallback = SLA_STAGE_PLACEHOLDER.find(item => item.stage_key === stageKey);
-    return fallback ? Number(fallback.target_hours) || 0 : 0;
-  };
-
-  const staffPlaceholders = ids.map(() => '?').join(',');
-  const sql = `SELECT a.status AS application_status, a.updated_at, a.created_at
-         FROM iset_case c
-         JOIN iset_application a ON a.id = c.application_id
-        WHERE c.assigned_to_user_id IN (${staffPlaceholders})`;
-
-  try {
-    const [rows] = await pool.query(sql, ids);
-    const nowMs = Date.now();
-    let total = 0;
-    for (const row of rows) {
-      const status = (row?.application_status || '').toLowerCase();
-      if (APPLICATION_COMPLETE_STATUSES.has(status)) continue;
-      let targetKey = 'assignment';
-      if (APPLICATION_DECISION_STATUSES.has(status)) {
-        targetKey = 'program_decision';
-      } else if (APPLICATION_ASSESSMENT_STATUSES.has(status)) {
-        targetKey = 'assessment';
-      }
-      const targetHours = getTargetHours(targetKey);
-      if (!targetHours || Number.isNaN(targetHours)) continue;
-      const start = row?.updated_at || row?.created_at;
-      const startDate = start ? new Date(start) : null;
-      if (!startDate || Number.isNaN(startDate.getTime())) continue;
-      const elapsedHours = (nowMs - startDate.getTime()) / 3600000;
-      if (elapsedHours > targetHours) {
-        total += 1;
-      }
-    }
-    return total;
-  } catch (err) {
-    if (isMissingTableErrorLocal(err)) {
-      return 0;
-    }
-    throw err;
-  }
+  const [rows, stageTargets] = await Promise.all([
+    fetchApplicationSlaRowsForAssignedStaff(pool, ids),
+    buildActiveSlaTargetHours(pool),
+  ]);
+  return countRowsBySlaWindow(rows, stageTargets, timing => timing.diffHours !== null && timing.diffHours < 0);
 }
 
 
@@ -25642,6 +25861,51 @@ app.get('/api/config/runtime/backend-jobs', async (_req, res) => {
   }
 });
 
+app.get('/api/config/runtime/service-announcement', async (_req, res) => {
+  try {
+    const config = await readServiceAnnouncementConfig();
+    res.set('Cache-Control', 'no-store');
+    res.json(config);
+  } catch (err) {
+    console.error('[service-announcement] config fetch failed:', err);
+    res.status(500).json({ error: 'service_announcement_fetch_failed', message: err.message });
+  }
+});
+
+app.patch('/api/config/runtime/service-announcement', async (req, res) => {
+  try {
+    if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+    const saved = await writeServiceAnnouncementConfig(req.body || {});
+    res.set('Cache-Control', 'no-store');
+    res.json(saved);
+  } catch (err) {
+    console.error('[service-announcement] config update failed:', err);
+    res.status(500).json({ error: 'service_announcement_update_failed', message: err.message });
+  }
+});
+
+app.delete('/api/config/runtime/service-announcement', async (req, res) => {
+  try {
+    if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+    await clearServiceAnnouncementConfig();
+    res.status(204).end();
+  } catch (err) {
+    console.error('[service-announcement] config clear failed:', err);
+    res.status(500).json({ error: 'service_announcement_clear_failed', message: err.message });
+  }
+});
+
+app.get('/api/service-announcement/current', async (_req, res) => {
+  try {
+    const config = await readServiceAnnouncementConfig();
+    res.set('Cache-Control', 'no-store');
+    res.json(config);
+  } catch (err) {
+    console.error('[service-announcement] current fetch failed:', err);
+    res.status(500).json({ error: 'service_announcement_current_failed', message: err.message });
+  }
+});
+
 app.patch('/api/config/runtime/backend-jobs', async (req, res) => {
   try {
     if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
@@ -31372,8 +31636,16 @@ app.get('/api/dashboard/ei-eligibility-items', async (req, res) => {
   }
   const regionIds = resolveRequestRegionIds(req);
   const regionId = regionIds.length ? regionIds[0] : null;
-  const filters = ['(ca.esdc_eligibility IS NULL OR ca.esdc_eligibility = \'\')'];
+  const filters = [
+    '(ca.esdc_eligibility IS NULL OR ca.esdc_eligibility = \'\')',
+    'c.assigned_to_user_id IS NOT NULL',
+    'c.assigned_to_user_id <> 0',
+  ];
   const params = [];
+  const statusExpr = `REPLACE(LOWER(TRIM(a.status)), ' ', '_')`;
+  const eligibleStatuses = ['submitted', 'in_review', 'docs_requested', 'closure_notice'];
+  filters.push(`${statusExpr} IN (${eligibleStatuses.map(() => '?').join(',')})`);
+  params.push(...eligibleStatuses);
   if (role === 'Regional Manager') {
     if (!regionIds.length) {
       return res.json({ role, items: [] });
@@ -39901,9 +40173,17 @@ app.get('/api/documents/:id/presign-download', async (req, res) => {
   if (!Number.isFinite(documentId) || documentId <= 0) {
     return res.status(400).json({ error: 'invalid_document_id' });
   }
+  const requestedMode = String(req.query.mode || '').trim().toLowerCase();
+  const wantsOriginalDownload = requestedMode === 'original';
+  if (wantsOriginalDownload && !hasSystemOrNwacAdminAccess(req)) {
+    return res.status(403).json({
+      error: 'forbidden',
+      message: 'Only System Administrators and NWAC Administrators can download original files.'
+    });
+  }
   try {
     const [[doc]] = await pool.query(
-      "SELECT id, file_name, file_path FROM iset_document WHERE id = ? AND status = 'active' LIMIT 1",
+      "SELECT id, file_name, file_path, mime_type, checksum_sha256 FROM iset_document WHERE id = ? AND status = 'active' LIMIT 1",
       [documentId]
     );
     if (!doc) {
@@ -39917,17 +40197,52 @@ app.get('/api/documents/:id/presign-download', async (req, res) => {
       if (DRIVER !== 's3' || typeof presignGet !== 'function') {
         return res.status(500).json({ error: 'presign_unavailable' });
       }
-      const presigned = await presignGet({ key: doc.file_path });
+      let responseKey = doc.file_path;
+      let responseFilename = doc.file_name;
+      let preview = null;
+      if (wantsOriginalDownload) {
+        const presigned = await presignGet({
+          key: responseKey,
+          responseContentDisposition: buildAttachmentContentDisposition(responseFilename),
+          responseContentType: doc.mime_type || undefined
+        });
+        return res.json({
+          mode: 's3',
+          fileId: doc.id,
+          filename: responseFilename,
+          key: responseKey,
+          preview: null,
+          originalDownload: true,
+          presigned
+        });
+      }
+      if (isWordPreviewCandidate(doc)) {
+        const previewResult = await ensureWordDocumentPreview({ docRow: doc });
+        responseKey = previewResult.key;
+        responseFilename = previewResult.fileName || responseFilename;
+        preview = {
+          kind: 'pdf',
+          source: 'internal_word_preview',
+          cached: previewResult.cached === true
+        };
+      }
+      const presigned = await presignGet({ key: responseKey });
       return res.json({
         mode: 's3',
         fileId: doc.id,
-        filename: doc.file_name,
-        key: doc.file_path,
+        filename: responseFilename,
+        key: responseKey,
+        preview,
         presigned
       });
     } catch (err) {
       console.error('[admin:documents:presign-download:s3] error', err);
-      return res.status(500).json({ error: 's3_presign_failed' });
+      return res.status(500).json({
+        error: 's3_presign_failed',
+        message: isWordPreviewCandidate(doc)
+          ? 'Unable to generate a secure PDF preview for this Word document.'
+          : 'Unable to prepare document view.'
+      });
     }
   } catch (error) {
     console.error('[admin:documents:presign-download] error', error);

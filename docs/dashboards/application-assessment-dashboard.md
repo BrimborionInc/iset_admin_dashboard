@@ -9,7 +9,7 @@ Operational dashboard for reviewing and adjudicating individual ISET application
 ## Current Board Items (production)
 | Title | File | Purpose / scope |
 |-------|------|-----------------|
-| Application Overview | `src/widgets/ApplicationOverviewWidget.js` | Case header with status badge, sysadmin-only status selector (others see read-only badge), and layout quick actions (Review application, Documents and messages, Notes and case calendar, View audit trail); shows reference # with copy control, province/territory, document checklist completeness, lock owner/expiry, assigned evaluator, timestamps. |
+| Application Overview | `src/widgets/ApplicationOverviewWidget.js` | Case header with status badge, sysadmin-only status selector (others see read-only badge), layout quick actions (Review application, Documents and messages, Notes and case calendar, View audit trail), and stage-aware timeline status. The timeline badge now routes files through `Assignment -> EI Status Verification -> Assessment -> Program decision` based on assignment state, application status, and `assessment_esdc_eligibility`. |
 | ISET Application Form | `src/widgets/IsetApplicationFormWidget.js` | Read-only or lock-protected edit view of the submitted application; version history and restore; edit disabled when decision final or status=withdrawn. |
 | Application Assessment | `src/widgets/CoordinatorAssessmentWidget.js` | Assessment workflow (declaration, recommendations, NWAC review) with status progression rules and locking; submits to `/api/cases/:id`. |
 | Supporting Documents | `src/widgets/SupportingDocumentsWidget.js` | Unified document list across submissions and secure messages; refresh control. |
@@ -31,6 +31,11 @@ Operational dashboard for reviewing and adjudicating individual ISET application
 - Submission reference: `iset_application_submission` (hydration + `schema_snapshot.fields`).
 - Documents: `iset_document` (linked by application / submission) [SupportingDocumentsWidget].
 - Case metadata: `iset_case`.
+
+## Timing Notes
+- The `Manage ISET Applications` table `Overdue` column and the `Application Overview` widget use the same shared frontend helper: `src/utils/applicationSla.js`.
+- Current milestone model remains submission-based. The stage changes with status/eligibility, but due dates are still measured from the original application submission/creation timestamp until a dedicated stage-timestamp model exists.
+- `Awaiting EI Validation` is not a standalone stored application status. It is a derived qualifier driven by an assigned file with no recorded `assessment_esdc_eligibility`.
 
 ## Key Decisions (chronological)
 1. Immutable vs mutable application data: `iset_application_submission` immutable; `iset_application.payload_json` mutable with patch endpoint for answers.

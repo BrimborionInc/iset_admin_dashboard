@@ -6,6 +6,12 @@ import { useAuth } from '../../context/AuthContext.js';
 import useCurrentUser from '../../hooks/useCurrentUser';
 import { getRoleDisplayName } from '../../utils/roleDisplay';
 import { formatSinDisplay } from '../../utils/applicantWatchlist';
+import {
+    SLA_DEFAULT_DAYS,
+    computeApplicationSlaMeta,
+    isEligibilityComplete,
+    isEligibilityPending,
+} from '../../utils/applicationSla';
 import ProgramAdminWorkQueueWidget, { PROGRAM_ADMIN_BUCKETS, PROGRAM_ADMIN_SAMPLE_ITEMS } from './widgets/ProgramAdminWorkQueueWidget';
 import IsetCoordinatorWorkQueueWidget, { ISET_COORDINATOR_BUCKETS, ISET_COORDINATOR_SAMPLE_ITEMS } from './widgets/IsetCoordinatorWorkQueueWidget';
 import WorkQueueItemsTableWidget from './widgets/WorkQueueItemsTableWidget';
@@ -113,7 +119,7 @@ const WIDGET_REGISTRY = {
 const STORAGE_PREFIX = 'admin-home-layout-v7';
 const SYSTEM_ADMIN_STORAGE_PREFIX = 'admin-home-layout-v10';
 const ISET_COORDINATOR_STATUS_FILTER = ['submitted', 'in_review', 'docs_requested', 'closure_notice', 'pending_approval', 'decision_ready'].join(',');
-const ISET_COORDINATOR_EI_ELIGIBILITY_FILTER = ISET_COORDINATOR_STATUS_FILTER;
+const ISET_COORDINATOR_EI_ELIGIBILITY_FILTER = ['submitted', 'in_review', 'docs_requested', 'closure_notice'].join(',');
 const ISET_COORDINATOR_READY_TO_ASSESS_FILTER = ['submitted', 'in_review'].join(',');
 const ISET_COORDINATOR_APPROVALS_FILTER = ['pending_approval'].join(',');
 const ISET_COORDINATOR_FUNDING_AGREEMENTS_FILTER = ['decision_ready', 'approved'].join(',');
@@ -157,15 +163,6 @@ const REGIONAL_MANAGER_CLIENT_CASES_BUCKET = {
 const buildDevHeaders = (role) => {
     return { Accept: 'application/json' };
 };
-
-const isEligibilityPending = (value) => {
-    if (value === null || value === undefined) return true;
-    const normalized = String(value).trim().toLowerCase();
-    if (!normalized) return true;
-    return ['pending', 'unknown'].includes(normalized);
-};
-
-const isEligibilityComplete = (value) => !isEligibilityPending(value);
 
 const MS_PER_DAY = 86400000;
 
@@ -2125,7 +2122,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                             dueDate: meta.due ? meta.due.toISOString() : null,
                             submittedAt: row.submitted_at || row.created_at || null,
                             updatedAt: row.application_updated_at || row.last_activity_at || row.submitted_at || row.created_at || null,
-                            summary: meta.status ? `Application SLA ${meta.status}` : 'Overdue',
+                            summary: meta.status ? `Application timeline ${meta.status}` : 'Overdue',
                             workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
                         };
                     })
@@ -2745,7 +2742,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                             docs_requested_source: row.docs_requested_source ?? row.docsRequestedSource ?? null,
                             dueDate: meta.due ? meta.due.toISOString() : null,
                             submittedAt: row.submitted_at || row.created_at || null,
-                            summary: meta.status ? `SLA ${meta.status}` : 'Overdue',
+                            summary: meta.status ? `Timeline ${meta.status}` : 'Overdue',
                             workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
                         };
                     })
@@ -2939,59 +2936,16 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         </SpaceBetween>
     );
 };
-const SLA_DEFAULT_DAYS = {
-    assignment: 3,
-    assessment: 10,
-    program_decision: 2
-};
-
-const normalizeClosedStatus = status => {
-    const key = (status || '').toString().trim().toLowerCase();
-    return key === 'withdrawn' ? 'closed' : key;
-};
-
 const computeSlaMeta = (row, slaTargets, rawStatus, isAssigned) => {
-    const submitted = row.submitted_at ? new Date(row.submitted_at) : row.created_at ? new Date(row.created_at) : null;
-    if (!submitted || Number.isNaN(submitted.getTime())) {
-        return { status: 'unknown', due: null };
-    }
-    const due = row.sla_due_at ? new Date(row.sla_due_at) : null;
-    const statusKey = normalizeClosedStatus(rawStatus || '');
-    if (['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived'].includes(statusKey)) {
-        return {
-            status: 'ok',
-            due: due || submitted,
-            deltaDays: null,
-            label: 'Complete',
-            stage: null
-        };
-    }
-    let targetKey = 'assignment';
-    const DECISION_STATUSES = new Set(['pending_approval', 'decision_ready']);
-    const ASSESSMENT_STATUSES = new Set([
-        'in_review', 'in review',
-        'docs_requested', 'docs requested',
-        'action_required', 'action required', 'action required (docs requested)',
-        'closure_notice', 'closure notice',
-        'pending info', 'pending information', 'info requested', 'information requested',
-        'on hold', 'on_hold'
-    ]);
-    if (DECISION_STATUSES.has(statusKey)) {
-        targetKey = 'program_decision';
-    } else if (ASSESSMENT_STATUSES.has(statusKey) || (statusKey === 'submitted' && isAssigned)) {
-        targetKey = 'assessment';
-    }
-    const targetDays = Number(slaTargets[targetKey]) || SLA_DEFAULT_DAYS[targetKey] || 0;
-    const nowMs = Date.now();
-    const ageDays = Math.floor((nowMs - submitted.getTime()) / 86400000);
-    const effectiveDue = due || new Date(submitted.getTime() + targetDays * 86400000);
-    const diffDays = Math.floor((effectiveDue.getTime() - nowMs) / 86400000);
-    let status = 'ok';
-    if (diffDays < -4) status = 'critical-overdue';
-    else if (diffDays < 0) status = 'high-overdue';
-    else if (diffDays === 0) status = 'due-today';
-    else if (diffDays <= 3) status = 'due-soon';
-    return { status, due: effectiveDue, deltaDays: diffDays, ageDays, label: '', stage: targetKey };
+    return computeApplicationSlaMeta({
+        submittedAt: row.submitted_at,
+        createdAt: row.created_at,
+        dueAt: row.sla_due_at,
+        slaTargets,
+        rawStatus,
+        isAssigned,
+        assessmentEligibility: row.assessment_esdc_eligibility,
+    });
 };
 
 export default AdminDashboard;

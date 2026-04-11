@@ -56,6 +56,15 @@ Purpose: Living reference of structure, core modules, and cross-cutting concerns
 - Tutorial status management entry point: `src/pages/support/TutorialsDashboardPage.jsx` (role-filtered tutorial table, per-row completion toggle, and `Reset all`; emits `tutorials:refresh`).
 - Canonical tutorial runbook: `docs/features/tutorial-platform.md`.
 
+### Shell notifications
+- `src/AppContent.js` owns the global admin shell (`AppLayout`) and renders the page-top notifications rail through `AppLayout.notifications`.
+- Staff bell alerts load from `/api/me/notifications` and are rendered as a stacked Cloudscape `Flashbar` from `src/AppContent.js`.
+- `src/internalNotifications.js` reads `iset_internal_notification` plus `iset_internal_notification_dismissal`; current filtering already supports `global`, `role`, and `user` audiences and scheduled windows via `starts_at` / `expires_at`.
+- `src/layouts/SideNavigation.js` footer item `Notifications` is a shell refresh affordance only, not a routed notification center.
+- Service-wide maintenance warnings now use the separate runtime-config key `iset_runtime_config(scope='runtime', k='service.announcement')` instead of the bell-notification tables.
+- `src/AppContent.js` polls `/api/service-announcement/current` every 15 seconds and renders the active maintenance warning as a non-dismissible `Flashbar` item ahead of bell alerts, with a local 1-second countdown once loaded.
+- Current limitation: this is still polling, not websocket/SSE push, so operator guidance should use a 2 to 5 minute lead time rather than relying on precise sub-minute delivery.
+
 ## Auth
 - Session detection uses real Cognito tokens only.
 - Frontend auth/current-user state is centralized in `src/context/AuthContext.js`.
@@ -184,6 +193,7 @@ Risk Mitigations:
 - v0.4: Added planned custom component macro/registry infrastructure section (task t9) outlining elimination of client DOM surgery for signature-ack and future bespoke components.
 - v0.4a: Draft `src/server-macros/signature-ack.njk` macro scaffolded (not yet wired into preview route or registry) to enable upcoming server-first rendering.
 - v0.4b: Added Query Editor architecture notes and corrected stale documentation paths under Docs & Specs and development-task references.
+- v0.4c: Added shell-notifications notes covering `AppLayout.notifications`, internal-notification data flow, and the current lack of hot-push refresh for service-wide warnings.
 
 ---
 Maintenance (Standing Directive): This map MUST be updated immediately upon learning any new structural, architectural, or cross-cutting detail (pages vs widgets placement, new directories, lifecycle hooks, synchronization pipelines). No feature work considered complete until corresponding map updates are made.

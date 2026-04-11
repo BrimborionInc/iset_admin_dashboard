@@ -2,7 +2,7 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-04-10
+Last Updated: 2026-04-11
 
 ## How to use
 
@@ -31,6 +31,21 @@ For each indexed thread/topic, keep:
 - `Status`: whether the note is current, partial, incomplete-title, or superseded
 
 ## Indexed Topics
+
+### Application timing targets and EI status verification stage
+
+- Codex task title: `Add EI status SLA target`
+- Topic: add the configurable `EI Status Verification` application timing stage between Assignment and Assessment, route all due/overdue displays through the shared stage helper, and relabel staff-facing `SLA` wording to plainer `workflow timing` / `timeline` language
+- Keywords: `Add EI status SLA target`, `EI Status Verification`, `workflow timing targets`, `timeline status`, `timeline target`, `due overdue`, `assessment_esdc_eligibility`, `applicationSla.js`, `sla_stage_target`, `missing stage in widget`, `path:maintenance`, `path:maintenance:fallback`
+- When to open: the user asks where the EI status timing stage was added, wants to change application due/overdue behavior, asks why `Awaiting EI Validation` or `EI Status Verification` is or is not appearing in queues/widgets, asks why the configuration widget is missing the EI row in DEV, or asks why the timing clock is still based on submission rather than assignment
+- Primary docs:
+  - `docs/AGENTS.md`
+  - `docs/dashboards/configuration-sla-widget.md`
+  - `docs/dashboards/application-assessment-dashboard.md`
+  - `docs/guides/status-lifecycle-implementation.md`
+  - `db/migrations/20260411_0001_add_ei_status_verification_sla_stage.sql`
+- Status: current as of 2026-04-11
+- Notes: durable outcomes from this thread: application due/overdue routing now derives the active stage from application status, assignment state, and `assessment_esdc_eligibility`, using `Assignment -> EI Status Verification -> Assessment -> Program decision`; the shared frontend source of truth is `src/utils/applicationSla.js` and the backend helper pair is `getApplicationSlaStageKey()` / `computeApplicationSlaTiming()` in `isetadminserver.js`; the staff-facing UI now prefers `Workflow timing targets`, `Timeline status`, and `Timeline target` while internal config/storage names remain `sla_*`; current timing is still anchored to application submission/creation time rather than a true stage-start timestamp, so a genuine “3 days from assignment” model would require schema/event work; and the configuration page now merges DB-returned rows with placeholder stages so `EI Status Verification` still appears in the widget even if DEV is missing the seeded `sla_stage_target` row. Later in the same thread, the new maintenance operator flow was exercised and deployed alongside this work: `scripts/path-maintenance-fallback.js` can now switch TEST/PROD ALB host rules to a fixed HTML `503` maintenance page for hard cutovers; release `20260411-test-maintenance-ei-sla` verified the warning-banner behavior in TEST while both target groups stayed healthy; and release `20260411-prod-ei-sla-maintenance` successfully deployed both the EI-status timing changes and the maintenance banner feature to PROD, after which `npm run path:deploy:smoke -- --env prod` returned `200` for `https://nwac-console.awentech.ca/healthz`, `https://iset.nwac.ca/healthz`, and `https://nwac-public.awentech.ca/healthz`. Durable prod caveat from that deploy: PROD did not have the in-app maintenance warning before release `20260411-prod-ei-sla-maintenance`, so that rollout could not show the countdown banner in advance, but future prod deploys can now use `path:maintenance` beforehand.
 
 ### PATH hosting requirements and scope framing
 
@@ -102,6 +117,20 @@ For each indexed thread/topic, keep:
 - Status: current as of 2026-04-07
 - Notes: durable rule from this thread: Cloudscape does not provide built-in currency formatting for `Input` components in this repo, so currency-entry fields should use the shared `getCurrencyInputDisplayValue` helper from `src/utils/currencyFormat.js` together with local focus/blur state. Keep the raw amount in component state while focused, and show formatted currency only for the blurred display state. Do not add ad hoc currency-formatting logic per screen.
 
+### Application Assessment cost-item decimal-input bug trace
+
+- Codex task title: `Trace reported bug`
+- Topic: production bug trace for the Application Assessment `Add cost item` modal dropping typed decimal points in the `Total amount` field
+- Keywords: `Trace reported bug`, `acurtis@nwac.ca`, `2026-04-10 1:48:03 p.m.`, `report #9`, `Dollar Amounts`, `/application-case/88`, `Add cost item`, `Total amount`, `period character`, `decimal point`, `1505.28`, `150280`, `sanitizeCurrencyInput`, `CoordinatorAssessmentWidget`
+- When to open: the user references the acurtis bug report, says the `Add cost item` `Total amount` field will not accept a period/decimal, asks why entering `1505.28` turns into `150280`, or asks which production feedback report matched that behavior
+- Primary docs:
+  - `docs/planning/coordinator-assessment-costing-line-items-tracker.md`
+  - `docs/widgets/admin/application-assessment-widget.md`
+  - `docs/features/admin-feedback-reporting.md`
+  - `src/widgets/CoordinatorAssessmentWidget.js`
+- Status: current as of 2026-04-11
+- Notes: production feedback report `#9` in `admin_feedback_report` was submitted by `acurtis@nwac.ca` at `2026-04-10 17:48:03` UTC (`2026-04-10 1:48:03 p.m.` Eastern) from `/application-case/88` with summary `Dollar Amounts`. The defect was reproduced in the `Add cost item` modal: while the controlled `Total amount` input was focused, `sanitizeCurrencyInput()` removed a trailing decimal on every keystroke, so typing `1505.` was immediately rewritten to `1505`, and continuing with `28` produced `150528`. The durable fix is to preserve a just-typed trailing decimal while editing and normalize the value on blur; the same rule now applies to the modal total amount, amount-per-period, and inline table amount editor in `CoordinatorAssessmentWidget.js`.
+
 ### Financial reports approved CRF/EI dashboard
 
 - Codex task title: `Add CRF and EI reports`
@@ -166,12 +195,14 @@ For each indexed thread/topic, keep:
   - `docs/data/database-overview.md`
   - `docs/AGENTS.md`
   - `scripts/path-schema-migrate.js`
-- Status: current as of 2026-04-04
+- Status: current as of 2026-04-11
 - Notes: this thread established `admin-dashboard/sql/migrations/` as the canonical PATH shared-schema path tracked by `iset_migration`, moved one-off/manual SQL into `admin-dashboard/sql/ops/`, documented `admin-dashboard/db/migrations/` as legacy archive only, and updated deployed portal paths to force `AUTO_MIGRATE=false`. It also captured the intended deployment direction: use an explicit DB preflight/apply step instead of relying on app startup or the legacy portal runners for test/prod schema work.
 - Follow-on implementation in the same thread added `scripts/path-data-sync.js`, the `docs/ops/deployments/data-promotion-catalog.md` allowlist, and a bash `scripts/run-prod-sql-via-ssm.sh` helper so Codex can promote the published intake runtime row and workflow-authoring graph to TEST/PROD through explicit commands instead of manual SQL bundles.
 - The same thread later added `scripts/path-deploy.js` plus the `docs/ops/deployments/path-deploy-orchestrator.md` runbook, making `npm run path:deploy` the preferred operator entry point. Durable outcomes from that phase: remote canonical schema plan/apply now supports `--target-env test|prod`; TEST smoke uses ALB target-group health (`nwac-test-admin-tg`, `nwac-test-portal-tg`) because public TEST `/healthz` currently returns `403` to Codex; release manifests are written locally under `tmp/path-deploy/`; and the TEST component deploy scripts now default to AWS profile `nwac-test`. On 2026-04-04 a dedicated `nwac-prod` profile alias was added in the Codex sandbox and the control-plane defaults were switched to it, so future prod operator work should use `nwac-prod` instead of relying on `default`. The same day, read-only prod verification confirmed that `npm` in this workspace runs under Windows Node while the trusted AWS profiles live in the bash/WSL CLI config, so AWS-backed Node/npm operator calls must shell through `bash`; the thread also captured that prod DB secret `nwac-prod-db-credentials` currently stores credentials only, so the prod SSM SQL helper supplies the default cluster host/database/port itself.
 - Follow-on completion in the same thread closed the remaining lifecycle gaps: `scripts/path-test-db-refresh.js` is now a real destructive TEST reset command (with `plan` and `run --yes`) that can generate its own DEV-derived baseline snapshot, backed by `scripts/run-test-db-restore-via-ssm.sh`, and prod `path:deploy` plans/runs now include an explicit restore-point step that auto-captures an Aurora snapshot for `nwac-prod-db` before DB-affecting prod mutations. The same final pass added `--refresh-test-db` to `scripts/path-deploy.js`, so Codex can now run a one-command TEST reset + redeploy path with no manual dump-taking from the user.
 - Final operational completion in the same thread verified the control plane against live environments: a non-destructive prod release (`20260404-142139`) completed through `path:deploy`, later followed by an admin-only prod refresh (`20260404-144835`) and a matching admin-only TEST rollout using the same release ID. The same pass added a visible frontend build stamp (package version + release ID + git SHA) to the admin landing-page footer and public portal Help page so operators can confirm which release is deployed without checking AWS.
+- Follow-on deployment documentation on 2026-04-11 added the companion `npm run path:maintenance -- set|clear ...` operator flow for global maintenance warnings. The current control path stores one structured announcement in `iset_runtime_config(scope='runtime', k='service.announcement')`, exposes it to both apps through `GET /api/service-announcement/current`, renders it in the admin shell `Flashbar` and portal shell GOV.UK banner, and is intended for 2 to 5 minute warning windows before deploy or incident cutovers rather than true sub-minute push delivery.
+- Additional TEST validation on 2026-04-11 deployed release `20260411-test-maintenance-smoke`, confirmed both TEST target groups healthy, confirmed the live portal backend row could be set and cleared with `path:maintenance`, and confirmed the deployed portal bundle rendered the expected maintenance banner text when exercised from an on-instance browser context. Durable caveat: the public TEST hosts still return `403` to Codex, so future TEST maintenance smokes may need on-instance checks or a human browser session, and the signed-in admin-console flashbar still needs a real staff session for final visual confirmation.
 
 ### System Administrator homepage widgets
 

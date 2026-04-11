@@ -32,6 +32,26 @@ cd X:\ISET\ISET-intake
 npm run deploy-portal-to-test -- -AwsProfile nwac-test
 ```
 
+## Feature-Flagged Portal Runtime Changes
+
+For portal-only changes guarded by a runtime flag, use a portal-only app rollout first, then flip the TEST runtime row after the deploy is healthy.
+
+Deploy the portal code:
+
+```powershell
+cd X:\ISET\admin-dashboard
+npm run path:deploy -- --env test --skip-schema --skip-data --skip-admin --release-id intake-draft-autosave-test
+```
+
+Enable the flag after smoke passes:
+
+```bash
+cd /mnt/x/ISET/admin-dashboard
+scripts/run-test-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('runtime', 'intake.draft_autosave', CAST('{\"enabled\": true}' AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP;"
+```
+
+Rollback is the same helper with `{\"enabled\": false}`.
+
 ## Manual fall-back (legacy process)
 
 These steps are kept for reference in case you ever need to perform the deployment by hand.

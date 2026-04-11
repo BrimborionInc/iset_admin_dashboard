@@ -1,6 +1,6 @@
 Purpose: Capture requirements, UX decisions, and implementation plan for enabling multiple interventions and manual line-item costing in the Coordinator Assessment wizard.
 Audience: Admin dashboard engineers, product owners, and operations.
-Last Updated: 2026-01-26
+Last Updated: 2026-04-11
 
 ## Background
 - The Coordinator Assessment wizard needs updates to support multiple interventions.
@@ -107,6 +107,7 @@ Last Updated: 2026-01-26
 - 2026-01-09: Overall total still displays and shows $0.00 when all interventions have no cost lines.
 - 2026-01-09: Overall total includes only currently proposed interventions (no archived/removed concept).
 - 2026-01-09: Persist cost line changes on Save and Next (not on each inline/modal edit).
+- 2026-04-11: Amount-entry sanitizing for the Add cost item modal and inline amount editors must preserve a just-typed trailing decimal while the field is focused. Stripping the trailing `.` during controlled-input updates turns values like `1505.28` into `150528`, so the UI must keep the raw in-progress numeric string during editing and normalize it on blur.
 - 2026-01-09: Save bypasses validation; Next enforces amount/recurrence rules.
 - 2026-01-09: Summary step lists interventions with totals (no full line-item table).
 - 2026-01-09: Summary step shows overall total plus per-intervention totals; if only one intervention, avoid duplicating the same total twice.

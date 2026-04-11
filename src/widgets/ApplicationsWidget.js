@@ -25,18 +25,19 @@ import { useHistory, useLocation } from 'react-router-dom';
 import { apiFetch } from '../auth/apiClient';
 import useCurrentUser from '../hooks/useCurrentUser';
 import { getRoleDisplayName } from '../utils/roleDisplay';
+import {
+  COMPLETED_APPLICATION_STATUSES,
+  SLA_DEFAULT_DAYS,
+  SLA_STAGE_ALLOWLIST,
+  computeApplicationSlaMeta,
+  isEligibilityPending,
+  normalizeClosedStatus,
+} from '../utils/applicationSla';
 import ApplicationsWidgetHelp from '../helpPanelContents/applicationsWidgetHelp';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 const DEFAULT_VISIBLE_COLUMNS = ['watch','applicant_name','address_province','tracking_id','status','sla_risk','assigned_user_email','submitted_at','lock_state','actions'];
 const COLUMN_WIDTHS_STORAGE_KEY = 'applications-widget-column-widths';
-const SLA_STAGE_ALLOWLIST = new Set(['assignment', 'assessment', 'program_decision']);
-const SLA_DEFAULT_DAYS = {
-  assignment: 3,
-  assessment: 10,
-  program_decision: 2
-};
-
 const redactApplicantDisplay = (value) => {
   if (!value) {
     return '-';
@@ -169,22 +170,6 @@ const PROVINCE_LABELS = {
   yt: 'Yukon Territory'
 };
 
-const normalizeClosedStatus = (status) => {
-  const key = (status || '').toString().trim().toLowerCase();
-  return key === 'withdrawn' ? 'closed' : key;
-};
-
-const COMPLETED_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived']);
-const DECISION_STATUSES = new Set(['pending_approval', 'decision_ready']);
-const ASSESSMENT_STATUSES = new Set([
-  'in_review', 'in review',
-  'docs_requested', 'docs requested',
-  'action_required', 'action required', 'action required (docs requested)',
-  'closure_notice', 'closure notice',
-  'pending info', 'pending information', 'info requested', 'information requested',
-  'on hold', 'on_hold'
-]);
-
 const getStatusInfo = (row) => {
   const applicationStatusRaw = typeof row.application_status === 'string' ? row.application_status.trim() : '';
   const rawStatus = normalizeClosedStatus(applicationStatusRaw || 'submitted');
@@ -195,7 +180,7 @@ const getStatusInfo = (row) => {
         .replace(/\b\w/g, c => c.toUpperCase());
   const isUnassignedCase = rawStatus === 'submitted' && !row.assigned_user_id;
   const eligibilityMissing =
-    !row.assessment_esdc_eligibility &&
+    isEligibilityPending(row.assessment_esdc_eligibility) &&
     ['submitted', 'in_review', 'docs_requested', 'pending_approval', 'closure_notice'].includes(rawStatus);
   const statusType = (() => {
     if (['approved', 'completed'].includes(rawStatus)) return 'success';
@@ -213,51 +198,15 @@ const getStatusInfo = (row) => {
 };
 
 const computeSlaMeta = (row, slaTargets, rawStatus, isAssigned) => {
-  const submitted = toDate(row.submitted_at) || toDate(row.created_at);
-  if (!submitted) {
-    return { ageDays: null, due: null, status: 'unknown', deltaDays: null, label: 'Unknown' };
-  }
-  const due = row.sla_due_at ? toDate(row.sla_due_at) : null;
-  const statusKey = normalizeClosedStatus(rawStatus || '');
-  if (COMPLETED_STATUSES.has(statusKey)) {
-    return {
-      ageDays: Math.floor((Date.now() - submitted.getTime()) / 86400000),
-      due: due || submitted,
-      status: 'ok',
-      deltaDays: null,
-      label: 'Complete'
-    };
-  }
-  let targetKey = 'assignment';
-  if (DECISION_STATUSES.has(statusKey)) {
-    targetKey = 'program_decision';
-  } else if (ASSESSMENT_STATUSES.has(statusKey) || (statusKey === 'submitted' && isAssigned)) {
-    targetKey = 'assessment';
-  } else {
-    targetKey = 'assignment';
-  }
-  const targetDays = Number(slaTargets[targetKey]) || SLA_DEFAULT_DAYS[targetKey] || 0;
-  const nowMs = Date.now();
-  if (!targetDays || Number.isNaN(targetDays)) {
-    return { ageDays: Math.floor((nowMs - submitted.getTime()) / 86400000), due: null, status: 'unknown', deltaDays: null, label: 'Unknown', stage: targetKey };
-  }
-  const ageDays = Math.floor((nowMs - submitted.getTime()) / 86400000);
-  const effectiveDue = due || new Date(submitted.getTime() + targetDays * 86400000);
-  const diffDays = Math.floor((effectiveDue.getTime() - nowMs) / 86400000);
-  let status = 'ok';
-  let label = diffDays > 0 ? `Due in ${diffDays} days` : diffDays === 0 ? 'Due today' : `${Math.abs(diffDays)} days overdue`;
-  if (diffDays < -4) {
-    status = 'critical-overdue';
-  } else if (diffDays < 0) {
-    status = 'high-overdue';
-  } else if (diffDays === 0) {
-    status = 'due-today';
-  } else if (diffDays <= 3) {
-    status = 'due-soon';
-  } else {
-    status = 'ok';
-  }
-  return { ageDays, due: effectiveDue, status, deltaDays: diffDays, label, stage: targetKey };
+  return computeApplicationSlaMeta({
+    submittedAt: row.submitted_at,
+    createdAt: row.created_at,
+    dueAt: row.sla_due_at,
+    slaTargets,
+    rawStatus,
+    isAssigned,
+    assessmentEligibility: row.assessment_esdc_eligibility,
+  });
 };
 
 const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
@@ -488,8 +437,8 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
           })();
           return (
             <span
-              title={`SLA (${meta.stage || 'unknown'}): ${meta.label} | Age: ${meta.ageDays ?? 'n/a'}d | Due: ${meta.due ? meta.due.toLocaleDateString() : 'n/a'}`}
-              aria-label={`SLA ${meta.stage || 'unknown'} ${meta.status || 'unknown'}; Age ${meta.ageDays ?? 'n/a'} days; Due ${meta.due ? meta.due.toLocaleDateString() : 'n/a'}`}
+              title={`Timeline (${meta.stage || 'unknown'}): ${meta.label} | Age: ${meta.ageDays ?? 'n/a'}d | Due: ${meta.due ? meta.due.toLocaleDateString() : 'n/a'}`}
+              aria-label={`Timeline ${meta.stage || 'unknown'} ${meta.status || 'unknown'}; Age ${meta.ageDays ?? 'n/a'} days; Due ${meta.due ? meta.due.toLocaleDateString() : 'n/a'}`}
             >
               {badge}
             </span>
@@ -545,7 +494,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
     const loadSlaTargets = async () => {
       try {
         const res = await apiFetch('/api/config/sla-targets');
-        if (!res.ok) throw new Error('Failed to load SLA targets');
+        if (!res.ok) throw new Error('Failed to load workflow timing targets');
         const data = await res.json();
         const targets = Array.isArray(data?.targets) ? data.targets : [];
         const next = { ...SLA_DEFAULT_DAYS };
@@ -879,7 +828,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
       const unassigned =
         item.case_id &&
         !item.assigned_user_id &&
-        !COMPLETED_STATUSES.has(caseStatusLower);
+        !COMPLETED_APPLICATION_STATUSES.has(caseStatusLower);
       const reassignRoles = ['NWAC Administrator','Regional Manager','System Administrator'];
       const canReassign = item.case_id && item.assigned_user_id && reassignRoles.includes(normalizedUserRole);
       const lockOwnerId = item.lock_owner_id ? String(item.lock_owner_id) : null;

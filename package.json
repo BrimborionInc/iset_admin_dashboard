@@ -42,6 +42,7 @@
     "jose": "^5.9.3",
     "json-logic-js": "^2.0.5",
     "lodash.template": "^4.5.0",
+    "mammoth": "^1.12.0",
     "multer": "^2.0.2",
     "mysql": "^2.18.1",
     "mysql2": "^3.12.0",
@@ -62,7 +63,8 @@
     "stream-http": "^3.2.0",
     "url": "^0.11.4",
     "util": "^0.12.5",
-    "web-vitals": "^4.2.4"
+    "web-vitals": "^4.2.4",
+    "word-extractor": "^1.0.4"
   },
   "scripts": {
     "dev": "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File ../ISET-intake/start-dev.ps1",
@@ -85,6 +87,8 @@
     "path:deploy": "node scripts/path-deploy.js",
     "path:deploy:plan": "node scripts/path-deploy.js plan",
     "path:deploy:smoke": "node scripts/path-deploy.js smoke",
+    "path:maintenance": "node scripts/path-maintenance.js",
+    "path:maintenance:fallback": "node scripts/path-maintenance-fallback.js",
     "data:sync:catalog": "node scripts/path-data-sync.js catalog",
     "data:sync:plan": "node scripts/path-data-sync.js plan",
     "data:sync:bundle": "node scripts/path-data-sync.js bundle",

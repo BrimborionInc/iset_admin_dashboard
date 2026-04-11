@@ -22,6 +22,9 @@ import {
 } from '@cloudscape-design/components';
 import SupportingDocumentsHelp from '../helpPanelContents/supportingDocumentsHelp';
 import { useCaseWorkspace } from '../pages/Caseworking/caseWorkspace/CaseWorkspaceContext.jsx';
+import { closePendingDocumentWindow, navigateDocumentWindow, openPendingDocumentWindow } from '../utils/documentOpen';
+import useCurrentUser from '../hooks/useCurrentUser';
+import { getRoleGroups } from '../utils/rbac';
 
 const REFRESH_EVENT = 'iset:supporting-documents:refresh';
 const OPEN_UPLOAD_EVENT = 'iset:supporting-documents:open-upload';
@@ -100,6 +103,8 @@ const ModalScopeHint = ({ children }) => (
 
 const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) => {
   const workspace = useCaseWorkspace();
+  const { role: currentUserRole } = useCurrentUser();
+  const { isAdminRole: canDownloadOriginalDocuments } = getRoleGroups(currentUserRole);
   const caseData = useMemo(() => {
     if (propCaseData) return propCaseData;
     if (workspace && typeof workspace === 'object') {
@@ -143,6 +148,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [pendingDownloads, setPendingDownloads] = useState({});
+  const [pendingOriginalDownloads, setPendingOriginalDownloads] = useState({});
   const [documentTypeOptions, setDocumentTypeOptions] = useState([DOCUMENT_TYPE_PLACEHOLDER_OPTION]);
   const [labelModalVisible, setLabelModalVisible] = useState(false);
   const [pendingLabel, setPendingLabel] = useState('');
@@ -151,6 +157,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState('');
+  const [downloadModalVisible, setDownloadModalVisible] = useState(false);
+  const [downloadTarget, setDownloadTarget] = useState(null);
+  const [downloadConfirm, setDownloadConfirm] = useState('');
   const [activeTabId, setActiveTabId] = useState('documents');
   const [checklistItems, setChecklistItems] = useState([]);
   const [checklistLoading, setChecklistLoading] = useState(false);
@@ -704,12 +713,16 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     async item => {
       const documentId = item?.id;
       if (!documentId) return;
+      const pendingWindow = openPendingDocumentWindow();
       setError(null);
       setPendingDownloads(prev => ({ ...prev, [documentId]: true }));
       try {
         const res = await apiFetch(`/api/documents/${documentId}/presign-download`);
         if (!res || !res.ok) {
-          const message = res && res.status === 404 ? 'Document not found' : 'Failed to prepare download';
+          const payload = await res?.json?.().catch(() => null);
+          const message =
+            payload?.message ||
+            (res && res.status === 404 ? 'Document not found' : 'Failed to prepare download');
           throw new Error(message);
         }
         const payload = await res.json().catch(() => null);
@@ -718,10 +731,11 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         if (!targetUrl) {
           throw new Error('Document download unavailable');
         }
-        if (typeof window !== 'undefined') {
-          window.open(targetUrl, '_blank', 'noopener,noreferrer');
+        if (!navigateDocumentWindow(pendingWindow, targetUrl)) {
+          throw new Error('Document preview was blocked by the browser. Allow pop-ups for PATH and try again.');
         }
       } catch (err) {
+        closePendingDocumentWindow(pendingWindow);
         console.error('[SupportingDocumentsWidget] document open failed', err);
         setError(err?.message || 'Failed to open document');
       } finally {
@@ -734,6 +748,58 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     },
     []
   );
+  const openDownloadModal = useCallback(item => {
+    if (!canDownloadOriginalDocuments || !item?.id) return;
+    setDownloadTarget(item);
+    setDownloadConfirm('');
+    setDownloadModalVisible(true);
+  }, [canDownloadOriginalDocuments]);
+  const handleDownloadCancel = useCallback(() => {
+    setDownloadModalVisible(false);
+    setDownloadTarget(null);
+    setDownloadConfirm('');
+  }, []);
+  const handleDownloadConfirm = useCallback(async () => {
+    const documentId = downloadTarget?.id;
+    if (!documentId) {
+      handleDownloadCancel();
+      return;
+    }
+    const pendingWindow = openPendingDocumentWindow('Please wait while PATH prepares the original file download.');
+    setError(null);
+    setPendingOriginalDownloads(prev => ({ ...prev, [documentId]: true }));
+    try {
+      const res = await apiFetch(`/api/documents/${encodeURIComponent(documentId)}/presign-download?mode=original`);
+      if (!res || !res.ok) {
+        const payload = await res?.json?.().catch(() => null);
+        const message =
+          payload?.message ||
+          (res && res.status === 403
+            ? 'Only System Administrators and NWAC Administrators can download original files.'
+            : (res && res.status === 404 ? 'Document not found' : 'Failed to prepare document download'));
+        throw new Error(message);
+      }
+      const payload = await res.json().catch(() => null);
+      if (!payload) throw new Error('Invalid download response');
+      const targetUrl = payload.presigned?.url || '';
+      if (!targetUrl) {
+        throw new Error('Document download unavailable');
+      }
+      if (!navigateDocumentWindow(pendingWindow, targetUrl)) {
+        throw new Error('Original file download was blocked by the browser. Allow pop-ups for PATH and try again.');
+      }
+      handleDownloadCancel();
+    } catch (err) {
+      closePendingDocumentWindow(pendingWindow);
+      setError(err?.message || 'Failed to download original document');
+    } finally {
+      setPendingOriginalDownloads(prev => {
+        const next = { ...prev };
+        delete next[documentId];
+        return next;
+      });
+    }
+  }, [downloadTarget, handleDownloadCancel]);
   const openLabelModal = useCallback(() => {
     if (uploading) return;
     if (!canUploadDocuments) {
@@ -938,7 +1004,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           }
           const errorCode = payload?.error || null;
           if (errorCode === 'unsupported_file_type') {
-            throw new Error('That file type is not allowed. Please upload a PDF, JPG, PNG, BMP, or TIFF file.');
+            throw new Error('That file type is not allowed. Please upload a PDF, Word (.doc or .docx), JPG, PNG, BMP, or TIFF file.');
           }
           if (errorCode === 'file_too_large') {
             const maxBytes = payload?.maxBytes;
@@ -1533,12 +1599,16 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
             return <span style={{ color: '#888' }}>Unavailable</span>;
           }
           const inFlight = !!pendingDownloads[item.id];
+          const downloadingOriginal = !!pendingOriginalDownloads[item.id];
           const deleting = !!pendingDeletes[item.id];
           const canDuplicate = item?.scope !== 'client';
           const allowDuplicate = canDuplicate && (isCaseWorkspace || hasMultipleApplications);
           const actionItems = [
             { id: 'edit', text: 'Edit' },
             ...(allowDuplicate ? [{ id: 'duplicate', text: 'Duplicate' }] : []),
+            ...(canDownloadOriginalDocuments
+              ? [{ id: 'download', text: downloadingOriginal ? 'Download (loading...)' : 'Download', disabled: downloadingOriginal }]
+              : []),
             { id: 'view', text: inFlight ? 'View (loading...)' : 'View', disabled: inFlight },
             { id: 'delete', text: deleting ? 'Delete (in progress...)' : 'Delete', disabled: deleting }
           ];
@@ -1554,6 +1624,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
                     break;
                   case 'duplicate':
                     openDuplicateModal(item);
+                    break;
+                  case 'download':
+                    openDownloadModal(item);
                     break;
                   case 'view':
                     handleViewDocument(item);
@@ -1574,11 +1647,14 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     ],
     [
       handleViewDocument,
+      openDownloadModal,
       openDeleteModal,
       openDuplicateModal,
       openEditModal,
+      pendingOriginalDownloads,
       pendingDownloads,
       pendingDeletes,
+      canDownloadOriginalDocuments,
       interventionOptionMap,
       actionPlanOptionMap,
       isCaseWorkspace,
@@ -1875,7 +1951,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         type="file"
         ref={fileInputRef}
         onChange={handleFileSelected}
-        accept=".pdf,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
+        accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
         style={{ display: 'none' }}
         aria-hidden="true"
       />
@@ -2054,6 +2130,49 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
               </FormField>
             </>
           ) : null}
+        </SpaceBetween>
+      </Modal>
+      <Modal
+        visible={downloadModalVisible}
+        onDismiss={handleDownloadCancel}
+        closeAriaLabel="Close dialog"
+        header="Download original file"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button variant="link" onClick={handleDownloadCancel}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleDownloadConfirm}
+              disabled={downloadConfirm.trim().toLowerCase() !== 'download' || pendingOriginalDownloads[downloadTarget?.id]}
+              loading={pendingOriginalDownloads[downloadTarget?.id]}
+            >
+              Download original file
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="s">
+          <Alert type="warning" header="Privacy risk">
+            This will download the original file to this device in its native format. Downloaded files can be copied,
+            retained outside PATH, or synchronized to other local or cloud storage.
+          </Alert>
+          <Box>
+            Only continue if local download is authorized for this record and you will handle the file according to
+            NWAC privacy, confidentiality, and records-management requirements.
+          </Box>
+          <Box variant="awsui-key-label">
+            File: {downloadTarget?.file_name || downloadTarget?.label || 'Selected document'}
+          </Box>
+          <FormField label="Type download to confirm">
+            <Input
+              value={downloadConfirm}
+              onChange={({ detail }) => setDownloadConfirm(detail.value)}
+              autoFocus
+              placeholder="download"
+            />
+          </FormField>
         </SpaceBetween>
       </Modal>
       <Modal

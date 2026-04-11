@@ -2,6 +2,17 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-04-11
+- Workflow/UX/Configuration: Added a configurable `EI Status Verification` timing target between Assignment and Assessment, seeded through `sla_stage_target`, and exposed it in `Configuration > Workflow timing targets`.
+- Fix/UX/API/Applications: Unified application due/overdue stage selection across the assessment dashboard, application overview, homepage queues, and server-side work-queue counts so assigned files with blank `assessment_esdc_eligibility` now report against the EI Status Verification target before moving into Assessment.
+- Ops/UX/Admin shell: Added a runtime-config-driven maintenance announcement rail to the admin shell, polling `/api/service-announcement/current` every 15 seconds and rendering a non-dismissible Cloudscape `Flashbar` warning with a live local countdown.
+- Ops/Deployments: Added the `path:maintenance` operator command so Codex can set or clear planned or unscheduled maintenance warnings in `iset_runtime_config(scope='runtime', k='service.announcement')` as part of deploy or incident workflows.
+- Ops/Deployments: Added the `path:maintenance:fallback` operator command so TEST/PROD HTTPS ALB host rules can be switched to a static HTML `503` maintenance page and later restored, giving users a deliberate maintenance message instead of a generic browser error during hard downtime.
+
+## 2026-04-10
+- Security/UX/Casework: Supporting Documents now exposes a separate `Download` action for `System Administrator` and `NWAC Administrator` only, gated by a privacy-risk confirmation and backed by a server-enforced original-file attachment path.
+- Fix/Security/Casework: Supporting Documents and other shared document-view actions now render `.doc` and `.docx` through an internal cached PDF preview instead of exposing the raw Word object to browser/Office Online handling, and admin-side manual document uploads now accept Word files in the same workflow.
+
 ## 2026-04-07
 - UX/AI/Casework: Expanded the Case Workspace help panels and embedded AI help context so staff get explicit guidance for backloading historical action plans, interventions, and supporting documents on imported/application-less cases.
 - Fix/UX/Casework: Supporting Documents now keeps imported/application-less cases in case-based document mode whenever the case has no linked application, even if the client already has a PATH account, so `Upload existing documents` no longer asks staff to attach application-scoped document types to a nonexistent application.

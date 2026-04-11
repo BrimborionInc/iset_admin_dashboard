@@ -41,6 +41,34 @@ The orchestrator performs:
 - post-refresh smoke checks
 - release manifest capture under `tmp/path-deploy/prod/`
 
+## Feature-Flagged Portal Changes
+
+For portal behaviors guarded by runtime config, deploy code first and enable the flag only after the app rollout is complete.
+
+Recommended prod sequence:
+
+1. Keep the target runtime row absent or set to `false`.
+2. Deploy the portal code:
+
+```powershell
+cd X:\ISET\admin-dashboard
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --release-id intake-draft-autosave-prod --yes
+```
+
+3. After the prod refresh and smoke checks pass, enable the flag:
+
+```bash
+cd /mnt/x/ISET/admin-dashboard
+scripts/run-prod-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('runtime', 'intake.draft_autosave', CAST('{\"enabled\": true}' AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP;"
+```
+
+Rollback path:
+- Set the same runtime row to `{\"enabled\": false}` first.
+- Only redeploy code if the problem is not resolved by turning the feature off.
+
+Current autosave safety note:
+- The portal uses a separate endpoint, `POST /api/draft/autosave`, so code-first / flag-later rollout avoids changing behavior for in-flight applicants until the fleet is fully updated.
+
 ## Low-Level Component Flow
 
 Use this only when you need the underlying primitives directly.

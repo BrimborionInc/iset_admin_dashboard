@@ -30,18 +30,17 @@ import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplic
 import { toCanonicalRole } from '../context/RoleMatrixContext';
 import { buildApplicantWatchlistIdentity, formatSinDisplay } from '../utils/applicantWatchlist';
 import {
+  SLA_DEFAULT_DAYS,
+  SLA_STAGE_ALLOWLIST,
+  computeApplicationSlaMeta,
+  normalizeClosedStatus,
+} from '../utils/applicationSla';
+import {
   canEditCaseStatus,
   getCaseStatusContext,
   getRoleGroups,
   isStatusTransitionAllowed,
 } from '../utils/rbac';
-
-const SLA_DEFAULT_DAYS = {
-  assignment: 3,
-  assessment: 10,
-  program_decision: 2
-};
-const SLA_STAGE_ALLOWLIST = new Set(['assignment', 'assessment', 'program_decision']);
 
 function formatDateTime(value) {
   if (!value) return '';
@@ -71,11 +70,6 @@ function formatDaysAgo(value) {
   return `${days} day${days === 1 ? '' : 's'} ago`;
 }
 
-function normalizeClosedStatus(status) {
-  const key = (status || '').toString().trim().toLowerCase();
-  return key === 'withdrawn' ? 'closed' : key;
-}
-
 function statusColor(status = '') {
   const normalized = normalizeClosedStatus(status);
   if (['approved', 'completed'].includes(normalized)) return 'green';
@@ -86,16 +80,6 @@ function statusColor(status = '') {
   return 'grey';
 }
 
-const COMPLETED_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived']);
-const DECISION_STATUSES = new Set(['pending_approval', 'decision_ready']);
-const ASSESSMENT_STATUSES = new Set([
-  'in_review', 'in review',
-  'docs_requested', 'docs requested',
-  'action_required', 'action required', 'action required (docs requested)',
-  'closure_notice', 'closure notice',
-  'pending info', 'pending information', 'info requested', 'information requested',
-  'on hold', 'on_hold'
-]);
 const APPLICATION_TERMINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived']);
 const ASSIGN_BLOCKED_STATUSES = new Set(['approved', 'archived', 'closed']);
 const CLOSURE_NOTICE_ELIGIBLE_STATUSES = new Set(['submitted', 'in_review', 'docs_requested', 'pending_approval']);
@@ -131,11 +115,6 @@ const APPLICATION_LAYOUT_ACTION_MAP = {
   'documents-messages': 'documentsMessages',
   'notes-calendar': 'notesCalendar',
   'audit-trail': 'auditTrail',
-};
-
-const toDate = value => {
-  const d = value ? new Date(value) : null;
-  return d && !Number.isNaN(d.getTime()) ? d : null;
 };
 
 const getStatusInfo = (row) => {
@@ -188,40 +167,33 @@ const formatRoleLabel = (roleKey) => {
 };
 
 const computeSlaMeta = (application, slaTargets, rawStatus, isAssigned) => {
-  const submitted = toDate(application?.submitted_at) || toDate(application?.created_at);
-  if (!submitted) {
+  const meta = computeApplicationSlaMeta({
+    submittedAt: application?.submitted_at,
+    createdAt: application?.created_at,
+    dueAt: application?.sla_due_at,
+    slaTargets,
+    rawStatus,
+    isAssigned,
+    assessmentEligibility: application?.assessment_esdc_eligibility,
+  });
+  if (!meta || meta.status === 'unknown') {
     return { label: 'Unknown', color: 'grey' };
   }
-  if (COMPLETED_STATUSES.has(rawStatus)) {
-    return { label: 'Complete', color: 'green' };
+  if (!meta.stage) {
+    return { label: meta.label || 'Complete', color: 'green' };
   }
-  let targetKey = 'assignment';
-  if (DECISION_STATUSES.has(rawStatus)) {
-    targetKey = 'program_decision';
-  } else if (ASSESSMENT_STATUSES.has(rawStatus) || (rawStatus === 'submitted' && isAssigned)) {
-    targetKey = 'assessment';
-  }
-  const targetDays = Number(slaTargets[targetKey]) || SLA_DEFAULT_DAYS[targetKey] || 0;
-  if (!targetDays || Number.isNaN(targetDays)) {
-    return { label: 'Unknown', color: 'grey' };
-  }
-  const nowMs = Date.now();
-  const due = toDate(application?.sla_due_at) || new Date(submitted.getTime() + targetDays * 86400000);
-  const diffDays = Math.floor((due.getTime() - nowMs) / 86400000);
-  const stageLabel = targetKey === 'program_decision' ? 'Decision' : targetKey === 'assessment' ? 'Assessment' : 'Assignment';
-  if (diffDays < 0) {
-    const overdueDays = Math.abs(diffDays);
+  if (meta.deltaDays < 0) {
+    const overdueDays = Math.abs(meta.deltaDays);
     let color = 'grey';
     if (overdueDays > 28) color = 'severity-critical';
     else if (overdueDays >= 15) color = 'severity-high';
     else if (overdueDays >= 7) color = 'severity-medium';
     else if (overdueDays >= 3) color = 'severity-low';
-    const label = `${stageLabel} ${overdueDays} day${overdueDays === 1 ? '' : 's'} overdue`;
-    return { label, color };
+    return { label: meta.label, color };
   }
-  if (diffDays === 0) return { label: `${stageLabel} due today`, color: 'severity-medium' };
-  if (diffDays <= 3) return { label: `${stageLabel} due in ${diffDays} days`, color: 'severity-low' };
-  return { label: `${stageLabel} due in ${diffDays} days`, color: 'green' };
+  if (meta.deltaDays === 0) return { label: meta.label, color: 'severity-medium' };
+  if (meta.deltaDays <= 3) return { label: meta.label, color: 'severity-low' };
+  return { label: meta.label, color: 'green' };
 };
 
 const APPLICATION_STATUS_OPTIONS = [
@@ -636,7 +608,7 @@ const ApplicationOverviewWidget = ({
     const loadSlaTargets = async () => {
       try {
         const res = await apiFetch('/api/config/sla-targets');
-        if (!res.ok) throw new Error('Failed to load SLA targets');
+        if (!res.ok) throw new Error('Failed to load workflow timing targets');
         const data = await res.json();
         const targets = Array.isArray(data?.targets) ? data.targets : [];
         const next = { ...SLA_DEFAULT_DAYS };
@@ -1890,7 +1862,7 @@ const ApplicationOverviewWidget = ({
   if (application?.created_at) overviewItems.push({ label: 'Received At', value: formatDateTime(application.created_at) });
   if (application?.updated_at) overviewItems.push({ label: 'Last Updated', value: formatDateTime(application.updated_at) });
   overviewItems.push({ label: 'Application Status', value: statusFormField });
-  if (slaValue) overviewItems.push({ label: 'SLA Status', value: slaValue });
+  if (slaValue) overviewItems.push({ label: 'Timeline status', value: slaValue });
   if (assignedStaffValue) overviewItems.push({ label: 'Case Manager', value: assignedStaffValue });
   if (checklistValue !== null) overviewItems.push({ label: 'Document Checklist', value: checklistValue });
   overviewItems.push({ label: 'Docs Requested', value: docsRequestedContent });

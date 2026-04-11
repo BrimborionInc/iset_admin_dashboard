@@ -1,6 +1,6 @@
 # Supporting Documents widget
 
-Date: 2026-03-23
+Date: 2026-04-10
 
 ## Workflow
 
@@ -30,6 +30,7 @@ manual uploads, and generated forms, then compares them against the relevant che
 - `POST /api/applicants/:id/documents/upload`
 - `GET /api/cases/:id/documents`
 - `POST /api/cases/:id/documents/upload`
+- `GET /api/documents/:id/presign-download`
 - `PUT /api/documents/:id`
 - `DELETE /api/documents/:id`
 - `POST /api/documents/:id/duplicate`
@@ -47,6 +48,14 @@ manual uploads, and generated forms, then compares them against the relevant che
     - `/api/applicants/:applicant_user_id/documents/upload` for applicant/application mode
     - `/api/cases/:case_id/documents/upload` for application-less case mode
 - Refresh behavior: listens for `iset:supporting-documents:refresh`, mainly from Secure Messaging attachment adoption.
+- View behavior:
+  - most files open from the presigned object URL returned by `GET /api/documents/:id/presign-download`
+  - Word files (`.doc`, `.docx`) now take a different path: the backend generates or reuses a cached internal PDF preview and returns that preview URL instead of the original Office object
+  - this avoids browser-dependent handoff to Microsoft 365 / Office Online for sensitive supporting documents
+- Download behavior:
+  - the inline `Download` action is shown only to `System Administrator` and `NWAC Administrator`
+  - it requires an explicit privacy warning confirmation
+  - it calls `GET /api/documents/:id/presign-download?mode=original`, which forces an attachment download of the original stored object instead of the preview path
 - Imported/application-less case mode:
   - enables upload and refresh without `applicant_user_id`
   - also remains the correct mode when the imported client has a linked PATH account but the case still has no linked `application_id`
@@ -75,6 +84,8 @@ manual uploads, and generated forms, then compares them against the relevant che
 
 - If an imported client file shows no checklist tab, that is expected.
 - If an imported client has a PATH account but still no linked application, the widget should still use case-based mode and should not ask staff to pick an application for application-scoped uploads.
+- If a Word document view now fails, inspect `GET /api/documents/:id/presign-download` rather than browser download settings first; the expected success path is an internal PDF preview, not a raw `.doc/.docx` open in Office Online.
+- If a privileged user reports that `Download` is missing, verify their canonical role/group resolves to `System Administrator` / `NWAC Administrator` (`System_Administrator` / `NWAC_Administrator`) before debugging the widget.
 - If a case-backed upload fails, inspect `caseData.id`, the selected document type scope, and the `/api/cases/:id/documents/upload` response code first.
 - If a normal applicant-backed case cannot upload or refresh, inspect `caseData.applicant_user_id` / `caseData.applicantUserId` and the `/api/applicants/:id/*` endpoints.
 - Do not add placeholder application, assessment, or action-plan rows just to make document management work.

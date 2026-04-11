@@ -10,6 +10,7 @@ import { BoardItem } from '@cloudscape-design/board-components';
 import { findOptionByValue } from '../pages/finance/widgets/paymentOptions';
 import { getCurrencyInputDisplayValue } from '../utils/currencyFormat';
 import { buildApplicantFacingReasonSentence, normalizeTemplateSentence } from '../utils/decisionLetterText';
+import { closePendingDocumentWindow, navigateDocumentWindow, openPendingDocumentWindow } from '../utils/documentOpen';
 
 const BARRIERS = [
   'None', 'Education', 'Lack of Marketable Skills', 'Lack of Work Experience', 'Remoteness', 'Lack of Transportation', 'Economic', 'Language', 'Lack of Labour Force Attachment', 'Dependent Care', 'Physical, Emotional, or Mental Health', 'Other'
@@ -225,6 +226,8 @@ const PROGRAM_ADMIN_APPROVER_EMAIL = 'sstacey@nwac.ca';
 const PROGRAM_ADMIN_ROLE_KEYS = new Set(['nwacadministrator']);
 const ELIGIBILITY_ALLOWED_MIME_TYPES = [
   'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'image/jpeg',
   'image/png',
   'image/bmp',
@@ -1268,13 +1271,17 @@ const buildLoanProviderApprovalLetters = ({
   });
 };
 
-const sanitizeCurrencyInput = (value) => {
+const sanitizeCurrencyInput = (value, options = {}) => {
+  const { preserveTrailingDecimal = false } = options;
   if (value === null || value === undefined) return '';
   const cleaned = String(value).replace(/[^\d.]/g, '');
   if (!cleaned) return '';
+  const hasDecimal = cleaned.includes('.');
   const [whole, ...rest] = cleaned.split('.');
   const decimals = rest.join('').slice(0, 2);
-  return decimals.length ? `${whole}.${decimals}` : whole;
+  if (!hasDecimal) return whole;
+  if (decimals.length) return `${whole}.${decimals}`;
+  return preserveTrailingDecimal ? `${whole}.` : whole;
 };
 
 const buildEmptyCostLine = (overrides = {}) => ({
@@ -4330,7 +4337,7 @@ const CoordinatorAssessmentWidget = forwardRef(
           }
           const errorCode = payload?.error || null;
           if (errorCode === 'unsupported_file_type') {
-            throw new Error('That file type is not allowed. Please upload a PDF or image.');
+            throw new Error('That file type is not allowed. Please upload a PDF, Word (.doc or .docx), JPG, PNG, BMP, or TIFF file.');
           }
           if (errorCode === 'file_too_large') {
             const maxBytes = payload?.maxBytes;
@@ -4448,7 +4455,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         }
         const errorCode = payload?.error || null;
         if (errorCode === 'unsupported_file_type') {
-          throw new Error('That file type is not allowed. Please upload a PDF or image.');
+          throw new Error('That file type is not allowed. Please upload a PDF, Word (.doc or .docx), JPG, PNG, BMP, or TIFF file.');
         }
         if (errorCode === 'file_too_large') {
           throw new Error('The file is too large to upload.');
@@ -4496,7 +4503,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
     if (!ELIGIBILITY_ALLOWED_MIME_TYPES.includes(file.type)) {
       setEiVerificationFile(null);
-      setEiVerificationFileError('Only PDF, JPG, PNG, BMP, or TIFF files are allowed.');
+      setEiVerificationFileError('Only PDF, Word (.doc or .docx), JPG, PNG, BMP, or TIFF files are allowed.');
       return;
     }
     if (file.size > ELIGIBILITY_MAX_BYTES) {
@@ -5323,7 +5330,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     [buildRecurrenceFromIntervention, getRecurrenceModeForType, proposedInterventions]
   );
   const updateCostLineAmount = useCallback((value) => {
-    const sanitized = sanitizeCurrencyInput(value);
+    const sanitized = sanitizeCurrencyInput(value, { preserveTrailingDecimal: true });
     updateCostLineDraft(draft => {
       const next = { ...draft, amount: sanitized };
       if (draft.recurrence?.enabled && draft.recurrence?.occurrences) {
@@ -5355,7 +5362,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     });
   }, [updateCostLineDraft]);
   const updateCostLineAmountPerPeriod = useCallback((value) => {
-    const sanitized = sanitizeCurrencyInput(value);
+    const sanitized = sanitizeCurrencyInput(value, { preserveTrailingDecimal: true });
     updateCostLineDraft(draft => {
       const recurrence = { ...(draft.recurrence || {}), amountPerPeriod: sanitized };
       const occ = Number(recurrence.occurrences);
@@ -5546,7 +5553,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   }, [commitCostLine, hydrateCostLineRecurrence, occurrenceConfirmModal, proposedInterventions, resetCostLineModal]);
   const handleInlineAmountChange = useCallback(
     (interventionId, lineId, value) => {
-      const sanitized = sanitizeCurrencyInput(value);
+      const sanitized = sanitizeCurrencyInput(value, { preserveTrailingDecimal: true });
       updateCostLine(interventionId, lineId, line => {
         const next = { ...line, amount: sanitized };
         if (line.recurrence?.enabled && line.recurrence?.occurrences) {
@@ -5564,9 +5571,13 @@ const CoordinatorAssessmentWidget = forwardRef(
     },
     [updateCostLine]
   );
-  const handleInlineAmountBlur = useCallback((lineId) => {
+  const handleInlineAmountBlur = useCallback((interventionId, lineId) => {
     setInlineAmountEditingId(prev => (prev === lineId ? null : prev));
-  }, []);
+    updateCostLine(interventionId, lineId, line => ({
+      ...line,
+      amount: sanitizeCurrencyInput(line.amount) || ''
+    }));
+  }, [updateCostLine]);
   const exitAssessmentWorkspace = useCallback(() => {
     if (typeof actions?.exitAssessment === 'function') {
       actions.exitAssessment();
@@ -5936,19 +5947,24 @@ const CoordinatorAssessmentWidget = forwardRef(
   const handleOpenEiVerificationDocument = useCallback(async (item) => {
     const documentId = item?.id;
     if (!documentId) return;
+    const pendingWindow = openPendingDocumentWindow();
     setEiVerificationDocsError(null);
     setEiVerificationDocDownloads(prev => ({ ...prev, [documentId]: true }));
     try {
       const res = await apiFetch(`/api/documents/${documentId}/presign-download`);
-      if (!res || !res.ok) throw new Error('Failed to open EI verification document.');
+      if (!res || !res.ok) {
+        const payload = await res?.json?.().catch(() => null);
+        throw new Error(payload?.message || 'Failed to open EI verification document.');
+      }
       const payload = await res.json().catch(() => null);
       if (!payload) throw new Error('Failed to open EI verification document.');
       const targetUrl = payload?.presigned?.url || payload?.url || '';
       if (!targetUrl) throw new Error('Document URL is unavailable.');
-      if (typeof window !== 'undefined') {
-        window.open(targetUrl, '_blank', 'noopener,noreferrer');
+      if (!navigateDocumentWindow(pendingWindow, targetUrl)) {
+        throw new Error('Document preview was blocked by the browser. Allow pop-ups for PATH and try again.');
       }
     } catch (err) {
+      closePendingDocumentWindow(pendingWindow);
       setEiVerificationDocsError(err?.message || 'Failed to open EI verification document.');
     } finally {
       setEiVerificationDocDownloads(prev => {
@@ -8169,7 +8185,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
           type="file"
           ref={eiVerificationFileInputRef}
           style={{ display: 'none' }}
-          accept=".pdf,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
+          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
           onChange={handleEiVerificationFileChange}
         />
       )}
@@ -8285,7 +8301,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
             <Box>{eiVerificationFile ? eiVerificationFile.name : 'No new file chosen'}</Box>
           </div>
           <Box variant="small" color="text-body-secondary">
-            Max size 6 MB. Allowed types: PDF, JPG, PNG, BMP, TIFF.
+            Max size 6 MB. Allowed types: PDF, Word (.doc, .docx), JPG, PNG, BMP, TIFF.
           </Box>
         </FormField>
       )}
@@ -9058,7 +9074,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                   cell: item => {
                     const lineError = costLineErrors[item.id] || {};
                     const displayValue = inlineAmountEditingId === item.id
-                      ? sanitizeCurrencyInput(item.amount)
+                      ? sanitizeCurrencyInput(item.amount, { preserveTrailingDecimal: true })
                       : getCurrencyInputDisplayValue(parseCurrencyInput(item.amount) ?? '', false);
                     return (
                       <FormField errorText={showCostErrors ? lineError.amount : undefined}>
@@ -9069,7 +9085,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                             if (!isAssessmentDisabled) setInlineAmountEditingId(item.id);
                           }}
                           onChange={({ detail }) => handleInlineAmountChange(intervention.id, item.id, detail.value)}
-                          onBlur={() => handleInlineAmountBlur(item.id)}
+                          onBlur={() => handleInlineAmountBlur(intervention.id, item.id)}
                           placeholder="0.00"
                           readOnly={isAssessmentDisabled}
                           data-error-focus={showCostErrors && lineError.amount ? 'true' : undefined}
@@ -9998,13 +10014,15 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       : true;
   const costLineAmountDisplay = costLineDraft
     ? getCurrencyInputDisplayValue(
-        sanitizeCurrencyInput(costLineDraft.amount),
+        sanitizeCurrencyInput(costLineDraft.amount, { preserveTrailingDecimal: costLineAmountFocused }),
         isCostLineEditable ? costLineAmountFocused : false
       )
     : '';
   const costLineAmountPerPeriodDisplay = costLineDraft
     ? getCurrencyInputDisplayValue(
-        sanitizeCurrencyInput(costLineDraft.recurrence?.amountPerPeriod),
+        sanitizeCurrencyInput(costLineDraft.recurrence?.amountPerPeriod, {
+          preserveTrailingDecimal: costLineAmountPerPeriodFocused,
+        }),
         isCostLineEditable ? costLineAmountPerPeriodFocused : false
       )
     : '';
@@ -10863,7 +10881,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
           type="file"
           ref={checklistFileInputRef}
           style={{ display: 'none' }}
-          accept=".pdf,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
+          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
           onChange={handleChecklistFileSelected}
         />
         <div style={{ visibility: wizardNavPriming ? 'hidden' : 'visible' }} aria-hidden={wizardNavPriming ? 'true' : undefined}>

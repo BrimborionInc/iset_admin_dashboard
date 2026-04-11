@@ -11,7 +11,7 @@
 - Dev/testing previously ran on a single Node process, so the in-memory object keyed by user ID was effectively consistent.
 - The test environment now runs multiple portal instances behind an ALB without sticky sessions, so each request may land on a different instance with a different in-memory state.
 - Result: applicants see inconsistent histories/answers (e.g., consent data disappearing) whenever requests hit different nodes—a blocker for production readiness.
-- Important distinction: the existing `iset_application_draft_dynamic` table stores user-initiated “Save and finish later” drafts; it is **not** the ephemeral store. The ephemeral store lives entirely in memory (`intakeAggregateData` / `intakeStepData`) and is supposed to be wiped on logout, submission, save/finish, or after ~30 minutes of inactivity. Any persistent replacement must preserve these lifecycle guarantees.
+- Important distinction: `iset_application_draft_dynamic` is the recoverable draft store; historically it was populated only by explicit “Save and finish later”, and the legacy portal now also has a runtime-gated step-autosave path. It is still **not** the ephemeral store. The ephemeral store originally lived entirely in memory (`intakeAggregateData` / `intakeStepData`) and now lives in transient shared table `input_json_state`, which is still supposed to be wiped on logout, submission, save/finish, or after ~30 minutes of inactivity. Any persistent replacement must preserve these lifecycle guarantees.
 
 ## Pain Points / Risks
 - Multi-instance inconsistency breaks back/forward navigation and jeopardises submission integrity.
@@ -90,5 +90,6 @@ _These decisions may evolve; update this section as the work progresses._
 - _2025-11-14 (docs update)_ : Admin docbase (`docs/features/public-portal-security-features.md`) now documents the shared `input_json_state` and TTL behaviour; portal docbase (`ISET-intake/docs/features/intake-form.md`) details how `/api/intake-json` leverages the new table and how drafts hydrate from it.
 - _2025-11-14 (save-for-later purge tweak)_ : `/api/draft` now accepts `saveForLater` and purges both caches + `input_json_state` when the user explicitly saves and exits. The DELETE draft endpoint no longer clears the ephemeral store to match the ApplicationCard behaviour; TTL/background jobs still prevent stale rows.
 - _2025-11-14_: Legacy `/api/save-draft` (Save & Finish Later path in current portal) now also clears `input_json_state` after persisting `iset_application_draft` so the DB-backed input JSON never lingers when the user returns to the dashboard.
+- _2026-04-11_: Legacy portal draft recovery now has a rollout-gated step autosave path (`POST /api/draft/autosave`, runtime key `intake.draft_autosave`). `input_json_state` remains the transient source of truth during the wizard; autosave refreshes `iset_application_draft_dynamic` only after successful step transitions and is intended for code-first, flag-later rollout in PROD.
 
 _(Add more entries chronologically as work proceeds.)_

@@ -36,6 +36,10 @@ import FloatingMessageWindow from './pages/messages/FloatingMessageWindow.jsx';
 import FloatingFeedbackReporter from './features/adminFeedback/FloatingFeedbackReporter.jsx';
 import FloatingFeedbackReviewPanel from './features/adminFeedback/FloatingFeedbackReviewPanel.jsx';
 import { getReportTypeLabel, getSeverityLabel } from './features/adminFeedback/constants.js';
+import {
+  buildMaintenanceAnnouncementDisplay,
+  isMaintenanceAnnouncementVisible,
+} from './utils/maintenanceAnnouncement.js';
 import { buildApplicationWorkspaceTutorials, APPLICATION_WORKSPACE_TUTORIAL_ID } from './tutorials/applicationWorkspaceTutorials';
 	import { buildCaseWorkspaceTutorials, CASE_WORKSPACE_TUTORIAL_ID } from './tutorials/caseWorkspaceTutorials';
 	import {
@@ -49,6 +53,7 @@ import { buildApplicationWorkspaceTutorials, APPLICATION_WORKSPACE_TUTORIAL_ID }
 const MAX_HISTORY_MESSAGES = 10;
 const MAX_STORED_MESSAGES = 24;
 const MAX_PROMPT_CHARS = 1000;
+const SERVICE_ANNOUNCEMENT_POLL_MS = 15 * 1000;
 const TUTORIAL_COMPLETION_STORAGE_KEY = 'iset-tutorials.completed.v1';
 const TUTORIAL_APP_LAYOUT_RESET_FLAG = 'iset.tutorial.resetApplicationLayout';
 const TUTORIAL_CASE_LAYOUT_RESET_FLAG = 'iset.tutorial.resetCaseWorkspaceLayout';
@@ -984,6 +989,8 @@ const AppContent = () => {
   // Notifications state (moved inside component)
   const [notifications, setNotifications] = useState([]);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [serviceAnnouncement, setServiceAnnouncement] = useState(null);
+  const [announcementNow, setAnnouncementNow] = useState(() => new Date());
   const flashbarRef = useRef(null);
   const notificationViewerTimeZone = useMemo(() => getNotificationViewerTimeZone(), []);
 
@@ -1061,6 +1068,42 @@ const AppContent = () => {
   useEffect(() => {
     loadNotifications();
   }, [loadNotifications]);
+
+  const loadServiceAnnouncement = useCallback(async () => {
+    try {
+      const response = await apiFetch('/api/service-announcement/current');
+      let data = null;
+      try { data = await response.json(); } catch { data = null; }
+      if (!response.ok) {
+        throw new Error(data?.error || 'Failed to load service announcement');
+      }
+      setServiceAnnouncement(data && typeof data === 'object' ? data : null);
+      return data;
+    } catch (error) {
+      console.error('[service-announcement] load failed', error);
+      setServiceAnnouncement(null);
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    loadServiceAnnouncement();
+    const intervalId = window.setInterval(() => {
+      loadServiceAnnouncement();
+    }, SERVICE_ANNOUNCEMENT_POLL_MS);
+    return () => window.clearInterval(intervalId);
+  }, [loadServiceAnnouncement]);
+
+  useEffect(() => {
+    if (!isMaintenanceAnnouncementVisible(serviceAnnouncement)) {
+      setAnnouncementNow(new Date());
+      return undefined;
+    }
+    const intervalId = window.setInterval(() => {
+      setAnnouncementNow(new Date());
+    }, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [serviceAnnouncement]);
 
   useEffect(() => {
     const handleAuthChange = () => {
@@ -1166,6 +1209,26 @@ const AppContent = () => {
         };
       }),
   [scopedNotifications, handleDismissNotification, mapSeverityToType, notificationViewerTimeZone]);
+
+  const serviceAnnouncementFlashbarItem = useMemo(() => {
+    const display = buildMaintenanceAnnouncementDisplay(serviceAnnouncement, { now: announcementNow, locale: 'en' });
+    if (!display) return null;
+    const content = display.detail
+      ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <span>{display.message}</span>
+          <span>{display.detail}</span>
+        </div>
+      )
+      : display.message;
+    return {
+      id: 'service-announcement',
+      type: serviceAnnouncement?.severity === 'error' ? 'error' : 'warning',
+      header: display.title,
+      content,
+      dismissible: false,
+    };
+  }, [serviceAnnouncement, announcementNow]);
 
   const refreshNotifications = useCallback(() => loadNotifications({ scrollIntoView: true }), [loadNotifications]);
 
@@ -1790,7 +1853,10 @@ const AppContent = () => {
               }
               notifications={
                 <div ref={flashbarRef}>
-                  <Flashbar stackItems items={notificationFlashbarItems} />
+                  <Flashbar
+                    stackItems
+                    items={serviceAnnouncementFlashbarItem ? [serviceAnnouncementFlashbarItem, ...notificationFlashbarItems] : notificationFlashbarItems}
+                  />
                 </div>
               }
               toolsOpen={isHelpPanelOpen}

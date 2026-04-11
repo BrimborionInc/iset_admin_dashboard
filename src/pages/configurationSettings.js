@@ -81,16 +81,22 @@ const SLA_STAGE_PLACEHOLDER = [
     description: "Time from submission to assign an assessor or coordinator.",
   },
   {
+    stage_key: "ei_status_verification",
+    display_name: "EI Status Verification",
+    target_days: 3,
+    description: "Time from assignment to confirm EI status / eligibility.",
+  },
+  {
     stage_key: "assessment",
     display_name: "Assessment",
     target_days: 10,
-    description: "Time from submission to complete the assessment.",
+    description: "Time from EI status verification to complete the assessment.",
   },
   {
     stage_key: "program_decision",
-    display_name: "Decision",
+    display_name: "Program decision",
     target_days: 2,
-    description: "Time from submission to issue the program decision.",
+    description: "Time from assessment submission to issue the program decision.",
   },
   {
     stage_key: "docs_request_reminder",
@@ -112,6 +118,27 @@ const SLA_STAGE_LABELS = SLA_STAGE_PLACEHOLDER.reduce((acc, item) => {
   acc[item.stage_key] = item.display_name;
   return acc;
 }, {});
+
+const mergeSlaTargetsWithPlaceholders = items => {
+  const itemMap = new Map();
+  (Array.isArray(items) ? items : []).forEach(item => {
+    if (!item || !SLA_STAGE_ALLOWLIST.has(item.stage_key)) return;
+    itemMap.set(item.stage_key, item);
+  });
+  return SLA_STAGE_PLACEHOLDER.map(placeholder => {
+    const existing = itemMap.get(placeholder.stage_key);
+    if (!existing) {
+      return { ...placeholder };
+    }
+    return {
+      ...placeholder,
+      ...existing,
+      stage_key: placeholder.stage_key,
+      display_name: existing.display_name || placeholder.display_name,
+      description: existing.description || placeholder.description,
+    };
+  });
+};
 
 const DEFAULT_LOCKING_CONFIG = {
   mode: "optimistic",
@@ -170,10 +197,10 @@ const widgetRegistry = {
     defaultRowSpan: 3,
     defaultColumnSpan: 2,
     component: SlaConfigWidget,
-    title: "SLA configuration",
-    description: "Baseline SLA targets for workflow stages.",
+    title: "Workflow timing targets",
+    description: "Baseline timing targets for workflow stages.",
     helpComponent: SlaWidgetHelp,
-    helpTitle: "SLA configuration",
+    helpTitle: "Workflow timing targets",
     aiContext: SlaWidgetHelp?.aiContext,
   },
   sessionAudit: {
@@ -723,10 +750,13 @@ export default function ConfigurationSettings({
             })
             .filter(Boolean)
         : SLA_STAGE_PLACEHOLDER.map(item => ({ ...item }));
-      setSlaTargets(normalised.length ? normalised : SLA_STAGE_PLACEHOLDER.map(item => ({ ...item })));
-      seedSlaEdits(normalised);
+      const merged = mergeSlaTargetsWithPlaceholders(
+        normalised.length ? normalised : SLA_STAGE_PLACEHOLDER.map(item => ({ ...item }))
+      );
+      setSlaTargets(merged);
+      seedSlaEdits(merged);
     } catch (err) {
-      const message = err?.message || "Failed to load SLA targets";
+      const message = err?.message || "Failed to load workflow timing targets";
       setSlaTargets(prev => {
         if (prev.length) return prev;
         const fallback = SLA_STAGE_PLACEHOLDER.map(item => ({ ...item }));
@@ -852,7 +882,7 @@ export default function ConfigurationSettings({
       );
       await fetchSlaTargets();
     } catch (err) {
-      setSlaError(err?.message || "Failed to save SLA targets");
+      setSlaError(err?.message || "Failed to save workflow timing targets");
     } finally {
       setSavingSla(false);
     }

@@ -104,6 +104,8 @@ const deriveFundingStreamFromEiStatus = status => {
 
 const ELIGIBILITY_ALLOWED_MIME_TYPES = [
   "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "image/jpeg",
   "image/png",
   "image/bmp",
@@ -4220,7 +4222,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
           }
           const errorCode = payload?.error || null;
           if (errorCode === "unsupported_file_type") {
-            throw new Error("That file type is not allowed. Please upload a PDF or image.");
+            throw new Error("That file type is not allowed. Please upload a PDF, Word (.doc or .docx), JPG, PNG, BMP, or TIFF file.");
           }
           if (errorCode === "file_too_large") {
             throw new Error("The file is too large to upload.");
@@ -4753,7 +4755,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     }
     if (!ELIGIBILITY_ALLOWED_MIME_TYPES.includes(file.type)) {
       setEiVerificationFile(null);
-      setEiVerificationFileError("Only PDF, JPG, PNG, BMP, or TIFF files are allowed.");
+      setEiVerificationFileError("Only PDF, Word (.doc or .docx), JPG, PNG, BMP, or TIFF files are allowed.");
       return;
     }
     if (file.size > ELIGIBILITY_MAX_BYTES) {
@@ -5835,7 +5837,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
             stretch
           >
             <Box variant="small" color="text-body-secondary">
-              Max size 6 MB. Allowed types: PDF, JPG, PNG, BMP, TIFF.
+              Max size 6 MB. Allowed types: PDF, Word (.doc, .docx), JPG, PNG, BMP, TIFF.
             </Box>
             <SpaceBetween size="xs" direction="horizontal">
               <Button
@@ -5868,7 +5870,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         type="file"
         ref={eiVerificationFileInputRef}
         style={{ display: "none" }}
-        accept=".pdf,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
+        accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
         onChange={handleEiVerificationFileChange}
       />
     </SpaceBetween>

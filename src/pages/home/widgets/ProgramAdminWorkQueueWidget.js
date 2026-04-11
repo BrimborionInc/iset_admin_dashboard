@@ -61,7 +61,7 @@ export const PROGRAM_ADMIN_BUCKETS = [
   {
     id: 'overdue',
     label: 'Overdue',
-    description: 'SLA breaches and overdue actions.'
+    description: 'Past-target files and overdue actions.'
   }
 ];
 

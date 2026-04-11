@@ -4,7 +4,7 @@ Purpose: running capture of user-facing fixes/changes for the next "What's New" 
 
 Current public release in Landing Page: `v0.5.8` (`26th March 2026`)
 Target next release notes draft: `v0.5.9` (date TBD)
-Last Updated: 2026-04-07
+Last Updated: 2026-04-11
 
 ## How to use
 
@@ -18,6 +18,13 @@ Last Updated: 2026-04-07
 
 ## Entries
 
+- 2026-04-11 | Release v0.5.9 | Workflow/Configuration | Workflow timing targets | Added a new configurable `EI Status Verification` timing target between Assignment and Assessment. | The stage seeds at 3 days and is stored in `sla_stage_target`, so admins can adjust it from `Configuration > Workflow timing targets`.
+- 2026-04-11 | Release v0.5.9 | Fix/UX/API | Application due and overdue reporting | Unified due/overdue stage routing so assigned files with no EI eligibility recorded now show and count against `EI Status Verification` before they move into `Assessment`. | This updates the assessment dashboard `Overdue` column, the Application Overview `Timeline status`, homepage/work-queue badges, and the server-side work-queue counters together.
+- 2026-04-11 | Release v0.5.9 | Ops/UX/Admin shell | Global maintenance warnings | Added a new runtime-config-driven maintenance warning that appears at the top of the admin console as a non-dismissible service announcement. | The shell polls every 15 seconds and keeps the countdown live locally so operators can warn staff a few minutes before planned or urgent downtime.
+- 2026-04-11 | Release v0.5.9 | Ops/Deployments | PATH operator controls | Added the `path:maintenance` operator command so Codex can set or clear global maintenance warnings for TEST or PROD as part of deploy and incident workflows. | The command writes a structured announcement into shared runtime config and is intended for 2 to 5 minute warning windows rather than true sub-minute push delivery.
+- 2026-04-11 | Release v0.5.9 | Ops/Deployments | Hard maintenance page | Added the `path:maintenance:fallback` operator command so TEST and PROD can temporarily return a static HTML `503` maintenance page from the ALB during a hard cutover. | This gives users a clear maintenance message instead of a generic browser error while the app is restarting or otherwise unavailable.
+- 2026-04-10 | Release v0.5.9 | Security/UX/Casework | Supporting Documents > Download original | Added a separate `Download` action for System Administrators and NWAC Administrators that retrieves the original stored file only after an explicit privacy warning confirmation. | This keeps the standard `View` flow on the safer internal preview path while still allowing privileged staff to download the native file when necessary.
+- 2026-04-10 | Release v0.5.9 | Fix/Security/Casework | Supporting Documents + shared document viewers | Word supporting documents now open through an internal cached PDF preview instead of handing the raw `.doc` / `.docx` object to the browser or Microsoft 365 viewer. | This makes staff viewing behavior consistent for sensitive files and avoids the prior browser-dependent Office Online path; the same release also allows admin-side manual supporting-document uploads for Word files.
 - 2026-04-10 | Release v0.5.9 | Fix/API/Admin users | Manage Users > Administrative Users | Staff region changes and new regional-role invites no longer try to write unsupported Cognito custom region attributes. | Staff/admin region access is now persisted through `staff_profiles` / `staff_region`, which fixes prod failures when editing regions or creating region-scoped admin users against pools with no `custom:region_id` schema.
 - 2026-04-10 | Release v0.5.9 | Fix/Auth/Admin shell | Staff auth context | Staff sign-in now preserves DB-backed region assignments and resolves effective `userId`, `regionId`, and `regionIds` from the local staff profile model instead of depending on legacy Cognito custom claims. | This avoids nulling staff regions on login and keeps coordinator/regional-manager scope aligned with the database-backed region model.
 - 2026-04-07 | Release v0.5.9 | UX/AI/Casework | Case Workspace help + AI chat | Expanded the Case Workspace info panels and embedded AI guidance to coach staff through backloading historical action plans, interventions, and documents on imported/application-less files. | The help text now points staff to the Case Header backload quick actions, explains the silent historical workflow, calls out intervention lifecycle guardrails, and reinforces case-based document fallback when there is no linked application.

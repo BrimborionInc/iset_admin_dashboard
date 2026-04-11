@@ -67,6 +67,47 @@ What this does:
 - waits for prod refresh
 - runs prod smoke checks
 
+## Feature-Flagged Portal Changes
+
+Use this pattern when a portal behavior change is guarded by a runtime flag such as `iset_runtime_config(scope='runtime', k='intake.draft_autosave')`.
+
+### TEST
+
+Deploy the portal code first, without unrelated schema/data/admin work:
+
+```powershell
+npm run path:deploy -- --env test --skip-schema --skip-data --skip-admin --release-id intake-draft-autosave-test
+```
+
+Then enable the runtime flag in TEST:
+
+```bash
+cd /mnt/x/ISET/admin-dashboard
+scripts/run-test-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('runtime', 'intake.draft_autosave', CAST('{\"enabled\": true}' AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP;"
+```
+
+### PROD
+
+Deploy the code first with the flag still absent or `false`, let the rollout finish, and only then enable the flag:
+
+```powershell
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --release-id intake-draft-autosave-prod --yes
+```
+
+After prod smoke passes, enable the flag:
+
+```bash
+cd /mnt/x/ISET/admin-dashboard
+scripts/run-prod-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('runtime', 'intake.draft_autosave', CAST('{\"enabled\": true}' AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP;"
+```
+
+Why this sequence matters:
+- The portal uses a separate endpoint, `POST /api/draft/autosave`, so a new client talking to an old server during rollout fails harmlessly.
+- Enabling the flag only after the app rollout avoids mixed-fleet behavior for in-flight applicants.
+- Rollback is simple: set the same runtime row to `{\"enabled\": false}` without redeploying.
+
+If the feature is already enabled in the target environment, set it to `false` before starting the app rollout, then re-enable it after smoke passes.
+
 ## Safe Preflight Commands
 
 Plan TEST:
@@ -93,6 +134,55 @@ Smoke only:
 npm run path:deploy:smoke -- --env test
 npm run path:deploy:smoke -- --env prod
 ```
+
+## Planned Maintenance Warning
+
+Set a warning before a planned deploy:
+
+```powershell
+npm run path:maintenance -- set --env test --start-in 5m --expected-duration 20m
+npm run path:maintenance -- set --env prod --start-in 5m --expected-duration 20m --yes
+```
+
+Use this when:
+- you want the admin console and public portal to show a global maintenance warning before the cutover
+- a 2 to 5 minute lead time is acceptable
+
+For unscheduled work that is already starting:
+
+```powershell
+npm run path:maintenance -- set --env test --start-now --expected-duration 20m --unscheduled
+npm run path:maintenance -- set --env prod --start-now --expected-duration 20m --unscheduled --yes
+```
+
+Clear the warning after smoke passes:
+
+```powershell
+npm run path:maintenance -- clear --env test
+npm run path:maintenance -- clear --env prod --yes
+```
+
+Notes:
+- The warning is driven by `iset_runtime_config(scope='runtime', k='service.announcement')`.
+- Admin and portal clients poll every 15 seconds and render the countdown locally, so this is an operator warning tool, not a precise sub-minute push channel.
+- If the service must be fully unavailable during cutover, the warning can be combined with the separate ALB `503` maintenance fallback.
+
+## Hard Maintenance Page
+
+If you want users to see a deliberate maintenance page instead of a generic browser error while the app is unavailable:
+
+```powershell
+npm run path:maintenance:fallback -- set --env test --surfaces all
+npm run path:maintenance:fallback -- clear --env test --surfaces all
+npm run path:maintenance:fallback -- set --env prod --surfaces all --yes
+npm run path:maintenance:fallback -- clear --env prod --surfaces all --yes
+```
+
+Notes:
+- This changes the HTTPS ALB host rules in place for the selected admin/portal hostnames.
+- The ALB returns a static HTML `503` page during the cutover.
+- `clear` restores the normal admin and portal target-group forwarding.
+- You can scope it to `admin`, `portal`, or `all` with `--surfaces`.
 
 ## TEST Reset Only
 

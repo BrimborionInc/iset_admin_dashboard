@@ -58,6 +58,80 @@ npm run path:deploy:smoke -- --env test
 npm run path:deploy:smoke -- --env prod
 ```
 
+## Maintenance announcements
+
+The deploy control plane now has a companion operator command for global admin + portal maintenance warnings:
+
+```powershell
+npm run path:maintenance -- set --env test --start-in 5m --expected-duration 20m
+npm run path:maintenance -- set --env prod --start-in 5m --expected-duration 20m --yes
+npm run path:maintenance -- clear --env test
+npm run path:maintenance -- clear --env prod --yes
+```
+
+Current behavior:
+
+- Stores one structured announcement in `iset_runtime_config(scope='runtime', k='service.announcement')`.
+- Admin polls `/api/service-announcement/current` and renders the warning in the shell `Flashbar`.
+- Portal polls the same endpoint and renders one global GOV.UK notification banner below the shared header.
+- Polling runs every 15 seconds with a local 1-second countdown after load, so operators should use a 2 to 5 minute warning window instead of relying on precise sub-minute delivery.
+- This command does not currently automate the ALB fixed-response `503` hard-maintenance fallback.
+
+For the hard maintenance page itself, use the separate ALB helper:
+
+```powershell
+npm run path:maintenance:fallback -- status --env test
+npm run path:maintenance:fallback -- set --env test --surfaces all
+npm run path:maintenance:fallback -- clear --env test --surfaces all
+npm run path:maintenance:fallback -- set --env prod --surfaces all --yes
+npm run path:maintenance:fallback -- clear --env prod --surfaces all --yes
+```
+
+Current fallback behavior:
+
+- Modifies the selected HTTPS host rules in place for admin and/or portal traffic.
+- Returns a static HTML `503` maintenance page from the ALB instead of a generic browser error while the app is unavailable.
+- `clear` restores the normal forward-to-target-group behavior.
+- Prod mutations require `--yes`.
+
+Recommended planned-maintenance sequence:
+
+1. Set the maintenance warning.
+2. Wait through the warning window.
+3. If a hard outage is required, enable the ALB fixed-response maintenance page.
+4. Run `path:deploy`.
+5. Clear the warning after smoke passes.
+6. Clear the ALB fixed-response maintenance page if you enabled it.
+
+## Feature-Flagged Portal Rollouts
+
+Some portal changes are intentionally deployed behind runtime flags. The current example is draft autosave via `iset_runtime_config(scope='runtime', k='intake.draft_autosave')`.
+
+Use this pattern:
+
+1. Deploy the portal code first.
+2. Leave the runtime flag absent or set to `false` during the rollout.
+3. Wait for deploy/smoke to finish.
+4. Flip the runtime flag to `true` with the environment SQL helper.
+
+Suggested portal-only deploy commands:
+
+```powershell
+npm run path:deploy -- --env test --skip-schema --skip-data --skip-admin --release-id intake-draft-autosave-test
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --release-id intake-draft-autosave-prod --yes
+```
+
+Then enable the flag with:
+
+```bash
+scripts/run-test-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('runtime', 'intake.draft_autosave', CAST('{\"enabled\": true}' AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP;"
+scripts/run-prod-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('runtime', 'intake.draft_autosave', CAST('{\"enabled\": true}' AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP;"
+```
+
+Current autosave rollout note:
+- The portal uses a separate endpoint, `POST /api/draft/autosave`, so mixed old/new app instances fail safe while the flag is still off.
+- If you need to back out after rollout, first set the runtime row to `{\"enabled\": false}`. That disables autosave without another code deploy.
+
 ## Current behavior
 
 - `test`

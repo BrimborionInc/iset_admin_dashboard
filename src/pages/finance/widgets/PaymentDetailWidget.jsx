@@ -28,6 +28,11 @@ import { apiFetch } from "../../../auth/apiClient";
 import { boardItemI18nStrings } from "./common";
 import { usePaymentsData } from "./PaymentsDataContext.jsx";
 import { findOptionByValue } from "./paymentOptions";
+import {
+  closePendingDocumentWindow,
+  navigateDocumentWindow,
+  openPendingDocumentWindow,
+} from "../../../utils/documentOpen";
 
 const formatCurrency = value =>
   new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(value);
@@ -1146,12 +1151,16 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
 
   const handleOpenDocument = useCallback(async documentId => {
     if (!documentId) return;
+    const pendingWindow = openPendingDocumentWindow();
     setViewError(null);
     setViewingDocumentId(documentId);
     try {
       const res = await apiFetch(`/api/documents/${encodeURIComponent(documentId)}/presign-download`);
       if (!res || !res.ok) {
-        const message = res && res.status === 404 ? "Document not found" : "Failed to prepare download";
+        const payload = await res?.json?.().catch(() => null);
+        const message =
+          payload?.message ||
+          (res && res.status === 404 ? "Document not found" : "Failed to prepare download");
         throw new Error(message);
       }
       const payload = await res.json().catch(() => null);
@@ -1160,10 +1169,11 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       if (!targetUrl) {
         throw new Error("Document download unavailable");
       }
-      if (typeof window !== "undefined") {
-        window.open(targetUrl, "_blank", "noopener,noreferrer");
+      if (!navigateDocumentWindow(pendingWindow, targetUrl)) {
+        throw new Error("Document preview was blocked by the browser. Allow pop-ups for PATH and try again.");
       }
     } catch (err) {
+      closePendingDocumentWindow(pendingWindow);
       setViewError(err?.message || "Failed to open document.");
     } finally {
       setViewingDocumentId(null);
@@ -1365,7 +1375,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         const payload = await uploadResp.json().catch(() => ({}));
         const errorCode = payload?.error || null;
         if (errorCode === "unsupported_file_type") {
-          throw new Error("That file type is not allowed. Please upload a PDF, JPG, PNG, BMP, or TIFF file.");
+          throw new Error("That file type is not allowed. Please upload a PDF, Word (.doc or .docx), JPG, PNG, BMP, or TIFF file.");
         }
         if (errorCode === "file_too_large") {
           const maxBytes = payload?.maxBytes;
@@ -2953,13 +2963,13 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
               disabled={!uploadDocumentTypeOptions.length}
             />
           </FormField>
-          <FormField label="File" description="PDF, JPG, PNG, BMP, or TIFF.">
+          <FormField label="File" description="PDF, Word (.doc, .docx), JPG, PNG, BMP, or TIFF.">
             <FileUpload
               value={evidenceFiles}
               onChange={({ detail }) => setEvidenceFiles(detail.value)}
               multiple={false}
-              accept=".pdf,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
-              constraintText="PDF, JPG, PNG, BMP, or TIFF."
+              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
+              constraintText="PDF, Word (.doc, .docx), JPG, PNG, BMP, or TIFF."
               loading={evidenceUploading}
             />
           </FormField>

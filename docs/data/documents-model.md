@@ -1,6 +1,6 @@
 # Unified Documents Model (iset_document)
 
-Date: 2026-03-23
+Date: 2026-04-10
 
 ## Summary
 The unified `iset_document` table now anchors every document to a single `client_id`, with optional links to applications, cases, or action plans. Intervention links are stored in the `iset_document_intervention` join table, and payment evidence attachments live in `payment_packet_document`.
@@ -43,6 +43,8 @@ Related tables:
 - `POST /api/cases/:id/documents/upload` now supports manual staff uploads for application-less client-file cases without requiring an applicant-user chain, including application-type documents that fall back to action-plan or case storage when no real application exists.
 - In Case Workspace, "application-less" means no linked `iset_case.application_id`. If an imported client later gets a participant PATH account, the workspace should still use this case-based document mode until a real application exists.
 - `PUT /api/documents/:id` and `/api/documents/:id/duplicate` update action plan + intervention associations (no `linked_intervention_id`) and preserve the same application-scope fallback rules in case-based mode.
+- `GET /api/documents/:id/presign-download` now treats Word documents specially: for `.doc` / `.docx`, the admin backend generates or reuses a cached PDF preview under the object-storage prefix `WORD_PREVIEW_OBJECT_PREFIX` (default `previews/word`) and returns a presigned URL for that preview instead of the original Office object. Preview artifacts stay out of `iset_document`.
+- `GET /api/documents/:id/presign-download?mode=original` is a separate staff-admin path that bypasses Word preview substitution and forces attachment download of the original stored object. It is server-side restricted to `System Administrator` / `NWAC Administrator`.
 - `GET /api/admin/messages/:id/attachments` upserts attachments into `iset_document` with `client_id` + case/application context when a `case_id` query param is provided.
 - `POST /api/finance/payment-packets/:id/documents` validates `iset_document.client_id` matches the packet.
 
@@ -53,6 +55,7 @@ As of 2026-03-23, the widget has two real operating modes:
 - case-based mode for imported/application-less client files: document list plus upload, keyed by `/api/cases/:id/documents*`
 
 In case-based mode, the widget intentionally hides the checklist tab because checklist logic remains applicant/application driven. It still allows application-type document categories, but stores them against an action plan or the case when there is no linked application.
+Admin-side manual uploads now also allow Word files (`.doc`, `.docx`) in addition to PDF and common image formats.
 
 ## Cross-widget Hooks (2025-09-21)
 - SecureMessagingWidget dispatches `iset:supporting-documents:refresh` after attachments load, giving SupportingDocumentsWidget an immediate view of newly adopted files.

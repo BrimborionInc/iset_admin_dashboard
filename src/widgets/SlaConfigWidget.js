@@ -30,7 +30,7 @@ export default function SlaConfigWidget({
     if (!toggleHelpPanel) return;
     const HelpComponent = metadata?.helpComponent;
     if (!HelpComponent) return;
-    const title = metadata?.helpTitle || metadata?.title || 'SLA configuration';
+    const title = metadata?.helpTitle || metadata?.title || 'Workflow timing targets';
     const context = metadata?.aiContext || '';
     toggleHelpPanel(<HelpComponent />, title, context);
   };
@@ -45,7 +45,7 @@ export default function SlaConfigWidget({
   const settingsMenu =
     actions && typeof actions.removeItem === 'function' ? (
       <ButtonDropdown
-        ariaLabel="SLA configuration widget settings"
+        ariaLabel="Workflow timing targets widget settings"
         variant="icon"
         items={[{ id: 'remove', text: 'Remove widget' }]}
         onItemClick={({ detail }) => {
@@ -57,7 +57,7 @@ export default function SlaConfigWidget({
     ) : undefined;
 
   const orderedItems = useMemo(() => {
-    const order = ['assignment', 'assessment', 'program_decision', 'docs_request_reminder', 'docs_request_closure'];
+    const order = ['assignment', 'ei_status_verification', 'assessment', 'program_decision', 'docs_request_reminder', 'docs_request_closure'];
     const index = key => {
       const i = order.indexOf(key);
       return i === -1 ? Number.MAX_SAFE_INTEGER : i;
@@ -74,16 +74,16 @@ export default function SlaConfigWidget({
           info={infoLink}
           actions={headerActions}
         >
-          {metadata?.title || 'SLA configuration'}
+          {metadata?.title || 'Workflow timing targets'}
         </Header>
       }
       settings={settingsMenu}
       i18nStrings={boardItemI18nStrings}
     >
       <SpaceBetween size="s">
-        {slaError && <Alert type="error" header="SLA configuration">{slaError}</Alert>}
+        {slaError && <Alert type="error" header="Workflow timing targets">{slaError}</Alert>}
         {slaLoading ? (
-          <StatusIndicator type="loading">Loading SLA targets</StatusIndicator>
+          <StatusIndicator type="loading">Loading workflow timing targets</StatusIndicator>
         ) : (
           <Table
             columnDefinitions={[
@@ -126,7 +126,7 @@ export default function SlaConfigWidget({
             items={orderedItems}
             trackBy="stage_key"
             variant="embedded"
-            empty={<Box>No SLA targets configured.</Box>}
+            empty={<Box>No workflow timing targets configured.</Box>}
           />
         )}
         {!canEditSla && <StatusIndicator type="stopped">Read only</StatusIndicator>}

@@ -13,7 +13,7 @@ const ApplicationsWidgetHelp = () => (
     <ul>
       <li><strong>Status:</strong> Check whether the file is newly submitted, in review, waiting on documents, or already with NWAC for approval.</li>
       <li><strong>Docs Requested badge:</strong> Use the age on the badge to see how long the applicant has been waiting to respond.</li>
-      <li><strong>SLA health and received date:</strong> Use these together to spot ageing files that need action now.</li>
+      <li><strong>Timeline status and received date:</strong> Use these together to spot ageing files that need action now.</li>
       <li><strong>Owner:</strong> Confirm who is responsible for the file before taking further action.</li>
       <li><strong>View:</strong> Open the full Application Workspace to review the form, documents, notes, messaging, and assessment.</li>
     </ul>
@@ -40,7 +40,7 @@ ApplicationsWidgetHelp.aiContext = `You are assisting staff using the ISET Appli
 For coordinators, treat this table as the place to identify which assigned application needs attention and then open the full Application Workspace to do the actual assessment, messaging, document review, and note-taking.
 
 Important guidance:
-- Explain the meaning of the main columns in staff language: status, Docs Requested age, SLA health, owner, and received date.
+- Explain the meaning of the main columns in staff language: status, Docs Requested age, timeline status, owner, and received date.
 - Tell users to use View to open /application-case/{case_id} for detailed work.
 - Mention that coordinators only see applications assigned to them; regional managers and NWAC admins have broader scope.
 - Mention Assign/Reassign only when the user has a role that can see those actions.

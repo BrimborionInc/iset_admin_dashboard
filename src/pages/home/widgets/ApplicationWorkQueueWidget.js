@@ -28,16 +28,16 @@ const getBucketTemplate = role => {
         { id: 'needs-reassignment', label: 'Assigned to me', count: '-', description: 'Applications waiting for me to re-route or pick up.' },
         { id: 'awaiting-my-approval', label: 'Awaiting approval', count: '-', description: 'Applications awaiting approval.' },
         { id: 'awaiting-info', label: 'Awaiting info', count: '-', description: 'Applications awaiting applicant action.' },
-        { id: 'due-this-week', label: 'Due this week', count: '-', description: 'Applications approaching SLA within 7 days.' },
-        { id: 'overdue', label: 'Overdue', count: '-', description: 'Applications breaching SLA within my region.' }
+        { id: 'due-this-week', label: 'Due this week', count: '-', description: 'Applications approaching their target date within 7 days.' },
+        { id: 'overdue', label: 'Overdue', count: '-', description: 'Applications past target date within my region.' }
       ];
     case 'ISET Coordinator':
       return [
         { id: 'assigned-to-me', label: 'Assigned to me', count: '-', description: 'Your active assessment queue.' },
-        { id: 'due-today', label: 'Due today', count: '-', description: 'Assessments approaching their SLA window.' },
+        { id: 'due-today', label: 'Due today', count: '-', description: 'Assessments reaching their target date soon.' },
         { id: 'due-soon', label: 'Due soon', count: '-', description: 'Assessments due within the next few days.' },
         { id: 'awaiting-applicant', label: 'Awaiting applicant', count: '-', description: 'Cases paused while the applicant responds.' },
-        { id: 'overdue', label: 'Overdue', count: '-', description: 'Cases past SLA that need immediate attention.' }
+        { id: 'overdue', label: 'Overdue', count: '-', description: 'Cases past target that need immediate attention.' }
       ];
     case 'System Administrator':
       return [

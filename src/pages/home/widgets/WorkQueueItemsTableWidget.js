@@ -26,6 +26,13 @@ import { apiFetch } from '../../../auth/apiClient';
 import { buildLockConflictMessage } from '../../../hooks/useApplicationLock';
 import useCurrentUser from '../../../hooks/useCurrentUser';
 import HomeWorkQueueItemsHelp from '../../../helpPanelContents/homeWorkQueueItemsHelp';
+import {
+  SLA_DEFAULT_DAYS,
+  computeApplicationSlaMeta,
+  formatApplicationSlaLabel,
+  isEligibilityPending,
+  normalizeClosedStatus,
+} from '../../../utils/applicationSla';
 
 const COLUMN_WIDTHS_STORAGE_KEY = 'work-queue-items-column-widths-v1';
 const WATCHLIST_REFRESH_EVENT = 'watchlist:refresh';
@@ -178,17 +185,14 @@ const formatRoleDisplay = role => {
 
 const ELIGIBILITY_ALLOWED_MIME_TYPES = [
   'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'image/jpeg',
   'image/png',
   'image/bmp',
   'image/tiff'
 ];
 const ELIGIBILITY_MAX_BYTES = 6 * 1024 * 1024;
-
-const normalizeClosedStatus = status => {
-  const key = (status || '').toString().trim().toLowerCase();
-  return key === 'withdrawn' ? 'closed' : key;
-};
 
 const normalizeStatusKey = status =>
   (status || '').toString().trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -233,92 +237,20 @@ const statusColor = (status = '') => {
   return 'grey';
 };
 
-const COMPLETED_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived']);
-const DECISION_STATUSES = new Set(['pending_approval', 'decision_ready']);
-const ASSESSMENT_STATUSES = new Set([
-  'in_review', 'in review',
-  'docs_requested', 'docs requested',
-  'action_required', 'action required', 'action required (docs requested)',
-  'closure_notice', 'closure notice',
-  'pending info', 'pending information', 'info requested', 'information requested',
-  'on hold', 'on_hold'
-]);
-
-const SLA_DEFAULT_DAYS = {
-  assignment: 3,
-  assessment: 10,
-  program_decision: 2
-};
-
-const SLA_STAGE_LABELS = {
-  assignment: 'Assignment',
-  assessment: 'Assessment',
-  program_decision: 'Decision'
-};
-
 const formatSlaTargetLabel = meta => {
-  if (!meta) return 'Unknown';
-  const stageLabel = SLA_STAGE_LABELS[meta.stage] || 'SLA';
-  if (meta.deltaDays === null || meta.deltaDays === undefined) {
-    return meta.label || `${stageLabel} target unknown`;
-  }
-  if (meta.deltaDays > 0) {
-    return `${stageLabel} due in ${meta.deltaDays} day${meta.deltaDays === 1 ? '' : 's'}`;
-  }
-  if (meta.deltaDays === 0) {
-    return `${stageLabel} due today`;
-  }
-  const overdueDays = Math.abs(meta.deltaDays);
-  return `${stageLabel} ${overdueDays} day${overdueDays === 1 ? '' : 's'} overdue`;
+  return formatApplicationSlaLabel(meta);
 };
 
 const computeSlaMeta = (row, slaTargets, rawStatus, isAssigned) => {
-  const submitted = toDate(row.submittedAt || row.receivedAt || row.submitted_at || row.created_at);
-  if (!submitted) {
-    return { ageDays: null, due: null, status: 'unknown', deltaDays: null, label: 'Unknown', stage: null };
-  }
-  const due = row.dueDate ? toDate(row.dueDate) : null;
-  const normalizedStatus = normalizeClosedStatus(rawStatus || row.status || 'submitted');
-  if (COMPLETED_STATUSES.has(rawStatus)) {
-    return {
-      ageDays: Math.floor((Date.now() - submitted.getTime()) / 86400000),
-      due: due || submitted,
-      status: 'ok',
-      deltaDays: null,
-      label: 'Complete',
-      stage: null
-    };
-  }
-  let targetKey = 'assignment';
-  if (DECISION_STATUSES.has(normalizedStatus)) {
-    targetKey = 'program_decision';
-  } else if (ASSESSMENT_STATUSES.has(normalizedStatus) || (normalizedStatus === 'submitted' && isAssigned)) {
-    targetKey = 'assessment';
-  } else {
-    targetKey = 'assignment';
-  }
-  const targetDays = Number(slaTargets[targetKey]) || SLA_DEFAULT_DAYS[targetKey] || 0;
-  const nowMs = Date.now();
-  if (!targetDays || Number.isNaN(targetDays)) {
-    return { ageDays: Math.floor((nowMs - submitted.getTime()) / 86400000), due: null, status: 'unknown', deltaDays: null, label: 'Unknown', stage: targetKey };
-  }
-  const ageDays = Math.floor((nowMs - submitted.getTime()) / 86400000);
-  const effectiveDue = due || new Date(submitted.getTime() + targetDays * 86400000);
-  const diffDays = Math.floor((effectiveDue.getTime() - nowMs) / 86400000);
-  let status = 'ok';
-  let label = diffDays > 0 ? `Due in ${diffDays} days` : diffDays === 0 ? 'Due today' : `${Math.abs(diffDays)} days overdue`;
-  if (diffDays < -4) {
-    status = 'critical-overdue';
-  } else if (diffDays < 0) {
-    status = 'high-overdue';
-  } else if (diffDays === 0) {
-    status = 'due-today';
-  } else if (diffDays <= 3) {
-    status = 'due-soon';
-  } else {
-    status = 'ok';
-  }
-  return { ageDays, due: effectiveDue, status, deltaDays: diffDays, label, stage: targetKey };
+  return computeApplicationSlaMeta({
+    submittedAt: row.submittedAt || row.receivedAt || row.submitted_at,
+    createdAt: row.created_at,
+    dueAt: row.dueDate || row.sla_due_at,
+    slaTargets,
+    rawStatus: rawStatus || row.status || 'submitted',
+    isAssigned,
+    assessmentEligibility: row.assessment_esdc_eligibility,
+  });
 };
 
 const getStatusInfo = (row) => {
@@ -335,7 +267,7 @@ const getStatusInfo = (row) => {
     row?.type === 'Intervention';
   const eligibilityMissing =
     !isInterventionApproval &&
-    !row.assessment_esdc_eligibility &&
+    isEligibilityPending(row.assessment_esdc_eligibility) &&
     ['submitted', 'in_review', 'docs_requested', 'pending_approval', 'closure_notice'].includes(rawStatus);
   const statusType = (() => {
     if (['approved', 'completed'].includes(rawStatus)) return 'success';
@@ -1037,7 +969,7 @@ const WorkQueueItemsTableWidget = ({
     const loadSlaTargets = async () => {
       try {
         const res = await apiFetch('/api/config/sla-targets');
-        if (!res.ok) throw new Error('Failed to load SLA targets');
+        if (!res.ok) throw new Error('Failed to load workflow timing targets');
         const data = await res.json();
         const targets = Array.isArray(data?.targets) ? data.targets : [];
         const next = { ...SLA_DEFAULT_DAYS };
@@ -1260,7 +1192,7 @@ const WorkQueueItemsTableWidget = ({
           }
           return {
             ...base,
-            header: 'SLA Target',
+            header: 'Timeline target',
             width: widthOverride,
             cell: item => {
               const meta = computeSlaMeta(
@@ -1270,7 +1202,7 @@ const WorkQueueItemsTableWidget = ({
                 Boolean(item.assigned_user_id)
               );
               const label = formatSlaTargetLabel(meta);
-              const title = `SLA (${meta.stage || 'unknown'}): ${label} | Age: ${meta.ageDays ?? 'n/a'}d | Due: ${meta.due ? meta.due.toLocaleDateString() : 'n/a'}`;
+              const title = `Timeline (${meta.stage || 'unknown'}): ${label} | Age: ${meta.ageDays ?? 'n/a'}d | Due: ${meta.due ? meta.due.toLocaleDateString() : 'n/a'}`;
               const badge = (() => {
                 switch (meta.status) {
                   case 'critical-overdue':
@@ -1679,7 +1611,7 @@ const WorkQueueItemsTableWidget = ({
         }
         const code = payload?.error;
         if (code === 'unsupported_file_type') {
-          throw new Error('That file type is not allowed. Please upload a PDF or image.');
+          throw new Error('That file type is not allowed. Please upload a PDF, Word (.doc or .docx), JPG, PNG, BMP, or TIFF file.');
         }
         if (code === 'file_too_large') {
           throw new Error('The file is too large to upload.');
@@ -1977,7 +1909,7 @@ const WorkQueueItemsTableWidget = ({
                 type="file"
                 ref={eligibilityFileInputRef}
                 style={{ display: 'none' }}
-                accept=".pdf,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
+                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.bmp,.tif,.tiff"
                 onChange={event => {
                   const file = event?.target?.files?.[0] || null;
                   if (event?.target) {
@@ -1986,7 +1918,7 @@ const WorkQueueItemsTableWidget = ({
                   if (file) {
                     if (!ELIGIBILITY_ALLOWED_MIME_TYPES.includes(file.type)) {
                       setEligibilityFile(null);
-                      setEligibilityFileError('Only PDF, JPG, PNG, BMP, or TIFF files are allowed.');
+                      setEligibilityFileError('Only PDF, Word (.doc or .docx), JPG, PNG, BMP, or TIFF files are allowed.');
                       return;
                     }
                     if (file.size > ELIGIBILITY_MAX_BYTES) {
@@ -2006,7 +1938,7 @@ const WorkQueueItemsTableWidget = ({
                 <Box>{eligibilityFile ? eligibilityFile.name : 'No file selected'}</Box>
               </SpaceBetween>
               <Box variant="small" color="text-body-secondary">
-                Max size 6 MB. Allowed types: PDF, JPG, PNG, BMP, TIFF.
+                Max size 6 MB. Allowed types: PDF, Word (.doc, .docx), JPG, PNG, BMP, TIFF.
               </Box>
             </FormField>
           </SpaceBetween>
