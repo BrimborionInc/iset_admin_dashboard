@@ -29,7 +29,10 @@ let pool; // Initialized after DB config loads
 const { getRenderer: getComponentRenderer } = require('./src/server/componentRenderRegistry');
 const { buildHelpPanelGuidanceSystemPrompt } = require('./src/server/adminAiGuidanceService');
 const { createEventService, EventValidationError, registerNotificationHook } = require('../shared/events');
-const { emitApplicantWatchlistHitEvents } = require('../shared/applicantWatchlist');
+const {
+  emitApplicantWatchlistHitEvents,
+  getApplicantWatchlistMatchesForApplication,
+} = require('../shared/applicantWatchlist');
 const events = require('events');
 const {
   getReminderBusinessDayDiffDays,
@@ -2164,16 +2167,34 @@ function buildWordPreviewVersionToken(docRow) {
     .digest('hex');
 }
 
-function buildWordPreviewFileName(fileName) {
+function buildWordPreviewFileName(fileName, format = 'pdf') {
   const parsed = path.parse(String(fileName || 'document'));
   const safeBase = (parsed.name || 'document').replace(/[^a-z0-9_\-]+/gi, '_').slice(0, 80) || 'document';
-  return `${safeBase}-preview.pdf`;
+  const normalizedFormat = String(format || 'pdf').trim().toLowerCase() === 'html' ? 'html' : 'pdf';
+  return `${safeBase}-preview.${normalizedFormat}`;
 }
 
-function buildWordPreviewObjectKey(docRow) {
-  const fileName = buildWordPreviewFileName(docRow?.file_name);
+function buildWordPreviewObjectKey(docRow, format = 'pdf') {
+  const fileName = buildWordPreviewFileName(docRow?.file_name, format);
   const token = buildWordPreviewVersionToken(docRow);
   return `${WORD_PREVIEW_OBJECT_PREFIX}/${docRow?.id || 'document'}/${token}-${fileName}`;
+}
+
+function buildWordPreviewArtifactCandidates(docRow) {
+  return [
+    {
+      kind: 'pdf',
+      key: buildWordPreviewObjectKey(docRow, 'pdf'),
+      fileName: buildWordPreviewFileName(docRow?.file_name, 'pdf'),
+      contentType: 'application/pdf'
+    },
+    {
+      kind: 'html',
+      key: buildWordPreviewObjectKey(docRow, 'html'),
+      fileName: buildWordPreviewFileName(docRow?.file_name, 'html'),
+      contentType: 'text/html; charset=utf-8'
+    }
+  ];
 }
 
 function buildWordPreviewParagraphsFromText(value) {
@@ -2366,11 +2387,12 @@ async function ensureWordDocumentPreview({ docRow }) {
     throw new Error('s3_preview_unavailable');
   }
 
-  const previewKey = buildWordPreviewObjectKey(docRow);
-  const previewFileName = buildWordPreviewFileName(docRow.file_name);
-  const existing = await headObject({ key: previewKey });
-  if (existing?.exists) {
-    return { key: previewKey, fileName: previewFileName, cached: true };
+  const previewArtifacts = buildWordPreviewArtifactCandidates(docRow);
+  for (const artifact of previewArtifacts) {
+    const existing = await headObject({ key: artifact.key });
+    if (existing?.exists) {
+      return { ...artifact, cached: true };
+    }
   }
 
   const sourceBuffer = await loadDocumentBuffer(docRow);
@@ -2388,13 +2410,29 @@ async function ensureWordDocumentPreview({ docRow }) {
     bodyHtml,
     usedFallbackText
   });
-  const pdfBuffer = await renderHtmlToPdfBuffer({ html });
-  await uploadBufferToObjectStore({
-    key: previewKey,
-    buffer: pdfBuffer,
-    contentType: 'application/pdf'
-  });
-  return { key: previewKey, fileName: previewFileName, cached: false };
+  const pdfArtifact = previewArtifacts.find(artifact => artifact.kind === 'pdf');
+  const htmlArtifact = previewArtifacts.find(artifact => artifact.kind === 'html');
+  try {
+    const pdfBuffer = await renderHtmlToPdfBuffer({ html });
+    await uploadBufferToObjectStore({
+      key: pdfArtifact.key,
+      buffer: pdfBuffer,
+      contentType: pdfArtifact.contentType
+    });
+    return { ...pdfArtifact, cached: false };
+  } catch (err) {
+    console.warn(
+      '[documents] pdf preview render failed for %s; falling back to html preview: %s',
+      docRow?.file_name || 'document',
+      err?.message || err
+    );
+    await uploadBufferToObjectStore({
+      key: htmlArtifact.key,
+      buffer: Buffer.from(html, 'utf8'),
+      contentType: htmlArtifact.contentType
+    });
+    return { ...htmlArtifact, cached: false };
+  }
 }
 
 const normalizeArchiveEntryBuffer = value => {
@@ -5353,6 +5391,123 @@ async function loadApplicantWatchlistEntryById(entryId, connection = pool) {
     params: [numericEntryId],
   });
   return items[0] || null;
+}
+
+function buildApplicantWatchlistViewerEntry(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  return {
+    id: entry.id || null,
+    fullName: entry.fullName || null,
+    firstName: entry.firstName || null,
+    lastName: entry.lastName || null,
+    dob: entry.dob || null,
+    sinMasked: entry.sinMasked || maskSinForDisplay(entry.sin) || null,
+    notes: entry.notes || null,
+    status: entry.status || null,
+    sourceCaseId: entry.sourceCaseId || null,
+    sourceCaseNumber: entry.sourceCaseNumber || null,
+    sourceApplicationId: entry.sourceApplicationId || null,
+    sourceTrackingId: entry.sourceTrackingId || null,
+    sourceLabel: entry.sourceLabel || null,
+    createdByLabel: entry.createdByLabel || null,
+    updatedByLabel: entry.updatedByLabel || null,
+    deactivatedByLabel: entry.deactivatedByLabel || null,
+    createdAt: entry.createdAt || null,
+    updatedAt: entry.updatedAt || null,
+    deactivatedAt: entry.deactivatedAt || null,
+  };
+}
+
+async function loadApplicantWatchlistHitEvent({ applicationId, watchlistEntryId, connection = pool } = {}) {
+  const numericApplicationId = Number(applicationId);
+  const numericWatchlistEntryId = Number(watchlistEntryId);
+  if (
+    !Number.isInteger(numericApplicationId) ||
+    numericApplicationId <= 0 ||
+    !Number.isInteger(numericWatchlistEntryId) ||
+    numericWatchlistEntryId <= 0
+  ) {
+    return null;
+  }
+
+  const correlationId = `applicant-watchlist-hit:${numericApplicationId}:${numericWatchlistEntryId}`;
+
+  try {
+    const [rows] = await connection.query(
+      `SELECT id, payload_json, tracking_id, captured_at
+         FROM iset_event_entry
+        WHERE event_type = 'applicant_watchlist_hit'
+          AND subject_type = 'application'
+          AND subject_id = ?
+          AND correlation_id = ?
+        ORDER BY captured_at DESC, id DESC
+        LIMIT 1`,
+      [String(numericApplicationId), correlationId]
+    );
+    const row = Array.isArray(rows) ? rows[0] : null;
+    if (!row) return null;
+    return {
+      id: row.id == null ? null : String(row.id),
+      trackingId: normaliseString(row.tracking_id) || null,
+      capturedAt: toIsoOrNull(row.captured_at),
+      payload: safeJsonParse(row.payload_json, null) || {},
+    };
+  } catch (error) {
+    if (isMissingTableErrorLocal(error) || isMissingColumnErrorLocal(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function loadApplicantWatchlistHitDetailsForApplication(applicationId, connection = pool) {
+  const numericApplicationId = Number(applicationId);
+  if (!Number.isInteger(numericApplicationId) || numericApplicationId <= 0) return null;
+
+  const matches = await getApplicantWatchlistMatchesForApplication({
+    pool: connection,
+    applicationId: numericApplicationId,
+  });
+  const match = Array.isArray(matches) ? matches[0] : null;
+  if (!match) return null;
+
+  const entry = await loadApplicantWatchlistEntryById(match.watchlistEntryId, connection);
+  const hitEvent = await loadApplicantWatchlistHitEvent({
+    applicationId: numericApplicationId,
+    watchlistEntryId: match.watchlistEntryId,
+    connection,
+  });
+  const eventPayload = hitEvent?.payload && typeof hitEvent.payload === 'object' ? hitEvent.payload : {};
+  const applicantName =
+    normaliseString(eventPayload.applicant_name) ||
+    normaliseString(match.applicantName) ||
+    normaliseString(entry?.fullName) ||
+    'Applicant';
+
+  return {
+    summary: {
+      applicationId: match.applicationId || numericApplicationId,
+      caseId: match.caseId || entry?.sourceCaseId || null,
+      caseNumber: normaliseString(match.caseNumber) || normaliseString(entry?.sourceCaseNumber) || null,
+      trackingId:
+        normaliseString(eventPayload.tracking_id) ||
+        normaliseString(match.trackingId) ||
+        normaliseString(entry?.sourceTrackingId) ||
+        null,
+      applicantName,
+      sinMasked:
+        normaliseString(eventPayload.sin_masked) ||
+        normaliseString(match.sinMasked) ||
+        normaliseString(entry?.sinMasked) ||
+        null,
+      matchSource: normaliseString(eventPayload.match_source) || 'sin',
+      message: normaliseString(eventPayload.message) || `Watchlist hit detected for ${applicantName}.`,
+      hitCapturedAt: hitEvent?.capturedAt || null,
+      watchlistEntryId: entry?.id || match.watchlistEntryId || null,
+      watchlistStatus: entry?.status || APPLICANT_WATCHLIST_STATUS_ACTIVE,
+    },
+    entry: buildApplicantWatchlistViewerEntry(entry),
+  };
 }
 
 function buildApplicantWatchlistEventPayload(type, entry) {
@@ -31952,6 +32107,35 @@ app.get('/api/dashboard/watchlist-hit-items', async (req, res) => {
   }
 });
 
+app.get('/api/applications/:id/watchlist-hit', async (req, res) => {
+  if (!req.auth || req.auth.subjectType !== 'staff') {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+
+  const applicationId = Number(req.params.id);
+  if (!Number.isInteger(applicationId) || applicationId <= 0) {
+    return res.status(400).json({ error: 'invalid_application_id' });
+  }
+
+  try {
+    const details = await loadApplicantWatchlistHitDetailsForApplication(applicationId);
+    if (!details) {
+      return res.json({ hasHit: false, summary: null, entry: null });
+    }
+    return res.json({
+      hasHit: true,
+      summary: details.summary || null,
+      entry: details.entry || null,
+    });
+  } catch (error) {
+    if (isMissingTableErrorLocal(error) || isMissingColumnErrorLocal(error)) {
+      return res.json({ hasHit: false, summary: null, entry: null });
+    }
+    console.error('[application-watchlist-hit] fetch failed', error);
+    return res.status(500).json({ error: 'application_watchlist_hit_fetch_failed' });
+  }
+});
+
 // Applications marked for closure
 app.get('/api/dashboard/marked-for-closure-items', async (req, res) => {
   const role = inferUserRole(req) || 'Guest';
@@ -32079,7 +32263,12 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
       sp.primary_role AS assigned_user_role,
       sp.region_id AS assigned_user_region_id,
       a.id AS application_id,
+      c.case_context_json,
+      cl.first_name AS client_first_name,
+      cl.last_name AS client_last_name,
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
+      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.full_name')) AS application_full_name,
+      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."preferred-name"')) AS application_preferred_name,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"first-name\"')) AS submission_first_name,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"last-name\"')) AS submission_last_name,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
@@ -32087,6 +32276,7 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
       ic.label AS intervention_label
     FROM iset_case_intervention ci
     JOIN iset_case c ON c.id = ci.case_id
+    LEFT JOIN client cl ON cl.id = c.client_id
     LEFT JOIN iset_application a ON c.application_id = a.id
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
@@ -32098,11 +32288,44 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
   try {
     const [rows] = await pool.query(sql, params);
     const items = Array.isArray(rows) ? rows.map(r => {
-      const preferred = normaliseString(r.submission_preferred_name);
-      const first = normaliseString(r.submission_first_name);
-      const last = normaliseString(r.submission_last_name);
+      const caseContext = safeJsonParse(r.case_context_json, null) || {};
+      const contextPersonal = caseContext?.applicationPersonal || {};
+      const contextAnswers = caseContext?.applicationAnswers || {};
+      const first = [
+        r.submission_first_name,
+        contextPersonal.first_name,
+        contextPersonal.firstName,
+        contextPersonal.given_name,
+        contextPersonal.givenName,
+        caseContext?.firstName,
+        r.client_first_name,
+      ].map(value => normaliseString(value)).find(Boolean) || null;
+      const last = [
+        r.submission_last_name,
+        contextPersonal.last_name,
+        contextPersonal.lastName,
+        contextPersonal.family_name,
+        contextPersonal.familyName,
+        caseContext?.lastName,
+        r.client_last_name,
+      ].map(value => normaliseString(value)).find(Boolean) || null;
+      const preferred = [
+        r.submission_preferred_name,
+        contextPersonal.preferred_name,
+        contextPersonal.preferredName,
+        caseContext?.preferredName,
+        contextAnswers['preferred-name'],
+        contextAnswers['preferred_name'],
+        r.application_preferred_name,
+      ].map(value => normaliseString(value)).find(Boolean) || null;
       const full = [first, last].filter(Boolean).join(' ').trim();
-      const applicantName = full || preferred || normaliseString(r.tracking_id) || 'Applicant';
+      const applicantName =
+        full ||
+        preferred ||
+        normaliseString(r.application_full_name) ||
+        normaliseString(r.tracking_id) ||
+        normaliseString(r.case_number) ||
+        'Applicant';
       const interventionLabel = normaliseString(r.intervention_label) || normaliseString(r.intervention_title) || null;
       return {
         interventionId: r.intervention_id || null,
@@ -40199,12 +40422,13 @@ app.get('/api/documents/:id/presign-download', async (req, res) => {
       }
       let responseKey = doc.file_path;
       let responseFilename = doc.file_name;
+      let responseContentType = doc.mime_type || undefined;
       let preview = null;
       if (wantsOriginalDownload) {
         const presigned = await presignGet({
           key: responseKey,
           responseContentDisposition: buildAttachmentContentDisposition(responseFilename),
-          responseContentType: doc.mime_type || undefined
+          responseContentType
         });
         return res.json({
           mode: 's3',
@@ -40220,13 +40444,17 @@ app.get('/api/documents/:id/presign-download', async (req, res) => {
         const previewResult = await ensureWordDocumentPreview({ docRow: doc });
         responseKey = previewResult.key;
         responseFilename = previewResult.fileName || responseFilename;
+        responseContentType = previewResult.contentType || responseContentType;
         preview = {
-          kind: 'pdf',
+          kind: previewResult.kind || 'pdf',
           source: 'internal_word_preview',
           cached: previewResult.cached === true
         };
       }
-      const presigned = await presignGet({ key: responseKey });
+      const presigned = await presignGet({
+        key: responseKey,
+        responseContentType
+      });
       return res.json({
         mode: 's3',
         fileId: doc.id,
@@ -40240,7 +40468,7 @@ app.get('/api/documents/:id/presign-download', async (req, res) => {
       return res.status(500).json({
         error: 's3_presign_failed',
         message: isWordPreviewCandidate(doc)
-          ? 'Unable to generate a secure PDF preview for this Word document.'
+          ? 'Unable to generate a secure preview for this Word document.'
           : 'Unable to prepare document view.'
       });
     }

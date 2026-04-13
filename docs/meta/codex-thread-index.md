@@ -183,6 +183,19 @@ For each indexed thread/topic, keep:
 - Status: current as of 2026-04-07
 - Notes: durable rule from this thread: in Case Workspace, document mode is keyed to whether the case has a linked `application_id`, not whether the client has a linked PATH account. Imported cases without an application must stay in case-based document mode even after applicant-account activation or silent account linking. In that mode, application-scoped document types still work by falling back to action-plan or case storage instead of forcing staff to select a nonexistent application.
 
+### Word supporting-document preview and original download
+
+- Codex task title: `Investigate Word view issue`
+- Topic: Supporting Documents and shared document-view actions now render Word files through an internal cached preview artifact, with a separate privileged original-file download path
+- Keywords: `Investigate Word view issue`, `Word view issue`, `docx viewer`, `Word preview`, `Supporting Documents`, `previews/word`, `mode=original`, `Download original`, `Office Online`, `Microsoft 365 viewer`
+- When to open: the user asks why Word documents no longer open through the browser or Microsoft 365 viewer, asks where the internal Word preview behavior was added, asks why `View` shows an internal preview instead of the native `.doc` / `.docx`, asks why privileged users see a separate `Download` action, or reports a prod Word preview failure
+- Primary docs:
+  - `docs/AGENTS.md`
+  - `docs/widgets/admin/supporting-documents-widget.md`
+  - `docs/data/documents-model.md`
+- Status: current as of 2026-04-11
+- Notes: durable outcomes from this task: `GET /api/documents/:id/presign-download` now detects `.doc` / `.docx`, generates or reuses a cached internal preview artifact under object-storage prefix `WORD_PREVIEW_OBJECT_PREFIX` (default `previews/word`), and returns a presigned URL for that preview instead of the raw Office object. The preferred artifact is PDF, but the backend now falls back to a self-contained HTML preview when the deployed host cannot launch Chromium for PDF rendering. The preview artifact is cached in object storage only and must not create a separate `iset_document` row. Supporting Documents also now exposes a separate `Download` action for `System Administrator` and `NWAC Administrator` only, gated by a privacy warning and backed by `GET /api/documents/:id/presign-download?mode=original`, which bypasses the preview substitution and forces attachment download of the original stored file. The prod incident on 2026-04-11 was traced to missing Chromium shared libraries on the EC2 host, not S3 encryption or document data.
+
 ### PATH deployment model and canonical shared-schema migrations
 
 - Codex task title: `Plan deployment strategy`

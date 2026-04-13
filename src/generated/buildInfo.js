@@ -1,12 +1,12 @@
 const buildInfo = {
   "packageVersion": "0.1.0",
-  "releaseId": "20260411-prod-ei-sla-maintenance",
+  "releaseId": "20260413-admin-refactors-prod",
   "buildTarget": "production",
-  "builtAt": "2026-04-11T20:34:22.022Z",
-  "gitCommit": "d2e8a5453743559a2ee52afc8e3d665479d406cc",
-  "gitShort": "d2e8a545",
+  "builtAt": "2026-04-13T21:36:05.656Z",
+  "gitCommit": "a30c8082dac97f2ae9d2ef29fd21d908ca28d3c9",
+  "gitShort": "a30c8082",
   "gitDirty": true,
-  "displayLabel": "v0.1.0 | 20260411-prod-ei-sla-maintenance | d2e8a545-dirty | production"
+  "displayLabel": "v0.1.0 | 20260413-admin-refactors-prod | a30c8082-dirty | production"
 };
 
 export default buildInfo;

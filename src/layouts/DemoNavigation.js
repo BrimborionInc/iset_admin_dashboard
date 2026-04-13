@@ -96,6 +96,34 @@ const renderResultDetails = (details) => {
   return null;
 };
 
+const renderClearResultMessage = clearResult => {
+  if (!clearResult?.debugRoutesDisabled) {
+    return <Box>{clearResult?.message}</Box>;
+  }
+
+  const powerShellCommand = `$env:ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES="true"; npm run server`;
+  const bashCommand = `ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES=true npm run server`;
+
+  return (
+    <SpaceBetween size="m">
+      <Box>
+        Unsafe debug routes are disabled on the admin backend. Restart the server with the environment setting below,
+        then try <strong>Clear ISET test data</strong> again.
+      </Box>
+      <FormField label="PowerShell">
+        <Textarea value={powerShellCommand} readOnly rows={2} />
+      </FormField>
+      <FormField label="bash / terminal">
+        <Textarea value={bashCommand} readOnly rows={2} />
+      </FormField>
+      <Box color="text-body-secondary" fontSize="body-s">
+        If you start the backend another way, keep `ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES=true` and use your normal start
+        command.
+      </Box>
+    </SpaceBetween>
+  );
+};
+
 const TopHeader = ({ currentLanguage = 'en', onLanguageChange }) => {
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [confirmationValue, setConfirmationValue] = useState('');
@@ -163,7 +191,8 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange }) => {
         setClearResult({
           type: 'error',
           header: 'Failed to clear ISET test data',
-          message: 'The admin backend has unsafe debug routes disabled. Restart `isetadminserver.js` with `ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES=true` to use Clear ISET test data.',
+          message: 'The admin backend has unsafe debug routes disabled.',
+          debugRoutesDisabled: true,
           details: extraDetails,
         });
         return;
@@ -708,7 +737,7 @@ const TopHeader = ({ currentLanguage = 'en', onLanguageChange }) => {
           }
         >
           <SpaceBetween size="s">
-            <Box>{clearResult.message}</Box>
+            {renderClearResultMessage(clearResult)}
           </SpaceBetween>
         </Modal>
       )}

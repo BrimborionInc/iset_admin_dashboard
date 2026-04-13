@@ -1,0 +1,40 @@
+review_group,code,label,active,current_scope,checklist_refs,finance_evidence_refs,known_system_generated,current_known_notes,issue_flag,issue_summary,nwac_decision_required
+Client,indigenous_declaration,Indigenous declaration,yes,client,compliance|intervention,IndigenousIdentity,no,,no,,no
+Client,status_card,Status or Treaty Card,yes,client,compliance|intervention,IndigenousIdentity,no,,no,,no
+Client,letter_of_reference,Letter of Reference,yes,client,compliance|intervention,IndigenousIdentity,no,,no,,no
+Client,identity_document,Identity document,yes,client,compliance|intervention,,no,,no,,no
+Client,iset_client_info_release,Authorization for release of ISET client information,yes,client,compliance|intervention,,no,Authorization for release of ISET client information,no,,no
+Client,resume,Resume,yes,client,compliance|intervention,,no,,no,,no
+Client,voided_cheque,Voided Cheque,yes,client,compliance|intervention,,no,Used as a funding-package checklist artifact in checklist logic.,yes,Current seeded scope is client; older planning docs described payment_packet scope.,yes
+Application,assessment_approval_letter,Assessment approval letter,yes,application,compliance|intervention,,yes,Decision-letter workflow and PDF generation use this type explicitly.,no,,no
+Application,assessment_denial_letter,Assessment denial letter,yes,application,compliance|intervention,,yes,Decision-letter workflow and PDF generation use this type explicitly.,no,,no
+Application,application_form,Application form,yes,application,compliance|intervention,ClientApplicationSigned,yes,Generated application PDF uses this type explicitly.,no,,no
+Application,ei_consent,EI Consent Form,yes,application,compliance|intervention,EIConsent,no,,no,,no
+Application,ei_verification,EI Eligibility Verification,yes,application,compliance|intervention,EIVerification,no,Upload and intervention-link actions are role-restricted; special approval gating in intervention assessment.,no,,no
+Application,conflict_of_interest,Conflict of Interest Form,yes,application,compliance|intervention,,no,,no,,no
+Application,band_funding_decision,Band or Nation funding decision letter,yes,application,compliance|intervention,,no,,no,,no
+Application,EFT_form,EFT or wire transfer direct deposit form,yes,application,compliance|intervention,,no,Auto-attached funding-package workflow uses this checklist doc type explicitly.,no,,no
+Application,mou_co_funding_agreement_letter,MOU/Co-funding agreement letter,yes,application,compliance|intervention,,no,Required only if the client is co-funded for this funding agreement.,no,,no
+Application,supporting_evidence,Supporting evidence,yes,application,,,no,,no,,no
+Application,client_acknowledgement,Client Acknowledgement of Funding Source,yes,application,compliance|intervention,,no,,no,,no
+Application,media_consent,Media consent form,yes,application,compliance|intervention,,no,,no,,no
+Application,financial_overview,Financial overview/budget,yes,application,compliance|intervention,FinancialOverview,yes,Generated financial-overview PDF uses this type explicitly.,no,,no
+Application,evidence_income,Income evidence,yes,application,,,no,,no,,no
+Application,evidence_expense,Expense evidence,yes,application,,,no,,no,,no
+Application,student_financial_assistance_statement,Student financial assistance statement,yes,application,,,no,,no,,no
+Application,acceptance_letter,Letter of acceptance to program,yes,application,compliance|intervention,AcceptanceLetter,no,,no,,no
+Application,band_funding_confirmation,Band funding confirmation,yes,application,compliance|intervention,,no,,no,,no
+Application,band_funding_denial,Band funding denial,yes,application,compliance|intervention,,no,,no,,no
+Application,medical_documentation,Medical documentation,yes,application,compliance|intervention,,no,,no,,no
+Application,case_assessment,Case manager assessment,yes,application,compliance|intervention,CaseManagerAssessment,yes,Generated assessment PDF uses this type explicitly.,yes,Current seeded scope is application; older planning docs described case scope.,yes
+Application,funding_agreement,Funding agreement,yes,application,compliance|intervention,FundingAgreement,yes,"Funding-agreement workflow, signing requests, and generated CFA PDFs use this type explicitly.",yes,Current seeded scope is application; older planning docs described action_plan scope.,yes
+Application,release_student_info,Release of student info form,no,application,,,no,,yes,Inactive catalog entry remains in older checklist notes and planning docs; confirm retirement.,yes
+Application,statement_of_account,Statement of Account,no,application,,StatementOfAccount|TuitionStatementOrInvoice,no,"Inactive in catalog, but still referenced in finance evidence mapping.",yes,Inactive catalog entry is still referenced by finance evidence mapping.,yes
+Action Plan,alternate_payee_letter,Alternate payee letter,yes,action_plan,compliance|intervention,AlternatePayeeLetter,no,,yes,Current seeded scope is action_plan; older planning docs described payment_packet scope.,yes
+Action Plan,employer_duties_letter,Employer duties letter,yes,action_plan,compliance|intervention,EmployerDutiesLetter,no,,no,,no
+Action Plan,employer_offer_letter_after_subsidy,Employer offer letter after subsidy,yes,action_plan,compliance|intervention,EmployerOfferLetterAfterSubsidy,no,,no,,no
+Action Plan,equipment_quote,Equipment quote,yes,action_plan,compliance|intervention,Quote,no,,no,,no
+Action Plan,institution_letter,Institution letter,yes,action_plan,compliance|intervention,InstitutionLetter,no,,no,,no
+Action Plan,wage_plan,Wage plan / MERCs schedule,yes,action_plan,compliance|intervention,WagePlan,no,,no,,no
+Action Plan,attendance_form,Attendance form,yes,action_plan,compliance|intervention,AttendanceReport,no,,no,,no
+Action Plan,receipt,Receipt,yes,action_plan,compliance|intervention,PaidReceipt|EquipmentReceipt,no,Used by payments evidence linking and action-plan checklist items.,yes,Current seeded scope is action_plan; older planning docs described payment_packet scope.,yes

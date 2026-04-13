@@ -24,6 +24,7 @@ import {
 } from '@cloudscape-design/components';
 import CopyToClipboard from '@cloudscape-design/components/copy-to-clipboard';
 import { apiFetch } from '../auth/apiClient';
+import ApplicantWatchlistHitDetailsModal from '../components/ApplicantWatchlistHitDetailsModal.jsx';
 import ApplicationOverviewHelp from '../helpPanelContents/applicationOverviewHelp';
 import useCurrentUser from '../hooks/useCurrentUser';
 import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplicationLock';
@@ -302,6 +303,11 @@ const ApplicationOverviewWidget = ({
   const [watchlistNotes, setWatchlistNotes] = useState('');
   const [watchlistError, setWatchlistError] = useState(null);
   const [watchlistSaving, setWatchlistSaving] = useState(false);
+  const [watchlistHitDetails, setWatchlistHitDetails] = useState(null);
+  const [watchlistHitLoading, setWatchlistHitLoading] = useState(false);
+  const [watchlistHitError, setWatchlistHitError] = useState(null);
+  const [watchlistHitDetailsOpen, setWatchlistHitDetailsOpen] = useState(false);
+  const watchlistHitRequestRef = useRef(0);
   const [regionLookup, setRegionLookup] = useState(() => {
     if (typeof window !== 'undefined' && window.__ISET_CANADA_REGION_LOOKUP) {
       return window.__ISET_CANADA_REGION_LOOKUP;
@@ -678,6 +684,50 @@ const ApplicationOverviewWidget = ({
   const watchlistDisplaySin = formatSinDisplay(watchlistIdentity.sin) || 'Unavailable';
   const watchlistExplanation =
     'Adding an applicant or participant to the watchlist means their future applications will be flagged for administrator review. Use this when the applicant owes money to the program or when there are similar risk concerns. If a new application is received with the same Social Insurance Number, administrators will be alerted automatically.';
+  const loadWatchlistHitDetails = useCallback(async () => {
+    if (!application_id) {
+      watchlistHitRequestRef.current += 1;
+      setWatchlistHitDetails(null);
+      setWatchlistHitError(null);
+      setWatchlistHitLoading(false);
+      return null;
+    }
+
+    const requestId = watchlistHitRequestRef.current + 1;
+    watchlistHitRequestRef.current = requestId;
+    setWatchlistHitLoading(true);
+    setWatchlistHitDetails(null);
+    setWatchlistHitError(null);
+    try {
+      const response = await apiFetch(`/api/applications/${application_id}/watchlist-hit`);
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch (_) {
+        payload = null;
+      }
+      if (!response.ok) {
+        throw new Error(payload?.message || payload?.error || 'Unable to load watchlist details.');
+      }
+      const nextDetails = payload?.hasHit ? payload : null;
+      if (watchlistHitRequestRef.current === requestId) {
+        setWatchlistHitDetails(nextDetails);
+        setWatchlistHitError(null);
+      }
+      return nextDetails;
+    } catch (err) {
+      if (watchlistHitRequestRef.current === requestId) {
+        setWatchlistHitDetails(null);
+        setWatchlistHitError(err?.message || 'Unable to load watchlist details.');
+      }
+      return null;
+    } finally {
+      if (watchlistHitRequestRef.current === requestId) {
+        setWatchlistHitLoading(false);
+      }
+    }
+  }, [application_id]);
+  const watchlistHitSummary = watchlistHitDetails?.summary || null;
   const isReportingOnlyDeniedIneligible = Boolean(
     caseData?.caseContext?.reportingOnlyDeniedIneligible || caseData?.caseContext?.reportingCorrectionAllowed
   );
@@ -732,6 +782,14 @@ const ApplicationOverviewWidget = ({
     }
     return code || raw;
   }, [provinceSource, regionLookup]);
+
+  useEffect(() => {
+    void loadWatchlistHitDetails();
+  }, [loadWatchlistHitDetails]);
+
+  useEffect(() => {
+    setWatchlistHitDetailsOpen(false);
+  }, [application_id]);
 
   useEffect(() => {
     if (!applicantUserId) {
@@ -1037,6 +1095,7 @@ const ApplicationOverviewWidget = ({
         });
         setWatchlistModalOpen(false);
         setWatchlistNotes('');
+        await loadWatchlistHitDetails();
         return;
       }
       let payload = null;
@@ -1067,6 +1126,7 @@ const ApplicationOverviewWidget = ({
     watchlistApplicationId,
     watchlistIdentity,
     watchlistNotes,
+    loadWatchlistHitDetails,
   ]);
 
   const requestLayoutSwitch = useCallback(layoutId => {
@@ -1982,6 +2042,18 @@ const ApplicationOverviewWidget = ({
             {statusFeedback.content}
           </Alert>
         )}
+        {watchlistHitSummary ? (
+          <Alert
+            type="warning"
+            header="Applicant watchlist hit"
+            action={<Button onClick={() => setWatchlistHitDetailsOpen(true)}>View details</Button>}
+          >
+            <Box>
+              This applicant&apos;s Social Insurance Number matches an entry on the NWAC watchlist. View details for
+              instructions on how to proceed and contact your manager before continuing assessment or approval work.
+            </Box>
+          </Alert>
+        ) : null}
         {isReportingOnlyDeniedIneligible && (
           <Alert type={ilmpStatus === 'blocked' ? 'error' : ilmpStatus === 'warning' ? 'warning' : ilmpStatus === 'clean' ? 'success' : 'info'}>
             <SpaceBetween size="xs">
@@ -2105,17 +2177,24 @@ const ApplicationOverviewWidget = ({
             </FormField>
             <FormField
               label="Notes"
-              description="Optional context for administrators reviewing this watchlist entry."
+              description="Shown in watchlist details when staff review a future watchlist hit."
             >
               <Textarea
                 value={watchlistNotes}
                 onChange={({ detail }) => setWatchlistNotes(detail.value)}
-                placeholder="Add internal notes (optional)"
+                placeholder="Explain why this applicant is watchlisted and what staff should do when a future watchlist hit is reviewed"
                 rows={4}
               />
             </FormField>
           </SpaceBetween>
         </Modal>
+        <ApplicantWatchlistHitDetailsModal
+          visible={watchlistHitDetailsOpen}
+          onDismiss={() => setWatchlistHitDetailsOpen(false)}
+          loading={watchlistHitLoading}
+          error={watchlistHitError}
+          details={watchlistHitDetails}
+        />
         {confirmModalVisible && (
           <Modal
             visible={confirmModalVisible}

@@ -50,7 +50,8 @@ manual uploads, and generated forms, then compares them against the relevant che
 - Refresh behavior: listens for `iset:supporting-documents:refresh`, mainly from Secure Messaging attachment adoption.
 - View behavior:
   - most files open from the presigned object URL returned by `GET /api/documents/:id/presign-download`
-  - Word files (`.doc`, `.docx`) now take a different path: the backend generates or reuses a cached internal PDF preview and returns that preview URL instead of the original Office object
+  - Word files (`.doc`, `.docx`) now take a different path: the backend generates or reuses a cached internal preview and returns that preview URL instead of the original Office object
+  - the preferred preview artifact is PDF, but the backend now falls back to a self-contained HTML preview if the server cannot render PDF on that host
   - this avoids browser-dependent handoff to Microsoft 365 / Office Online for sensitive supporting documents
 - Download behavior:
   - the inline `Download` action is shown only to `System Administrator` and `NWAC Administrator`
@@ -84,7 +85,7 @@ manual uploads, and generated forms, then compares them against the relevant che
 
 - If an imported client file shows no checklist tab, that is expected.
 - If an imported client has a PATH account but still no linked application, the widget should still use case-based mode and should not ask staff to pick an application for application-scoped uploads.
-- If a Word document view now fails, inspect `GET /api/documents/:id/presign-download` rather than browser download settings first; the expected success path is an internal PDF preview, not a raw `.doc/.docx` open in Office Online.
+- If a Word document view now fails, inspect `GET /api/documents/:id/presign-download` rather than browser download settings first; the expected success path is an internal preview artifact (PDF when available, otherwise HTML), not a raw `.doc/.docx` open in Office Online.
 - If a privileged user reports that `Download` is missing, verify their canonical role/group resolves to `System Administrator` / `NWAC Administrator` (`System_Administrator` / `NWAC_Administrator`) before debugging the widget.
 - If a case-backed upload fails, inspect `caseData.id`, the selected document type scope, and the `/api/cases/:id/documents/upload` response code first.
 - If a normal applicant-backed case cannot upload or refresh, inspect `caseData.applicant_user_id` / `caseData.applicantUserId` and the `/api/applicants/:id/*` endpoints.

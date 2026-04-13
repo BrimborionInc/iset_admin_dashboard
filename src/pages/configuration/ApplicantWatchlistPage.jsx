@@ -13,7 +13,6 @@ import {
   Modal,
   Select,
   SpaceBetween,
-  StatusIndicator,
   Table,
   TextFilter,
   Textarea,
@@ -311,15 +310,6 @@ const ApplicantWatchlistPage = () => {
 
   const columns = useMemo(() => ([
     {
-      id: "status",
-      header: "Status",
-      cell: item => (
-        <StatusIndicator type={item.status === "active" ? "success" : "stopped"}>
-          {item.status === "active" ? "Active" : "Inactive"}
-        </StatusIndicator>
-      ),
-    },
-    {
       id: "applicant",
       header: "Applicant",
       cell: item => (
@@ -376,7 +366,7 @@ const ApplicantWatchlistPage = () => {
             loading={rowActionId === item.id}
             onClick={() => updateStatus(item, item.status === "active" ? "inactive" : "active")}
           >
-            {item.status === "active" ? "Mark inactive" : "Reactivate"}
+            {item.status === "active" ? "Disable watch" : "Enable watch"}
           </Button>
         </SpaceBetween>
       ),
@@ -548,7 +538,7 @@ const ApplicantWatchlistPage = () => {
               value={form.notes}
               onChange={({ detail }) => updateForm("notes", detail.value)}
               rows={6}
-              placeholder="Reason for the watchlist entry or handling instructions"
+              placeholder="Explain why this applicant is watchlisted and what staff should do when a future watchlist hit is reviewed"
             />
           </FormField>
 

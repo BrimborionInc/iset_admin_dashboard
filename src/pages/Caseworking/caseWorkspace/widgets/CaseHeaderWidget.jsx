@@ -1364,12 +1364,12 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
             </FormField>
             <FormField
               label="Notes"
-              description="Optional context for administrators reviewing this watchlist entry."
+              description="Shown in watchlist details when staff review a future watchlist hit."
             >
               <Textarea
                 value={watchlistNotes}
                 onChange={({ detail }) => setWatchlistNotes(detail.value)}
-                placeholder="Add internal notes (optional)"
+                placeholder="Explain why this applicant is watchlisted and what staff should do when a future watchlist hit is reviewed"
                 rows={4}
               />
             </FormField>
