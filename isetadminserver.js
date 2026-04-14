@@ -18,6 +18,7 @@ const {
   resolveApplicantPoolId,
 } = require('./src/lib/applicantAccountService');
 const { runStartupSharedSchemaMigrations } = require('./src/lib/sharedSchemaMigrationRunner');
+const { getRegionalManagerCaseAccessError } = require('./src/lib/caseAccess');
 const {
   createCaseWatch,
   deleteCaseWatch,
@@ -13961,22 +13962,11 @@ function validateCaseAccessForPlan(req, planRow) {
   if (allowAll) return null;
 
   if (role === 'Regional Manager' || role === 'Regional_Manager') {
-    const regionIds = resolveRequestRegionIds(req);
-    if (!regionIds.length) {
-      return { status: 403, body: { error: 'forbidden', detail: 'region_scope_missing' } };
-    }
-    const isUnassigned =
-      planRow.assigned_to_user_id === null || typeof planRow.assigned_to_user_id === 'undefined';
-    const portfolioMatch =
-      Number.isFinite(planRow.portfolio_region_id) &&
-      regionIds.includes(Number(planRow.portfolio_region_id));
-    const ownerMatch =
-      Number.isFinite(planRow.owner_region_id) &&
-      regionIds.includes(Number(planRow.owner_region_id));
-    if (!isUnassigned && !portfolioMatch && !ownerMatch) {
-      return { status: 403, body: { error: 'forbidden', detail: 'region_scope_mismatch' } };
-    }
-    return null;
+    return getRegionalManagerCaseAccessError({
+      requesterId: identity.userId,
+      regionIds: resolveRequestRegionIds(req),
+      caseRow: planRow,
+    });
   }
 
   if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
@@ -14006,23 +13996,11 @@ function validateCaseAccessForIntervention(req, interventionRow) {
   if (allowAll) return null;
 
   if (role === 'Regional Manager' || role === 'Regional_Manager') {
-    const regionIds = resolveRequestRegionIds(req);
-    if (!regionIds.length) {
-      return { status: 403, body: { error: 'forbidden', detail: 'region_scope_missing' } };
-    }
-    const isUnassigned =
-      interventionRow.assigned_to_user_id === null ||
-      typeof interventionRow.assigned_to_user_id === 'undefined';
-    const portfolioMatch =
-      Number.isFinite(interventionRow.portfolio_region_id) &&
-      regionIds.includes(Number(interventionRow.portfolio_region_id));
-    const ownerMatch =
-      Number.isFinite(interventionRow.owner_region_id) &&
-      regionIds.includes(Number(interventionRow.owner_region_id));
-    if (!isUnassigned && !portfolioMatch && !ownerMatch) {
-      return { status: 403, body: { error: 'forbidden', detail: 'region_scope_mismatch' } };
-    }
-    return null;
+    return getRegionalManagerCaseAccessError({
+      requesterId: identity.userId,
+      regionIds: resolveRequestRegionIds(req),
+      caseRow: interventionRow,
+    });
   }
 
   if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
@@ -41341,17 +41319,13 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
 
     if (!allowAll) {
       if (role === 'Regional Manager' || role === 'Regional_Manager') {
-        const regionIds = resolveRequestRegionIds(req);
-        if (!regionIds.length) {
-          return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
-        }
-        const isUnassigned = typeof row.assigned_to_user_id === 'undefined' || row.assigned_to_user_id === null;
-        const portfolioRegionMatch =
-          Number.isFinite(row.portfolio_region_id) && regionIds.includes(Number(row.portfolio_region_id));
-        const ownerRegionMatch =
-          Number.isFinite(row.owner_region_id) && regionIds.includes(Number(row.owner_region_id));
-        if (!isUnassigned && !portfolioRegionMatch && !ownerRegionMatch) {
-          return res.status(403).json({ error: 'forbidden', detail: 'region_scope_mismatch' });
+        const accessError = getRegionalManagerCaseAccessError({
+          requesterId: identity.userId,
+          regionIds: resolveRequestRegionIds(req),
+          caseRow: row,
+        });
+        if (accessError) {
+          return res.status(accessError.status).json(accessError.body);
         }
       } else if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
         const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
@@ -42321,17 +42295,13 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
 
     if (!allowAll) {
       if (role === 'Regional Manager' || role === 'Regional_Manager') {
-        const regionIds = resolveRequestRegionIds(req);
-        if (!regionIds.length) {
-          return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
-        }
-        const isUnassigned = caseRow.assigned_to_user_id === null || typeof caseRow.assigned_to_user_id === 'undefined';
-        const portfolioMatch =
-          Number.isFinite(caseRow.portfolio_region_id) && regionIds.includes(Number(caseRow.portfolio_region_id));
-        const ownerMatch =
-          Number.isFinite(caseRow.owner_region_id) && regionIds.includes(Number(caseRow.owner_region_id));
-        if (!isUnassigned && !portfolioMatch && !ownerMatch) {
-          return res.status(403).json({ error: 'forbidden', detail: 'region_scope_mismatch' });
+        const accessError = getRegionalManagerCaseAccessError({
+          requesterId: identity.userId,
+          regionIds: resolveRequestRegionIds(req),
+          caseRow,
+        });
+        if (accessError) {
+          return res.status(accessError.status).json(accessError.body);
         }
       } else if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
         const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
@@ -43068,17 +43038,13 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
 
   if (!allowAll) {
     if (role === 'Regional Manager' || role === 'Regional_Manager') {
-      const regionIds = resolveRequestRegionIds(req);
-      if (!regionIds.length) {
-        return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
-      }
-      const isUnassigned = caseRow.assigned_to_user_id === null || typeof caseRow.assigned_to_user_id === 'undefined';
-      const portfolioMatch =
-        Number.isFinite(caseRow.portfolio_region_id) && regionIds.includes(Number(caseRow.portfolio_region_id));
-      const ownerMatch =
-        Number.isFinite(caseRow.owner_region_id) && regionIds.includes(Number(caseRow.owner_region_id));
-      if (!isUnassigned && !portfolioMatch && !ownerMatch) {
-        return res.status(403).json({ error: 'forbidden', detail: 'region_scope_mismatch' });
+      const accessError = getRegionalManagerCaseAccessError({
+        requesterId: identity.userId,
+        regionIds: resolveRequestRegionIds(req),
+        caseRow,
+      });
+      if (accessError) {
+        return res.status(accessError.status).json(accessError.body);
       }
     } else if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
       const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
@@ -44737,21 +44703,13 @@ app.patch('/api/interventions/:id', async (req, res) => {
         role === 'NWAC_Administrator';
       if (!allowAll) {
         if (role === 'Regional Manager' || role === 'Regional_Manager') {
-          const regionIds = resolveRequestRegionIds(req);
-          if (!regionIds.length) {
-            return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
-          }
-          const isUnassigned =
-            interventionRow.assigned_to_user_id === null ||
-            typeof interventionRow.assigned_to_user_id === 'undefined';
-          const portfolioMatch =
-            Number.isFinite(interventionRow.portfolio_region_id) &&
-            regionIds.includes(Number(interventionRow.portfolio_region_id));
-          const ownerMatch =
-            Number.isFinite(interventionRow.owner_region_id) &&
-            regionIds.includes(Number(interventionRow.owner_region_id));
-          if (!isUnassigned && !portfolioMatch && !ownerMatch) {
-            return res.status(403).json({ error: 'forbidden', detail: 'region_scope_mismatch' });
+          const accessError = getRegionalManagerCaseAccessError({
+            requesterId: identity.userId,
+            regionIds: resolveRequestRegionIds(req),
+            caseRow: interventionRow,
+          });
+          if (accessError) {
+            return res.status(accessError.status).json(accessError.body);
           }
         } else if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
           const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : null;

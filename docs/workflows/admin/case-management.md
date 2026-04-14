@@ -67,6 +67,7 @@ Widget references:
 
 - Intended for ISET Coordinator, Regional Manager, Program Administrator.
 - Some actions are role-sensitive; route and server checks determine final access.
+- Regional Managers can now open directly assigned case-workspace files even when the case's current portfolio/owner region falls outside their normal region scope; otherwise normal region-scoped case access still applies.
 
 ## Current Gaps / Risks
 

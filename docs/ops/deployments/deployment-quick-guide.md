@@ -140,19 +140,20 @@ npm run path:deploy:smoke -- --env prod
 Set a warning before a planned deploy:
 
 ```powershell
-npm run path:maintenance -- set --env test --start-in 5m --expected-duration 20m
-npm run path:maintenance -- set --env prod --start-in 5m --expected-duration 20m --yes
+npm run path:maintenance -- set --env test --start-in 5m --expected-duration 5m
+npm run path:maintenance -- set --env prod --start-in 5m --expected-duration 5m --yes
 ```
 
 Use this when:
 - you want the admin console and public portal to show a global maintenance warning before the cutover
 - a 2 to 5 minute lead time is acceptable
+- the expected user-facing interruption window is brief and you want to warn about possible reloads or short transient failures rather than true downtime
 
 For unscheduled work that is already starting:
 
 ```powershell
-npm run path:maintenance -- set --env test --start-now --expected-duration 20m --unscheduled
-npm run path:maintenance -- set --env prod --start-now --expected-duration 20m --unscheduled --yes
+npm run path:maintenance -- set --env test --start-now --expected-duration 5m --unscheduled
+npm run path:maintenance -- set --env prod --start-now --expected-duration 5m --unscheduled --yes
 ```
 
 Clear the warning after smoke passes:
@@ -165,6 +166,7 @@ npm run path:maintenance -- clear --env prod --yes
 Notes:
 - The warning is driven by `iset_runtime_config(scope='runtime', k='service.announcement')`.
 - Admin and portal clients poll every 15 seconds and render the countdown locally, so this is an operator warning tool, not a precise sub-minute push channel.
+- Set `expected-duration` to the likely user-visible interruption window, not the full end-to-end deploy runtime. Rolling app deploys often take several minutes in the operator console while causing little or no visible disruption.
 - If the service must be fully unavailable during cutover, the warning can be combined with the separate ALB `503` maintenance fallback.
 
 ## Hard Maintenance Page

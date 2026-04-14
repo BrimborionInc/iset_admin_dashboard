@@ -103,6 +103,10 @@ Recommended planned-maintenance sequence:
 5. Clear the warning after smoke passes.
 6. Clear the ALB fixed-response maintenance page if you enabled it.
 
+Guidance:
+- Size `--expected-duration` to the likely user-facing interruption window, not the total operator runtime of the release.
+- For normal rolling releases, prefer no banner or a short `brief interruptions possible` warning and keep the ALB `503` fallback as contingency only.
+
 ## Feature-Flagged Portal Rollouts
 
 Some portal changes are intentionally deployed behind runtime flags. The current example is draft autosave via `iset_runtime_config(scope='runtime', k='intake.draft_autosave')`.

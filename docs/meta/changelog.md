@@ -3,6 +3,7 @@
 Format: YYYY-MM-DD - Category: Short description
 
 ## 2026-04-14
+- Fix/API/Casework: Regional Manager case-workspace access now treats direct assignment as a first-class grant across the `/cases/:id` workspace family and the shared action-plan/intervention validators, so directly assigned out-of-region files no longer fail with a region-scope `403`.
 - UX/Workflow: Intake step authoring and Workflow Preview now expose the same runtime-backed checkbox-array conditional-visibility operators and whole-step skip behavior as the public portal, bringing the admin editor suite back in line for renderable intake content.
 - Ops/Workflow: Verified that DEV workflow `21` authoring rows now regenerate the published intake runtime payload, so the step library, workflow library, and `publish/workflow.schema.intake` row are back in sync in DEV.
 - UX/Applications: Application Overview now exposes the manual status selector to `NWAC Administrator` users as well as `System Administrator`, while keeping the existing role-scoped transition checks and finalized-status confirmation flow.
