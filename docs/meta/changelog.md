@@ -3,6 +3,7 @@
 Format: YYYY-MM-DD - Category: Short description
 
 ## 2026-04-14
+- Docs/Ops: Updated the standing handoff docs to require live PROD feedback-log updates during Codex bug/change triage, documented the short outcome-first hotfix-note wording style, and captured the later same-thread PROD Regional Manager case-access and feedback-log follow-up under the exact Codex task-history title.
 - Fix/API/Casework: Regional Manager case-workspace access now treats direct assignment as a first-class grant across the `/cases/:id` workspace family and the shared action-plan/intervention validators, so directly assigned out-of-region files no longer fail with a region-scope `403`.
 - UX/Workflow: Intake step authoring and Workflow Preview now expose the same runtime-backed checkbox-array conditional-visibility operators and whole-step skip behavior as the public portal, bringing the admin editor suite back in line for renderable intake content.
 - Ops/Workflow: Verified that DEV workflow `21` authoring rows now regenerate the published intake runtime payload, so the step library, workflow library, and `publish/workflow.schema.intake` row are back in sync in DEV.

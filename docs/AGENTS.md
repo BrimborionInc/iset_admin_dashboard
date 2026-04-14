@@ -5,7 +5,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-04-11
+Last Updated: 2026-04-14
 
 ## Working relationship (design dialog)
 
@@ -33,6 +33,7 @@ Last Updated: 2026-04-11
 - Use this as a starting context map, then verify details in code before making claims.
 - Treat linked docs as the source of truth for deeper implementation details.
 - Keep this file focused on practical orientation (what matters, where to look, what commonly breaks).
+- Treat `docs/AGENTS.md` as the entry point for standing directives. If a durable workflow/style/how-to guide lives somewhere else in `docs/`, add or maintain an explicit pointer here so a new thread can find it from this file first.
 
 ## Thread-start checklist
 
@@ -48,6 +49,8 @@ Last Updated: 2026-04-11
 ## For future Codex threads
 
 Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current project context for this repo. If the user references prior-thread work, notes, or "something we already figured out", check [codex-thread-index.md](./meta/codex-thread-index.md) before searching blindly. As you work, keep the docbase current: update [AGENTS.md](./AGENTS.md) with durable context pointers, guardrails, and architecture notes that would help future chats; update [codex-thread-index.md](./meta/codex-thread-index.md) whenever you add or materially revise a durable handoff/how-to note that a future thread may need to rediscover; update affected live docs under [`docs/`](./) when behavior changes; and record notable shipped changes in [changelog.md](./meta/changelog.md) and [next-release-notes-log.md](./meta/next-release-notes-log.md). The goal is that a new thread can recover the current state of the system from the repo docs without depending on prior chat history.
+
+- Standing operational rule for PROD bug/change triage: if a thread investigates, fixes, deploys, or otherwise materially resolves a PROD item that came through the in-app feedback system, update the live PROD feedback log before closing the thread. That means keeping `admin_feedback_report.status`, `admin_feedback_status_history`, and `admin_feedback_note` in sync with the real outcome instead of leaving the resolution only in chat, code comments, or repo docs.
 
 ## Core conventions
 
@@ -178,8 +181,10 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Canonical schema migrations: `sql/migrations/20260405_0001_create_admin_feedback_reporting.sql` and `sql/migrations/20260405_0002_create_admin_feedback_management_tables.sql`.
 - DEV recovery note from 2026-04-05: the original feedback attachment DDL used `storage_key VARCHAR(1024) UNIQUE`, which exceeds MySQL/InnoDB's 3072-byte utf8mb4 index limit. The canonical migration now uses `storage_key VARCHAR(512)`, and the shared-schema runner now treats failed tracking rows as still pending and upserts retries into `iset_migration`.
 - Persistence is intentionally separate from `iset_document`: use `admin_feedback_report`, `admin_feedback_attachment`, `admin_feedback_status_history`, and `admin_feedback_note`, because bug/change evidence is not a client/application/case supporting document and must not appear in Supporting Documents.
+- Current operational rule for PROD feedback triage: when Codex confirms, deploys, or otherwise resolves a PROD feedback report, write the corresponding internal note(s) and status transition directly into the PROD `admin_feedback_note`, `admin_feedback_status_history`, and `admin_feedback_report` tables before considering the thread closed.
 - Known PROD triage finding from 2026-04-14: applicant reply failures like admin feedback report `#18` were caused by an older portal reply rule that resolved the allowed recipient from the case's current `assigned_to_user_id` and then rejected replies when the original message sender differed from that assignee. Current repo behavior in `../ISET-intake/server.js` now allows replies to the original thread counterpart when the replied message belongs to the applicant's current case and application, while still keeping new-message compose constrained to the current assigned case manager.
 - Known PROD triage finding from 2026-04-14: the case-workspace Step 6 `Add cost item` buttons were disabled for non-finance roles because `src/pages/Caseworking/caseWorkspace/widgets/InterventionAssessmentWidget.jsx` was calling `/api/config/runtime/payment-type-mapping`, a finance-config endpoint guarded by `requireFinanceRole`. Current repo behavior now reads the existing broader-access payments mapping endpoint `/api/finance/payment-intervention-type-map`, matching the legacy coordinator assessment widget and avoiding false empty cost-item options for `Regional Manager` / `ISET Coordinator`.
+- Known PROD triage finding from 2026-04-14: admin feedback reports `#20` (`/cases/90`) and `#21` (`/cases/50`) from Amanda Curtis were caused by a Regional Manager access gap on the case-workspace route family. Amanda was directly assigned those cases, but because they were outside her regional scope (`AB` / `BC` versus her `NB, NL, NS, ON, PE` assignments), the old workspace guard returned `forbidden` / `failed to load case` instead of honoring direct assignment. Current repo behavior in `src/lib/caseAccess.js` and `isetadminserver.js` now allows direct-assignment access for Regional Managers on the case-workspace/action-plan/intervention routes even when the case region is out of scope.
 - Known PROD data cleanup candidate from 2026-04-14: case `88` / application `6` / client `97` is internally inconsistent. The case and client are stored as Nova Scotia (`iset_case.portfolio_region_id = 7`, `client.address_json.address.province = NS`, `case_context_json.applicationAnswers."address-province" = ns`, `iset_application_submission.intake_payload."address-province" = ns`) while the same record's intake content points to Burns Lake, BC and `education-location = bc`. The prepared guarded correction script is `sql/ops/prod-fix-case-88-region-alignment.sql`.
 
 ## PATH deployment control plane
@@ -347,6 +352,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Record major structural doc reorganizations in `docs/meta/project-map.md`.
 - Maintain `docs/meta/next-release-notes-log.md` as a standing running log for the next Landing Page "What's New" update.
 - Keep release-note entries tagged with an explicit target release number (for example `v0.5.4`) and verify the current public version from `src/pages/LandingPage.jsx` before drafting or updating entries.
+- When drafting user-facing hotfix notes or Landing Page "What's New" bullets, keep them short and outcome-first. Prefer plain openers like `Fixed a bug...` or `Made a change...`, and do not mention internal bug/CR IDs, reporter names, or that the item came from a complaint.
 - Keep credentials and environment-specific secrets out of docs.
 - The thread index exists to recover the exact item in Codex Task History. The Task History label is the point of the index; topic labels are only fallback search aids.
 - When updating `docs/meta/codex-thread-index.md` for the current thread, record the exact Codex Task History label verbatim. If the user gives you the label, store that exact string even if the thread later covers additional topics.

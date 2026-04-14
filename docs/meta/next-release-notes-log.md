@@ -16,6 +16,16 @@ Last Updated: 2026-04-14
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+## Hotfix note style
+
+- Write short, one-sentence, user-facing bullets.
+- Prefer simple openers like `Fixed a bug...` or `Made a change...`.
+- Describe the user-visible outcome, not the internal route, table, or implementation detail.
+- Do not mention bug IDs, change-request IDs, reporter names, or that the item came from a complaint.
+- Keep unrelated fixes as separate bullets instead of chaining them together.
+- Good example: `Fixed a bug where some Regional Managers could not open case files that were already assigned to them if those files belonged to a different region.`
+- Good example: `Made a change so the admin intake editor, preview, and Manual Intake follow the same conditional step rules as the public application form.`
+
 ## Entries
 
 - 2026-04-14 | Release v0.5.9 | Fix/API/Casework | Case Workspace access for Regional Managers | Directly assigned case files now stay openable for Regional Managers across the case-workspace endpoints even when the file sits outside the manager's normal regional scope. | This closes the route mismatch where some `/cases/:id` actions still returned `403 region_scope_mismatch` for directly assigned files while the assignment itself was valid.
@@ -183,6 +193,8 @@ Last Updated: 2026-04-14
 
 ### What's New (draft bullets)
 
+- Fixed a bug where some Regional Managers could not open case files that were already assigned to them if those files belonged to a different region.
+- Made a change so the admin intake editor, preview, and Manual Intake follow the same conditional step rules as the public application form.
 - Notification Settings now lets admins configure the PATH sender email used for PATH-generated SES mail, with the value shared across the admin dashboard and portal through runtime config.
 - v0.5.4: Reporting > Data and Results now uses a cleaner 3-column control layout with participant province/territory, case manager, fiscal year, and demo-mode controls aligned to the workbook-style reporting page.
 - v0.5.4: Reporting > Data and Results now supports case-manager slice-and-dice filtering on the live PATH-backed operational sections, while keeping Quarterly Data Uploads agreement-wide.

@@ -40,6 +40,12 @@ Provide an in-app way for signed-in PATH staff to report admin-console bugs and 
   - status history
   - internal admin notes
 
+## Operational triage expectations
+
+- If a PROD feedback report is materially investigated, fixed, deployed, or otherwise resolved through Codex, update the live PROD feedback log before closing the thread.
+- Keep `admin_feedback_report.status`, `admin_feedback_status_history`, and `admin_feedback_note` in sync with the real PROD outcome instead of leaving the resolution only in chat or repo docs.
+- User-facing hotfix or release-note copy should stay neutral and outcome-focused. Use short bullets such as `Fixed a bug...` or `Made a change...`, and do not reference report IDs, reporter names, or that a change came from a complaint.
+
 ## Current form model
 
 - Report type: `bug` or `change_request`
