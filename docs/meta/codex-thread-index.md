@@ -2,7 +2,7 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-04-11
+Last Updated: 2026-04-14
 
 ## How to use
 
@@ -31,6 +31,38 @@ For each indexed thread/topic, keep:
 - `Status`: whether the note is current, partial, incomplete-title, or superseded
 
 ## Indexed Topics
+
+### Digital forms parity, workflow-21 publish alignment, and later admin follow-ups
+
+- Codex task title: `Investigate digital forms`
+- Topic: aligning the admin digital-forms editor suite with the published public-intake runtime, verifying DEV workflow-21 authoring/runtime parity, and the later same-thread homepage/Application Overview follow-up changes
+- Keywords: `Investigate digital forms`, `digital forms`, `intake editor parity`, `workflow preview parity`, `manual intake parity`, `workflow 21`, `step library`, `workflow library`, `workflow.schema.intake`, `buildWorkflowSchema`, `Step 19`, `containsAny`, `containsAll`, `Approvals below All Cases`, `NWAC Administrator status selector`
+- When to open: the user references the `Investigate digital forms` thread, asks whether the step library/workflow library still drift from the published intake, asks how the intake step editor / Workflow Preview / Manual Intake were brought back in line with the public portal runtime, asks about the remaining caveats for those admin paths, or remembers the later same-thread changes that moved `Approvals` under the case queue or extended the Application Overview status selector to NWAC Administrators
+- Primary docs:
+  - `docs/planning/step19-checkbox-conditionality-followup.md`
+  - `docs/features/file-uploads/conditional-visibility-authoring.md`
+  - `docs/guides/workflow-studio.md`
+  - `docs/dashboards/admin-home-my-work-widget.md`
+  - `docs/dashboards/application-assessment-dashboard.md`
+  - `docs/AGENTS.md`
+- Status: current as of 2026-04-14
+- Notes: durable outcomes from this thread: the admin intake-step editor, validation path, Workflow Preview, and Manual Intake now share the runtime-backed conditional-visibility operator set used by the public portal for renderable manual-intake content, including checkbox-array operators (`contains`, `notContains`, `containsAny`, `notContainsAny`, `containsAll`) and whole-step skipping when authored content becomes fully hidden. Workflow Preview and Manual Intake now also clear hidden answers so stale conditional data does not survive backtracking. DEV workflow `21` authoring rows were compared directly against `iset_runtime_config(scope='publish', k='workflow.schema.intake')`, and `buildWorkflowSchema` / `scripts/publish-workflow.js` now reproduce the same published payload apart from normal timestamp/checksum refresh, so the step library, workflow library, and published runtime row are back in sync in DEV. Remaining caveat: Manual Intake still intentionally skips portal-only upload/signature steps, so parity claims there apply only to renderable manual-intake content. Later in the same thread, the homepage `Work Queue` was reordered so `Approvals` appears directly below `All Cases` / `Clients in My Region` for `NWAC Administrator` and `Regional Manager`, and the `Application Overview` manual status selector was extended to `NWAC Administrator` users.
+
+### PROD X bug and change-request triage, hotfix rollout, and feedback-log closure
+
+- Codex task title: `Triage PROD X bugs and CRs`
+- Topic: production triage and closure of the April 14 PROD X feedback reports, including the Step 6 cost-item fix, the applicant secure-message reply fix, the two-decimal currency display fix, hotfix deployment guidance, and final PROD feedback-log status updates
+- Keywords: `Triage PROD X bugs and CRs`, `PROD X`, `prod bug log`, `admin_feedback_report`, `What will it cost step 6`, `Client cannot respond`, `Dollar values`, `Trouble uploading files`, `Approval/Denial`, `Wabanang Polson`, `wabapolson@gmail.com`, `wpolson978@my.nipissingu.ca`, `recipient_not_allowed`, `payment-intervention-type-map`, `hotfix-20260414-bugfixes`, `hotfix-20260414-bugfixes-prod`, `no banner`, `10 MB upload cap`
+- When to open: the user references the PROD X bug/CR triage thread, asks which April 2026 PROD feedback reports were confirmed and fixed, asks what was deployed in the `hotfix-20260414-bugfixes` or `hotfix-20260414-bugfixes-prod` releases, asks whether the applicant reply issue for Wabanang Polson was the same case Codex fixed, asks why Step 6 `Add cost item` was disabled for some staff, asks about the one-decimal dollar-display bug, or asks what final notes/statuses were written back to the PROD feedback log for reports `#13` through `#18`
+- Primary docs:
+  - `docs/AGENTS.md`
+  - `docs/features/admin-feedback-reporting.md`
+  - `docs/ops/deployments/prod-deployment-guide.md`
+  - `docs/ops/environments/prod-env-guide.md`
+  - `docs/ops/deployments/path-deploy-orchestrator.md`
+  - `scripts/run-prod-sql-via-ssm.sh`
+- Status: current as of 2026-04-14
+- Notes: durable outcomes from this thread: PROD feedback reports `#13` through `#18` were reviewed against live prod data and code. Confirmed software defects were `#13` (case-workspace Step 6 `Add cost item` falsely disabled because `InterventionAssessmentWidget` fetched the finance-only `/api/config/runtime/payment-type-mapping` endpoint instead of a broader-read payment mapping source), `#15` / `#16` (application-form dollar values could render with one decimal because `IsetApplicationFormWidget` used a formatter with `minimumFractionDigits: 0`), and `#18` (applicant replies to an existing secure-message thread could fail with `recipient_not_allowed` after case reassignment because portal reply targeting was tied to the current assignee rather than the original same-case thread counterpart). `#14` was confirmed as a real change request but not a hotfix candidate because approval/denial reversal needs its own audit-safe design. `#17` was not fixed in code by Codex; the later resolution was based on a manual increase of the upload cap to `10 MB`, and that manual cap change should not be described as part of the Codex hotfix. The applicant tied to case `84` was confirmed from PROD as Wabanang Polson, with current portal account email `wabapolson@gmail.com`; if staff mention `wpolson978@my.nipissingu.ca`, treat that as a possible alternate contact rather than the PATH login on file. The code hotfixes were deployed app-only to TEST as release `hotfix-20260414-bugfixes` and to PROD as release `hotfix-20260414-bugfixes-prod`, with no schema or data changes required for those fixes. The agreed PROD operator guidance for that rollout was `no banner`, `no ALB maintenance fallback`, and user impact framed as near-zero-downtime hotfix deployment; during the actual PROD refresh there was a brief transient `502` while the replacement instance finished bootstrap and ALB health thresholds, but the release completed successfully with public health `200` on `https://nwac-console.awentech.ca/healthz`, `https://iset.nwac.ca/healthz`, and `https://nwac-public.awentech.ca/healthz`. Final PROD feedback-log outcomes from the same thread were: `#13 resolved`, `#14 triaging`, `#15 resolved`, `#16 closed` as duplicate of `#15`, `#17 resolved` on the basis of the manual `10 MB` upload-cap increase, and `#18 resolved`, with matching internal notes and status-history rows written directly into the PROD `admin_feedback_note`, `admin_feedback_status_history`, and `admin_feedback_report` tables.
 
 ### Application timing targets and EI status verification stage
 
@@ -356,14 +388,15 @@ For each indexed thread/topic, keep:
 
 ### Step 19 checkbox-conditionality follow-up
 
+- Codex task title: `exact original task title not preserved`
 - Topic: keeping Step 19 `Supports Requested` as a checkbox array while driving later intake conditionality from those selections
 - Keywords: `step 19`, `supports requested`, `checkbox array`, `contains`, `containsAny`, `notContainsAny`, `manual intake parity`, `workflow preview parity`
 - When to open: the user asks why Step 19 support selections work in the public portal but not in Manual Intake or preview, or asks how the checkbox-array conditionality was implemented without refactoring Step 19 into yes/no fields
 - Primary docs:
   - `docs/planning/step19-checkbox-conditionality-followup.md`
   - `docs/AGENTS.md`
-- Status: current partial implementation as of 2026-04-01
-- Notes: public portal runtime support and DEV workflow-21 authoring were added on 2026-04-01. That runtime support now includes checkbox-array operators plus whole-step skipping when a step has no visible components, and DEV Step 21/22 rely on that behavior instead of placeholder notices. Workflow 21 also now branches after Step `93` so applicants with `dependent-children = 0` are sent to a cloned Step 19 that omits the `Childcare` option. Manual Intake, Workflow Preview, and the intake-step editor still need parity work before this becomes a full-stack authoring feature. Additional 2026-04-02 deployment note: last-minute portal/runtime fixes now exist in DEV runtime data that current admin-side authoring/preview flows cannot faithfully regenerate, so prod intake rollouts must copy `iset_runtime_config(scope='publish', k='workflow.schema.intake')` from DEV rather than relying on admin-side republish, and Manual Intake is not yet safe to treat as parity coverage for the newest runtime schema.
+- Status: superseded by `Investigate digital forms` for current parity state as of 2026-04-14
+- Notes: this older recovery alias is still useful for Step 19 searches, but the current state has moved forward. Admin Workflow Preview, the intake-step editor, and Manual Intake now support the runtime checkbox-array operator set and whole-step skipping for renderable manual-intake content, and DEV workflow `21` authoring rows now regenerate the published runtime payload in `iset_runtime_config(scope='publish', k='workflow.schema.intake')`. The remaining caveat is narrower than before: Manual Intake still intentionally skips portal-only upload/signature steps. For the current full recovery note, open the `Investigate digital forms` entry above.
 
 ### TEST staff Cognito recovery
 

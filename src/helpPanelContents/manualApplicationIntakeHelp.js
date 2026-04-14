@@ -22,8 +22,16 @@ const ManualApplicationIntakeHelp = () => (
       <strong>How the intake flow behaves</strong>
       <p>
         PATH validates each step before moving forward. If you leave and come back in the same browser,
-        the page can restore your in-progress draft. Use <em>Reset</em> only when you want to clear the
-        local draft and start over.
+        the page can restore your in-progress draft. Manual Intake now follows the published schema&apos;s
+        conditional visibility rules and skips steps that have nothing left to enter for the current answer
+        path. Use <em>Reset</em> only when you want to clear the local draft and start over.
+      </p>
+    </Box>
+    <Box>
+      <strong>Limits to know</strong>
+      <p>
+        Manual Intake is for entering the application data itself. Steps that are only for portal uploads or
+        portal-only signing are not completed here and may be skipped in the manual path.
       </p>
     </Box>
     <Box>
@@ -51,7 +59,8 @@ ManualApplicationIntakeHelp.aiContext =
 Explain the page as a staff data-entry workflow, not a technical feature:
 - Use it for applications received outside the public portal.
 - Tell the user to work from the paper/PDF/phone/in-person source and enter the information accurately.
-- Explain that each step validates before Next, drafts can be restored in the same browser session, and Reset clears the local draft.
+- Explain that each step validates before Next, drafts can be restored in the same browser session, conditional visibility can hide and skip irrelevant steps, and Reset clears the local draft.
+- Mention that upload-only or portal-signature-only steps are not completed in Manual Intake and may be skipped in this admin path.
 - After Create Application, PATH opens the new Application Workspace where documents, notes, and applicant follow-up continue.
 
 Training-aligned reminders to mention when relevant:

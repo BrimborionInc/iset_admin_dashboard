@@ -30,6 +30,7 @@ import IsetApplicationFormHelpPanelContent from '../helpPanelContents/isetApplic
 import { apiFetch } from '../auth/apiClient';
 import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplicationLock';
 import useCurrentUser from '../hooks/useCurrentUser';
+import { formatCurrencyDisplay } from '../utils/currencyFormat';
 
 const NOT_PROVIDED = <Box color="text-body-secondary">Not provided</Box>;
 
@@ -227,8 +228,6 @@ const EXPENSE_FIELDS = [
   { key: 'expenses-other-total', label: 'Other expenses total' }
 ];
 
-const currencyFormatter = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD', minimumFractionDigits: 0 });
-
 const parseCurrencyValue = (value) => {
   if (value === null || value === undefined) return { number: null, cleaned: '' };
   if (typeof value === 'number' && Number.isFinite(value)) return { number: value, cleaned: String(value) };
@@ -245,7 +244,7 @@ const formatCurrency = (value) => {
     if (!cleaned || value === null || value === undefined || value === '') return NOT_PROVIDED;
     return String(value);
   }
-  return currencyFormatter.format(number);
+  return formatCurrencyDisplay(number);
 };
 
 const formatDate = (value) => {
@@ -389,7 +388,7 @@ const buildFinancialRows = (fields, answers, totalLabel) => {
       name: label,
       rawValue: rawValue ?? '',
       number,
-      formattedAmount: number === null ? '' : currencyFormatter.format(number),
+      formattedAmount: number === null ? '' : formatCurrencyDisplay(number),
       isTotal: false
     };
   });
@@ -399,7 +398,7 @@ const buildFinancialRows = (fields, answers, totalLabel) => {
     name: totalLabel,
     rawValue: '',
     number: total,
-    formattedAmount: currencyFormatter.format(total),
+    formattedAmount: formatCurrencyDisplay(total),
     isTotal: true
   };
   return [...rows, totalRow];

@@ -42,6 +42,16 @@ const ModifyIntakeStepHelp = () => (
         <p>Duplicate value and empty label checks surface as red badges. Ensure each option has a stable value (used in json-logic & submission payload).</p>
       </Section>
 
+      <Section header="3A. Conditional Visibility">
+        <p>Conditional visibility now follows the same rule contract used by the public portal runtime preview path.</p>
+        <ul>
+          <li>Supported operators: <code>equals</code>, <code>notEquals</code>, <code>exists</code>, <code>notExists</code>, <code>emptyOrZero</code>, <code>contains</code>, <code>notContains</code>, <code>containsAny</code>, <code>notContainsAny</code>, <code>containsAll</code>, <code>&gt;</code>, <code>&lt;</code>.</li>
+          <li><code>contains*</code> operators are intended for checkbox-array answers such as Step 19 supports. Use comma-separated values for <code>containsAny</code>, <code>notContainsAny</code>, and <code>containsAll</code>.</li>
+          <li>Refs from earlier components in the same step are always available. Workflow context is optional and only needed when a component must react to fields authored elsewhere.</li>
+          <li>The Validate panel now flags unsupported operators, missing comparison values, missing refs, and conditions attached to component types the runtime will ignore.</li>
+        </ul>
+      </Section>
+
       <Section header="4. Page (Step) Properties">
         <p>Edit Step <strong>Name</strong> & <strong>Status</strong> (Active / Inactive). Inactive may hide from production flows depending on consuming logic.</p>
       </Section>

@@ -31,6 +31,7 @@ const ManageWorkflowsHelpPanel = () => {
         <h3>Common Tasks</h3>
         <ul>
           <li>Create a draft in Library &rarr; add steps (Modify) &rarr; validate with Interactive preview &rarr; Publish.</li>
+          <li>Use the Interactive preview to verify conditional visibility and whole-step skipping before publish.</li>
           <li>Use the Runtime Schema to verify storage keys and branching before rollout.</li>
           <li>Copy Output JSON (Preview) when filing support tickets about data capture.</li>
         </ul>

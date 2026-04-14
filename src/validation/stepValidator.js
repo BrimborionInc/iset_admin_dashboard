@@ -4,6 +4,14 @@
 
 // Categories: structure, i18n, accessibility, options, logic, config, linkage
 
+import {
+  componentCanBeConditionReference,
+  componentSupportsConditionalVisibility,
+  conditionOperatorRequiresValue,
+  conditionOperatorSupported,
+  getConditionLookupKeys,
+} from '../utils/intakeConditionalVisibility';
+
 // Helper: safe bilingual string extractor
 function extractLang(val, lang='en') {
   if (!val) return '';
@@ -34,6 +42,11 @@ export function validateStep(step, opts = {}) {
   const issues = [];
   if (!step || typeof step !== 'object') return [{ id: issueId('fatal'), category: 'structure', severity: 'error', message: 'Invalid step object' }];
   const components = Array.isArray(step.components) ? step.components : [];
+  const conditionReferenceKeys = new Set();
+  components.forEach((c) => {
+    if (!componentCanBeConditionReference(c?.template_key || c?.type)) return;
+    getConditionLookupKeys(c).forEach((key) => conditionReferenceKeys.add(String(key)));
+  });
 
   // 1. Duplicate data keys (name/id) among components
   const keyMap = new Map();
@@ -199,7 +212,123 @@ export function validateStep(step, opts = {}) {
     });
   });
 
-  // 7. Summary List: if present, ensure configured
+  // 7. Conditional visibility authoring sanity
+  components.forEach((c, idx) => {
+    const t = String(c?.template_key || c?.type || '').toLowerCase();
+    const conditions = c?.props?.conditions;
+    if (!conditions || typeof conditions !== 'object') return;
+    const rules = Array.isArray(conditions.all) ? conditions.all : [];
+    const externalRefs = new Set();
+    const workflowSnapshot = Array.isArray(c?.props?.__workflowFields) ? c.props.__workflowFields : [];
+    workflowSnapshot.forEach((stepSnap) => {
+      (Array.isArray(stepSnap?.components) ? stepSnap.components : []).forEach((field) => {
+        const ref = field?.ref || field?.name || field?.id;
+        if (ref) externalRefs.add(String(ref));
+      });
+    });
+
+    if (!componentSupportsConditionalVisibility(t)) {
+      issues.push({
+        id: issueId('condscope'),
+        category: 'config',
+        severity: 'warning',
+        message: 'Conditional visibility is configured on a component type that the runtime does not currently honor',
+        componentIndex: idx,
+        componentName: c?.props?.name,
+      });
+      return;
+    }
+
+    if (!rules.length) {
+      issues.push({
+        id: issueId('condempty'),
+        category: 'config',
+        severity: 'info',
+        message: 'Conditional visibility is enabled but contains no rules',
+        componentIndex: idx,
+        componentName: c?.props?.name,
+      });
+      return;
+    }
+
+    rules.forEach((rule, ruleIndex) => {
+      if (!rule || typeof rule !== 'object') {
+        issues.push({
+          id: issueId('condrule'),
+          category: 'config',
+          severity: 'warning',
+          message: `Condition ${ruleIndex + 1} is malformed`,
+          componentIndex: idx,
+          componentName: c?.props?.name,
+        });
+        return;
+      }
+
+      const ref = String(rule.ref || '').trim();
+      const op = String(rule.op || '').trim();
+      const needsValue = conditionOperatorRequiresValue(op);
+      const hasValue = !(rule.value === undefined || rule.value === null || String(rule.value).trim() === '');
+
+      if (!ref) {
+        issues.push({
+          id: issueId('condref'),
+          category: 'config',
+          severity: 'error',
+          message: `Condition ${ruleIndex + 1} is missing a field reference`,
+          componentIndex: idx,
+          componentName: c?.props?.name,
+        });
+      } else if (
+        !conditionReferenceKeys.has(ref) &&
+        !externalRefs.has(ref) &&
+        !ref.includes('.') &&
+        !ref.includes('[')
+      ) {
+        issues.push({
+          id: issueId('condref'),
+          category: 'linkage',
+          severity: 'warning',
+          message: `Condition ${ruleIndex + 1} references '${ref}', but that field is not available in this step or selected workflow context`,
+          componentIndex: idx,
+          componentName: c?.props?.name,
+        });
+      }
+
+      if (!conditionOperatorSupported(op)) {
+        issues.push({
+          id: issueId('condop'),
+          category: 'config',
+          severity: 'error',
+          message: `Condition ${ruleIndex + 1} uses unsupported operator '${op || '(blank)'}'`,
+          componentIndex: idx,
+          componentName: c?.props?.name,
+        });
+        return;
+      }
+
+      if (needsValue && !hasValue) {
+        issues.push({
+          id: issueId('condvalue'),
+          category: 'config',
+          severity: 'error',
+          message: `Condition ${ruleIndex + 1} requires a comparison value`,
+          componentIndex: idx,
+          componentName: c?.props?.name,
+        });
+      } else if (!needsValue && hasValue) {
+        issues.push({
+          id: issueId('condvalue'),
+          category: 'config',
+          severity: 'info',
+          message: `Condition ${ruleIndex + 1} includes a value that the selected operator ignores`,
+          componentIndex: idx,
+          componentName: c?.props?.name,
+        });
+      }
+    });
+  });
+
+  // 8. Summary List: if present, ensure configured
   components.forEach((c, idx) => {
     const t = String(c?.template_key || c?.type || '').toLowerCase();
     if (t !== 'summary-list') return;
@@ -211,7 +340,7 @@ export function validateStep(step, opts = {}) {
     }
   });
 
-  // 8. Page name / status sanity
+  // 9. Page name / status sanity
   if (!step.name || !String(step.name).trim()) {
     issues.push({ id: issueId('stepname'), category: 'structure', severity: 'error', message: 'Step name is blank' });
   }

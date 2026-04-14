@@ -2,6 +2,16 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-04-14
+- UX/Workflow: Intake step authoring and Workflow Preview now expose the same runtime-backed checkbox-array conditional-visibility operators and whole-step skip behavior as the public portal, bringing the admin editor suite back in line for renderable intake content.
+- Ops/Workflow: Verified that DEV workflow `21` authoring rows now regenerate the published intake runtime payload, so the step library, workflow library, and `publish/workflow.schema.intake` row are back in sync in DEV.
+- UX/Applications: Application Overview now exposes the manual status selector to `NWAC Administrator` users as well as `System Administrator`, while keeping the existing role-scoped transition checks and finalized-status confirmation flow.
+- UX/Home: Reordered the homepage `Work Queue` for `NWAC Administrator` and `Regional Manager` so `Approvals` now sits directly below the case queue in both the card layout and the `Work queue preferences` list.
+- UX/Workflow/Manual Intake: Manual Application Intake now uses the same shared conditional-visibility operators and visible-step skipping logic as the public-intake-aligned admin preview/editor path, so support-driven follow-up steps like the Step 19 checkbox flow stay navigable in the admin console without stale hidden answers leaking into submission.
+- Fix/UX/Casework: Case Workspace `Intervention Assessment` Step 6 now loads payment-type mapping from the existing payments read endpoint used by the coordinator assessment flow, so `Regional Manager` and `ISET Coordinator` users no longer lose all `Add cost item` options because of a finance-config `403`.
+- Fix/UX/Applications: `ISET Application Form` financial totals and amount displays now use the shared two-decimal CAD currency helper instead of a one-off formatter that could show inconsistent decimal precision.
+- Fix/Messaging/Portal: Applicant message replies now stay allowed when the replied thread belongs to the applicant's current case and application but the original staff sender is no longer the current case assignee, preventing false `recipient_not_allowed` reply failures after reassignment.
+
 ## 2026-04-11
 - Fix/Security/Casework: Hardened Word supporting-document viewing so the internal preview path now falls back to a cached self-contained HTML preview when a deployed host cannot launch Chromium for PDF rendering, instead of failing the document view outright.
 - Workflow/UX/Configuration: Added a configurable `EI Status Verification` timing target between Assignment and Assessment, seeded through `sla_stage_target`, and exposed it in `Configuration > Workflow timing targets`.

@@ -2,7 +2,7 @@
 
 Purpose: document the live homepage Work Queue widget and the queues that drive the shared `Work Queue Items` table.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-03-30
+Last Updated: 2026-04-14
 
 ## Scope
 
@@ -21,12 +21,14 @@ Last Updated: 2026-03-30
 - `NWAC Administrator`
   - sees `All Applications` first
   - then sees `All Cases`
-  - then sees the shared admin/manager queue set (`Unassigned Applications`, `Unresolved Conflicts`, `EI Eligibility Checks`, `Exceptions & Escalations`, `Approvals`, `Payments Issues`, `Watchlist Hits`, `Marked for Closure`, `Overdue`)
+  - then sees `Approvals`
+  - then sees the remaining shared admin/manager queue set (`Unassigned Applications`, `Unresolved Conflicts`, `EI Eligibility Checks`, `Exceptions & Escalations`, `Payments Issues`, `Watchlist Hits`, `Marked for Closure`, `Overdue`)
 - `Regional Manager`
   - sees `Applications in My Region` first
   - then sees `Clients in My Region`
+  - then sees `Approvals`
   - then sees `My Applications`
-  - then sees the shared admin/manager queue set
+  - then sees the remaining shared admin/manager queue set
 - `ISET Coordinator`
   - sees the coordinator-specific queue set from `IsetCoordinatorWorkQueueWidget`
 

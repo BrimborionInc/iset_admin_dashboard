@@ -2498,7 +2498,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     const loadMapping = async () => {
       setPaymentTypeMappingLoading(true);
       try {
-        const response = await apiFetch("/api/config/runtime/payment-type-mapping", { method: "GET" });
+        const response = await apiFetch("/api/finance/payment-intervention-type-map", { method: "GET" });
         if (!response.ok) throw new Error(`Failed to load payment mapping (${response.status})`);
         const payload = await response.json().catch(() => null);
         if (!cancelled) setPaymentTypeMapping(normalizePaymentTypeMappingPayload(payload));

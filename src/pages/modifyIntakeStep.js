@@ -12,6 +12,12 @@ import PropertiesPanel, { ValidationEditor } from './PropertiesPanel.js';
 import { validateStep, summarizeIssues } from '../validation/stepValidator';
 import TranslationsWidget from '../widgets/TranslationsWidget';
 import { apiFetch } from '../auth/apiClient';
+import {
+  componentSupportsConditionalVisibility,
+  CONDITIONAL_VISIBILITY_OPERATOR_OPTIONS,
+  CONDITIONAL_VISIBILITY_REFERENCEABLE_TYPES,
+  conditionOperatorRequiresValue,
+} from '../utils/intakeConditionalVisibility';
 
 // API_BASE constant removed; all network calls now go through apiFetch which handles base URL & auth.
 
@@ -980,7 +986,7 @@ const ModifyComponent = () => {
   const historyIndexRef = useRef(historyIndex);
   const [initialComponents, setInitialComponents] = useState([]);
   const [selectedComponent, setSelectedComponent] = useState(null);
-  // Draft inputs for adding a conditional visibility rule (file-upload panel)
+  // Draft inputs for adding a conditional visibility rule in the selected component panel
   const [condDraftRef, setCondDraftRef] = useState('');
   const [condDraftOp, setCondDraftOp] = useState('equals');
   const [condDraftValue, setCondDraftValue] = useState('');
@@ -1117,13 +1123,18 @@ const ModifyComponent = () => {
     setSelectedComponent(sc => (sc && sc.index < snap.length) ? { ...snap[sc.index], index: sc.index } : null);
   };
 
-  // --- Conditional Visibility (file-upload) workflow selector state ---
+  // --- Conditional Visibility workflow selector state ---
   const [condWfLoading, setCondWfLoading] = useState(false);
   const [condWorkflows, setCondWorkflows] = useState([]);
   const condWorkflowsLoadedRef = useRef(false);
+  const workflowIdsMatch = (left, right) => {
+    if (left === undefined || left === null || right === undefined || right === null) return false;
+    return String(left) === String(right);
+  };
   useEffect(() => {
     if (!selectedComponent) return;
-    const t = String(selectedComponent.template_key || selectedComponent.type || '').toLowerCase();    const allowedTypes = new Set(['file-upload', 'radio', 'radios', 'input']);    if (!allowedTypes.has(t)) return;    if (condWorkflowsLoadedRef.current) return;
+    if (!componentSupportsConditionalVisibility(selectedComponent)) return;
+    if (condWorkflowsLoadedRef.current) return;
     setCondWfLoading(true);
     (async () => {
       try {
@@ -1143,20 +1154,28 @@ const ModifyComponent = () => {
 
   const handleSelectCondWorkflow = async (wfId) => {
     if (!selectedComponent) return;
+    const normalizedWorkflowId = (() => {
+      if (wfId === undefined || wfId === null) return null;
+      const trimmed = String(wfId).trim();
+      if (!trimmed) return null;
+      const numeric = Number(trimmed);
+      return Number.isFinite(numeric) ? numeric : trimmed;
+    })();
     try {
       // Patch component props with chosen workflowId for conditions context
       let updatedComp = null;
       setComponents(prev => prev.map((c,i) => {
         if (i !== selectedComponent.index) return c;
-        const nextProps = { ...(c.props||{}), conditionsWorkflowId: wfId };
+        const nextProps = { ...(c.props||{}), conditionsWorkflowId: normalizedWorkflowId };
+        if (!normalizedWorkflowId) delete nextProps.__workflowFields;
         updatedComp = { ...c, props: nextProps };
         return updatedComp;
       }));
       if (updatedComp) {
         setSelectedComponent({ ...updatedComp, index: selectedComponent.index });
       }
-      if (!wfId) return;
-      const wfDetails = await apiFetch(`/api/workflows/${wfId}`);
+      if (!normalizedWorkflowId) return;
+      const wfDetails = await apiFetch(`/api/workflows/${normalizedWorkflowId}`);
       let wfData = null;
       if (wfDetails && typeof wfDetails.json === 'function') {
         if (wfDetails.ok) {
@@ -1167,11 +1186,10 @@ const ModifyComponent = () => {
         wfData = wfDetails;
       }
       if (wfData && Array.isArray(wfData.steps)) {
-        // If steps do not include components, attempt per-step fetch to enrich snapshot
-        const enrichedSteps = [];
-        for (const step of wfData.steps) {
+        // If steps do not include components, fetch the missing step payloads in parallel.
+        const enrichedSteps = await Promise.all(wfData.steps.map(async (step) => {
           let stepObj = step;
-            // Only fetch if components missing
+          // Only fetch if components missing
           if (!Array.isArray(stepObj.components)) {
             try {
               const stepResp = await apiFetch(`/api/steps/${step.id}`);
@@ -1188,8 +1206,8 @@ const ModifyComponent = () => {
               console.warn('Conditional visibility: step component fetch failed', step.id, e);
             }
           }
-          enrichedSteps.push(stepObj);
-        }
+          return stepObj;
+        }));
         const stepsForSnapshot = enrichedSteps.length ? enrichedSteps : wfData.steps;
         const snapshot = stepsForSnapshot.map((s, si) => {
           const comps = Array.isArray(s.components) ? s.components : [];
@@ -1219,7 +1237,7 @@ const ModifyComponent = () => {
         let finalComp = null;
         setComponents(prev => prev.map((c,i) => {
           if (i !== selectedComponent.index) return c;
-          const nextProps = { ...(c.props||{}), __workflowFields: snapshot, conditionsWorkflowId: wfId };
+          const nextProps = { ...(c.props||{}), __workflowFields: snapshot, conditionsWorkflowId: normalizedWorkflowId };
             finalComp = { ...c, props: nextProps };
           return finalComp;
         }));
@@ -1231,6 +1249,15 @@ const ModifyComponent = () => {
       console.error('Load workflow details (conditional visibility) failed', e);
     }
   };
+
+  useEffect(() => {
+    if (!selectedComponent || !componentSupportsConditionalVisibility(selectedComponent)) return;
+    const existingWorkflowId = selectedComponent?.props?.conditionsWorkflowId;
+    const hasSnapshot = Array.isArray(selectedComponent?.props?.__workflowFields);
+    if (!existingWorkflowId || hasSnapshot) return;
+    handleSelectCondWorkflow(existingWorkflowId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedComponent]);
 
   // Add component with i18n seeding (moved inside component scope to satisfy linter)
   const pendingSelectIndexRef = useRef(null);
@@ -1642,6 +1669,8 @@ const ModifyComponent = () => {
       const templateKey = c.template_key || c.type;
       // Shallow clone props to avoid mutating editor state
       const props = c.props ? { ...c.props } : {};
+      // Editor-only workflow field snapshots should not persist in authored step JSON.
+      if (Object.prototype.hasOwnProperty.call(props, '__workflowFields')) delete props.__workflowFields;
       // If summary-list has been configured (workflow selected or included rows chosen), drop placeholder rows
       if ((templateKey === 'summary-list') && props) {
         const hasConfig = (Array.isArray(props.included) && props.included.length) || props.workflowId;
@@ -1992,33 +2021,21 @@ const ModifyComponent = () => {
                 );
               })()}
               {selectedComponent && (() => {
-                // Scaffold: Conditional visibility editor (beta) for selected component types (initially file-upload, now extends to radios + input)
-                const t = String(selectedComponent?.template_key || selectedComponent?.type || '').toLowerCase();
-                const allowedTypes = new Set(['file-upload', 'radio', 'radios', 'input']);
-                if (!allowedTypes.has(t)) return null;
+                if (!componentSupportsConditionalVisibility(selectedComponent)) return null;
 
                 const idx = selectedComponent.index;
-                // Gather prior components as potential refs
-                // Local step prior components
-                const inputLikeTypes = new Set(['input','text','email','phone','password','number','textarea','select','radio','radios','checkbox','checkboxes','date','date-input','character-count','file-upload']);
                 const priorLocal = components
                   .slice(0, idx)
                   .filter(Boolean)
-                  .filter(c => {
-                    const ttype = String(c.template_key || c.type || '').toLowerCase();
-                    return inputLikeTypes.has(ttype);
-                  })
+                  .filter(c => CONDITIONAL_VISIBILITY_REFERENCEABLE_TYPES.has(String(c.template_key || c.type || '').toLowerCase()))
                   .map((c, i) => {
                     const ref = c.props?.name || c.props?.id || c.id || c.templateId || `comp-${i + 1}`;
                     return { label: ref, value: ref, group: 'This Step' };
                   });
-                // Prototype: if workflow fields snapshot already attached to this component (e.g., via future PropertiesPanel selection)
-                // expect structure props.__workflowFields = [{ stepId, components:[{ ref, label }] }]
                 const wfFields = [];
                 try {
                   const snap = selectedComponent.props?.__workflowFields;
                   if (Array.isArray(snap)) {
-                    const includeTypes = new Set(['input','text','email','phone','password','number','textarea','select','radio','checkbox','checkboxes','date','date-input','character-count','file-upload']);
                     snap.forEach(s => {
                       const sid = s.stepName || s.stepId || 'Step';
                       (s.components||[]).forEach(f => {
@@ -2027,8 +2044,7 @@ const ModifyComponent = () => {
                         if (!ref) return;
                         let ttype = String(f.type || '').toLowerCase();
                         if (!ttype && f.templateKey) ttype = String(f.templateKey).toLowerCase();
-                        // Exclude anything not explicitly in allowlist (including missing type)
-                        if (!ttype || !includeTypes.has(ttype)) return; // skip non-input / display-only components
+                        if (!ttype || !CONDITIONAL_VISIBILITY_REFERENCEABLE_TYPES.has(ttype)) return;
                         const lab = f.label || ref;
                         wfFields.push({ label: `${lab} (${sid})`, value: ref, group: sid });
                       });
@@ -2038,8 +2054,8 @@ const ModifyComponent = () => {
                 const liveComponent = components[idx] || selectedComponent;
                 const liveConditions = liveComponent?.props?.conditions || { all: [] };
                 const condWfId = liveComponent?.props?.conditionsWorkflowId || null;
-                const prior = [...priorLocal, ...wfFields];
-                // Local ephemeral control state is not kept; rely on immediate writes to component props via setComponents.
+                const selectedCondWorkflow = condWorkflows.find((w) => workflowIdsMatch(w?.id, condWfId));
+                const prior = Array.from(new Map([...priorLocal, ...wfFields].map(item => [item.value, item])).values());
                 const addRule = (rule) => {
                   let updatedComp = null;
                   setComponents(prev =>
@@ -2106,104 +2122,129 @@ const ModifyComponent = () => {
                   }
                 };
 
-                // Temporary state for new rule inputs kept in refs to avoid re-renders
-                // Replaced ref object with component state (condDraftRef/Op/Value) so inputs are interactive.
+                const selectedOperator = CONDITIONAL_VISIBILITY_OPERATOR_OPTIONS.find((option) => option.value === condDraftOp) || CONDITIONAL_VISIBILITY_OPERATOR_OPTIONS[0];
+                const operatorNeedsValue = conditionOperatorRequiresValue(condDraftOp);
+                const valueDescription = (() => {
+                  switch (condDraftOp) {
+                    case 'containsAny':
+                    case 'notContainsAny':
+                    case 'containsAll':
+                      return 'Enter one or more values separated by commas.';
+                    case 'contains':
+                    case 'notContains':
+                      return 'Enter the single option value that should be checked for membership.';
+                    default:
+                      return operatorNeedsValue ? 'Enter the comparison value.' : 'Ignored for this operator.';
+                  }
+                })();
+
                 return (
-                  <ExpandableSection headerText="Conditional Visibility (Beta)" defaultExpanded={false}>
+                  <ExpandableSection headerText="Conditional Visibility" defaultExpanded={false}>
                     <SpaceBetween size="s">
-                      <Box variant="p" fontSize="body-s" color="text-body-secondary">                        Use these conditions to show this component only when every rule you add evaluates to true.                      </Box>                      <FormField label="Workflow context" description="Optionally pull fields from another workflow's steps.">
-                        <Select
-                          statusType={condWfLoading ? 'loading' : 'finished'}
-                          placeholder={condWfLoading ? 'Loading workflows…' : 'Select workflow (optional)'}
-                          selectedOption={condWfId && condWorkflows.find(w => w.id === condWfId) ? { label: condWorkflows.find(w => w.id === condWfId).name, value: condWfId } : null}
-                          onChange={({ detail }) => handleSelectCondWorkflow(detail.selectedOption?.value || null)}
-                          options={condWorkflows.map(w => ({ label: w.name, value: w.id }))}
-                          expandToViewport
-                        />
-                      </FormField>
-                      {!condWfId && (
-                        <Box color="text-body-secondary">Select a workflow to configure visibility conditions.</Box>
-                      )}
+                      <Box variant="p" fontSize="body-s" color="text-body-secondary">
+                        Use these conditions to show this component only when every rule you add evaluates to true. This editor now mirrors the public portal runtime operators, including checkbox-array matching.
+                      </Box>
+                      <SpaceBetween direction="horizontal" size="xs">
+                        <FormField label="Workflow context" description="Optional. Adds fields from another workflow to the ref picker.">
+                          <Select
+                            statusType={condWfLoading ? 'loading' : 'finished'}
+                            placeholder={condWfLoading ? 'Loading workflows…' : 'Select workflow (optional)'}
+                            selectedOption={selectedCondWorkflow ? { label: selectedCondWorkflow.name, value: selectedCondWorkflow.id } : null}
+                            onChange={({ detail }) => handleSelectCondWorkflow(detail.selectedOption?.value || null)}
+                            options={condWorkflows.map(w => ({ label: w.name, value: w.id }))}
+                            expandToViewport
+                          />
+                        </FormField>
+                        {condWfId && (
+                          <Button onClick={() => handleSelectCondWorkflow(null)}>
+                            Clear workflow
+                          </Button>
+                        )}
+                      </SpaceBetween>
+                      <Box color="text-body-secondary">
+                        Refs from earlier components in this step are always available. Select a workflow only when this component needs to react to fields authored elsewhere in the journey.
+                      </Box>
                       {condWfId && !liveComponent?.props?.__workflowFields && (
                         <Box variant="span" color="text-status-info">Loading workflow fields…</Box>
                       )}
-                      {condWfId && liveComponent?.props?.__workflowFields && (
-                        <>
-                          {(() => {
-                            const snap = liveComponent?.props?.__workflowFields || [];
-                            const totalFields = snap.reduce((acc,s)=> acc + ((s.components&&s.components.length)||0),0);
-                            if (totalFields === 0) {
-                              return (
-                                <Alert type="info">
-                                  No input fields found in the selected workflow steps. The field list below will remain empty until that workflow has components with identifiable refs (props.name or id).
-                                </Alert>
-                              );
-                            }
-                            return null;
-                          })()}
-                          <Table
-                            variant="embedded"
-                            columnDefinitions={[
-                              { id: 'ref', header: 'Ref', cell: r => r.ref },
-                              { id: 'op', header: 'Op', cell: r => r.op },
-                              { id: 'val', header: 'Value', cell: r => (r.value===undefined||r.value===null||r.value==='') ? '—' : String(r.value) },
-                              { id: 'act', header: '', cell: (row) => (
-                                <Button
-                                  variant="icon"
-                                  iconName="close"
-                                  ariaLabel="Remove"
-                                  onClick={() => removeRule(row.__ruleIndex)}
-                                />
-                              ) }
-                            ]}
-                            items={(liveConditions.all || []).map((r, ri) => ({ ...r, __ruleIndex: ri }))}
-                            empty={<Box color="text-body-secondary">No conditions defined.</Box>}
-                            ariaLabels={{ tableLabel: 'Conditional visibility rules' }}
-                          />
-                          <SpaceBetween size="xs">
-                            <FormField label="When field" stretch>
-                              <Select
-                                selectedOption={condDraftRef ? { label: condDraftRef, value: condDraftRef } : null}
-                                onChange={({ detail }) => { setCondDraftRef(detail.selectedOption?.value || ''); }}
-                                options={prior}
-                                placeholder="Select a field"
-                              />
-                            </FormField>
-                            <FormField label="Operator">
-                              <Select
-                                selectedOption={{ label: condDraftOp, value: condDraftOp }}
-                                onChange={({ detail }) => {
-                                  const next = detail.selectedOption?.value || 'equals';
-                                  setCondDraftOp(next);
-                                  if (['exists','notExists','emptyOrZero'].includes(next)) setCondDraftValue('');
-                                }}
-                                options={[ 'equals','notEquals','exists','notExists','emptyOrZero','>','<' ].map(o => ({ label: o, value: o }))}
-                              />
-                            </FormField>
-                            <FormField label="Value" description="Ignored for exists/notExists/emptyOrZero">
-                              <Input
-                                value={condDraftValue}
-                                onChange={({ detail }) => { setCondDraftValue(detail.value); }}
-                                placeholder="e.g. married"
-                                disabled={['exists','notExists','emptyOrZero'].includes(condDraftOp)}
-                              />
-                            </FormField>
+                      {condWfId && liveComponent?.props?.__workflowFields && (() => {
+                        const snap = liveComponent?.props?.__workflowFields || [];
+                        const totalFields = snap.reduce((acc,s)=> acc + ((s.components&&s.components.length)||0),0);
+                        if (totalFields === 0) {
+                          return (
+                            <Alert type="info">
+                              No referenceable input fields were found in the selected workflow. You can still author rules against components earlier in this step.
+                            </Alert>
+                          );
+                        }
+                        return null;
+                      })()}
+                      <Table
+                        variant="embedded"
+                        columnDefinitions={[
+                          { id: 'ref', header: 'Ref', cell: r => r.ref },
+                          { id: 'op', header: 'Op', cell: r => r.op },
+                          { id: 'val', header: 'Value', cell: r => (r.value===undefined||r.value===null||r.value==='') ? '—' : String(r.value) },
+                          { id: 'act', header: '', cell: (row) => (
                             <Button
-                              onClick={() => {
-                                if (!condDraftRef) return;
-                                const rule = { ref: condDraftRef, op: condDraftOp };
-                                if (!['exists','notExists','emptyOrZero'].includes(condDraftOp)) rule.value = condDraftValue;
-                                addRule(rule);
-                                // reset draft
-                                setCondDraftRef('');
-                                setCondDraftOp('equals');
-                                setCondDraftValue('');
-                              }}
-                              variant="primary"
-                            >Add condition</Button>
-                          </SpaceBetween>
-                        </>
+                              variant="icon"
+                              iconName="close"
+                              ariaLabel="Remove"
+                              onClick={() => removeRule(row.__ruleIndex)}
+                            />
+                          ) }
+                        ]}
+                        items={(liveConditions.all || []).map((r, ri) => ({ ...r, __ruleIndex: ri }))}
+                        empty={<Box color="text-body-secondary">No conditions defined.</Box>}
+                        ariaLabels={{ tableLabel: 'Conditional visibility rules' }}
+                      />
+                      {!prior.length && (
+                        <Alert type="info">
+                          Add at least one input component earlier in this step, or choose a workflow context, before authoring conditions.
+                        </Alert>
                       )}
+                      <SpaceBetween size="xs">
+                        <FormField label="When field" stretch>
+                          <Select
+                            selectedOption={condDraftRef ? { label: condDraftRef, value: condDraftRef } : null}
+                            onChange={({ detail }) => { setCondDraftRef(detail.selectedOption?.value || ''); }}
+                            options={prior}
+                            placeholder={prior.length ? 'Select a field' : 'No available fields'}
+                          />
+                        </FormField>
+                        <FormField label="Operator">
+                          <Select
+                            selectedOption={{ label: selectedOperator.label, value: selectedOperator.value }}
+                            onChange={({ detail }) => {
+                              const next = detail.selectedOption?.value || 'equals';
+                              setCondDraftOp(next);
+                              if (!conditionOperatorRequiresValue(next)) setCondDraftValue('');
+                            }}
+                            options={CONDITIONAL_VISIBILITY_OPERATOR_OPTIONS.map(o => ({ label: o.label, value: o.value }))}
+                          />
+                        </FormField>
+                        <FormField label="Value" description={valueDescription}>
+                          <Input
+                            value={condDraftValue}
+                            onChange={({ detail }) => { setCondDraftValue(detail.value); }}
+                            placeholder={condDraftOp.includes('contains') ? 'e.g. living,transportation' : 'e.g. married'}
+                            disabled={!operatorNeedsValue}
+                          />
+                        </FormField>
+                        <Button
+                          onClick={() => {
+                            if (!condDraftRef) return;
+                            const rule = { ref: condDraftRef, op: condDraftOp };
+                            if (operatorNeedsValue) rule.value = condDraftValue;
+                            addRule(rule);
+                            setCondDraftRef('');
+                            setCondDraftOp('equals');
+                            setCondDraftValue('');
+                          }}
+                          variant="primary"
+                          disabled={!condDraftRef || (operatorNeedsValue && !String(condDraftValue || '').trim())}
+                        >Add condition</Button>
+                      </SpaceBetween>
                     </SpaceBetween>
                   </ExpandableSection>
                 );

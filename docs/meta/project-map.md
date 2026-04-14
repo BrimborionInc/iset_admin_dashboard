@@ -23,7 +23,7 @@ Purpose: Living reference of structure, core modules, and cross-cutting concerns
 (Continuously expanded; every newly learned architectural fact must be reflected here immediately – standing directive.)
 - `layouts/`: Navigation & global layout components (e.g., `DemoNavigation.js`, `TopNavigation.js`). Handles global admin controls, top-level navigation, and session-aware layout state.
 - `pages/`: Page-level screens & dashboards (all dashboards, editors, management consoles live here). Examples: `home/HomeDashboardPage.jsx` (landing dashboard), `templateEditorDashboard.js` (standalone notification template authoring), `modifyIntakeStep.js` (intake step/component authoring working area), workflow management pages, code tables, messaging, notifications.
-- `widgets/`: Reusable complex UI building blocks embedded within pages (e.g., `WorkflowPreviewWidget.js` – interactive workflow step preview mirroring portal runtime logic for file upload visibility & messaging). Pages compose multiple widgets; widgets should not own routing.
+- `widgets/`: Reusable complex UI building blocks embedded within pages (e.g., `WorkflowPreviewWidget.js` – interactive workflow step preview mirroring portal runtime logic for conditional visibility, option-reveal children, and whole-step skipping). Pages compose multiple widgets; widgets should not own routing.
 - `features/`: Feature-scoped UI modules that are broader than a widget but narrower than a full page. Current example: `src/features/adminFeedback/` for the shell-level bug/change reporting and System Administrator feedback-review windows.
 - `auth/`: Cognito helpers for session storage, token parsing, Hosted UI redirects, and bearer-auth API calls.
 - (Future) `components/`: Smaller presentational or configuration components (to catalog as added).
@@ -78,7 +78,7 @@ Purpose: Living reference of structure, core modules, and cross-cutting concerns
 - Dev task metadata central source: `src/devTasksData.js`.
 
 ## Workflow Authoring & Preview
-- `WorkflowPreviewWidget.js`: Simulates portal step rendering, respects conditional visibility for `file-upload` components, shows bilingual "no documents required" notice when all hidden.
+- `WorkflowPreviewWidget.js`: Simulates portal step rendering, now using the shared admin conditional-visibility evaluator so preview matches portal behavior for supported condition targets, checkbox-array operators, option reveal-children, and steps that become empty after hiding.
 - Block step JSON templates in `blocksteps/` consumed to build workflows; Nunjucks templates provide markup for some step types.
 - Planned extension point: new `signature-ack` component for acknowledgment capture (task t9, see Tasks & Roadmap below once added).
 
@@ -150,7 +150,11 @@ Risk Mitigations:
 - Clear rollback (delete registry entry & macro) if regressions appear.
 
 ## Conditional Visibility
-- Current parity established for file upload components only (AND semantics). Planned enhancements (task t7) to introduce grouped boolean logic and isNull/isNotNull operators.
+- Admin intake-step authoring and `WorkflowPreviewWidget.js` now share the runtime-backed operator set for supported target components: `equals`, `notEquals`, `exists`, `notExists`, `emptyOrZero`, `contains`, `notContains`, `containsAny`, `notContainsAny`, `containsAll`, `>`, `<`.
+- Workflow Preview now skips steps whose authored content becomes fully hidden after conditional evaluation and renumbers visible progress to match the applicant-visible path.
+- Manual Intake now uses the same shared evaluator and visible-step skipping for renderable manual-intake steps, clearing hidden answers after backtracks so stale values are not submitted.
+- Manual Intake still intentionally skips portal-only upload and signature steps.
+- Planned enhancements (task t7) remain grouped boolean logic and isNull/isNotNull-style operators if future runtime work requires them.
 
 ## Development Tasks System
 - Source of truth: `devTasksData.js` -> merged into `sessionStorage.devTasks`.
@@ -194,6 +198,9 @@ Risk Mitigations:
 - v0.4a: Draft `src/server-macros/signature-ack.njk` macro scaffolded (not yet wired into preview route or registry) to enable upcoming server-first rendering.
 - v0.4b: Added Query Editor architecture notes and corrected stale documentation paths under Docs & Specs and development-task references.
 - v0.4c: Added shell-notifications notes covering `AppLayout.notifications`, internal-notification data flow, and the current lack of hot-push refresh for service-wide warnings.
+- v0.4d: Updated workflow-authoring notes to reflect shared conditional-visibility utilities, runtime-parity workflow preview behavior, and the then-remaining Manual Intake parity gap.
+- v0.4e: Updated Manual Intake notes to reflect shared conditional-visibility evaluation, visible-step skipping, and the intentional omission of portal-only upload/signature steps.
+- v0.4f: Closed the intake parity follow-up by documenting that the step editor, Workflow Preview, and renderable Manual Intake content now align with the public-intake runtime operator set and that DEV workflow `21` authoring rows rebuild the published runtime payload.
 
 ---
 Maintenance (Standing Directive): This map MUST be updated immediately upon learning any new structural, architectural, or cross-cutting detail (pages vs widgets placement, new directories, lifecycle hooks, synchronization pipelines). No feature work considered complete until corresponding map updates are made.

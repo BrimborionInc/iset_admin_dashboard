@@ -851,7 +851,7 @@ const ApplicationOverviewWidget = ({
     isApplicationAssessorRole
   } = roleAccess;
   const roleKey = normalizeEscalationRole(canonicalRoleKey);
-  const canEditStatus = isSystemAdministratorRole && canEditCaseStatus({
+  const canEditStatus = isAdminRole && canEditCaseStatus({
     role: canonicalRole || userRole,
     status: fallbackStatus,
     hasCase: Boolean(caseData?.id),
@@ -1768,7 +1768,7 @@ const ApplicationOverviewWidget = ({
 
     if (statusSelectDisabled) {
       const message = !canEditStatus
-        ? 'Status changes in this widget are limited to system administrators.'
+        ? 'Status changes in this widget are limited to System Administrators and NWAC Administrators.'
         : 'Status changes are not permitted right now.';
       setStatusFeedback({ type: 'info', content: message });
       return;
@@ -1783,7 +1783,7 @@ const ApplicationOverviewWidget = ({
       return;
     }
 
-    if (isSystemAdministratorRole && isFinalStatus && canonicalNextStatus !== canonicalStatus) {
+    if (isAdminRole && isFinalStatus && canonicalNextStatus !== canonicalStatus) {
       setConfirmStatusChange({ nextStatus, nextOption });
       return;
     }
@@ -1791,7 +1791,7 @@ const ApplicationOverviewWidget = ({
     runStatusUpdate(nextStatus, nextOption);
   };
 
-  const statusFormField = isSystemAdministratorRole ? (
+  const statusFormField = isAdminRole ? (
     <FormField stretch={true} label="" description="">
       <Select
         selectedOption={selectedStatusOption}

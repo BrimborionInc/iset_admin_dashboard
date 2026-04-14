@@ -19,6 +19,17 @@ import jsonLogic from 'json-logic-js';
 import { apiFetch } from '../../auth/apiClient';
 import PortalRegistry from '../../portalRendererRegistry';
 import ManualApplicationIntakeHelp from '../../helpPanelContents/manualApplicationIntakeHelp';
+import { buildConditionComponentLookup } from '../../utils/intakeConditionalVisibility';
+import {
+  buildManualValidationData,
+  collectActiveManualComponents,
+  collectHiddenConditionalManualKeys,
+  componentIsVisibleInManual,
+  findFirstRenderableManualStepIndex,
+  findNextRenderableManualStepIndex,
+  findStepIndexByField,
+  stepHasRenderableManualContent,
+} from '../../utils/manualIntakeRuntime';
 
 const STORAGE_KEY = 'manual-application-intake-runtime.v2';
 const DASHBOARD_STORAGE_KEY = 'manual-intake-dashboard-layout-v1';
@@ -31,7 +42,7 @@ const INTAKE_SOURCE_OPTIONS = [
   { label: 'Other', value: 'other' },
 ];
 
-const nonInputTypes = new Set(['paragraph', 'text-block', 'summary-list', 'panel', 'inset-text']);
+const nonInputTypes = new Set(['paragraph', 'text-block', 'summary-list', 'panel', 'inset-text', 'warning-text']);
 const INTAKE_WIDGET_ID = 'manual-intake-flow';
 
 const widgetRegistry = {
@@ -338,68 +349,34 @@ function componentKey(component, index) {
   return component.storageKey || component.id || `component-${index}`;
 }
 
-function computeVisibility(component, answers, steps) {
-  const conditions = component?.conditions?.all;
-  if (!Array.isArray(conditions) || conditions.length === 0) return true;
+function StepRenderer({ step, answers, errors, setAnswer, lang, componentLookup, stepTitle }) {
+  const renderNode = (component, componentIndex, isTopLevel = true) => {
+    if (!component || !componentIsVisibleInManual(component, answers, componentLookup)) return null;
 
-  const resolveRefValue = (ref) => {
-    if (Object.prototype.hasOwnProperty.call(answers, ref)) return answers[ref];
-    for (const step of steps) {
-      const comps = Array.isArray(step?.components) ? step.components : [];
-      for (const comp of comps) {
-        const matches = String(comp.id) === String(ref) || comp?.props?.name === ref || comp?.storageKey === ref;
-        if (!matches) continue;
-        const key = comp.storageKey || comp.id;
-        if (key && Object.prototype.hasOwnProperty.call(answers, key)) return answers[key];
-      }
-    }
-    return undefined;
-  };
-
-  const exists = (v) => {
-    if (v === null || typeof v === 'undefined') return false;
-    if (typeof v === 'string') return v.trim() !== '';
-    if (Array.isArray(v)) return v.length > 0;
-    if (typeof v === 'object') return Object.keys(v).length > 0;
-    return true;
-  };
-
-  for (const cond of conditions) {
-    if (!cond || !cond.ref || !cond.op) return false;
-    const raw = resolveRefValue(cond.ref);
-    const ln = coerceNumber(raw);
-    const rn = coerceNumber(cond.value);
-    switch (cond.op) {
-      case 'exists': if (!exists(raw)) return false; break;
-      case 'notExists': if (exists(raw)) return false; break;
-      case 'equals':
-        if (ln !== null && rn !== null) { if (ln !== rn) return false; }
-        else if (String(raw ?? '') !== String(cond.value ?? '')) return false;
-        break;
-      case 'notEquals':
-        if (ln !== null && rn !== null) { if (ln === rn) return false; }
-        else if (String(raw ?? '') === String(cond.value ?? '')) return false;
-        break;
-      case '>': if (ln === null || rn === null || !(ln > rn)) return false; break;
-      case '<': if (ln === null || rn === null || !(ln < rn)) return false; break;
-      default: return false;
-    }
-  }
-  return true;
-}
-
-function StepRenderer({ step, answers, errors, setAnswer, lang, steps, stepTitle }) {
-  const renderComponent = (component, componentIndex) => {
     const key = componentKey(component, componentIndex);
     const type = String(component.type || '').toLowerCase();
-    const visible = computeVisibility(component, answers, steps);
-    if (!visible) return null;
     if (type === 'signature-ack' || type === 'file-upload') return null;
-    if ((type === 'paragraph' || type === 'text-block') && componentIndex === 0) {
+
+    if ((type === 'paragraph' || type === 'text-block') && isTopLevel && componentIndex === 0) {
       const headingText = t(lang, component?.text, '');
       if (normalizeTextValue(headingText) && normalizeTextValue(headingText) === normalizeTextValue(stepTitle)) {
         return null;
       }
+    }
+
+    if (type === 'warning-text') {
+      const text = t(lang, component?.text || component?.props?.text, '');
+      const assistive = t(lang, component?.iconFallbackText || component?.props?.iconFallbackText, '');
+      const classes = component?.classes || component?.props?.classes || '';
+      return (
+        <div key={key} className={`govuk-warning-text ${classes}`.trim()} role={component?.role || component?.props?.role || 'alert'} style={{ marginBottom: 16 }}>
+          <span className="govuk-warning-text__icon" aria-hidden="true">!</span>
+          <strong className="govuk-warning-text__text">
+            {assistive ? <span className="govuk-warning-text__assistive">{assistive} </span> : null}
+            {text}
+          </strong>
+        </div>
+      );
     }
 
     const Comp = PortalRegistry[type];
@@ -420,68 +397,23 @@ function StepRenderer({ step, answers, errors, setAnswer, lang, steps, stepTitle
         values={answers}
         error={errors[key]}
         onChange={(next) => setAnswer(key, next)}
-        render={(child) => {
-          const childKey = child.storageKey || child.id;
-          const ChildComp = PortalRegistry[String(child.type || '').toLowerCase()];
-          if (!ChildComp || !childKey) return null;
-          return (
-            <ChildComp
-              comp={child}
-              lang={lang}
-              value={answers[childKey]}
-              values={answers}
-              error={errors[childKey]}
-              onChange={(next) => setAnswer(childKey, next)}
-            />
-          );
-        }}
+        render={(child) => renderNode(child, child?.storageKey || child?.id || `${key}-child`, false)}
       />
     );
+  };
+
+  const renderComponent = (component, componentIndex) => {
+    return renderNode(component, componentIndex, true);
   };
 
   const components = Array.isArray(step?.components) ? step.components : [];
   return <>{components.map(renderComponent)}</>;
 }
 
-function collectActiveComponents(step, answers, steps) {
-  const active = [];
-  const components = Array.isArray(step?.components) ? step.components : [];
-
-  const visit = (component) => {
-    if (!component) return;
-    if (!computeVisibility(component, answers, steps)) return;
-    active.push(component);
-    const type = String(component.type || '').toLowerCase();
-    if (type !== 'radio' && type !== 'checkbox' && type !== 'checkboxes') return;
-
-    const key = component.storageKey || component.id;
-    const selected = answers[key];
-    const selectedSet = new Set(Array.isArray(selected) ? selected.map(String) : [String(selected)]);
-    const options = Array.isArray(component.options) ? component.options : [];
-    options.forEach((option) => {
-      if (!selectedSet.has(String(option.value))) return;
-      const children = Array.isArray(option.children)
-        ? option.children
-        : (Array.isArray(option?.conditional?.children) ? option.conditional.children : []);
-      children.forEach((child) => visit(child));
-    });
-  };
-
-  components.forEach((component) => visit(component));
-  return active;
-}
-
-function stepHasActionableInputs(step, answers, steps) {
-  const activeComponents = collectActiveComponents(step, answers, steps);
-  return activeComponents.some((component) => {
-    const type = String(component?.type || '').toLowerCase();
-    return !nonInputTypes.has(type) && type !== 'signature-ack' && type !== 'file-upload';
-  });
-}
-
-function validateStep(step, answers, steps, lang) {
+function validateStep(step, answers, lang, componentLookup) {
   const errors = {};
-  const activeComponents = collectActiveComponents(step, answers, steps);
+  const activeComponents = collectActiveManualComponents(step, answers, componentLookup);
+  const validationData = buildManualValidationData(step, answers);
 
   activeComponents.forEach((component, index) => {
     const key = componentKey(component, index);
@@ -503,7 +435,7 @@ function validateStep(step, answers, steps, lang) {
     for (const rule of validation.rules) {
       const triggers = Array.isArray(rule.trigger) ? rule.trigger : ['submit'];
       if (!triggers.includes('submit')) continue;
-      const result = evaluateRule(rule, value, answers);
+      const result = evaluateRule(rule, value, validationData);
       if (!result.failed) continue;
       errors[key] = result.message || 'Invalid value';
       if (rule.block !== false) break;
@@ -511,69 +443,6 @@ function validateStep(step, answers, steps, lang) {
   });
 
   return errors;
-}
-
-function findNextStepIndex(currentStep, answers, steps) {
-  if (!currentStep) return -1;
-  let nextStepId = null;
-  if (Array.isArray(currentStep.branching)) {
-    for (const branch of currentStep.branching) {
-      try {
-        if (branch?.condition && jsonLogic.apply(branch.condition, answers)) {
-          nextStepId = branch.nextStepId;
-          break;
-        }
-      } catch (_) {
-        // ignore malformed branch expressions
-      }
-    }
-  }
-  if (!nextStepId && currentStep.defaultNextStepId) nextStepId = currentStep.defaultNextStepId;
-  if (!nextStepId && currentStep.nextStepId) nextStepId = currentStep.nextStepId;
-  if (!nextStepId) return -1;
-  const target = String(nextStepId);
-  return steps.findIndex((step, index) => {
-    const normalizedStepId = getStepId(step, index);
-    return String(normalizedStepId) === target
-      || String(step?.stepId ?? '') === target
-      || String(step?.id ?? '') === target;
-  });
-}
-
-function findNextActionableStepIndex(currentIndex, answers, steps) {
-  const visited = new Set();
-  let cursor = currentIndex;
-  while (Number.isInteger(cursor) && cursor >= 0 && cursor < steps.length) {
-    if (visited.has(cursor)) break;
-    visited.add(cursor);
-    const step = steps[cursor];
-    if (stepHasActionableInputs(step, answers, steps)) return cursor;
-    const next = findNextStepIndex(step, answers, steps);
-    if (next < 0) return cursor;
-    cursor = next;
-  }
-  return Number.isInteger(currentIndex) ? currentIndex : 0;
-}
-
-function findStepIndexByField(fieldKey, steps) {
-  for (let stepIndex = 0; stepIndex < steps.length; stepIndex += 1) {
-    const step = steps[stepIndex];
-    const components = Array.isArray(step?.components) ? step.components : [];
-    for (const component of components) {
-      if (!component) continue;
-      if (component.storageKey === fieldKey || component.id === fieldKey) return stepIndex;
-      const options = Array.isArray(component.options) ? component.options : [];
-      for (const option of options) {
-        const children = Array.isArray(option.children)
-          ? option.children
-          : (Array.isArray(option?.conditional?.children) ? option.conditional.children : []);
-        for (const child of children) {
-          if (child?.storageKey === fieldKey || child?.id === fieldKey) return stepIndex;
-        }
-      }
-    }
-  }
-  return -1;
 }
 
 function buildDraftPayload({
@@ -628,10 +497,28 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
   const [submitError, setSubmitError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  const componentLookup = useMemo(() => buildConditionComponentLookup(steps), [steps]);
   const currentStep = steps[runner.stepIndex] || null;
   const currentStepId = currentStep ? getStepId(currentStep, runner.stepIndex) : null;
-  const nextStepIndex = useMemo(() => findNextStepIndex(currentStep, runner.answers, steps), [currentStep, runner.answers, steps]);
-  const isFinalStep = Boolean(currentStep) && nextStepIndex < 0;
+  const hiddenConditionalKeys = useMemo(
+    () => collectHiddenConditionalManualKeys(steps, runner.answers, componentLookup),
+    [componentLookup, runner.answers, steps]
+  );
+  const nextRenderableStepIndex = useMemo(
+    () => findNextRenderableManualStepIndex(runner.stepIndex, runner.answers, steps, componentLookup),
+    [componentLookup, runner.answers, runner.stepIndex, steps]
+  );
+  const visibleStepIndices = useMemo(() => {
+    const indices = steps.reduce((acc, step, index) => {
+      if (stepHasRenderableManualContent(step, runner.answers, componentLookup)) acc.push(index);
+      return acc;
+    }, []);
+    return indices.length ? indices : steps.map((_, index) => index);
+  }, [componentLookup, runner.answers, steps]);
+  const currentVisibleStepIndex = visibleStepIndices.indexOf(runner.stepIndex);
+  const currentVisibleStepNumber = currentVisibleStepIndex >= 0 ? currentVisibleStepIndex + 1 : 1;
+  const totalVisibleSteps = visibleStepIndices.length || 1;
+  const isFinalStep = Boolean(currentStep) && nextRenderableStepIndex < 0;
 
   useEffect(() => {
     const signature = JSON.stringify(paletteItems.map((item) => item.id));
@@ -712,30 +599,39 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
         const draft = loadDraft();
         const nextVersion = data.version || null;
         const nextWorkflowId = String(data.workflowId || data?.meta?.workflowId || 'iset-v1');
+        const nextComponentLookup = buildConditionComponentLookup(nextSteps);
 
         setSchemaVersion(nextVersion);
         setWorkflowId(nextWorkflowId);
         setSteps(nextSteps);
 
         if (draft && draft.schemaVersion === nextVersion) {
+          const draftAnswers = draft.answers && typeof draft.answers === 'object' ? draft.answers : {};
           const restoredIndex = Number.isInteger(draft.stepIndex) ? Math.min(Math.max(draft.stepIndex, 0), nextSteps.length - 1) : 0;
-          const actionableIndex = findNextActionableStepIndex(
-            restoredIndex,
-            draft.answers && typeof draft.answers === 'object' ? draft.answers : {},
-            nextSteps
-          );
+          const restoredStepIsRenderable = stepHasRenderableManualContent(nextSteps[restoredIndex], draftAnswers, nextComponentLookup);
+          const restoredStepIndex = (() => {
+            if (restoredStepIsRenderable) return restoredIndex;
+            const candidate = restoredIndex > 0
+              ? findNextRenderableManualStepIndex(restoredIndex - 1, draftAnswers, nextSteps, nextComponentLookup)
+              : -1;
+            return candidate >= 0
+              ? candidate
+              : findFirstRenderableManualStepIndex(nextSteps, draftAnswers, nextComponentLookup);
+          })();
           setRunner({
-            stepIndex: actionableIndex,
-            answers: draft.answers && typeof draft.answers === 'object' ? draft.answers : {},
+            stepIndex: restoredStepIndex,
+            answers: draftAnswers,
             errors: {},
-            history: Array.isArray(draft.history) ? draft.history : [],
+            history: Array.isArray(draft.history)
+              ? draft.history.filter((index) => Number.isInteger(index) && index >= 0 && index < nextSteps.length)
+              : [],
           });
           setIntakeSource(draft.intakeSource || 'paper');
           setIntakeSourceNotes(draft.intakeSourceNotes || '');
           setLang(draft.lang === 'fr' ? 'fr' : 'en');
         } else {
-          const firstActionable = findNextActionableStepIndex(0, {}, nextSteps);
-          setRunner({ stepIndex: firstActionable, answers: {}, errors: {}, history: [] });
+          const firstRenderable = findFirstRenderableManualStepIndex(nextSteps, {}, nextComponentLookup);
+          setRunner({ stepIndex: firstRenderable, answers: {}, errors: {}, history: [] });
           setIntakeSource('paper');
           setIntakeSourceNotes('');
           setLang('en');
@@ -784,6 +680,36 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
     lang,
   ]);
 
+  useEffect(() => {
+    if (!hiddenConditionalKeys.size) return;
+    setRunner((previous) => {
+      let changed = false;
+      const nextAnswers = { ...previous.answers };
+      const nextErrors = { ...previous.errors };
+      hiddenConditionalKeys.forEach((key) => {
+        if (Object.prototype.hasOwnProperty.call(nextAnswers, key)) {
+          delete nextAnswers[key];
+          changed = true;
+        }
+        if (Object.prototype.hasOwnProperty.call(nextErrors, key)) {
+          delete nextErrors[key];
+          changed = true;
+        }
+      });
+      return changed ? { ...previous, answers: nextAnswers, errors: nextErrors } : previous;
+    });
+  }, [hiddenConditionalKeys]);
+
+  useEffect(() => {
+    if (!started || !steps.length || !currentStep) return;
+    if (stepHasRenderableManualContent(currentStep, runner.answers, componentLookup)) return;
+    const fallbackIndex = runner.stepIndex > 0
+      ? findNextRenderableManualStepIndex(runner.stepIndex - 1, runner.answers, steps, componentLookup)
+      : findFirstRenderableManualStepIndex(steps, runner.answers, componentLookup);
+    if (!Number.isInteger(fallbackIndex) || fallbackIndex < 0 || fallbackIndex === runner.stepIndex) return;
+    setRunner((previous) => ({ ...previous, stepIndex: fallbackIndex, errors: {} }));
+  }, [componentLookup, currentStep, runner.answers, runner.stepIndex, started, steps]);
+
   const setAnswer = (key, value) => {
     const nextValue = key === 'social-insurance-number' ? normalizeSinValue(value) : value;
     setRunner((prev) => {
@@ -801,28 +727,31 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
     setRunner((prev) => {
       if (!prev.history.length) return prev;
       const nextHistory = [...prev.history];
-      const previous = nextHistory.pop();
-      return {
-        ...prev,
-        stepIndex: previous,
-        history: nextHistory,
-        errors: {},
-      };
+      while (nextHistory.length) {
+        const previous = nextHistory.pop();
+        if (!stepHasRenderableManualContent(steps[previous], prev.answers, componentLookup)) continue;
+        return {
+          ...prev,
+          stepIndex: previous,
+          history: nextHistory,
+          errors: {},
+        };
+      }
+      return { ...prev, history: [], errors: {} };
     });
   };
 
   const goNext = () => {
     if (!currentStep) return;
-    const errors = validateStep(currentStep, runner.answers, steps, lang);
+    const errors = validateStep(currentStep, runner.answers, lang, componentLookup);
     if (Object.keys(errors).length > 0) {
       setRunner((prev) => ({ ...prev, errors }));
       return;
     }
-    if (nextStepIndex < 0) return;
-    const actionableIndex = findNextActionableStepIndex(nextStepIndex, runner.answers, steps);
+    if (nextRenderableStepIndex < 0) return;
     setRunner((prev) => ({
       ...prev,
-      stepIndex: actionableIndex,
+      stepIndex: nextRenderableStepIndex,
       history: [...prev.history, prev.stepIndex],
       errors: {},
     }));
@@ -830,7 +759,7 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
 
   const handleSubmit = async () => {
     if (!currentStep) return;
-    const errors = validateStep(currentStep, runner.answers, steps, lang);
+    const errors = validateStep(currentStep, runner.answers, lang, componentLookup);
     if (Object.keys(errors).length > 0) {
       setRunner((prev) => ({ ...prev, errors }));
       return;
@@ -910,7 +839,7 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
       {started ? (
         <SpaceBetween size="l">
           <SpaceBetween direction="horizontal" size="xs">
-            <Box color="text-body-secondary">{`Step ${runner.stepIndex + 1} of ${steps.length}`}</Box>
+            <Box color="text-body-secondary">{`Step ${currentVisibleStepNumber} of ${totalVisibleSteps}`}</Box>
             <Button onClick={() => setLang((prev) => (prev === 'en' ? 'fr' : 'en'))}>
               {lang === 'en' ? 'Francais' : 'English'}
             </Button>
@@ -938,7 +867,7 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
                 errors={runner.errors}
                 setAnswer={setAnswer}
                 lang={lang}
-                steps={steps}
+                componentLookup={componentLookup}
                 stepTitle={t(lang, currentStep.title, currentStep.name || currentStepId || 'Intake Step')}
               />
 
@@ -959,7 +888,12 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
                 <Button
                   disabled={submitting}
                   onClick={() => {
-                    setRunner({ stepIndex: 0, answers: {}, errors: {}, history: [] });
+                    setRunner({
+                      stepIndex: findFirstRenderableManualStepIndex(steps, {}, componentLookup),
+                      answers: {},
+                      errors: {},
+                      history: [],
+                    });
                     setIntakeSource('paper');
                     setIntakeSourceNotes('');
                     setSubmitError('');

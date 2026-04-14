@@ -37,4 +37,5 @@ Case summary, status context, quick actions, and layout shortcuts.
 ## Current Notes
 
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
+- The manual status selector in this widget is currently available to `System Administrator` and `NWAC Administrator` users; other roles see the read-only status badge plus any role-gated quick actions.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.

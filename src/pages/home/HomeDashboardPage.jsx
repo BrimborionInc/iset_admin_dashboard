@@ -159,6 +159,25 @@ const REGIONAL_MANAGER_CLIENT_CASES_BUCKET = {
     label: 'Clients in My Region',
     description: 'Open client cases in your regional portfolio, including dormant files.'
 };
+const APPROVALS_BUCKET_ID = 'approvals';
+
+const moveBucketAfter = (buckets, bucketId, afterId) => {
+    const source = Array.isArray(buckets) ? buckets.filter(Boolean) : [];
+    const target = source.find(bucket => bucket?.id === bucketId) || null;
+    if (!target) {
+        return source;
+    }
+    const withoutTarget = source.filter(bucket => bucket?.id !== bucketId);
+    const afterIndex = withoutTarget.findIndex(bucket => bucket?.id === afterId);
+    if (afterIndex < 0) {
+        return withoutTarget;
+    }
+    return [
+        ...withoutTarget.slice(0, afterIndex + 1),
+        target,
+        ...withoutTarget.slice(afterIndex + 1)
+    ];
+};
 
 const buildDevHeaders = (role) => {
     return { Accept: 'application/json' };
@@ -398,19 +417,19 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         if (!isWorkQueueRole) return [];
         if (isRegionalCoordinatorRole) {
             const myBucket = ISET_COORDINATOR_BUCKETS.find(bucket => bucket.id === 'my-new-applications') || null;
-            return [
+            return moveBucketAfter([
                 REGIONAL_MANAGER_OPEN_APPLICATIONS_BUCKET,
                 REGIONAL_MANAGER_CLIENT_CASES_BUCKET,
                 ...(myBucket ? [myBucket] : []),
                 ...PROGRAM_ADMIN_BUCKETS
-            ];
+            ], APPROVALS_BUCKET_ID, REGIONAL_MANAGER_CLIENT_CASES_BUCKET.id);
         }
         if (isNwacAdminRole) {
-            return [
+            return moveBucketAfter([
                 NWAC_ADMIN_OPEN_APPLICATIONS_BUCKET,
                 NWAC_ADMIN_CLIENT_CASES_BUCKET,
                 ...PROGRAM_ADMIN_BUCKETS
-            ];
+            ], APPROVALS_BUCKET_ID, NWAC_ADMIN_CLIENT_CASES_BUCKET.id);
         }
         return PROGRAM_ADMIN_BUCKETS;
     }, [isWorkQueueRole, isNwacAdminRole, isRegionalCoordinatorRole]);

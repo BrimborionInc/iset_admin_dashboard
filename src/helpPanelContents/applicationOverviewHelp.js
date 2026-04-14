@@ -12,7 +12,8 @@ const ApplicationOverviewHelp = () => (
     <ul>
       <li>
         <strong>Check status:</strong> The badge shows the current application status. If your role allows, use
-        the selector to update status and trigger downstream updates.
+        the selector to update status and trigger downstream updates. Manual status changes from this widget are
+        available to System Administrators and NWAC Administrators.
       </li>
       <li>
         <strong>Validate identifiers:</strong> Copy the reference number, contact email, or phone details for
@@ -53,7 +54,7 @@ const ApplicationOverviewHelp = () => (
 
 ApplicationOverviewHelp.aiContext = `
 You are assisting an ISET program coordinator using the Application Overview widget. Explain the status badge and
-selector, timeline status, assignment and escalation quick actions, document checklist summary, the ESDC/ILMP reporting status shown for denied-ineligible records, and where to confirm identifiers and contact details.
+selector, including that the manual status selector in this widget is available to System Administrators and NWAC Administrators, plus timeline status, assignment and escalation quick actions, document checklist summary, the ESDC/ILMP reporting status shown for denied-ineligible records, and where to confirm identifiers and contact details.
 Keep guidance operational and aligned with the visible controls. Treat this widget as the first orientation point in the file, not as a substitute for reviewing the underlying application, documents, notes, and assessment.
 `;
 

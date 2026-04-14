@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, SegmentedControl, Modal } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import ReactFlow from 'reactflow';
@@ -9,6 +9,13 @@ import jsonLogic from 'json-logic-js';
 // Reuse the actual public portal component registry for faithful rendering
 // The portal package is linked via file:../ISET-intake in package.json, so we can import its renderer registry directly.
 import PortalRegistry from '../portalRendererRegistry';
+import {
+  buildConditionComponentLookup,
+  componentConditionsSatisfied,
+  componentSupportsConditionalVisibility,
+  optionRevealChildren,
+  visitComponentTree,
+} from '../utils/intakeConditionalVisibility';
 
 // Dedicated component for signature-ack preview so hooks are not used inside map callback
 function SignatureAckPreview({ comp: c, answerObj, lang, setAnswer, errorMsg }) {
@@ -105,6 +112,17 @@ const NODE_W = 160;
 const NODE_H = 60;
 const GAP_X = 180;
 const GAP_Y = 96;
+const DISPLAY_ONLY_TYPES = new Set([
+  'paragraph',
+  'text-block',
+  'summary-list',
+  'panel',
+  'inset-text',
+  'warning-text',
+  'details',
+  'accordion',
+  'label',
+]);
 
 const elk = new ELK();
 
@@ -269,7 +287,11 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
   const [showAnswers, setShowAnswers] = useState(false);
   // Load runtime schema only when workflow changes (retain answers & position when switching modes)
   useEffect(() => {
-    if (!selectedWorkflow) { setRuntime(null); setRunner({ stepIndex: 0, answers: {}, errors: {}, history: [] }); return; }
+    if (!selectedWorkflow) {
+      setRuntime(null);
+      setRunner({ stepIndex: 0, answers: {}, errors: {}, warnings: {}, history: [] });
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -278,7 +300,7 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
           if (resp.ok) {
             const data = await resp.json();
             setRuntime(data);
-            setRunner({ stepIndex: 0, answers: {}, errors: {}, history: [] });
+            setRunner({ stepIndex: 0, answers: {}, errors: {}, warnings: {}, history: [] });
           } else {
             setRuntime({ error: 'Failed to load runtime schema' });
           }
@@ -330,127 +352,183 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
   }, [mode, hasSummaryList]);
   const currentStep = steps[runner.stepIndex] || null;
   const answers = runner.answers;
+  const componentLookup = useMemo(() => buildConditionComponentLookup(steps), [steps]);
 
-  // --- Conditional Visibility (file-upload) ---------------------------------
-  // v1 scope: only file-upload components honor props.conditions (AND semantics).
-  // No cross-workflow references are supported; any ref not present in current answers fails its rule.
-  // Unrecognized operators or malformed rules => component hidden (fail-closed).
-  // When a file-upload becomes hidden its stored answer is cleared to avoid stale submissions.
-  function refValue(ref) {
-    if (ref == null) return undefined;
-    // Direct key match first
-    if (Object.prototype.hasOwnProperty.call(answers, ref)) return answers[ref];
-    // Fallback: locate component whose props.name or id matches ref, then use its storageKey/id
-    for (const s of steps) {
-      if (!s || !Array.isArray(s.components)) continue;
-      for (const c of s.components) {
-        if (!c) continue;
-        const nameMatch = c.props && (c.props.name === ref || c.props.id === ref);
-        const idMatch = String(c.id) === String(ref);
-        if (nameMatch || idMatch) {
-          const key = c.storageKey || c.id;
-          if (key != null && Object.prototype.hasOwnProperty.call(answers, key)) return answers[key];
-        }
-      }
-    }
-    return undefined;
-  }
-  function valueExists(v) {
-    if (v === null || v === undefined) return false;
-    if (Array.isArray(v)) return v.length > 0;
-    if (typeof v === 'object') return Object.keys(v).length > 0;
-    if (typeof v === 'string') return v.trim() !== '';
-    return true;
-  }
-  function coerceForCompare(v) {
-    if (v === null || v === undefined || v === '') return null;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  }
-  function evaluateConditions(conds) {
-    if (!conds || typeof conds !== 'object') return true; // no conditions => visible
-    const all = Array.isArray(conds.all) ? conds.all : [];
-    if (!all.length) return true;
-    for (const r of all) {
-      if (!r || !r.ref || !r.op) return false; // malformed => fail
-      const raw = refValue(r.ref);
-      switch (r.op) {
-        case 'exists':
-          if (!valueExists(raw)) return false;
-          break;
-        case 'notExists':
-          if (valueExists(raw)) return false;
-          break;
-        case 'emptyOrZero': {
-          if (!valueExists(raw)) break;
-          const ln = coerceForCompare(raw);
-          if (ln === 0) break;
-          return false;
-        }
-        case 'equals': {
-          const lhs = raw;
-          const rhs = r.value;
-          // numeric equality if both numeric
-            const ln = coerceForCompare(lhs); const rn = coerceForCompare(rhs);
-            if (ln !== null && rn !== null) { if (ln !== rn) return false; }
-            else { if (String(lhs ?? '') !== String(rhs ?? '')) return false; }
-          break;
-        }
-        case 'notEquals': {
-          const lhs = raw; const rhs = r.value;
-          const ln = coerceForCompare(lhs); const rn = coerceForCompare(rhs);
-          if (ln !== null && rn !== null) { if (ln === rn) return false; }
-          else { if (String(lhs ?? '') === String(rhs ?? '')) return false; }
-          break;
-        }
-        case '>': {
-          const ln = coerceForCompare(raw); const rn = coerceForCompare(r.value);
-          if (ln === null || rn === null) return false; if (!(ln > rn)) return false; break;
-        }
-        case '<': {
-          const ln = coerceForCompare(raw); const rn = coerceForCompare(r.value);
-          if (ln === null || rn === null) return false; if (!(ln < rn)) return false; break;
-        }
-        default:
-          return false; // unknown operator => fail
-      }
-    }
-    return true; // all passed
-  }
+  const componentIsVisible = useCallback((component, currentAnswers) => {
+    if (!component || typeof component !== 'object') return false;
+    if (!componentSupportsConditionalVisibility(component)) return true;
+    return componentConditionsSatisfied(component, currentAnswers, componentLookup);
+  }, [componentLookup]);
 
-  // Detect if current step has file-upload components and all are hidden by conditions
-  function allFileUploadsHidden(stepObj){
-    if(!stepObj) return false;
-    const comps = Array.isArray(stepObj.components)? stepObj.components: [];
-    const fileUploads = comps.filter(c=> c && c.type === 'file-upload');
-    if(!fileUploads.length) return false; // no file-upload components
-    // If every file-upload evaluates to hidden, return true
-    for(const c of fileUploads){
-      const cond = c.props?.conditions || c.conditions;
-      const visible = evaluateConditions(cond);
-      if(visible) return false;
-    }
-    return true;
-  }
+  const currentStepComponents = useMemo(() => {
+    const components = [];
+    visitComponentTree(currentStep?.components || [], (component) => {
+      components.push(component);
+    });
+    return components;
+  }, [currentStep]);
 
-  // --- Validation (unified schema parity with public portal) --------------
-  // Helper: flatten top-level components plus single-level option children (conditional reveals)
-  function flattenComponents(stepObj){
-    const list = [];
-    if(!stepObj || !Array.isArray(stepObj.components)) return list;
-    for(const c of stepObj.components){
-      if(!c) continue;
-      list.push(c);
-      if(Array.isArray(c.options)){
-        for(const opt of c.options){
-          if(opt && Array.isArray(opt.children)){
-            for(const ch of opt.children){ if(ch) list.push(ch); }
+  const hiddenConditionalKeys = useMemo(() => {
+    const hidden = new Set();
+    currentStepComponents.forEach((component) => {
+      if (!componentSupportsConditionalVisibility(component)) return;
+      if (componentIsVisible(component, answers)) return;
+      const key = component.storageKey || component.id;
+      if (key) hidden.add(key);
+    });
+    return hidden;
+  }, [answers, componentIsVisible, currentStepComponents]);
+
+  useEffect(() => {
+    if (!hiddenConditionalKeys.size) return;
+    setRunner((previous) => {
+      let changed = false;
+      const nextAnswers = { ...previous.answers };
+      const nextErrors = { ...previous.errors };
+      const nextWarnings = { ...(previous.warnings || {}) };
+      hiddenConditionalKeys.forEach((key) => {
+        if (Object.prototype.hasOwnProperty.call(nextAnswers, key)) {
+          delete nextAnswers[key];
+          changed = true;
+        }
+        if (Object.prototype.hasOwnProperty.call(nextErrors, key)) {
+          delete nextErrors[key];
+          changed = true;
+        }
+        if (Object.prototype.hasOwnProperty.call(nextWarnings, key)) {
+          delete nextWarnings[key];
+          changed = true;
+        }
+      });
+      return changed ? { ...previous, answers: nextAnswers, errors: nextErrors, warnings: nextWarnings } : previous;
+    });
+  }, [hiddenConditionalKeys]);
+
+  const componentWouldRender = useCallback((component, currentAnswers) => {
+    if (!component || typeof component !== 'object') return false;
+    if (!componentIsVisible(component, currentAnswers)) return false;
+    const type = String(component.type || '').toLowerCase();
+    if (PortalRegistry[type] || type === 'warning-text' || type === 'signature-ack') return true;
+    if (Array.isArray(component.children) && component.children.some((child) => componentWouldRender(child, currentAnswers))) {
+      return true;
+    }
+    if (Array.isArray(component.options)) {
+      return component.options.some((option) =>
+        optionRevealChildren(option).some((child) => componentWouldRender(child, currentAnswers))
+      );
+    }
+    return false;
+  }, [componentIsVisible]);
+
+  const stepHasVisibleContent = useCallback((stepObj, currentAnswers) => {
+    if (!stepObj || typeof stepObj !== 'object') return false;
+    const description = stepObj.description;
+    const hasDescription =
+      (typeof description === 'string' && description.trim().length > 0) ||
+      (!!description &&
+        typeof description === 'object' &&
+        Object.values(description).some((value) => typeof value === 'string' && value.trim().length > 0));
+    if (hasDescription) return true;
+    return Array.isArray(stepObj.components)
+      ? stepObj.components.some((component) => componentWouldRender(component, currentAnswers))
+      : false;
+  }, [componentWouldRender]);
+
+  const resolveNextStepIndex = useCallback((fromIndex, currentAnswers) => {
+    const sourceStep = steps[fromIndex];
+    if (!sourceStep) return -1;
+    let nextStepId = null;
+    if (Array.isArray(sourceStep.branching)) {
+      for (const branch of sourceStep.branching) {
+        try {
+          if (jsonLogic.apply(branch?.condition, currentAnswers)) {
+            nextStepId = branch?.nextStepId;
+            break;
           }
+        } catch {
+          // Ignore malformed branch rules in preview.
         }
       }
     }
+    if (!nextStepId && sourceStep.defaultNextStepId) nextStepId = sourceStep.defaultNextStepId;
+    if (!nextStepId && sourceStep.nextStepId) nextStepId = sourceStep.nextStepId;
+    if (nextStepId) {
+      const nextIndex = steps.findIndex((candidateStep) => candidateStep.stepId === nextStepId);
+      if (nextIndex !== -1) return nextIndex;
+    }
+    return fromIndex < steps.length - 1 ? fromIndex + 1 : -1;
+  }, [steps]);
+
+  const findNextVisibleStepIndex = useCallback((fromIndex, currentAnswers) => {
+    const visited = new Set([fromIndex]);
+    let candidateIndex = resolveNextStepIndex(fromIndex, currentAnswers);
+    while (candidateIndex !== -1 && !visited.has(candidateIndex)) {
+      const candidateStep = steps[candidateIndex];
+      if (stepHasVisibleContent(candidateStep, currentAnswers)) return candidateIndex;
+      visited.add(candidateIndex);
+      candidateIndex = resolveNextStepIndex(candidateIndex, currentAnswers);
+    }
+    return -1;
+  }, [resolveNextStepIndex, stepHasVisibleContent, steps]);
+
+  const visibleStepIndices = useMemo(() => {
+    const indices = steps.reduce((acc, stepObj, idx) => {
+      if (stepHasVisibleContent(stepObj, answers)) acc.push(idx);
+      return acc;
+    }, []);
+    return indices.length ? indices : steps.map((_, idx) => idx);
+  }, [answers, stepHasVisibleContent, steps]);
+
+  const hasVisibleNextStep = useMemo(
+    () => findNextVisibleStepIndex(runner.stepIndex, answers) !== -1,
+    [answers, findNextVisibleStepIndex, runner.stepIndex]
+  );
+  const currentVisibleStepIndex = visibleStepIndices.indexOf(runner.stepIndex);
+  const currentVisibleStepNumber = currentVisibleStepIndex >= 0 ? currentVisibleStepIndex + 1 : 1;
+  const totalVisibleSteps = visibleStepIndices.length || 1;
+
+  useEffect(() => {
+    if (!steps.length) return;
+    if (stepHasVisibleContent(currentStep, answers)) return;
+    const nextVisible = visibleStepIndices[0];
+    if (!Number.isInteger(nextVisible) || nextVisible === runner.stepIndex) return;
+    setRunner((previous) => ({ ...previous, stepIndex: nextVisible, history: [], errors: {}, warnings: {} }));
+  }, [answers, currentStep, runner.stepIndex, stepHasVisibleContent, steps.length, visibleStepIndices]);
+
+  const collectActiveComponents = useCallback((stepObj, currentAnswers) => {
+    const active = [];
+    const visit = (component) => {
+      if (!component || !componentIsVisible(component, currentAnswers)) return;
+      active.push(component);
+      if (Array.isArray(component.children)) component.children.forEach((child) => visit(child));
+      const type = String(component.type || '').toLowerCase();
+      if (type !== 'radio' && type !== 'checkbox' && type !== 'checkboxes') return;
+      const key = component.storageKey || component.id;
+      const selected = currentAnswers[key];
+      const selectedSet = new Set(Array.isArray(selected) ? selected.map(String) : [String(selected)]);
+      const options = Array.isArray(component.options) ? component.options : [];
+      options.forEach((option) => {
+        if (!selectedSet.has(String(option.value))) return;
+        optionRevealChildren(option).forEach((child) => visit(child));
+      });
+    };
+    (Array.isArray(stepObj?.components) ? stepObj.components : []).forEach((component) => visit(component));
+    return active;
+  }, [componentIsVisible]);
+
+  const activeComponents = useMemo(
+    () => collectActiveComponents(currentStep, answers),
+    [answers, collectActiveComponents, currentStep]
+  );
+
+  const flattenComponents = useCallback((stepObj) => {
+    const list = [];
+    visitComponentTree(stepObj?.components || [], (component) => {
+      list.push(component);
+    });
     return list;
-  }
+  }, []);
+
   const msgFor = (m) => {
     if (!m) return '';
     if (typeof m === 'string') return m;
@@ -501,7 +579,7 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
   }
   function mergedLogicData(stepObj){
     const data = { ...answers };
-    const comps = flattenComponents(stepObj);
+    const comps = activeComponents.length && stepObj === currentStep ? activeComponents : flattenComponents(stepObj);
     comps.forEach(c=>{
       const sk = c.storageKey || c.id; const id = c.id; if(sk && id){ const val = answers[sk]; if(val!==undefined && data[id]===undefined) data[id]=val; if(answers[id]!==undefined && data[sk]===undefined) data[sk]=answers[id]; }
     });
@@ -573,10 +651,12 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
     if(!currentStep) return {};
     focusErrorSummaryNext.current = true;
     const data = mergedLogicData(currentStep);
-  const compList = flattenComponents(currentStep);
+    const compList = activeComponents;
     const errs={}; const warns={};
     compList.forEach(c=>{
       const k = c.storageKey || c.id; if(!k) return; const val = answers[k];
+      const type = String(c.type || '').toLowerCase();
+      if (DISPLAY_ONLY_TYPES.has(type) || type === 'signature-ack') return;
       const rawValidation = (() => {
         const base = (c.validation && typeof c.validation === 'object') ? JSON.parse(JSON.stringify(c.validation)) : {};
         const fromProps = (c.props && c.props.validation && typeof c.props.validation === 'object') ? c.props.validation : null;
@@ -611,37 +691,24 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
     return errs;
   };
   const next = () => {
-  const errs = validateStep();
+    const errs = validateStep();
     if (Object.keys(errs).length) return;
     if (!currentStep) return;
-    // Branching logic
-    let nextId = null;
-    if (Array.isArray(currentStep.branching)) {
-      for (const b of currentStep.branching) {
-        try { if (jsonLogic.apply(b.condition, answers)) { nextId = b.nextStepId; break; } } catch { /* ignore */ }
-      }
+    const nextIndex = findNextVisibleStepIndex(runner.stepIndex, answers);
+    if (nextIndex >= 0) {
+      setRunner(r => ({
+        ...r,
+        history: [...r.history, r.stepIndex],
+        stepIndex: nextIndex,
+        errors: {},
+        warnings: {}
+      }));
+      setShowAnswers(false);
+      return;
     }
-    if (!nextId && currentStep.defaultNextStepId) nextId = currentStep.defaultNextStepId;
-    if (!nextId && currentStep.nextStepId) nextId = currentStep.nextStepId;
-    if (nextId) {
-      const idx = steps.findIndex(s => s.stepId === nextId);
-      if (idx >= 0) {
-        setRunner(r => ({
-          ...r,
-          history: [...r.history, r.stepIndex],
-          stepIndex: idx,
-          errors: {},
-          warnings: {}
-        }));
-        setShowAnswers(false);
-        return;
-      }
-    }
-  // End reached – show answers modal
-  setShowAnswers(true);
-  // Automatically switch to JSON output view so author sees final answer object
-  setMode('json');
-  setRunner(r => ({ ...r }));
+    setShowAnswers(true);
+    setMode('json');
+    setRunner(r => ({ ...r }));
   };
   const back = () => {
     setRunner(r => {
@@ -763,25 +830,20 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
             {runtime?.error && <div style={{ color: '#d4351c' }}>{runtime.error}</div>}
             {runtime && !runtime.error && currentStep && (
               <div>
-                <div style={{ marginBottom: 12, fontWeight: 600, fontSize: 16 }}>{currentStep.title?.[previewLang] || currentStep.title?.en || currentStep.stepId}</div>
+                <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ fontWeight: 600, fontSize: 16 }}>{currentStep.title?.[previewLang] || currentStep.title?.en || currentStep.stepId}</div>
+                  <div style={{ fontSize: 12, color: '#555' }}>{`Step ${currentVisibleStepNumber} of ${totalVisibleSteps}`}</div>
+                </div>
                 <div className="govuk-width-container" style={{ paddingLeft: 0, paddingRight: 0 }}>
                   {/* Live region for change validations */}
                   <div aria-live="polite" className="govuk-visually-hidden">{liveAnnouncement}</div>
-                  {allFileUploadsHidden(currentStep) && (
-                    <div style={{ marginBottom:16, padding:12, background:'#f0f7ff', border:'1px solid #b3d6f5', borderRadius:4, fontSize:14 }}>
-                      {previewLang==='fr' ?
-                        "Aucun document requis pour cette étape selon vos réponses actuelles." :
-                        "No documents are required for this step based on your current answers."}
-                    </div>
-                  )}
                   {Object.keys(runner.errors||{}).length>0 && (
                     <div ref={errorSummaryRef} tabIndex="-1" className="govuk-error-summary" aria-labelledby="wp-error-summary-title" role="alert" style={{marginBottom:16}}>
                       <h2 className="govuk-error-summary__title" id="wp-error-summary-title" style={{fontSize:18}}>There is a problem</h2>
                       <div className="govuk-error-summary__body">
                         <ul className="govuk-list govuk-error-summary__list">
                           {Object.entries(runner.errors).map(([k,m])=>{
-                                    const all = flattenComponents(currentStep);
-                                    const comp = all.find(c=> (c.storageKey||c.id)===k);
+                                    const comp = activeComponents.find(c=> (c.storageKey||c.id)===k) || flattenComponents(currentStep).find(c=> (c.storageKey||c.id)===k);
                                     const anchor = comp? anchorIdFor(comp): k;
                                     return <li key={k}><a href={`#${anchor}`}>{m}</a></li>;
                                   })}
@@ -792,17 +854,7 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
                   {(currentStep.components || []).map(c => {
                     const type = c.type;
                     const key = c.storageKey || c.id;
-                    // Apply conditional visibility only to file-upload components (v1 scope)
-                    if (type === 'file-upload') {
-                      const visible = evaluateConditions(c.props?.conditions || c.conditions);
-                      if (!visible) {
-                        // Clear stored answer if present to avoid stale data
-                        if (key && answers[key] !== undefined) {
-                          setRunner(r => ({ ...r, answers: { ...r.answers, [key]: undefined } }));
-                        }
-                        return null; // skip render
-                      }
-                    }
+                    if (!componentIsVisible(c, answers)) return null;
                     if (type === 'summary-list') {
                       return <SummaryListAdapter key={c.id} comp={c} answers={answers} lang={previewLang} />;
                     }
@@ -869,12 +921,25 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
                       );
                     }
                     const Comp = PortalRegistry[type];
-                    if (!Comp) return <div key={c.id} style={{ fontSize: 12, color: '#666' }}>[Unsupported: {type}]</div>;
+                    if (!Comp) {
+                      return (
+                        <div key={c.id} style={{ padding: '8px 12px', border: '1px solid #d5dbdb', borderRadius: 6, background: '#fff', color: '#555', fontSize: 12, marginBottom: 12 }}>
+                          Unsupported preview renderer: {type}
+                        </div>
+                      );
+                    }
                     const val = answers[key];
                     const renderChild = (child) => {
                       if (!child || !child.type) return null;
+                      if (!componentIsVisible(child, answers)) return null;
                       const ChildComp = PortalRegistry[child.type];
-                      if (!ChildComp) return <div key={child.id || child.storageKey} style={{ fontSize: 12, color: '#666' }}>[Unsupported: {child.type}]</div>;
+                      if (!ChildComp) {
+                        return (
+                          <div key={child.id || child.storageKey} style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
+                            [Unsupported: {child.type}]
+                          </div>
+                        );
+                      }
                       const childKey = child.storageKey || child.id;
                       const childVal = answers[childKey];
                       return <ChildComp key={child.id || childKey} comp={child} value={childVal} onChange={v => setAnswer(child, v)} error={runner.errors[childKey]} values={answers} lang={previewLang} />;
@@ -884,9 +949,9 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
                 </div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                   <Button disabled={!runner.history.length} onClick={back}>Back</Button>
-                  <Button variant="primary" onClick={next}>{runner.stepIndex < steps.length - 1 ? 'Next' : 'Finish'}</Button>
+                  <Button variant="primary" onClick={next}>{hasVisibleNextStep ? 'Next' : 'Finish'}</Button>
                 </div>
-                {runner.stepIndex === steps.length - 1 && <div style={{ marginTop: 12, fontSize: 12, color: '#555' }}>Finish simulates end of workflow; data not persisted.</div>}
+                {!hasVisibleNextStep && <div style={{ marginTop: 12, fontSize: 12, color: '#555' }}>Finish simulates end of workflow; data not persisted.</div>}
               </div>
             )}
             {showAnswers && (

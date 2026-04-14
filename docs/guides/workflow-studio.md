@@ -1,7 +1,7 @@
 # Workflow Studio (Intake Authoring)
 **Purpose:** How the admin console builds and edits intake workflows (step library, canvas, props, preview, runtime schema).  
 **Audience:** Engineers extending workflow authoring or adding component props.  
-**Last Updated:** 2025-11-25
+**Last Updated:** 2026-04-14
 
 ## High-level flow
 - **Manage Workflows page** (`src/pages/manageWorkflows.js`): Cloudscape board with four widgets:
@@ -26,8 +26,9 @@
 ## Data & publishing
 - **Step library** is sourced from `/api/steps`; each step references a component template and stores props.
 - **Workflow save payload**: includes steps (with props), routes (linear or by_option), and workflow metadata (name/status/start step).
-- **Preview** uses the same renderers as the portal, respecting conditional visibility and file upload rules; nothing persists during preview.
+- **Preview** uses the same renderers as the portal and now mirrors runtime conditional-visibility operators plus whole-step skipping for steps whose authored components all hide.
 - **Runtime schema widget** shows the server-generated schema for the selected workflow for sanity checks.
+- **DEV publish parity**: verified on 2026-04-14 that workflow `21` authoring rows rebuild the same `iset_runtime_config(scope='publish', k='workflow.schema.intake')` payload through `buildWorkflowSchema` / `scripts/publish-workflow.js` once timestamp/checksum fields are ignored, so the step library, workflow library, and published runtime row are back in sync for that intake.
 
 ## Persistence & storage keys
 - Board layout on Manage Workflows: `manageWorkflows.board.items.v1` (localStorage).
@@ -43,3 +44,5 @@
 ## Notes / gaps
 - No dedicated guide existed; keep this file current when studio behavior changes.
 - Conditional visibility enhancements and schema publishing rules should be documented here when extended.
+- The step editor condition builder now supports the runtime checkbox-array operators (`contains`, `notContains`, `containsAny`, `notContainsAny`, `containsAll`) on the currently supported target component types, `WorkflowPreviewWidget` now mirrors the same whole-step skip behavior as the portal runtime, and Manual Intake now uses the same operator set for renderable manual-intake steps.
+- Manual Intake still intentionally skips portal-only upload/signature steps, so treat parity there as limited to steps the admin path can actually render.
