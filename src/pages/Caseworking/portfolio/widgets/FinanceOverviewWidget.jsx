@@ -54,7 +54,7 @@ const FinanceOverviewWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
         ...entry,
         actualCommitted,
         remaining,
-        variance: entry.allocated - entry.actual,
+        variance: entry.allocated - actualCommitted,
       };
     });
 

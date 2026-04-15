@@ -98,7 +98,7 @@ const persistColumnWidths = widths => {
 };
 
 const enrichMetrics = pot => {
-  const remaining = pot.adjusted - pot.actual;
+  const remaining = pot.adjusted - pot.committed - pot.actual;
   const variance = pot.forecast - pot.adjusted;
   const burnRate = pot.adjusted > 0 ? pot.actual / pot.adjusted : 0;
   const target = pot.adminTargetPct;

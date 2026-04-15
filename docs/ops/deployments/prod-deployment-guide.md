@@ -7,6 +7,7 @@ This is the shortest safe path to deploy the current prod stack.
 ## Before You Start
 
 - Work from the repo roots on the same machine that has AWS prod access.
+- Launch the app deploy from the Windows checkout at `X:\ISET\admin-dashboard`, not from a WSL-only checkout or a `\\wsl$\\...` current directory.
 - Prefer the PATH orchestrator from `admin-dashboard`; it wraps schema/data/app rollout/smoke into one release command.
 - Uploading artifacts does not update the live instance by itself. The orchestrator and the low-level manual flow both trigger a prod instance refresh after uploads.
 - The dedicated prod profile name is now `nwac-prod`. Override with `--profile` or `-Profile` only if your local prod credentials live under a different profile name.

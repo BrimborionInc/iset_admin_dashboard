@@ -188,14 +188,15 @@ const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
         const pot = (pots || []).find(p => String(p.id) === String(id));
         if (!pot) return acc;
         acc.adjusted += Number(pot.adjusted ?? pot.adjusted_amount) || 0;
+        acc.committed += Number(pot.committed) || 0;
         acc.actual += Number(pot.actual) || 0;
         acc.forecastVariance += Number(pot.forecastVariance) || 0;
         return acc;
       },
-      { adjusted: 0, actual: 0, forecastVariance: 0 }
+      { adjusted: 0, committed: 0, actual: 0, forecastVariance: 0 }
     );
     const burn = sums.adjusted > 0 ? sums.actual / sums.adjusted : 0;
-    const remaining = sums.adjusted - sums.actual;
+    const remaining = sums.adjusted - sums.committed - sums.actual;
     const overBudget = remaining < 0;
     const varianceType = overBudget ? "error" : sums.forecastVariance > 0 ? "error" : sums.forecastVariance < 0 ? "success" : "info";
     const varianceLabel = overBudget

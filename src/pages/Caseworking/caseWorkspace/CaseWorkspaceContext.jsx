@@ -129,7 +129,21 @@ const buildInterventionFromApi = (planId, payload = {}) => {
     notes: payload.notes || null,
     compliance,
     approvedAmount: toNumberOrNull(payload.approvedAmount),
+    committedAmount: toNumberOrNull(
+      payload.committedAmount ??
+      payload.financeCommittedAmount ??
+      payload.metadata?.finance?.committed
+    ),
+    financeCommittedAmount: toNumberOrNull(
+      payload.financeCommittedAmount ??
+      payload.committedAmount ??
+      payload.metadata?.finance?.committed
+    ),
     actualAmount: toNumberOrNull(payload.actualAmount),
+    financeActualAmount: toNumberOrNull(
+      payload.financeActualAmount ??
+      payload.metadata?.finance?.actual
+    ),
     budgetAmount: toNumberOrNull(payload.budgetAmount),
     metadata: resolvedMetadata,
     createdByStaffProfileId: payload.createdByStaffProfileId || null,

@@ -32,6 +32,24 @@ For each indexed thread/topic, keep:
 
 ## Indexed Topics
 
+### WSL repo relocation, finance-semantics rollout, and case-header funding fix
+
+- Codex task title: `Avoid Git on Windows drives`
+- Topic: moving active admin-dashboard work off `/mnt/x`, keeping TEST/PROD deploys on the Windows checkout, re-aligning PATH case-funding semantics to `Approved` / `Committed` / `Actual`, correcting the one prod decimal-shift finance record, and fixing the case-header overall-approved fallback bug
+- Keywords: `Avoid Git on Windows drives`, `WSL warning`, `/mnt/x`, `/root/ISET/admin-dashboard`, `X:\\ISET\\admin-dashboard`, `deploy from Windows checkout`, `Approved Committed Actual`, `funds approved`, `case header funding`, `Overall $0 approved`, `ISET-20260408-509365`, `CASE-2026-0000070`, `decimal point`, `divide by 100`, `budget pot recalc`
+- When to open: the user references the `Avoid Git on Windows drives` thread, asks why WSL warns against running Git-heavy work on Windows-mounted drives, asks where the active repo should live versus where deploys should be launched, asks what `Approved`, `Committed`, and `Actual` now mean in PATH, asks why a case header showed `Overall $0.00 approved` while the selected action plan showed approved funding, or asks which prod record was manually corrected for the decimal-shift finance bug
+- Primary docs:
+  - `docs/AGENTS.md`
+  - `docs/ops/deployments/deployment-quick-guide.md`
+  - `docs/ops/deployments/deploy-test-notes.md`
+  - `docs/ops/deployments/prod-deployment-guide.md`
+  - `docs/dashboards/admin-home-metrics-widget.md`
+  - `docs/widgets/admin/case-header-widget.md`
+  - `docs/widgets/admin/case-finance-panel-widget.md`
+  - `docs/meta/changelog.md`
+- Status: current as of 2026-04-14
+- Notes: durable outcomes from this thread: the WSL warning was valid for this repo because `X:\ISET\admin-dashboard` appears in WSL as `/mnt/x/ISET/admin-dashboard`, so active coding/Git work was moved into the Linux filesystem (`/root/ISET/admin-dashboard`) while the old Windows checkout remained the supported deploy working tree. The deploy docs were updated to say explicitly that TEST/PROD app deploys must be launched from `X:\ISET\admin-dashboard`, not from a WSL-only checkout or a `\\wsl$\\...` current directory, because the rollout still shells into Windows `npm` / PowerShell. The finance model was then clarified and implemented as: `Approved` = intervention funding approved in PATH, `Committed` = PATH finance transactions submitted to finance, and `Actual` = PATH-recorded paid spend. Homepage metrics, Case Workspace funding summaries, finance widgets, and budget-pot rollups were updated to use that model, and TEST `budget_pot` committed/actual rollups were backfilled after deploy so older totals matched the new meaning immediately. Manual backloads remain history-only and should contribute to `Actual`, not to new approval or commitment. The same thread also repaired one production data defect on `CASE-2026-0000070`: intervention `#5` and linked finance transaction `#1` had `1,394,862.00` stored instead of the obvious divide-by-100 value `13,948.62`, so the intervention actual, finance transaction amount/metadata, and affected pot `actual_amount` rollups were corrected in prod. A later pass uncovered a UI-only bug on TEST case `ISET-20260408-509365`, where the selected action plan line correctly showed `$6,500.00 approved` but the overall case-header line incorrectly showed `$0.00 approved`; that fallback bug was fixed in `CaseHeaderWidget.jsx`, verified in TEST, and then deployed to PROD in release `20260414-prod-approved-committed-actual-header-fix`. The thread also established an operational rule for this repo: normal rolling admin-only releases like this one do not require a maintenance banner unless user-visible downtime is expected; the final TEST and PROD rollouts were verified with instance health / `/healthz` smoke checks.
+
 ### Digital forms parity, workflow-21 publish alignment, and late-thread admin/prod follow-ups
 
 - Codex task title: `Investigate edit digital forms`

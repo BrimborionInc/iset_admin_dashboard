@@ -18542,8 +18542,11 @@ const METRICS_AWAITING_APPROVAL_APPLICATION_STATUSES = ['pending_approval'];
 const METRICS_APPLICATION_DECISION_STATUSES = ['decision_ready', 'completed'];
 const METRICS_INTERVENTION_DECISION_STATUSES = ['approved', 'changes_requested', 'rejected'];
 const METRICS_ACTIVE_CASE_STATUSES = ['initiated', 'active', 'dormant', 'ready_to_close'];
-const METRICS_COMMITTED_INTERVENTION_STATUSES = ['approved', 'in_progress', 'suspended', 'completed'];
-const METRICS_SPENT_TRANSACTION_STATUSES = ['posted'];
+const METRICS_APPROVED_INTERVENTION_STATUSES = ['approved', 'in_progress', 'suspended', 'completed'];
+const METRICS_COMMITTED_TRANSACTION_STATUSES = ['submitted'];
+const METRICS_ACTUAL_TRANSACTION_STATUSES = ['posted'];
+const METRICS_COMMITTED_INTERVENTION_STATUSES = METRICS_APPROVED_INTERVENTION_STATUSES;
+const METRICS_SPENT_TRANSACTION_STATUSES = METRICS_ACTUAL_TRANSACTION_STATUSES;
 const METRICS_DEFAULT_TIMEZONE = 'America/Toronto';
 const METRICS_TIMEZONE_BY_REGION_CODE = {
   AB: 'America/Edmonton',
@@ -18766,8 +18769,9 @@ const buildEmptyMetricsValues = () => ({
   interventionsCompleted: 0,
   employed: 0,
   returnedToSchool: 0,
+  fundsApproved: 0,
   fundsCommitted: 0,
-  fundsSpent: 0,
+  fundsActual: 0,
   decisionsMade: 0,
 });
 
@@ -19028,15 +19032,15 @@ async function countMetricsCompletedInterventions(pool, { start, end, scope }) {
   }
 }
 
-async function sumMetricsCommittedInterventionAmounts(pool, { start, end, scope }) {
+async function sumMetricsApprovedInterventionAmounts(pool, { start, end, scope }) {
   try {
-    const statuses = normalizeStatusList(METRICS_COMMITTED_INTERVENTION_STATUSES);
+    const statuses = normalizeStatusList(METRICS_APPROVED_INTERVENTION_STATUSES);
     const placeholders = statuses.map(() => '?').join(',');
     const statusExpr = `REPLACE(LOWER(TRIM(ci.status)), ' ', '_')`;
-    const commitmentDateExpr = 'COALESCE(ci.reviewed_at, ci.created_at)';
+    const approvalDateExpr = 'COALESCE(ci.reviewed_at, ci.created_at)';
     const filters = [
-      `${commitmentDateExpr} >= ?`,
-      `${commitmentDateExpr} < ?`,
+      `${approvalDateExpr} >= ?`,
+      `${approvalDateExpr} < ?`,
       `${statusExpr} IN (${placeholders})`
     ];
     const params = [start, end, ...statuses];
@@ -32652,8 +32656,9 @@ app.get('/api/dashboard/metrics', async (req, res) => {
         newInterventionProposals,
         interventionsCompleted,
         actionPlanOutcomeBuckets,
+        fundsApproved,
         fundsCommitted,
-        fundsSpent
+        fundsActual
       ] = await Promise.all([
         safeMetricsValue('newApplications', () => countMetricsNewApplications(pool, { start, end, scope: context.scope })),
         safeMetricsValue(
@@ -32676,12 +32681,16 @@ app.get('/api/dashboard/metrics', async (req, res) => {
           { employed: 0, returnedToSchool: 0 }
         ),
         safeMetricsValue(
-          'fundsCommitted',
-          () => sumMetricsCommittedInterventionAmounts(pool, { start, end, scope: context.scope })
+          'fundsApproved',
+          () => sumMetricsApprovedInterventionAmounts(pool, { start, end, scope: context.scope })
         ),
         safeMetricsValue(
-          'fundsSpent',
-          () => sumMetricsTransactions(pool, { start, end, scope: context.scope, statuses: METRICS_SPENT_TRANSACTION_STATUSES })
+          'fundsCommitted',
+          () => sumMetricsTransactions(pool, { start, end, scope: context.scope, statuses: METRICS_COMMITTED_TRANSACTION_STATUSES })
+        ),
+        safeMetricsValue(
+          'fundsActual',
+          () => sumMetricsTransactions(pool, { start, end, scope: context.scope, statuses: METRICS_ACTUAL_TRANSACTION_STATUSES })
         )
       ]);
       const approved = Number(applicationStatusBuckets?.approved ?? 0);
@@ -32705,8 +32714,9 @@ app.get('/api/dashboard/metrics', async (req, res) => {
             interventionsCompleted,
             employed: Number(actionPlanOutcomeBuckets?.employed ?? 0),
             returnedToSchool: Number(actionPlanOutcomeBuckets?.returnedToSchool ?? 0),
+            fundsApproved,
             fundsCommitted,
-            fundsSpent,
+            fundsActual,
             decisionsMade: approved + denied,
           }
         }
@@ -41422,6 +41432,8 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
     );
 
     const planIds = planRows.map(plan => plan.id).filter(id => Number.isFinite(Number(id)));
+    const financeTotalsByIntervention = new Map();
+    const financeTotalsByPot = new Map();
     const interventionsByPlan = new Map();
     if (planIds.length > 0) {
       const [interventionRows] = await pool.query(
@@ -41434,9 +41446,54 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
          ORDER BY ci.start_date IS NULL, ci.start_date ASC, ci.id ASC`,
         [planIds]
       );
+      const interventionIds = Array.from(
+        new Set(
+          interventionRows
+            .map(intervention => normalisePositiveInteger(intervention?.id))
+            .filter(Boolean)
+        )
+      );
+      if (interventionIds.length) {
+        const [financeRows] = await pool.query(
+          `SELECT
+             case_intervention_id AS intervention_id,
+             budget_pot_id,
+             COALESCE(SUM(CASE WHEN LOWER(TRIM(COALESCE(status, ''))) = 'submitted' THEN amount ELSE 0 END), 0) AS committed_amount,
+             COALESCE(SUM(CASE WHEN LOWER(TRIM(COALESCE(status, ''))) = 'posted' THEN amount ELSE 0 END), 0) AS actual_amount
+           FROM finance_transaction
+           WHERE case_id = ?
+             AND case_intervention_id IN (?)
+           GROUP BY case_intervention_id, budget_pot_id`,
+          [caseId, interventionIds]
+        );
+        (Array.isArray(financeRows) ? financeRows : []).forEach(financeRow => {
+          const interventionId = normalisePositiveInteger(financeRow?.intervention_id);
+          const potId = normalisePositiveInteger(financeRow?.budget_pot_id);
+          const committedAmount = Number(financeRow?.committed_amount || 0);
+          const actualAmount = Number(financeRow?.actual_amount || 0);
+
+          if (interventionId) {
+            const currentInterventionTotals = financeTotalsByIntervention.get(interventionId) || { committed: 0, actual: 0 };
+            currentInterventionTotals.committed += committedAmount;
+            currentInterventionTotals.actual += actualAmount;
+            financeTotalsByIntervention.set(interventionId, currentInterventionTotals);
+          }
+
+          if (potId) {
+            const currentPotTotals = financeTotalsByPot.get(String(potId)) || { committed: 0, actual: 0 };
+            currentPotTotals.committed += committedAmount;
+            currentPotTotals.actual += actualAmount;
+            financeTotalsByPot.set(String(potId), currentPotTotals);
+          }
+        });
+      }
       interventionRows.forEach(row => {
         const mapped = mapInterventionRow(row);
         if (!mapped) return;
+        const interventionId = normalisePositiveInteger(row?.id);
+        const financeTotals = interventionId ? financeTotalsByIntervention.get(interventionId) : null;
+        mapped.financeCommittedAmount = roundFinanceCurrencyAmount(financeTotals?.committed || 0);
+        mapped.financeActualAmount = roundFinanceCurrencyAmount(financeTotals?.actual || 0);
         const key = row.action_plan_id || 0;
         if (!interventionsByPlan.has(key)) interventionsByPlan.set(key, []);
         interventionsByPlan.get(key).push(mapped);
@@ -41459,12 +41516,82 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       return Math.round(numeric * 100) / 100;
     };
 
+    const approvedFundingStatuses = new Set(normalizeStatusList(METRICS_APPROVED_INTERVENTION_STATUSES));
+    const normalizeFundingStatusKey = value =>
+      typeof value === 'string' ? value.trim().toLowerCase().replace(/\s+/g, '_') : '';
+    const isApprovedFundingIntervention = intervention =>
+      approvedFundingStatuses.has(normalizeFundingStatusKey(intervention?.status));
+    const resolveApprovedFundingAmount = intervention => {
+      if (!isApprovedFundingIntervention(intervention)) {
+        return null;
+      }
+      const candidates = [
+        intervention?.approvedAmount,
+        intervention?.budgetAmount,
+        intervention?.plannedCost,
+        intervention?.cost,
+        intervention?.intervention_cost,
+        intervention?.metadata?.cost,
+      ];
+      for (const candidate of candidates) {
+        const numeric = toCurrencyValue(candidate);
+        if (numeric !== null) {
+          return numeric;
+        }
+      }
+      return null;
+    };
+    const resolveFinancePotId = intervention => {
+      const directPotId = normalisePositiveInteger(intervention?.potId);
+      if (directPotId) return String(directPotId);
+      const metadataPotId =
+        normalisePositiveInteger(intervention?.metadata?.budget?.id) ||
+        normalisePositiveInteger(intervention?.metadata?.finance?.potId) ||
+        null;
+      return metadataPotId ? String(metadataPotId) : null;
+    };
+
+    const potIdsForLabels = Array.from(
+      new Set(
+        [
+          ...planRows.map(plan => normalisePositiveInteger(plan?.budget_pot)),
+          ...actionPlans.flatMap(plan =>
+            (Array.isArray(plan?.interventions) ? plan.interventions : []).map(intervention =>
+              normalisePositiveInteger(resolveFinancePotId(intervention))
+            )
+          ),
+          ...Array.from(financeTotalsByPot.keys()).map(key => normalisePositiveInteger(key)),
+        ].filter(Boolean)
+      )
+    );
+    const budgetPotLabelById = new Map();
+    if (potIdsForLabels.length) {
+      const [budgetPotRows] = await pool.query(
+        `SELECT id, name, code
+           FROM budget_pot
+          WHERE id IN (?)`,
+        [potIdsForLabels]
+      );
+      (Array.isArray(budgetPotRows) ? budgetPotRows : []).forEach(budgetPotRow => {
+        const potId = normalisePositiveInteger(budgetPotRow?.id);
+        if (!potId) return;
+        budgetPotLabelById.set(
+          String(potId),
+          normaliseString(budgetPotRow?.name) ||
+            normaliseString(budgetPotRow?.code) ||
+            `Budget pot ${potId}`
+        );
+      });
+    }
+
     const normalisePotEntry = (entry, index = 0) => {
       if (!entry || typeof entry !== 'object') {
         return null;
       }
-      const allocated =
+      const approved =
         toCurrencyValue(
+          entry.approved ??
+            entry.approved_amount ??
           entry.allocated ??
             entry.allocated_amount ??
             entry.totalAllocated ??
@@ -41489,6 +41616,7 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
             entry.disbursed ??
             entry.actuals
         ) ?? 0;
+      const remaining = toCurrencyValue(approved - committed - actual) ?? 0;
       const id = entry.id || entry.potId || entry.budgetPotId || `pot-${index}`;
       const nameCandidate =
         entry.name ||
@@ -41508,9 +41636,11 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       return {
         id,
         name,
-        allocated,
+        approved,
+        allocated: approved,
         committed,
         actual,
+        remaining,
       };
     };
 
@@ -41536,7 +41666,101 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       return [];
     };
 
-    let financeSummary = null;
+    const buildLiveFinanceSummary = () => {
+      if (!actionPlans.length && !financeTotalsByPot.size) {
+        return null;
+      }
+      const potMap = new Map();
+      const ensurePotBucket = (id, fallbackName = null) => {
+        const key = id ? String(id) : fallbackName || 'General allocation';
+        if (!potMap.has(key)) {
+          potMap.set(key, {
+            id: key,
+            name:
+              fallbackName ||
+              budgetPotLabelById.get(key) ||
+              (id ? `Budget pot ${id}` : 'General allocation'),
+            approved: 0,
+            committed: 0,
+            actual: 0,
+          });
+        }
+        return potMap.get(key);
+      };
+
+      actionPlans.forEach(plan => {
+        (plan.interventions || []).forEach(intervention => {
+          const potId = resolveFinancePotId(intervention);
+          const nameCandidates = [
+            potId ? budgetPotLabelById.get(String(potId)) : null,
+            intervention?.metadata?.finance?.potName,
+            intervention?.metadata?.finance?.potLabel,
+            intervention?.metadata?.budget?.name,
+            intervention?.metadata?.budget?.label,
+            intervention?.metadata?.potName,
+            intervention?.fundingStream,
+            intervention?.metadata?.title,
+          ];
+          const name =
+            nameCandidates.find(value => typeof value === 'string' && value.trim().length) ||
+            'General allocation';
+          const bucket = ensurePotBucket(potId, name);
+          const approvedAmount = resolveApprovedFundingAmount(intervention);
+          if (approvedAmount !== null) {
+            bucket.approved += approvedAmount;
+          }
+          const financeActualAmount = toCurrencyValue(intervention?.financeActualAmount);
+          const legacyActualAmount = toCurrencyValue(intervention?.actualAmount);
+          if ((financeActualAmount === null || financeActualAmount === 0) && legacyActualAmount !== null) {
+            bucket.actual += legacyActualAmount;
+          }
+        });
+      });
+
+      financeTotalsByPot.forEach((totals, potId) => {
+        const bucket = ensurePotBucket(potId, budgetPotLabelById.get(String(potId)) || null);
+        bucket.committed += Number(totals?.committed || 0);
+        bucket.actual += Number(totals?.actual || 0);
+      });
+
+      const pots = Array.from(potMap.values())
+        .map(pot => {
+          const approved = toCurrencyValue(pot.approved) ?? 0;
+          const committed = toCurrencyValue(pot.committed) ?? 0;
+          const actual = toCurrencyValue(pot.actual) ?? 0;
+          return {
+            id: pot.id,
+            name: pot.name,
+            approved,
+            allocated: approved,
+            committed,
+            actual,
+            remaining: toCurrencyValue(approved - committed - actual) ?? 0,
+          };
+        })
+        .sort((a, b) => (b.approved || 0) - (a.approved || 0));
+
+      if (!pots.length) {
+        return null;
+      }
+
+      const approved = pots.reduce((sum, pot) => sum + (pot.approved || 0), 0);
+      const committed = pots.reduce((sum, pot) => sum + (pot.committed || 0), 0);
+      const actuals = pots.reduce((sum, pot) => sum + (pot.actual || 0), 0);
+      return {
+        approved: toCurrencyValue(approved),
+        allocated: toCurrencyValue(approved),
+        committed: toCurrencyValue(committed),
+        actual: toCurrencyValue(actuals),
+        actuals: toCurrencyValue(actuals),
+        remaining: toCurrencyValue(approved - committed - actuals),
+        variance: toCurrencyValue(approved - committed - actuals),
+        pots,
+      };
+    };
+
+    let financeSummary = buildLiveFinanceSummary();
+    let snapshotFinanceSummary = null;
     try {
       const [[snapshotRow]] = await pool.query(
         `SELECT
@@ -41553,25 +41777,36 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
         [caseId]
       );
       if (snapshotRow) {
-        const allocated = toCurrencyValue(snapshotRow.allocated_amount);
+        const approved = toCurrencyValue(snapshotRow.allocated_amount);
         const committed = toCurrencyValue(snapshotRow.committed_amount);
         const actuals = toCurrencyValue(snapshotRow.spent_amount);
         const variance =
           toCurrencyValue(snapshotRow.variance_amount) ??
-          (allocated !== null && actuals !== null ? toCurrencyValue(allocated - actuals) : null);
+          (approved !== null && committed !== null && actuals !== null
+            ? toCurrencyValue(approved - committed - actuals)
+            : null);
         const potEntries = parseSnapshotDetails(snapshotRow.details_json)
           .map((entry, index) => normalisePotEntry(entry, index))
           .filter(Boolean)
-          .sort((a, b) => (b.allocated || 0) - (a.allocated || 0));
-        financeSummary = {
-          allocated: allocated ?? (potEntries.length ? potEntries.reduce((sum, pot) => sum + pot.allocated, 0) : null),
+          .sort((a, b) => (b.approved || 0) - (a.approved || 0));
+        snapshotFinanceSummary = {
+          approved: approved ?? (potEntries.length ? potEntries.reduce((sum, pot) => sum + pot.approved, 0) : null),
+          allocated: approved ?? (potEntries.length ? potEntries.reduce((sum, pot) => sum + pot.approved, 0) : null),
           committed:
             committed ?? (potEntries.length ? potEntries.reduce((sum, pot) => sum + pot.committed, 0) : null),
+          actual:
+            actuals ?? (potEntries.length ? potEntries.reduce((sum, pot) => sum + pot.actual, 0) : null),
           actuals:
             actuals ?? (potEntries.length ? potEntries.reduce((sum, pot) => sum + pot.actual, 0) : null),
+          remaining:
+            approved !== null && committed !== null && actuals !== null
+              ? toCurrencyValue(approved - committed - actuals)
+              : null,
           variance:
             variance ??
-            (allocated !== null && actuals !== null ? toCurrencyValue(allocated - actuals) : null),
+            (approved !== null && committed !== null && actuals !== null
+              ? toCurrencyValue(approved - committed - actuals)
+              : null),
           asOfDate: snapshotRow.as_of_date ? toDateOnlyString(snapshotRow.as_of_date) : null,
           pots: potEntries,
         };
@@ -41579,65 +41814,10 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
     } catch (err) {
       console.warn('[workspace] failed to load finance snapshot for case', caseId, err);
     }
-
-    if (!financeSummary && actionPlans.length > 0) {
-      const potMap = new Map();
-      const addAmount = (bucket, field, value) => {
-        const numeric = toCurrencyValue(value);
-        if (numeric !== null) {
-          bucket[field] += numeric;
-        }
-      };
-      actionPlans.forEach(plan => {
-        (plan.interventions || []).forEach(intervention => {
-          const nameCandidates = [
-            intervention.metadata?.finance?.potName,
-            intervention.metadata?.finance?.potLabel,
-            intervention.metadata?.budget?.name,
-            intervention.metadata?.budget?.label,
-            intervention.metadata?.potName,
-            intervention.potId,
-            intervention.fundingStream,
-            intervention.metadata?.title,
-          ];
-          const name =
-            nameCandidates.find(value => typeof value === 'string' && value.trim().length) ||
-            'General allocation';
-          const key =
-            intervention.potId ||
-            intervention.metadata?.budget?.id ||
-            intervention.metadata?.finance?.potId ||
-            name;
-          if (!potMap.has(key)) {
-            potMap.set(key, { id: key, name, allocated: 0, committed: 0, actual: 0 });
-          }
-          const bucket = potMap.get(key);
-          addAmount(bucket, 'allocated', intervention.budgetAmount ?? intervention.metadata?.cost);
-          addAmount(
-            bucket,
-            'committed',
-            intervention.approvedAmount ??
-              intervention.metadata?.finance?.committed ??
-              intervention.metadata?.committed ??
-              intervention.budgetAmount ??
-              intervention.metadata?.cost
-          );
-          addAmount(bucket, 'actual', intervention.actualAmount ?? intervention.metadata?.finance?.actual);
-        });
-      });
-      const pots = Array.from(potMap.values()).sort((a, b) => b.allocated - a.allocated);
-      if (pots.length) {
-        const allocated = pots.reduce((sum, pot) => sum + pot.allocated, 0);
-        const committed = pots.reduce((sum, pot) => sum + pot.committed, 0);
-        const actuals = pots.reduce((sum, pot) => sum + pot.actual, 0);
-        financeSummary = {
-          allocated: toCurrencyValue(allocated),
-          committed: toCurrencyValue(committed),
-          actuals: toCurrencyValue(actuals),
-          variance: toCurrencyValue(allocated - actuals),
-          pots,
-        };
-      }
+    if (!financeSummary) {
+      financeSummary = snapshotFinanceSummary;
+    } else if (snapshotFinanceSummary?.asOfDate) {
+      financeSummary.asOfDate = snapshotFinanceSummary.asOfDate;
     }
 
     const parseJsonField = (value, fallback) => {
@@ -60464,7 +60644,6 @@ function evaluateTransferPolicies(sourcePot, destPot) {
 
 async function refreshFinancePotSums(connection = null) {
   const runner = connection || pool;
-  const committedInterventionStatuses = normalizeStatusList(METRICS_COMMITTED_INTERVENTION_STATUSES);
   try {
     const [potRows] = await runner.query(
       `SELECT id, parent_id
@@ -60484,65 +60663,19 @@ async function refreshFinancePotSums(connection = null) {
       parentByPotId.set(potId, normalisePositiveInteger(row?.parent_id) || null);
     });
 
-    if (committedInterventionStatuses.length) {
-      const [interventionRows] = await runner.query(
-        `SELECT
-           ci.id,
-           ci.status,
-           ci.approved_amount,
-           ci.budget_amount,
-           ci.intervention_cost,
-           ci.metadata_json,
-           ap.budget_pot AS plan_budget_pot
-         FROM iset_case_intervention ci
-         LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
-         WHERE REPLACE(LOWER(TRIM(COALESCE(ci.status, ''))), ' ', '_') IN (${committedInterventionStatuses.map(() => '?').join(',')})`,
-        committedInterventionStatuses
-      );
-
-      (Array.isArray(interventionRows) ? interventionRows : []).forEach(row => {
-        const metadata = safeJsonParse(row?.metadata_json, {}) || {};
-        const potId =
-          normalisePositiveInteger(metadata?.budgetPotId) ||
-          normalisePositiveInteger(metadata?.potId) ||
-          normalisePositiveInteger(row?.plan_budget_pot) ||
-          null;
-        if (!potId || !potTotals.has(potId)) return;
-
-        const amountCandidates = [
-          row?.approved_amount,
-          row?.budget_amount,
-          row?.intervention_cost,
-          metadata?.cost,
-        ];
-        let committedAmount = 0;
-        amountCandidates.some(candidate => {
-          if (candidate === null || typeof candidate === 'undefined' || candidate === '') {
-            return false;
-          }
-          const numeric = Number(candidate);
-          if (!Number.isFinite(numeric)) return false;
-          committedAmount = numeric;
-          return true;
-        });
-        if (!Number.isFinite(committedAmount) || committedAmount === 0) return;
-
-        const bucket = potTotals.get(potId);
-        bucket.committed += committedAmount;
-      });
-    }
-
-    const [actualRows] = await runner.query(
+    const [financeRows] = await runner.query(
       `SELECT
          budget_pot_id,
-         COALESCE(SUM(CASE WHEN status = 'posted' THEN amount ELSE 0 END), 0) AS actual
+         COALESCE(SUM(CASE WHEN LOWER(TRIM(COALESCE(status, ''))) = 'submitted' THEN amount ELSE 0 END), 0) AS committed,
+         COALESCE(SUM(CASE WHEN LOWER(TRIM(COALESCE(status, ''))) = 'posted' THEN amount ELSE 0 END), 0) AS actual
        FROM finance_transaction
        GROUP BY budget_pot_id`
     );
-    (Array.isArray(actualRows) ? actualRows : []).forEach(row => {
+    (Array.isArray(financeRows) ? financeRows : []).forEach(row => {
       const potId = normalisePositiveInteger(row?.budget_pot_id);
       if (!potId || !potTotals.has(potId)) return;
       const bucket = potTotals.get(potId);
+      bucket.committed += Number(row?.committed || 0);
       bucket.actual += Number(row?.actual || 0);
     });
 
@@ -63263,17 +63396,21 @@ async function applyAllocationTransaction({ allocation, appliedAtOverride = null
   }
   const effectiveDate = resolveEffectiveDate(allocation);
   const appliedAt = appliedAtOverride || effectiveDate || new Date();
-  // Capture before/after balances for audit; using adjusted - actual as available proxy.
+  // Capture before/after balances for audit using remaining available authority.
   const [[sourcePot]] = await pool.query(
-    'SELECT adjusted_amount, actual_amount, metadata FROM budget_pot WHERE id = ? LIMIT 1',
+    'SELECT adjusted_amount, committed_amount, actual_amount, metadata FROM budget_pot WHERE id = ? LIMIT 1',
     [allocation.sourcePotId]
   );
   const [[destPot]] = await pool.query(
-    'SELECT adjusted_amount, actual_amount, metadata FROM budget_pot WHERE id = ? LIMIT 1',
+    'SELECT adjusted_amount, committed_amount, actual_amount, metadata FROM budget_pot WHERE id = ? LIMIT 1',
     [allocation.destPotId]
   );
   const availableFor = pot =>
-    pot ? Number(pot.adjusted_amount || 0) - Number(pot.actual_amount || 0) : null;
+    pot
+      ? Number(pot.adjusted_amount || 0) -
+        Number(pot.committed_amount || 0) -
+        Number(pot.actual_amount || 0)
+      : null;
   const beforeBalances = {
     source: availableFor(sourcePot),
     destination: availableFor(destPot),

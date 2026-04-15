@@ -60,7 +60,7 @@ export const BudgetsDataProvider = ({ children }) => {
     const committed = Number(pot.committed) || 0;
     const actual = Number(pot.actual) || 0;
     const forecast = Number(pot.forecast ?? pot.adjusted ?? pot.approved) || 0;
-    const remaining = adjusted - actual;
+    const remaining = adjusted - committed - actual;
     const forecastVariance = forecast - adjusted;
     const pacing = adjusted > 0 ? (actual / adjusted) * 100 : null;
     return {

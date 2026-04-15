@@ -10,6 +10,8 @@ Run the PATH orchestrator from `X:\ISET\admin-dashboard`:
 npm run path:deploy -- --env test --dataset intake-release --workflow-id 21
 ```
 
+Do not start this from a WSL-only checkout path. The app rollout still shells into Windows `npm` / PowerShell deploy scripts, so use the Windows working tree at `X:\ISET\admin-dashboard`.
+
 What it does:
 - Verifies the TEST AWS identity/profile before doing anything
 - Plans/applies canonical shared-schema migrations through SSM on a TEST app host

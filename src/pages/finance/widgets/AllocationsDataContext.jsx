@@ -23,7 +23,7 @@ const computePotMetrics = pot => {
   const actual = Number(pot.actual) || 0;
   const adminShare = Number(pot.adminShare) || 0;
   const forecast = Number(pot.forecast) || 0;
-  const available = adjusted - actual;
+  const available = adjusted - committed - actual;
   const adminPct = adjusted > 0 ? (adminShare / adjusted) * 100 : null;
   const forecastVariance = adjusted > 0 ? ((forecast - adjusted) / adjusted) * 100 : null;
   return {

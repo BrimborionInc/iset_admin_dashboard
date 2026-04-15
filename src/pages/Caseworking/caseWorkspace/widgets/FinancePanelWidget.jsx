@@ -36,7 +36,7 @@ const formatDate = value => {
 };
 
 const COLUMN_WIDTHS_STORAGE_KEY = "caseworking-finance-panel-column-widths-v1";
-const ALL_COLUMN_IDS = ["name", "allocated", "committed", "actual", "status"];
+const ALL_COLUMN_IDS = ["name", "approved", "committed", "actual", "status"];
 
 const loadStoredColumnWidths = () => {
   if (typeof window === "undefined") return [];
@@ -96,16 +96,16 @@ const FinancePanelWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =>
     }
     return financeSummary.pots
       .map(pot => {
-        const allocated = toAmount(pot.allocated);
+        const approved = toAmount(pot.approved ?? pot.allocated);
         const committed = toAmount(pot.committed);
         const actual = toAmount(pot.actual);
         return {
           id: pot.id || pot.name || "",
           name: pot.name || "Budget pot",
-          allocated,
+          approved,
           committed,
           actual,
-          variance: allocated - actual,
+          remaining: approved - committed - actual,
         };
       })
       .filter(item => item.name);
@@ -122,31 +122,31 @@ const FinancePanelWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =>
       return toAmount(candidate);
     };
 
-    const allocatedFromSummary = pickSummaryValue(financeSummary?.allocated);
+    const approvedFromSummary = pickSummaryValue(financeSummary?.approved, financeSummary?.allocated);
     const committedFromSummary = pickSummaryValue(financeSummary?.committed);
     const actualFromSummary = pickSummaryValue(
-      financeSummary?.actuals,
       financeSummary?.actual,
+      financeSummary?.actuals,
       financeSummary?.spent
     );
 
-    const allocated = allocatedFromSummary ?? sum(rows, "allocated");
+    const approved = approvedFromSummary ?? sum(rows, "approved");
     const committed = committedFromSummary ?? sum(rows, "committed");
     const actual = actualFromSummary ?? sum(rows, "actual");
-    const variance = toAmount(allocated - actual);
+    const remaining = toAmount(approved - committed - actual);
 
-    const hasValues = rows.length > 0 || allocated !== 0 || committed !== 0 || actual !== 0 || variance !== 0;
+    const hasValues = rows.length > 0 || approved !== 0 || committed !== 0 || actual !== 0 || remaining !== 0;
 
     if (!hasValues) return null;
 
-    return { allocated, committed, actual, variance };
+    return { approved, committed, actual, remaining };
   }, [financeSummary, rows]);
 
   const tableItems = useMemo(() => {
     if (!totals) {
       return rows;
     }
-    const shouldRenderTotals = rows.length > 0 || totals.allocated || totals.committed || totals.actual;
+    const shouldRenderTotals = rows.length > 0 || totals.approved || totals.committed || totals.actual;
     if (!shouldRenderTotals) {
       return rows;
     }
@@ -155,10 +155,10 @@ const FinancePanelWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =>
       {
         id: "__totals",
         name: "Totals",
-        allocated: totals.allocated,
+        approved: totals.approved,
         committed: totals.committed,
         actual: totals.actual,
-        variance: totals.variance,
+        remaining: totals.remaining,
         isTotals: true,
       },
     ];
@@ -194,9 +194,9 @@ const FinancePanelWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =>
         cell: item => (item.isTotals ? <strong>{item.name || "Totals"}</strong> : item.name || "Budget pot"),
       },
       {
-        id: "allocated",
-        header: "Allocated",
-        cell: item => (item.isTotals ? <strong>{formatCurrency(item.allocated)}</strong> : formatCurrency(item.allocated)),
+        id: "approved",
+        header: "Approved",
+        cell: item => (item.isTotals ? <strong>{formatCurrency(item.approved)}</strong> : formatCurrency(item.approved)),
       },
       {
         id: "committed",
@@ -212,8 +212,8 @@ const FinancePanelWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =>
         id: "status",
         header: "Status",
         cell: item => (
-          <StatusIndicator type={item.variance >= 0 ? "success" : "error"}>
-            {item.variance >= 0 ? "Within allocation" : "Overspend"}
+          <StatusIndicator type={item.remaining >= 0 ? "success" : "error"}>
+            {item.remaining >= 0 ? "Within approval" : "Overspend"}
           </StatusIndicator>
         ),
       },

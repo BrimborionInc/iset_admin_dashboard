@@ -2,7 +2,7 @@
 
 Purpose: document the live behavior of the homepage Metrics widget and its drilldown into the shared Items table.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-03-24
+Last Updated: 2026-04-14
 
 ## Scope
 
@@ -14,7 +14,7 @@ Last Updated: 2026-03-24
 ## Current UX
 
 - The widget shows configurable metrics for `This week`, `This month`, `This quarter`, and `This year`.
-- Currency metrics (`Funds committed`, `Funds spent`) are display-only.
+- Currency metrics (`Funds approved`, `Funds committed`, `Funds actual`) are display-only.
 - Count metrics are links. Selecting one opens the matching records in the existing `Work Queue Items` widget.
 - The `Work Queue Items` widget switches into a dedicated metric-results mode with neutral columns and a `Back to work queue` action.
 - If the user previously removed `Work Queue Items` from the board, selecting a metric restores that widget automatically.
@@ -61,3 +61,7 @@ Important:
 - Do not fake metric drilldown as another queue bucket. Queue mode and metric-results mode in `Work Queue Items` are intentionally separate.
 - Do not add a Metrics-only region filter. If homepage geography scoping is needed in the future, make it a shared page-level filter that drives both Metrics and the Items drilldown.
 - `Active cases` is a current snapshot metric. The period selector does not change that list; only the other count metrics are period-windowed.
+- Funding semantics for the currency tiles are now:
+  - `Funds approved`: intervention funding approved in PATH during the selected period.
+  - `Funds committed`: finance transactions submitted to finance during the selected period.
+  - `Funds actual`: finance transactions marked paid in PATH during the selected period.

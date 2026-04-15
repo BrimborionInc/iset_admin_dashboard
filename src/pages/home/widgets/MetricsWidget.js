@@ -94,15 +94,21 @@ const METRIC_DEFINITIONS = [
     format: 'count'
   },
   {
-    id: 'fundsCommitted',
-    label: 'Funds committed',
-    description: 'Approved intervention value in the selected period.',
+    id: 'fundsApproved',
+    label: 'Funds approved',
+    description: 'Approved intervention funding in the selected period.',
     format: 'currency'
   },
   {
-    id: 'fundsSpent',
-    label: 'Funds spent',
-    description: 'Posted finance transactions in the selected period.',
+    id: 'fundsCommitted',
+    label: 'Funds committed',
+    description: 'Finance transactions submitted to finance in the selected period.',
+    format: 'currency'
+  },
+  {
+    id: 'fundsActual',
+    label: 'Funds actual',
+    description: 'Finance transactions marked paid in the selected period.',
     format: 'currency'
   }
 ];

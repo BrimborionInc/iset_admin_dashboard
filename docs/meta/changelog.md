@@ -783,3 +783,8 @@ Format: YYYY-MM-DD - Category: Short description
 - Feature: Tutorial toggle OFF now resets that tutorial progress via single-tutorial reset, while toggle ON marks it completed.
 - UX: Refactored tutorials reset action to a dedicated `Reset all tutorial progress` control.
 - Docs: Added initial non-System-Administrator workflow inventory tranche (Application Assessment, Case Management, ILMP Reporting, Payments AP Integrations) with workflow docs and widget-level documentation index/files.
+## 2026-04-14
+- Finance semantics: Re-aligned PATH summaries to treat `Approved` as intervention approval in PATH, `Committed` as payment packets submitted to finance, and `Actual` as PATH-recorded paid spend.
+- Home: Metrics widget now reports `Funds approved`, `Funds committed`, and `Funds actual` with those meanings.
+- Case workspace: Funding header and Finance panel now separate approved, committed, and actual amounts, and remaining balances subtract both committed and actual.
+- Finance budgets: Pot rollups and remaining-balance calculations now derive committed totals from submitted finance transactions rather than approved intervention amounts.

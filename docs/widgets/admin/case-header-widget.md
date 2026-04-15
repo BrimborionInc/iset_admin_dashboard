@@ -42,6 +42,7 @@ Top-level case identity, status, ownership, and quick actions.
 ## Current Notes
 
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
+- The funding line now distinguishes `Approved`, `Committed`, and `Actual` instead of using `Committed` as a stand-in for approved intervention funding.
 - Imported/application-less cases use these quick actions as silent backload entry points. They record current-state action plans, interventions, and documents without starting approvals, checklist progression, or applicant notifications.
 - Existing-intervention backload is lifecycle-aware: archived plans are blocked, closed plans accept only completed/cancelled interventions, and in-progress/suspended interventions require an active plan.
 - Backloaded intervention `actual amount` is now finance-history only: it can write a posted historical ledger entry for reporting/budget burn, but the intervention cannot create payment packets or enter the live finance submission workflow.

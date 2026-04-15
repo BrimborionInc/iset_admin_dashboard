@@ -8,6 +8,8 @@ Work from:
 cd X:\ISET\admin-dashboard
 ```
 
+Do not run the app deploy commands from a WSL-only checkout such as `/root/ISET/admin-dashboard` or from a `\\wsl$\\...` working directory. The current rollout still drops into Windows `npm` / PowerShell deploy scripts, and those subprocesses need a normal Windows path like `X:\ISET\admin-dashboard`.
+
 ## Rules
 
 - Do not dump the DEV database manually before asking Codex to deploy.
@@ -28,6 +30,12 @@ npm run path:deploy -- --env test --dataset intake-release --workflow-id 21
 Use this when:
 - you want to deploy app/config/schema changes to TEST
 - you do not want to wipe TEST data first
+
+For an admin-only TEST rollout with no schema/data/portal work:
+
+```powershell
+npm run path:deploy -- --env test --skip-schema --skip-data --skip-portal --release-id <release-id>
+```
 
 ### 2. Reset TEST from the current DEV baseline, then deploy
 
@@ -66,6 +74,12 @@ What this does:
 - deploys artifacts
 - waits for prod refresh
 - runs prod smoke checks
+
+For an admin-only PROD rollout with no schema/data/portal work:
+
+```powershell
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-portal --release-id <release-id> --yes
+```
 
 ## Feature-Flagged Portal Changes
 

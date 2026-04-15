@@ -193,6 +193,9 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Planning entry point: `npm run path:deploy:plan -- --env test|prod ...`.
 - Smoke-only entry point: `npm run path:deploy:smoke -- --env test|prod`.
 - Maintenance-announcement entry point: `npm run path:maintenance -- set|clear ...`.
+- Working-tree rule: launch TEST/PROD app deploy commands from the Windows checkout at `X:\ISET\admin-dashboard` (or another normal Windows path), not from a WSL-only checkout like `/root/...` and not from a `\\wsl$\\...` current directory.
+- Reason: the current admin/portal rollout path still hands off to Windows `npm` / `cmd` / PowerShell scripts, and those subprocesses do not run reliably from a WSL UNC working directory.
+- Recommended workflow when active coding happens in WSL: make the code changes in the WSL repo, sync the changed files into `X:\ISET\admin-dashboard`, then run the documented deploy command there.
 - TEST destructive reset entry points: `npm run test:db:refresh:plan -- --source-env dev` and `npm run test:db:refresh -- --source-env dev --yes`. Manual `--snapshot-file` / `--snapshot-key` inputs still work when needed.
 - Canonical schema preflight/apply now supports remote targets: `npm run db:migrate:plan -- --target-env test|prod` and `npm run db:migrate:apply -- --target-env test|prod`.
 - Current deploy orchestration order is: AWS identity preflight -> optional TEST DB refresh/reset -> prod restore point when DB mutation is planned -> canonical schema apply -> optional allowlisted data sync -> app rollout primitives -> smoke checks -> local release manifest under `tmp/path-deploy/<env>/`.

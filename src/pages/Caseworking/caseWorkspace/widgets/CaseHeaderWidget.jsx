@@ -231,8 +231,9 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     const stream = selectedPlan.fundingStream || selectedPlan.funding_stream || "—";
     return `${planLabel} · ${status} · ${stream}`;
   }, [selectedPlan]);
-  const interventionCostTotals = useMemo(() => {
+  const interventionFundingTotals = useMemo(() => {
     const plans = caseData?.actionPlans || [];
+    const approvedStatuses = new Set(["approved", "in_progress", "suspended", "completed"]);
     const toNumberOrNull = value => {
       if (value === null || typeof value === "undefined") return null;
       if (typeof value === "string") {
@@ -244,30 +245,52 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       const numeric = Number(value);
       return Number.isFinite(numeric) ? numeric : null;
     };
-    const getPlannedCost = item =>
-      toNumberOrNull(
-        item?.plannedCost ??
-          item?.cost ??
+    const normalizeStatusKey = value =>
+      typeof value === "string" ? value.trim().toLowerCase().replace(/\s+/g, "_") : "";
+    const getApprovedCost = item => {
+      if (!approvedStatuses.has(normalizeStatusKey(item?.status))) {
+        return null;
+      }
+      return toNumberOrNull(
+        item?.approvedAmount ??
           item?.budgetAmount ??
-          item?.approvedAmount ??
+          item?.plannedCost ??
+          item?.cost ??
           item?.intervention_cost ??
           item?.interventionCost
       );
-    const getActualCost = item => toNumberOrNull(item?.actualAmount);
+    };
+    const getCommittedCost = item =>
+      toNumberOrNull(
+        item?.financeCommittedAmount ??
+          item?.committedAmount ??
+          item?.metadata?.finance?.committed
+      );
+    const getActualCost = item =>
+      toNumberOrNull(
+        item?.financeActualAmount ??
+          item?.actualAmount ??
+          item?.metadata?.finance?.actual
+      );
     const totals = {
-      overall: { committed: 0, actual: 0, count: 0 },
+      overall: { approved: 0, committed: 0, actual: 0, count: 0 },
       byPlan: new Map(),
     };
     plans.forEach(plan => {
       const interventions = Array.isArray(plan.interventions) ? plan.interventions : [];
-      const planTotals = { committed: 0, actual: 0, count: interventions.length };
+      const planTotals = { approved: 0, committed: 0, actual: 0, count: interventions.length };
       interventions.forEach(intervention => {
         totals.overall.count += 1;
-        const planned = getPlannedCost(intervention);
+        const approved = getApprovedCost(intervention);
+        const committed = getCommittedCost(intervention);
         const actual = getActualCost(intervention);
-        if (planned !== null) {
-          totals.overall.committed += planned;
-          planTotals.committed += planned;
+        if (approved !== null) {
+          totals.overall.approved += approved;
+          planTotals.approved += approved;
+        }
+        if (committed !== null) {
+          totals.overall.committed += committed;
+          planTotals.committed += committed;
         }
         if (actual !== null) {
           totals.overall.actual += actual;
@@ -291,43 +314,63 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         const numeric = Number(pot?.[key]);
         return acc + (Number.isFinite(numeric) ? numeric : 0);
       }, 0);
-    const overallCommitted =
-      pickSummaryValue(financeSummary?.committed) ??
-      (pots.length ? sumPotValues("committed") : null) ??
-      interventionCostTotals.overall.committed;
-    const overallActual =
-      pickSummaryValue(financeSummary?.actuals, financeSummary?.actual, financeSummary?.spent) ??
-      (pots.length ? sumPotValues("actual") : null) ??
-      interventionCostTotals.overall.actual;
+    const potApprovedTotal = pots.length ? sumPotValues("approved") : null;
+    const potCommittedTotal = pots.length ? sumPotValues("committed") : null;
+    const potActualTotal = pots.length ? sumPotValues("actual") : null;
+    let overallApproved =
+      pickSummaryValue(potApprovedTotal, financeSummary?.approved, financeSummary?.allocated) ??
+      interventionFundingTotals.overall.approved;
+    let overallCommitted =
+      pickSummaryValue(potCommittedTotal, financeSummary?.committed) ??
+      interventionFundingTotals.overall.committed;
+    let overallActual =
+      pickSummaryValue(potActualTotal, financeSummary?.actual, financeSummary?.actuals, financeSummary?.spent) ??
+      interventionFundingTotals.overall.actual;
+    const financeSummaryLooksEmpty =
+      Number(overallApproved || 0) === 0 &&
+      Number(overallCommitted || 0) === 0 &&
+      Number(overallActual || 0) === 0 &&
+      (interventionFundingTotals.overall.approved > 0 ||
+        interventionFundingTotals.overall.committed > 0 ||
+        interventionFundingTotals.overall.actual > 0);
+    if (financeSummaryLooksEmpty) {
+      overallApproved = interventionFundingTotals.overall.approved;
+      overallCommitted = interventionFundingTotals.overall.committed;
+      overallActual = interventionFundingTotals.overall.actual;
+    }
     const overallRemaining =
-      overallCommitted !== null && overallActual !== null ? overallCommitted - overallActual : null;
+      overallApproved !== null && overallCommitted !== null && overallActual !== null
+        ? overallApproved - overallCommitted - overallActual
+        : null;
     const hasOverall =
+      Number.isFinite(overallApproved) ||
       Number.isFinite(overallCommitted) ||
       Number.isFinite(overallActual) ||
-      interventionCostTotals.overall.count > 0;
+      interventionFundingTotals.overall.count > 0;
     let planLine = "Selected Action Plan: —";
     if (selectedPlan) {
-      const planTotals = interventionCostTotals.byPlan.get(String(selectedPlan.id)) || {
+      const planTotals = interventionFundingTotals.byPlan.get(String(selectedPlan.id)) || {
+        approved: 0,
         committed: 0,
         actual: 0,
         count: 0,
       };
-      const planRemaining = planTotals.committed - planTotals.actual;
-      planLine = `Selected Action Plan: ${formatCurrency(planTotals.committed)} committed · ${formatCurrency(
-        planTotals.actual
-      )} actual · ${formatCurrency(planRemaining)} remaining`;
+      const planRemaining = planTotals.approved - planTotals.committed - planTotals.actual;
+      planLine = `Selected Action Plan: ${formatCurrency(planTotals.approved)} approved · ${formatCurrency(
+        planTotals.committed
+      )} committed · ${formatCurrency(planTotals.actual)} actual · ${formatCurrency(planRemaining)} remaining`;
     }
     if (!hasOverall && !selectedPlan) return "—";
-    const overallLine = `Overall: ${formatCurrency(overallCommitted)} committed · ${formatCurrency(
-      overallActual
-    )} actual · ${formatCurrency(overallRemaining)} remaining`;
+    const overallLine = `Overall: ${formatCurrency(overallApproved)} approved · ${formatCurrency(
+      overallCommitted
+    )} committed · ${formatCurrency(overallActual)} actual · ${formatCurrency(overallRemaining)} remaining`;
     return (
       <Box>
         <div>{overallLine}</div>
         <div style={{ color: "var(--color-text-body-secondary)", fontSize: "12px" }}>{planLine}</div>
       </Box>
     );
-  }, [caseData, interventionCostTotals, selectedPlan]);
+  }, [caseData, interventionFundingTotals, selectedPlan]);
   const nextKeyDate = useMemo(() => {
     const plans = caseData?.actionPlans || [];
     const candidates = [];
