@@ -38,3 +38,4 @@ Runs assessment workflow, recommendation, and decision preparation.
 
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.
+- Browser spellcheck is now explicitly enabled only for narrative assessment fields (for example overview, goals, justification, notes, and letter drafting) and explicitly disabled for proper-noun, code, reference, and semi-structured fields such as institutions, program names, NOC lookup, payees, and similar identifiers.

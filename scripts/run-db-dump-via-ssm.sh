@@ -3,31 +3,37 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Restore a SQL snapshot into the NWAC test database via SSM on a live test app host.
+Create a SQL dump from the NWAC test or prod database via SSM on a live app host and upload it to S3.
 
 Usage:
-  scripts/run-test-db-restore-via-ssm.sh --s3-bucket nwac-test-artifacts --s3-key db-refresh/snapshot.sql
+  scripts/run-db-dump-via-ssm.sh --env test
+  scripts/run-db-dump-via-ssm.sh --env prod --s3-key db-dumps/custom/prod.sql.gz
 
 Options:
-  --s3-bucket NAME     S3 bucket holding the snapshot object. Required.
-  --s3-key KEY         S3 object key holding the snapshot object. Required.
-  --instance-id ID     Override the auto-discovered SSM target instance.
-  --profile NAME       AWS profile to use. Default: nwac-test
-  --region REGION      AWS region to use. Default: ca-central-1
-  --asg-name NAME      Auto Scaling Group to inspect. Default: nwac-test-asg
-  --db-secret-id ID    Secrets Manager secret for DB credentials. Default: nwac-test-db-credentials
-  --db-host HOST       Aurora writer/cluster endpoint. Default: nwac-test-db.cluster-cn4yoy2s4w5t.ca-central-1.rds.amazonaws.com
-  --db-name NAME       Database name to recreate and restore. Default: iset_intake
-  --db-port PORT       Database port. Default: 3306
-  --help               Show this help text.
+  --env NAME          Target environment: test or prod. Required.
+  --s3-bucket NAME    S3 bucket for the dump object. Defaults by env:
+                      test -> nwac-test-artifacts
+                      prod -> nwac-prod-artifacts
+  --s3-key KEY        Exact S3 object key to write. Default:
+                      db-dumps/<env>/<timestamp>-iset_intake.sql.gz
+  --instance-id ID    Override the auto-discovered SSM target instance.
+  --profile NAME      AWS profile override. Defaults by env.
+  --region REGION     AWS region. Default: ca-central-1
+  --asg-name NAME     Auto Scaling Group override. Defaults by env.
+  --db-secret-id ID   Secrets Manager secret override. Defaults by env.
+  --db-host HOST      Aurora writer/cluster endpoint override. Defaults by env.
+  --db-name NAME      Database name. Default: iset_intake
+  --db-port PORT      Database port. Default: 3306
+  --help              Show this help text.
 EOF
 }
 
-AWS_PROFILE="nwac-test"
 AWS_REGION="ca-central-1"
-ASG_NAME="nwac-test-asg"
-DB_SECRET_ID="nwac-test-db-credentials"
-DB_HOST="nwac-test-db.cluster-cn4yoy2s4w5t.ca-central-1.rds.amazonaws.com"
+ENV_NAME=""
+AWS_PROFILE=""
+ASG_NAME=""
+DB_SECRET_ID=""
+DB_HOST=""
 DB_NAME="iset_intake"
 DB_PORT="3306"
 INSTANCE_ID=""
@@ -41,6 +47,28 @@ fail() {
 
 shell_quote() {
   printf "'%s'" "${1//\'/\'\\\'\'}"
+}
+
+set_defaults_for_env() {
+  case "$1" in
+    test)
+      AWS_PROFILE="${AWS_PROFILE:-nwac-test}"
+      ASG_NAME="${ASG_NAME:-nwac-test-asg}"
+      DB_SECRET_ID="${DB_SECRET_ID:-nwac-test-db-credentials}"
+      DB_HOST="${DB_HOST:-nwac-test-db.cluster-cn4yoy2s4w5t.ca-central-1.rds.amazonaws.com}"
+      S3_BUCKET="${S3_BUCKET:-nwac-test-artifacts}"
+      ;;
+    prod)
+      AWS_PROFILE="${AWS_PROFILE:-nwac-prod}"
+      ASG_NAME="${ASG_NAME:-nwac-prod-asg}"
+      DB_SECRET_ID="${DB_SECRET_ID:-nwac-prod-db-credentials}"
+      DB_HOST="${DB_HOST:-nwac-prod-db.cluster-c3g4iamg8j38.ca-central-1.rds.amazonaws.com}"
+      S3_BUCKET="${S3_BUCKET:-nwac-prod-artifacts}"
+      ;;
+    *)
+      fail "--env must be one of: test, prod"
+      ;;
+  esac
 }
 
 discover_instance_id() {
@@ -73,6 +101,11 @@ discover_instance_id() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --env)
+      [[ $# -ge 2 ]] || fail "--env requires a value"
+      ENV_NAME="$2"
+      shift 2
+      ;;
     --s3-bucket)
       [[ $# -ge 2 ]] || fail "--s3-bucket requires a value"
       S3_BUCKET="$2"
@@ -133,6 +166,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+[[ -n "$ENV_NAME" ]] || fail "--env is required"
+
 command -v aws >/dev/null 2>&1 || fail "aws CLI not found in PATH"
 
 LOCAL_PY_BIN="python3"
@@ -141,31 +176,41 @@ if ! command -v "$LOCAL_PY_BIN" >/dev/null 2>&1; then
 fi
 command -v "$LOCAL_PY_BIN" >/dev/null 2>&1 || fail "python3/python not found in PATH"
 
-[[ -n "$S3_BUCKET" ]] || fail "--s3-bucket is required"
-[[ -n "$S3_KEY" ]] || fail "--s3-key is required"
+set_defaults_for_env "$ENV_NAME"
+
+if [[ -z "$S3_KEY" ]]; then
+  S3_KEY="db-dumps/$ENV_NAME/$(date +%Y%m%d-%H%M%S)-$DB_NAME.sql.gz"
+fi
 
 if [[ -z "$INSTANCE_ID" ]]; then
   INSTANCE_ID="$(discover_instance_id)" || fail "Unable to find an online SSM-managed instance in ASG '$ASG_NAME'"
 fi
 
-REMOTE_SNAPSHOT="/tmp/$(basename "$S3_KEY")"
+CALLER_AWS_ACCESS_KEY_ID="$(aws configure get aws_access_key_id --profile "$AWS_PROFILE" || true)"
+CALLER_AWS_SECRET_ACCESS_KEY="$(aws configure get aws_secret_access_key --profile "$AWS_PROFILE" || true)"
+CALLER_AWS_SESSION_TOKEN="$(aws configure get aws_session_token --profile "$AWS_PROFILE" || true)"
+
+[[ -n "$CALLER_AWS_ACCESS_KEY_ID" ]] || fail "Unable to resolve aws_access_key_id for profile '$AWS_PROFILE'"
+[[ -n "$CALLER_AWS_SECRET_ACCESS_KEY" ]] || fail "Unable to resolve aws_secret_access_key for profile '$AWS_PROFILE'"
+
+REMOTE_DUMP="/tmp/$(basename "$S3_KEY")"
 PARAMS_FILE="$(mktemp)"
 trap 'rm -f "$PARAMS_FILE"' EXIT
 
 REMOTE_COMMANDS=(
   "set -euo pipefail"
   "command -v aws >/dev/null 2>&1 || { echo 'aws CLI not found on target host' >&2; exit 127; }"
-  "if ! command -v mysql >/dev/null 2>&1; then if command -v dnf >/dev/null 2>&1; then sudo dnf install -y mariadb105 >/dev/null 2>&1 || sudo dnf install -y mariadb >/dev/null 2>&1; elif command -v yum >/dev/null 2>&1; then sudo yum install -y mariadb >/dev/null 2>&1; else echo 'mysql client not found on target host and no supported package manager is available' >&2; exit 127; fi; fi"
+  "if ! command -v mysqldump >/dev/null 2>&1; then if command -v dnf >/dev/null 2>&1; then sudo dnf install -y mariadb105 >/dev/null 2>&1 || sudo dnf install -y mariadb >/dev/null 2>&1; elif command -v yum >/dev/null 2>&1; then sudo yum install -y mariadb >/dev/null 2>&1; else echo 'mysqldump not found on target host and no supported package manager is available' >&2; exit 127; fi; fi"
+  "if ! command -v gzip >/dev/null 2>&1; then echo 'gzip not found on target host' >&2; exit 127; fi"
   "if ! command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then echo 'python3/python not available on target host for secret parsing' >&2; exit 127; fi"
-  "aws s3 cp s3://$S3_BUCKET/$S3_KEY $(shell_quote "$REMOTE_SNAPSHOT") --region $(shell_quote "$AWS_REGION")"
   "SECRET_PAYLOAD=\$(aws secretsmanager get-secret-value --secret-id $(shell_quote "$DB_SECRET_ID") --region $(shell_quote "$AWS_REGION") --query SecretString --output text)"
   "PY_BIN=python3; command -v python3 >/dev/null 2>&1 || PY_BIN=python"
   "DB_USER=\$(printf '%s' \"\$SECRET_PAYLOAD\" | \$PY_BIN -c 'import json,sys; print(json.loads(sys.stdin.read()).get(\"username\", \"\"))')"
   "DB_PASS=\$(printf '%s' \"\$SECRET_PAYLOAD\" | \$PY_BIN -c 'import json,sys; print(json.loads(sys.stdin.read()).get(\"password\", \"\"))')"
   "test -n \"\$DB_USER\" && test -n \"\$DB_PASS\" || { echo 'secret missing username/password' >&2; exit 1; }"
-  "MYSQL_PWD=\"\$DB_PASS\" mysql --protocol TCP --ssl -h $(shell_quote "$DB_HOST") -P $(shell_quote "$DB_PORT") -u \"\$DB_USER\" -e \"DROP DATABASE IF EXISTS \\\`$DB_NAME\\\`; CREATE DATABASE \\\`$DB_NAME\\\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\""
-  "if [[ $(shell_quote "$REMOTE_SNAPSHOT") == *.gz ]]; then gzip -dc $(shell_quote "$REMOTE_SNAPSHOT") | sed -E 's/DEFINER=\`[^\\`]+\`@\`[^\\`]+\`//g' | MYSQL_PWD=\"\$DB_PASS\" mysql --protocol TCP --ssl -h $(shell_quote "$DB_HOST") -P $(shell_quote "$DB_PORT") -u \"\$DB_USER\" $(shell_quote "$DB_NAME"); else sed -E 's/DEFINER=\`[^\\`]+\`@\`[^\\`]+\`//g' $(shell_quote "$REMOTE_SNAPSHOT") | MYSQL_PWD=\"\$DB_PASS\" mysql --protocol TCP --ssl -h $(shell_quote "$DB_HOST") -P $(shell_quote "$DB_PORT") -u \"\$DB_USER\" $(shell_quote "$DB_NAME"); fi"
-  "rm -f $(shell_quote "$REMOTE_SNAPSHOT")"
+  "MYSQL_PWD=\"\$DB_PASS\" mysqldump --protocol TCP --ssl -h $(shell_quote "$DB_HOST") -P $(shell_quote "$DB_PORT") -u \"\$DB_USER\" --single-transaction --quick --routines --triggers --events --hex-blob --default-character-set=utf8mb4 --no-tablespaces $(shell_quote "$DB_NAME") | gzip -c > $(shell_quote "$REMOTE_DUMP")"
+  "AWS_ACCESS_KEY_ID=$(shell_quote "$CALLER_AWS_ACCESS_KEY_ID") AWS_SECRET_ACCESS_KEY=$(shell_quote "$CALLER_AWS_SECRET_ACCESS_KEY") AWS_SESSION_TOKEN=$(shell_quote "$CALLER_AWS_SESSION_TOKEN") aws s3 cp $(shell_quote "$REMOTE_DUMP") s3://$S3_BUCKET/$S3_KEY --region $(shell_quote "$AWS_REGION") --only-show-errors"
+  "rm -f $(shell_quote "$REMOTE_DUMP")"
 )
 
 "$LOCAL_PY_BIN" - "$PARAMS_FILE" "${REMOTE_COMMANDS[@]}" <<'PY'
@@ -186,13 +231,13 @@ COMMAND_ID="$(aws ssm send-command \
   --instance-ids "$INSTANCE_ID" \
   --document-name AWS-RunShellScript \
   --parameters "file://$PARAMS_FILE" \
-  --comment "Codex test DB restore" \
+  --comment "Codex $ENV_NAME DB dump" \
   --region "$AWS_REGION" \
   --profile "$AWS_PROFILE" \
   --query 'Command.CommandId' \
   --output text)"
 
-printf 'Restoring TEST DB on %s via SSM command %s\n' "$INSTANCE_ID" "$COMMAND_ID" >&2
+printf 'Creating %s DB dump on %s via SSM command %s\n' "$ENV_NAME" "$INSTANCE_ID" "$COMMAND_ID" >&2
 
 while true; do
   STATUS="$(aws ssm get-command-invocation \
@@ -208,13 +253,6 @@ while true; do
       sleep 5
       ;;
     Success)
-      aws ssm get-command-invocation \
-        --command-id "$COMMAND_ID" \
-        --instance-id "$INSTANCE_ID" \
-        --region "$AWS_REGION" \
-        --profile "$AWS_PROFILE" \
-        --query 'StandardOutputContent' \
-        --output text
       STDERR_CONTENT="$(aws ssm get-command-invocation \
         --command-id "$COMMAND_ID" \
         --instance-id "$INSTANCE_ID" \
@@ -225,6 +263,8 @@ while true; do
       if [[ "$STDERR_CONTENT" != "None" && -n "$STDERR_CONTENT" ]]; then
         printf '%s\n' "$STDERR_CONTENT" >&2
       fi
+      printf '{"env":"%s","profile":"%s","instanceId":"%s","bucket":"%s","key":"%s","commandId":"%s"}\n' \
+        "$ENV_NAME" "$AWS_PROFILE" "$INSTANCE_ID" "$S3_BUCKET" "$S3_KEY" "$COMMAND_ID"
       exit 0
       ;;
     *)

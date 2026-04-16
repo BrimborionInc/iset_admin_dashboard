@@ -401,6 +401,7 @@ const BudgetSavedViewsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }
               value={formState.name}
               placeholder="e.g., Executive roll-up"
               onChange={({ detail }) => setFormState(prev => ({ ...prev, name: detail.value }))}
+              spellcheck={true}
             />
           </FormField>
           <FormField label="Description">
@@ -408,6 +409,7 @@ const BudgetSavedViewsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }
               value={formState.description}
               rows={2}
               onChange={({ detail }) => setFormState(prev => ({ ...prev, description: detail.value }))}
+              spellcheck={true}
             />
           </FormField>
           <FormField label="Audience">
@@ -415,6 +417,7 @@ const BudgetSavedViewsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }
               value={formState.audience}
               placeholder="e.g., Executive, Regional finance"
               onChange={({ detail }) => setFormState(prev => ({ ...prev, audience: detail.value }))}
+              spellcheck={true}
             />
           </FormField>
           <FormField label="View mode">
@@ -439,12 +442,14 @@ const BudgetSavedViewsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }
             <Input
               value={formState.region}
               onChange={({ detail }) => setFormState(prev => ({ ...prev, region: detail.value }))}
+              spellcheck={false}
             />
           </FormField>
           <FormField label="Owner (optional)">
             <Input
               value={formState.owner}
               onChange={({ detail }) => setFormState(prev => ({ ...prev, owner: detail.value }))}
+              spellcheck={false}
             />
           </FormField>
           <FormField label="Timeframe (optional)">
@@ -452,6 +457,7 @@ const BudgetSavedViewsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }
               value={formState.timeframe}
               placeholder="e.g., FY2025 or FY2025-Q2"
               onChange={({ detail }) => setFormState(prev => ({ ...prev, timeframe: detail.value }))}
+              spellcheck={false}
             />
           </FormField>
           <FormField label="Allowed export formats">

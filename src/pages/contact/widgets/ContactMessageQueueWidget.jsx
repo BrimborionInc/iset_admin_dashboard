@@ -885,6 +885,7 @@ const ContactMessageQueueWidget = ({
                           }}
                           rows={3}
                           placeholder="Record triage context or follow-up actions"
+                          spellcheck={true}
                           disabled={noteSaving}
                         />
                       </FormField>

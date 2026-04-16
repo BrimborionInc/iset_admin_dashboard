@@ -2643,6 +2643,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
                 value={createForm.notes}
                 onChange={({ detail }) => updateCreateForm("notes", detail.value)}
                 rows={3}
+                spellcheck={true}
                 disabled={createPacketFieldsDisabled}
               />
             </FormField>
@@ -2678,6 +2679,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
                   value={createForm.payeeName}
                   onChange={({ detail }) => updateCreateForm("payeeName", detail.value)}
                   placeholder="Payee name"
+                  spellcheck={false}
                   disabled={createPacketFieldsDisabled}
                 />
               </FormField>
@@ -2686,6 +2688,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
                   value={createForm.payeeReference}
                   onChange={({ detail }) => updateCreateForm("payeeReference", detail.value)}
                   placeholder="Account or vendor reference"
+                  spellcheck={false}
                   disabled={createPacketFieldsDisabled}
                 />
               </FormField>
@@ -2704,6 +2707,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
                   onChange={({ detail }) => updateCreateForm("amount", detail.value)}
                   inputMode="decimal"
                   placeholder="0.00"
+                  spellcheck={false}
                   onFocus={() => setIsCreateAmountFocused(true)}
                   onBlur={() => setIsCreateAmountFocused(false)}
                   disabled={createPacketFieldsDisabled}
@@ -2751,6 +2755,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
                   value={createForm.invoiceReferenceNumber}
                   onChange={({ detail }) => updateCreateForm("invoiceReferenceNumber", detail.value)}
                   placeholder="Invoice or receipt number"
+                  spellcheck={false}
                   disabled={createPacketFieldsDisabled}
                 />
               </FormField>

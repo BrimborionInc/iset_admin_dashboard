@@ -637,6 +637,7 @@ const AllocationTransferWizardWidget = ({
                 value={formState.justification}
                 onChange={({ detail }) => updateField("justification", detail.value)}
                 rows={6}
+                spellcheck={true}
               />
             </FormField>
             <FormField
@@ -647,6 +648,7 @@ const AllocationTransferWizardWidget = ({
                 placeholder="NWAC-BRD-24-07; ESDC-UAF-2024"
                 value={formState.tags}
                 onChange={({ detail }) => updateField("tags", detail.value)}
+                spellcheck={false}
               />
             </FormField>
           </SpaceBetween>

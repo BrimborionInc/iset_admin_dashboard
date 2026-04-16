@@ -22,7 +22,9 @@ import {
   formatInterventionStatusLabel,
   INTERVENTION_CLOSED_STATUSES,
   INTERVENTION_OPEN_STATUSES,
+  isInterventionClosedStatus,
   normalizeInterventionStatus,
+  resolveInterventionStateFields,
 } from "../../../../utils/interventionStatus.js";
 import {
   isEducationInterventionCode as isEducationCode,
@@ -60,6 +62,73 @@ const calculateDurationDays = (start, end) => {
   const diffMs = endDate.getTime() - startDate.getTime();
   if (diffMs < 0) return null;
   return Math.round(diffMs / (1000 * 60 * 60 * 24)) + 1;
+};
+
+const normalizeApprovedCostLine = (raw, index = 0) => {
+  if (!raw || typeof raw !== "object") return null;
+  const recurrenceRaw =
+    raw.recurrence && typeof raw.recurrence === "object" ? raw.recurrence : {};
+  const payeeRaw = raw.payee && typeof raw.payee === "object" ? raw.payee : {};
+  const amount =
+    raw.amount === null || typeof raw.amount === "undefined" || raw.amount === ""
+      ? null
+      : Number(raw.amount);
+  const amountPerPeriod =
+    recurrenceRaw.amountPerPeriod === null ||
+    typeof recurrenceRaw.amountPerPeriod === "undefined" ||
+    recurrenceRaw.amountPerPeriod === ""
+      ? null
+      : Number(recurrenceRaw.amountPerPeriod);
+  const occurrences =
+    recurrenceRaw.occurrences === null || typeof recurrenceRaw.occurrences === "undefined"
+      ? null
+      : Number(recurrenceRaw.occurrences);
+  if (!(Number.isFinite(amount) && amount > 0) && !(Number.isFinite(amountPerPeriod) && amountPerPeriod > 0)) {
+    return null;
+  }
+  return {
+    id: raw.id || `approved-line-${index + 1}`,
+    paymentType: raw.type || raw.paymentType || raw.payment_type || "—",
+    payeeName: String(payeeRaw.name || raw.payeeName || raw.payee_name || "").trim() || "—",
+    amount:
+      Number.isFinite(amount) && amount > 0
+        ? formatCurrencyDisplay(String(amount))
+        : Number.isFinite(amountPerPeriod) && amountPerPeriod > 0 && Number.isFinite(occurrences) && occurrences > 0
+          ? formatCurrencyDisplay(String(amountPerPeriod * occurrences))
+          : Number.isFinite(amountPerPeriod) && amountPerPeriod > 0
+            ? `${formatCurrencyDisplay(String(amountPerPeriod))} / period`
+            : "Not set",
+    schedule: (() => {
+      const parts = [];
+      const startDate = recurrenceRaw.startDate || recurrenceRaw.start_date || "";
+      const endDate = recurrenceRaw.endDate || recurrenceRaw.end_date || "";
+      if (startDate && endDate) {
+        parts.push(`${startDate} to ${endDate}`);
+      } else if (startDate) {
+        parts.push(startDate);
+      } else if (endDate) {
+        parts.push(endDate);
+      }
+      if (Number.isFinite(amountPerPeriod) && amountPerPeriod > 0 && Number.isFinite(occurrences) && occurrences > 0) {
+        parts.push(`${formatCurrencyDisplay(String(amountPerPeriod))} x ${occurrences}`);
+      }
+      return parts.join(" · ") || "—";
+    })(),
+  };
+};
+
+const resolveApprovedCostLines = intervention => {
+  if (!intervention || typeof intervention !== "object") return [];
+  const metadata =
+    intervention.metadata && typeof intervention.metadata === "object" ? intervention.metadata : {};
+  const snapshot =
+    metadata.snapshot && typeof metadata.snapshot === "object" ? metadata.snapshot : {};
+  const source =
+    (Array.isArray(intervention.costLines) && intervention.costLines) ||
+    (Array.isArray(metadata.costLines) && metadata.costLines) ||
+    (Array.isArray(snapshot.costLines) && snapshot.costLines) ||
+    [];
+  return source.map((line, index) => normalizeApprovedCostLine(line, index)).filter(Boolean);
 };
 
 const defaultForm = {
@@ -118,12 +187,22 @@ const normaliseFormNumbers = value =>
 
 const normaliseInterventionText = value => (typeof value === "string" ? value : "");
 
+const resolveModalInterventionState = (record, fallbackStatus = "approved") =>
+  resolveInterventionStateFields(record, { fallbackStatus });
+
+const normalizeEditableInterventionStatus = (record, fallbackStatus = "approved") =>
+  resolveModalInterventionState(record, fallbackStatus).effectiveStatus ||
+  normalizeInterventionStatus(
+    record && typeof record === "object" ? record?.status ?? record?.interventionStatus ?? null : record,
+    fallbackStatus
+  );
+
 const buildInitialForm = (mode, intervention) => {
   if (mode === "edit" && intervention) {
     const metadata = intervention.metadata && typeof intervention.metadata === "object" ? intervention.metadata : {};
     return {
       code: intervention.code ? String(intervention.code) : "",
-      status: normalizeInterventionStatus(intervention.status, "approved"),
+      status: normalizeEditableInterventionStatus(intervention, "approved"),
       startDate: intervention.startDate || "",
       endDate: intervention.endDate || "",
       durationDays: intervention.endDate ? normaliseFormNumbers(intervention.durationDays) : "",
@@ -160,10 +239,11 @@ const buildInitialForm = (mode, intervention) => {
   return { ...defaultForm };
 };
 
-const isClosedStatusValue = status => INTERVENTION_CLOSED_STATUSES.has(normalizeInterventionStatus(status));
+const isClosedStatusValue = status => isInterventionClosedStatus(status);
 
 const ensureOutcomeForStatus = (status, currentOutcome) => {
-  const normalized = normalizeInterventionStatus(status);
+  const interventionState = resolveModalInterventionState(status);
+  const normalized = interventionState.effectiveStatus || normalizeInterventionStatus(status);
   if (INTERVENTION_OPEN_STATUSES.has(normalized)) {
     return IN_PROGRESS_OUTCOME;
   }
@@ -174,8 +254,8 @@ const ensureOutcomeForStatus = (status, currentOutcome) => {
 };
 
 const buildCloseForm = intervention => {
-  const resolvedStatus =
-    normalizeInterventionStatus(intervention?.status) === "cancelled" ? "cancelled" : "completed";
+  const interventionState = resolveModalInterventionState(intervention, "completed");
+  const resolvedStatus = interventionState.deliveryStatus === "cancelled" ? "cancelled" : "completed";
   const resolvedOutcome =
     intervention?.outcome && intervention?.outcome !== IN_PROGRESS_OUTCOME
       ? String(intervention.outcome).trim()
@@ -285,7 +365,7 @@ const InterventionModal = ({
       return draft;
     })();
 
-    prepared.status = normalizeInterventionStatus(prepared.status, "approved");
+    prepared.status = normalizeEditableInterventionStatus(prepared.status, "approved");
     prepared.outcome = ensureOutcomeForStatus(prepared.status, prepared.outcome);
 
     initialFormRef.current = { ...prepared };
@@ -366,8 +446,9 @@ const InterventionModal = ({
     }
   }, [isClosing]);
 
-  const interventionStatus = normalizeInterventionStatus(intervention?.status, "approved");
-  const isClosedIntervention = ["completed", "cancelled"].includes(interventionStatus);
+  const interventionState = resolveModalInterventionState(intervention, "approved");
+  const interventionStatus = interventionState.effectiveStatus || normalizeInterventionStatus(intervention?.status, "approved");
+  const isClosedIntervention = isInterventionClosedStatus(interventionState);
   const isAccessReadOnly = Boolean(readOnly || (mode === "edit" && isClosedIntervention && !canClose));
   const isViewMode = mode === "edit" && !isEditing;
   const isFormReadOnly = isAccessReadOnly || isViewMode || (mode === "edit" && isClosing);
@@ -413,7 +494,7 @@ const InterventionModal = ({
 
   const statusOptions = useMemo(() => {
     const options = [...BASE_STATUS_OPTIONS];
-    const current = normalizeInterventionStatus(form.status, "approved");
+    const current = normalizeEditableInterventionStatus(form.status, "approved");
     if (current && !options.some(option => option.value === current)) {
       options.push({ value: current, label: formatInterventionStatusLabel(current), disabled: true });
     }
@@ -421,7 +502,7 @@ const InterventionModal = ({
   }, [form.status]);
 
   const selectedStatusOption = useMemo(
-    () => statusOptions.find(option => option.value === normalizeInterventionStatus(form.status, "approved")) || statusOptions[0],
+    () => statusOptions.find(option => option.value === normalizeEditableInterventionStatus(form.status, "approved")) || statusOptions[0],
     [statusOptions, form.status]
   );
   const isEducationIntervention = useMemo(() => isEducationCode(form.code), [form.code]);
@@ -577,6 +658,10 @@ const InterventionModal = ({
   }, [
     packetLineItems,
   ]);
+  const approvedFundingLineItems = useMemo(
+    () => resolveApprovedCostLines(intervention),
+    [intervention]
+  );
 
   const applyFieldSideEffects = (draft, field, value) => {
     const next = { ...draft, [field]: value };
@@ -604,7 +689,7 @@ const InterventionModal = ({
       next.durationDays = duration !== null ? String(duration) : "";
     }
 
-    next.status = normalizeInterventionStatus(next.status, "approved");
+    next.status = normalizeEditableInterventionStatus(next.status, "approved");
     next.outcome = ensureOutcomeForStatus(next.status, next.outcome);
 
     return next;
@@ -688,7 +773,9 @@ const InterventionModal = ({
       return;
     }
     const statusValue =
-      closeForm.status === "cancelled" ? "cancelled" : "completed";
+      resolveModalInterventionState({ status: closeForm.status }, "completed").deliveryStatus === "cancelled"
+        ? "cancelled"
+        : "completed";
     const actualAmountRaw = (closeForm.actualAmount || "").trim();
     if (actualAmountRaw) {
       const numeric = Number(actualAmountRaw);
@@ -710,6 +797,7 @@ const InterventionModal = ({
     try {
       await onClose({
         status: statusValue,
+        deliveryStatus: statusValue,
         outcome: outcomeValue,
         actualAmount: actualAmountRaw ? Number(actualAmountRaw) : null,
         completionDate: closeForm.completionDate || null,
@@ -733,7 +821,8 @@ const InterventionModal = ({
     if (isAccessReadOnly) return;
     setValidationError(null);
     setFieldErrors({});
-    const statusNormalized = normalizeInterventionStatus(form.status, "approved");
+    const statusState = resolveModalInterventionState({ status: form.status }, "approved");
+    const statusNormalized = statusState.effectiveStatus || normalizeInterventionStatus(form.status, "approved");
     const outcomeValue = ensureOutcomeForStatus(statusNormalized, form.outcome);
     const trimmedCode = (form.code ?? "").toString().trim();
     const errors = {};
@@ -791,7 +880,7 @@ const InterventionModal = ({
     if (
       form.endDate &&
       !errors.endDate &&
-      !["completed", "cancelled"].includes(statusNormalized)
+      !INTERVENTION_CLOSED_STATUSES.has(statusState.deliveryStatus || statusNormalized)
     ) {
       errors.endDate =
         'Use "Close intervention" to set completion date and final outcome.';
@@ -831,6 +920,7 @@ const InterventionModal = ({
     const payload = {
       code: trimmedCode,
       status: statusNormalized,
+      deliveryStatus: statusState.deliveryStatus || null,
       startDate: form.startDate || null,
       endDate: form.endDate || null,
       durationDays: durationValue,
@@ -1079,6 +1169,7 @@ const InterventionModal = ({
                   onFocus={() => setIsActualCostFocused(true)}
                   onBlur={() => setIsActualCostFocused(false)}
                   placeholder="e.g. 4200"
+                  spellcheck={false}
                   readOnly={isCloseReadOnly}
                 />
               </FormField>
@@ -1200,6 +1291,7 @@ const InterventionModal = ({
                         fetchNocSuggestions(detail.filteringText);
                       }}
                       invalid={Boolean(fieldErrors.noc)}
+                      spellcheck={false}
                     />
                   </FormField>
                 </>
@@ -1222,6 +1314,7 @@ const InterventionModal = ({
                       <Input
                         value={form.institution}
                         onChange={({ detail }) => handleChange("institution", detail.value)}
+                        spellcheck={false}
                         readOnly={isFormReadOnly}
                       />
                     </FormField>
@@ -1238,6 +1331,7 @@ const InterventionModal = ({
                     <Input
                       value={form.institution}
                       onChange={({ detail }) => handleChange("institution", detail.value)}
+                      spellcheck={false}
                       readOnly={isFormReadOnly}
                     />
                   </FormField>
@@ -1245,6 +1339,7 @@ const InterventionModal = ({
                     <Input
                       value={form.programName}
                       onChange={({ detail }) => handleChange("programName", detail.value)}
+                      spellcheck={false}
                       readOnly={isFormReadOnly}
                     />
                   </FormField>
@@ -1257,6 +1352,7 @@ const InterventionModal = ({
                     value={form.itpDetails}
                     rows={3}
                     onChange={({ detail }) => handleChange("itpDetails", detail.value)}
+                    spellcheck={true}
                     readOnly={isFormReadOnly}
                   />
                 </FormField>
@@ -1272,6 +1368,7 @@ const InterventionModal = ({
                     <Input
                       value={form.institution}
                       onChange={({ detail }) => handleChange("institution", detail.value)}
+                      spellcheck={false}
                       readOnly={isFormReadOnly}
                     />
                   </FormField>
@@ -1279,6 +1376,7 @@ const InterventionModal = ({
                     <Input
                       value={form.programName}
                       onChange={({ detail }) => handleChange("programName", detail.value)}
+                      spellcheck={false}
                       readOnly={isFormReadOnly}
                     />
                   </FormField>
@@ -1289,6 +1387,7 @@ const InterventionModal = ({
                       value={form.wageSubsidyDetails}
                       rows={3}
                       onChange={({ detail }) => handleChange("wageSubsidyDetails", detail.value)}
+                      spellcheck={true}
                       readOnly={isFormReadOnly}
                     />
                   </FormField>
@@ -1338,10 +1437,47 @@ const InterventionModal = ({
                   onFocus={() => setIsCostFocused(true)}
                   onBlur={() => setIsCostFocused(false)}
                   placeholder="e.g. 42000"
+                  spellcheck={false}
                   readOnly={isFormReadOnly}
                 />
               </FormField>
             </ColumnLayout>
+            <Table
+              items={approvedFundingLineItems}
+              trackBy="id"
+              variant="embedded"
+              columnDefinitions={[
+                {
+                  id: "paymentType",
+                  header: "Approved funding type",
+                  cell: item => item.paymentType,
+                },
+                {
+                  id: "payeeName",
+                  header: "Payee name",
+                  cell: item => item.payeeName,
+                },
+                {
+                  id: "amount",
+                  header: "Approved amount",
+                  cell: item => item.amount,
+                },
+                {
+                  id: "schedule",
+                  header: "Schedule",
+                  cell: item => item.schedule,
+                },
+              ]}
+              header={
+                <Header
+                  variant="h3"
+                  counter={approvedFundingLineItems.length ? `(${approvedFundingLineItems.length})` : undefined}
+                >
+                  Approved funding lines
+                </Header>
+              }
+              empty={<Box padding="s">No approved funding lines are stored for this intervention.</Box>}
+            />
             <Table
               items={costLineItems}
               trackBy="id"
@@ -1364,12 +1500,16 @@ const InterventionModal = ({
                 },
                 {
                   id: "recurrence",
-                  header: "Recurrence",
+                  header: "Schedule / recurrence",
                   cell: item => item.recurrence,
                 },
               ]}
-              header={<Header variant="h3">Cost line items</Header>}
-              empty={<Box padding="s">No cost line items recorded for this intervention.</Box>}
+              header={
+                <Header variant="h3" counter={costLineItems.length ? `(${costLineItems.length})` : undefined}>
+                  Payment packet lines
+                </Header>
+              }
+              empty={<Box padding="s">No payment packet lines have been created for this intervention yet.</Box>}
             />
           </SpaceBetween>
           <SpaceBetween size="s">
@@ -1379,6 +1519,7 @@ const InterventionModal = ({
                 rows={3}
                 onChange={({ detail }) => handleChange("notes", detail.value)}
                 placeholder="Optional context or reminders"
+                spellcheck={true}
                 readOnly={isFormReadOnly}
               />
             </FormField>

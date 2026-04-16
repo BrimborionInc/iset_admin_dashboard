@@ -32,7 +32,7 @@ import useCurrentUser from "../../../../hooks/useCurrentUser.js";
 import { findOptionByValue } from "../../../finance/widgets/paymentOptions";
 import { getCurrencyInputDisplayValue } from "../../../../utils/currencyFormat";
 import { buildApplicantFacingReasonSentence } from "../../../../utils/decisionLetterText";
-import { normalizeInterventionStatus } from "../../../../utils/interventionStatus.js";
+import { normalizeInterventionStatus, resolveInterventionStateFields } from "../../../../utils/interventionStatus.js";
 import {
   isEducationInterventionCode as isEducationCode,
   isEmployerInterventionCode as isEmployerCode,
@@ -949,7 +949,17 @@ const idsMatch = (left, right) => {
 
 const parseCurrencyInput = value => {
   if (value === null || typeof value === "undefined") return null;
-  const cleaned = String(value).replace(/[^0-9.]/g, "");
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const lastDot = raw.lastIndexOf(".");
+  const lastComma = raw.lastIndexOf(",");
+  let cleaned = raw.replace(/[^\d.,]/g, "");
+  if (!cleaned) return null;
+  if (lastComma > lastDot) {
+    cleaned = cleaned.replace(/\./g, "").replace(",", ".");
+  } else {
+    cleaned = cleaned.replace(/,/g, "");
+  }
   if (!cleaned) return null;
   const num = Number.parseFloat(cleaned);
   return Number.isFinite(num) ? num : null;
@@ -970,12 +980,25 @@ const formatCurrencyDisplay = value => {
   return `$ ${num.toFixed(2)}`;
 };
 
-const sanitizeCurrencyInput = value => {
+const sanitizeCurrencyInput = (value, options = {}) => {
+  const { preserveTrailingDecimal = false } = options;
   if (value === null || value === undefined) return "";
-  const cleaned = String(value).replace(/[^\d.]/g, "");
+  const raw = String(value);
+  const cleaned = raw.replace(/[^\d.,]/g, "");
   if (!cleaned) return "";
-  const [whole, ...rest] = cleaned.split(".");
-  const decimals = rest.join("").slice(0, 2);
+  const lastDot = cleaned.lastIndexOf(".");
+  const lastComma = cleaned.lastIndexOf(",");
+  const separatorIndex = Math.max(lastDot, lastComma);
+  if (separatorIndex === -1) {
+    return cleaned.replace(/[^\d]/g, "");
+  }
+  const whole = cleaned.slice(0, separatorIndex).replace(/[^\d]/g, "");
+  const decimalRaw = cleaned.slice(separatorIndex + 1).replace(/[^\d]/g, "");
+  const hasTrailingSeparator = separatorIndex === cleaned.length - 1;
+  const decimals = decimalRaw.slice(0, 2);
+  if (hasTrailingSeparator) {
+    return preserveTrailingDecimal ? `${whole}.` : whole;
+  }
   return decimals.length ? `${whole}.${decimals}` : whole;
 };
 
@@ -1792,8 +1815,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     const plans = caseData?.actionPlans || [];
     return plans.some(plan =>
       (plan.interventions || []).some(intervention => {
-        const statusValue = normalizeInterventionStatus(intervention?.status, null);
-        return statusValue === "submitted" || statusValue === "in_review";
+        const state = resolveInterventionStateFields(intervention);
+        return state.reviewStatus === "submitted" || state.reviewStatus === "in_review";
       })
     );
   }, [caseData]);
@@ -1802,20 +1825,21 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     const plans = caseData?.actionPlans || [];
     return plans.some(plan =>
       (plan.interventions || []).some(intervention => {
-        const statusValue = normalizeInterventionStatus(intervention?.status, null);
-        return statusValue === "draft" || statusValue === "changes_requested";
+        const state = resolveInterventionStateFields(intervention);
+        return state.reviewStatus === "draft" || state.reviewStatus === "changes_requested";
       })
     );
   }, [caseData]);
 
   const hasBlockingProposal = hasBlockingReviewStage || hasBlockingDraft;
 
-  const statusValue = normalizeInterventionStatus(currentInterventionStatus, null);
-  const isDraftStatus = statusValue === "draft";
-  const isSubmittedStatus = statusValue === "submitted";
-  const isInReviewStatus = statusValue === "in_review";
+  const currentInterventionState = resolveInterventionStateFields(currentInterventionStatus);
+  const statusValue = currentInterventionState.reviewStatus || currentInterventionState.effectiveStatus;
+  const isDraftStatus = currentInterventionState.reviewStatus === "draft";
+  const isSubmittedStatus = currentInterventionState.reviewStatus === "submitted";
+  const isInReviewStatus = currentInterventionState.reviewStatus === "in_review";
   const isReviewStageStatus = isSubmittedStatus || isInReviewStatus;
-  const isChangesRequestedStatus = statusValue === "changes_requested";
+  const isChangesRequestedStatus = currentInterventionState.reviewStatus === "changes_requested";
   const isRevisionMode = Boolean(revisionContext?.sourceInterventionId);
   const revisionSourceInterventionId = revisionContext?.sourceInterventionId || null;
   const revisionSourceActionPlanId = revisionContext?.sourceActionPlanId || "";
@@ -3381,7 +3405,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
 
   const updateCostLineAmount = useCallback(
     value => {
-      const sanitized = sanitizeCurrencyInput(value);
+      const sanitized = sanitizeCurrencyInput(value, { preserveTrailingDecimal: true });
       updateCostLineDraft(draft => {
         const next = { ...draft, amount: sanitized };
         if (draft.recurrence?.enabled && draft.recurrence?.occurrences) {
@@ -3419,7 +3443,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
 
   const updateCostLineAmountPerPeriod = useCallback(
     value => {
-      const sanitized = sanitizeCurrencyInput(value);
+      const sanitized = sanitizeCurrencyInput(value, { preserveTrailingDecimal: true });
       updateCostLineDraft(draft => {
         const recurrence = { ...(draft.recurrence || {}), amountPerPeriod: sanitized };
         const occ = Number(recurrence.occurrences);
@@ -5413,6 +5437,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
           rows={4}
           onChange={({ detail }) => handleChange("rationale", detail.value)}
           placeholder="Summarize why these interventions are needed and expected outcomes."
+          spellcheck={true}
           disabled={isFormLocked}
         />
       </FormField>
@@ -5550,6 +5575,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
               value={form.otherFundingNwacCoverage || ""}
               onChange={({ detail }) => updateOtherFundingFields({ otherFundingNwacCoverage: detail.value })}
               rows={3}
+              spellcheck={true}
               disabled={isFormLocked}
             />
           </FormField>
@@ -5560,6 +5586,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
           value={form.otherFundingNotes || ""}
           onChange={({ detail }) => updateOtherFundingFields({ otherFundingNotes: detail.value })}
           rows={3}
+          spellcheck={true}
           disabled={isFormLocked}
         />
       </FormField>
@@ -5589,6 +5616,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
           value={form.childcareFunding || ""}
           onChange={({ detail }) => handleChange("childcareFunding", detail.value)}
           rows={3}
+          spellcheck={true}
           disabled={isFormLocked || form.childcareNeed !== "yes"}
         />
       </FormField>
@@ -5673,6 +5701,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                           onChange={({ detail }) => handleInlineAmountChange(intervention.id, item.id, detail.value)}
                           onBlur={() => handleInlineAmountBlur(item.id)}
                           placeholder="0.00"
+                          spellcheck={false}
                           readOnly={isFormLocked}
                         />
                         {showCostErrors && lineErrors.amount && (
@@ -5841,6 +5870,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
             onChange={({ detail }) => handleChange("decisionNotes", detail.value)}
             rows={3}
             placeholder="Provide context for this decision."
+            spellcheck={true}
             disabled={isDecisionReadOnly}
           />
         </FormField>
@@ -6299,6 +6329,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                   return next;
                 });
               }}
+              spellcheck={false}
               readOnly={isFormLocked}
             />
           </FormField>
@@ -6332,6 +6363,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                   return next;
                 });
               }}
+              spellcheck={true}
               readOnly={isFormLocked}
             />
           </FormField>
@@ -6507,6 +6539,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                         return next;
                       });
                     }}
+                    spellcheck={false}
                     readOnly={!interventionModalEditable || isFormLocked}
                   />
                 </FormField>
@@ -6533,6 +6566,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                         return next;
                       });
                     }}
+                    spellcheck={false}
                     readOnly={!interventionModalEditable || isFormLocked}
                   />
                 </FormField>
@@ -6540,6 +6574,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                   <Input
                     value={interventionModalDraft.programName}
                     onChange={({ detail }) => updateInterventionModalDraft({ programName: detail.value })}
+                    spellcheck={false}
                     readOnly={!interventionModalEditable || isFormLocked}
                   />
                 </FormField>
@@ -6557,9 +6592,10 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                     setInterventionModalErrors(prev => {
                       const next = { ...prev };
                       delete next.itpDetails;
-                      return next;
-                    });
-                  }}
+                        return next;
+                      });
+                    }}
+                  spellcheck={true}
                   readOnly={!interventionModalEditable || isFormLocked}
                 />
               </FormField>
@@ -6583,6 +6619,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                         return next;
                       });
                     }}
+                    spellcheck={false}
                     readOnly={!interventionModalEditable || isFormLocked}
                   />
                 </FormField>
@@ -6590,6 +6627,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                   <Input
                     value={interventionModalDraft.programName}
                     onChange={({ detail }) => updateInterventionModalDraft({ programName: detail.value })}
+                    spellcheck={false}
                     readOnly={!interventionModalEditable || isFormLocked}
                   />
                 </FormField>
@@ -6610,6 +6648,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                         return next;
                       });
                     }}
+                    spellcheck={true}
                     readOnly={!interventionModalEditable || isFormLocked}
                   />
                 </FormField>
@@ -6690,6 +6729,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                       !interventionModalDraft.interventionNocVersion
                     }
                     enteredTextLabel={value => `Use "${value}"`}
+                    spellcheck={false}
                   />
                 </FormField>
             </ColumnLayout>
@@ -6751,13 +6791,17 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     : costLineRecurrenceRequired || Boolean(costLineDraft?.recurrence?.enabled);
   const costLineAmountDisplay = costLineDraft
     ? getCurrencyInputDisplayValue(
-        sanitizeCurrencyInput(costLineDraft.amount),
+        sanitizeCurrencyInput(costLineDraft.amount, {
+          preserveTrailingDecimal: isCostLineEditable ? costLineAmountFocused : false,
+        }),
         isCostLineEditable ? costLineAmountFocused : false,
       )
     : "";
   const costLineAmountPerPeriodDisplay = costLineDraft
     ? getCurrencyInputDisplayValue(
-        sanitizeCurrencyInput(costLineDraft.recurrence?.amountPerPeriod),
+        sanitizeCurrencyInput(costLineDraft.recurrence?.amountPerPeriod, {
+          preserveTrailingDecimal: isCostLineEditable ? costLineAmountPerPeriodFocused : false,
+        }),
         isCostLineEditable ? costLineAmountPerPeriodFocused : false,
       )
     : "";
@@ -6845,6 +6889,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
               onFocus={() => setCostLineAmountFocused(true)}
               onBlur={blurCostLineAmount}
               placeholder="0.00"
+              spellcheck={false}
               readOnly={!isCostLineEditable || isFormLocked}
             />
           </FormField>
@@ -6869,6 +6914,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                 })
               }
               placeholder={costLinePayeeNamePlaceholder}
+              spellcheck={false}
               readOnly={!isCostLineEditable || isFormLocked || lockParticipantPayeeName}
             />
           </FormField>
@@ -6885,6 +6931,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                   })
                 }
                 placeholder={costLineIsStudentLoanRepayment ? "Enter loan account number" : "Vendor/account reference"}
+                spellcheck={false}
                 readOnly={!isCostLineEditable || isFormLocked}
               />
             </FormField>
@@ -6927,6 +6974,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                     inputMode="numeric"
                     value={costLineDraft.recurrence?.occurrences || ""}
                     onChange={({ detail }) => updateCostLineOccurrences(detail.value)}
+                    spellcheck={false}
                     readOnly={!isCostLineEditable || isFormLocked}
                   />
                 </FormField>
@@ -6937,6 +6985,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                     onChange={({ detail }) => updateCostLineAmountPerPeriod(detail.value)}
                     onFocus={() => setCostLineAmountPerPeriodFocused(true)}
                     onBlur={blurCostLineAmountPerPeriod}
+                    spellcheck={false}
                     readOnly={!isCostLineEditable || isFormLocked}
                   />
                 </FormField>
@@ -6948,6 +6997,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
               value={costLineDraft.notes || ""}
               rows={3}
               onChange={({ detail }) => updateCostLineDraft({ notes: detail.value })}
+              spellcheck={true}
               readOnly={!isCostLineEditable || isFormLocked}
             />
           </FormField>

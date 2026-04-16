@@ -5,6 +5,8 @@ Date: 2026-04-10
 ## Summary
 The unified `iset_document` table now anchors every document to a single `client_id`, with optional links to applications, cases, or action plans. Intervention links are stored in the `iset_document_intervention` join table, and payment evidence attachments live in `payment_packet_document`.
 
+> Entity-model note: the agreed PATH core relationship model is tracked in `docs/planning/client-case-application-target-model.md`. This document describes document ownership/scoping within that broader model and, where noted, distinguishes the current implementation from the target relationship shape.
+
 ## Drivers
 - Need a single list of all supporting documents for an applicant regardless of origin.
 - Support auto-adoption of secure message attachments into the case file.

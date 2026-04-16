@@ -31,6 +31,7 @@ import { apiFetch } from '../auth/apiClient';
 import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplicationLock';
 import useCurrentUser from '../hooks/useCurrentUser';
 import { formatCurrencyDisplay } from '../utils/currencyFormat';
+import { resolveApplicationStateFields } from '../utils/applicationStatus';
 
 const NOT_PROVIDED = <Box color="text-body-secondary">Not provided</Box>;
 
@@ -1494,14 +1495,36 @@ const IsetApplicationFormWidget = ({
 
   const diff = useMemo(() => answersDiff(answers, editableAnswers), [answers, editableAnswers]);
   const hasDirtyFields = isEditing && Object.keys(diff).length > 0;
-  const decisionStatusSource = caseData?.applicationStatus || caseData?.application_status || caseData?.status || '';
+  const resolvedApplicationState = resolveApplicationStateFields({
+    applicationStatus:
+      caseData?.applicationStatus ||
+      caseData?.application_status ||
+      application?.status ||
+      null,
+    applicationLifecycleStatus:
+      caseData?.applicationLifecycleStatus ??
+      caseData?.application_lifecycle_status ??
+      null,
+    decisionOutcome: caseData?.decisionOutcome ?? caseData?.decision_outcome ?? null,
+    awaitingReason:
+      caseData?.applicationAwaitingReason ??
+      caseData?.application_awaiting_reason ??
+      null,
+    closureReason:
+      caseData?.applicationClosureReason ??
+      caseData?.application_closure_reason ??
+      null,
+    caseStatus: caseData?.status ?? null,
+    reviewStatus: caseData?.reviewStatus ?? caseData?.review_status ?? null,
+  });
+  const decisionStatusSource = resolvedApplicationState.applicationStatus || '';
   const reportingCaseContext = caseData?.caseContext || {};
   const reportingCorrectionAllowed = Boolean(
     reportingCaseContext?.reportingOnlyDeniedIneligible || reportingCaseContext?.reportingCorrectionAllowed
   );
-  const isDecisionFinal = ['approved', 'rejected', 'declined', 'decision_ready', 'completed'].includes(
-    decisionStatusSource.toLowerCase()
-  );
+  const isDecisionFinal =
+    Boolean(resolvedApplicationState.decisionOutcome) ||
+    ['decision_ready', 'completed', 'closed', 'archived'].includes(decisionStatusSource.toLowerCase());
   const isDecisionEditLocked = isDecisionFinal && !reportingCorrectionAllowed;
   const reportingComplianceStatus = caseData?.compliance?.ilmp?.status || 'pending';
   const reportingStatusMessage = reportingCorrectionAllowed
@@ -2442,11 +2465,11 @@ const IsetApplicationFormWidget = ({
   const employmentNarrativeReadOnly = renderTextBlock(answers['long-term-goal']);
   const employmentNarrativeValue = editableAnswers['long-term-goal'] ?? '';
   const showEmploymentNarrative = isEditing || employmentNarrativeReadOnly !== NOT_PROVIDED;
-  const currentApplicationStatus = (caseData?.applicationStatus || caseData?.status || application?.status || '')
+  const currentApplicationStatus = (resolvedApplicationState.applicationStatus || '')
     .toString()
     .trim()
     .toLowerCase();
-  const isClosedStatus = currentApplicationStatus === 'closed' || currentApplicationStatus === 'withdrawn';
+  const isClosedStatus = currentApplicationStatus === 'closed' || currentApplicationStatus === 'archived';
   const employmentGoalsIndex = useMemo(
     () => sectionDefinitions.findIndex(section => section.id === 'employment-goals'),
     [sectionDefinitions]

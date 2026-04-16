@@ -1,29 +1,37 @@
 # Single Case Per Client
-Purpose: capture the working rule that a client should have one case record, even when multiple applications arrive over time.  
-Audience: assessors, case managers, and developers wiring application→case flows.  
-Last Updated: 2025-11-24
 
-## Policy
-- Default model: one case per client; new applications attach to that case instead of creating a parallel case.
-- If a client has an existing case in a non-terminal status (active, dormant, ready_to_close), always reuse it.
-- If the case is closed/archived, prefer reopening and reusing it; only create a new case when there is a clear, explicit reason.
+Purpose: capture the agreed operating rule that a client should have one long-lived case record, even when multiple applications arrive over time.
 
-## Assessor experience
-- When opening an application in the workspace, surface a notice if the client already has a case (e.g., banner/bell with a link to the case workspace and last status/date).
-- The notice should be acknowledged before approval so the reuse decision is deliberate.
-  - Implementation note: existing-client detection in the admin backend matches by SIN hash (preferred), prior submission SIN scan, email, then name + DOB (fallback to name-only). The assessment UI should only flag "existing client" when another case already exists for that matched client and show the current case manager if assigned.
+Audience: assessors, case managers, and developers wiring client/application/case flows.
 
-## Approval flow
-- On approval, if a case exists: prompt “Reuse existing case (recommended)” vs “Create new case (rare)”. Default to reuse.
-- Reuse path: if the case is closed/archived, reopen it; create a new action plan for the approved application; add any indicated interventions in draft/approved.
-- New-case path: allowed only with justification (e.g., explicitly documented edge case); create a separate case row and seed the plan/interventions there.
+Last Updated: 2026-04-16
 
-## Data rules (platform)
-- Application approval should first resolve the client identity, then look up the client’s case by `client_id`.
-- Reuse should update the existing `iset_case` rather than insert a new row; the new application links to that case via action plan/intervention records.
-- History must preserve prior applications and plans inside the case; never drop or overwrite earlier content when reusing.
+## Status
 
-## Open questions
-- What exact statuses count as “non-terminal” for reuse? (Current intent: active, dormant, ready_to_close.)
-- When is a truly new case justified for the same client and program?
-- How should reporting show multiple approved applications within one case (e.g., per-application rollups vs. case-level totals)?
+- This is the agreed target operating model for PATH.
+- Current implementation remains partial/hybrid; migration work is tracked in `docs/planning/client-case-application-target-model.md`.
+
+## Rule
+
+- One real person maps to one `client`.
+- One `client` maps to one `case`.
+- `application` is a repeatable intake/request/decision event and can occur many times for the same client.
+- `action_plan` represents an episode of support inside the case.
+
+## Entry-Path Implications
+
+- Portal registration alone does not create a case.
+- On submitted application receipt, PATH must resolve or create both the client and that client's single case.
+- Manual Intake follows the same rule.
+- Client Batch Import may create a client/case without creating an application when the source record is historical casework rather than an intake event.
+
+## Operational Implications
+
+- Repeat yearly ISET applications should reuse the client's existing case rather than creating a parallel case.
+- Case history, documents, action plans, and interventions should accumulate in that single case.
+- Duplicate case rows for the same client are data defects unless a future exception is explicitly designed and approved.
+
+## Current Implementation Note
+
+- The admin backend already detects prior same-client cases and surfaces a warning in the assessment workspace, but current write paths still do not fully enforce case reuse.
+- Use `docs/planning/client-case-application-target-model.md` for the canonical target-model and migration plan.

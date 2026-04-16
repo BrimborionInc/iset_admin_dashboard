@@ -40,6 +40,7 @@ import {
   buildMaintenanceAnnouncementDisplay,
   isMaintenanceAnnouncementVisible,
 } from './utils/maintenanceAnnouncement.js';
+import { buildApplicationStatusInfo } from './utils/applicationStatus';
 import { buildApplicationWorkspaceTutorials, APPLICATION_WORKSPACE_TUTORIAL_ID } from './tutorials/applicationWorkspaceTutorials';
 	import { buildCaseWorkspaceTutorials, CASE_WORKSPACE_TUTORIAL_ID } from './tutorials/caseWorkspaceTutorials';
 	import {
@@ -932,9 +933,20 @@ const AppContent = () => {
 	          const json = await resp.json().catch(() => null);
 	          if (cancelled || !resp.ok) return;
 	          const caseStatus = json?.status || json?.case?.status || null;
-	          const appStatus = json?.application_status || json?.applicationStatus || null;
-	          const normalizedStatus = String(appStatus || caseStatus || '').trim().toLowerCase();
-	          if (normalizedStatus === 'pending_approval') {
+	          const statusInfo = buildApplicationStatusInfo({
+	            applicationStatus: json?.application_status || json?.applicationStatus || null,
+	            applicationLifecycleStatus:
+	              json?.application_lifecycle_status || json?.applicationLifecycleStatus || null,
+	            caseStatus,
+	            caseId,
+	            decisionOutcome: json?.decision_outcome || json?.decisionOutcome || null,
+	            awaitingReason:
+	              json?.application_awaiting_reason || json?.applicationAwaitingReason || null,
+	            closureReason:
+	              json?.application_closure_reason || json?.applicationClosureReason || null,
+	            reviewStatus: json?.review_status || json?.reviewStatus || null,
+	          });
+	          if (statusInfo.rawStatus === 'pending_approval') {
 	            pageTutorialPromptShownRef.current.add(nwacKey);
 	            setPageTutorialPrompt({ visible: true, tutorialId: NWAC_ASSESSMENT_TUTORIAL_ID });
 	            return;
@@ -1336,6 +1348,25 @@ const AppContent = () => {
 	        const n = Number(caseId);
 	        return Number.isFinite(n) && n > 0 ? n : null;
 	      };
+
+	      const fetchFirstCaseIdFromApplications = async statusList => {
+	        const params = new URLSearchParams({
+	          limit: '1',
+	          offset: '0',
+	          sort: 'updatedAt',
+	          direction: 'desc',
+	        });
+	        if (statusList) params.set('status', statusList);
+	        const resp = await apiFetch(`/api/applications?${params.toString()}`);
+	        if (!resp.ok) return null;
+	        const json = await resp.json().catch(() => null);
+	        const items = Array.isArray(json?.rows) ? json.rows : [];
+	        if (!items.length) return null;
+	        const row = items[0] || {};
+	        const caseId = row.case_id || row.caseId || null;
+	        const n = Number(caseId);
+	        return Number.isFinite(n) && n > 0 ? n : null;
+	      };
 	
 	      if (category === 'case-workspace') {
 	        const anyCaseId = await fetchFirstCaseIdFromCases(null);
@@ -1343,8 +1374,10 @@ const AppContent = () => {
 	        return '/iset/cases';
 	      }
 
-	      // Prefer an actual pending-approval file for NWAC tutorials when possible.
+	      // Prefer an actual pending-decision application for NWAC tutorials when possible.
 	      if (category === 'nwac-assessment') {
+	        const pendingApplicationCaseId = await fetchFirstCaseIdFromApplications('pending_approval');
+	        if (pendingApplicationCaseId) return `/application-case/${pendingApplicationCaseId}`;
 	        const pending = await fetchFirstCaseIdFromCases('pending_approval');
 	        if (pending) return `/application-case/${pending}`;
 	      }

@@ -1,3 +1,10 @@
+import {
+  APPLICATION_FINAL_STATUSES,
+  APPLICATION_PENDING_DECISION_STATUSES,
+  normalizeApplicationStatus,
+} from './applicationStatus';
+import { CASE_FINAL_STATUSES, normalizeCaseStatus } from './caseStatus';
+
 const PROGRAM_ADMIN_ROLE_VALUES = Object.freeze(['nwac administrator']);
 const SYSTEM_ADMIN_ROLE_VALUES = Object.freeze(['system administrator']);
 const ADMIN_ROLE_VALUES = Object.freeze([...PROGRAM_ADMIN_ROLE_VALUES, ...SYSTEM_ADMIN_ROLE_VALUES]);
@@ -17,31 +24,8 @@ const REGIONAL_COORDINATOR_ROLES = new Set(REGIONAL_COORDINATOR_ROLE_VALUES);
 const APPLICATION_ASSESSOR_ROLES = new Set(APPLICATION_ASSESSOR_ROLE_VALUES);
 const OUTCOME_REVIEW_ROLES = new Set(OUTCOME_REVIEW_ROLE_VALUES);
 
-const FINAL_CASE_STATUSES = new Set(['ready_to_close', 'closed', 'archived', 'rejected']);
-const APPLICATION_FINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived']);
-
-const APPLICATION_STATUS_SYNONYMS = Object.freeze({
-  complete: 'completed',
-  withdrawn: 'closed',
-});
-
-const STATUS_SYNONYMS = Object.freeze({
-  action_required: 'docs_requested',
-  'action_required_(docs_requested)': 'docs_requested',
-  assessed_pending_approval: 'pending_approval',
-  'assessed,_pending_approval': 'pending_approval',
-  approved: 'initiated',
-  review_complete: 'ready_to_close',
-  assessment_submitted: 'pending_approval',
-  assessment_submitted_pending_decision: 'pending_approval',
-  in_review: 'pending_approval',
-  submitted: 'pending_approval',
-  rejected: 'archived',
-  withdrawn: 'closed',
-});
-
 const REGIONAL_COORDINATOR_ALLOWED_TRANSITIONS = Object.freeze({
-  pending_approval: new Set(['initiated', 'archived']),
+  intake: new Set(['initiated', 'archived']),
   initiated: new Set(['active', 'dormant', 'archived']),
   active: new Set(['dormant', 'ready_to_close', 'archived']),
   dormant: new Set(['active', 'ready_to_close', 'archived']),
@@ -50,7 +34,7 @@ const REGIONAL_COORDINATOR_ALLOWED_TRANSITIONS = Object.freeze({
 });
 
 const APPLICATION_ASSESSOR_ALLOWED_TRANSITIONS = Object.freeze({
-  pending_approval: new Set(),
+  intake: new Set(),
   initiated: new Set(),
   active: new Set(),
   dormant: new Set(),
@@ -69,11 +53,6 @@ export function canonicalizeStatus(status) {
     .replace(/[\s-]+/g, '_');
 }
 
-function normalizeStatusKey(status) {
-  const canonical = canonicalizeStatus(status);
-  return STATUS_SYNONYMS[canonical] || canonical;
-}
-
 export function getRoleGroups(role) {
   const normalizedRole = canonicalizeRole(role);
   return {
@@ -87,21 +66,20 @@ export function getRoleGroups(role) {
 }
 
 export function getCaseStatusContext(status) {
-  const canonicalStatus = normalizeStatusKey(status);
+  const canonicalStatus = normalizeCaseStatus(status);
   return {
     canonicalStatus,
-    isFinalStatus: FINAL_CASE_STATUSES.has(canonicalStatus),
-    isPendingApprovalStatus: canonicalStatus === 'pending_approval',
+    isFinalStatus: CASE_FINAL_STATUSES.has(canonicalStatus),
+    isIntakeStatus: canonicalStatus === 'intake',
   };
 }
 
 export function getApplicationStatusContext(status) {
-  const base = canonicalizeStatus(status);
-  const canonicalStatus = APPLICATION_STATUS_SYNONYMS[base] || base;
+  const canonicalStatus = normalizeApplicationStatus(status);
   return {
     canonicalStatus,
     isFinalStatus: APPLICATION_FINAL_STATUSES.has(canonicalStatus),
-    isPendingApprovalStatus: canonicalStatus === 'pending_approval',
+    isPendingApprovalStatus: APPLICATION_PENDING_DECISION_STATUSES.has(canonicalStatus),
   };
 }
 
@@ -124,17 +102,11 @@ export function canEditCaseStatus({ role, status, hasCase }) {
 
 export function isStatusTransitionAllowed({ role, fromStatus, toStatus }) {
   const { isAdminRole, isRegionalCoordinatorRole, isApplicationAssessorRole } = getRoleGroups(role);
-  const fromKey = normalizeStatusKey(fromStatus);
-  const toKey = normalizeStatusKey(toStatus);
+  const fromKey = normalizeCaseStatus(fromStatus);
+  const toKey = normalizeCaseStatus(toStatus);
 
   if (!fromKey || !toKey) return false;
   if (fromKey === toKey) return true;
-
-  // Allow everyone to move between in_review and docs_requested (action required) states
-  const canFreelyToggleActionRequired =
-    (fromKey === 'pending_approval' && toKey === 'docs_requested') ||
-    (fromKey === 'docs_requested' && toKey === 'pending_approval');
-  if (canFreelyToggleActionRequired) return true;
 
   if (isAdminRole) return true;
 
@@ -149,21 +121,45 @@ export function isStatusTransitionAllowed({ role, fromStatus, toStatus }) {
   }
 
   // Default behaviour: disallow changing final statuses and transitions to final states
-  if (FINAL_CASE_STATUSES.has(fromKey)) return false;
-  if (FINAL_CASE_STATUSES.has(toKey)) return false;
+  if (CASE_FINAL_STATUSES.has(fromKey)) return false;
+  if (CASE_FINAL_STATUSES.has(toKey)) return false;
   return true;
+}
+
+export function canEditApplicationStatus({ role, status, hasCase }) {
+  if (!hasCase) return false;
+  const { isAdminRole } = getRoleGroups(role);
+  if (isAdminRole) return true;
+  const { isFinalStatus } = getApplicationStatusContext(status);
+  return !isFinalStatus;
+}
+
+export function isApplicationStatusTransitionAllowed({ role, fromStatus, toStatus }) {
+  const { isAdminRole } = getRoleGroups(role);
+  const fromKey = normalizeApplicationStatus(fromStatus);
+  const toKey = normalizeApplicationStatus(toStatus);
+  if (!fromKey || !toKey) return false;
+  if (fromKey === toKey) return true;
+  if (isAdminRole) return true;
+  return false;
 }
 
 export function canCompleteOutcomeReview({ role, status }) {
   const { isOutcomeReviewerRole } = getRoleGroups(role);
   if (!isOutcomeReviewerRole) return false;
-  const { isPendingApprovalStatus } = getCaseStatusContext(status);
+  const { isPendingApprovalStatus } = getApplicationStatusContext(status);
   return isPendingApprovalStatus;
 }
 
 export function requiresFinalStatusConfirmation({ role, currentStatus }) {
   const { isAdminRole } = getRoleGroups(role);
   const { isFinalStatus } = getCaseStatusContext(currentStatus);
+  return isAdminRole && isFinalStatus;
+}
+
+export function requiresFinalApplicationStatusConfirmation({ role, currentStatus }) {
+  const { isAdminRole } = getRoleGroups(role);
+  const { isFinalStatus } = getApplicationStatusContext(currentStatus);
   return isAdminRole && isFinalStatus;
 }
 
@@ -174,5 +170,5 @@ export const RBAC_CONSTANTS = Object.freeze({
   REGIONAL_COORDINATOR_ROLE_VALUES,
   APPLICATION_ASSESSOR_ROLE_VALUES,
   OUTCOME_REVIEW_ROLE_VALUES,
-  FINAL_CASE_STATUSES,
+  FINAL_CASE_STATUSES: CASE_FINAL_STATUSES,
 });

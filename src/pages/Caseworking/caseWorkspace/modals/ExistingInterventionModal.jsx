@@ -32,6 +32,7 @@ import {
   normalizeActionPlanLifecycleStatus,
 } from "../../../../utils/backloadInterventionRules.js";
 import { getCurrencyInputDisplayValue } from "../../../../utils/currencyFormat.js";
+import { resolveInterventionStateFields } from "../../../../utils/interventionStatus.js";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
 
 const POSTING_CONTEXT_OPTIONS = [
@@ -192,6 +193,9 @@ const formatCurrencyAmount = amount => {
   })}`;
 };
 
+const resolveExistingInterventionState = status =>
+  resolveInterventionStateFields({ status }, { fallbackStatus: "approved" });
+
 const ExistingInterventionModal = ({
   visible,
   initialActionPlanId = null,
@@ -338,7 +342,9 @@ const ExistingInterventionModal = ({
   );
   const requiresNoc = useMemo(() => requiresNocForInterventionCode(form.code), [form.code]);
 
-  const isClosed = form.status === "completed" || form.status === "cancelled";
+  const isClosed = ["completed", "cancelled"].includes(
+    resolveExistingInterventionState(form.status).deliveryStatus || form.status
+  );
   const planStatusNotice = getBackloadInterventionPlanStatusNotice(selectedPlanStatus);
 
   const setCurrencyFieldFocused = (field, focused) => {
@@ -835,6 +841,7 @@ const ExistingInterventionModal = ({
         code: form.code,
         title: form.title.trim(),
         status: form.status,
+        deliveryStatus: resolveExistingInterventionState(form.status).deliveryStatus || null,
         startDate: form.startDate || null,
         endDate: form.endDate || null,
         durationDays: form.durationDays === "" ? null : Number(form.durationDays),
@@ -964,6 +971,7 @@ const ExistingInterventionModal = ({
                 value={form.title}
                 onChange={({ detail }) => handleFieldChange("title", detail.value)}
                 placeholder="e.g. Occupational skills training"
+                spellcheck={true}
               />
             </FormField>
             <FormField label="Start date" errorText={fieldErrors.startDate}>
@@ -1038,6 +1046,7 @@ const ExistingInterventionModal = ({
                   }
                   empty="No NOC matches found."
                   disabled={nocVersionsLoading || !form.nocVersion}
+                  spellcheck={false}
                 />
               </FormField>
             </ColumnLayout>
@@ -1061,6 +1070,7 @@ const ExistingInterventionModal = ({
                     value={form.institution}
                     onChange={({ detail }) => handleFieldChange("institution", detail.value)}
                     placeholder="Training institution, employer, or provider"
+                    spellcheck={false}
                   />
                 </FormField>
               ) : (
@@ -1080,12 +1090,14 @@ const ExistingInterventionModal = ({
                   <Input
                     value={form.institution}
                     onChange={({ detail }) => handleFieldChange("institution", detail.value)}
+                    spellcheck={false}
                   />
                 </FormField>
                 <FormField label="Program name (optional)" description="Course, credential, or stream name.">
                   <Input
                     value={form.programName}
                     onChange={({ detail }) => handleFieldChange("programName", detail.value)}
+                    spellcheck={false}
                   />
                 </FormField>
               </ColumnLayout>
@@ -1098,6 +1110,7 @@ const ExistingInterventionModal = ({
                   value={form.itpDetails}
                   rows={3}
                   onChange={({ detail }) => handleFieldChange("itpDetails", detail.value)}
+                  spellcheck={true}
                 />
               </FormField>
             </SpaceBetween>
@@ -1114,12 +1127,14 @@ const ExistingInterventionModal = ({
                   <Input
                     value={form.institution}
                     onChange={({ detail }) => handleFieldChange("institution", detail.value)}
+                    spellcheck={false}
                   />
                 </FormField>
                 <FormField label="Program name (optional)" description="Job title, role, or program name.">
                   <Input
                     value={form.programName}
                     onChange={({ detail }) => handleFieldChange("programName", detail.value)}
+                    spellcheck={false}
                   />
                 </FormField>
               </ColumnLayout>
@@ -1129,6 +1144,7 @@ const ExistingInterventionModal = ({
                     value={form.wageSubsidyDetails}
                     rows={3}
                     onChange={({ detail }) => handleFieldChange("wageSubsidyDetails", detail.value)}
+                    spellcheck={true}
                   />
                 </FormField>
               )}
@@ -1146,6 +1162,7 @@ const ExistingInterventionModal = ({
                   onBlur={() => setCurrencyFieldFocused("plannedCost", false)}
                   inputMode="decimal"
                   placeholder="Whole dollars"
+                  spellcheck={false}
                 />
               </FormField>
               <FormField label="Approved amount (optional)">
@@ -1156,6 +1173,7 @@ const ExistingInterventionModal = ({
                   onBlur={() => setCurrencyFieldFocused("approvedAmount", false)}
                   inputMode="decimal"
                   placeholder="Whole dollars"
+                  spellcheck={false}
                 />
               </FormField>
               <FormField label="Actual amount (optional)">
@@ -1166,6 +1184,7 @@ const ExistingInterventionModal = ({
                   onBlur={() => setCurrencyFieldFocused("actualAmount", false)}
                   inputMode="decimal"
                   placeholder="Whole dollars"
+                  spellcheck={false}
                 />
               </FormField>
               </ColumnLayout>
@@ -1209,6 +1228,7 @@ const ExistingInterventionModal = ({
                 onChange={({ detail }) => handleFieldChange("notes", detail.value)}
                 rows={4}
                 placeholder="Optional notes about the existing intervention"
+                spellcheck={true}
               />
             </FormField>
           </SpaceBetween>
@@ -1248,6 +1268,7 @@ const ExistingInterventionModal = ({
                 onBlur={() => setCurrencyFieldFocused("costLineAmount", false)}
                 inputMode="decimal"
                 placeholder="Whole dollars"
+                spellcheck={false}
               />
             </FormField>
             <FormField label="Payee type">
@@ -1263,6 +1284,7 @@ const ExistingInterventionModal = ({
                 value={costLineDraft.payeeName}
                 onChange={({ detail }) => handleCostLineDraftChange("payeeName", detail.value)}
                 placeholder="Optional"
+                spellcheck={false}
               />
             </FormField>
             <FormField label="Payee reference">
@@ -1270,6 +1292,7 @@ const ExistingInterventionModal = ({
                 value={costLineDraft.payeeReference}
                 onChange={({ detail }) => handleCostLineDraftChange("payeeReference", detail.value)}
                 placeholder="Optional vendor or account reference"
+                spellcheck={false}
               />
             </FormField>
           </ColumnLayout>
@@ -1322,6 +1345,7 @@ const ExistingInterventionModal = ({
                   value={costLineDraft.recurrenceOccurrences}
                   onChange={({ detail }) => handleCostLineDraftChange("recurrenceOccurrences", detail.value)}
                   placeholder="Optional"
+                  spellcheck={false}
                 />
               </FormField>
               <FormField label="Amount per period" errorText={costLineDraftErrors.recurrenceAmountPerPeriod}>
@@ -1335,6 +1359,7 @@ const ExistingInterventionModal = ({
                   onBlur={() => setCurrencyFieldFocused("recurrenceAmountPerPeriod", false)}
                   inputMode="decimal"
                   placeholder="Optional"
+                  spellcheck={false}
                 />
               </FormField>
             </ColumnLayout>
@@ -1345,6 +1370,7 @@ const ExistingInterventionModal = ({
               rows={3}
               onChange={({ detail }) => handleCostLineDraftChange("notes", detail.value)}
               placeholder="Optional"
+              spellcheck={true}
             />
           </FormField>
         </SpaceBetween>

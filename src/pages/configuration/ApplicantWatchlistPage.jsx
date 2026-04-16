@@ -487,6 +487,7 @@ const ApplicantWatchlistPage = () => {
                 value={form.fullName}
                 onChange={({ detail }) => updateForm("fullName", detail.value)}
                 placeholder="Full name"
+                spellcheck={false}
               />
             </FormField>
             <FormField label="Date of birth" description="Required.">
@@ -501,6 +502,7 @@ const ApplicantWatchlistPage = () => {
                 value={form.firstName}
                 onChange={({ detail }) => updateForm("firstName", detail.value)}
                 placeholder="Optional"
+                spellcheck={false}
               />
             </FormField>
             <FormField label="Last name">
@@ -508,6 +510,7 @@ const ApplicantWatchlistPage = () => {
                 value={form.lastName}
                 onChange={({ detail }) => updateForm("lastName", detail.value)}
                 placeholder="Optional"
+                spellcheck={false}
               />
             </FormField>
             <FormField label="Social Insurance Number" description="Required. Enter 9 digits.">
@@ -515,6 +518,7 @@ const ApplicantWatchlistPage = () => {
                 value={form.sin ? (formatSinDisplay(form.sin) || form.sin) : ""}
                 onChange={({ detail }) => updateForm("sin", cleanSin(detail.value) || "")}
                 placeholder="123 456 789"
+                spellcheck={false}
               />
             </FormField>
             {editingItem ? (
@@ -539,6 +543,7 @@ const ApplicantWatchlistPage = () => {
               onChange={({ detail }) => updateForm("notes", detail.value)}
               rows={6}
               placeholder="Explain why this applicant is watchlisted and what staff should do when a future watchlist hit is reviewed"
+              spellcheck={true}
             />
           </FormField>
 

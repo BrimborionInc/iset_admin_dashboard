@@ -30,9 +30,12 @@ import {
   SLA_DEFAULT_DAYS,
   SLA_STAGE_ALLOWLIST,
   computeApplicationSlaMeta,
-  isEligibilityPending,
-  normalizeClosedStatus,
 } from '../utils/applicationSla';
+import {
+  buildApplicationStatusInfo,
+  normalizeApplicationStatus,
+  normalizeStatusKey,
+} from '../utils/applicationStatus';
 import ApplicationsWidgetHelp from '../helpPanelContents/applicationsWidgetHelp';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
@@ -131,11 +134,8 @@ const formatDaysAgo = value => {
   return `${days} day${days === 1 ? '' : 's'} ago`;
 };
 
-const toStatusKey = value =>
-  (value || '').toString().trim().toLowerCase().replace(/[\s-]+/g, '_');
-
 const getDocsRequestedMeta = (row, rawStatus) => {
-  const statusKey = toStatusKey(rawStatus || row?.application_status || '');
+  const statusKey = normalizeStatusKey(rawStatus || row?.application_status || '');
   const statusIndicatesDocsRequested = ['docs_requested', 'action_required', 'action_required_(docs_requested)'].includes(statusKey);
   const active = Number(row?.docs_requested_active || 0) === 1 || statusIndicatesDocsRequested;
   if (!active) return { active: false, label: null, color: null };
@@ -171,30 +171,17 @@ const PROVINCE_LABELS = {
 };
 
 const getStatusInfo = (row) => {
-  const applicationStatusRaw = typeof row.application_status === 'string' ? row.application_status.trim() : '';
-  const rawStatus = normalizeClosedStatus(applicationStatusRaw || 'submitted');
-  const label = rawStatus === 'rejected'
-    ? 'Not Approved'
-    : rawStatus
-        .replace(/[_-]+/g, ' ')
-        .replace(/\b\w/g, c => c.toUpperCase());
-  const isUnassignedCase = rawStatus === 'submitted' && !row.assigned_user_id;
-  const eligibilityMissing =
-    isEligibilityPending(row.assessment_esdc_eligibility) &&
-    ['submitted', 'in_review', 'docs_requested', 'pending_approval', 'closure_notice'].includes(rawStatus);
-  const statusType = (() => {
-    if (['approved', 'completed'].includes(rawStatus)) return 'success';
-    if (['rejected', 'declined'].includes(rawStatus)) return 'error';
-    if (['closed', 'cancelled'].includes(rawStatus)) return 'info';
-    if (eligibilityMissing) return 'warning';
-    if (['docs_requested', 'action_required', 'closure_notice', 'closure notice'].includes(rawStatus)) return 'warning';
-    return isUnassignedCase || rawStatus === 'new' ? 'pending' : 'info';
-  })();
-  const qualifiers = [];
-  if (isUnassignedCase) qualifiers.push('Unassigned');
-  if (eligibilityMissing) qualifiers.push('Awaiting EI Validation');
-  const statusLabel = qualifiers.length ? `${label} • ${qualifiers.join(' • ')}` : label;
-  return { rawStatus, statusLabel, statusType, isUnassignedCase };
+  return buildApplicationStatusInfo({
+    applicationStatus: row.application_status || row.status || null,
+    applicationLifecycleStatus: row.application_lifecycle_status ?? row.applicationLifecycleStatus ?? null,
+    caseStatus: row.case_status || null,
+    caseId: row.case_id,
+    assignedUserId: row.assigned_user_id,
+    assessmentEligibility: row.assessment_esdc_eligibility,
+    decisionOutcome: row.decision_outcome ?? row.decisionOutcome ?? null,
+    awaitingReason: row.application_awaiting_reason ?? row.applicationAwaitingReason ?? null,
+    closureReason: row.application_closure_reason ?? row.applicationClosureReason ?? null,
+  });
 };
 
 const computeSlaMeta = (row, slaTargets, rawStatus, isAssigned) => {
@@ -824,7 +811,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
 
   const actionsColumn = {
     id: 'actions', header: 'Actions', minWidth: 160, cell: item => {
-      const caseStatusLower = (item.case_status || item.status || '').toLowerCase();
+      const caseStatusLower = normalizeApplicationStatus(item.application_status || item.status || '');
       const unassigned =
         item.case_id &&
         !item.assigned_user_id &&

@@ -9,6 +9,8 @@ Date: 2026-04-05
 - A true client-file import should be modeled as `client` + `iset_case` + seeded `case_context_json`.
 - Core case creation, case updates, and case listing now support that model, but some participant-facing features still depend on an applicant account even when no historical application exists.
 
+> Entity-model note: this import flow should be read alongside `docs/planning/client-case-application-target-model.md`. Client-file import is the approved exception path where a case may validly exist without any application because the imported record represents historical casework rather than a submitted PATH intake event.
+
 ## Current source of truth
 
 - Participant identity and contact details now live primarily in `iset_case.case_context_json`.

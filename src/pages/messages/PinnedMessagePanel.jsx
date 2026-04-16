@@ -228,7 +228,7 @@ const PinnedMessagePanel = () => {
               />
             </FormField>
             <FormField label="Subject">
-              <Input value={subjectValue} onChange={({ detail }) => setSubjectValue(detail.value)} placeholder="Subject" />
+              <Input value={subjectValue} onChange={({ detail }) => setSubjectValue(detail.value)} placeholder="Subject" spellcheck={true} />
             </FormField>
             <FormField label="Message">
               <Textarea
@@ -236,6 +236,7 @@ const PinnedMessagePanel = () => {
                 onChange={({ detail }) => setBodyValue(detail.value)}
                 placeholder="Type a message…"
                 rows={6}
+                spellcheck={true}
               />
             </FormField>
             {sendError && (

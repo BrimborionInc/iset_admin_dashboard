@@ -19,6 +19,8 @@
 
 The current database supports initial case tracking (linking applications to cases, assessments, notes/tasks) and emerging action-plan scaffolding. Financial data is limited to lightweight snapshots; detailed budgeting and commitments are still pending, while the participant submission pipeline now has dedicated persistence (`esdc_participant_submission` + history and reporting package tables) that still requires service integration. This document outlines the target-state entity-relationship model (ERM) required to manage case workflows end-to-end, align interventions with budgets, and satisfy ILMP (ESDC) reporting. A gap analysis and staged transition path are provided to guide schema evolution and service/API work.
 
+> Entity-model note: for the agreed PATH core relationship model, use `docs/planning/client-case-application-target-model.md`. This finance architecture note should be read as a downstream extension of that target, not as an alternate definition of the `client`/`case`/`application` relationships.
+
 ---
 
 ## 2. Current-State Reference Points
@@ -27,13 +29,13 @@ The current database supports initial case tracking (linking applications to cas
 
 | Table | Purpose | Key Columns (selected) | Relationships |
 |-------|---------|------------------------|---------------|
-| `iset_case` | Root case record linked to application/client | `id`, `application_id`, `client_id`, `assigned_to_user_id`, `status` | FK → `iset_application.id`, `client.id` |
+| `iset_case` | Root case record linked to client and still carrying a current application anchor | `id`, `application_id`, `client_id`, `assigned_to_user_id`, `status` | FK → `iset_application.id`, `client.id`; target model is one case per client |
 | `iset_case_assessment` | Assessment snapshot (single row per case) | `employment_goals`, `esdc_eligibility`, `employment_barriers` (JSON), `itp_payload`, `wage_payload` | PK = `case_id` |
 | `iset_case_action_plan` | Early action plan scaffold | `case_id`, `name`, `status`, `effective_date`, `review_date`, `metadata_json` | FK → `iset_case.id`, optional owner FKs |
 | `iset_case_intervention` | Intervention scaffold tied to case/action plan | `case_id`, `action_plan_id`, `intervention_code`, `status`, `funding_stream`, amounts | FK → `iset_case`, `iset_case_action_plan` |
 | `iset_case_financial_snapshot` | Rolling totals per case | `allocated_amount`, `committed_amount`, `spent_amount`, `variance_amount` | FK → `iset_case.id` |
 | `iset_case_task`, `iset_case_note`, `iset_case_event`, `iset_case_watch`, `iset_case_action_item`, `iset_case_compliance_check` | Ancillary workflow activity spanning tasks, notes, timeline entries, watchers, action items, and compliance verifications | Standard audit columns + soft-delete timestamps where applicable | FK → `iset_case.id`, optional assignee FKs → `staff_profiles.id`/`user.id` |
-| `iset_application`, `iset_application_version` | Source application payloads (immutable snapshot for audit) | `payload_json` (answers, submission data) | FK from `iset_case.application_id` |
+| `iset_application`, `iset_application_version` | Source application payloads (immutable snapshot for audit) | `payload_json` (answers, submission data) | Current implementation often joins via `iset_case.application_id`; target model is for each submitted application to carry its own `client_id` and `case_id` |
 | `esdc_participant_submission` | Participant readiness + payload snapshot for ILMP exports | `case_id`, `application_id`, `readiness_status`, `submission_status`, `payload_snapshot`, `payload_checksum`, `rejection_reason` | FK → `iset_case.id`, `iset_application.id`, `user.id` (submitter) |
 | `esdc_participant_submission_history` | Timeline of validation/export events | `participant_submission_id`, `event_type`, `actor_user_id`, `event_details`, `occurred_at` | FK → `esdc_participant_submission.id`, `user.id` |
 | `esdc_reporting_package`, `esdc_reporting_note` | Reporting package lifecycle + internal collaboration | `reporting_period`, `due_date`, `status`, `checklist_state`, `note_text` | FK → `user.id` (submitter/author) |
@@ -115,14 +117,16 @@ Application answers (stored in `iset_application.payload_json.answers`) are used
 ### 4.4 Conceptual ER Relationships (textual)
 
 ```
-Client 1───* Application *───1 Case ───1..* ActionPlan ───1..* Intervention
-                          │             │                    │
-                          │             │                    ├── 1..* InterventionFundingSplit ──* BudgetPot ──1 FundingAgreement
-                          │             │                    ├── 0..* InterventionCommitment ───1..* Disbursement ───1..* Payment
-                          │             │                    └── 0..* InterventionDocument ─── Document
-                          │             └── 0..* CaseAssessment (versioned)
-                          │
-                          └── 0..* CaseEvent / CaseTask / CaseNote
+Client 1───1 Case ───1..* ActionPlan ───1..* Intervention
+   │          │                              │
+   │          │                              ├── 1..* InterventionFundingSplit ──* BudgetPot ──1 FundingAgreement
+   │          │                              ├── 0..* InterventionCommitment ───1..* Disbursement ───1..* Payment
+   │          │                              └── 0..* InterventionDocument ─── Document
+   │          ├── 0..* CaseAssessment (versioned)
+   │          ├── 0..* Application
+   │          └── 0..* CaseEvent / CaseTask / CaseNote
+   │
+   └── 0..* Application
 
 Case ───0..* FinancialSnapshot (denormalized)
 ActionPlan ───0..1 ActionPlanOutcome

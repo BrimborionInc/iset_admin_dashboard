@@ -829,6 +829,7 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
               rows={3}
               value={intakeSourceNotes}
               onChange={({ detail }) => setIntakeSourceNotes(detail.value)}
+              spellcheck={true}
             />
           </FormField>
 

@@ -431,6 +431,7 @@ export default function FloatingFeedbackReviewPanel({
                         rows={4}
                         maxLength={MAX_INTERNAL_NOTE_CHARS}
                         placeholder="Add triage notes, follow-up decisions, or implementation context."
+                        spellcheck={true}
                         onChange={({ detail: changeDetail }) => setNoteText(changeDetail.value)}
                       />
                     </FormField>

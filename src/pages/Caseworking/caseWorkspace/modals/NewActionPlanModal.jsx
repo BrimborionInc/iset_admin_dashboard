@@ -775,6 +775,7 @@ const NewActionPlanModal = ({
               value={form.name}
               onChange={({ detail }) => setForm(current => ({ ...current, name: detail.value }))}
               placeholder="e.g. Skills Development 2025"
+              spellcheck={true}
             />
           </FormField>
           <FormField label="Plan summary" stretch>
@@ -783,6 +784,7 @@ const NewActionPlanModal = ({
               rows={3}
               onChange={({ detail }) => setForm(current => ({ ...current, summary: detail.value }))}
               placeholder="High-level objective for this plan"
+              spellcheck={true}
             />
           </FormField>
           <FormField label="Start date" stretch errorText={fieldErrors.startDate}>
@@ -946,6 +948,7 @@ const NewActionPlanModal = ({
                   expandToViewport
                   disabled={!form.prevEmploymentNocVersion}
                   invalid={Boolean(fieldErrors.prevEmploymentNoc)}
+                  spellcheck={false}
                 />
               </FormField>
               <FormField

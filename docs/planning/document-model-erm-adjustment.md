@@ -8,6 +8,11 @@ Last Updated: 2026-01-08
 - Planning: Complete
 - Implementation: Complete
 
+## Historical Note
+- Parts of this note predate later portal intake changes.
+- The current public portal submit path now resolves or creates `client` before completion and writes `client_id` onto the created or reused `iset_case`.
+- For the current client/case/application target model, use `docs/planning/client-case-application-target-model.md`.
+
 ## Objective
 Transition to a model where a single document can be associated with a client plus optional application/case, and multiple interventions (scoped to a single action plan).
 Immediate goal: rewire intake to ensure a client record exists before document uploads.
@@ -23,14 +28,14 @@ Immediate goal: rewire intake to ensure a client record exists before document u
 - Existing document tables and relationships.
 - Current attachment/linking flows and ownership rules.
 - Any constraints, uniqueness rules, or assumptions in code.
-- Client rows are created in the admin backend when a case is moved to initiated/approved; the intake server creates the submission, application, and case but does not insert into `client` (see `isetadminserver.js` and `../ISET-intake/server.js`).
+- The public portal now resolves or creates `client` during submit completion and writes `client_id` onto the created or reused `iset_case`.
 - Client match logic (admin backend): match by SIN hash (with optional DOB), then fallback scan of prior submissions for SIN hash, then emailNormalized, then name+DOB (or name-only when DOB missing); insert a new client if no match, and update `client.address_json.sinHash` when a match is found.
 
 ## Current Flow Summary (Intake)
 - `/api/uploads/presign` creates a pending upload; no client record linkage.
 - `/api/documents/finalize` stores into `iset_application_file` and dual-writes to `iset_document` (application_id may be null until submission).
 - `/api/upload-application-file` handles direct local uploads (legacy path).
-- `/api/intake/complete` creates `iset_application_submission`, `iset_application`, and `iset_case` (no client_id); then runs PDF generation + document linking.
+- `/api/intake/complete` creates `iset_application_submission`, creates or reuses `iset_application`, creates or updates the application-backed `iset_case` with `client_id`, then runs PDF generation + document linking.
 
 ## Proposed Data Model Changes (Phase 1)
 - Add `client.applicant_cognito_sub` (nullable, unique) to persist Cognito sub → client mapping.
@@ -55,7 +60,7 @@ Immediate goal: rewire intake to ensure a client record exists before document u
 - After an initial SIN-based match or creation, future matching should rely on Cognito `sub`.
 - Persist Cognito `sub` on the `client` table via a new column `applicant_cognito_sub` (nullable, unique).
 - Action plan creation paths:
-  - When an application is approved and completed, an action plan specific to that application is created; documents supporting interventions within that plan can also link to the originating application.
+  - When an application is approved, an action plan specific to that application is created; documents supporting interventions within that plan can also link to the originating application.
   - Action plans can also be created for existing clients without applications; in those cases, non-client document links should attach to the action plan and its interventions only.
 - Non-client document links cannot be reused across action plans.
 - Financial evidence documents follow the same action-plan scoping rules unless a conflict is identified.

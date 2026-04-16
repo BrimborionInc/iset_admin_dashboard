@@ -5,7 +5,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-04-14
+Last Updated: 2026-04-16
 
 ## Working relationship (design dialog)
 
@@ -55,6 +55,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 ## Core conventions
 
 - Prefer Cloudscape components over native HTML. Use `Link` from `@cloudscape-design/components` instead of raw `<a>` unless there is no Cloudscape equivalent.
+- For Cloudscape `Input` / `Textarea` / `Autosuggest`, set `spellcheck` intentionally instead of relying on browser defaults when field semantics are clear: enable it for narrative staff-entered prose (notes, summaries, messages, rationale, letters, justifications) and disable it for names, institutions, communities, codes, IDs, emails, addresses, references, and numeric/currency fields.
 - Cloudscape `Input` does not provide built-in currency formatting. For money-entry fields, use the shared helper in `src/utils/currencyFormat.js` (`getCurrencyInputDisplayValue`) with focus/blur state so the form keeps the raw value while the blurred field shows formatted currency. Do not hand-roll one-off currency formatting per widget or modal.
 - Do not assume parity with the public portal. Verify the full chain:
   schema -> runtime config JSON -> API payload -> renderer/template.
@@ -85,12 +86,20 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - After refactors, dev/test databases can be purged of old records that would otherwise require backward-compatibility handling.
 - As a principle, avoid adding legacy fallback fields, compatibility branches, or dual-write/dual-read logic when they increase code or data complexity without current operational need.
 - Prefer a clean target model and simple code paths. Only introduce compatibility handling when explicitly required and validated from current production constraints.
+- Current entity-model planning note (2026-04-16): the agreed target model is `one client -> one case -> many applications`, with every submitted application carrying both `client_id` and `case_id`. Current implementation remains hybrid until migration lands; use `docs/planning/client-case-application-target-model.md` when reasoning about client/application/case changes.
+- Current migration-planning note (2026-04-16): use `docs/planning/client-case-application-migration-plan.md` for the staged schema, data, and workflow migration plan covering test rehearsal, production cutover, historical merge, and constraint enforcement.
+- Current status-overhaul planning note (2026-04-16): use `docs/planning/status-architecture-overhaul.md` for the target status model, including the split between lifecycle state, decision state, queue state, and intervention proposal review state.
+- Current cutover dependency inventory (2026-04-16): use `docs/planning/client-case-application-cutover-dependency-inventory.md` for the concrete list of routes, queries, widgets, and workflow assumptions that still depend on `iset_case.application_id` or on overloaded legacy status values.
 
 ## High-value repo map
 
 - Docs base path: `X:\ISET\admin-dashboard\docs` (WSL: `/mnt/x/ISET/admin-dashboard/docs`)
 - Codex thread/context recovery index: `docs/meta/codex-thread-index.md`
 - Applicant-account activation data model: `docs/data/applicant-account-activation.md`
+- Client/case/application target model: `docs/planning/client-case-application-target-model.md`
+- Client/case/application migration plan: `docs/planning/client-case-application-migration-plan.md`
+- Client/case/application cutover dependency inventory: `docs/planning/client-case-application-cutover-dependency-inventory.md`
+- Status architecture overhaul: `docs/planning/status-architecture-overhaul.md`
 - Client-file import guide: `docs/guides/client-file-imports.md`
 - Client Batch Import dashboard reference: `docs/dashboards/client-file-import-dashboard.md`
 - Data and Results dashboard reference: `docs/dashboards/data-and-results-dashboard.md`
@@ -116,6 +125,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Prod environment guide: `docs/ops/environments/prod-env-guide.md`
 - Test deployment notes: `docs/ops/deployments/deploy-test-notes.md`
 - Test DB refresh planning note: `docs/ops/environments/test-env-db-refresh.md`
+- TEST prod-like migration rehearsal: `docs/ops/environments/test-prod-migration-rehearsal.md`
 - TEST DB refresh CLI: `scripts/path-test-db-refresh.js`
 - TEST DB restore helper: `scripts/run-test-db-restore-via-ssm.sh`
 - Legacy reference only: `scripts/deploy-test-db.ps1` (the npm alias `deploy:test-db` now routes to `scripts/path-test-db-refresh.js run`)
@@ -129,6 +139,9 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Cross-thread context recovery index: `docs/meta/codex-thread-index.md`
 - Live dashboard behavior: `docs/dashboards/*`
 - Import and data-backload constraints: `docs/guides/client-file-imports.md`
+- Client/case/application target model: `docs/planning/client-case-application-target-model.md`
+- Client/case/application migration plan: `docs/planning/client-case-application-migration-plan.md`
+- Status architecture overhaul: `docs/planning/status-architecture-overhaul.md`
 - Client Batch Import dashboard: `docs/dashboards/client-file-import-dashboard.md`
 - Data and Results dashboard: `docs/dashboards/data-and-results-dashboard.md`
 - Widget-level docs index: `docs/widgets/admin/README.md`

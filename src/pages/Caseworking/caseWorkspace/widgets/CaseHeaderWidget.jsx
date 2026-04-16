@@ -25,7 +25,8 @@ import { toCanonicalRole } from "../../../../context/RoleMatrixContext.js";
 import { usePaymentsData } from "../../../finance/widgets/PaymentsDataContext.jsx";
 import { buildApplicantWatchlistIdentity, formatSinDisplay } from "../../../../utils/applicantWatchlist.js";
 import { buildLockConflictMessage } from "../../../../hooks/useApplicationLock.js";
-import { normalizeInterventionStatus } from "../../../../utils/interventionStatus.js";
+import { getCaseStatusLabel, normalizeCaseStatus } from "../../../../utils/caseStatus.js";
+import { resolveInterventionStateFields } from "../../../../utils/interventionStatus.js";
 import ExistingActionPlanModal from "../modals/ExistingActionPlanModal.jsx";
 import ExistingInterventionModal from "../modals/ExistingInterventionModal.jsx";
 
@@ -157,28 +158,22 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         : null;
   const rawStatus = typeof caseData?.status === "string" ? caseData.status.trim().toLowerCase() : "";
   const normalizedStatus = rawStatus.replace(/-/g, "_");
-  const statusKey = normalizedStatus === "withdrawn" ? "closed" : normalizedStatus;
-  const labelSource = statusKey || rawStatus;
-  const statusLabel = labelSource
-    ? labelSource
-        .split(/[_-]/g)
-        .filter(Boolean)
-        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(" ")
-    : "Unknown";
+  const statusKey = normalizeCaseStatus(normalizedStatus === "withdrawn" ? "closed" : normalizedStatus);
+  const statusLabel = getCaseStatusLabel(statusKey || rawStatus) || "Unknown";
   const statusType = (() => {
     switch (statusKey) {
+      case "intake":
+        return "info";
       case "active":
       case "closed":
         return "success";
       case "ready_to_close":
         return "warning";
-      case "pending_approval":
       case "initiated":
       case "dormant":
+      case "archived":
         return "info";
       case "cancelled":
-      case "rejected":
         return "error";
       default:
         return "info";
@@ -309,6 +304,22 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       if (candidate === undefined) return null;
       return Number(candidate);
     };
+    const pickMetricWithInterventionFallback = (financeValue, interventionValue) => {
+      if (
+        Number.isFinite(Number(interventionValue)) &&
+        Number(interventionValue) > 0 &&
+        (!Number.isFinite(Number(financeValue)) || Number(financeValue) <= 0)
+      ) {
+        return Number(interventionValue);
+      }
+      if (Number.isFinite(Number(financeValue))) {
+        return Number(financeValue);
+      }
+      if (Number.isFinite(Number(interventionValue))) {
+        return Number(interventionValue);
+      }
+      return null;
+    };
     const sumPotValues = key =>
       pots.reduce((acc, pot) => {
         const numeric = Number(pot?.[key]);
@@ -317,27 +328,18 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     const potApprovedTotal = pots.length ? sumPotValues("approved") : null;
     const potCommittedTotal = pots.length ? sumPotValues("committed") : null;
     const potActualTotal = pots.length ? sumPotValues("actual") : null;
-    let overallApproved =
-      pickSummaryValue(potApprovedTotal, financeSummary?.approved, financeSummary?.allocated) ??
-      interventionFundingTotals.overall.approved;
-    let overallCommitted =
-      pickSummaryValue(potCommittedTotal, financeSummary?.committed) ??
-      interventionFundingTotals.overall.committed;
-    let overallActual =
-      pickSummaryValue(potActualTotal, financeSummary?.actual, financeSummary?.actuals, financeSummary?.spent) ??
-      interventionFundingTotals.overall.actual;
-    const financeSummaryLooksEmpty =
-      Number(overallApproved || 0) === 0 &&
-      Number(overallCommitted || 0) === 0 &&
-      Number(overallActual || 0) === 0 &&
-      (interventionFundingTotals.overall.approved > 0 ||
-        interventionFundingTotals.overall.committed > 0 ||
-        interventionFundingTotals.overall.actual > 0);
-    if (financeSummaryLooksEmpty) {
-      overallApproved = interventionFundingTotals.overall.approved;
-      overallCommitted = interventionFundingTotals.overall.committed;
-      overallActual = interventionFundingTotals.overall.actual;
-    }
+    const overallApproved = pickMetricWithInterventionFallback(
+      pickSummaryValue(potApprovedTotal, financeSummary?.approved, financeSummary?.allocated),
+      interventionFundingTotals.overall.approved
+    );
+    const overallCommitted = pickMetricWithInterventionFallback(
+      pickSummaryValue(potCommittedTotal, financeSummary?.committed),
+      interventionFundingTotals.overall.committed
+    );
+    const overallActual = pickMetricWithInterventionFallback(
+      pickSummaryValue(potActualTotal, financeSummary?.actual, financeSummary?.actuals, financeSummary?.spent),
+      interventionFundingTotals.overall.actual
+    );
     const overallRemaining =
       overallApproved !== null && overallCommitted !== null && overallActual !== null
         ? overallApproved - overallCommitted - overallActual
@@ -494,17 +496,19 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       const interventions = Array.isArray(plan.interventions) ? plan.interventions : [];
       interventions.forEach(intervention => {
         counts.total += 1;
-        const status = normalizeInterventionStatus(intervention?.status, null);
-        if (status === "draft") {
+        const interventionState = resolveInterventionStateFields(intervention, { fallbackStatus: null });
+        const reviewStatus = interventionState.reviewStatus || null;
+        const deliveryStatus = interventionState.deliveryStatus || null;
+        if (reviewStatus === "draft") {
           counts.draft += 1;
-        } else if (["submitted", "in_review", "changes_requested"].includes(status)) {
+        } else if (["submitted", "in_review", "changes_requested"].includes(reviewStatus)) {
           counts.submitted += 1;
-        } else if (status === "approved") {
-          counts.approved += 1;
-        } else if (["in_progress", "suspended"].includes(status)) {
+        } else if (deliveryStatus === "in_progress" || deliveryStatus === "suspended") {
           counts.inProgress += 1;
-        } else if (["completed", "cancelled", "rejected"].includes(status)) {
+        } else if (deliveryStatus === "completed" || deliveryStatus === "cancelled" || reviewStatus === "rejected") {
           counts.closed += 1;
+        } else if (reviewStatus === "approved" || deliveryStatus === "planned") {
+          counts.approved += 1;
         }
       });
     });

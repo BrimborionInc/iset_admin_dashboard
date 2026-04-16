@@ -167,6 +167,10 @@ Risk Mitigations:
 - `docs/features/landing-page.md`: Iterative change log for dashboard/landing-page evolution.
 - `docs/features/admin-feedback-reporting.md`: Current in-app bug-reporting and change-request flow, API, storage model, and shell entry points.
 - `docs/features/file-uploads/conditional-rules.md`: Spec for expanded file-upload conditional rule logic.
+- `docs/planning/client-case-application-target-model.md`: Canonical target-model and migration tracker for one-client/one-case/many-applications work.
+- `docs/planning/client-case-application-migration-plan.md`: Canonical rollout plan for schema changes, backfills, workflow cutover, and production data migration.
+- `docs/planning/client-case-application-cutover-dependency-inventory.md`: Concrete inventory of the backend routes, frontend widgets, queue logic, and status assumptions that must be changed before production cutover and historical case consolidation.
+- `docs/planning/status-architecture-overhaul.md`: Canonical target status model and rollout plan for separating lifecycle state, decisions, queues, and intervention proposals.
 - `docs/dashboards/client-file-import-dashboard.md`: Current Client Batch Import dashboard behavior and constraints.
 - `docs/dashboards/data-and-results-dashboard.md`: Current `Reporting > Data and Results` behavior, section order, and live/demo data rules.
 - `docs/dashboards/query-editor-dashboard.md`: Current Query Editor dashboard behavior and limitations.
@@ -201,6 +205,7 @@ Risk Mitigations:
 - v0.4d: Updated workflow-authoring notes to reflect shared conditional-visibility utilities, runtime-parity workflow preview behavior, and the then-remaining Manual Intake parity gap.
 - v0.4e: Updated Manual Intake notes to reflect shared conditional-visibility evaluation, visible-step skipping, and the intentional omission of portal-only upload/signature steps.
 - v0.4f: Closed the intake parity follow-up by documenting that the step editor, Workflow Preview, and renderable Manual Intake content now align with the public-intake runtime operator set and that DEV workflow `21` authoring rows rebuild the published runtime payload.
+- v0.4g: Added the canonical client/case/application target-model planning note to the docs index so future threads can distinguish current hybrid behavior from the agreed structural target.
 
 ---
 Maintenance (Standing Directive): This map MUST be updated immediately upon learning any new structural, architectural, or cross-cutting detail (pages vs widgets placement, new directories, lifecycle hooks, synchronization pipelines). No feature work considered complete until corresponding map updates are made.

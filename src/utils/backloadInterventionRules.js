@@ -1,3 +1,5 @@
+import { resolveInterventionStateFields } from "./interventionStatus.js";
+
 export const EXISTING_INTERVENTION_STATUS_OPTIONS = Object.freeze([
   { value: "approved", label: "Approved" },
   { value: "in_progress", label: "In progress" },
@@ -44,7 +46,9 @@ export const getDefaultBackloadInterventionStatus = planStatus => {
 
 export const getBackloadInterventionPlanStatusError = ({ planStatus, interventionStatus }) => {
   const normalizedPlanStatus = normalizeActionPlanLifecycleStatus(planStatus, null);
-  const normalizedInterventionStatus = String(interventionStatus || "").trim().toLowerCase();
+  const normalizedInterventionStatus =
+    resolveInterventionStateFields(interventionStatus).effectiveStatus ||
+    String(interventionStatus || "").trim().toLowerCase();
   if (normalizedPlanStatus === "archived") {
     return "Archived action plans cannot receive existing interventions.";
   }

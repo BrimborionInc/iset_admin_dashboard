@@ -12,6 +12,7 @@ import CaseNotesWidget from '../widgets/CaseNotesWidget';
 import ApplicationEvents from '../widgets/applicationEvents';
 import CaseCalendarWidget from '../widgets/CaseCalendarWidget';
 import { parseWorkspaceEntry } from '../utils/approvalWorkspaceEntry';
+import { resolveApplicationStateFields } from '../utils/applicationStatus';
 
 const STORAGE_KEY = 'application-assessment-dashboard-layout.v2';
 const TUTORIAL_APP_LAYOUT_RESET_FLAG = 'iset.tutorial.resetApplicationLayout';
@@ -463,9 +464,10 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
       if (!data.assigned_user_email && location?.state?.assessorEmail) {
         data.assigned_user_email = location.state.assessorEmail;
       }
-      const applicationStatus =
-        data.applicationStatus ?? data.application_status ?? null;
-      const normalised = { ...data, applicationStatus, application_status: applicationStatus ?? data.application_status ?? null };
+      const normalised = {
+        ...data,
+        ...resolveApplicationStateFields(data),
+      };
       const applied = applyCaseDataIfNewer(String(id), normalised);
       setCaseData(applied);
       const incomingVersion = Number(normalised.application_row_version || 0);
@@ -512,9 +514,10 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
         if (!hydrated.assigned_user_email && location?.state?.assessorEmail) {
           hydrated.assigned_user_email = location.state.assessorEmail;
         }
-        const applicationStatus =
-          hydrated.applicationStatus ?? hydrated.application_status ?? null;
-        const normalised = { ...hydrated, applicationStatus, application_status: applicationStatus ?? hydrated.application_status ?? null };
+        const normalised = {
+          ...hydrated,
+          ...resolveApplicationStateFields(hydrated),
+        };
         const applied = applyCaseDataIfNewer(key, normalised);
         setCaseData(applied);
         const incomingVersion = Number(normalised.application_row_version || 0);

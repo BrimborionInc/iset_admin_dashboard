@@ -1,9 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../../../auth/apiClient.js";
 import {
-  isInterventionOpenStatus,
-  normalizeInterventionStatus,
+  resolveInterventionStateFields,
 } from "../../../utils/interventionStatus.js";
+import { resolveApplicationStateFields } from "../../../utils/applicationStatus.js";
 
 const interventionWizardStepStore = new Map();
 const interventionWizardDraftStore = new Map();
@@ -28,6 +28,37 @@ const toNumberOrNull = value => {
   }
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
+};
+
+const normalizeInterventionCostLine = raw => {
+  if (!raw || typeof raw !== "object") return null;
+  const recurrenceRaw =
+    raw.recurrence && typeof raw.recurrence === "object" ? raw.recurrence : {};
+  const payeeRaw = raw.payee && typeof raw.payee === "object" ? raw.payee : {};
+  return {
+    id: raw.id || null,
+    type: raw.type || raw.paymentType || raw.payment_type || "",
+    amount: raw.amount ?? null,
+    notes: raw.notes || raw.description || "",
+    payee: {
+      type: String(payeeRaw.type || raw.payeeType || raw.payee_type || "").trim(),
+      name: String(payeeRaw.name || raw.payeeName || raw.payee_name || "").trim(),
+      reference: String(payeeRaw.reference || raw.payeeReference || raw.payee_reference || "").trim(),
+    },
+    recurrence: {
+      enabled: Boolean(recurrenceRaw.enabled),
+      startDate: recurrenceRaw.startDate || recurrenceRaw.start_date || "",
+      endDate: recurrenceRaw.endDate || recurrenceRaw.end_date || "",
+      occurrences:
+        recurrenceRaw.occurrences === null || typeof recurrenceRaw.occurrences === "undefined"
+          ? ""
+          : String(recurrenceRaw.occurrences),
+      amountPerPeriod:
+        recurrenceRaw.amountPerPeriod === null || typeof recurrenceRaw.amountPerPeriod === "undefined"
+          ? ""
+          : String(recurrenceRaw.amountPerPeriod),
+    },
+  };
 };
 
 const buildInterventionFromApi = (planId, payload = {}) => {
@@ -78,7 +109,28 @@ const buildInterventionFromApi = (planId, payload = {}) => {
           finance: payload.compliance.finance || "pending",
         }
       : { ilmp: "pending", finance: "pending" };
-  const status = normalizeInterventionStatus(payload.status, "draft");
+  const interventionState = resolveInterventionStateFields(payload, { fallbackStatus: "draft" });
+  const status = interventionState.effectiveStatus || "draft";
+  const snapshot =
+    resolvedMetadata?.snapshot && typeof resolvedMetadata.snapshot === "object"
+      ? resolvedMetadata.snapshot
+      : {};
+  const resolvedCostLinesSource =
+    Array.isArray(payload.costLines)
+      ? payload.costLines
+      : Array.isArray(resolvedMetadata?.costLines)
+        ? resolvedMetadata.costLines
+        : Array.isArray(snapshot.costLines)
+          ? snapshot.costLines
+          : [];
+  const resolvedFundingBreakdown =
+    Array.isArray(payload.fundingBreakdown)
+      ? payload.fundingBreakdown
+      : Array.isArray(resolvedMetadata?.fundingBreakdown)
+        ? resolvedMetadata.fundingBreakdown
+        : Array.isArray(snapshot.fundingBreakdown)
+          ? snapshot.fundingBreakdown
+          : [];
   const durationDays = toNumberOrNull(payload.durationDays);
   const plannedCost =
     toNumberOrNull(payload.plannedCost) ??
@@ -110,6 +162,12 @@ const buildInterventionFromApi = (planId, payload = {}) => {
     title: payload.title || payload.description || payload.notes || "Untitled intervention",
     description: payload.description || null,
     status,
+    reviewStatus: interventionState.reviewStatus || null,
+    review_status: interventionState.reviewStatus || null,
+    proposalReviewStatus: interventionState.reviewStatus || null,
+    proposal_review_status: interventionState.reviewStatus || null,
+    deliveryStatus: interventionState.deliveryStatus || null,
+    delivery_status: interventionState.deliveryStatus || null,
     startDate: payload.startDate || null,
     endDate: payload.endDate || null,
     durationDays,
@@ -145,6 +203,8 @@ const buildInterventionFromApi = (planId, payload = {}) => {
       payload.metadata?.finance?.actual
     ),
     budgetAmount: toNumberOrNull(payload.budgetAmount),
+    costLines: resolvedCostLinesSource.map(normalizeInterventionCostLine).filter(Boolean),
+    fundingBreakdown: resolvedFundingBreakdown,
     metadata: resolvedMetadata,
     createdByStaffProfileId: payload.createdByStaffProfileId || null,
     createdAt: payload.createdAt || null,
@@ -153,14 +213,25 @@ const buildInterventionFromApi = (planId, payload = {}) => {
   };
 };
 
+const resolveLiveInterventionDeliveryStatus = intervention => {
+  const state = resolveInterventionStateFields(intervention, { fallbackStatus: "draft" });
+  if (state.deliveryStatus) {
+    return state.deliveryStatus;
+  }
+  return state.reviewStatus === "approved" ? "planned" : null;
+};
+
 const recomputeInterventionCounts = plans => {
   let open = 0;
   let total = 0;
   plans.forEach(plan => {
     const list = Array.isArray(plan.interventions) ? plan.interventions : [];
-    total += list.length;
     list.forEach(item => {
-      if (isInterventionOpenStatus(item?.status)) {
+      const liveDeliveryStatus = resolveLiveInterventionDeliveryStatus(item);
+      if (liveDeliveryStatus) {
+        total += 1;
+      }
+      if (liveDeliveryStatus && ["planned", "in_progress", "suspended"].includes(liveDeliveryStatus)) {
         open += 1;
       }
     });
@@ -324,7 +395,7 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
     applicant_email: payload.applicant_email ?? payload.applicantEmail ?? null,
     caseNumber: payload.caseNumber ?? null,
     status: payload.status ?? null,
-    applicationStatus: payload.applicationStatus ?? payload.application_status ?? null,
+    ...resolveApplicationStateFields(payload),
     riskRating: payload.riskRating ?? null,
     openedAt: payload.openedAt ?? null,
     closedAt: payload.closedAt ?? null,

@@ -37,11 +37,20 @@ import {
   normalizeClosedStatus,
 } from '../utils/applicationSla';
 import {
-  canEditCaseStatus,
-  getCaseStatusContext,
+  canEditApplicationStatus,
+  getApplicationStatusContext,
   getRoleGroups,
-  isStatusTransitionAllowed,
+  isApplicationStatusTransitionAllowed,
+  requiresFinalApplicationStatusConfirmation,
 } from '../utils/rbac';
+import {
+  APPLICATION_STATUS_OPTIONS,
+  buildApplicationStatusInfo,
+  getApplicationStatusBadgeColor,
+  getApplicationStatusLabel,
+  mapWorkflowStatusToPersistenceStatus,
+  normalizeApplicationStatus,
+} from '../utils/applicationStatus';
 
 function formatDateTime(value) {
   if (!value) return '';
@@ -69,16 +78,6 @@ function formatDaysAgo(value) {
   const days = getDaysAgo(value);
   if (days === null) return null;
   return `${days} day${days === 1 ? '' : 's'} ago`;
-}
-
-function statusColor(status = '') {
-  const normalized = normalizeClosedStatus(status);
-  if (['approved', 'completed'].includes(normalized)) return 'green';
-  if (['submitted', 'in review', 'in_review', 'in progress', 'pending', 'assigned', 'pending_approval', 'decision_ready'].includes(normalized)) return 'blue';
-  if (['docs requested', 'docs_requested', 'action required', 'action required (docs requested)', 'closure notice', 'closure_notice'].includes(normalized)) return 'severity-high';
-  if (['rejected', 'declined', 'errored'].includes(normalized)) return 'red';
-  if (['closed', 'inactive', 'archived'].includes(normalized)) return 'grey';
-  return 'grey';
 }
 
 const APPLICATION_TERMINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived']);
@@ -119,27 +118,19 @@ const APPLICATION_LAYOUT_ACTION_MAP = {
 };
 
 const getStatusInfo = (row) => {
-  const applicationStatusRaw = typeof row.application_status === 'string' ? row.application_status.trim() : '';
-  const caseStatusRaw = typeof row.case_status === 'string' ? row.case_status.trim() : '';
-  const fallbackStatus = row.case_id ? 'submitted' : 'new';
-  const rawStatus = normalizeClosedStatus(applicationStatusRaw || caseStatusRaw || fallbackStatus);
-  const label = rawStatus === 'rejected'
-    ? 'Denied'
-    : rawStatus === 'decision_ready'
-      ? 'Decision Ready (Legacy)'
-    : rawStatus
-        .replace(/[_-]+/g, ' ')
-        .replace(/\b\w/g, c => c.toUpperCase());
-  const isUnassignedCase = Boolean(row.case_id) && !row.assigned_user_id && rawStatus === 'submitted';
-  const statusType = (() => {
-    if (['approved', 'completed'].includes(rawStatus)) return 'success';
-    if (['rejected', 'declined'].includes(rawStatus)) return 'error';
-    if (['closed', 'cancelled'].includes(rawStatus)) return 'info';
-    if (['docs_requested', 'action_required', 'closure_notice', 'closure notice'].includes(rawStatus)) return 'warning';
-    return isUnassignedCase || rawStatus === 'new' ? 'pending' : 'info';
-  })();
-  const statusLabel = isUnassignedCase ? `${label} • Unassigned` : label;
-  return { rawStatus, statusLabel, statusType, isUnassignedCase };
+  return buildApplicationStatusInfo({
+    applicationStatus: row.application_status || row.case_status || null,
+    applicationLifecycleStatus: row.application_lifecycle_status ?? row.applicationLifecycleStatus ?? null,
+    caseStatus: row.case_status || null,
+    caseId: row.case_id,
+    assignedUserId: row.assigned_user_id,
+    assessmentEligibility: row.assessment_esdc_eligibility,
+    decisionOutcome: row.decision_outcome ?? row.decisionOutcome ?? null,
+    awaitingReason: row.application_awaiting_reason ?? row.applicationAwaitingReason ?? null,
+    closureReason: row.application_closure_reason ?? row.applicationClosureReason ?? null,
+    type: row.type,
+    includeEligibilityQualifier: false,
+  });
 };
 
 const canonicalizeRole = (role) => {
@@ -169,7 +160,7 @@ const formatRoleLabel = (roleKey) => {
     .join(' ');
 };
 
-const computeSlaMeta = (application, slaTargets, rawStatus, isAssigned) => {
+const computeSlaMeta = (application, caseData, slaTargets, rawStatus, isAssigned) => {
   const meta = computeApplicationSlaMeta({
     submittedAt: application?.submitted_at,
     createdAt: application?.created_at,
@@ -177,7 +168,7 @@ const computeSlaMeta = (application, slaTargets, rawStatus, isAssigned) => {
     slaTargets,
     rawStatus,
     isAssigned,
-    assessmentEligibility: application?.assessment_esdc_eligibility,
+    assessmentEligibility: application?.assessment_esdc_eligibility || caseData?.assessment_esdc_eligibility,
   });
   if (!meta || meta.status === 'unknown') {
     return { label: 'Unknown', color: 'grey' };
@@ -198,26 +189,6 @@ const computeSlaMeta = (application, slaTargets, rawStatus, isAssigned) => {
   if (meta.deltaDays <= 3) return { label: meta.label, color: 'severity-low' };
   return { label: meta.label, color: 'green' };
 };
-
-const APPLICATION_STATUS_OPTIONS = [
-  { label: 'Submitted', value: 'submitted' },
-  { label: 'In Review', value: 'in_review' },
-  { label: 'Action Required', value: 'docs_requested' },
-  { label: 'Closure Notice', value: 'closure_notice' },
-  { label: 'Pending Approval', value: 'pending_approval' },
-  { label: 'Decision Ready (Legacy)', value: 'decision_ready' },
-  { label: 'Approved', value: 'approved' },
-  { label: 'Completed', value: 'completed' },
-  { label: 'Denied', value: 'rejected' },
-  { label: 'Closed', value: 'closed' },
-  { label: 'Archived', value: 'archived' },
-];
-
-const APPLICATION_STATUS_LABEL_MAP = APPLICATION_STATUS_OPTIONS.reduce((acc, option) => {
-  acc[option.value] = option.label;
-  return acc;
-}, {});
-APPLICATION_STATUS_LABEL_MAP.withdrawn = 'Closed';
 
 const buildCanadaRegionLookup = (rows = []) => {
   const lookup = {};
@@ -250,16 +221,7 @@ const extractRegionCode = value => {
 };
 
 const formatStatusLabel = value => {
-  if (!value) return 'Unknown';
-  const normalised = String(value).trim().toLowerCase();
-  if (APPLICATION_STATUS_LABEL_MAP[normalised]) {
-    return APPLICATION_STATUS_LABEL_MAP[normalised];
-  }
-  return normalised
-    .split(/[_-]+/g)
-    .filter(Boolean)
-    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
+  return getApplicationStatusLabel(value);
 };
 
 const ApplicationOverviewWidget = ({
@@ -841,11 +803,11 @@ const ApplicationOverviewWidget = ({
   }, [applicantUserId]);
 
   const fallbackStatusRaw = statusValue || applicationStatusFromCase || application?.status || '';
-  const fallbackStatus = normalizeClosedStatus(fallbackStatusRaw);
-  const normalizedStatusKey = (fallbackStatus || '').toString().trim().toLowerCase().replace(/[\s-]+/g, '_');
-  const statusContext = getCaseStatusContext(fallbackStatus);
+  const fallbackStatus = normalizeApplicationStatus(normalizeClosedStatus(fallbackStatusRaw));
+  const normalizedStatusKey = fallbackStatus;
+  const statusContext = getApplicationStatusContext(fallbackStatus);
   const roleAccess = getRoleGroups(canonicalRole || userRole);
-  const { canonicalStatus, isFinalStatus } = statusContext;
+  const { canonicalStatus } = statusContext;
   const {
     isSystemAdministratorRole,
     isAdminRole,
@@ -853,7 +815,7 @@ const ApplicationOverviewWidget = ({
     isApplicationAssessorRole
   } = roleAccess;
   const roleKey = normalizeEscalationRole(canonicalRoleKey);
-  const canEditStatus = isAdminRole && canEditCaseStatus({
+  const canEditStatus = isAdminRole && canEditApplicationStatus({
     role: canonicalRole || userRole,
     status: fallbackStatus,
     hasCase: Boolean(caseData?.id),
@@ -880,7 +842,7 @@ const ApplicationOverviewWidget = ({
     if (docsRequestedDays >= 3) return 'severity-low';
     return 'grey';
   })();
-  const statusBadgeColor = statusColor(statusOption?.value || fallbackStatus || 'unknown');
+  const statusBadgeColor = getApplicationStatusBadgeColor(statusOption?.value || fallbackStatus || 'unknown');
   const statusSelectDisabled = !canEditStatus || savingStatus || docsRequestSaving || lockedByAnotherUser;
   const docsRequestToggleDisabled =
     docsRequestSaving || savingStatus || lockedByAnotherUser || !caseData?.id;
@@ -1456,7 +1418,23 @@ const ApplicationOverviewWidget = ({
       }
 
       const expectedRowVersion = Number(rowVersion || caseData?.application_row_version || application?.row_version || 0);
-      const payload = { applicationStatus: nextStatus };
+      const payload = {
+        applicationStatus: mapWorkflowStatusToPersistenceStatus(nextStatus, {
+          currentStatus: applicationStatusFromCase || application?.status || null,
+          awaitingReason:
+            caseData?.application_awaiting_reason ??
+            caseData?.applicationAwaitingReason ??
+            application?.application_awaiting_reason ??
+            application?.awaiting_reason ??
+            null,
+          decisionOutcome:
+            caseData?.decision_outcome ??
+            caseData?.decisionOutcome ??
+            application?.decision_outcome ??
+            application?.decisionOutcome ??
+            null,
+        }) || nextStatus,
+      };
       if (expectedRowVersion > 0) {
         payload.expectedRowVersion = expectedRowVersion;
       }
@@ -1776,8 +1754,8 @@ const ApplicationOverviewWidget = ({
       return;
     }
 
-    const canonicalNextStatus = getCaseStatusContext(nextStatus).canonicalStatus;
-    if (!isStatusTransitionAllowed({ role: canonicalRole || userRole, fromStatus: canonicalStatus, toStatus: canonicalNextStatus })) {
+    const canonicalNextStatus = getApplicationStatusContext(nextStatus).canonicalStatus;
+    if (!isApplicationStatusTransitionAllowed({ role: canonicalRole || userRole, fromStatus: canonicalStatus, toStatus: canonicalNextStatus })) {
       setStatusFeedback({
         type: 'info',
         content: 'That status change is not available for your role.',
@@ -1785,7 +1763,10 @@ const ApplicationOverviewWidget = ({
       return;
     }
 
-    if (isAdminRole && isFinalStatus && canonicalNextStatus !== canonicalStatus) {
+    if (
+      requiresFinalApplicationStatusConfirmation({ role: canonicalRole || userRole, currentStatus: canonicalStatus }) &&
+      canonicalNextStatus !== canonicalStatus
+    ) {
       setConfirmStatusChange({ nextStatus, nextOption });
       return;
     }
@@ -1850,8 +1831,44 @@ const ApplicationOverviewWidget = ({
       application?.assigned_user_id ||
       application?.assigned_to_user_id
     );
-    const statusInfo = getStatusInfo({ application_status: fallbackStatus, case_status: null, case_id: null, assigned_user_id: assigned });
-    const slaMeta = computeSlaMeta(application, slaTargets, statusInfo.rawStatus, assigned);
+    const statusInfo = getStatusInfo({
+      application_status: application?.status || fallbackStatus,
+      application_lifecycle_status:
+        application?.application_lifecycle_status ??
+        application?.applicationLifecycleStatus ??
+        application?.lifecycle_status ??
+        caseData?.application_lifecycle_status ??
+        caseData?.applicationLifecycleStatus ??
+        null,
+      decision_outcome:
+        application?.decision_outcome ??
+        application?.decisionOutcome ??
+        caseData?.decision_outcome ??
+        caseData?.decisionOutcome ??
+        null,
+      application_awaiting_reason:
+        application?.application_awaiting_reason ??
+        application?.applicationAwaitingReason ??
+        application?.awaiting_reason ??
+        caseData?.application_awaiting_reason ??
+        caseData?.applicationAwaitingReason ??
+        null,
+      application_closure_reason:
+        application?.application_closure_reason ??
+        application?.applicationClosureReason ??
+        application?.closure_reason ??
+        caseData?.application_closure_reason ??
+        caseData?.applicationClosureReason ??
+        null,
+      case_status: caseData?.status || null,
+      case_id: caseData?.id ?? application?.case_id ?? null,
+      assigned_user_id: assigned ? 1 : null,
+      assessment_esdc_eligibility:
+        application?.assessment_esdc_eligibility ??
+        caseData?.assessment_esdc_eligibility ??
+        null,
+    });
+    const slaMeta = computeSlaMeta(application, caseData, slaTargets, statusInfo.rawStatus, assigned);
     slaValue = <Badge color={slaMeta.color}>{slaMeta.label}</Badge>;
   }
 
@@ -2186,6 +2203,7 @@ const ApplicationOverviewWidget = ({
                 onChange={({ detail }) => setWatchlistNotes(detail.value)}
                 placeholder="Explain why this applicant is watchlisted and what staff should do when a future watchlist hit is reviewed"
                 rows={4}
+                spellcheck={true}
               />
             </FormField>
           </SpaceBetween>
@@ -2311,6 +2329,7 @@ const ApplicationOverviewWidget = ({
                     value={quickActionNote}
                     onChange={e => setQuickActionNote(e.detail.value || '')}
                     rows={3}
+                    spellcheck={true}
                   />
                 </FormField>
               ) : null}
@@ -2320,6 +2339,7 @@ const ApplicationOverviewWidget = ({
                     value={quickActionConfirmInput}
                     onChange={e => setQuickActionConfirmInput(e.detail.value || '')}
                     placeholder={quickActionConfirm.confirmWord}
+                    spellcheck={false}
                   />
                 </FormField>
               ) : null}

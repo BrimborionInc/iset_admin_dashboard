@@ -399,6 +399,7 @@ const ExistingActionPlanModal = ({ visible, onDismiss, onCreated }) => {
               value={form.name}
               onChange={({ detail }) => handleChange("name", detail.value)}
               autoFocus
+              spellcheck={true}
             />
           </FormField>
           <Box>
@@ -449,6 +450,7 @@ const ExistingActionPlanModal = ({ visible, onDismiss, onCreated }) => {
               onChange={({ detail }) => handleChange("summary", detail.value)}
               rows={4}
               placeholder="Optional notes about the existing plan"
+              spellcheck={true}
             />
           </FormField>
           {isClosed && (
@@ -527,6 +529,7 @@ const ExistingActionPlanModal = ({ visible, onDismiss, onCreated }) => {
                         loadingText="Searching NOC codes"
                         expandToViewport
                         disabled={!form.resultNocVersion}
+                        spellcheck={false}
                       />
                     </FormField>
                   </>
@@ -538,6 +541,7 @@ const ExistingActionPlanModal = ({ visible, onDismiss, onCreated }) => {
                   onChange={({ detail }) => handleChange("outcomeSummary", detail.value)}
                   rows={3}
                   placeholder="Optional summary of the completed plan"
+                  spellcheck={true}
                 />
               </FormField>
               <FormField label="Closure notes">
@@ -546,6 +550,7 @@ const ExistingActionPlanModal = ({ visible, onDismiss, onCreated }) => {
                   onChange={({ detail }) => handleChange("closureNotes", detail.value)}
                   rows={3}
                   placeholder="Optional closure notes"
+                  spellcheck={true}
                 />
               </FormField>
             </SpaceBetween>

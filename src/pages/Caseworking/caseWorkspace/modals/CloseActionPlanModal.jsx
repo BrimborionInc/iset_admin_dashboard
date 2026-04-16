@@ -381,6 +381,7 @@ const CloseActionPlanModal = ({
                 loadingText="Searching NOC codes"
                 expandToViewport
                 disabled={!resultNocVersion}
+                spellcheck={false}
               />
             </FormField>
           </>
@@ -391,6 +392,7 @@ const CloseActionPlanModal = ({
             rows={3}
             onChange={({ detail }) => setOutcomeSummary(detail.value)}
             placeholder="Summarize the plan outcome"
+            spellcheck={true}
           />
         </FormField>
         <FormField label="Closure notes (optional)">
@@ -399,6 +401,7 @@ const CloseActionPlanModal = ({
             rows={3}
             onChange={({ detail }) => setClosureNotes(detail.value)}
             placeholder="Internal notes"
+            spellcheck={true}
           />
         </FormField>
       </SpaceBetween>

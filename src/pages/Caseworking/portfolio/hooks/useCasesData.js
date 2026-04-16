@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "../../../../auth/apiClient";
+import { getCaseStatusBadgeColor, getCaseStatusLabel, normalizeCaseStatus } from "../../../../utils/caseStatus";
 
 const defaultResult = {
   items: [],
@@ -66,30 +67,16 @@ const formatClientName = (firstName, lastName) => {
   return combined || "Unknown client";
 };
 
-const CASE_STATUS_BADGE_COLORS = {
-  pending_approval: "blue",
-  initiated: "grey",
-  active: "green",
-  dormant: "grey",
-  ready_to_close: "yellow",
-  closed: "green",
-  archived: "grey",
-};
-
 const formatCaseStatus = value => {
   if (!value) {
     return { normalized: null, label: "-", color: "grey" };
   }
-  const normalized = String(value).trim().toLowerCase();
+  const normalized = normalizeCaseStatus(value);
   if (!normalized) {
     return { normalized: null, label: "-", color: "grey" };
   }
-  const label = normalized
-    .split(/[_-]/g)
-    .filter(Boolean)
-    .map(part => toTitleCase(part))
-    .join(" ");
-  const color = CASE_STATUS_BADGE_COLORS[normalized] || "grey";
+  const label = getCaseStatusLabel(normalized);
+  const color = getCaseStatusBadgeColor(normalized);
   return { normalized, label, color };
 };
 

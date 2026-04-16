@@ -637,6 +637,7 @@ const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) =
               onChange={({ detail }) => setDraftText(detail.value)}
               placeholder="Add internal details, next steps, or reminders for the team."
               rows={6}
+              spellcheck={true}
             />
           </FormField>
         </SpaceBetween>

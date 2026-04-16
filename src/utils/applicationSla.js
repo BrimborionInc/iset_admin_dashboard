@@ -17,6 +17,7 @@ export const SLA_STAGE_LABELS = {
 };
 
 export const COMPLETED_APPLICATION_STATUSES = new Set([
+  'decision_recorded',
   'approved',
   'completed',
   'rejected',
@@ -26,11 +27,16 @@ export const COMPLETED_APPLICATION_STATUSES = new Set([
   'archived',
 ]);
 
-export const DECISION_APPLICATION_STATUSES = new Set(['pending_approval', 'decision_ready']);
+export const DECISION_APPLICATION_STATUSES = new Set([
+  'pending_decision',
+  'pending_approval',
+  'decision_ready',
+]);
 
 export const ASSESSMENT_APPLICATION_STATUSES = new Set([
   'in_review',
   'in review',
+  'awaiting_applicant',
   'docs_requested',
   'docs requested',
   'action_required',

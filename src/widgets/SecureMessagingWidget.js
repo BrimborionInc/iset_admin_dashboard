@@ -22,7 +22,7 @@ import {
 import { apiFetch } from '../auth/apiClient';
 import SecureMessagesHelpPanelContent from '../helpPanelContents/secureMessagesHelpPanelContent';
 import { useCaseWorkspace } from '../pages/Caseworking/caseWorkspace/CaseWorkspaceContext.jsx';
-import { getApplicationStatusContext } from '../utils/rbac';
+import { resolveApplicationStateFields } from '../utils/applicationStatus';
 
 const TAB_IDS = {
   inbox: 'inbox',
@@ -106,15 +106,6 @@ const normalizeStatusValue = (value) => {
 };
 
 const LETTER_DOC_TYPES = new Set(['assessment_approval_letter', 'assessment_denial_letter']);
-const APPROVED_CASE_STATUSES = new Set([
-  'initiated',
-  'active',
-  'dormant',
-  'ready_to_close',
-  'closed',
-  'archived',
-  'approved'
-]);
 
 const buildAttachmentUrl = attachment => {
   const directUrl = attachment?.download_url || '';
@@ -164,32 +155,76 @@ const SecureMessagingWidget = ({
       ? null
       : applicationIdNum;
 
-  const applicationStatusRaw =
-    caseData?.applicationStatus ??
-    caseData?.application_status ??
-    workspaceCaseData?.applicationStatus ??
-    workspaceCaseData?.application_status ??
-    null;
-  const applicationStatusContext = useMemo(
-    () => getApplicationStatusContext(applicationStatusRaw),
-    [applicationStatusRaw]
-  );
-  const canonicalApplicationStatus = applicationStatusContext?.canonicalStatus || null;
-  const caseStatusNormalized = normalizeStatusValue(
-    caseData?.status ?? workspaceCaseData?.status ?? null
-  );
-  const decisionOutcome = useMemo(() => {
-    const appStatus = normalizeStatusValue(canonicalApplicationStatus || applicationStatusRaw);
-    if (!appStatus) return null;
-    if (appStatus === 'approved') return 'approved';
-    if (appStatus === 'rejected' || appStatus === 'declined') return 'denied';
-    if (appStatus === 'decision_ready' || appStatus === 'completed') {
-      if (APPROVED_CASE_STATUSES.has(caseStatusNormalized)) return 'approved';
-      if (caseStatusNormalized === 'in_review') return 'denied';
-      return null;
-    }
-    return null;
-  }, [applicationStatusRaw, canonicalApplicationStatus, caseStatusNormalized]);
+  const applicationState = useMemo(() => {
+    return resolveApplicationStateFields({
+      applicationStatus:
+        caseData?.applicationStatus ??
+        caseData?.application_status ??
+        workspaceCaseData?.applicationStatus ??
+        workspaceCaseData?.application_status ??
+        null,
+      applicationLifecycleStatus:
+        caseData?.applicationLifecycleStatus ??
+        caseData?.application_lifecycle_status ??
+        workspaceCaseData?.applicationLifecycleStatus ??
+        workspaceCaseData?.application_lifecycle_status ??
+        null,
+      decisionOutcome:
+        caseData?.decisionOutcome ??
+        caseData?.decision_outcome ??
+        workspaceCaseData?.decisionOutcome ??
+        workspaceCaseData?.decision_outcome ??
+        null,
+      awaitingReason:
+        caseData?.applicationAwaitingReason ??
+        caseData?.application_awaiting_reason ??
+        workspaceCaseData?.applicationAwaitingReason ??
+        workspaceCaseData?.application_awaiting_reason ??
+        null,
+      closureReason:
+        caseData?.applicationClosureReason ??
+        caseData?.application_closure_reason ??
+        workspaceCaseData?.applicationClosureReason ??
+        workspaceCaseData?.application_closure_reason ??
+        null,
+      caseStatus: caseData?.status ?? workspaceCaseData?.status ?? null,
+      reviewStatus:
+        caseData?.reviewStatus ??
+        caseData?.review_status ??
+        workspaceCaseData?.reviewStatus ??
+        workspaceCaseData?.review_status ??
+        null,
+    });
+  }, [
+    caseData?.applicationStatus,
+    caseData?.application_status,
+    caseData?.applicationLifecycleStatus,
+    caseData?.application_lifecycle_status,
+    caseData?.decisionOutcome,
+    caseData?.decision_outcome,
+    caseData?.applicationAwaitingReason,
+    caseData?.application_awaiting_reason,
+    caseData?.applicationClosureReason,
+    caseData?.application_closure_reason,
+    caseData?.reviewStatus,
+    caseData?.review_status,
+    caseData?.status,
+    workspaceCaseData?.applicationStatus,
+    workspaceCaseData?.application_status,
+    workspaceCaseData?.applicationLifecycleStatus,
+    workspaceCaseData?.application_lifecycle_status,
+    workspaceCaseData?.decisionOutcome,
+    workspaceCaseData?.decision_outcome,
+    workspaceCaseData?.applicationAwaitingReason,
+    workspaceCaseData?.application_awaiting_reason,
+    workspaceCaseData?.applicationClosureReason,
+    workspaceCaseData?.application_closure_reason,
+    workspaceCaseData?.reviewStatus,
+    workspaceCaseData?.review_status,
+    workspaceCaseData?.status,
+  ]);
+  const canonicalApplicationStatus = applicationState.applicationStatus || null;
+  const decisionOutcome = applicationState.decisionOutcome || null;
   const allowedLetterDocTypes = useMemo(() => {
     if (decisionOutcome === 'approved') return new Set(['assessment_approval_letter']);
     if (decisionOutcome === 'denied') return new Set(['assessment_denial_letter']);
@@ -1228,6 +1263,7 @@ const SecureMessagingWidget = ({
               value={composeToName}
               placeholder="Applicant"
               onChange={({ detail }) => setComposeToName(detail.value)}
+              spellcheck={false}
               disabled={composeSending}
             />
           </div>
@@ -1237,6 +1273,7 @@ const SecureMessagingWidget = ({
               value={composeFromName}
               placeholder="Case Worker"
               onChange={({ detail }) => setComposeFromName(detail.value)}
+              spellcheck={false}
               disabled={composeSending}
             />
           </div>
@@ -1246,6 +1283,7 @@ const SecureMessagingWidget = ({
               value={composeSubject}
               onChange={({ detail }) => setComposeSubject(detail.value)}
               placeholder="Subject"
+              spellcheck={true}
               disabled={composeSending}
             />
           </div>
@@ -1256,6 +1294,7 @@ const SecureMessagingWidget = ({
               onChange={({ detail }) => setComposeBody(detail.value)}
               rows={6}
               placeholder="Write your message"
+              spellcheck={true}
               disabled={composeSending}
             />
           </div>
@@ -1362,6 +1401,7 @@ const SecureMessagingWidget = ({
             onChange={({ detail }) => setEmptyConfirmText(detail.value)}
             placeholder="Type 'delete' to confirm"
             autoFocus
+            spellcheck={false}
             disabled={emptyDeleting}
           />
         </SpaceBetween>

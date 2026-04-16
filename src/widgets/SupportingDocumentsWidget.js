@@ -25,6 +25,8 @@ import { useCaseWorkspace } from '../pages/Caseworking/caseWorkspace/CaseWorkspa
 import { closePendingDocumentWindow, navigateDocumentWindow, openPendingDocumentWindow } from '../utils/documentOpen';
 import useCurrentUser from '../hooks/useCurrentUser';
 import { getRoleGroups } from '../utils/rbac';
+import { resolveApplicationStateFields } from '../utils/applicationStatus';
+import { resolveInterventionStateFields } from '../utils/interventionStatus';
 
 const REFRESH_EVENT = 'iset:supporting-documents:refresh';
 const OPEN_UPLOAD_EVENT = 'iset:supporting-documents:open-upload';
@@ -79,6 +81,20 @@ const formatApplicationStatus = value => {
   const normalized = String(value).trim().toLowerCase();
   if (normalized === 'rejected') return 'Not Approved';
   return String(value).trim().replace(/_/g, ' ');
+};
+
+const buildInterventionDocumentOption = (intervention, planLabel, planId) => {
+  if (!intervention?.id) return null;
+  const interventionState = resolveInterventionStateFields(intervention, { fallbackStatus: null });
+  return {
+    value: String(intervention.id),
+    label: intervention.title || intervention.code || `Intervention ${intervention.id}`,
+    description: planLabel ? `Plan: ${planLabel}` : undefined,
+    status: interventionState.effectiveStatus || intervention.status || null,
+    review_status: interventionState.reviewStatus || null,
+    delivery_status: interventionState.deliveryStatus || null,
+    planId,
+  };
 };
 
 const normalizeIdList = list =>
@@ -317,16 +333,10 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       const planLabel = plan?.title || plan?.name || '';
       const list = Array.isArray(plan?.interventions) ? plan.interventions : [];
       list.forEach(intervention => {
-        if (!intervention?.id) return;
-        const title = intervention.title || intervention.code || `Intervention ${intervention.id}`;
-        const description = planLabel ? `Plan: ${planLabel}` : undefined;
-        options.push({
-          value: String(intervention.id),
-          label: title,
-          description,
-          status: intervention.status || null,
-          planId
-        });
+        const option = buildInterventionDocumentOption(intervention, planLabel, planId);
+        if (option) {
+          options.push(option);
+        }
       });
     });
     return options;
@@ -364,13 +374,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       const planLabel = plan?.title || plan?.name || '';
       const list = Array.isArray(plan?.interventions) ? plan.interventions : [];
       const options = list
-        .filter(intervention => intervention?.id)
-        .map(intervention => ({
-          value: String(intervention.id),
-          label: intervention.title || intervention.code || `Intervention ${intervention.id}`,
-          description: planLabel ? `Plan: ${planLabel}` : undefined,
-          status: intervention.status || null
-        }));
+        .map(intervention => buildInterventionDocumentOption(intervention, planLabel, planId))
+        .filter(Boolean);
       map.set(planId, options);
     });
     return map;
@@ -415,6 +420,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       const opts = items
         .filter(item => item && item.applicationId)
         .map(item => {
+          const applicationState = resolveApplicationStateFields(item);
           const value = String(item.applicationId);
           const reference = item.referenceNumber || item.caseNumber || value;
           const label = isCaseWorkspace
@@ -426,12 +432,12 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
             ? item.caseNumber && item.referenceNumber
               ? `Application ${item.referenceNumber}`
               : null
-            : formatApplicationStatus(item.applicationStatus) || null;
+            : formatApplicationStatus(applicationState.applicationStatus) || null;
           return {
             value,
             label,
             description: description || undefined,
-            status: item.applicationStatus || null
+            status: applicationState.applicationStatus || null
           };
         });
       // Ensure the current workspace application appears as an option even if not returned
@@ -597,7 +603,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       const params = new URLSearchParams();
       if (isCaseWorkspace && selectedIntervention?.value) {
         params.set('interventionId', selectedIntervention.value);
-        const statusValue = String(selectedIntervention.status || '').toLowerCase();
+        const statusValue = String(selectedIntervention.review_status || selectedIntervention.status || '').toLowerCase();
         const stage = statusValue && statusValue !== 'draft' ? 'submitted' : 'draft';
         params.set('stage', stage);
       } else if (applicationId) {

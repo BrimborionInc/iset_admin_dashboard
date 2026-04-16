@@ -29,9 +29,23 @@ import {
   SLA_DEFAULT_DAYS,
   computeApplicationSlaMeta,
   formatApplicationSlaLabel,
-  isEligibilityPending,
-  normalizeClosedStatus,
 } from '../../../utils/applicationSla';
+import {
+  buildApplicationStatusInfo,
+  getApplicationStatusBadgeColor,
+  normalizeApplicationStatus,
+  normalizeStatusKey,
+} from '../../../utils/applicationStatus';
+import {
+  getCaseStatusBadgeColor,
+  getCaseStatusIndicatorType,
+  getCaseStatusLabel,
+  normalizeCaseStatus,
+} from '../../../utils/caseStatus';
+import {
+  formatInterventionStatusLabel,
+  resolveInterventionStateFields,
+} from '../../../utils/interventionStatus';
 
 const COLUMN_WIDTHS_STORAGE_KEY = 'work-queue-items-column-widths-v1';
 const WATCHLIST_REFRESH_EVENT = 'watchlist:refresh';
@@ -165,9 +179,6 @@ const ELIGIBILITY_ALLOWED_MIME_TYPES = [
 ];
 const ELIGIBILITY_MAX_BYTES = 6 * 1024 * 1024;
 
-const normalizeStatusKey = status =>
-  (status || '').toString().trim().toLowerCase().replace(/[\s-]+/g, '_');
-
 const getDaysAgo = value => {
   if (!value) return null;
   const date = new Date(value);
@@ -180,32 +191,6 @@ const formatDaysAgo = value => {
   const days = getDaysAgo(value);
   if (days === null) return null;
   return `${days} day${days === 1 ? '' : 's'} ago`;
-};
-
-const statusColor = (status = '') => {
-  const normalized = normalizeClosedStatus(status);
-  if (['approved', 'completed'].includes(normalized)) return 'green';
-  if ([
-    'submitted',
-    'in review',
-    'in_review',
-    'in progress',
-    'in_progress',
-    'pending',
-    'assigned',
-    'pending_approval',
-    'decision_ready',
-    'ready_to_close',
-    'ready to close'
-  ].includes(normalized)) {
-    return 'blue';
-  }
-  if (['docs requested', 'docs_requested', 'action required', 'action required (docs requested)', 'closure notice', 'closure_notice'].includes(normalized)) {
-    return 'severity-high';
-  }
-  if (['rejected', 'declined', 'errored'].includes(normalized)) return 'red';
-  if (['closed', 'inactive', 'archived'].includes(normalized)) return 'grey';
-  return 'grey';
 };
 
 const formatSlaTargetLabel = meta => {
@@ -303,41 +288,115 @@ const renderApprovalSlaBadge = meta => {
   );
 };
 
-const formatWorkflowStatusLabel = status => {
-  const rawStatus = normalizeClosedStatus(typeof status === 'string' ? status.trim() : status || '');
-  if (!rawStatus) return null;
-  if (rawStatus === 'rejected') return 'Denied';
-  if (rawStatus === 'decision_ready') return 'Decision Ready (Legacy)';
-  return rawStatus
-    .replace(/[_-]+/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase());
+const getInterventionStatusInfo = row => {
+  const typeKey = normalizeStatusKey(row?.type || '');
+  const interventionState = resolveInterventionStateFields({
+    status: row?.status || row?.intervention_status || null,
+    reviewStatus: row?.review_status ?? row?.reviewStatus ?? row?.proposal_review_status ?? row?.proposalReviewStatus ?? null,
+    deliveryStatus: row?.delivery_status ?? row?.deliveryStatus ?? null,
+  });
+  const rawStatus =
+    (typeKey.includes('approval')
+      ? interventionState.reviewStatus || interventionState.effectiveStatus
+      : interventionState.effectiveStatus || interventionState.reviewStatus) ||
+    interventionState.legacyStatus ||
+    'unknown';
+  let statusType = 'info';
+  let badgeColor = 'blue';
+  switch (rawStatus) {
+    case 'draft':
+      statusType = 'stopped';
+      badgeColor = 'grey';
+      break;
+    case 'submitted':
+    case 'in_review':
+      statusType = 'info';
+      badgeColor = 'blue';
+      break;
+    case 'changes_requested':
+      statusType = 'warning';
+      badgeColor = 'orange';
+      break;
+    case 'approved':
+      statusType = 'success';
+      badgeColor = 'green';
+      break;
+    case 'in_progress':
+      statusType = 'info';
+      badgeColor = 'blue';
+      break;
+    case 'suspended':
+      statusType = 'warning';
+      badgeColor = 'orange';
+      break;
+    case 'completed':
+      statusType = 'success';
+      badgeColor = 'green';
+      break;
+    case 'cancelled':
+      statusType = 'stopped';
+      badgeColor = 'grey';
+      break;
+    case 'rejected':
+      statusType = 'error';
+      badgeColor = 'red';
+      break;
+    default:
+      statusType = 'info';
+      badgeColor = 'grey';
+      break;
+  }
+  return {
+    rawStatus,
+    statusLabel: formatInterventionStatusLabel(rawStatus),
+    statusType,
+    badgeColor,
+  };
 };
 
 const getStatusInfo = (row) => {
-  const applicationStatusRaw = typeof row.status === 'string' ? row.status.trim() : '';
-  const rawStatus = normalizeClosedStatus(applicationStatusRaw || 'submitted');
-  const label = formatWorkflowStatusLabel(rawStatus) || 'Unknown';
-  const isUnassignedCase = rawStatus === 'submitted' && !row.assigned_user_id;
-  const isInterventionApproval =
-    row?.type === 'InterventionApproval' ||
-    row?.type === 'Intervention';
-  const eligibilityMissing =
-    !isInterventionApproval &&
-    isEligibilityPending(row.assessment_esdc_eligibility) &&
-    ['submitted', 'in_review', 'docs_requested', 'pending_approval', 'closure_notice'].includes(rawStatus);
-  const statusType = (() => {
-    if (['approved', 'completed'].includes(rawStatus)) return 'success';
-    if (['rejected', 'declined'].includes(rawStatus)) return 'error';
-    if (['closed', 'cancelled'].includes(rawStatus)) return 'info';
-    if (eligibilityMissing) return 'warning';
-    if (['docs_requested', 'action_required', 'closure_notice', 'closure notice'].includes(rawStatus)) return 'warning';
-    return isUnassignedCase || rawStatus === 'new' ? 'pending' : 'info';
-  })();
-  const qualifiers = [];
-  if (isUnassignedCase) qualifiers.push('Unassigned');
-  if (eligibilityMissing) qualifiers.push('Awaiting EI Validation');
-  const statusLabel = qualifiers.length ? `${label} • ${qualifiers.join(' • ')}` : label;
-  return { rawStatus, statusLabel, statusType, isUnassignedCase };
+  const typeKey = normalizeStatusKey(row?.type || '');
+  const isCaseLifecycleItem =
+    typeKey === 'case' ||
+    typeKey === 'clientcase' ||
+    typeKey === 'casework' ||
+    (typeKey.includes('case') && !typeKey.includes('intervention') && !typeKey.includes('approval'));
+  if (isCaseLifecycleItem) {
+    const rawStatus = normalizeCaseStatus(row.status || row.case_status || '');
+    const isUnassignedCase =
+      Boolean(row.case_id ?? row.caseId ?? row.id) &&
+      !row.assigned_user_id &&
+      rawStatus === 'intake';
+    const qualifiers = [];
+    if (isUnassignedCase) {
+      qualifiers.push('Unassigned');
+    }
+    const baseLabel = getCaseStatusLabel(rawStatus);
+    return {
+      rawStatus,
+      statusLabel: qualifiers.length ? `${baseLabel} • ${qualifiers.join(' • ')}` : baseLabel,
+      statusType: getCaseStatusIndicatorType(rawStatus),
+      badgeColor: getCaseStatusBadgeColor(rawStatus),
+      isUnassignedCase,
+    };
+  }
+
+  if (typeKey.includes('intervention')) {
+    return getInterventionStatusInfo(row);
+  }
+
+  return buildApplicationStatusInfo({
+    applicationStatus: row.status || row.application_status || null,
+    applicationLifecycleStatus: row.application_lifecycle_status ?? row.applicationLifecycleStatus ?? null,
+    caseStatus: row.case_status || null,
+    caseId: row.case_id ?? row.caseId ?? null,
+    assignedUserId: row.assigned_user_id,
+    assessmentEligibility: row.assessment_esdc_eligibility,
+    decisionOutcome: row.decision_outcome ?? row.decisionOutcome ?? null,
+    awaitingReason: row.application_awaiting_reason ?? row.applicationAwaitingReason ?? null,
+    closureReason: row.application_closure_reason ?? row.applicationClosureReason ?? null,
+    type: row.type,
+  });
 };
 
 const boardItemI18n = {
@@ -1152,7 +1211,7 @@ const WorkQueueItemsTableWidget = ({
                 if (docsRequestedDays >= 3) return 'severity-low';
                 return 'grey';
               })();
-              const statusBadgeColor = statusColor(statusInfo.rawStatus || item.status || 'unknown');
+              const statusBadgeColor = statusInfo.badgeColor || getApplicationStatusBadgeColor(statusInfo.rawStatus || item.status || 'unknown');
               return (
                 <SpaceBetween size="xxs">
                   <Badge color={statusBadgeColor}>{statusInfo.statusLabel}</Badge>
@@ -1201,7 +1260,7 @@ const WorkQueueItemsTableWidget = ({
               computeSlaMeta(
                 item,
                 slaTargets,
-                normalizeClosedStatus(item.status || 'submitted'),
+                normalizeApplicationStatus(item.status || 'submitted'),
                 Boolean(item.assigned_user_id)
               )
             )

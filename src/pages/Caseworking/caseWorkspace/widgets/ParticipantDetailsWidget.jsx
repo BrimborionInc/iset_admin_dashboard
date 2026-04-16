@@ -1942,6 +1942,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
                   readOnly={!editing}
                   rows={2}
                   placeholder="Household members and relationships"
+                  spellcheck={true}
                 />
               </FormField>
               <FormField label="Receiving social assistance">
@@ -2004,6 +2005,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
                               }
                               readOnly={!editing}
                               placeholder="Employer name"
+                              spellcheck={false}
                             />
                           </FormField>
                           <FormField label="NOC Version">
@@ -2059,9 +2061,10 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
                                 }
                                 empty={form.employmentNocVersion ? "No NOC codes found." : "Select a NOC version first."}
                                 disabled={!form.employmentNocVersion}
-                                enteredTextLabel={value => `Use \"${value}\"`}
+                                enteredTextLabel={value => `Use "${value}"`}
                                 filteringType="manual"
                                 loadingText="Searching NOC codes"
+                                spellcheck={false}
                               />
                             ) : (
                               <Input value={form.employmentNoc || "Not set"} readOnly />
@@ -2145,6 +2148,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
                             }
                             readOnly={!editing}
                             placeholder="Provider name"
+                            spellcheck={false}
                           />
                         </FormField>
                       )}
@@ -2156,6 +2160,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
                       onChange={({ detail }) => setForm(current => ({ ...current, programEmployer: detail.value }))}
                       readOnly={!editing}
                       placeholder="Employer name"
+                      spellcheck={false}
                     />
                   </FormField>
                   <FormField label="NOC Version">
@@ -2209,9 +2214,10 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
                         }
                         empty={form.programNocVersion ? "No NOC codes found." : "Select a NOC version first."}
                         disabled={!form.programNocVersion}
-                        enteredTextLabel={value => `Use \"${value}\"`}
+                        enteredTextLabel={value => `Use "${value}"`}
                         filteringType="manual"
                         loadingText="Searching NOC codes"
+                        spellcheck={false}
                       />
                     ) : (
                       <Input value={form.programNoc || "Not set"} readOnly />
@@ -2252,6 +2258,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
                   readOnly={!editing}
                   rows={3}
                   placeholder="Description"
+                  spellcheck={true}
                 />
               </FormField>
               <FormField label="Requesting disability support">
@@ -2274,6 +2281,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
                   readOnly={!editing}
                   rows={3}
                   placeholder="Details of support requested"
+                  spellcheck={true}
                 />
               </FormField>
             </ColumnLayout>
@@ -2292,6 +2300,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
                   readOnly={!editing}
                   rows={3}
                   placeholder="Describe goals"
+                  spellcheck={true}
                 />
               </FormField>
               <FormField label="Barriers">
@@ -2330,6 +2339,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
                     readOnly={!editing}
                     rows={2}
                     placeholder="Details if 'Other' selected"
+                    spellcheck={true}
                   />
                 ) : form.otherBarrier ? (
                   <Textarea value={form.otherBarrier} readOnly rows={2} />
@@ -2418,6 +2428,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
                     readOnly={!editing}
                     rows={2}
                     placeholder="Describe other support"
+                    spellcheck={true}
                   />
                 ) : (
                   <Box color="text-body-secondary">Not provided</Box>
@@ -2533,6 +2544,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
                       onChange={({ detail }) => setForm(current => ({ ...current, incomeOther: detail.value }))}
                       rows={2}
                       placeholder="Other income details"
+                      spellcheck={true}
                     />
                   ) : form.incomeOther ? (
                     <Box>{form.incomeOther}</Box>
@@ -2601,6 +2613,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
                       onChange={({ detail }) => setForm(current => ({ ...current, expensesOtherList: detail.value }))}
                       rows={2}
                       placeholder="Other expense notes"
+                      spellcheck={true}
                     />
                   ) : form.expensesOtherList ? <Box>{form.expensesOtherList}</Box> : <Box color="text-body-secondary">Not provided</Box>}
                 </FormField>
@@ -2611,6 +2624,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
                       onChange={({ detail }) => setForm(current => ({ ...current, loanGrantDetails: detail.value }))}
                       rows={2}
                       placeholder="Details"
+                      spellcheck={true}
                     />
                   ) : loanGrantDetailsValue
                     ? <Box>{loanGrantDetailsValue}</Box>

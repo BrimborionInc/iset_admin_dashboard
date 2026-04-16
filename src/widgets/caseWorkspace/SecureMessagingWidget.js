@@ -840,6 +840,7 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
               value={composeSubject}
               onChange={({ detail }) => setComposeSubject(detail.value)}
               placeholder="Subject"
+              spellcheck={true}
               disabled={composeSending}
             />
           </div>
@@ -850,6 +851,7 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
               onChange={({ detail }) => setComposeBody(detail.value)}
               rows={6}
               placeholder="Write your message"
+              spellcheck={true}
               disabled={composeSending}
             />
           </div>
@@ -917,6 +919,7 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
             onChange={({ detail }) => setEmptyConfirmText(detail.value)}
             placeholder="Type 'delete' to confirm"
             autoFocus
+            spellcheck={false}
             disabled={emptyDeleting}
           />
         </SpaceBetween>

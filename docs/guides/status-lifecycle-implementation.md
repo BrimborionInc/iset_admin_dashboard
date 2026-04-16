@@ -2,14 +2,16 @@
 
 This document captures the end-to-end status model in the ISET admin dashboard after the case-status realignment (CR-0012). It explains which entities expose lifecycle statuses, how we canonicalise and persist them, and where the frontend consumes the data. Use this as the source of truth when extending workflows, authoring tests, or debugging status-related issues.
 
+> Important: this guide now reflects the current DEV implementation, not yet a completed TEST/PROD rollout. DEV now dual-writes additive application lifecycle/decision fields and canonical case lifecycle fields while preserving legacy compatibility columns during cutover. The agreed long-term entity model is tracked separately in `docs/planning/client-case-application-target-model.md`, and the broader target status redesign remains in `docs/planning/status-architecture-overhaul.md`.
+
 ---
 
 ## 1. Overview
-- **Applications** track the intake lifecycle (`iset_application.status`). These reflect program decisions and remain separate from casework.
+- **Applications** still expose legacy `iset_application.status`, but DEV now also writes additive workflow fields (`application_lifecycle_status`, `decision_outcome`, awaiting/closure qualifiers) so workflow, decision, and blocker state can be separated during the migration.
 - **Application SLA stages** are derived, not stored. PATH currently chooses the active SLA milestone from application status, assignment state, and `assessment_esdc_eligibility`.
 - **Document requests** are tracked independently on `iset_application` so they can overlap any application status (e.g., `approved` + docs requested).
-- **Cases** represent the ongoing service relationship (`iset_case.status`). The status is derived from application state and action plan activity via `recomputeCaseStatus`.
-- **Action plans** and **interventions** retain their own lifecycle fields; the case status derives from the aggregate state of action plans.
+- **Cases** represent the ongoing service relationship. DEV now persists canonical lifecycle in `iset_case.lifecycle_status` and keeps legacy `iset_case.status` aligned for compatibility during cutover.
+- **Action plans** retain their own lifecycle field; intervention proposal review state and live intervention delivery state are now being separated during the DEV cutover.
 - All primary APIs now return both application and case statuses so widgets can render the correct context without guessing.
 
 ---
@@ -37,6 +39,7 @@ Stored in `iset_application.status` (varchar). Canonical values:
 
 > **Normalization:** `getApplicationStatusContext()` (in `src/utils/rbac.js`) lowercases/underscores incoming values and maps `withdrawn` to `closed`. SLA and queue logic also treat hold variants (`action_required`, `docs requested`, `closure notice`, `pending info`, `information requested`, `on_hold`) as assessment/hold states (see `APPLICATION_STATUS_HOLD_VALUES` in `isetadminserver.js`).
 > **Note:** `docs_requested` remains an application status option, but document-request timing is now tracked separately (see below) so requests can overlap any status.
+> **DEV migration note:** the development branch now also writes `application_lifecycle_status`, `decision_outcome`, `application_awaiting_reason`, and `application_closure_reason`. `iset_application.status` remains in place as the legacy compatibility field until rollout and backfill are complete.
 
 ### 2.2 Document Request Tracking (independent of status)
 Document requests are recorded on `iset_application` to allow "docs requested" to coexist with any application status.
@@ -72,11 +75,11 @@ Current implementation note:
 - Backend source of truth: `getApplicationSlaStageKey()` and `computeApplicationSlaTiming()` in `isetadminserver.js`
 
 ### 2.3 Case Statuses
-Stored in `iset_case.status`. Canonical set defined in `CASE_STATUS_DERIVED_VALUES` (see `isetadminserver.js`):
+Canonical lifecycle is now stored in `iset_case.lifecycle_status` in DEV, with `iset_case.status` kept aligned as a compatibility mirror during cutover. Canonical set defined in `CASE_STATUS_DERIVED_VALUES` (see `isetadminserver.js`):
 
 | Canonical Value | Meaning | Trigger |
 | --------------- | ------- | ------- |
-| `pending_approval` | Default state: case exists but application not yet approved. | Application ingestion or reassignment prior to approval. |
+| `intake` | Default case lifecycle before service delivery begins. | Application ingestion/receipt, reassignment, or returned-for-changes review state. |
 | `initiated` | Application approved but no active action plans. | Application transitions to `approved`; no plans active. |
 | `active` | At least one action plan is active. | Action plan activate/create or manual status update. |
 | `dormant` | Plans exist but all are closed/archived. | All plans closed/archived while case not yet ready to close. |
@@ -84,7 +87,7 @@ Stored in `iset_case.status`. Canonical set defined in `CASE_STATUS_DERIVED_VALU
 | `closed` | Casework complete and formally closed. | Manual close action or automation. |
 | `archived` | Historical record retained, no further activity. | Administrative archive. |
 
-> **Note:** Stage/sub-stage columns are deprecated. All consumers must rely on the derived case status above.
+> **Note:** `pending_approval` and `rejected` are no longer valid target case lifecycle values in DEV. Legacy rows with those values are normalized to canonical lifecycle on read and progressively removed from write paths.
 
 ### 2.4 Action Plan Statuses
 Persisted in `iset_case_action_plan.status`:
@@ -110,6 +113,11 @@ Persisted in `iset_case_intervention.status`. Common values:
 
 The intervention status set is now canonical and single-source. `approved` is the pre-start approved state; `planned`, `on_hold`, and `ready_to_close` are not valid intervention statuses.
 
+**DEV migration note:**
+- Proposal-review state is now also dual-written into `iset_intervention_proposal.review_status`.
+- Live delivery state is now carried separately in `iset_case_intervention.delivery_status`.
+- During cutover, queues and workspaces should prefer derived `review_status` / `delivery_status` over raw legacy `status`.
+
 **Outcome handling:**
 - ESDC outcome codes now derive from status. Open delivery states (`approved`, `in_progress`, `suspended`) always persist outcome code `02 – In progress`.
 - The close workflow (available only when editing an open intervention) gathers the final status (`completed` or `cancelled`) and unlocks the ESDC outcome selector for the terminal code that should be persisted.
@@ -120,24 +128,24 @@ The intervention status set is now canonical and single-source. `approved` is th
 ## 3. Transition Rules
 
 ### 3.1 Application → Case Interactions
-1. **Submission** (`submitted`): auto-created `iset_case` row defaults to `pending_approval`.
-2. **Assessment Submitted** (`pending_approval`): triggered in `CoordinatorAssessmentWidget.handleSubmit`, which sends `status: 'pending_approval'` via `PUT /api/cases/:id`. Backend persists the new application status and recalculates action plan-derived case status (which typically remains `pending_approval` until approval).
-3. **Outcome Decision** (`approved` / `rejected`): `handleComplete` records the decision immediately on the application. Approvals now move the application to `approved`; denials now move it to `rejected`; `Request Changes` returns the application to `in_review`. The approved path still continues through approval correspondence and any required funding-form/signature follow-up before the application moves to `completed`. When the outcome is **approved** the case moves to `initiated`; when the outcome is **rejected** the case moves to `rejected`. Legacy `decision_ready` rows are still supported as a compatibility state while correspondence is completed.
-4. **Manual Overrides**: The Application Overview widget can POST/PUT `status` changes via `PUT /api/cases/:id`. The manual status selector is currently exposed to `System Administrator` and `NWAC Administrator` users. Locks ensure only one user manipulates state at a time.
+1. **Submission** (`submitted`): application receipt resolves or creates the client and case; the case lifecycle starts at `intake`.
+2. **Assessment Submitted** (`pending_approval` on the application): `CoordinatorAssessmentWidget.handleSubmit` now keeps case lifecycle at `intake` while moving the application into the pending-decision stage.
+3. **Outcome Decision** (`approved` / `rejected` / returned for changes): `handleComplete` records the decision immediately on the application. Approvals move the application to `approved` and the case to `initiated`; denials move the application to `rejected` and the case to `closed`; `Request Changes` returns the application to `in_review` and the case to `intake`.
+4. **Manual Overrides**: The Application Overview widget can still POST/PUT changes via `PUT /api/cases/:id`, but DEV now writes canonical case lifecycle plus additive application lifecycle/decision fields rather than relying on one overloaded case status value.
 5. **Secure Messaging with forms**: Sending a secure message with attached forms from the Application Workspace while status is `submitted` or `in_review` sets `docs_requested_active` and updates the application status to `docs_requested` so the applicant action is still visible.
 6. **Manual doc-request toggle**: The Application Overview widget can set/clear `docs_requested_active` without changing application status, and the secure-message flow auto-clears document requests once all signing requests are complete.
 
 ### 3.2 Case Status Derivation
 Implemented in `recomputeCaseStatus(caseId)` (see `isetadminserver.js`):
 - Loads action plan summary: counts active, closed, archived plans.
-- Evaluates application status to detect pre-approval scenarios.
+- Evaluates application lifecycle/decision state to detect pre-service and post-decision scenarios.
 - Applies ordered rules (pseudo):
-  1. If application status is not approved and there is no active plan ⇒ `pending_approval`.
+  1. If there is no active plan and the case has not yet entered delivery lifecycle ⇒ `intake`.
   2. If application approved and zero plans ⇒ `initiated`.
   3. If any plan `active` ⇒ `active`.
   4. If no active plans but at least one closed ⇒ `dormant` (or `ready_to_close` when closure criteria satisfied).
   5. If case flagged for closure ⇒ `ready_to_close` / `closed` / `archived` as per manual actions.
-- Writes the derived value back to `iset_case.status` and returns it to callers.
+- Writes the derived value back to `iset_case.lifecycle_status`, mirrors compatibility `iset_case.status`, and returns it to callers.
 - Invoked after plan create/update/close/archive endpoints and wherever application status changes (`/api/cases/:id` PUT, assignment flows, etc.).
 
 ### 3.3 Action Plan & Intervention Implications
@@ -156,7 +164,7 @@ Implemented in `recomputeCaseStatus(caseId)` (see `isetadminserver.js`):
   - Case assignment and status update endpoints.
   - Application approval workflows (assessment submission & outcome completion).
 - **API Surface**:
-  - `/api/cases/:id` now returns both `status` (case) and `application_status` (application). This query must always project `a.status AS application_status`; earlier omissions caused null application statuses downstream.
+  - `/api/cases/:id` now returns both case lifecycle and application workflow fields. In DEV that includes compatibility `status`, canonical `lifecycle_status`, legacy `application_status`, and additive application fields such as `application_lifecycle_status` and `decision_outcome`.
   - `/api/cases/:id` returns `docs_requested_*` fields and accepts `docsRequested` + `docsRequestedSource` updates; these emit `document_request_set`/`document_request_cleared` events.
   - `/api/cases` summary list also surfaces both values for dashboards.
   - `/api/cases/:id/workspace` continues to provide the full workspace payload; ensure any new fields added here stay in sync with the case summary query.
@@ -172,7 +180,7 @@ Implemented in `recomputeCaseStatus(caseId)` (see `isetadminserver.js`):
   - Uses `getApplicationStatusContext` and `getCaseStatusContext` to decide which panels to show.
   - Calls `actions.refreshCaseData()` after successful submit or outcome decision, ensuring the Application Overview widget reflects the new status without page reloads.
 - **Badges & Tables**: Portfolio and workspace headers display derived case status badges; they no longer present stage/sub-stage chips.
-- **Portfolio filtering**: The ISET Case Portfolio widget defaults to `initiated`, `active`, `dormant`, `ready_to_close`, `closed`, and `archived` statuses so newly submitted (`pending_approval`) cases remain on the assessor dashboard rather than the portfolio view.
+- **Portfolio filtering**: The ISET Case Portfolio widget defaults to `initiated`, `active`, `dormant`, `ready_to_close`, `closed`, and `archived` statuses so newly submitted/intake cases remain on the assessor dashboard rather than the portfolio view.
 
 ### 4.3 Data Synchronisation Lessons
 During the November 2025 testing cycle the NWAC widget kept showing the outcome notice prematurely because `/api/cases/:id` omitted `application_status`. We spent hours debugging front-end caching (`__ISET_CASE_CACHE`) before identifying the missing SQL column. Always validate API projections first when a widget reports stale data—especially when new fields were recently introduced.
@@ -182,10 +190,11 @@ During the November 2025 testing cycle the NWAC widget kept showing the outcome 
 ## 5. Operational Notes
 - **Caching**: When debugging status flows, clear `window.__ISET_CASE_CACHE` to force a refetch. Long-lived caches can retain stale data if the API response is incomplete.
 - **Testing**: End-to-end tests should walk an application through:
-  1. Submission (`submitted` → case `pending_approval`).
-  2. Assessment submission (`pending_approval`).
+  1. Submission (`submitted` → case `intake`).
+  2. Assessment submission (`pending_approval` on the application while case remains `intake`).
   3. Outcome approval (`approved`, case transitions to `initiated`/`active` depending on plans).
-  4. Action plan activation and closure to exercise `active` → `dormant` transitions.
+  4. Outcome denial (`rejected`, case transitions to `closed`).
+  5. Action plan activation and closure to exercise `active` → `dormant` transitions.
 - **Backfill/Migration**: The original migration used action plan summaries to backfill existing cases; rerun or adapt this logic if importing historical datasets.
 
 ---

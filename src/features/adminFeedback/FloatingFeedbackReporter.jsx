@@ -426,6 +426,7 @@ export default function FloatingFeedbackReporter({
                         value={summary}
                         maxLength={MAX_SUMMARY_CHARS}
                         placeholder={reportType === 'change_request' ? 'e.g., Add export filter by region' : 'e.g., Case notes save button stalls'}
+                        spellcheck={true}
                         onChange={({ detail }) => {
                           setSummary(detail.value);
                           if (submitError) {
@@ -449,6 +450,7 @@ export default function FloatingFeedbackReporter({
                         placeholder={reportType === 'change_request'
                           ? 'Describe the workflow gap, desired behavior, and who is affected.'
                           : 'Describe the steps to reproduce, visible error, and incorrect behavior.'}
+                        spellcheck={true}
                         onChange={({ detail }) => {
                           setDescription(detail.value);
                           if (submitError) {

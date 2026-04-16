@@ -18,6 +18,7 @@ import {
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "../../widgets/common";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
+import { resolveInterventionStateFields } from "../../../../utils/interventionStatus.js";
 import NewActionPlanModal from "../modals/NewActionPlanModal.jsx";
 import CloseActionPlanModal from "../modals/CloseActionPlanModal.jsx";
 import ConfirmActionPlanModal from "../modals/ConfirmActionPlanModal.jsx";
@@ -68,6 +69,19 @@ const getPlanActions = status => {
       break;
   }
   return actions;
+};
+
+const resolvePlanBlockingInterventionStatus = item => {
+  const state = resolveInterventionStateFields(item, { fallbackStatus: null });
+  const reviewStatus = state.reviewStatus || state.effectiveStatus || null;
+  const deliveryStatus = state.deliveryStatus || (state.reviewStatus === "approved" ? "planned" : null);
+  if (deliveryStatus && ["planned", "in_progress", "suspended"].includes(deliveryStatus)) {
+    return deliveryStatus;
+  }
+  if (reviewStatus && ["draft", "submitted", "in_review", "changes_requested"].includes(reviewStatus)) {
+    return reviewStatus;
+  }
+  return null;
 };
 
 const PREFERENCES_STORAGE_KEY = "caseworking-action-plans-preferences-v1";
@@ -430,10 +444,12 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
       } else if (actionId === "activate") {
         setPendingConfirm({ type: "activate", plan });
       } else if (actionId === "close") {
-        const openInterventions = (plan.interventions || []).filter(item => {
-          const status = (item?.status || "").toLowerCase();
-          return status !== "completed" && status !== "cancelled" && status !== "submitted";
-        });
+        const openInterventions = (plan.interventions || [])
+          .map(item => {
+            const blockingStatus = resolvePlanBlockingInterventionStatus(item);
+            return blockingStatus ? { ...item, status: blockingStatus } : null;
+          })
+          .filter(Boolean);
         if (openInterventions.length > 0) {
           const message = buildOpenInterventionMessage(openInterventions, plan.id);
           setCloseModalPlan(null);

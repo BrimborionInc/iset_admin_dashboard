@@ -28,6 +28,7 @@ import {
   isInterventionDeletableStatus,
   isInterventionProposalStatus,
   normalizeInterventionStatus,
+  resolveInterventionStateFields,
 } from "../../../../utils/interventionStatus.js";
 
 const formatCurrency = value => {
@@ -83,20 +84,24 @@ const getEiStatusValue = item => {
 };
 
 const getStatusDisplayLabel = item => {
-  const value = normalizeInterventionStatus(item?.status, null);
-  if (value === "submitted") {
+  const state = resolveInterventionStateFields(item);
+  if (state.reviewStatus === "submitted" && !state.deliveryStatus) {
     const hasEiStatus = Boolean(getEiStatusValue(item));
     return `Submitted - EI ${hasEiStatus ? "verified" : "unverified"}`;
   }
-  return formatInterventionStatusLabel(item?.status);
+  return formatInterventionStatusLabel(item);
 };
-const isDraftStatus = status => normalizeInterventionStatus(status) === "draft";
+const getComparableStatus = item => {
+  const state = resolveInterventionStateFields(item);
+  return state.effectiveStatus || normalizeInterventionStatus(item?.status ?? item, null);
+};
+const isDraftStatus = status => resolveInterventionStateFields(status).reviewStatus === "draft";
 const isBlockingProposalStatus = status => isInterventionProposalStatus(status);
 const isRevisionEligibleStatus = status =>
-  ["approved", "in_progress", "suspended"].includes(normalizeInterventionStatus(status, null));
+  ["approved", "in_progress", "suspended"].includes(getComparableStatus(status));
 
 const statusIndicatorType = status => {
-  const value = (status || "").toLowerCase();
+  const value = getComparableStatus(status);
   if (value === "completed") return "success";
   if (value === "cancelled") return "stopped";
   if (value === "suspended") return "warning";
@@ -130,7 +135,7 @@ const getActualCost = item => toNumberOrNull(item.actualAmount);
 const getDisplayCost = item => {
   const actual = getActualCost(item);
   const planned = getPlannedCost(item);
-  const closed = isInterventionClosedStatus(item.status);
+  const closed = isInterventionClosedStatus(item);
   if (closed && actual !== null) {
     return { value: actual, label: "actual" };
   }
@@ -376,7 +381,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const hasOpenProposal = useMemo(() => {
     const plans = caseData?.actionPlans || [];
     return plans.some(plan =>
-      (plan.interventions || []).some(intervention => isInterventionProposalStatus(intervention?.status))
+      (plan.interventions || []).some(intervention => isInterventionProposalStatus(intervention))
     );
   }, [caseData]);
   const openRevisionDraftsBySourceId = useMemo(() => {
@@ -384,7 +389,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     const map = new Map();
     plans.forEach(plan => {
       (plan.interventions || []).forEach(intervention => {
-        if (!isInterventionProposalStatus(intervention?.status)) return;
+        if (!isInterventionProposalStatus(intervention)) return;
         const revisionMetadata = parseMetadata(intervention?.metadata)?.revision;
         const sourceInterventionId = revisionMetadata?.sourceInterventionId;
         if (!sourceInterventionId) return;
@@ -612,9 +617,9 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       return interventions;
     }
     return interventions.filter(item => {
-      const value = normalizeInterventionStatus(item?.status, null);
+      const value = getComparableStatus(item);
       if (statusFilter === "closed") {
-        return isInterventionClosedStatus(value);
+        return isInterventionClosedStatus(item);
       }
       return value === statusFilter;
     });
@@ -665,7 +670,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const planStatus = (activePlan?.status || "").toLowerCase();
   const canModify = !!activePlan && ["draft", "active"].includes(planStatus);
   const canCloseSelected =
-    canModify && !!selectedIntervention && isInterventionClosableStatus(selectedIntervention?.status);
+    canModify && !!selectedIntervention && isInterventionClosableStatus(selectedIntervention);
 
   const dispatchWizardSelection = useCallback(
     intervention => {
@@ -716,7 +721,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       }
       const items = [{ id: "view", text: "View intervention" }];
       if (canModify) {
-        const normalized = normalizeInterventionStatus(status, null);
+        const normalized = getComparableStatus(intervention);
         const matchingRevisionDraft = intervention?.id
           ? openRevisionDraftsBySourceId.get(String(intervention.id))
           : null;
@@ -726,13 +731,13 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             text: matchingRevisionDraft ? "Resume revision draft" : "Revise approved intervention",
           });
         }
-        if (isInterventionActivatableStatus(normalized)) {
+        if (isInterventionActivatableStatus(intervention)) {
           items.push({ id: "activate", text: "Activate intervention" });
         }
-        if (isInterventionClosableStatus(normalized)) {
+        if (isInterventionClosableStatus(intervention)) {
           items.push({ id: "close", text: "Close intervention" });
         }
-        if (isInterventionDeletableStatus(normalized)) {
+        if (isInterventionDeletableStatus(intervention)) {
           items.push({ id: "delete", text: "Delete intervention" });
         }
       }
@@ -773,7 +778,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       }
       setSuccessMessage(null);
       setErrorMessage(null);
-      if (isInterventionProposalStatus(target.status)) {
+      if (isInterventionProposalStatus(target)) {
         openInterventionInWizard(target);
         return;
       }
@@ -807,7 +812,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         setErrorMessage("Select an intervention to close.");
         return;
       }
-      if (!canModify || !isInterventionClosableStatus(target.status)) {
+      if (!canModify || !isInterventionClosableStatus(target)) {
         setErrorMessage(
           "Interventions that are already completed or cancelled cannot be closed again."
         );
@@ -910,8 +915,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       setErrorMessage("Select an intervention to activate.");
       return;
     }
-    const normalized = normalizeInterventionStatus(target.status, null);
-    if (!isInterventionActivatableStatus(normalized)) {
+    if (!isInterventionActivatableStatus(target)) {
       setErrorMessage("Only approved interventions can be activated.");
       return;
     }
@@ -1039,7 +1043,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         id: "status",
         header: "Status",
         cell: item => (
-          <StatusIndicator type={statusIndicatorType(item.status)}>
+          <StatusIndicator type={statusIndicatorType(item)}>
             {getStatusDisplayLabel(item)}
           </StatusIndicator>
         ),
@@ -1347,7 +1351,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
               const item = detail.selectedItems?.[0];
               setSelectedInterventionId(item?.id ?? null);
               if (item) {
-                const isProposal = isInterventionProposalStatus(item.status);
+                const isProposal = isInterventionProposalStatus(item);
                 if (isProposal) {
                   openInterventionInWizard(item);
                 }

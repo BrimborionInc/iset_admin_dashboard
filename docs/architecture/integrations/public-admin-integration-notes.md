@@ -1,5 +1,5 @@
 # Public <> Admin Portal Integration Notes
-Last updated: 2025-09-27
+Last updated: 2026-04-16
 
 ## Delivery Status
 - Phase 1 "Clean foundation" complete: Vite + React app, Fastify mock API, shared packages, CI, accessibility baseline, thin ports/adapters seam.
@@ -32,7 +32,7 @@ pm run web\ with the new .env.development.local files now exercises real hosted 
 ## Intake Submission Lifecycle
 - Canonical intake path is schema-driven via the published runtime-config payload; Jordan/static experiments stay quarantined in packages/legacy.
 - /api/intake/draft now persists to iset_application_draft_dynamic, merging step payloads, history, and workflow version while logging application_saved_draft events.
-- /api/intake/submit inserts into iset_application_submission, snapshots schema metadata, auto-creates iset_application / iset_case, deletes the draft row, and records application_submitted in iset_case_event.
+- /api/intake/submit inserts into iset_application_submission, snapshots schema metadata, resolves or creates `client`, auto-creates `iset_application`, creates or updates the application-backed `iset_case`, deletes the draft row, and records `application_submitted` in `iset_case_event`.
 - Responses surface reference numbers and timestamps; frontend clears local state and redirects to the dashboard without caching applicant data beyond the visible DOM.
 
 ## Messaging and Events

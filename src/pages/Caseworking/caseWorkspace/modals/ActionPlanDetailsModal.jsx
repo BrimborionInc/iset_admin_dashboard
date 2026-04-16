@@ -1103,6 +1103,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
                   setForm(curr => ({ ...curr, summary: detail.value }));
                 }}
                 placeholder="High-level objective for this plan"
+                spellcheck={true}
               />
             </FormField>
           </ColumnLayout>
@@ -1374,6 +1375,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
                       disabled={!isFormReadOnly && !form.prevEmploymentNocVersion}
                       readOnly={isFormReadOnly}
                       invalid={Boolean(fieldErrors.prevEmploymentNoc)}
+                      spellcheck={false}
                     />
                   </FormField>
                 </>
@@ -1493,6 +1495,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
                         expandToViewport
                         disabled={!isCloseoutReadOnly && !form.resultNocVersion}
                         readOnly={isCloseoutReadOnly}
+                        spellcheck={false}
                       />
                     </FormField>
                   </>
@@ -1509,6 +1512,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
                     }}
                     placeholder="Summarize the plan outcome"
                     readOnly={isCloseoutReadOnly}
+                    spellcheck={true}
                   />
                 </FormField>
                 <FormField label="Closure notes (optional)">
@@ -1521,6 +1525,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
                     }}
                     placeholder="Internal notes"
                     readOnly={isCloseoutReadOnly}
+                    spellcheck={true}
                   />
                 </FormField>
               </ColumnLayout>

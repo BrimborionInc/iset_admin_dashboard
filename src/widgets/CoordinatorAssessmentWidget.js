@@ -11,6 +11,12 @@ import { findOptionByValue } from '../pages/finance/widgets/paymentOptions';
 import { getCurrencyInputDisplayValue } from '../utils/currencyFormat';
 import { buildApplicantFacingReasonSentence, normalizeTemplateSentence } from '../utils/decisionLetterText';
 import { closePendingDocumentWindow, navigateDocumentWindow, openPendingDocumentWindow } from '../utils/documentOpen';
+import {
+  APPLICATION_FINAL_STATUSES,
+  APPLICATION_LOCKED_STATUSES,
+  POST_DECISION_APPLICATION_STATUSES,
+  deriveApplicationDecisionOutcome,
+} from '../utils/applicationStatus';
 
 const BARRIERS = [
   'None', 'Education', 'Lack of Marketable Skills', 'Lack of Work Experience', 'Remoteness', 'Lack of Transportation', 'Economic', 'Language', 'Lack of Labour Force Attachment', 'Dependent Care', 'Physical, Emotional, or Mental Health', 'Other'
@@ -213,16 +219,25 @@ const requiresNocForCode = (value) => {
   return Number.isFinite(numeric) && NOC_REQUIRED_CODES.has(numeric);
 };
 
-const DECISION_READY_STATUS = 'decision_ready';
-const APPLICATION_FINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived']);
-const APPLICATION_LOCKED_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived', DECISION_READY_STATUS]);
-const POST_DECISION_APPLICATION_STATUSES = new Set([DECISION_READY_STATUS, 'approved', 'completed', 'rejected']);
 const OVERVIEW_WORD_LIMIT = 400;
 const EMPLOYMENT_GOALS_WORD_LIMIT = 400;
 const APPROVAL_COST_THRESHOLD = 15000;
 const PROGRAM_ADMIN_APPROVAL_THRESHOLD = 25000;
 const PROGRAM_ADMIN_APPROVER_EMAIL = 'sstacey@nwac.ca';
 const PROGRAM_ADMIN_ROLE_KEYS = new Set(['nwacadministrator']);
+const LEGACY_APPLICATION_FALLBACK_STATUSES = new Set([
+  'submitted',
+  'in_review',
+  'docs_requested',
+  'closure_notice',
+  'pending_approval',
+  'decision_ready',
+  'approved',
+  'completed',
+  'rejected',
+  'closed',
+  'archived',
+]);
 const ELIGIBILITY_ALLOWED_MIME_TYPES = [
   'application/pdf',
   'application/msword',
@@ -2336,23 +2351,43 @@ const CoordinatorAssessmentWidget = forwardRef(
   }, []);
 
   const rawApplicationStatus = caseData?.applicationStatus ?? caseData?.application_status ?? null;
-  const rawApplicationStatusNormalized = typeof rawApplicationStatus === 'string'
-    ? rawApplicationStatus.trim().toLowerCase()
-    : null;
   const rawCaseStatusSnapshot = caseData?.status ?? '';
   const canonicalCaseStatusSnapshot = getCaseStatusContext(rawCaseStatusSnapshot).canonicalStatus;
   const applicationStatusContext = getApplicationStatusContext(rawApplicationStatus);
-  const canonicalApplicationStatus = applicationStatusContext.canonicalStatus || canonicalCaseStatusSnapshot;
-  const isPendingApprovalStatus = rawApplicationStatusNormalized === 'pending_approval';
-  const normalizedApplicationStatus = canonicalApplicationStatus || rawApplicationStatusNormalized || '';
+  const legacyApplicationFallbackContext = getApplicationStatusContext(rawCaseStatusSnapshot);
+  const caseDerivedApplicationStatus = LEGACY_APPLICATION_FALLBACK_STATUSES.has(
+    legacyApplicationFallbackContext.canonicalStatus
+  )
+    ? legacyApplicationFallbackContext.canonicalStatus
+    : '';
+  const canonicalApplicationStatus = applicationStatusContext.canonicalStatus || caseDerivedApplicationStatus;
+  const isPendingApprovalStatus = applicationStatusContext.isPendingApprovalStatus;
+  const normalizedApplicationStatus = canonicalApplicationStatus || '';
   const isPostDecisionStatus = POST_DECISION_APPLICATION_STATUSES.has(normalizedApplicationStatus);
   const isCompletedStatus = normalizedApplicationStatus === 'completed';
+  const persistedDecisionOutcome = useMemo(
+    () => deriveApplicationDecisionOutcome({
+      applicationStatus: canonicalApplicationStatus || rawApplicationStatus,
+      caseStatus: rawCaseStatusSnapshot,
+      decisionOutcome: caseData?.decision_outcome ?? caseData?.decisionOutcome ?? null,
+      reviewStatus: caseData?.assessment_nwac_review_status ?? caseData?.assessment_nwac_review ?? null,
+    }),
+    [
+      canonicalApplicationStatus,
+      rawApplicationStatus,
+      rawCaseStatusSnapshot,
+      caseData?.decision_outcome,
+      caseData?.decisionOutcome,
+      caseData?.assessment_nwac_review_status,
+      caseData?.assessment_nwac_review,
+    ]
+  );
   const decisionOutcome = useMemo(() => {
     const decision = assessment.nwacReviewStatus;
     if (decision === 'approve') return 'approved';
     if (decision === 'reject') return 'denied';
-    return null;
-  }, [assessment.nwacReviewStatus]);
+    return persistedDecisionOutcome;
+  }, [assessment.nwacReviewStatus, persistedDecisionOutcome]);
   const activeLetterKey = decisionOutcome === 'approved' ? 'approval' : decisionOutcome === 'denied' ? 'denial' : null;
   const applicantUserId = caseData?.applicant_user_id ?? caseData?.applicantUserId ?? null;
   const applicationId = caseData?.application_id ?? caseData?.applicationId ?? application_id ?? null;
@@ -3835,21 +3870,13 @@ const CoordinatorAssessmentWidget = forwardRef(
       if (reviewRaw === 'agree' || reviewRaw === 'approve' || reviewRaw === 'approved') return 'approve';
       if (reviewRaw === 'disagree' || reviewRaw === 'reject' || reviewRaw === 'denied') return 'reject';
 
-      const statusNorm = typeof rawApplicationStatusNormalized === 'string'
-        ? rawApplicationStatusNormalized.trim().toLowerCase()
-        : (typeof canonicalApplicationStatus === 'string' ? canonicalApplicationStatus.trim().toLowerCase() : '');
-      const caseStatusNorm = typeof caseData?.status === 'string'
-        ? caseData.status.trim().toLowerCase()
-        : '';
-      const approvedCaseStatuses = new Set(['initiated', 'active', 'dormant', 'ready_to_close', 'closed', 'archived', 'approved']);
-      const deniedCaseStatuses = new Set(['in_review', 'pending_approval', 'pending', 'open', 'submitted', 'rejected']);
-
-      if (statusNorm === 'approved' || statusNorm === 'completed') return 'approve';
-      if (statusNorm === 'rejected') return 'reject';
-      if (statusNorm === DECISION_READY_STATUS) {
-        if (approvedCaseStatuses.has(caseStatusNorm)) return 'approve';
-        if (deniedCaseStatuses.has(caseStatusNorm)) return 'reject';
-      }
+      const persistedOutcome = deriveApplicationDecisionOutcome({
+        applicationStatus: canonicalApplicationStatus || rawApplicationStatus,
+        caseStatus: caseData?.status ?? null,
+        decisionOutcome: caseData?.decision_outcome ?? caseData?.decisionOutcome ?? null,
+      });
+      if (persistedOutcome === 'approved') return 'approve';
+      if (persistedOutcome === 'denied') return 'reject';
       return '';
     })();
 
@@ -4096,7 +4123,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     setLocalAssessmentSubmitted(pendingApproval || isDecisionFinal || isPostDecisionStatus);
   }, [isDecisionFinal, isPendingApprovalStatus, isPostDecisionStatus]);
 
-  // UI logic: once status reaches pending approval or a final decision, lock assessment fields and surface NWAC review
+  // UI logic: once status reaches pending decision or a final decision, lock assessment fields and surface NWAC review
   const isAssessmentSubmitted = isPendingApprovalStatus;
   const isReviewComplete = APPLICATION_FINAL_STATUSES.has(normalizedApplicationStatus);
   const shouldUnlockWizardNavigation = !isEditingAssessment && (isPendingApprovalStatus || isPostDecisionStatus || isReviewComplete);
@@ -6276,7 +6303,7 @@ const CoordinatorAssessmentWidget = forwardRef(
           assessment_date_of_assessment: dateOfAssessment,
         };
         if (!APPLICATION_FINAL_STATUSES.has(canonicalApplicationStatus)) {
-          payload.status = 'pending_approval';
+          payload.status = 'intake';
           payload.applicationStatus = 'pending_approval';
           nextApplicationStatus = 'pending_approval';
         }
@@ -6362,7 +6389,7 @@ const CoordinatorAssessmentWidget = forwardRef(
           scrollAfterAction();
           setAlert({
             type: 'success',
-            content: 'Assessment submitted successfully. Application status moved to Pending Approval. Assessments must be approved by an authorised NWAC representative. Your assessment has been flagged for their attention.',
+            content: 'Assessment submitted successfully. Application status moved to Pending Decision. Assessments must be approved by an authorised NWAC representative. Your assessment has been flagged for their attention.',
             dismissible: true,
             statusIconAriaLabel: 'Success'
           });
@@ -7642,7 +7669,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     const decision = assessment.nwacReviewStatus;
     const isOutcomeApproved = decision === 'approve';
     const isOutcomePushBack = decision === 'push_back';
-    const nextCaseStatus = isOutcomeApproved ? 'initiated' : (isOutcomePushBack ? 'pending_approval' : 'rejected');
+    const nextCaseStatus = isOutcomeApproved ? 'initiated' : (isOutcomePushBack ? 'intake' : 'closed');
     const nextApplicationStatus = isOutcomePushBack ? 'in_review' : (isOutcomeApproved ? 'approved' : 'rejected');
     if (isOutcomeApproved && decisionHasCost && !assessment.interventionPotId) {
       errors.interventionPotId = 'Select a budget pot for the intervention cost.';
@@ -8136,6 +8163,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
               <Textarea
                 value={assessment.justification}
                 onChange={({ detail }) => handleField('justification', detail.value)}
+                spellcheck={true}
                 data-error-focus={showReviewErrors && fieldErrors.justification ? 'true' : undefined}
                 tabIndex={-1}
                 readOnly={readOnly}
@@ -8438,6 +8466,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
               placeholder={initialAssessment.overview}
               value={assessment.overview}
               onChange={({ detail }) => handleField('overview', detail.value)}
+              spellcheck={true}
               data-error-focus={showRationaleErrors && fieldErrors.overview ? 'true' : undefined}
               tabIndex={-1}
               readOnly={isAssessmentDisabled}
@@ -8458,6 +8487,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
               placeholder={initialAssessment.employmentGoals}
               value={assessment.employmentGoals}
               onChange={({ detail }) => handleField('employmentGoals', detail.value)}
+              spellcheck={true}
               data-error-focus={showRationaleErrors && fieldErrors.employmentGoals ? 'true' : undefined}
               tabIndex={-1}
               readOnly={isAssessmentDisabled}
@@ -8513,6 +8543,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                     <Input
                       value={intervention.institution}
                       onChange={({ detail }) => updateIntervention(intervention.id, { institution: detail.value })}
+                      spellcheck={false}
                       placeholder="Training institution, employer, or provider"
                       data-error-focus={showTypeErrors && interventionFieldErrors[intervention.id]?.institution ? 'true' : undefined}
                       readOnly={isAssessmentDisabled}
@@ -8535,6 +8566,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                     <Input
                       value={intervention.institution}
                       onChange={({ detail }) => updateIntervention(intervention.id, { institution: detail.value })}
+                      spellcheck={false}
                       data-error-focus={showTypeErrors && interventionFieldErrors[intervention.id]?.institution ? 'true' : undefined}
                       readOnly={isAssessmentDisabled}
                     />
@@ -8546,6 +8578,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                     <Input
                       value={intervention.programName}
                       onChange={({ detail }) => updateIntervention(intervention.id, { programName: detail.value })}
+                      spellcheck={false}
                       readOnly={isAssessmentDisabled}
                     />
                   </FormField>
@@ -8559,6 +8592,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                     value={intervention.itpDetails || ''}
                     rows={3}
                     onChange={({ detail }) => updateIntervention(intervention.id, { itpDetails: detail.value })}
+                    spellcheck={true}
                     placeholder="Summarize training plan, key milestones, supports, or materials."
                     data-error-focus={showTypeErrors && interventionFieldErrors[intervention.id]?.itpDetails ? 'true' : undefined}
                     readOnly={isAssessmentDisabled}
@@ -8578,6 +8612,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                     <Input
                       value={intervention.institution}
                       onChange={({ detail }) => updateIntervention(intervention.id, { institution: detail.value })}
+                      spellcheck={false}
                       data-error-focus={showTypeErrors && interventionFieldErrors[intervention.id]?.institution ? 'true' : undefined}
                       readOnly={isAssessmentDisabled}
                     />
@@ -8589,6 +8624,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                     <Input
                       value={intervention.programName}
                       onChange={({ detail }) => updateIntervention(intervention.id, { programName: detail.value })}
+                      spellcheck={false}
                       readOnly={isAssessmentDisabled}
                     />
                   </FormField>
@@ -8602,6 +8638,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                       value={intervention.wageSubsidyDetails || ''}
                       rows={3}
                       onChange={({ detail }) => updateIntervention(intervention.id, { wageSubsidyDetails: detail.value })}
+                      spellcheck={true}
                       placeholder="Employer, wage subsidy amount/percentage, duration, expectations."
                       data-error-focus={showTypeErrors && interventionFieldErrors[intervention.id]?.wageSubsidyDetails ? 'true' : undefined}
                       readOnly={isAssessmentDisabled}
@@ -8671,6 +8708,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                     readOnly={isAssessmentDisabled}
                     disabled={!intervention.interventionNocVersion}
                     enteredTextLabel={value => `Use "${value}"`}
+                    spellcheck={false}
                     data-error-focus={showTypeErrors && interventionFieldErrors[intervention.id]?.interventionNoc ? 'true' : undefined}
                   />
                 </FormField>
@@ -8705,6 +8743,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
             <Textarea
               value={assessment.childcareFunding || ''}
               onChange={({ detail }) => handleField('childcareFunding', detail.value)}
+              spellcheck={true}
               readOnly={isAssessmentDisabled}
               disabled={assessment.childcareNeed !== 'yes'}
             />
@@ -8841,6 +8880,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
             <Textarea
               value={assessment.previousISETDetails || ''}
               onChange={({ detail }) => handleField('previousISETDetails', detail.value)}
+              spellcheck={false}
               data-error-focus={showPreviousIsetErrors && fieldErrors.previousISETDetails ? 'true' : undefined}
               tabIndex={-1}
               readOnly={isAssessmentDisabled}
@@ -8884,6 +8924,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
           <Input
             value={assessment.barriersOther || ''}
             onChange={({ detail }) => handleField('barriersOther', detail.value)}
+            spellcheck={true}
             placeholder="Describe the other barrier"
             readOnly={isAssessmentDisabled}
           />
@@ -9021,6 +9062,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                 value={assessment.otherFundingNwacCoverage || ''}
                 onChange={({ detail }) => handleField('otherFundingNwacCoverage', detail.value)}
                 rows={3}
+                spellcheck={true}
                 readOnly={isAssessmentDisabled}
               />
             </FormField>
@@ -9033,6 +9075,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
             value={assessment.otherFundingNotes || ''}
             onChange={({ detail }) => handleField('otherFundingNotes', detail.value)}
             rows={3}
+            spellcheck={true}
             readOnly={isAssessmentDisabled}
           />
         </FormField>
@@ -9109,6 +9152,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                           }}
                           onChange={({ detail }) => handleInlineAmountChange(intervention.id, item.id, detail.value)}
                           onBlur={() => handleInlineAmountBlur(intervention.id, item.id)}
+                          spellcheck={false}
                           placeholder="0.00"
                           readOnly={isAssessmentDisabled}
                           data-error-focus={showCostErrors && lineError.amount ? 'true' : undefined}
@@ -9347,6 +9391,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
               value={letter.body || ''}
               readOnly
               rows={14}
+              spellcheck={false}
             />
           </Box>
         ))}
@@ -9360,6 +9405,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
         value={letterBody}
         onChange={handleLetterBodyChange}
         rows={18}
+        spellcheck={true}
         disabled={isLetterEditingDisabled}
       />
     </SpaceBetween>
@@ -9462,6 +9508,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                 value={letterBody}
                 onChange={handleLetterBodyChange}
                 rows={18}
+                spellcheck={true}
                 disabled={isLetterEditingDisabled}
               />
             )}
@@ -9781,6 +9828,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                   return next;
                 });
               }}
+              spellcheck={false}
               readOnly={isAssessmentDisabled}
             />
           </FormField>
@@ -9814,6 +9862,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                   return next;
                 });
               }}
+              spellcheck={true}
               readOnly={isAssessmentDisabled}
             />
           </FormField>
@@ -10127,6 +10176,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
               onChange={({ detail }) => updateCostLineAmount(detail.value)}
               onFocus={() => setCostLineAmountFocused(true)}
               onBlur={blurCostLineAmount}
+              spellcheck={false}
               placeholder="0.00"
               readOnly={!isCostLineEditable || isAssessmentDisabled}
             />
@@ -10151,6 +10201,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                   }
                 })
               }
+              spellcheck={false}
               placeholder={costLinePayeeNamePlaceholder}
               readOnly={!isCostLineEditable || isAssessmentDisabled || lockParticipantPayeeName}
             />
@@ -10167,6 +10218,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                     }
                   })
                 }
+                spellcheck={false}
                 placeholder={costLineIsStudentLoanRepayment ? 'Enter loan account number' : 'Vendor/account reference'}
                 readOnly={!isCostLineEditable || isAssessmentDisabled}
               />
@@ -10208,6 +10260,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                     inputMode="numeric"
                     value={costLineDraft.recurrence?.occurrences || ''}
                     onChange={({ detail }) => updateCostLineOccurrences(detail.value)}
+                    spellcheck={false}
                     readOnly={!isCostLineEditable || isAssessmentDisabled}
                   />
                 </FormField>
@@ -10218,6 +10271,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                     onChange={({ detail }) => updateCostLineAmountPerPeriod(detail.value)}
                     onFocus={() => setCostLineAmountPerPeriodFocused(true)}
                     onBlur={blurCostLineAmountPerPeriod}
+                    spellcheck={false}
                     readOnly={!isCostLineEditable || isAssessmentDisabled}
                   />
                 </FormField>
@@ -10229,6 +10283,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
               value={costLineDraft.notes || ''}
               rows={3}
               onChange={({ detail }) => updateCostLineDraft({ notes: detail.value })}
+              spellcheck={true}
               readOnly={!isCostLineEditable || isAssessmentDisabled}
             />
           </FormField>
@@ -10364,6 +10419,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
               }}
               placeholder={assessment.nwacReason || ''}
               rows={4}
+              spellcheck={true}
             />
           </FormField>
         )}
@@ -10536,7 +10592,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                   <Textarea value={assessment.nwacReason} onChange={({ detail }) => {
                     if (isNWACFieldsDisabled) return;
                     handleField('nwacReason', detail.value);
-                  }} data-error-focus={showDecisionErrors && fieldErrors.nwacReason ? 'true' : undefined} readOnly={isNWACFieldsDisabled} />
+                  }} spellcheck={true} data-error-focus={showDecisionErrors && fieldErrors.nwacReason ? 'true' : undefined} readOnly={isNWACFieldsDisabled} />
                 </Hotspot>
               </Box>
             </FormField>
@@ -10823,6 +10879,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                     }}
                     placeholder="Include names, roles, timelines, and any context needed for triage."
                     rows={4}
+                    spellcheck={false}
                     disabled={lockedByAnotherUser || isSigningDeclaration}
                   />
                 </FormField>

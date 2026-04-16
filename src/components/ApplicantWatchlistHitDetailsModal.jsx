@@ -141,6 +141,7 @@ const ApplicantWatchlistHitDetailsModal = ({
               readOnly
               value={notesValue || 'No notes recorded.'}
               rows={6}
+              spellcheck={false}
             />
           </FormField>
         </SpaceBetween>
