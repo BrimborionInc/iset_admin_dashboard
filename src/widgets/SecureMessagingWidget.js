@@ -45,6 +45,15 @@ const normalizeStatus = status => {
     .replace(/\b\w/g, char => char.toUpperCase());
 };
 
+const STATUS_LABELS = {
+  unread: 'Unread',
+  read: 'Read',
+  sent: 'Sent',
+  replied: 'Replied',
+  read_by_applicant: 'Read by applicant',
+  applicant_replied: 'Applicant replied'
+};
+
 const isMessageDeleted = message => {
   if (!message) return false;
   if (message.deleted === 1 || message.deleted === true) return true;
@@ -58,9 +67,35 @@ const isMessageDeleted = message => {
   return false;
 };
 
+const isSentToApplicant = (message, applicantUserId) => {
+  const applicantId = Number(applicantUserId);
+  if (!message || !Number.isFinite(applicantId) || applicantId <= 0) return false;
+  return Number(message.recipient_id) === applicantId && Number(message.sender_id) !== applicantId;
+};
+
+const getMailboxStatusKey = message => normalizeStatusValue(message?.mailbox_status || message?.status);
+
+const getRecipientStatusKey = message => normalizeStatusValue(message?.recipient_status);
+
+const getDisplayStatusKey = (message, applicantUserId) => {
+  if (isSentToApplicant(message, applicantUserId)) {
+    const recipientStatus = getRecipientStatusKey(message);
+    if (recipientStatus === 'replied') return 'applicant_replied';
+    if (recipientStatus === 'read') return 'read_by_applicant';
+    return 'sent';
+  }
+  const mailboxStatus = getMailboxStatusKey(message);
+  return mailboxStatus === 'unread' ? 'unread' : 'read';
+};
+
+const formatStatusLabel = statusKey => {
+  const normalized = normalizeStatusValue(statusKey);
+  if (!normalized) return '--';
+  return STATUS_LABELS[normalized] || normalizeStatus(normalized);
+};
+
 const isUnread = message => {
-  if (!message || !message.status) return false;
-  return message.status.toString().toLowerCase() === 'unread';
+  return getMailboxStatusKey(message) === 'unread';
 };
 
 const resolveList = data => (Array.isArray(data) ? data : []);
@@ -532,7 +567,7 @@ const SecureMessagingWidget = ({
         const haystack = [
           msg.subject,
           msg.body,
-          msg.status,
+          formatStatusLabel(getDisplayStatusKey(msg, applicantUserId)),
           getSenderName(msg),
           getRecipientName(msg)
         ]
@@ -542,7 +577,7 @@ const SecureMessagingWidget = ({
         return haystack.includes(filteringTextLower);
       });
     },
-    [filteringTextLower, getSenderName, getRecipientName]
+    [filteringTextLower, getSenderName, getRecipientName, applicantUserId]
   );
 
   const openMessage = useCallback(
@@ -563,7 +598,11 @@ const SecureMessagingWidget = ({
           });
           if (response.ok) {
             setMessages(prev =>
-              prev.map(item => (item.id === message.id ? { ...item, status: 'read' } : item))
+              prev.map(item =>
+                item.id === message.id
+                  ? { ...item, status: 'read', mailbox_status: 'read' }
+                  : item
+              )
             );
           }
         } catch (err) {
@@ -626,10 +665,10 @@ const SecureMessagingWidget = ({
         header: 'Status',
         cell: item => (
           <span style={{ fontWeight: isUnread(item) ? 'bold' : 'normal' }}>
-            {normalizeStatus(item?.status)}
+            {formatStatusLabel(getDisplayStatusKey(item, applicantUserId))}
           </span>
         ),
-        minWidth: 120
+        minWidth: 180
       },
       {
         id: 'forms',
@@ -663,7 +702,7 @@ const SecureMessagingWidget = ({
         minWidth: 80
       }
     ],
-    [getSenderName, openMessage]
+    [getSenderName, openMessage, applicantUserId]
   );
 
   useEffect(() => {

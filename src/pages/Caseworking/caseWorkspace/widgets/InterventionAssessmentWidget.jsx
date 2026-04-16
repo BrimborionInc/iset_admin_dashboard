@@ -114,9 +114,9 @@ const ELIGIBILITY_ALLOWED_MIME_TYPES = [
 const ELIGIBILITY_MAX_BYTES = 6 * 1024 * 1024;
 
 const DECISION_OPTIONS = [
-  { value: "approved", label: "Approve" },
-  { value: "changes_requested", label: "Request changes" },
-  { value: "rejected", label: "Reject" },
+  { value: "approved", label: "Approved" },
+  { value: "changes_requested", label: "Request Changes" },
+  { value: "rejected", label: "Denied" },
 ];
 
 const BASE_STEP_IDS = [
@@ -130,8 +130,7 @@ const BASE_STEP_IDS = [
   "review",
 ];
 const SUBMITTED_STEP_IDS = ["decision"];
-const COMMUNICATION_STEP_ID = "communication";
-const ALL_STEP_IDS = [...BASE_STEP_IDS, ...SUBMITTED_STEP_IDS, COMMUNICATION_STEP_ID];
+const ALL_STEP_IDS = [...BASE_STEP_IDS, ...SUBMITTED_STEP_IDS];
 const STEP_LABELS = {
   plan: "Action plan",
   framing: "What is being proposed?",
@@ -1448,8 +1447,12 @@ const isRecurrenceScheduleComplete = line => {
   return true;
 };
 
-const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel }) => {
+const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel, workspaceEntry }) => {
   const currentUser = useCurrentUser();
+  const approvalWorkspaceEntry =
+    workspaceEntry?.mode === "approval" && workspaceEntry?.approvalType === "intervention"
+      ? workspaceEntry
+      : null;
   const {
     caseId: workspaceCaseId,
     caseData,
@@ -1528,6 +1531,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const [clientLetterBody, setClientLetterBody] = useState("");
   const [sendingLetter, setSendingLetter] = useState(false);
   const [sendingLetterError, setSendingLetterError] = useState(null);
+  const [decisionLetterSuccess, setDecisionLetterSuccess] = useState(null);
   const [showSendApprovalLetterConfirmModal, setShowSendApprovalLetterConfirmModal] = useState(false);
   const [eiVerificationFile, setEiVerificationFile] = useState(null);
   const [eiVerificationFileError, setEiVerificationFileError] = useState(null);
@@ -1547,6 +1551,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const initialFormRef = useRef(defaultFormState);
   const wizardStepRestoreKeyRef = useRef(null);
   const wizardStepRestoreStepsRef = useRef(null);
+  const approvalSelectionAppliedRef = useRef(null);
+  const pendingApprovalStepRef = useRef(null);
 
   const caseId = useMemo(
     () => workspaceCaseId ?? caseData?.id ?? caseData?.case_id ?? null,
@@ -1782,12 +1788,12 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     return `${caseId}:draft`;
   }, [caseId, selectedInterventionId]);
 
-  const hasBlockingSubmitted = useMemo(() => {
+  const hasBlockingReviewStage = useMemo(() => {
     const plans = caseData?.actionPlans || [];
     return plans.some(plan =>
       (plan.interventions || []).some(intervention => {
         const statusValue = normalizeInterventionStatus(intervention?.status, null);
-        return statusValue === "submitted";
+        return statusValue === "submitted" || statusValue === "in_review";
       })
     );
   }, [caseData]);
@@ -1802,11 +1808,13 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     );
   }, [caseData]);
 
-  const hasBlockingProposal = hasBlockingSubmitted || hasBlockingDraft;
+  const hasBlockingProposal = hasBlockingReviewStage || hasBlockingDraft;
 
   const statusValue = normalizeInterventionStatus(currentInterventionStatus, null);
   const isDraftStatus = statusValue === "draft";
   const isSubmittedStatus = statusValue === "submitted";
+  const isInReviewStatus = statusValue === "in_review";
+  const isReviewStageStatus = isSubmittedStatus || isInReviewStatus;
   const isChangesRequestedStatus = statusValue === "changes_requested";
   const isRevisionMode = Boolean(revisionContext?.sourceInterventionId);
   const revisionSourceInterventionId = revisionContext?.sourceInterventionId || null;
@@ -1816,7 +1824,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const decisionOutcomeKey = String(form.decisionOutcome || "").trim().toLowerCase();
   const isApprovedDecisionOutcome = decisionOutcomeKey === "approved";
   const isRejectedDecisionOutcome = decisionOutcomeKey === "rejected";
-  const showCommunicationStep = isSubmittedStatus && (isApprovedDecisionOutcome || isRejectedDecisionOutcome);
+  const showDecisionLettersPanel = Boolean(completionNote && (isApprovedDecisionOutcome || isRejectedDecisionOutcome));
   const role = currentUser?.role || null;
   const roleKey = normalizeRoleKey(role);
   const canonicalRole = role === "Regional Manager" ? "Regional Manager" : role;
@@ -1829,23 +1837,32 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     isDraftStatus ||
     isChangesRequestedStatus ||
     (isSubmittedStatus && canEditSubmittedProposal) ||
+    (isInReviewStatus && canDecideSubmittedProposal) ||
     (!statusValue && !hasBlockingProposal);
   const isFormLocked = !isEditable || isSubmitting;
   const isDecisionReadOnly = isFormLocked || !canDecideSubmittedProposal;
   const statusLabel = completionNote
-    ? "Completed"
+    ? (isApprovedDecisionOutcome ? "Approved" : (isRejectedDecisionOutcome ? "Denied" : "Completed"))
     : statusValue
-      ? statusValue.replace(/_/g, " ").replace(/\b\w/g, char => char.toUpperCase())
+      ? statusValue === "rejected"
+        ? "Denied"
+        : statusValue === "changes_requested"
+          ? "Request Changes"
+          : statusValue.replace(/_/g, " ").replace(/\b\w/g, char => char.toUpperCase())
       : hasBlockingProposal
         ? "Read only"
         : "Draft";
-  const statusBadgeColor = completionNote ? "green" : "blue";
+  const statusBadgeColor =
+    completionNote && isRejectedDecisionOutcome
+      ? "red"
+      : completionNote
+        ? "green"
+        : "blue";
 
   const activeStepIds = useMemo(() => {
-    if (!isSubmittedStatus || !canDecideSubmittedProposal) return BASE_STEP_IDS;
-    const submitted = [...BASE_STEP_IDS, ...SUBMITTED_STEP_IDS];
-    return showCommunicationStep ? [...submitted, COMMUNICATION_STEP_ID] : submitted;
-  }, [canDecideSubmittedProposal, isSubmittedStatus, showCommunicationStep]);
+    if (!isReviewStageStatus || !canDecideSubmittedProposal) return BASE_STEP_IDS;
+    return [...BASE_STEP_IDS, ...SUBMITTED_STEP_IDS];
+  }, [canDecideSubmittedProposal, isReviewStageStatus]);
 
   const codeOptions = useMemo(() => {
     if (!Array.isArray(interventionCodes) || interventionCodes.length === 0) return [];
@@ -2240,6 +2257,38 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       setCurrentStep(BASE_STEP_IDS[0]);
     }
   }, [wizardStepKey, activeStepIds, currentStep, resolveStoredStep]);
+
+  useEffect(() => {
+    const requestedStep = pendingApprovalStepRef.current || null;
+    if (!wizardStepKey || !requestedStep) return;
+    if (!activeStepIds.includes(requestedStep)) return;
+    const requestedInterventionId = approvalWorkspaceEntry?.interventionId
+      ? String(approvalWorkspaceEntry.interventionId)
+      : null;
+    const loadedInterventionIds = [
+      selectedInterventionId,
+      selectedDraftId,
+      hydratedDraftId,
+    ]
+      .map(value => (value ? String(value) : null))
+      .filter(Boolean);
+    if (requestedInterventionId && !loadedInterventionIds.includes(requestedInterventionId)) {
+      return;
+    }
+    if (currentStep !== requestedStep) {
+      setCurrentStep(requestedStep);
+      return;
+    }
+    pendingApprovalStepRef.current = null;
+  }, [
+    activeStepIds,
+    approvalWorkspaceEntry,
+    currentStep,
+    hydratedDraftId,
+    selectedDraftId,
+    selectedInterventionId,
+    wizardStepKey,
+  ]);
 
   useEffect(() => {
     if (!wizardStepKey || typeof setInterventionWizardStep !== "function") return;
@@ -3548,6 +3597,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       const detail = event?.detail || {};
       const interventionId = detail.interventionId;
       if (!interventionId) return;
+      pendingApprovalStepRef.current = detail.requestedStep || null;
       const selectionKey = caseId ? `${caseId}:${interventionId}` : null;
       const storedStep = resolveStoredStep(selectionKey);
       if (typeof setSelectedInterventionId === "function") {
@@ -3578,8 +3628,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     const handleNew = event => {
       const detail = event?.detail || {};
       const planId = detail.planId;
+      pendingApprovalStepRef.current = null;
       if (hasBlockingProposal) {
-        setError("A draft or submitted proposal already exists. Resume it from the table.");
+        setError("A proposal is already in progress. Resume it from the table.");
         setSuccessMessage("");
         return;
       }
@@ -3625,11 +3676,70 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   ]);
 
   useEffect(() => {
+    if (!approvalWorkspaceEntry) return;
     const plans = caseData?.actionPlans || [];
     if (!plans.length) return;
+    const approvalKey = `${caseId || "case"}:${approvalWorkspaceEntry.key}`;
+    if (approvalSelectionAppliedRef.current === approvalKey) return;
+    const reviewTargets = plans
+      .flatMap(plan =>
+        (Array.isArray(plan?.interventions) ? plan.interventions : []).map(intervention => ({
+          ...intervention,
+          actionPlanId: intervention?.actionPlanId || plan?.id || null,
+        }))
+      )
+      .filter(item => ["submitted", "in_review"].includes(String(item?.status || "").toLowerCase()));
+    const requestedInterventionId = approvalWorkspaceEntry.interventionId
+      ? String(approvalWorkspaceEntry.interventionId)
+      : null;
+    const target =
+      (requestedInterventionId
+        ? reviewTargets.find(item => String(item?.id) === requestedInterventionId)
+        : null) ||
+      reviewTargets.sort(
+        (left, right) =>
+          new Date(right?.updatedAt || right?.createdAt || 0).getTime() -
+          new Date(left?.updatedAt || left?.createdAt || 0).getTime()
+      )[0] ||
+      null;
+    if (!target?.id) return;
+    approvalSelectionAppliedRef.current = approvalKey;
+    pendingApprovalStepRef.current = approvalWorkspaceEntry.step || "decision";
+    setSelectedDraftId(target.id);
+    setHydratedDraftId(null);
+    setHydratedDraftUpdatedAt(null);
+    setCurrentInterventionStatus(null);
+    setRevisionContext(null);
+    setError(null);
+    setSuccessMessage("");
+    setCompletionNote(null);
+    setAttemptedSteps({});
+    if (typeof setSelectedInterventionId === "function") {
+      setSelectedInterventionId(target.id);
+    }
+    if (target.actionPlanId && typeof setSelectedActionPlanId === "function") {
+      setSelectedActionPlanId(target.actionPlanId);
+    }
+    setForm(prev => ({
+      ...prev,
+      actionPlanId: target.actionPlanId ? String(target.actionPlanId) : prev.actionPlanId,
+    }));
+  }, [
+    approvalWorkspaceEntry,
+    caseData,
+    caseId,
+    setSelectedActionPlanId,
+    setSelectedInterventionId,
+  ]);
+
+  useEffect(() => {
+    const plans = caseData?.actionPlans || [];
+    if (!plans.length) return;
+    if (pendingApprovalStepRef.current && !selectedDraftId) return;
     const isDraftStatusValue = value => String(value || "").toLowerCase() === "draft";
     const isChangesRequestedValue = value => String(value || "").toLowerCase() === "changes_requested";
     const isSubmittedValue = value => String(value || "").toLowerCase() === "submitted";
+    const isInReviewValue = value => String(value || "").toLowerCase() === "in_review";
     const findById = interventionId => {
       const target = String(interventionId);
       for (const plan of plans) {
@@ -3645,7 +3755,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
           item =>
             isDraftStatusValue(item?.status) ||
             isChangesRequestedValue(item?.status) ||
-            isSubmittedValue(item?.status)
+            isSubmittedValue(item?.status) ||
+            isInReviewValue(item?.status)
         )
         .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
       return sorted[0] || null;
@@ -3721,9 +3832,15 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         setSelectedInterventionId(draft.id);
       }
       const draftStatus = String(draft.status || "").toLowerCase();
-      const stepIds = draftStatus === "submitted" ? [...BASE_STEP_IDS, ...SUBMITTED_STEP_IDS] : BASE_STEP_IDS;
+      const stepIds = ["submitted", "in_review"].includes(draftStatus)
+        ? [...BASE_STEP_IDS, ...SUBMITTED_STEP_IDS]
+        : BASE_STEP_IDS;
       const storedStep = resolveStoredStep(storedStepKey, stepIds);
-      const nextStep = storedStep || BASE_STEP_IDS[0];
+      const requestedStep = pendingApprovalStepRef.current;
+      const nextStep =
+        (requestedStep && stepIds.includes(requestedStep) ? requestedStep : null) ||
+        storedStep ||
+        BASE_STEP_IDS[0];
       setHydratedDraftId(draft.id || null);
       setHydratedDraftUpdatedAt(draft.updatedAt || draft.createdAt || null);
       setCurrentInterventionStatus(draftStatus || null);
@@ -4045,24 +4162,24 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         }
         return { ok: false, error: new Error(message) };
       }
-      const targetStatus = isSubmittedStatus ? "submitted" : "draft";
+      const targetStatus = isReviewStageStatus ? statusValue : "draft";
       const payload = buildProposalPayload(targetStatus);
       setIsSubmitting(true);
       try {
-        const submittedTargetId =
-          isSubmittedStatus && activeInterventionIdValue
+        const reviewTargetId =
+          isReviewStageStatus && activeInterventionIdValue
             ? Number(activeInterventionIdValue)
             : null;
         const existingDraft = findEditableDraft();
         const actionPlanId = Number(form.actionPlanId);
         if (
-          Number.isInteger(submittedTargetId) &&
-          submittedTargetId > 0 &&
+          Number.isInteger(reviewTargetId) &&
+          reviewTargetId > 0 &&
           typeof updateInterventionRecord === "function"
         ) {
-          const updated = await updateInterventionRecord(actionPlanId, submittedTargetId, payload);
-          setSelectedDraftId(updated?.id || submittedTargetId);
-          setHydratedDraftId(updated?.id || submittedTargetId);
+          const updated = await updateInterventionRecord(actionPlanId, reviewTargetId, payload);
+          setSelectedDraftId(updated?.id || reviewTargetId);
+          setHydratedDraftId(updated?.id || reviewTargetId);
           setHydratedDraftUpdatedAt(updated?.updatedAt || updated?.createdAt || null);
         } else if (existingDraft && typeof updateInterventionRecord === "function") {
           const updated = await updateInterventionRecord(actionPlanId, existingDraft.id, payload);
@@ -4080,7 +4197,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         }
         setCurrentInterventionStatus(targetStatus);
         if (!silent) {
-          setSuccessMessage(targetStatus === "submitted" ? "Changes saved." : "Progress saved.");
+          setSuccessMessage(targetStatus === "draft" ? "Progress saved." : "Changes saved.");
         }
         initialFormRef.current = form;
         return { ok: true };
@@ -4101,7 +4218,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       form,
       activeInterventionIdValue,
       isEditable,
-      isSubmittedStatus,
+      isReviewStageStatus,
+      statusValue,
       setSelectedInterventionId,
       updateInterventionRecord,
     ]
@@ -4383,12 +4501,20 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       setEiVerificationFileError(null);
       setEiVerificationUploadError(null);
       setEiVerificationUploadSuccess(null);
+      setApprovalLetterPackTabId("client");
+      setApprovalLetterPackGenerated(false);
+      setClientLetterBody("");
+      setSendingLetterError(null);
+      setDecisionLetterSuccess(null);
+      setShowSendApprovalLetterConfirmModal(false);
     },
     [
       activeInterventionIdValue,
       caseId,
       clearInterventionWizardDraft,
       clearInterventionWizardStep,
+      setClientLetterBody,
+      setDecisionLetterSuccess,
       setRevisionContext,
       setSelectedInterventionId,
     ]
@@ -4521,11 +4647,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         targetStep = targetStep || "decision";
       }
       if (outcome === "rejected" && !form.decisionNotes.trim()) {
-        reasons.push("Rejection requires a note.");
+        reasons.push("Denial requires a note.");
         targetStep = targetStep || "decision";
       }
       if (requireActiveIntervention && !activeInterventionIdValue) {
-        reasons.push("Select a submitted proposal before submitting a decision.");
+        reasons.push("Select a proposal in review before submitting a decision.");
         targetStep = targetStep || "decision";
       }
       if (!Number(form.actionPlanId)) {
@@ -4559,15 +4685,15 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       setSuccessMessage("");
       setAttemptedSteps(prev => ({ ...prev, decision: true }));
       if (!canDecideSubmittedProposal) {
-        setError("Only approver roles can record a decision on a submitted proposal.");
+        setError("Only approver roles can record a decision on a proposal in review.");
         return { ok: false };
       }
       if (!isEditable) {
         setError("This proposal is read-only and cannot be updated.");
         return { ok: false };
       }
-      if (!isSubmittedStatus) {
-        setError("Only submitted proposals can be decided.");
+      if (!isReviewStageStatus) {
+        setError("Only proposals in review can be decided.");
         return { ok: false };
       }
       const outcome = form.decisionOutcome;
@@ -4642,13 +4768,17 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
               }
             }
             setCurrentInterventionStatus(revisionSourceStatus || "approved");
-            resetProposalState();
+            setApprovalLetterPackGenerated(false);
+            setApprovalLetterPackTabId("client");
+            setClientLetterBody("");
+            setSendingLetterError(null);
+            setDecisionLetterSuccess(null);
             setCompletionNote({
               type: cleanupError ? "info" : "success",
               header: cleanupError ? "Revision applied with follow-up needed" : "Revision workflow complete",
               body: cleanupError
-                ? `The approved revision was applied to ${revisionSourceTitle}, but the temporary revision draft could not be cleaned up automatically. ${cleanupError.message || "Delete it from the interventions table if needed."}`
-                : `The approved revision was applied to ${revisionSourceTitle}.`,
+                ? `The approved revision was applied to ${revisionSourceTitle}, but the temporary revision draft could not be cleaned up automatically. ${cleanupError.message || "Delete it from the interventions table if needed."} Decision letters can be prepared below if needed.`
+                : `The approved revision was applied to ${revisionSourceTitle}. Decision letters can be prepared below if needed.`,
             });
           } else {
             const [primary, ...rest] = interventionsToCreate;
@@ -4672,11 +4802,15 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
             }
             setCurrentInterventionStatus("approved");
             setSuccessMessage("Interventions approved and created.");
-            resetProposalState();
+            setApprovalLetterPackGenerated(false);
+            setApprovalLetterPackTabId("client");
+            setClientLetterBody("");
+            setSendingLetterError(null);
+            setDecisionLetterSuccess(null);
             setCompletionNote({
               type: "success",
               header: "Intervention workflow complete",
-              body: "Approved interventions were created. Start a new proposal from the Interventions table when you are ready.",
+              body: "Approved interventions were created. Decision letters can be prepared below if needed. Start a new proposal from the Interventions table when you are ready.",
             });
           }
         } else {
@@ -4687,17 +4821,21 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
             await addCaseNote("Intervention proposal — Request changes", form.decisionNotes.trim());
           }
           if (outcome === "rejected") {
-            await addCaseNote("Intervention proposal — Rejected", form.decisionNotes.trim());
+            await addCaseNote("Intervention proposal — Denied", form.decisionNotes.trim());
           }
           setSuccessMessage(updated ? "Decision submitted." : "Decision submitted.");
           if (outcome === "rejected") {
-            resetProposalState();
+            setApprovalLetterPackGenerated(false);
+            setApprovalLetterPackTabId("client");
+            setClientLetterBody("");
+            setSendingLetterError(null);
+            setDecisionLetterSuccess(null);
             setCompletionNote({
               type: "info",
               header: isRevisionMode ? "Revision closed" : "Proposal closed",
               body: isRevisionMode
-                ? `The revision was rejected and ${revisionSourceTitle} was left unchanged.`
-                : "The proposal was rejected and closed. Start a new proposal from the Interventions table when needed.",
+                ? `The revision was denied and ${revisionSourceTitle} was left unchanged. Decision letters can be prepared below if needed.`
+                : "The proposal was denied and closed. Decision letters can be prepared below if needed. Start a new proposal from the Interventions table when needed.",
             });
           }
         }
@@ -4721,12 +4859,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       form,
       isEditable,
       isRevisionMode,
-      isSubmittedStatus,
+      isReviewStageStatus,
       linkEiDocumentToInterventions,
       proposedInterventions,
       resolvedApprovalPotId,
       resolvedApprovalPostingContext,
-      resetProposalState,
       revisionSourceActionPlanId,
       revisionSourceInterventionId,
       revisionSourceStatus,
@@ -5029,53 +5166,70 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
     isRevisionMode,
     participantLegalName,
   ]);
-  const executeCommunicationSubmit = useCallback(async () => {
-    const decisionResult = await handleSubmitDecision();
-    if (!decisionResult?.ok) return;
-    await handleSendDecisionLetter({
+  const handleSendPreparedDecisionLetter = useCallback(async () => {
+    if (sendingLetter) return;
+    setDecisionLetterSuccess(null);
+    if (isApprovedDecisionOutcome) {
+      setShowSendApprovalLetterConfirmModal(true);
+      return;
+    }
+    const result = await handleSendDecisionLetter({
       interventionId:
         isRevisionMode && revisionSourceInterventionId
           ? revisionSourceInterventionId
           : activeInterventionIdValue,
     });
-  }, [activeInterventionIdValue, handleSendDecisionLetter, handleSubmitDecision, isRevisionMode, revisionSourceInterventionId]);
-  const handleSubmitCommunication = useCallback(async () => {
-    if (isApprovedDecisionOutcome) {
-      setShowSendApprovalLetterConfirmModal(true);
-      return;
+    if (result?.ok) {
+      setDecisionLetterSuccess("Client denial letter sent.");
     }
-    await executeCommunicationSubmit();
-  }, [executeCommunicationSubmit, isApprovedDecisionOutcome]);
+  }, [
+    activeInterventionIdValue,
+    handleSendDecisionLetter,
+    isApprovedDecisionOutcome,
+    isRevisionMode,
+    revisionSourceInterventionId,
+    sendingLetter,
+  ]);
   const handleConfirmSendApprovalLetter = useCallback(async () => {
     if (sendingLetter) return;
     setShowSendApprovalLetterConfirmModal(false);
-    await executeCommunicationSubmit();
-  }, [executeCommunicationSubmit, sendingLetter]);
-  useEffect(() => {
-    if (!showCommunicationStep) {
-      setApprovalLetterPackGenerated(false);
-      setApprovalLetterPackTabId("client");
-      setClientLetterBody("");
-      setSendingLetterError(null);
+    const result = await handleSendDecisionLetter({
+      interventionId:
+        isRevisionMode && revisionSourceInterventionId
+          ? revisionSourceInterventionId
+          : activeInterventionIdValue,
+    });
+    if (result?.ok) {
+      setDecisionLetterSuccess(isRevisionMode ? "Client funding revision letter sent." : "Client approval letter sent.");
     }
-  }, [showCommunicationStep]);
+  }, [activeInterventionIdValue, handleSendDecisionLetter, isRevisionMode, revisionSourceInterventionId, sendingLetter]);
+  useEffect(() => {
+    if (isApprovedDecisionOutcome || isRejectedDecisionOutcome) return;
+    setApprovalLetterPackGenerated(false);
+    setApprovalLetterPackTabId("client");
+    setClientLetterBody("");
+    setSendingLetterError(null);
+    setDecisionLetterSuccess(null);
+    setShowSendApprovalLetterConfirmModal(false);
+  }, [isApprovedDecisionOutcome, isRejectedDecisionOutcome]);
 
   const handleStartAnotherProposal = useCallback(() => {
     setCompletionNote(null);
     setSuccessMessage("");
     setError(null);
-  }, []);
+    resetProposalState();
+  }, [resetProposalState]);
 
   const headerDescription = completionNote
     ? "This intervention workflow is complete."
-    : isSubmittedStatus && isEditable && isRevisionMode && !canDecideSubmittedProposal
-      ? `Update the submitted revision for ${revisionSourceTitle}. Record of decision is limited to approver roles.`
-      : isSubmittedStatus && isEditable && !canDecideSubmittedProposal
-        ? "Update the submitted proposal. Record of decision is limited to approver roles."
-    : isSubmittedStatus && isEditable && isRevisionMode
-      ? `Review the submitted revision for ${revisionSourceTitle}, verify EI status, and record the decision.`
-      : isSubmittedStatus && isEditable
-        ? "Review the submitted proposal, verify EI status, and record the decision."
+    : isReviewStageStatus && isEditable && isRevisionMode && !canDecideSubmittedProposal
+      ? `Update the revision for ${revisionSourceTitle}. Record of decision is limited to approver roles.`
+      : isReviewStageStatus && isEditable && !canDecideSubmittedProposal
+        ? "Update the proposal. Record of decision is limited to approver roles."
+    : isReviewStageStatus && isEditable && isRevisionMode
+      ? `Review the revision for ${revisionSourceTitle}, verify EI status, and record the decision.`
+      : isReviewStageStatus && isEditable
+        ? "Review the proposal, verify EI status, and record the decision."
         : isEditable && isRevisionMode
           ? `Revise ${revisionSourceTitle}. The approved intervention stays unchanged until this revision is approved.`
           : isEditable
@@ -5084,7 +5238,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
               ? `Viewing the revision for ${revisionSourceTitle} in read-only mode.`
               : statusValue
                 ? "Viewing this proposal in read-only mode."
-    : "Select a draft or submitted proposal from the Interventions table to view it here.";
+    : "Select a draft or proposal in review from the Interventions table to view it here.";
 
   const infoLink = metadata.helpComponent && toggleHelpPanel ? (
     <Link
@@ -5134,9 +5288,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
           />
         </FormField>
       )}
-      {hasBlockingSubmitted && !isSubmittedStatus && (
+      {hasBlockingReviewStage && !isReviewStageStatus && (
         <Alert type="warning">
-          A submitted proposal is pending approval. Resolve it before starting a new proposal.
+          A proposal is awaiting review. Resolve it before starting a new proposal.
         </Alert>
       )}
       {hasBlockingDraft && !isDraftStatus && !isChangesRequestedStatus && (
@@ -5675,7 +5829,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
       </FormField>
       {(form.decisionOutcome === "changes_requested" || form.decisionOutcome === "rejected") && (
         <FormField
-          label={form.decisionOutcome === "changes_requested" ? "Request changes note" : "Rejection reason"}
+          label={form.decisionOutcome === "changes_requested" ? "Request changes note" : "Reason for denial"}
           errorText={
             showDecisionErrors && !form.decisionNotes.trim()
               ? "A note is required."
@@ -5935,6 +6089,16 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
               >
                 {isApprovedDecisionOutcome ? "Generate drafts" : "Generate draft"}
               </Button>
+              <Button
+                variant="primary"
+                onClick={handleSendPreparedDecisionLetter}
+                disabled={!activeLetterWorkflowId || sendingLetter || (!approvalLetterPackGenerated && !String(clientLetterBody || "").trim())}
+                loading={sendingLetter}
+              >
+                {isApprovedDecisionOutcome
+                  ? (isRevisionMode ? "Send client funding revision letter" : "Send client approval letter")
+                  : "Send client denial letter"}
+              </Button>
             </SpaceBetween>
           }
         >
@@ -5942,6 +6106,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
             ? (isRevisionMode ? "Funding revision letters" : "Approval letters")
             : "Denial letter"}
         </Header>
+        <Box margin={{ top: "xs" }}>
+          The decision has already been recorded. Use this section only if you need to prepare or send the client letter and related follow-up documents.
+        </Box>
         {letterWorkflowsError && (
           <Alert type="error" statusIconAriaLabel="Error" dismissible onDismiss={() => setLetterWorkflowsError(null)}>
             {letterWorkflowsError}
@@ -5952,11 +6119,12 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
             {sendingLetterError}
           </Alert>
         )}
-        {!showCommunicationStep ? (
-          <Alert type="info" statusIconAriaLabel="Info">
-            Decision letters are available for approved or rejected decisions.
+        {decisionLetterSuccess && (
+          <Alert type="success" statusIconAriaLabel="Success" dismissible onDismiss={() => setDecisionLetterSuccess(null)}>
+            {decisionLetterSuccess}
           </Alert>
-        ) : isApprovedDecisionOutcome ? (
+        )}
+        {isApprovedDecisionOutcome ? (
           <SpaceBetween size="m">
             <Box>
               {isRevisionMode
@@ -6791,12 +6959,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
   const steps = activeStepIds
     .map(stepId => ({
       id: stepId,
-      title:
-        stepId === COMMUNICATION_STEP_ID
-          ? isApprovedDecisionOutcome
-            ? (isRevisionMode ? "Funding revision letters" : "Approval letters")
-            : "Denial letter"
-          : STEP_LABELS[stepId],
+      title: STEP_LABELS[stepId],
       content: {
         plan: planStepContent,
         framing: framingStepContent,
@@ -6807,30 +6970,22 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         docs: docsStepContent,
         review: reviewStepContent,
         decision: decisionStepContent,
-        communication: communicationStepContent,
       }[stepId],
       isOptional: false,
     }))
     .filter(Boolean);
 
   const activeStepIndex = Math.max(activeStepIds.indexOf(currentStep), 0);
-  const isCommunicationStep = currentStep === COMMUNICATION_STEP_ID;
-  const wizardSubmitLabel = isCommunicationStep
-    ? isApprovedDecisionOutcome
-      ? (isRevisionMode ? "Send Client Funding Revision Letter" : "Send Client Approval letter")
-      : "Send Client Denial letter"
-    : isSubmittedStatus
-      ? canDecideSubmittedProposal
-        ? "Submit Decision"
-        : "Save changes"
-      : "Submit for approval";
-  const wizardSubmitHandler = isCommunicationStep
-    ? handleSubmitCommunication
-    : isSubmittedStatus
-      ? canDecideSubmittedProposal
-        ? handleSubmitDecision
-        : handleSave
-      : handleSubmitProposal;
+  const wizardSubmitLabel = isReviewStageStatus
+    ? canDecideSubmittedProposal
+      ? "Submit Decision"
+      : "Save changes"
+    : "Submit for approval";
+  const wizardSubmitHandler = isReviewStageStatus
+    ? canDecideSubmittedProposal
+      ? handleSubmitDecision
+      : handleSave
+    : handleSubmitProposal;
   const wizardIsWorking = isSubmitting || eiVerificationUploading;
 
   return (
@@ -6841,15 +6996,15 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
         actions={
           <SpaceBetween direction="horizontal" size="s">
             <Badge color={statusBadgeColor}>{statusLabel}</Badge>
-            {isEditable && !completionNote && (!isSubmittedStatus || !canDecideSubmittedProposal) && (
+            {isEditable && !completionNote && (!isReviewStageStatus || !canDecideSubmittedProposal) && (
               <Button variant="primary" disabled={!isDirty} onClick={handleSave}>
-                {isSubmittedStatus ? "Save Changes" : "Save Progress"}
+                {isReviewStageStatus ? "Save Changes" : "Save Progress"}
               </Button>
             )}
           </SpaceBetween>
         }
       >
-        {isRevisionMode ? "Revise approved intervention" : "Propose new intervention"}
+        {isRevisionMode ? "Revise approved intervention" : "Proposed new intervention"}
       </Header>
     } i18nStrings={boardItemI18nStrings} settings={
       <ButtonDropdown
@@ -6874,14 +7029,17 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
           </Alert>
         )}
         {completionNote ? (
-          <Alert
-            type={completionNote.type || "success"}
-            header={completionNote.header}
-            statusIconAriaLabel={completionNote.type === "info" ? "Info" : "Success"}
-            action={<Button onClick={handleStartAnotherProposal}>Start new proposal</Button>}
-          >
-            {completionNote.body}
-          </Alert>
+          <SpaceBetween size="m">
+            <Alert
+              type={completionNote.type || "success"}
+              header={completionNote.header}
+              statusIconAriaLabel={completionNote.type === "info" ? "Info" : "Success"}
+              action={<Button onClick={handleStartAnotherProposal}>Start new proposal</Button>}
+            >
+              {completionNote.body}
+            </Alert>
+            {showDecisionLettersPanel ? communicationStepContent : null}
+          </SpaceBetween>
         ) : (
           <Wizard
             className={isPlanStepBlocked || isFramingStepBlocked ? styles.blockNext : undefined}
@@ -6903,18 +7061,6 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
                 setError("Add at least one proposed intervention before continuing.");
                 return;
               }
-              if (movingForward && currentStep === "decision" && requestedStepId === COMMUNICATION_STEP_ID) {
-                const { reasons, targetStep } = getDecisionBlockingIssues({ requireActiveIntervention: true });
-                if (reasons.length) {
-                  if (needsActionPlanFundingSetup) {
-                    setActionPlanFundingErrors(validateActionPlanFundingDraft(actionPlanFundingDraft));
-                  }
-                  setDecisionBlockerReasons(reasons);
-                  setDecisionBlockerTargetStep(targetStep);
-                  setDecisionBlockerVisible(true);
-                  return;
-                }
-              }
               if (movingForward) {
                 setAttemptedSteps(prev => ({ ...prev, [currentStep]: true }));
                 if (!validateStep(currentStep)) {
@@ -6924,7 +7070,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel 
               }
               if (
                 requestedStepIndex !== currentIdx &&
-                !isSubmittedStatus &&
+                !isReviewStageStatus &&
                 isEditable &&
                 isDirty &&
                 !isSubmitting &&

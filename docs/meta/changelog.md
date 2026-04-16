@@ -2,6 +2,13 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-04-15
+- Security/Auth/Portal: Public password-reset requests now write a durable audit trail keyed by normalized email, including page route, request flow, source IP, user agent, outcome, and small Cognito delivery/error metadata so future investigations can distinguish `/forgot-password`, `/activate-account`, and `/reset-password` resend traffic.
+- Fix/Workflow/Applications: Application approvals now move `iset_application.status` to real decision outcomes at commit time, using `approved` or `rejected` immediately instead of the placeholder `decision_ready`, while keeping the approval path open until letters and any required funding forms are finished.
+- UX/Approvals/Workspaces: Opening a row from the homepage `Approvals` queue now launches the target workspace in an approval-focused board layout and lands the relevant wizard on its decision step, including selecting the correct intervention proposal in case workspace.
+- UX/Approvals/Casework: `Proposed new intervention` now uses `Approved`, `Denied`, and `Request Changes` as the intervention-decision labels, commits the approval at `Record of decision`, and keeps decision-letter preparation as a separate post-decision follow-up instead of another wizard step.
+- UX/Home/Docs: Updated the homepage approvals queue messaging, help-panel content, and durable docs to reflect the current `Approvals Items` layout, including province, EI status, compact timeline badges, and workspace-only approval actions.
+
 ## 2026-04-14
 - Docs/Ops: Updated the standing handoff docs to require live PROD feedback-log updates during Codex bug/change triage, documented the short outcome-first hotfix-note wording style, and captured the later same-thread PROD Regional Manager case-access and feedback-log follow-up under the exact Codex task-history title.
 - Fix/API/Casework: Regional Manager case-workspace access now treats direct assignment as a first-class grant across the `/cases/:id` workspace family and the shared action-plan/intervention validators, so directly assigned out-of-region files no longer fail with a region-scope `403`.

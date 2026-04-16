@@ -216,10 +216,9 @@ const requiresNocForCode = (value) => {
 const DECISION_READY_STATUS = 'decision_ready';
 const APPLICATION_FINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived']);
 const APPLICATION_LOCKED_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed', 'archived', DECISION_READY_STATUS]);
-const DECISION_READY_STATUSES = new Set([DECISION_READY_STATUS, 'approved']);
+const POST_DECISION_APPLICATION_STATUSES = new Set([DECISION_READY_STATUS, 'approved', 'completed', 'rejected']);
 const OVERVIEW_WORD_LIMIT = 400;
 const EMPLOYMENT_GOALS_WORD_LIMIT = 400;
-const NOT_APPROVED_CASE_STATUS = 'in_review';
 const APPROVAL_COST_THRESHOLD = 15000;
 const PROGRAM_ADMIN_APPROVAL_THRESHOLD = 25000;
 const PROGRAM_ADMIN_APPROVER_EMAIL = 'sstacey@nwac.ca';
@@ -2062,8 +2061,12 @@ const extractJsonFromAi = (value) => {
 };
 
 const CoordinatorAssessmentWidget = forwardRef(
-  ({ actions, toggleHelpPanel, caseData, application_id, onCaseUpdate, applicationRowVersion, onRowVersionUpdate }, ref) => {
+  ({ actions, toggleHelpPanel, caseData, application_id, onCaseUpdate, applicationRowVersion, onRowVersionUpdate, workspaceEntry }, ref) => {
   const history = useHistory();
+  const approvalWorkspaceEntry =
+    workspaceEntry?.mode === 'approval' && workspaceEntry?.approvalType === 'application'
+      ? workspaceEntry
+      : null;
   // State for form fields
   const [assessment, setAssessment] = useState(() => buildEmptyAssessment());
   const [initialAssessment, setInitialAssessment] = useState(() => buildEmptyAssessment());
@@ -2166,6 +2169,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [attemptedSteps, setAttemptedSteps] = useState({});
   const wizardStepRestoreKeyRef = useRef(null);
   const wizardStepRestoreStepsRef = useRef(null);
+  const approvalEntryStepAppliedRef = useRef(null);
   const wizardNavPrimeRef = useRef({ signature: null, restoreStep: null });
   const defaultInterventionSeedCaseKeyRef = useRef(null);
   const defaultInterventionSeedAppliedRef = useRef(false);
@@ -2341,7 +2345,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const canonicalApplicationStatus = applicationStatusContext.canonicalStatus || canonicalCaseStatusSnapshot;
   const isPendingApprovalStatus = rawApplicationStatusNormalized === 'pending_approval';
   const normalizedApplicationStatus = canonicalApplicationStatus || rawApplicationStatusNormalized || '';
-  const isDecisionReadyStatus = DECISION_READY_STATUSES.has(normalizedApplicationStatus);
+  const isPostDecisionStatus = POST_DECISION_APPLICATION_STATUSES.has(normalizedApplicationStatus);
   const isCompletedStatus = normalizedApplicationStatus === 'completed';
   const decisionOutcome = useMemo(() => {
     const decision = assessment.nwacReviewStatus;
@@ -3084,7 +3088,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const isDeclarationGateActive = !conflictDeclarationSigned || hasPersistedDeclaredConflict;
   const eligibilitySet = Boolean(assessment.esdcEligibility);
   const isEligibilityGateActive = isDeclarationGateActive || !eligibilitySet;
-  const showCommunicationStep = isDecisionReadyStatus || isCompletedStatus;
+  const showCommunicationStep = isPostDecisionStatus;
   const approvalLetterSentAt = decisionLetterSent?.approval || null;
   const approvalLetterSent = Boolean(approvalLetterSentAt);
   const showFundingDocsStep = decisionOutcome === 'approved' && (approvalLetterSent || isCompletedStatus);
@@ -4087,30 +4091,30 @@ const CoordinatorAssessmentWidget = forwardRef(
   // Show NWAC section after submission, review completion, or outcome-ready status
   useEffect(() => {
     const pendingApproval = isPendingApprovalStatus;
-    const shouldShowOutcome = pendingApproval || isDecisionFinal || isDecisionReadyStatus;
+    const shouldShowOutcome = pendingApproval || isDecisionFinal || isPostDecisionStatus;
     setShowNWACSection(shouldShowOutcome);
-    setLocalAssessmentSubmitted(pendingApproval || isDecisionFinal || isDecisionReadyStatus);
-  }, [isDecisionFinal, isDecisionReadyStatus, isPendingApprovalStatus]);
+    setLocalAssessmentSubmitted(pendingApproval || isDecisionFinal || isPostDecisionStatus);
+  }, [isDecisionFinal, isPendingApprovalStatus, isPostDecisionStatus]);
 
   // UI logic: once status reaches pending approval or a final decision, lock assessment fields and surface NWAC review
   const isAssessmentSubmitted = isPendingApprovalStatus;
   const isReviewComplete = APPLICATION_FINAL_STATUSES.has(normalizedApplicationStatus);
-  const shouldUnlockWizardNavigation = !isEditingAssessment && (isPendingApprovalStatus || isDecisionReadyStatus || isReviewComplete);
+  const shouldUnlockWizardNavigation = !isEditingAssessment && (isPendingApprovalStatus || isPostDecisionStatus || isReviewComplete);
   const assessmentSubmitted =
     localAssessmentSubmitted ||
     isAssessmentSubmitted ||
     isReviewComplete ||
     isDecisionFinal ||
-    isDecisionReadyStatus ||
+    isPostDecisionStatus ||
     isLockedStatus ||
     lockedByAnotherUser;
   // Disable all fields (including NWAC) if review is complete, a final decision exists, status is locked, conflict not signed, or eligibility not set
-  const baseAssessmentLocked = lockedByAnotherUser || isLockedStatus || isReviewComplete || isDecisionFinal || isDecisionReadyStatus;
+  const baseAssessmentLocked = lockedByAnotherUser || isLockedStatus || isReviewComplete || isDecisionFinal || isPostDecisionStatus;
   const isAssessmentDisabled = baseAssessmentLocked || isEligibilityGateActive || (assessmentSubmitted && !isEditingAssessment);
   const checklistUploadsLocked = isAssessmentDisabled && !isCommunicationStep && !isFundingDocsStep;
   const isNWACFieldsDisabled = baseAssessmentLocked || isEligibilityGateActive || !showNWACSection || !isPendingApprovalStatus || !canManageOutcomeReview;
   const isEligibilityDisabled = baseAssessmentLocked || isDeclarationGateActive || !isEligibilityAdmin;
-  const showDenyFundingShortcut = !isDecisionFinal && !isDecisionReadyStatus;
+  const showDenyFundingShortcut = !isDecisionFinal && !isPostDecisionStatus;
   const denyFundingBlockedReason = (() => {
     if (!showDenyFundingShortcut) return '';
     if (!caseId) return 'Save progress to create a case before denying funding.';
@@ -4146,6 +4150,18 @@ const CoordinatorAssessmentWidget = forwardRef(
       setCurrentStep(BASE_STEP_IDS[0]);
     }
   }, [wizardStepKey, activeStepIds, currentStep, resolveStoredWizardStep]);
+
+  useEffect(() => {
+    const requestedStep = approvalWorkspaceEntry?.step || null;
+    if (!wizardStepKey || !requestedStep) return;
+    if (!activeStepIds.includes(requestedStep)) return;
+    const approvalKey = `${wizardStepKey}:${approvalWorkspaceEntry.key}:${requestedStep}`;
+    if (approvalEntryStepAppliedRef.current === approvalKey) return;
+    approvalEntryStepAppliedRef.current = approvalKey;
+    if (currentStep !== requestedStep) {
+      setCurrentStep(requestedStep);
+    }
+  }, [activeStepIds, approvalWorkspaceEntry, currentStep, wizardStepKey]);
 
   useEffect(() => {
     if (!shouldUnlockWizardNavigation || activeStepIds.length < 2) return;
@@ -6104,7 +6120,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
     // 13. Conditional: NWAC fields
     if (assessment.recommendation === 'no_recommend' && assessment.nwacReview && !assessment.nwacReason) {
-      errors.nwacReason = 'Reason for not approving is required.';
+      errors.nwacReason = 'Reason for denial is required.';
     }
     // 14. Budget pot validation (only if set)
     if (assessment.interventionPotId) {
@@ -7489,8 +7505,8 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     }
     if ((decision === 'reject' || decision === 'push_back') && (!assessment.nwacReason || !assessment.nwacReason.trim())) {
       errors.nwacReason = decision === 'push_back'
-        ? 'Reason for push back is required.'
-        : 'Reason for not approving is required.';
+        ? 'Request Changes note is required.'
+        : 'Reason for denial is required.';
     }
     return errors;
   };
@@ -7626,6 +7642,8 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     const decision = assessment.nwacReviewStatus;
     const isOutcomeApproved = decision === 'approve';
     const isOutcomePushBack = decision === 'push_back';
+    const nextCaseStatus = isOutcomeApproved ? 'initiated' : (isOutcomePushBack ? 'pending_approval' : 'rejected');
+    const nextApplicationStatus = isOutcomePushBack ? 'in_review' : (isOutcomeApproved ? 'approved' : 'rejected');
     if (isOutcomeApproved && decisionHasCost && !assessment.interventionPotId) {
       errors.interventionPotId = 'Select a budget pot for the intervention cost.';
     }
@@ -7656,8 +7674,8 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       const payload = {
         ...buildAssessmentPayload({ includeDecisionFields: true }),
         assessment_submit_action: true,
-        status: isOutcomeApproved ? 'initiated' : NOT_APPROVED_CASE_STATUS,
-        applicationStatus: isOutcomePushBack ? 'in_review' : DECISION_READY_STATUS
+        status: nextCaseStatus,
+        applicationStatus: nextApplicationStatus
       };
       const requestBody = { ...payload };
       if (versionToken > 0) {
@@ -7731,10 +7749,10 @@ ${JSON.stringify(contextPayload, null, 2)}`;
         if (isOutcomePushBack) return 'Decision pushed back. Application returned to In review.';
         if (isOutcomeApproved) {
           return approvalHasFundingPackage
-            ? 'Decision recorded. Prepare the approval letter and funding agreement.'
-            : 'Decision recorded. Prepare the approval letter.';
+            ? 'Application marked as approved. Prepare the approval letter and funding agreement.'
+            : 'Application marked as approved. Prepare the approval letter.';
         }
-        return 'Decision recorded. Prepare the denial letter.';
+        return 'Application marked as denied. Prepare the denial letter.';
       })();
       setAlert({
         type: 'success',
@@ -7937,10 +7955,15 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     const letterResult = await handleSendDecisionLetter();
     if (!letterResult.ok) return;
     if (decisionOutcome === 'denied') {
+      if (normalizedApplicationStatus === 'rejected') {
+        setHasSubmitted(false);
+        scrollAfterAction();
+        return;
+      }
       await updateApplicationStatus({
         nextStatus: 'rejected',
-        successMessage: 'Denial letter sent. Application marked as not approved.',
-        errorMessage: 'Failed to mark application as not approved.',
+        successMessage: 'Denial letter sent. Application marked as denied.',
+        errorMessage: 'Failed to mark application as denied.',
         resetSubmitted: true
       });
       return;
@@ -10473,8 +10496,8 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                   }}
                   items={[
                     { value: 'approve', label: 'Approved' },
-                    { value: 'reject', label: 'Not Approved' },
-                    { value: 'push_back', label: 'Push back to coordinator' }
+                    { value: 'reject', label: 'Denied' },
+                    { value: 'push_back', label: 'Request Changes' }
                   ]}
                   ariaLabel="NWAC Review Status"
                   data-error-focus={showDecisionErrors && fieldErrors.nwacReviewStatus ? 'true' : undefined}
@@ -10505,7 +10528,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
         {['reject', 'push_back'].includes(assessment.nwacReviewStatus) && (
           <Grid gridDefinition={[{ colspan: 12 }]}>
             <FormField
-              label={assessment.nwacReviewStatus === 'push_back' ? 'Reason for Push Back' : 'Reason for Not Approving'}
+              label={assessment.nwacReviewStatus === 'push_back' ? 'Request Changes note' : 'Reason for denial'}
               stretch={true}
             >
               <Box width="100%">
@@ -10583,7 +10606,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       <Modal
         visible={showApproveConfirmModal}
         onDismiss={() => setShowApproveConfirmModal(false)}
-        header="Clear not-approved reason?"
+        header="Clear decision note?"
         footer={
           <SpaceBetween direction="horizontal" size="xs">
             <Button variant="primary" onClick={() => {
@@ -10594,12 +10617,12 @@ ${JSON.stringify(contextPayload, null, 2)}`;
               handleField('nwacReason', '');
               handleField('nwacReviewStatus', 'approve');
               setShowApproveConfirmModal(false);
-            }}>Clear and Approve</Button>
+            }}>Clear Note and Approve</Button>
             <Button variant="normal" onClick={() => setShowApproveConfirmModal(false)}>Cancel</Button>
           </SpaceBetween>
         }
       >
-        <Box>Switching to "Approve" will clear the reason for not approving. Do you want to continue?</Box>
+        <Box>Switching to "Approved" will clear the current denial or request changes note. Do you want to continue?</Box>
       </Modal>
     </>
   );

@@ -9,10 +9,8 @@ import {
   FormField,
   Header,
   Icon,
-  Input,
   Link,
   Modal,
-  RadioGroup,
   Select,
   Textarea,
   SpaceBetween,
@@ -24,8 +22,9 @@ import {
 import { PROGRAM_ADMIN_BUCKETS } from './ProgramAdminWorkQueueWidget';
 import { apiFetch } from '../../../auth/apiClient';
 import { buildLockConflictMessage } from '../../../hooks/useApplicationLock';
-import useCurrentUser from '../../../hooks/useCurrentUser';
+import HomeApprovalsItemsHelp from '../../../helpPanelContents/homeApprovalsItemsHelp';
 import HomeWorkQueueItemsHelp from '../../../helpPanelContents/homeWorkQueueItemsHelp';
+import { buildApprovalWorkspacePath } from '../../../utils/approvalWorkspaceEntry';
 import {
   SLA_DEFAULT_DAYS,
   computeApplicationSlaMeta,
@@ -36,10 +35,6 @@ import {
 
 const COLUMN_WIDTHS_STORAGE_KEY = 'work-queue-items-column-widths-v1';
 const WATCHLIST_REFRESH_EVENT = 'watchlist:refresh';
-const APPROVAL_COST_THRESHOLD = 15000;
-const PROGRAM_ADMIN_APPROVAL_THRESHOLD = 25000;
-const PROGRAM_ADMIN_APPROVER_EMAIL = 'sstacey@nwac.ca';
-const PROGRAM_ADMIN_ROLE_KEYS = new Set(['nwacadministrator']);
 const ESDC_OPTIONS = [
   { label: 'CRF', value: 'CRF' },
   { label: 'EI Active Claim', value: 'EI Active Claim' },
@@ -70,6 +65,22 @@ const getWorkspacePath = item => {
   const caseId = item?.case_id || item?.caseId || null;
   if (!caseId) return null;
   const type = (item?.type || '').toString().trim().toLowerCase();
+  if (type.includes('interventionapproval')) {
+    return buildApprovalWorkspacePath({
+      basePath: `/cases/${caseId}`,
+      approvalType: 'intervention',
+      step: 'decision',
+      interventionId: item?.interventionId || item?.intervention_id || null,
+      planId: item?.actionPlanId || item?.action_plan_id || null,
+    });
+  }
+  if (type.includes('awaitingapproval')) {
+    return buildApprovalWorkspacePath({
+      basePath: `/application-case/${caseId}`,
+      approvalType: 'application',
+      step: 'decision',
+    });
+  }
   if (type.includes('intervention') || type.includes('case')) {
     return `/cases/${caseId}`;
   }
@@ -99,13 +110,6 @@ const PROVINCE_LABELS = {
   xx: 'Test Region'
 };
 
-const normalizeProvinceCode = value => {
-  if (!value) return null;
-  const trimmed = String(value).trim();
-  if (!trimmed) return null;
-  return trimmed.slice(0, 2).toUpperCase();
-};
-
 const normalizeProvinceKey = value => (value || '').toString().trim().toLowerCase();
 
 const normalizeProvinceLabelKey = value =>
@@ -130,39 +134,6 @@ const resolveProvinceCode = value => {
   if (raw.length === 2) return raw.toUpperCase();
   const normalizedLabel = normalizeProvinceLabelKey(raw);
   return PROVINCE_NAME_TO_CODE[normalizedLabel] || null;
-};
-
-const mapEligibilityToFundingSource = value => {
-  if (!value) return null;
-  const norm = value.toString().trim().toLowerCase();
-  if (!norm) return null;
-  if (norm.includes('ei')) return 'EI';
-  if (norm.includes('crf')) return 'CRF';
-  return null;
-};
-
-const toBudgetPotOptions = list => {
-  if (!Array.isArray(list)) return [];
-  return list
-    .filter(pot => {
-      const potType = pot?.potType || pot?.pot_type || '';
-      const normalizedType = potType ? potType.toString().trim().toLowerCase() : '';
-      const isFundingStream = normalizedType === 'funding stream';
-      const isActive = pot?.isActive !== false && pot?.is_active !== 0;
-      return isActive && isFundingStream;
-    })
-    .map(pot => {
-      const label = [pot.code, pot.name].filter(Boolean).join(' - ') || pot.name || pot.code || pot.id || pot.value;
-      const value = pot.id ?? pot.value;
-      return {
-        label,
-        value: value != null ? String(value) : '',
-        fundingSource: pot.fundingSource || pot.funding_source || null,
-        regions: Array.isArray(pot.regions) ? pot.regions : [],
-      };
-    })
-    .filter(option => option.value)
-    .sort((a, b) => (a.label || '').localeCompare(b.label || ''));
 };
 
 const ROLE_DISPLAY_MAP = {
@@ -253,14 +224,99 @@ const computeSlaMeta = (row, slaTargets, rawStatus, isAssigned) => {
   });
 };
 
+const computeApprovalSlaMeta = (row, slaTargets) => {
+  return computeApplicationSlaMeta({
+    submittedAt: row.approvalQueuedAt || row.submittedAt || row.receivedAt || row.submitted_at,
+    createdAt: row.created_at,
+    dueAt: row.dueDate || row.sla_due_at,
+    slaTargets,
+    rawStatus: 'pending_approval',
+    isAssigned: true,
+    assessmentEligibility: row.assessment_esdc_eligibility || 'complete',
+  });
+};
+
+const renderSlaBadge = meta => {
+  const label = formatSlaTargetLabel(meta);
+  const title = `Timeline (${meta?.stage || 'unknown'}): ${label} | Age: ${meta?.ageDays ?? 'n/a'}d | Due: ${meta?.due ? meta.due.toLocaleDateString() : 'n/a'}`;
+  const badge = (() => {
+    switch (meta?.status) {
+      case 'critical-overdue':
+        return <Badge color="severity-critical">{label}</Badge>;
+      case 'high-overdue':
+        return <Badge color="severity-high">{label}</Badge>;
+      case 'due-today':
+        return <Badge color="severity-medium">{label}</Badge>;
+      case 'due-soon':
+        return <Badge color="severity-low">{label}</Badge>;
+      case 'ok':
+        return <Badge color="green">{label}</Badge>;
+      default:
+        return <Badge color="grey">{label || 'Unknown'}</Badge>;
+    }
+  })();
+  return (
+    <span title={title} aria-label={title}>
+      {badge}
+    </span>
+  );
+};
+
+const formatApprovalSlaBadgeLabel = meta => {
+  const deltaDays = meta?.deltaDays;
+  if (deltaDays === null || deltaDays === undefined) {
+    return meta?.label || 'Unknown';
+  }
+  if (deltaDays > 0) {
+    return `Due in ${deltaDays} day${deltaDays === 1 ? '' : 's'}`;
+  }
+  if (deltaDays === 0) {
+    return 'Due today';
+  }
+  const overdueDays = Math.abs(deltaDays);
+  return `${overdueDays} day${overdueDays === 1 ? '' : 's'} overdue`;
+};
+
+const renderApprovalSlaBadge = meta => {
+  const label = formatApprovalSlaBadgeLabel(meta);
+  const title = `Timeline (${meta?.stage || 'unknown'}): ${meta?.label || label} | Age: ${meta?.ageDays ?? 'n/a'}d | Due: ${meta?.due ? meta.due.toLocaleDateString() : 'n/a'}`;
+  const badge = (() => {
+    switch (meta?.status) {
+      case 'critical-overdue':
+        return <Badge color="severity-critical">{label}</Badge>;
+      case 'high-overdue':
+        return <Badge color="severity-high">{label}</Badge>;
+      case 'due-today':
+        return <Badge color="severity-medium">{label}</Badge>;
+      case 'due-soon':
+        return <Badge color="severity-low">{label}</Badge>;
+      case 'ok':
+        return <Badge color="green">{label}</Badge>;
+      default:
+        return <Badge color="grey">{label || 'Unknown'}</Badge>;
+    }
+  })();
+  return (
+    <span title={title} aria-label={title}>
+      {badge}
+    </span>
+  );
+};
+
+const formatWorkflowStatusLabel = status => {
+  const rawStatus = normalizeClosedStatus(typeof status === 'string' ? status.trim() : status || '');
+  if (!rawStatus) return null;
+  if (rawStatus === 'rejected') return 'Denied';
+  if (rawStatus === 'decision_ready') return 'Decision Ready (Legacy)';
+  return rawStatus
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+};
+
 const getStatusInfo = (row) => {
   const applicationStatusRaw = typeof row.status === 'string' ? row.status.trim() : '';
   const rawStatus = normalizeClosedStatus(applicationStatusRaw || 'submitted');
-  const label = rawStatus === 'rejected'
-    ? 'Not Approved'
-    : rawStatus
-        .replace(/[_-]+/g, ' ')
-        .replace(/\b\w/g, c => c.toUpperCase());
+  const label = formatWorkflowStatusLabel(rawStatus) || 'Unknown';
   const isUnassignedCase = rawStatus === 'submitted' && !row.assigned_user_id;
   const isInterventionApproval =
     row?.type === 'InterventionApproval' ||
@@ -312,14 +368,20 @@ const columnDefinitionsByKey = {
     cell: item => {
       const displayName = item.applicant || item.applicant_name || item.applicantName || item.title || item.id || '—';
       const workspacePath = getWorkspacePath(item);
-      const secondaryText =
-        item.titleSecondaryText ||
-        [
-          item.trackingId || item.id || null,
-          formatDateOnly(item.submittedAt || item.receivedAt)
-            ? `Received ${formatDateOnly(item.submittedAt || item.receivedAt)}`
-            : null
-        ].filter(Boolean).join(' · ') || '—';
+      const hasExplicitSecondaryContent = Object.prototype.hasOwnProperty.call(item, 'titleSecondaryContent');
+      const hasExplicitSecondaryText = Object.prototype.hasOwnProperty.call(item, 'titleSecondaryText');
+      const secondaryContent = hasExplicitSecondaryContent
+        ? item.titleSecondaryContent
+        : hasExplicitSecondaryText
+          ? (item.titleSecondaryText ?? '')
+          : (
+              [
+                item.trackingId || item.id || null,
+                formatDateOnly(item.submittedAt || item.receivedAt)
+                  ? `Received ${formatDateOnly(item.submittedAt || item.receivedAt)}`
+                  : null
+              ].filter(Boolean).join(' · ') || '—'
+            );
       return (
         <SpaceBetween size="xxs">
           <Box fontWeight="bold">
@@ -334,9 +396,11 @@ const columnDefinitionsByKey = {
               {displayName}
             </Link>
           </Box>
-          <Box fontSize="body-s" color="text-status-inactive">
-            {secondaryText}
-          </Box>
+          {secondaryContent ? (
+            <Box fontSize="body-s" color="text-status-inactive">
+              {secondaryContent}
+            </Box>
+          ) : null}
         </SpaceBetween>
       );
     },
@@ -375,6 +439,12 @@ const columnDefinitionsByKey = {
     header: 'Type',
     cell: item => item.type || '—',
     sortingField: 'type'
+  },
+  eiStatus: {
+    id: 'eiStatus',
+    header: 'EI status',
+    cell: item => item.assessment_esdc_eligibility || 'Not yet verified',
+    sortingField: 'assessment_esdc_eligibility'
   },
   metricSubject: {
     id: 'metricSubject',
@@ -476,6 +546,12 @@ const columnDefinitionsByKey = {
     sortingField: 'dueDate',
     cell: item => formatDateOnly(item.dueDate) || '—'
   },
+  approvalQueuedAt: {
+    id: 'approvalQueuedAt',
+    header: 'Timeline target',
+    sortingField: 'approvalQueuedAt',
+    cell: item => formatDateOnly(item.approvalQueuedAt || item.submittedAt || item.receivedAt) || '—'
+  },
   actions: {
     id: 'actions',
     header: 'Actions',
@@ -512,6 +588,7 @@ const columnKeysByType = {
 };
 
 const mixedColumnKeys = ['title', 'type', 'owner', 'status', 'dueDate', 'actions'];
+const approvalColumnKeys = ['title', 'region', 'eiStatus', 'owner', 'approvalQueuedAt', 'actions'];
 const metricColumnKeysByPreset = {
   'metric-applications': ['title', 'region', 'owner', 'status', 'eventDate', 'actions'],
   'metric-cases': ['title', 'region', 'owner', 'status', 'actions'],
@@ -519,7 +596,10 @@ const metricColumnKeysByPreset = {
   'metric-interventions': ['title', 'intervention', 'region', 'owner', 'status', 'eventDate', 'actions']
 };
 
-const buildColumns = (types = []) => {
+const buildColumns = (types = [], selectedBucketId = null) => {
+  if (selectedBucketId === 'approvals') {
+    return approvalColumnKeys;
+  }
   if (!types || types.length === 0) {
     return mixedColumnKeys;
   }
@@ -592,13 +672,8 @@ const WorkQueueItemsTableWidget = ({
   onRefresh,
   toggleHelpPanel
 }) => {
-  const { email: currentUserEmail } = useCurrentUser();
-  const canonicalRole = role === 'Regional Manager' ? 'Regional Manager' : role;
-  const isAssessor = canonicalRole === 'ISET Coordinator';
+  const isAssessor = role === 'ISET Coordinator';
   const roleKey = normalizeRoleKey(role);
-  const isProgramAdminRole = PROGRAM_ADMIN_ROLE_KEYS.has(roleKey);
-  const normalizedUserEmail = (currentUserEmail || '').trim().toLowerCase();
-  const canOverrideProgramAdminLimit = normalizedUserEmail === PROGRAM_ADMIN_APPROVER_EMAIL;
   const canManageEiEligibility = EI_ELIGIBILITY_ROLE_KEYS.has(roleKey);
   const isMetricMode = mode === 'metric';
   const metricItems = isMetricMode && Array.isArray(metricView?.items) ? metricView.items : [];
@@ -612,18 +687,6 @@ const WorkQueueItemsTableWidget = ({
   const [assignError, setAssignError] = useState(null);
   const [selectedAssignee, setSelectedAssignee] = useState(null);
   const [assignSubmitting, setAssignSubmitting] = useState(false);
-  const [decisionModalVisible, setDecisionModalVisible] = useState(false);
-  const [decisionTarget, setDecisionTarget] = useState(null);
-  const [selectedDecision, setSelectedDecision] = useState(null);
-  const [decisionReason, setDecisionReason] = useState('');
-  const [selectedAssurance, setSelectedAssurance] = useState(null);
-  const [postingContextValue, setPostingContextValue] = useState('external');
-  const [selectedBudgetPot, setSelectedBudgetPot] = useState(null);
-  const [budgetPotOptions, setBudgetPotOptions] = useState([]);
-  const [budgetPotLoading, setBudgetPotLoading] = useState(false);
-  const [decisionError, setDecisionError] = useState(null);
-  const [postingContextError, setPostingContextError] = useState(null);
-  const [decisionSubmitting, setDecisionSubmitting] = useState(false);
   const [eligibilityModalVisible, setEligibilityModalVisible] = useState(false);
   const [eligibilityTarget, setEligibilityTarget] = useState(null);
   const [selectedEligibility, setSelectedEligibility] = useState(null);
@@ -641,55 +704,34 @@ const WorkQueueItemsTableWidget = ({
   const [escalationNote, setEscalationNote] = useState('');
   const [escalationSubmitting, setEscalationSubmitting] = useState(false);
   const [escalationError, setEscalationError] = useState(null);
-  const applicantProvinceCode = normalizeProvinceCode(decisionTarget?.address_province || decisionTarget?.region);
-  const applicantProvinceLabel = applicantProvinceCode
-    ? PROVINCE_LABELS[applicantProvinceCode.toLowerCase()] || applicantProvinceCode
-    : 'Province not set';
-  const applicantEligibilityLabel = decisionTarget?.assessment_esdc_eligibility || 'no eligibility recorded';
-  const interventionCostValue = useMemo(() => {
-    const raw =
-      decisionTarget?.intervention_cost_total ??
-      decisionTarget?.assessment_intervention_cost_total ??
-      decisionTarget?.interventionCost ??
-      decisionTarget?.intervention_cost ??
-      null;
-    if (raw === null || raw === undefined || raw === '') return null;
-    const parsed = typeof raw === 'string' ? Number(raw.replace(/[^0-9.-]/g, '')) : Number(raw);
-    return Number.isFinite(parsed) ? parsed : null;
-  }, [decisionTarget]);
-  const hasInterventionCost = useMemo(
-    () => interventionCostValue !== null && interventionCostValue > 0,
-    [interventionCostValue]
-  );
-  const infoLink = toggleHelpPanel ? (
-    <Link
-      variant="info"
-      onFollow={event => {
-        event.preventDefault();
-        toggleHelpPanel(<HomeWorkQueueItemsHelp />, 'Work Queue Items', HomeWorkQueueItemsHelp.aiContext || '');
-      }}
-    >
-      Info
-    </Link>
-  ) : undefined;
-  const approvalBlockMessage = useMemo(() => {
-    if (interventionCostValue === null) return null;
-    if (canonicalRole === 'Regional Manager' && interventionCostValue >= APPROVAL_COST_THRESHOLD) {
-      return `Regional Managers cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to NWAC Administrators.`;
-    }
-    if (isProgramAdminRole && interventionCostValue >= PROGRAM_ADMIN_APPROVAL_THRESHOLD && !canOverrideProgramAdminLimit) {
-      return `NWAC Administrators cannot approve applications with total cost \u2265 $${PROGRAM_ADMIN_APPROVAL_THRESHOLD.toLocaleString()}. Only ${PROGRAM_ADMIN_APPROVER_EMAIL} can approve above this limit.`;
-    }
-    return null;
-  }, [canOverrideProgramAdminLimit, canonicalRole, interventionCostValue, isProgramAdminRole]);
-  const approvalThresholdBlocked = Boolean(approvalBlockMessage);
   const selectedBucket =
     useMemo(
       () => (isMetricMode ? null : bucketDefinitions.find(bucket => bucket.id === selectedBucketId) || bucketDefinitions[0] || null),
       [bucketDefinitions, isMetricMode, selectedBucketId]
     );
+  const helpContent = !isMetricMode && selectedBucketId === 'approvals'
+    ? <HomeApprovalsItemsHelp />
+    : <HomeWorkQueueItemsHelp />;
+  const helpTitle = !isMetricMode && selectedBucketId === 'approvals' ? 'Approvals Items' : 'Work Queue Items';
+  const helpAiContext = !isMetricMode && selectedBucketId === 'approvals'
+    ? HomeApprovalsItemsHelp.aiContext
+    : HomeWorkQueueItemsHelp.aiContext;
+  const infoLink = toggleHelpPanel ? (
+    <Link
+      variant="info"
+      onFollow={event => {
+        event.preventDefault();
+        toggleHelpPanel(helpContent, helpTitle, helpAiContext || '');
+      }}
+    >
+      Info
+    </Link>
+  ) : undefined;
   const shouldWrapLines = !isMetricMode && selectedBucket && ['exceptions-escalations', 'unresolved-conflicts'].includes(selectedBucket.id);
   const sourceItems = isMetricMode ? metricItems : items;
+  const queueDescription = !isMetricMode && selectedBucketId === 'approvals'
+    ? 'Submitted application assessments and new intervention proposals waiting for your decision. Use Open workspace to open the review layout and record the decision in the workspace.'
+    : selectedBucket?.description || selectedBucket?.label;
 
   const decoratedItems = useMemo(() => {
     return sourceItems.map(item => {
@@ -726,12 +768,6 @@ const WorkQueueItemsTableWidget = ({
   }, [decoratedItems, filteringText, isMetricMode, selectedBucket]);
 
   const [columnWidths, setColumnWidths] = useState(() => loadStoredColumnWidths());
-
-  useEffect(() => {
-    if (isAssessor) {
-      setPostingContextValue('external');
-    }
-  }, [isAssessor]);
 
   const itemTypes = useMemo(() => {
     const types = new Set();
@@ -998,43 +1034,10 @@ const WorkQueueItemsTableWidget = ({
     };
   }, []);
 
-  useEffect(() => {
-    if (!decisionModalVisible) return;
-    if (!selectedBudgetPot?.value) return;
-    const match = budgetPotOptions.find(opt => String(opt.value) === String(selectedBudgetPot.value));
-    if (match) {
-      if (selectedBudgetPot.label !== match.label) {
-        setSelectedBudgetPot(match);
-      }
-      return;
-    }
-    if (!budgetPotLoading && budgetPotOptions.length) {
-      setSelectedBudgetPot(prev => (prev?.value ? { value: String(prev.value), label: String(prev.value) } : prev));
-    }
-  }, [decisionModalVisible, selectedBudgetPot, budgetPotOptions, budgetPotLoading]);
-
-  useEffect(() => {
-    if (!decisionModalVisible) return;
-    if (selectedBudgetPot?.value) return;
-    if (!budgetPotOptions.length) return;
-    const eligibilityFunding = mapEligibilityToFundingSource(decisionTarget?.assessment_esdc_eligibility);
-    const provinceCode = applicantProvinceCode;
-    const match = budgetPotOptions.find(opt => {
-      const optFunding = opt.fundingSource ? String(opt.fundingSource).toUpperCase() : null;
-      const regionList = Array.isArray(opt.regions) ? opt.regions.map(r => String(r).toUpperCase()) : [];
-      const fundingOk = eligibilityFunding ? optFunding === eligibilityFunding : true;
-      const regionOk = provinceCode ? regionList.length === 0 || regionList.includes(provinceCode) : true;
-      return fundingOk && regionOk;
-    });
-    if (match) {
-      setSelectedBudgetPot(match);
-    }
-  }, [decisionModalVisible, selectedBudgetPot, budgetPotOptions, decisionTarget, applicantProvinceCode]);
-
   const columnDefinitions = useMemo(() => {
     let keys = isMetricMode
       ? (metricColumnKeysByPreset[metricView?.columnPreset] || metricColumnKeysByPreset['metric-applications'])
-      : buildColumns(itemTypes);
+      : buildColumns(itemTypes, selectedBucketId);
     keys = ['watch', ...keys];
     const dedupedKeys = [];
     const seen = new Set();
@@ -1194,37 +1197,22 @@ const WorkQueueItemsTableWidget = ({
             ...base,
             header: 'Timeline target',
             width: widthOverride,
-            cell: item => {
-              const meta = computeSlaMeta(
+            cell: item => renderSlaBadge(
+              computeSlaMeta(
                 item,
                 slaTargets,
                 normalizeClosedStatus(item.status || 'submitted'),
                 Boolean(item.assigned_user_id)
-              );
-              const label = formatSlaTargetLabel(meta);
-              const title = `Timeline (${meta.stage || 'unknown'}): ${label} | Age: ${meta.ageDays ?? 'n/a'}d | Due: ${meta.due ? meta.due.toLocaleDateString() : 'n/a'}`;
-              const badge = (() => {
-                switch (meta.status) {
-                  case 'critical-overdue':
-                    return <Badge color="severity-critical">{label}</Badge>;
-                  case 'high-overdue':
-                    return <Badge color="severity-high">{label}</Badge>;
-                  case 'due-today':
-                    return <Badge color="severity-medium">{label}</Badge>;
-                  case 'due-soon':
-                    return <Badge color="severity-low">{label}</Badge>;
-                  case 'ok':
-                    return <Badge color="green">{label}</Badge>;
-                  default:
-                    return <Badge color="grey">{label || 'Unknown'}</Badge>;
-                }
-              })();
-              return (
-                <span title={title} aria-label={title}>
-                  {badge}
-                </span>
-              );
-            }
+              )
+            )
+          };
+        }
+        if (base.id === 'approvalQueuedAt' && !isMetricMode) {
+          return {
+            ...base,
+            header: 'Timeline target',
+            width: widthOverride,
+            cell: item => renderApprovalSlaBadge(computeApprovalSlaMeta(item, slaTargets))
           };
         }
         if (base.id === 'actions') {
@@ -1350,50 +1338,7 @@ const WorkQueueItemsTableWidget = ({
                         </SpaceBetween>
                       );
                     }
-                    if (item.type === 'AwaitingApproval') {
-                      return (
-                        <SpaceBetween size="xxs" direction="horizontal">
-                          <Link
-                            href="#"
-                            onFollow={event => {
-                              event.preventDefault();
-                              setDecisionTarget(item);
-                              setSelectedDecision(null);
-                              setDecisionReason('');
-                              setSelectedAssurance(null);
-                              setDecisionError(null);
-                              setPostingContextError(null);
-                              const existingPosting =
-                                item.assessment_posting_context ||
-                                item.postingContext ||
-                                item.posting_context ||
-                                null;
-                              const normalizedPosting =
-                                typeof existingPosting === 'string' && ['external', 'internal'].includes(existingPosting.trim().toLowerCase())
-                                  ? existingPosting.trim().toLowerCase()
-                                  : 'external';
-                              setPostingContextValue(isAssessor ? 'external' : normalizedPosting);
-                              const existingPotId = item.assessment_intervention_pot_id || item.assessment_budget_pot_id || null;
-                              setSelectedBudgetPot(
-                                existingPotId ? { value: String(existingPotId), label: String(existingPotId) } : null
-                              );
-                              setDecisionModalVisible(true);
-                              if (!budgetPotOptions.length) {
-                                setBudgetPotLoading(true);
-                                apiFetch('/api/reference/budget-pots-lite?chargeableOnly=1')
-                                  .then(res => (res.ok ? res.json() : []))
-                                  .then(list => setBudgetPotOptions(toBudgetPotOptions(list)))
-                                  .catch(() => setBudgetPotOptions([]))
-                                  .finally(() => setBudgetPotLoading(false));
-                              }
-                            }}
-                          >
-                            Make Decision
-                          </Link>
-                        </SpaceBetween>
-                      );
-                    }
-                    if (item.type === 'InterventionApproval') {
+                    if (item.bucketId === 'approvals' || item.type === 'AwaitingApproval' || item.type === 'InterventionApproval') {
                       return null;
                     }
                     if (item.bucketId === 'overdue') {
@@ -1432,7 +1377,6 @@ const WorkQueueItemsTableWidget = ({
     selectedBucketId,
     slaTargets,
     columnWidths,
-    budgetPotOptions.length,
     role,
     isAssessor,
     canManageEiEligibility,
@@ -1652,97 +1596,6 @@ const WorkQueueItemsTableWidget = ({
     }
   };
 
-  const handleDecisionSubmit = async () => {
-    const caseId = decisionTarget?.case_id || decisionTarget?.caseId;
-    const applicationId = decisionTarget?.application_id || decisionTarget?.applicationId;
-    const decisionValue = selectedDecision?.value;
-    const isApprove = decisionValue === 'approve';
-    const isReject = decisionValue === 'reject';
-    const isPushBack = decisionValue === 'push_back';
-    const assuranceValue = selectedAssurance?.value;
-    const potId = selectedBudgetPot?.value || null;
-    const postingContext = isAssessor ? 'external' : postingContextValue || 'external';
-    const assessmentEligibility = decisionTarget?.assessment_esdc_eligibility || null;
-    if (approvalThresholdBlocked && decisionValue === 'approve') {
-      setDecisionError(approvalBlockMessage || 'Approval not permitted.');
-      return;
-    }
-    const requiresBudgetPot = isApprove && hasInterventionCost;
-    const requiresAssurance = Boolean(decisionValue && !isPushBack);
-    const requiresReason = Boolean(isReject || isPushBack);
-    if (!caseId || !decisionValue || (requiresAssurance && !assuranceValue) || (requiresReason && !decisionReason.trim())) {
-      setDecisionError('Fill in all required fields.');
-      return;
-    }
-    if (requiresBudgetPot && !potId) {
-      setDecisionError('Select a budget pot for the intervention cost.');
-      return;
-    }
-    setDecisionSubmitting(true);
-    setDecisionError(null);
-    setPostingContextError(null);
-    try {
-      if (applicationId) {
-        await apiFetch(`/api/locks/application/${applicationId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({})
-        });
-      }
-      const payload = {
-        assessment_nwac_review_status: decisionValue,
-        assessment_nwac_review: requiresAssurance ? assuranceValue : null,
-        assessment_nwac_reason: requiresReason ? decisionReason : null,
-        assessment_intervention_pot_id: requiresBudgetPot ? potId : null,
-        assessment_esdc_eligibility: assessmentEligibility,
-        postingContext: requiresBudgetPot ? postingContext : null,
-        status: isApprove ? 'initiated' : 'in_review',
-        applicationStatus: (isApprove || isReject) ? 'decision_ready' : 'in_review'
-      };
-      const response = await apiFetch(`/api/cases/${caseId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!response.ok) {
-        let details = null;
-        try {
-          details = await response.json();
-        } catch (_) {
-          details = null;
-        }
-        const error = new Error(details?.message || 'Failed to save decision. Please try again.');
-        error.code = details?.error;
-        throw error;
-      }
-      if (applicationId) {
-        try {
-          await apiFetch(`/api/locks/application/${applicationId}`, { method: 'DELETE' });
-        } catch (_) {}
-      }
-      setDecisionModalVisible(false);
-      setDecisionTarget(null);
-      setSelectedDecision(null);
-      setDecisionReason('');
-      setSelectedAssurance(null);
-      setPostingContextValue('external');
-      setPostingContextError(null);
-      setSelectedBudgetPot(null);
-      if (typeof onRefresh === 'function') {
-        onRefresh();
-      }
-    } catch (err) {
-      if (['missing_internal_gl_code', 'missing_external_gl_code', 'posting_context_not_permitted'].includes(err?.code)) {
-        setPostingContextError(err?.message || 'Check Paid from selection.');
-        setDecisionError(null);
-      } else {
-        setDecisionError('Failed to save decision. Please try again.');
-      }
-    } finally {
-      setDecisionSubmitting(false);
-    }
-  };
-
   const handleResolveConfirm = async () => {
     if (!resolveTarget?.case_id || !resolveTarget?.staffProfileId) {
       setResolveTarget(null);
@@ -1793,9 +1646,9 @@ const WorkQueueItemsTableWidget = ({
             isMetricMode
               ? metricLoading
                 ? 'Loading metric results...'
-                : metricSummaryParts.join(' · ') || 'Metric drilldown results.'
+              : metricSummaryParts.join(' · ') || 'Metric drilldown results.'
               : selectedBucket
-                ? `${selectedBucket.description || selectedBucket.label} · ${tableItems.length} item(s)`
+                ? `${queueDescription} · ${tableItems.length} item(s)`
                 : 'Select a work queue to view its items.'
           }
         >
@@ -1944,136 +1797,6 @@ const WorkQueueItemsTableWidget = ({
           </SpaceBetween>
         </Modal>
       )}
-      <Modal
-        visible={decisionModalVisible}
-        onDismiss={() => {
-          setDecisionModalVisible(false);
-          setDecisionTarget(null);
-          setSelectedDecision(null);
-          setDecisionReason('');
-          setSelectedAssurance(null);
-          setPostingContextValue('external');
-          setPostingContextError(null);
-          setSelectedBudgetPot(null);
-          setDecisionError(null);
-        }}
-        header="Make Decision"
-        closeAriaLabel="Close decision modal"
-        footer={
-          <SpaceBetween size="xs" direction="horizontal">
-            <Button
-              onClick={() => {
-                setDecisionModalVisible(false);
-                setDecisionTarget(null);
-                setSelectedDecision(null);
-                setDecisionReason('');
-                setSelectedAssurance(null);
-                setPostingContextValue('external');
-                setPostingContextError(null);
-                setSelectedBudgetPot(null);
-                setDecisionError(null);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              loading={decisionSubmitting}
-              onClick={handleDecisionSubmit}
-            >
-              Save
-            </Button>
-          </SpaceBetween>
-        }
-      >
-        <SpaceBetween size="s">
-          {decisionError && <Box color="text-status-error">{decisionError}</Box>}
-          <FormField label="Funding Decision" stretch>
-            <Select
-              placeholder="Select decision"
-              selectedOption={selectedDecision}
-              onChange={({ detail }) => {
-                if (approvalThresholdBlocked && detail.selectedOption?.value === 'approve') {
-                  setDecisionError(approvalBlockMessage || 'Approval not permitted.');
-                  return;
-                }
-                if (detail.selectedOption?.value === 'push_back') {
-                  setSelectedAssurance(null);
-                }
-                setDecisionError(null);
-                setSelectedDecision(detail.selectedOption || null);
-              }}
-              options={[
-                { label: 'Approved', value: 'approve' },
-                { label: 'Not Approved', value: 'reject' },
-                { label: 'Push back to review', value: 'push_back' }
-              ]}
-            />
-          </FormField>
-          {['reject', 'push_back'].includes(selectedDecision?.value) && (
-            <FormField
-              label={selectedDecision?.value === 'push_back' ? 'Reason for push back' : 'Reason for not approving'}
-              stretch
-            >
-              <Textarea
-                value={decisionReason}
-                onChange={({ detail }) => setDecisionReason(detail.value)}
-                rows={3}
-              />
-            </FormField>
-          )}
-          {selectedDecision?.value !== 'push_back' && (
-            <FormField label="Assessment Assurance" stretch>
-              <Select
-                placeholder="Select assurance"
-                selectedOption={selectedAssurance}
-                onChange={({ detail }) => setSelectedAssurance(detail.selectedOption || null)}
-                options={[
-                  { label: 'Agree with recommendation', value: 'agree' },
-                  { label: 'Disagree with recommendation', value: 'disagree' }
-                ]}
-              />
-            </FormField>
-          )}
-          {selectedDecision?.value === 'approve' && hasInterventionCost && (
-            <>
-              <FormField
-                label="Budget Pot"
-                stretch
-                description={`Applicant province: ${applicantProvinceLabel} · Eligibility: ${applicantEligibilityLabel}`}
-              >
-                <Select
-                  placeholder={budgetPotLoading ? 'Loading budget pots' : 'Select budget pot'}
-                  selectedOption={selectedBudgetPot}
-                  options={budgetPotOptions}
-                  statusType={budgetPotLoading ? 'loading' : 'finished'}
-                  loadingText="Loading budget pots"
-                  onChange={({ detail }) => setSelectedBudgetPot(detail.selectedOption || null)}
-                  filteringType="auto"
-                />
-              </FormField>
-              <FormField label="Paid from" errorText={postingContextError} stretch>
-                {isAssessor ? (
-                  <Input value="External (region/PTMA)" readOnly disabled />
-                ) : (
-                  <RadioGroup
-                    direction="horizontal"
-                    value={postingContextValue}
-                    onChange={({ detail }) => {
-                      setPostingContextError(null);
-                      setPostingContextValue(detail.value || 'external');
-                    }}
-                    items={[
-                      { value: 'external', label: 'External (region/PTMA)' },
-                      { value: 'internal', label: 'Internal (NWAC)' }
-                    ]}
-                  />
-                )}
-              </FormField>
-            </>
-          )}
-        </SpaceBetween>
-      </Modal>
       <Modal
         visible={assignModalVisible}
         onDismiss={() => {

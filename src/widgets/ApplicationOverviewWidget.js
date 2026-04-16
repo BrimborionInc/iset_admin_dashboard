@@ -124,7 +124,9 @@ const getStatusInfo = (row) => {
   const fallbackStatus = row.case_id ? 'submitted' : 'new';
   const rawStatus = normalizeClosedStatus(applicationStatusRaw || caseStatusRaw || fallbackStatus);
   const label = rawStatus === 'rejected'
-    ? 'Not Approved'
+    ? 'Denied'
+    : rawStatus === 'decision_ready'
+      ? 'Decision Ready (Legacy)'
     : rawStatus
         .replace(/[_-]+/g, ' ')
         .replace(/\b\w/g, c => c.toUpperCase());
@@ -203,10 +205,10 @@ const APPLICATION_STATUS_OPTIONS = [
   { label: 'Action Required', value: 'docs_requested' },
   { label: 'Closure Notice', value: 'closure_notice' },
   { label: 'Pending Approval', value: 'pending_approval' },
-  { label: 'Decision Ready', value: 'decision_ready' },
+  { label: 'Decision Ready (Legacy)', value: 'decision_ready' },
   { label: 'Approved', value: 'approved' },
   { label: 'Completed', value: 'completed' },
-  { label: 'Not Approved', value: 'rejected' },
+  { label: 'Denied', value: 'rejected' },
   { label: 'Closed', value: 'closed' },
   { label: 'Archived', value: 'archived' },
 ];

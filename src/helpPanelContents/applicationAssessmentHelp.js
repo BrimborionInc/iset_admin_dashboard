@@ -149,9 +149,9 @@ export const NwacAssessmentHelp = ({ onRestartTutorial, onEndTutorial }) => {
         <Button onClick={handleEnd}>End</Button>
       </SpaceBetween>
       <ol>
-        <li>Select <strong>Approved</strong>, <strong>Not Approved</strong>, or <strong>Push back to coordinator</strong>.</li>
-        <li>Choose the <strong>Assessment Assurance</strong> outcome when approving or not approving.</li>
-        <li>Provide the <strong>Reason for Not Approving</strong> or <strong>Reason for Push Back</strong> when required.</li>
+        <li>Select <strong>Approved</strong>, <strong>Denied</strong>, or <strong>Request Changes</strong>.</li>
+        <li>Choose the <strong>Assessment Assurance</strong> outcome when approving or denying.</li>
+        <li>Provide the <strong>Reason for denial</strong> or <strong>Request Changes note</strong> when required.</li>
         <li>Click <em>Commit</em> to save the outcome, update status, and unlock the Communication step.</li>
       </ol>
 
@@ -177,10 +177,10 @@ export const NwacAssessmentHelp = ({ onRestartTutorial, onEndTutorial }) => {
 NwacAssessmentHelp.aiContext = `
 You are assisting an NWAC reviewer who is completing the outcome notice at the end of the Application Assessment widget.
 Explain how to record the funding decision, assurance outcome, and required reasons, and what happens when Commit is
-selected. Approved or Not Approved moves the application to decision ready and unlocks the Communication step; approvals
+selected. Approved or Denied moves the application to decision ready and unlocks the Communication step; approvals
 with funded cost lines then require completing Funding forms and signatures after the letter is sent, while zero-funding
 approvals send an intervention-focused approval letter without a funding package. Complete the application only when all
-required items are Complete, while denials complete after the letter is sent. Push back returns the assessment to the
+required items are Complete, while denials complete after the letter is sent. Request Changes returns the assessment to the
 coordinator for updates. Editing is disabled after a final decision unless
 reopening is permitted. Status and audit logs update automatically.
 `;

@@ -11,6 +11,7 @@ import SecureMessagingWidget from '../widgets/SecureMessagingWidget';
 import CaseNotesWidget from '../widgets/CaseNotesWidget';
 import ApplicationEvents from '../widgets/applicationEvents';
 import CaseCalendarWidget from '../widgets/CaseCalendarWidget';
+import { parseWorkspaceEntry } from '../utils/approvalWorkspaceEntry';
 
 const STORAGE_KEY = 'application-assessment-dashboard-layout.v2';
 const TUTORIAL_APP_LAYOUT_RESET_FLAG = 'iset.tutorial.resetApplicationLayout';
@@ -97,6 +98,13 @@ const reviewAssessmentLayout = [
   { id: 'application-overview', rowSpan: 3, columnSpan: 4 },
   { id: 'iset-application-form', rowSpan: 6, columnSpan: 2 },
   { id: 'coordinator-assessment', rowSpan: 6, columnSpan: 2 },
+];
+
+const approvalReviewLayout = [
+  { id: 'application-overview', rowSpan: 3, columnSpan: 4 },
+  { id: 'iset-application-form', rowSpan: 6, columnSpan: 2 },
+  { id: 'supporting-documents', rowSpan: 6, columnSpan: 2 },
+  { id: 'coordinator-assessment', rowSpan: 7, columnSpan: 4 },
 ];
 
 const documentsMessagesLayout = [
@@ -229,6 +237,9 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
   const paletteSignatureRef = useRef(JSON.stringify(computePaletteItems(layout)));
   const cacheRef = useRef(typeof window !== 'undefined' ? (window.__ISET_CASE_CACHE || (window.__ISET_CASE_CACHE = new Map())) : new Map());
   const inflightRef = useRef(typeof window !== 'undefined' ? (window.__ISET_CASE_INFLIGHT || (window.__ISET_CASE_INFLIGHT = new Map())) : new Map());
+  const approvalLayoutAppliedRef = useRef(null);
+  const workspaceEntry = useMemo(() => parseWorkspaceEntry(location.search), [location.search]);
+  const isApprovalEntry = workspaceEntry?.mode === 'approval' && workspaceEntry?.approvalType === 'application';
 
   const boardItems = useMemo(() => toBoardItems(layout), [layout]);
   const paletteItems = useMemo(() => computePaletteItems(layout), [layout]);
@@ -363,6 +374,14 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
       window.removeEventListener('applicationAssessment:set-layout', handleSetLayout);
     };
   }, [applyLayout, openPalette, resetLayout]);
+
+  useEffect(() => {
+    if (!isApprovalEntry) return;
+    const approvalKey = `${id}:${workspaceEntry.key}`;
+    if (approvalLayoutAppliedRef.current === approvalKey) return;
+    approvalLayoutAppliedRef.current = approvalKey;
+    applyLayout(approvalReviewLayout);
+  }, [applyLayout, id, isApprovalEntry, workspaceEntry]);
 
   const handleCaseUpdate = updates => {
     setCaseData(prev => {
@@ -585,6 +604,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
         actions={actions}
         application_id={caseData?.application_id ?? null}
         caseData={caseData}
+        workspaceEntry={workspaceEntry}
         toggleHelpPanel={toggleHelpPanel}
         assessorEmail={caseData?.assigned_user_email || null}
         refreshCaseData={refreshCaseData}

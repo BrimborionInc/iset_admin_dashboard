@@ -6,6 +6,8 @@ import { useAuth } from '../../context/AuthContext.js';
 import useCurrentUser from '../../hooks/useCurrentUser';
 import { getRoleDisplayName } from '../../utils/roleDisplay';
 import { formatSinDisplay } from '../../utils/applicantWatchlist';
+import { buildApprovalWorkspacePath } from '../../utils/approvalWorkspaceEntry';
+import { formatCurrencyDisplay } from '../../utils/currencyFormat';
 import {
     SLA_DEFAULT_DAYS,
     computeApplicationSlaMeta,
@@ -24,6 +26,66 @@ import SystemAdminAwsEnvironmentStatusWidget from './widgets/SystemAdminAwsEnvir
 import SystemAdminUsersAccessAlertsWidget from './widgets/SystemAdminUsersAccessAlertsWidget';
 import SystemAdminFeedbackQueueWidget from './widgets/SystemAdminFeedbackQueueWidget.jsx';
 import buildInfo from '../../generated/buildInfo';
+
+const buildApprovalInterventionBreakdownContent = row => {
+    const groups = Array.isArray(row?.interventionGroups)
+        ? row.interventionGroups
+        : Array.isArray(row?.intervention_groups)
+            ? row.intervention_groups
+            : [];
+    const normalizedGroups = groups
+        .map(group => {
+            if (!group || typeof group !== 'object') {
+                return null;
+            }
+            const paymentItems = Array.isArray(group.paymentItems)
+                ? group.paymentItems
+                : Array.isArray(group.payment_items)
+                    ? group.payment_items
+                    : [];
+            const fundedItems = paymentItems
+                .filter(item => Number.isFinite(Number(item?.amount)) && Number(item.amount) > 0)
+                .map(item => ({
+                    key: item.code || item.label || item.paymentType || item.payment_type || '',
+                    label: item.label || item.paymentTypeLabel || item.payment_type_label || item.paymentType || item.payment_type || '',
+                    amount: Number(item.amount),
+                }))
+                .filter(item => item.label);
+            if (!fundedItems.length) {
+                return null;
+            }
+            return {
+                key: group.code || group.label || '',
+                label: group.label || group.interventionLabel || group.intervention_label || 'Intervention',
+                paymentItems: fundedItems,
+            };
+        })
+        .filter(Boolean);
+    if (!normalizedGroups.length) {
+        return null;
+    }
+    return (
+        <SpaceBetween size="xxs">
+            {normalizedGroups.map((group, groupIndex) => (
+                <Box key={group.key || `${group.label}-${groupIndex}`} variant="small" color="text-body-secondary">
+                    <Box variant="small" color="text-body-secondary">{group.label}</Box>
+                    <SpaceBetween size="xxs">
+                        {group.paymentItems.map((item, itemIndex) => (
+                            <Box
+                                key={item.key || `${item.label}-${itemIndex}`}
+                                variant="small"
+                                color="text-body-secondary"
+                                margin={{ left: 's' }}
+                            >
+                                {item.label}: {formatCurrencyDisplay(item.amount)}
+                            </Box>
+                        ))}
+                    </SpaceBetween>
+                </Box>
+            ))}
+        </SpaceBetween>
+    );
+};
 
 const WIDGET_REGISTRY = {
     'program-admin-work-queue': {
@@ -2416,11 +2478,21 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         tracking ||
                         'Applicant';
                     const submitted = row.submittedAt || row.submitted_at || null;
+                    const approvalQueuedAt =
+                        row.approvalQueuedAt ||
+                        row.approval_queued_at ||
+                        row.updatedAt ||
+                        row.updated_at ||
+                        submitted;
+                    const interventionBreakdownContent = buildApprovalInterventionBreakdownContent(row);
+                    const caseId = row.caseId || row.case_id || null;
                     return {
                         id: tracking,
                         title: applicantName,
                         trackingId: tracking,
-                        case_id: row.caseId || row.case_id || null,
+                        titleSecondaryText: '',
+                        titleSecondaryContent: interventionBreakdownContent,
+                        case_id: caseId,
                         application_id: row.applicationId || row.application_id || null,
                         bucketId: 'approvals',
                         type: 'AwaitingApproval',
@@ -2435,13 +2507,24 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         intervention_code: row.intervention_code || null,
                         intervention_label: row.intervention_label || null,
                         intervention_cost_total: row.intervention_cost_total || null,
+                        interventionGroups: row.interventionGroups || row.intervention_groups || [],
+                        interventionSummaries: row.interventionSummaries || row.intervention_summaries || [],
                         intervention_start_date: row.intervention_start_date || null,
                         intervention_pot_id: row.intervention_pot_id || null,
+                        budgetPotCode: row.budgetPotCode || row.budget_pot_code || null,
+                        budget_pot_code: row.budgetPotCode || row.budget_pot_code || null,
                         assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                        approvalQueuedAt,
                         dueDate: null,
                         submittedAt: submitted,
                         summary: 'Awaiting program decision',
-                        workspacePath: row.caseId ? `/application-case/${row.caseId}` : '/case-assignment-dashboard'
+                        workspacePath: caseId
+                            ? buildApprovalWorkspacePath({
+                                basePath: `/application-case/${caseId}`,
+                                approvalType: 'application',
+                                step: 'decision'
+                            })
+                            : '/case-assignment-dashboard'
                     };
                 });
                 setProgramAdminItems(current => {
@@ -2493,13 +2576,25 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         row.interventionTitle ||
                         null;
                     const interventionId = row.interventionId || row.intervention_id || null;
+                    const actionPlanId = row.actionPlanId || row.action_plan_id || null;
                     const caseId = row.caseId || row.case_id || null;
+                    const approvalQueuedAt =
+                        row.approvalQueuedAt ||
+                        row.approval_queued_at ||
+                        row.submittedAt ||
+                        row.submitted_at ||
+                        null;
+                    const interventionBreakdownContent = buildApprovalInterventionBreakdownContent(row);
                     return {
                         id: interventionId ? `INT-${interventionId}` : String(tracking),
                         title: applicantName,
                         trackingId: tracking,
+                        titleSecondaryText: '',
+                        titleSecondaryContent: interventionBreakdownContent,
                         case_id: caseId,
                         application_id: row.applicationId || row.application_id || null,
+                        interventionId,
+                        actionPlanId,
                         bucketId: 'approvals',
                         type: 'InterventionApproval',
                         applicant: applicantName,
@@ -2512,11 +2607,25 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         intervention_code: row.intervention_code || null,
                         intervention_label: interventionLabel,
                         intervention_cost_total: row.intervention_cost_total || null,
+                        interventionGroups: row.interventionGroups || row.intervention_groups || [],
+                        interventionSummaries: row.interventionSummaries || row.intervention_summaries || [],
                         intervention_start_date: row.intervention_start_date || null,
+                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                        budgetPotCode: row.budgetPotCode || row.budget_pot_code || null,
+                        budget_pot_code: row.budgetPotCode || row.budget_pot_code || null,
+                        approvalQueuedAt,
                         dueDate: null,
                         submittedAt: row.submittedAt || row.submitted_at || null,
                         summary: 'Intervention proposal awaiting approval',
-                        workspacePath: caseId ? `/cases/${caseId}` : '/case-assignment-dashboard'
+                        workspacePath: caseId
+                            ? buildApprovalWorkspacePath({
+                                basePath: `/cases/${caseId}`,
+                                approvalType: 'intervention',
+                                step: 'decision',
+                                interventionId,
+                                planId: actionPlanId
+                            })
+                            : '/case-assignment-dashboard'
                     };
                 });
                 setProgramAdminItems(current => {

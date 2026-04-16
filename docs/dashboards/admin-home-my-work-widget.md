@@ -2,7 +2,7 @@
 
 Purpose: document the live homepage Work Queue widget and the queues that drive the shared `Work Queue Items` table.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-04-14
+Last Updated: 2026-04-15
 
 ## Scope
 
@@ -31,6 +31,15 @@ Last Updated: 2026-04-14
   - then sees the remaining shared admin/manager queue set
 - `ISET Coordinator`
   - sees the coordinator-specific queue set from `IsetCoordinatorWorkQueueWidget`
+
+## Current Approvals queue
+
+- The shared `Approvals` queue is visible to `NWAC Administrator` and `Regional Manager`.
+- It combines submitted application assessments with new intervention proposals waiting for decision.
+- Selecting `Approvals` drives the shared items table into `Approvals Items` mode rather than opening a separate widget.
+- Current detailed behavior for that table is documented in `docs/dashboards/admin-home-approvals-items-widget.md`.
+- Approval decisions are completed from the workspace after opening the selected row.
+- `Open workspace` now passes explicit approval-entry context so the target workspace opens in a review-focused board layout and the relevant decision step instead of restoring a stale personal board/wizard position.
 
 ## NWAC Administrator scope rule
 

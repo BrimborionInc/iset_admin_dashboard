@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import Board from "@cloudscape-design/board-components/board";
 import { Box, SpaceBetween } from "@cloudscape-design/components";
 import CaseHeaderWidget from "./caseWorkspace/widgets/CaseHeaderWidget.jsx";
@@ -33,6 +33,7 @@ import CaseWorkspaceHelp from "../../helpPanelContents/caseWorkspaceHelp.js";
 import { CaseWorkspaceProvider } from "./caseWorkspace/CaseWorkspaceContext.jsx";
 import { PaymentsDataProvider } from "../finance/widgets/PaymentsDataContext.jsx";
 import CaseApplicationEventsWidget from "./caseWorkspace/widgets/CaseApplicationEventsWidget.jsx";
+import { parseWorkspaceEntry } from "../../utils/approvalWorkspaceEntry.js";
 
 const STORAGE_KEY = "iset-case-workspace-layout-v14";
 const TUTORIAL_CASE_LAYOUT_RESET_FLAG = "iset.tutorial.resetCaseWorkspaceLayout";
@@ -219,6 +220,13 @@ const interventionWorkflowLayout = [
   { id: "interventions", rowSpan: 4, columnSpan: 2 },
 ];
 
+const interventionApprovalLayout = [
+  { id: "caseHeader", rowSpan: 3, columnSpan: 4 },
+  { id: "interventionAssessment", rowSpan: 6, columnSpan: 4 },
+  { id: "participantDetails", rowSpan: 6, columnSpan: 2 },
+  { id: "supporting-documents", rowSpan: 6, columnSpan: 2 },
+];
+
 const managePlansLayout = [
   { id: "caseHeader", rowSpan: 3, columnSpan: 4 },
   { id: "actionPlans", rowSpan: 3, columnSpan: 4 },
@@ -385,11 +393,16 @@ const CaseWorkspacePage = ({
   toggleHelpPanel,
 }) => {
   const { caseId } = useParams();
+  const location = useLocation();
   const paymentFilters = useMemo(() => (caseId ? { caseId } : {}), [caseId]);
   const [layout, setLayout] = useState(() => loadLayoutFromStorage() ?? [...defaultLayout]);
   const boardItems = useMemo(() => toBoardItems(layout), [layout]);
   const paletteItems = useMemo(() => computePaletteItems(boardItems), [boardItems]);
   const paletteSignatureRef = useRef(JSON.stringify(paletteItems.map(item => item.id)));
+  const approvalLayoutAppliedRef = useRef(null);
+  const workspaceEntry = useMemo(() => parseWorkspaceEntry(location.search), [location.search]);
+  const isInterventionApprovalEntry =
+    workspaceEntry?.mode === "approval" && workspaceEntry?.approvalType === "intervention";
 
   useEffect(() => {
     if (typeof updateBreadcrumbs === "function") {
@@ -451,11 +464,12 @@ const CaseWorkspacePage = ({
         <WidgetComponent
           actions={enhancedActions}
           metadata={item.data}
+          workspaceEntry={workspaceEntry}
           toggleHelpPanel={toggleHelpPanel}
         />
       );
     },
-    [setLayout, toggleHelpPanel]
+    [setLayout, toggleHelpPanel, workspaceEntry]
   );
 
   const resetLayout = useCallback(() => {
@@ -559,6 +573,14 @@ const CaseWorkspacePage = ({
       window.removeEventListener("iset-case-workspace:add-widget", addWidgetHandler);
     };
   }, [addWidgetToLayout, applyLayout, openPalette, resetLayout]);
+
+  useEffect(() => {
+    if (!isInterventionApprovalEntry) return;
+    const approvalKey = `${caseId}:${workspaceEntry.key}`;
+    if (approvalLayoutAppliedRef.current === approvalKey) return;
+    approvalLayoutAppliedRef.current = approvalKey;
+    applyLayout(interventionApprovalLayout);
+  }, [applyLayout, caseId, isInterventionApprovalEntry, workspaceEntry]);
 
   return (
     <CaseWorkspaceProvider caseId={caseId}>

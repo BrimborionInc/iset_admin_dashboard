@@ -7,7 +7,7 @@ This document captures the end-to-end status model in the ISET admin dashboard a
 ## 1. Overview
 - **Applications** track the intake lifecycle (`iset_application.status`). These reflect program decisions and remain separate from casework.
 - **Application SLA stages** are derived, not stored. PATH currently chooses the active SLA milestone from application status, assignment state, and `assessment_esdc_eligibility`.
-- **Document requests** are tracked independently on `iset_application` so they can overlap any application status (e.g., `decision_ready` + docs requested).
+- **Document requests** are tracked independently on `iset_application` so they can overlap any application status (e.g., `approved` + docs requested).
 - **Cases** represent the ongoing service relationship (`iset_case.status`). The status is derived from application state and action plan activity via `recomputeCaseStatus`.
 - **Action plans** and **interventions** retain their own lifecycle fields; the case status derives from the aggregate state of action plans.
 - All primary APIs now return both application and case statuses so widgets can render the correct context without guessing.
@@ -26,9 +26,9 @@ Stored in `iset_application.status` (varchar). Canonical values:
 | `docs_requested` (aka “Action Required”) | Additional information is needed from the applicant. | Manual status update from Application Overview widget. |
 | `closure_notice` | Closure notice sent; awaiting applicant response before closing. | Application Overview quick action. |
 | `pending_approval` | Assessor submitted their review; awaiting NWAC outcome decision. | `CoordinatorAssessmentWidget.handleSubmit`. |
-| `approved` | NWAC outcome marked as approved. | `CoordinatorAssessmentWidget.handleComplete` with `approve`. |
-| `completed` | Post-approval processing completed (future use). | Finance/closure flows. |
-| `rejected` | NWAC outcome rejected. | `CoordinatorAssessmentWidget.handleCommunicationComplete` after the denial letter is sent. |
+| `approved` | NWAC outcome approved; approval correspondence and funding-signature follow-up may still be outstanding. | `CoordinatorAssessmentWidget.handleComplete` with `approve`. |
+| `completed` | Post-approval correspondence and required funding-form/signature follow-up are complete. | `CoordinatorAssessmentWidget.handleFundingDocsComplete`. |
+| `rejected` | NWAC outcome denied. | `CoordinatorAssessmentWidget.handleComplete` with `reject`, or legacy denial records finalized in `handleCommunicationComplete`. |
 | `declined` | Legacy decision status treated as rejected/terminal. | Legacy/imported records. |
 | `cancelled` | Legacy terminal status for cancelled applications. | Legacy/imported records. |
 | `closed` | Application closed (e.g., applicant withdrew or file closed administratively). | Manual status change or automation. |
@@ -63,7 +63,7 @@ PATH currently derives the active application SLA stage from live record state r
 | `assignment` | File is still unassigned. | `getApplicationSlaStageKey()` / `src/utils/applicationSla.js` |
 | `ei_status_verification` | File is assigned and `assessment_esdc_eligibility` is still blank while the application remains in pre-decision review. | same |
 | `assessment` | EI status has been recorded and the file is still in active assessment/hold review. | same |
-| `program_decision` | Application status is `pending_approval` or `decision_ready`. | same |
+| `program_decision` | Application status is `pending_approval` (plus legacy `decision_ready` rows). | same |
 
 Current implementation note:
 - Due/overdue milestones are still anchored to the original application submission/creation timestamp.
@@ -122,7 +122,7 @@ The intervention status set is now canonical and single-source. `approved` is th
 ### 3.1 Application → Case Interactions
 1. **Submission** (`submitted`): auto-created `iset_case` row defaults to `pending_approval`.
 2. **Assessment Submitted** (`pending_approval`): triggered in `CoordinatorAssessmentWidget.handleSubmit`, which sends `status: 'pending_approval'` via `PUT /api/cases/:id`. Backend persists the new application status and recalculates action plan-derived case status (which typically remains `pending_approval` until approval).
-3. **Outcome Decision** (`approved` / `rejected`): `handleComplete` records the decision and moves the application to `decision_ready`. For denials, the application status moves to `rejected` only after the denial letter is sent in the communication step; approvals continue to follow the approval/funding-docs path. When the outcome is **approved** the server also seeds an initial action plan and intervention from the NWAC recommendation. As of 2026‑03 the auto-generated plan always starts in `draft` (regardless of the recommended start date) and the intervention in `approved`, keeping the case in `initiated` until a caseworker explicitly activates the plan.
+3. **Outcome Decision** (`approved` / `rejected`): `handleComplete` records the decision immediately on the application. Approvals now move the application to `approved`; denials now move it to `rejected`; `Request Changes` returns the application to `in_review`. The approved path still continues through approval correspondence and any required funding-form/signature follow-up before the application moves to `completed`. When the outcome is **approved** the case moves to `initiated`; when the outcome is **rejected** the case moves to `rejected`. Legacy `decision_ready` rows are still supported as a compatibility state while correspondence is completed.
 4. **Manual Overrides**: The Application Overview widget can POST/PUT `status` changes via `PUT /api/cases/:id`. The manual status selector is currently exposed to `System Administrator` and `NWAC Administrator` users. Locks ensure only one user manipulates state at a time.
 5. **Secure Messaging with forms**: Sending a secure message with attached forms from the Application Workspace while status is `submitted` or `in_review` sets `docs_requested_active` and updates the application status to `docs_requested` so the applicant action is still visible.
 6. **Manual doc-request toggle**: The Application Overview widget can set/clear `docs_requested_active` without changing application status, and the secure-message flow auto-clears document requests once all signing requests are complete.

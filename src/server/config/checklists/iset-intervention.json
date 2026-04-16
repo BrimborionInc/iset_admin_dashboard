@@ -310,7 +310,9 @@
       "label": "Gate 4 - Deny",
       "statusScope": "application",
       "statuses": [
-        "closure_notice"
+        "closure_notice",
+        "rejected",
+        "declined"
       ],
       "items": [
         {
@@ -333,8 +335,7 @@
       "label": "Gate 5 - Approve",
       "statusScope": "application",
       "statuses": [
-        "pending_approval",
-        "decision_ready"
+        "pending_approval"
       ],
       "items": [
         {
@@ -357,7 +358,9 @@
       "label": "Gate 6 - Approve and Commence",
       "statusScope": "application",
       "statuses": [
-        "decision_ready"
+        "decision_ready",
+        "approved",
+        "completed"
       ],
       "items": [
         {

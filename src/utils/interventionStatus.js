@@ -62,6 +62,8 @@ export const formatInterventionStatusLabel = value => {
       .toLowerCase()
       .replace(/[\s-]+/g, "_");
   if (!normalized) return "-";
+  if (normalized === "rejected") return "Denied";
+  if (normalized === "changes_requested") return "Request Changes";
   return normalized
     .replace(/_/g, " ")
     .replace(/\b\w/g, char => char.toUpperCase());

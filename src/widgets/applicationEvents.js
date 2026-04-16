@@ -15,10 +15,10 @@ const STATUS_LABELS = {
   action_required: 'Action Required',
   closure_notice: 'Closure Notice',
   'closure notice': 'Closure Notice',
-  decision_ready: 'Decision Ready',
+  decision_ready: 'Decision Ready (Legacy)',
   approved: 'Approved',
   completed: 'Completed',
-  rejected: 'Not Approved',
+  rejected: 'Denied',
   closed: 'Closed',
   withdrawn: 'Closed',
   archived: 'Archived'

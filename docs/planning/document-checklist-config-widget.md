@@ -46,7 +46,7 @@ Last Updated: 2026-01-20
   `submitted`, `in_review`, `docs_requested` (plus hold aliases like `action_required`, `pending info`,
   `information requested`, `on_hold`), `closure_notice`.
 - `pending_approval` should use the same checklist as "Needed to Submit Assessment" (not the funding gate).
-- Application gate mapping (Needed to Enable Funding): apply when application_status is `decision_ready` only (ignore `approved` since it is not set in normal flow).
+- Application gate mapping (Needed to Enable Funding): apply when application_status is `approved` in the normal flow, while still accepting legacy `decision_ready` rows during cleanup.
 - Application "Needed to Release Payments" gate should be driven by case status (not application status).
 - Terminal case statuses (`closed`, `archived`) should not have checklists.
 - Application "Needed to Release Payments" gate applies when case status is `initiated`, `active`, `dormant`, or `ready_to_close`.

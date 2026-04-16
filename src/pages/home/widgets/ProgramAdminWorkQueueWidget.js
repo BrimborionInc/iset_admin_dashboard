@@ -41,7 +41,7 @@ export const PROGRAM_ADMIN_BUCKETS = [
   {
     id: 'approvals',
     label: 'Approvals',
-    description: 'Applications and intervention proposals waiting for your decision.'
+    description: 'Submitted application assessments and new intervention proposals waiting for your decision.'
   },
   {
     id: 'payments-issues',

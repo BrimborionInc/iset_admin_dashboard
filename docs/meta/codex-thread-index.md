@@ -2,7 +2,7 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-04-14
+Last Updated: 2026-04-15
 
 ## How to use
 
@@ -443,6 +443,20 @@ For each indexed thread/topic, keep:
   - `sql/migrations/20260406_0001_rebuild_applicant_watchlist.sql`
 - Status: current as of 2026-04-06
 - Notes: durable decisions from this thread: the direct manager route is `/configuration/applicant-watchlist`; default access is `System Administrator` plus `NWAC Administrator` through the standard access-control matrix; the contextual case/application quick actions remain broadly available; removal is `inactive`, not hard delete; the canonical schema now stores 9-digit SIN values plus `status`, `updated_by_staff_profile_id`, `deactivated_at`, and `deactivated_by_staff_profile_id`; homepage watchlist-hit matching now uses active entries only; watchlist events are shared events (`added`, `updated`, `removed`, `hit`); hit events are emitted from both admin manual intake and the public intake completion path; and generic event-feed access is filtered so users without dashboard access cannot retrieve watchlist activity by probing the event feed.
+
+### Approvals queue workspace launch behavior
+
+- Codex task title: `exact original task title not preserved`
+- Topic: making homepage approval rows open the correct application/case workspace layout, select the correct approval record, and land the wizard on the decision step
+- Keywords: `Approvals queue`, `Open workspace`, `approval layout`, `Approval and decision`, `Record of decision`, `approval workspace entry`, `selected proposal`, `stale board`, `stale wizard step`
+- When to open: the user asks why an approver lands on the wrong board or wrong wizard step after opening an item from the homepage `Approvals` queue, asks how PATH now ensures the correct intervention proposal is selected from the queue, or asks where the approval-entry routing contract is documented
+- Primary docs:
+  - `docs/dashboards/admin-home-approvals-items-widget.md`
+  - `docs/dashboards/admin-home-my-work-widget.md`
+  - `docs/AGENTS.md`
+  - `src/utils/approvalWorkspaceEntry.js`
+- Status: current as of 2026-04-15
+- Notes: durable outcomes from this thread: the homepage `Approvals` queue now opens application approvals with an explicit approval-entry URL (`entry=approval&approvalType=application&step=decision`) so the application workspace switches to an approval-review layout and `CoordinatorAssessmentWidget` lands on `Approval and decision` instead of restoring the last saved wizard step. Intervention approvals now carry `interventionId` and `planId` in the queue-to-workspace handoff so the case workspace opens an approval-review layout, selects the correct submitted proposal, and loads `InterventionAssessmentWidget` at `Record of decision`. The intervention approval path now treats `Record of decision` as the approval commit point, uses `Approved`, `Denied`, and `Request Changes` as the visible decision labels, and keeps decision-letter preparation separate from the stepper as a post-decision follow-up. The shared fallback helper for `Open workspace` now understands approval rows too, so queue items still route correctly even if a caller does not precompute `workspacePath`.
 
 ## Future improvements
 

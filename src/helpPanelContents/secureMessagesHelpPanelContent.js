@@ -17,6 +17,8 @@ const SecureMessagesHelpPanelContent = () => (
       </li>
       <li>
         <strong>Sent:</strong> Outgoing messages you or your teammates have delivered to the applicant.
+        The status in this tab shows whether the message is only sent, read by the applicant, or
+        followed by an applicant reply.
       </li>
       <li>
         <strong>Deleted:</strong> Items you have archived. Empty this tab to permanently remove sensitive
@@ -56,7 +58,7 @@ const SecureMessagesHelpPanelContent = () => (
 
 SecureMessagesHelpPanelContent.aiContext = `
 You are assisting an ISET staff member using the Secure Messaging widget. Explain the purpose of each tab, how to
-compose and manage messages, search/filter the inbox, and what happens to attachments. Clarify that attachments are adopted into Supporting Documents (labels can be edited there). Highlight best practices for urgency flags and for emptying deleted items (type "delete" to confirm).
+compose and manage messages, search/filter the inbox, and what happens to attachments. Clarify that attachments are adopted into Supporting Documents (labels can be edited there). Explain that Sent status shows applicant state (Sent, Read by applicant, Applicant replied), while Inbox unread/read reflects the current staff viewer's mailbox state. Highlight best practices for urgency flags and for emptying deleted items (type "delete" to confirm).
 
 When relevant, frame messaging as part of staff workflow: acknowledge applications, request missing information, follow up with applicants, and keep important outcomes reflected in the case notes as well.
 `;

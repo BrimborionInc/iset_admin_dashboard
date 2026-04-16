@@ -91,7 +91,7 @@ const getStatusDisplayLabel = item => {
   return formatInterventionStatusLabel(item?.status);
 };
 const isDraftStatus = status => normalizeInterventionStatus(status) === "draft";
-const isBlockingProposalStatus = status => ["draft", "submitted"].includes(normalizeInterventionStatus(status));
+const isBlockingProposalStatus = status => isInterventionProposalStatus(status);
 const isRevisionEligibleStatus = status =>
   ["approved", "in_progress", "suspended"].includes(normalizeInterventionStatus(status, null));
 
@@ -163,7 +163,7 @@ const STATUS_FILTER_OPTIONS = [
   { id: "all", text: "All" },
   { id: "draft", text: "Draft" },
   { id: "submitted", text: "Submitted" },
-  { id: "rejected", text: "Rejected" },
+  { id: "rejected", text: "Denied" },
   { id: "approved", text: "Approved" },
   { id: "in_progress", text: "In progress" },
   { id: "closed", text: "Closed" },
@@ -747,7 +747,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       return;
     }
     if (hasBlockingProposal) {
-      setErrorMessage("A draft or submitted proposal already exists. Resume it from the table.");
+      setErrorMessage("A proposal is already in progress. Resume it from the table.");
       return;
     }
     setStartInCloseMode(false);
@@ -946,7 +946,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         return;
       }
       if (hasOpenProposal) {
-        setErrorMessage("A draft or submitted proposal already exists. Resume it from the table.");
+        setErrorMessage("A proposal is already in progress. Resume it from the table.");
         return;
       }
       try {
@@ -1330,7 +1330,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         )}
         {hasBlockingProposal && (
           <Alert type="info" header="Proposal in progress">
-            A draft or submitted proposal already exists for this case. Resume it from the table before starting another.
+            A proposal is already in progress for this case. Resume it from the table before starting another.
           </Alert>
         )}
         {activePlan ? (
@@ -1418,7 +1418,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         <SpaceBetween size="s">
           <Box>
             Delete this intervention? Draft, submitted, in-review, changes requested, approved,
-            and rejected interventions can be deleted. Deleting will also remove any draft payment packages
+            and denied interventions can be deleted. Deleting will also remove any draft payment packages
             and budget cost items tied to this intervention. Active or closed interventions should be closed
             instead to maintain history.
           </Box>

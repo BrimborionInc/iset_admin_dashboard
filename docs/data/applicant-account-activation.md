@@ -51,6 +51,41 @@ Columns:
 - `metadata_json`
 - `created_at`
 
+## `applicant_password_reset_request_audit`
+
+`applicant_password_reset_request_audit` stores public-portal password-reset request attempts for later investigation.
+
+Current sources:
+
+- `/forgot-password`
+- `/activate-account`
+- `/reset-password` resend
+
+Columns:
+
+- `id`
+- `email`
+- `request_route`
+- `request_flow`
+- `source_ip`
+- `user_agent`
+- `outcome`
+- `metadata_json`
+- `created_at`
+
+Current outcome values written by the portal:
+
+- `submitted`
+- `rate_limited`
+- `daily_limit_exceeded`
+- `cognito_error`
+
+Notes:
+
+- The audit row is written by the portal server when `/api/auth/forgot-password` is called.
+- Route attribution is explicit from the frontend, so activation traffic is distinguishable from normal forgot-password traffic after the fact.
+- `metadata_json` may include small delivery or Cognito error details to help explain whether the reset request actually reached Cognito.
+
 ## Import behavior
 
 Client-file import may create client/case records without creating an applicant account.

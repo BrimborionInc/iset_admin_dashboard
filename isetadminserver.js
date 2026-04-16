@@ -11328,6 +11328,112 @@ async function fetchInterventionCodeLabels(connection, codes = []) {
   return labels;
 }
 
+const buildApprovalInterventionSummaries = ({
+  proposedInterventions = [],
+  labelMap = new Map(),
+  fallbackCode = null,
+  fallbackLabel = null,
+  fallbackCost = null,
+} = {}) => {
+  const summaries = Array.isArray(proposedInterventions)
+    ? proposedInterventions
+        .map((entry, index) => {
+          if (!entry || typeof entry !== 'object') return null;
+          const code = entry.code != null ? String(entry.code).trim() : null;
+          const resolvedLabel =
+            (code ? labelMap.get(code) : null) ||
+            normaliseString(entry.label ?? entry.interventionLabel ?? entry.intervention_label ?? null) ||
+            (index === 0 ? normaliseString(fallbackLabel) : null);
+          const amountCandidate =
+            entry.costTotal ??
+            entry.totalCost ??
+            entry.cost ??
+            entry.interventionCost ??
+            entry.intervention_cost ??
+            null;
+          const amount = parseCurrencyValue(amountCandidate);
+          if (!resolvedLabel && !Number.isFinite(amount)) {
+            return null;
+          }
+          return {
+            code: code || null,
+            label: resolvedLabel || (index === 0 ? normaliseString(fallbackLabel) : null),
+            amount: Number.isFinite(amount) ? amount : null,
+          };
+        })
+        .filter(Boolean)
+    : [];
+  if (summaries.length) {
+    return summaries;
+  }
+
+  const fallbackAmount = parseCurrencyValue(fallbackCost);
+  const normalizedFallbackLabel = normaliseString(fallbackLabel);
+  const normalizedFallbackCode = fallbackCode != null ? String(fallbackCode).trim() : null;
+  const resolvedFallbackLabel =
+    (normalizedFallbackCode ? labelMap.get(normalizedFallbackCode) : null) ||
+    normalizedFallbackLabel ||
+    null;
+  if (!resolvedFallbackLabel && !Number.isFinite(fallbackAmount)) {
+    return [];
+  }
+  return [{
+    code: normalizedFallbackCode || null,
+    label: resolvedFallbackLabel,
+    amount: Number.isFinite(fallbackAmount) ? fallbackAmount : null,
+  }];
+};
+
+const buildApprovalInterventionGroups = ({
+  proposedInterventions = [],
+  labelMap = new Map(),
+  fallbackCode = null,
+  fallbackLabel = null,
+} = {}) => {
+  const groups = Array.isArray(proposedInterventions)
+    ? proposedInterventions
+        .map((entry, index) => {
+          if (!entry || typeof entry !== 'object') return null;
+          const code = entry.code != null ? String(entry.code).trim() : null;
+          const label =
+            (code ? labelMap.get(code) : null) ||
+            normaliseString(entry.label ?? entry.interventionLabel ?? entry.intervention_label ?? null) ||
+            (index === 0 ? normaliseString(fallbackLabel) : null) ||
+            (index === 0 && fallbackCode != null ? labelMap.get(String(fallbackCode).trim()) : null) ||
+            null;
+          const costLines = Array.isArray(entry.costLines) ? entry.costLines : [];
+          const paymentItemsMap = new Map();
+          costLines.forEach(line => {
+            const amount = parseCurrencyValue(line?.amount);
+            if (!Number.isFinite(amount) || amount <= 0) return;
+            const paymentTypeCode = normalizePaymentTypeCode(line?.type) || normaliseString(line?.type) || null;
+            const paymentTypeLabel = resolvePaymentTypeLabel(paymentTypeCode || line?.type);
+            if (!paymentTypeLabel) return;
+            const key = paymentTypeCode || paymentTypeLabel;
+            const current = paymentItemsMap.get(key);
+            if (current) {
+              current.amount += amount;
+              return;
+            }
+            paymentItemsMap.set(key, {
+              code: paymentTypeCode || null,
+              label: paymentTypeLabel,
+              amount,
+            });
+          });
+          const paymentItems = Array.from(paymentItemsMap.values());
+          if (!label || !paymentItems.length) return null;
+          return {
+            code: code || null,
+            label,
+            paymentItems,
+          };
+        })
+        .filter(Boolean)
+    : [];
+  return groups;
+};
+
 async function moveApplicationDocumentsToIntervention(connection, {
   caseId,
   applicationId,
@@ -31895,6 +32001,7 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
       a.id AS application_id,
       a.status AS application_status,
       a.created_at AS submitted_at,
+      a.updated_at AS approval_queued_at,
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
       c.assigned_to_user_id,
       sp.email AS assigned_user_email,
@@ -31906,6 +32013,8 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
       ca.intervention_cost_total,
       ca.intervention_start_date,
       ca.intervention_budget_pot_id,
+      ca.proposed_interventions,
+      bp.code AS budget_pot_code,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"first-name\"')) AS submission_first_name,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"last-name\"')) AS submission_last_name,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
@@ -31917,13 +32026,42 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
     LEFT JOIN esdc_intervention_code ic ON ic.code = ca.intervention_code
+    LEFT JOIN budget_pot bp ON bp.id = ca.intervention_budget_pot_id
     ${where}
-    ORDER BY a.created_at DESC
+    ORDER BY a.updated_at DESC, a.created_at DESC
     LIMIT 200
   `;
   try {
     const [rows] = await pool.query(sql, params);
-    const items = Array.isArray(rows) ? rows.map(r => {
+    const assessmentInterventionsByRow = new Map();
+    const interventionCodes = new Set();
+    (Array.isArray(rows) ? rows : []).forEach((row, index) => {
+      const proposedInterventions = normalizeAssessmentProposedInterventions(row?.proposed_interventions);
+      assessmentInterventionsByRow.set(index, proposedInterventions);
+      proposedInterventions.forEach(entry => {
+        if (entry?.code) {
+          interventionCodes.add(String(entry.code));
+        }
+      });
+      if (row?.intervention_code != null) {
+        interventionCodes.add(String(row.intervention_code));
+      }
+    });
+    const interventionLabelMap = await fetchInterventionCodeLabels(pool, Array.from(interventionCodes));
+    const items = Array.isArray(rows) ? rows.map((r, rowIndex) => {
+      const interventionSummaries = buildApprovalInterventionSummaries({
+        proposedInterventions: assessmentInterventionsByRow.get(rowIndex) || [],
+        labelMap: interventionLabelMap,
+        fallbackCode: r.intervention_code,
+        fallbackLabel: r.intervention_label,
+        fallbackCost: r.intervention_cost_total,
+      });
+      const interventionGroups = buildApprovalInterventionGroups({
+        proposedInterventions: assessmentInterventionsByRow.get(rowIndex) || [],
+        labelMap: interventionLabelMap,
+        fallbackCode: r.intervention_code,
+        fallbackLabel: r.intervention_label,
+      });
       const preferred = normaliseString(r.submission_preferred_name);
       const first = normaliseString(r.submission_first_name);
       const last = normaliseString(r.submission_last_name);
@@ -31939,6 +32077,7 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
         address_province: normaliseString(r.submission_address_province) || null,
         status: normaliseString(r.application_status) || null,
         submittedAt: r.submitted_at ? new Date(r.submitted_at).toISOString() : null,
+        approvalQueuedAt: r.approval_queued_at ? new Date(r.approval_queued_at).toISOString() : null,
         owner: r.assigned_user_email || null,
         assigned_user_id: r.assigned_to_user_id || null,
         assigned_user_email: r.assigned_user_email || null,
@@ -31948,8 +32087,14 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
         intervention_code: r.intervention_code || null,
         intervention_label: r.intervention_label || null,
         intervention_cost_total: r.intervention_cost_total || null,
+        interventionGroups,
+        intervention_groups: interventionGroups,
+        interventionSummaries,
+        intervention_summaries: interventionSummaries,
         intervention_start_date: r.intervention_start_date || null,
         intervention_pot_id: r.intervention_pot_id || null,
+        budgetPotCode: normaliseString(r.budget_pot_code) || null,
+        budget_pot_code: normaliseString(r.budget_pot_code) || null,
         assessment_esdc_eligibility: r.assessment_esdc_eligibility || null
       };
     }) : [];
@@ -32234,6 +32379,7 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
       ci.case_id,
       ci.action_plan_id,
       ci.intervention_code AS intervention_code,
+      ci.metadata_json,
       JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.title')) AS intervention_title,
       ci.status AS intervention_status,
       ci.start_date AS intervention_start_date,
@@ -32244,6 +32390,8 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
       sp.email AS assigned_user_email,
       sp.primary_role AS assigned_user_role,
       sp.region_id AS assigned_user_region_id,
+      ca.esdc_eligibility AS assessment_esdc_eligibility,
+      bp.code AS budget_pot_code,
       a.id AS application_id,
       c.case_context_json,
       cl.first_name AS client_first_name,
@@ -32258,18 +32406,39 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
       ic.label AS intervention_label
     FROM iset_case_intervention ci
     JOIN iset_case c ON c.id = ci.case_id
+    LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
+    LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
     LEFT JOIN client cl ON cl.id = c.client_id
     LEFT JOIN iset_application a ON c.application_id = a.id
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
     LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
+    LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
     ${where}
     ORDER BY ci.updated_at DESC, ci.created_at DESC
     LIMIT 200
   `;
   try {
     const [rows] = await pool.query(sql, params);
-    const items = Array.isArray(rows) ? rows.map(r => {
+    const proposalInterventionsByRow = new Map();
+    const interventionCodes = new Set();
+    (Array.isArray(rows) ? rows : []).forEach((row, index) => {
+      const metadata = safeJsonParse(row?.metadata_json, {}) || {};
+      const proposedInterventions = normalizeAssessmentProposedInterventions(
+        metadata?.proposedInterventions ?? metadata?.proposed_interventions ?? null
+      );
+      proposalInterventionsByRow.set(index, proposedInterventions);
+      proposedInterventions.forEach(entry => {
+        if (entry?.code) {
+          interventionCodes.add(String(entry.code));
+        }
+      });
+      if (row?.intervention_code != null) {
+        interventionCodes.add(String(row.intervention_code));
+      }
+    });
+    const interventionLabelMap = await fetchInterventionCodeLabels(pool, Array.from(interventionCodes));
+    const items = Array.isArray(rows) ? rows.map((r, rowIndex) => {
       const caseContext = safeJsonParse(r.case_context_json, null) || {};
       const contextPersonal = caseContext?.applicationPersonal || {};
       const contextAnswers = caseContext?.applicationAnswers || {};
@@ -32309,11 +32478,25 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
         normaliseString(r.case_number) ||
         'Applicant';
       const interventionLabel = normaliseString(r.intervention_label) || normaliseString(r.intervention_title) || null;
+      const interventionGroups = buildApprovalInterventionGroups({
+        proposedInterventions: proposalInterventionsByRow.get(rowIndex) || [],
+        labelMap: interventionLabelMap,
+        fallbackCode: r.intervention_code,
+        fallbackLabel: interventionLabel,
+      });
+      const interventionSummaries = buildApprovalInterventionSummaries({
+        proposedInterventions: proposalInterventionsByRow.get(rowIndex) || [],
+        labelMap: interventionLabelMap,
+        fallbackCode: r.intervention_code,
+        fallbackLabel: interventionLabel,
+        fallbackCost: r.intervention_cost_total,
+      });
       return {
         interventionId: r.intervention_id || null,
         caseId: r.case_id || null,
         caseNumber: r.case_number || null,
         applicationId: r.application_id || null,
+        actionPlanId: r.action_plan_id || null,
         trackingId: r.tracking_id || null,
         applicantName,
         applicant_name: applicantName,
@@ -32328,7 +32511,14 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
         intervention_code: r.intervention_code || null,
         intervention_label: interventionLabel,
         intervention_cost_total: r.intervention_cost_total || null,
-        intervention_start_date: r.intervention_start_date || null
+        interventionGroups,
+        intervention_groups: interventionGroups,
+        interventionSummaries,
+        intervention_summaries: interventionSummaries,
+        intervention_start_date: r.intervention_start_date || null,
+        assessment_esdc_eligibility: r.assessment_esdc_eligibility || null,
+        budgetPotCode: normaliseString(r.budget_pot_code) || null,
+        budget_pot_code: normaliseString(r.budget_pot_code) || null
       };
     }) : [];
     return res.json({ role, regionId: regionId ?? null, regionIds: regionIds.length ? regionIds : null, items });
@@ -39625,12 +39815,15 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
     const isTrainingProgram = trainingProgramSet.has(targetProgramValue);
     const assessmentHasLivingAllowance = assessmentLivingAllowance > 0;
     const decisionReady = applicationStatusLower === 'decision_ready';
-    const legacyApproved = applicationStatusLower === 'approved';
+    const approvedStatus = applicationStatusLower === 'approved';
+    const rejectedStatus =
+      applicationStatusLower === 'rejected' ||
+      applicationStatusLower === 'declined';
     const completedStatus = applicationStatusLower === 'completed';
-    const hasDecisionOutcome = decisionReady || legacyApproved || completedStatus;
+    const hasDecisionOutcome = decisionReady || approvedStatus || rejectedStatus || completedStatus;
     const caseStatusApproved = CASE_STATUS_INITIATED_SEEDS.has(caseStatusLower);
-    const decisionApproved = legacyApproved || (hasDecisionOutcome && caseStatusApproved);
-    const decisionDenied = hasDecisionOutcome && !decisionApproved;
+    const decisionApproved = approvedStatus || ((decisionReady || completedStatus) && caseStatusApproved);
+    const decisionDenied = rejectedStatus || ((decisionReady || completedStatus) && hasDecisionOutcome && !decisionApproved);
     const approvalOrLater = (() => {
       if (applicationStatusLower) {
         return (
@@ -40172,13 +40365,13 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
     }
 
     const normalizedStatus = applicationStatusLower || caseStatusLower || '';
-    if (normalizedStatus === 'closure_notice') {
+    if (normalizedStatus === 'closure_notice' || decisionDenied) {
       return res.json(buildGatePayload('deny'));
     }
     if (normalizedStatus === CASE_STATUS_DERIVED_VALUES.pendingApproval) {
       return res.json(buildGatePayload('approve'));
     }
-    if (decisionReady || legacyApproved || completedStatus || postApproval) {
+    if (decisionReady || decisionApproved || completedStatus || postApproval) {
       return res.json(buildGatePayload('approve_and_commence'));
     }
 
@@ -49438,6 +49631,11 @@ app.get('/api/cases/:id/messages', async (req, res) => {
           m.recipient_id,
           m.subject,
           m.body,
+          m.status AS recipient_status,
+          CASE
+            WHEN mi.folder = 'inbox' AND mi.read_at IS NULL THEN 'unread'
+            ELSE 'read'
+          END AS mailbox_status,
           CASE
             WHEN mi.folder = 'inbox' AND mi.read_at IS NULL THEN 'unread'
             ELSE 'read'
