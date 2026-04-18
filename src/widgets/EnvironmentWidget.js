@@ -18,7 +18,8 @@ export default function EnvironmentWidget({
   headerActions,
   runtime,
   demoToolbarColumns,
-  demoToolbarRows
+  demoToolbarRows,
+  demoToolbarSaving
 }) {
   const handleOpenHelp = () => {
     if (!toggleHelpPanel) return;
@@ -77,7 +78,18 @@ export default function EnvironmentWidget({
           columnDefinitions={demoToolbarColumns}
           items={demoToolbarRows}
           trackBy="role"
-          header={<Header variant="h3">Demo Toolbar Visibility</Header>}
+          header={
+            <Header
+              variant="h3"
+              description={
+                demoToolbarSaving
+                  ? "Saving shared runtime visibility..."
+                  : "Shared runtime visibility for the demo toolbar."
+              }
+            >
+              Demo Toolbar Visibility
+            </Header>
+          }
           empty={<Box>No roles available</Box>}
         />
       </SpaceBetween>

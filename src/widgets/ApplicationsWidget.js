@@ -3,7 +3,6 @@ import {
   Box,
   Header,
   Table,
-  Spinner,
   TextFilter,
   Pagination,
   CollectionPreferences,
@@ -203,6 +202,8 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filteringText, setFilteringText] = useState('');
+  const [useServerSearch, setUseServerSearch] = useState(true);
+  const [serverSearchText, setServerSearchText] = useState('');
   const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
   const [sortingState, setSortingState] = useState({ columnId: 'submitted_at', isDescending: true });
@@ -233,6 +234,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
   const currentUserId = currentUserIdRaw ? String(currentUserIdRaw) : null;
   const userRole = currentUserRole || '';
   const normalizedUserRole = userRole.trim();
+  const locationSearch = location?.search || '';
   const normalizedRegionIds = useMemo(() => {
     if (Array.isArray(currentUserRegionIds) && currentUserRegionIds.length) {
       return Array.from(new Set(currentUserRegionIds.map(Number).filter(Number.isFinite)));
@@ -243,17 +245,30 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
 
   // Apply incoming query param filter (e.g., status=Awaiting EI Validation)
   useEffect(() => {
-    if (!location) return;
-    const params = new URLSearchParams(location.search || '');
+    const params = new URLSearchParams(locationSearch);
     const statusFilter = params.get('status') || params.get('statusFilter');
-    if (statusFilter) {
-      const decoded = decodeURIComponent(statusFilter.replace(/\+/g, ' '));
-      if (decoded && decoded !== filteringText) {
-        setFilteringText(decoded);
-        setCurrentPageIndex(1);
-      }
+    if (!statusFilter) {
+      return;
     }
-  }, [location, filteringText]);
+    const decoded = decodeURIComponent(statusFilter.replace(/\+/g, ' '));
+    if (decoded) {
+      setFilteringText(decoded);
+      setUseServerSearch(false);
+      setCurrentPageIndex(1);
+    }
+  }, [locationSearch]);
+
+  useEffect(() => {
+    if (!useServerSearch) {
+      setServerSearchText('');
+      return;
+    }
+    const nextSearchText = filteringText.trim();
+    const timeoutId = setTimeout(() => {
+      setServerSearchText(nextSearchText);
+    }, 250);
+    return () => clearTimeout(timeoutId);
+  }, [filteringText, useServerSearch]);
 
   const isStaffVisible = useCallback((staff) => {
     if (!staff) return false;
@@ -462,14 +477,21 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
 
   const load = useCallback(() => {
     let cancelled = false;
+    const params = new URLSearchParams({
+      limit: String(pageSize),
+      offset: String((currentPageIndex - 1) * pageSize),
+    });
+    if (serverSearchText) {
+      params.set('search', serverSearchText);
+    }
     setLoading(true); setError(null);
-    apiFetch(`/api/applications?limit=${pageSize}&offset=${(currentPageIndex-1)*pageSize}`)
+    apiFetch(`/api/applications?${params.toString()}`)
       .then(res => { if (!res.ok) throw new Error('Fetch failed'); return res.json(); })
       .then(data => { if (!cancelled) { setItems(data.rows || []); setTotalCount(data.count || (data.rows ? data.rows.length : 0)); } })
       .catch(() => { if (!cancelled) setError('Failed to load applications'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [pageSize, currentPageIndex]);
+  }, [pageSize, currentPageIndex, serverSearchText]);
 
   useEffect(() => {
     const c = load();
@@ -745,7 +767,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
     });
   }, [items, watchMap]);
 
-  // Client filtering (post-fetch) for quick text search; can be pushed server-side later
+  // Keep a local pass so status shortcut links and immediate typing feedback still work.
   const filteredItems = decoratedItems
     .filter(i => {
       const s = filteringText.toLowerCase();
@@ -1137,83 +1159,89 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
         <Box variant="small">This table lists the applications you can work on. NWAC Administrators see all applications, Regional Managers see their assigned and regional files, and ISET Coordinators see only their assigned applications.</Box>
         <Box>
           <SpaceBetween direction="vertical" size="xs">
-            {loading ? (
-              <Box textAlign="center" padding="m"><Spinner /> Loading...</Box>
-            ) : error ? (
-              <Box color="error" textAlign="center">{error}</Box>
-            ) : (
-              <Table
-                columnDefinitions={columnDefinitionsForTable}
-                items={sortedItems}
-                loading={false}
-                variant="embedded"
-                wrapLines
-                resizableColumns
-                sortingColumn={activeSortingColumn || { id: sortingState.columnId }}
-                sortingDescending={sortingState.isDescending}
-                onSortingChange={({ detail }) => {
-                  const columnId = detail?.sortingColumn?.id;
-                  if (columnId) {
-                    setSortingState({ columnId, isDescending: detail.isDescending });
-                  }
-                }}
-                onColumnWidthsChange={handleColumnWidthsChange}
-                stickyHeader
-                stripedRows
-                empty={<Box textAlign="center">No applications</Box>}
-                ariaLabels={{
-                  tableLabel: 'Cases table',
-                  header: 'Cases',
-                  rowHeader: 'Case ID'
-                }}
-                renderAriaLive={({ firstIndex, lastIndex }) => `Displaying items ${firstIndex} to ${lastIndex}`}
-                filter={<TextFilter filteringPlaceholder="Search" filteringText={filteringText} onChange={({ detail }) => { setFilteringText(detail.filteringText); setCurrentPageIndex(1); }} />}
-                pagination={<Pagination currentPageIndex={currentPageIndex} pagesCount={pagesCount} onChange={({ detail }) => setCurrentPageIndex(detail.currentPageIndex)} />}
-                preferences={
-                  <CollectionPreferences
-                    title="Preferences"
-                    confirmLabel="Confirm"
-                    cancelLabel="Cancel"
-                    preferences={preferences}
-                    pageSizePreference={{ title: 'Page size', options: PAGE_SIZE_OPTIONS.map(v => ({ value: v, label: `${v} rows` })) }}
-                    contentDisplayPreference={{ title: 'Select visible columns', options: columnPreferenceOptions }}
-                    onConfirm={({ detail }) => {
-                      if (detail.pageSize !== undefined) {
-                        setPageSize(detail.pageSize);
-                      }
-                      if (Array.isArray(detail.contentDisplay)) {
-                        const nextVisible = detail.contentDisplay
-                          .filter(c => c.visible)
-                          .map(c => c.id);
-                        if (!nextVisible.includes('watch')) {
-                          nextVisible.unshift('watch');
-                        }
-                        setVisibleColumns(nextVisible);
-                        setCurrentPageIndex(1);
-                      }
-                      if (Array.isArray(detail.columnWidths)) {
-                        const sanitized = detail.columnWidths
-                          .map(entry => {
-                            if (!entry || typeof entry !== 'object') {
-                              return null;
-                            }
-                            const { id, width } = entry;
-                            if (typeof id !== 'string' || !Number.isFinite(Number(width))) {
-                              return null;
-                            }
-                            return { id, width: Number(width) };
-                          })
-                          .filter(Boolean);
-
-                        if (sanitized.length > 0) {
-                          mergeColumnWidths(sanitized);
-                        }
-                      }
-                    }}
-                  />
+            {error ? <Box color="error" textAlign="center">{error}</Box> : null}
+            <Table
+              columnDefinitions={columnDefinitionsForTable}
+              items={sortedItems}
+              loading={loading}
+              loadingText="Loading applications"
+              variant="embedded"
+              wrapLines
+              resizableColumns
+              sortingColumn={activeSortingColumn || { id: sortingState.columnId }}
+              sortingDescending={sortingState.isDescending}
+              onSortingChange={({ detail }) => {
+                const columnId = detail?.sortingColumn?.id;
+                if (columnId) {
+                  setSortingState({ columnId, isDescending: detail.isDescending });
                 }
-              />
-            )}
+              }}
+              onColumnWidthsChange={handleColumnWidthsChange}
+              stickyHeader
+              stripedRows
+              empty={<Box textAlign="center">No applications</Box>}
+              ariaLabels={{
+                tableLabel: 'Cases table',
+                header: 'Cases',
+                rowHeader: 'Case ID'
+              }}
+              renderAriaLive={({ firstIndex, lastIndex }) => `Displaying items ${firstIndex} to ${lastIndex}`}
+              filter={
+                <TextFilter
+                  filteringPlaceholder="Search"
+                  filteringText={filteringText}
+                  onChange={({ detail }) => {
+                    setUseServerSearch(true);
+                    setFilteringText(detail.filteringText);
+                    setCurrentPageIndex(1);
+                  }}
+                />
+              }
+              pagination={<Pagination currentPageIndex={currentPageIndex} pagesCount={pagesCount} onChange={({ detail }) => setCurrentPageIndex(detail.currentPageIndex)} />}
+              preferences={
+                <CollectionPreferences
+                  title="Preferences"
+                  confirmLabel="Confirm"
+                  cancelLabel="Cancel"
+                  preferences={preferences}
+                  pageSizePreference={{ title: 'Page size', options: PAGE_SIZE_OPTIONS.map(v => ({ value: v, label: `${v} rows` })) }}
+                  contentDisplayPreference={{ title: 'Select visible columns', options: columnPreferenceOptions }}
+                  onConfirm={({ detail }) => {
+                    if (detail.pageSize !== undefined) {
+                      setPageSize(detail.pageSize);
+                    }
+                    if (Array.isArray(detail.contentDisplay)) {
+                      const nextVisible = detail.contentDisplay
+                        .filter(c => c.visible)
+                        .map(c => c.id);
+                      if (!nextVisible.includes('watch')) {
+                        nextVisible.unshift('watch');
+                      }
+                      setVisibleColumns(nextVisible);
+                      setCurrentPageIndex(1);
+                    }
+                    if (Array.isArray(detail.columnWidths)) {
+                      const sanitized = detail.columnWidths
+                        .map(entry => {
+                          if (!entry || typeof entry !== 'object') {
+                            return null;
+                          }
+                          const { id, width } = entry;
+                          if (typeof id !== 'string' || !Number.isFinite(Number(width))) {
+                            return null;
+                          }
+                          return { id, width: Number(width) };
+                        })
+                        .filter(Boolean);
+
+                      if (sanitized.length > 0) {
+                        mergeColumnWidths(sanitized);
+                      }
+                    }
+                  }}
+                />
+              }
+            />
           </SpaceBetween>
         </Box>
         {assignModalVisible && (

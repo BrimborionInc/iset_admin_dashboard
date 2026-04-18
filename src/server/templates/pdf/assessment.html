@@ -67,7 +67,7 @@
 
     .meta {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 6px;
       margin-top: 6px;
     }
@@ -116,24 +116,126 @@
       font-size: 9.5px;
     }
 
-    input[type="text"],
-    input[type="date"],
-    textarea {
+    .text-field {
       width: 100%;
       box-sizing: border-box;
       border: 1px solid #999999;
-      padding: 2px 4px;
+      padding: 3px 5px;
       font-size: 10px;
       background: #ffffff;
+      min-height: 18px;
+      white-space: pre-wrap;
+      word-break: break-word;
     }
 
-    textarea {
-      min-height: 36px;
-      resize: none;
+    .text-field.large {
+      min-height: 88px;
     }
 
-    textarea.other-funding-details {
+    .text-field.medium {
       min-height: 72px;
+    }
+
+    .text-field.compact {
+      min-height: 18px;
+    }
+
+    .redline-badge {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      border: 1px solid #9ba7b6;
+      border-radius: 10px;
+      padding: 1px 5px;
+      margin-right: 6px;
+    }
+
+    .redline-added {
+      border-color: #2f855a;
+      background: #f0fff4;
+    }
+
+    .redline-modified {
+      border-color: #1d4ed8;
+      background: #eff6ff;
+    }
+
+    .redline-removed {
+      border-color: #a61d24;
+      background: #fff1f2;
+      text-decoration: line-through;
+    }
+
+    .redline-added-badge {
+      color: #2f855a;
+      border-color: #2f855a;
+    }
+
+    .redline-removed-badge {
+      color: #a61d24;
+      border-color: #a61d24;
+    }
+
+    .redline-modified-badge {
+      color: #1d4ed8;
+      border-color: #1d4ed8;
+    }
+
+    .redline-row-added td {
+      background: #f0fff4;
+    }
+
+    .redline-row-removed td {
+      background: #fff1f2;
+      text-decoration: line-through;
+    }
+
+    .redline-inline-old {
+      color: #a61d24;
+      text-decoration: line-through;
+    }
+
+    .redline-inline-old em {
+      text-decoration: line-through;
+    }
+
+    .redline-inline-new {
+      color: #2f855a;
+      font-weight: 600;
+    }
+
+    .redline-inline-arrow {
+      color: #1d4ed8;
+      font-weight: 600;
+      margin: 0 4px;
+    }
+
+    .signature-panel {
+      display: grid;
+      gap: 6px;
+    }
+
+    .signature-box {
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      min-height: 30px;
+      padding: 6px 8px;
+      display: flex;
+      align-items: center;
+      font-size: 15px;
+      font-family: "Segoe Script", "Lucida Handwriting", cursive;
+    }
+
+    .signature-box.empty {
+      font-family: var(--sans);
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    .signature-meta {
+      font-size: 9.5px;
+      color: var(--muted);
     }
 
     .check-grid {
@@ -272,15 +374,19 @@
     <div class="meta">
       <div class="field">
         <label>Reference #</label>
-        <input type="text" data-field="reference_number" />
+        <div class="text-field compact" data-field="reference_number"></div>
       </div>
       <div class="field">
         <label>Client Name</label>
-        <input type="text" data-field="client_name" />
+        <div class="text-field compact" data-field="client_name"></div>
       </div>
       <div class="field">
         <label>Date of Assessment</label>
-        <input type="text" data-field="date_of_assessment" />
+        <div class="text-field compact" data-field="date_of_assessment"></div>
+      </div>
+      <div class="field">
+        <label>Version</label>
+        <div class="text-field compact" data-field="assessment_version_label"></div>
       </div>
     </div>
 
@@ -301,14 +407,14 @@
       </tr>
       <tr>
         <td class="label">Conflict details</td>
-        <td colspan="3"><textarea data-field="conflict_details"></textarea></td>
+        <td colspan="3"><div class="text-field large" data-field="conflict_details"></div></td>
       </tr>
     </table>
 
     <div class="section-title">CLIENT APPLICATION OVERVIEW</div>
     <table class="form-table">
       <tr>
-        <td><textarea data-field="client_application_overview"></textarea></td>
+        <td><div class="text-field large" data-field="client_application_overview"></div></td>
       </tr>
     </table>
 
@@ -316,7 +422,7 @@
     <table class="form-table">
       <tr>
         <td class="label">What is the Client's Training and Employment Goal as it relates to ISET support?</td>
-        <td colspan="3"><textarea data-field="training_employment_goal"></textarea></td>
+        <td colspan="3"><div class="text-field large" data-field="training_employment_goal"></div></td>
       </tr>
       <tr>
         <td class="label">Previously funded under the ISET Program?</td>
@@ -327,11 +433,11 @@
           </div>
         </td>
         <td class="label">If yes, include year, program, amount(s)</td>
-        <td><input type="text" data-field="previously_funded_iset_details" /></td>
+        <td><div class="text-field compact" data-field="previously_funded_iset_details"></div></td>
       </tr>
       <tr>
         <td class="label">Other funding sources for this intervention</td>
-        <td colspan="3"><textarea class="other-funding-details" data-field="other_funding_sources_details"></textarea></td>
+        <td colspan="3"><div class="text-field medium" data-field="other_funding_sources_details"></div></td>
       </tr>
       <tr>
         <td class="label">Note</td>
@@ -365,7 +471,7 @@
       <tr>
         <td>
           <div class="label">Other (specify)</div>
-          <input type="text" data-field="barriers_other_specify" />
+          <div class="text-field compact" data-field="barriers_other_specify"></div>
         </td>
       </tr>
     </table>
@@ -416,7 +522,7 @@
           </div>
         </td>
         <td class="label">Funding details</td>
-        <td><textarea data-field="childcare_funding_details"></textarea></td>
+        <td><div class="text-field large" data-field="childcare_funding_details"></div></td>
       </tr>
     </table>
 
@@ -424,15 +530,15 @@
     <table class="form-table">
       <tr>
         <td class="label">Total proposed cost</td>
-        <td><input type="text" data-field="intervention_cost_total" /></td>
+        <td><div class="text-field compact" data-field="intervention_cost_total"></div></td>
         <td class="label">Intervention count</td>
-        <td><input type="text" data-field="intervention_count" /></td>
+        <td><div class="text-field compact" data-field="intervention_count"></div></td>
       </tr>
       <tr>
         <td class="label">Budget pot</td>
-        <td><input type="text" data-field="budget_pot_label" /></td>
+        <td><div class="text-field compact" data-field="budget_pot_label"></div></td>
         <td class="label">Paid from</td>
-        <td><input type="text" data-field="posting_context" /></td>
+        <td><div class="text-field compact" data-field="posting_context"></div></td>
       </tr>
     </table>
 
@@ -450,24 +556,15 @@
       </tr>
       <tr>
         <td class="label">Written justification</td>
-        <td colspan="3"><textarea data-field="recommendation_justification"></textarea></td>
+        <td colspan="3"><div class="text-field large" data-field="recommendation_justification"></div></td>
+      </tr>
+      <tr>
+        <td class="label">Case manager eSignature</td>
+        <td colspan="3"><div data-field="recommendation_signature_html"></div></td>
       </tr>
     </table>
 
-    <div class="section-title">AGREEMENT WITH COORDINATOR RECOMMENDATION</div>
-    <table class="form-table">
-      <tr>
-        <td class="label">Coordinator recommendation</td>
-        <td>
-          <div class="check-grid">
-            <label class="check"><input type="radio" name="agreeCoordinator" data-field="agree_with_coordinator" value="agree" />Agree</label>
-            <label class="check"><input type="radio" name="agreeCoordinator" data-field="agree_with_coordinator" value="disagree" />Disagree</label>
-          </div>
-        </td>
-        <td class="label">Reason for denial by NWAC (if applicable)</td>
-        <td><textarea data-field="denial_reason"></textarea></td>
-      </tr>
-    </table>
+    <div data-field="agreement_section_html"></div>
   </div>
 </body>
 </html>

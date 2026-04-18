@@ -368,7 +368,7 @@ const EVIDENCE_DOCUMENT_TYPE_MAP = {
   StatementOfAccount: ["statement_of_account"],
   TuitionStatementOrInvoice: ["statement_of_account"],
   FundingAgreement: ["funding_agreement"],
-  CaseManagerAssessment: ["case_assessment"],
+  CaseManagerAssessment: ["case_assessment", "case_assessment_approved"],
   AttendanceReport: ["attendance_form"],
   FinancialOverview: ["financial_overview"],
   IncomeVerification: ["financial_records"],

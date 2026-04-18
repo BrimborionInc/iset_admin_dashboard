@@ -24,6 +24,12 @@ const BARRIERS = [
 const PRIORITIES = [
   'Off Reserve', 'Single Parent Family', 'Woman over 45', 'Literacy', 'Youth', 'Unskilled Clerical/Service Worker', 'No Grade 12', 'Unskilled Labourer', 'Non-Targeted'
 ];
+const STABLE_CHECKBOX_GRID_STYLE = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+  gap: '0.5rem 1.5rem',
+  alignItems: 'start'
+};
 const ESDC_OPTIONS = [
   { label: 'CRF', value: 'CRF' },
   { label: 'EI Active Claim', value: 'EI Active Claim' },
@@ -8205,32 +8211,33 @@ ${JSON.stringify(contextPayload, null, 2)}`;
   const interventionFieldErrors = fieldErrors.interventions || {};
   const costLineFieldErrors = fieldErrors.costLines || {};
 
+  const denyFundingShortcut = showDenyFundingShortcut ? (
+    <Box border={{ color: 'border-divider', width: 1 }} borderRadius="medium">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
+        <div>
+          <Box fontWeight="bold">Not eligible for funding?</Box>
+          <Box variant="small" color="text-body-secondary">
+            Record a denial now and bypass the remaining assessment steps.
+          </Box>
+          {denyFundingBlockedReason ? (
+            <Box variant="small" color="text-body-secondary">
+              {denyFundingBlockedReason}
+            </Box>
+          ) : null}
+        </div>
+        <Button
+          variant="normal"
+          onClick={() => setDenyFundingModalVisible(true)}
+          disabled={!canUseDenyFundingShortcut}
+        >
+          Deny Funding
+        </Button>
+      </div>
+    </Box>
+  ) : null;
+
   const eligibilityStepContent = (
     <SpaceBetween size="m">
-      {showDenyFundingShortcut ? (
-        <Box border={{ color: 'border-divider', width: 1 }} borderRadius="medium">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
-            <div>
-              <Box fontWeight="bold">Not eligible for funding?</Box>
-              <Box variant="small" color="text-body-secondary">
-                Record a denial now and bypass the remaining assessment steps.
-              </Box>
-              {denyFundingBlockedReason ? (
-                <Box variant="small" color="text-body-secondary">
-                  {denyFundingBlockedReason}
-                </Box>
-              ) : null}
-            </div>
-            <Button
-              variant="normal"
-              onClick={() => setDenyFundingModalVisible(true)}
-              disabled={!canUseDenyFundingShortcut}
-            >
-              Deny Funding
-            </Button>
-          </div>
-        </Box>
-      ) : null}
       {canUploadEiVerification && (
         <input
           type="file"
@@ -8361,6 +8368,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
 
   const framingStepContent = (
     <SpaceBetween size="l">
+      {denyFundingShortcut}
       {showFramingErrors && interventionFieldErrors._global && (
         <Alert type="error" statusIconAriaLabel="Error">
           {interventionFieldErrors._global}
@@ -8902,7 +8910,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
           data-error-focus={showBarriersErrors && fieldErrors.barriers ? 'true' : undefined}
           tabIndex={-1}
         >
-          <ColumnLayout columns={2} variant="text-grid">
+          <div style={STABLE_CHECKBOX_GRID_STYLE}>
             {BARRIERS.map(barrier => (
               <Checkbox
                 key={barrier}
@@ -8913,7 +8921,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                 {barrier}
               </Checkbox>
             ))}
-          </ColumnLayout>
+          </div>
         </div>
       </FormField>
       {(assessment.barriers || []).includes('Other') && (

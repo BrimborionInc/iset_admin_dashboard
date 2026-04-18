@@ -4,7 +4,7 @@
 # This script is designed to be used as EC2 user data (AL2023) or invoked manually via SSM.
 #
 # Responsibilities:
-#   - Install runtime prerequisites (Node.js, pm2, awscli, jq, unzip)
+#   - Install runtime prerequisites (Node.js, pm2, awscli, jq, unzip, Chromium libs)
 #   - Fetch environment configuration from SSM and Secrets Manager
 #   - Render admin and portal `.env` files under /opt/nwac/*
 #   - Download application artifacts from S3 and unpack them
@@ -45,6 +45,28 @@ SHARED_ROOT="/opt/nwac/shared"
 CONFIG_DUMP_DIR="/opt/nwac/config"
 
 AWS_REGION="${AWS_REGION:-ca-central-1}"
+RUNTIME_PACKAGES=(nodejs awscli jq unzip)
+PUPPETEER_SYSTEM_PACKAGES=(
+  alsa-lib
+  atk
+  at-spi2-atk
+  at-spi2-core
+  cairo
+  cups-libs
+  gtk3
+  libX11
+  libXcomposite
+  libXdamage
+  libXext
+  libXfixes
+  libXrandr
+  libxcb
+  libxkbcommon
+  mesa-libgbm
+  nss
+  nspr
+  pango
+)
 
 log() {
   echo "[$(date --iso-8601=seconds)] $*"
@@ -73,8 +95,44 @@ ensure_packages() {
   log "Installing prerequisite packages..."
   sudo dnf update -y >/dev/null
   curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash - >/dev/null
-  sudo dnf install -y nodejs awscli jq unzip >/dev/null
+  sudo dnf install -y "${RUNTIME_PACKAGES[@]}" "${PUPPETEER_SYSTEM_PACKAGES[@]}" >/dev/null
   sudo npm install -g pm2 >/dev/null
+}
+
+validate_puppeteer_runtime() {
+  local app_root="$1"
+  local app_name="$2"
+
+  if [ ! -f "$app_root/package.json" ]; then
+    return 0
+  fi
+
+  log "Validating Puppeteer runtime for ${app_name}..."
+  (
+    cd "$app_root"
+    node <<'NODE'
+let puppeteer;
+try {
+  puppeteer = require('puppeteer');
+} catch (error) {
+  if (error && error.code === 'MODULE_NOT_FOUND') {
+    process.exit(0);
+  }
+  throw error;
+}
+
+(async () => {
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  });
+  await browser.close();
+})().catch((error) => {
+  console.error(error && error.stack ? error.stack : error);
+  process.exit(1);
+});
+NODE
+  )
 }
 
 fetch_env_parameter() {
@@ -244,6 +302,9 @@ main() {
       sudo npm install --omit=dev --prefix "$PORTAL_ROOT" >/dev/null
     fi
   fi
+
+  validate_puppeteer_runtime "$ADMIN_ROOT" "nwac-admin"
+  validate_puppeteer_runtime "$PORTAL_ROOT" "nwac-portal"
 
   start_service "nwac-admin" "$ADMIN_ROOT" "isetadminserver.js"
   start_service "nwac-portal" "$PORTAL_ROOT" "server.js"

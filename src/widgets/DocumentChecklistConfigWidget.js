@@ -25,11 +25,11 @@ import { apiFetch } from "../auth/apiClient";
 import boardItemI18nStrings from "./common";
 
 const SOURCE_OPTIONS = [
-  { value: "application_form", label: "Application form" },
-  { value: "application_submission", label: "Application submission" },
-  { value: "manual_upload", label: "Manual upload" },
+  { value: "application_form", label: "Portal application form" },
+  { value: "application_submission", label: "Applicant upload" },
+  { value: "manual_upload", label: "Staff upload" },
   { value: "secure_message_attachment", label: "Secure message attachment" },
-  { value: "system_generated", label: "System generated" },
+  { value: "system_generated", label: "PATH generated" },
 ];
 
 const STATUS_SCOPE_LABELS = {

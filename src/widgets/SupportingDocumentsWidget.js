@@ -32,19 +32,40 @@ const REFRESH_EVENT = 'iset:supporting-documents:refresh';
 const OPEN_UPLOAD_EVENT = 'iset:supporting-documents:open-upload';
 const CASE_DOCUMENT_SCOPES = new Set(['client', 'case', 'action_plan', 'application']);
 
-const PREFERENCES_STORAGE_KEY = 'supporting-documents-table-preferences-v2';
+const PREFERENCES_STORAGE_KEY = 'supporting-documents-table-preferences-v3';
 const COLUMN_WIDTHS_STORAGE_KEY = 'supporting-documents-table-widths-v2';
 const CASE_MODE_INFO_DISMISSED_KEY = 'supporting-documents-case-mode-info-dismissed-v1';
-const ALL_COLUMN_IDS = ['label', 'file_name', 'source', 'case_number', 'scope', 'uploaded_at', 'actions'];
-const REQUIRED_COLUMN_IDS = ['file_name', 'actions'];
+const ALL_COLUMN_IDS = ['label', 'uploaded_at', 'file_name', 'case_number', 'scope', 'source', 'actions'];
+const REQUIRED_COLUMN_IDS = ['actions'];
+const DEFAULT_VISIBLE_COLUMN_IDS = ['label', 'uploaded_at', 'source', 'actions'];
 const DOCUMENT_TYPE_PLACEHOLDER_OPTION = { value: '', label: 'Select document type', scope: '' };
 
-const formatDate = value => {
+const formatDateTime = value => {
   if (!value) return '';
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? value
-    : date.toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' });
+    : date.toLocaleString(undefined, {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+};
+
+const normalizeSortText = value => String(value || '').trim().toLowerCase();
+
+const toSortTimestamp = value => {
+  if (!value) return null;
+  const date = new Date(value);
+  const time = date.getTime();
+  return Number.isNaN(time) ? null : time;
+};
+
+const buildVisibleColumnOrder = ids => {
+  const visibleSet = new Set([...(Array.isArray(ids) ? ids : []), ...REQUIRED_COLUMN_IDS]);
+  return ALL_COLUMN_IDS.filter(id => visibleSet.has(id));
 };
 
 const parseMetadata = value => {
@@ -58,10 +79,10 @@ const parseMetadata = value => {
 };
 
 const SOURCE_LABELS = {
-  application_submission: 'Application submission',
-  secure_message_attachment: 'Message attachment',
-  manual_upload: 'Manual upload',
-  system_generated: 'System Generated'
+  application_submission: 'Applicant upload',
+  secure_message_attachment: 'Secure message attachment',
+  manual_upload: 'Staff upload',
+  system_generated: 'PATH generated'
 };
 
 const formatSourceLabel = item => {
@@ -69,9 +90,16 @@ const formatSourceLabel = item => {
   if (!source) return '';
   const normalized = String(source).trim().toLowerCase();
   if (!normalized) return '';
+  const metadata = parseMetadata(item?.metadata);
+  const generatedKind = String(
+    metadata?.generated_kind || metadata?.generatedKind || metadata?.display_source || ''
+  )
+    .trim()
+    .toLowerCase();
+  if (generatedKind === 'signed_form') return 'Signed form';
   if (normalized === 'system_generated') {
-    const label = String(item?.label || parseMetadata(item?.metadata)?.label || '').toLowerCase();
-    if (label.includes('(signed)')) return 'Digitally signed';
+    const label = String(item?.label || metadata?.label || '').toLowerCase();
+    if (label.includes('(signed)')) return 'Signed form';
   }
   return SOURCE_LABELS[normalized] || normalized.replace(/_/g, ' ');
 };
@@ -217,21 +245,21 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const [duplicateError, setDuplicateError] = useState('');
   const [duplicateSubmitting, setDuplicateSubmitting] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState(() => {
-    if (typeof window === 'undefined') return ALL_COLUMN_IDS;
+    const defaultVisibleColumns = buildVisibleColumnOrder(DEFAULT_VISIBLE_COLUMN_IDS);
+    if (typeof window === 'undefined') return defaultVisibleColumns;
     try {
       const raw = window.localStorage.getItem(PREFERENCES_STORAGE_KEY);
-      if (!raw) return ALL_COLUMN_IDS;
+      if (!raw) return defaultVisibleColumns;
       const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') return ALL_COLUMN_IDS;
+      if (!parsed || typeof parsed !== 'object') return defaultVisibleColumns;
       const stored = Array.isArray(parsed.visibleColumns)
         ? parsed.visibleColumns.filter(id => ALL_COLUMN_IDS.includes(id))
         : [];
-      const visibleSet = new Set([...stored, ...REQUIRED_COLUMN_IDS]);
-      const ordered = ALL_COLUMN_IDS.filter(id => visibleSet.has(id));
-      return ordered.length ? ordered : ALL_COLUMN_IDS;
+      const ordered = buildVisibleColumnOrder(stored);
+      return ordered.length ? ordered : defaultVisibleColumns;
     } catch (err) {
       console.error('[SupportingDocuments] failed to read table preferences', err);
-      return ALL_COLUMN_IDS;
+      return defaultVisibleColumns;
     }
   });
   const [columnWidths, setColumnWidths] = useState(() => {
@@ -255,6 +283,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       return [];
     }
   });
+  const [sortingState, setSortingState] = useState({ columnId: 'uploaded_at', isDescending: true });
   const [showCaseModeInfo, setShowCaseModeInfo] = useState(() => {
     if (typeof window === 'undefined') return true;
     try {
@@ -477,11 +506,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     nextVisibleColumns => {
       if (typeof window === 'undefined') return;
       try {
-        const visibleSet = new Set(
+        const ordered = buildVisibleColumnOrder(
           (nextVisibleColumns || []).filter(id => ALL_COLUMN_IDS.includes(id))
         );
-        REQUIRED_COLUMN_IDS.forEach(id => visibleSet.add(id));
-        const ordered = ALL_COLUMN_IDS.filter(id => visibleSet.has(id));
         const payload = { visibleColumns: ordered };
         window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(payload));
       } catch (err) {
@@ -1529,12 +1556,81 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
 
   const hasMultipleApplications = applicationOptions.length > 1;
 
+  const getDocumentReferenceLabel = useCallback(
+    item => {
+      const linkedInterventions = Array.isArray(item?.intervention_ids) ? item.intervention_ids : [];
+      if (linkedInterventions.length) {
+        const labels = linkedInterventions.map(id => {
+          const key = String(id);
+          const option = interventionOptionMap.get(key);
+          return option?.label ? option.label : `Intervention ${key}`;
+        });
+        if (labels.length === 1) return `Intervention: ${labels[0]}`;
+        if (labels.length <= 2) return `Interventions: ${labels.join(', ')}`;
+        return `Interventions (${labels.length})`;
+      }
+      if (item?.action_plan_id) {
+        const planKey = String(item.action_plan_id);
+        const plan = actionPlanOptionMap.get(planKey);
+        return plan?.label ? `Action plan: ${plan.label}` : `Action plan ${planKey}`;
+      }
+      const referenceNumber = item?.reference_number || item?.referenceNumber || null;
+      if (!isCaseWorkspace) {
+        if (referenceNumber) return referenceNumber;
+        if (item?.application_id) return `Application ${item.application_id}`;
+      }
+      if (item?.case_number) return item.case_number;
+      if (referenceNumber) return referenceNumber;
+      if (item?.application_id) return `Application ${item.application_id}`;
+      return 'Client';
+    },
+    [actionPlanOptionMap, interventionOptionMap, isCaseWorkspace]
+  );
+
+  const getDocumentSortValue = useCallback(
+    (item, columnId) => {
+      switch (columnId) {
+        case 'label':
+          return normalizeSortText(item?.label || item?.file_name || '');
+        case 'uploaded_at':
+          return toSortTimestamp(item?.uploaded_at);
+        case 'file_name':
+          return normalizeSortText(item?.file_name || '');
+        case 'source':
+          return normalizeSortText(formatSourceLabel(item));
+        case 'case_number':
+          return normalizeSortText(getDocumentReferenceLabel(item));
+        case 'scope':
+          return normalizeSortText(formatScopeLabel(item?.scope));
+        default:
+          return null;
+      }
+    },
+    [getDocumentReferenceLabel]
+  );
+
+  const compareDocuments = useCallback(
+    (columnId, a, b) => {
+      const aValue = getDocumentSortValue(a, columnId);
+      const bValue = getDocumentSortValue(b, columnId);
+      if (aValue === bValue) return 0;
+      if (aValue === null || aValue === undefined || aValue === '') return 1;
+      if (bValue === null || bValue === undefined || bValue === '') return -1;
+      if (typeof aValue === 'number' && typeof bValue === 'number') {
+        return aValue - bValue;
+      }
+      return String(aValue).localeCompare(String(bValue));
+    },
+    [getDocumentSortValue]
+  );
+
   const baseColumnDefinitions = useMemo(
     () => [
       {
         id: 'label',
         header: 'Document label',
         cell: item => item.label || item.file_name || '',
+        sortingComparator: (a, b) => compareDocuments('label', a, b),
         editConfig: {
           ariaLabel: 'Document label',
           editIconAriaLabel: 'Edit document label',
@@ -1550,51 +1646,34 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         }
       },
       {
+        id: 'uploaded_at',
+        header: 'Uploaded',
+        cell: item => formatDateTime(item.uploaded_at),
+        sortingComparator: (a, b) => compareDocuments('uploaded_at', a, b)
+      },
+      {
         id: 'file_name',
         header: 'File Name',
-        cell: item => item.file_name || ''
+        cell: item => item.file_name || '',
+        sortingComparator: (a, b) => compareDocuments('file_name', a, b)
       },
       {
         id: 'case_number',
         header: isCaseWorkspace ? 'Case / Plan' : 'Application',
-        cell: item => {
-          const linkedInterventions = Array.isArray(item.intervention_ids) ? item.intervention_ids : [];
-          if (linkedInterventions.length) {
-            const labels = linkedInterventions.map(id => {
-              const key = String(id);
-              const option = interventionOptionMap.get(key);
-              return option?.label ? option.label : `Intervention ${key}`;
-            });
-            if (labels.length === 1) return `Intervention: ${labels[0]}`;
-            if (labels.length <= 2) return `Interventions: ${labels.join(', ')}`;
-            return `Interventions (${labels.length})`;
-          }
-          if (item.action_plan_id) {
-            const planKey = String(item.action_plan_id);
-            const plan = actionPlanOptionMap.get(planKey);
-            return plan?.label ? `Action plan: ${plan.label}` : `Action plan ${planKey}`;
-          }
-          const referenceNumber = item.reference_number || item.referenceNumber || null;
-          if (!isCaseWorkspace) {
-            if (referenceNumber) return referenceNumber;
-            if (item.application_id) return `Application ${item.application_id}`;
-          }
-          if (item.case_number) return item.case_number;
-          if (referenceNumber) return referenceNumber;
-          if (item.application_id) return `Application ${item.application_id}`;
-          return 'Client';
-        }
+        cell: item => getDocumentReferenceLabel(item),
+        sortingComparator: (a, b) => compareDocuments('case_number', a, b)
       },
-      { id: 'source', header: 'Source', cell: item => formatSourceLabel(item) },
       {
         id: 'scope',
         header: 'Scope',
-        cell: item => formatScopeLabel(item.scope)
+        cell: item => formatScopeLabel(item.scope),
+        sortingComparator: (a, b) => compareDocuments('scope', a, b)
       },
       {
-        id: 'uploaded_at',
-        header: 'Uploaded',
-        cell: item => formatDate(item.uploaded_at)
+        id: 'source',
+        header: 'Source',
+        cell: item => formatSourceLabel(item),
+        sortingComparator: (a, b) => compareDocuments('source', a, b)
       },
       {
         id: 'actions',
@@ -1661,8 +1740,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       pendingDownloads,
       pendingDeletes,
       canDownloadOriginalDocuments,
-      interventionOptionMap,
-      actionPlanOptionMap,
+      compareDocuments,
+      getDocumentReferenceLabel,
       isCaseWorkspace,
       hasMultipleApplications
     ]
@@ -1684,6 +1763,37 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     const allowed = new Set([...visibleColumns, ...REQUIRED_COLUMN_IDS]);
     return mergedColumnDefinitions.filter(column => allowed.has(column.id));
   }, [mergedColumnDefinitions, visibleColumns]);
+
+  useEffect(() => {
+    const hasActiveSortingColumn = columnDefinitionsForTable.some(
+      column => column.id === sortingState.columnId && typeof column.sortingComparator === 'function'
+    );
+    if (hasActiveSortingColumn) return;
+    const fallbackColumn = columnDefinitionsForTable.find(
+      column => typeof column.sortingComparator === 'function'
+    );
+    if (!fallbackColumn?.id) return;
+    setSortingState({
+      columnId: fallbackColumn.id,
+      isDescending: fallbackColumn.id === 'uploaded_at'
+    });
+  }, [columnDefinitionsForTable, sortingState.columnId]);
+
+  const sortedDocuments = useMemo(() => {
+    const next = Array.isArray(documents) ? [...documents] : [];
+    const { columnId, isDescending } = sortingState;
+    if (!columnId) return next;
+    next.sort((a, b) => {
+      const result = compareDocuments(columnId, a, b);
+      return isDescending ? -result : result;
+    });
+    return next;
+  }, [documents, sortingState, compareDocuments]);
+
+  const activeSortingColumn = useMemo(
+    () => columnDefinitionsForTable.find(column => column.id === sortingState.columnId),
+    [columnDefinitionsForTable, sortingState.columnId]
+  );
 
   const preferencesState = useMemo(
     () => ({
@@ -1772,8 +1882,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           .filter(entry => entry && entry.visible)
           .map(entry => entry.id)
           .filter(id => ALL_COLUMN_IDS.includes(id));
-        const visibleSet = new Set([...nextVisible, ...REQUIRED_COLUMN_IDS]);
-        const ordered = ALL_COLUMN_IDS.filter(id => visibleSet.has(id));
+        const ordered = buildVisibleColumnOrder(nextVisible);
         setVisibleColumns(ordered);
         persistPreferences(ordered);
       }
@@ -2624,11 +2733,19 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
                   loading={loading || refreshing}
                   loadingText={`Loading ${isCaseDocumentMode ? 'case documents' : 'supporting documents'}`}
                   variant="embedded"
-                  items={documents}
+                  items={sortedDocuments}
                   columnDefinitions={columnDefinitionsForTable}
                   resizableColumns
                   stickyHeader
                   enableKeyboardNavigation
+                  sortingColumn={activeSortingColumn || { id: sortingState.columnId }}
+                  sortingDescending={sortingState.isDescending}
+                  onSortingChange={({ detail }) => {
+                    const columnId = detail?.sortingColumn?.id;
+                    if (columnId) {
+                      setSortingState({ columnId, isDescending: detail.isDescending });
+                    }
+                  }}
                   onColumnWidthsChange={handleColumnWidthsChange}
                   preferences={preferencesComponent}
                   submitEdit={handleInlineEdit}

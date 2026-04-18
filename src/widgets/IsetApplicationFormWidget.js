@@ -375,6 +375,22 @@ const renderConflictDeclaration = (answers) => {
   );
 };
 
+const isManualEnteredApplication = ({ answers = {}, payload = {} } = {}) => {
+  const manualIntake =
+    (answers?.manual_intake && typeof answers.manual_intake === 'object' ? answers.manual_intake : null) ||
+    (payload?.manual_intake && typeof payload.manual_intake === 'object' ? payload.manual_intake : null);
+  const originMode = String(manualIntake?.origin_mode || '').trim().toLowerCase();
+  const originChannel = String(manualIntake?.origin_channel || '').trim().toLowerCase();
+  const submittedVia = String(manualIntake?.submitted_via || '').trim().toLowerCase();
+  const payloadSource = String(payload?.source || '').trim().toLowerCase();
+  return (
+    originMode === 'staff_entered' ||
+    originChannel === 'admin_manual' ||
+    submittedVia === 'admin_dashboard' ||
+    payloadSource === 'admin_manual_intake'
+  );
+};
+
 const buildFinancialRows = (fields, answers, totalLabel) => {
   let total = 0;
   const rows = fields.map(({ key, label }) => {
@@ -2100,23 +2116,27 @@ const IsetApplicationFormWidget = ({
     }
   ], [handleRestoreVersion, handleViewVersion, restoringVersionId, versionDetailsLoading]);
 
-  const sectionDefinitions = useMemo(
-    () =>
-      buildSectionDefinitions({
-        onOpenConsentModal: handleOpenConsentModal,
-        onOpenIndigenousModal: handleOpenIndigenousModal,
-        onOpenAuthorizationModal: handleOpenAuthorizationModal,
-        onOpenClientAcknowledgementModal: handleOpenClientAcknowledgementModal,
-        onOpenConflictModal: handleOpenConflictModal
-      }),
-    [
-      handleOpenConsentModal,
-      handleOpenIndigenousModal,
-      handleOpenAuthorizationModal,
-      handleOpenClientAcknowledgementModal,
-      handleOpenConflictModal
-    ]
-  );
+  const sectionDefinitions = useMemo(() => {
+    const sections = buildSectionDefinitions({
+      onOpenConsentModal: handleOpenConsentModal,
+      onOpenIndigenousModal: handleOpenIndigenousModal,
+      onOpenAuthorizationModal: handleOpenAuthorizationModal,
+      onOpenClientAcknowledgementModal: handleOpenClientAcknowledgementModal,
+      onOpenConflictModal: handleOpenConflictModal
+    });
+    if (isManualEnteredApplication({ answers, payload })) {
+      return sections.filter(section => section.id !== 'consent');
+    }
+    return sections;
+  }, [
+    answers,
+    handleOpenConsentModal,
+    handleOpenIndigenousModal,
+    handleOpenAuthorizationModal,
+    handleOpenClientAcknowledgementModal,
+    handleOpenConflictModal,
+    payload
+  ]);
   const fieldLabelLookup = useMemo(() => {
     const lookup = new Map();
     const fromSchema = schemaSnapshot?.fields && typeof schemaSnapshot.fields === 'object'

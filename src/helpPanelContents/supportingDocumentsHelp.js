@@ -34,29 +34,30 @@ const SupportingDocumentsHelp = () => (
         <strong>Document label:</strong> Human-friendly label you can edit inline to make the file easy to recognize.
       </li>
       <li>
+        <strong>Uploaded:</strong> Date and time the file was added to the system. This is the second column by default,
+        and you can sort newest-to-oldest or oldest-to-newest from the table header.
+      </li>
+      <li>
         <strong>File Name:</strong> Original filename as uploaded or generated.
+      </li>
+      <li>
+        <strong>Source:</strong> Where the file came from. Common values are Applicant upload, Secure message
+        attachment, Signed form, Staff upload, and PATH generated.
       </li>
       <li>
         <strong>Application / Case:</strong> Shows the application reference or case number. Intervention documents
         appear as "Intervention: (name)" in the case workspace when the document is linked to that intervention.
       </li>
       <li>
-        <strong>Source:</strong> Where the file came from. Common values are Application submission, Message attachment,
-        Digitally signed, and Manual upload.
-      </li>
-      <li>
         <strong>Scope:</strong> Client documents apply across the client file. Application documents belong to a
         specific application when one exists. Action-plan documents can also be linked to interventions.
-      </li>
-      <li>
-        <strong>Uploaded:</strong> Date the file was added to the system.
       </li>
       <li>
         <strong>Actions:</strong> Edit metadata, duplicate to another application or intervention (when available),
         view the file, or delete it.
       </li>
       <li>
-        <strong>Preferences:</strong> Use table preferences and column resizing to customize the view.
+        <strong>Preferences:</strong> Use table preferences, column sorting, and column resizing to customize the view.
       </li>
     </ul>
 
@@ -116,9 +117,10 @@ const SupportingDocumentsHelp = () => (
 SupportingDocumentsHelp.aiContext = `
 You are assisting an ISET program staff member using the Supporting Documents widget. Explain how to filter by application
 or by documents relevant to an intervention, interpret the Documents and Checklist tabs, and what each column means.
-Clarify sources (application submission, message attachment, digitally signed, manual upload), scope (client,
+Clarify sources (applicant upload, secure message attachment, signed form, staff upload, PATH generated), scope (client,
 application, case, and action plan), and how to upload, edit, duplicate, view, or delete documents. Note that duplicate
-only appears when reuse is possible and delete requires typing "delete". Mention column preferences and resizing.
+only appears when reuse is possible and delete requires typing "delete". Mention that the document list columns are
+sortable, with Uploaded shown near the front by default, and that column preferences and resizing are available.
 Clarify the two modes: normal applicant/application document management versus case-based documents for imported or
 application-less client files. In case-based mode, uploads can attach to the client, case, or action plan, and
 application-type documents can still be uploaded by storing them against an action plan or the case when no linked

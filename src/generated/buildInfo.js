@@ -1,12 +1,12 @@
 const buildInfo = {
   "packageVersion": "0.1.0",
-  "releaseId": "test-prodlike-migration-rehearsal",
-  "buildTarget": "test",
-  "builtAt": "2026-04-16T19:44:23.510Z",
-  "gitCommit": "e12fee3c2f94e630f89b11bb57bd886d4fd66710",
-  "gitShort": "e12fee3c",
+  "releaseId": "",
+  "buildTarget": "local-start",
+  "builtAt": "2026-04-18T13:41:44.375Z",
+  "gitCommit": "6b8811b17c0d64614281b1d06d378c07b8957633",
+  "gitShort": "6b8811b1",
   "gitDirty": true,
-  "displayLabel": "v0.1.0 | test-prodlike-migration-rehearsal | e12fee3c-dirty | test"
+  "displayLabel": "v0.1.0 | 6b8811b1-dirty | local-start"
 };
 
 export default buildInfo;

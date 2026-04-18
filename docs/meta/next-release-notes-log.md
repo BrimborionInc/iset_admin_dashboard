@@ -11,6 +11,8 @@ Last Updated: 2026-04-15
 - Add an entry whenever a user-visible bug fix, UX change, workflow change, or operationally meaningful behavior change is merged/implemented.
 - Include enough context that a future thread can convert entries into polished "What's New", "Known Bugs", and "Coming Soon" sections.
 - Keep entries concise and factual; avoid speculative language.
+- If Bill asks for a bullet summary of the last week's user-interesting fixes/changes, use this log as the primary source but also review `docs/meta/codex-thread-index.md` for recent user-visible work that may not have originated from a bug report or change request.
+- Do not assume the feedback-report queue is a complete source for weekly user-facing summaries; include relevant non-queue improvements when they materially changed the product experience.
 
 ## Entry format
 

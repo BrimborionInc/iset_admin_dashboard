@@ -24,7 +24,10 @@ const {
   deleteCaseWatch,
   listCaseWatchesForUser,
 } = require('./src/server/caseWatchRepository');
-const { dispatchInternalNotifications } = require('../shared/events/notificationDispatcher');
+const {
+  dispatchInternalNotifications,
+  dispatchAssignmentNotificationEmails,
+} = require('../shared/events/notificationDispatcher');
 const nunjucks = require("nunjucks");
 let pool; // Initialized after DB config loads
 const { getRenderer: getComponentRenderer } = require('./src/server/componentRenderRegistry');
@@ -1658,14 +1661,20 @@ const parseCurrencyValue = (value) => {
 const formatCurrencyValue = (value) => {
   const num = parseCurrencyValue(value);
   if (num === null) return '';
-  return num.toFixed(2);
+  return num.toLocaleString('en-CA', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
 };
 
 const formatCurrencyField = (value) => {
   if (value === null || typeof value === 'undefined' || value === '') return '';
   const num = parseCurrencyValue(value);
   if (num === null) return normaliseString(value) || '';
-  return num.toFixed(2);
+  return num.toLocaleString('en-CA', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
 };
 
 const sumCurrencyValues = (...values) => {
@@ -1738,6 +1747,104 @@ const buildAssessmentPdfHtml = ({ templateHtml, fields }) => {
   return $.html();
 };
 
+function buildAssessmentVersionLabel({
+  versionNumber = null,
+  variant = 'submitted',
+  previousVersionNumber = null
+} = {}) {
+  const normalizedVersion = normalisePositiveInteger(versionNumber);
+  if (!normalizedVersion) return '';
+  if (variant === 'approved') {
+    return `v${normalizedVersion} approved`;
+  }
+  if (variant === 'redline') {
+    const priorVersion = normalisePositiveInteger(previousVersionNumber);
+    return priorVersion ? `v${normalizedVersion} redline vs v${priorVersion}` : `v${normalizedVersion} redline`;
+  }
+  return `v${normalizedVersion}`;
+}
+
+function buildAssessmentDocumentMetadata({
+  label,
+  documentType,
+  versionNumber = null,
+  variant = 'submitted',
+  previousVersionNumber = null,
+  snapshot = null
+} = {}) {
+  const metadata = {
+    label,
+    document_type: documentType,
+    assessment_version_number: normalisePositiveInteger(versionNumber) || null,
+    assessment_variant: normaliseString(variant) || null,
+    assessment_previous_version_number: normalisePositiveInteger(previousVersionNumber) || null,
+    assessment_snapshot: snapshot && typeof snapshot === 'object' ? snapshot : null
+  };
+  return JSON.stringify(metadata);
+}
+
+function parseAssessmentDocumentInfo(row) {
+  if (!row || typeof row !== 'object') return null;
+  const metadata = parseMetadata(row.metadata) || {};
+  const documentType =
+    normaliseString(row.document_category || metadata.document_type || null) ||
+    null;
+  const versionNumber = normalisePositiveInteger(metadata.assessment_version_number) || 1;
+  const previousVersionNumber = normalisePositiveInteger(metadata.assessment_previous_version_number) || null;
+  const variant = normaliseString(metadata.assessment_variant || null) || null;
+  const snapshot = metadata.assessment_snapshot && typeof metadata.assessment_snapshot === 'object'
+    ? metadata.assessment_snapshot
+    : null;
+  return {
+    id: normalisePositiveInteger(row.id) || null,
+    documentType,
+    versionNumber,
+    previousVersionNumber,
+    variant,
+    snapshot,
+    createdAt: toIsoDateTime(row.created_at) || null,
+    label: normaliseString(row.label || metadata.label || null) || null,
+    status: normaliseString(row.status || null) || null
+  };
+}
+
+async function fetchLatestAssessmentDocumentInfo({
+  applicationId,
+  caseId = null,
+  documentTypes = ['case_assessment'],
+  connection = pool
+} = {}) {
+  const categories = Array.isArray(documentTypes)
+    ? Array.from(new Set(documentTypes.map(item => normaliseString(item)).filter(Boolean)))
+    : [];
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  if (!categories.length || (!normalizedApplicationId && !normalizedCaseId)) {
+    return null;
+  }
+  const placeholders = categories.map(() => '?').join(',');
+  const whereClauses = [`document_category IN (${placeholders})`];
+  const params = [...categories];
+  if (normalizedApplicationId) {
+    whereClauses.push('application_id = ?');
+    params.push(normalizedApplicationId);
+  } else {
+    whereClauses.push('case_id = ?');
+    params.push(normalizedCaseId);
+  }
+  const [rows] = await connection.query(
+    `SELECT id, document_category, label, metadata, status, created_at
+       FROM iset_document
+      WHERE ${whereClauses.join(' AND ')}
+      ORDER BY created_at DESC, id DESC`,
+    params
+  );
+  const items = Array.isArray(rows)
+    ? rows.map(parseAssessmentDocumentInfo).filter(Boolean)
+    : [];
+  return items[0] || null;
+}
+
 async function storeAssessmentPdfDocument({
   applicationId,
   caseId,
@@ -1745,12 +1852,21 @@ async function storeAssessmentPdfDocument({
   applicantUserId,
   actorUserId,
   trackingId,
-  pdfBuffer
+  pdfBuffer,
+  documentType = 'case_assessment',
+  label = 'Case manager assessment',
+  fileNamePrefix = 'case-manager-assessment',
+  versionNumber = null,
+  variant = 'submitted',
+  previousVersionNumber = null,
+  snapshot = null,
+  archivePreviousActive = true,
+  replaceExistingVersion = false
 }) {
   if (!applicationId || !pdfBuffer) return null;
-  const documentType = 'case_assessment';
-  const label = 'Case manager assessment';
-  const displayName = `case-manager-assessment-${trackingId || applicationId}.pdf`;
+  const normalizedVersionNumber = normalisePositiveInteger(versionNumber);
+  const versionSuffix = normalizedVersionNumber ? `-v${normalizedVersionNumber}` : '';
+  const displayName = `${fileNamePrefix}${versionSuffix}-${trackingId || applicationId}.pdf`;
   const sizeBytes = Number.isFinite(Number(pdfBuffer?.length)) ? Number(pdfBuffer.length) : null;
   const checksum = pdfBuffer ? crypto.createHash('sha256').update(pdfBuffer).digest('hex') : null;
   const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
@@ -1775,16 +1891,47 @@ async function storeAssessmentPdfDocument({
     throw new Error('path_resolution_failed');
   }
 
-  await pool.query(
-    `UPDATE iset_document
-        SET status = 'archived', updated_at = NOW()
-      WHERE application_id = ?
-        AND document_category = ?
-        AND status = 'active'`,
-    [applicationId, documentType]
-  );
+  if (archivePreviousActive) {
+    await pool.query(
+      `UPDATE iset_document
+          SET status = 'archived', updated_at = NOW()
+        WHERE application_id = ?
+          AND document_category = ?
+          AND status = 'active'`,
+      [applicationId, documentType]
+    );
+  } else if (replaceExistingVersion && normalizedVersionNumber) {
+    const [existingRows] = await pool.query(
+      `SELECT id, metadata
+         FROM iset_document
+        WHERE application_id = ?
+          AND document_category = ?
+          AND status = 'active'`,
+      [applicationId, documentType]
+    );
+    const idsToArchive = (Array.isArray(existingRows) ? existingRows : [])
+      .map(row => ({ id: normalisePositiveInteger(row?.id), info: parseAssessmentDocumentInfo(row) }))
+      .filter(item => item.id && item.info?.versionNumber === normalizedVersionNumber)
+      .map(item => item.id);
+    if (idsToArchive.length) {
+      const idPlaceholders = idsToArchive.map(() => '?').join(',');
+      await pool.query(
+        `UPDATE iset_document
+            SET status = 'archived', updated_at = NOW()
+          WHERE id IN (${idPlaceholders})`,
+        idsToArchive
+      );
+    }
+  }
 
-  const metadata = JSON.stringify({ label, document_type: documentType });
+  const metadata = buildAssessmentDocumentMetadata({
+    label,
+    documentType,
+    versionNumber: normalizedVersionNumber,
+    variant,
+    previousVersionNumber,
+    snapshot
+  });
   const insertPayload = [
     caseId || null,
     applicationId,
@@ -2638,6 +2785,53 @@ function formatMultilineHtml(value) {
   return escapeHtml(value || '').replace(/\r?\n/g, '<br />');
 }
 
+function buildPdfSignaturePanelHtml({
+  signerName,
+  signedAt,
+  emptyMessage = 'Not signed'
+} = {}) {
+  const normalizedSignerName = normaliseString(signerName);
+  const signatureBoxClass = normalizedSignerName ? 'signature-box' : 'signature-box empty';
+  const signatureValue = normalizedSignerName || emptyMessage;
+  const signedAtText = signedAt ? `Signed on ${escapeHtml(formatSignatureDate(signedAt))}` : 'No signature timestamp recorded';
+  return `
+    <div class="signature-panel">
+      <div class="${signatureBoxClass}">${escapeHtml(signatureValue)}</div>
+      <div class="signature-meta">${signedAtText}</div>
+    </div>
+  `;
+}
+
+function buildAssessmentAgreementSectionHtml({
+  agreeWithCoordinator,
+  denialReason,
+  approvalSignatureHtml
+} = {}) {
+  const normalizedDecision = normaliseString(agreeWithCoordinator);
+  const agreeChecked = normalizedDecision === 'agree' ? ' checked="checked"' : '';
+  const disagreeChecked = normalizedDecision === 'disagree' ? ' checked="checked"' : '';
+  return `
+    <div class="section-title">AGREEMENT WITH COORDINATOR RECOMMENDATION</div>
+    <table class="form-table">
+      <tr>
+        <td class="label">Coordinator recommendation</td>
+        <td>
+          <div class="check-grid">
+            <label class="check"><input type="radio" name="agreeCoordinatorApproved"${agreeChecked} />Agree</label>
+            <label class="check"><input type="radio" name="agreeCoordinatorApproved"${disagreeChecked} />Disagree</label>
+          </div>
+        </td>
+        <td class="label">Reason for denial by NWAC (if applicable)</td>
+        <td><div class="text-field large">${escapeHtml(denialReason || '')}</div></td>
+      </tr>
+      <tr>
+        <td class="label">Approver eSignature</td>
+        <td colspan="3">${approvalSignatureHtml || buildPdfSignaturePanelHtml({})}</td>
+      </tr>
+    </table>
+  `;
+}
+
 const resolvePaymentTypeLabel = (value) => {
   const normalized = normalizePaymentTypeCode(value) || normaliseString(value);
   if (!normalized) return '';
@@ -2895,6 +3089,255 @@ const resolveDeliveryModeLabel = (value) => {
   return formatCaseStatusLabel(normalized) || normalized;
 };
 
+const buildAssessmentInlineDiffHtml = ({
+  currentValue = '',
+  previousValue = '',
+  diffStatus = null,
+  emptyValue = '&mdash;'
+} = {}) => {
+  const diff = buildFundingAgreementValueDiff(previousValue, currentValue);
+  return renderFundingAgreementDiffValueHtml({
+    diff,
+    value: currentValue,
+    diffStatus,
+    emptyValue
+  });
+};
+
+const buildAssessmentMultilineDiffHtml = ({
+  currentValue = '',
+  previousValue = '',
+  diffStatus = null,
+  emptyValue = '&mdash;'
+} = {}) => {
+  const current = normaliseString(currentValue ?? null) || '';
+  const previous = normaliseString(previousValue ?? null) || '';
+  const currentHtml = current ? formatMultilineHtml(current) : emptyValue;
+  const previousHtml = previous ? formatMultilineHtml(previous) : emptyValue;
+  if (diffStatus === 'removed') {
+    return `<span class="redline-inline-old">${previousHtml}</span>`;
+  }
+  if (diffStatus === 'added') {
+    return `<span class="redline-inline-new">${currentHtml}</span>`;
+  }
+  if (current === previous) {
+    return currentHtml;
+  }
+  return [
+    `<div class="redline-inline-old">${previousHtml}</div>`,
+    '<div class="redline-inline-arrow">&rarr;</div>',
+    `<div class="redline-inline-new">${currentHtml}</div>`
+  ].join('');
+};
+
+function sortAssessmentInterventions(list) {
+  const items = Array.isArray(list) ? list.slice() : [];
+  return items.sort((a, b) => {
+    const aDate = a?.startDate || '';
+    const bDate = b?.startDate || '';
+    if (aDate && bDate && aDate !== bDate) return String(aDate).localeCompare(String(bDate));
+    if (aDate && !bDate) return -1;
+    if (!aDate && bDate) return 1;
+    const aCode = a?.code || '';
+    const bCode = b?.code || '';
+    if (aCode !== bCode) return String(aCode).localeCompare(String(bCode));
+    const aId = a?.id || 0;
+    const bId = b?.id || 0;
+    return Number(aId) - Number(bId);
+  });
+}
+
+function buildAssessmentInterventionKey(intervention) {
+  if (!intervention) return '';
+  if (intervention.id) return `id:${intervention.id}`;
+  const code = intervention.code || '';
+  const start = intervention.startDate || '';
+  const end = intervention.endDate || '';
+  const program = intervention.programName || '';
+  const institution = intervention.institution || '';
+  return `key:${code}|${start}|${end}|${program}|${institution}`;
+}
+
+function buildAssessmentInterventionSignature(intervention) {
+  const canonical = canonicalisePreviewValue({
+    code: intervention?.code || null,
+    label: intervention?.label || null,
+    startDate: intervention?.startDate || null,
+    endDate: intervention?.endDate || null,
+    deliveryMode: intervention?.deliveryMode || null,
+    programName: intervention?.programName || null,
+    institution: intervention?.institution || null,
+    noc: intervention?.noc || null,
+    nocVersion: intervention?.nocVersion || null,
+    itpDetails: intervention?.itpDetails || null,
+    wageSubsidyDetails: intervention?.wageSubsidyDetails || null,
+    costLines: Array.isArray(intervention?.costLines) ? intervention.costLines : [],
+    costTotal: intervention?.costTotal ?? null,
+  });
+  return JSON.stringify(canonical);
+}
+
+function buildAssessmentCostLineKey(line, index = 0) {
+  const id = normaliseString(line?.id ?? line?.lineId ?? line?.line_id ?? null);
+  if (id) return `id:${id}`;
+  const type = normaliseString(line?.type ?? line?.paymentType ?? line?.payment_type ?? null) || '';
+  const payeeType = normaliseString(line?.payee?.type ?? line?.payeeType ?? line?.payee_type ?? null) || '';
+  const payeeName = normaliseString(line?.payee?.name ?? line?.payeeName ?? line?.payee_name ?? null) || '';
+  return `key:${type}|${payeeType}|${payeeName}|${Number(index) + 1}`;
+}
+
+function buildAssessmentCostLineSignature(line) {
+  return JSON.stringify(
+    canonicalisePreviewValue({
+      type: line?.type || null,
+      amount: line?.amount ?? null,
+      notes: line?.notes || null,
+      recurrence: line?.recurrence || null,
+      payee: line?.payee || null,
+    })
+  );
+}
+
+function buildAssessmentCostLineDiffList({ previousCostLines, currentCostLines }) {
+  const previousList = Array.isArray(previousCostLines) ? previousCostLines : [];
+  const currentList = Array.isArray(currentCostLines) ? currentCostLines : [];
+  const previousByKey = new Map();
+  const previousSignature = new Map();
+  previousList.forEach((line, index) => {
+    const key = buildAssessmentCostLineKey(line, index);
+    if (!key) return;
+    previousByKey.set(key, { ...line, sourceLineIndex: index + 1 });
+    previousSignature.set(key, buildAssessmentCostLineSignature(line));
+  });
+
+  const seen = new Set();
+  const diff = [];
+  currentList.forEach((line, index) => {
+    const key = buildAssessmentCostLineKey(line, index);
+    const previousLine = key ? previousByKey.get(key) : null;
+    if (!previousLine) {
+      diff.push({ ...line, diffStatus: 'added', sourceLineIndex: index + 1 });
+      return;
+    }
+    seen.add(key);
+    const currentSignature = buildAssessmentCostLineSignature(line);
+    const previousLineSignature = previousSignature.get(key);
+    if (currentSignature !== previousLineSignature) {
+      diff.push({ ...previousLine, diffStatus: 'removed' });
+      diff.push({ ...line, diffStatus: 'added', sourceLineIndex: index + 1 });
+    } else {
+      diff.push({ ...line, sourceLineIndex: index + 1 });
+    }
+  });
+
+  previousList.forEach((line, index) => {
+    const key = buildAssessmentCostLineKey(line, index);
+    if (!key || seen.has(key)) return;
+    diff.push({ ...line, diffStatus: 'removed', sourceLineIndex: index + 1 });
+  });
+  return diff;
+}
+
+function buildAssessmentInterventionMetaDiffs({ previousIntervention, currentIntervention }) {
+  return {
+    label: buildFundingAgreementValueDiff(
+      previousIntervention?.label ?? null,
+      currentIntervention?.label ?? null
+    ),
+    deliveryMode: buildFundingAgreementValueDiff(
+      resolveDeliveryModeLabel(previousIntervention?.deliveryMode ?? null),
+      resolveDeliveryModeLabel(currentIntervention?.deliveryMode ?? null)
+    ),
+    programName: buildFundingAgreementValueDiff(
+      previousIntervention?.programName ?? null,
+      currentIntervention?.programName ?? null
+    ),
+    institution: buildFundingAgreementValueDiff(
+      previousIntervention?.institution ?? null,
+      currentIntervention?.institution ?? null
+    ),
+    startDate: buildFundingAgreementValueDiff(
+      toDateOnlyString(previousIntervention?.startDate ?? null),
+      toDateOnlyString(currentIntervention?.startDate ?? null)
+    ),
+    endDate: buildFundingAgreementValueDiff(
+      toDateOnlyString(previousIntervention?.endDate ?? null),
+      toDateOnlyString(currentIntervention?.endDate ?? null)
+    ),
+    noc: buildFundingAgreementValueDiff(
+      previousIntervention?.noc ?? null,
+      currentIntervention?.noc ?? null
+    ),
+    nocVersion: buildFundingAgreementValueDiff(
+      previousIntervention?.nocVersion ?? null,
+      currentIntervention?.nocVersion ?? null
+    ),
+    itpDetails: buildFundingAgreementValueDiff(
+      previousIntervention?.itpDetails ?? null,
+      currentIntervention?.itpDetails ?? null
+    ),
+    wageSubsidyDetails: buildFundingAgreementValueDiff(
+      previousIntervention?.wageSubsidyDetails ?? null,
+      currentIntervention?.wageSubsidyDetails ?? null
+    )
+  };
+}
+
+function buildAssessmentInterventionDiffList({ previousInterventions, currentInterventions }) {
+  const previousList = sortAssessmentInterventions(previousInterventions);
+  const currentList = sortAssessmentInterventions(currentInterventions);
+  const previousByKey = new Map();
+  const previousSignature = new Map();
+  previousList.forEach(item => {
+    const key = buildAssessmentInterventionKey(item);
+    if (!key) return;
+    previousByKey.set(key, item);
+    previousSignature.set(key, buildAssessmentInterventionSignature(item));
+  });
+
+  const seen = new Set();
+  const diff = [];
+
+  currentList.forEach(item => {
+    const key = buildAssessmentInterventionKey(item);
+    const previous = key ? previousByKey.get(key) : null;
+    if (!previous) {
+      diff.push({ ...item, diffStatus: 'added' });
+      return;
+    }
+    seen.add(key);
+    const currentSignature = buildAssessmentInterventionSignature(item);
+    const previousItemSignature = previousSignature.get(key);
+    if (currentSignature !== previousItemSignature) {
+      diff.push({
+        ...item,
+        diffStatus: 'modified',
+        metaDiffs: buildAssessmentInterventionMetaDiffs({
+          previousIntervention: previous,
+          currentIntervention: item
+        }),
+        costLineDiffs: buildAssessmentCostLineDiffList({
+          previousCostLines: previous?.costLines,
+          currentCostLines: item?.costLines
+        }),
+        previousCostTotal:
+          computeCostLinesTotal(Array.isArray(previous?.costLines) ? previous.costLines : []) ??
+          parseCurrencyValue(previous?.costTotal) ??
+          null
+      });
+    } else {
+      diff.push({ ...item });
+    }
+  });
+
+  previousList.forEach(item => {
+    const key = buildAssessmentInterventionKey(item);
+    if (!key || seen.has(key)) return;
+    diff.push({ ...item, diffStatus: 'removed' });
+  });
+  return diff;
+}
+
 const buildAssessmentProposedInterventionsHtml = ({
   interventions,
   interventionLabelLookup,
@@ -2911,9 +3354,20 @@ const buildAssessmentProposedInterventionsHtml = ({
       intervention?.label ?? intervention?.interventionLabel ?? intervention?.intervention_label
     );
     const label = explicitLabel || (code && interventionLabelLookup ? interventionLabelLookup.get(code) : null);
-    const displayLabel = label
-      ? (code ? `${label} (${code})` : label)
-      : (code || '');
+    const displayLabel = label ? (code ? `${label} (${code})` : label) : (code || '');
+    const diffStatusRaw = normaliseString(intervention?.diffStatus ?? intervention?.diff_status ?? null);
+    const diffStatus = diffStatusRaw ? diffStatusRaw.toLowerCase() : null;
+    const diffLabel =
+      diffStatus === 'added'
+        ? 'Added'
+        : diffStatus === 'removed'
+        ? 'Removed'
+        : diffStatus === 'modified'
+        ? 'Updated'
+        : '';
+    const diffBadge = diffLabel
+      ? `<span class="redline-badge redline-${escapeHtml(diffStatus)}-badge">${escapeHtml(diffLabel)}</span>`
+      : '';
     const title = `Intervention ${index + 1}${displayLabel ? `: ${displayLabel}` : ''}`;
     const deliveryLabel =
       resolveDeliveryModeLabel(intervention?.deliveryMode) ||
@@ -2929,9 +3383,16 @@ const buildAssessmentProposedInterventionsHtml = ({
     const institution = normaliseString(intervention?.institution);
     const itpDetails = normaliseString(intervention?.itpDetails);
     const wageDetails = normaliseString(intervention?.wageSubsidyDetails);
-    const costLines = Array.isArray(intervention?.costLines) ? intervention.costLines : [];
+    const metaDiffs = intervention?.metaDiffs && typeof intervention.metaDiffs === 'object'
+      ? intervention.metaDiffs
+      : {};
+    const currentCostLines = Array.isArray(intervention?.costLines) ? intervention.costLines : [];
+    const renderedCostLines =
+      diffStatus === 'modified' && Array.isArray(intervention?.costLineDiffs)
+        ? intervention.costLineDiffs
+        : currentCostLines;
 
-    const costRows = costLines.map(line => {
+    const costRows = renderedCostLines.map(line => {
       const typeLabel = resolvePaymentTypeLabel(line?.type);
       const amountValue = formatCurrencyValue(line?.amount);
       const amountText = amountValue ? `$${amountValue}` : '';
@@ -2940,61 +3401,149 @@ const buildAssessmentProposedInterventionsHtml = ({
       const detailsHtml = notes
         ? `${escapeHtml(details || '')}<br /><em>${formatMultilineHtml(notes)}</em>`
         : escapeHtml(details || '');
+      const rowDiffStatusRaw = normaliseString(line?.diffStatus ?? line?.diff_status ?? null);
+      const rowDiffStatus = rowDiffStatusRaw ? rowDiffStatusRaw.toLowerCase() : null;
+      const rowBadgeLabel =
+        rowDiffStatus === 'removed'
+          ? 'Removed'
+          : rowDiffStatus === 'added'
+          ? 'Added'
+          : '';
+      const rowBadgeHtml = rowBadgeLabel
+        ? `<span class="redline-badge redline-${escapeHtml(rowDiffStatus)}-badge">${escapeHtml(rowBadgeLabel)}</span> `
+        : '';
+      const rowClassName = rowDiffStatus ? ` class="redline-row-${escapeHtml(rowDiffStatus)}"` : '';
       return `
-        <tr>
-          <td>${escapeHtml(typeLabel || '')}</td>
-          <td class="amount">${escapeHtml(amountText)}</td>
-          <td>${detailsHtml}</td>
+        <tr${rowClassName}>
+          <td>${rowBadgeHtml}${buildAssessmentInlineDiffHtml({ currentValue: typeLabel || '', diffStatus: rowDiffStatus, emptyValue: '' })}</td>
+          <td class="amount">${buildAssessmentInlineDiffHtml({ currentValue: amountText, diffStatus: rowDiffStatus, emptyValue: '' })}</td>
+          <td>${rowDiffStatus ? renderFundingAgreementDiffHtml({ html: detailsHtml, diffStatus: rowDiffStatus, emptyValue: '&mdash;' }) : detailsHtml}</td>
         </tr>`;
     }).join('');
 
     const costRowsHtml = costRows || '<tr><td colspan="3">No cost items recorded.</td></tr>';
-    const costTotal = computeCostLinesTotal(costLines);
+    const costTotal = computeCostLinesTotal(currentCostLines);
     const fallbackTotal = Number.isFinite(Number(intervention?.costTotal))
       ? Number(intervention.costTotal)
       : null;
     const totalValue = costTotal !== null ? costTotal : fallbackTotal;
     const totalText = totalValue === null ? '' : `$${formatCurrencyValue(totalValue)}`;
+    const previousTotalValue = parseCurrencyValue(intervention?.previousCostTotal);
+    const previousTotalText = previousTotalValue === null ? '' : `$${formatCurrencyValue(previousTotalValue)}`;
+    const totalHtml = buildFundingAgreementTotalHtml({
+      diffStatus,
+      currentValue: totalText,
+      previousValue: previousTotalText
+    });
+    const titleHtml = diffBadge ? `${diffBadge} ${escapeHtml(title)}` : escapeHtml(title);
+    const displayLabelHtml = buildAssessmentInlineDiffHtml({
+      currentValue: displayLabel || '',
+      previousValue: metaDiffs?.label?.from || '',
+      diffStatus,
+      emptyValue: ''
+    });
+    const deliveryModeHtml = diffStatus === 'modified'
+      ? buildAssessmentInlineDiffHtml({
+          currentValue: deliveryLabel,
+          previousValue: metaDiffs?.deliveryMode?.from || '',
+          emptyValue: ''
+        })
+      : buildAssessmentInlineDiffHtml({ currentValue: deliveryLabel, diffStatus, emptyValue: '' });
+    const programNameHtml = diffStatus === 'modified'
+      ? buildAssessmentInlineDiffHtml({
+          currentValue: programName,
+          previousValue: metaDiffs?.programName?.from || '',
+          emptyValue: ''
+        })
+      : buildAssessmentInlineDiffHtml({ currentValue: programName, diffStatus, emptyValue: '' });
+    const startDateHtml = diffStatus === 'modified'
+      ? buildAssessmentInlineDiffHtml({
+          currentValue: startDate,
+          previousValue: metaDiffs?.startDate?.from || '',
+          emptyValue: ''
+        })
+      : buildAssessmentInlineDiffHtml({ currentValue: startDate, diffStatus, emptyValue: '' });
+    const endDateHtml = diffStatus === 'modified'
+      ? buildAssessmentInlineDiffHtml({
+          currentValue: endDate,
+          previousValue: metaDiffs?.endDate?.from || '',
+          emptyValue: ''
+        })
+      : buildAssessmentInlineDiffHtml({ currentValue: endDate, diffStatus, emptyValue: '' });
+    const nocCodeHtml = diffStatus === 'modified'
+      ? buildAssessmentInlineDiffHtml({
+          currentValue: nocCode,
+          previousValue: metaDiffs?.noc?.from || '',
+          emptyValue: ''
+        })
+      : buildAssessmentInlineDiffHtml({ currentValue: nocCode, diffStatus, emptyValue: '' });
+    const nocVersionHtml = diffStatus === 'modified'
+      ? buildAssessmentInlineDiffHtml({
+          currentValue: nocVersion,
+          previousValue: metaDiffs?.nocVersion?.from || '',
+          emptyValue: ''
+        })
+      : buildAssessmentInlineDiffHtml({ currentValue: nocVersion, diffStatus, emptyValue: '' });
+    const institutionHtml = diffStatus === 'modified'
+      ? buildAssessmentInlineDiffHtml({
+          currentValue: institution,
+          previousValue: metaDiffs?.institution?.from || '',
+          emptyValue: ''
+        })
+      : buildAssessmentInlineDiffHtml({ currentValue: institution, diffStatus, emptyValue: '' });
+    const itpDetailsHtml = diffStatus === 'modified'
+      ? buildAssessmentMultilineDiffHtml({
+          currentValue: itpDetails,
+          previousValue: metaDiffs?.itpDetails?.from || ''
+        })
+      : buildAssessmentMultilineDiffHtml({ currentValue: itpDetails, diffStatus });
+    const wageDetailsHtml = diffStatus === 'modified'
+      ? buildAssessmentMultilineDiffHtml({
+          currentValue: wageDetails,
+          previousValue: metaDiffs?.wageSubsidyDetails?.from || ''
+        })
+      : buildAssessmentMultilineDiffHtml({ currentValue: wageDetails, diffStatus });
+    const blockClassName = diffStatus ? `intervention-block redline-${escapeHtml(diffStatus)}` : 'intervention-block';
 
     return `
-      <div class="intervention-block">
-        <div class="intervention-title">${escapeHtml(title)}</div>
+      <div class="${blockClassName}">
+        <div class="intervention-title">${titleHtml}</div>
         <table class="form-table intervention-table">
           <tr>
             <td class="label">Intervention</td>
-            <td colspan="3">${escapeHtml(displayLabel || '')}</td>
+            <td colspan="3">${displayLabelHtml}</td>
           </tr>
           <tr>
             <td class="label">Delivery mode</td>
-            <td>${escapeHtml(deliveryLabel)}</td>
+            <td>${deliveryModeHtml}</td>
             <td class="label">Program name</td>
-            <td>${escapeHtml(programName || '')}</td>
+            <td>${programNameHtml}</td>
           </tr>
           <tr>
             <td class="label">Start date</td>
-            <td>${escapeHtml(startDate || '')}</td>
+            <td>${startDateHtml}</td>
             <td class="label">End date</td>
-            <td>${escapeHtml(endDate || '')}</td>
+            <td>${endDateHtml}</td>
           </tr>
           <tr>
             <td class="label">Duration (days)</td>
             <td>${escapeHtml(durationText)}</td>
             <td class="label">NOC version</td>
-            <td>${escapeHtml(nocVersion || '')}</td>
+            <td>${nocVersionHtml}</td>
           </tr>
           <tr>
             <td class="label">NOC code</td>
-            <td>${escapeHtml(nocCode || '')}</td>
+            <td>${nocCodeHtml}</td>
             <td class="label">Training Institution / Employer</td>
-            <td>${escapeHtml(institution || '')}</td>
+            <td>${institutionHtml}</td>
           </tr>
           <tr>
             <td class="label">ITP details</td>
-            <td colspan="3">${formatMultilineHtml(itpDetails)}</td>
+            <td colspan="3">${itpDetailsHtml}</td>
           </tr>
           <tr>
             <td class="label">Wage subsidy details</td>
-            <td colspan="3">${formatMultilineHtml(wageDetails)}</td>
+            <td colspan="3">${wageDetailsHtml}</td>
           </tr>
         </table>
         <table class="cost-table">
@@ -3009,7 +3558,7 @@ const buildAssessmentProposedInterventionsHtml = ({
             ${costRowsHtml}
           </tbody>
         </table>
-        <div class="cost-total">Intervention total: ${escapeHtml(totalText)}</div>
+        <div class="cost-total">Intervention total: ${totalHtml || escapeHtml(totalText)}</div>
       </div>`;
   }).join('');
 };
@@ -3139,7 +3688,7 @@ function formatAssessmentOtherFundingDetailsForPdf(structuredDetails, fallbackTe
   return lines.join('\n');
 }
 
-function buildAssessmentPdfFields({
+async function buildAssessmentPdfSnapshot({
   caseRow,
   applicantName,
   referenceNumber,
@@ -3308,10 +3857,16 @@ function buildAssessmentPdfFields({
   if (proposedTotal !== null) {
     interventionCostTotalRaw = proposedTotal;
   }
-  const proposedInterventionsHtml = buildAssessmentProposedInterventionsHtml({
-    interventions: proposedInterventions,
-    interventionLabelLookup,
-    fallbackDeliveryModeLabel: deliveryModeLabel
+  const interventionCodes = Array.from(new Set(
+    [interventionCode]
+      .concat(proposedInterventions.map(intervention => intervention?.code || null))
+      .filter(Boolean)
+  ));
+  const fetchedInterventionLabels = await fetchInterventionCodeLabels(pool, interventionCodes);
+  fetchedInterventionLabels.forEach((label, code) => {
+    if (!interventionLabelLookup.has(code)) {
+      interventionLabelLookup.set(code, label);
+    }
   });
   const interventionCount = String(proposedInterventions.length);
 
@@ -3362,7 +3917,6 @@ function buildAssessmentPdfFields({
     (caseRow?.application_id ? String(caseRow.application_id) : '');
 
   return {
-    nwac_logo: getNwacLogoDataUri(),
     reference_number: resolvedReference,
     date_of_assessment: resolvedAssessmentDate,
     client_name: applicantName || '',
@@ -3376,7 +3930,8 @@ function buildAssessmentPdfFields({
     previously_funded_iset_details: caseRow?.assessment_previous_iset_details || '',
     other_funding_sources_details: otherFundingSourcesDetails,
     esdc_eligibility: esdcEligibilityValue,
-    proposed_interventions_html: { html: proposedInterventionsHtml },
+    proposed_interventions: proposedInterventions,
+    intervention_label_lookup: Object.fromEntries(interventionLabelLookup),
     intervention_code: interventionDisplay,
     delivery_mode: deliveryModeLabel,
     intervention_start_date: toDateOnlyString(caseRow?.assessment_intervention_start_date),
@@ -3391,21 +3946,15 @@ function buildAssessmentPdfFields({
     childcare_need_yes: childcareNeedYes,
     childcare_need_no: childcareNeedNo,
     childcare_funding_details: caseRow?.assessment_childcare_funding_details || '',
-    intervention_cost_total: interventionCostTotalRaw === null || typeof interventionCostTotalRaw === 'undefined'
-      ? ''
-      : `$${formatCurrencyValue(interventionCostTotalRaw)}`,
+    intervention_cost_total_raw: interventionCostTotalRaw,
     intervention_count: interventionCount,
     cost_type: costType,
     recurring_period: recurringPeriod,
-    recurring_amount: recurringAmountRaw === null || typeof recurringAmountRaw === 'undefined'
-      ? ''
-      : formatCurrencyValue(recurringAmountRaw),
+    recurring_amount_raw: recurringAmountRaw,
     recurring_occurrences: recurringOccurrencesRaw === null || typeof recurringOccurrencesRaw === 'undefined'
       ? ''
       : String(recurringOccurrencesRaw),
-    recurring_total: recurringTotalRaw === null || typeof recurringTotalRaw === 'undefined'
-      ? ''
-      : formatCurrencyValue(recurringTotalRaw),
+    recurring_total_raw: recurringTotalRaw,
     budget_pot_label: budgetPotLabel,
     posting_context: postingContextLabel,
     itp_tuition_amount: formatCurrencyValue(itp.tuition),
@@ -3430,6 +3979,157 @@ function buildAssessmentPdfFields({
     barriers_other_specify: barriersOtherDetails || '',
     ...barrierFields,
     ...priorityFields
+  };
+}
+
+async function buildAssessmentPdfFields({
+  caseRow,
+  applicantName,
+  referenceNumber,
+  caseContext,
+  recommendationSignature = null,
+  approvalSignature = null,
+  includeAgreementSection = false,
+  versionNumber = null,
+  variant = 'submitted',
+  previousVersionNumber = null,
+  redlineBaseSnapshot = null
+}) {
+  const snapshot = await buildAssessmentPdfSnapshot({
+    caseRow,
+    applicantName,
+    referenceNumber,
+    caseContext
+  });
+  const previousSnapshot = redlineBaseSnapshot && typeof redlineBaseSnapshot === 'object'
+    ? redlineBaseSnapshot
+    : null;
+  const currentLookup = snapshot?.intervention_label_lookup && typeof snapshot.intervention_label_lookup === 'object'
+    ? snapshot.intervention_label_lookup
+    : {};
+  const previousLookup = previousSnapshot?.intervention_label_lookup && typeof previousSnapshot.intervention_label_lookup === 'object'
+    ? previousSnapshot.intervention_label_lookup
+    : {};
+  const mergedInterventionLabelLookup = new Map(Object.entries({
+    ...previousLookup,
+    ...currentLookup
+  }));
+  const currentInterventions = Array.isArray(snapshot?.proposed_interventions) ? snapshot.proposed_interventions : [];
+  const previousInterventions = Array.isArray(previousSnapshot?.proposed_interventions)
+    ? previousSnapshot.proposed_interventions
+    : [];
+  const renderedInterventions = previousSnapshot
+    ? buildAssessmentInterventionDiffList({
+        previousInterventions,
+        currentInterventions
+      })
+    : currentInterventions;
+  const proposedInterventionsHtml = buildAssessmentProposedInterventionsHtml({
+    interventions: renderedInterventions,
+    interventionLabelLookup: mergedInterventionLabelLookup,
+    fallbackDeliveryModeLabel: snapshot?.delivery_mode || ''
+  });
+  const recommendationSignatureHtml = buildPdfSignaturePanelHtml({
+    signerName: recommendationSignature?.signerName,
+    signedAt: recommendationSignature?.signedAt
+  });
+  const approvalSignatureHtml = buildPdfSignaturePanelHtml({
+    signerName: approvalSignature?.signerName,
+    signedAt: approvalSignature?.signedAt
+  });
+  const agreementSectionHtml = includeAgreementSection
+    ? buildAssessmentAgreementSectionHtml({
+        agreeWithCoordinator: snapshot?.agree_with_coordinator || '',
+        denialReason: snapshot?.denial_reason || '',
+        approvalSignatureHtml
+      })
+    : '';
+  const inlineField = (fieldName, { emptyValue = '&mdash;' } = {}) => {
+    const currentValue = snapshot?.[fieldName] ?? '';
+    if (!previousSnapshot) return currentValue;
+    const previousValue = previousSnapshot?.[fieldName] ?? '';
+    return {
+      html: buildAssessmentInlineDiffHtml({
+        currentValue,
+        previousValue,
+        emptyValue
+      })
+    };
+  };
+  const multilineField = fieldName => {
+    const currentValue = snapshot?.[fieldName] ?? '';
+    if (!previousSnapshot) return currentValue;
+    const previousValue = previousSnapshot?.[fieldName] ?? '';
+    return {
+      html: buildAssessmentMultilineDiffHtml({
+        currentValue,
+        previousValue
+      })
+    };
+  };
+  const currentTotal = snapshot?.intervention_cost_total_raw === null || typeof snapshot?.intervention_cost_total_raw === 'undefined'
+    ? ''
+    : `$${formatCurrencyValue(snapshot.intervention_cost_total_raw)}`;
+  const previousTotal = previousSnapshot?.intervention_cost_total_raw === null || typeof previousSnapshot?.intervention_cost_total_raw === 'undefined'
+    ? ''
+    : `$${formatCurrencyValue(previousSnapshot.intervention_cost_total_raw)}`;
+
+  return {
+    nwac_logo: getNwacLogoDataUri(),
+    assessment_version_label: buildAssessmentVersionLabel({
+      versionNumber,
+      variant,
+      previousVersionNumber
+    }),
+    reference_number: inlineField('reference_number', { emptyValue: '' }),
+    date_of_assessment: inlineField('date_of_assessment', { emptyValue: '' }),
+    client_name: inlineField('client_name', { emptyValue: '' }),
+    conflict_declaration_signed: Boolean(snapshot?.conflict_declaration_signed),
+    conflict_choice_no: Boolean(snapshot?.conflict_choice_no),
+    conflict_choice_yes: Boolean(snapshot?.conflict_choice_yes),
+    conflict_details: multilineField('conflict_details'),
+    client_application_overview: multilineField('client_application_overview'),
+    training_employment_goal: multilineField('training_employment_goal'),
+    previously_funded_iset: snapshot?.previously_funded_iset || '',
+    previously_funded_iset_details: inlineField('previously_funded_iset_details', { emptyValue: '' }),
+    other_funding_sources_details: multilineField('other_funding_sources_details'),
+    esdc_eligibility: snapshot?.esdc_eligibility || '',
+    proposed_interventions_html: { html: proposedInterventionsHtml },
+    childcare_need_yes: Boolean(snapshot?.childcare_need_yes),
+    childcare_need_no: Boolean(snapshot?.childcare_need_no),
+    childcare_funding_details: multilineField('childcare_funding_details'),
+    intervention_cost_total: previousSnapshot
+      ? { html: buildAssessmentInlineDiffHtml({ currentValue: currentTotal, previousValue: previousTotal, emptyValue: '' }) }
+      : currentTotal,
+    intervention_count: inlineField('intervention_count', { emptyValue: '' }),
+    budget_pot_label: inlineField('budget_pot_label', { emptyValue: '' }),
+    posting_context: inlineField('posting_context', { emptyValue: '' }),
+    recommendation: snapshot?.recommendation || '',
+    recommendation_justification: multilineField('recommendation_justification'),
+    recommendation_signature_html: { html: recommendationSignatureHtml },
+    agreement_section_html: { html: agreementSectionHtml },
+    barriers_other_specify: inlineField('barriers_other_specify', { emptyValue: '' }),
+    barriers_none: Boolean(snapshot?.barriers_none),
+    barriers_education: Boolean(snapshot?.barriers_education),
+    barriers_lack_marketable_skills: Boolean(snapshot?.barriers_lack_marketable_skills),
+    barriers_lack_work_experience: Boolean(snapshot?.barriers_lack_work_experience),
+    barriers_remoteness: Boolean(snapshot?.barriers_remoteness),
+    barriers_lack_transportation: Boolean(snapshot?.barriers_lack_transportation),
+    barriers_economic: Boolean(snapshot?.barriers_economic),
+    barriers_language: Boolean(snapshot?.barriers_language),
+    barriers_lack_labour_force_attachment: Boolean(snapshot?.barriers_lack_labour_force_attachment),
+    barriers_dependent_care: Boolean(snapshot?.barriers_dependent_care),
+    barriers_health: Boolean(snapshot?.barriers_health),
+    barriers_other: Boolean(snapshot?.barriers_other),
+    priorities_off_reserve: Boolean(snapshot?.priorities_off_reserve),
+    priorities_single_parent_family: Boolean(snapshot?.priorities_single_parent_family),
+    priorities_woman_over_45: Boolean(snapshot?.priorities_woman_over_45),
+    priorities_literacy: Boolean(snapshot?.priorities_literacy),
+    priorities_youth: Boolean(snapshot?.priorities_youth),
+    priorities_unskilled_clerical_service_worker: Boolean(snapshot?.priorities_unskilled_clerical_service_worker),
+    priorities_no_grade_12: Boolean(snapshot?.priorities_no_grade_12),
+    priorities_unskilled_labourer: Boolean(snapshot?.priorities_unskilled_labourer),
+    priorities_non_targeted: Boolean(snapshot?.priorities_non_targeted)
   };
 }
 
@@ -3951,12 +4651,36 @@ function buildFinancialOverviewPdfFields({
   };
 }
 
-async function generateAssessmentPdfBuffer({ caseRow, applicantName, referenceNumber }) {
+async function generateAssessmentPdfBuffer({
+  caseRow,
+  applicantName,
+  referenceNumber,
+  caseContext = null,
+  recommendationSignature = null,
+  approvalSignature = null,
+  includeAgreementSection = false,
+  versionNumber = null,
+  variant = 'submitted',
+  previousVersionNumber = null,
+  redlineBaseSnapshot = null
+}) {
   const templateHtml = getAssessmentTemplateHtml();
   if (!templateHtml) {
     throw new Error('assessment_template_missing');
   }
-  const fields = buildAssessmentPdfFields({ caseRow, applicantName, referenceNumber });
+  const fields = await buildAssessmentPdfFields({
+    caseRow,
+    applicantName,
+    referenceNumber,
+    caseContext,
+    recommendationSignature,
+    approvalSignature,
+    includeAgreementSection,
+    versionNumber,
+    variant,
+    previousVersionNumber,
+    redlineBaseSnapshot
+  });
   const html = buildAssessmentPdfHtml({ templateHtml, fields });
   let browser;
   try {
@@ -11171,6 +11895,7 @@ const normalizeProposedIntervention = (raw, index = 0) => {
   const code = normalizeInterventionCodeValue(
     raw.code ?? raw.interventionCode ?? raw.intervention_code ?? null
   );
+  const label = normaliseString(raw.label ?? raw.interventionLabel ?? raw.intervention_label ?? null);
   const id = normaliseString(raw.id ?? raw.interventionId ?? raw.intervention_id ?? null);
   const startDate = toDateOnlyString(
     raw.startDate ?? raw.interventionStartDate ?? raw.intervention_start_date ?? null
@@ -11209,6 +11934,7 @@ const normalizeProposedIntervention = (raw, index = 0) => {
   return {
     id: id || null,
     code: code || null,
+    label: label || null,
     startDate,
     endDate,
     deliveryMode: deliveryMode || null,
@@ -11400,6 +12126,59 @@ async function fetchInterventionCodeLabels(connection, codes = []) {
     }
   });
   return labels;
+}
+
+async function fetchLatestCaseEventSignature(connection, { caseId, eventType, outcome = null } = {}) {
+  if (!connection || !caseId || !eventType) return null;
+  const whereClauses = ['e.case_id = ?', 'e.event_type = ?'];
+  const params = [caseId, eventType];
+  if (outcome) {
+    whereClauses.push(`JSON_UNQUOTE(JSON_EXTRACT(e.payload_json, '$.outcome')) = ?`);
+    params.push(outcome);
+  }
+  const [[row]] = await connection.query(
+    `SELECT
+        e.occurred_at,
+        COALESCE(
+          NULLIF(TRIM(sp.display_name), ''),
+          NULLIF(TRIM(sp.name), ''),
+          NULLIF(TRIM(sp.email), ''),
+          NULLIF(TRIM(u.name), ''),
+          NULLIF(TRIM(u.email), '')
+        ) AS signer_name
+       FROM iset_case_event e
+       LEFT JOIN staff_profiles sp ON sp.id = e.actor_staff_profile_id
+       LEFT JOIN user u ON u.id = e.actor_user_id
+      WHERE ${whereClauses.join(' AND ')}
+      ORDER BY e.occurred_at DESC, e.id DESC
+      LIMIT 1`,
+    params
+  );
+  if (!row) return null;
+  const signerName = normaliseString(row?.signer_name) || null;
+  const signedAt = toIsoDateTime(row?.occurred_at);
+  if (!signerName && !signedAt) return null;
+  return { signerName, signedAt };
+}
+
+async function fetchAssessmentPdfSignatureContext({
+  caseId,
+  connection = pool,
+  submittedFallback = null,
+  approvedFallback = null
+} = {}) {
+  const submittedSignature =
+    await fetchLatestCaseEventSignature(connection, { caseId, eventType: 'assessment_submitted' }) ||
+    submittedFallback ||
+    null;
+  const approvedSignature =
+    await fetchLatestCaseEventSignature(connection, { caseId, eventType: 'nwac_review_submitted', outcome: 'approve' }) ||
+    approvedFallback ||
+    null;
+  return {
+    submittedSignature,
+    approvedSignature
+  };
 }
 
 const buildApprovalInterventionSummaries = ({
@@ -12312,7 +13091,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
           metadata_json,
           esdc_intervention_json,
           created_by_staff_profile_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         caseId,
         planId,
@@ -17408,6 +18187,20 @@ const DEFAULT_LOCK_CONFIG = Object.freeze({
   lockTtlMinutes: 15,
   heartbeatMinutes: 2
 });
+const DEMO_NAVIGATION_SCOPE = 'admin';
+const DEMO_NAVIGATION_KEY = 'demoNavigation';
+const DEMO_NAVIGATION_ROLES = Object.freeze([
+  'System Administrator',
+  'NWAC Administrator',
+  'Regional Manager',
+  'ISET Coordinator',
+]);
+const DEMO_NAVIGATION_DEFAULT_VISIBILITY = Object.freeze(
+  DEMO_NAVIGATION_ROLES.reduce((acc, role) => {
+    acc[role] = false;
+    return acc;
+  }, {})
+);
 const AUTO_ASSIGNMENT_SCOPE = 'workflow';
 const AUTO_ASSIGNMENT_KEY = 'autoAssignment';
 const AUTO_ASSIGNMENT_ALLOWED_FIELDS = new Set(['province', 'indigenous_group', 'any']);
@@ -17437,6 +18230,21 @@ function normaliseLockConfig(raw) {
   return config;
 }
 
+function normaliseDemoNavigationVisibilityConfig(raw) {
+  const source = raw && typeof raw === 'object' && !Array.isArray(raw) && raw.visibility
+    ? raw.visibility
+    : raw;
+  const visibility = { ...DEMO_NAVIGATION_DEFAULT_VISIBILITY };
+  if (source && typeof source === 'object' && !Array.isArray(source)) {
+    DEMO_NAVIGATION_ROLES.forEach(role => {
+      if (Object.prototype.hasOwnProperty.call(source, role)) {
+        visibility[role] = !!source[role];
+      }
+    });
+  }
+  return { visibility };
+}
+
 async function readLockConfig() {
   try {
     const [[row]] = await pool.query("SELECT v FROM iset_runtime_config WHERE scope='admin' AND k='locking' LIMIT 1");
@@ -17451,6 +18259,46 @@ async function readLockConfig() {
     console.warn('[locking] read config failed:', err.message);
     return { ...DEFAULT_LOCK_CONFIG, source: 'error' };
   }
+}
+
+async function readDemoNavigationVisibilityConfig() {
+  try {
+    await ensureRuntimeConfigTable();
+    const [[row]] = await pool.query(
+      'SELECT v, updated_at FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
+      [DEMO_NAVIGATION_SCOPE, DEMO_NAVIGATION_KEY]
+    );
+    if (!row) {
+      return {
+        ...normaliseDemoNavigationVisibilityConfig(null),
+        source: 'default',
+        updatedAt: null,
+      };
+    }
+    const normalised = normaliseDemoNavigationVisibilityConfig(parseJsonValue(row.v));
+    return {
+      ...normalised,
+      source: 'stored',
+      updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+    };
+  } catch (err) {
+    console.warn('[demo-navigation] read config failed:', err.message);
+    return {
+      ...normaliseDemoNavigationVisibilityConfig(null),
+      source: 'error',
+      updatedAt: null,
+    };
+  }
+}
+
+async function writeDemoNavigationVisibilityConfig(payload) {
+  const normalised = normaliseDemoNavigationVisibilityConfig(payload);
+  await ensureRuntimeConfigTable();
+  await pool.query(
+    'INSERT INTO iset_runtime_config (scope,k,v) VALUES (?,?,CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP',
+    [DEMO_NAVIGATION_SCOPE, DEMO_NAVIGATION_KEY, JSON.stringify(normalised)]
+  );
+  return await readDemoNavigationVisibilityConfig();
 }
 
 async function readServiceAnnouncementConfig() {
@@ -17750,7 +18598,7 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 const cheerio = require('cheerio');
 const { sendSecureMessageAlert, sendDecisionOutcome } = require('../ISET-intake/notifications/applicantEmailNotifications');
-const { sendNotificationEmail } = require('../ISET-intake/sesMailer');
+const { sendNotificationEmail, configureSesMailer } = require('../ISET-intake/sesMailer');
 const axios = require('axios');
 // Workflow normalization (shared preview/publish schema builder)
 let buildWorkflowSchema; // lazy require inside try-catch to avoid crash if file missing
@@ -27285,6 +28133,29 @@ app.get('/api/config/runtime/backend-jobs', async (_req, res) => {
   }
 });
 
+app.get('/api/config/runtime/demo-navigation', async (_req, res) => {
+  try {
+    const config = await readDemoNavigationVisibilityConfig();
+    res.set('Cache-Control', 'no-store');
+    res.json(config);
+  } catch (err) {
+    console.error('[demo-navigation] config fetch failed:', err);
+    res.status(500).json({ error: 'demo_navigation_config_fetch_failed', message: err.message });
+  }
+});
+
+app.patch('/api/config/runtime/demo-navigation', async (req, res) => {
+  try {
+    if (!sysAdminOnly(req)) return res.status(403).json({ error: 'forbidden' });
+    const saved = await writeDemoNavigationVisibilityConfig(req.body || {});
+    res.set('Cache-Control', 'no-store');
+    res.json(saved);
+  } catch (err) {
+    console.error('[demo-navigation] config update failed:', err);
+    res.status(500).json({ error: 'demo_navigation_config_update_failed', message: err.message });
+  }
+});
+
 app.get('/api/config/runtime/service-announcement', async (_req, res) => {
   try {
     const config = await readServiceAnnouncementConfig();
@@ -27981,9 +28852,10 @@ app.get('/api/config/runtime', async (req, res) => {
     const nodeEnv = process.env.NODE_ENV || 'development';
     const authAdmin = __authConfig.admin;
     const authPublic = __authConfig.public;
-    const [cognitoTokens, cognitoPolicy] = await Promise.all([
+    const [cognitoTokens, cognitoPolicy, demoNavigation] = await Promise.all([
       getCognitoTokenValidity(),
-      getCognitoAuthPolicy()
+      getCognitoAuthPolicy(),
+      readDemoNavigationVisibilityConfig(),
     ]);
     res.json({
       ai: { enabled, model: aiModel, params: aiParams, fallbackModels },
@@ -28018,7 +28890,8 @@ app.get('/api/config/runtime', async (req, res) => {
         cognitoPolicy
       },
       cors: { allowedOrigins },
-      env: { nodeEnv }
+      env: { nodeEnv },
+      demoNavigation,
     });
   } catch (e) {
     res.status(500).json({ error: 'config_runtime_failed', message: e.message });
@@ -32210,6 +33083,7 @@ const dbConfig = {
 
 pool = mysql.createPool(dbConfig);
 app.locals.pool = pool;
+configureSesMailer({ pool });
 hydrateAuthConfigFromDatabase().catch(err => {
   console.warn('[auth-config] Initial hydration failed:', err.message);
 });
@@ -34392,6 +35266,7 @@ app.get('/api/dashboard/metrics/details', async (req, res) => {
 const eventService = createEventService({ pool, logger: console });
 registerNotificationHook(async (event) => {
   await dispatchInternalNotifications({ pool, event, logger: console });
+  await dispatchAssignmentNotificationEmails({ pool, event, logger: console });
   await dispatchMessageReceivedEmail({ pool, event, logger: console });
 });
 
@@ -40103,7 +40978,10 @@ function handleAdminDocumentUpload({ requireApplicant = false, applicantIdHint =
     }
 
     const applicantId = normalisePositiveInteger(
-      applicantIdHint || req.params.id || req.body?.applicantUserId || req.body?.applicant_user_id
+      applicantIdHint ||
+        (requireApplicant ? req.params.id : null) ||
+        req.body?.applicantUserId ||
+        req.body?.applicant_user_id
     );
     const cleanupUploadedFile = () => {
       if (req.file && req.file.path) {
@@ -46218,7 +47096,7 @@ app.post('/api/interventions/:id/revise', async (req, res) => {
           metadata_json,
           esdc_intervention_json,
           created_by_staff_profile_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         sourceRow.case_id,
         sourceRow.action_plan_id,
@@ -55430,6 +56308,7 @@ const PAYMENT_EVIDENCE_DOCUMENT_TYPE_MAP = {
   statement_of_account: ['StatementOfAccount', 'TuitionStatementOrInvoice'],
   funding_agreement: ['FundingAgreement'],
   case_assessment: ['CaseManagerAssessment'],
+  case_assessment_approved: ['CaseManagerAssessment'],
   attendance_form: ['AttendanceReport'],
   financial_overview: ['FinancialOverview'],
   financial_records: ['IncomeVerification'],
@@ -72547,7 +73426,9 @@ app.get('/api/cases/:case_id/events', async (req, res) => {
 app.get('/api/applications', async (req, res) => {
   try {
     if (!req.auth || req.auth.subjectType !== 'staff') return res.status(403).json({ error: 'forbidden' });
-    const { status, limit = 50, offset = 0, search } = req.query;
+    const { status, limit = 50, offset = 0 } = req.query;
+    const searchText = String(firstQueryValue(req.query.search) || '').trim();
+    const searchTerm = searchText ? `%${searchText.toLowerCase()}%` : null;
     const excludeTerminalRaw = firstQueryValue(req.query.excludeTerminal);
     const excludeTerminal = ['1', 'true', 'yes'].includes(String(excludeTerminalRaw || '').trim().toLowerCase());
     const role = req.auth.role;
@@ -72560,10 +73441,65 @@ app.get('/api/applications', async (req, res) => {
       ? Array.from(TERMINAL_APPLICATION_STATUSES)
       : [];
     const terminalStatusPlaceholders = terminalStatuses.map(() => '?').join(',');
+    const trackingIdExpr = `JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))`;
     const addressProvinceExpr = `COALESCE(
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."address-province"')),
       JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."address-province"'))
     )`;
+    const preferredNameExpr = `JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."preferred-name"'))`;
+    const applicantFirstNameExpr = `JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."first-name"'))`;
+    const applicantLastNameExpr = `JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."last-name"'))`;
+    const applicantFullNameExpr = `JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.full_name'))`;
+    const applicantPersonalFirstNameExpr = `JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.first_name'))`;
+    const applicantPersonalLastNameExpr = `JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.last_name'))`;
+    const submissionPreferredNameExpr = `JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."preferred-name"'))`;
+    const submissionFirstNameExpr = `JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."first-name"'))`;
+    const submissionLastNameExpr = `JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."last-name"'))`;
+    const applicationAnswersFullNameExpr = `TRIM(CONCAT_WS(' ', ${applicantFirstNameExpr}, ${applicantLastNameExpr}))`;
+    const applicationPersonalFullNameExpr = `TRIM(CONCAT_WS(' ', ${applicantPersonalFirstNameExpr}, ${applicantPersonalLastNameExpr}))`;
+    const submissionFullNameExpr = `TRIM(CONCAT_WS(' ', ${submissionFirstNameExpr}, ${submissionLastNameExpr}))`;
+    const normalizedApplicationLifecycleSearchExpr = `LOWER(REPLACE(TRIM(COALESCE(${applicationLifecycleStatusExpr}, '')), '_', ' '))`;
+    const normalizedApplicationStatusSearchExpr = `LOWER(REPLACE(TRIM(COALESCE(a.status, '')), '_', ' '))`;
+    const normalizedCaseStatusSearchExpr = `LOWER(REPLACE(TRIM(COALESCE(c.status, '')), '_', ' '))`;
+    const asSearchableLower = expression => `LOWER(COALESCE(${expression}, ''))`;
+    const baseSearchClauses = [
+      `${asSearchableLower(trackingIdExpr)} LIKE ?`,
+      `${asSearchableLower(preferredNameExpr)} LIKE ?`,
+      `${asSearchableLower(applicantFirstNameExpr)} LIKE ?`,
+      `${asSearchableLower(applicantLastNameExpr)} LIKE ?`,
+      `${asSearchableLower(applicantFullNameExpr)} LIKE ?`,
+      `${asSearchableLower(applicantPersonalFirstNameExpr)} LIKE ?`,
+      `${asSearchableLower(applicantPersonalLastNameExpr)} LIKE ?`,
+      `${asSearchableLower(applicationAnswersFullNameExpr)} LIKE ?`,
+      `${asSearchableLower(applicationPersonalFullNameExpr)} LIKE ?`,
+      `${asSearchableLower(submissionPreferredNameExpr)} LIKE ?`,
+      `${asSearchableLower(submissionFirstNameExpr)} LIKE ?`,
+      `${asSearchableLower(submissionLastNameExpr)} LIKE ?`,
+      `${asSearchableLower(submissionFullNameExpr)} LIKE ?`,
+      `${asSearchableLower(addressProvinceExpr)} LIKE ?`,
+      `${asSearchableLower('sp.email')} LIKE ?`,
+      `${normalizedApplicationLifecycleSearchExpr} LIKE ?`,
+      `${normalizedApplicationStatusSearchExpr} LIKE ?`,
+      `${normalizedCaseStatusSearchExpr} LIKE ?`
+    ];
+    const unassignedSearchClauses = [
+      `${asSearchableLower(trackingIdExpr)} LIKE ?`,
+      `${asSearchableLower(preferredNameExpr)} LIKE ?`,
+      `${asSearchableLower(applicantFirstNameExpr)} LIKE ?`,
+      `${asSearchableLower(applicantLastNameExpr)} LIKE ?`,
+      `${asSearchableLower(applicantFullNameExpr)} LIKE ?`,
+      `${asSearchableLower(applicantPersonalFirstNameExpr)} LIKE ?`,
+      `${asSearchableLower(applicantPersonalLastNameExpr)} LIKE ?`,
+      `${asSearchableLower(applicationAnswersFullNameExpr)} LIKE ?`,
+      `${asSearchableLower(applicationPersonalFullNameExpr)} LIKE ?`,
+      `${asSearchableLower(submissionPreferredNameExpr)} LIKE ?`,
+      `${asSearchableLower(submissionFirstNameExpr)} LIKE ?`,
+      `${asSearchableLower(submissionLastNameExpr)} LIKE ?`,
+      `${asSearchableLower(submissionFullNameExpr)} LIKE ?`,
+      `${asSearchableLower(addressProvinceExpr)} LIKE ?`,
+      `${normalizedApplicationLifecycleSearchExpr} LIKE ?`,
+      `${normalizedApplicationStatusSearchExpr} LIKE ?`
+    ];
 
     // Base case + application join using new lean model.
     // Assignment user now from staff_profiles (nullable); tracking_id fallback derived from payload_json->submission_snapshot.reference_number if tracking_id column absent.
@@ -72586,7 +73522,7 @@ app.get('/api/applications', async (req, res) => {
       al.owner_display_name AS lock_owner_name,
       al.owner_email AS lock_owner_email,
       al.expires_at AS lock_expires_at,
-      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
+      ${trackingIdExpr} AS tracking_id,
       ${addressProvinceExpr} AS address_province,
       ca.esdc_eligibility AS assessment_esdc_eligibility,
       ca.intervention_cost_total AS assessment_intervention_cost_total,
@@ -72599,15 +73535,15 @@ app.get('/api/applications', async (req, res) => {
            AND (dfa.application_id = a.id OR dfa.case_id = c.id)
       ) AS funding_agreement_count,
       a.created_at AS submitted_at,
-      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."preferred-name"')) AS preferred_name,
-      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."first-name"')) AS applicant_first_name,
-      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."last-name"')) AS applicant_last_name,
-      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.full_name')) AS applicant_full_name,
-      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.first_name')) AS applicant_personal_first_name,
-      JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.last_name')) AS applicant_personal_last_name,
-      JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."preferred-name"')) AS submission_preferred_name,
-      JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."first-name"')) AS submission_first_name,
-      JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."last-name"')) AS submission_last_name,
+      ${preferredNameExpr} AS preferred_name,
+      ${applicantFirstNameExpr} AS applicant_first_name,
+      ${applicantLastNameExpr} AS applicant_last_name,
+      ${applicantFullNameExpr} AS applicant_full_name,
+      ${applicantPersonalFirstNameExpr} AS applicant_personal_first_name,
+      ${applicantPersonalLastNameExpr} AS applicant_personal_last_name,
+      ${submissionPreferredNameExpr} AS submission_preferred_name,
+      ${submissionFirstNameExpr} AS submission_first_name,
+      ${submissionLastNameExpr} AS submission_last_name,
       0 AS is_unassigned_submission
       FROM iset_case c
       ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
@@ -72622,10 +73558,9 @@ app.get('/api/applications', async (req, res) => {
       const list = String(status).split(',').map(s => s.trim()).filter(Boolean);
       if (list.length) { where.push(`a.status IN (${list.map(()=>'?').join(',')})`); params.push(...list); }
     }
-    if (search) {
-      const term = `%${search}%`;
-      where.push("(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) LIKE ? OR sp.email LIKE ? OR ca.overview LIKE ?)");
-      params.push(term, term, term);
+    if (searchText) {
+      where.push(`(${baseSearchClauses.join(' OR ')})`);
+      params.push(...baseSearchClauses.map(() => searchTerm));
     }
     if (archivedFilter) {
       where.push(archivedFilter);
@@ -72681,6 +73616,11 @@ app.get('/api/applications', async (req, res) => {
     // Add unassigned submissions (applications without case) for elevated roles.
     if (role === 'NWAC Administrator' || role === 'System Administrator') {
       const unassignedWhereClauses = ['c2.id IS NULL'];
+      const unassignedParams = [];
+      if (searchText) {
+        unassignedWhereClauses.push(`(${unassignedSearchClauses.join(' OR ')})`);
+        unassignedParams.push(...unassignedSearchClauses.map(() => searchTerm));
+      }
       if (archivedFilter) {
         unassignedWhereClauses.push(archivedFilter);
       }
@@ -72704,28 +73644,31 @@ app.get('/api/applications', async (req, res) => {
         NULL AS case_status, NULL AS assigned_to_user_id, NULL AS opened_at, NULL AS last_activity_at,
         NULL AS assigned_user_email, NULL AS assigned_user_role, NULL AS staff_profile_id,
         NULL AS lock_owner_id, NULL AS lock_owner_name, NULL AS lock_owner_email, NULL AS lock_expires_at,
-  JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
+        ${trackingIdExpr} AS tracking_id,
         ${addressProvinceExpr} AS address_province,
         NULL AS assessment_esdc_eligibility,
         NULL AS assessment_intervention_cost_total,
         NULL AS assessment_intervention_pot_id,
         0 AS funding_agreement_count,
         a.created_at AS submitted_at,
-        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."preferred-name"')) AS preferred_name,
-        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."first-name"')) AS applicant_first_name,
-        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."last-name"')) AS applicant_last_name,
-        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.full_name')) AS applicant_full_name,
-        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.first_name')) AS applicant_personal_first_name,
-        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.last_name')) AS applicant_personal_last_name,
-        JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."preferred-name"')) AS submission_preferred_name,
-        JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."first-name"')) AS submission_first_name,
-        JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."last-name"')) AS submission_last_name,
+        ${preferredNameExpr} AS preferred_name,
+        ${applicantFirstNameExpr} AS applicant_first_name,
+        ${applicantLastNameExpr} AS applicant_last_name,
+        ${applicantFullNameExpr} AS applicant_full_name,
+        ${applicantPersonalFirstNameExpr} AS applicant_personal_first_name,
+        ${applicantPersonalLastNameExpr} AS applicant_personal_last_name,
+        ${submissionPreferredNameExpr} AS submission_preferred_name,
+        ${submissionFirstNameExpr} AS submission_first_name,
+        ${submissionLastNameExpr} AS submission_last_name,
         1 AS is_unassigned_submission
         FROM iset_application a
         LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
         LEFT JOIN iset_case c2 ON ${buildApplicationCaseJoinPredicate('c2', 'a')}
         ${unassignedWhereSql}
       )`;
+      if (unassignedParams.length) {
+        finalParams.push(...unassignedParams);
+      }
       if (terminalStatuses.length) {
         finalParams.push(...terminalStatuses);
       }
@@ -72740,11 +73683,15 @@ app.get('/api/applications', async (req, res) => {
     let count = rows.length;
     try {
       if (role === 'NWAC Administrator' || role === 'System Administrator') {
-        let countCaseSql = `SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c ${buildCasePrimaryApplicationJoinSql('c', 'a', true)} LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id`;
+        let countCaseSql = `SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c ${buildCasePrimaryApplicationJoinSql('c', 'a', true)} LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id`;
         if (where.length) countCaseSql += ' WHERE ' + where.join(' AND ');
         const [[caseCnt]] = await pool.query(countCaseSql, params);
         const unassignedWhereClauses = ['c2.id IS NULL'];
         const unassignedParams = [];
+        if (searchText) {
+          unassignedWhereClauses.push(`(${unassignedSearchClauses.join(' OR ')})`);
+          unassignedParams.push(...unassignedSearchClauses.map(() => searchTerm));
+        }
         if (archivedFilter) {
           unassignedWhereClauses.push(archivedFilter);
         }
@@ -72753,11 +73700,11 @@ app.get('/api/applications', async (req, res) => {
           unassignedParams.push(...terminalStatuses);
         }
         const unassignedSql =
-          `SELECT COUNT(*) AS cnt FROM iset_application a LEFT JOIN iset_case c2 ON ${buildApplicationCaseJoinPredicate('c2', 'a')} WHERE ${unassignedWhereClauses.join(' AND ')}`;
+          `SELECT COUNT(*) AS cnt FROM iset_application a LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN iset_case c2 ON ${buildApplicationCaseJoinPredicate('c2', 'a')} WHERE ${unassignedWhereClauses.join(' AND ')}`;
         const [[unassignedCnt]] = await pool.query(unassignedSql, unassignedParams);
         count = (caseCnt?.cnt || 0) + (unassignedCnt?.cnt || 0);
       } else {
-        let countSql = `SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c ${buildCasePrimaryApplicationJoinSql('c', 'a', true)} LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id`;
+        let countSql = `SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c ${buildCasePrimaryApplicationJoinSql('c', 'a', true)} LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id`;
         if (where.length) countSql += ' WHERE ' + where.join(' AND ');
         const [[cRow]] = await pool.query(countSql, params);
         if (cRow && typeof cRow.cnt === 'number') count = cRow.cnt;
@@ -75058,6 +76005,13 @@ app.put('/api/cases/:id', async (req, res) => {
         trackingId,
       });
     }
+    const requestSignatureTimestamp = new Date().toISOString();
+    const submittedSignatureFallback = assessmentSubmitted
+      ? {
+          signerName: actorName || null,
+          signedAt: requestSignatureTimestamp
+        }
+      : null;
 
     const submittedCaseLifecycleStatus = normaliseCaseLifecycleStatusValue(body.status, { preserveUnknown: true });
     const submittedApplicationStatus = normaliseApplicationStatusValue(body.applicationStatus);
@@ -75087,21 +76041,73 @@ app.put('/api/cases/:id', async (req, res) => {
       hasAssessmentPayload &&
       beforeAssessmentReviewStatus !== 'approve' &&
       afterAssessmentReviewStatus === 'approve';
-    const shouldRegenerateAssessmentPdfForBudgetPot =
-      !shouldGenerateAssessmentPdf &&
+    const approvedSignatureFallback =
+      assessmentReviewStatusProvided && afterAssessmentReviewStatus === 'approve'
+        ? {
+            signerName: actorName || null,
+            signedAt: requestSignatureTimestamp
+          }
+        : null;
+    const shouldGenerateApprovedAssessmentPdf =
       assessmentHasApplicationId &&
       afterAssessmentReviewStatus === 'approve' &&
-      afterAssessmentPotId !== null &&
       (budgetPotOrPostingChanged || reviewTransitionedToApproved);
-    const generateAndStoreAssessmentPdf = async () => {
+    const generateAndStoreAssessmentPdf = async ({
+      approved = false,
+      submittedSignature = null,
+      approvedSignature = null
+    } = {}) => {
       const applicantContext = await fetchAssessmentApplicantContext({
         applicationId: caseRow.application_id,
         applicantUserId: caseRow.applicant_user_id
       });
+      const signatureContext = approved
+        ? await fetchAssessmentPdfSignatureContext({
+            caseId,
+            submittedFallback: submittedSignature,
+            approvedFallback: approvedSignature
+          })
+        : {
+            submittedSignature: submittedSignature || null,
+            approvedSignature: null
+          };
+      const latestSubmittedDoc = await fetchLatestAssessmentDocumentInfo({
+        applicationId: caseRow.application_id,
+        caseId,
+        documentTypes: ['case_assessment']
+      });
+      const latestVersionedDoc = await fetchLatestAssessmentDocumentInfo({
+        applicationId: caseRow.application_id,
+        caseId,
+        documentTypes: ['case_assessment', 'case_assessment_approved']
+      });
+      const assessmentVersionNumber = approved
+        ? (
+            latestSubmittedDoc?.versionNumber ||
+            latestVersionedDoc?.versionNumber ||
+            1
+          )
+        : ((latestVersionedDoc?.versionNumber || 0) + 1);
+      const previousSubmittedVersionNumber = latestSubmittedDoc?.versionNumber || null;
+      const previousSubmittedSnapshot = latestSubmittedDoc?.snapshot || null;
+      const assessmentVariant = approved ? 'approved' : 'submitted';
+      const referenceNumber = applicantContext.trackingId || trackingId;
+      const currentSnapshot = await buildAssessmentPdfSnapshot({
+        caseRow,
+        applicantName: applicantContext.applicantName,
+        referenceNumber,
+        caseContext: afterCaseContext
+      });
       const pdfBuffer = await generateAssessmentPdfBuffer({
         caseRow,
         applicantName: applicantContext.applicantName,
-        referenceNumber: applicantContext.trackingId || trackingId
+        referenceNumber,
+        caseContext: afterCaseContext,
+        recommendationSignature: signatureContext.submittedSignature,
+        approvalSignature: approved ? signatureContext.approvedSignature : null,
+        includeAgreementSection: approved,
+        versionNumber: assessmentVersionNumber,
+        variant: assessmentVariant
       });
       await storeAssessmentPdfDocument({
         applicationId: caseRow.application_id,
@@ -75109,15 +76115,60 @@ app.put('/api/cases/:id', async (req, res) => {
         clientId: caseRow.client_id,
         applicantUserId: applicantContext.applicantUserId,
         actorUserId: actorId,
-        trackingId: applicantContext.trackingId || trackingId,
-        pdfBuffer
+        trackingId: referenceNumber,
+        pdfBuffer,
+        documentType: approved ? 'case_assessment_approved' : 'case_assessment',
+        label: approved
+          ? `Approved case manager assessment v${assessmentVersionNumber}`
+          : `Case manager assessment v${assessmentVersionNumber}`,
+        fileNamePrefix: approved ? 'approved-case-manager-assessment' : 'case-manager-assessment',
+        versionNumber: assessmentVersionNumber,
+        variant: assessmentVariant,
+        snapshot: currentSnapshot,
+        archivePreviousActive: false,
+        replaceExistingVersion: true
       });
+      if (!approved && previousSubmittedVersionNumber && previousSubmittedSnapshot) {
+        const redlineBuffer = await generateAssessmentPdfBuffer({
+          caseRow,
+          applicantName: applicantContext.applicantName,
+          referenceNumber,
+          caseContext: afterCaseContext,
+          recommendationSignature: signatureContext.submittedSignature,
+          approvalSignature: null,
+          includeAgreementSection: false,
+          versionNumber: assessmentVersionNumber,
+          variant: 'redline',
+          previousVersionNumber: previousSubmittedVersionNumber,
+          redlineBaseSnapshot: previousSubmittedSnapshot
+        });
+        await storeAssessmentPdfDocument({
+          applicationId: caseRow.application_id,
+          caseId,
+          clientId: caseRow.client_id,
+          applicantUserId: applicantContext.applicantUserId,
+          actorUserId: actorId,
+          trackingId: referenceNumber,
+          pdfBuffer: redlineBuffer,
+          documentType: 'case_assessment_redline',
+          label: `Case manager assessment redline v${assessmentVersionNumber}`,
+          fileNamePrefix: 'case-manager-assessment-redline',
+          versionNumber: assessmentVersionNumber,
+          variant: 'redline',
+          previousVersionNumber: previousSubmittedVersionNumber,
+          snapshot: currentSnapshot,
+          archivePreviousActive: false,
+          replaceExistingVersion: true
+        });
+      }
       return applicantContext;
     };
 
     if (shouldGenerateAssessmentPdf) {
       try {
-        const applicantContext = await generateAndStoreAssessmentPdf();
+        const applicantContext = await generateAndStoreAssessmentPdf({
+          submittedSignature: submittedSignatureFallback
+        });
         try {
           const applicationPayload = await readApplicationPayload(pool, caseRow.application_id, { forUpdate: false });
           if (!applicationPayload) {
@@ -75173,11 +76224,15 @@ app.put('/api/cases/:id', async (req, res) => {
       }
     }
 
-    if (shouldRegenerateAssessmentPdfForBudgetPot) {
+    if (shouldGenerateApprovedAssessmentPdf) {
       try {
-        await generateAndStoreAssessmentPdf();
+        await generateAndStoreAssessmentPdf({
+          approved: true,
+          submittedSignature: submittedSignatureFallback,
+          approvedSignature: approvedSignatureFallback
+        });
       } catch (err) {
-        console.error('[assessment-pdf] budget-pot regeneration failed:', err?.message || err);
+        console.error('[assessment-pdf] approved assessment generation failed:', err?.message || err);
       }
     }
 

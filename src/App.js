@@ -13,7 +13,11 @@ import BottomFooter from './layouts/BottomFooter.js';
 import ErrorBoundary from './context/ErrorBoundary.js';
 import LandingPage from './pages/LandingPage.jsx';
 import AuthCallback from './pages/AuthCallback.js';
-import { readDemoNavigationVisibility, subscribeToDemoNavigationVisibility } from './utils/demoNavigationVisibility';
+import {
+  loadDemoNavigationVisibility,
+  readDemoNavigationVisibility,
+  subscribeToDemoNavigationVisibility,
+} from './utils/demoNavigationVisibility';
 
 import '@cloudscape-design/global-styles/index.css';
 
@@ -26,14 +30,32 @@ const RoutedAppLayout = ({ currentLanguage, onLanguageChange }) => {
   );
 
   useEffect(() => {
+    let cancelled = false;
     if (!role) {
-      setShowDemoNavigation(true);
-      return;
+      setShowDemoNavigation(false);
+      return () => {
+        cancelled = true;
+      };
     }
     setShowDemoNavigation(prev => {
       const next = readDemoNavigationVisibility(role);
       return prev === next ? prev : next;
     });
+    loadDemoNavigationVisibility()
+      .then(config => {
+        if (cancelled) return;
+        const next = config?.visibility && Object.prototype.hasOwnProperty.call(config.visibility, role)
+          ? !!config.visibility[role]
+          : readDemoNavigationVisibility(role);
+        setShowDemoNavigation(prev => (prev === next ? prev : next));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setShowDemoNavigation(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [role]);
 
   useEffect(() => {
@@ -41,7 +63,7 @@ const RoutedAppLayout = ({ currentLanguage, onLanguageChange }) => {
       const visibilityMap = map || readDemoNavigationVisibility();
       const next = role && Object.prototype.hasOwnProperty.call(visibilityMap, role)
         ? visibilityMap[role]
-        : true;
+        : false;
       setShowDemoNavigation(prev => (prev === next ? prev : next));
     });
     return unsubscribe;

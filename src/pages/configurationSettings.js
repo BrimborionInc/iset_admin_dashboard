@@ -42,8 +42,10 @@ import { apiFetch } from "../auth/apiClient";
 import { useAuth } from "../context/AuthContext.js";
 import { useDarkMode as useDarkModeContext } from "../context/DarkModeContext";
 import {
+  applyDemoNavigationVisibility,
+  loadDemoNavigationVisibility,
   readDemoNavigationVisibility,
-  writeDemoNavigationVisibility,
+  saveDemoNavigationVisibility,
   subscribeToDemoNavigationVisibility,
   DEMO_NAVIGATION_ROLES,
 } from "../utils/demoNavigationVisibility";
@@ -426,6 +428,7 @@ export default function ConfigurationSettings({
   const [runtime, setRuntime] = useState(null);
   const [security, setSecurity] = useState(null);
   const [error, setError] = useState(null);
+  const [demoToolbarSaving, setDemoToolbarSaving] = useState(false);
   const { useDarkMode: isDarkMode, setUseDarkMode } = useDarkModeContext();
   const [demoToolbarVisibility, setDemoToolbarVisibility] = useState(() =>
     readDemoNavigationVisibility(),
@@ -569,6 +572,9 @@ export default function ConfigurationSettings({
   }, []);
 
   useEffect(() => {
+    loadDemoNavigationVisibility().catch(() => {
+      setDemoToolbarVisibility(readDemoNavigationVisibility());
+    });
     const unsubscribe = subscribeToDemoNavigationVisibility(map => {
       setDemoToolbarVisibility(map || readDemoNavigationVisibility());
     });
@@ -579,6 +585,7 @@ export default function ConfigurationSettings({
   const canEditAuth = role === "System Administrator";
   const canEditSla = role === "System Administrator" || role === "NWAC Administrator";
   const canEditLocking = role === "System Administrator";
+  const canEditDemoToolbarVisibility = role === "System Administrator";
 
   const visibility = security?.visibility;
   const canSeeAnySecrets = visibility === "admin" || visibility === "restricted";
@@ -673,19 +680,32 @@ export default function ConfigurationSettings({
     lockingDirty,
   ]);
 
-  const handleDemoToolbarVisibilityChange = useCallback((roleName, visible) => {
-    setDemoToolbarVisibility(prev => {
-      const next = { ...(prev || {}), [roleName]: visible };
-      writeDemoNavigationVisibility(next);
-      return next;
-    });
-  }, []);
+  const handleDemoToolbarVisibilityChange = useCallback(async (roleName, visible) => {
+    if (!canEditDemoToolbarVisibility || demoToolbarSaving) return;
+    const next = {
+      ...(demoToolbarVisibility || readDemoNavigationVisibility()),
+      [roleName]: visible,
+    };
+    setDemoToolbarSaving(true);
+    setError(null);
+    try {
+      const saved = await saveDemoNavigationVisibility(next);
+      const visibility = saved?.visibility || readDemoNavigationVisibility();
+      setDemoToolbarVisibility(visibility);
+      setRuntime(current => (current ? { ...current, demoNavigation: saved } : current));
+    } catch (err) {
+      setError(err?.message || "Failed to save demo toolbar visibility.");
+      setDemoToolbarVisibility(readDemoNavigationVisibility());
+    } finally {
+      setDemoToolbarSaving(false);
+    }
+  }, [canEditDemoToolbarVisibility, demoToolbarSaving, demoToolbarVisibility]);
 
   const demoToolbarRows = useMemo(() => {
     const map = demoToolbarVisibility || {};
     return DEMO_NAVIGATION_ROLES.map(roleName => ({
       role: roleName,
-      visible: Object.prototype.hasOwnProperty.call(map, roleName) ? !!map[roleName] : true,
+      visible: Object.prototype.hasOwnProperty.call(map, roleName) ? !!map[roleName] : false,
     }));
   }, [demoToolbarVisibility]);
 
@@ -702,6 +722,7 @@ export default function ConfigurationSettings({
         cell: item => (
           <Button
             variant={item.visible ? "normal" : "link"}
+            disabled={!canEditDemoToolbarVisibility || demoToolbarSaving}
             onClick={() => handleDemoToolbarVisibilityChange(item.role, !item.visible)}
           >
             {item.visible ? "Visible" : "Hidden"}
@@ -709,7 +730,7 @@ export default function ConfigurationSettings({
         ),
       },
     ],
-    [handleDemoToolbarVisibilityChange],
+    [canEditDemoToolbarVisibility, demoToolbarSaving, handleDemoToolbarVisibilityChange],
   );
 
   const seedSlaEdits = useCallback(items => {
@@ -1001,6 +1022,10 @@ export default function ConfigurationSettings({
       if (Array.isArray(runtimeResponse?.ai?.fallbackModels)) {
         setFallbackValues(runtimeResponse.ai.fallbackModels.map(model => String(model)));
       }
+      const demoNavigationVisibility = runtimeResponse?.demoNavigation?.visibility
+        ? applyDemoNavigationVisibility(runtimeResponse.demoNavigation.visibility)
+        : readDemoNavigationVisibility();
+      setDemoToolbarVisibility(demoNavigationVisibility);
 
       const tokenTtl = runtimeResponse?.auth?.tokenTtl || {};
       const sessionTemplate = scope => {
@@ -1755,6 +1780,7 @@ export default function ConfigurationSettings({
               runtime={runtime}
               demoToolbarColumns={demoToolbarColumns}
               demoToolbarRows={demoToolbarRows}
+              demoToolbarSaving={demoToolbarSaving}
             />
           );
         case "secrets":
@@ -1823,6 +1849,7 @@ export default function ConfigurationSettings({
       canSeeAnySecrets,
       demoToolbarColumns,
       demoToolbarRows,
+      demoToolbarSaving,
       fetchAudit,
       filteredSlaTargets,
       fullyAdminSecrets,

@@ -14,6 +14,7 @@ This is the shortest safe path to deploy the current prod stack.
 - In the current Codex sandbox, `npm` runs under Windows Node while the trusted operator AWS profiles live in the bash/WSL-side AWS CLI config. The PATH control-plane scripts already route AWS-backed checks through `bash`; if you write new operator helpers, follow the same pattern instead of assuming `npm` -> `aws.exe` will see the same profiles.
 - Current prod DB helper assumption: `nwac-prod-db-credentials` currently contains only `username` and `password`, so `scripts/run-prod-sql-via-ssm.sh` defaults the host/database/port to `nwac-prod-db.cluster-c3g4iamg8j38.ca-central-1.rds.amazonaws.com`, `iset_intake`, and `3306`.
 - Do not use `-SkipBuild` unless you have already inspected the current `build/` output and confirmed it was compiled for prod. React bundles bake environment-specific Cognito domains, client IDs, and external links, so a stale test build can be uploaded to prod unchanged.
+- Prod app deploys package the current working tree. If you intend to ship only a subset of local edits, stage the intended files and temporarily stash the rest before running `path:deploy`.
 
 ## Full Prod Deploy
 
@@ -53,7 +54,7 @@ Recommended prod sequence:
 
 ```powershell
 cd X:\ISET\admin-dashboard
-npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --release-id intake-draft-autosave-prod --yes
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-shared --release-id intake-draft-autosave-prod --yes
 ```
 
 3. After the prod refresh and smoke checks pass, enable the flag:
@@ -117,6 +118,27 @@ npm run deploy-admin-to-prod -- -Profile nwac-prod
 npm run refresh-prod -- -Profile nwac-prod
 ```
 
+Recommended admin-only hotfix path with a user-facing warning:
+
+```powershell
+cd X:\ISET\admin-dashboard
+npm run path:maintenance -- set --env prod --start-in 5m --expected-duration 5m --yes
+```
+
+Wait through the warning window, then run:
+
+```powershell
+cd X:\ISET\admin-dashboard
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-portal --skip-shared --release-id <release-id> --yes
+npm run path:maintenance -- clear --env prod --yes
+```
+
+Use this when:
+- the release is app-only
+- the release does not include changes from `X:\ISET\shared`
+- the change is already validated in TEST
+- you want a short `brief interruptions possible` warning instead of a hard maintenance page
+
 Portal only:
 
 ```powershell
@@ -124,6 +146,27 @@ cd X:\ISET\ISET-intake
 npm run deploy-portal-to-prod -- -Profile nwac-prod
 npm run refresh-prod -- -Profile nwac-prod
 ```
+
+Recommended portal-only hotfix path with a user-facing warning:
+
+```powershell
+cd X:\ISET\admin-dashboard
+npm run path:maintenance -- set --env prod --start-in 5m --expected-duration 5m --yes
+```
+
+Wait through the warning window, then run:
+
+```powershell
+cd X:\ISET\admin-dashboard
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-shared --release-id <release-id> --yes
+npm run path:maintenance -- clear --env prod --yes
+```
+
+Use this when:
+- the release is portal-only
+- the release does not include changes from `X:\ISET\shared`
+- the change is already validated or intentionally being hotfixed directly
+- you want a short `brief interruptions possible` warning instead of a hard maintenance page
 
 Shared only:
 

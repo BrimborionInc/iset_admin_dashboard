@@ -2,6 +2,13 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-04-17
+- Docs/Ops: Expanded the durable bug/change triage guidance so Codex now treats triage requests as full queue review plus internal notes, intentional status updates, duplicate/info-gap handling, and a prioritized planning analysis for Bill, while keeping autonomous implementation/deployment out of scope unless explicitly requested.
+- Docs/Ops: Added a standing weekly-summary instruction so user-facing "last week" fix/change bullets must review both the release-notes working log and the thread index, catching relevant non-bug/non-CR changes instead of relying only on the feedback queue.
+
+## 2026-04-18
+- Fix/Notifications/Admin+Events: `Case assigned` and `Case reassigned` now send configured SES notification emails from the Manage Notifications matrix to the actual assignee plus any case watchers, using the assignee's role row or the `ISET Coordinator` row for watchers, while keeping bell notifications on the existing shared dispatcher path and honoring the shared runtime sender email.
+
 ## 2026-04-15
 - Security/Auth/Portal: Public password-reset requests now write a durable audit trail keyed by normalized email, including page route, request flow, source IP, user agent, outcome, and small Cognito delivery/error metadata so future investigations can distinguish `/forgot-password`, `/activate-account`, and `/reset-password` resend traffic.
 - Fix/Workflow/Applications: Application approvals now move `iset_application.status` to real decision outcomes at commit time, using `approved` or `rejected` immediately instead of the placeholder `decision_ready`, while keeping the approval path open until letters and any required funding forms are finished.

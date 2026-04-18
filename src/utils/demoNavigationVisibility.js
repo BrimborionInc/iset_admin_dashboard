@@ -1,4 +1,5 @@
-const STORAGE_KEY = 'demoNavigationVisible';
+import { apiFetch } from '../auth/apiClient';
+
 const EVENT_NAME = 'demo-navigation-visibility';
 
 export const DEMO_NAVIGATION_ROLES = [
@@ -9,118 +10,100 @@ export const DEMO_NAVIGATION_ROLES = [
 ];
 
 export const DEMO_NAVIGATION_DEFAULT_VISIBILITY = DEMO_NAVIGATION_ROLES.reduce((acc, role) => {
-  acc[role] = true;
+  acc[role] = false;
   return acc;
 }, {});
 
-function getLocalStorage() {
-  try {
-    return typeof window !== 'undefined' ? window.localStorage : null;
-  } catch {
-    return null;
-  }
-}
+const ROLE_ALIASES = Object.freeze({
+  System_Administrator: 'System Administrator',
+  'System Administrator': 'System Administrator',
+  NWAC_Administrator: 'NWAC Administrator',
+  'NWAC Administrator': 'NWAC Administrator',
+  Regional_Manager: 'Regional Manager',
+  'Regional Manager': 'Regional Manager',
+  ISET_Coordinator: 'ISET Coordinator',
+  'ISET Coordinator': 'ISET Coordinator',
+});
 
-function getSessionStorage() {
-  try {
-    return typeof window !== 'undefined' ? window.sessionStorage : null;
-  } catch {
-    return null;
-  }
+let cachedVisibilityMap = { ...DEMO_NAVIGATION_DEFAULT_VISIBILITY };
+
+function normalizeRole(role) {
+  if (!role) return null;
+  const raw = typeof role === 'object' && role !== null
+    ? role.value || role.label || role.role || role.name
+    : role;
+  if (!raw) return null;
+  const normalized = String(raw).trim();
+  return ROLE_ALIASES[normalized] || normalized;
 }
 
 function normalizeVisibilityMap(mapLike) {
+  const source = mapLike && typeof mapLike === 'object' && !Array.isArray(mapLike) && mapLike.visibility
+    ? mapLike.visibility
+    : mapLike;
   const normalized = { ...DEMO_NAVIGATION_DEFAULT_VISIBILITY };
-  if (!mapLike || typeof mapLike !== 'object') {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
     return normalized;
   }
   for (const role of DEMO_NAVIGATION_ROLES) {
-    if (Object.prototype.hasOwnProperty.call(mapLike, role)) {
-      normalized[role] = !!mapLike[role];
+    if (Object.prototype.hasOwnProperty.call(source, role)) {
+      normalized[role] = !!source[role];
     }
   }
   return normalized;
 }
 
-function readRawVisibilityValue() {
-  if (typeof window === 'undefined') {
-    return null;
+function publishVisibilityMap(mapLike) {
+  cachedVisibilityMap = normalizeVisibilityMap(mapLike);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: { visibility: cachedVisibilityMap } }));
   }
-  const storages = [getLocalStorage(), getSessionStorage()];
-  for (const storage of storages) {
-    if (!storage) continue;
-    const raw = storage.getItem(STORAGE_KEY);
-    if (raw != null) {
-      return raw;
-    }
-  }
-  return null;
+  return cachedVisibilityMap;
 }
 
-function readVisibilityMap() {
-  const raw = readRawVisibilityValue();
-  if (raw == null) {
-    return { ...DEMO_NAVIGATION_DEFAULT_VISIBILITY };
-  }
-  if (raw === 'true' || raw === 'false') {
-    const visible = raw === 'true';
-    return DEMO_NAVIGATION_ROLES.reduce((acc, role) => {
-      acc[role] = visible;
-      return acc;
-    }, {});
-  }
+async function parseConfigResponse(response, fallbackMessage) {
+  let payload = null;
   try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      const mapFromArray = parsed.reduce((acc, entry) => {
-        if (entry && typeof entry === 'object' && entry.role) {
-          acc[entry.role] = !!entry.visible;
-        }
-        return acc;
-      }, {});
-      return normalizeVisibilityMap(mapFromArray);
-    }
-    return normalizeVisibilityMap(parsed);
+    payload = await response.json();
   } catch {
-    return { ...DEMO_NAVIGATION_DEFAULT_VISIBILITY };
+    payload = null;
   }
+  if (!response.ok) {
+    throw new Error(payload?.message || payload?.error || fallbackMessage);
+  }
+  const visibility = publishVisibilityMap(payload?.visibility || payload);
+  return { ...(payload || {}), visibility };
 }
 
-function persistVisibilityMap(map) {
-  if (typeof window === 'undefined') {
-    return map;
-  }
-  const payload = JSON.stringify(map);
-  const local = getLocalStorage();
-  const session = getSessionStorage();
-  if (local) {
-    try { local.setItem(STORAGE_KEY, payload); } catch {/* ignore */}
-  }
-  if (session) {
-    try { session.setItem(STORAGE_KEY, payload); } catch {/* ignore */}
-  }
-  window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: { visibility: map } }));
-  return map;
+export function applyDemoNavigationVisibility(payload) {
+  return publishVisibilityMap(payload);
 }
 
 export function readDemoNavigationVisibility(role) {
-  const map = readVisibilityMap();
+  const map = cachedVisibilityMap;
   if (!role) {
     return map;
   }
-  return Object.prototype.hasOwnProperty.call(map, role) ? map[role] : true;
+  const normalizedRole = normalizeRole(role);
+  if (!normalizedRole) {
+    return false;
+  }
+  return Object.prototype.hasOwnProperty.call(map, normalizedRole) ? map[normalizedRole] : false;
 }
 
-export function writeDemoNavigationVisibility(payload, visible) {
-  const current = readVisibilityMap();
-  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-    return persistVisibilityMap(normalizeVisibilityMap({ ...current, ...payload }));
-  }
-  if (typeof payload === 'string') {
-    const next = { ...current, [payload]: !!visible };
-    return persistVisibilityMap(normalizeVisibilityMap(next));
-  }
-  return persistVisibilityMap(current);
+export async function loadDemoNavigationVisibility() {
+  const response = await apiFetch('/api/config/runtime/demo-navigation');
+  return parseConfigResponse(response, 'Failed to load demo navigation visibility.');
+}
+
+export async function saveDemoNavigationVisibility(payload) {
+  const visibility = normalizeVisibilityMap(payload);
+  const response = await apiFetch('/api/config/runtime/demo-navigation', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ visibility }),
+  });
+  return parseConfigResponse(response, 'Failed to save demo navigation visibility.');
 }
 
 export function subscribeToDemoNavigationVisibility(listener) {
@@ -134,4 +117,3 @@ export function subscribeToDemoNavigationVisibility(listener) {
   window.addEventListener(EVENT_NAME, handler);
   return () => window.removeEventListener(EVENT_NAME, handler);
 }
-

@@ -20,7 +20,7 @@ const ApplicationsWidgetHelp = () => (
 
     <h3>Working practice</h3>
     <ul>
-      <li>Search or sort the table when you need to find a specific applicant, tracking number, or status.</li>
+      <li>Search or sort the table when you need to find a specific applicant, tracking number, owner, province, or status.</li>
       <li>Refresh the widget after assignment changes or major updates made by another staff member.</li>
       <li>Use the Application Workspace for the real work: request documents, message the applicant, write notes, and complete the assessment there.</li>
       <li>Follow NWAC training expectations: acknowledge new applications promptly, document follow-up attempts, and keep every application tracked even when it is not funded.</li>

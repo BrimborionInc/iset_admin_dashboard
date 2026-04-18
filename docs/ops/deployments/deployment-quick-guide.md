@@ -18,6 +18,7 @@ Do not run the app deploy commands from a WSL-only checkout such as `/root/ISET/
 - PROD deploys require `--yes`.
 - TEST deploys require `--yes` only when you include `--refresh-test-db`.
 - Deploys do not auto-bump `package.json` semver; instead, each frontend build now carries a visible release/build stamp.
+- App deploys package the current working tree. If you mean “deploy only the staged subset,” stage the intended files and stash the rest before running `path:deploy`.
 
 ## Most Common Commands
 
@@ -75,10 +76,10 @@ What this does:
 - waits for prod refresh
 - runs prod smoke checks
 
-For an admin-only PROD rollout with no schema/data/portal work:
+For an admin-only PROD rollout with no schema/data/portal work and no shared-library changes:
 
 ```powershell
-npm run path:deploy -- --env prod --skip-schema --skip-data --skip-portal --release-id <release-id> --yes
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-portal --skip-shared --release-id <release-id> --yes
 ```
 
 ## Feature-Flagged Portal Changes
@@ -105,7 +106,7 @@ scripts/run-test-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (scope, k
 Deploy the code first with the flag still absent or `false`, let the rollout finish, and only then enable the flag:
 
 ```powershell
-npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --release-id intake-draft-autosave-prod --yes
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-shared --release-id intake-draft-autosave-prod --yes
 ```
 
 After prod smoke passes, enable the flag:
@@ -121,6 +122,12 @@ Why this sequence matters:
 - Rollback is simple: set the same runtime row to `{\"enabled\": false}` without redeploying.
 
 If the feature is already enabled in the target environment, set it to `false` before starting the app rollout, then re-enable it after smoke passes.
+
+For a portal-only PROD hotfix with no schema/data/admin/shared work:
+
+```powershell
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-shared --release-id <release-id> --yes
+```
 
 ## Safe Preflight Commands
 

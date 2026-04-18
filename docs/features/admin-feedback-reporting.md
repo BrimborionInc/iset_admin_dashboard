@@ -44,6 +44,21 @@ Provide an in-app way for signed-in PATH staff to report admin-console bugs and 
 
 - If a PROD feedback report is materially investigated, fixed, deployed, or otherwise resolved through Codex, update the live PROD feedback log before closing the thread.
 - Keep `admin_feedback_report.status`, `admin_feedback_status_history`, and `admin_feedback_note` in sync with the real PROD outcome instead of leaving the resolution only in chat or repo docs.
+- When Bill asks Codex to triage bugs / change requests, treat that as a queue-review workflow:
+  - review the open queue
+  - inspect each item's available evidence and related product/code/data context
+  - add internal notes for substantive triage judgments
+  - change statuses where appropriate
+  - return a prioritized analysis for planning, not just a cleaned-up queue
+- Current status intent for Codex triage:
+  - `triaging`: acknowledged and under validation, design review, or information gathering
+  - `planned`: confirmed and ready for implementation planning
+  - `in_progress`: active execution is underway
+  - `closed`: duplicate, by-design/support-only, withdrawn, or otherwise non-actionable
+  - `resolved`: requested outcome is actually delivered in the target environment
+- If evidence is insufficient, keep the item open and note what additional information is needed from the reporter instead of guessing.
+- If an item is a duplicate, note the canonical item before closing the duplicate.
+- Current autonomy boundary: this workflow is for queue review, notes/status updates, and planning analysis. Do not assume a triage request also authorizes autonomous implementation or deployment unless the user asks for that separately.
 - User-facing hotfix or release-note copy should stay neutral and outcome-focused. Use short bullets such as `Fixed a bug...` or `Made a change...`, and do not reference report IDs, reporter names, or that a change came from a complaint.
 
 ## Current form model

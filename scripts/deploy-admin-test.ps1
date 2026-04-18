@@ -443,6 +443,8 @@ try {
         $commandsList.Add('rm -rf /opt/nwac/admin-dashboard/public')
         $commandsList.Add('cp -r "$TMPDIR/public" /opt/nwac/admin-dashboard/')
     }
+    $commandsList.Add('CHROME_PACKAGES="alsa-lib atk at-spi2-atk at-spi2-core cairo cups-libs gtk3 libX11 libXcomposite libXdamage libXext libXfixes libXrandr libxcb libxkbcommon mesa-libgbm nss nspr pango"')
+    $commandsList.Add('if command -v dnf >/dev/null 2>&1; then sudo dnf install -y $CHROME_PACKAGES >/dev/null; elif command -v yum >/dev/null 2>&1; then sudo yum install -y $CHROME_PACKAGES >/dev/null; else echo "supported package manager not found; cannot install Chromium dependencies"; exit 1; fi')
     $commandsList.Add('NPM_BIN="$(command -v npm 2>/dev/null || command -v /usr/local/bin/npm 2>/dev/null || command -v /usr/bin/npm 2>/dev/null)"')
     $commandsList.Add('if [ -z "$NPM_BIN" ]; then')
     $commandsList.Add('  echo "npm not found on PATH; deployment aborting"')
@@ -452,6 +454,7 @@ try {
     $commandsList.Add('if [ -d node_modules ]; then chmod -R u+w node_modules || true; fi')
     $commandsList.Add('"$NPM_BIN" install --production')
     $commandsList.Add('"$NPM_BIN" prune --production || true')
+    $commandsList.Add('node -e "let puppeteer; try { puppeteer = require(\"puppeteer\"); } catch (error) { if (error && error.code === \"MODULE_NOT_FOUND\") process.exit(0); throw error; } (async () => { const browser = await puppeteer.launch({ headless: \"new\", args: [\"--no-sandbox\", \"--disable-setuid-sandbox\"] }); await browser.close(); })().catch((error) => { console.error(error && error.stack ? error.stack : error); process.exit(1); });"')
     $commandsList.Add('PM2_BIN="$(command -v pm2 2>/dev/null || true)"')
     $commandsList.Add('if [ -z "$PM2_BIN" ]; then')
     $commandsList.Add('  echo "pm2 not found on PATH; installing globally"')

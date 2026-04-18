@@ -5,14 +5,18 @@ export default function EnvironmentWidgetHelp() {
   return (
     <div>
       <h1>Environment</h1>
-      <p>Surface of immutable runtime flags (e.g. NODE_ENV) exposed for situational awareness and troubleshooting.</p>
+      <p>Shows environment diagnostics plus the shared runtime visibility setting for the demo toolbar.</p>
       <h2>Usage</h2>
       <ul>
-        <li>Differentiates dev/test vs production logic branches.</li>
-        <li>Assists support teams when validating feature flags vs environment tiers.</li>
+        <li>Confirms the active environment, such as dev, test, or production.</li>
+        <li>Lets System Administrators control demo-toolbar visibility for staff roles through shared runtime config.</li>
+        <li>If the demo-toolbar setting cannot be read, PATH hides the demo toolbar by default.</li>
       </ul>
-      <Alert header="Modification" type="info">Adjust via deployment pipeline variables; not editable through the UI to maintain immutability guarantees.</Alert>
+      <Alert header="Modification" type="info">
+        NODE_ENV remains deployment-controlled. Demo toolbar visibility is a centrally stored runtime setting for the
+        active environment.
+      </Alert>
     </div>
   );
 }
-EnvironmentWidgetHelp.aiContext = 'Widget help: Environment immutability and diagnostic usage.';
+EnvironmentWidgetHelp.aiContext = 'Widget help: Environment diagnostics plus shared demo toolbar runtime visibility.';
