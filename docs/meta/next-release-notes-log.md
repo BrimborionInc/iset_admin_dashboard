@@ -4,7 +4,7 @@ Purpose: running capture of user-facing fixes/changes for the next "What's New" 
 
 Current public release in Landing Page: `v0.5.8` (`26th March 2026`)
 Target next release notes draft: `v0.5.9` (date TBD)
-Last Updated: 2026-04-15
+Last Updated: 2026-04-18
 
 ## How to use
 
@@ -30,6 +30,9 @@ Last Updated: 2026-04-15
 
 ## Entries
 
+- 2026-04-18 | Release v0.5.9 | Workflow/Notifications | Manage Notifications + assignment flow | Made a change so `Auto assigned`, `Case assigned`, and `Case reassigned` can each send their configured email to the assigned staff member and any watchers without double-sending during auto-assignment. | The notification matrix still controls template/language selection per event and role; watchers continue to use the `ISET Coordinator` role row for those assignment emails.
+- 2026-04-18 | Release v0.5.9 | UX/Workflow | Application Assessment | Made a change so `Deny Funding` now appears on `What is being proposed?` instead of the earlier eligibility step, so staff can capture the proposed intervention context before denying funding. | The denial flow itself is unchanged; only the placement in the assessment workflow moved.
+- 2026-04-18 | Release v0.5.9 | UX/Configuration | Configuration > Environment Settings | Made a change so demo-toolbar visibility is now saved in shared runtime config instead of only in the current browser. | System Administrators can now set the visibility once and have the same role-based demo-toolbar state apply consistently across sessions.
 - 2026-04-15 | Release v0.5.9 | Security/Auth | Public portal password reset | Added a reset-request audit trail so future password-reset investigations can distinguish whether a code request came from the forgot-password page, the account-activation page, or a resend from the reset page. | The portal now records the normalized email, request route, request flow, source IP, browser user agent, and whether Cognito accepted or rejected the request.
 - 2026-04-15 | Release v0.5.9 | Fix/Workflow | Application approvals | Made application approval decisions write real outcome statuses right away, so approvals now move to `Approved` and denials move to `Denied` instead of sitting in an ambiguous post-decision placeholder state. | Approved applications still move to `Completed` only after the approval letter and any required funding forms/signatures are finished; legacy `decision_ready` rows remain supported while older files are worked through.
 - 2026-04-15 | Release v0.5.9 | UX/Approvals | Homepage Approvals queue + Application/Case Workspace | Made a change so opening an approval item now loads the right review widgets and jumps straight to the approval decision step instead of restoring an old personal board or wizard position. | Application approvals now open a review-focused application board at `Approval and decision`; intervention approvals now open the case board with the selected proposal loaded at `Record of decision`.

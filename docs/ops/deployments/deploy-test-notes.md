@@ -14,6 +14,8 @@ Do not start this from a WSL-only checkout path. The app rollout still shells in
 
 Important: the deploy scripts package the current working tree, not just the Git index. If you only want to release a subset of local edits, isolate them first by staging the intended files and temporarily stashing the rest (`git stash push --keep-index --include-untracked` is the safe pattern).
 
+Important coupling rule: do not assume `admin-only` just because the user-facing behavior is in the admin console. The admin backend stages sibling `..\shared` during `deploy-admin-to-test`, and some admin runtime paths also import sibling `..\ISET-intake` modules from the deployed portal tree. If the changed code path touches either of those sibling locations, deploy the coupled surface as well instead of using `--skip-portal`.
+
 What it does:
 - Verifies the TEST AWS identity/profile before doing anything
 - Plans/applies canonical shared-schema migrations through SSM on a TEST app host
@@ -35,6 +37,10 @@ npm run deploy-admin-to-test -- -AwsProfile nwac-test
 cd X:\ISET\ISET-intake
 npm run deploy-portal-to-test -- -AwsProfile nwac-test
 ```
+
+Use that split form when you have already determined the coupling explicitly:
+- admin-only is acceptable only when the changed runtime path stays inside `admin-dashboard` plus any sibling `shared` code staged by the admin artifact
+- include the portal deploy whenever the admin runtime path imports `..\ISET-intake\*` modules on the server
 
 ## Feature-Flagged Portal Runtime Changes
 

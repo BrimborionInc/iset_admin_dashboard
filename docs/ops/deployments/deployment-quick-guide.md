@@ -38,6 +38,8 @@ For an admin-only TEST rollout with no schema/data/portal work:
 npm run path:deploy -- --env test --skip-schema --skip-data --skip-portal --release-id <release-id>
 ```
 
+Use that admin-only shortcut only when the change is truly confined to the admin repo. Do not use `--skip-portal` when the admin backend depends on sibling code under `..\ISET-intake` or `..\shared` for the changed runtime path. Current concrete example: assignment/reassignment notification email delivery uses `../shared/events/notificationDispatcher.js` plus `../ISET-intake/notifications/templateRenderer.js`, so that fix must ship as an `admin + portal` TEST rollout, not as admin-only.
+
 ### 2. Reset TEST from the current DEV baseline, then deploy
 
 ```powershell
@@ -189,6 +191,13 @@ Notes:
 - Admin and portal clients poll every 15 seconds and render the countdown locally, so this is an operator warning tool, not a precise sub-minute push channel.
 - Set `expected-duration` to the likely user-visible interruption window, not the full end-to-end deploy runtime. Rolling app deploys often take several minutes in the operator console while causing little or no visible disruption.
 - If the service must be fully unavailable during cutover, the warning can be combined with the separate ALB `503` maintenance fallback.
+
+## App-Coupling Rule
+
+- The TEST deploy decision is based on runtime dependency, not on which repo you edited from first.
+- `deploy-admin-to-test` stages the sibling `..\shared` tree into the admin artifact, so admin changes that touch `shared` still count as admin deploys.
+- The admin backend on the server also resolves some modules from the deployed portal tree via `../ISET-intake/*`, so changes under `X:\ISET\ISET-intake` that are used by the admin backend require a portal deploy too.
+- Before using an `admin-only` shortcut, check whether the changed execution path imports from `../shared/*` or `../ISET-intake/*`. If it does, ship the coupled surface(s) together.
 
 ## Hard Maintenance Page
 
