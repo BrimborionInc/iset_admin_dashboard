@@ -256,6 +256,56 @@ const planRecencyScore = plan => {
   );
 };
 
+const interventionRecencyScore = intervention => {
+  return (
+    toTimestamp(intervention?.updatedAt) ??
+    toTimestamp(intervention?.createdAt) ??
+    0
+  );
+};
+
+const findLatestProposalPlanId = plans => {
+  let selectedPlanId = null;
+  let selectedScore = -1;
+  plans.forEach(plan => {
+    (plan?.interventions || []).forEach(intervention => {
+      const reviewStatus = resolveInterventionStateFields(intervention).reviewStatus;
+      if (
+        !reviewStatus ||
+        !["draft", "submitted", "in_review", "changes_requested"].includes(reviewStatus)
+      ) {
+        return;
+      }
+      const score = interventionRecencyScore(intervention);
+      if (selectedPlanId === null || score >= selectedScore) {
+        selectedPlanId = plan?.id ?? null;
+        selectedScore = score;
+      }
+    });
+  });
+  return selectedPlanId;
+};
+
+const resolvePreferredActionPlanId = (plans, currentSelectedActionPlanId = null) => {
+  const list = Array.isArray(plans) ? plans : [];
+  if (!list.length) return null;
+
+  const currentMatch =
+    currentSelectedActionPlanId === null || typeof currentSelectedActionPlanId === "undefined"
+      ? null
+      : list.find(plan => String(plan?.id) === String(currentSelectedActionPlanId)) || null;
+  if (currentMatch?.id) {
+    return currentMatch.id;
+  }
+
+  const proposalPlanId = findLatestProposalPlanId(list);
+  if (proposalPlanId) {
+    return proposalPlanId;
+  }
+
+  return list[0]?.id ?? null;
+};
+
 const sortActionPlansByRecency = plans => {
   return [...plans].sort((a, b) => {
     const scoreA = planRecencyScore(a);
@@ -636,7 +686,9 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
       if (typeof window !== 'undefined') {
         window.__CASE_WORKSPACE = { caseData: data };
       }
-      setSelectedActionPlanId(data.actionPlans?.[0]?.id ?? null);
+      setSelectedActionPlanId(currentSelectedActionPlanId =>
+        resolvePreferredActionPlanId(data.actionPlans, currentSelectedActionPlanId)
+      );
       return data;
     } catch (error) {
       setState(prev => ({ ...prev, isLoading: false, error: error?.message || "Failed to load case." }));

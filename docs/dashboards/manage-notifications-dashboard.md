@@ -1,6 +1,6 @@
 # Manage Notifications Dashboard
 
-Last updated: 2026-04-18
+Last updated: 2026-04-19
 
 > **Quick patch (2025-10-02):** Applicant email alerts for submissions, secure messages, and decisions are temporarily hardwired while the dashboard toggles remain read-only.
 
@@ -8,7 +8,7 @@ Last updated: 2026-04-18
 
 ### Notification Settings
 - Combines `/api/events`, `/api/roles`, `/api/templates`, and `/api/notifications`, normalising responses before rendering.
-- Stores the PATH SES sender address in `iset_runtime_config` (`scope='notifications'`, `k='path.email'`) so PATH-generated emails share one configurable `From` address across the admin dashboard and portal.
+- Stores the PATH SES sender settings in `iset_runtime_config` (`scope='notifications'`, `k='path.email'`) so PATH-generated emails share one configurable `From` address, display name, and `Reply-To` across the admin dashboard and portal.
 - Roles are hydrated with `value`/`label` pairs; legacy `PTMA Staff` entries map to `Application Assessor`, and the synthetic `Applicant` row is injected when the API omits it so applicant toggles stay visible.
 - Each row captures `enabled`, `template_id`, `email_alert`, and `bell_alert`; the Save action only posts rows whose state changed and refreshes from the API so new IDs or template edits flow through immediately.
 - Success and error states surface through a `Flashbar`, and the Cancel button restores the last-saved matrix snapshot without reloading the page.
@@ -21,7 +21,8 @@ Last updated: 2026-04-18
 - Role comparisons rely on canonical string values. Ensure backend payloads emit the normalised keys used in the widget (`ApplicationAssessor`, `applicant`, etc.).
 - The side-navigation footer item labelled `Notifications` is not a link to this dashboard. It is a signed-in shell control that refreshes the current user's bell alerts, so it stays visible even when the route access matrix does not allow `/manage-notifications`.
 - Templates are optional. When none is selected the backend stores `NULL`; bell notifications continue to use stock text, while email delivery suppresses that event/role until a template is assigned.
-- `bell_alert` toggles drive staff-facing internal notifications via `shared/events/notificationDispatcher`. `email_alert` now drives assignment-family SES delivery from the same `notification_setting` + `notification_template` rows, using the shared runtime sender address stored in `iset_runtime_config`.
+- `bell_alert` toggles drive staff-facing internal notifications via `shared/events/notificationDispatcher`. `email_alert` now drives assignment-family SES delivery from the same `notification_setting` + `notification_template` rows, using the shared runtime sender settings stored in `iset_runtime_config`.
+- When the runtime config leaves sender name blank, PATH falls back to `NWAC PATH`. When the runtime config leaves `Reply-To` blank, PATH falls back to the support mailbox env vars if present (`NOTIFICATION_SUPPORT_EMAIL`, `SUPPORT_EMAIL`, `DEFAULT_SUPPORT_EMAIL`).
 - `Auto assigned`, `Case assigned`, and `Case reassigned` are separate configurable events. `Auto assigned` is for system-driven assignment, `Case assigned` is for manual first assignment, and `Case reassigned` is for manual reassignment.
 - For those assignment-family events, email recipients are the actual assignee plus any case watchers. The assignee uses the template row for their real staff role, while watchers use the `ISET Coordinator` row for that event.
 - Bell-alert headings now append the notification timestamp using `delivered_at` when present and otherwise `created_at`, formatted in the current viewer browser timezone with `America/Toronto` fallback. This is display-only; staff/applicant timezone preferences are not yet stored in PATH.

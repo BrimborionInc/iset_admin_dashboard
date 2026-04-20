@@ -60,6 +60,13 @@ const formatDateRange = (startValue, endValue) => {
   return `${startLabel} - ${endLabel}`;
 };
 
+const toTimestamp = value => {
+  if (!value) return null;
+  const date = new Date(value);
+  const time = date.getTime();
+  return Number.isFinite(time) ? time : null;
+};
+
 const parseMetadata = value => {
   if (!value) return null;
   if (typeof value === "object") return value;
@@ -384,6 +391,27 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       (plan.interventions || []).some(intervention => isInterventionProposalStatus(intervention))
     );
   }, [caseData]);
+  const latestBlockingProposal = useMemo(() => {
+    const plans = caseData?.actionPlans || [];
+    let selected = null;
+    plans.forEach(plan => {
+      (plan.interventions || []).forEach(intervention => {
+        if (!isInterventionProposalStatus(intervention)) return;
+        const score =
+          toTimestamp(intervention?.updatedAt) ??
+          toTimestamp(intervention?.createdAt) ??
+          0;
+        if (!selected || score >= selected.score) {
+          selected = {
+            score,
+            planId: plan?.id ?? null,
+            interventionId: intervention?.id ?? null,
+          };
+        }
+      });
+    });
+    return selected;
+  }, [caseData]);
   const openRevisionDraftsBySourceId = useMemo(() => {
     const plans = caseData?.actionPlans || [];
     const map = new Map();
@@ -671,6 +699,12 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const canModify = !!activePlan && ["draft", "active"].includes(planStatus);
   const canCloseSelected =
     canModify && !!selectedIntervention && isInterventionClosableStatus(selectedIntervention);
+  const activePlanHasBlockingProposal = useMemo(
+    () =>
+      !!activePlan &&
+      (activePlan.interventions || []).some(intervention => isInterventionProposalStatus(intervention)),
+    [activePlan]
+  );
 
   const dispatchWizardSelection = useCallback(
     intervention => {
@@ -698,8 +732,34 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       setForceReadOnly(false);
       dispatchWizardSelection(intervention);
     },
-    [dispatchWizardSelection]
+    [dispatchWizardSelection, setSelectedInterventionId]
   );
+
+  const focusIntervention = useCallback(
+    (planId, interventionId) => {
+      if (!planId || !interventionId) return;
+      if (typeof setSelectedActionPlanId === "function") {
+        setSelectedActionPlanId(planId);
+      }
+      requestAnimationFrame(() => {
+        const container = document.getElementById("case-interventions-widget");
+        if (container?.scrollIntoView) {
+          container.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        window.dispatchEvent(
+          new CustomEvent("iset:focus-intervention", {
+            detail: { planId, interventionId },
+          })
+        );
+      });
+    },
+    [setSelectedActionPlanId]
+  );
+
+  const focusBlockingProposal = useCallback(() => {
+    if (!latestBlockingProposal?.planId || !latestBlockingProposal?.interventionId) return;
+    focusIntervention(latestBlockingProposal.planId, latestBlockingProposal.interventionId);
+  }, [focusIntervention, latestBlockingProposal]);
 
   const resumeDraft = useCallback(
     intervention => {
@@ -1333,7 +1393,17 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           </Alert>
         )}
         {hasBlockingProposal && (
-          <Alert type="info" header="Proposal in progress">
+          <Alert
+            type="info"
+            header="Proposal in progress"
+            action={
+              latestBlockingProposal?.planId &&
+              latestBlockingProposal?.interventionId &&
+              !activePlanHasBlockingProposal ? (
+                <Button onClick={focusBlockingProposal}>Go to draft proposal</Button>
+              ) : null
+            }
+          >
             A proposal is already in progress for this case. Resume it from the table before starting another.
           </Alert>
         )}

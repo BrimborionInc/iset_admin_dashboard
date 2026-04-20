@@ -583,6 +583,12 @@ const parseCurrencyInput = (value) => {
 };
 
 const SUPPORTING_DOCS_REFRESH_EVENT = 'iset:supporting-documents:refresh';
+const CASE_NOTES_REFRESH_EVENT = 'case-notes-refresh';
+const CASE_EVENTS_REFRESH_EVENT = 'case-events-refresh';
+const SUBMIT_PDF_CONFLICT_DOCUMENT_LABELS = Object.freeze({
+  application_form: 'Application form',
+  financial_overview: 'Financial overview'
+});
 const parseDocumentMetadata = (value) => {
   if (!value) return null;
   if (typeof value === 'object') return value;
@@ -599,6 +605,26 @@ const resolveDocumentType = (row) => {
   const metadata = parseDocumentMetadata(row?.metadata);
   const fromMetadata = metadata?.document_type || metadata?.documentType || null;
   return fromMetadata ? String(fromMetadata).trim().toLowerCase() : '';
+};
+const formatSubmitConflictUploadedAt = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString();
+};
+const summarizeSubmitConflictDocuments = (documents = []) => {
+  const list = Array.isArray(documents) ? documents : [];
+  if (!list.length) return 'Existing uploaded files will be kept if selected below.';
+  const preview = list.slice(0, 2).map(doc => {
+    const name = doc?.label || doc?.fileName || 'Uploaded file';
+    const uploadedAt = formatSubmitConflictUploadedAt(doc?.uploadedAt);
+    return uploadedAt ? `${name} (${uploadedAt})` : name;
+  });
+  const remainingCount = list.length - preview.length;
+  if (remainingCount > 0) {
+    preview.push(`+${remainingCount} more`);
+  }
+  return preview.join(', ');
 };
 
 const formatCurrencyDisplay = (value) => {
@@ -2146,6 +2172,9 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [validationAlert, setValidationAlert] = useState(null);
   const [isSubmittingAssessment, setIsSubmittingAssessment] = useState(false);
+  const [submitDocumentConflictModalVisible, setSubmitDocumentConflictModalVisible] = useState(false);
+  const [submitDocumentConflicts, setSubmitDocumentConflicts] = useState([]);
+  const [submitDocumentRetention, setSubmitDocumentRetention] = useState({});
   const [isEditingAssessment, setIsEditingAssessment] = useState(false);
   const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
   const [showApproveConfirmModal, setShowApproveConfirmModal] = useState(false);
@@ -2184,6 +2213,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const eiVerificationFileInputRef = useRef(null);
   const checklistFileInputRef = useRef(null);
   const nextChecklistDocTypeRef = useRef('');
+  const pendingAssessmentSubmitRef = useRef(null);
   const nextChecklistLabelRef = useRef('');
   const [currentStep, setCurrentStep] = useState(BASE_STEP_IDS[0]);
   const [wizardNavPriming, setWizardNavPriming] = useState(false);
@@ -3166,6 +3196,126 @@ const CoordinatorAssessmentWidget = forwardRef(
       }
     }
   }, [actions, applicantUserId]);
+  const dispatchCaseNotesRefresh = useCallback(() => {
+    if (!caseId || typeof window === 'undefined') return;
+    try {
+      const detail = { caseId };
+      window.dispatchEvent(new CustomEvent(CASE_NOTES_REFRESH_EVENT, { detail }));
+      window.dispatchEvent(new CustomEvent(CASE_EVENTS_REFRESH_EVENT, { detail }));
+    } catch (_) {
+      // ignore dispatch errors
+    }
+  }, [caseId]);
+  const closeSubmitDocumentConflictModal = useCallback(() => {
+    setSubmitDocumentConflictModalVisible(false);
+    setSubmitDocumentConflicts([]);
+    setSubmitDocumentRetention({});
+  }, []);
+  const inspectAssessmentSubmitDocumentConflicts = useCallback(async () => {
+    const loadDocuments = async (endpoint) => {
+      const res = await apiFetch(endpoint);
+      if (!res.ok) {
+        throw new Error('Failed to inspect existing supporting documents.');
+      }
+      const payload = await res.json().catch(() => []);
+      return Array.isArray(payload) ? payload : [];
+    };
+
+    let documents = [];
+    let loaded = false;
+    let lastError = null;
+
+    if (applicantUserId) {
+      try {
+        const params = new URLSearchParams();
+        if (applicationId) {
+          params.set('applicationId', String(applicationId));
+        } else if (caseId) {
+          params.set('caseId', String(caseId));
+        }
+        const query = params.toString() ? `?${params.toString()}` : '';
+        documents = await loadDocuments(`/api/applicants/${applicantUserId}/documents${query}`);
+        loaded = true;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (!loaded && caseId) {
+      try {
+        documents = await loadDocuments(`/api/cases/${caseId}/documents`);
+        loaded = true;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (!loaded) {
+      if (lastError) throw lastError;
+      return [];
+    }
+
+    const filteredDocuments = documents.filter(row => {
+      const documentType = resolveDocumentType(row);
+      if (!Object.prototype.hasOwnProperty.call(SUBMIT_PDF_CONFLICT_DOCUMENT_LABELS, documentType)) {
+        return false;
+      }
+      const source = String(row?.source || '').trim().toLowerCase();
+      if (source === 'system_generated') return false;
+      if (applicationId) {
+        const rowApplicationId = Number(row?.application_id || row?.applicationId || 0);
+        if (rowApplicationId) return rowApplicationId === Number(applicationId);
+      }
+      const rowCaseId = Number(row?.case_id || row?.caseId || 0);
+      return caseId ? rowCaseId === Number(caseId) || !rowCaseId : true;
+    });
+
+    const grouped = new Map();
+    filteredDocuments.forEach(row => {
+      const documentType = resolveDocumentType(row);
+      if (!documentType) return;
+      const existing = grouped.get(documentType) || {
+        documentType,
+        title: SUBMIT_PDF_CONFLICT_DOCUMENT_LABELS[documentType] || documentType,
+        documents: []
+      };
+      existing.documents.push({
+        id: row?.id || null,
+        label: row?.label || null,
+        fileName: row?.file_name || row?.fileName || null,
+        uploadedAt: row?.uploaded_at || row?.uploadedAt || null
+      });
+      grouped.set(documentType, existing);
+    });
+
+    return Array.from(grouped.values()).map(entry => ({
+      ...entry,
+      documents: [...entry.documents].sort((left, right) => {
+        const leftTime = new Date(left?.uploadedAt || 0).getTime();
+        const rightTime = new Date(right?.uploadedAt || 0).getTime();
+        return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
+      }),
+      count: entry.documents.length,
+      summary: summarizeSubmitConflictDocuments(entry.documents)
+    }));
+  }, [applicantUserId, applicationId, caseId]);
+  const handleSubmitDocumentConflictDismiss = useCallback(() => {
+    pendingAssessmentSubmitRef.current = null;
+    closeSubmitDocumentConflictModal();
+  }, [closeSubmitDocumentConflictModal]);
+  const handleSubmitDocumentConflictConfirm = useCallback(async () => {
+    const submitFn = pendingAssessmentSubmitRef.current;
+    pendingAssessmentSubmitRef.current = null;
+    const preserveExistingApplicationForm = Boolean(submitDocumentRetention.application_form);
+    const preserveExistingFinancialOverview = Boolean(submitDocumentRetention.financial_overview);
+    closeSubmitDocumentConflictModal();
+    if (typeof submitFn === 'function') {
+      await submitFn({
+        preserveExistingApplicationForm,
+        preserveExistingFinancialOverview
+      });
+    }
+  }, [closeSubmitDocumentConflictModal, submitDocumentRetention]);
   const openAssessmentWidget = useCallback((widgetId) => {
     if (typeof window === 'undefined') return;
     window.dispatchEvent(new CustomEvent('applicationAssessment:palette:add', { detail: { id: widgetId } }));
@@ -6255,30 +6405,33 @@ const CoordinatorAssessmentWidget = forwardRef(
       showLockAlert({ reason: 'owned_by_other', lock: activeLock }, 'warning');
       return;
     }
-    setIsSubmittingAssessment(true);
-    try {
-      setHasSubmitted(true);
-      setValidationAlert(null);
-      const errors = denyFundingFlowActive
-        ? validateAssessmentForDeny(assessment)
-        : validateAssessment(assessment);
-      setFieldErrors(errors);
-      if (Object.keys(errors).length > 0) {
-        setValidationAlert(buildValidationMessages(errors));
-        // Scroll to first error field
-        setTimeout(() => {
-          const firstErrorField = document.querySelector('[data-error-focus="true"]');
-          if (firstErrorField) {
-            firstErrorField.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            if (typeof firstErrorField.focus === 'function') {
-              firstErrorField.focus();
-            }
+    setHasSubmitted(true);
+    setValidationAlert(null);
+    const errors = denyFundingFlowActive
+      ? validateAssessmentForDeny(assessment)
+      : validateAssessment(assessment);
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      setValidationAlert(buildValidationMessages(errors));
+      // Scroll to first error field
+      setTimeout(() => {
+        const firstErrorField = document.querySelector('[data-error-focus="true"]');
+        if (firstErrorField) {
+          firstErrorField.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          if (typeof firstErrorField.focus === 'function') {
+            firstErrorField.focus();
           }
-        }, 0);
-        return;
-      }
+        }
+      }, 0);
+      return;
+    }
 
-      const submitAssessment = async () => {
+    const submitAssessment = async ({
+      preserveExistingApplicationForm = false,
+      preserveExistingFinancialOverview = false
+    } = {}) => {
+      setIsSubmittingAssessment(true);
+      try {
         // --- POST-VALIDATION WORKFLOW ---
         const lockCheck = await ensureLockForOperation();
         if (!lockCheck.ok) return;
@@ -6314,6 +6467,12 @@ const CoordinatorAssessmentWidget = forwardRef(
           nextApplicationStatus = 'pending_approval';
         }
         const requestBody = { ...payload };
+        if (preserveExistingApplicationForm) {
+          requestBody.assessment_preserve_existing_application_form = true;
+        }
+        if (preserveExistingFinancialOverview) {
+          requestBody.assessment_preserve_existing_financial_overview = true;
+        }
         if (versionToken > 0) {
           requestBody.expectedRowVersion = versionToken;
         }
@@ -6411,17 +6570,49 @@ const CoordinatorAssessmentWidget = forwardRef(
           setAlert({ type: 'error', content: err.message || 'Failed to submit assessment.', dismissible: true, statusIconAriaLabel: 'Error' });
           scrollAfterAction();
         }
-      };
+      } finally {
+        setIsSubmittingAssessment(false);
+      }
+    };
 
-      const checklistOk = await runDocumentChecklist(submitAssessment, {
-        allowBypass: denyFundingFlowActive,
-        stage: SUBMIT_ASSESSMENT_STAGE
-      });
-      if (!checklistOk) return;
+    const submitAssessmentWithConflictCheck = async () => {
+      setIsSubmittingAssessment(true);
+      try {
+        const conflicts = await inspectAssessmentSubmitDocumentConflicts();
+        if (conflicts.length > 0) {
+          pendingAssessmentSubmitRef.current = submitAssessment;
+          setSubmitDocumentConflicts(conflicts);
+          setSubmitDocumentRetention(
+            conflicts.reduce((acc, conflict) => {
+              acc[conflict.documentType] = true;
+              return acc;
+            }, {})
+          );
+          setSubmitDocumentConflictModalVisible(true);
+          return;
+        }
+      } catch (err) {
+        setAlert({
+          type: 'error',
+          content: err?.message || 'Could not verify whether uploaded Application form or Financial overview files already exist. Review Supporting Documents and try again.',
+          dismissible: true,
+          statusIconAriaLabel: 'Error'
+        });
+        scrollAfterAction();
+        return;
+      } finally {
+        setIsSubmittingAssessment(false);
+      }
+
       await submitAssessment();
-    } finally {
-      setIsSubmittingAssessment(false);
-    }
+    };
+
+    const checklistOk = await runDocumentChecklist(submitAssessmentWithConflictCheck, {
+      allowBypass: denyFundingFlowActive,
+      stage: SUBMIT_ASSESSMENT_STAGE
+    });
+    if (!checklistOk) return;
+    await submitAssessmentWithConflictCheck();
   };
 
   const handleLetterBodyChange = useCallback(
@@ -7770,6 +7961,9 @@ ${JSON.stringify(contextPayload, null, 2)}`;
         }
       }
       dispatchSupportingDocsRefresh();
+      if (isOutcomePushBack) {
+        dispatchCaseNotesRefresh();
+      }
       setIsEditingAssessment(false);
       setShowEditConfirmModal(false);
       setShowApproveConfirmModal(false);
@@ -10766,6 +10960,50 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       : (wizardSubmitHandler
         ? wizardSubmitLabel
         : (isFundingDocsStep ? wizardSubmitLabel : (hideWizardActions ? undefined : wizardReadOnlyLabel)));
+  const submitDocumentConflictModal = (
+    <Modal
+      visible={submitDocumentConflictModalVisible}
+      onDismiss={handleSubmitDocumentConflictDismiss}
+      closeAriaLabel="Close existing document warning"
+      header="Existing uploaded documents found"
+      footer={
+        <SpaceBetween direction="horizontal" size="xs">
+          <Button variant="normal" onClick={handleSubmitDocumentConflictDismiss}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={handleSubmitDocumentConflictConfirm}>
+            Submit assessment
+          </Button>
+        </SpaceBetween>
+      }
+    >
+      <SpaceBetween size="m">
+        <Box>
+          PATH is about to generate a new Case Manager Assessment PDF automatically. It can also replace the current
+          <strong> Application form</strong> and <strong> Financial overview</strong> documents for this application.
+        </Box>
+        <Box>
+          Uploaded files already exist for the items below. Keep the boxes checked to retain those current uploaded files
+          instead of replacing them with system-generated PDFs.
+        </Box>
+        {submitDocumentConflicts.map(conflict => (
+          <Checkbox
+            key={conflict.documentType}
+            checked={Boolean(submitDocumentRetention[conflict.documentType])}
+            onChange={({ detail }) => {
+              setSubmitDocumentRetention(prev => ({
+                ...prev,
+                [conflict.documentType]: detail.checked,
+              }));
+            }}
+            description={conflict.summary}
+          >
+            Keep existing {conflict.title}
+          </Checkbox>
+        ))}
+      </SpaceBetween>
+    </Modal>
+  );
   const conflictHoldModal = (
     <Modal
       visible={conflictHoldModalVisible}
@@ -10909,6 +11147,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
               )}
             </SpaceBetween>
           </Box>
+          {submitDocumentConflictModal}
           {conflictHoldModal}
         </div>
       </BoardItem>
@@ -10953,6 +11192,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
             {alert.content}
           </Alert>
         )}
+        {submitDocumentConflictModal}
         {isEligibilityGateActive && (
           <>
             <Alert

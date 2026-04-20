@@ -60,18 +60,27 @@ npm run path:deploy:smoke -- --env prod
 
 ## Maintenance announcements
 
-The deploy control plane now has a companion operator command for global admin + portal maintenance warnings:
+The deploy control plane now has a companion operator command for scoped admin and/or portal maintenance warnings:
 
 ```powershell
-npm run path:maintenance -- set --env test --start-in 5m --expected-duration 20m
-npm run path:maintenance -- set --env prod --start-in 5m --expected-duration 20m --yes
+npm run path:maintenance -- set --env test --surfaces admin --start-in 5m --expected-duration 20m
+npm run path:maintenance -- set --env test --surfaces portal --start-in 5m --expected-duration 20m
+npm run path:maintenance -- set --env test --surfaces all --start-in 5m --expected-duration 20m
+npm run path:maintenance -- set --env prod --surfaces admin --start-in 5m --expected-duration 20m --yes
+npm run path:maintenance -- set --env prod --surfaces portal --start-in 5m --expected-duration 20m --yes
+npm run path:maintenance -- set --env prod --surfaces all --start-in 5m --expected-duration 20m --yes
+npm run path:maintenance -- clear --env test --surfaces admin
+npm run path:maintenance -- clear --env test --surfaces portal
 npm run path:maintenance -- clear --env test
+npm run path:maintenance -- clear --env prod --surfaces admin --yes
+npm run path:maintenance -- clear --env prod --surfaces portal --yes
 npm run path:maintenance -- clear --env prod --yes
 ```
 
 Current behavior:
 
 - Stores one structured announcement in `iset_runtime_config(scope='runtime', k='service.announcement')`.
+- `--surfaces admin|portal|all` controls which shell(s) render the banner, with `all` as the default for backwards compatibility.
 - Admin polls `/api/service-announcement/current` and renders the warning in the shell `Flashbar`.
 - Portal polls the same endpoint and renders one global GOV.UK notification banner below the shared header.
 - Polling runs every 15 seconds with a local 1-second countdown after load, so operators should use a 2 to 5 minute warning window instead of relying on precise sub-minute delivery.
@@ -106,6 +115,7 @@ Recommended planned-maintenance sequence:
 Guidance:
 - Size `--expected-duration` to the likely user-facing interruption window, not the total operator runtime of the release.
 - For normal rolling releases, prefer no banner or a short `brief interruptions possible` warning and keep the ALB `503` fallback as contingency only.
+- For admin-only or portal-only hotfixes, prefer a scoped announcement instead of a global banner so unaffected users are not warned unnecessarily.
 
 ## Feature-Flagged Portal Rollouts
 

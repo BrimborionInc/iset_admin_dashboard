@@ -4,7 +4,7 @@ Purpose: running capture of user-facing fixes/changes for the next "What's New" 
 
 Current public release in Landing Page: `v0.5.8` (`26th March 2026`)
 Target next release notes draft: `v0.5.9` (date TBD)
-Last Updated: 2026-04-18
+Last Updated: 2026-04-20
 
 ## How to use
 
@@ -30,6 +30,13 @@ Last Updated: 2026-04-18
 
 ## Entries
 
+- 2026-04-20 | Release v0.5.9 | Fix/Agreements | Client Funding Agreement signer prefill | Fixed a bug where a CFA could pick up the name of the staff member who generated or sent it instead of the case's assigned case manager. | PATH now prefers the assigned case manager for CFA signer prefill and stores that signer name with the CFA version so later rerenders keep the same signer.
+- 2026-04-20 | Release v0.5.9 | Fix/Documents | Case manager assessment PDF signatures | Fixed a bug where submitted or approved assessment PDFs could show a staff email address in the signature panel instead of the person’s name. | Assessment PDFs now prefer the signer’s PATH staff display name and read signature history from the current shared event store before falling back to older legacy audit rows.
+- 2026-04-20 | Release v0.5.9 | Fix/Workflow | Application Assessment > Submit assessment | Fixed a bug where submitting an assessment could silently replace uploaded `Application form` or `Financial overview` scans with system-generated PDFs. | PATH now warns when those uploaded files already exist and lets staff keep the current files instead of replacing them.
+- 2026-04-20 | Release v0.5.9 | Fix/Workflow | Application Assessment > Approval and decision | Fixed a bug where `Request Changes` decisions could finish without the new case note appearing right away in Notes and Reminders. | The request-changes note is now written as part of the main decision save and the workspace refreshes Notes and Timeline immediately after commit.
+- 2026-04-20 | Release v0.5.9 | Fix/Documents | Case manager assessment PDF redlines | Fixed the assessment PDF compare view so first-version PDFs no longer show false change markup and later redline PDFs now compare against the immediately previous submitted version with old text struck through in red above the new green replacement text. | Added guards so PATH only enters redline mode when a real previous assessment snapshot exists, and added value-based add/remove handling for blank-to-filled and filled-to-blank text changes.
+- 2026-04-19 | Release v0.5.9 | Fix/UX/Casework | Case Workspace > Interventions | Fixed a bug where PATH could warn that a proposal was already in progress but reopen the case on a different action plan, leaving staff unable to see the draft they were supposed to resume. | The workspace now opens on the plan that owns the latest open proposal and the warning includes a direct jump back to that draft proposal.
+- 2026-04-19 | Release v0.5.9 | UX/Notifications | Manage Notifications + applicant email delivery | Made a change so PATH-generated emails can use a configurable sender name and reply-to address instead of only a bare email address. | The shared notification settings now drive the SES `From` display name and `Reply-To` for notification mail and applicant account invitations, with safe fallbacks when fields are left blank.
 - 2026-04-18 | Release v0.5.9 | Workflow/Notifications | Manage Notifications + assignment flow | Made a change so `Auto assigned`, `Case assigned`, and `Case reassigned` can each send their configured email to the assigned staff member and any watchers without double-sending during auto-assignment. | The notification matrix still controls template/language selection per event and role; watchers continue to use the `ISET Coordinator` role row for those assignment emails.
 - 2026-04-18 | Release v0.5.9 | UX/Workflow | Application Assessment | Made a change so `Deny Funding` now appears on `What is being proposed?` instead of the earlier eligibility step, so staff can capture the proposed intervention context before denying funding. | The denial flow itself is unchanged; only the placement in the assessment workflow moved.
 - 2026-04-18 | Release v0.5.9 | UX/Configuration | Configuration > Environment Settings | Made a change so demo-toolbar visibility is now saved in shared runtime config instead of only in the current browser. | System Administrators can now set the visibility once and have the same role-based demo-toolbar state apply consistently across sessions.

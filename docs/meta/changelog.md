@@ -2,6 +2,17 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-04-20
+- Fix/Agreements/CFA: Client Funding Agreement signature prefill now prefers the assigned case manager on the case and stores that signer name in the CFA version snapshot so later sends/regenerations do not drift to the staff member who happened to click Generate or Send.
+- Fix/Documents/PDF: Case manager assessment signature blocks now prefer staff display names from PATH profiles and read approval/submission signatures from the current shared event store before falling back to legacy case-event rows, avoiding raw email addresses on newly generated assessment PDFs.
+- Fix/Workflow/Applications: Application Assessment request-changes decisions now refresh Notes and Timeline immediately after commit, and the auto-created request-changes case note is now written in the main case-update transaction with the normal note-added audit event.
+- Fix/Workflow/Documents: Assessment submission now warns before replacing uploaded `Application form` or `Financial overview` files and lets staff retain those current uploads while still generating the case manager assessment PDF.
+- Fix/Documents/PDF: Case manager assessment PDF redlines now stay clean on version 1 and compare later versions against the immediately previous submitted assessment so changed text fields render prior values in red strikethrough above the new green replacement text.
+
+## 2026-04-19
+- Fix/UX/Casework: Case Workspace now prefers the action plan that owns the latest open intervention proposal when a case is reopened, and the `Proposal in progress` warning now offers a direct jump to that draft proposal instead of leaving staff on the wrong plan tab.
+- UX/Notifications/Admin+Portal: PATH-generated emails now support a configurable sender display name and `Reply-To` address in addition to the shared sender email, and applicant-facing mailers now use those settings consistently across notifications and account invitations.
+
 ## 2026-04-17
 - Docs/Ops: Expanded the durable bug/change triage guidance so Codex now treats triage requests as full queue review plus internal notes, intentional status updates, duplicate/info-gap handling, and a prioritized planning analysis for Bill, while keeping autonomous implementation/deployment out of scope unless explicitly requested.
 - Docs/Ops: Added a standing weekly-summary instruction so user-facing "last week" fix/change bullets must review both the release-notes working log and the thread index, catching relevant non-bug/non-CR changes instead of relying only on the feedback queue.

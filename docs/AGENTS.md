@@ -489,7 +489,7 @@ Notes:
 - Admin dashboard and public portal are separate apps/repos.
 - Do not copy env files or code between apps without explicit approval.
 - Confirm which renderer you are editing before making intake-rendering changes.
-- PATH-generated SES sender email is now shared through `iset_runtime_config` (`scope='notifications'`, `k='path.email'`) and edited from the admin Notification Settings widget; keep admin and portal mailers aligned to that runtime value rather than hardcoded app-local defaults.
+- PATH-generated SES sender settings are now shared through `iset_runtime_config` (`scope='notifications'`, `k='path.email'`) and edited from the admin Notification Settings widget; keep admin and portal mailers aligned to that runtime sender email / sender name / reply-to payload rather than hardcoded app-local defaults.
 - Staff bell alerts are fetched from `/api/me/notifications`, backed by `iset_internal_notification`, and rendered in the app shell `Flashbar` from `src/AppContent.js`.
 - Current admin-shell notification rule: `src/AppContent.js` mounts the global `AppLayout.notifications` rail, while `src/layouts/SideNavigation.js` footer item `Notifications` only triggers a manual refresh of that rail. There is no existing hot-push/polling loop for service-wide warnings.
 - Current bell-alert timestamp rule: the heading uses `delivered_at` when populated and otherwise `created_at`, formatted in the viewer browser's IANA timezone via `Intl.DateTimeFormat().resolvedOptions().timeZone`, with `America/Toronto` as the fallback display timezone.

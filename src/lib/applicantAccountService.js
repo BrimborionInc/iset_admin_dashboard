@@ -18,6 +18,7 @@ const APPLICANT_STATUS_ACTIVATED = 'activated';
 const NOTIFICATION_RUNTIME_SCOPE = 'notifications';
 const PATH_EMAIL_SETTINGS_KEY = 'path.email';
 const DEFAULT_SENDER_EMAIL = 'ISET@awentech.ca';
+const DEFAULT_SENDER_NAME = 'NWAC PATH';
 
 let applicantCognitoClient = null;
 let sesClient = null;
@@ -37,9 +38,40 @@ function normalizeEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) ? normalized : null;
 }
 
-async function resolveConfiguredSenderEmail(dbPool) {
+function normalizeDisplayName(value) {
+  if (value === null || typeof value === 'undefined') return null;
+  const compact = String(value).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!compact) return null;
+  return compact.slice(0, 120);
+}
+
+function resolveReplyToFallback() {
+  return normalizeEmail(
+    process.env.NOTIFICATION_SUPPORT_EMAIL ||
+    process.env.SUPPORT_EMAIL ||
+    process.env.DEFAULT_SUPPORT_EMAIL ||
+    null
+  );
+}
+
+function formatSesSource(senderEmail, senderName) {
+  if (!senderName) return senderEmail;
+  const escapedName = senderName.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `"${escapedName}" <${senderEmail}>`;
+}
+
+async function resolveConfiguredSenderConfig(dbPool) {
   const envSender = normalizeEmail(process.env.SES_SENDER_EMAIL);
-  if (!dbPool) return envSender || DEFAULT_SENDER_EMAIL;
+  const fallbackSenderEmail = envSender || DEFAULT_SENDER_EMAIL;
+  const fallbackSenderName = normalizeDisplayName(process.env.SES_SENDER_NAME) || DEFAULT_SENDER_NAME;
+  const fallbackReplyTo = resolveReplyToFallback();
+  if (!dbPool) {
+    return {
+      senderEmail: fallbackSenderEmail,
+      senderName: fallbackSenderName,
+      replyTo: fallbackReplyTo,
+    };
+  }
   try {
     const [rows] = await dbPool.query(
       'SELECT v FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
@@ -47,13 +79,34 @@ async function resolveConfiguredSenderEmail(dbPool) {
     );
     const raw = rows?.[0]?.v;
     const payload = safeJsonParse(raw, null);
-    const configured =
+    const configuredEmail =
       normalizeEmail(payload?.senderEmail) ||
       normalizeEmail(payload?.sender_email) ||
       normalizeEmail(payload?.fromEmail);
-    return configured || envSender || DEFAULT_SENDER_EMAIL;
+    const configuredSenderName =
+      normalizeDisplayName(payload?.senderName) ||
+      normalizeDisplayName(payload?.sender_name) ||
+      normalizeDisplayName(payload?.fromName) ||
+      normalizeDisplayName(payload?.displayName) ||
+      fallbackSenderName;
+    const configuredReplyTo =
+      normalizeEmail(payload?.replyTo) ||
+      normalizeEmail(payload?.reply_to) ||
+      normalizeEmail(payload?.replyToEmail) ||
+      normalizeEmail(payload?.supportEmail) ||
+      fallbackReplyTo ||
+      null;
+    return {
+      senderEmail: configuredEmail || fallbackSenderEmail,
+      senderName: configuredSenderName,
+      replyTo: configuredReplyTo,
+    };
   } catch (error) {
-    return envSender || DEFAULT_SENDER_EMAIL;
+    return {
+      senderEmail: fallbackSenderEmail,
+      senderName: fallbackSenderName,
+      replyTo: fallbackReplyTo,
+    };
   }
 }
 
@@ -900,7 +953,7 @@ async function sendApplicantActivationEmail({
   });
 
   const overrideRecipient = normaliseString(process.env.SES_REDIRECT_TO);
-  const senderEmail = await resolveConfiguredSenderEmail(dbPool);
+  const senderConfig = await resolveConfiguredSenderConfig(dbPool);
   const finalRecipient = overrideRecipient || recipient;
   const client = getSesClient();
   await client.send(new SendEmailCommand({
@@ -912,7 +965,8 @@ async function sendApplicantActivationEmail({
         Text: { Charset: 'UTF-8', Data: bodyText },
       },
     },
-    Source: senderEmail,
+    Source: formatSesSource(senderConfig.senderEmail, senderConfig.senderName),
+    ...(senderConfig.replyTo ? { ReplyToAddresses: [senderConfig.replyTo] } : {}),
   }));
 
   return { activationLink, recipient, finalRecipient };

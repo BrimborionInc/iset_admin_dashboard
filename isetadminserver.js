@@ -3091,44 +3091,102 @@ const resolveDeliveryModeLabel = (value) => {
 
 const buildAssessmentInlineDiffHtml = ({
   currentValue = '',
-  previousValue = '',
+  previousValue,
   diffStatus = null,
   emptyValue = '&mdash;'
 } = {}) => {
-  const diff = buildFundingAgreementValueDiff(previousValue, currentValue);
-  return renderFundingAgreementDiffValueHtml({
-    diff,
-    value: currentValue,
+  const normalizedStatus = normaliseString(diffStatus ?? null);
+  const resolvedStatus = normalizedStatus ? normalizedStatus.toLowerCase() : null;
+  const hasPreviousValue = typeof previousValue !== 'undefined';
+  const current = normaliseString(currentValue ?? null) || '';
+  const previous = hasPreviousValue ? (normaliseString(previousValue ?? null) || '') : '';
+
+  if (!resolvedStatus && !hasPreviousValue) {
+    return current ? escapeHtml(current) : emptyValue;
+  }
+  if (resolvedStatus === 'removed') {
+    const removedValue = previous || current;
+    return removedValue ? `<div class="redline-inline-old">${escapeHtml(removedValue)}</div>` : emptyValue;
+  }
+  if (resolvedStatus === 'added') {
+    const addedValue = current || previous;
+    return addedValue ? `<div class="redline-inline-new">${escapeHtml(addedValue)}</div>` : emptyValue;
+  }
+  if (current === previous) {
+    return current ? escapeHtml(current) : emptyValue;
+  }
+  if (!previous) {
+    return current ? `<div class="redline-inline-new">${escapeHtml(current)}</div>` : emptyValue;
+  }
+  if (!current) {
+    return `<div class="redline-inline-old">${escapeHtml(previous)}</div>`;
+  }
+  return [
+    '<div class="redline-change-block">',
+    `<div class="redline-inline-old">${escapeHtml(previous)}</div>`,
+    `<div class="redline-inline-new">${escapeHtml(current)}</div>`,
+    '</div>'
+  ].join('');
+};
+
+const buildAssessmentTotalDiffHtml = ({
+  currentValue = '',
+  previousValue,
+  diffStatus = null,
+  emptyValue = ''
+} = {}) => {
+  const contentHtml = buildAssessmentInlineDiffHtml({
+    currentValue,
+    previousValue,
     diffStatus,
     emptyValue
   });
+  return contentHtml || '';
 };
 
 const buildAssessmentMultilineDiffHtml = ({
   currentValue = '',
-  previousValue = '',
+  previousValue,
   diffStatus = null,
   emptyValue = '&mdash;'
 } = {}) => {
+  const normalizedStatus = normaliseString(diffStatus ?? null);
+  const resolvedStatus = normalizedStatus ? normalizedStatus.toLowerCase() : null;
+  const hasPreviousValue = typeof previousValue !== 'undefined';
   const current = normaliseString(currentValue ?? null) || '';
-  const previous = normaliseString(previousValue ?? null) || '';
+  const previous = hasPreviousValue ? (normaliseString(previousValue ?? null) || '') : '';
   const currentHtml = current ? formatMultilineHtml(current) : emptyValue;
   const previousHtml = previous ? formatMultilineHtml(previous) : emptyValue;
-  if (diffStatus === 'removed') {
-    return `<span class="redline-inline-old">${previousHtml}</span>`;
+  if (!resolvedStatus && !hasPreviousValue) {
+    return currentHtml;
   }
-  if (diffStatus === 'added') {
-    return `<span class="redline-inline-new">${currentHtml}</span>`;
+  if (resolvedStatus === 'removed') {
+    const removedHtml = previous ? formatMultilineHtml(previous) : currentHtml;
+    return removedHtml ? `<div class="redline-inline-old">${removedHtml}</div>` : emptyValue;
+  }
+  if (resolvedStatus === 'added') {
+    const addedHtml = current ? formatMultilineHtml(current) : previousHtml;
+    return addedHtml ? `<div class="redline-inline-new">${addedHtml}</div>` : emptyValue;
   }
   if (current === previous) {
     return currentHtml;
   }
+  if (!previous) {
+    return currentHtml ? `<div class="redline-inline-new">${currentHtml}</div>` : emptyValue;
+  }
+  if (!current) {
+    return `<div class="redline-inline-old">${previousHtml}</div>`;
+  }
   return [
+    '<div class="redline-change-block">',
     `<div class="redline-inline-old">${previousHtml}</div>`,
-    '<div class="redline-inline-arrow">&rarr;</div>',
-    `<div class="redline-inline-new">${currentHtml}</div>`
+    `<div class="redline-inline-new">${currentHtml}</div>`,
+    '</div>'
   ].join('');
 };
+
+const hasAssessmentSnapshotContent = snapshot =>
+  Boolean(snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot) && Object.keys(snapshot).length);
 
 function sortAssessmentInterventions(list) {
   const items = Array.isArray(list) ? list.slice() : [];
@@ -3239,6 +3297,12 @@ function buildAssessmentCostLineDiffList({ previousCostLines, currentCostLines }
 }
 
 function buildAssessmentInterventionMetaDiffs({ previousIntervention, currentIntervention }) {
+  const previousStartDate = toDateOnlyString(previousIntervention?.startDate ?? null);
+  const currentStartDate = toDateOnlyString(currentIntervention?.startDate ?? null);
+  const previousEndDate = toDateOnlyString(previousIntervention?.endDate ?? null);
+  const currentEndDate = toDateOnlyString(currentIntervention?.endDate ?? null);
+  const previousDuration = calculateDurationDaysFromDates(previousStartDate, previousEndDate);
+  const currentDuration = calculateDurationDaysFromDates(currentStartDate, currentEndDate);
   return {
     label: buildFundingAgreementValueDiff(
       previousIntervention?.label ?? null,
@@ -3257,12 +3321,16 @@ function buildAssessmentInterventionMetaDiffs({ previousIntervention, currentInt
       currentIntervention?.institution ?? null
     ),
     startDate: buildFundingAgreementValueDiff(
-      toDateOnlyString(previousIntervention?.startDate ?? null),
-      toDateOnlyString(currentIntervention?.startDate ?? null)
+      previousStartDate,
+      currentStartDate
     ),
     endDate: buildFundingAgreementValueDiff(
-      toDateOnlyString(previousIntervention?.endDate ?? null),
-      toDateOnlyString(currentIntervention?.endDate ?? null)
+      previousEndDate,
+      currentEndDate
+    ),
+    durationDays: buildFundingAgreementValueDiff(
+      previousDuration === null ? '' : String(previousDuration),
+      currentDuration === null ? '' : String(currentDuration)
     ),
     noc: buildFundingAgreementValueDiff(
       previousIntervention?.noc ?? null,
@@ -3430,77 +3498,87 @@ const buildAssessmentProposedInterventionsHtml = ({
     const totalText = totalValue === null ? '' : `$${formatCurrencyValue(totalValue)}`;
     const previousTotalValue = parseCurrencyValue(intervention?.previousCostTotal);
     const previousTotalText = previousTotalValue === null ? '' : `$${formatCurrencyValue(previousTotalValue)}`;
-    const totalHtml = buildFundingAgreementTotalHtml({
-      diffStatus,
-      currentValue: totalText,
-      previousValue: previousTotalText
-    });
+    const totalHtml = diffStatus === 'modified'
+      ? buildAssessmentTotalDiffHtml({
+          currentValue: totalText,
+          previousValue: previousTotalText,
+          emptyValue: ''
+        })
+      : buildAssessmentTotalDiffHtml({ currentValue: totalText, diffStatus, emptyValue: '' });
     const titleHtml = diffBadge ? `${diffBadge} ${escapeHtml(title)}` : escapeHtml(title);
-    const displayLabelHtml = buildAssessmentInlineDiffHtml({
-      currentValue: displayLabel || '',
-      previousValue: metaDiffs?.label?.from || '',
-      diffStatus,
-      emptyValue: ''
-    });
+    const displayLabelHtml = diffStatus === 'modified'
+      ? buildAssessmentInlineDiffHtml({
+          currentValue: displayLabel || '',
+          previousValue: metaDiffs?.label?.from,
+          emptyValue: ''
+        })
+      : buildAssessmentInlineDiffHtml({ currentValue: displayLabel || '', diffStatus, emptyValue: '' });
     const deliveryModeHtml = diffStatus === 'modified'
       ? buildAssessmentInlineDiffHtml({
           currentValue: deliveryLabel,
-          previousValue: metaDiffs?.deliveryMode?.from || '',
+          previousValue: metaDiffs?.deliveryMode?.from,
           emptyValue: ''
         })
       : buildAssessmentInlineDiffHtml({ currentValue: deliveryLabel, diffStatus, emptyValue: '' });
     const programNameHtml = diffStatus === 'modified'
       ? buildAssessmentInlineDiffHtml({
           currentValue: programName,
-          previousValue: metaDiffs?.programName?.from || '',
+          previousValue: metaDiffs?.programName?.from,
           emptyValue: ''
         })
       : buildAssessmentInlineDiffHtml({ currentValue: programName, diffStatus, emptyValue: '' });
     const startDateHtml = diffStatus === 'modified'
       ? buildAssessmentInlineDiffHtml({
           currentValue: startDate,
-          previousValue: metaDiffs?.startDate?.from || '',
+          previousValue: metaDiffs?.startDate?.from,
           emptyValue: ''
         })
       : buildAssessmentInlineDiffHtml({ currentValue: startDate, diffStatus, emptyValue: '' });
     const endDateHtml = diffStatus === 'modified'
       ? buildAssessmentInlineDiffHtml({
           currentValue: endDate,
-          previousValue: metaDiffs?.endDate?.from || '',
+          previousValue: metaDiffs?.endDate?.from,
           emptyValue: ''
         })
       : buildAssessmentInlineDiffHtml({ currentValue: endDate, diffStatus, emptyValue: '' });
+    const durationHtml = diffStatus === 'modified'
+      ? buildAssessmentInlineDiffHtml({
+          currentValue: durationText,
+          previousValue: metaDiffs?.durationDays?.from,
+          emptyValue: ''
+        })
+      : buildAssessmentInlineDiffHtml({ currentValue: durationText, diffStatus, emptyValue: '' });
     const nocCodeHtml = diffStatus === 'modified'
       ? buildAssessmentInlineDiffHtml({
           currentValue: nocCode,
-          previousValue: metaDiffs?.noc?.from || '',
+          previousValue: metaDiffs?.noc?.from,
           emptyValue: ''
         })
       : buildAssessmentInlineDiffHtml({ currentValue: nocCode, diffStatus, emptyValue: '' });
     const nocVersionHtml = diffStatus === 'modified'
       ? buildAssessmentInlineDiffHtml({
           currentValue: nocVersion,
-          previousValue: metaDiffs?.nocVersion?.from || '',
+          previousValue: metaDiffs?.nocVersion?.from,
           emptyValue: ''
         })
       : buildAssessmentInlineDiffHtml({ currentValue: nocVersion, diffStatus, emptyValue: '' });
     const institutionHtml = diffStatus === 'modified'
       ? buildAssessmentInlineDiffHtml({
           currentValue: institution,
-          previousValue: metaDiffs?.institution?.from || '',
+          previousValue: metaDiffs?.institution?.from,
           emptyValue: ''
         })
       : buildAssessmentInlineDiffHtml({ currentValue: institution, diffStatus, emptyValue: '' });
     const itpDetailsHtml = diffStatus === 'modified'
       ? buildAssessmentMultilineDiffHtml({
           currentValue: itpDetails,
-          previousValue: metaDiffs?.itpDetails?.from || ''
+          previousValue: metaDiffs?.itpDetails?.from
         })
       : buildAssessmentMultilineDiffHtml({ currentValue: itpDetails, diffStatus });
     const wageDetailsHtml = diffStatus === 'modified'
       ? buildAssessmentMultilineDiffHtml({
           currentValue: wageDetails,
-          previousValue: metaDiffs?.wageSubsidyDetails?.from || ''
+          previousValue: metaDiffs?.wageSubsidyDetails?.from
         })
       : buildAssessmentMultilineDiffHtml({ currentValue: wageDetails, diffStatus });
     const blockClassName = diffStatus ? `intervention-block redline-${escapeHtml(diffStatus)}` : 'intervention-block';
@@ -3527,7 +3605,7 @@ const buildAssessmentProposedInterventionsHtml = ({
           </tr>
           <tr>
             <td class="label">Duration (days)</td>
-            <td>${escapeHtml(durationText)}</td>
+            <td>${durationHtml}</td>
             <td class="label">NOC version</td>
             <td>${nocVersionHtml}</td>
           </tr>
@@ -4001,7 +4079,7 @@ async function buildAssessmentPdfFields({
     referenceNumber,
     caseContext
   });
-  const previousSnapshot = redlineBaseSnapshot && typeof redlineBaseSnapshot === 'object'
+  const previousSnapshot = hasAssessmentSnapshotContent(redlineBaseSnapshot)
     ? redlineBaseSnapshot
     : null;
   const currentLookup = snapshot?.intervention_label_lookup && typeof snapshot.intervention_label_lookup === 'object'
@@ -11212,6 +11290,102 @@ async function buildCfaSnapshotFromAssessment({ connection, caseId }) {
   };
 }
 
+async function fetchAssignedCaseManagerForFundingAgreement(connection, caseId) {
+  if (!connection || !caseId) {
+    return { staffProfileId: null, name: '' };
+  }
+  try {
+    const [[row]] = await connection.query(
+      `SELECT
+          c.assigned_to_user_id,
+          sp.display_name,
+          sp.name,
+          sp.email
+         FROM iset_case c
+         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        WHERE c.id = ?
+        LIMIT 1`,
+      [caseId]
+    );
+    const staffProfileId = normalisePositiveInteger(row?.assigned_to_user_id) || null;
+    const name = normaliseString(row?.display_name || row?.name || row?.email || null) || '';
+    return { staffProfileId, name };
+  } catch (err) {
+    console.warn('[cfa] failed to resolve assigned case manager:', err?.message || err);
+    return { staffProfileId: null, name: '' };
+  }
+}
+
+async function resolveFundingAgreementCaseManager({
+  connection,
+  caseId,
+  snapshot = null,
+  preferredName = null,
+  createdByUserId = null,
+} = {}) {
+  const runner = connection || pool;
+  const snapshotStaffProfileId =
+    normalisePositiveInteger(
+      snapshot?.case?.assignedStaffProfileId ??
+      snapshot?.case?.assigned_staff_profile_id ??
+      null
+    ) || null;
+  const snapshotName =
+    normaliseString(
+      snapshot?.case?.caseManagerName ??
+      snapshot?.case?.case_manager_name ??
+      null
+    ) || '';
+  if (snapshotName || snapshotStaffProfileId) {
+    return { staffProfileId: snapshotStaffProfileId, name: snapshotName };
+  }
+
+  const assigned = await fetchAssignedCaseManagerForFundingAgreement(runner, caseId);
+  if (assigned.name || assigned.staffProfileId) {
+    return assigned;
+  }
+
+  const preferred = normaliseString(preferredName || null) || '';
+  if (preferred) {
+    return { staffProfileId: null, name: preferred };
+  }
+
+  if (createdByUserId) {
+    try {
+      const [[senderUser]] = await runner.query(
+        `SELECT email, name
+           FROM user
+          WHERE id = ?
+          LIMIT 1`,
+        [createdByUserId]
+      );
+      const senderEmail = normaliseString(senderUser?.email || '');
+      if (senderEmail) {
+        const [[senderStaff]] = await runner.query(
+          `SELECT display_name, name, email
+             FROM staff_profiles
+            WHERE LOWER(email) = LOWER(?)
+            LIMIT 1`,
+          [senderEmail]
+        );
+        const senderStaffName =
+          normaliseString(senderStaff?.display_name || senderStaff?.name || senderStaff?.email || null) || '';
+        if (senderStaffName) {
+          return { staffProfileId: null, name: senderStaffName };
+        }
+      }
+      const senderUserName = normaliseString(senderUser?.name || senderUser?.email || null) || '';
+      if (senderUserName) {
+        return { staffProfileId: null, name: senderUserName };
+      }
+    } catch (err) {
+      console.warn('[cfa] failed to resolve fallback case manager signer:', err?.message || err);
+    }
+  }
+
+  return { staffProfileId: null, name: '' };
+}
+
 async function buildCfaTemplateTokens({
   connection,
   interventions,
@@ -11292,11 +11466,18 @@ async function buildCfaRenderSet({
 }) {
   const currentInterventions = Array.isArray(snapshot?.interventions) ? snapshot.interventions : [];
   const resolvedApplicantName = applicantName || snapshot?.client?.name || '';
+  const resolvedCaseManagerName =
+    normaliseString(
+      snapshot?.case?.caseManagerName ??
+      snapshot?.case?.case_manager_name ??
+      caseManagerName ??
+      null
+    ) || '';
   const cleanTokens = await buildCfaTemplateTokens({
     connection,
     interventions: currentInterventions,
     applicantName: resolvedApplicantName,
-    caseManagerName,
+    caseManagerName: resolvedCaseManagerName,
     caseManagerSignedDate,
   });
 
@@ -11360,7 +11541,7 @@ async function buildCfaRenderSet({
         connection,
         interventions: diffInterventions,
         applicantName: resolvedApplicantName,
-        caseManagerName,
+        caseManagerName: resolvedCaseManagerName,
         caseManagerSignedDate,
         livingAllowanceInterventions: currentInterventions,
         fundingTotalOverrideValue: currentTotal,
@@ -11439,40 +11620,13 @@ async function regenerateSignedCfaDocument({
   );
   if (!caseRow?.application_id || !caseRow?.client_id) return null;
 
-  let caseManagerName = '';
-  if (caseRow.assigned_to_user_id) {
-    const [[staffRow]] = await runner.query(
-      `SELECT display_name, name
-         FROM staff_profiles
-        WHERE id = ?
-        LIMIT 1`,
-      [caseRow.assigned_to_user_id]
-    );
-    caseManagerName = normaliseString(staffRow?.display_name || staffRow?.name || '') || '';
-  }
-  if (!caseManagerName && createdByUserId) {
-    const [[senderUser]] = await runner.query(
-      `SELECT email, name
-         FROM user
-        WHERE id = ?
-        LIMIT 1`,
-      [createdByUserId]
-    );
-    const senderEmail = normaliseString(senderUser?.email || '');
-    if (senderEmail) {
-      const [[senderStaff]] = await runner.query(
-        `SELECT display_name, name
-           FROM staff_profiles
-          WHERE LOWER(email) = LOWER(?)
-          LIMIT 1`,
-        [senderEmail]
-      );
-      caseManagerName = normaliseString(senderStaff?.display_name || senderStaff?.name || '') || '';
-    }
-    if (!caseManagerName) {
-      caseManagerName = normaliseString(senderUser?.name || '') || '';
-    }
-  }
+  const resolvedCaseManager = await resolveFundingAgreementCaseManager({
+    connection: runner,
+    caseId,
+    snapshot,
+    createdByUserId,
+  });
+  const caseManagerName = resolvedCaseManager.name || '';
   const caseManagerSignedDate = formatFundingDate(new Date());
   const clientSignature =
     extractParticipantSignatureNameFromPayload(signedPayload) ||
@@ -11618,7 +11772,22 @@ async function createCfaVersionForPlan({
       return { skipped: true, reason: 'no_interventions' };
     }
 
-    const { canonicalJson, hash } = computeCfaSnapshotSignature(snapshot);
+    const resolvedCaseManager = await resolveFundingAgreementCaseManager({
+      connection: runner,
+      caseId,
+      snapshot,
+      preferredName: caseManagerName || '',
+      createdByUserId: actorUserId || null,
+    });
+    const snapshotWithSigner = {
+      ...snapshot,
+      case: {
+        ...(snapshot?.case || {}),
+        assignedStaffProfileId: resolvedCaseManager.staffProfileId || null,
+        caseManagerName: resolvedCaseManager.name || null,
+      }
+    };
+    const { canonicalJson, hash } = computeCfaSnapshotSignature(snapshotWithSigner);
     const effectiveDate = snapshot?.plan?.effectiveDate || null;
 
     const [insert] = await runner.query(
@@ -11646,9 +11815,9 @@ async function createCfaVersionForPlan({
     const caseManagerSignedDate = formatFundingDate(new Date());
     const renderSet = await buildCfaRenderSet({
       connection: runner,
-      snapshot,
-      applicantName: snapshot?.client?.name || '',
-      caseManagerName: caseManagerName || '',
+      snapshot: snapshotWithSigner,
+      applicantName: snapshotWithSigner?.client?.name || '',
+      caseManagerName: resolvedCaseManager.name || caseManagerName || '',
       caseManagerSignedDate,
       cfaVersionId,
       cfaSeriesId: seriesId,
@@ -11659,13 +11828,13 @@ async function createCfaVersionForPlan({
     const cleanBuffer = await generateFundingAgreementPdfBuffer({ tokens: cleanTokens });
     const cleanDocId = await storeFundingAgreementPdfDocument({
       caseId,
-      applicationId: snapshot?.case?.applicationId || null,
+      applicationId: snapshotWithSigner?.case?.applicationId || null,
       actionPlanId,
-      clientId: snapshot?.case?.clientId || null,
-      applicantUserId: snapshot?.case?.applicantUserId || null,
+      clientId: snapshotWithSigner?.case?.clientId || null,
+      applicantUserId: snapshotWithSigner?.case?.applicantUserId || null,
       actorUserId,
       versionNumber: nextVersionNumber,
-      trackingId: snapshot?.case?.trackingId || null,
+      trackingId: snapshotWithSigner?.case?.trackingId || null,
       cfaVersionId,
       pdfBuffer: cleanBuffer,
       isRedline: false,
@@ -11684,13 +11853,13 @@ async function createCfaVersionForPlan({
       const redlineBuffer = await generateFundingAgreementPdfBuffer({ tokens: redlineTokens });
       const redlineDocId = await storeFundingAgreementPdfDocument({
         caseId,
-        applicationId: snapshot?.case?.applicationId || null,
+        applicationId: snapshotWithSigner?.case?.applicationId || null,
         actionPlanId,
-        clientId: snapshot?.case?.clientId || null,
-        applicantUserId: snapshot?.case?.applicantUserId || null,
+        clientId: snapshotWithSigner?.case?.clientId || null,
+        applicantUserId: snapshotWithSigner?.case?.applicantUserId || null,
         actorUserId,
         versionNumber: nextVersionNumber,
-        trackingId: snapshot?.case?.trackingId || null,
+        trackingId: snapshotWithSigner?.case?.trackingId || null,
         cfaVersionId,
         pdfBuffer: redlineBuffer,
         isRedline: true,
@@ -11784,7 +11953,22 @@ async function createCfaVersionFromAssessment({
       return { skipped: true, reason: 'no_interventions' };
     }
 
-    const { canonicalJson, hash } = computeCfaSnapshotSignature(snapshot);
+    const resolvedCaseManager = await resolveFundingAgreementCaseManager({
+      connection: runner,
+      caseId,
+      snapshot,
+      preferredName: caseManagerName || '',
+      createdByUserId: actorUserId || null,
+    });
+    const snapshotWithSigner = {
+      ...snapshot,
+      case: {
+        ...(snapshot?.case || {}),
+        assignedStaffProfileId: resolvedCaseManager.staffProfileId || null,
+        caseManagerName: resolvedCaseManager.name || null,
+      }
+    };
+    const { canonicalJson, hash } = computeCfaSnapshotSignature(snapshotWithSigner);
 
     const [insert] = await runner.query(
       `INSERT INTO cfa_version
@@ -11811,9 +11995,9 @@ async function createCfaVersionFromAssessment({
     const caseManagerSignedDate = formatFundingDate(new Date());
     const renderSet = await buildCfaRenderSet({
       connection: runner,
-      snapshot,
-      applicantName: snapshot?.client?.name || '',
-      caseManagerName: caseManagerName || '',
+      snapshot: snapshotWithSigner,
+      applicantName: snapshotWithSigner?.client?.name || '',
+      caseManagerName: resolvedCaseManager.name || caseManagerName || '',
       caseManagerSignedDate,
       cfaVersionId,
       cfaSeriesId: seriesId,
@@ -11824,13 +12008,13 @@ async function createCfaVersionFromAssessment({
     const cleanBuffer = await generateFundingAgreementPdfBuffer({ tokens: cleanTokens });
     const cleanDocId = await storeFundingAgreementPdfDocument({
       caseId,
-      applicationId: snapshot?.case?.applicationId || null,
+      applicationId: snapshotWithSigner?.case?.applicationId || null,
       actionPlanId: null,
-      clientId: snapshot?.case?.clientId || null,
-      applicantUserId: snapshot?.case?.applicantUserId || null,
+      clientId: snapshotWithSigner?.case?.clientId || null,
+      applicantUserId: snapshotWithSigner?.case?.applicantUserId || null,
       actorUserId,
       versionNumber: nextVersionNumber,
-      trackingId: snapshot?.case?.trackingId || null,
+      trackingId: snapshotWithSigner?.case?.trackingId || null,
       cfaVersionId,
       pdfBuffer: cleanBuffer,
       isRedline: false,
@@ -11849,13 +12033,13 @@ async function createCfaVersionFromAssessment({
       const redlineBuffer = await generateFundingAgreementPdfBuffer({ tokens: redlineTokens });
       const redlineDocId = await storeFundingAgreementPdfDocument({
         caseId,
-        applicationId: snapshot?.case?.applicationId || null,
+        applicationId: snapshotWithSigner?.case?.applicationId || null,
         actionPlanId: null,
-        clientId: snapshot?.case?.clientId || null,
-        applicantUserId: snapshot?.case?.applicantUserId || null,
+        clientId: snapshotWithSigner?.case?.clientId || null,
+        applicantUserId: snapshotWithSigner?.case?.applicantUserId || null,
         actorUserId,
         versionNumber: nextVersionNumber,
-        trackingId: snapshot?.case?.trackingId || null,
+        trackingId: snapshotWithSigner?.case?.trackingId || null,
         cfaVersionId,
         pdfBuffer: redlineBuffer,
         isRedline: true,
@@ -12128,7 +12312,86 @@ async function fetchInterventionCodeLabels(connection, codes = []) {
   return labels;
 }
 
-async function fetchLatestCaseEventSignature(connection, { caseId, eventType, outcome = null } = {}) {
+async function fetchLatestEventEntrySignature(connection, { caseId, eventType, outcome = null } = {}) {
+  if (!connection || !caseId || !eventType) return null;
+  const whereClauses = [
+    "e.subject_type = 'case'",
+    'e.subject_id = ?',
+    'e.event_type = ?'
+  ];
+  const params = [String(caseId), eventType];
+  if (outcome) {
+    whereClauses.push(`JSON_UNQUOTE(JSON_EXTRACT(e.payload_json, '$.outcome')) = ?`);
+    params.push(outcome);
+  }
+  try {
+    const [[row]] = await connection.query(
+      `SELECT
+          e.captured_at AS occurred_at,
+          COALESCE(
+            CASE
+              WHEN e.actor_type = 'staff' THEN (
+                SELECT COALESCE(
+                  NULLIF(TRIM(sp.display_name), ''),
+                  NULLIF(TRIM(sp.name), ''),
+                  NULLIF(TRIM(sp.email), '')
+                )
+                  FROM staff_profiles sp
+                 WHERE sp.cognito_sub = e.actor_id
+                    OR LOWER(sp.email) = LOWER(e.actor_id)
+                 ORDER BY sp.id DESC
+                 LIMIT 1
+              )
+              ELSE (
+                SELECT COALESCE(
+                  NULLIF(TRIM(u.name), ''),
+                  NULLIF(TRIM(u.email), '')
+                )
+                  FROM user u
+                 WHERE CAST(u.id AS CHAR) = e.actor_id
+                    OR u.cognito_sub = e.actor_id
+                    OR LOWER(u.email) = LOWER(e.actor_id)
+                 ORDER BY u.id DESC
+                 LIMIT 1
+              )
+            END,
+            CASE
+              WHEN e.actor_type = 'staff' THEN (
+                SELECT COALESCE(
+                  NULLIF(TRIM(u.name), ''),
+                  NULLIF(TRIM(u.email), '')
+                )
+                  FROM user u
+                 WHERE CAST(u.id AS CHAR) = e.actor_id
+                    OR u.cognito_sub = e.actor_id
+                    OR LOWER(u.email) = LOWER(e.actor_id)
+                 ORDER BY u.id DESC
+                 LIMIT 1
+              )
+              ELSE NULL
+            END,
+            NULLIF(TRIM(e.actor_display_name), '')
+          ) AS signer_name
+         FROM iset_event_entry e
+        WHERE ${whereClauses.join(' AND ')}
+        ORDER BY e.captured_at DESC, e.ingested_at DESC, e.id DESC
+        LIMIT 1`,
+      params
+    );
+    if (!row) return null;
+    const signerName = normaliseString(row?.signer_name) || null;
+    const signedAt = toIsoDateTime(row?.occurred_at);
+    if (!signerName && !signedAt) return null;
+    return { signerName, signedAt };
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err)) {
+      console.warn('[assessment-pdf] event-entry signature lookup failed', err?.message || err);
+    }
+    return null;
+  }
+}
+
+async function fetchLatestLegacyCaseEventSignature(connection, { caseId, eventType, outcome = null } = {}) {
   if (!connection || !caseId || !eventType) return null;
   const whereClauses = ['e.case_id = ?', 'e.event_type = ?'];
   const params = [caseId, eventType];
@@ -12136,29 +12399,42 @@ async function fetchLatestCaseEventSignature(connection, { caseId, eventType, ou
     whereClauses.push(`JSON_UNQUOTE(JSON_EXTRACT(e.payload_json, '$.outcome')) = ?`);
     params.push(outcome);
   }
-  const [[row]] = await connection.query(
-    `SELECT
-        e.occurred_at,
-        COALESCE(
-          NULLIF(TRIM(sp.display_name), ''),
-          NULLIF(TRIM(sp.name), ''),
-          NULLIF(TRIM(sp.email), ''),
-          NULLIF(TRIM(u.name), ''),
-          NULLIF(TRIM(u.email), '')
-        ) AS signer_name
-       FROM iset_case_event e
-       LEFT JOIN staff_profiles sp ON sp.id = e.actor_staff_profile_id
-       LEFT JOIN user u ON u.id = e.actor_user_id
-      WHERE ${whereClauses.join(' AND ')}
-      ORDER BY e.occurred_at DESC, e.id DESC
-      LIMIT 1`,
-    params
-  );
-  if (!row) return null;
-  const signerName = normaliseString(row?.signer_name) || null;
-  const signedAt = toIsoDateTime(row?.occurred_at);
-  if (!signerName && !signedAt) return null;
-  return { signerName, signedAt };
+  try {
+    const [[row]] = await connection.query(
+      `SELECT
+          e.occurred_at,
+          COALESCE(
+            NULLIF(TRIM(sp.display_name), ''),
+            NULLIF(TRIM(sp.name), ''),
+            NULLIF(TRIM(sp.email), ''),
+            NULLIF(TRIM(u.name), ''),
+            NULLIF(TRIM(u.email), '')
+          ) AS signer_name
+         FROM iset_case_event e
+         LEFT JOIN staff_profiles sp ON sp.id = e.actor_staff_profile_id
+         LEFT JOIN user u ON u.id = e.actor_user_id
+        WHERE ${whereClauses.join(' AND ')}
+        ORDER BY e.occurred_at DESC, e.id DESC
+        LIMIT 1`,
+      params
+    );
+    if (!row) return null;
+    const signerName = normaliseString(row?.signer_name) || null;
+    const signedAt = toIsoDateTime(row?.occurred_at);
+    if (!signerName && !signedAt) return null;
+    return { signerName, signedAt };
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err)) {
+      console.warn('[assessment-pdf] legacy case-event signature lookup failed', err?.message || err);
+    }
+    return null;
+  }
+}
+
+async function fetchLatestCaseEventSignature(connection, options = {}) {
+  const currentSignature = await fetchLatestEventEntrySignature(connection, options);
+  if (currentSignature) return currentSignature;
+  return fetchLatestLegacyCaseEventSignature(connection, options);
 }
 
 async function fetchAssessmentPdfSignatureContext({
@@ -35371,8 +35647,8 @@ app.post('/api/escalations', async (req, res) => {
     const caseIdRaw = req.body?.caseId || req.body?.case_id || null;
     const reason = toNull(req.body?.reason);
     const details = toNull(req.body?.details);
-    const staffProfileId = req.staffProfile?.id || null;
-    const authorUserId = getAuthenticatedNumericUserId(req);
+    const staffProfileId = resolveActiveStaffProfileId(req) || null;
+    let authorUserId = null;
     const escalationNoteBody = buildEscalationCaseNoteBody(reason, details);
     const targetRoleKey = canonicalEscalationRole(req.body?.targetRole || req.body?.target_role || (roleKey === 'regional_manager' ? 'nwac_administrator' : 'regional_manager'));
     if (!targetRoleKey) {
@@ -35382,6 +35658,7 @@ app.post('/api/escalations', async (req, res) => {
     const lockConfig = await readLockConfig();
     conn = await pool.getConnection();
     await conn.beginTransaction();
+    authorUserId = await resolveExistingUserIdFromAuth(req, conn);
 
     const [[appRow]] = await conn.query(
       `SELECT id, status, has_open_escalation, current_escalation_id FROM iset_application WHERE id = ? LIMIT 1 FOR UPDATE`,
@@ -35623,13 +35900,14 @@ app.post('/api/escalations/:id/respond', async (req, res) => {
     const action = normaliseEscalationAction(req.body?.action || req.body?.type || null) || 'respond';
     const note = toNull(req.body?.note || req.body?.notes || req.body?.message);
     const disposition = toNull(req.body?.disposition) || action;
-    const staffProfileId = req.staffProfile?.id || null;
-    const authorUserId = getAuthenticatedNumericUserId(req);
+    const staffProfileId = resolveActiveStaffProfileId(req) || null;
+    let authorUserId = null;
     const escalateToRoleKey = canonicalEscalationRole(req.body?.targetRole || req.body?.target_role || req.body?.escalateToRole || null);
 
     const lockConfig = await readLockConfig();
     conn = await pool.getConnection();
     await conn.beginTransaction();
+    authorUserId = await resolveExistingUserIdFromAuth(req, conn);
 
     const [[escRow]] = await conn.query(
       `SELECT e.*, a.status AS application_status, a.has_open_escalation, a.current_escalation_id
@@ -36065,6 +36343,26 @@ const getAuthenticatedNumericUserId = (req) => {
     if (Number.isFinite(numeric) && numeric > 0) {
       return numeric;
     }
+  }
+  return null;
+};
+
+const resolveExistingUserIdFromAuth = async (req, runner = pool) => {
+  const db = runner || pool;
+  const directUserId = getAuthenticatedNumericUserId(req);
+  if (directUserId) {
+    const existingDirectUserId = await ensureUserExists(db, directUserId);
+    if (existingDirectUserId) return existingDirectUserId;
+  }
+  const sub = req?.auth?.sub || null;
+  if (sub) {
+    const [[subRow]] = await db.query('SELECT id FROM user WHERE cognito_sub = ? LIMIT 1', [sub]);
+    if (subRow?.id) return Number(subRow.id);
+  }
+  const email = req?.auth?.email ? String(req.auth.email).trim().toLowerCase() : null;
+  if (email) {
+    const [[emailRow]] = await db.query('SELECT id FROM user WHERE LOWER(email) = LOWER(?) LIMIT 1', [email]);
+    if (emailRow?.id) return Number(emailRow.id);
   }
   return null;
 };
@@ -51682,14 +51980,14 @@ app.post('/api/cases/:caseId/notes', async (req, res) => {
     throw err;
   }
   const followUpDate = followUpDateValue === undefined ? null : followUpDateValue;
-  const staffProfileId = req.staffProfile?.id || null;
-  const authorUserId = getAuthenticatedNumericUserId(req);
+  const staffProfileId = resolveActiveStaffProfileId(req) || null;
   const pinnedValue = isPinned ? 1 : 0;
   let connection;
   const pendingReminderCreates = [];
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
+    const authorUserId = await resolveExistingUserIdFromAuth(req, connection);
     const caseRow = await loadCaseIdentifiers(connection, caseId);
     if (!caseRow) {
       await connection.rollback();
@@ -51813,13 +52111,13 @@ app.put('/api/cases/:caseId/notes/:noteId', async (req, res) => {
       parsedFollowUp = null;
     }
   }
-  const staffProfileId = req.staffProfile?.id || null;
-  const editorUserId = getAuthenticatedNumericUserId(req);
+  const staffProfileId = resolveActiveStaffProfileId(req) || null;
   let connection;
   const pendingReminderCreates = [];
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
+    const editorUserId = await resolveExistingUserIdFromAuth(req, connection);
     const [rows] = await connection.query(
       'SELECT id, case_id, body, is_pinned, follow_up_at, reminder_id FROM iset_case_note WHERE id = ? AND case_id = ? AND deleted_at IS NULL LIMIT 1 FOR UPDATE',
       [noteId, caseId]
@@ -51997,12 +52295,12 @@ app.delete('/api/cases/:caseId/notes/:noteId', async (req, res) => {
   if (!Number.isInteger(caseId) || caseId <= 0 || !Number.isInteger(noteId) || noteId <= 0) {
     return res.status(400).json({ error: 'invalid_identifier' });
   }
-  const staffProfileId = req.staffProfile?.id || null;
-  const editorUserId = getAuthenticatedNumericUserId(req);
+  const staffProfileId = resolveActiveStaffProfileId(req) || null;
   let connection;
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
+    const editorUserId = await resolveExistingUserIdFromAuth(req, connection);
     const [rows] = await connection.query(
       'SELECT reminder_id FROM iset_case_note WHERE id = ? AND case_id = ? AND deleted_at IS NULL LIMIT 1 FOR UPDATE',
       [noteId, caseId]
@@ -52493,14 +52791,20 @@ const handlePostCaseSecureMessage = async (req, res) => {
       if (!cfaDraftRow) {
         try {
           const staffProfileId = resolveActiveStaffProfileId(req);
-          const caseManagerName = await resolveStaffDisplayName(pool, req);
+          const requesterDisplayName = await resolveStaffDisplayName(pool, req);
+          const caseManager = await resolveFundingAgreementCaseManager({
+            connection: pool,
+            caseId,
+            preferredName: requesterDisplayName,
+            createdByUserId: senderId,
+          });
           const created = await createCfaVersionFromAssessment({
             caseId,
             changeReason: 'NEW_INTERVENTION_APPROVED',
             changeSummary: 'Initial funding agreement',
             actorUserId: senderId,
             staffProfileId,
-            caseManagerName
+            caseManagerName: caseManager.name || requesterDisplayName || ''
           });
           if (!created || created.skipped) {
             console.warn(
@@ -52584,7 +52888,15 @@ const handlePostCaseSecureMessage = async (req, res) => {
           message: 'Funding agreement draft is missing intervention details.'
         });
       }
-      const caseManagerName = await resolveStaffDisplayName(pool, req);
+      const requesterDisplayName = await resolveStaffDisplayName(pool, req);
+      const caseManager = await resolveFundingAgreementCaseManager({
+        connection: pool,
+        caseId,
+        snapshot: cfaSnapshot,
+        preferredName: requesterDisplayName,
+        createdByUserId: senderId,
+      });
+      const caseManagerName = caseManager.name || requesterDisplayName || '';
       const caseManagerSignedDate = formatFundingDate(new Date());
       const [[assessmentRow]] = await pool.query(
         `SELECT program_name, institution, intervention_start_date, intervention_end_date, itp_payload, intervention_cost_total, proposed_interventions
@@ -54336,6 +54648,7 @@ const INTACCT_INTEGRATION_KEY = 'intacct.integration';
 const NOTIFICATION_RUNTIME_SCOPE = 'notifications';
 const PATH_EMAIL_SETTINGS_KEY = 'path.email';
 const DEFAULT_NOTIFICATION_SENDER_EMAIL = 'ISET@awentech.ca';
+const DEFAULT_NOTIFICATION_SENDER_NAME = 'NWAC PATH';
 
 const normalizeEmailAddress = (value) => {
   if (!value) return null;
@@ -54345,6 +54658,21 @@ const normalizeEmailAddress = (value) => {
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(lowered)) return null;
   return lowered;
 };
+
+const normalizeNotificationSenderName = (value) => {
+  if (value === null || typeof value === 'undefined') return null;
+  const compact = String(value).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!compact) return null;
+  return compact.slice(0, 120);
+};
+
+const resolveNotificationReplyToFallback = () =>
+  normalizeEmailAddress(
+    process.env.NOTIFICATION_SUPPORT_EMAIL ||
+    process.env.SUPPORT_EMAIL ||
+    process.env.DEFAULT_SUPPORT_EMAIL ||
+    null
+  );
 
 const normalizeEmailList = (input) => {
   const list = [];
@@ -56086,6 +56414,20 @@ function sanitizeNotificationEmailSettings(raw) {
     senderEmail: normalizeEmailAddress(
       payload.senderEmail || payload.sender_email || payload.fromEmail || ''
     ),
+    senderName: normalizeNotificationSenderName(
+      payload.senderName ||
+      payload.sender_name ||
+      payload.fromName ||
+      payload.displayName ||
+      ''
+    ),
+    replyTo: normalizeEmailAddress(
+      payload.replyTo ||
+      payload.reply_to ||
+      payload.replyToEmail ||
+      payload.supportEmail ||
+      ''
+    ),
   };
 }
 
@@ -56093,8 +56435,19 @@ async function readNotificationEmailSettings(connection = null) {
   const runner = connection || pool;
   const envSender = normalizeEmailAddress(process.env.SES_SENDER_EMAIL);
   const fallbackSenderEmail = envSender || DEFAULT_NOTIFICATION_SENDER_EMAIL;
+  const fallbackSenderName =
+    normalizeNotificationSenderName(process.env.SES_SENDER_NAME) || DEFAULT_NOTIFICATION_SENDER_NAME;
+  const fallbackReplyTo = resolveNotificationReplyToFallback();
   if (!runner) {
-    return { senderEmail: null, fallbackSenderEmail, updatedAt: null };
+    return {
+      senderEmail: null,
+      senderName: null,
+      replyTo: null,
+      fallbackSenderEmail,
+      fallbackSenderName,
+      fallbackReplyTo,
+      updatedAt: null,
+    };
   }
   try {
     await ensureRuntimeConfigTable();
@@ -56103,7 +56456,15 @@ async function readNotificationEmailSettings(connection = null) {
       [NOTIFICATION_RUNTIME_SCOPE, PATH_EMAIL_SETTINGS_KEY],
     );
     if (!rows || rows.length === 0) {
-      return { senderEmail: null, fallbackSenderEmail, updatedAt: null };
+      return {
+        senderEmail: null,
+        senderName: null,
+        replyTo: null,
+        fallbackSenderEmail,
+        fallbackSenderName,
+        fallbackReplyTo,
+        updatedAt: null,
+      };
     }
     let payload = rows[0].v;
     if (payload && typeof payload === 'string') {
@@ -56117,13 +56478,23 @@ async function readNotificationEmailSettings(connection = null) {
     return {
       ...sanitized,
       fallbackSenderEmail,
+      fallbackSenderName,
+      fallbackReplyTo,
       updatedAt: rows[0].updated_at || null,
     };
   } catch (err) {
     if (!isMissingTableErrorLocal(err)) {
       console.warn('[notification-email-settings] failed to read config:', err.message);
     }
-    return { senderEmail: null, fallbackSenderEmail, updatedAt: null };
+    return {
+      senderEmail: null,
+      senderName: null,
+      replyTo: null,
+      fallbackSenderEmail,
+      fallbackSenderName,
+      fallbackReplyTo,
+      updatedAt: null,
+    };
   }
 }
 
@@ -56131,8 +56502,19 @@ async function writeNotificationEmailSettings(next, connection = null) {
   const runner = connection || pool;
   const envSender = normalizeEmailAddress(process.env.SES_SENDER_EMAIL);
   const fallbackSenderEmail = envSender || DEFAULT_NOTIFICATION_SENDER_EMAIL;
+  const fallbackSenderName =
+    normalizeNotificationSenderName(process.env.SES_SENDER_NAME) || DEFAULT_NOTIFICATION_SENDER_NAME;
+  const fallbackReplyTo = resolveNotificationReplyToFallback();
   if (!runner) {
-    return { senderEmail: null, fallbackSenderEmail, updatedAt: null };
+    return {
+      senderEmail: null,
+      senderName: null,
+      replyTo: null,
+      fallbackSenderEmail,
+      fallbackSenderName,
+      fallbackReplyTo,
+      updatedAt: null,
+    };
   }
   const sanitized = sanitizeNotificationEmailSettings(next);
   await ensureRuntimeConfigTable();
@@ -56147,6 +56529,8 @@ async function writeNotificationEmailSettings(next, connection = null) {
   return {
     ...sanitized,
     fallbackSenderEmail,
+    fallbackSenderName,
+    fallbackReplyTo,
     updatedAt: row?.updated_at || null,
   };
 }
@@ -74749,6 +75133,8 @@ app.put('/api/cases/:id', async (req, res) => {
   let conflictDeclarationSignedAt = null;
   let conflictDeclarationChoice = null;
   let conflictDeclarationDetails = null;
+  let pushBackCaseNoteId = null;
+  let pushBackCaseNoteBody = null;
 
   try {
     conn = await pool.getConnection();
@@ -75552,6 +75938,28 @@ app.put('/api/cases/:id', async (req, res) => {
       await recomputeCaseStatus(caseId, conn);
     }
 
+    if (assessmentReviewStatusProvided && assessmentReviewStatus === 'push_back') {
+      const pushBackReason =
+        typeof body.assessment_nwac_reason === 'string'
+          ? body.assessment_nwac_reason.trim()
+          : '';
+      if (pushBackReason) {
+        const staffProfileId = resolveActiveStaffProfileId(req) || null;
+        const authorUserId = await resolveExistingUserIdFromAuth(req, conn);
+        const noteBody = `Push back to ISET Coordinator/Case Manager: ${pushBackReason}`;
+        const trimmedNote =
+          noteBody.length > CASE_NOTE_MAX_LENGTH
+            ? noteBody.slice(0, CASE_NOTE_MAX_LENGTH)
+            : noteBody;
+        const [noteResult] = await conn.query(
+          'INSERT INTO iset_case_note (case_id, author_staff_profile_id, author_user_id, body, is_internal, is_pinned, follow_up_at) VALUES (?,?,?,?,1,0,NULL)',
+          [caseId, staffProfileId, authorUserId, trimmedNote]
+        );
+        pushBackCaseNoteId = noteResult?.insertId || null;
+        pushBackCaseNoteBody = trimmedNote;
+      }
+    }
+
     await conn.commit();
   } catch (error) {
     if (conn) {
@@ -75671,34 +76079,6 @@ app.put('/api/cases/:id', async (req, res) => {
         WHERE c.id = ?`,
       [conflictSummaryStaffId, caseId]
     );
-
-    const reviewStatus =
-      typeof body.assessment_nwac_review_status === 'string'
-        ? body.assessment_nwac_review_status.trim().toLowerCase()
-        : '';
-    const pushBackReason =
-      typeof body.assessment_nwac_reason === 'string'
-        ? body.assessment_nwac_reason.trim()
-        : '';
-    if (reviewStatus === 'push_back' && pushBackReason) {
-      const staffProfileId = req.staffProfile?.id || null;
-      const authorUserId = getAuthenticatedNumericUserId(req);
-      const noteBody = `Push back to ISET Coordinator/Case Manager: ${pushBackReason}`;
-      const trimmedNote =
-        noteBody.length > CASE_NOTE_MAX_LENGTH
-          ? noteBody.slice(0, CASE_NOTE_MAX_LENGTH)
-          : noteBody;
-      try {
-        await pool.query(
-          'INSERT INTO iset_case_note (case_id, author_staff_profile_id, author_user_id, body, is_internal, is_pinned, follow_up_at) VALUES (?,?,?,?,1,0,NULL)',
-          [caseId, staffProfileId, authorUserId, trimmedNote]
-        );
-      } catch (err) {
-        if (!isMissingTableErrorLocal(err)) {
-          console.warn('[case-notes] failed to add push back note', err?.message || err);
-        }
-      }
-    }
 
     try {
       caseRow.assessment_employment_barriers = caseRow.assessment_employment_barriers
@@ -75889,7 +76269,28 @@ app.put('/api/cases/:id', async (req, res) => {
       caseRow.application_closure_reason || applicationClosureReasonToPersist || null;
     caseRow.applicationClosureReason = caseRow.application_closure_reason;
     const { actorId, actorName } = resolveRequestActor(req);
+    const actorDisplayName = await resolveStaffDisplayName(pool, req) || actorName || null;
     const trackingId = caseRow?.tracking_id || null;
+
+    if (pushBackCaseNoteId && pushBackCaseNoteBody) {
+      try {
+        await captureCaseEvent({
+          type: 'note_added',
+          caseId,
+          payload: {
+            note_id: pushBackCaseNoteId,
+            body: pushBackCaseNoteBody,
+            is_pinned: false,
+            follow_up_at: null,
+          },
+          trackingId,
+          actorId,
+          actorName,
+        });
+      } catch (eventErr) {
+        console.warn('[case-notes] failed to emit note_added event for push back note', eventErr?.message || eventErr);
+      }
+    }
 
     const shouldEmitStatusEvent = applicationStatusChanged || statusChanged;
     const statusEventFrom = applicationStatusChanged ? beforeApplicationStatus : beforeCaseLifecycleStatus;
@@ -75981,7 +76382,7 @@ app.put('/api/cases/:id', async (req, res) => {
       (submitAction || hasStatusField);
 
     if (assessmentSubmitted) {
-      const coordinatorName = actorName || '';
+      const coordinatorName = actorDisplayName || actorName || '';
       await captureCaseEvent({
         type: 'assessment_submitted',
         caseId,
@@ -76008,7 +76409,7 @@ app.put('/api/cases/:id', async (req, res) => {
     const requestSignatureTimestamp = new Date().toISOString();
     const submittedSignatureFallback = assessmentSubmitted
       ? {
-          signerName: actorName || null,
+          signerName: actorDisplayName || actorName || null,
           signedAt: requestSignatureTimestamp
         }
       : null;
@@ -76018,6 +76419,18 @@ app.put('/api/cases/:id', async (req, res) => {
     const submittedApplicationLifecycleStatus = normaliseApplicationLifecycleStatusValue(body.applicationStatus, {
       preserveUnknown: true,
     });
+    const preserveExistingApplicationForm = parseBooleanFlag(
+      body.assessment_preserve_existing_application_form ??
+      body.preserveExistingApplicationForm ??
+      body.preserveExistingApplicationFormDocument,
+      false
+    );
+    const preserveExistingFinancialOverview = parseBooleanFlag(
+      body.assessment_preserve_existing_financial_overview ??
+      body.preserveExistingFinancialOverview ??
+      body.preserveExistingFinancialOverviewDocument,
+      false
+    );
     const assessmentHasApplicationId = Number.isFinite(Number(caseRow?.application_id));
     const shouldGenerateAssessmentPdf =
       assessmentSubmitted &&
@@ -76044,7 +76457,7 @@ app.put('/api/cases/:id', async (req, res) => {
     const approvedSignatureFallback =
       assessmentReviewStatusProvided && afterAssessmentReviewStatus === 'approve'
         ? {
-            signerName: actorName || null,
+            signerName: actorDisplayName || actorName || null,
             signedAt: requestSignatureTimestamp
           }
         : null;
@@ -76128,7 +76541,7 @@ app.put('/api/cases/:id', async (req, res) => {
         archivePreviousActive: false,
         replaceExistingVersion: true
       });
-      if (!approved && previousSubmittedVersionNumber && previousSubmittedSnapshot) {
+      if (!approved && previousSubmittedVersionNumber && hasAssessmentSnapshotContent(previousSubmittedSnapshot)) {
         const redlineBuffer = await generateAssessmentPdfBuffer({
           caseRow,
           applicantName: applicantContext.applicantName,
@@ -76169,55 +76582,59 @@ app.put('/api/cases/:id', async (req, res) => {
         const applicantContext = await generateAndStoreAssessmentPdf({
           submittedSignature: submittedSignatureFallback
         });
-        try {
-          const applicationPayload = await readApplicationPayload(pool, caseRow.application_id, { forUpdate: false });
-          if (!applicationPayload) {
-            throw new Error('application_payload_missing');
-          }
-          const payload = applicationPayload.payload || {};
-          const rawAnswers = payload.answers || payload.intake_answers || payload;
-          const answers = rawAnswers && typeof rawAnswers === 'object' ? rawAnswers : {};
-          const referenceNumber = applicantContext.trackingId || trackingId;
-          const appPdfBuffer = await generateApplicationFormPdfBuffer({
-            applicationRow: applicationPayload.row,
-            payload,
-            answers,
-            applicantName: applicantContext.applicantName,
-            referenceNumber,
-            receivedAt: applicationPayload.row?.created_at
-          });
-          await storeApplicationFormPdfDocument({
-            applicationId: caseRow.application_id,
-            caseId,
-            clientId: caseRow.client_id,
-            applicantUserId: applicantContext.applicantUserId,
-            actorUserId: actorId,
-            referenceNumber,
-            pdfBuffer: appPdfBuffer
-          });
+        const shouldGenerateApplicationFormPdf = !preserveExistingApplicationForm;
+        const shouldGenerateFinancialOverviewPdf = !preserveExistingFinancialOverview;
+        if (shouldGenerateApplicationFormPdf || shouldGenerateFinancialOverviewPdf) {
           try {
-            const financialPdfBuffer = await generateFinancialOverviewPdfBuffer({
-              applicationRow: applicationPayload.row,
-              payload,
-              answers,
-              applicantName: applicantContext.applicantName,
-              referenceNumber,
-              receivedAt: applicationPayload.row?.created_at
-            });
-            await storeFinancialOverviewPdfDocument({
-              applicationId: caseRow.application_id,
-              caseId,
-              clientId: caseRow.client_id,
-              applicantUserId: applicantContext.applicantUserId,
-              actorUserId: actorId,
-              referenceNumber,
-              pdfBuffer: financialPdfBuffer
-            });
-          } catch (financialPdfErr) {
-            console.error('[financial-overview-pdf] generation failed:', financialPdfErr?.message || financialPdfErr);
+            const applicationPayload = await readApplicationPayload(pool, caseRow.application_id, { forUpdate: false });
+            if (!applicationPayload) {
+              throw new Error('application_payload_missing');
+            }
+            const payload = applicationPayload.payload || {};
+            const rawAnswers = payload.answers || payload.intake_answers || payload;
+            const answers = rawAnswers && typeof rawAnswers === 'object' ? rawAnswers : {};
+            const referenceNumber = applicantContext.trackingId || trackingId;
+            if (shouldGenerateApplicationFormPdf) {
+              const appPdfBuffer = await generateApplicationFormPdfBuffer({
+                applicationRow: applicationPayload.row,
+                payload,
+                answers,
+                applicantName: applicantContext.applicantName,
+                referenceNumber,
+                receivedAt: applicationPayload.row?.created_at
+              });
+              await storeApplicationFormPdfDocument({
+                applicationId: caseRow.application_id,
+                caseId,
+                clientId: caseRow.client_id,
+                applicantUserId: applicantContext.applicantUserId,
+                actorUserId: actorId,
+                referenceNumber,
+                pdfBuffer: appPdfBuffer
+              });
+            }
+            if (shouldGenerateFinancialOverviewPdf) {
+              const financialPdfBuffer = await generateFinancialOverviewPdfBuffer({
+                applicationRow: applicationPayload.row,
+                payload,
+                answers,
+                applicantName: applicantContext.applicantName,
+                referenceNumber,
+                receivedAt: applicationPayload.row?.created_at
+              });
+              await storeFinancialOverviewPdfDocument({
+                applicationId: caseRow.application_id,
+                caseId,
+                clientId: caseRow.client_id,
+                applicantUserId: applicantContext.applicantUserId,
+                actorUserId: actorId,
+                referenceNumber,
+                pdfBuffer: financialPdfBuffer
+              });
+            }
+          } catch (appPdfErr) {
+            console.error('[assessment-generated-docs] generation failed:', appPdfErr?.message || appPdfErr);
           }
-        } catch (appPdfErr) {
-          console.error('[application-form-pdf] generation failed:', appPdfErr?.message || appPdfErr);
         }
       } catch (err) {
         console.error('[assessment-pdf] generation failed:', err?.message || err);
@@ -76273,7 +76690,7 @@ app.put('/api/cases/:id', async (req, res) => {
 
         trackingId,
         actorId,
-        actorName,
+        actorName: actorDisplayName || actorName,
       });
     }
     // Approval transitions no longer send a separate auto-generated funding-forms message.
@@ -77353,14 +77770,27 @@ app.get('/api/config/notifications/email-settings', async (req, res) => {
 
 app.patch('/api/config/notifications/email-settings', async (req, res) => {
     try {
-        const { senderEmail = null } = req.body || {};
+        const { senderEmail = null, senderName = null, replyTo = null } = req.body || {};
         const trimmedSenderEmail = senderEmail === null || senderEmail === undefined
           ? null
           : String(senderEmail).trim();
+        const trimmedSenderName = senderName === null || senderName === undefined
+          ? null
+          : String(senderName).trim();
+        const trimmedReplyTo = replyTo === null || replyTo === undefined
+          ? null
+          : String(replyTo).trim();
         if (trimmedSenderEmail && !normalizeEmailAddress(trimmedSenderEmail)) {
             return res.status(400).json({ error: 'Enter a valid sender email address.' });
         }
-        const settings = await writeNotificationEmailSettings({ senderEmail: trimmedSenderEmail || null });
+        if (trimmedReplyTo && !normalizeEmailAddress(trimmedReplyTo)) {
+            return res.status(400).json({ error: 'Enter a valid reply-to email address.' });
+        }
+        const settings = await writeNotificationEmailSettings({
+          senderEmail: trimmedSenderEmail || null,
+          senderName: trimmedSenderName || null,
+          replyTo: trimmedReplyTo || null,
+        });
         res.json(settings);
     } catch (err) {
         console.error(err);

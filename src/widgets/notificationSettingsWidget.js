@@ -8,6 +8,7 @@ const DEFAULT_LANGUAGE = 'en'; // Adjust as needed
 
 const NONE_TEMPLATE_OPTION = { label: 'No template', value: '__none__' };
 const EMAIL_SETTINGS_FALLBACK = 'ISET@awentech.ca';
+const SENDER_NAME_FALLBACK = 'NWAC PATH';
 
 const APPLICANT_ROLE_VALUE = 'applicant';
 const APPLICANT_ROLE = Object.freeze({ value: APPLICANT_ROLE_VALUE, label: 'Applicant' });
@@ -166,6 +167,11 @@ const normaliseEmailInput = (value) => {
   return String(value).trim().toLowerCase();
 };
 
+const normaliseTextInput = (value) => {
+  if (value === null || value === undefined) return '';
+  return String(value).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+};
+
 const isValidEmail = (value) =>
   /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normaliseEmailInput(value));
 
@@ -176,11 +182,19 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
   const [templates, setTemplates] = useState([]);
   const [senderEmail, setSenderEmail] = useState('');
   const [savedSenderEmail, setSavedSenderEmail] = useState('');
+  const [senderName, setSenderName] = useState('');
+  const [savedSenderName, setSavedSenderName] = useState('');
+  const [replyTo, setReplyTo] = useState('');
+  const [savedReplyTo, setSavedReplyTo] = useState('');
+  const [fallbackSenderEmail, setFallbackSenderEmail] = useState(EMAIL_SETTINGS_FALLBACK);
+  const [fallbackSenderName, setFallbackSenderName] = useState(SENDER_NAME_FALLBACK);
+  const [fallbackReplyTo, setFallbackReplyTo] = useState('');
   const [loading, setLoading] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [flashMessages, setFlashMessages] = useState([]);
   const [senderValidationError, setSenderValidationError] = useState('');
+  const [replyToValidationError, setReplyToValidationError] = useState('');
 
   const loadAllData = async () => {
     const [eventsRes, rolesRes, templatesRes, settingsRes, senderSettingsRes] = await Promise.all([
@@ -207,6 +221,13 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
       eventRows,
       templateOptions,
       senderEmail: normaliseEmailInput(senderSettingsRaw?.senderEmail || ''),
+      senderName: normaliseTextInput(senderSettingsRaw?.senderName || ''),
+      replyTo: normaliseEmailInput(senderSettingsRaw?.replyTo || ''),
+      fallbackSenderEmail:
+        normaliseEmailInput(senderSettingsRaw?.fallbackSenderEmail || '') || EMAIL_SETTINGS_FALLBACK,
+      fallbackSenderName:
+        normaliseTextInput(senderSettingsRaw?.fallbackSenderName || '') || SENDER_NAME_FALLBACK,
+      fallbackReplyTo: normaliseEmailInput(senderSettingsRaw?.fallbackReplyTo || ''),
     };
   };
 
@@ -219,7 +240,16 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
       setFlashMessages([]);
 
       try {
-        const { eventRows, templateOptions, senderEmail: loadedSenderEmail } = await loadAllData();
+        const {
+          eventRows,
+          templateOptions,
+          senderEmail: loadedSenderEmail,
+          senderName: loadedSenderName,
+          replyTo: loadedReplyTo,
+          fallbackSenderEmail: loadedFallbackSenderEmail,
+          fallbackSenderName: loadedFallbackSenderName,
+          fallbackReplyTo: loadedFallbackReplyTo,
+        } = await loadAllData();
 
         if (cancelled) return;
 
@@ -229,7 +259,15 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
         setTemplates(templateOptions);
         setSenderEmail(loadedSenderEmail);
         setSavedSenderEmail(loadedSenderEmail);
+        setSenderName(loadedSenderName);
+        setSavedSenderName(loadedSenderName);
+        setReplyTo(loadedReplyTo);
+        setSavedReplyTo(loadedReplyTo);
+        setFallbackSenderEmail(loadedFallbackSenderEmail);
+        setFallbackSenderName(loadedFallbackSenderName);
+        setFallbackReplyTo(loadedFallbackReplyTo);
         setSenderValidationError('');
+        setReplyToValidationError('');
         setDirty(false);
       } catch (error) {
         if (cancelled) return;
@@ -270,6 +308,22 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
       setSenderValidationError('');
     } else {
       setSenderValidationError('Enter a valid email address.');
+    }
+    markDirty();
+  };
+
+  const handleSenderNameChange = ({ detail }) => {
+    setSenderName(normaliseTextInput(detail.value));
+    markDirty();
+  };
+
+  const handleReplyToChange = ({ detail }) => {
+    const nextValue = normaliseEmailInput(detail.value);
+    setReplyTo(nextValue);
+    if (!nextValue || isValidEmail(nextValue)) {
+      setReplyToValidationError('');
+    } else {
+      setReplyToValidationError('Enter a valid email address.');
     }
     markDirty();
   };
@@ -347,7 +401,12 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
     setFlashMessages([]);
 
     const normalizedSenderEmail = normaliseEmailInput(senderEmail);
-    const senderChanged = normalizedSenderEmail !== savedSenderEmail;
+    const normalizedSenderName = normaliseTextInput(senderName);
+    const normalizedReplyTo = normaliseEmailInput(replyTo);
+    const senderChanged =
+      normalizedSenderEmail !== savedSenderEmail ||
+      normalizedSenderName !== savedSenderName ||
+      normalizedReplyTo !== savedReplyTo;
 
     if (normalizedSenderEmail && !isValidEmail(normalizedSenderEmail)) {
       setSaving(false);
@@ -359,6 +418,21 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
           dismissible: true,
           onDismiss: () => setFlashMessages([]),
           id: 'notif-save-sender-invalid',
+        },
+      ]);
+      return;
+    }
+
+    if (normalizedReplyTo && !isValidEmail(normalizedReplyTo)) {
+      setSaving(false);
+      setReplyToValidationError('Enter a valid email address.');
+      setFlashMessages([
+        {
+          type: 'error',
+          content: 'Enter a valid reply-to email address before saving.',
+          dismissible: true,
+          onDismiss: () => setFlashMessages([]),
+          id: 'notif-save-replyto-invalid',
         },
       ]);
       return;
@@ -448,6 +522,8 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             senderEmail: normalizedSenderEmail || null,
+            senderName: normalizedSenderName || null,
+            replyTo: normalizedReplyTo || null,
           }),
         });
 
@@ -460,11 +536,20 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
 
         if (!senderResponse.ok || (senderBody && senderBody.error)) {
           const detail = senderBody && (senderBody.error || senderBody.message);
-          throw new Error(detail || 'Failed to save notification email sender.');
+          throw new Error(detail || 'Failed to save notification email settings.');
         }
       }
 
-      const { eventRows, templateOptions, senderEmail: loadedSenderEmail } = await loadAllData();
+      const {
+        eventRows,
+        templateOptions,
+        senderEmail: loadedSenderEmail,
+        senderName: loadedSenderName,
+        replyTo: loadedReplyTo,
+        fallbackSenderEmail: loadedFallbackSenderEmail,
+        fallbackSenderName: loadedFallbackSenderName,
+        fallbackReplyTo: loadedFallbackReplyTo,
+      } = await loadAllData();
 
       const preparedRows = cloneEventRows(eventRows);
       setEvents(preparedRows);
@@ -472,7 +557,15 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
       setTemplates(templateOptions);
       setSenderEmail(loadedSenderEmail);
       setSavedSenderEmail(loadedSenderEmail);
+      setSenderName(loadedSenderName);
+      setSavedSenderName(loadedSenderName);
+      setReplyTo(loadedReplyTo);
+      setSavedReplyTo(loadedReplyTo);
+      setFallbackSenderEmail(loadedFallbackSenderEmail);
+      setFallbackSenderName(loadedFallbackSenderName);
+      setFallbackReplyTo(loadedFallbackReplyTo);
       setSenderValidationError('');
+      setReplyToValidationError('');
       setDirty(false);
       setSaving(false);
 
@@ -503,7 +596,10 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
   const handleCancel = () => {
     setEvents(cloneEventRows(savedEvents));
     setSenderEmail(savedSenderEmail);
+    setSenderName(savedSenderName);
+    setReplyTo(savedReplyTo);
     setSenderValidationError('');
+    setReplyToValidationError('');
     setDirty(false);
     setFlashMessages([]);
   };
@@ -690,18 +786,48 @@ const NotificationSettingsWidget = ({ actions, toggleHelpPanel }) => {
       {flashMessages.length > 0 && <Flashbar items={flashMessages} />}
 
       <Box margin={{ bottom: 'l' }}>
-        <FormField
-          label="PATH sender email"
-          description={`Used as the From address for PATH-generated SES emails. Leave blank to fall back to ${EMAIL_SETTINGS_FALLBACK}.`}
-          errorText={senderValidationError || undefined}
-        >
-          <Input
-            type="email"
-            value={senderEmail}
-            onChange={handleSenderEmailChange}
-            placeholder={EMAIL_SETTINGS_FALLBACK}
-          />
-        </FormField>
+        <SpaceBetween size="m">
+          <FormField
+            label="PATH sender name"
+            description={`Shown as the From display name for PATH-generated emails. Leave blank to fall back to ${fallbackSenderName || SENDER_NAME_FALLBACK}.`}
+          >
+            <Input
+              value={senderName}
+              onChange={handleSenderNameChange}
+              placeholder={fallbackSenderName || SENDER_NAME_FALLBACK}
+            />
+          </FormField>
+
+          <FormField
+            label="PATH sender email"
+            description={`Used as the From address for PATH-generated SES emails. Leave blank to fall back to ${fallbackSenderEmail || EMAIL_SETTINGS_FALLBACK}.`}
+            errorText={senderValidationError || undefined}
+          >
+            <Input
+              type="email"
+              value={senderEmail}
+              onChange={handleSenderEmailChange}
+              placeholder={fallbackSenderEmail || EMAIL_SETTINGS_FALLBACK}
+            />
+          </FormField>
+
+          <FormField
+            label="PATH reply-to email"
+            description={
+              fallbackReplyTo
+                ? `Used as the Reply-To address for PATH-generated emails. Leave blank to fall back to ${fallbackReplyTo}.`
+                : 'Used as the Reply-To address for PATH-generated emails. Use a monitored mailbox.'
+            }
+            errorText={replyToValidationError || undefined}
+          >
+            <Input
+              type="email"
+              value={replyTo}
+              onChange={handleReplyToChange}
+              placeholder={fallbackReplyTo || 'iset@nwac.ca'}
+            />
+          </FormField>
+        </SpaceBetween>
       </Box>
 
       <Box>
