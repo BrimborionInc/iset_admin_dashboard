@@ -395,6 +395,9 @@ const FINANCE_QUEUE_FILTER_OPTIONS = [
   { value: "overdue", label: "Overdue" },
   { value: "no_due_date_set", label: "No due date set" },
 ];
+const DEFAULT_FINANCE_QUEUE_FILTER =
+  FINANCE_QUEUE_FILTER_OPTIONS.find(option => option.value === "unsubmitted") ||
+  FINANCE_QUEUE_FILTER_OPTIONS[0];
 
 const formatCurrency = value =>
   new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(value);
@@ -1018,7 +1021,6 @@ const defaultPreferences = {
     "id",
     "clientName",
     "schedule",
-    "status",
     "amount",
     "blockingReason",
   ],
@@ -1070,7 +1072,6 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     requests,
     selectedRequestId,
     selectRequest,
-    updatePacketStatus,
     createPacket,
     paymentTypeMappingLookup,
     paymentTypeOptions: configuredPaymentTypeOptions,
@@ -1123,14 +1124,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
   const [createError, setCreateError] = useState(null);
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [isCreateAmountFocused, setIsCreateAmountFocused] = useState(false);
-  const [financeQueueFilter, setFinanceQueueFilter] = useState(
-    () => FINANCE_QUEUE_FILTER_OPTIONS[0]
-  );
-  const [queueSelectedIds, setQueueSelectedIds] = useState([]);
-  const [bulkSubmitModalOpen, setBulkSubmitModalOpen] = useState(false);
-  const [bulkSubmitError, setBulkSubmitError] = useState(null);
-  const [bulkSubmitting, setBulkSubmitting] = useState(false);
-  const [bulkResult, setBulkResult] = useState(null);
+  const [financeQueueFilter, setFinanceQueueFilter] = useState(() => DEFAULT_FINANCE_QUEUE_FILTER);
   const [caseOptions, setCaseOptions] = useState([]);
   const [caseOptionsLoading, setCaseOptionsLoading] = useState(false);
   const [caseDetailsLoading, setCaseDetailsLoading] = useState(false);
@@ -1163,12 +1157,6 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     },
     [caseRegionCode, potOptions]
   );
-  useEffect(() => {
-    if (isProgramView) {
-      setQueueSelectedIds([]);
-    }
-  }, [isProgramView]);
-
   useEffect(() => {
     if (!statusOptions.length) return;
     if (!statusFilter || !statusOptions.some(option => option.value === statusFilter.value)) {
@@ -2064,17 +2052,9 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     const ids = Array.isArray(detail.selectedItems)
       ? detail.selectedItems.map(item => item?.id).filter(Boolean)
       : [];
-    if (isProgramView) {
-      const id = ids[0] ?? null;
-      if (id !== selectedRequestId) {
-        selectRequest(id);
-      }
-      return;
-    }
-    setQueueSelectedIds(ids);
-    const firstId = ids[0] ?? null;
-    if (firstId !== selectedRequestId) {
-      selectRequest(firstId);
+    const id = ids[0] ?? null;
+    if (id !== selectedRequestId) {
+      selectRequest(id);
     }
   };
 
@@ -2082,97 +2062,22 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     return pagedItems.map(item => {
       const onOpen = () => {
         selectRequest(item.id);
-        if (!isProgramView) {
-          setQueueSelectedIds([item.id]);
-        }
       };
       return { ...item, onOpen };
     });
-  }, [isProgramView, pagedItems, selectRequest]);
+  }, [pagedItems, selectRequest]);
 
   const selectedItems = useMemo(() => {
-    const selectedIds = isProgramView
-      ? selectedRequestId
-        ? [selectedRequestId]
-        : []
-      : queueSelectedIds;
-    if (!selectedIds.length) {
+    if (!selectedRequestId) {
       return [];
     }
-    const selectedSet = new Set(selectedIds);
-    return tableItems.filter(item => selectedSet.has(item.id));
-  }, [isProgramView, queueSelectedIds, selectedRequestId, tableItems]);
+    return tableItems.filter(item => item.id === selectedRequestId);
+  }, [selectedRequestId, tableItems]);
 
   const sortingColumn = useMemo(
     () => columnDefinitions.find(column => column.id === sortingColumnId) || null,
     [sortingColumnId]
   );
-
-  useEffect(() => {
-    if (isProgramView) return;
-    setQueueSelectedIds(current => {
-      if (!current.length) return current;
-      const validIds = new Set(requestsWithWorkflowMeta.map(item => item.id));
-      const next = current.filter(id => validIds.has(id));
-      return next.length === current.length ? current : next;
-    });
-  }, [isProgramView, requestsWithWorkflowMeta]);
-
-  const selectedPackets = useMemo(() => {
-    if (isProgramView || !queueSelectedIds.length) return [];
-    const selectedSet = new Set(queueSelectedIds);
-    return requestsWithWorkflowMeta.filter(item => selectedSet.has(item.id));
-  }, [isProgramView, queueSelectedIds, requestsWithWorkflowMeta]);
-
-  const bulkReadyPackets = useMemo(
-    () => selectedPackets.filter(item => item.readyToSubmit),
-    [selectedPackets]
-  );
-  const bulkBlockedPackets = useMemo(
-    () => selectedPackets.filter(item => !item.readyToSubmit),
-    [selectedPackets]
-  );
-  const bulkSelectedAmount = useMemo(
-    () => selectedPackets.reduce((sum, item) => sum + Number(item.totalAmount || 0), 0),
-    [selectedPackets]
-  );
-
-  const handleBulkSubmit = async () => {
-    if (bulkSubmitting) return;
-    if (!bulkReadyPackets.length) {
-      setBulkSubmitError("No selected packets are ready to send.");
-      return;
-    }
-    setBulkSubmitError(null);
-    setBulkSubmitting(true);
-    const failed = [];
-    let submitted = 0;
-    try {
-      for (const packet of bulkReadyPackets) {
-        try {
-          await updatePacketStatus(packet.id, "submitted");
-          submitted += 1;
-        } catch (err) {
-          failed.push({
-            id: packet.id,
-            reason: err?.message || "Send failed.",
-          });
-        }
-      }
-      const failedIds = new Set(failed.map(item => item.id));
-      setQueueSelectedIds(current => current.filter(id => failedIds.has(id)));
-      setBulkSubmitModalOpen(false);
-      const message =
-        failed.length === 0
-          ? `Sent ${submitted} packet${submitted === 1 ? "" : "s"} to finance.`
-          : `Sent ${submitted}. ${failed.length} failed.`;
-      setBulkResult({ type: failed.length ? "warning" : "success", message, failures: failed });
-    } catch (err) {
-      setBulkSubmitError(err?.message || "Bulk send failed.");
-    } finally {
-      setBulkSubmitting(false);
-    }
-  };
 
   useEffect(() => {
     if (!isProgramView || typeof window === "undefined") return;
@@ -2201,6 +2106,14 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     }
     managePaymentsSelectionRef.current = false;
   }, [requests, selectRequest]);
+
+  useEffect(() => {
+    if (isProgramView || !selectedRequestId) return;
+    const isVisible = filteredItems.some(item => item.id === selectedRequestId);
+    if (!isVisible) {
+      selectRequest(null);
+    }
+  }, [filteredItems, isProgramView, selectRequest, selectedRequestId]);
 
   const preferencesComponent = (
     <CollectionPreferences
@@ -2291,22 +2204,10 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
                   options={FINANCE_QUEUE_FILTER_OPTIONS}
                   ariaLabel="Queue filter"
                   onChange={({ detail }) => {
-                    setFinanceQueueFilter(detail.selectedOption || FINANCE_QUEUE_FILTER_OPTIONS[0]);
+                    setFinanceQueueFilter(detail.selectedOption || DEFAULT_FINANCE_QUEUE_FILTER);
                     setCurrentPageIndex(1);
                   }}
                 />
-              ) : null}
-              {!isProgramView ? (
-                <Button
-                  variant="primary"
-                  disabled={!bulkReadyPackets.length}
-                  onClick={() => {
-                    setBulkSubmitError(null);
-                    setBulkSubmitModalOpen(true);
-                  }}
-                >
-                  Send selected ({queueSelectedIds.length})
-                </Button>
               ) : null}
               {isProgramView ? (
                 <Select
@@ -2337,25 +2238,10 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
       i18nStrings={boardItemI18nStrings}
     >
       <SpaceBetween size="m">
-        {bulkResult ? (
-          <Alert type={bulkResult.type} onDismiss={() => setBulkResult(null)}>
-            <SpaceBetween size="xs">
-              <Box>{bulkResult.message}</Box>
-              {bulkResult.failures?.length ? (
-                <Box variant="p">
-                  Failed packets:{" "}
-                  {bulkResult.failures
-                    .map(item => `${item.id} (${item.reason})`)
-                    .join(", ")}
-                </Box>
-              ) : null}
-            </SpaceBetween>
-          </Alert>
-        ) : null}
         <Table
           trackBy="id"
           items={tableItems}
-          selectionType={isProgramView ? "single" : "multi"}
+          selectionType="single"
           selectedItems={selectedItems}
           onSelectionChange={handleSelectionChange}
           sortingColumn={sortingColumn}
@@ -2402,66 +2288,6 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
             </Box>
           }
         />
-        <Modal
-          visible={bulkSubmitModalOpen}
-          onDismiss={() => {
-            if (bulkSubmitting) return;
-            setBulkSubmitModalOpen(false);
-            setBulkSubmitError(null);
-          }}
-          header="Send selected packets"
-          footer={
-            <SpaceBetween direction="horizontal" size="xs">
-              <Button
-                variant="link"
-                onClick={() => {
-                  if (bulkSubmitting) return;
-                  setBulkSubmitModalOpen(false);
-                  setBulkSubmitError(null);
-                }}
-                disabled={bulkSubmitting}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                onClick={handleBulkSubmit}
-                disabled={!bulkReadyPackets.length || bulkSubmitting}
-                loading={bulkSubmitting}
-              >
-                Submit ready packets ({bulkReadyPackets.length})
-              </Button>
-            </SpaceBetween>
-          }
-        >
-          <SpaceBetween size="m">
-            {bulkSubmitError ? <Alert type="error">{bulkSubmitError}</Alert> : null}
-            <ColumnLayout columns={3} variant="text-grid">
-              <Box>
-                <Box variant="awsui-key-label">Selected packets</Box>
-                <Box>{selectedPackets.length}</Box>
-              </Box>
-              <Box>
-                <Box variant="awsui-key-label">Ready now</Box>
-                <Box>{bulkReadyPackets.length}</Box>
-              </Box>
-              <Box>
-                <Box variant="awsui-key-label">Total amount</Box>
-                <Box>{formatCurrency(bulkSelectedAmount)}</Box>
-              </Box>
-            </ColumnLayout>
-            {bulkBlockedPackets.length ? (
-              <Box variant="p">
-                Blocked packets:{" "}
-                {bulkBlockedPackets
-                  .map(item => `${item.id} (${item.blockingReason || "Blocked"})`)
-                  .join(", ")}
-              </Box>
-            ) : (
-              <Box variant="p">All selected packets are ready.</Box>
-            )}
-          </SpaceBetween>
-        </Modal>
         <Modal
           visible={createModalOpen}
           onDismiss={handleCloseCreateModal}

@@ -7,6 +7,7 @@ import ExpandableSection from '@cloudscape-design/components/expandable-section'
 import SegmentedControl from '@cloudscape-design/components/segmented-control';
 import heroBackground from '../assets/images/awentech/nwac-hero.png';
 import buildInfo from '../generated/buildInfo';
+import publicReleaseNotes from '../generated/publicReleaseNotes';
 
 const portalUrl = process.env.REACT_APP_PORTAL_URL || 'http://localhost:3000/';
 
@@ -58,56 +59,6 @@ const copy = {
       ],
       updatesPrompt: 'Looking for recent changes?',
       updatesAction: 'View release notes'
-    },
-    releaseNotes: {
-      sectionEyebrow: 'Optional reading',
-      sectionTitle: 'Release Notes - v0.5.8 (26th March 2026)',
-      description: 'Recent PATH changes are summarized here for staff who want them before signing in.',
-      features: {
-        heading: 'What changed',
-        sections: [
-          {
-            title: 'Bug fixes across core workflows',
-            paragraphs: [
-              'This release includes a broad set of fixes across intake, case management, and reporting workflows to improve consistency and reduce day-to-day friction for staff.',
-              'Updates in this version address smaller workflow issues, validation gaps, and general usability problems reported during routine use.',
-              'The overall result is a more stable PATH experience with fewer interruptions during common administrative tasks.'
-            ]
-          },
-          {
-            title: 'User activation improvements',
-            paragraphs: [
-              'User activation steps have been improved to make account setup and access readiness easier for administrators and newly enabled users.',
-              'These changes help reduce activation delays and make it clearer when users are ready to sign in and begin working in PATH.',
-              'The activation flow is now better aligned with operational onboarding needs, especially for routine staff access management.'
-            ]
-          },
-        ]
-      },
-      knownBugs: {
-        heading: 'Known issues',
-        sections: [
-          {
-            title: 'No major release blockers logged',
-            paragraphs: [
-              'No major release-blocking issues are currently logged for v0.5.8.',
-              'If staff identify workflow, document, or reporting issues during day-to-day use, they should continue to log them with the NWAC PATH support team for review.'
-            ]
-          }
-        ]
-      },
-      comingNext: {
-        heading: 'Coming next',
-        sections: [
-          {
-            title: 'Further reporting refinements',
-            paragraphs: [
-              'The next phase will focus on operational validation, additional slice-and-dice filters, and refinements based on NWAC feedback across both reporting dashboards.',
-              'This includes continuing to align PATH reporting outputs with NWAC reporting practices and expanding management-focused reporting views over time.'
-            ]
-          }
-        ]
-      }
     },
     footer: {
       heading: 'Need access or support?',
@@ -165,56 +116,6 @@ const copy = {
       updatesPrompt: 'Vous cherchez les changements récents?',
       updatesAction: 'Voir les notes de version'
     },
-    releaseNotes: {
-      sectionEyebrow: 'Lecture optionnelle',
-      sectionTitle: 'Notes de version - v0.5.8 (26 mars 2026)',
-      description: 'Les changements récents à PATH sont résumés ici pour le personnel qui souhaite les consulter avant de se connecter.',
-      features: {
-        heading: 'Ce qui a changé',
-        sections: [
-          {
-            title: 'Correctifs dans les flux de travail principaux',
-            paragraphs: [
-              'Cette version comprend un ensemble général de correctifs dans les flux d’accueil, de gestion de dossier et de rapports afin d’améliorer la cohérence et de réduire les irritants au quotidien pour le personnel.',
-              'Les mises à jour de cette version corrigent divers problèmes mineurs de flux, certaines lacunes de validation et des enjeux généraux de convivialité signalés dans l’utilisation courante.',
-              'Le résultat est une expérience PATH plus stable, avec moins d’interruptions dans les tâches administratives les plus fréquentes.'
-            ]
-          },
-          {
-            title: 'Améliorations de l’activation des utilisatrices',
-            paragraphs: [
-              'Les étapes d’activation des utilisatrices ont été améliorées afin de faciliter la préparation des comptes et l’accès pour les administratrices et les nouvelles utilisatrices.',
-              'Ces changements contribuent à réduire les délais d’activation et à mieux indiquer quand une utilisatrice est prête à se connecter et à commencer son travail dans PATH.',
-              'Le flux d’activation répond maintenant plus clairement aux besoins opérationnels liés à l’intégration courante du personnel et à la gestion des accès.'
-            ]
-          }
-        ]
-      },
-      knownBugs: {
-        heading: 'Points connus',
-        sections: [
-          {
-            title: 'Aucun bloqueur majeur consigné',
-            paragraphs: [
-              'Aucun problème bloquant majeur n’est actuellement consigné pour la version 0.5.8.',
-              'Si le personnel constate des problèmes de flux de travail, de documents ou de rapports, ils doivent continuer de les signaler à l’équipe de soutien PATH de l’AFAC.'
-            ]
-          }
-        ]
-      },
-      comingNext: {
-        heading: 'À venir',
-        sections: [
-          {
-            title: 'Autres améliorations des rapports',
-            paragraphs: [
-              'La prochaine phase portera sur la validation opérationnelle, l’ajout de filtres supplémentaires et les ajustements selon les commentaires de l’AFAC pour les deux tableaux de bord de rapports.',
-              'Cela comprend la poursuite de l’alignement entre les sorties de rapport PATH et les pratiques de reddition de comptes de l’AFAC, ainsi que l’élargissement graduel des vues de gestion.'
-            ]
-          }
-        ]
-      }
-    },
     footer: {
       heading: 'Besoin d’accès ou de soutien?',
       body: 'Communiquez avec l’équipe d’administration du programme ISET de l’AFAC pour obtenir de l’aide à la connexion, au démarrage ou aux changements d’accès.',
@@ -233,19 +134,31 @@ const languageOptions = [
 const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
   const lang = currentLanguage === 'fr' ? 'fr' : 'en';
   const content = copy[lang];
+  const releaseNotes = publicReleaseNotes?.[lang] || publicReleaseNotes?.en || null;
   const [releaseNotesExpanded, setReleaseNotesExpanded] = React.useState(false);
   const pathLogo = `${process.env.PUBLIC_URL || ''}/PATH-Logo.png`;
   const buildStampLabel = React.useMemo(() => {
+    const gitLabel = buildInfo?.gitShort
+      ? (buildInfo.gitDirty ? `${buildInfo.gitShort}-dirty` : buildInfo.gitShort)
+      : '';
     if (buildInfo?.releaseId) {
-      const gitLabel = buildInfo.gitDirty ? `${buildInfo.gitShort}-dirty` : (buildInfo.gitShort || 'no-git');
-      return `Version ${buildInfo.packageVersion} | Release ${buildInfo.releaseId} | ${gitLabel}`;
+      return gitLabel ? `Release ${buildInfo.releaseId} | ${gitLabel}` : `Release ${buildInfo.releaseId}`;
     }
-    if (buildInfo?.gitShort) {
-      const gitLabel = buildInfo.gitDirty ? `${buildInfo.gitShort}-dirty` : buildInfo.gitShort;
-      return `Version ${buildInfo.packageVersion} | ${gitLabel}`;
+    if (buildInfo?.buildTarget) {
+      return gitLabel ? `Build ${buildInfo.buildTarget} | ${gitLabel}` : `Build ${buildInfo.buildTarget}`;
     }
-    return `Version ${buildInfo?.packageVersion || 'unknown'}`;
+    if (gitLabel) {
+      return `Build ${gitLabel}`;
+    }
+    return 'Build information unavailable';
   }, []);
+  const releaseNotesTitle = React.useMemo(() => {
+    if (!publicReleaseNotes) return '';
+    if (lang === 'fr') {
+      return `Notes de version - ${publicReleaseNotes.releaseId || 'version courante'} (${publicReleaseNotes.releaseDateFr || ''})`;
+    }
+    return `Release Notes - ${publicReleaseNotes.releaseId || 'Current build'} (${publicReleaseNotes.releaseDateEn || ''})`;
+  }, [lang]);
   const handleLanguageToggle = targetLang => {
     if (targetLang !== lang && typeof onLanguageChange === 'function') {
       onLanguageChange(targetLang);
@@ -423,71 +336,40 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
 
         <section id="release-notes" className="landing-section landing-section--subtle">
           <div className="landing-section__inner landing-section__inner--wide">
-            <p className="landing-section__eyebrow">{content.releaseNotes.sectionEyebrow}</p>
+            <p className="landing-section__eyebrow">{releaseNotes?.sectionEyebrow || content.support.updatesAction}</p>
             <ExpandableSection
-              headerText={content.releaseNotes.sectionTitle}
+              headerText={releaseNotesTitle}
               expanded={releaseNotesExpanded}
               onChange={({ detail }) => setReleaseNotesExpanded(detail.expanded)}
               variant="container"
             >
               <p className="landing-release-notes__description">
-                {content.releaseNotes.description}
+                {releaseNotes?.description || ''}
               </p>
               <div className="landing-card-grid">
                 <article className="landing-card">
-                  <h3 className="release-notes-heading">{content.releaseNotes.features.heading}</h3>
-                  <div className="release-notes-sections">
-                    {content.releaseNotes.features.sections.map((section, idx) => (
-                      <ExpandableSection
-                        key={section.title}
-                        headerText={section.title}
-                        defaultExpanded={idx === 0}
-                        variant="container"
-                      >
-                        {section.paragraphs.map((text, index) => {
-                          const t = typeof text === 'string' ? text.trim() : '';
-                          const isSubheading = typeof text === 'string' && t.endsWith(':') && !t.startsWith('-');
-                          return (
-                            <p key={index}>{isSubheading ? <strong>{text}</strong> : text}</p>
-                          );
-                        })}
-                      </ExpandableSection>
+                  <h3 className="release-notes-heading">{releaseNotes?.featuresHeading || ''}</h3>
+                  <ul className="landing-release-notes__list">
+                    {(releaseNotes?.features || []).map(item => (
+                      <li key={item}>{item}</li>
                     ))}
-                  </div>
+                  </ul>
                 </article>
                 <article className="landing-card">
-                  <h3 className="release-notes-heading">{content.releaseNotes.knownBugs.heading}</h3>
-                  <div className="release-notes-sections">
-                    {content.releaseNotes.knownBugs.sections.map(section => (
-                      <section key={section.title}>
-                        <h4>{section.title}</h4>
-                        {section.paragraphs.map((text, idx) => {
-                          const t = typeof text === 'string' ? text.trim() : '';
-                          const isSubheading = typeof text === 'string' && t.endsWith(':') && !t.startsWith('-');
-                          return (
-                            <p key={idx}>{isSubheading ? <strong>{text}</strong> : text}</p>
-                          );
-                        })}
-                      </section>
+                  <h3 className="release-notes-heading">{releaseNotes?.knownIssuesHeading || ''}</h3>
+                  <ul className="landing-release-notes__list">
+                    {(releaseNotes?.knownIssues || []).map(item => (
+                      <li key={item}>{item}</li>
                     ))}
-                  </div>
+                  </ul>
                 </article>
                 <article className="landing-card">
-                  <h3 className="release-notes-heading">{content.releaseNotes.comingNext.heading}</h3>
-                  <div className="release-notes-sections">
-                    {content.releaseNotes.comingNext.sections.map(section => (
-                      <section key={section.title}>
-                        <h4>{section.title}</h4>
-                        {section.paragraphs.map((text, idx) => {
-                          const t = typeof text === 'string' ? text.trim() : '';
-                          const isSubheading = typeof text === 'string' && t.endsWith(':') && !t.startsWith('-');
-                          return (
-                            <p key={idx}>{isSubheading ? <strong>{text}</strong> : text}</p>
-                          );
-                        })}
-                      </section>
+                  <h3 className="release-notes-heading">{releaseNotes?.comingNextHeading || ''}</h3>
+                  <ul className="landing-release-notes__list">
+                    {(releaseNotes?.comingNext || []).map(item => (
+                      <li key={item}>{item}</li>
                     ))}
-                  </div>
+                  </ul>
                 </article>
               </div>
             </ExpandableSection>

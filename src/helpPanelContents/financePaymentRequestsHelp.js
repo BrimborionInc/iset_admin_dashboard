@@ -6,8 +6,7 @@ const FinancePaymentRequestsHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Process payment packets that are due to be sent. Create separate packets for separate months,
-        receipts, or claim periods, then use this queue to send the ready ones to finance.
+        Review payment packets at a queue level and pick one packet at a time for deeper inspection.
       </p>
     </Box>
     <Box>
@@ -24,10 +23,9 @@ const FinancePaymentRequestsHelp = () => (
     <Box>
       <strong>How to use</strong>
       <ul>
-        <li>Select a packet to load lines and evidence in the detail widget.</li>
+        <li>Select one packet in the queue to load lines and evidence in the detail widget.</li>
+        <li>Use the queue filter to switch between unsubmitted, sent, blocked, and overdue slices.</li>
         <li>Create packets for the specific claim you are sending, not the whole approved intervention by default.</li>
-        <li>Use the Ready only toggle to focus packets that can be sent now.</li>
-        <li>Use table checkboxes to select packets, then Send selected to open a preflight summary and send ready packets in bulk.</li>
         <li>Search by packet ID, client, intervention, reporting unit, risk flags, or blocking reason.</li>
         <li>Customise table columns, widths, and pagination via the settings cogwheel.</li>
       </ul>
@@ -35,14 +33,13 @@ const FinancePaymentRequestsHelp = () => (
     <Box>
       <strong>Next steps</strong>
       <p>
-        After a bulk send, review the result banner for any failed packet IDs, fix blockers in packet detail,
-        and retry from the queue.
+        Use the selected packet's detail view to inspect evidence completeness and the draft Intacct payload.
       </p>
     </Box>
   </SpaceBetween>
 );
 
 FinancePaymentRequestsHelp.aiContext =
-  "Explain the due-to-send payment packet queue: draft-only scope, blocking reason, Ready only toggle, checkbox multi-select with Send selected preflight flow, row-to-detail behavior, and that packets should be created for the specific month, receipt, or claim period being sent rather than defaulting to the whole approved intervention.";
+  "Explain the Batch Payments queue as an oversight list: single-packet selection drives the detail panel, queue filters slice the packet list, blocking reason and schedule indicate attention, and packets should be created for the specific month, receipt, or claim period being sent rather than defaulting to the whole approved intervention.";
 
 export default FinancePaymentRequestsHelp;

@@ -4065,6 +4065,7 @@ async function buildAssessmentPdfFields({
   applicantName,
   referenceNumber,
   caseContext,
+  snapshotOverride = null,
   recommendationSignature = null,
   approvalSignature = null,
   includeAgreementSection = false,
@@ -4073,12 +4074,14 @@ async function buildAssessmentPdfFields({
   previousVersionNumber = null,
   redlineBaseSnapshot = null
 }) {
-  const snapshot = await buildAssessmentPdfSnapshot({
-    caseRow,
-    applicantName,
-    referenceNumber,
-    caseContext
-  });
+  const snapshot = hasAssessmentSnapshotContent(snapshotOverride)
+    ? snapshotOverride
+    : await buildAssessmentPdfSnapshot({
+        caseRow,
+        applicantName,
+        referenceNumber,
+        caseContext
+      });
   const previousSnapshot = hasAssessmentSnapshotContent(redlineBaseSnapshot)
     ? redlineBaseSnapshot
     : null;
@@ -4734,6 +4737,7 @@ async function generateAssessmentPdfBuffer({
   applicantName,
   referenceNumber,
   caseContext = null,
+  snapshotOverride = null,
   recommendationSignature = null,
   approvalSignature = null,
   includeAgreementSection = false,
@@ -4751,6 +4755,7 @@ async function generateAssessmentPdfBuffer({
     applicantName,
     referenceNumber,
     caseContext,
+    snapshotOverride,
     recommendationSignature,
     approvalSignature,
     includeAgreementSection,
@@ -11511,7 +11516,6 @@ async function buildCfaRenderSet({
         `SELECT id
            FROM cfa_version
           WHERE series_id = ?
-            AND status IN ('sent', 'signed')
             ${versionFilter}
           ORDER BY version_number DESC
           LIMIT 1`,
@@ -11755,7 +11759,6 @@ async function createCfaVersionForPlan({
       `SELECT id, metadata_json
          FROM cfa_version
         WHERE series_id = ?
-          AND status IN ('sent', 'signed')
         ORDER BY version_number DESC
         LIMIT 1`,
       [seriesId]
@@ -11937,7 +11940,6 @@ async function createCfaVersionFromAssessment({
       `SELECT id, metadata_json
          FROM cfa_version
         WHERE series_id = ?
-          AND status IN ('sent', 'signed')
         ORDER BY version_number DESC
         LIMIT 1`,
       [seriesId]
@@ -12153,6 +12155,428 @@ const computeProposedInterventionsTotal = (interventions) => {
   });
   return hasAmount ? total : null;
 };
+
+const buildAssessmentSnapshotInterventionMatchKey = intervention => {
+  const normalized = normalizeProposedIntervention(intervention);
+  if (!normalized) return '';
+  return [
+    normalized.code || '',
+    normalized.startDate || '',
+    normalized.endDate || '',
+    normaliseString(normalized.programName || '') || '',
+    normaliseString(normalized.institution || '') || '',
+    normalized.noc || '',
+    normalized.nocVersion || '',
+  ]
+    .map(value => String(value || '').trim().toLowerCase())
+    .join('|');
+};
+
+const buildRevisionAssessmentPrimaryIntervention = ({ revisionMetadata, sourceInterventionRow = null } = {}) => {
+  const metadata = revisionMetadata && typeof revisionMetadata === 'object' ? revisionMetadata : {};
+  const proposed = normalizeAssessmentProposedInterventions(
+    metadata.proposedInterventions ?? metadata.proposed_interventions ?? null
+  );
+  if (proposed.length) {
+    return proposed[0];
+  }
+
+  const snapshot = metadata.snapshot && typeof metadata.snapshot === 'object'
+    ? metadata.snapshot
+    : {};
+  const sourcePayload = sourceInterventionRow ? (mapInterventionRow(sourceInterventionRow) || {}) : {};
+  const fallback = normalizeProposedIntervention({
+    id:
+      metadata?.revision?.sourceInterventionId ||
+      metadata?.revision?.source_intervention_id ||
+      sourcePayload.id ||
+      null,
+    code: snapshot.code || sourcePayload.code || null,
+    startDate: snapshot.startDate || sourcePayload.startDate || null,
+    endDate: snapshot.endDate || sourcePayload.endDate || null,
+    deliveryMode: snapshot.deliveryMode || sourcePayload.deliveryMode || null,
+    institution: snapshot.institution || sourcePayload.institution || null,
+    programName: snapshot.programName || sourcePayload.programName || null,
+    itpDetails: snapshot.itpDetails || sourcePayload.itpDetails || null,
+    wageSubsidyDetails: snapshot.wageSubsidyDetails || sourcePayload.wageSubsidyDetails || null,
+    interventionNoc: snapshot.nocCode || sourcePayload.noc || null,
+    interventionNocVersion: snapshot.nocVersion || sourcePayload.nocVersion || null,
+    costLines: Array.isArray(metadata.costLines) ? metadata.costLines : Array.isArray(snapshot.costLines) ? snapshot.costLines : [],
+  });
+  return fallback || null;
+};
+
+async function buildRevisionAssessmentSnapshot({
+  baselineSnapshot,
+  sourceInterventionRow,
+  revisionMetadata,
+  connection = pool
+} = {}) {
+  if (!hasAssessmentSnapshotContent(baselineSnapshot)) return null;
+  const sourceRow = sourceInterventionRow && typeof sourceInterventionRow === 'object'
+    ? sourceInterventionRow
+    : null;
+  const metadata = revisionMetadata && typeof revisionMetadata === 'object'
+    ? revisionMetadata
+    : {};
+  const revisedIntervention = buildRevisionAssessmentPrimaryIntervention({
+    revisionMetadata: metadata,
+    sourceInterventionRow: sourceRow
+  });
+  if (!revisedIntervention) {
+    return JSON.parse(JSON.stringify(baselineSnapshot));
+  }
+
+  const nextSnapshot = JSON.parse(JSON.stringify(baselineSnapshot));
+  const currentInterventions = normalizeAssessmentProposedInterventions(nextSnapshot.proposed_interventions);
+  const sourcePayload = sourceRow ? (mapInterventionRow(sourceRow) || {}) : {};
+  const sourceCandidate = normalizeProposedIntervention({
+    code: sourcePayload.code || null,
+    startDate: sourcePayload.startDate || null,
+    endDate: sourcePayload.endDate || null,
+    deliveryMode: sourcePayload.deliveryMode || null,
+    institution: sourcePayload.institution || null,
+    programName: sourcePayload.programName || null,
+    itpDetails: sourcePayload.itpDetails || null,
+    wageSubsidyDetails: sourcePayload.wageSubsidyDetails || null,
+    interventionNoc: sourcePayload.noc || null,
+    interventionNocVersion: sourcePayload.nocVersion || null,
+  });
+
+  const preferredMatchKeys = Array.from(new Set(
+    [sourceCandidate, revisedIntervention]
+      .map(buildAssessmentSnapshotInterventionMatchKey)
+      .filter(Boolean)
+  ));
+  let matchIndex = preferredMatchKeys.length
+    ? currentInterventions.findIndex(entry => preferredMatchKeys.includes(buildAssessmentSnapshotInterventionMatchKey(entry)))
+    : -1;
+
+  if (matchIndex < 0 && revisedIntervention.code) {
+    const sameCodeIndexes = currentInterventions
+      .map((entry, index) => ({ entry, index }))
+      .filter(item => String(item.entry?.code || '') === String(revisedIntervention.code));
+    if (sameCodeIndexes.length === 1) {
+      matchIndex = sameCodeIndexes[0].index;
+    }
+  }
+
+  const matchedIntervention = matchIndex >= 0 ? currentInterventions[matchIndex] : null;
+  const mergedIntervention = normalizeProposedIntervention({
+    ...revisedIntervention,
+    id:
+      matchedIntervention?.id ||
+      revisedIntervention.id ||
+      metadata?.revision?.sourceInterventionId ||
+      metadata?.revision?.source_intervention_id ||
+      null,
+    label: revisedIntervention.label || matchedIntervention?.label || null,
+  });
+  if (!mergedIntervention) {
+    return nextSnapshot;
+  }
+
+  const nextInterventions = Array.isArray(currentInterventions) ? [...currentInterventions] : [];
+  if (matchIndex >= 0) {
+    nextInterventions[matchIndex] = mergedIntervention;
+  } else {
+    nextInterventions.push(mergedIntervention);
+  }
+
+  const codeList = Array.from(new Set(
+    nextInterventions
+      .map(intervention => normaliseString(intervention?.code) || null)
+      .filter(Boolean)
+      .concat(Object.keys(
+        nextSnapshot.intervention_label_lookup && typeof nextSnapshot.intervention_label_lookup === 'object'
+          ? nextSnapshot.intervention_label_lookup
+          : {}
+      ))
+  ));
+  const labelMap = new Map(
+    Object.entries(
+      nextSnapshot.intervention_label_lookup && typeof nextSnapshot.intervention_label_lookup === 'object'
+        ? nextSnapshot.intervention_label_lookup
+        : {}
+    )
+  );
+  const fetchedLabels = await fetchInterventionCodeLabels(connection, codeList);
+  fetchedLabels.forEach((label, code) => {
+    if (!labelMap.has(code)) {
+      labelMap.set(code, label);
+    }
+  });
+
+  const primaryIntervention = nextInterventions[0] || null;
+  const overallCostTotal = computeProposedInterventionsTotal(nextInterventions);
+  const primaryDurationDays = primaryIntervention
+    ? calculateDurationDaysFromDates(primaryIntervention.startDate, primaryIntervention.endDate)
+    : null;
+  const primaryLabel = primaryIntervention
+    ? (
+        labelMap.get(String(primaryIntervention.code || '')) ||
+        normaliseString(primaryIntervention.label || null) ||
+        null
+      )
+    : null;
+  const revisionRationale = normaliseString(metadata.rationale || null);
+  const reviewMetadata = metadata.review && typeof metadata.review === 'object'
+    ? metadata.review
+    : {};
+  const revisedEligibility = normalizeEsdcEligibilityValue(reviewMetadata.eiStatus || reviewMetadata.ei_status || null);
+  const revisedChildcareNeed = normalizeYesNoValue(metadata.childcareNeed);
+  const postingContext = normalizePostingContext(metadata.postingContext || nextSnapshot.posting_context || null);
+  const revisedOtherFundingDetails = metadata.otherFundingDetails && typeof metadata.otherFundingDetails === 'object'
+    ? formatAssessmentOtherFundingDetailsForPdf(
+        metadata.otherFundingDetails,
+        nextSnapshot.other_funding_sources_details || ''
+      )
+    : null;
+
+  nextSnapshot.proposed_interventions = nextInterventions;
+  nextSnapshot.intervention_label_lookup = Object.fromEntries(labelMap);
+  nextSnapshot.intervention_count = String(nextInterventions.length);
+  if (Number.isFinite(overallCostTotal)) {
+    nextSnapshot.intervention_cost_total_raw = overallCostTotal;
+  }
+  if (primaryIntervention) {
+    nextSnapshot.intervention_code = primaryLabel
+      ? `${primaryLabel} (${primaryIntervention.code || ''})`
+      : (primaryIntervention.code || '');
+    nextSnapshot.delivery_mode = resolveDeliveryModeLabel(primaryIntervention.deliveryMode) || '';
+    nextSnapshot.intervention_start_date = primaryIntervention.startDate || '';
+    nextSnapshot.intervention_end_date = primaryIntervention.endDate || '';
+    nextSnapshot.intervention_duration_days = primaryDurationDays === null ? '' : String(primaryDurationDays);
+    nextSnapshot.training_institution_or_employer = primaryIntervention.institution || '';
+    nextSnapshot.program_name = primaryIntervention.programName || '';
+    nextSnapshot.intervention_noc = primaryIntervention.noc || '';
+    nextSnapshot.intervention_noc_version = primaryIntervention.nocVersion || '';
+    nextSnapshot.itp_details = primaryIntervention.itpDetails || '';
+    nextSnapshot.wage_subsidy_details = primaryIntervention.wageSubsidyDetails || '';
+  }
+  if (revisionRationale) {
+    nextSnapshot.recommendation_justification = revisionRationale;
+  }
+  if (revisedOtherFundingDetails !== null) {
+    nextSnapshot.other_funding_sources_details = revisedOtherFundingDetails;
+  }
+  if (revisedEligibility) {
+    nextSnapshot.esdc_eligibility = revisedEligibility;
+  }
+  if (postingContext) {
+    nextSnapshot.posting_context = postingContext;
+  }
+  if (revisedChildcareNeed === 'yes' || revisedChildcareNeed === 'no') {
+    nextSnapshot.childcare_need_yes = revisedChildcareNeed === 'yes';
+    nextSnapshot.childcare_need_no = revisedChildcareNeed === 'no';
+  }
+  if (Object.prototype.hasOwnProperty.call(metadata, 'childcareFunding')) {
+    nextSnapshot.childcare_funding_details = normaliseString(metadata.childcareFunding || '') || '';
+  }
+
+  if (Array.isArray(metadata.barriers)) {
+    const normalizeListValue = value => String(value || '').trim().toLowerCase();
+    const barrierSet = new Set(metadata.barriers.map(normalizeListValue));
+    const barriersOtherDetails = normaliseString(
+      metadata.barriersOtherDetails || metadata.barriers_other_details || nextSnapshot.barriers_other_specify || ''
+    ) || '';
+    const hasOtherBarrier = barrierSet.has('other') || Boolean(barriersOtherDetails);
+    nextSnapshot.barriers_none = barrierSet.has('none');
+    nextSnapshot.barriers_education = barrierSet.has('education');
+    nextSnapshot.barriers_lack_marketable_skills = barrierSet.has('lack of marketable skills');
+    nextSnapshot.barriers_lack_work_experience = barrierSet.has('lack of work experience');
+    nextSnapshot.barriers_remoteness = barrierSet.has('remoteness');
+    nextSnapshot.barriers_lack_transportation = barrierSet.has('lack of transportation');
+    nextSnapshot.barriers_economic = barrierSet.has('economic');
+    nextSnapshot.barriers_language = barrierSet.has('language');
+    nextSnapshot.barriers_lack_labour_force_attachment = barrierSet.has('lack of labour force attachment');
+    nextSnapshot.barriers_dependent_care = barrierSet.has('dependent care');
+    nextSnapshot.barriers_health = barrierSet.has('physical, emotional, or mental health');
+    nextSnapshot.barriers_other = hasOtherBarrier;
+    nextSnapshot.barriers_other_specify = barriersOtherDetails;
+  }
+
+  return nextSnapshot;
+}
+
+async function generateAndStoreRevisionAssessmentPdf({
+  caseId,
+  sourceInterventionRow,
+  revisionInterventionRow,
+  actorUserId = null,
+  submittedSignature = null,
+  connection = pool
+} = {}) {
+  const normalizedCaseId = normalisePositiveInteger(caseId || sourceInterventionRow?.case_id || revisionInterventionRow?.case_id || null);
+  if (!normalizedCaseId || !sourceInterventionRow || !revisionInterventionRow) {
+    return null;
+  }
+
+  const [[caseContextRow]] = await connection.query(
+    `SELECT c.client_id,
+            COALESCE(a.id, c.application_id) AS application_id
+       FROM iset_case c
+       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+      WHERE c.id = ?
+      LIMIT 1`,
+    [normalizedCaseId]
+  );
+  const applicationId = normalisePositiveInteger(caseContextRow?.application_id);
+  if (!applicationId) {
+    return null;
+  }
+
+  const latestSubmittedDoc = await fetchLatestAssessmentDocumentInfo({
+    applicationId,
+    caseId: normalizedCaseId,
+    documentTypes: ['case_assessment'],
+    connection
+  });
+  const latestVersionedDoc = await fetchLatestAssessmentDocumentInfo({
+    applicationId,
+    caseId: normalizedCaseId,
+    documentTypes: ['case_assessment', 'case_assessment_approved'],
+    connection
+  });
+  const baselineSnapshot = latestSubmittedDoc?.snapshot || latestVersionedDoc?.snapshot || null;
+  if (!hasAssessmentSnapshotContent(baselineSnapshot)) {
+    return null;
+  }
+
+  const revisionMetadata = safeJsonParse(revisionInterventionRow.metadata_json, {}) || {};
+  const currentSnapshot = await buildRevisionAssessmentSnapshot({
+    baselineSnapshot,
+    sourceInterventionRow,
+    revisionMetadata,
+    connection
+  });
+  if (!hasAssessmentSnapshotContent(currentSnapshot)) {
+    return null;
+  }
+
+  const applicantContext = await fetchAssessmentApplicantContext({
+    applicationId
+  });
+  const signatureContext = {
+    submittedSignature:
+      await fetchLatestCaseEventSignature(connection, { caseId: normalizedCaseId, eventType: 'assessment_submitted' }) ||
+      submittedSignature ||
+      null,
+    approvedSignature: null
+  };
+  const assessmentVersionNumber = (latestVersionedDoc?.versionNumber || 0) + 1;
+  const previousSubmittedVersionNumber = latestSubmittedDoc?.versionNumber || null;
+  const previousSubmittedSnapshot = latestSubmittedDoc?.snapshot || null;
+  const referenceNumber =
+    applicantContext.trackingId ||
+    normaliseString(currentSnapshot.reference_number || null) ||
+    null;
+
+  const pdfBuffer = await generateAssessmentPdfBuffer({
+    caseRow: sourceInterventionRow,
+    applicantName: applicantContext.applicantName,
+    referenceNumber,
+    snapshotOverride: currentSnapshot,
+    recommendationSignature: signatureContext.submittedSignature,
+    approvalSignature: null,
+    includeAgreementSection: false,
+    versionNumber: assessmentVersionNumber,
+    variant: 'submitted'
+  });
+  await storeAssessmentPdfDocument({
+    applicationId,
+    caseId: normalizedCaseId,
+    clientId: caseContextRow?.client_id || null,
+    applicantUserId: applicantContext.applicantUserId,
+    actorUserId,
+    trackingId: referenceNumber,
+    pdfBuffer,
+    documentType: 'case_assessment',
+    label: `Case manager assessment v${assessmentVersionNumber}`,
+    fileNamePrefix: 'case-manager-assessment',
+    versionNumber: assessmentVersionNumber,
+    variant: 'submitted',
+    snapshot: currentSnapshot,
+    archivePreviousActive: false,
+    replaceExistingVersion: true
+  });
+
+  if (previousSubmittedVersionNumber && hasAssessmentSnapshotContent(previousSubmittedSnapshot)) {
+    const redlineBuffer = await generateAssessmentPdfBuffer({
+      caseRow: sourceInterventionRow,
+      applicantName: applicantContext.applicantName,
+      referenceNumber,
+      snapshotOverride: currentSnapshot,
+      recommendationSignature: signatureContext.submittedSignature,
+      approvalSignature: null,
+      includeAgreementSection: false,
+      versionNumber: assessmentVersionNumber,
+      variant: 'redline',
+      previousVersionNumber: previousSubmittedVersionNumber,
+      redlineBaseSnapshot: previousSubmittedSnapshot
+    });
+    await storeAssessmentPdfDocument({
+      applicationId,
+      caseId: normalizedCaseId,
+      clientId: caseContextRow?.client_id || null,
+      applicantUserId: applicantContext.applicantUserId,
+      actorUserId,
+      trackingId: referenceNumber,
+      pdfBuffer: redlineBuffer,
+      documentType: 'case_assessment_redline',
+      label: `Case manager assessment redline v${assessmentVersionNumber}`,
+      fileNamePrefix: 'case-manager-assessment-redline',
+      versionNumber: assessmentVersionNumber,
+      variant: 'redline',
+      previousVersionNumber: previousSubmittedVersionNumber,
+      snapshot: currentSnapshot,
+      archivePreviousActive: false,
+      replaceExistingVersion: true
+    });
+  }
+
+  return {
+    versionNumber: assessmentVersionNumber,
+    previousVersionNumber: previousSubmittedVersionNumber,
+  };
+}
+
+function syncInterventionMetadataCompatibilityFromProposedInterventions(metadata) {
+  if (!metadata || typeof metadata !== 'object') return metadata;
+  const proposedInterventions = normalizeAssessmentProposedInterventions(
+    metadata.proposedInterventions ?? metadata.proposed_interventions ?? null
+  );
+  if (!proposedInterventions.length) return metadata;
+
+  const [primary] = proposedInterventions;
+  const primaryCostLines = Array.isArray(primary?.costLines) ? primary.costLines : [];
+  const primaryCostTotal = computeCostLinesTotal(primaryCostLines);
+  const snapshot =
+    metadata.snapshot && typeof metadata.snapshot === 'object' && metadata.snapshot !== null
+      ? { ...metadata.snapshot }
+      : {};
+
+  snapshot.code = primary?.code || null;
+  snapshot.startDate = primary?.startDate || null;
+  snapshot.endDate = primary?.endDate || null;
+  snapshot.deliveryMode = primary?.deliveryMode === 'in_house' ? 'in_house' : 'partner';
+  snapshot.institution = primary?.institution || '';
+  snapshot.programName = primary?.programName || '';
+  snapshot.itpDetails = primary?.itpDetails || '';
+  snapshot.wageSubsidyDetails = primary?.wageSubsidyDetails || '';
+  snapshot.nocCode = primary?.noc || '';
+  snapshot.nocVersion = primary?.nocVersion || '';
+  snapshot.costLines = primaryCostLines;
+  if (Number.isFinite(primaryCostTotal)) {
+    snapshot.costTotal = primaryCostTotal;
+  } else {
+    delete snapshot.costTotal;
+  }
+
+  metadata.snapshot = snapshot;
+  metadata.costLines = primaryCostLines;
+  return metadata;
+}
 
 const assessmentHasFundedCostLines = (assessmentRow) => {
   if (!assessmentRow || typeof assessmentRow !== 'object') return false;
@@ -16471,7 +16895,9 @@ async function syncInterventionProposalCompatibility(interventionRow, connection
     proposedCost,
     notes: interventionRow.notes || null,
   });
-  const proposalMetadata = safeJsonParse(interventionRow.metadata_json, null);
+  const proposalMetadata = syncInterventionMetadataCompatibilityFromProposedInterventions(
+    safeJsonParse(interventionRow.metadata_json, null)
+  );
   let proposalMetadataJson = null;
   if (proposalMetadata && typeof proposalMetadata === 'object') {
     proposalMetadataJson = JSON.stringify(proposalMetadata);
@@ -28821,13 +29247,18 @@ app.patch('/api/config/runtime/finance-email-routing', async (req, res) => {
     const invalid = [];
     Object.entries(source).forEach(([code, email]) => {
       if (!email) return;
-      const normalized = normalizeEmailAddress(email);
-      if (!normalized) {
+      const normalized = normalizeEmailList(email);
+      const invalidTokens = findInvalidEmailTokens(email);
+      if (!normalized.length || invalidTokens.length) {
         invalid.push({ code: String(code || '').trim().toUpperCase(), email });
       }
     });
     if (invalid.length) {
-      return res.status(400).json({ error: 'invalid_finance_email_addresses', invalid });
+      return res.status(400).json({
+        error: 'invalid_finance_email_addresses',
+        message: 'Enter one or more valid finance email addresses, separated by commas or semicolons.',
+        invalid,
+      });
     }
     const saved = await writeFinanceEmailRouting(payload);
     res.json(saved);
@@ -34455,7 +34886,9 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
         intervention_pot_id: r.intervention_pot_id || null,
         budgetPotCode: normaliseString(r.budget_pot_code) || null,
         budget_pot_code: normaliseString(r.budget_pot_code) || null,
-        assessment_esdc_eligibility: r.assessment_esdc_eligibility || null
+        assessment_esdc_eligibility: r.assessment_esdc_eligibility || null,
+        approval_request_type: 'new_application',
+        approval_request_type_label: 'New application assessment',
       };
     }) : [];
     return res.json({ role, regionId: regionId ?? null, regionIds: regionIds.length ? regionIds : null, items });
@@ -34765,6 +35198,7 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
   const legacySql = `
     SELECT
       NULL AS proposal_id,
+      NULL AS proposal_kind,
       ci.id AS intervention_id,
       ci.case_id,
       ci.action_plan_id,
@@ -34816,6 +35250,7 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
       FROM (
         SELECT
           p.id AS proposal_id,
+          p.proposal_kind AS proposal_kind,
           COALESCE(p.legacy_intervention_id, p.source_intervention_id, NULL) AS intervention_id,
           p.case_id,
           COALESCE(p.action_plan_id, ci.action_plan_id) AS action_plan_id,
@@ -34869,6 +35304,7 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
 
         SELECT
           NULL AS proposal_id,
+          NULL AS proposal_kind,
           ci.id AS intervention_id,
           ci.case_id,
           ci.action_plan_id,
@@ -34950,6 +35386,7 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
     const interventionLabelMap = await fetchInterventionCodeLabels(pool, Array.from(interventionCodes));
     const items = Array.isArray(rows) ? rows.map((r, rowIndex) => {
       const caseContext = safeJsonParse(r.case_context_json, null) || {};
+      const metadata = safeJsonParse(r?.metadata_json, {}) || {};
       const contextPersonal = caseContext?.applicationPersonal || {};
       const contextAnswers = caseContext?.applicationAnswers || {};
       const first = [
@@ -35001,6 +35438,21 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
         fallbackLabel: interventionLabel,
         fallbackCost: r.intervention_cost_total,
       });
+      const revisionSourceInterventionId =
+        normalisePositiveInteger(
+          metadata?.revision?.sourceInterventionId ??
+          metadata?.revision?.source_intervention_id ??
+          null
+        ) || null;
+      const proposalKind = normaliseString(r.proposal_kind || null) || null;
+      const approvalRequestType =
+        proposalKind === 'revision' || revisionSourceInterventionId
+          ? 'revised_intervention'
+          : 'new_intervention';
+      const approvalRequestTypeLabel =
+        approvalRequestType === 'revised_intervention'
+          ? 'Proposed change to intervention'
+          : 'Additional intervention proposal';
       return {
         proposalId: r.proposal_id || null,
         interventionId: r.intervention_id || null,
@@ -35032,7 +35484,9 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
         intervention_start_date: r.intervention_start_date || null,
         assessment_esdc_eligibility: r.assessment_esdc_eligibility || null,
         budgetPotCode: normaliseString(r.budget_pot_code) || null,
-        budget_pot_code: normaliseString(r.budget_pot_code) || null
+        budget_pot_code: normaliseString(r.budget_pot_code) || null,
+        approval_request_type: approvalRequestType,
+        approval_request_type_label: approvalRequestTypeLabel,
       };
     }) : [];
     return res.json({ role, regionId: regionId ?? null, regionIds: regionIds.length ? regionIds : null, items });
@@ -41305,7 +41759,8 @@ function handleAdminDocumentUpload({ requireApplicant = false, applicantIdHint =
     const label = labelRaw ? labelRaw.slice(0, 255) : null;
     const docTypeRaw = typeof req.body?.documentType === 'string' ? req.body.documentType.trim() : '';
     const docType = docTypeRaw || null;
-    if (docType && docType.toLowerCase() === 'ei_verification') {
+    const isEiVerificationDocument = docType && docType.toLowerCase() === 'ei_verification';
+    if (isEiVerificationDocument) {
       const eligibilityRoleAllowlist = new Set([
         'systemadministrator',
         'nwacadministrator',
@@ -41368,6 +41823,36 @@ function handleAdminDocumentUpload({ requireApplicant = false, applicantIdHint =
       applicationId = attachment.applicationId;
       actionPlanId = attachment.actionPlanId;
       interventionIds = attachment.interventionIds;
+      if (isEiVerificationDocument) {
+        const requestedInterventionIds = Array.from(
+          new Set([...interventionIdsRaw, interventionIdRaw].filter(Boolean))
+        );
+        if (requestedInterventionIds.length) {
+          interventionIds = requestedInterventionIds;
+          if (!actionPlanId) {
+            actionPlanId = await resolveActionPlanIdForInterventions({
+              interventionIds,
+              connection: pool,
+            });
+          }
+          if (actionPlanId) {
+            interventionIds = await ensureInterventionsBelongToActionPlan({
+              actionPlanId,
+              interventionIds,
+              connection: pool,
+            });
+          }
+        }
+        if (!actionPlanId) {
+          actionPlanId = actionPlanIdRaw || null;
+        }
+        if (!caseId) {
+          caseId = caseIdRaw || null;
+          if (!caseId && actionPlanId) {
+            caseId = await resolveCaseIdForActionPlan(actionPlanId, pool);
+          }
+        }
+      }
       if (attachment.usedApplicationFallback) {
         metadataObj.scope_fallback = {
           requested: normalizedScope,
@@ -43381,16 +43866,46 @@ app.get('/api/cases', async (req, res) => {
       params.push(...ownerFilters);
     }
 
+    // Keep the case list name precedence aligned with `/api/cases/:id/workspace`
+    // so edits made in Participant Details surface consistently in the Clients table.
+    const workspaceClientFirstNameExpr = `COALESCE(
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."first-name"')), ''),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.applicationPersonal.first_name')), ''),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.applicationPersonal.firstName')), ''),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.applicationPersonal.given_name')), ''),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.applicationPersonal.givenName')), ''),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.firstName')), ''),
+      NULLIF(cl.first_name, '')
+    )`;
+    const workspaceClientLastNameExpr = `COALESCE(
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."last-name"')), ''),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.applicationPersonal.last_name')), ''),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.applicationPersonal.lastName')), ''),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.applicationPersonal.family_name')), ''),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.applicationPersonal.familyName')), ''),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.lastName')), ''),
+      NULLIF(cl.last_name, '')
+    )`;
+    const workspaceClientPreferredNameExpr = `COALESCE(
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."preferred-name"')), ''),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.applicationPersonal.preferred_name')), ''),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.applicationPersonal.preferredName')), ''),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.preferredName')), ''),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.applicationAnswers."preferred-name"')), ''),
+      NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.applicationAnswers.preferred_name')), '')
+    )`;
+    const workspaceClientFullNameExpr = `NULLIF(TRIM(CONCAT_WS(' ', ${workspaceClientFirstNameExpr}, ${workspaceClientLastNameExpr})), '')`;
+
     const searchRaw = firstValue(req.query.query);
     if (typeof searchRaw === 'string' && searchRaw.trim()) {
       const search = `%${searchRaw.trim().toLowerCase()}%`;
       whereClauses.push(
         `(
-          LOWER(COALESCE(cl.first_name, '')) LIKE ?
-          OR LOWER(COALESCE(cl.last_name, '')) LIKE ?
+          LOWER(COALESCE(${workspaceClientFullNameExpr}, '')) LIKE ?
+          OR LOWER(COALESCE(${workspaceClientPreferredNameExpr}, '')) LIKE ?
           OR LOWER(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.full_name'))) LIKE ?
           OR LOWER(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."preferred-name"'))) LIKE ?
-          OR LOWER(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) LIKE ?
+          OR LOWER(COALESCE(s.reference_number, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')), '')) LIKE ?
           OR LOWER(COALESCE(c.case_number, '')) LIKE ?
           OR LOWER(COALESCE(sp.display_name, sp.name, '')) LIKE ?
           OR LOWER(COALESCE(sp.email, '')) LIKE ?
@@ -43450,6 +43965,7 @@ app.get('/api/cases', async (req, res) => {
       FROM iset_case c
       LEFT JOIN client cl ON c.client_id = cl.id
       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+      LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN staff_profiles sp ON c.assigned_to_user_id = sp.id
 	      LEFT JOIN (
 	        SELECT
@@ -43545,16 +44061,17 @@ app.get('/api/cases', async (req, res) => {
         cl.gender AS client_gender,
         cl.dob AS client_dob,
         cl.aboriginal_group AS client_aboriginal_group,
-        JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
+        COALESCE(s.reference_number, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) AS tracking_id,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."first-name"')) AS submission_first_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."last-name"')) AS submission_last_name,
+        JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."preferred-name"')) AS submission_preferred_name,
+        ${workspaceClientFirstNameExpr} AS workspace_client_first_name,
+        ${workspaceClientLastNameExpr} AS workspace_client_last_name,
+        ${workspaceClientPreferredNameExpr} AS workspace_client_preferred_name,
         a.created_at AS submitted_at,
         a.updated_at AS application_updated_at,
         JSON_EXTRACT(a.payload_json, '$') AS payload_json,
-        COALESCE(
-          NULLIF(cl.last_name, ''),
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.personal.last_name')), ''),
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."last-name"')), ''),
-          NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers.last_name')), '')
-        ) AS client_sort_last_name
+        ${workspaceClientLastNameExpr} AS client_sort_last_name
       ${baseFrom}
     `;
 
@@ -43601,23 +44118,18 @@ app.get('/api/cases', async (req, res) => {
       const payloadAnswers = (payload && payload.answers) || {};
       const payloadSubmission = (payload && payload.submission_snapshot) || {};
 
-      const fallbackFirstName =
-        row.client_first_name ||
-        payloadPersonal.first_name ||
-        payloadAnswers['first-name'] ||
-        payloadAnswers.first_name ||
-        null;
-      const fallbackLastName =
-        row.client_last_name ||
-        payloadPersonal.last_name ||
-        payloadAnswers['last-name'] ||
-        payloadAnswers.last_name ||
-        null;
+      const fallbackFirstName = normaliseString(row.workspace_client_first_name) || null;
+      const fallbackLastName = normaliseString(row.workspace_client_last_name) || null;
+      const fallbackPreferredName = normaliseString(row.workspace_client_preferred_name) || null;
+      const clientFullName = [fallbackFirstName, fallbackLastName].filter(Boolean).join(' ').trim() || fallbackPreferredName || null;
 
       const client = {
         id: row.client_id || null,
         firstName: fallbackFirstName || null,
         lastName: fallbackLastName || null,
+        preferredName: fallbackPreferredName || null,
+        fullName: clientFullName,
+        name: clientFullName,
         gender: row.client_gender || payloadPersonal.gender || null,
         dob: toIsoString(row.client_dob) || payloadPersonal.dob || null,
         aboriginalGroup: row.client_aboriginal_group || payloadPersonal.aboriginal_group || null,
@@ -43704,11 +44216,7 @@ app.get('/api/cases', async (req, res) => {
     const groupedCases = groupRows.map(mapRowToCase);
     const groups = new Map();
     const formatClientName = (client = {}) => {
-      const parts = [];
-      if (client.firstName) parts.push(client.firstName);
-      if (client.lastName) parts.push(client.lastName);
-      const combined = parts.join(' ').trim();
-      return combined || 'Unknown client';
+      return client.fullName || client.name || 'Unknown client';
     };
 
     groupedCases.forEach(caseItem => {
@@ -47085,9 +47593,11 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
 
     const metadataSource =
       metadataPayload && typeof metadataPayload === 'object' ? metadataPayload : null;
-    const metadata = metadataSource ? { ...metadataSource } : {};
-    const normalizedCostLines = Array.isArray(metadataSource?.costLines)
-      ? metadataSource.costLines.map(normalizeProposedCostLine).filter(Boolean)
+    const metadata = metadataSource
+      ? syncInterventionMetadataCompatibilityFromProposedInterventions({ ...metadataSource })
+      : {};
+    const normalizedCostLines = Array.isArray(metadata.costLines)
+      ? metadata.costLines.map(normalizeProposedCostLine).filter(Boolean)
       : [];
     if (normalizedCostLines.length && plannedCostInt === null) {
       const totalFromLines = computeCostLinesTotal(normalizedCostLines);
@@ -47945,11 +48455,20 @@ app.patch('/api/interventions/:id', async (req, res) => {
     const metadata = { ...parsedInterventionMetadata };
     const metadataPayload =
       body.metadata && typeof body.metadata === 'object' ? body.metadata : null;
+    const metadataPayloadHasProposedInterventions =
+      metadataPayload &&
+      (
+        Object.prototype.hasOwnProperty.call(metadataPayload, 'proposedInterventions') ||
+        Object.prototype.hasOwnProperty.call(metadataPayload, 'proposed_interventions')
+      );
     if (metadataPayload) {
       Object.entries(metadataPayload).forEach(([key, value]) => {
         if (typeof value === 'undefined') return;
         metadata[key] = value;
       });
+      if (metadataPayloadHasProposedInterventions) {
+        syncInterventionMetadataCompatibilityFromProposedInterventions(metadata);
+      }
       metadataChanged = true;
     }
     const planMetadata = safeJsonParse(planRow?.metadata_json, null) || {};
@@ -48297,6 +48816,47 @@ app.patch('/api/interventions/:id', async (req, res) => {
           delivery_status: statusPersistence.deliveryStatus,
         })
       : previousInterventionState;
+    const updatedMetadata = safeJsonParse(updatedRow?.metadata_json, {}) || {};
+    const updatedRevisionInfo =
+      updatedMetadata.revision && typeof updatedMetadata.revision === 'object'
+        ? updatedMetadata.revision
+        : null;
+    const revisionSourceInterventionId = normalisePositiveInteger(
+      updatedRevisionInfo?.sourceInterventionId || updatedRevisionInfo?.source_intervention_id || null
+    );
+    const shouldGenerateRevisionAssessmentPdf =
+      revisionSourceInterventionId &&
+      previousInterventionState.reviewStatus !== 'submitted' &&
+      nextInterventionState.reviewStatus === 'submitted';
+    if (shouldGenerateRevisionAssessmentPdf) {
+      try {
+        const sourceInterventionRow = await fetchInterventionWithCase(revisionSourceInterventionId);
+        if (sourceInterventionRow) {
+          const { actorName } = resolveRequestActor(req);
+          const actorDisplayName = await resolveStaffDisplayName(pool, req) || actorName || null;
+          const submittedSignatureFallback = {
+            signerName: actorDisplayName || actorName || null,
+            signedAt: new Date().toISOString()
+          };
+          const actorUserId = await resolveOrCreateUserIdFromAuth(req);
+          await generateAndStoreRevisionAssessmentPdf({
+            caseId: updatedRow?.case_id || interventionRow?.case_id || null,
+            sourceInterventionRow,
+            revisionInterventionRow: updatedRow,
+            actorUserId,
+            submittedSignature: submittedSignatureFallback,
+            connection: pool
+          });
+        } else {
+          console.warn('[assessment-pdf] skipped revision assessment generation: source intervention not found', {
+            interventionId,
+            revisionSourceInterventionId
+          });
+        }
+      } catch (err) {
+        console.error('[assessment-pdf] revision assessment generation failed:', err?.message || err);
+      }
+    }
     const nextPlanFundingStream =
       planRow?.funding_stream || updatedRow?.plan_funding_stream || null;
     const nextSnapshot = buildCfaInterventionSnapshot(updatedRow, nextPlanFundingStream);
@@ -52708,19 +53268,19 @@ const handlePostCaseSecureMessage = async (req, res) => {
         'open',
         'submitted'
       ]);
-      const normalizeStatusValue = value => {
-        if (!value) return '';
-        return String(value).trim().toLowerCase().replace(/[\s-]+/g, '_');
-      };
-      const resolveDecisionOutcome = (applicationStatusRaw, caseStatusRaw, explicitDecisionRaw = null) => {
-        const explicitDecision = normalizeStatusValue(explicitDecisionRaw);
-        if (explicitDecision === 'approved') return 'approved';
-        if (explicitDecision === 'denied' || explicitDecision === 'not_approved') return 'denied';
-        const appStatus = normalizeStatusValue(applicationStatusRaw);
-        const caseStatus = normalizeStatusValue(caseStatusRaw);
-        if (!appStatus) return null;
-        if (appStatus === 'approved') return 'approved';
-        if (appStatus === 'rejected' || appStatus === 'declined') return 'denied';
+	      const normalizeStatusValue = value => {
+	        if (!value) return '';
+	        return String(value).trim().toLowerCase().replace(/[\s-]+/g, '_');
+	      };
+	      const resolveDecisionOutcome = (applicationStatusRaw, caseStatusRaw, explicitDecisionRaw = null) => {
+	        const explicitDecision = normalizeStatusValue(explicitDecisionRaw);
+	        if (explicitDecision === 'approved' || explicitDecision === 'approve') return 'approved';
+	        if (['denied', 'not_approved', 'reject', 'rejected', 'declined'].includes(explicitDecision)) return 'denied';
+	        const appStatus = normalizeStatusValue(applicationStatusRaw);
+	        const caseStatus = normalizeStatusValue(caseStatusRaw);
+	        if (!appStatus) return null;
+	        if (appStatus === 'approved') return 'approved';
+	        if (appStatus === 'rejected' || appStatus === 'declined') return 'denied';
         if (appStatus === 'decision_ready' || appStatus === 'completed') {
           if (approvedCaseStatuses.has(caseStatus)) return 'approved';
           if (deniedCaseStatuses.has(caseStatus)) return 'denied';
@@ -52729,15 +53289,18 @@ const handlePostCaseSecureMessage = async (req, res) => {
         return null;
       };
       const letterAttachments = attachmentRows.filter(row => letterDocTypes.has(row.document_type));
-      if (letterAttachments.length) {
-        const decisionOutcome = resolveDecisionOutcome(
-          caseRow?.application_status,
-          caseRow?.case_lifecycle_status || caseRow?.case_status,
-          caseRow?.decision_outcome
-        );
-        const allowedDocTypes = decisionOutcome === 'approved'
-          ? new Set(['assessment_approval_letter'])
-          : decisionOutcome === 'denied'
+	      if (letterAttachments.length) {
+	        const decisionOutcome = resolveDecisionOutcome(
+	          caseRow?.application_status,
+	          caseRow?.case_lifecycle_status || caseRow?.case_status,
+	          caseRow?.decision_outcome ||
+	            caseContext?.assessment_nwac_review_status ||
+	            caseContext?.assessmentNwacReviewStatus ||
+	            null
+	        );
+	        const allowedDocTypes = decisionOutcome === 'approved'
+	          ? new Set(['assessment_approval_letter'])
+	          : decisionOutcome === 'denied'
             ? new Set(['assessment_denial_letter'])
             : new Set();
         const invalidLetters = letterAttachments.filter(row => !allowedDocTypes.has(row.document_type));
@@ -54700,6 +55263,30 @@ const normalizeEmailList = (input) => {
   return Array.from(new Set(list)).slice(0, FINANCE_EMAIL_MAX_RECIPIENTS);
 };
 
+const findInvalidEmailTokens = (input) => {
+  const invalid = [];
+  const pushValue = (value) => {
+    if (!value) return;
+    if (Array.isArray(value)) {
+      value.forEach(pushValue);
+      return;
+    }
+    if (typeof value === 'string') {
+      value
+        .split(/[;,]+/)
+        .map(entry => entry.trim())
+        .filter(Boolean)
+        .forEach(token => {
+          if (!normalizeEmailAddress(token)) invalid.push(token);
+        });
+      return;
+    }
+    if (!normalizeEmailAddress(value)) invalid.push(String(value));
+  };
+  pushValue(input);
+  return Array.from(new Set(invalid));
+};
+
 const normalizeRecipientsObject = (raw) => {
   if (!raw || typeof raw !== 'object') {
     return { to: normalizeEmailList(raw), cc: [], bcc: [] };
@@ -54726,9 +55313,9 @@ const sanitizeFinanceEmailRouting = (raw) => {
   const regions = {};
   Object.entries(source).forEach(([code, email]) => {
     const normalizedCode = String(code || '').trim().toUpperCase();
-    const normalizedEmail = normalizeEmailAddress(email);
-    if (!normalizedCode || !normalizedEmail) return;
-    regions[normalizedCode] = normalizedEmail;
+    const normalizedEmails = normalizeEmailList(email);
+    if (!normalizedCode || !normalizedEmails.length) return;
+    regions[normalizedCode] = normalizedEmails.join(', ');
   });
   return { enabled, regions };
 };
@@ -56623,8 +57210,44 @@ async function resolveFinanceEmailForPacket(packetRow, connection = null) {
   const routing = await readFinanceEmailRouting(connection);
   const regionCode = await resolvePacketRegionCode(packetRow, connection);
   const emailEnabled = routing?.enabled !== false;
-  const email = emailEnabled && regionCode ? normalizeEmailAddress(routing.regions?.[regionCode]) : null;
-  return { regionCode, email, routing };
+  const emails = emailEnabled && regionCode ? normalizeEmailList(routing.regions?.[regionCode]) : [];
+  return { regionCode, emails, routing };
+}
+
+async function resolvePaymentPacketCaseManagerMailbox(packetRow, connection = null) {
+  const runner = connection || pool;
+  const caseId = normalisePositiveInteger(
+    packetRow?.case_id ??
+    packetRow?.caseId ??
+    null
+  );
+  if (!runner || !caseId) {
+    return { staffProfileId: null, name: null, emails: [], primaryEmail: null };
+  }
+  try {
+    const [[row]] = await runner.query(
+      `SELECT c.assigned_to_user_id,
+              sp.display_name,
+              sp.name,
+              sp.email
+         FROM iset_case c
+         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        WHERE c.id = ?
+        LIMIT 1`,
+      [caseId]
+    );
+    const emails = normalizeEmailList(row?.email || null);
+    const name = normaliseString(row?.display_name || row?.name || null) || null;
+    return {
+      staffProfileId: normalisePositiveInteger(row?.assigned_to_user_id) || null,
+      name,
+      emails,
+      primaryEmail: emails[0] || null,
+    };
+  } catch (err) {
+    console.warn('[payments] failed to resolve case manager mailbox', err?.message || err);
+    return { staffProfileId: null, name: null, emails: [], primaryEmail: null };
+  }
 }
 
 const PAYMENT_EVIDENCE_RULES_SCOPE = 'finance';
@@ -63444,7 +64067,8 @@ async function sendFinanceEmailForPacket({ packetId, packetRow = null, note = nu
   const packetWithPayeeIdentity = payeeIdentity
     ? { ...packet, payeeIdentity }
     : packet;
-  const { regionCode, email, routing } = await resolveFinanceEmailForPacket(row, runner);
+  const { regionCode, emails, routing } = await resolveFinanceEmailForPacket(row, runner);
+  const caseManagerMailbox = await resolvePaymentPacketCaseManagerMailbox(row, runner);
   if (routing?.enabled === false) {
     const senderUserId = await resolveOrCreateUserIdFromAuth(req);
     const senderLabel =
@@ -63489,7 +64113,7 @@ async function sendFinanceEmailForPacket({ packetId, packetRow = null, note = nu
       suppressionReason: 'disabled_by_runtime_config',
     };
   }
-  if (!email) {
+  if (!emails.length) {
     return {
       error: 'finance_email_missing',
       message: 'No finance email configured for this packet region.',
@@ -63522,14 +64146,19 @@ async function sendFinanceEmailForPacket({ packetId, packetRow = null, note = nu
     bundleExpiresInDays: PAYMENT_PACKET_BUNDLE_EXPIRY_DAYS,
     payeeIdentity,
   });
-  const recipients = { to: [email] };
-  const senderLabel =
+  const financeRecipients = emails;
+  const caseManagerCc = (caseManagerMailbox.emails || []).filter(address => !financeRecipients.includes(address));
+  const recipients = { to: financeRecipients, cc: caseManagerCc };
+  const actorLabel =
     req?.auth?.name ||
     req?.staffProfile?.display_name ||
     req?.staffProfile?.name ||
     req?.auth?.email ||
     req?.staffProfile?.email ||
     null;
+  const senderLabel = caseManagerMailbox.primaryEmail
+    ? (caseManagerMailbox.name || caseManagerMailbox.primaryEmail)
+    : actorLabel;
   const sendAttemptId = `pkt-${packetId}-${Date.now()}`;
   const sendStartedAt = Date.now();
   console.info('[payments][finance-email] sending via SES', {
@@ -63537,6 +64166,8 @@ async function sendFinanceEmailForPacket({ packetId, packetRow = null, note = nu
     packetId: String(packetId),
     regionCode: regionCode || null,
     to: recipients.to,
+    cc: recipients.cc,
+    from: caseManagerMailbox.primaryEmail || null,
     subject,
     attachmentCount: Array.isArray(attachments) ? attachments.length : 0,
     hasBundleLink: Boolean(bundleLink),
@@ -63547,9 +64178,13 @@ async function sendFinanceEmailForPacket({ packetId, packetRow = null, note = nu
   try {
     const result = await sendNotificationEmail({
       to: recipients.to,
+      cc: recipients.cc,
       subject,
       bodyHtml,
       bodyText,
+      senderEmail: caseManagerMailbox.primaryEmail || undefined,
+      senderName: caseManagerMailbox.name || undefined,
+      replyTo: caseManagerMailbox.emails?.length ? caseManagerMailbox.emails : undefined,
     });
     messageId = result?.MessageId || result?.messageId || null;
     console.info('[payments][finance-email] SES accepted send', {
@@ -68450,6 +69085,7 @@ app.post('/api/finance/payment-packets/:id/send-email', async (req, res) => {
       mode: result.mode,
       regionCode: result.regionCode,
       to: result.recipients?.to || [],
+      cc: result.recipients?.cc || [],
       billId: result.billId,
       baseUrl: result.baseUrl,
       communication: result.communication,
@@ -69102,6 +69738,59 @@ app.post('/api/finance/payment-packets/:id/validate', async (req, res) => {
       connection: conn,
     });
     await syncFinanceTransactionEvidenceFromPacket({ packetId, connection: conn });
+
+    const nextPacketStatus = combinedValidation.passed ? 'ready_to_send' : 'draft';
+    const nextLineStatus = PACKET_STATUS_TO_LINE_STATUS[nextPacketStatus] || null;
+    const fromPacketStatus = normalizePaymentStatus(packetRow.status) || 'draft';
+
+    if (fromPacketStatus !== nextPacketStatus) {
+      await conn.query(
+        'UPDATE payment_packet SET status = ?, updated_at = NOW() WHERE id = ?',
+        [nextPacketStatus, packetId]
+      );
+      await conn.query(
+        `INSERT INTO payment_status_event
+          (payment_packet_id, payment_packet_line_id, from_status, to_status, actor_user_id, notes, metadata, created_at)
+         VALUES (?, NULL, ?, ?, ?, ?, NULL, NOW())`,
+        [
+          packetId,
+          packetRow.status || null,
+          nextPacketStatus,
+          actorUserId,
+          combinedValidation.passed
+            ? 'Packet marked ready after validation passed.'
+            : 'Packet returned to draft after validation failed.',
+        ]
+      );
+    }
+
+    if (nextLineStatus) {
+      const eventTimestamp = new Date();
+      const lineEventValues = (lineRows || [])
+        .filter(row => row.status !== nextLineStatus && !['paid', 'cancelled'].includes(row.status))
+        .map(row => [
+          packetId,
+          row.id,
+          row.status || null,
+          nextLineStatus,
+          actorUserId,
+          null,
+          null,
+          eventTimestamp,
+        ]);
+      if (lineEventValues.length) {
+        await conn.query(
+          'UPDATE payment_packet_line SET status = ?, updated_at = NOW() WHERE payment_packet_id = ? AND status NOT IN ("paid","cancelled")',
+          [nextLineStatus, packetId]
+        );
+        await conn.query(
+          `INSERT INTO payment_status_event
+            (payment_packet_id, payment_packet_line_id, from_status, to_status, actor_user_id, notes, metadata, created_at)
+           VALUES ?`,
+          [lineEventValues]
+        );
+      }
+    }
 
     await conn.commit();
     const packet = await fetchPaymentPacketById(packetId);
@@ -76377,6 +77066,7 @@ app.put('/api/cases/:id', async (req, res) => {
     const hasStatusField = typeof body.status !== 'undefined' && body.status !== null && body.status !== '';
 
     const assessmentSubmitted =
+      !assessmentReviewStatusProvided &&
       hasRecommendation &&
       hasJustification &&
       (submitAction || hasStatusField);
@@ -76653,40 +77343,62 @@ app.put('/api/cases/:id', async (req, res) => {
       }
     }
 
-    if (assessmentReviewStatusProvided) {
-      const outcome = assessmentReviewStatus;
-      const reason = body.assessment_nwac_reason || null;
-      const approvalCost = parseCostValue(
-        body.assessment_intervention_cost_total ??
+	    if (assessmentReviewStatusProvided) {
+	      const outcome = assessmentReviewStatus;
+	      const reason = body.assessment_nwac_reason || null;
+	      const approvalCost = parseCostValue(
+	        body.assessment_intervention_cost_total ??
         body.intervention_cost_total ??
         caseRow?.assessment_intervention_cost_total ??
         null
       );
-      const budgetPotId =
-        typeof assessmentBudgetPotId !== 'undefined'
-          ? assessmentBudgetPotId
-          : toNumericRange(body.assessment_intervention_pot_id, { min: 1, max: null, stripNonDigits: true });
-      const postingContext = normalizePostingContext(
-        body.postingContext || body.posting_context || caseRow?.assessment_posting_context
-      ) || null;
-      const outcomeLabel = outcome === 'approve' ? 'approved' : outcome ? 'not approved' : 'submitted';
-      await captureCaseEvent({
+	      const budgetPotId =
+	        typeof assessmentBudgetPotId !== 'undefined'
+	          ? assessmentBudgetPotId
+	          : toNumericRange(body.assessment_intervention_pot_id, { min: 1, max: null, stripNonDigits: true });
+	      const budgetPotCode =
+	        (typeof caseRow?.assessment_intervention_pot_code === 'string' && caseRow.assessment_intervention_pot_code.trim()) ||
+	        null;
+	      const budgetPotName =
+	        (typeof caseRow?.assessment_intervention_pot_name === 'string' && caseRow.assessment_intervention_pot_name.trim()) ||
+	        null;
+	      const budgetPotLabel = budgetPotCode || budgetPotName || (budgetPotId ? String(budgetPotId) : null);
+	      const postingContext = normalizePostingContext(
+	        body.postingContext || body.posting_context || caseRow?.assessment_posting_context
+	      ) || null;
+	      const outcomeLabel =
+        outcome === 'approve'
+          ? 'approved'
+          : outcome === 'reject'
+            ? 'denied'
+            : outcome === 'push_back'
+              ? 'changes requested'
+              : outcome
+                ? String(outcome).replace(/[_-]+/g, ' ').trim()
+                : 'submitted';
+	      await captureCaseEvent({
         type: 'nwac_review_submitted',
         caseId,
         payload: {
           tracking_id: trackingId,
           outcome,
-          outcome_label: outcomeLabel,
-          reason,
-          approval_cost_total: approvalCost,
-          budget_pot_id: budgetPotId ?? null,
-          posting_context: postingContext,
-          message: outcome === 'approve'
-            ? `NWAC review approved${approvalCost !== null ? ` ($${approvalCost})` : ''}${budgetPotId ? ` · Pot ${budgetPotId}` : ''}${postingContext ? ` · Paid from ${postingContext}` : ''}.`
-            : outcome
-              ? `NWAC review not approved${approvalCost !== null ? ` ($${approvalCost})` : ''}${budgetPotId ? ` · Pot ${budgetPotId}` : ''}${postingContext ? ` · Paid from ${postingContext}` : ''}.`
-              : 'NWAC review submitted.',
-        },
+	          outcome_label: outcomeLabel,
+	          reason,
+	          approval_cost_total: approvalCost,
+	          budget_pot_id: budgetPotId ?? null,
+	          budget_pot_code: budgetPotCode,
+	          budget_pot_name: budgetPotName,
+	          posting_context: postingContext,
+	          message: outcome === 'approve'
+	            ? `Application approved${approvalCost !== null ? ` ($${approvalCost})` : ''}${budgetPotLabel ? ` · Pot ${budgetPotLabel}` : ''}${postingContext ? ` · Paid from ${postingContext}` : ''}.`
+	            : outcome === 'reject'
+	              ? 'Application denied.'
+	              : outcome === 'push_back'
+	                ? 'Changes requested for the application.'
+	                : outcome
+	                  ? `NWAC review recorded as ${outcomeLabel}.`
+	                  : 'NWAC review submitted.',
+	        },
 
         trackingId,
         actorId,

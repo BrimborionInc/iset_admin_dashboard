@@ -37,4 +37,6 @@ Communication history for packet submissions.
 ## Current Notes
 
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
+- The communication log table shows `Client name` as the first column for each packet communication row.
+- In `/finance/payments`, the widget is read-only and shows either the active packet's log or the all-packets log when no packet is selected.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.

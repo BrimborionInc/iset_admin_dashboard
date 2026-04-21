@@ -14,7 +14,7 @@ Payments AP Integrations
 
 ## Purpose
 
-Packet line items, evidence checks, and approvals.
+Read-only inspection of packet line items, evidence, and draft Intacct payload.
 
 ## User Actions (observed)
 
@@ -37,4 +37,5 @@ Packet line items, evidence checks, and approvals.
 ## Current Notes
 
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
+- In `/finance/payments`, this widget is inspection-only; create/edit/validate/send actions remain in the program workflow.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.

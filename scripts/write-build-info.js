@@ -7,7 +7,39 @@ const { execFileSync } = require('child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const PACKAGE_JSON_PATH = path.join(REPO_ROOT, 'package.json');
+const RELEASE_NOTES_LOG_PATH = path.join(REPO_ROOT, 'docs', 'meta', 'next-release-notes-log.md');
 const OUTPUT_PATH = path.join(REPO_ROOT, 'src', 'generated', 'buildInfo.js');
+const RELEASE_NOTES_OUTPUT_PATH = path.join(REPO_ROOT, 'src', 'generated', 'publicReleaseNotes.js');
+
+const EN_MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+const FR_MONTH_NAMES = [
+  'janvier',
+  'fevrier',
+  'mars',
+  'avril',
+  'mai',
+  'juin',
+  'juillet',
+  'aout',
+  'septembre',
+  'octobre',
+  'novembre',
+  'decembre',
+];
 
 function parseArgs(argv) {
   const args = {
@@ -47,17 +79,117 @@ function runGit(args) {
 }
 
 function buildDisplayLabel(buildInfo) {
-  const parts = [`v${buildInfo.packageVersion}`];
+  const parts = [];
   if (buildInfo.releaseId) {
-    parts.push(buildInfo.releaseId);
+    parts.push(`release ${buildInfo.releaseId}`);
+  } else if (buildInfo.buildTarget) {
+    parts.push(`build ${buildInfo.buildTarget}`);
   }
   if (buildInfo.gitShort) {
     parts.push(buildInfo.gitDirty ? `${buildInfo.gitShort}-dirty` : buildInfo.gitShort);
   }
-  if (buildInfo.buildTarget) {
+  if (buildInfo.buildTarget && !buildInfo.releaseId) {
     parts.push(buildInfo.buildTarget);
   }
-  return parts.join(' | ');
+  return parts.join(' | ') || `build v${buildInfo.packageVersion}`;
+}
+
+function extractBulletSection(markdown, heading) {
+  const lines = String(markdown || '').split(/\r?\n/);
+  const targetHeading = `### ${heading}`;
+  const startIndex = lines.findIndex(line => line.trim() === targetHeading);
+  if (startIndex === -1) {
+    throw new Error(`Missing release-notes draft section: ${heading}`);
+  }
+  const items = [];
+  for (let index = startIndex + 1; index < lines.length; index += 1) {
+    const trimmed = lines[index].trim();
+    if (trimmed.startsWith('### ') || trimmed.startsWith('## ')) {
+      break;
+    }
+    if (trimmed.startsWith('- ')) {
+      items.push(trimmed.slice(2).trim());
+    }
+  }
+  if (!items.length) {
+    throw new Error(`Release-notes draft section is empty: ${heading}`);
+  }
+  return items;
+}
+
+function getOrdinalSuffix(day) {
+  const mod100 = day % 100;
+  if (mod100 >= 11 && mod100 <= 13) return 'th';
+  const mod10 = day % 10;
+  if (mod10 === 1) return 'st';
+  if (mod10 === 2) return 'nd';
+  if (mod10 === 3) return 'rd';
+  return 'th';
+}
+
+function formatReleaseDate(dateValue, locale) {
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error('Invalid build timestamp for release notes generation.');
+  }
+  const day = date.getUTCDate();
+  const monthIndex = date.getUTCMonth();
+  const year = date.getUTCFullYear();
+  if (locale === 'fr') {
+    return `${day} ${FR_MONTH_NAMES[monthIndex]} ${year}`;
+  }
+  return `${day}${getOrdinalSuffix(day)} ${EN_MONTH_NAMES[monthIndex]} ${year}`;
+}
+
+function buildPublicReleaseNotes({ builtAt, releaseId }) {
+  const markdown = fs.readFileSync(RELEASE_NOTES_LOG_PATH, 'utf8');
+  const enFeatures = extractBulletSection(markdown, "What's New (draft bullets - EN)");
+  const enKnownIssues = extractBulletSection(markdown, 'Known Bugs (draft bullets - EN)');
+  const enComingNext = extractBulletSection(markdown, 'Coming Soon (draft bullets - EN)');
+  const frFeatures = extractBulletSection(markdown, 'Nouveautes (brouillon - FR)');
+  const frKnownIssues = extractBulletSection(markdown, 'Problemes connus (brouillon - FR)');
+  const frComingNext = extractBulletSection(markdown, 'A venir (brouillon - FR)');
+  const releaseLabel = releaseId ? `Release ${releaseId}` : 'Current build';
+
+  return {
+    generatedAt: builtAt,
+    releaseId: releaseId || '',
+    releaseLabel,
+    releaseDateEn: formatReleaseDate(builtAt, 'en'),
+    releaseDateFr: formatReleaseDate(builtAt, 'fr'),
+    en: {
+      sectionEyebrow: 'Optional reading',
+      description: 'Recent PATH changes are summarized here for staff who want them before signing in.',
+      featuresHeading: 'What changed',
+      features: enFeatures,
+      knownIssuesHeading: 'Known issues',
+      knownIssues: enKnownIssues,
+      comingNextHeading: 'Coming next',
+      comingNext: enComingNext,
+    },
+    fr: {
+      sectionEyebrow: 'Lecture optionnelle',
+      description: 'Les changements recents de PATH sont resumes ici pour le personnel qui souhaite les consulter avant de se connecter.',
+      featuresHeading: 'Ce qui a change',
+      features: frFeatures,
+      knownIssuesHeading: 'Points connus',
+      knownIssues: frKnownIssues,
+      comingNextHeading: 'A venir',
+      comingNext: frComingNext,
+    },
+  };
+}
+
+function writeGeneratedModule(outputPath, variableName, value) {
+  const output = [
+    `const ${variableName} = ` + JSON.stringify(value, null, 2) + ';',
+    '',
+    `export default ${variableName};`,
+    '',
+  ].join('\n');
+
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, output, 'utf8');
 }
 
 function main() {
@@ -68,28 +200,27 @@ function main() {
   const dirtyOutput = runGit(['status', '--porcelain', '--untracked-files=no']);
   const releaseId = args.releaseId || process.env.PATH_RELEASE_ID || '';
   const buildTarget = args.buildTarget || process.env.PATH_DEPLOY_ENV || process.env.NODE_ENV || '';
+  const builtAt = new Date().toISOString();
+  const publicReleaseNotes = buildPublicReleaseNotes({ builtAt, releaseId });
 
   const buildInfo = {
     packageVersion: String(packageJson.version || '0.0.0'),
     releaseId,
     buildTarget,
-    builtAt: new Date().toISOString(),
+    builtAt,
     gitCommit,
     gitShort,
     gitDirty: Boolean(dirtyOutput),
+    publicReleaseLabel: publicReleaseNotes.releaseLabel,
+    publicReleaseDateEn: publicReleaseNotes.releaseDateEn,
+    publicReleaseDateFr: publicReleaseNotes.releaseDateFr,
   };
   buildInfo.displayLabel = buildDisplayLabel(buildInfo);
 
-  const output = [
-    'const buildInfo = ' + JSON.stringify(buildInfo, null, 2) + ';',
-    '',
-    'export default buildInfo;',
-    '',
-  ].join('\n');
-
-  fs.mkdirSync(path.dirname(OUTPUT_PATH), { recursive: true });
-  fs.writeFileSync(OUTPUT_PATH, output, 'utf8');
+  writeGeneratedModule(OUTPUT_PATH, 'buildInfo', buildInfo);
+  writeGeneratedModule(RELEASE_NOTES_OUTPUT_PATH, 'publicReleaseNotes', publicReleaseNotes);
   console.log(`Wrote ${path.relative(REPO_ROOT, OUTPUT_PATH)}: ${buildInfo.displayLabel}`);
+  console.log(`Wrote ${path.relative(REPO_ROOT, RELEASE_NOTES_OUTPUT_PATH)}: ${publicReleaseNotes.releaseLabel}`);
 }
 
 main();

@@ -6,7 +6,7 @@ const FinancePaymentDetailHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Provide program staff with a single view of the payment lines and evidence for the packet being sent to finance.
+        Provide a read-only inspection view of the selected packet's lines, evidence, and draft Intacct payload.
       </p>
     </Box>
     <Box>
@@ -30,9 +30,8 @@ const FinancePaymentDetailHelp = () => (
     <Box>
       <strong>Actions</strong>
       <ul>
-        <li>Validate checks policy, evidence, and funding before sending.</li>
-        <li>Send to finance emails the configured region address.</li>
-        <li>Sending locks edits to lines and evidence.</li>
+        <li>This finance view is inspection-only; create, edit, validate, and send actions happen in the program workflow.</li>
+        <li>Use the queue selection to change which packet is shown here.</li>
       </ul>
     </Box>
     <Box>
@@ -53,6 +52,6 @@ const FinancePaymentDetailHelp = () => (
 );
 
 FinancePaymentDetailHelp.aiContext =
-  "Explain the payment detail widget: line items, recurrence and service-period policy by payment type, evidence checklist, validate step, send-to-finance action, and the Intacct XML draft preview. Mention evidence and payee completeness gates, that packets should reflect the specific claim being sent now, that sending emails finance and locks edits, and that the XML preview is read-only and not transmitted.";
+  "Explain the Batch Payments detail widget as a read-only inspection panel: line items, recurrence and service-period policy by payment type, evidence checklist, and the Intacct XML draft preview. Mention evidence and payee completeness gates, that packets should reflect the specific claim being sent now, and that edit/validate/send actions live in the program workflow rather than this finance overview.";
 
 export default FinancePaymentDetailHelp;

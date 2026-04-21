@@ -29,6 +29,10 @@ import SystemAdminFeedbackQueueWidget from './widgets/SystemAdminFeedbackQueueWi
 import buildInfo from '../../generated/buildInfo';
 
 const buildApprovalInterventionBreakdownContent = row => {
+    const approvalRequestTypeLabel =
+        row?.approvalRequestTypeLabel ||
+        row?.approval_request_type_label ||
+        null;
     const groups = Array.isArray(row?.interventionGroups)
         ? row.interventionGroups
         : Array.isArray(row?.intervention_groups)
@@ -62,11 +66,16 @@ const buildApprovalInterventionBreakdownContent = row => {
             };
         })
         .filter(Boolean);
-    if (!normalizedGroups.length) {
+    if (!approvalRequestTypeLabel && !normalizedGroups.length) {
         return null;
     }
     return (
         <SpaceBetween size="xxs">
+            {approvalRequestTypeLabel ? (
+                <Box variant="small" color="text-body-secondary">
+                    {approvalRequestTypeLabel}
+                </Box>
+            ) : null}
             {normalizedGroups.map((group, groupIndex) => (
                 <Box key={group.key || `${group.label}-${groupIndex}`} variant="small" color="text-body-secondary">
                     <Box variant="small" color="text-body-secondary">{group.label}</Box>
@@ -487,13 +496,19 @@ const buildStampLabel = (() => {
     if (!buildInfo) {
         return '';
     }
+    const gitLabel = buildInfo.gitShort
+        ? (buildInfo.gitDirty ? `${buildInfo.gitShort}-dirty` : buildInfo.gitShort)
+        : '';
     if (buildInfo.releaseId) {
-        return `Version ${buildInfo.packageVersion} | Release ${buildInfo.releaseId} | ${buildInfo.gitDirty ? `${buildInfo.gitShort}-dirty` : buildInfo.gitShort || 'no-git'}`;
+        return gitLabel ? `Release ${buildInfo.releaseId} | ${gitLabel}` : `Release ${buildInfo.releaseId}`;
     }
-    if (buildInfo.gitShort) {
-        return `Version ${buildInfo.packageVersion} | ${buildInfo.gitDirty ? `${buildInfo.gitShort}-dirty` : buildInfo.gitShort}`;
+    if (buildInfo.buildTarget) {
+        return gitLabel ? `Build ${buildInfo.buildTarget} | ${gitLabel}` : `Build ${buildInfo.buildTarget}`;
     }
-    return `Version ${buildInfo.packageVersion}`;
+    if (gitLabel) {
+        return `Build ${gitLabel}`;
+    }
+    return '';
 })();
 
 const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel }) => {
@@ -2549,6 +2564,8 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         owner: row.owner || row.assigned_user_email || 'Unassigned',
                         assigned_user_id: row.assigned_user_id || null,
                         status: row.status || 'Pending approval',
+                        approvalRequestType: row.approval_request_type || row.approvalRequestType || 'new_application',
+                        approvalRequestTypeLabel: row.approval_request_type_label || row.approvalRequestTypeLabel || 'New application assessment',
                         recommendation: row.recommendation || null,
                         intervention_code: row.intervention_code || null,
                         intervention_label: row.intervention_label || null,
@@ -2650,6 +2667,8 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         owner: row.owner || row.assigned_user_email || 'Unassigned',
                         assigned_user_id: row.assigned_user_id || null,
                         status: row.review_status || row.status || 'Submitted',
+                        approvalRequestType: row.approval_request_type || row.approvalRequestType || 'new_intervention',
+                        approvalRequestTypeLabel: row.approval_request_type_label || row.approvalRequestTypeLabel || 'Additional intervention proposal',
                         review_status: row.review_status || null,
                         delivery_status: row.delivery_status || null,
                         intervention_effective_status: row.intervention_effective_status || null,

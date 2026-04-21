@@ -103,9 +103,9 @@ const reviewAssessmentLayout = [
 
 const approvalReviewLayout = [
   { id: 'application-overview', rowSpan: 3, columnSpan: 4 },
+  { id: 'coordinator-assessment', rowSpan: 7, columnSpan: 4 },
   { id: 'iset-application-form', rowSpan: 6, columnSpan: 2 },
   { id: 'supporting-documents', rowSpan: 6, columnSpan: 2 },
-  { id: 'coordinator-assessment', rowSpan: 7, columnSpan: 4 },
 ];
 
 const documentsMessagesLayout = [
@@ -174,6 +174,8 @@ const loadLayoutFromStorage = () => {
   return null;
 };
 
+const cloneLayout = (layout = []) => layout.map(item => ({ ...item }));
+
 const computePaletteItems = (layout = []) =>
   Object.values(widgetRegistry)
     .filter(def => !layout.some(entry => entry.id === def.id))
@@ -234,14 +236,16 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
   const [loadError, setLoadError] = useState(null);
   const [appRowVersion, setAppRowVersion] = useState(0);
   const [flashItems, setFlashItems] = useState([]);
-  const [layout, setLayout] = useState(() => loadLayoutFromStorage() ?? defaultLayout);
-  const paletteSignatureRef = useRef(JSON.stringify(computePaletteItems(layout)));
   const cacheRef = useRef(typeof window !== 'undefined' ? (window.__ISET_CASE_CACHE || (window.__ISET_CASE_CACHE = new Map())) : new Map());
   const inflightRef = useRef(typeof window !== 'undefined' ? (window.__ISET_CASE_INFLIGHT || (window.__ISET_CASE_INFLIGHT = new Map())) : new Map());
   const approvalLayoutAppliedRef = useRef(null);
   const workspaceEntry = useMemo(() => parseWorkspaceEntry(location.search), [location.search]);
   const isApprovalEntry = workspaceEntry?.mode === 'approval' && workspaceEntry?.approvalType === 'application';
-
+  const [layout, setLayout] = useState(() =>
+    isApprovalEntry ? cloneLayout(approvalReviewLayout) : loadLayoutFromStorage() ?? cloneLayout(defaultLayout)
+  );
+  const paletteSignatureRef = useRef(JSON.stringify(computePaletteItems(layout)));
+  const previousApprovalEntryRef = useRef(isApprovalEntry);
   const boardItems = useMemo(() => toBoardItems(layout), [layout]);
   const paletteItems = useMemo(() => computePaletteItems(layout), [layout]);
 
@@ -264,12 +268,28 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
   }, [history, location]);
 
   useEffect(() => {
+    if (isApprovalEntry) {
+      return;
+    }
+    if (previousApprovalEntryRef.current && !isApprovalEntry) {
+      return;
+    }
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
     } catch (err) {
       console.error('[ApplicationCaseDashboard] Failed to persist layout', err);
     }
-  }, [layout]);
+  }, [isApprovalEntry, layout]);
+
+  useEffect(() => {
+    const wasApprovalEntry = previousApprovalEntryRef.current;
+    if (wasApprovalEntry && !isApprovalEntry) {
+      approvalLayoutAppliedRef.current = null;
+      const restoredLayout = loadLayoutFromStorage() ?? cloneLayout(defaultLayout);
+      setLayout(current => (areLayoutsEqual(current, restoredLayout) ? current : restoredLayout));
+    }
+    previousApprovalEntryRef.current = isApprovalEntry;
+  }, [isApprovalEntry]);
 
   useEffect(() => {
     const signature = JSON.stringify(paletteItems);
@@ -309,8 +329,12 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
   }, []);
 
   const resetLayout = useCallback(() => {
-    setLayout(current => (areLayoutsEqual(current, defaultLayout) ? current : defaultLayout));
-    const defaultPalette = computePaletteItems(defaultLayout);
+    const baselineLayout = isApprovalEntry ? approvalReviewLayout : defaultLayout;
+    setLayout(current => {
+      const nextLayout = cloneLayout(baselineLayout);
+      return areLayoutsEqual(current, nextLayout) ? current : nextLayout;
+    });
+    const defaultPalette = computePaletteItems(baselineLayout);
     paletteSignatureRef.current = JSON.stringify(defaultPalette);
     if (typeof setAvailableItems === 'function') {
       try {
@@ -320,7 +344,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
     try {
       window.localStorage.removeItem(STORAGE_KEY);
     } catch (_) {}
-  }, [setAvailableItems]);
+  }, [isApprovalEntry, setAvailableItems]);
 
   useEffect(() => {
     let shouldReset = false;
@@ -340,7 +364,10 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
   const applyLayout = useCallback(
     nextLayout => {
       if (!Array.isArray(nextLayout) || nextLayout.length === 0) return;
-      setLayout(current => (areLayoutsEqual(current, nextLayout) ? current : [...nextLayout]));
+      setLayout(current => {
+        const normalisedLayout = cloneLayout(nextLayout);
+        return areLayoutsEqual(current, normalisedLayout) ? current : normalisedLayout;
+      });
     },
     [setLayout]
   );

@@ -90,14 +90,67 @@ const getEiStatusValue = item => {
   return review.eiStatus || review.ei_status || "";
 };
 
+const formatEiStatusLabel = value => {
+  if (!value) return "";
+  const normalized = String(value).trim().toLowerCase().replace(/\s+/g, " ");
+  if (!normalized) return "";
+  if (normalized === "crf") return "CRF";
+  if (normalized === "ei active claim" || normalized === "ei active") return "EI Active Claim";
+  if (normalized === "ei reach back" || normalized === "ei reachback" || normalized === "reach back" || normalized === "reachback") {
+    return "EI Reach Back";
+  }
+  return String(value).trim();
+};
+
+const getRevisionMetadata = item => {
+  const metadata = parseMetadata(item?.metadata);
+  const revision = metadata?.revision;
+  return revision && typeof revision === "object" ? revision : null;
+};
+
+const getRevisionSourceInterventionId = item => {
+  const revision = getRevisionMetadata(item);
+  const sourceId = revision?.sourceInterventionId ?? revision?.source_intervention_id ?? null;
+  return sourceId ? String(sourceId) : null;
+};
+
 const getStatusDisplayLabel = item => {
   const state = resolveInterventionStateFields(item);
   if (state.reviewStatus === "submitted" && !state.deliveryStatus) {
-    const hasEiStatus = Boolean(getEiStatusValue(item));
-    return `Submitted - EI ${hasEiStatus ? "verified" : "unverified"}`;
+    const eiStatusLabel = formatEiStatusLabel(getEiStatusValue(item));
+    return `Submitted - ${eiStatusLabel || "Awaiting EI status verification"}`;
   }
   return formatInterventionStatusLabel(item);
 };
+
+const getInterventionRelationshipStatus = (item, openRevisionDraftsBySourceId) => {
+  const revisionSourceInterventionId = getRevisionSourceInterventionId(item);
+  if (revisionSourceInterventionId) {
+    return {
+      badgeText: "Revision",
+      badgeColor: "blue",
+    };
+  }
+
+  const relatedRevision =
+    item?.id && openRevisionDraftsBySourceId instanceof Map
+      ? openRevisionDraftsBySourceId.get(String(item.id))
+      : null;
+  if (!relatedRevision?.id) return null;
+
+  const revisionState = resolveInterventionStateFields(relatedRevision);
+  const badgeText =
+    revisionState.reviewStatus === "draft"
+      ? "Revision draft"
+      : revisionState.reviewStatus === "changes_requested"
+        ? "Revision changes requested"
+        : "Revision pending";
+  return {
+    badgeText,
+    badgeColor: "blue",
+  };
+};
+
 const getComparableStatus = item => {
   const state = resolveInterventionStateFields(item);
   return state.effectiveStatus || normalizeInterventionStatus(item?.status ?? item, null);
@@ -436,6 +489,17 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const selectedIntervention = useMemo(
     () => interventions.find(item => item.id === selectedInterventionId) || null,
     [interventions, selectedInterventionId]
+  );
+  const selectedInterventionPendingRevision = useMemo(() => {
+    if (!selectedIntervention || isInterventionProposalStatus(selectedIntervention)) return null;
+    return openRevisionDraftsBySourceId.get(String(selectedIntervention.id)) || null;
+  }, [openRevisionDraftsBySourceId, selectedIntervention]);
+  const selectedInterventionPendingRevisionStatusLabel = useMemo(
+    () =>
+      selectedInterventionPendingRevision
+        ? getStatusDisplayLabel(selectedInterventionPendingRevision)
+        : null,
+    [selectedInterventionPendingRevision]
   );
 
   useEffect(() => {
@@ -1102,11 +1166,19 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       {
         id: "status",
         header: "Status",
-        cell: item => (
-          <StatusIndicator type={statusIndicatorType(item)}>
-            {getStatusDisplayLabel(item)}
-          </StatusIndicator>
-        ),
+        cell: item => {
+          const relationshipStatus = getInterventionRelationshipStatus(item, openRevisionDraftsBySourceId);
+          return (
+            <SpaceBetween size="xxs">
+              <StatusIndicator type={statusIndicatorType(item)}>
+                {getStatusDisplayLabel(item)}
+              </StatusIndicator>
+              {relationshipStatus ? (
+                <Badge color={relationshipStatus.badgeColor}>{relationshipStatus.badgeText}</Badge>
+              ) : null}
+            </SpaceBetween>
+          );
+        },
       },
       {
         id: "dates",
@@ -1181,6 +1253,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     getInterventionActionItems,
     formMode,
     handleReviseIntervention,
+    openRevisionDraftsBySourceId,
     openWizardView,
     openCloseModal,
     resumeDraft,
@@ -1464,6 +1537,8 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         nocVersionsLoading={nocVersionsLoading}
         onSearchNocCodes={searchNocCodes}
         planStartDate={activePlan?.startDate || activePlan?.effectiveDate || ""}
+        pendingRevision={selectedInterventionPendingRevision}
+        pendingRevisionStatusLabel={selectedInterventionPendingRevisionStatusLabel}
       />
       <Modal
         visible={!!pendingDelete}

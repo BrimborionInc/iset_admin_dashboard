@@ -657,6 +657,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     paymentTypeRecurrencePolicyLookup,
     paymentTypeMappingLoading,
   } = usePaymentsData();
+  const isFinanceView = metadata?.mode === "finance";
   const [selectedLineId, setSelectedLineId] = useState(null);
   const [actionStatus, setActionStatus] = useState(null);
   const [activeTabId, setActiveTabId] = useState("packet-details");
@@ -940,14 +941,15 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     selectedLine.status !== "cancelled" &&
     packetStatusKey === "draft";
   const showRecurringLinesButton = false;
-  const canEditPacketLines = selectedRequest && packetStatusKey === "draft";
+  const canEditPacketLines = !isFinanceView && selectedRequest && packetStatusKey === "draft";
   const canMarkLinePaid =
+    !isFinanceView &&
     Boolean(selectedRequest) &&
     packetStatusValue === "submitted" &&
     Boolean(selectedLine) &&
     selectedLine.status !== "paid" &&
     selectedLine.status !== "cancelled";
-  const canUploadEvidence = packetStatusKey === "draft";
+  const canUploadEvidence = !isFinanceView && packetStatusKey === "draft";
   const intacctPreview = useMemo(
     () => buildIntacctApBillPreview(selectedRequest, intacctConfig),
     [selectedRequest, intacctConfig]
@@ -1599,7 +1601,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       if (status === "passed") {
         setActionStatus({
           type: "success",
-          message: "Validation passed. You can send this packet to finance.",
+          message: "Validation passed. Packet is ready to send.",
         });
         return;
       }
@@ -2126,17 +2128,28 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     </span>
   );
 
-  const canValidatePacket = packetStatusKey === "draft";
-  const canReadyPacket = packetStatusKey === "draft" && packetStatusValue !== "ready_to_send" && isValidated;
-  const canSubmitPacket = packetStatusValue === "ready_to_send" && isValidated;
+  const canValidatePacket = !isFinanceView && packetStatusKey === "draft";
+  const canSubmitPacket = !isFinanceView && packetStatusValue === "ready_to_send" && isValidated;
   const latestIntacctAttempt = useMemo(
     () => resolveLatestIntacctAttempt(selectedRequest),
     [selectedRequest]
   );
   const intacctOutcome = resolveIntacctOutcome(latestIntacctAttempt);
   const canReopenPacket =
+    !isFinanceView &&
     packetStatusKey === "submitted" &&
     (intacctOutcome === "failed" || intacctOutcome === "partial");
+  const activePacketSummary = useMemo(
+    () =>
+      [
+        selectedRequest?.id ? `Packet ${selectedRequest.id}` : null,
+        selectedRequest?.clientName || null,
+        selectedRequest?.caseNumber ? `Case ${selectedRequest.caseNumber}` : null,
+      ]
+        .filter(Boolean)
+        .join(" • "),
+    [selectedRequest]
+  );
 
   const activeEvidenceDocuments = activeEvidenceRow?.documentLinks ?? [];
   const activeEvidenceContext = activeEvidenceRow
@@ -2158,17 +2171,11 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           disabled={!selectedRequest?.id || validationSubmitting}
           loading={validationSubmitting}
         >
-          {validationSubmitting ? "Validating" : "Validate"}
-        </Button>
-      ) : null}
-      {canReadyPacket ? (
-        <Button
-          variant="primary"
-          onClick={() => handlePacketStatusChange("ready_to_send")}
-          disabled={!selectedRequest?.id || submitSubmitting}
-          loading={submitSubmitting}
-        >
-          {submitSubmitting ? "Updating" : "Mark ready to send"}
+          {validationSubmitting
+            ? "Validating"
+            : packetStatusValue === "ready_to_send"
+              ? "Re-validate"
+              : "Validate"}
         </Button>
       ) : null}
       {canSubmitPacket ? (
@@ -2193,7 +2200,9 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     </SpaceBetween>
   ) : undefined;
   const detailDescription =
-    "Add payment lines, attach evidence, validate, then send to finance. Sending emails finance or submits to Intacct and locks edits.";
+    isFinanceView
+      ? "Inspect the selected packet's lines, evidence, and Intacct preview."
+      : "Add payment lines, attach evidence, validate, then send to finance. Sending emails finance or submits to Intacct and locks edits.";
   return (
     <BoardItem
       header={
@@ -2220,6 +2229,11 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     >
       {selectedRequest ? (
         <SpaceBetween size="m">
+          {activePacketSummary ? (
+            <Box variant="small" color="text-body-secondary">
+              Viewing {activePacketSummary}
+            </Box>
+          ) : null}
           {actionStatus && (
             <Alert type={actionStatus.type} dismissible onDismiss={() => setActionStatus(null)}>
               {actionStatus.message}

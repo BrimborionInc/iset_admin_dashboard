@@ -31,6 +31,7 @@ Provide a clear public entry point for NWAC staff who need to access PATH before
 - Write for NWAC staff accessing PATH, not for product marketing or technical demonstration.
 - Do not claim that the public page is role-aware before sign-in.
 - Do not let release notes dominate the initial viewport.
+- Keep landing-page release notes build-generated from `docs/meta/next-release-notes-log.md`, not hardcoded in the component.
 - Prefer operational wording such as applications, cases, reporting, support, and access.
 - Keep the applicant portal obvious but secondary to staff sign-in.
 

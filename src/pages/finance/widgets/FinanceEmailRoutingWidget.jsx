@@ -173,7 +173,7 @@ const FinanceEmailRoutingWidget = ({ actions = {}, metadata = {}, toggleHelpPane
         <Header
           variant="h2"
           info={infoLink}
-          description="Configure one finance recipient per province or territory for outbound payment packets."
+          description="Configure one or more finance recipients per province or territory for outbound payment packets."
           actions={
             <SpaceBetween direction="horizontal" size="xs">
               <Toggle
@@ -227,6 +227,9 @@ const FinanceEmailRoutingWidget = ({ actions = {}, metadata = {}, toggleHelpPane
             Automatic finance email sending (SES) is currently {draftEnabled ? "enabled" : "disabled"}.
             When disabled, packet submission continues but finance emails are suppressed and logged as skipped.
           </Box>
+          <Box color="text-body-secondary" fontSize="body-s">
+            Separate multiple addresses with commas or semicolons.
+          </Box>
           <Table
             items={rows}
             columnDefinitions={[
@@ -241,7 +244,7 @@ const FinanceEmailRoutingWidget = ({ actions = {}, metadata = {}, toggleHelpPane
                 cell: item => (
                   <Input
                     value={item.email}
-                    placeholder="finance@example.org"
+                    placeholder="finance@example.org, backup@example.org"
                     autoComplete="off"
                     onChange={({ detail }) => {
                       setDraftRouting(current => ({

@@ -21,21 +21,21 @@ const FinancePaymentCommsHelp = () => (
     <Box>
       <strong>How to use</strong>
       <ul>
+        <li>Select a packet in the queue to focus the log on that packet, or clear selection to review all packets together.</li>
         <li>Filter or search the table by packet ID, subject, or recipient to locate past messages.</li>
-        <li>Log manual communications when offline channels (phone, Teams) generate follow-up actions.</li>
         <li>Review template usage to ensure standard request wording is applied consistently.</li>
       </ul>
     </Box>
     <Box>
       <strong>Next steps</strong>
       <p>
-        Use manual entries only for offline conversations so the audit trail stays complete and consistent.
+        Use this log to confirm when packets were sent and which packets still need follow-up.
       </p>
     </Box>
   </SpaceBetween>
 );
 
 FinancePaymentCommsHelp.aiContext =
-  "Explain the payment communications log: automatic email entries from packets sent to finance, manual log entries, filtering by packet or recipient, and how attachments support audit trails.";
+  "Explain the Batch Payments communications log: automatic email entries from packets sent to finance, packet-scoped versus all-packets viewing, filtering by packet or recipient, and how attachments support audit trails.";
 
 export default FinancePaymentCommsHelp;

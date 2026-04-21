@@ -32,10 +32,10 @@ Widgets:
 
 ### Finance Payments (`/finance/payments`)
 Widgets:
-- **Payment packet queue**: Draft, sent, and confirmed filters for oversight.
-- **Payment packet detail**: Read-only view of lines, evidence, and the Intacct XML (Draft) preview tab.
-- **Payment communications**: Email log for sent packets.
-- **SLA snapshot**: Drafts needing evidence and sent-packet age metrics.
+- **Payment packet queue**: Oversight queue with filters for current packet slices; select one packet at a time to inspect.
+- **Payment packet detail**: Read-only view of lines, evidence, and the Intacct XML (Draft) preview tab for the selected packet.
+- **Payment communications**: Email log for the selected packet or, when no packet is selected, across all packets.
+- **SLA snapshot**: Optional widget available from the dashboard palette when you need a metrics summary.
 
 ## 5) Status lifecycle (packet + line)
 Packet statuses (typical path):
@@ -91,8 +91,10 @@ This keeps evidence, claim amounts, and fiscal-year reporting clean. Historical 
 5. Note: Uploading sets evidence to **Received**. Sending is blocked until required evidence is received.
 
 ### D) Send to Finance
-1. Click **Send to finance** once required evidence is received.
-2. The system emails the configured finance address and locks edits on the packet.
+1. Click **Validate** once required evidence is received.
+2. If validation passes, PATH automatically marks the packet **Ready to send**.
+3. Click **Send to finance**.
+4. The system emails the configured finance address and locks edits on the packet.
 
 ### E) Intacct XML preview (Draft)
 1. Open **Intacct XML (Draft)** in the Payment packet detail tabs.
@@ -193,8 +195,8 @@ Test steps:
    - Expected: Line saves with updated values and evidence checklist updates.
 3. **Evidence upload**: Upload baseline and line evidence.
    - Expected: Evidence shows as **Received** and listed in the checklist.
-4. **Validate and mark ready**: Validate the packet, then mark it ready to send.
-   - Expected: Validation passes and the packet moves to `Ready to send`.
+4. **Validate**: Validate the packet.
+   - Expected: If validation passes, PATH automatically moves the packet to `Ready to send`.
 5. **Send to finance**: Click **Send to finance**.
    - Expected: Status changes to `Sent to finance`, an email log entry is created, and the packet locks.
 6. **Record payment**: Mark one line as paid or confirm the packet through the finance follow-up flow.

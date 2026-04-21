@@ -816,6 +816,7 @@ const WorkQueueItemsTableWidget = ({
         item.applicant,
         item.title,
         item.trackingId,
+        item.approvalRequestTypeLabel,
         item.metricSubject,
         item.status,
         item.owner,

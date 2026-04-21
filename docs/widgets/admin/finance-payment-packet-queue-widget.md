@@ -14,7 +14,7 @@ Payments AP Integrations
 
 ## Purpose
 
-Operational queue for packet triage and submission.
+Oversight queue for drilling into one packet at a time.
 
 ## User Actions (observed)
 
@@ -37,4 +37,6 @@ Operational queue for packet triage and submission.
 ## Current Notes
 
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
+- In `/finance/payments`, queue selection is single-select and drives the detail/communications drill-down state.
+- The default finance queue filter opens on `Unsubmitted` to reduce clutter and surface current work first.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.

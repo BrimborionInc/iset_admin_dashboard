@@ -158,7 +158,7 @@ Batch UI:
 MVP (compliance-critical):
 - Packet + line creation.
 - Evidence engine with living allowance/tuition/equipment/TWS hard gates.
-- Validate, mark ready, and send to finance.
+- Validate, auto-mark ready, and send to finance.
 - Mark paid / confirm payment in PATH.
 - Auto-create `finance_transaction` on confirmation.
 - Audit trail and basic duplicate warnings.

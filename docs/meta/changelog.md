@@ -2,6 +2,14 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-04-21
+- Fix/Notifications/Approvals: Approval-decision bell alerts now show the actual approver action for application reviews, with `Request Changes` and denials no longer reusing a generic green `Assessment submitted` notification and request-changes alerts now surfacing as yellow warnings.
+- UX/Landing Page: Public landing-page release notes are now generated from the maintained release-notes log during build, stamped with the deployed release ID/date, and no longer depend on a separate hardcoded version label that can drift from the live build.
+- UX/Admin shell: The visible admin build/version line now uses the deployed release/build identity instead of the stale package semver, keeping the footer build stamp aligned with the published landing-page release notes.
+- Fix/Approvals/Wizards: Queue-launched application and intervention approvals now keep the explicit `decision` entry step instead of letting local wizard-step restore or the old Cloudscape navigation-priming workaround bounce approvers back to step 1 or another stale step.
+- Fix/Approvals/Workspaces: Queue-launched application and intervention approvals now start on their approval-review board layouts without overwriting the user's saved normal workspace layout, and board quick actions/reset work again after launch.
+- UX/Workflow/Wizards: Application Assessment and Intervention Assessment now switch their widget heading and lead-in copy to match the current phase, so drafting, approval, and follow-up states no longer reuse assessment-era labels.
+
 ## 2026-04-20
 - Fix/Agreements/CFA: Client Funding Agreement signature prefill now prefers the assigned case manager on the case and stores that signer name in the CFA version snapshot so later sends/regenerations do not drift to the staff member who happened to click Generate or Send.
 - Fix/Documents/PDF: Case manager assessment signature blocks now prefer staff display names from PATH profiles and read approval/submission signatures from the current shared event store before falling back to legacy case-event rows, avoiding raw email addresses on newly generated assessment PDFs.
@@ -816,3 +824,10 @@ Format: YYYY-MM-DD - Category: Short description
 - Home: Metrics widget now reports `Funds approved`, `Funds committed`, and `Funds actual` with those meanings.
 - Case workspace: Funding header and Finance panel now separate approved, committed, and actual amounts, and remaining balances subtract both committed and actual.
 - Finance budgets: Pot rollups and remaining-balance calculations now derive committed totals from submitted finance transactions rather than approved intervention amounts.
+
+## 2026-04-21
+- UX: Batch Payments now behaves as an oversight dashboard, not a second send/edit workbench.
+- UX: Finance queue selection is now single-select and no longer auto-loads the first packet when nothing is selected.
+- UX: Batch Payments detail is now inspection-only; create/edit/validate/send flows stay in the program workspace.
+- UX: Batch Payments communications now clearly switch between active-packet and all-packets views, and the finance page hides manual-log actions.
+- UX: SLA snapshot now starts in the widget palette instead of the default Batch Payments layout.

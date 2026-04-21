@@ -2,21 +2,27 @@
 
 Purpose: running capture of user-facing fixes/changes for the next "What's New" update on `src/pages/LandingPage.jsx`.
 
-Current public release in Landing Page: `v0.5.8` (`26th March 2026`)
-Target next release notes draft: `v0.5.9` (date TBD)
-Last Updated: 2026-04-20
+Last Updated: 2026-04-21
+
+Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
 ## How to use
 
 - Add an entry whenever a user-visible bug fix, UX change, workflow change, or operationally meaningful behavior change is merged/implemented.
 - Include enough context that a future thread can convert entries into polished "What's New", "Known Bugs", and "Coming Soon" sections.
 - Keep entries concise and factual; avoid speculative language.
+- Keep the draft bullet sections at the bottom of this file current in both English and French. The normal build/deploy path now generates `src/generated/publicReleaseNotes.js` from those sections, so missing sections or empty lists will break the build.
 - If Bill asks for a bullet summary of the last week's user-interesting fixes/changes, use this log as the primary source but also review `docs/meta/codex-thread-index.md` for recent user-visible work that may not have originated from a bug report or change request.
 - Do not assume the feedback-report queue is a complete source for weekly user-facing summaries; include relevant non-queue improvements when they materially changed the product experience.
 
 ## Entry format
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
+
+2026-04-21 | Release v0.5.9 | UX/Approvals | Homepage Approvals queue + Application/Case Workspace | Fixed a bug where opening an approval item could still bounce approvers back to step 1 or another stale wizard step instead of the decision step. | Explicit approval-entry step intent now overrides local wizard-step restore state in both the application and intervention approval widgets.
+2026-04-21 | Release v0.5.9 | UX/Approvals | Homepage Approvals queue + Application/Case Workspace | Fixed a bug where opening an approval item could land on the wrong board layout, while `Reset layout` and the board quick-action layouts stopped working afterward. | Approval-mode workspaces now start on the review board without overwriting the saved normal board, and normal board quick actions/reset keep working after launch.
+2026-04-21 | Release v0.5.9 | UX/Workflow | Application Assessment + Intervention Assessment | Made the wizard headings and lead-in text match the phase staff are in, so proposal, approval, and follow-up states no longer keep draft-era labels. | Application workflow now reads as assessment vs approval vs follow-up; intervention workflow now reads as propose/update vs review vs follow-up.
+2026-04-21 | Release v0.5.9 | Fix/Notifications | Application approval bell alerts | Fixed approval-decision notifications so approver actions now say whether the application was approved, denied, or sent back for changes instead of reusing a generic assessment-submitted or review-complete alert. | Request-changes and denial decisions now surface as warnings, and decision saves no longer emit a duplicate approver-side `Assessment submitted` bell row.
 
 ## Hotfix note style
 
@@ -188,6 +194,7 @@ Last Updated: 2026-04-20
 - 2026-03-10 | Release v0.5.4 | UX/Data | Application Assessment + Case Workspace > Other Funding step | Refactored Other Funding into a structured flow with `involved?` state, repeatable non-NWAC funders, NWAC coverage summary, and optional notes. | Persists backward-compatible summary text while storing structured detail for future coordination/letter workflows.
 - 2026-03-10 | Release v0.5.4 | UX | Application Workspace + Case Workspace > Proposed Intervention Cost Items | Cost-item add/edit modal now includes early payee capture fields (`payee type`, `payee name`, optional `reference`) without adding a new table column. | Payee remains optional at costing-step progression time.
 - 2026-03-10 | Release v0.5.4 | Workflow/Validation | Batch Payments > Payment Packet Detail | Packet validation now blocks submission when payee details are missing and surfaces both top-level block messaging and line-level `Payee missing` indicators. | New validation code path emits line-addressable `payee_missing` policy errors.
+- 2026-04-21 | Release TBD | UX | Batch Payments dashboard | Reworked Batch Payments into a cleaner oversight view: single-packet selection now drives detail, finance-side edit/send actions were removed, communications clearly scope to the selected packet or all packets, and SLA snapshot now starts in the palette instead of the default layout. | Aligns the finance dashboard with its oversight purpose and removes the misleading multi-select/detail coupling.
 - 2026-03-10 | Release v0.5.4 | API/Data | Intervention -> Payments Auto Seeding | Auto-generated payment lines now inherit payee values from proposal cost lines when provided (including optional payee reference), with existing fallback payee derivation retained. | Reduces re-entry of payee data at draft packet stage.
 - 2026-03-09 | Release v0.5.4 | Ops/Storage | Demo Controls > Clear ISET test data | Clear-test now deletes linked object-store documents as part of reset flow, preventing new upload orphans after DB clear. | Endpoint now reports `objectKeySources` and `objectPurge` summary in response payload.
 - 2026-03-09 | Release v0.5.4 | Safety/Ops | Demo Controls > Clear ISET test data | Added bucket safety guard to block clear-test object purge when `OBJECT_BUCKET` appears production-like (`prod`). | DB clear still runs; object purge is skipped with reason in summary.
@@ -209,28 +216,44 @@ Last Updated: 2026-04-20
 
 ## Draft sections for Landing Page
 
-### What's New (draft bullets)
+### What's New (draft bullets - EN)
 
-- Fixed a bug where some Regional Managers could not open case files that were already assigned to them if those files belonged to a different region.
-- Made a change so the admin intake editor, preview, and Manual Intake follow the same conditional step rules as the public application form.
-- Notification Settings now lets admins configure the PATH sender email used for PATH-generated SES mail, with the value shared across the admin dashboard and portal through runtime config.
-- v0.5.4: Reporting > Data and Results now uses a cleaner 3-column control layout with participant province/territory, case manager, fiscal year, and demo-mode controls aligned to the workbook-style reporting page.
-- v0.5.4: Reporting > Data and Results now supports case-manager slice-and-dice filtering on the live PATH-backed operational sections, while keeping Quarterly Data Uploads agreement-wide.
-- v0.5.4: Reporting > Data and Results AOP targets are now maintained per fiscal year, keeping target editing aligned with the selected reporting year.
-- Homepage conflict queue workflow now emphasizes reassignment as the inline remediation path (`Reassign`/`Assign`) and removes inline conflict resolve.
-- Homepage help guidance has been aligned with current queue operations and widget controls across Program Admin/Regional Manager/ISET Coordinator views.
-- Assessment Step 1 now surfaces current EI verification documents directly in the wizard, marks the latest as current, and updates the list immediately when a new EI report is added.
-- ISET Application Form edit mode now enforces SIN format + checksum validation before allowing save.
-- Assessment wizard Step 1 was clarified as `Assess Eligibility` with role-appropriate guidance and cleaner eligibility-copy/denial-action layout.
-- Assessment wizard `Cancel` now exits edit mode cleanly (with confirmation) instead of remaining on the same step.
-- Version History now shows human-friendly `Changes Saved by` names and a `View changes` diff instead of raw JSON.
-- Secure Messaging attachments now open via S3 presigned links (no local `/uploads` dependency).
-- Legacy local-static `/uploads` delivery path has been retired in favor of S3-only document downloads.
+- Approval items now open the correct review layout and decision step in both the application and case workspaces instead of dropping staff back into an old personal board or remembered wizard step.
+- Application, intervention, and revision wizards now use clearer phase-based headings and guidance so staff can tell more easily whether they are drafting, reviewing, or completing follow-up work.
+- Revised intervention submissions now generate a fresh case-manager assessment PDF, and revised client funding agreements can now redline against the immediately previous agreement in the series.
+- Application approval handling is more coherent: decisions now write real outcome statuses right away, request-changes notes appear immediately, and follow-up communication steps behave more consistently.
+- Finance packet routing is more flexible: province finance addresses can use multiple recipients, and case-manager sender, reply-to, and CC details are now carried through when available.
+- Client and case views now resolve participant names more consistently across the Clients table, case header, and applicant details displays, reducing mismatches between different workspace surfaces.
+- Approval queues now show clearer request types for new applications, additional interventions, and proposed intervention changes, with more stable launch behavior from the homepage.
+- The public landing page now publishes release notes from this log and stamps them with the deployed release ID/date so the published notes and the visible build line stay in sync.
 
-### Known Bugs (draft bullets)
+### Known Bugs (draft bullets - EN)
 
-- None logged yet for `v0.5.4`.
+- No major release-blocking issues are currently logged for this release.
+- Some labels and workflow wording are still being refined as the new approval and revision flows settle into everyday use.
 
-### Coming Soon (draft bullets)
+### Coming Soon (draft bullets - EN)
 
-- TBD.
+- Further cleanup of approval and revision status wording so staff can see more clearly whether PATH is dealing with a new application, an additional intervention, or a proposed change to an approved intervention.
+- Continued finance and document workflow hardening around payment packets, supporting evidence, and generated client correspondence.
+
+### Nouveautes (brouillon - FR)
+
+- Les elements d'approbation ouvrent maintenant la bonne disposition de revision et la bonne etape de decision dans les espaces de travail des demandes et des dossiers, au lieu de ramener le personnel a une ancienne disposition personnelle ou a une etape memorisee.
+- Les assistants de demande, d'intervention et de revision utilisent maintenant des titres et des indications mieux adaptes a la phase en cours, afin qu'il soit plus facile de voir si le personnel prepare, revise ou termine un suivi.
+- Les soumissions de revision d'intervention generent maintenant un nouveau PDF d'evaluation du gestionnaire de cas, et les ententes de financement revisees peuvent maintenant afficher les modifications par rapport a l'entente precedente immediate de la serie.
+- Le traitement des decisions d'approbation des demandes est plus coherent: les decisions ecrivent immediatement le bon resultat, les notes de demande de changements apparaissent tout de suite et les etapes de suivi se comportent de facon plus uniforme.
+- Les courriels de lots de paiement prennent maintenant en charge l'acheminement par province, ainsi que l'expediteur, le repondre-a, la copie conforme et plusieurs adresses pour le gestionnaire de cas lorsque ces adresses sont configurees.
+- Les vues client et dossier resolvent maintenant plus uniformement le nom de la participante dans le tableau Clients, l'en-tete du dossier et les details de la demandeuse, ce qui reduit les ecarts entre les ecrans.
+- Les files d'attente d'approbation affichent maintenant des types de demande plus clairs pour les nouvelles demandes, les interventions additionnelles et les changements proposes aux interventions approuvees, avec un lancement plus fiable depuis la page d'accueil.
+- La page d'accueil publique publie maintenant les notes de version a partir de ce journal et les marque avec l'identifiant et la date de la version deployee afin que les notes publiees et la ligne de build visible restent synchronisees.
+
+### Problemes connus (brouillon - FR)
+
+- Aucun probleme bloquant majeur n'est actuellement consigne pour cette version.
+- Certains libelles et certaines formulations de flux de travail continuent d'etre affines pendant que les nouveaux flux d'approbation et de revision se stabilisent.
+
+### A venir (brouillon - FR)
+
+- Poursuivre le nettoyage du libelle des statuts d'approbation et de revision afin que le personnel voie plus clairement si PATH traite une nouvelle demande, une intervention additionnelle ou un changement propose a une intervention approuvee.
+- Poursuivre le renforcement des flux de travail financiers et documentaires autour des lots de paiement, des pieces justificatives et de la correspondance client generee.

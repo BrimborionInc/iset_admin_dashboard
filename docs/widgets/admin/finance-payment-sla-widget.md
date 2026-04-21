@@ -37,4 +37,5 @@ SLA and turnaround metrics for packet handling.
 ## Current Notes
 
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
+- The finance dashboard now starts with this widget in the palette rather than on the default layout.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.

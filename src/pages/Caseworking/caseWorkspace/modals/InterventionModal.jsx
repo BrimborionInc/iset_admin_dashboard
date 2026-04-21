@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Autosuggest,
+  Badge,
   Box,
   Button,
   ColumnLayout,
@@ -311,6 +312,8 @@ const InterventionModal = ({
   nocVersions = [],
   nocVersionsLoading = false,
   onSearchNocCodes = () => Promise.resolve([]),
+  pendingRevision = null,
+  pendingRevisionStatusLabel = null,
 }) => {
   const currentUser = useCurrentUser();
   const role = currentUser?.role ? currentUser.role : null;
@@ -459,6 +462,16 @@ const InterventionModal = ({
         ? "View intervention"
         : "Edit intervention"
       : "Add intervention";
+  const modalHeaderContent = (
+    <Header
+      variant="h2"
+      actions={
+        pendingRevision?.id ? <Badge color="blue">Revision pending</Badge> : undefined
+      }
+    >
+      {modalHeader}
+    </Header>
+  );
   useEffect(() => {
     if (!visible) return;
     if (mode !== "edit") return;
@@ -1049,7 +1062,7 @@ const InterventionModal = ({
   return (
     <Modal
       visible={visible}
-      header={modalHeader}
+      header={modalHeaderContent}
       onDismiss={handleCancel}
       closeAriaLabel={
         mode === "edit"

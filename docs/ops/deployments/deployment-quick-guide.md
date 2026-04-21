@@ -265,7 +265,7 @@ tmp/path-deploy/<env>/
 
 - Admin console: check the subtle version line at the bottom of the landing page.
 - Public portal: open the Help page and check the version line near the bottom.
-- The line shows the package version plus the deploy release ID and git SHA when available.
+- The admin landing page now also generates its public release-notes panel from `docs/meta/next-release-notes-log.md` during build, so the visible landing-page notes heading should carry the same deployed release ID/date as the footer build line.
 
 ## How To Ask Codex
 

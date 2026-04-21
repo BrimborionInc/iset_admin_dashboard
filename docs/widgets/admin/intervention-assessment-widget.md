@@ -38,3 +38,4 @@ Propose and stage intervention details for approvals.
 
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.
+- The widget header and lead-in copy are now phase-aware: draft flows use proposal/change wording, approval flows use review wording, and completion/follow-up states use completion or letter-follow-up wording instead of leaving the widget titled `Proposed new intervention` throughout.

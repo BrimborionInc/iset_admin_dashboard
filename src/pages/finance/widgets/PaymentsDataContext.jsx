@@ -564,7 +564,7 @@ const buildPaymentsQuery = ({
   return params.toString();
 };
 
-export const PaymentsDataProvider = ({ children, filters = {} }) => {
+export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst = true }) => {
   const {
     status,
     statuses,
@@ -673,8 +673,12 @@ export const PaymentsDataProvider = ({ children, filters = {} }) => {
     if (selectedRequestId && requests.some(entry => entry.id === selectedRequestId)) {
       return;
     }
-    setSelectedRequestId(requests[0].id);
-  }, [requests, selectedRequestId]);
+    if (autoSelectFirst) {
+      setSelectedRequestId(requests[0].id);
+      return;
+    }
+    setSelectedRequestId(null);
+  }, [autoSelectFirst, requests, selectedRequestId]);
 
   const selectRequest = useCallback(requestId => {
     setSelectedRequestId(requestId ?? null);

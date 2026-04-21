@@ -13,12 +13,13 @@ import FinancePaymentDetailHelp from "../../helpPanelContents/financePaymentDeta
 import FinancePaymentCommsHelp from "../../helpPanelContents/financePaymentCommsHelp.js";
 import FinancePaymentSlaHelp from "../../helpPanelContents/financePaymentSlaHelp.js";
 
-const STORAGE_KEY = "finance-payments-layout-v1";
+const STORAGE_KEY = "finance-payments-layout-v2";
 
 const widgetRegistry = {
   requests: {
     id: "requests",
     component: PaymentRequestsWidget,
+    mode: "finance",
     title: "Payment packet queue",
     description: "Draft packets created as needed before they are sent to finance.",
     helpComponent: FinancePaymentRequestsHelp,
@@ -30,6 +31,7 @@ const widgetRegistry = {
   detail: {
     id: "detail",
     component: PaymentDetailWidget,
+    mode: "finance",
     title: "Payment packet detail",
     description: "Payment lines and evidence for the packet currently being sent to finance.",
     helpComponent: FinancePaymentDetailHelp,
@@ -41,6 +43,7 @@ const widgetRegistry = {
   comms: {
     id: "comms",
     component: PaymentCommunicationWidget,
+    mode: "finance",
     title: "Payment communications",
     description: "Email log for packets already sent to finance.",
     helpComponent: FinancePaymentCommsHelp,
@@ -52,6 +55,7 @@ const widgetRegistry = {
   sla: {
     id: "sla",
     component: PaymentSlaWidget,
+    mode: "finance",
     title: "SLA snapshot",
     description: "Evidence completeness and turnaround metrics.",
     helpComponent: FinancePaymentSlaHelp,
@@ -65,7 +69,6 @@ const widgetRegistry = {
 const defaultLayout = [
   { id: "requests", rowSpan: 5, columnSpan: 4 },
   { id: "detail", rowSpan: 4, columnSpan: 2 },
-  { id: "sla", rowSpan: 2, columnSpan: 2 },
   { id: "comms", rowSpan: 4, columnSpan: 4 },
 ];
 
@@ -90,6 +93,7 @@ const toBoardItems = layout =>
         columnSpan: item.columnSpan ?? definition.defaultColumnSpan,
         columnOffset: item.columnOffset,
         data: {
+          mode: definition.mode,
           title: definition.title,
           description: definition.description,
           component: definition.component,
@@ -273,7 +277,7 @@ const FinancePaymentsPage = ({
   };
 
   return (
-    <PaymentsDataProvider>
+    <PaymentsDataProvider autoSelectFirst={false}>
       <SpaceBetween size="l">
         <Board
           i18nStrings={boardI18nStrings}

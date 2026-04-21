@@ -1476,6 +1476,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     workspaceEntry?.mode === "approval" && workspaceEntry?.approvalType === "intervention"
       ? workspaceEntry
       : null;
+  const approvalRequestedStep = approvalWorkspaceEntry?.step || null;
   const {
     caseId: workspaceCaseId,
     caseData,
@@ -1554,7 +1555,6 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   const [clientLetterBody, setClientLetterBody] = useState("");
   const [sendingLetter, setSendingLetter] = useState(false);
   const [sendingLetterError, setSendingLetterError] = useState(null);
-  const [decisionLetterSuccess, setDecisionLetterSuccess] = useState(null);
   const [showSendApprovalLetterConfirmModal, setShowSendApprovalLetterConfirmModal] = useState(false);
   const [eiVerificationFile, setEiVerificationFile] = useState(null);
   const [eiVerificationFileError, setEiVerificationFileError] = useState(null);
@@ -1848,7 +1848,12 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   const decisionOutcomeKey = String(form.decisionOutcome || "").trim().toLowerCase();
   const isApprovedDecisionOutcome = decisionOutcomeKey === "approved";
   const isRejectedDecisionOutcome = decisionOutcomeKey === "rejected";
-  const showDecisionLettersPanel = Boolean(completionNote && (isApprovedDecisionOutcome || isRejectedDecisionOutcome));
+  const showDecisionLettersPanel = Boolean(
+    completionNote &&
+      completionNote.showDecisionLetters !== false &&
+      (isApprovedDecisionOutcome || isRejectedDecisionOutcome)
+  );
+  const decisionLetterAlreadySent = Boolean(completionNote?.decisionLetterSent);
   const role = currentUser?.role || null;
   const roleKey = normalizeRoleKey(role);
   const canonicalRole = role === "Regional Manager" ? "Regional Manager" : role;
@@ -2272,6 +2277,13 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     if (!keyChanged && !stepsChanged) return;
     wizardStepRestoreKeyRef.current = wizardStepKey;
     wizardStepRestoreStepsRef.current = stepSignature;
+    const requestedStep = pendingApprovalStepRef.current || approvalRequestedStep || null;
+    if (requestedStep && activeStepIds.includes(requestedStep)) {
+      if (requestedStep !== currentStep) {
+        setCurrentStep(requestedStep);
+      }
+      return;
+    }
     const storedStep = resolveStoredStep(wizardStepKey, activeStepIds);
     if (storedStep && activeStepIds.includes(storedStep) && storedStep !== currentStep) {
       setCurrentStep(storedStep);
@@ -2280,10 +2292,10 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     if (stepsChanged && !activeStepIds.includes(currentStep)) {
       setCurrentStep(BASE_STEP_IDS[0]);
     }
-  }, [wizardStepKey, activeStepIds, currentStep, resolveStoredStep]);
+  }, [wizardStepKey, activeStepIds, approvalRequestedStep, currentStep, resolveStoredStep]);
 
   useEffect(() => {
-    const requestedStep = pendingApprovalStepRef.current || null;
+    const requestedStep = pendingApprovalStepRef.current || approvalRequestedStep || null;
     if (!wizardStepKey || !requestedStep) return;
     if (!activeStepIds.includes(requestedStep)) return;
     const requestedInterventionId = approvalWorkspaceEntry?.interventionId
@@ -2306,6 +2318,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     pendingApprovalStepRef.current = null;
   }, [
     activeStepIds,
+    approvalRequestedStep,
     approvalWorkspaceEntry,
     currentStep,
     hydratedDraftId,
@@ -3621,7 +3634,12 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       const detail = event?.detail || {};
       const interventionId = detail.interventionId;
       if (!interventionId) return;
-      pendingApprovalStepRef.current = detail.requestedStep || null;
+      const requestedStep =
+        detail.requestedStep ||
+        pendingApprovalStepRef.current ||
+        approvalRequestedStep ||
+        null;
+      pendingApprovalStepRef.current = requestedStep;
       const selectionKey = caseId ? `${caseId}:${interventionId}` : null;
       const storedStep = resolveStoredStep(selectionKey);
       if (typeof setSelectedInterventionId === "function") {
@@ -3638,7 +3656,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       setSuccessMessage("");
       setCompletionNote(null);
       setAttemptedSteps({});
-      setCurrentStep(storedStep || BASE_STEP_IDS[0]);
+      setCurrentStep(
+        requestedStep && activeStepIds.includes(requestedStep)
+          ? requestedStep
+          : storedStep || BASE_STEP_IDS[0]
+      );
       if (planId) {
         const numericPlanId = Number(planId);
         const resolvedPlanId = Number.isFinite(numericPlanId) ? numericPlanId : planId;
@@ -3692,6 +3714,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       }
     };
   }, [
+    activeStepIds,
+    approvalRequestedStep,
     caseId,
     hasBlockingProposal,
     resolveStoredStep,
@@ -3728,7 +3752,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       null;
     if (!target?.id) return;
     approvalSelectionAppliedRef.current = approvalKey;
-    pendingApprovalStepRef.current = approvalWorkspaceEntry.step || "decision";
+    pendingApprovalStepRef.current = approvalRequestedStep || "decision";
     setSelectedDraftId(target.id);
     setHydratedDraftId(null);
     setHydratedDraftUpdatedAt(null);
@@ -3749,6 +3773,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       actionPlanId: target.actionPlanId ? String(target.actionPlanId) : prev.actionPlanId,
     }));
   }, [
+    approvalRequestedStep,
     approvalWorkspaceEntry,
     caseData,
     caseId,
@@ -3860,7 +3885,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         ? [...BASE_STEP_IDS, ...SUBMITTED_STEP_IDS]
         : BASE_STEP_IDS;
       const storedStep = resolveStoredStep(storedStepKey, stepIds);
-      const requestedStep = pendingApprovalStepRef.current;
+      const requestedStep = pendingApprovalStepRef.current || approvalRequestedStep || null;
       const nextStep =
         (requestedStep && stepIds.includes(requestedStep) ? requestedStep : null) ||
         storedStep ||
@@ -3896,6 +3921,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       hydrate(fallbackDraft);
     }
   }, [
+    approvalRequestedStep,
     caseData,
     caseId,
     form.actionPlanId,
@@ -4090,6 +4116,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         isRevisionMode ? proposedInterventions.slice(0, 1) : proposedInterventions
       );
       const primary = primaryIntervention;
+      const primaryCostLines = Array.isArray(primary?.costLines)
+        ? primary.costLines.map(serializeCostLine)
+        : [];
       const primaryStartDate = primary?.startDate || "";
       const primaryEndDate = primary?.endDate || "";
       const interventionDuration = calculateDurationDays(primaryStartDate, primaryEndDate);
@@ -4126,6 +4155,20 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                 },
               }
             : {}),
+          snapshot: {
+            code: primary?.code || null,
+            startDate: primaryStartDate || null,
+            endDate: primaryEndDate || null,
+            deliveryMode: primary?.deliveryMode === "in_house" ? "in_house" : "partner",
+            institution: primary?.institution || "",
+            programName: primary?.programName || "",
+            itpDetails: primary?.itpDetails || "",
+            wageSubsidyDetails: primary?.wageSubsidyDetails || "",
+            nocVersion: primary?.interventionNocVersion || "",
+            nocCode: primary?.interventionNoc || "",
+            costLines: primaryCostLines,
+          },
+          costLines: primaryCostLines,
           proposedInterventions: proposedPayload.length ? proposedPayload : null,
           rationale: form.rationale || "",
           barriers: Array.isArray(form.barriers) ? form.barriers.map(item => item.value || item) : [],
@@ -4149,6 +4192,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       proposedInterventions,
       revisionContext,
       serializeProposedInterventions,
+      serializeCostLine,
       interventionTotals,
       resolveInterventionLabel,
     ]
@@ -4327,19 +4371,23 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
 
   const uploadEiVerificationIfSelected = useCallback(
     async ({ interventionId } = {}) => {
-      if (isFormLocked) return true;
-      if (!eiVerificationFile) return true;
+      if (isFormLocked) return { ok: true, documentId: form.eiVerificationDocumentId || null };
+      if (!eiVerificationFile) return { ok: true, documentId: form.eiVerificationDocumentId || null };
       if (!form.eiVerificationStatus) {
         setEiVerificationUploadError("Select an eligibility value to upload the document.");
-        return false;
+        return { ok: false, error: new Error("Select an eligibility value to upload the document."), documentId: null };
       }
       if (!applicantUserId) {
         setEiVerificationUploadError("Unable to determine the applicant for this upload.");
-        return false;
+        return { ok: false, error: new Error("Unable to determine the applicant for this upload."), documentId: null };
       }
       if (!interventionId) {
         setEiVerificationUploadError("Save progress to create the intervention record before uploading EI verification.");
-        return false;
+        return {
+          ok: false,
+          error: new Error("Save progress to create the intervention record before uploading EI verification."),
+          documentId: null,
+        };
       }
       setEiVerificationUploading(true);
       setEiVerificationUploadError(null);
@@ -4391,15 +4439,15 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         setEiVerificationUploadSuccess(`Uploaded ${uploadedName}.`);
         setEiVerificationFile(null);
         setEiVerificationFileError(null);
-        return true;
+        return { ok: true, documentId: documentId || null };
       } catch (err) {
         setEiVerificationUploadError(err?.message || "Failed to upload EI verification document.");
-        return false;
+        return { ok: false, error: err, documentId: null };
       } finally {
         setEiVerificationUploading(false);
       }
     },
-    [apiFetch, applicantUserId, caseId, eiVerificationFile, form.eiVerificationStatus, isFormLocked]
+    [apiFetch, applicantUserId, caseId, eiVerificationFile, form.eiVerificationDocumentId, form.eiVerificationStatus, isFormLocked]
   );
 
   const addCaseNote = useCallback(
@@ -4431,12 +4479,29 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   );
 
   const buildApprovedInterventionPayload = useCallback(
-    (intervention, { approvedStatus = "approved", potId = null, postingContext = null } = {}) => {
+    (intervention, { approvedStatus = "approved", potId = null, postingContext = null, eiDocumentId = null } = {}) => {
       const totalCost = interventionTotals.get(intervention.id) || 0;
       const durationDays = calculateDurationDays(intervention.startDate, intervention.endDate);
       const approvedCostLines = Array.isArray(intervention.costLines)
         ? intervention.costLines.filter(hasApprovedFundingAmount).map(serializeCostLine)
         : [];
+      const approvedProposedInterventions = [
+        {
+          id: intervention.id || buildUuid(),
+          code: intervention.code || null,
+          startDate: intervention.startDate || null,
+          endDate: intervention.endDate || null,
+          deliveryMode: intervention.deliveryMode === "in_house" ? "in_house" : "partner",
+          institution: intervention.institution || null,
+          programName: intervention.programName || null,
+          itpDetails: intervention.itpDetails || null,
+          wageSubsidyDetails: intervention.wageSubsidyDetails || null,
+          interventionNoc: intervention.interventionNoc || null,
+          interventionNocVersion: intervention.interventionNocVersion || null,
+          cost: totalCost,
+          costLines: approvedCostLines,
+        },
+      ];
       return {
         code: intervention.code || null,
         title: resolveInterventionLabel(intervention.code) || "Intervention",
@@ -4462,9 +4527,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
             wageSubsidyDetails: intervention.wageSubsidyDetails || "",
             nocVersion: intervention.interventionNocVersion || "",
             nocCode: intervention.interventionNoc || "",
+            costTotal: totalCost,
             costLines: approvedCostLines,
           },
           costLines: approvedCostLines,
+          proposedInterventions: approvedProposedInterventions,
           rationale: form.rationale || "",
           barriers: Array.isArray(form.barriers) ? form.barriers.map(item => item.value || item) : [],
           otherFundingDetails: normalizeOtherFundingDetails(
@@ -4480,68 +4547,12 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
           review: {
             eiStatus: form.eiVerificationStatus || "",
             decision: "approved",
-            eiDocumentId: form.eiVerificationDocumentId || null,
+            eiDocumentId: eiDocumentId || form.eiVerificationDocumentId || null,
           },
         },
       };
     },
     [form, interventionTotals, resolveInterventionLabel, serializeCostLine]
-  );
-
-  const resetProposalState = useCallback(
-    () => {
-      const keysToClear = [];
-      if (caseId) {
-        if (activeInterventionIdValue) {
-          keysToClear.push(`${caseId}:${activeInterventionIdValue}`);
-        }
-        keysToClear.push(`${caseId}:draft`);
-      }
-      if (typeof clearInterventionWizardDraft === "function") {
-        keysToClear.forEach(key => clearInterventionWizardDraft(key));
-      }
-      if (typeof clearInterventionWizardStep === "function") {
-        keysToClear.forEach(key => clearInterventionWizardStep(key));
-      }
-
-      setSelectedDraftId(null);
-      setHydratedDraftId(null);
-      setHydratedDraftUpdatedAt(null);
-      setCurrentInterventionStatus(null);
-      setRevisionContext(null);
-      if (typeof setSelectedInterventionId === "function") {
-        setSelectedInterventionId(null);
-      }
-
-      const nextForm = { ...defaultFormState };
-      setForm(nextForm);
-      initialFormRef.current = nextForm;
-      setCurrentStep(BASE_STEP_IDS[0]);
-      setAttemptedSteps({});
-      setDecisionBlockerVisible(false);
-      setDecisionBlockerReasons([]);
-      setDecisionBlockerTargetStep(null);
-      setEiVerificationFile(null);
-      setEiVerificationFileError(null);
-      setEiVerificationUploadError(null);
-      setEiVerificationUploadSuccess(null);
-      setApprovalLetterPackTabId("client");
-      setApprovalLetterPackGenerated(false);
-      setClientLetterBody("");
-      setSendingLetterError(null);
-      setDecisionLetterSuccess(null);
-      setShowSendApprovalLetterConfirmModal(false);
-    },
-    [
-      activeInterventionIdValue,
-      caseId,
-      clearInterventionWizardDraft,
-      clearInterventionWizardStep,
-      setClientLetterBody,
-      setDecisionLetterSuccess,
-      setRevisionContext,
-      setSelectedInterventionId,
-    ]
   );
 
   const resolvedApprovalPotId = useMemo(() => {
@@ -4642,10 +4653,6 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
           reasons.push("Set EI eligibility for approval.");
           targetStep = targetStep || "decision";
         }
-        if (!form.eiVerificationDocumentId && !eiVerificationFile) {
-          reasons.push("Upload an EI verification document to approve.");
-          targetStep = targetStep || "decision";
-        }
         if (hasPlanFundingMismatch) {
           reasons.push(`Action Plan funding stream must match EI eligibility (${requiredFundingStream}).`);
           targetStep = targetStep || "decision";
@@ -4686,11 +4693,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     },
     [
       activeInterventionIdValue,
-      eiVerificationFile,
       form.actionPlanId,
       form.decisionNotes,
       form.decisionOutcome,
-      form.eiVerificationDocumentId,
       form.eiVerificationStatus,
       actionPlanFundingDraft,
       hasPlanFundingMismatch,
@@ -4746,11 +4751,12 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
             isRevisionMode && revisionSourceInterventionId
               ? revisionSourceInterventionId
               : activeInterventionIdValue;
-          const uploadOk = await uploadEiVerificationIfSelected({ interventionId: uploadTargetInterventionId });
-          if (!uploadOk) {
+          const uploadResult = await uploadEiVerificationIfSelected({ interventionId: uploadTargetInterventionId });
+          if (!uploadResult?.ok) {
             setIsSubmitting(false);
             return { ok: false };
           }
+          const approvalEiDocumentId = uploadResult?.documentId || form.eiVerificationDocumentId || null;
           const interventionsToCreate = proposedInterventions.length
             ? (isRevisionMode ? proposedInterventions.slice(0, 1) : proposedInterventions)
             : [];
@@ -4765,6 +4771,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
               approvedStatus: revisionSourceStatus || "approved",
               potId: approvalPotId,
               postingContext: approvalPostingContext,
+              eiDocumentId: approvalEiDocumentId,
             });
             const updated = await updateInterventionRecord(
               sourceActionPlanId,
@@ -4774,8 +4781,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                 revisionAppliedFromInterventionId: Number(activeInterventionIdValue),
               }
             );
-            if (form.eiVerificationDocumentId) {
-              await linkEiDocumentToInterventions(form.eiVerificationDocumentId, [
+            if (approvalEiDocumentId) {
+              await linkEiDocumentToInterventions(approvalEiDocumentId, [
                 updated?.id || Number(revisionSourceInterventionId),
               ]);
             }
@@ -4796,19 +4803,21 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
             setApprovalLetterPackTabId("client");
             setClientLetterBody("");
             setSendingLetterError(null);
-            setDecisionLetterSuccess(null);
             setCompletionNote({
               type: cleanupError ? "info" : "success",
               header: cleanupError ? "Revision applied with follow-up needed" : "Revision workflow complete",
               body: cleanupError
                 ? `The approved revision was applied to ${revisionSourceTitle}, but the temporary revision draft could not be cleaned up automatically. ${cleanupError.message || "Delete it from the interventions table if needed."} Decision letters can be prepared below if needed.`
                 : `The approved revision was applied to ${revisionSourceTitle}. Decision letters can be prepared below if needed.`,
+              followUpIssue: cleanupError ? "draft_cleanup_failed" : null,
+              showDecisionLetters: true,
             });
           } else {
             const [primary, ...rest] = interventionsToCreate;
             const primaryPayload = buildApprovedInterventionPayload(primary, {
               potId: approvalPotId,
               postingContext: approvalPostingContext,
+              eiDocumentId: approvalEiDocumentId,
             });
             const updated = await updateInterventionRecord(actionPlanId, Number(activeInterventionIdValue), primaryPayload);
             const created = [];
@@ -4816,13 +4825,14 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
               const payload = buildApprovedInterventionPayload(intervention, {
                 potId: approvalPotId,
                 postingContext: approvalPostingContext,
+                eiDocumentId: approvalEiDocumentId,
               });
               const row = await createIntervention(actionPlanId, payload);
               if (row?.id) created.push(row.id);
             }
             const allIds = [updated?.id || Number(activeInterventionIdValue), ...created].filter(Boolean);
-            if (form.eiVerificationDocumentId) {
-              await linkEiDocumentToInterventions(form.eiVerificationDocumentId, allIds);
+            if (approvalEiDocumentId) {
+              await linkEiDocumentToInterventions(approvalEiDocumentId, allIds);
             }
             setCurrentInterventionStatus("approved");
             setSuccessMessage("Interventions approved and created.");
@@ -4830,11 +4840,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
             setApprovalLetterPackTabId("client");
             setClientLetterBody("");
             setSendingLetterError(null);
-            setDecisionLetterSuccess(null);
             setCompletionNote({
               type: "success",
               header: "Intervention workflow complete",
               body: "Approved interventions were created. Decision letters can be prepared below if needed. Start a new proposal from the Interventions table when you are ready.",
+              showDecisionLetters: true,
             });
           }
         } else {
@@ -4853,13 +4863,13 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
             setApprovalLetterPackTabId("client");
             setClientLetterBody("");
             setSendingLetterError(null);
-            setDecisionLetterSuccess(null);
             setCompletionNote({
               type: "info",
               header: isRevisionMode ? "Revision closed" : "Proposal closed",
               body: isRevisionMode
                 ? `The revision was denied and ${revisionSourceTitle} was left unchanged. Decision letters can be prepared below if needed.`
                 : "The proposal was denied and closed. Decision letters can be prepared below if needed. Start a new proposal from the Interventions table when needed.",
+              showDecisionLetters: true,
             });
           }
         }
@@ -5190,9 +5200,52 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     isRevisionMode,
     participantLegalName,
   ]);
+  const buildSentLetterCompletionNote = useCallback(() => {
+    if (isApprovedDecisionOutcome) {
+      if (isRevisionMode) {
+        if (completionNote?.followUpIssue === "draft_cleanup_failed") {
+          return {
+            type: "info",
+            header: "Client letter sent with follow-up still needed",
+            body: `The approved revision was applied to ${revisionSourceTitle}, and the client funding revision letter was sent to the client's secure messages. Remove the leftover temporary revision draft from the interventions table if needed.`,
+            followUpIssue: completionNote.followUpIssue,
+            decisionLetterSent: true,
+            showDecisionLetters: false,
+          };
+        }
+        return {
+          type: "success",
+          header: "Revision complete",
+          body: `The approved revision was applied to ${revisionSourceTitle}, and the client funding revision letter was sent to the client's secure messages.`,
+          decisionLetterSent: true,
+          showDecisionLetters: false,
+        };
+      }
+      return {
+        type: "success",
+        header: "Intervention workflow complete",
+        body: "Approved interventions were created, and the client approval letter was sent to the client's secure messages. Supporting letters remain available below if you need them.",
+        decisionLetterSent: true,
+        showDecisionLetters: true,
+      };
+    }
+    return {
+      type: "info",
+      header: isRevisionMode ? "Revision closed" : "Proposal closed",
+      body: isRevisionMode
+        ? `The revision was denied, ${revisionSourceTitle} was left unchanged, and the client denial letter was sent to the client's secure messages.`
+        : "The proposal was denied, and the client denial letter was sent to the client's secure messages.",
+      decisionLetterSent: true,
+      showDecisionLetters: !isRevisionMode,
+    };
+  }, [
+    completionNote,
+    isApprovedDecisionOutcome,
+    isRevisionMode,
+    revisionSourceTitle,
+  ]);
   const handleSendPreparedDecisionLetter = useCallback(async () => {
     if (sendingLetter) return;
-    setDecisionLetterSuccess(null);
     if (isApprovedDecisionOutcome) {
       setShowSendApprovalLetterConfirmModal(true);
       return;
@@ -5204,10 +5257,13 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
           : activeInterventionIdValue,
     });
     if (result?.ok) {
-      setDecisionLetterSuccess("Client denial letter sent.");
+      setApprovalLetterPackGenerated(false);
+      setSendingLetterError(null);
+      setCompletionNote(buildSentLetterCompletionNote());
     }
   }, [
     activeInterventionIdValue,
+    buildSentLetterCompletionNote,
     handleSendDecisionLetter,
     isApprovedDecisionOutcome,
     isRevisionMode,
@@ -5224,57 +5280,87 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
           : activeInterventionIdValue,
     });
     if (result?.ok) {
-      setDecisionLetterSuccess(isRevisionMode ? "Client funding revision letter sent." : "Client approval letter sent.");
+      setApprovalLetterPackGenerated(false);
+      setSendingLetterError(null);
+      setCompletionNote(buildSentLetterCompletionNote());
     }
-  }, [activeInterventionIdValue, handleSendDecisionLetter, isRevisionMode, revisionSourceInterventionId, sendingLetter]);
+  }, [
+    activeInterventionIdValue,
+    buildSentLetterCompletionNote,
+    handleSendDecisionLetter,
+    isRevisionMode,
+    revisionSourceInterventionId,
+    sendingLetter,
+  ]);
   useEffect(() => {
     if (isApprovedDecisionOutcome || isRejectedDecisionOutcome) return;
     setApprovalLetterPackGenerated(false);
     setApprovalLetterPackTabId("client");
     setClientLetterBody("");
     setSendingLetterError(null);
-    setDecisionLetterSuccess(null);
     setShowSendApprovalLetterConfirmModal(false);
   }, [isApprovedDecisionOutcome, isRejectedDecisionOutcome]);
 
-  const handleStartAnotherProposal = useCallback(() => {
-    setCompletionNote(null);
-    setSuccessMessage("");
-    setError(null);
-    resetProposalState();
-  }, [resetProposalState]);
-
-  const headerDescription = completionNote
-    ? "This intervention workflow is complete."
+  const interventionWidgetTitle = completionNote
+    ? showDecisionLettersPanel
+      ? isRevisionMode
+        ? "Intervention change follow-up"
+        : "Intervention approval follow-up"
+      : isRevisionMode
+        ? "Intervention change complete"
+        : "Intervention proposal complete"
     : isReviewStageStatus && isEditable && isRevisionMode && !canDecideSubmittedProposal
-      ? `Update the revision for ${revisionSourceTitle}. Record of decision is limited to approver roles.`
+      ? "Update intervention change"
       : isReviewStageStatus && isEditable && !canDecideSubmittedProposal
-        ? "Update the proposal. Record of decision is limited to approver roles."
+        ? "Update intervention proposal"
+        : isReviewStageStatus && isRevisionMode
+          ? "Review intervention change"
+          : isReviewStageStatus
+            ? "Review intervention proposal"
+            : isEditable && isRevisionMode
+              ? "Propose intervention change"
+              : isEditable
+                ? "Propose new intervention"
+                : statusValue && isRevisionMode
+                  ? "Intervention change proposal"
+                  : statusValue
+                    ? "Intervention proposal"
+                    : "Intervention assessment";
+  const headerDescription = completionNote
+    ? showDecisionLettersPanel
+      ? isApprovedDecisionOutcome
+        ? "The decision is recorded. Prepare or send the approval letters and related funding documents from here if needed."
+        : "The decision is recorded. Prepare or send the client decision letter from here if needed."
+      : null
+    : isReviewStageStatus && isEditable && isRevisionMode && !canDecideSubmittedProposal
+      ? `Update the proposed change to ${revisionSourceTitle}. Record of decision is limited to approver roles.`
+      : isReviewStageStatus && isEditable && !canDecideSubmittedProposal
+        ? "Update the submitted proposal. Record of decision is limited to approver roles."
     : isReviewStageStatus && isEditable && isRevisionMode
-      ? `Review the revision for ${revisionSourceTitle}, verify EI status, and record the decision.`
+      ? `Review the proposed change to ${revisionSourceTitle}, verify EI status, and record the decision.`
       : isReviewStageStatus && isEditable
-        ? "Review the proposal, verify EI status, and record the decision."
+        ? "Review the submitted proposal, verify EI status, and record the decision."
         : isEditable && isRevisionMode
-          ? `Revise ${revisionSourceTitle}. The approved intervention stays unchanged until this revision is approved.`
+          ? `Draft a proposed change to ${revisionSourceTitle}. The approved intervention stays unchanged until this change is approved.`
           : isEditable
-            ? "Propose new interventions for this client. Save progress to finish later. Only one draft proposal can exist at a time."
+            ? "Draft a new intervention proposal for this client. Save progress to finish later. Only one draft proposal can exist at a time."
             : statusValue && isRevisionMode
-              ? `Viewing the revision for ${revisionSourceTitle} in read-only mode.`
+              ? `Viewing the proposed change to ${revisionSourceTitle} in read-only mode.`
               : statusValue
-                ? "Viewing this proposal in read-only mode."
+                ? "Viewing this submitted proposal in read-only mode."
     : "Select a draft or proposal in review from the Interventions table to view it here.";
 
   const infoLink = metadata.helpComponent && toggleHelpPanel ? (
-    <Link
-      variant="info"
-      onFollow={event => {
-        event.preventDefault();
-        const helpContent = React.createElement(metadata.helpComponent);
-        toggleHelpPanel(helpContent, metadata.helpTitle ?? "Proposed interventions", metadata.aiContext ?? "");
-      }}
-    >
-      Info
-    </Link>
+        <Link
+          variant="info"
+          onFollow={event => {
+            event.preventDefault();
+            const helpContent = React.createElement(metadata.helpComponent);
+            toggleHelpPanel(helpContent, interventionWidgetTitle, metadata.aiContext ?? "");
+          }}
+        >
+          Info
+        </Link>
   ) : undefined;
 
   const planStepContent = (
@@ -6013,15 +6099,12 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
           <FormField
             label="EI Verification document"
             errorText={
-              eiVerificationFileError ||
-              (showDecisionErrors && !form.eiVerificationDocumentId && !eiVerificationFile
-                ? "EI verification document is required."
-                : undefined)
+              eiVerificationFileError || undefined
             }
             stretch
           >
             <Box variant="small" color="text-body-secondary">
-              Max size 6 MB. Allowed types: PDF, Word (.doc, .docx), JPG, PNG, BMP, TIFF.
+              Optional. Max size 6 MB. Allowed types: PDF, Word (.doc, .docx), JPG, PNG, BMP, TIFF.
             </Box>
             <SpaceBetween size="xs" direction="horizontal">
               <Button
@@ -6112,7 +6195,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
             <SpaceBetween direction="horizontal" size="xs">
               <Button
                 onClick={generateLetterPackDrafts}
-                disabled={!canGenerateLetterDrafts || letterWorkflowsLoading}
+                disabled={!canGenerateLetterDrafts || letterWorkflowsLoading || decisionLetterAlreadySent}
                 loading={false}
                 iconAlign="left"
                 iconName="gen-ai"
@@ -6122,7 +6205,12 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
               <Button
                 variant="primary"
                 onClick={handleSendPreparedDecisionLetter}
-                disabled={!activeLetterWorkflowId || sendingLetter || (!approvalLetterPackGenerated && !String(clientLetterBody || "").trim())}
+                disabled={
+                  !activeLetterWorkflowId ||
+                  sendingLetter ||
+                  decisionLetterAlreadySent ||
+                  (!approvalLetterPackGenerated && !String(clientLetterBody || "").trim())
+                }
                 loading={sendingLetter}
               >
                 {isApprovedDecisionOutcome
@@ -6147,11 +6235,6 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         {sendingLetterError && (
           <Alert type="error" statusIconAriaLabel="Error" dismissible onDismiss={() => setSendingLetterError(null)}>
             {sendingLetterError}
-          </Alert>
-        )}
-        {decisionLetterSuccess && (
-          <Alert type="success" statusIconAriaLabel="Success" dismissible onDismiss={() => setDecisionLetterSuccess(null)}>
-            {decisionLetterSuccess}
           </Alert>
         )}
         {isApprovedDecisionOutcome ? (
@@ -7045,6 +7128,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         info={infoLink}
         actions={
           <SpaceBetween direction="horizontal" size="s">
+            {isRevisionMode && <Badge color="blue">Revision</Badge>}
             <Badge color={statusBadgeColor}>{statusLabel}</Badge>
             {isEditable && !completionNote && (!isReviewStageStatus || !canDecideSubmittedProposal) && (
               <Button variant="primary" disabled={!isDirty} onClick={handleSave}>
@@ -7054,7 +7138,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
           </SpaceBetween>
         }
       >
-        {isRevisionMode ? "Revise approved intervention" : "Proposed new intervention"}
+        {interventionWidgetTitle}
       </Header>
     } i18nStrings={boardItemI18nStrings} settings={
       <ButtonDropdown
@@ -7065,9 +7149,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       />
     }>
       <div id="intervention-assessment-widget">
-        <Box variant="small" margin={{ bottom: "s" }}>
-          {headerDescription}
-        </Box>
+        {headerDescription ? (
+          <Box variant="small" margin={{ bottom: "s" }}>
+            {headerDescription}
+          </Box>
+        ) : null}
         {error && (
           <Alert type="error" dismissible onDismiss={() => setError(null)} statusIconAriaLabel="Error">
             {error}
@@ -7084,7 +7170,6 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
               type={completionNote.type || "success"}
               header={completionNote.header}
               statusIconAriaLabel={completionNote.type === "info" ? "Info" : "Success"}
-              action={<Button onClick={handleStartAnotherProposal}>Start new proposal</Button>}
             >
               {completionNote.body}
             </Alert>

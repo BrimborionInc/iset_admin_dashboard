@@ -17,8 +17,10 @@ import { boardItemI18nStrings } from "./common";
 import { usePaymentsData } from "./PaymentsDataContext.jsx";
 
 const COLUMN_WIDTHS_STORAGE_KEY = "finance-payments-communications-widths-v2";
-const PREFERENCES_STORAGE_KEY = "finance-payments-communications-preferences-v2";
+const LEGACY_PREFERENCES_STORAGE_KEY = "finance-payments-communications-preferences-v2";
+const PREFERENCES_STORAGE_KEY = "finance-payments-communications-preferences-v3";
 const DEFAULT_PAGE_SIZE = 10;
+const CLIENT_NAME_COLUMN_ID = "clientName";
 
 const directionBadge = {
   outbound: { label: "Sent", color: "blue" },
@@ -26,6 +28,11 @@ const directionBadge = {
 };
 
 const baseColumns = [
+  {
+    id: CLIENT_NAME_COLUMN_ID,
+    header: "Client name",
+    cell: item => item.clientName ?? "-",
+  },
   {
     id: "sentOn",
     header: "Timestamp",
@@ -76,6 +83,20 @@ const defaultPreferences = {
   visibleColumns: baseColumns.map(column => column.id),
 };
 
+const normalizePreferences = (parsed, { includeClientName = false } = {}) => {
+  const visibleColumns = Array.isArray(parsed?.visibleColumns)
+    ? parsed.visibleColumns.filter(id => baseColumns.some(column => column.id === id))
+    : defaultPreferences.visibleColumns;
+  const nextVisibleColumns =
+    includeClientName && !visibleColumns.includes(CLIENT_NAME_COLUMN_ID)
+      ? [CLIENT_NAME_COLUMN_ID, ...visibleColumns]
+      : visibleColumns;
+  return {
+    pageSize: Number.isFinite(parsed?.pageSize) ? parsed.pageSize : DEFAULT_PAGE_SIZE,
+    visibleColumns: nextVisibleColumns.length ? nextVisibleColumns : defaultPreferences.visibleColumns,
+  };
+};
+
 const loadColumnWidths = () => {
   if (typeof window === "undefined") {
     return [];
@@ -96,20 +117,17 @@ const loadPreferences = () => {
     return defaultPreferences;
   }
   try {
-    const raw = window.localStorage.getItem(PREFERENCES_STORAGE_KEY);
-    if (!raw) {
-      return defaultPreferences;
+    const currentRaw = window.localStorage.getItem(PREFERENCES_STORAGE_KEY);
+    if (currentRaw) {
+      return normalizePreferences(JSON.parse(currentRaw));
     }
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") {
-      return defaultPreferences;
+
+    const legacyRaw = window.localStorage.getItem(LEGACY_PREFERENCES_STORAGE_KEY);
+    if (legacyRaw) {
+      return normalizePreferences(JSON.parse(legacyRaw), { includeClientName: true });
     }
-    return {
-      pageSize: Number.isFinite(parsed.pageSize) ? parsed.pageSize : DEFAULT_PAGE_SIZE,
-      visibleColumns: Array.isArray(parsed.visibleColumns)
-        ? parsed.visibleColumns.filter(id => baseColumns.some(column => column.id === id))
-        : defaultPreferences.visibleColumns,
-    };
+
+    return defaultPreferences;
   } catch (error) {
     console.error("[Payments] failed to parse communication preferences", error);
     return defaultPreferences;
@@ -117,7 +135,8 @@ const loadPreferences = () => {
 };
 
 const PaymentCommunicationWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
-  const { communications, selectedRequestId, addCommunication } = usePaymentsData();
+  const { requests, communications, selectedRequestId, addCommunication } = usePaymentsData();
+  const isFinanceView = metadata?.mode === "finance";
 
   const [filteringText, setFilteringText] = useState("");
   const [columnWidths, setColumnWidths] = useState(() => loadColumnWidths());
@@ -130,8 +149,20 @@ const PaymentCommunicationWidget = ({ actions = {}, metadata = {}, toggleHelpPan
     return baseColumns.filter(column => set.has(column.id));
   }, [preferences.visibleColumns]);
 
+  const communicationItems = useMemo(() => {
+    const clientNameByPacketId = new Map(
+      (requests || [])
+        .filter(item => item?.id)
+        .map(item => [String(item.id), item.clientName ?? null]),
+    );
+    return (communications || []).map(item => ({
+      ...item,
+      clientName: item.clientName ?? clientNameByPacketId.get(String(item.packetId)) ?? null,
+    }));
+  }, [communications, requests]);
+
   const filteredItems = useMemo(() => {
-    return communications.filter(item => {
+    return communicationItems.filter(item => {
       if (item.channel && item.channel !== "email") {
         return false;
       }
@@ -149,7 +180,7 @@ const PaymentCommunicationWidget = ({ actions = {}, metadata = {}, toggleHelpPan
         (item.recipients ?? []).some(recipient => recipient.toLowerCase().includes(lower))
       );
     });
-  }, [communications, selectedRequestId, filteringText]);
+  }, [communicationItems, selectedRequestId, filteringText]);
 
   const pageSize = preferences.pageSize ?? DEFAULT_PAGE_SIZE;
   const pagesCount = Math.max(1, Math.ceil(filteredItems.length / pageSize));
@@ -282,7 +313,8 @@ const PaymentCommunicationWidget = ({ actions = {}, metadata = {}, toggleHelpPan
     />
   );
 
-  const logTargetId = selectedRequestId ?? communications[0]?.packetId ?? null;
+  const selectedPacketLabel = selectedRequestId ? `Packet ${selectedRequestId}` : null;
+  const logTargetId = isFinanceView ? null : selectedRequestId ?? communicationItems[0]?.packetId ?? null;
 
   return (
     <BoardItem
@@ -290,7 +322,11 @@ const PaymentCommunicationWidget = ({ actions = {}, metadata = {}, toggleHelpPan
         <Header
           variant="h2"
           info={infoLink}
-          description="Track email interactions and attachments exchanged for finance packets."
+          description={
+            isFinanceView
+              ? "Review the communication history for the active packet or across all packets."
+              : "Track email interactions and attachments exchanged for finance packets."
+          }
         >
           Payment communications
         </Header>
@@ -308,6 +344,11 @@ const PaymentCommunicationWidget = ({ actions = {}, metadata = {}, toggleHelpPan
       i18nStrings={boardItemI18nStrings}
     >
       <SpaceBetween size="m">
+        <Box variant="small" color="text-body-secondary">
+          {selectedPacketLabel
+            ? `Showing communications for ${selectedPacketLabel}.`
+            : "Showing communications across all packets. Select a packet in the queue to focus this log."}
+        </Box>
         <SpaceBetween direction="horizontal" size="xs">
           <TextFilter
             filteringText={filteringText}
@@ -318,20 +359,22 @@ const PaymentCommunicationWidget = ({ actions = {}, metadata = {}, toggleHelpPan
             }}
             countText={`${filteredItems.length} match${filteredItems.length === 1 ? "" : "es"}`}
           />
-          <Button
-            iconName="add-plus"
-            disabled={!logTargetId}
-            onClick={() =>
-              addCommunication({
-                packetId: logTargetId,
-                subject: "Follow-up note",
-                recipients: ["finance@nwac.org"],
-                direction: "outbound",
-              })
-            }
-          >
-            Log manual email
-          </Button>
+          {!isFinanceView ? (
+            <Button
+              iconName="add-plus"
+              disabled={!logTargetId}
+              onClick={() =>
+                addCommunication({
+                  packetId: logTargetId,
+                  subject: "Follow-up note",
+                  recipients: ["finance@nwac.org"],
+                  direction: "outbound",
+                })
+              }
+            >
+              Log manual email
+            </Button>
+          ) : null}
         </SpaceBetween>
         <Table
           trackBy="id"

@@ -2114,6 +2114,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     workspaceEntry?.mode === 'approval' && workspaceEntry?.approvalType === 'application'
       ? workspaceEntry
       : null;
+  const approvalRequestedStep = approvalWorkspaceEntry?.step || null;
   // State for form fields
   const [assessment, setAssessment] = useState(() => buildEmptyAssessment());
   const [initialAssessment, setInitialAssessment] = useState(() => buildEmptyAssessment());
@@ -2623,8 +2624,11 @@ const CoordinatorAssessmentWidget = forwardRef(
   }, [caseData, currentUserName]);
   const wizardStepKey = useMemo(() => {
     const baseId = caseData?.id ?? applicationId ?? application_id ?? null;
-    return baseId ? `assessment:${baseId}` : null;
-  }, [caseData?.id, applicationId, application_id]);
+    if (!baseId) return null;
+    const baseKey = `assessment:${baseId}`;
+    if (!approvalWorkspaceEntry?.key) return baseKey;
+    return `${baseKey}:approval:${approvalWorkspaceEntry.key}`;
+  }, [caseData?.id, applicationId, application_id, approvalWorkspaceEntry?.key]);
 
   const isDecisionFinal = APPLICATION_FINAL_STATUSES.has(normalizedApplicationStatus);
   const isLockedStatus = APPLICATION_LOCKED_STATUSES.has(normalizedApplicationStatus);
@@ -3170,6 +3174,12 @@ const CoordinatorAssessmentWidget = forwardRef(
     const steps = [...afterSubmit, ...COMMUNICATION_STEP_IDS];
     return showFundingDocsStep ? [...steps, ...FUNDING_DOCS_STEP_IDS] : steps;
   }, [showNWACSection, showCommunicationStep, showFundingDocsStep]);
+  const declarationContinueStep = useMemo(() => {
+    if (approvalRequestedStep && activeStepIds.includes(approvalRequestedStep)) {
+      return approvalRequestedStep;
+    }
+    return BASE_STEP_IDS[0];
+  }, [activeStepIds, approvalRequestedStep]);
   useEffect(() => {
     if (!pendingDecisionJump) return;
     if (!activeStepIds.includes('decision')) return;
@@ -4297,6 +4307,25 @@ const CoordinatorAssessmentWidget = forwardRef(
   const checklistUploadsLocked = isAssessmentDisabled && !isCommunicationStep && !isFundingDocsStep;
   const isNWACFieldsDisabled = baseAssessmentLocked || isEligibilityGateActive || !showNWACSection || !isPendingApprovalStatus || !canManageOutcomeReview;
   const isEligibilityDisabled = baseAssessmentLocked || isDeclarationGateActive || !isEligibilityAdmin;
+  const applicationWidgetTitle =
+    currentStep === FUNDING_DOCS_STEP_ID
+      ? 'Application approval follow-up'
+      : isCommunicationStep
+        ? 'Application decision follow-up'
+        : showNWACSection
+          ? 'Application approval'
+          : 'Application assessment';
+  const applicationWidgetHelpTitle = showNWACSection ? 'Application Approval Help' : 'Application Assessment Help';
+  const applicationPhaseDescription =
+    currentStep === FUNDING_DOCS_STEP_ID
+      ? 'The program decision is recorded. Complete the required funding forms and signatures before marking this workflow complete.'
+      : isCommunicationStep
+        ? 'The program decision is recorded. Prepare or send the applicant communication and complete any remaining approval follow-up from here.'
+        : currentStep === 'decision'
+          ? 'Review the submitted assessment, confirm the program decision, and capture any required approval notes.'
+          : showNWACSection
+            ? 'Review the submitted assessment and move it through the NWAC approval decision.'
+            : "Assess the applicant's needs, eligibility, and funding recommendation. Complete all required sections before submitting for approval.";
   const showDenyFundingShortcut = !isDecisionFinal && !isPostDecisionStatus;
   const denyFundingBlockedReason = (() => {
     if (!showDenyFundingShortcut) return '';
@@ -4324,6 +4353,12 @@ const CoordinatorAssessmentWidget = forwardRef(
     if (!keyChanged && !stepsChanged) return;
     wizardStepRestoreKeyRef.current = wizardStepKey;
     wizardStepRestoreStepsRef.current = stepSignature;
+    if (approvalRequestedStep && activeStepIds.includes(approvalRequestedStep)) {
+      if (approvalRequestedStep !== currentStep) {
+        setCurrentStep(approvalRequestedStep);
+      }
+      return;
+    }
     const storedStep = resolveStoredWizardStep(wizardStepKey, activeStepIds);
     if (storedStep && storedStep !== currentStep) {
       setCurrentStep(storedStep);
@@ -4332,10 +4367,10 @@ const CoordinatorAssessmentWidget = forwardRef(
     if (!activeStepIds.includes(currentStep)) {
       setCurrentStep(BASE_STEP_IDS[0]);
     }
-  }, [wizardStepKey, activeStepIds, currentStep, resolveStoredWizardStep]);
+  }, [wizardStepKey, activeStepIds, approvalRequestedStep, currentStep, resolveStoredWizardStep]);
 
   useEffect(() => {
-    const requestedStep = approvalWorkspaceEntry?.step || null;
+    const requestedStep = approvalRequestedStep;
     if (!wizardStepKey || !requestedStep) return;
     if (!activeStepIds.includes(requestedStep)) return;
     const approvalKey = `${wizardStepKey}:${approvalWorkspaceEntry.key}:${requestedStep}`;
@@ -4344,9 +4379,16 @@ const CoordinatorAssessmentWidget = forwardRef(
     if (currentStep !== requestedStep) {
       setCurrentStep(requestedStep);
     }
-  }, [activeStepIds, approvalWorkspaceEntry, currentStep, wizardStepKey]);
+  }, [activeStepIds, approvalRequestedStep, approvalWorkspaceEntry, currentStep, wizardStepKey]);
 
   useEffect(() => {
+    if (approvalRequestedStep) {
+      wizardNavPrimeRef.current = { signature: null, restoreStep: null };
+      if (wizardNavPriming) {
+        setWizardNavPriming(false);
+      }
+      return;
+    }
     if (!shouldUnlockWizardNavigation || activeStepIds.length < 2) return;
     const signature = activeStepIds.join('|');
     if (wizardNavPrimeRef.current.signature === signature) return;
@@ -4362,7 +4404,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       return;
     }
     wizardNavPrimeRef.current = { signature, restoreStep: null };
-  }, [shouldUnlockWizardNavigation, activeStepIds, currentStep]);
+  }, [approvalRequestedStep, activeStepIds, currentStep, shouldUnlockWizardNavigation, wizardNavPriming]);
 
   useEffect(() => {
     if (!wizardNavPriming) return;
@@ -5986,7 +6028,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       if (choice === 'conflict') {
         setConflictHoldModalVisible(true);
       } else {
-        setCurrentStep(BASE_STEP_IDS[0]);
+        setCurrentStep(declarationContinueStep);
         setAttemptedSteps({});
       }
       if (releaseAfterSuccess) {
@@ -6012,6 +6054,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     conflictDeclarationSigned,
     conflictDeclarationChoice,
     conflictDeclarationDetails,
+    declarationContinueStep,
     persistedConflictDeclarationDetails,
     normalizedPersistedConflictChoice,
     isSigningDeclaration,
@@ -8303,9 +8346,9 @@ ${JSON.stringify(contextPayload, null, 2)}`;
           onFollow={() => {
             if (!toggleHelpPanel) return;
             if (showNWACSection) {
-              toggleHelpPanel(<NwacAssessmentHelp />, 'NWAC Assessment Help', NwacAssessmentHelp.aiContext);
+              toggleHelpPanel(<NwacAssessmentHelp />, applicationWidgetHelpTitle, NwacAssessmentHelp.aiContext);
             } else {
-              toggleHelpPanel(<ApplicationAssessmentHelp />, 'Application Assessment Help', ApplicationAssessmentHelp.aiContext);
+              toggleHelpPanel(<ApplicationAssessmentHelp />, applicationWidgetHelpTitle, ApplicationAssessmentHelp.aiContext);
             }
           }}
         >
@@ -8314,7 +8357,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       }
     >
       <Hotspot hotspotId="app-workspace-assessment" direction="right" />
-      {showNWACSection ? 'NWAC Assessment' : 'Application Assessment'}
+      {applicationWidgetTitle}
     </Header>
   );
   const boardItemI18nStrings = {
@@ -11048,10 +11091,12 @@ ${JSON.stringify(contextPayload, null, 2)}`;
         <div ref={setWidgetRootRef}>
           <div ref={alertAnchorRef} />
           <Box variant="small" margin={{ bottom: 's' }}>
-            This form is used by the ISET admin team to assess the applicant's needs, eligibility, and funding recommendation.
+            {applicationPhaseDescription}
             {hasPersistedDeclaredConflict
               ? ' A conflict of interest was declared; assessment is locked until the conflict is resolved or the case is reassigned.'
-              : ' Complete the conflict of interest declaration below to unlock the assessment.'}
+              : showNWACSection
+                ? ' Complete the conflict of interest declaration below to unlock the approval review.'
+                : ' Complete the conflict of interest declaration below to unlock the assessment.'}
           </Box>
           {alert && (
             <Alert
@@ -11073,7 +11118,8 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                   client's application or assessment. If a conflict exists, describe it so the file can be triaged appropriately.
                 </Box>
                 <Box color="text-status-inactive">
-                  This declaration is recorded per staff member. Even if a previous owner signed, you must complete it before continuing your assessment work.
+                  This declaration is recorded per staff member. Even if a previous owner signed, you must complete it before continuing your
+                  {showNWACSection ? ' approval review.' : ' assessment work.'}
                 </Box>
               </Box>
               {declarationError && (
@@ -11163,7 +11209,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       <div ref={setWidgetRootRef}>
         <div ref={alertAnchorRef} />
         <Box variant="small" margin={{ bottom: 's' }}>
-          This form is used by the ISET admin team to assess the applicant’s needs, eligibility, and funding recommendation. Complete all required sections before submitting. After submission, the final approval fields will become available.
+          {applicationPhaseDescription}
         </Box>
         {validationAlert && (
           <Alert

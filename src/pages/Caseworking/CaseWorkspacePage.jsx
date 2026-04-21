@@ -320,6 +320,8 @@ const loadLayoutFromStorage = () => {
   }
 };
 
+const cloneLayout = layout => (Array.isArray(layout) ? layout.map(item => ({ ...item })) : []);
+
 const PALETTE_EXCLUDE_IDS = new Set();
 
 const computePaletteItems = items =>
@@ -394,15 +396,18 @@ const CaseWorkspacePage = ({
 }) => {
   const { caseId } = useParams();
   const location = useLocation();
+  const workspaceEntry = useMemo(() => parseWorkspaceEntry(location.search), [location.search]);
+  const isInterventionApprovalEntry =
+    workspaceEntry?.mode === "approval" && workspaceEntry?.approvalType === "intervention";
   const paymentFilters = useMemo(() => (caseId ? { caseId } : {}), [caseId]);
-  const [layout, setLayout] = useState(() => loadLayoutFromStorage() ?? [...defaultLayout]);
+  const [layout, setLayout] = useState(() =>
+    isInterventionApprovalEntry ? cloneLayout(interventionApprovalLayout) : loadLayoutFromStorage() ?? cloneLayout(defaultLayout)
+  );
   const boardItems = useMemo(() => toBoardItems(layout), [layout]);
   const paletteItems = useMemo(() => computePaletteItems(boardItems), [boardItems]);
   const paletteSignatureRef = useRef(JSON.stringify(paletteItems.map(item => item.id)));
   const approvalLayoutAppliedRef = useRef(null);
-  const workspaceEntry = useMemo(() => parseWorkspaceEntry(location.search), [location.search]);
-  const isInterventionApprovalEntry =
-    workspaceEntry?.mode === "approval" && workspaceEntry?.approvalType === "intervention";
+  const previousApprovalEntryRef = useRef(isInterventionApprovalEntry);
 
   useEffect(() => {
     if (typeof updateBreadcrumbs === "function") {
@@ -426,12 +431,28 @@ const CaseWorkspacePage = ({
         }
       }
     }
+    if (isInterventionApprovalEntry) {
+      return;
+    }
+    if (previousApprovalEntryRef.current && !isInterventionApprovalEntry) {
+      return;
+    }
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(exportLayout(boardItems)));
     } catch {
       // ignore storage issues in scaffold
     }
-  }, [boardItems, paletteItems, setAvailableItems]);
+  }, [boardItems, isInterventionApprovalEntry, paletteItems, setAvailableItems]);
+
+  useEffect(() => {
+    const wasApprovalEntry = previousApprovalEntryRef.current;
+    if (wasApprovalEntry && !isInterventionApprovalEntry) {
+      approvalLayoutAppliedRef.current = null;
+      const restoredLayout = loadLayoutFromStorage() ?? cloneLayout(defaultLayout);
+      setLayout(current => (areLayoutsEqual(current, restoredLayout) ? current : restoredLayout));
+    }
+    previousApprovalEntryRef.current = isInterventionApprovalEntry;
+  }, [isInterventionApprovalEntry]);
 
   const handleItemsChange = useCallback(({ detail }) => {
     if (!detail || !Array.isArray(detail.items)) return;
@@ -473,7 +494,10 @@ const CaseWorkspacePage = ({
   );
 
   const resetLayout = useCallback(() => {
-    setLayout(current => (areLayoutsEqual(current, defaultLayout) ? current : [...defaultLayout]));
+    setLayout(current => {
+      const nextLayout = cloneLayout(defaultLayout);
+      return areLayoutsEqual(current, nextLayout) ? current : nextLayout;
+    });
     const defaultPalette = computePaletteItems(toBoardItems(defaultLayout));
     paletteSignatureRef.current = JSON.stringify(defaultPalette.map(item => item.id));
     if (typeof setAvailableItems === "function") {
@@ -538,7 +562,10 @@ const CaseWorkspacePage = ({
 
   const applyLayout = useCallback(nextLayout => {
     if (!Array.isArray(nextLayout) || nextLayout.length === 0) return;
-    setLayout(current => (areLayoutsEqual(current, nextLayout) ? current : [...nextLayout]));
+    setLayout(current => {
+      const normalisedLayout = cloneLayout(nextLayout);
+      return areLayoutsEqual(current, normalisedLayout) ? current : normalisedLayout;
+    });
   }, [setLayout]);
 
   useEffect(() => {
