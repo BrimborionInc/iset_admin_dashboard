@@ -17,6 +17,7 @@ Created via:
 
 - `scripts/run-db-dump-via-ssm.sh --env test ...`
 - `scripts/run-db-dump-via-ssm.sh --env prod ...`
+- In the current Codex sandbox, the prod form of this helper works with the reduced role-backed `nwac-prod` profile because the helper now exports temporary credentials from the active AWS profile before copying the dump back to S3.
 
 ## Why raw PROD -> TEST is unsafe as-is
 

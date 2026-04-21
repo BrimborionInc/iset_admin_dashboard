@@ -6,7 +6,7 @@ The PATH deployment control plane now lives in `admin-dashboard` and is operated
 
 Deployed admin environments now force `DISABLE_AUTO_MIGRATIONS=true`, so this explicit deploy path is the intended schema-ownership path for TEST/PROD.
 
-Operator runtime caveat: in the current Codex sandbox, `npm` package scripts execute under Windows Node while the trusted operator AWS profiles live in the bash/WSL-side AWS CLI config. The control-plane scripts intentionally shell AWS-backed checks through `bash` so `nwac-test` / `nwac-prod` resolve consistently.
+Operator runtime caveat: in the current Codex sandbox, `npm` package scripts execute under Windows Node while the trusted operator AWS profiles live in the bash/WSL-side AWS CLI config. The control-plane scripts intentionally shell AWS-backed checks through `bash` so `nwac-test` / `nwac-prod` resolve consistently. `nwac-prod` is now a reduced assumed-role profile and `default` is only a bootstrap IAM user, so direct prod resource calls through `default` are expected to fail.
 For prod app rollout, the control plane now also exports credentials from the working bash-side profile into the Windows-side PowerShell deploy subprocesses before running the shared/admin/portal upload scripts and the ASG refresh.
 
 Use this from `X:\ISET\admin-dashboard` so one command can sequence:
@@ -161,6 +161,7 @@ Current autosave rollout note:
 
 - `prod`
   - Uses AWS profile `nwac-prod` by default in the Codex/operator control plane.
+  - `nwac-prod` now resolves to the reduced role `nwac-prod-codex-operator`; it covers `path:deploy`, prod SQL/dump helpers via SSM, ASG refresh, restore-point snapshots, and the ALB `path-maintenance-fallback` flow, but not broader infra/admin operations such as WAF changes, SSM env parameter writes, uploads-bucket CORS changes, or Terraform/ACM changes.
   - Captures an Aurora cluster snapshot restore point automatically when the planned run will apply canonical schema changes or allowlisted data promotion.
   - Runs canonical schema work remotely through SSM on a PROD app host.
   - Optional config/data promotion uses `scripts/path-data-sync.js`.
@@ -168,6 +169,7 @@ Current autosave rollout note:
   - The frontend bundles now carry a visible build stamp derived from package version + release ID + git SHA. Check the admin landing-page footer or the public portal Help page after deploy.
   - Smoke currently uses public `/healthz` URLs (`nwac-console.awentech.ca`, `iset.nwac.ca`, `nwac-public.awentech.ca`).
   - `scripts/run-prod-sql-via-ssm.sh` currently reads DB credentials from `nwac-prod-db-credentials`, but supplies the prod cluster host/database/port itself because that secret currently contains only `username` and `password`.
+  - `scripts/run-db-dump-via-ssm.sh` now uses `aws configure export-credentials`, so assumed-role profiles such as `nwac-prod` also work for prod dump capture.
 
 ## Key flags
 

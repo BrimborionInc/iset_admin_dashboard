@@ -186,12 +186,31 @@ if [[ -z "$INSTANCE_ID" ]]; then
   INSTANCE_ID="$(discover_instance_id)" || fail "Unable to find an online SSM-managed instance in ASG '$ASG_NAME'"
 fi
 
-CALLER_AWS_ACCESS_KEY_ID="$(aws configure get aws_access_key_id --profile "$AWS_PROFILE" || true)"
-CALLER_AWS_SECRET_ACCESS_KEY="$(aws configure get aws_secret_access_key --profile "$AWS_PROFILE" || true)"
-CALLER_AWS_SESSION_TOKEN="$(aws configure get aws_session_token --profile "$AWS_PROFILE" || true)"
+CALLER_AWS_ACCESS_KEY_ID=""
+CALLER_AWS_SECRET_ACCESS_KEY=""
+CALLER_AWS_SESSION_TOKEN=""
 
-[[ -n "$CALLER_AWS_ACCESS_KEY_ID" ]] || fail "Unable to resolve aws_access_key_id for profile '$AWS_PROFILE'"
-[[ -n "$CALLER_AWS_SECRET_ACCESS_KEY" ]] || fail "Unable to resolve aws_secret_access_key for profile '$AWS_PROFILE'"
+exported_creds="$(aws configure export-credentials --profile "$AWS_PROFILE" --format env-no-export 2>/dev/null || true)"
+if [[ -z "$exported_creds" ]]; then
+  fail "Unable to export AWS credentials for profile '$AWS_PROFILE'"
+fi
+
+while IFS='=' read -r key value; do
+  case "$key" in
+    AWS_ACCESS_KEY_ID)
+      CALLER_AWS_ACCESS_KEY_ID="$value"
+      ;;
+    AWS_SECRET_ACCESS_KEY)
+      CALLER_AWS_SECRET_ACCESS_KEY="$value"
+      ;;
+    AWS_SESSION_TOKEN)
+      CALLER_AWS_SESSION_TOKEN="$value"
+      ;;
+  esac
+done <<< "$exported_creds"
+
+[[ -n "$CALLER_AWS_ACCESS_KEY_ID" ]] || fail "Unable to resolve AWS_ACCESS_KEY_ID for profile '$AWS_PROFILE'"
+[[ -n "$CALLER_AWS_SECRET_ACCESS_KEY" ]] || fail "Unable to resolve AWS_SECRET_ACCESS_KEY for profile '$AWS_PROFILE'"
 
 REMOTE_DUMP="/tmp/$(basename "$S3_KEY")"
 PARAMS_FILE="$(mktemp)"

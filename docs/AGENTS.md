@@ -475,11 +475,13 @@ Notes:
 ### AWS CLI profile/account mapping (Codex sandbox)
 
 - Keep prod and test identities as separate AWS CLI profiles; never rely on implicit defaults.
-- Current known mappings in this Codex environment (re-verified 2026-04-04):
-  - `default` -> `arn:aws:iam::468278742295:user/nwac-prod-automation` (prod account `468278742295`)
-  - `nwac-prod` -> `arn:aws:iam::468278742295:user/nwac-prod-automation` (dedicated prod alias for Codex/operator use)
+- Current known mappings in this Codex environment (re-verified 2026-04-20 after the prod-role cutover):
+  - `default` -> `arn:aws:iam::468278742295:user/nwac-prod-automation` (bootstrap identity only; direct prod resource access is intentionally denied)
+  - `nwac-prod` -> `arn:aws:sts::468278742295:assumed-role/nwac-prod-codex-operator/codex-prod-operator` when assumed from `default`
+  - `nwac-prod-codex-operator` -> `arn:aws:sts::468278742295:assumed-role/nwac-prod-codex-operator/codex-prod-operator` when assumed from `default`
   - `nwac-test` -> `arn:aws:iam::124355655255:user/CODEX_CLI_Admin` (test account `124355655255`)
-- `npm`-spawned Windows processes do not share the same AWS config home as the bash/WSL sandbox. If an operator script needs AWS access from inside a Node/npm process, route the AWS CLI call through `bash` so it reads the Codex-managed profile set under `/root/.aws`.
+- Reduced prod operator role added 2026-04-20 and widened 2026-04-20 for the full repo-driven deploy/migration path: `nwac-prod-codex-operator` / `nwac-prod` cover artifact uploads in `nwac-prod-artifacts` (`admin/*`, `portal/*`, `shared/*`, `ssm-sql/*`, `db-dumps/*`), prod SSM SQL/dump execution, ASG refresh, prod DB restore-point snapshots, and the ALB `path-maintenance-fallback` flow. They still do not allow direct `secretsmanager:GetSecretValue` on `nwac-prod-db-credentials`.
+- Windows/npm processes do not share the same AWS config home as bash/WSL. For Windows-side deploy scripts, first export credentials from the bash/WSL role-backed profile into the child-process env. `scripts/path-deploy.js` already does this through `seedWindowsAwsCredentials()`.
 - Always pass `--profile` for AWS commands in threads that touch infra or storage:
   - Test example: `aws s3api get-bucket-encryption --bucket nwac-test-uploads-20251014 --region ca-central-1 --profile nwac-test`
   - Prod example: `aws sts get-caller-identity --profile nwac-prod`

@@ -15,6 +15,8 @@ Do not run the app deploy commands from a WSL-only checkout such as `/root/ISET/
 - Do not dump the DEV database manually before asking Codex to deploy.
 - Use `path:deploy` for normal releases.
 - Use `test:db:refresh` only when you want to reset TEST.
+- In the current Codex sandbox, `nwac-prod` is the standard role-backed prod operator profile. `default` is only the bootstrap IAM user and direct prod resource calls through it are expected to fail.
+- The reduced `nwac-prod` role covers normal deploys, prod SQL/dumps via SSM, restore-point snapshots, ASG refresh, and the ALB maintenance fallback. It does not cover broader infra/admin work such as WAF changes, SSM env parameter writes, uploads-bucket CORS changes, or Terraform/ACM changes.
 - PROD deploys require `--yes`.
 - TEST deploys require `--yes` only when you include `--refresh-test-db`.
 - Deploys do not auto-bump `package.json` semver; instead, each frontend build now carries a visible release/build stamp.

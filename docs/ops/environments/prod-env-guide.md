@@ -155,6 +155,8 @@ The main operational tasks are deployments, user access, and database migrations
 
 Technical details  
 - Deployments: upload new artifacts, then refresh the ASG instance to pull them.  
+- In the current Codex/operator sandbox, normal prod deploy and DB operator work should use the reduced role-backed profile `nwac-prod`; `default` is only the bootstrap IAM user and direct prod resource calls through it are expected to fail.  
+- That reduced prod role covers artifact uploads, prod SQL/dump helpers via SSM, ASG refresh, restore-point snapshots, and the ALB maintenance fallback. Broader infra/admin changes such as WAF updates, SSM env parameter writes, uploads-bucket CORS changes, or Terraform/ACM changes still require a separate elevated prod role.  
 - User access: add users to Cognito groups for admin roles.  
 - Migrations: run SQL inside the VPC using SSM on the instance (not from the public internet).  
   - Helper: `scripts/run-prod-sql.ps1` runs ad-hoc SQL against prod via SSM and prints results.
