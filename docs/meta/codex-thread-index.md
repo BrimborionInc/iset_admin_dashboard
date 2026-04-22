@@ -2,7 +2,7 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-04-20
+Last Updated: 2026-04-22
 
 ## How to use
 
@@ -444,6 +444,21 @@ For each indexed thread/topic, keep:
   - `docs/planning/payment-packet-scheduling-design.md`
 - Status: current durable handoff baseline
 
+### Finance payment-packet email body reset and follow-up
+
+- Codex task title: `Update payment packet rules`
+- Topic: finance payment-packet email body reset for a single-payee Sage-oriented workflow, plus deferred follow-up on evidence-document rules and packet-zip contents
+- Keywords: `Update payment packet rules`, `payment packet rules`, `finance email body`, `single payee per packet`, `Sage`, `Payment Instructions`, `Vendor reference`, `payee reference`, `requested payment date`, `evidence documents`, `download zip`
+- When to open: the user asks what was decided for the finance payment-packet email body, whether PATH knows a Sage/vendor ID, why `payee reference` is not the same as vendor master data, or wants to resume the later work on evidence-document requirements, checklist rules, or packet-zip contents
+- Primary docs:
+  - `docs/widgets/admin/finance-payment-communications-widget.md`
+  - `docs/widgets/admin/finance-payment-packet-detail-widget.md`
+  - `docs/planning/path-document-type-canonical-review.md`
+  - `isetadminserver.js`
+  - `src/pages/finance/widgets/PaymentDetailWidget.jsx`
+- Status: partial as of 2026-04-22
+- Notes: durable outcomes from this thread: for NWAC finance processing, the working assumption is now `single payee per packet`. Do not claim PATH knows a Sage vendor ID. The repo-backed optional field is `payment_packet_line.payee_reference`, surfaced in PATH as `Payee reference (optional)` with placeholder `Account or vendor reference`; if included in finance email content it must be treated as a CM-entered reference only, not as confirmed Sage master data. PATH does know packet/line fields such as payee name, amount, service-period dates, invoice reference, requested payment date, budget pot, funding stream, and reporting unit. The agreed next-pass body shape is: intro line `A payment request has been submitted to finance for processing.`, `Payee` section with payee name and optional `Vendor reference` only when staff intentionally entered a prior finance-provided identifier, `Payment Instructions` as an HTML table with required `Payment type`, `Amount`, and `Invoice reference` columns plus optional `Requested payment date` and `Payee reference` columns when present, then `Coding` with budget pot, funding stream, and reporting unit. The evidence-document list and download-zip contents were intentionally deferred for a later continuation. Review the current local `isetadminserver.js` finance-email diff before any TEST/PROD rollout because the thread paused before final verification.
+
 ### Payments status-set cleanup
 
 - Topic: canonical payment packet/line status model, packet-first claim workflow, and removal of legacy review-stage statuses
@@ -518,6 +533,25 @@ For each indexed thread/topic, keep:
   - `src/utils/approvalWorkspaceEntry.js`
 - Status: current as of 2026-04-21
 - Notes: durable outcomes from this thread: the homepage `Approvals` queue now opens application approvals with an explicit approval-entry URL (`entry=approval&approvalType=application&step=decision`) so the application workspace switches to an approval-review layout and `CoordinatorAssessmentWidget` lands on `Approval and decision` instead of restoring the last saved wizard step. A later hardening pass is also important: explicit approval-entry step intent now beats both the application wizard's local step-memory restore and the old Cloudscape navigation-priming workaround that briefly jumped to the last step and then restored the previous one. The application workspace board now uses the approval-review layout as the starting layout for queue launches without overwriting the user's saved normal board, and normal board quick actions/reset still work after launch. Intervention approvals now carry `interventionId` and `planId` in the queue-to-workspace handoff so the case workspace opens an approval-review layout, selects the correct submitted proposal, and loads `InterventionAssessmentWidget` at `Record of decision`. That intervention path was also hardened later so approval-entry step intent beats the widget's stored-step restore plus selection/hydration resets instead of snapping back to step 1 or another remembered draft step during queue-driven launches. The case workspace board now likewise uses the approval-review layout as the starting layout for queue launches without overwriting the user's saved normal case board, and normal board quick actions/reset still work after launch. The intervention approval path now treats `Record of decision` as the approval commit point, uses `Approved`, `Denied`, and `Request Changes` as the visible decision labels, and keeps decision-letter preparation separate from the stepper as a post-decision follow-up. The shared fallback helper for `Open workspace` now understands approval rows too, so queue items still route correctly even if a caller does not precompute `workspacePath`.
+
+### PROD feedback merge and follow-up fixes
+
+- Codex task title: `Merge TEST reports into PROD`
+- Topic: merging TEST admin feedback into the PROD bug/CR log, triaging the resulting queue against live code/data, and implementing the first low-risk follow-up fixes in DEV
+- Keywords: `Merge TEST reports into PROD`, `admin_feedback_report`, `TEST into PROD`, `report 40`, `report 46`, `report 47`, `funded clients`, `reminders overdue`, `secure messaging modal`
+- When to open: the user asks what happened during the TEST-to-PROD feedback merge, wants the queue triage outcomes for reports `#40`/`#41`/`#45`/`#46`/`#47`/`#48`, or wants to resume the low-risk DEV fixes that came out of that review
+- Primary docs:
+  - `docs/AGENTS.md`
+  - `docs/meta/codex-thread-index.md`
+  - `sql/ops/prod-sync-test-feedback-20260422.sql`
+  - `isetadminserver.js`
+  - `src/pages/Caseworking/portfolio/widgets/CasesTableWidget.jsx`
+  - `src/widgets/CaseNotesWidget.js`
+  - `src/widgets/CaseCalendarWidget.js`
+  - `src/widgets/SecureMessagingWidget.js`
+  - `src/widgets/caseWorkspace/SecureMessagingWidget.js`
+- Status: current as of 2026-04-22
+- Notes: durable outcomes from this thread: the TEST feedback merge found no missing report/note/attachment rows to insert into PROD; the only data sync required was reopening report `#25` because TEST had a later status change than PROD. The queue was then reviewed one item at a time in PROD and the live `admin_feedback_report`, `admin_feedback_note`, and `admin_feedback_status_history` tables were updated during triage rather than only in chat. Confirmed low-risk code changes implemented in DEV from that pass were: report `#40` adding a `Show Funded Clients` filter plus relabelling the existing cases-list `active` filter to `Show Open Clients` without changing PATH status mechanics; report `#47` fixing reminder severity so future reminders no longer render overdue in notes/calendar views; and report `#46` preventing secure-message compose modals from closing on accidental backdrop/escape dismissal, with explicit cancel/discard confirmation instead. Report `#48` was intentionally left as a low-priority change request rather than implemented. This thread also corrected a deploy-process assumption: when Bill says `deploy to TEST` or `deploy to PROD`, the intended meaning is the full current awaiting-release state from the working checkout, including relevant code/config/runtime/schema promotion work, not a hand-picked subset from only the current chat. A narrower subset release should happen only if Bill explicitly asks for that scope. For release-note wording from this thread family, use neutral outcome-first bullets (`Fixed a bug...`, `Made a change...`) and keep PROD feedback-log status updates tied to actual deployment state rather than local code state.
 
 ## Future improvements
 

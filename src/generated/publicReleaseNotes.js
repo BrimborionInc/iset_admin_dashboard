@@ -1,9 +1,9 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-04-21T22:00:25.703Z",
-  "releaseId": "20260421-215923",
-  "releaseLabel": "Release 20260421-215923",
-  "releaseDateEn": "21st April 2026",
-  "releaseDateFr": "21 avril 2026",
+  "generatedAt": "2026-04-22T15:18:47.931Z",
+  "releaseId": "20260422-151756",
+  "releaseLabel": "Release 20260422-151756",
+  "releaseDateEn": "22nd April 2026",
+  "releaseDateFr": "22 avril 2026",
   "en": {
     "sectionEyebrow": "Optional reading",
     "description": "Recent PATH changes are summarized here for staff who want them before signing in.",

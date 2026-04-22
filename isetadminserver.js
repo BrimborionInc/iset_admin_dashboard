@@ -43842,6 +43842,27 @@ app.get('/api/cases', async (req, res) => {
       whereClauses.push(
         `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.excludeFromCaseworkQueues')), 'false') <> 'true'`
       );
+    } else if (clientCategory === 'funded') {
+      const fundedInterventionStatusExpr = buildInterventionEffectiveStatusSql('ci_funded');
+      whereClauses.push(
+        `EXISTS (
+          SELECT 1
+            FROM iset_case_intervention ci_funded
+           WHERE ci_funded.case_id = c.id
+             AND ${fundedInterventionStatusExpr} IN (?, ?, ?, ?, ?)
+             AND COALESCE(ci_funded.approved_amount, ci_funded.budget_amount, ci_funded.intervention_cost, 0) > 0
+        )`
+      );
+      params.push(
+        'approved',
+        'in_progress',
+        'suspended',
+        'completed',
+        'cancelled'
+      );
+      whereClauses.push(
+        `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.excludeFromCaseworkQueues')), 'false') <> 'true'`
+      );
     } else if (clientCategory === 'dormant') {
       whereClauses.push(`${caseLifecycleStatusExpr} IN (?, ?, ?)`);
       params.push(
@@ -63195,103 +63216,113 @@ const buildPaymentPacketEmail = ({
   payeeIdentity = null,
 }) => {
   const lines = Array.isArray(packet?.lines) ? packet.lines : [];
-  const totalAmount = lines.reduce((sum, line) => sum + (Number(line.amount) || 0), 0);
   const packetIdLabel = formatPacketIdLabel(packet?.id || '');
   const subject = packetIdLabel
     ? `${packetIdLabel} payment packet submitted to finance`
     : 'Payment packet submitted to finance';
-  const statusValue = statusOverride || packet?.status;
-
-  const headerRows = [
-    `Packet: ${packetIdLabel || packet?.id || '-'}`,
-    `Status: ${formatStatusLabel(statusValue) || statusValue || '-'}`,
-    `Reporting unit: ${packet?.reportingUnit || packet?.reporting_unit || '-'}`,
-    `Region code: ${regionCode || '-'}`,
-    `Client: ${packet?.clientName || packet?.client_name || '-'}`,
-    `Case: ${packet?.caseNumber || packet?.case_number || packet?.caseId || packet?.case_id || '-'}`,
-    `Total: ${formatCurrencyCad(totalAmount)}`,
-  ];
-
-  const lineRows = lines.map(line => {
-    const lineId = line.id ? `LINE-${line.id}` : '';
-    const payee = line.payeeName || line.payee_name || '-';
-    const type = line.paymentType || line.payment_type || '-';
-    const amount = formatCurrencyCad(line.amount || 0);
-    const stream = line.fundingStream || line.funding_stream || '-';
-    const pot = line.potName || line.pot_name || line.potId || line.budget_pot_id || '-';
-    const period = line.servicePeriodStart && line.servicePeriodEnd
-      ? `${line.servicePeriodStart} to ${line.servicePeriodEnd}`
-      : '-';
-    return `${lineId} ${type} | ${payee} | ${amount} | ${stream} | Pot ${pot} | ${period}`.trim();
-  });
-  const payeeIdentityRows = buildPaymentPayeeIdentityRows(
-    payeeIdentity || packet?.payeeIdentity || null
-  );
-  const payeeIdentityTextRows = payeeIdentityRows.map(
-    row => `${row.label}: ${row.value}`
-  );
 
   const attachments = buildPacketAttachmentSummary(packet);
-  const attachmentRows = attachments.map(entry => {
-    const label = entry.type ? `${entry.type}: ` : '';
-    return `${label}${entry.name || entry.documentId || 'Document'}`;
-  });
-  const bundleExpiryLabel = bundleExpiresAt ? toDateOnlyString(bundleExpiresAt) : null;
-  const bundleExpiryText =
-    bundleLink && bundleExpiresInDays && bundleExpiryLabel
-      ? `Link expires in ${bundleExpiresInDays} days (${bundleExpiryLabel}).`
-      : null;
-  const bundleTextRows = bundleLink
-    ? [
-        `Download packet bundle: ${bundleLink}`,
-        ...(bundleExpiryText ? [bundleExpiryText] : []),
-      ]
-    : [];
+  const uniqueValues = values =>
+    Array.from(new Set((Array.isArray(values) ? values : []).map(value => String(value || '').trim()).filter(Boolean)));
+  const formatLineType = (line, index) =>
+    line?.paymentType ||
+    line?.payment_type ||
+    (line?.id ? `Line ${line.id}` : `Line ${index + 1}`);
+  const uniquePayeeNames = uniqueValues(lines.map(line => line?.payeeName || line?.payee_name || null));
+  const uniquePayeeReferences = uniqueValues(lines.map(line => line?.payeeReference || line?.payee_reference || null));
+  const uniquePotLabels = uniqueValues(lines.map(line => line?.potName || line?.pot_name || line?.potId || line?.budget_pot_id || null));
+  const uniqueFundingStreams = uniqueValues(lines.map(line => line?.fundingStream || line?.funding_stream || null));
+  const uniqueReportingUnits = uniqueValues(
+    lines.map(line => line?.reportingUnit || line?.reporting_unit || null).concat([
+      packet?.reportingUnit || packet?.reporting_unit || regionCode || null,
+    ])
+  );
 
-  const bodyText = [
-    'A payment packet has been submitted to finance.',
-    '',
-    ...headerRows,
-    ...(note ? ['', 'Requester note:', note] : []),
-    ...(payeeIdentityTextRows.length
-      ? ['', 'Payee identity (for Sage vendor matching):', ...payeeIdentityTextRows.map(row => `- ${row}`)]
+  const payeeSummary =
+    uniquePayeeNames.length === 1
+      ? uniquePayeeNames[0]
+      : uniquePayeeNames.length > 1
+        ? 'Multiple payees in packet'
+        : '-';
+  const vendorReference = uniquePayeeReferences.length === 1 ? uniquePayeeReferences[0] : null;
+  const includeRequestedPaymentDateColumn = lines.some(line => Boolean(line?.requestedPaymentDate));
+  const includePayeeReferenceColumn = lines.some(line => Boolean(line?.payeeReference || line?.payee_reference));
+  const paymentTableColumns = [
+    { key: 'paymentType', label: 'Payment type' },
+    { key: 'amount', label: 'Amount' },
+    { key: 'invoiceReference', label: 'Invoice reference' },
+    ...(includeRequestedPaymentDateColumn
+      ? [{ key: 'requestedPaymentDate', label: 'Requested payment date' }]
       : []),
-    ...(bundleTextRows.length ? ['', 'Packet bundle:', ...bundleTextRows.map(row => `- ${row}`)] : []),
+    ...(includePayeeReferenceColumn
+      ? [{ key: 'payeeReference', label: 'Payee reference' }]
+      : []),
+  ];
+  const paymentTableRows = lines.map((line, index) => ({
+    paymentType: formatLineType(line, index),
+    amount: formatCurrencyCad(line?.amount || 0),
+    invoiceReference: line?.invoiceReferenceNumber || '',
+    requestedPaymentDate: line?.requestedPaymentDate || '',
+    payeeReference: line?.payeeReference || line?.payee_reference || '',
+  }));
+
+  const bodyTextLines = [
+    'A payment packet request has been submitted to finance for processing.',
     '',
-    'Payment lines:',
-    ...(lineRows.length ? lineRows.map(row => `- ${row}`) : ['- None listed']),
+    'Payee',
+    `- Payee name: ${payeeSummary}`,
+    ...(vendorReference ? [`- Vendor reference: ${vendorReference}`] : []),
     '',
-    'Evidence documents:',
-    ...(attachmentRows.length ? attachmentRows.map(row => `- ${row}`) : ['- None listed']),
-  ].join('\n');
+    'Payment Instructions',
+    paymentTableColumns.map(column => column.label).join(' | '),
+    ...(paymentTableRows.length
+      ? paymentTableRows.map(row =>
+          paymentTableColumns
+            .map(column => row[column.key] || '')
+            .join(' | ')
+        )
+      : ['No payment lines listed.']),
+    '',
+    'Coding',
+    `- Budget pot: ${uniquePotLabels[0] || '-'}`,
+    `- Funding stream: ${uniqueFundingStreams[0] || '-'}`,
+    `- Reporting unit: ${uniqueReportingUnits[0] || '-'}`,
+    ...(note ? ['', `Requester note: ${note}`] : []),
+  ];
+  const bodyText = bodyTextLines.join('\n');
 
   const bodyHtml = `
-    <p>A payment packet has been submitted to finance.</p>
+    <p>A payment packet request has been submitted to finance for processing.</p>
+    <p><strong>Payee</strong></p>
     <ul>
-      ${headerRows.map(row => `<li>${row}</li>`).join('')}
+      <li>Payee name: ${escapeHtml(payeeSummary)}</li>
+      ${vendorReference ? `<li>Vendor reference: ${escapeHtml(vendorReference)}</li>` : ''}
     </ul>
-    ${note ? `<p><strong>Requester note:</strong> ${note}</p>` : ''}
-    ${payeeIdentityRows.length ? `
-      <p><strong>Payee identity (for Sage vendor matching)</strong></p>
-      <ul>
-        ${payeeIdentityRows.map(row => `<li>${escapeHtml(row.label)}: ${escapeHtml(row.value)}</li>`).join('')}
-      </ul>
-    ` : ''}
-    ${bundleLink ? `
-      <p><strong>Packet bundle</strong></p>
-      <ul>
-        <li><a href="${bundleLink}">Download packet bundle</a></li>
-        ${bundleExpiryText ? `<li>${bundleExpiryText}</li>` : ''}
-      </ul>
-    ` : ''}
-    <p><strong>Payment lines</strong></p>
+    <p><strong>Payment Instructions</strong></p>
+    <table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse; width: 100%;">
+      <thead>
+        <tr>
+          ${paymentTableColumns.map(column => `<th align="left">${escapeHtml(column.label)}</th>`).join('')}
+        </tr>
+      </thead>
+      <tbody>
+        ${(paymentTableRows.length
+          ? paymentTableRows
+          : [{ paymentType: 'No payment lines listed.', amount: '', invoiceReference: '', requestedPaymentDate: '', payeeReference: '' }]
+        ).map(row => `
+          <tr>
+            ${paymentTableColumns.map(column => `<td>${escapeHtml(row[column.key] || '')}</td>`).join('')}
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+    <p><strong>Coding</strong></p>
     <ul>
-      ${(lineRows.length ? lineRows : ['None listed']).map(row => `<li>${row}</li>`).join('')}
+      <li>Budget pot: ${escapeHtml(uniquePotLabels[0] || '-')}</li>
+      <li>Funding stream: ${escapeHtml(uniqueFundingStreams[0] || '-')}</li>
+      <li>Reporting unit: ${escapeHtml(uniqueReportingUnits[0] || '-')}</li>
     </ul>
-    <p><strong>Evidence documents</strong></p>
-    <ul>
-      ${(attachmentRows.length ? attachmentRows : ['None listed']).map(row => `<li>${row}</li>`).join('')}
-    </ul>
+    ${note ? `<p>Requester note: ${escapeHtml(note)}</p>` : ''}
   `;
 
   return { subject, bodyText, bodyHtml, attachments };

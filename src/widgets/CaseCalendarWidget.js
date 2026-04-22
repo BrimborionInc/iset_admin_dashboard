@@ -53,8 +53,8 @@ const deriveReminderSeverity = reminder => {
   if (!reminder || !reminder.dueAt) return 'info';
   const diffDays = getReminderBusinessDayDiffDays(reminder.dueAt, new Date());
   if (diffDays === null) return 'info';
-  if (diffDays < 0) return 'error';
-  if (diffDays <= 7) return 'warning';
+  if (diffDays > 0) return 'error';
+  if (diffDays >= -7) return 'warning';
   return 'success';
 };
 

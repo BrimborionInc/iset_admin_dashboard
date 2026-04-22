@@ -454,6 +454,16 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
     setComposeModalOpen(true);
   };
 
+  const handleCancelCompose = () => {
+    if (composeSending) return;
+    const hasDraft = composeSubject.trim() || composeBody.trim() || Boolean(composeUrgent);
+    if (hasDraft && typeof window !== 'undefined') {
+      const confirmed = window.confirm('Discard this draft message?');
+      if (!confirmed) return;
+    }
+    setComposeModalOpen(false);
+  };
+
   const handleSendMessage = async () => {
     if (!caseId) return;
     if (!composeSubject.trim() || !composeBody.trim()) {
@@ -801,9 +811,7 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
       </Modal>
       <Modal
         visible={composeModalOpen}
-        onDismiss={() => {
-          if (!composeSending) setComposeModalOpen(false);
-        }}
+        onDismiss={() => {}}
         header="New Message"
         footer={
           <SpaceBetween direction="horizontal" size="xs">
@@ -817,7 +825,7 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
             </Button>
             <Button
               variant="normal"
-              onClick={() => setComposeModalOpen(false)}
+              onClick={handleCancelCompose}
               disabled={composeSending}
             >
               Cancel

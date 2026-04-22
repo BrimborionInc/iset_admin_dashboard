@@ -27,6 +27,7 @@
 - **Step library** is sourced from `/api/steps`; each step references a component template and stores props.
 - **Workflow save payload**: includes steps (with props), routes (linear or by_option), and workflow metadata (name/status/start step).
 - **Preview** uses the same renderers as the portal and now mirrors runtime conditional-visibility operators plus whole-step skipping for steps whose authored components all hide.
+- **File-upload preview rule**: the real applicant runtime now uses one `Upload` button that conditionally opens `Take photo` plus `Choose file` on likely mobile camera-capable devices; admin previews show a static explanation of that chooser instead of trying to invoke camera/file pickers from the editor surface.
 - **Runtime schema widget** shows the server-generated schema for the selected workflow for sanity checks.
 - **DEV publish parity**: verified on 2026-04-14 that workflow `21` authoring rows rebuild the same `iset_runtime_config(scope='publish', k='workflow.schema.intake')` payload through `buildWorkflowSchema` / `scripts/publish-workflow.js` once timestamp/checksum fields are ignored, so the step library, workflow library, and published runtime row are back in sync for that intake.
 

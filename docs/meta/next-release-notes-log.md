@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next "What's New" update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-04-21
+Last Updated: 2026-04-22
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -23,6 +23,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 2026-04-21 | Release v0.5.9 | UX/Approvals | Homepage Approvals queue + Application/Case Workspace | Fixed a bug where opening an approval item could land on the wrong board layout, while `Reset layout` and the board quick-action layouts stopped working afterward. | Approval-mode workspaces now start on the review board without overwriting the saved normal board, and normal board quick actions/reset keep working after launch.
 2026-04-21 | Release v0.5.9 | UX/Workflow | Application Assessment + Intervention Assessment | Made the wizard headings and lead-in text match the phase staff are in, so proposal, approval, and follow-up states no longer keep draft-era labels. | Application workflow now reads as assessment vs approval vs follow-up; intervention workflow now reads as propose/update vs review vs follow-up.
 2026-04-21 | Release v0.5.9 | Fix/Notifications | Application approval bell alerts | Fixed approval-decision notifications so approver actions now say whether the application was approved, denied, or sent back for changes instead of reusing a generic assessment-submitted or review-complete alert. | Request-changes and denial decisions now surface as warnings, and decision saves no longer emit a duplicate approver-side `Assessment submitted` bell row.
+2026-04-21 | Release v0.5.9 | UX/Intake | Applicant file uploads | Made a change so applicant upload fields now keep a single `Upload` button but offer `Take photo` plus `Choose file` on supported phones, instead of forcing staff to choose between camera support and broader document formats. | Mixed document/image upload slots still accept their authored file types; the mobile-only chooser now sits behind the same shared portal file-upload renderer and the admin previews explain that behavior.
 
 ## Hotfix note style
 
@@ -36,6 +37,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ## Entries
 
+- 2026-04-22 | Release TBD | UX/Finance | Batch Payments > outbound finance email | Made a change so finance payment-packet emails now send a lean AP-style summary with `Payee`, `Payment Instructions`, and `Coding` sections instead of a long case and evidence narrative. | The payment details now render as a compact line table, and optional PATH-entered values like requested payment date, invoice reference, and payee reference appear only when staff entered them.
 - 2026-04-20 | Release v0.5.9 | Fix/Agreements | Client Funding Agreement signer prefill | Fixed a bug where a CFA could pick up the name of the staff member who generated or sent it instead of the case's assigned case manager. | PATH now prefers the assigned case manager for CFA signer prefill and stores that signer name with the CFA version so later rerenders keep the same signer.
 - 2026-04-20 | Release v0.5.9 | Fix/Documents | Case manager assessment PDF signatures | Fixed a bug where submitted or approved assessment PDFs could show a staff email address in the signature panel instead of the person’s name. | Assessment PDFs now prefer the signer’s PATH staff display name and read signature history from the current shared event store before falling back to older legacy audit rows.
 - 2026-04-20 | Release v0.5.9 | Fix/Workflow | Application Assessment > Submit assessment | Fixed a bug where submitting an assessment could silently replace uploaded `Application form` or `Financial overview` scans with system-generated PDFs. | PATH now warns when those uploaded files already exist and lets staff keep the current files instead of replacing them.

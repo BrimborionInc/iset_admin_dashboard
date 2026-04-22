@@ -2,7 +2,13 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-04-22
+- Docs/Ops: Clarified the standing deploy-intent rule in `docs/AGENTS.md`: when Bill asks to deploy to TEST or PROD, Codex should assume the full current awaiting-release checkout state, including relevant code/config/runtime/schema promotion work, unless he explicitly narrows the release. Data resets or one-off live data mutation still require explicit intent.
+- UX/Finance/Email: Finance payment-packet emails now use a lean AP-style body with `Payee`, `Payment Instructions`, and `Coding` sections, rendering the payment details as a compact line table and only showing optional PATH-entered references when staff provided them.
+
 ## 2026-04-21
+- UX/Intake/Uploads: Applicant file-upload fields in the legacy public portal now use one visible `Upload` action that opens a `Take photo` / `Choose file` chooser on likely camera-capable mobile devices, while keeping the authored broad document/image accept lists for normal file picking.
+- UX/Workflow/Preview: Admin Workflow Preview and the intake-step editor now show a static upload-preview callout explaining the mobile camera chooser behavior so authoring screens stay aligned with the live applicant runtime.
 - Fix/Notifications/Approvals: Approval-decision bell alerts now show the actual approver action for application reviews, with `Request Changes` and denials no longer reusing a generic green `Assessment submitted` notification and request-changes alerts now surfacing as yellow warnings.
 - UX/Landing Page: Public landing-page release notes are now generated from the maintained release-notes log during build, stamped with the deployed release ID/date, and no longer depend on a separate hardcoded version label that can drift from the live build.
 - UX/Admin shell: The visible admin build/version line now uses the deployed release/build identity instead of the stale package semver, keeping the footer build stamp aligned with the published landing-page release notes.

@@ -9,6 +9,7 @@ import jsonLogic from 'json-logic-js';
 // Reuse the actual public portal component registry for faithful rendering
 // The portal package is linked via file:../ISET-intake in package.json, so we can import its renderer registry directly.
 import PortalRegistry from '../portalRendererRegistry';
+import FileUploadPreview from '../components/intake/FileUploadPreview';
 import {
   buildConditionComponentLookup,
   componentConditionsSatisfied,
@@ -892,33 +893,8 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
                         </div>
                       );
                     }
-                    // Inline adapter for file-upload to ensure labelClass is applied
                     if (type === 'file-upload') {
-                      const labelObj = c.label || {};
-                      const label = (labelObj && typeof labelObj === 'object') ? (labelObj[previewLang] || labelObj.en || labelObj.fr || '') : (labelObj || '');
-                      const hintObj = c.hint || {};
-                      const hint = (hintObj && typeof hintObj === 'object') ? (hintObj[previewLang] || hintObj.en || hintObj.fr || '') : (hintObj || '');
-                      const labelClass = c.labelClass ? ` ${c.labelClass}` : '';
-                      const disabled = c.disabled === true;
-                      return (
-                        <div key={c.id} className="govuk-form-group" style={{ marginBottom: 20 }}>
-                          <label className={`govuk-label${labelClass}`} htmlFor={key}>{label || key}</label>
-                          {hint && <div id={`${key}-hint`} className="govuk-hint">{hint}</div>}
-                          <input
-                            id={key}
-                            name={key}
-                            type="file"
-                            className="govuk-file-upload"
-                            accept={c.accept || undefined}
-                            disabled={disabled}
-                            aria-describedby={hint ? `${key}-hint` : undefined}
-                            onChange={() => {/* Preview: ignore real file selection */}}
-                          />
-                          {c.maxSizeMb && c.showMaxSize !== false && (
-                            <div style={{ fontSize: 12, color: '#555', marginTop: 4 }}>Max size: {c.maxSizeMb}MB</div>
-                          )}
-                        </div>
-                      );
+                      return <FileUploadPreview key={c.id} comp={c} lang={previewLang} />;
                     }
                     const Comp = PortalRegistry[type];
                     if (!Comp) {

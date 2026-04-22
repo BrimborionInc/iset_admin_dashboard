@@ -1,15 +1,15 @@
 const buildInfo = {
   "packageVersion": "0.1.0",
-  "releaseId": "20260421-215923",
+  "releaseId": "20260422-151756",
   "buildTarget": "test",
-  "builtAt": "2026-04-21T22:00:25.703Z",
-  "gitCommit": "6bf6e0aa006dd2a9e3ea8b9cd4c0fe968c6a374e",
-  "gitShort": "6bf6e0aa",
+  "builtAt": "2026-04-22T15:18:47.931Z",
+  "gitCommit": "dcb4c68535280c68b8a16be0fc0b55c9e9e91993",
+  "gitShort": "dcb4c685",
   "gitDirty": true,
-  "publicReleaseLabel": "Release 20260421-215923",
-  "publicReleaseDateEn": "21st April 2026",
-  "publicReleaseDateFr": "21 avril 2026",
-  "displayLabel": "release 20260421-215923 | 6bf6e0aa-dirty"
+  "publicReleaseLabel": "Release 20260422-151756",
+  "publicReleaseDateEn": "22nd April 2026",
+  "publicReleaseDateFr": "22 avril 2026",
+  "displayLabel": "release 20260422-151756 | dcb4c685-dirty"
 };
 
 export default buildInfo;

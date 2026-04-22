@@ -11,6 +11,7 @@ import { useParams, useHistory, useLocation } from "react-router-dom";
 import PropertiesPanel, { ValidationEditor } from './PropertiesPanel.js';
 import { validateStep, summarizeIssues } from '../validation/stepValidator';
 import TranslationsWidget from '../widgets/TranslationsWidget';
+import FileUploadPreview from '../components/intake/FileUploadPreview';
 import { apiFetch } from '../auth/apiClient';
 import {
   componentSupportsConditionalVisibility,
@@ -783,7 +784,9 @@ function useNunjucksHTML({ templateKey, templateId, version = 1, props, suspende
     else {
       // Post-process HTML for signature-ack to provide working-area interactive approximation
   const lowerType = String(comp?.template_key || comp?.type || '').toLowerCase();
-  if (lowerType === 'signature-ack') {
+  if (lowerType === 'file-upload') {
+        inner = <FileUploadPreview comp={comp} lang={previewLang} />;
+      } else if (lowerType === 'signature-ack') {
         const resolveI18n = (val, fallback = '') => {
           if (!val) return fallback;
           if (typeof val === 'string') return val;

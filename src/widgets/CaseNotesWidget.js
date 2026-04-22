@@ -78,13 +78,13 @@ const classifyFollowUpStatus = (value) => {
   if (!value) return null;
   const diffDays = getReminderBusinessDayDiffDays(value, new Date());
   if (diffDays === null) return null;
-  if (diffDays < 0) {
+  if (diffDays > 0) {
     return { color: 'red', label: 'Overdue follow-up' };
   }
   if (diffDays === 0) {
     return { color: 'green', label: 'Follow-up today' };
   }
-  if (diffDays <= 7) {
+  if (diffDays >= -7) {
     return { color: 'yellow', label: 'Follow-up due soon' };
   }
   return { color: 'blue', label: 'Scheduled follow-up' };
