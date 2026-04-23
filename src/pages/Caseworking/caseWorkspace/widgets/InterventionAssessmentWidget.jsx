@@ -82,7 +82,6 @@ const SUBMITTED_PROPOSAL_EDITOR_ROLE_KEYS = new Set([
 const SUBMITTED_PROPOSAL_DECIDER_ROLE_KEYS = new Set([
   "systemadministrator",
   "nwacadministrator",
-  "regionalmanager",
 ]);
 
 const normalizeRoleKey = value =>
@@ -4714,7 +4713,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       setSuccessMessage("");
       setAttemptedSteps(prev => ({ ...prev, decision: true }));
       if (!canDecideSubmittedProposal) {
-        setError("Only approver roles can record a decision on a proposal in review.");
+        setError("Only NWAC Administrators and System Administrators can record a decision on a proposal in review.");
         return { ok: false };
       }
       if (!isEditable) {
@@ -5333,9 +5332,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         : "The decision is recorded. Prepare or send the client decision letter from here if needed."
       : null
     : isReviewStageStatus && isEditable && isRevisionMode && !canDecideSubmittedProposal
-      ? `Update the proposed change to ${revisionSourceTitle}. Record of decision is limited to approver roles.`
+      ? `Update the proposed change to ${revisionSourceTitle}. Record of decision is limited to NWAC Administrators.`
       : isReviewStageStatus && isEditable && !canDecideSubmittedProposal
-        ? "Update the submitted proposal. Record of decision is limited to approver roles."
+        ? "Update the submitted proposal. Record of decision is limited to NWAC Administrators."
     : isReviewStageStatus && isEditable && isRevisionMode
       ? `Review the proposed change to ${revisionSourceTitle}, verify EI status, and record the decision.`
       : isReviewStageStatus && isEditable

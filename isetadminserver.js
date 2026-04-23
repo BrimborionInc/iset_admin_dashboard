@@ -1549,21 +1549,9 @@ const clampReminderMinutes = (value) => {
 
 const reminderMinutesToMs = minutes => clampReminderMinutes(minutes) * 60 * 1000;
 
-function resolveAdminActorUserId(req) {
+async function resolveAdminActorUserId(req, runner = pool) {
   if (!req || typeof req !== 'object') return null;
-  const candidates = [
-    req.staffProfile?.user_id,
-    req.staffProfile?.id,
-    req.auth?.staffProfileId,
-    req.auth?.userId,
-    req.auth?.id,
-    req.auth?.sub
-  ];
-  for (const candidate of candidates) {
-    const normalised = normalisePositiveInteger(candidate);
-    if (normalised !== null) return normalised;
-  }
-  return null;
+  return resolveOrCreateUserIdFromAuth(req, runner || pool);
 }
 
 function escapeHtml(value) {
@@ -15255,9 +15243,10 @@ function resolveRequestActor(req) {
 }
 
 async function resolveOrCreateUserIdFromAuth(req, runner = pool) {
+  const subjectType = req?.auth?.subjectType === 'staff' ? 'staff' : 'applicant';
   const sub = req?.auth?.sub || null;
   const email = req?.auth?.email ? String(req.auth.email).trim().toLowerCase() : null;
-  const subjectType = req?.auth?.subjectType === 'staff' ? 'staff' : 'applicant';
+  if (subjectType === 'staff' && !sub) return null;
   if (!sub && !email) return null;
   const db = runner || pool;
   try {
@@ -15315,16 +15304,21 @@ async function resolveOrCreateUserIdFromAuth(req, runner = pool) {
 
 async function resolveRequestActorUserId(req, explicitActorUserId = null, runner = pool) {
   const db = runner || pool;
+  const isStaffSubject = req?.auth?.subjectType === 'staff';
   const directUserId =
-    normalisePositiveInteger(explicitActorUserId) ||
+    (isStaffSubject ? null : normalisePositiveInteger(explicitActorUserId)) ||
     normalisePositiveInteger(req?.user?.id) ||
-    normalisePositiveInteger(req?.auth?.id) ||
+    (isStaffSubject ? null : normalisePositiveInteger(req?.auth?.id)) ||
     null;
   if (directUserId) {
     const existingUserId = await ensureUserExists(db, directUserId);
     if (existingUserId) return existingUserId;
   }
   return resolveOrCreateUserIdFromAuth(req, db);
+}
+
+async function resolveFinanceRouteActorUserId(req, runner = pool) {
+  return resolveRequestActorUserId(req, null, runner);
 }
 
 const ASSIGN_ROLE_ALLOWLIST = new Set([
@@ -15339,14 +15333,18 @@ const ASSIGN_FORBIDDEN_ROLES = new Set([
 
 function getRequesterIdentity(req) {
   const role = inferUserRole(req);
-  const userIdRaw = req?.staffProfile?.id ?? req?.auth?.staffProfileId ?? req?.auth?.userId ?? req?.auth?.sub ?? null;
+  const staffProfileId = resolveActiveStaffProfileId(req);
+  const localUserId = getAuthenticatedNumericUserId(req);
+  const actorIdRaw = req?.auth?.sub ?? req?.auth?.id ?? req?.auth?.user_id ?? null;
   const regionRaw = req?.staffProfile?.region_id ?? req?.auth?.regionId ?? null;
-  const userId = Number.parseInt(userIdRaw, 10);
   const regionId = Number.parseInt(regionRaw, 10);
   const regionIds = resolveRequestRegionIds(req);
   return {
     role: role || null,
-    userId: Number.isFinite(userId) ? userId : null,
+    userId: staffProfileId ?? localUserId ?? null,
+    staffProfileId: staffProfileId ?? null,
+    localUserId: localUserId ?? null,
+    actorId: actorIdRaw ? String(actorIdRaw) : null,
     regionId: regionIds.length ? regionIds[0] : (Number.isFinite(regionId) ? regionId : null),
     regionIds: regionIds.length ? regionIds : null,
   };
@@ -15878,14 +15876,14 @@ function validateCaseAccessForPlan(req, planRow) {
 
   if (role === 'Regional Manager' || role === 'Regional_Manager') {
     return getRegionalManagerCaseAccessError({
-      requesterId: identity.userId,
+      requesterId: identity.staffProfileId,
       regionIds: resolveRequestRegionIds(req),
       caseRow: planRow,
     });
   }
 
   if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
-    const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : Number.NaN;
+    const requesterId = Number.isFinite(identity.staffProfileId) ? Number(identity.staffProfileId) : Number.NaN;
     if (!Number.isFinite(requesterId)) {
       return { status: 403, body: { error: 'forbidden', detail: 'assessor_scope_missing' } };
     }
@@ -15912,14 +15910,14 @@ function validateCaseAccessForIntervention(req, interventionRow) {
 
   if (role === 'Regional Manager' || role === 'Regional_Manager') {
     return getRegionalManagerCaseAccessError({
-      requesterId: identity.userId,
+      requesterId: identity.staffProfileId,
       regionIds: resolveRequestRegionIds(req),
       caseRow: interventionRow,
     });
   }
 
   if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
-    const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : Number.NaN;
+    const requesterId = Number.isFinite(identity.staffProfileId) ? Number(identity.staffProfileId) : Number.NaN;
     if (!Number.isFinite(requesterId)) {
       return { status: 403, body: { error: 'forbidden', detail: 'assessor_scope_missing' } };
     }
@@ -19391,6 +19389,14 @@ function requireSystemOrNwacAdmin(req, res, next) {
   return next();
 }
 
+function canRecordApplicationDecision(req) {
+  return hasSystemOrNwacAdminAccess(req);
+}
+
+function canRecordInterventionProposalDecision(req) {
+  return hasSystemOrNwacAdminAccess(req);
+}
+
 const UNSAFE_ADMIN_DEBUG_ROUTES_ENABLED = ['1', 'true', 'yes', 'on'].includes(
   String(process.env.ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES || '').trim().toLowerCase()
 );
@@ -19889,6 +19895,7 @@ async function staffProfileMiddleware(req, res, next) {
       req.staffProfile = rows[0];
       const numericStaffId = Number(rows[0].id);
       if (Number.isInteger(numericStaffId) && numericStaffId > 0) {
+        req.auth.staffProfileId = numericStaffId;
         req.auth.userId = numericStaffId;
       }
       const rowRegionId = Number(rows[0].region_id);
@@ -27634,22 +27641,7 @@ app.post('/api/admin/contact-messages/:id/notes', async (req, res) => {
 
   let authorUserId = null;
   try {
-    const candidateIdValues = [req.auth?.userId, req.auth?.user_id, req.auth?.id]
-      .map(value => {
-        const numeric = Number.parseInt(value, 10);
-        return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
-      })
-      .filter(value => value !== null);
-    if (candidateIdValues.length) {
-      const placeholders = candidateIdValues.map(() => '?').join(', ');
-      const [idRows] = await pool.query(
-        `SELECT id FROM user WHERE id IN (${placeholders}) LIMIT 1`,
-        candidateIdValues
-      );
-      if (idRows && idRows[0] && Number.isFinite(Number(idRows[0].id))) {
-        authorUserId = Number(idRows[0].id);
-      }
-    }
+    authorUserId = await resolveExistingUserIdFromAuth(req, pool);
     if (authorUserId === null) {
       const candidateEmails = new Set();
       if (typeof req.auth?.email === 'string' && req.auth.email.trim()) {
@@ -36786,7 +36778,10 @@ async function deleteTableIfExists(tableName) {
 const getAuthenticatedNumericUserId = (req) => {
   if (!req) return null;
   const values = [];
-  if (req.auth) {
+  if (req?.user?.id != null) {
+    values.push(req.user.id);
+  }
+  if (req.auth && req.auth.subjectType !== 'staff') {
     values.push(req.auth.userId);
     values.push(req.auth.user_id);
     values.push(req.auth.id);
@@ -36803,7 +36798,8 @@ const getAuthenticatedNumericUserId = (req) => {
 
 const resolveExistingUserIdFromAuth = async (req, runner = pool) => {
   const db = runner || pool;
-  const directUserId = getAuthenticatedNumericUserId(req);
+  const isStaffSubject = req?.auth?.subjectType === 'staff';
+  const directUserId = isStaffSubject ? null : getAuthenticatedNumericUserId(req);
   if (directUserId) {
     const existingDirectUserId = await ensureUserExists(db, directUserId);
     if (existingDirectUserId) return existingDirectUserId;
@@ -36812,6 +36808,9 @@ const resolveExistingUserIdFromAuth = async (req, runner = pool) => {
   if (sub) {
     const [[subRow]] = await db.query('SELECT id FROM user WHERE cognito_sub = ? LIMIT 1', [sub]);
     if (subRow?.id) return Number(subRow.id);
+  }
+  if (isStaffSubject) {
+    return resolveOrCreateUserIdFromAuth(req, db);
   }
   const email = req?.auth?.email ? String(req.auth.email).trim().toLowerCase() : null;
   if (email) {
@@ -41868,7 +41867,7 @@ function handleAdminDocumentUpload({ requireApplicant = false, applicantIdHint =
     }
     const metadata = Object.keys(metadataObj).length ? JSON.stringify(metadataObj) : null;
     const source = 'manual_upload';
-    const uploaderUserId = resolveAdminActorUserId(req);
+    const uploaderUserId = await resolveAdminActorUserId(req, pool);
     const mimeType = file.mimetype || null;
     const sizeBytes = Number.isFinite(Number(file.size)) ? Number(file.size) : null;
     const checksum = await computeFileSha256(file.path);
@@ -42566,7 +42565,7 @@ app.post('/api/documents/:id/duplicate', async (req, res) => {
     metadataObj.label = nextLabel;
     if (docType) metadataObj.document_type = docType;
     const metadata = JSON.stringify(metadataObj);
-    const uploaderUserId = resolveAdminActorUserId(req);
+    const uploaderUserId = await resolveAdminActorUserId(req, pool);
     const nextPath = await duplicateDocumentFile({
       filePath: doc.file_path,
       fileName: doc.file_name,
@@ -43937,7 +43936,7 @@ app.get('/api/cases', async (req, res) => {
 
     const role = inferUserRole(req);
     const requesterId = Number.parseInt(
-      req?.staffProfile?.id ?? req?.auth?.userId ?? req?.auth?.sub ?? '', 10
+      req?.staffProfile?.id ?? req?.auth?.staffProfileId ?? req?.auth?.userId ?? req?.auth?.sub ?? '', 10
     );
     const requesterRegionIds = resolveRequestRegionIds(req);
 
@@ -44313,8 +44312,8 @@ async function handleAssignmentRequest(req, res, { requireExistingAssignee = fal
     }
 
     const requesterIsCurrentAssignee =
-      Number.isFinite(identity.userId) &&
-      Number(caseRow.assigned_to_user_id) === Number(identity.userId);
+      Number.isFinite(identity.staffProfileId) &&
+      Number(caseRow.assigned_to_user_id) === Number(identity.staffProfileId);
     if (disallowSelfReassign && requesterIsCurrentAssignee) {
       return res.status(403).json({ error: 'forbidden', detail: 'self_reassign_not_allowed' });
     }
@@ -44679,7 +44678,7 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
     if (!allowAll) {
       if (role === 'Regional Manager' || role === 'Regional_Manager') {
         const accessError = getRegionalManagerCaseAccessError({
-          requesterId: identity.userId,
+          requesterId: identity.staffProfileId,
           regionIds: resolveRequestRegionIds(req),
           caseRow: row,
         });
@@ -44687,7 +44686,7 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
           return res.status(accessError.status).json(accessError.body);
         }
       } else if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
-        const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
+        const requesterId = Number.isFinite(identity.staffProfileId) ? Number(identity.staffProfileId) : null;
         if (!Number.isFinite(requesterId)) {
           return res.status(403).json({ error: 'forbidden', detail: 'assessor_scope_missing' });
         }
@@ -45855,7 +45854,7 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
     if (!allowAll) {
       if (role === 'Regional Manager' || role === 'Regional_Manager') {
         const accessError = getRegionalManagerCaseAccessError({
-          requesterId: identity.userId,
+          requesterId: identity.staffProfileId,
           regionIds: resolveRequestRegionIds(req),
           caseRow,
         });
@@ -45863,7 +45862,7 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
           return res.status(accessError.status).json(accessError.body);
         }
       } else if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
-        const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
+        const requesterId = Number.isFinite(identity.staffProfileId) ? Number(identity.staffProfileId) : null;
         if (!Number.isFinite(requesterId)) {
           return res.status(403).json({ error: 'forbidden', detail: 'assessor_scope_missing' });
         }
@@ -46598,7 +46597,7 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
   if (!allowAll) {
     if (role === 'Regional Manager' || role === 'Regional_Manager') {
       const accessError = getRegionalManagerCaseAccessError({
-        requesterId: identity.userId,
+        requesterId: identity.staffProfileId,
         regionIds: resolveRequestRegionIds(req),
         caseRow,
       });
@@ -46606,7 +46605,7 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
         return res.status(accessError.status).json(accessError.body);
       }
     } else if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
-      const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
+      const requesterId = Number.isFinite(identity.staffProfileId) ? Number(identity.staffProfileId) : null;
       if (!Number.isFinite(requesterId)) {
         return res.status(403).json({ error: 'forbidden', detail: 'assessor_scope_missing' });
       }
@@ -46627,8 +46626,8 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
     resolvedOwnerStaffProfileId = Number(ownerProfile.id);
   }
 
-  if (resolvedOwnerStaffProfileId === null && Number.isFinite(identity.userId)) {
-    resolvedOwnerStaffProfileId = Number(identity.userId);
+  if (resolvedOwnerStaffProfileId === null && Number.isFinite(identity.staffProfileId)) {
+    resolvedOwnerStaffProfileId = Number(identity.staffProfileId);
   }
   if (resolvedOwnerStaffProfileId === null && Number.isFinite(caseRow.assigned_to_user_id)) {
     resolvedOwnerStaffProfileId = Number(caseRow.assigned_to_user_id);
@@ -47445,6 +47444,16 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     }
 
     const role = inferUserRole(req);
+    if (
+      !isBackloadMode &&
+      ['approved', 'changes_requested', 'rejected'].includes(createInterventionState.reviewStatus || '') &&
+      !canRecordInterventionProposalDecision(req)
+    ) {
+      return res.status(403).json({
+        error: 'intervention_decision_forbidden',
+        message: 'Only System Administrators and NWAC Administrators can record proposal decisions.',
+      });
+    }
     const planMetadata = safeJsonParse(planRow.metadata_json, null) || {};
     const planPostingContext = normalizePostingContext(planMetadata.postingContext) || 'external';
     let postingContext =
@@ -47454,9 +47463,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     }
 
     const identity = getRequesterIdentity(req);
-    const createdBy =
-      resolveActiveStaffProfileId(req) ||
-      (Number.isFinite(identity.userId) ? Number(identity.userId) : null);
+    const createdBy = identity.staffProfileId || null;
 
     const trimmedOutcomeCreate =
       typeof outcome === 'string' && outcome.trim()
@@ -47898,11 +47905,7 @@ app.post('/api/interventions/:id/revise', async (req, res) => {
       : Number.isFinite(Number(sourcePayload.cost))
         ? Math.round(Number(sourcePayload.cost))
         : null;
-    const createdBy =
-      resolveActiveStaffProfileId(req) ||
-      (Number.isFinite(Number(getRequesterIdentity(req)?.userId))
-        ? Number(getRequesterIdentity(req).userId)
-        : null);
+    const createdBy = getRequesterIdentity(req)?.staffProfileId || null;
 
     const [result] = await pool.query(
       `INSERT INTO iset_case_intervention
@@ -48238,6 +48241,15 @@ app.patch('/api/interventions/:id', async (req, res) => {
           }
         )
       : null;
+    if (
+      ['approved', 'changes_requested', 'rejected'].includes(nextStatusPersistence?.reviewStatus || '') &&
+      !canRecordInterventionProposalDecision(req)
+    ) {
+      return res.status(403).json({
+        error: 'intervention_decision_forbidden',
+        message: 'Only System Administrators and NWAC Administrators can record proposal decisions.',
+      });
+    }
     const isApplyingApprovedRevision = Number.isInteger(revisionAppliedFromInterventionId);
     let revisionDraftRow = null;
     let revisionDraftMetadata = null;
@@ -48337,7 +48349,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
       if (!allowAll) {
         if (role === 'Regional Manager' || role === 'Regional_Manager') {
           const accessError = getRegionalManagerCaseAccessError({
-            requesterId: identity.userId,
+            requesterId: identity.staffProfileId,
             regionIds: resolveRequestRegionIds(req),
             caseRow: interventionRow,
           });
@@ -48345,7 +48357,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
             return res.status(accessError.status).json(accessError.body);
           }
         } else if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
-          const requesterId = Number.isFinite(identity.userId) ? Number(identity.userId) : null;
+          const requesterId = Number.isFinite(identity.staffProfileId) ? Number(identity.staffProfileId) : null;
           if (!Number.isFinite(requesterId) || Number(caseRow.assigned_to_user_id) !== requesterId) {
             return res.status(403).json({ error: 'forbidden' });
           }
@@ -52418,11 +52430,11 @@ app.post('/api/reminders/:reminderId/acknowledge', async (req, res) => {
     return res.status(400).json({ error: 'invalid_reminder_id' });
   }
   const actingStaffProfileId = req.staffProfile?.id || null;
-  const editorUserId = getAuthenticatedNumericUserId(req);
   let connection;
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
+    const editorUserId = await resolveExistingUserIdFromAuth(req, connection);
 
     const [rows] = await connection.query(
       `SELECT id, case_id, application_id, action_plan_id, intervention_id, title, description, category, status, due_at,
@@ -68943,11 +68955,10 @@ app.get('/api/finance/payment-packets/:id/pdf', async (req, res) => {
   if (!Number.isFinite(packetId)) {
     return res.status(400).json({ error: 'invalid_payment_packet_id' });
   }
-  const actorUserId =
-    normalisePositiveInteger(req.query?.actorUserId || req.query?.actor_user_id) ||
-    req.user?.id ||
-    req.auth?.id ||
-    null;
+  const actorUserId = await resolveFinanceRouteActorUserId(req, pool);
+  if (!actorUserId) {
+    return res.status(400).json({ error: 'actor_user_required' });
+  }
   try {
     const packet = await fetchPaymentPacketById(packetId);
     if (!packet) {
@@ -68988,11 +68999,10 @@ app.post('/api/finance/payment-packets/:id/audit-bundle', async (req, res) => {
   if (!Number.isFinite(packetId)) {
     return res.status(400).json({ error: 'invalid_payment_packet_id' });
   }
-  const actorUserId =
-    normalisePositiveInteger(req.body?.actorUserId || req.body?.actor_user_id) ||
-    req.user?.id ||
-    req.auth?.id ||
-    null;
+  const actorUserId = await resolveFinanceRouteActorUserId(req, pool);
+  if (!actorUserId) {
+    return res.status(400).json({ error: 'actor_user_required' });
+  }
   try {
     const packet = await fetchPaymentPacketById(packetId);
     if (!packet) {
@@ -69226,30 +69236,26 @@ app.post('/api/finance/payment-packets', async (req, res) => {
       : [];
   const riskFlags = riskFlagsInput.filter(Boolean);
   const metadata = safeJsonParse(body.metadata, {}) || {};
+  const requesterRoleRaw = inferUserRole(req);
+  const requesterRole = canonicaliseAccessRole(requesterRoleRaw) || requesterRoleRaw || null;
   const requesterName =
-    body.requesterName ||
     req.user?.name ||
     req.user?.email ||
     req.auth?.name ||
     req.auth?.email ||
     null;
-  if (requesterName && !metadata.requesterName) {
+  if (requesterName) {
     metadata.requesterName = requesterName;
   }
-  if (body.requesterRole && !metadata.requesterRole) {
-    metadata.requesterRole = body.requesterRole;
+  if (requesterRole) {
+    metadata.requesterRole = requesterRole;
   }
-  const requesterUserId =
-    normalisePositiveInteger(body.requesterUserId || body.requester_user_id) ||
-    req.user?.id ||
-    req.auth?.id ||
-    null;
-  const programApprovedByUserId = normalisePositiveInteger(
-    body.programApprovedByUserId || body.program_approved_by_user_id
-  );
-  const financeApprovedByUserId = normalisePositiveInteger(
-    body.financeApprovedByUserId || body.finance_approved_by_user_id
-  );
+  const requesterUserId = await resolveFinanceRouteActorUserId(req, pool);
+  if (!requesterUserId) {
+    return res.status(400).json({ error: 'requester_user_required' });
+  }
+  const programApprovedByUserId = null;
+  const financeApprovedByUserId = null;
 
   const now = new Date();
   const submittedStages = new Set(['submitted', 'confirmed']);
@@ -69633,9 +69639,6 @@ app.put('/api/finance/payment-packets/:id', async (req, res) => {
       const meta = safeJsonParse(body.metadata, {}) || {};
       assign('metadata', JSON.stringify(meta));
     }
-    if (body.requesterUserId !== undefined || body.requester_user_id !== undefined) {
-      assign('requester_user_id', normalisePositiveInteger(body.requesterUserId || body.requester_user_id) || null);
-    }
     if (!fields.length) {
       return res.status(400).json({ error: 'no_fields_to_update' });
     }
@@ -69701,15 +69704,15 @@ app.post('/api/finance/payment-packets/:id/validate', async (req, res) => {
   if (!Number.isFinite(packetId)) {
     return res.status(400).json({ error: 'invalid_payment_packet_id' });
   }
-  const actorUserId =
-    normalisePositiveInteger(req.body?.actorUserId || req.body?.actor_user_id) ||
-    req.user?.id ||
-    req.auth?.id ||
-    null;
 
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
+    const actorUserId = await resolveFinanceRouteActorUserId(req, conn);
+    if (!actorUserId) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'actor_user_required' });
+    }
     const [[packetRow]] = await conn.query(
       'SELECT * FROM payment_packet WHERE id = ? LIMIT 1 FOR UPDATE',
       [packetId]
@@ -69852,14 +69855,7 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
   if (SIMPLE_PAYMENT_WORKFLOW && !SIMPLE_PAYMENT_PACKET_STATUSES.has(nextStatus)) {
     return res.status(400).json({ error: 'status_not_supported' });
   }
-  const explicitActorUserId =
-    normalisePositiveInteger(body.actorUserId || body.actor_user_id) ||
-    null;
-  let actorUserId =
-    explicitActorUserId ||
-    normalisePositiveInteger(req.user?.id) ||
-    normalisePositiveInteger(req.auth?.id) ||
-    null;
+  let actorUserId = null;
   const actorRoleRaw = inferUserRole(req);
   const actorRole = canonicaliseAccessRole(actorRoleRaw) || actorRoleRaw;
   const notes = typeof body.notes === 'string' ? body.notes.trim() : null;
@@ -69873,7 +69869,11 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    actorUserId = await resolveRequestActorUserId(req, explicitActorUserId, conn);
+    actorUserId = await resolveFinanceRouteActorUserId(req, conn);
+    if (!actorUserId) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'actor_user_required' });
+    }
     const [[packetRow]] = await conn.query(
       'SELECT * FROM payment_packet WHERE id = ? LIMIT 1 FOR UPDATE',
       [packetId]
@@ -71312,14 +71312,7 @@ app.post('/api/finance/payment-lines/:id/status', async (req, res) => {
   if (!nextStatus) {
     return res.status(400).json({ error: 'invalid_status' });
   }
-  const explicitActorUserId =
-    normalisePositiveInteger(body.actorUserId || body.actor_user_id) ||
-    null;
-  let actorUserId =
-    explicitActorUserId ||
-    normalisePositiveInteger(req.user?.id) ||
-    normalisePositiveInteger(req.auth?.id) ||
-    null;
+  let actorUserId = null;
   const actorRoleRaw = inferUserRole(req);
   const actorRole = canonicaliseAccessRole(actorRoleRaw) || actorRoleRaw;
   const notes = typeof body.notes === 'string' ? body.notes.trim() : null;
@@ -71343,7 +71336,11 @@ app.post('/api/finance/payment-lines/:id/status', async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    actorUserId = await resolveRequestActorUserId(req, explicitActorUserId, conn);
+    actorUserId = await resolveFinanceRouteActorUserId(req, conn);
+    if (!actorUserId) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'actor_user_required' });
+    }
     const [[lineRow]] = await conn.query(
       `SELECT ppl.*, pp.case_id, pp.intervention_id, pp.client_id, pp.status AS packet_status, pp.confirmed_at,
               pp.metadata AS packet_metadata, pp.requester_user_id
@@ -71757,11 +71754,21 @@ app.post('/api/finance/payment-packets/:id/documents', async (req, res) => {
     body.receivedAt ||
     body.received_at ||
     (body.received ? new Date() : null);
-  const verifiedByUserId = normalisePositiveInteger(body.verifiedByUserId || body.verified_by_user_id) || null;
+  const verificationRequested =
+    body.verifiedByUserId !== undefined ||
+    body.verified_by_user_id !== undefined ||
+    body.verifiedAt !== undefined ||
+    body.verified_at !== undefined;
+  const verifiedByUserId = verificationRequested
+    ? await resolveFinanceRouteActorUserId(req, pool)
+    : null;
+  if (verificationRequested && !verifiedByUserId) {
+    return res.status(400).json({ error: 'verified_by_user_required' });
+  }
   const verifiedAt =
-    body.verifiedAt ||
-    body.verified_at ||
-    (verifiedByUserId ? new Date() : null);
+    verificationRequested
+      ? (body.verifiedAt || body.verified_at || new Date())
+      : null;
   const notes = typeof body.notes === 'string' ? body.notes.trim() : null;
 
   try {
@@ -71858,7 +71865,10 @@ app.put('/api/finance/payment-documents/:id', async (req, res) => {
       return res.status(400).json({ error: 'invalid_verified_flag' });
     }
     if (!hasExplicitVerifier) {
-      const verifierId = verified ? await resolveOrCreateUserIdFromAuth(req) : null;
+      const verifierId = verified ? await resolveFinanceRouteActorUserId(req, pool) : null;
+      if (verified && !verifierId) {
+        return res.status(400).json({ error: 'verified_by_user_required' });
+      }
       assign('verified_by_user_id', verifierId || null);
     }
     if (!hasExplicitVerifiedAt) {
@@ -71866,7 +71876,16 @@ app.put('/api/finance/payment-documents/:id', async (req, res) => {
     }
   }
   if (body.verifiedByUserId !== undefined || body.verified_by_user_id !== undefined) {
-    assign('verified_by_user_id', normalisePositiveInteger(body.verifiedByUserId || body.verified_by_user_id) || null);
+    const requestedVerifierId = normalisePositiveInteger(body.verifiedByUserId || body.verified_by_user_id);
+    if (!requestedVerifierId) {
+      assign('verified_by_user_id', null);
+    } else {
+      const verifierId = await resolveFinanceRouteActorUserId(req, pool);
+      if (!verifierId) {
+        return res.status(400).json({ error: 'verified_by_user_required' });
+      }
+      assign('verified_by_user_id', verifierId);
+    }
   }
   if (body.verifiedAt !== undefined || body.verified_at !== undefined) {
     assign('verified_at', body.verifiedAt || body.verified_at || null);
@@ -72053,10 +72072,10 @@ app.post('/api/finance/payment-batches/:id/status', async (req, res) => {
   if (!nextStatus) {
     return res.status(400).json({ error: 'invalid_status' });
   }
-  const explicitActorUserId =
-    normalisePositiveInteger(body.actorUserId || body.actor_user_id) ||
-    null;
-  const actorUserId = await resolveRequestActorUserId(req, explicitActorUserId, pool);
+  const actorUserId = await resolveFinanceRouteActorUserId(req, pool);
+  if (!actorUserId) {
+    return res.status(400).json({ error: 'actor_user_required' });
+  }
   const actorRoleRaw = inferUserRole(req);
   const actorRole = canonicaliseAccessRole(actorRoleRaw) || actorRoleRaw;
   const overrideReason = normalizeOverrideReason(
@@ -72144,10 +72163,10 @@ app.post('/api/finance/payment-batches/:id/export', async (req, res) => {
   if (!Number.isFinite(batchId)) {
     return res.status(400).json({ error: 'invalid_payment_batch_id' });
   }
-  const explicitActorUserId =
-    normalisePositiveInteger(req.body?.actorUserId || req.body?.actor_user_id) ||
-    null;
-  const actorUserId = await resolveRequestActorUserId(req, explicitActorUserId, pool);
+  const actorUserId = await resolveFinanceRouteActorUserId(req, pool);
+  if (!actorUserId) {
+    return res.status(400).json({ error: 'actor_user_required' });
+  }
   try {
     const rows = await fetchPaymentBatchExportRows(batchId);
     if (!rows.length) {
@@ -76223,6 +76242,22 @@ app.put('/api/cases/:id', async (req, res) => {
     assessmentReviewStatus = normalizedDecision;
   }
 
+    const requestedApplicationDecisionStatus = Object.prototype.hasOwnProperty.call(body, 'applicationStatus')
+      ? (normaliseApplicationStatusValue(toNull(body.applicationStatus)) || null)
+      : null;
+    const requestedFinalApplicationDecision =
+      requestedApplicationDecisionStatus === 'approved' ||
+      requestedApplicationDecisionStatus === 'rejected';
+    if ((assessmentReviewStatusProvided || requestedFinalApplicationDecision) && !canRecordApplicationDecision(req)) {
+      await conn.rollback();
+      return res.status(403).json({
+        success: false,
+        error: 'application_decision_forbidden',
+        message: 'Only System Administrators and NWAC Administrators can record application decisions.',
+        lock: lockCheck.lock || null
+      });
+    }
+
     const canonicalRoleForApproval = canonicaliseAccessRole(identity.role);
     const approvalRequested = (() => {
       const statusNorm = normaliseCaseStatusValue(body.status);
@@ -76425,7 +76460,7 @@ app.put('/api/cases/:id', async (req, res) => {
     if (conflictSignatureRequested) {
       const conflictSigned = toTinyInt(body.assessment_conflict_declaration_signed);
       if (typeof conflictSigned !== 'undefined' && conflictSigned !== null) {
-        const signingStaffProfileId = resolveActiveStaffProfileId(req) || identity.userId || null;
+        const signingStaffProfileId = identity.staffProfileId || null;
         if (!signingStaffProfileId) {
           await conn.rollback();
           return res.status(400).json({
@@ -76550,12 +76585,6 @@ app.put('/api/cases/:id', async (req, res) => {
     if (shouldAutoPlanForApprovedState) {
       let approvalUserId = await resolveOrCreateUserIdFromAuth(req, conn);
       approvalUserId = Number.isFinite(Number(approvalUserId)) ? Number(approvalUserId) : null;
-      if (!approvalUserId) {
-        const fallbackUserId = Number.isFinite(Number(identity?.userId)) ? Number(identity.userId) : null;
-        if (fallbackUserId) {
-          approvalUserId = await ensureUserExists(conn, fallbackUserId);
-        }
-      }
       autoPlanApprovalUserId = approvalUserId || null;
       autoPlanSuggestion = await ensureAutoPlanAndInterventionFromAssessment(conn, {
         caseId,
@@ -76697,7 +76726,7 @@ app.put('/api/cases/:id', async (req, res) => {
     const resolvedConflictSummaryStaffId = resolveActiveStaffProfileId(req);
     const conflictSummaryStaffId = Number.isFinite(resolvedConflictSummaryStaffId)
       ? Number(resolvedConflictSummaryStaffId)
-      : (Number.isFinite(identity.userId) ? Number(identity.userId) : 0);
+      : (Number.isFinite(identity.staffProfileId) ? Number(identity.staffProfileId) : 0);
     if (autoPlanSuggestion?.createdIntervention && autoPlanSuggestion?.planId) {
       try {
         const actorUserId = autoPlanApprovalUserId || (await resolveOrCreateUserIdFromAuth(req));

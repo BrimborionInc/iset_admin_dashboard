@@ -69,15 +69,15 @@ tests/
 | Legacy auth | POST `/api/login`; POST `/api/logout`; POST `/api/register`; POST `/api/check-email`; POST `/api/request-password-reset`; POST `/api/reset-password` | Current username/password flows in dev and prod. |
 | Cognito handshake | POST `/api/auth/callback`; POST `/api/auth/logout`; POST `/api/auth/forgot-password`; POST `/api/auth/confirm-forgot-password`; POST `/api/auth/register`; POST `/api/auth/confirm-registration`; POST `/api/auth/resend-confirmation`; POST `/api/auth/dev-admin-confirm`; POST `/api/auth/password-login`; POST `/api/auth/refresh` | New OIDC-based journeys for `/auth/callback`, password reset, and admin-assisted confirmations. |
 | Intake navigation | GET `/api/intake-step/:stepId`; POST `/api/intake-step/:stepId/update`; GET `/api/intake-json`; POST `/api/intake-json`; POST `/api/intake/complete` | Dynamic workflow runner fetches step configs, persists partial answers, and finalizes submissions. |
-| Draft management | GET/POST/DELETE `/api/draft`; POST `/api/save-draft`; POST `/api/jordan/save-draft`; GET `/api/jordan/get-draft`; DELETE `/api/jordan/delete-draft` | Save-and-resume for schema flow plus Jordan variant. |
-| Applications & submissions | POST `/api/applications`; GET `/api/applications`; GET `/api/applications/by-tracking-id`; GET `/api/jordan-applications/by-tracking-id`; GET `/api/submissions`; GET `/api/submissions/by-reference` | Applicant dashboards, tracking lookup, and Jordan flows. |
+| Draft management | GET/POST/DELETE `/api/draft` | Save-and-resume for the current schema-driven flow. |
+| Applications & submissions | POST `/api/applications`; GET `/api/applications`; GET `/api/applications/by-tracking-id`; GET `/api/submissions`; GET `/api/submissions/by-reference` | Applicant dashboards and tracking lookup for the current portal journey. |
 | Messaging | GET `/api/messages`; GET `/api/messages/context`; GET `/api/messages/:id`; POST `/api/messages/reply`; POST `/api/messages/reply-with-attachments`; PUT `/api/messages/:id/read`; PUT `/api/messages/:id/replied`; DELETE `/api/messages/:id`; DELETE `/api/messages/clear-deleted` | Secure messaging inbox, compose, reply, and deletion flows. |
-| Document lifecycle | GET `/api/uploads/info`; POST `/api/uploads/presign`; POST `/api/documents/finalize`; GET `/api/documents`; GET `/api/documents/:id/presign-download`; POST `/api/upload-application-file`; DELETE `/api/delete-bil` | File upload wizard, presigned S3 integration, and legacy cleanup endpoints. |
+| Document lifecycle | GET `/api/uploads/info`; POST `/api/uploads/presign`; POST `/api/documents/finalize`; GET `/api/documents`; GET `/api/documents/:id/presign-download`; POST `/api/upload-application-file`; DELETE `/api/uploads/remove` | File upload wizard, presigned S3 integration, and document cleanup. |
 | Organizations | GET `/api/organizations`; GET `/api/organizations/:id` | Self-identification flows and required document lists. |
-| Case coordination | POST `/api/case-events`; POST `/api/jordan/save-draft` | Timeline updates and notifications when applicants submit or respond. |
+| Case coordination | Server-side event capture within `/api/draft`, `/api/intake/complete`, `/api/applications`, and `/api/upload-application-file` | Timeline updates and notifications are emitted during draft save, submission, and upload flows rather than through a standalone public event endpoint. |
 | AI support | POST `/api/ai-support` | Applicant help chat using OpenRouter. |
 | Provisioning | POST `/api/provision/applicant` | Admin-triggered applicant bootstrap exposed via admin dashboard. |
-| Admin metrics/config | GET `/api/admin/auth-metrics`; GET `/api/admin/linkage-stats`; GET/PATCH `/api/admin/upload-config` | Admin console widgets and upload size configuration. |
+| Admin metrics/config | GET `/api/admin/linkage-stats`; GET/PATCH `/api/admin/upload-config` | Admin console widgets and upload size configuration. |
 ## Compliance Addendum
 
 ### Accessibility Targets

@@ -2,6 +2,16 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-04-23
+- Fix/Application Assessment: Step 13/14 in the application workspace now trusts the canonical recorded application decision before the older assurance-only fallback, so denied files cannot reopen the approval branch just because `assessment_nwac_review` still says `agree`.
+- Ops/Data repair: Applied a guarded one-off PROD correction for `ISET-20260409-123477`, forcing the persisted assessment review fallback onto the denied path and bumping the application row version so step 13 / step 14 in the application workspace hydrate consistently as a denial.
+- Ops/Maintenance: Shortened the default ALB fallback maintenance-page body copy to `PATH is temporarily unavailable while maintenance is in progress.` so incident holds do not imply an immediate reopen.
+- UX/Homepage: Reworked the NWAC Administrator and Regional Manager Work Queue into a clearer application pipeline with `New Applications`, `In Assessment`, `Pending Decision`, and `Pending Completion`, while keeping all decision-stage application and intervention work combined in the final decision queue.
+- UX/Homepage: Removed the redundant NWAC Administrator `All Applications` queue card now that the homepage application pipeline is represented directly by the four stage buckets.
+- UX/Homepage: Narrowed `Pending Assessment` to submitted assigned files still waiting for EI verification, and expanded `New Applications` to also include EI-verified submitted files that have not yet entered active assessment.
+- UX/Homepage: NWAC Administrators no longer see the narrower EI-pending queue separately; those files are folded into `New Applications`, while Regional Managers keep the same stage under the shorter label `EI Check Needed`.
+- UX/Homepage: Added `Pending Completion` across the role homepages as the post-decision application stage for files that still need letters, funding-form/signature follow-through, or other closeout work before the application workflow is complete, and aligned the coordinator's former funding-agreement queue to the same concept.
+
 ## 2026-04-22
 - Docs/Ops: Clarified the standing deploy-intent rule in `docs/AGENTS.md`: when Bill asks to deploy to TEST or PROD, Codex should assume the full current awaiting-release checkout state, including relevant code/config/runtime/schema promotion work, unless he explicitly narrows the release. Data resets or one-off live data mutation still require explicit intent.
 - UX/Finance/Email: Finance payment-packet emails now use a lean AP-style body with `Payee`, `Payment Instructions`, and `Coding` sections, rendering the payment details as a compact line table and only showing optional PATH-entered references when staff provided them.
@@ -837,3 +847,17 @@ Format: YYYY-MM-DD - Category: Short description
 - UX: Batch Payments detail is now inspection-only; create/edit/validate/send flows stay in the program workspace.
 - UX: Batch Payments communications now clearly switch between active-packet and all-packets views, and the finance page hides manual-log actions.
 - UX: SLA snapshot now starts in the widget palette instead of the default Batch Payments layout.
+
+## 2026-04-23
+- Security: Fixed public-portal applicant secure-message routing so assigned case managers resolve through staff user accounts instead of overlapping `staff_profiles.id` values, preventing applicant-origin messages from landing in unrelated applicant inboxes.
+- Ops: Added guarded PROD repair SQL to reassign existing misrouted applicant secure messages to the correct staff recipients and remove the wrong mailbox rows before reopening the portal.
+- Ops: Restored the PROD public portal after final live verification that the five repaired messages had no remaining unauthorized applicant mailbox rows in any folder state and that both public portal hosts were returning healthy `200 {"status":"ok"}` responses.
+- Access control: Regional Managers can no longer record application decisions or intervention proposal/revision decisions; those approval/denial paths are now restricted to NWAC Administrators and System Administrators in both frontend gating and backend enforcement.
+- Security: Removed the unused legacy portal `POST /api/case-events` endpoint after confirming the current portal source/build no longer calls it; current intake event capture remains on `/api/draft`, `/api/intake/complete`, `/api/applications`, and `/api/upload-application-file`.
+- Security: Removed the unused legacy portal upload-delete alias and the Jordan experiment draft/application lookup endpoints after confirming the current portal source/build no longer calls them; current upload deletion is `DELETE /api/uploads/remove`.
+- Maintenance: Removed stale current-portal references to old slot-search/save-draft endpoint names; the dashboard start flow and `DynamicTest` fallback now use only the current draft/intake endpoints.
+- Maintenance: Removed orphan current-source leftovers that were not mounted in the live portal server, including the unused test-notification helper, the dead admin-auth-metrics router/snippet pair, and the stale `/api/get-profile` test mock.
+- Security: Hardened finance payment routes so audit-owner user IDs now resolve from authenticated staff context on the server and no longer trust caller-supplied actor/requester/verifier ID fields.
+- Security: Hardened admin note/reminder/escalation/document audit writes so staff requests now resolve to the real local `user.id` by Cognito subject instead of falling back to `staff_profiles.id` or other raw auth numeric IDs.
+- Maintenance: Clarified admin identity semantics by exposing explicit `staffProfileId` values for staff-profile comparisons in backend requester identity and frontend current-user state, while leaving application-lock ownership on its existing opaque actor/subject identity.
+- Maintenance: Staff auth hydration now writes an explicit `staffProfileId` field on admin auth state, and shared RBAC/authz helpers now prefer that field for staff assignment scope checks.

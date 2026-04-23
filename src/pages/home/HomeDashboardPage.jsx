@@ -194,7 +194,7 @@ const ISET_COORDINATOR_STATUS_FILTER = ['submitted', 'in_review', 'docs_requeste
 const ISET_COORDINATOR_EI_ELIGIBILITY_FILTER = ['submitted', 'in_review', 'docs_requested', 'closure_notice'].join(',');
 const ISET_COORDINATOR_READY_TO_ASSESS_FILTER = ['submitted', 'in_review'].join(',');
 const ISET_COORDINATOR_APPROVALS_FILTER = ['pending_approval'].join(',');
-const ISET_COORDINATOR_FUNDING_AGREEMENTS_FILTER = ['decision_ready', 'approved'].join(',');
+const ISET_COORDINATOR_FUNDING_AGREEMENTS_FILTER = ['decision_ready', 'approved', 'rejected', 'declined'].join(',');
 const ISET_COORDINATOR_MILESTONE_WINDOW_DAYS = 14;
 const ISET_COORDINATOR_MISSING_DOCS_FILTER = [
     'docs_requested',
@@ -211,11 +211,6 @@ const ISET_COORDINATOR_MISSING_DOCS_FILTER = [
     'on hold',
     'on_hold'
 ].join(',');
-const NWAC_ADMIN_OPEN_APPLICATIONS_BUCKET = {
-    id: 'all-applications',
-    label: 'All Applications',
-    description: 'All non-terminal applications across the portfolio.'
-};
 const NWAC_ADMIN_CLIENT_CASES_BUCKET = {
     id: 'all-client-cases',
     label: 'All Cases',
@@ -231,25 +226,42 @@ const REGIONAL_MANAGER_CLIENT_CASES_BUCKET = {
     label: 'Clients in My Region',
     description: 'Open client cases in your regional portfolio, including dormant files.'
 };
-const APPROVALS_BUCKET_ID = 'approvals';
-
-const moveBucketAfter = (buckets, bucketId, afterId) => {
-    const source = Array.isArray(buckets) ? buckets.filter(Boolean) : [];
-    const target = source.find(bucket => bucket?.id === bucketId) || null;
-    if (!target) {
-        return source;
-    }
-    const withoutTarget = source.filter(bucket => bucket?.id !== bucketId);
-    const afterIndex = withoutTarget.findIndex(bucket => bucket?.id === afterId);
-    if (afterIndex < 0) {
-        return withoutTarget;
-    }
-    return [
-        ...withoutTarget.slice(0, afterIndex + 1),
-        target,
-        ...withoutTarget.slice(afterIndex + 1)
-    ];
-};
+const SHARED_PROGRAM_ADMIN_PIPELINE_BUCKET_IDS = Object.freeze([
+    'new-applications',
+    'pending-assessment',
+    'in-assessment',
+    'pending-decision',
+    'pending-completion',
+]);
+const NWAC_ADMIN_PIPELINE_BUCKET_IDS = Object.freeze([
+    'new-applications',
+    'in-assessment',
+    'pending-decision',
+    'pending-completion',
+]);
+const PROGRAM_ADMIN_EXCEPTION_BUCKET_IDS = Object.freeze([
+    'unresolved-conflicts',
+    'exceptions-escalations',
+    'payments-issues',
+    'ilmp-issues',
+    'overdue',
+]);
+const WORK_QUEUE_IN_ASSESSMENT_FILTER = [
+    'in_review',
+    'docs_requested',
+    'docs requested',
+    'action_required',
+    'action required',
+    'action required (docs requested)',
+    'closure_notice',
+    'closure notice',
+    'pending info',
+    'pending information',
+    'info requested',
+    'information requested',
+    'on hold',
+    'on_hold'
+].join(',');
 
 const buildDevHeaders = (role) => {
     return { Accept: 'application/json' };
@@ -347,6 +359,30 @@ const buildApplicationQueueStatusFields = (row, fallbackStatus = 'submitted') =>
 
 const getApplicationQueueRawStatus = (row, fallbackStatus = 'submitted') =>
     buildApplicationQueueStatusFields(row, fallbackStatus).status;
+
+const isAssignedApplicationRow = row => {
+    const assignedId = row?.assigned_user_id ?? row?.assignedUserId ?? row?.assigned_to_user_id ?? null;
+    if (Number(assignedId) > 0) return true;
+    const assignedEmail = String(row?.assigned_user_email ?? row?.assignedUserEmail ?? '').trim();
+    return Boolean(assignedEmail);
+};
+
+const resolveApplicationPipelineBucketId = row => {
+    const rawStatus = getApplicationQueueRawStatus(row, 'submitted');
+    if (rawStatus === 'submitted') {
+        if (isAssignedApplicationRow(row) && isEligibilityPending(row?.assessment_esdc_eligibility ?? row?.assessmentEsdcEligibility ?? null)) {
+            return 'pending-assessment';
+        }
+        return 'new-applications';
+    }
+    if (rawStatus === 'in_review' || rawStatus === 'awaiting_applicant') {
+        return 'in-assessment';
+    }
+    if (rawStatus === 'pending_decision') {
+        return 'pending-decision';
+    }
+    return null;
+};
 
 const filterWidgetsForRole = (role) => {
     const allowed = { ...WIDGET_REGISTRY };
@@ -514,7 +550,7 @@ const buildStampLabel = (() => {
 const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel }) => {
     const { isAuthenticated, role: authenticatedRole, signIn } = useAuth();
     const role = authenticatedRole || 'Guest';
-    const { userId: currentUserId, email: currentUserEmail } = useCurrentUser();
+    const { userId: currentUserId, staffProfileId: currentStaffProfileId, email: currentUserEmail } = useCurrentUser();
     const authRefreshKey = useMemo(
         () => [role, currentUserId || '', currentUserEmail || ''].join(':'),
         [role, currentUserEmail, currentUserId]
@@ -526,21 +562,41 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
 
     const workQueueBuckets = useMemo(() => {
         if (!isWorkQueueRole) return [];
+        const bucketLookup = new Map(PROGRAM_ADMIN_BUCKETS.map(bucket => [bucket.id, bucket]));
+        const pipelineBucketIds = isNwacAdminRole
+            ? NWAC_ADMIN_PIPELINE_BUCKET_IDS
+            : SHARED_PROGRAM_ADMIN_PIPELINE_BUCKET_IDS;
+        const pipelineBuckets = pipelineBucketIds
+            .map(id => bucketLookup.get(id))
+            .filter(Boolean);
+        const exceptionBuckets = PROGRAM_ADMIN_EXCEPTION_BUCKET_IDS
+            .map(id => bucketLookup.get(id))
+            .filter(Boolean);
         if (isRegionalCoordinatorRole) {
+            const regionalPipelineBuckets = pipelineBuckets.map(bucket => (
+                bucket?.id === 'pending-assessment'
+                    ? {
+                        ...bucket,
+                        label: 'EI Check Needed',
+                        description: 'Assigned applications still waiting for EI status verification before assessment can begin.'
+                    }
+                    : bucket
+            ));
             const myBucket = ISET_COORDINATOR_BUCKETS.find(bucket => bucket.id === 'my-new-applications') || null;
-            return moveBucketAfter([
+            return [
                 REGIONAL_MANAGER_OPEN_APPLICATIONS_BUCKET,
-                REGIONAL_MANAGER_CLIENT_CASES_BUCKET,
                 ...(myBucket ? [myBucket] : []),
-                ...PROGRAM_ADMIN_BUCKETS
-            ], APPROVALS_BUCKET_ID, REGIONAL_MANAGER_CLIENT_CASES_BUCKET.id);
+                ...regionalPipelineBuckets,
+                REGIONAL_MANAGER_CLIENT_CASES_BUCKET,
+                ...exceptionBuckets,
+            ];
         }
         if (isNwacAdminRole) {
-            return moveBucketAfter([
-                NWAC_ADMIN_OPEN_APPLICATIONS_BUCKET,
+            return [
+                ...pipelineBuckets,
                 NWAC_ADMIN_CLIENT_CASES_BUCKET,
-                ...PROGRAM_ADMIN_BUCKETS
-            ], APPROVALS_BUCKET_ID, NWAC_ADMIN_CLIENT_CASES_BUCKET.id);
+                ...exceptionBuckets,
+            ];
         }
         return PROGRAM_ADMIN_BUCKETS;
     }, [isWorkQueueRole, isNwacAdminRole, isRegionalCoordinatorRole]);
@@ -876,10 +932,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                     payload.buckets.forEach(bucket => {
                         if (bucket && bucket.id) {
                             const parsed = Number(bucket.count);
-                            const mappedId = bucket.id === 'new-submissions'
-                                ? 'unassigned-applications'
-                                : bucket.id;
-                            nextCounts[mappedId] = Number.isFinite(parsed) ? parsed : 0;
+                            nextCounts[bucket.id] = Number.isFinite(parsed) ? parsed : 0;
                         }
                     });
                     setProgramAdminCounts(current => ({
@@ -894,87 +947,6 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         loadProgramAdminCounts();
         return () => { ignore = true; };
     }, [role, programAdminRefresh, isWorkQueueRole]);
-
-    useEffect(() => {
-        if (!isNwacAdminRole) {
-            return;
-        }
-        let ignore = false;
-        const loadAllOpenApplications = async () => {
-            try {
-                const response = await apiFetch('/api/applications?excludeTerminal=1&limit=200&offset=0', {
-                    headers: buildDevHeaders(role)
-                });
-                if (!response.ok) {
-                    throw new Error(`Request failed: ${response.status}`);
-                }
-                const payload = await response.json();
-                if (ignore) return;
-                if (!payload || !Array.isArray(payload.rows)) {
-                    throw new Error('Unexpected response format while loading all applications.');
-                }
-                const mapped = payload.rows.map((row, idx) => {
-                    const id = row.tracking_id || row.case_id || row.application_id || `all-open-${idx}`;
-                    const applicantName =
-                        row.applicant_name ||
-                        row.applicantName ||
-                        row.client?.displayName ||
-                        row.client?.name ||
-                        [row.client?.firstName, row.client?.lastName].filter(Boolean).join(' ') ||
-                        row.client?.firstName ||
-                        row.client?.lastName ||
-                        [row.client?.first_name, row.client?.last_name].filter(Boolean).join(' ') ||
-                        row.client?.first_name ||
-                        row.client?.last_name ||
-                        row.tracking_id ||
-                        'Applicant';
-                    const submitted = row.submitted_at || row.created_at || null;
-                    return {
-                        id,
-                        title: applicantName,
-                        trackingId: row.tracking_id || row.trackingId || null,
-                        application_id: row.application_id || row.applicationId || null,
-                        case_id: row.case_id || row.caseId || null,
-                        bucketId: 'all-applications',
-                        type: 'Application',
-                        applicant: applicantName,
-                        applicant_name: applicantName,
-                        region: row.region || row.address_province || '—',
-                        address_province: row.address_province || row.region || null,
-                        owner: row.assigned_user_email || 'Unassigned',
-                        assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
-                        ...buildApplicationQueueStatusFields(row, 'submitted'),
-                        docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
-                        docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
-                        docs_requested_cleared_at: row.docs_requested_cleared_at ?? row.docsRequestedClearedAt ?? null,
-                        docs_requested_source: row.docs_requested_source ?? row.docsRequestedSource ?? null,
-                        dueDate: null,
-                        submittedAt: submitted,
-                        updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
-                        summary: 'Non-terminal application across the national portfolio.',
-                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
-                        workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
-                    };
-                });
-                const totalCount = Number(payload.count);
-                setProgramAdminItems(current => {
-                    const nonAllApplications = current.filter(item => item.bucketId !== 'all-applications');
-                    return [...mapped, ...nonAllApplications];
-                });
-                setProgramAdminCounts(current => ({
-                    ...current,
-                    'all-applications': Number.isFinite(totalCount) ? totalCount : mapped.length
-                }));
-                if (mapped.length) {
-                    setProgramAdminBucketId(bucket => bucket || 'all-applications');
-                }
-            } catch (_) {
-                // keep existing items on failure
-            }
-        };
-        loadAllOpenApplications();
-        return () => { ignore = true; };
-    }, [role, programAdminRefresh, isNwacAdminRole]);
 
     useEffect(() => {
         if (!isNwacAdminRole) {
@@ -1219,9 +1191,9 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         if (!isRegionalCoordinatorRole) {
             return;
         }
-        const currentUserIdValue = currentUserId ? String(currentUserId) : null;
+        const currentStaffProfileIdValue = currentStaffProfileId ? String(currentStaffProfileId) : null;
         const currentUserEmailValue = currentUserEmail ? String(currentUserEmail).toLowerCase() : null;
-        if (!currentUserIdValue && !currentUserEmailValue) {
+        if (!currentStaffProfileIdValue && !currentUserEmailValue) {
             setProgramAdminItems(current => current.filter(item => item.bucketId !== 'my-new-applications'));
             setProgramAdminCounts(current => ({
                 ...current,
@@ -1246,7 +1218,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                 const assignedRows = payload.rows.filter(row => {
                     const assignedId = row.assigned_user_id || row.assigned_to_user_id || null;
                     const assignedEmail = row.assigned_user_email || row.assignedUserEmail || null;
-                    if (currentUserIdValue && assignedId && String(assignedId) === currentUserIdValue) {
+                    if (currentStaffProfileIdValue && assignedId && String(assignedId) === currentStaffProfileIdValue) {
                         return true;
                     }
                     if (currentUserEmailValue && assignedEmail && assignedEmail.toLowerCase() === currentUserEmailValue) {
@@ -1320,7 +1292,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadRegionalManagerAssignedApplications();
         return () => { ignore = true; };
-    }, [role, programAdminRefresh, isRegionalCoordinatorRole, coordinatorStatusesParam, currentUserId, currentUserEmail]);
+    }, [role, programAdminRefresh, isRegionalCoordinatorRole, coordinatorStatusesParam, currentStaffProfileId, currentUserEmail]);
 
     useEffect(() => {
         if (!isIsetCoordinatorRole) {
@@ -1801,14 +1773,14 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         application_id: row.application_id || row.applicationId || null,
                         case_id: row.case_id || row.caseId || null,
                         bucketId: 'funding-agreements',
-                        type: 'Agreement',
+                        type: 'Application',
                         applicant: applicantName,
                         applicant_name: applicantName,
                         region: row.region || row.address_province || '—',
                         address_province: row.address_province || row.region || null,
                         owner: row.assigned_user_email || 'You',
                         assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
-                        status: 'Funding agreement pending',
+                        ...buildApplicationQueueStatusFields(row, row.application_status || row.status || 'approved'),
                         docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
                         docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
                         docs_requested_cleared_at: row.docs_requested_cleared_at ?? row.docsRequestedClearedAt ?? null,
@@ -1816,9 +1788,22 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         dueDate: null,
                         submittedAt: submitted,
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
-                        summary: 'Funding agreement not yet signed.',
+                        summary: (() => {
+                            const statusKey = String(row.application_status || row.status || '').trim().toLowerCase();
+                            const hasFundingAgreement = Number(row.funding_agreement_count || 0) > 0;
+                            if (statusKey === 'approved') {
+                                return hasFundingAgreement
+                                    ? 'Approved file still needs funding-form or signature follow-through before completion.'
+                                    : 'Approved file still needs post-decision follow-through before completion.';
+                            }
+                            if (['rejected', 'declined', 'denied'].includes(statusKey)) {
+                                return 'Denied file still needs post-decision closeout.';
+                            }
+                            return 'Decision-recorded file still needs post-decision follow-through before completion.';
+                        })(),
                         assessment_intervention_cost_total: row.assessment_intervention_cost_total ?? null,
                         assessment_intervention_pot_id: row.assessment_intervention_pot_id ?? null,
+                        funding_agreement_count: row.funding_agreement_count ?? 0,
                         workspacePath: row.case_id ? `/cases/${row.case_id}` : '/case-assignment-dashboard'
                     };
                 });
@@ -2292,9 +2277,9 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
             return;
         }
         let ignore = false;
-        const loadUnassignedApplications = async () => {
+        const loadSubmittedApplicationsPipeline = async () => {
             try {
-                const response = await apiFetch('/api/applications?status=submitted,in_review&limit=200&offset=0', {
+                const response = await apiFetch('/api/applications?status=submitted&limit=200&offset=0', {
                     headers: buildDevHeaders(role)
                 });
                 if (!response.ok) {
@@ -2303,76 +2288,109 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                 const payload = await response.json();
                 if (ignore) return;
                 if (!payload || !Array.isArray(payload.rows)) {
-                    throw new Error('Unexpected response format while loading unassigned applications.');
+                    throw new Error('Unexpected response format while loading submitted applications.');
                 }
-                const unassignedItems = payload.rows.filter(item => {
-                    const assignee = item.assigned_user_id || item.assigned_user_email;
-                    return !assignee || Number(assignee) === 0 || item.is_unassigned;
-                });
-                const mapped = unassignedItems.map((row, idx) => {
-                    const id = row.tracking_id || row.case_id || row.application_id || `unassigned-${idx}`;
-                    const applicantName =
-                        row.applicant_name ||
-                        row.applicantName ||
-                        row.client?.displayName ||
-                        row.client?.name ||
-                        [row.client?.firstName, row.client?.lastName].filter(Boolean).join(' ') ||
-                        row.client?.firstName ||
-                        row.client?.lastName ||
-                        [row.client?.first_name, row.client?.last_name].filter(Boolean).join(' ') ||
-                        row.client?.first_name ||
-                        row.client?.last_name ||
-                        row.tracking_id ||
-                        'Applicant';
-                    const title = applicantName;
-                    const submitted = row.submitted_at || row.opened_at || null;
-                    return {
-                        id,
-                        title,
-                        trackingId: row.tracking_id || row.trackingId || null,
-                        application_id: row.applicationId || row.application_id || null,
-                        case_id: row.case_id || null,
-                        bucketId: 'unassigned-applications',
-                        type: 'Application',
-                        applicant: applicantName,
-                        applicant_name: applicantName,
-                        region: row.region || row.address_province || row.owner?.regionId || '—',
-                        address_province: row.address_province || row['address-province'] || row.region || null,
-                        owner: row.assigned_user_email || 'Unassigned',
-                        assigned_user_id: row.assigned_user_id || null,
-                        ...buildApplicationQueueStatusFields(row, 'submitted'),
-                        docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
-                        docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
-                        docs_requested_cleared_at: row.docs_requested_cleared_at ?? row.docsRequestedClearedAt ?? null,
-                        docs_requested_source: row.docs_requested_source ?? row.docsRequestedSource ?? null,
-                        dueDate: row.nextActionDueAt || null,
-                        submittedAt: submitted,
-                        summary: submitted ? `Submitted ${submitted}` : 'Unassigned submission',
-                        workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
-                    };
+                const nextItems = {
+                    'new-applications': [],
+                    'pending-assessment': []
+                };
+                const mappedSubmittedItems = payload.rows
+                    .map((row, idx) => {
+                        const resolvedBucketId = resolveApplicationPipelineBucketId(row);
+                        if (resolvedBucketId !== 'new-applications' && resolvedBucketId !== 'pending-assessment') {
+                            return null;
+                        }
+                        const bucketId =
+                            isNwacAdminRole && resolvedBucketId === 'pending-assessment'
+                                ? 'new-applications'
+                                : resolvedBucketId;
+                        const id = row.tracking_id || row.case_id || row.application_id || `submitted-${idx}`;
+                        const applicantName =
+                            row.applicant_name ||
+                            row.applicantName ||
+                            row.client?.displayName ||
+                            row.client?.name ||
+                            [row.client?.firstName, row.client?.lastName].filter(Boolean).join(' ') ||
+                            row.client?.firstName ||
+                            row.client?.lastName ||
+                            [row.client?.first_name, row.client?.last_name].filter(Boolean).join(' ') ||
+                            row.client?.first_name ||
+                            row.client?.last_name ||
+                            row.tracking_id ||
+                            'Applicant';
+                        const title = applicantName;
+                        const submitted = row.submitted_at || row.opened_at || null;
+                        return {
+                            id,
+                            title,
+                            trackingId: row.tracking_id || row.trackingId || null,
+                            application_id: row.applicationId || row.application_id || null,
+                            case_id: row.case_id || null,
+                            bucketId,
+                            type: 'Application',
+                            applicant: applicantName,
+                            applicant_name: applicantName,
+                            region: row.region || row.address_province || row.owner?.regionId || '—',
+                            address_province: row.address_province || row['address-province'] || row.region || null,
+                            owner: row.assigned_user_email || 'Unassigned',
+                            assigned_user_id: row.assigned_user_id || null,
+                            ...buildApplicationQueueStatusFields(row, 'submitted'),
+                            docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
+                            docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
+                            docs_requested_cleared_at: row.docs_requested_cleared_at ?? row.docsRequestedClearedAt ?? null,
+                            docs_requested_source: row.docs_requested_source ?? row.docsRequestedSource ?? null,
+                            dueDate: row.nextActionDueAt || null,
+                            submittedAt: submitted,
+                            summary:
+                                bucketId === 'new-applications'
+                                    ? (isAssignedApplicationRow(row)
+                                        ? 'Assigned and ready for assessment start.'
+                                        : 'Submitted and awaiting assignment.')
+                                    : 'Assigned and waiting for EI verification before assessment can begin.',
+                            workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
+                        };
+                    })
+                    .filter(Boolean);
+                mappedSubmittedItems.forEach(item => {
+                    nextItems[item.bucketId].push(item);
                 });
                 setProgramAdminItems(current => {
-                    const nonUnassigned = current.filter(item => item.bucketId !== 'unassigned-applications');
-                    return [...mapped, ...nonUnassigned];
+                    const nonPipelineStart = current.filter(
+                        item => item.bucketId !== 'new-applications' && item.bucketId !== 'pending-assessment'
+                    );
+                    return [
+                        ...nextItems['new-applications'],
+                        ...nextItems['pending-assessment'],
+                        ...nonPipelineStart
+                    ];
                 });
                 setProgramAdminCounts(current => ({
                     ...current,
-                    'unassigned-applications': mapped.length
+                    'new-applications': nextItems['new-applications'].length,
+                    'pending-assessment': isNwacAdminRole ? 0 : nextItems['pending-assessment'].length
                 }));
-                if (mapped.length) {
-                    setProgramAdminBucketId(bucket => bucket || 'unassigned-applications');
+                const firstVisibleItem =
+                    nextItems['new-applications'][0] ||
+                    nextItems['pending-assessment'][0] ||
+                    null;
+                if (firstVisibleItem) {
+                    setProgramAdminBucketId(bucket => bucket || firstVisibleItem.bucketId);
                     setProgramAdminSelectedItemId(current => {
-                        if (mapped.some(item => item.id === current)) {
+                        const combined = [
+                            ...nextItems['new-applications'],
+                            ...nextItems['pending-assessment']
+                        ];
+                        if (combined.some(item => item.id === current)) {
                             return current;
                         }
-                        return mapped[0].id;
+                        return firstVisibleItem.id;
                     });
                 }
             } catch (_) {
                 // keep existing data on failure
             }
         };
-        loadUnassignedApplications();
+        loadSubmittedApplicationsPipeline();
         return () => { ignore = true; };
     }, [role, programAdminRefresh, isWorkQueueRole]);
 
@@ -2448,9 +2466,9 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
             return;
         }
         let ignore = false;
-        const loadEiEligibility = async () => {
+        const loadInAssessmentApplications = async () => {
             try {
-                const response = await apiFetch('/api/dashboard/ei-eligibility-items', {
+                const response = await apiFetch(`/api/applications?status=${encodeURIComponent(WORK_QUEUE_IN_ASSESSMENT_FILTER)}&limit=200&offset=0`, {
                     headers: buildDevHeaders(role)
                 });
                 if (!response.ok) {
@@ -2458,48 +2476,61 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                 }
                 const payload = await response.json();
                 if (ignore) return;
-                const items = Array.isArray(payload?.items) ? payload.items : [];
-                const mapped = items.map((row, idx) => {
-                    const tracking = row.trackingId || row.tracking_id || row.caseId || `elig-${idx}`;
+                if (!payload || !Array.isArray(payload.rows)) {
+                    throw new Error('Unexpected response format while loading in-assessment applications.');
+                }
+                const mapped = payload.rows
+                    .filter(row => resolveApplicationPipelineBucketId(row) === 'in-assessment')
+                    .map((row, idx) => {
+                    const tracking = row.trackingId || row.tracking_id || row.caseId || `assessment-${idx}`;
+                    const caseId = row.caseId || row.case_id || null;
                     const applicantName =
                         row.applicant_name ||
                         row.applicantName ||
                         tracking ||
                         'Applicant';
                     const submitted = row.submittedAt || row.submitted_at || null;
+                    const rawStatus = getApplicationQueueRawStatus(row, 'in_review');
                     return {
                         id: tracking,
                         title: applicantName,
                         trackingId: tracking,
                         case_id: row.caseId || row.case_id || null,
-                        bucketId: 'ei-eligibility-checks',
-                        type: 'Eligibility',
+                        application_id: row.applicationId || row.application_id || null,
+                        bucketId: 'in-assessment',
+                        type: 'Application',
                         applicant: applicantName,
                         applicant_name: applicantName,
                         region: row.address_province || '—',
                         address_province: row.address_province || null,
-                        sin: row.sin || row.sin_number || null,
                         assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
-                        applicationId: row.applicationId || row.application_id || null,
                         owner: row.owner || row.assigned_user_email || 'Unassigned',
                         assigned_user_id: row.assigned_user_id || null,
-                        status: row.status || 'Submitted',
+                        ...buildApplicationQueueStatusFields(row, rawStatus),
+                        docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
+                        docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
+                        docs_requested_cleared_at: row.docs_requested_cleared_at ?? row.docsRequestedClearedAt ?? null,
+                        docs_requested_source: row.docs_requested_source ?? row.docsRequestedSource ?? null,
                         dueDate: null,
                         submittedAt: submitted,
-                        summary: 'Awaiting EI eligibility decision',
-                        workspacePath: row.caseId ? `/application-case/${row.caseId}` : '/case-assignment-dashboard'
+                        updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
+                        summary:
+                            rawStatus === 'awaiting_applicant'
+                                ? 'Assessment is paused while PATH waits for applicant documents or a response.'
+                                : 'Assessment is in progress.',
+                        workspacePath: caseId ? `/application-case/${caseId}` : '/case-assignment-dashboard'
                     };
                 });
                 setProgramAdminItems(current => {
-                    const nonEligibility = current.filter(item => item.bucketId !== 'ei-eligibility-checks');
-                    return [...mapped, ...nonEligibility];
+                    const nonAssessment = current.filter(item => item.bucketId !== 'in-assessment');
+                    return [...mapped, ...nonAssessment];
                 });
                 setProgramAdminCounts(current => ({
                     ...current,
-                    'ei-eligibility-checks': mapped.length
+                    'in-assessment': mapped.length
                 }));
                 if (mapped.length) {
-                    setProgramAdminBucketId(bucket => bucket || 'ei-eligibility-checks');
+                    setProgramAdminBucketId(bucket => bucket || 'in-assessment');
                     setProgramAdminSelectedItemId(current => {
                         if (mapped.some(item => item.id === current)) {
                             return current;
@@ -2511,7 +2542,89 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                 // keep existing items on failure
             }
         };
-        loadEiEligibility();
+        loadInAssessmentApplications();
+        return () => { ignore = true; };
+    }, [role, programAdminRefresh, isWorkQueueRole]);
+
+    useEffect(() => {
+        if (!isWorkQueueRole) {
+            return;
+        }
+        let ignore = false;
+        const loadPendingCompletionApplications = async () => {
+            try {
+                const response = await apiFetch('/api/applications?status=decision_ready,approved,rejected,declined&limit=200&offset=0', {
+                    headers: buildDevHeaders(role)
+                });
+                if (!response.ok) {
+                    throw new Error(`Request failed: ${response.status}`);
+                }
+                const payload = await response.json();
+                if (ignore) return;
+                if (!payload || !Array.isArray(payload.rows)) {
+                    throw new Error('Unexpected response format while loading pending-completion applications.');
+                }
+                const mapped = payload.rows.map((row, idx) => {
+                    const tracking = row.tracking_id || row.case_id || row.application_id || `completion-${idx}`;
+                    const applicantName =
+                        row.applicant_name ||
+                        row.applicantName ||
+                        tracking ||
+                        'Applicant';
+                    const submitted = row.submitted_at || row.created_at || null;
+                    const statusKey = String(row.application_status || row.status || '').trim().toLowerCase();
+                    const hasFundingAgreement = Number(row.funding_agreement_count || 0) > 0;
+                    let summary = 'Decision-recorded file still needs post-decision follow-through before completion.';
+                    if (statusKey === 'approved') {
+                        summary = hasFundingAgreement
+                            ? 'Approved file still needs funding-form or signature follow-through before completion.'
+                            : 'Approved file still needs post-decision follow-through before completion.';
+                    } else if (['rejected', 'declined', 'denied'].includes(statusKey)) {
+                        summary = 'Denied file still needs post-decision closeout.';
+                    } else if (statusKey === 'decision_ready') {
+                        summary = 'Decision-recorded file still needs post-decision follow-through before completion.';
+                    }
+                    return {
+                        id: tracking,
+                        title: applicantName,
+                        trackingId: tracking,
+                        case_id: row.case_id || null,
+                        application_id: row.application_id || null,
+                        bucketId: 'pending-completion',
+                        type: 'Application',
+                        applicant: applicantName,
+                        applicant_name: applicantName,
+                        region: row.region || row.address_province || '—',
+                        address_province: row.address_province || null,
+                        owner: row.assigned_user_email || 'Unassigned',
+                        assigned_user_id: row.assigned_user_id || null,
+                        ...buildApplicationQueueStatusFields(row, row.application_status || row.status || 'approved'),
+                        docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
+                        docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
+                        docs_requested_cleared_at: row.docs_requested_cleared_at ?? row.docsRequestedClearedAt ?? null,
+                        docs_requested_source: row.docs_requested_source ?? row.docsRequestedSource ?? null,
+                        dueDate: null,
+                        submittedAt: submitted,
+                        updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
+                        summary,
+                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                        funding_agreement_count: row.funding_agreement_count ?? 0,
+                        workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
+                    };
+                });
+                setProgramAdminItems(current => {
+                    const nonCompletion = current.filter(item => item.bucketId !== 'pending-completion');
+                    return [...mapped, ...nonCompletion];
+                });
+                setProgramAdminCounts(current => ({
+                    ...current,
+                    'pending-completion': mapped.length
+                }));
+            } catch (_) {
+                // keep existing items on failure
+            }
+        };
+        loadPendingCompletionApplications();
         return () => { ignore = true; };
     }, [role, programAdminRefresh, isWorkQueueRole]);
 
@@ -2555,7 +2668,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         titleSecondaryContent: interventionBreakdownContent,
                         case_id: caseId,
                         application_id: row.applicationId || row.application_id || null,
-                        bucketId: 'approvals',
+                        bucketId: 'pending-decision',
                         type: 'AwaitingApproval',
                         applicant: applicantName,
                         applicant_name: applicantName,
@@ -2580,7 +2693,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         approvalQueuedAt,
                         dueDate: null,
                         submittedAt: submitted,
-                        summary: 'Awaiting program decision',
+                        summary: 'Application decision is waiting on approver review.',
                         workspacePath: caseId
                             ? buildApprovalWorkspacePath({
                                 basePath: `/application-case/${caseId}`,
@@ -2658,7 +2771,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         application_id: row.applicationId || row.application_id || null,
                         interventionId,
                         actionPlanId,
-                        bucketId: 'approvals',
+                        bucketId: 'pending-decision',
                         type: 'InterventionApproval',
                         applicant: applicantName,
                         applicant_name: applicantName,
@@ -2684,7 +2797,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         approvalQueuedAt,
                         dueDate: null,
                         submittedAt: row.submittedAt || row.submitted_at || null,
-                        summary: 'Intervention proposal awaiting approval',
+                        summary: 'Intervention decision is waiting on approver review.',
                         workspacePath: caseId
                             ? buildApprovalWorkspacePath({
                                 basePath: `/cases/${caseId}`,
@@ -2782,76 +2895,6 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
             }
         };
         loadWatchlistHits();
-        return () => { ignore = true; };
-    }, [role, programAdminRefresh, isWorkQueueRole]);
-
-    useEffect(() => {
-        if (!isWorkQueueRole) {
-            return;
-        }
-        let ignore = false;
-        const loadMarkedForClosure = async () => {
-            try {
-                const response = await apiFetch('/api/dashboard/marked-for-closure-items', {
-                    headers: buildDevHeaders(role)
-                });
-                if (!response.ok) {
-                    throw new Error(`Request failed: ${response.status}`);
-                }
-                const payload = await response.json();
-                if (ignore) return;
-                const items = Array.isArray(payload?.items) ? payload.items : [];
-                const mapped = items.map((row, idx) => {
-                    const tracking =
-                        row.trackingId ||
-                        row.tracking_id ||
-                        row.caseNumber ||
-                        row.case_number ||
-                        row.caseId ||
-                        row.case_id ||
-                        `closure-${idx}`;
-                    const applicantName =
-                        row.applicant_name ||
-                        row.applicantName ||
-                        row.applicant ||
-                        tracking ||
-                        'Applicant';
-                    const submitted = row.submittedAt || row.submitted_at || null;
-                    const caseId = row.caseId || row.case_id || null;
-                    return {
-                        id: `closure-${tracking}`,
-                        title: applicantName,
-                        trackingId: tracking,
-                        case_id: caseId,
-                        application_id: row.applicationId || row.application_id || null,
-                        bucketId: 'marked-for-closure',
-                        type: 'Application',
-                        applicant: applicantName,
-                        applicant_name: applicantName,
-                        region: row.address_province || '—',
-                        address_province: row.address_province || null,
-                        owner: row.owner || row.assigned_user_email || 'Unassigned',
-                        assigned_user_id: row.assigned_user_id || null,
-                        ...buildApplicationQueueStatusFields(row, 'closure_notice'),
-                        dueDate: null,
-                        submittedAt: submitted,
-                        summary: 'Closure notice sent; awaiting applicant response.',
-                        workspacePath: caseId ? `/application-case/${caseId}` : '/case-assignment-dashboard'
-                    };
-                });
-                setProgramAdminItems(current => {
-                    const nonClosure = current.filter(item => item.bucketId !== 'marked-for-closure');
-                    return [...mapped, ...nonClosure];
-                });
-                setProgramAdminCounts(current => ({
-                    ...current,
-                    'marked-for-closure': mapped.length
-                }));
-            } catch (_) {
-                // keep existing items on failure
-            }
-        };
-        loadMarkedForClosure();
         return () => { ignore = true; };
     }, [role, programAdminRefresh, isWorkQueueRole]);
 

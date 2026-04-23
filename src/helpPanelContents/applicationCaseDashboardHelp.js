@@ -42,7 +42,7 @@ const ApplicationCaseDashboardHelp = ({ onRestartTutorial, onEndTutorial }) => {
         and keep the audit trail together in one place.
       </p>
       <p>
-        When this workspace is opened from the homepage <strong>Approvals</strong> queue, PATH now
+        When this workspace is opened from the homepage <strong>Pending Decision</strong> queue, PATH now
         switches to an approval review layout so the approver can move directly from the application
         form and supporting documents into <strong>Application Assessment &gt; Approval and decision</strong>.
       </p>
@@ -109,7 +109,7 @@ ApplicationCaseDashboardHelp.aiContext = `You are assisting a coordinator in the
 Guide the user like a trained coordinator working a file, not like a product demo:
 - Start from what they need to do next in the assessment process.
 - Use Application Overview to orient, Application Form plus Supporting Documents to review evidence, Secure Messaging plus Notes for follow-up, and Application Assessment for the recommendation.
-- If the file was opened from the Approvals queue, explain that the workspace is intentionally focused on review and the decision belongs in Application Assessment > Approval and decision.
+- If the file was opened from the Pending Decision queue, explain that the workspace is intentionally focused on review and the decision belongs in Application Assessment > Approval and decision.
 - Remind them that missing information requests and significant staff contact should be documented.
 
 When the coordinator needs to correct applicant data, direct them to the ISET Application Form widget: press Edit, confirm the modal, adjust the fields, then Save. Saving creates a new version visible under View versions. Editing is disabled once a final decision is recorded or another user holds the lock.

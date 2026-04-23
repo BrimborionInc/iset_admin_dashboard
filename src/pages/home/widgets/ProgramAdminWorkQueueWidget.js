@@ -19,9 +19,29 @@ import HomeWorkQueueHelp from '../../../helpPanelContents/homeWorkQueueHelp';
 
 export const PROGRAM_ADMIN_BUCKETS = [
   {
-    id: 'unassigned-applications',
-    label: 'Unassigned Applications',
-    description: 'Applications in your region that lack an owner.'
+    id: 'new-applications',
+    label: 'New Applications',
+    description: 'Submitted applications not yet in active assessment.'
+  },
+  {
+    id: 'pending-assessment',
+    label: 'Pending Assessment',
+    description: 'Assigned applications still waiting for EI status verification before assessment can begin.'
+  },
+  {
+    id: 'in-assessment',
+    label: 'In Assessment',
+    description: 'Applications currently being assessed, including files waiting on applicant documents or responses.'
+  },
+  {
+    id: 'pending-decision',
+    label: 'Pending Decision',
+    description: 'Application assessments plus new and revised intervention proposals waiting for a decision.'
+  },
+  {
+    id: 'pending-completion',
+    label: 'Pending Completion',
+    description: 'Decision-recorded application files that still need post-decision follow-through before the application workflow is complete.'
   },
   {
     id: 'unresolved-conflicts',
@@ -29,19 +49,9 @@ export const PROGRAM_ADMIN_BUCKETS = [
     description: 'Conflicts of interest declarations that need resolution or reassignment.'
   },
   {
-    id: 'ei-eligibility-checks',
-    label: 'EI Eligibility Checks',
-    description: 'Applications waiting for EI status validation by an Admin or Manager.'
-  },
-  {
     id: 'exceptions-escalations',
     label: 'Exceptions & Escalations',
     description: 'Applications escalated for your attention.'
-  },
-  {
-    id: 'approvals',
-    label: 'Approvals',
-    description: 'Submitted application assessments and new intervention proposals waiting for your decision.'
   },
   {
     id: 'payments-issues',
@@ -54,11 +64,6 @@ export const PROGRAM_ADMIN_BUCKETS = [
     description: 'Applications with SIN numbers matching the watchlist.'
   },
   {
-    id: 'marked-for-closure',
-    label: 'Marked for Closure',
-    description: 'Where the applicant has not responded to a request for information.'
-  },
-  {
     id: 'overdue',
     label: 'Overdue',
     description: 'Past-target files and overdue actions.'
@@ -69,7 +74,7 @@ export const PROGRAM_ADMIN_SAMPLE_ITEMS = [
   {
     id: 'APP-2045',
     title: 'APP-2045 · Northern Trades Training Society',
-    bucketId: 'unassigned-applications',
+    bucketId: 'new-applications',
     type: 'Application',
     applicant: 'Northern Trades Training Society',
     region: 'North',
@@ -83,41 +88,28 @@ export const PROGRAM_ADMIN_SAMPLE_ITEMS = [
   {
     id: 'APP-2098',
     title: 'APP-2098 · Coastal Welding Program',
-    bucketId: 'unassigned-applications',
+    bucketId: 'pending-assessment',
     type: 'Application',
     applicant: 'Coastal Welding Program',
     region: 'Vancouver Island',
-    owner: 'Unassigned',
+    owner: 's.chao@nwac.ca',
     status: 'Submitted',
     dueDate: '2025-02-26',
     submittedAt: '2025-02-10',
-    summary: 'Awaiting owner; flagged as high-priority by intake.'
+    summary: 'Assigned and waiting for EI verification before assessment can begin.'
   },
   {
-    id: 'CONFLICT-77',
-    title: 'Conflict · D. Serrano vs Lakeside Skills',
-    bucketId: 'unresolved-conflicts',
-    type: 'Conflict',
-    applicant: 'Lakeside Skills Partnership',
-    region: 'Fraser',
-    owner: 'NWAC Administrator',
-    status: 'Pending decision',
-    dueDate: '2025-02-20',
-    submittedAt: '2025-02-11',
-    summary: 'Assessor declared COI; need reassignment decision.'
-  },
-  {
-    id: 'ELIG-18',
-    title: 'EI Validation · APP-1932',
-    bucketId: 'ei-eligibility-checks',
-    type: 'Eligibility',
+    id: 'APP-1932',
+    title: 'APP-1932 · Prairie Pathfinders',
+    bucketId: 'in-assessment',
+    type: 'Application',
     applicant: 'Prairie Pathfinders',
     region: 'Central',
-    owner: 'EI Desk',
-    status: 'Waiting on SIN verification',
+    owner: 'ei.desk@nwac.ca',
+    status: 'In Review',
     dueDate: '2025-02-19',
     submittedAt: '2025-02-08',
-    summary: 'Missing employer contact and EI confirmation.'
+    summary: 'Assessment has started and is waiting on supporting evidence from the applicant.'
   },
   {
     id: 'ESC-03',
@@ -135,30 +127,57 @@ export const PROGRAM_ADMIN_SAMPLE_ITEMS = [
   {
     id: 'APP-1984',
     title: 'APP-1984 · Apprenticeship Accelerator',
-    bucketId: 'approvals',
+    bucketId: 'pending-decision',
     type: 'AwaitingApproval',
     applicant: 'Apprenticeship Accelerator',
     region: 'Fraser',
     owner: 'T. Firth',
-    status: 'Awaiting program approval',
+    status: 'Pending Decision',
     dueDate: '2025-02-18',
     submittedAt: '2025-02-04',
-    summary: 'Assessment complete; pending approval decision.',
+    summary: 'Assessment complete; pending application decision.',
     workspacePath: '/case-assignment-dashboard'
   },
   {
     id: 'INT-118',
     title: 'Intervention · Welding simulator upgrade',
-    bucketId: 'approvals',
+    bucketId: 'pending-decision',
     type: 'InterventionApproval',
     applicant: 'Coastal Welding Program',
     region: 'Vancouver Island',
     owner: 'S. Chao',
-    status: 'Awaiting approval',
+    status: 'Submitted',
     dueDate: '2025-02-22',
     submittedAt: '2025-02-06',
-    summary: 'New intervention proposed by assessor.',
+    summary: 'Intervention proposal is ready for decision.',
     workspacePath: '/iset/cases'
+  },
+  {
+    id: 'APP-2006',
+    title: 'APP-2006 · Aurora Skills Partnership',
+    bucketId: 'pending-completion',
+    type: 'Application',
+    applicant: 'Aurora Skills Partnership',
+    region: 'North',
+    owner: 'mcoppola@nwac.ca',
+    status: 'Approved',
+    dueDate: null,
+    submittedAt: '2025-02-03',
+    summary: 'Approved file still needs post-decision completion work.',
+    workspacePath: '/case-assignment-dashboard'
+  },
+  {
+    id: 'CONFLICT-77',
+    title: 'Conflict · D. Serrano vs Lakeside Skills',
+    bucketId: 'unresolved-conflicts',
+    type: 'Conflict',
+    applicant: 'Lakeside Skills Partnership',
+    region: 'Fraser',
+    owner: 'NWAC Administrator',
+    status: 'Pending decision',
+    dueDate: '2025-02-20',
+    submittedAt: '2025-02-11',
+    summary: 'Assessor declared COI; need reassignment decision.'
   },
   {
     id: 'PAY-220',
@@ -187,19 +206,6 @@ export const PROGRAM_ADMIN_SAMPLE_ITEMS = [
     dueDate: null,
     submittedAt: '2025-02-05',
     summary: 'SIN matches a watchlist entry; review notes before assessment.'
-  },
-  {
-    id: 'CLS-109',
-    title: 'Closure · No response after info request (APP-2071)',
-    bucketId: 'marked-for-closure',
-    type: 'Closure',
-    applicant: 'Community Training Hub',
-    region: 'Fraser',
-    owner: 'Regional Manager',
-    status: 'Awaiting response',
-    dueDate: '2025-02-17',
-    submittedAt: '2025-02-11',
-    summary: 'Applicant unresponsive after multiple requests; flagged for closure review.'
   }
 ];
 
@@ -207,7 +213,7 @@ const DISABLED_BUCKET_IDS = new Set([
   'payments-issues'
 ]);
 
-const BUCKET_PREFERENCES_STORAGE_KEY_PREFIX = 'home-work-queue-preferences-v4';
+const BUCKET_PREFERENCES_STORAGE_KEY_PREFIX = 'home-work-queue-preferences-v5';
 
 const normalizeRoleKey = role => {
   const raw = String(role || '').trim().toLowerCase();
@@ -229,8 +235,10 @@ const sanitizeVisibleContent = (candidate, allowedIds) => {
   asArray.forEach(value => {
     const rawId = typeof value === 'string' ? value : null;
     const id =
-      rawId === 'applications-awaiting-approval' || rawId === 'interventions-awaiting-approval'
-        ? 'approvals'
+      rawId === 'applications-awaiting-approval' ||
+      rawId === 'interventions-awaiting-approval' ||
+      rawId === 'approvals'
+        ? 'pending-decision'
         : rawId;
     if (!id || !allowed.has(id) || seen.has(id)) return;
     seen.add(id);

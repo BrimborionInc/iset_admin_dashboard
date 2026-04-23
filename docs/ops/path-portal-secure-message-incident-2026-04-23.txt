@@ -1,0 +1,111 @@
+# PATH Public Portal Secure Messaging Privacy Incident
+
+Prepared: 2026-04-23
+
+Status as of 2026-04-23: contained. The code fix is live in PATH live environment, existing wrong mailbox rows were repaired, and the public portal remains behind the maintenance page pending privacy/governance direction on reopening.
+
+This record intentionally omits message body content. It is intended to serve as the single timeline report for the incident and the response steps taken on April 22-23, 2026.
+
+## Incident Summary
+
+On April 22, 2026, Valerie Peters reported that immediately after activating her PATH account she was taken to the portal Messages page and saw unread messages that were not meant for her. She reported that the messages contained another student's personal information, including full name, SIN number, and funding amount.
+
+The subsequent PATH live environment audit confirmed that applicant-origin secure messages in the public portal could be delivered into unrelated applicant inboxes because the portal was treating `iset_case.assigned_to_user_id` as a shared-table `user.id` when it was actually a `staff_profiles.id`.
+
+## Confirmed Scope
+
+- Misrouted messages: 5
+- Affected cases: 5
+- Unauthorized recipient accounts: 3
+- Exposed applicant sender accounts: 5
+- Directly involved portal accounts if counting both unauthorized recipients and exposed applicants: 8
+- Messages confirmed opened by the wrong recipient: 2
+
+Unauthorized recipients:
+
+- Valerie Peters
+- Cheyanne Watkinson
+- Teri Daniels
+
+Applicants whose information was exposed and accessed without authorisation by another applicant:
+
+- Shelly Van Loon
+- Jacqueline Chaban
+
+Applicants whose information was expose temporarily but was not accessed
+- Samantha Rodrigue
+- Calla Brown
+- Melody Bruesewitz
+
+## Timeline Of Events And Steps
+
+- 2026-04-22 17:37 EDT: Valerie Peters emailed Amanda Curtis reporting that, after activating her PATH account, she was immediately taken to the portal Messages page and saw unread messages that were not hers.
+- 2026-04-22 20:59:12: PATH recorded Valerie Peters opening misrouted message `#1`, which belonged to Shelly Van Loon.
+- 2026-04-22 20:59:47: PATH recorded Valerie Peters opening misrouted message `#25`, which belonged to Jacqueline Chaban.
+- 2026-04-23, early morning: a PATH live environment audit began to determine blast radius, identify the wrong recipients, and isolate the routing fault.
+- 2026-04-23, early morning: the PATH live environment audit confirmed 5 misrouted applicant-origin secure messages across 5 cases, received by 3 unrelated applicant accounts.
+- 2026-04-23, early morning: root cause was confirmed in the public portal server code. Applicant outbound secure-message routing was using `iset_case.assigned_to_user_id` directly as `messages.recipient_id`, even though `assigned_to_user_id` stores `staff_profiles.id`, not `user.id`.
+- 2026-04-23, early morning: a guarded PATH live environment mailbox-repair script was prepared at `sql/ops/PATH live environment-fix-applicant-message-recipient-collision-20260423.sql`.
+- 2026-04-23 07:58:18 EDT: the public portal was put behind the static maintenance page by running `npm run path:maintenance:fallback -- set --env PATH live environment --surfaces portal --yes`. The admin console remained online.
+- 2026-04-23, morning: a narrow portal-only PATH live environment hotfix was deployed so secure-message routing now resolves the assigned staff profile to the actual staff `user.id` before compose/write is allowed.
+- 2026-04-23, after the hotfix: the guarded PATH live environment repair script was executed to correct the 5 already-misrouted messages.
+- 2026-04-23, immediately after the repair: verification confirmed 0 remaining misrouted messages, 0 remaining wrong-recipient users, and 0 wrong inbox rows for the 5 repaired messages. Each repaired message now has one correct staff inbox row and was reset to `unread`.
+- 2026-04-23 14:00:04.802 UTC: full PATH live environment release `20260423-135946` completed successfully while leaving the public portal maintenance page in place. The admin console received a 10-minute maintenance warning before shutdown; the portal maintenance page was not removed.
+- 2026-04-23, later the same day: the default portal maintenance message was shortened to `PATH is temporarily unavailable while maintenance is in progress.` so it would not imply a near-term reopen during a privacy-incident hold.
+- 2026-04-23, later the same day: a broader security review was completed for related mixed-ID risks stemming from older shared `user` table assumptions. That follow-on work removed dead legacy portal endpoints and hardened live admin/finance paths that were still vulnerable to the same class of ID-domain confusion.
+- 2026-04-23 14:34:04 EDT: after final live verification that the five repaired messages had `0` remaining applicant mailbox rows in any folder state and that the running PROD portal host contained the recipient-routing hotfix, the public portal maintenance fallback was cleared. Both `https://iset.nwac.ca/healthz` and `https://nwac-public.awentech.ca/healthz` returned `200 {"status":"ok"}` immediately after restore.
+
+## Confirmed Message-Level Impact
+
+| Message ID | Created At | Case Number | Original Applicant | Wrong Recipient | Read By Wrong Recipient |
+|---|---|---|---|---|---|
+| 1 | 2026-04-09 19:37:09 | ISET-20260409-9D9E8C | Shelly Van Loon | Valerie Peters | Yes |
+| 25 | 2026-04-19 20:35:04 | ISET-20260419-05180C | Jacqueline Chaban | Valerie Peters | Yes |
+| 41 | 2026-04-21 23:54:48 | ISET-20260413-E6162E | Samantha Rodrigue | Teri Daniels | No PATH read evidence |
+| 55 | 2026-04-22 23:27:43 | ISET-20260415-0436E9 | Calla Brown | Cheyanne Watkinson | No PATH read evidence |
+| 56 | 2026-04-23 01:08:55 | ISET-20260418-34BECC | Melody Bruesewitz | Cheyanne Watkinson | No PATH read evidence |
+
+## Root Cause
+
+The public portal used the wrong identity domain when routing applicant outbound secure messages.
+
+- The portal treated `iset_case.assigned_to_user_id` as though it were a shared-table `user.id`.
+- In PATH, `iset_case.assigned_to_user_id` actually stores a `staff_profiles.id`.
+- Because `staff_profiles.id` values overlap numerically with applicant `user.id` values, some applicant messages were written with a `messages.recipient_id` that matched an unrelated applicant account instead of the assigned staff user account.
+
+This was legacy migration debt from an older shared `user` table model. Applicants still rely on the shared `user` table as their portal identity principal, while staff were later split into `staff_profiles`. Some older code paths still treated those domains as interchangeable when they are not.
+
+## Containment And Remediation
+
+Containment:
+
+- Public portal placed behind static maintenance page on April 23, 2026 at 07:58:18 EDT.
+- Admin console left online so staff operations could continue.
+- Portal remained closed after the technical fix so reopening could stay under privacy-incident control.
+
+Technical remediation:
+
+- Fixed the public portal routing logic so assigned case managers resolve through the actual staff `user.id`, not the overlapping `staff_profiles.id`.
+- Prepared and executed guarded PATH live environment repair SQL to:
+  - reassign the 5 misrouted messages to the correct staff recipients
+  - remove the wrong applicant mailbox rows
+  - reset corrected recipient inbox state to `unread`
+- Completed a full PATH live environment deployment later the same day while keeping the portal maintenance page enabled.
+
+## Verification After Repair
+
+- Remaining misrouted messages: 0
+- Remaining wrong-recipient users: 0
+- Wrong inbox rows for the 5 repaired messages: 0
+- Corrected repaired messages now point only to the intended staff recipients
+- Corrected recipient mailbox rows were reset to `unread`
+- Public portal hosts were restored at 2026-04-23 14:34:04 EDT after final verification
+
+## Current Status
+
+As of April 23, 2026 14:34pm EDT:
+
+- the routing defect has been fixed in PATH live environment
+- the known wrong mailbox rows have been repaired in PATH live environment
+- a broader mixed-ID hardening work triggered by this incident has been completed to the point that no further work is needed
+- the public portal has been restored and both public hosts are healthy

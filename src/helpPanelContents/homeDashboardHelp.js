@@ -42,7 +42,10 @@ const HomeDashboardHelp = () => {
         <li>Use metrics as a workload snapshot, then drill into the matching record list from any count.</li>
         <li>Keep a personal list of tagged files that need follow-up.</li>
         {(isRegionalManager || isNwacAdmin) ? (
-          <li>Use the Approvals queue to review submitted application assessments and new intervention proposals, then complete the decision inside the workspace.</li>
+          <li>Use the Pending Decision queue to review submitted application assessments, new intervention proposals, and proposed intervention changes, then complete the decision inside the workspace.</li>
+        ) : null}
+        {(isRegionalManager || isNwacAdmin || isCoordinator) ? (
+          <li>Use Pending Completion to catch decision-recorded files that still need letters, funding-form follow-through, signatures, or other post-decision completion work.</li>
         ) : null}
         {isSystemAdmin ? (
           <li>Use the operations snapshot to triage reporting blockers, applicant-account backlog, and staff access hygiene before opening deeper admin tools.</li>
@@ -63,7 +66,10 @@ const HomeDashboardHelp = () => {
         <li><strong>{isCoordinator ? 'Work Queue (ISET Coordinator)' : 'Work Queue'}</strong> - the role-based list of things that need action first.</li>
         <li><strong>Work Queue Items</strong> - the detailed table for the selected queue, with direct links into the correct workspace.</li>
         {(isRegionalManager || isNwacAdmin) ? (
-          <li><strong>Approvals Items</strong> - the approvals-mode view of Work Queue Items, showing applicant province, EI status, timeline target, and workspace access for approval decisions.</li>
+          <li><strong>Pending Decision Items</strong> - the decision-focused view of Work Queue Items, showing applicant province, EI status, timeline target, and workspace access for approval decisions.</li>
+        ) : null}
+        {(isRegionalManager || isNwacAdmin || isCoordinator) ? (
+          <li><strong>Pending Completion</strong> - the post-decision application queue for files that are decided but not yet fully completed.</li>
         ) : null}
         {!isSystemAdmin ? (
           <li><strong>Metrics</strong> - activity totals for the selected period; count values open the contributing records below.</li>
@@ -105,7 +111,7 @@ const HomeDashboardHelp = () => {
         <li>Use Work queue preferences to choose which queue cards are visible for your role.</li>
         <li>Use the tag icon in Work Queue Items to add or remove tagged items from your list.</li>
         {(isRegionalManager || isNwacAdmin) ? (
-          <li>Queue actions vary by role. In the Approvals queue, use <strong>Open workspace</strong> and complete the decision inside the workspace rather than from the table.</li>
+          <li>Queue actions vary by role. In the Pending Decision queue, use <strong>Open workspace</strong> and complete the decision inside the workspace rather than from the table.</li>
         ) : null}
       </ul>
 
@@ -147,7 +153,8 @@ How to answer:
 - Start from the staff task: identify today’s priority, select the right queue, open the matching workspace, then do the real work in the application or case record.
 - When helping coordinators, connect queue names to training expectations such as prompt acknowledgement of new applications, documented follow-up attempts for missing information, keeping all files tracked, and following active cases through check-ins and closure.
 - Explain that metrics can drill into the same Work Queue Items table, while tagging is a personal follow-up tool.
-- For NWAC Administrators and Regional Managers, mention that the Approvals queue opens an approvals-focused table and that approval decisions are completed inside the workspace.
+- For NWAC Administrators and Regional Managers, mention that the Pending Decision queue opens a decision-focused table. Clarify that approval decisions are completed inside the workspace by NWAC Administrators.
+- For coordinators, NWAC Administrators, and Regional Managers, explain that Pending Completion is the post-decision stage for letters, funding-form follow-through, signatures, and other completion tasks before the application workflow is fully done.
 - Mention Add widget and Reset layout only as secondary page controls, not the main purpose of the page.
 - Avoid product-tour language unless the user specifically asks about layout or mechanics.`;
 

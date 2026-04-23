@@ -20,7 +20,7 @@ const HomeCoordinatorWorkQueueHelp = () => (
         <li><strong>Ready to assess:</strong> files that appear ready for the assessment and recommendation work.</li>
         <li><strong>Missing Docs / Follow-ups Needed:</strong> applications waiting on the applicant.</li>
         <li><strong>Awaiting Approval:</strong> recommendations already submitted to NWAC.</li>
-        <li><strong>Funding Agreements to Complete / Sign:</strong> approved files that still need agreement follow-through.</li>
+        <li><strong>Pending Completion:</strong> decision-recorded files that still need letters, funding forms, signatures, or other post-decision follow-through before completion.</li>
         <li><strong>Active Clients</strong>, <strong>Payments &amp; Proof Due</strong>, and <strong>Follow-ups &amp; File Closure Due:</strong> active case-management work after approval.</li>
       </ul>
     </Box>
@@ -39,7 +39,7 @@ Explain the coordinator queue cards in staff language and connect them to the ne
 - Ready to assess -> complete the assessment and recommendation.
 - Missing Docs / Follow-ups Needed -> contact the applicant, request missing items, and document the attempt.
 - Awaiting Approval -> monitor files submitted to NWAC.
-- Funding Agreements / Active Clients / Payments / Follow-ups -> continue active case management after approval.
+- Pending Completion / Active Clients / Payments / Follow-ups -> continue post-decision and active case-management work after approval or denial.
 
 Always mention that the selected card drives the Work Queue Items table, and that Work queue preferences lets the user show or hide queue cards in this browser.
 `;

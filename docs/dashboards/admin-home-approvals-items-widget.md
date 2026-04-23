@@ -1,14 +1,14 @@
-# Admin Home - Approvals Items Widget
+# Admin Home - Pending Decision Items Widget
 
-Purpose: document the live approvals-mode behavior of the shared homepage `Work Queue Items` table.
+Purpose: document the live pending-decision-mode behavior of the shared homepage `Work Queue Items` table.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-04-21
+Last Updated: 2026-04-23
 
 ## Scope
 
 - Route: `/`
-- Queue trigger: `Approvals` in the homepage `Work Queue`
-- Widget title in this mode: `Approvals Items`
+- Queue trigger: `Pending Decision` in the homepage `Work Queue`
+- Widget title in this mode: `Pending Decision Items`
 - Visible to: `NWAC Administrator`, `Regional Manager`
 - Frontend implementation:
   - `src/pages/home/HomeDashboardPage.jsx`
@@ -24,10 +24,11 @@ Last Updated: 2026-04-21
 - New and revised intervention proposals waiting for review
   - sourced from `GET /api/dashboard/intervention-approval-items`
   - current intervention status filter is `submitted` or `in_review`
+- Operationally this bucket is "all decision work waiting on approvers", even though only the application side maps cleanly to a single application lifecycle stage.
 
 ## Current table behavior
 
-- The shared `Work Queue Items` table switches into an approvals-focused column set when the selected bucket is `approvals`.
+- The shared `Work Queue Items` table switches into a decision-focused column set when the selected bucket is `pending-decision`.
 - The current columns are:
   - `Tag`
   - `Item`
@@ -37,7 +38,8 @@ Last Updated: 2026-04-21
   - `Timeline target`
   - `Actions`
 - `Actions` is intentionally limited to `Open workspace`.
-- Do not expose inline `Make Decision` or `Assign` actions in this mode. Approval decisions are completed inside the workspace.
+- Do not expose inline `Make Decision` or `Assign` actions in this mode. Decisions are completed inside the workspace.
+- Regional Managers may still monitor this queue, but current business rules restrict the actual decision commit to NWAC Administrators and System Administrators.
 
 ## Current column rules
 
@@ -59,22 +61,22 @@ Last Updated: 2026-04-21
 
 ## Current routing and date anchors
 
-- Application approvals
+- Application decisions
   - `Open workspace` goes to `/application-case/:id?entry=approval&approvalType=application&step=decision`
   - the application workspace now opens an approval-review board layout with `ISET Application Form`, `Supporting Documents`, and `Application Assessment`
   - approval mode now seeds that board as the starting layout for queue launches without overwriting the user's saved normal board, and the usual board quick actions/reset still work afterward
   - `Application Assessment` now lands on `Approval and decision`; explicit approval-entry step intent beats local wizard-step memory and no longer gets bounced back by the Cloudscape navigation-priming workaround
-  - the approvals timing anchor currently uses `a.updated_at` as the best available proxy for when the file entered `pending_approval`
-- Intervention approvals
+  - the decision timing anchor currently uses `a.updated_at` as the best available proxy for when the file entered `pending_approval`
+- Intervention decisions
   - `Open workspace` goes to `/cases/:caseId?entry=approval&approvalType=intervention&step=decision&interventionId=...&planId=...`
   - the case workspace now opens an approval-review board layout with `Case header`, `Proposed new intervention`, `Participant details`, and `Supporting documents`
   - approval mode now seeds that board as the starting layout for queue launches without overwriting the user's saved normal case board, and the usual board quick actions/reset still work afterward
   - the case workspace uses the queue-provided intervention/action-plan context so `Intervention assessment` loads the correct proposal and lands on `Record of decision` instead of snapping back to a stored draft step during selection/hydration
-  - intervention approval is committed from `Record of decision`; optional decision-letter preparation is available separately after the decision is recorded and is not part of the stepper
-  - the approvals timing anchor currently uses `COALESCE(ci.updated_at, ci.created_at)`
+  - intervention decision is committed from `Record of decision`; optional decision-letter preparation is available separately after the decision is recorded and is not part of the stepper
+  - the decision timing anchor currently uses `COALESCE(ci.updated_at, ci.created_at)`
 
 ## Current guardrails
 
-- Do not infer budget-pot assignment for application approvals when no explicit pot is stored. The approvals table now uses `EI status` instead of a derived budget guess.
+- Do not infer budget-pot assignment for application decisions when no explicit pot is stored. The table uses `EI status` instead of a derived budget guess.
 - Do not show unfunded proposed intervention rows in the `Item` breakdown.
-- Keep this table as a launch point into the real record. Detailed review and the final approval or rejection action belong in the workspace, not in the homepage table.
+- Keep this table as a launch point into the real record. Detailed review and the final decision action belong in the workspace, not in the homepage table.

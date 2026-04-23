@@ -39,7 +39,7 @@ const CaseWorkspaceHelp = ({ tutorial, onRestartTutorial, onEndTutorial }) => {
         documents, communicate with the client, and track follow-up through completion and closure.
       </p>
       <p>
-        When this workspace is opened from the homepage <strong>Approvals</strong> queue for a new
+        When this workspace is opened from the homepage <strong>Pending Decision</strong> queue for a new
         intervention proposal, PATH now opens a focused four-widget approval layout with
         <strong> Case header</strong>, <strong>Proposed new intervention</strong>,
         <strong> Participant details</strong>, and <strong>Supporting documents</strong>, and loads
@@ -122,7 +122,7 @@ CaseWorkspaceHelp.aiContext = `You are guiding a case manager through the Case W
 Focus on the staff workflow:
 - confirm the right case and current participant details;
 - manage action plans and interventions against the client's goals;
-- if the file was opened from the Approvals queue, explain that the workspace is intentionally focused on the selected proposal, the approver should use Intervention assessment > Record of decision, and any decision-letter follow-up happens separately after the decision is committed;
+- if the file was opened from the Pending Decision queue, explain that the workspace is intentionally focused on the selected proposal, the approver should use Intervention assessment > Record of decision, and any decision-letter follow-up happens separately after the decision is committed;
 - record notes, documents, and client contact;
 - for imported or application-less client files, explain that the Case Header quick actions \`Add existing action plan\`, \`Add existing intervention\`, and \`Upload existing documents\` are the approved way to backload pre-PATH history without inventing intake or approval records;
 - when backload questions come up, mention the key guardrails: archived plans cannot receive existing interventions, closed plans only accept completed/cancelled interventions, in-progress or suspended interventions require an active plan, and historic documents stay case-based when there is no linked application;

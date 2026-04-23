@@ -166,7 +166,7 @@ const TUTORIAL_DEFINITIONS = [
           },
           {
             title: 'Work Queue',
-            content: 'Use queues to work unassigned files, approvals, escalations, and overdue actions.',
+            content: 'Use queues to work new applications, pending decisions, escalations, and overdue actions.',
             hotspotId: 'home-program-work-queue'
           },
           {

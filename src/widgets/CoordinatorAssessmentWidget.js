@@ -15,6 +15,7 @@ import {
   APPLICATION_FINAL_STATUSES,
   APPLICATION_LOCKED_STATUSES,
   POST_DECISION_APPLICATION_STATUSES,
+  deriveAssessmentReviewStatusSelection,
   deriveApplicationDecisionOutcome,
 } from '../utils/applicationStatus';
 
@@ -4025,25 +4026,22 @@ const CoordinatorAssessmentWidget = forwardRef(
       return def;
     };
     const derivedOutcomeStatus = (() => {
-      const raw = typeof caseData?.assessment_nwac_review_status === 'string'
-        ? caseData.assessment_nwac_review_status.trim().toLowerCase()
-        : '';
-      if (raw === 'approve' || raw === 'reject' || raw === 'push_back') return raw;
-
-      const reviewRaw = typeof caseData?.assessment_nwac_review === 'string'
-        ? caseData.assessment_nwac_review.trim().toLowerCase()
-        : '';
-      if (reviewRaw === 'agree' || reviewRaw === 'approve' || reviewRaw === 'approved') return 'approve';
-      if (reviewRaw === 'disagree' || reviewRaw === 'reject' || reviewRaw === 'denied') return 'reject';
-
-      const persistedOutcome = deriveApplicationDecisionOutcome({
+      return deriveAssessmentReviewStatusSelection({
+        assessmentReviewStatus: caseData?.assessment_nwac_review_status ?? null,
+        assessmentReview: caseData?.assessment_nwac_review ?? null,
         applicationStatus: canonicalApplicationStatus || rawApplicationStatus,
+        applicationLifecycleStatus: caseData?.application_lifecycle_status ?? caseData?.applicationLifecycleStatus ?? null,
         caseStatus: caseData?.status ?? null,
         decisionOutcome: caseData?.decision_outcome ?? caseData?.decisionOutcome ?? null,
+        awaitingReason:
+          caseData?.application_awaiting_reason ??
+          caseData?.applicationAwaitingReason ??
+          null,
+        closureReason:
+          caseData?.application_closure_reason ??
+          caseData?.applicationClosureReason ??
+          null,
       });
-      if (persistedOutcome === 'approved') return 'approve';
-      if (persistedOutcome === 'denied') return 'reject';
-      return '';
     })();
 
     const contextDeliveryMode = (() => {
@@ -7900,7 +7898,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       return;
     }
     if (!canManageOutcomeReview) {
-      setValidationAlert(['You do not have permission to complete the outcome notice for this case.']);
+      setValidationAlert(['Only NWAC Administrators and System Administrators can record the application decision for this case.']);
       return;
     }
     setHasSubmitted(true);

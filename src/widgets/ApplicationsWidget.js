@@ -226,12 +226,14 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
   const [autoAssignStatus, setAutoAssignStatus] = useState({ loading: true, enabled: null, error: null, rules: [] });
   const {
     userId: currentUserIdRaw,
+    staffProfileId: currentStaffProfileIdRaw,
     displayName: currentUserName,
     role: currentUserRole,
     regionId: currentUserRegionId,
     regionIds: currentUserRegionIds,
   } = useCurrentUser();
   const currentUserId = currentUserIdRaw ? String(currentUserIdRaw) : null;
+  const currentStaffProfileId = currentStaffProfileIdRaw ? String(currentStaffProfileIdRaw) : null;
   const userRole = currentUserRole || '';
   const normalizedUserRole = userRole.trim();
   const locationSearch = location?.search || '';
@@ -273,12 +275,12 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
   const isStaffVisible = useCallback((staff) => {
     if (!staff) return false;
     if (normalizedUserRole === 'Regional Manager') {
-      if (currentUserId && String(staff.id) === String(currentUserId)) return true;
+      if (currentStaffProfileId && String(staff.id) === String(currentStaffProfileId)) return true;
       const staffRegion = staff.region_id != null ? Number(staff.region_id) : (staff.regionId != null ? Number(staff.regionId) : null);
       return normalizedRegionIds.length && Number.isFinite(staffRegion) && normalizedRegionIds.includes(staffRegion);
     }
     return true;
-  }, [normalizedUserRole, normalizedRegionIds, currentUserId]);
+  }, [normalizedUserRole, normalizedRegionIds, currentStaffProfileId]);
 
   const filteredAssignableStaff = useMemo(() => {
     return Array.isArray(assignableStaff)

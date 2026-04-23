@@ -12,10 +12,6 @@ const REGIONAL_COORDINATOR_ROLE_VALUES = Object.freeze(['regional manager']);
 const APPLICATION_ASSESSOR_ROLE_VALUES = Object.freeze(['iset coordinator']);
 const OUTCOME_REVIEW_ROLE_VALUES = Object.freeze([
   ...ADMIN_ROLE_VALUES,
-  'regional manager',
-  'nwac reviewer',
-  'nwac assessment reviewer',
-  'nwac outcome reviewer',
 ]);
 
 const ADMIN_ROLES = new Set(ADMIN_ROLE_VALUES);

@@ -25,9 +25,9 @@ Owner: Admin Dashboard / Public Portal teams
 - M6 Unsupported/advanced components strategy: Publish-time validation added; unsupported types are rejected. Discover supported types at `/api/publish/supported-component-types`.
 ## How to test
 - Post-M0 essentials: conditional reveals; summary-list review step; summary formatters.
-- Upload integration: `/api/upload-application-file` and `/api/delete-bil` wired from the `file-upload` component; multiple and single file flows supported.
+- Upload integration: `/api/upload-application-file` and `/api/uploads/remove` wired from the `file-upload` component; multiple and single file flows supported.
 
-3. Walk the flow; uploads go to `/api/upload-application-file`, remove via `/api/delete-bil`.
+3. Walk the flow; uploads go to `/api/upload-application-file`, remove via `/api/uploads/remove`.
 4. Finish to view Intake JSON Preview; expect your entered values and the history array.
 5. Schema Preview (`/schema-preview`) is a dev harness for quick visual checks.
 - `ISET-intake/src/renderer/renderers.js` - GOV.UK-compliant components, conditional reveals, summary-list with formatters, file-upload with upload/remove.
@@ -38,7 +38,7 @@ Owner: Admin Dashboard / Public Portal teams
 ### Key files (server)
 - `ISET-intake/server.js` — existing endpoints used by preview:
   - `POST /api/upload-application-file` (auth required; multer + DB insert + case event)
-  - `DELETE /api/delete-bil` (remove uploaded file by filePath)
+  - `DELETE /api/uploads/remove` (remove uploaded file by filePath)
 
 ## How to test quickly
 1) Ensure the portal (React) and API (Express) are running. The axios base URL defaults to `http://localhost:5000` in development.

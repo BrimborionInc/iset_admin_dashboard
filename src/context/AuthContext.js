@@ -13,6 +13,7 @@ import {
 const EMPTY_USER = Object.freeze({
   loading: false,
   userId: null,
+  staffProfileId: null,
   displayName: null,
   email: null,
   role: null,
@@ -60,6 +61,7 @@ function normaliseUserResponse(data) {
   const auth = data.auth || {};
   const profile = data.profile || {};
   const userId = auth.sub || auth.user_id || auth.id || profile.id || null;
+  const staffProfileId = auth.staffProfileId || profile.id || null;
   const displayName = auth.name || profile.name || null;
   const email = auth.email || profile.email || null;
   const role = auth.role || auth.primary_role || profile.role || null;
@@ -78,6 +80,7 @@ function normaliseUserResponse(data) {
     .filter(Boolean);
   return {
     userId: userId ? String(userId) : null,
+    staffProfileId: staffProfileId ? String(staffProfileId) : null,
     displayName,
     email,
     role,
@@ -157,6 +160,7 @@ export function AuthProvider({ children }) {
           ...EMPTY_USER,
           loading: false,
           userId: normalised.userId || null,
+          staffProfileId: normalised.staffProfileId || null,
           displayName: normalised.displayName || null,
           email: normalised.email || null,
           role: normalised.role || null,

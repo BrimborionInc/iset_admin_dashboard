@@ -52,8 +52,9 @@ function scopePredicate(tableAlias, auth, regionColumn = 'region_id') {
     return { sql: `${tableAlias}.${regionColumn} IN (${regionIds.map(() => '?').join(',')})`, params: regionIds };
   }
   if (isIsetCoordinatorRole(auth?.role)) {
-    // Both region and assignment constraints (assumes assigned_to_user_id column)
-    return { sql: `${tableAlias}.${regionColumn} = ? AND ${tableAlias}.assigned_to_user_id = ?`, params: [regionIds[0], Number(auth.userId) || -1] };
+    // Coordinator assignment is stored as a staff_profiles.id, not a shared user-table id.
+    const staffProfileId = Number(auth?.staffProfileId ?? auth?.userId) || -1;
+    return { sql: `${tableAlias}.${regionColumn} = ? AND ${tableAlias}.assigned_to_user_id = ?`, params: [regionIds[0], staffProfileId] };
   }
   return { sql: '0=1', params: [] };
 }

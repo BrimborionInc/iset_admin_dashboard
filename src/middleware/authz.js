@@ -31,8 +31,8 @@ function requireRole(...allowed) {
 function scopedAccess(req) {
   const role = req?.auth?.role || null;
   const regionId = req?.auth?.regionId || null;
-  const userId = req?.auth?.userId || null;
-  return { role, regionId, userId };
+  const staffProfileId = req?.auth?.staffProfileId ?? req?.auth?.userId ?? null;
+  return { role, regionId, userId: staffProfileId, staffProfileId };
 }
 
 module.exports = { requireRole, scopedAccess };

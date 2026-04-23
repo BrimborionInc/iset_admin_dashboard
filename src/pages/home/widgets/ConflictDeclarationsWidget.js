@@ -92,7 +92,7 @@ const ConflictDeclarationsWidget = ({ role, refreshKey, actions }) => {
   const [resolveTarget, setResolveTarget] = useState(null);
   const [resolveSubmitting, setResolveSubmitting] = useState(false);
   const {
-    userId: currentUserId,
+    staffProfileId: currentStaffProfileId,
     role: currentUserRole,
     regionId: currentUserRegionId,
     regionIds: currentUserRegionIds
@@ -139,13 +139,13 @@ const ConflictDeclarationsWidget = ({ role, refreshKey, actions }) => {
     return (staff) => {
       if (!staff) return false;
         if (userRole === 'Regional Manager') {
-          if (currentUserId && String(staff.id) === String(currentUserId)) return true;
+          if (currentStaffProfileId && String(staff.id) === String(currentStaffProfileId)) return true;
           const staffRegion = staff.region_id != null ? Number(staff.region_id) : (staff.staff_region_id != null ? Number(staff.staff_region_id) : null);
           return Number.isFinite(staffRegion) && normalizedRegionIds.length && normalizedRegionIds.includes(staffRegion);
         }
         return true;
       };
-  }, [currentUserRole, currentUserId, normalizedRegionIds]);
+  }, [currentUserRole, currentStaffProfileId, normalizedRegionIds]);
 
   const filteredAssignableStaff = useMemo(() => {
     return Array.isArray(assignableStaff) ? assignableStaff.filter(isStaffVisible) : [];

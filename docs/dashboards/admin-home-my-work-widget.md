@@ -2,7 +2,7 @@
 
 Purpose: document the live homepage Work Queue widget and the queues that drive the shared `Work Queue Items` table.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-04-15
+Last Updated: 2026-04-23
 
 ## Scope
 
@@ -19,35 +19,49 @@ Last Updated: 2026-04-15
 ## Current role behavior
 
 - `NWAC Administrator`
-  - sees `All Applications` first
+  - sees the shared application-pipeline queues (`New Applications`, `In Assessment`, `Pending Decision`, `Pending Completion`) first
   - then sees `All Cases`
-  - then sees `Approvals`
-  - then sees the remaining shared admin/manager queue set (`Unassigned Applications`, `Unresolved Conflicts`, `EI Eligibility Checks`, `Exceptions & Escalations`, `Payments Issues`, `Watchlist Hits`, `Marked for Closure`, `Overdue`)
+  - then sees the remaining shared admin/manager exception queues (`Unresolved Conflicts`, `Exceptions & Escalations`, `Payments Issues`, `Watchlist Hits`, `Overdue`)
 - `Regional Manager`
   - sees `Applications in My Region` first
-  - then sees `Clients in My Region`
-  - then sees `Approvals`
   - then sees `My Applications`
-  - then sees the remaining shared admin/manager queue set
+  - then sees the shared application-pipeline queues (`New Applications`, `EI Check Needed`, `In Assessment`, `Pending Decision`, `Pending Completion`)
+  - then sees `Clients in My Region`
+  - then sees the remaining shared admin/manager exception queues
 - `ISET Coordinator`
   - sees the coordinator-specific queue set from `IsetCoordinatorWorkQueueWidget`
 
-## Current Approvals queue
+## Current shared application pipeline
 
-- The shared `Approvals` queue is visible to `NWAC Administrator` and `Regional Manager`.
-- It combines submitted application assessments with new intervention proposals waiting for decision.
-- Selecting `Approvals` drives the shared items table into `Approvals Items` mode rather than opening a separate widget.
-- Current detailed behavior for that table is documented in `docs/dashboards/admin-home-approvals-items-widget.md`.
-- Approval decisions are completed from the workspace after opening the selected row.
-- `Open workspace` now passes explicit approval-entry context so the target workspace opens in a review-focused board layout and the relevant decision step instead of restoring a stale personal board/wizard position.
+- The shared pipeline is visible to `NWAC Administrator` and `Regional Manager`.
+- `New Applications`
+  - contains non-terminal applications whose normalized lifecycle status is still `submitted` and that are not yet in active assessment
+  - this now includes both unassigned files and assigned files whose EI status has already been verified but that have not yet moved into `in_review`
+- `Pending Assessment`
+  - contains assigned non-terminal applications whose normalized lifecycle status is still `submitted` and whose EI status is still pending
+  - this queue is currently visible to `Regional Manager` under the label `EI Check Needed`; for `NWAC Administrator`, those files are folded into `New Applications` instead of shown as a separate queue
+  - `Awaiting EI status verification` is now a status qualifier within this queue instead of its own top-level queue card
+- `In Assessment`
+  - contains applications whose normalized lifecycle status is `in_review` or `awaiting_applicant`
+  - applicant-wait states such as docs requested / closure-response now remain in this queue as qualifiers instead of their own top-level queue cards
+- `Pending Decision`
+  - is the final decision-stage queue in this pipeline
+  - combines submitted application assessments plus new and revised intervention proposals waiting for decision
+  - selecting it drives the shared items table into `Pending Decision Items` mode rather than opening a separate widget
+  - detailed behavior for that table is documented in `docs/dashboards/admin-home-approvals-items-widget.md`
+  - decision actions are still completed from the workspace after opening the selected row
+  - `Open workspace` continues to pass explicit decision-entry context so the target workspace opens in a review-focused board layout and the relevant decision step instead of restoring a stale personal board or wizard position
+- `Pending Completion`
+  - contains decision-recorded application files that still need post-decision follow-through before the application workflow is complete
+  - currently includes approved and denied/declined outcomes from `/api/applications`, because those records still need letters, funding-form/signature follow-through, or other closeout work
+  - is visible across the admin/manager shared pipeline and as the renamed coordinator `funding-agreements` queue so the post-decision stage is represented consistently across role homepages
 
 ## NWAC Administrator scope rule
 
-- `All Applications` includes all non-terminal applications visible through `/api/applications?excludeTerminal=1`.
 - `All Cases` includes open client cases visible through `/api/dashboard/all-client-cases`.
 - `All Cases` is case-based, not deduped by client, so multiple open files for one client count separately.
 - The case queue excludes only `closed` and `archived` statuses. `Dormant` and `ready_to_close` remain in scope.
-- The applications queue excludes terminal application statuses, including normalized terminal variants such as `approved`, `completed`, `withdrawn`, `cancelled`, `closed`, and `archived`.
+- `Pending Completion` is the exception to the non-terminal-only rule for the pipeline cards: it intentionally surfaces decision-recorded application files that still need post-decision work even when the underlying application outcome is `approved`, `rejected`, or `declined`.
 
 ## Regional Manager scope rule
 
@@ -70,5 +84,5 @@ Last Updated: 2026-04-15
 
 - Queue cards are removable from the homepage board like other widgets.
 - Within the widget, `Work queue preferences` controls which queue cards are visible.
-- The current bucket preference storage key is `home-work-queue-preferences-v4`.
-- The version was bumped when `All Applications` and `All Cases` were added so the new NWAC Administrator queues are visible by default in existing browsers, while Regional Manager browsers also pick up the new default ordering.
+- The current bucket preference storage key is `home-work-queue-preferences-v5`.
+- The version was bumped again when the shared application pipeline was reworked so existing browsers pick up the new queue IDs and ordering by default.

@@ -259,6 +259,47 @@ export function deriveApplicationDecisionOutcome({
   return null;
 }
 
+export function deriveAssessmentReviewStatusSelection({
+  assessmentReviewStatus,
+  assessmentReview,
+  applicationStatus,
+  applicationLifecycleStatus,
+  decisionOutcome,
+  awaitingReason,
+  closureReason,
+  caseStatus,
+} = {}) {
+  const explicitStatus = normalizeStatusKey(assessmentReviewStatus);
+  if (explicitStatus === 'approve' || explicitStatus === 'reject' || explicitStatus === 'push_back') {
+    return explicitStatus;
+  }
+
+  const persistedOutcome = deriveApplicationDecisionOutcome({
+    applicationStatus,
+    applicationLifecycleStatus,
+    decisionOutcome,
+    awaitingReason,
+    closureReason,
+    caseStatus,
+  });
+  if (persistedOutcome === 'approved') {
+    return 'approve';
+  }
+  if (persistedOutcome === 'denied') {
+    return 'reject';
+  }
+
+  const assuranceStatus = normalizeStatusKey(assessmentReview);
+  if (assuranceStatus === 'agree' || assuranceStatus === 'approve' || assuranceStatus === 'approved') {
+    return 'approve';
+  }
+  if (assuranceStatus === 'disagree' || assuranceStatus === 'reject' || assuranceStatus === 'denied') {
+    return 'reject';
+  }
+
+  return '';
+}
+
 export function resolveApplicationStateFields(record = {}, { fallbackStatus = null } = {}) {
   const applicationStatus = record?.applicationStatus ?? record?.application_status ?? null;
   const applicationLifecycleStatus =

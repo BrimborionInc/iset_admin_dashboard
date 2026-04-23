@@ -41,7 +41,7 @@ const ENVIRONMENTS = {
 };
 
 const DEFAULT_TITLE = 'Scheduled maintenance';
-const DEFAULT_MESSAGE = 'PATH is temporarily unavailable while maintenance is in progress. Please try again in a few minutes.';
+const DEFAULT_MESSAGE = 'PATH is temporarily unavailable while maintenance is in progress.';
 
 function usage() {
   console.log([

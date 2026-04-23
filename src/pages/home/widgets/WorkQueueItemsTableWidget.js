@@ -29,6 +29,7 @@ import {
   SLA_DEFAULT_DAYS,
   computeApplicationSlaMeta,
   formatApplicationSlaLabel,
+  isEligibilityPending,
 } from '../../../utils/applicationSla';
 import {
   buildApplicationStatusInfo,
@@ -656,7 +657,7 @@ const metricColumnKeysByPreset = {
 };
 
 const buildColumns = (types = [], selectedBucketId = null) => {
-  if (selectedBucketId === 'approvals') {
+  if (selectedBucketId === 'pending-decision') {
     return approvalColumnKeys;
   }
   if (!types || types.length === 0) {
@@ -768,11 +769,11 @@ const WorkQueueItemsTableWidget = ({
       () => (isMetricMode ? null : bucketDefinitions.find(bucket => bucket.id === selectedBucketId) || bucketDefinitions[0] || null),
       [bucketDefinitions, isMetricMode, selectedBucketId]
     );
-  const helpContent = !isMetricMode && selectedBucketId === 'approvals'
+  const helpContent = !isMetricMode && selectedBucketId === 'pending-decision'
     ? <HomeApprovalsItemsHelp />
     : <HomeWorkQueueItemsHelp />;
-  const helpTitle = !isMetricMode && selectedBucketId === 'approvals' ? 'Approvals Items' : 'Work Queue Items';
-  const helpAiContext = !isMetricMode && selectedBucketId === 'approvals'
+  const helpTitle = !isMetricMode && selectedBucketId === 'pending-decision' ? 'Pending Decision Items' : 'Work Queue Items';
+  const helpAiContext = !isMetricMode && selectedBucketId === 'pending-decision'
     ? HomeApprovalsItemsHelp.aiContext
     : HomeWorkQueueItemsHelp.aiContext;
   const infoLink = toggleHelpPanel ? (
@@ -788,8 +789,8 @@ const WorkQueueItemsTableWidget = ({
   ) : undefined;
   const shouldWrapLines = !isMetricMode && selectedBucket && ['exceptions-escalations', 'unresolved-conflicts'].includes(selectedBucket.id);
   const sourceItems = isMetricMode ? metricItems : items;
-  const queueDescription = !isMetricMode && selectedBucketId === 'approvals'
-    ? 'Submitted application assessments and new intervention proposals waiting for your decision. Use Open workspace to open the review layout and record the decision in the workspace.'
+  const queueDescription = !isMetricMode && selectedBucketId === 'pending-decision'
+    ? 'Application assessments, new intervention proposals, and proposed intervention changes waiting for a decision. Use Open workspace to open the review layout and record the decision in the workspace.'
     : selectedBucket?.description || selectedBucket?.label;
 
   const decoratedItems = useMemo(() => {
@@ -1364,7 +1365,18 @@ const WorkQueueItemsTableWidget = ({
                         </SpaceBetween>
                       );
                     }
-                    if (item.bucketId === 'ei-eligibility-checks') {
+                    const hasAssignedOwner =
+                      Number(item.assigned_user_id || 0) > 0 ||
+                      (typeof item.owner === 'string' &&
+                        item.owner.trim() &&
+                        item.owner.trim().toLowerCase() !== 'unassigned');
+                    const canSetEligibilityFromPipeline =
+                      (
+                        ['pending-assessment', 'in-assessment'].includes(item.bucketId) ||
+                        (item.bucketId === 'new-applications' && hasAssignedOwner)
+                      ) &&
+                      isEligibilityPending(item.assessment_esdc_eligibility);
+                    if (canSetEligibilityFromPipeline) {
                       if (!canManageEiEligibility) {
                         return null;
                       }
@@ -1398,7 +1410,12 @@ const WorkQueueItemsTableWidget = ({
                         </SpaceBetween>
                       );
                     }
-                    if (item.bucketId === 'approvals' || item.type === 'AwaitingApproval' || item.type === 'InterventionApproval') {
+                    if (
+                      item.bucketId === 'pending-decision' ||
+                      item.bucketId === 'pending-completion' ||
+                      item.type === 'AwaitingApproval' ||
+                      item.type === 'InterventionApproval'
+                    ) {
                       return null;
                     }
                     if (item.bucketId === 'overdue') {

@@ -290,6 +290,7 @@ const ApplicationOverviewWidget = ({
   });
   const {
     userId: currentUserId,
+    staffProfileId: currentStaffProfileId,
     displayName: currentUserName,
     email: currentUserEmail,
     role: currentUserRole,
@@ -1807,7 +1808,7 @@ const ApplicationOverviewWidget = ({
     : '';
   const assignedEmail = caseData?.assigned_user_email;
   const isCaseManagerCurrentUser = Boolean(
-    (assignedUserId != null && currentUserId && String(assignedUserId) === String(currentUserId)) ||
+    (assignedUserId != null && currentStaffProfileId && String(assignedUserId) === String(currentStaffProfileId)) ||
     (
       typeof assignedEmail === 'string' &&
       assignedEmail.trim() &&

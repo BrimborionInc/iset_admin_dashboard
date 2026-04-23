@@ -40,8 +40,8 @@ export const ISET_COORDINATOR_BUCKETS = [
   },
   {
     id: 'funding-agreements',
-    label: 'Funding Agreements to Complete / Sign',
-    description: 'NWAC-approved files where the Client Funding Agreement is still in progress or unsigned.'
+    label: 'Pending Completion',
+    description: 'Decision-recorded application files that still need post-decision follow-through before completion.'
   },
   {
     id: 'active-clients-checkins',
