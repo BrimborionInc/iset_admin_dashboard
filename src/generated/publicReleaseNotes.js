@@ -1,20 +1,23 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-04-23T17:28:16.370Z",
-  "releaseId": "",
-  "releaseLabel": "Current build",
-  "releaseDateEn": "23rd April 2026",
-  "releaseDateFr": "23 avril 2026",
+  "generatedAt": "2026-04-24T15:05:08.716Z",
+  "releaseId": "20260424-150407",
+  "releaseLabel": "Release 20260424-150407",
+  "releaseDateEn": "24th April 2026",
+  "releaseDateFr": "24 avril 2026",
   "en": {
     "sectionEyebrow": "Optional reading",
     "description": "Recent PATH changes are summarized here for staff who want them before signing in.",
     "featuresHeading": "What changed",
     "features": [
       "Approval items now open the correct review layout and decision step in both the application and case workspaces instead of dropping staff back into an old personal board or remembered wizard step.",
+      "Application and intervention proposal decisions are now restricted to NWAC Administrators, so Regional Managers can monitor approval queues without committing approvals or denials.",
+      "Historical intake uploads now stay visible in the application workspace and checklist even on older files where the original applicant documents were saved before PATH linked them to the final application record.",
       "Application, intervention, and revision wizards now use clearer phase-based headings and guidance so staff can tell more easily whether they are drafting, reviewing, or completing follow-up work.",
       "Revised intervention submissions now generate a fresh case-manager assessment PDF, and revised client funding agreements can now redline against the immediately previous agreement in the series.",
       "Application approval handling is more coherent: decisions now write real outcome statuses right away, request-changes notes appear immediately, and follow-up communication steps behave more consistently.",
       "Finance packet routing is more flexible: province finance addresses can use multiple recipients, and case-manager sender, reply-to, and CC details are now carried through when available.",
       "Client and case views now resolve participant names more consistently across the Clients table, case header, and applicant details displays, reducing mismatches between different workspace surfaces.",
+      "The homepage Work Queue now shows a clearer application pipeline for NWAC Administrators and Regional Managers, separating new files, assigned-but-not-started files, active assessment work, and pending decisions.",
       "Approval queues now show clearer request types for new applications, additional interventions, and proposed intervention changes, with more stable launch behavior from the homepage.",
       "The public landing page now publishes release notes from this log and stamps them with the deployed release ID/date so the published notes and the visible build line stay in sync."
     ],
@@ -40,6 +43,7 @@ const publicReleaseNotes = {
       "Le traitement des decisions d'approbation des demandes est plus coherent: les decisions ecrivent immediatement le bon resultat, les notes de demande de changements apparaissent tout de suite et les etapes de suivi se comportent de facon plus uniforme.",
       "Les courriels de lots de paiement prennent maintenant en charge l'acheminement par province, ainsi que l'expediteur, le repondre-a, la copie conforme et plusieurs adresses pour le gestionnaire de cas lorsque ces adresses sont configurees.",
       "Les vues client et dossier resolvent maintenant plus uniformement le nom de la participante dans le tableau Clients, l'en-tete du dossier et les details de la demandeuse, ce qui reduit les ecarts entre les ecrans.",
+      "La file de travail de la page d'accueil presente maintenant un pipeline de demandes plus clair pour les administrateurs de la NWAC et les gestionnaires regionaux, en separant les nouveaux dossiers, les dossiers assignes non commences, les dossiers en evaluation et les decisions en attente.",
       "Les files d'attente d'approbation affichent maintenant des types de demande plus clairs pour les nouvelles demandes, les interventions additionnelles et les changements proposes aux interventions approuvees, avec un lancement plus fiable depuis la page d'accueil.",
       "La page d'accueil publique publie maintenant les notes de version a partir de ce journal et les marque avec l'identifiant et la date de la version deployee afin que les notes publiees et la ligne de build visible restent synchronisees."
     ],

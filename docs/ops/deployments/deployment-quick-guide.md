@@ -16,11 +16,12 @@ Do not run the app deploy commands from a WSL-only checkout such as `/root/ISET/
 - Use `path:deploy` for normal releases.
 - Use `test:db:refresh` only when you want to reset TEST.
 - In the current Codex sandbox, `nwac-prod` is the standard role-backed prod operator profile. `default` is only the bootstrap IAM user and direct prod resource calls through it are expected to fail.
-- The reduced `nwac-prod` role covers normal deploys, prod SQL/dumps via SSM, restore-point snapshots, ASG refresh, and the ALB maintenance fallback. It does not cover broader infra/admin work such as WAF changes, SSM env parameter writes, uploads-bucket CORS changes, or Terraform/ACM changes.
+- The reduced `nwac-prod` role covers normal deploys, prod SQL/dumps via SSM, ASG refresh, and the ALB maintenance fallback. It does not cover broader infra/admin work such as WAF changes, SSM env parameter writes, uploads-bucket CORS changes, or Terraform/ACM changes. Important current caveat: as of 2026-04-24 the role still cannot complete restore-point snapshot capture because the RDS snapshot create path also needs `rds:AddTagsToResource` on the snapshot resource.
 - PROD deploys require `--yes`.
 - TEST deploys require `--yes` only when you include `--refresh-test-db`.
 - Deploys do not auto-bump `package.json` semver; instead, each frontend build now carries a visible release/build stamp.
 - App deploys package the current working tree. If you mean “deploy only the staged subset,” stage the intended files and stash the rest before running `path:deploy`.
+- Current dependency-reinstall safeguard: in-place TEST deploy scripts now clear the deployed `node_modules` tree before running remote `npm ci/install`, and the PROD bootstrap path already does the same during instance boot. Keep that rule in any future deploy helper to avoid stale-filesystem `ENOTEMPTY` failures during runtime dependency replacement.
 
 ## Most Common Commands
 
@@ -74,6 +75,7 @@ Use this when:
 What this does:
 - verifies AWS prod identity
 - captures a prod DB restore point if DB mutation is planned
+- if that restore-point step fails under `nwac-prod` with `rds:AddTagsToResource`, stop treating it as a normal role capability; only continue with `--skip-schema --skip-data` when you have separately proved there is no real schema/data delta to apply
 - applies canonical schema work
 - applies allowlisted config/data only
 - deploys artifacts

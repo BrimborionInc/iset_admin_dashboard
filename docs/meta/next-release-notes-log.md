@@ -227,6 +227,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 - Approval items now open the correct review layout and decision step in both the application and case workspaces instead of dropping staff back into an old personal board or remembered wizard step.
 - Application and intervention proposal decisions are now restricted to NWAC Administrators, so Regional Managers can monitor approval queues without committing approvals or denials.
+- Historical intake uploads now stay visible in the application workspace and checklist even on older files where the original applicant documents were saved before PATH linked them to the final application record.
 - Application, intervention, and revision wizards now use clearer phase-based headings and guidance so staff can tell more easily whether they are drafting, reviewing, or completing follow-up work.
 - Revised intervention submissions now generate a fresh case-manager assessment PDF, and revised client funding agreements can now redline against the immediately previous agreement in the series.
 - Application approval handling is more coherent: decisions now write real outcome statuses right away, request-changes notes appear immediately, and follow-up communication steps behave more consistently.

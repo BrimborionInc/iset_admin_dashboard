@@ -154,6 +154,7 @@ Current autosave rollout note:
   - Runs canonical schema work remotely through SSM on a TEST app host.
   - Optional config/data promotion uses `scripts/path-data-sync.js`.
   - App rollout still uses the existing in-place SSM deploy scripts for admin and portal.
+  - Current runtime-install safeguard: the TEST admin/portal deploy scripts now remove the deployed `node_modules` tree before remote `npm ci/install`, matching the existing PROD bootstrap rule, so stale instance filesystems do not break a rerun with `ENOTEMPTY`.
   - The frontend bundles now carry a visible build stamp derived from package version + release ID + git SHA. Check the admin landing-page footer or the public portal Help page after deploy.
   - Smoke uses ALB target-group health (`nwac-test-admin-tg`, `nwac-test-portal-tg`) instead of public `/healthz`, because the public TEST hosts are fronted by ALB/Nginx auth and currently return `403` to unauthenticated requests from Codex.
   - Standalone full TEST reset still exists through `npm run test:db:refresh`, but the normal Codex-operated path can now generate a DEV-derived baseline snapshot automatically with `--source-env dev`.
@@ -161,11 +162,13 @@ Current autosave rollout note:
 
 - `prod`
   - Uses AWS profile `nwac-prod` by default in the Codex/operator control plane.
-  - `nwac-prod` now resolves to the reduced role `nwac-prod-codex-operator`; it covers `path:deploy`, prod SQL/dump helpers via SSM, ASG refresh, restore-point snapshots, and the ALB `path-maintenance-fallback` flow, but not broader infra/admin operations such as WAF changes, SSM env parameter writes, uploads-bucket CORS changes, or Terraform/ACM changes.
+  - `nwac-prod` now resolves to the reduced role `nwac-prod-codex-operator`; it covers `path:deploy`, prod SQL/dump helpers via SSM, ASG refresh, and the ALB `path-maintenance-fallback` flow, but not broader infra/admin operations such as WAF changes, SSM env parameter writes, uploads-bucket CORS changes, or Terraform/ACM changes. Current caveat from 2026-04-24: automatic restore-point capture is still blocked because the role lacks `rds:AddTagsToResource` on cluster snapshots.
   - Captures an Aurora cluster snapshot restore point automatically when the planned run will apply canonical schema changes or allowlisted data promotion.
+  - If that restore-point step fails, only rerun with `--skip-schema --skip-data` when you have direct proof that no schema/data delta remains. Example from 2026-04-24: DEV and PROD checksums for workflow `21` plus `publish/workflow.schema.intake` were identical, so an app-only rerun was safe.
   - Runs canonical schema work remotely through SSM on a PROD app host.
   - Optional config/data promotion uses `scripts/path-data-sync.js`.
   - App rollout uploads `shared`, `admin`, and `portal` artifacts, then waits for `refresh-prod`.
+  - The boot-time app bootstrap already removes deployed `node_modules` before reinstalling runtime dependencies; keep any future prod in-place helper aligned with that rule.
   - The frontend bundles now carry a visible build stamp derived from package version + release ID + git SHA. Check the admin landing-page footer or the public portal Help page after deploy.
   - Smoke currently uses public `/healthz` URLs (`nwac-console.awentech.ca`, `iset.nwac.ca`, `nwac-public.awentech.ca`).
   - `scripts/run-prod-sql-via-ssm.sh` currently reads DB credentials from `nwac-prod-db-credentials`, but supplies the prod cluster host/database/port itself because that secret currently contains only `username` and `password`.

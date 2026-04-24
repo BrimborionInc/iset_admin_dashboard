@@ -23,6 +23,7 @@ What it does:
 - Runs the existing admin and portal TEST app deploy scripts
 - Verifies TEST health through the ALB target groups (`nwac-test-admin-tg`, `nwac-test-portal-tg`)
 - Writes a release manifest under `tmp/path-deploy/test/`
+- Current dependency-install safeguard: the TEST admin and portal deploy scripts now clear the deployed `node_modules` tree before running remote `npm ci/install`, mirroring the existing PROD bootstrap behavior and avoiding stale-filesystem `ENOTEMPTY` failures on rerun.
 
 For a non-destructive preflight first:
 

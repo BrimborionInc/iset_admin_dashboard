@@ -17,6 +17,10 @@ const {
   fetchApplicantAccountSummary,
   resolveApplicantPoolId,
 } = require('./src/lib/applicantAccountService');
+const {
+  createSubmissionPayloadFilePathSet,
+  isSubmissionPayloadDocumentMatch,
+} = require('./src/lib/applicationSubmissionDocumentScope');
 const { runStartupSharedSchemaMigrations } = require('./src/lib/sharedSchemaMigrationRunner');
 const { getRegionalManagerCaseAccessError } = require('./src/lib/caseAccess');
 const {
@@ -1193,6 +1197,52 @@ async function loadApplicationAnswers({ applicantId = null, applicationId = null
       hasExpenses: false,
       targetProgramValue: ''
     };
+  }
+}
+
+function buildEmptyApplicationSubmissionDocumentScope() {
+  return {
+    applicationId: null,
+    referenceNumber: null,
+    submissionPayloadFilePaths: new Set(),
+  };
+}
+
+async function loadApplicationSubmissionDocumentScope(applicationId) {
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (!normalizedApplicationId) return buildEmptyApplicationSubmissionDocumentScope();
+  try {
+    const [[row]] = await pool.query(
+      `SELECT a.id,
+              a.payload_json,
+              s.intake_payload,
+              COALESCE(
+                JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')),
+                s.reference_number
+              ) AS reference_number
+         FROM iset_application a
+         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+        WHERE a.id = ?
+        LIMIT 1`,
+      [normalizedApplicationId]
+    );
+    if (!row) return buildEmptyApplicationSubmissionDocumentScope();
+    const applicationPayload = safeParseJson(row.payload_json) || {};
+    const intakePayload = safeParseJson(row.intake_payload);
+    const submissionPayload =
+      intakePayload ||
+      applicationPayload?.submission_snapshot?.payload ||
+      applicationPayload?.submission_snapshot?.intake_payload ||
+      applicationPayload?.submission_snapshot ||
+      null;
+    return {
+      applicationId: normalizedApplicationId,
+      referenceNumber: row.reference_number || null,
+      submissionPayloadFilePaths: createSubmissionPayloadFilePathSet(submissionPayload),
+    };
+  } catch (err) {
+    console.warn('[documents] failed to load application submission scope:', err?.message || err);
+    return buildEmptyApplicationSubmissionDocumentScope();
   }
 }
 
@@ -42806,6 +42856,9 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
     const checklistApplicationId = isIntervention
       ? normalisePositiveInteger(interventionApplicationId || resolvedApplicationId)
       : resolvedApplicationId;
+    const applicationDocumentScope = checklistApplicationId
+      ? await loadApplicationSubmissionDocumentScope(checklistApplicationId)
+      : buildEmptyApplicationSubmissionDocumentScope();
     const signedChecklistDocTypeCounts = new Map();
     if (applicantId && (checklistCaseId || checklistApplicationId)) {
       try {
@@ -42860,12 +42913,17 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
         label: doc.label,
         source: doc.source,
         uploaded_at: doc.uploaded_at,
+        file_path: doc.file_path,
         application_id: doc.application_id || null,
         case_id: doc.case_id || null,
         action_plan_id: doc.action_plan_id || null,
         action_plan_case_id: doc.action_plan_case_id || null,
         action_plan_application_id: doc.action_plan_application_id || null,
         intervention_ids: linkedInterventions,
+        submission_payload_match: isSubmissionPayloadDocumentMatch(
+          doc,
+          applicationDocumentScope.submissionPayloadFilePaths
+        ),
         scope,
         docTypes,
       };
@@ -42948,7 +43006,10 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
           return interventionCaseId && Number(d.case_id) === Number(interventionCaseId);
         }
         if (scope === 'application') {
-          return interventionApplicationId && Number(d.application_id) === Number(interventionApplicationId);
+          return Boolean(
+            (interventionApplicationId && Number(d.application_id) === Number(interventionApplicationId)) ||
+            d.submission_payload_match
+          );
         }
         return false;
       }
@@ -42961,7 +43022,10 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
         return resolvedCaseId && Number(d.case_id) === Number(resolvedCaseId);
       }
       if (scope === 'application') {
-        return resolvedApplicationId && Number(d.application_id) === Number(resolvedApplicationId);
+        return Boolean(
+          (resolvedApplicationId && Number(d.application_id) === Number(resolvedApplicationId)) ||
+          d.submission_payload_match
+        );
       }
       return false;
     });
@@ -43481,6 +43545,9 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
     const docTypeScopeMap = await loadDocumentTypeScopeMap();
     const whereClauses = ['d.applicant_user_id = ?', `d.status = 'active'`];
     const params = [applicantId];
+    const applicationDocumentScope = applicationFilterId
+      ? await loadApplicationSubmissionDocumentScope(applicationFilterId)
+      : buildEmptyApplicationSubmissionDocumentScope();
     if (caseFilterId) {
       whereClauses.push('(d.case_id = ? OR ap.case_id = ?)');
       params.push(caseFilterId, caseFilterId);
@@ -43504,8 +43571,22 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
       );
       params.push(interventionFilterId, interventionFilterId, interventionFilterId);
     } else if (applicationFilterId) {
-      whereClauses.push('(d.application_id = ? OR ac.application_id = ?)');
-      params.push(applicationFilterId, applicationFilterId);
+      const matchedFilePaths = Array.from(applicationDocumentScope.submissionPayloadFilePaths);
+      if (matchedFilePaths.length) {
+        whereClauses.push(
+          `(d.application_id = ? OR ac.application_id = ? OR (
+              d.application_id IS NULL
+              AND d.case_id IS NULL
+              AND d.action_plan_id IS NULL
+              AND d.source = 'application_submission'
+              AND d.file_path IN (${matchedFilePaths.map(() => '?').join(',')})
+            ))`
+        );
+        params.push(applicationFilterId, applicationFilterId, ...matchedFilePaths);
+      } else {
+        whereClauses.push('(d.application_id = ? OR ac.application_id = ?)');
+        params.push(applicationFilterId, applicationFilterId);
+      }
     }
     const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
     const [rows] = await pool.query(
@@ -43543,11 +43624,18 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
     );
     const docIds = rows.map(row => Number(row.id)).filter(Number.isFinite);
     const interventionMap = await fetchDocumentInterventionMap({ documentIds: docIds });
-    const items = rows.map(row => ({
-      ...row,
-      intervention_ids: interventionMap.get(Number(row.id)) || [],
-      scope: docTypeScopeMap.get(row.document_category) || 'application'
-    }));
+    const items = rows.map(row => {
+      const submissionPayloadMatch = isSubmissionPayloadDocumentMatch(
+        row,
+        applicationDocumentScope.submissionPayloadFilePaths
+      );
+      return {
+        ...row,
+        reference_number: row.reference_number || (submissionPayloadMatch ? applicationDocumentScope.referenceNumber : null),
+        intervention_ids: interventionMap.get(Number(row.id)) || [],
+        scope: docTypeScopeMap.get(row.document_category) || 'application'
+      };
+    });
     res.status(200).json(items);
   } catch (error) {
     console.error('Error fetching applicant documents:', error);

@@ -632,6 +632,77 @@ For each indexed thread/topic, keep:
 - Status: current as of 2026-04-23
 - Notes: durable fix from this thread: `CoordinatorAssessmentWidget` no longer derives the step-13 funding decision by reading `assessment_nwac_review = agree/disagree` before checking the canonical stored decision. The precedence is now: explicit `assessment_nwac_review_status` first, then canonical recorded decision outcome/application status, and only then the older assurance fallback. This prevents inconsistent historical records from reopening the approval branch after a denied decision has already been recorded.
 
+### TEST portal deploy `ENOTEMPTY` recovery
+
+- Codex task title: `Please deploy to TEST. A full deployment to bring it up to date with the changes to DEV.`
+- Topic: recovering a TEST portal rollout when the remote instance filesystem leaves `/opt/nwac/portal/node_modules` in a bad state and `npm ci --omit=dev` fails with `ENOTEMPTY`
+- Keywords: `deploy to TEST`, `portal deploy failed`, `ENOTEMPTY`, `node_modules`, `deploy-portal-test.ps1`, `clear node_modules`, `SSM rerun`
+- When to open: a TEST portal deploy fails during remote dependency install with `ENOTEMPTY` on `/opt/nwac/portal/node_modules/...`, or the user asks what to do when the portal TEST deploy succeeds on build/upload but fails on-instance during `npm ci`
+- Primary docs:
+  - `docs/AGENTS.md`
+  - `docs/ops/deployments/deployment-quick-guide.md`
+  - `docs/ops/deployments/path-deploy-orchestrator.md`
+  - `../ISET-intake/scripts/deploy-portal-test.ps1`
+  - `scripts/deploy-admin-test.ps1`
+- Status: current as of 2026-04-23
+- Notes: durable ops note from this thread: one TEST portal deploy failed on instance `i-09fe8c219a4564040` during remote `npm ci --omit=dev` with `ENOTEMPTY: directory not empty, rmdir '/opt/nwac/portal/node_modules/@cloudscape-design/components/attribute-editor'`. The artefact and build were fine; the failure was on the remote instance filesystem. The lasting fix was not just to document a manual cleanup: the in-place TEST admin and portal deploy scripts now remove the deployed `node_modules` tree before reinstalling runtime dependencies, matching the existing PROD bootstrap path. Future deploy guidance should treat that as the standard rule for both environments.
+
+### PROD deploy rerun after snapshot-tagging IAM gap
+
+- Codex task title: `OK now please deploy to PROD. Judge how long a warning and downtime prediction to give staff and users of the public portal based on the TEST deployment and your best judgement.`
+- Topic: completing a full PROD rollout after the reduced prod operator role failed the restore-point preflight because Aurora snapshot creation also needed snapshot-tagging permission
+- Keywords: `20260424-094930`, `CreateDBClusterSnapshot`, `rds:AddTagsToResource`, `nwac-prod-codex-operator`, `skip-schema`, `skip-data`, `workflow 21 checksum`, `public portal warning`
+- When to open: a prod deploy fails before rollout with an RDS snapshot-tagging access error, or the user asks how the 2026-04-24 PROD deploy was recovered safely
+- Primary docs:
+  - `docs/AGENTS.md`
+  - `docs/ops/deployments/deployment-quick-guide.md`
+  - `docs/ops/deployments/prod-deployment-guide.md`
+  - `docs/ops/deployments/path-deploy-orchestrator.md`
+  - `tmp/path-deploy/prod/20260424-094558--2026-04-24T09-46-17-985Z.json`
+  - `tmp/path-deploy/prod/20260424-094930--2026-04-24T09-49-30-815Z.json`
+- Status: completed on 2026-04-24
+- Notes: this PROD release was planned with a 10-minute warning and a 15-minute expected interruption window based on the prior TEST rollout plus normal PROD instance-refresh overhead. The first `path:deploy` run failed before any app rollout because `nwac-prod-codex-operator` could call `CreateDBClusterSnapshot` but not the implicit `rds:AddTagsToResource` on the cluster snapshot, so the automatic restore-point step aborted. Before rerunning, DEV and PROD were compared directly for the only allowlisted data unit in scope (`intake-release` for workflow `21`): the workflow row, `workflow_step`, `step`, `step_component`, `workflow_route`, `workflow_route_option`, and `iset_runtime_config(scope='publish', k='workflow.schema.intake')` all had identical SHA-256 digests between DEV and PROD. Because there was also no pending canonical schema migration, the safe recovery was an app-only rerun with `npm run path:deploy -- --env prod --skip-schema --skip-data --skip-build --yes`, which completed successfully as release `20260424-094930`. Final public verification after clearing maintenance: `https://nwac-console.awentech.ca/healthz`, `https://iset.nwac.ca/healthz`, and `https://nwac-public.awentech.ca/healthz` all returned `{"status":"ok"}`.
+
+### Review PROD and TEST feedback logs; clear TEST
+
+- Codex task title: `OK please reivew the CR and BUG logs on PROD. Please also chack whether any new CRs or BUGs have been added in TEST. After merging into PROD please empty the logs in TEST.`
+- Topic: rechecking the live PROD feedback queue, confirming whether TEST had accumulated any new bug/change-request reports worth merging, and then resetting the TEST feedback tables
+- Keywords: `review prod bug and cr log`, `test feedback clear`, `admin_feedback_report`, `admin_feedback_note`, `admin_feedback_status_history`, `admin_feedback_attachment`, `test-clear-admin-feedback-log-20260424.sql`
+- When to open: the user asks whether TEST has any new bug/CR reports to merge into PROD, asks whether the TEST admin feedback queue has been emptied, or asks what the current open PROD feedback items were after the 2026-04-24 review
+- Primary docs:
+  - `docs/AGENTS.md`
+  - `docs/features/admin-feedback-reporting.md`
+  - `sql/ops/test-clear-admin-feedback-log-20260424.sql`
+- Status: completed on 2026-04-24
+- Notes: direct TEST/PROD comparison on 2026-04-24 showed that TEST still contained only the older 27-report admin-feedback queue already represented in PROD; there were no TEST-only reports, notes, or attachments left to merge. PROD therefore remained unchanged at `52` total reports with `7` open items (`#51`, `#52`, `#49`, `#40`, `#48`, `#46`, `#47`). TEST was then intentionally reset using guarded script `sql/ops/test-clear-admin-feedback-log-20260424.sql`, which deleted all `admin_feedback_report` rows and relied on the existing `ON DELETE CASCADE` foreign keys to clear `admin_feedback_note`, `admin_feedback_status_history`, and `admin_feedback_attachment` as well before resetting the four AUTO_INCREMENT counters. Post-run verification on TEST returned `0` rows in all four tables.
+
+### Denise duplicate-client merge prep
+
+- Codex task title: `OK can you prepare (but not yet implement) that merge?`
+- Topic: preparing a guarded PROD merge for duplicate Denise Chalifoux client records discovered while triaging feedback report `#51`
+- Keywords: `Denise Chalifoux`, `duplicate client`, `case 113`, `application 31`, `client 108`, `client 126`, `user 115`, `user 159`, `kiyaostisondenisehelen`, `kiyaostinsondenisehelen`, `prod merge prep`
+- When to open: the user asks why Denise has two client records, asks whether a guarded merge was prepared, or asks which Denise email must be confirmed before running the merge
+- Primary docs:
+  - `sql/ops/prod-merge-denise-chalifoux-client-126-into-108-20260424.sql`
+  - `docs/meta/changelog.md`
+  - `admin_feedback_report` item `#51`
+- Status: executed on 2026-04-24
+- Notes: PROD data showed duplicate Denise Chalifoux client rows created through different identity anchors. Client `108` was the older Denise record with activated PATH account email `kiyaostisondenisehelen@gmail.com` and Cognito-linked user `115`; client `126` was created by admin manual intake on 2026-04-20 for application `31` / case `113` with no applicant-account linkage, while the linked manual-intake user was local-only `user 159` on email `kiyaostinsondenisehelen@gmail.com`. The durable code-level finding behind the split remains: current `resolveOrCreateManualClient()` in `isetadminserver.js` only reuses an existing client by applicant Cognito sub, while the broader application matching helper can also match by SIN/email/name+DOB, so a staff-entered manual intake with a slightly different email can still create a second client even when a near-duplicate already exists. After Amanda Curtis confirmed `kiyaostisondenisehelen@gmail.com` is Denise's real PATH sign-in, the guarded SQL merge was executed successfully. Temporary live precautions were a manual `application_lock` on application `31` owned by `System maintenance` plus a short admin service-announcement banner telling staff to avoid Denise's record until the notice cleared. The merge kept activated client `108` / user `115` as the survivor, repointed application `31`, case `113`, submission `31`, `input_json_state`, and all linked `iset_document` rows away from duplicate client `126` / user `159`, and then corrected the remaining `iset_application.payload_json.submission_snapshot.user_id` from `159` to `115` for consistency with the new authoritative submission owner. Post-run verification showed `application 31 -> client 108`, `submission 31 -> user 115`, `case 113 -> client 108`, `0` document refs left on client `126` / user `159`, and the temporary lock/banner cleared. The merged-away client row was intentionally retained without live references for audit/recovery rather than hard-deleting it, and PROD feedback report `#51` was resolved as a data fix.
+
+### Historical intake documents hidden on application workspace
+
+- Codex task title: `OK go ahead with the safe fix in DEV. We will then test thoroughly in TEST.`
+- Topic: fixing application workspaces that hide older applicant-uploaded intake documents when those `application_submission` rows were saved before an `iset_application` row existed and therefore still have `application_id = NULL`
+- Keywords: `#49`, `application-case documents missing`, `acceptance letter hidden`, `application_id NULL`, `application_submission`, `document checklist`, `safe fix`, `submission payload file_path`
+- When to open: the user asks why intake uploads exist in PROD but do not appear on `/application-case/:id`, asks whether the fix risks leaking documents from another application, or asks what was changed in DEV for feedback report `#49`
+- Primary docs:
+  - `isetadminserver.js`
+  - `src/lib/applicationSubmissionDocumentScope.js`
+  - `tests/applicationSubmissionDocumentScope.test.js`
+  - `../ISET-intake/server.js`
+- Status: fixed in DEV on 2026-04-24; pending TEST validation and later deploy
+- Notes: the confirmed live pattern on application `4` / case `86` was that original applicant intake uploads such as `Letter of Acceptance`, `Government ID`, `Status Card`, `Band Denial Letter`, and `Resume / CV` were present in `iset_document` with `source = 'application_submission'`, correct `applicant_user_id`, and `application_id = NULL` because the portal upload flow intentionally stores them before final submission without guessing a target application. The old admin application-document query only accepted rows already linked to the current `application_id`, so those historical intake files were hidden even though the data existed. The rejected broad fix was “show all null-application applicant documents,” because that would risk leaking the wrong files onto the wrong application for applicants with multiple files. The chosen safe fix mirrors the existing intake-side linker: it derives a set of upload `file_path` values from the current application's submission payload and treats only those matching unscoped `application_submission` docs as belonging to that application. That narrow proof rule now powers both `/api/applicants/:id/documents` and `/api/applicants/:id/document-checklist`, and the focused unit test in `tests/applicationSubmissionDocumentScope.test.js` covers nested payload path collection plus the “only unscoped application_submission docs may match” guard.
+
 ## Future improvements
 
 - Add stable entry IDs if this grows beyond a small manual list.
