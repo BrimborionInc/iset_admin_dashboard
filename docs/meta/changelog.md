@@ -2,6 +2,11 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-04-25
+- Docs/Security: Added the public-portal legacy fallback security review, documenting remaining high-risk applicant-portal identity/linking fallbacks after the secure-message breach and the recommended next hardening pass.
+- Security/Portal: Hardened the current deployed public portal repo (`../ISET-intake`) against legacy identity fallback risks: Cognito/local-user linking no longer returns already-bound email matches, applicant data routes require the primary applicant portal Cognito client and reject staff/admin roles, client linking no longer claims existing clients by SIN/email/name fallback or overwrites another subject, staff message recipients no longer resolve by arbitrary email fallback, and legacy `POST /api/applications` now returns `410`.
+- Ops/Portal: Deployed the portal hardening to TEST, then followed up with release `portal-security-hardening-message-20260425-test` so staff/admin or wrong-client public-portal sign-ins show an explicit applicant-account-required message instead of a generic workflow-schema load error.
+
 ## 2026-04-23
 - Fix/Application Assessment: Step 13/14 in the application workspace now trusts the canonical recorded application decision before the older assurance-only fallback, so denied files cannot reopen the approval branch just because `assessment_nwac_review` still says `agree`.
 - Ops/Data repair: Applied a guarded one-off PROD correction for `ISET-20260409-123477`, forcing the persisted assessment review fallback onto the denied path and bumping the application row version so step 13 / step 14 in the application workspace hydrate consistently as a denial.
