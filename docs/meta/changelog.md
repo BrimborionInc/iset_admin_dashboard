@@ -886,3 +886,4 @@ Format: YYYY-MM-DD - Category: Short description
 - Security: Hardened finance payment-packet routes so casework payment roles are scoped to their authorized cases, while payment batches and full ledger exports require finance/admin payment access.
 - Security: Hardened admin secure-message routes by retiring broad legacy list/create endpoints, requiring case access before case-thread reads or sends, and validating message case context before attachment presign/adoption or mailbox mutation.
 - Security: Hardened case notes, reminders, and timeline events so narrative client data is returned or mutated only after case/reminder target scope validation.
+- Ops/Security: Fixed the public portal TEST deploy installer so the runtime `auth/` helper is copied to `/opt/nwac/portal/auth` alongside `server.js`; the stale helper had caused real TEST applicant-pool users to fail the new applicant-account gate with `applicant_account_required`.
