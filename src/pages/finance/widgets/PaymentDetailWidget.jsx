@@ -1131,6 +1131,8 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           params.set("interventionId", String(interventionId));
         } else if (selectedRequest?.applicationId) {
           params.set("applicationId", String(selectedRequest.applicationId));
+        } else if (selectedRequest?.caseId) {
+          params.set("caseId", String(selectedRequest.caseId));
         }
         const query = params.toString() ? `?${params.toString()}` : "";
         const resp = await apiFetch(
@@ -1148,7 +1150,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         setSupportingDocumentsLoading(false);
       }
     },
-    [selectedRequest?.applicantUserId, selectedRequest?.applicationId]
+    [selectedRequest?.applicantUserId, selectedRequest?.applicationId, selectedRequest?.caseId]
   );
 
   const handleOpenDocument = useCallback(async documentId => {
@@ -1157,7 +1159,11 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     setViewError(null);
     setViewingDocumentId(documentId);
     try {
-      const res = await apiFetch(`/api/documents/${encodeURIComponent(documentId)}/presign-download`);
+      const params = new URLSearchParams();
+      const packetId = selectedRequest?.id || selectedRequest?.packetId || selectedRequest?.paymentPacketId;
+      if (packetId) params.set("paymentPacketId", String(packetId));
+      const query = params.toString() ? `?${params.toString()}` : "";
+      const res = await apiFetch(`/api/documents/${encodeURIComponent(documentId)}/presign-download${query}`);
       if (!res || !res.ok) {
         const payload = await res?.json?.().catch(() => null);
         const message =
@@ -1180,7 +1186,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     } finally {
       setViewingDocumentId(null);
     }
-  }, []);
+  }, [selectedRequest?.id, selectedRequest?.packetId, selectedRequest?.paymentPacketId]);
 
   const openUploadModal = useCallback(
     row => {

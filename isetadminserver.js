@@ -22,7 +22,7 @@ const {
   isSubmissionPayloadDocumentMatch,
 } = require('./src/lib/applicationSubmissionDocumentScope');
 const { runStartupSharedSchemaMigrations } = require('./src/lib/sharedSchemaMigrationRunner');
-const { getRegionalManagerCaseAccessError } = require('./src/lib/caseAccess');
+const { getCaseAccessError, getRegionalManagerCaseAccessError } = require('./src/lib/caseAccess');
 const {
   createCaseWatch,
   deleteCaseWatch,
@@ -15944,6 +15944,463 @@ function validateCaseAccessForPlan(req, planRow) {
   }
 
   return { status: 403, body: { error: 'forbidden' } };
+}
+
+function validateCaseAccessForCaseRow(req, caseRow) {
+  const identity = getRequesterIdentity(req);
+  return getCaseAccessError({
+    role: inferUserRole(req),
+    requesterId: identity.staffProfileId,
+    regionIds: resolveRequestRegionIds(req),
+    caseRow,
+  });
+}
+
+async function fetchCaseAccessRowById(caseId, connection = pool) {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  if (!normalizedCaseId) return null;
+  const [[row]] = await connection.query(
+    `SELECT
+        c.id,
+        c.client_id,
+        COALESCE(a.id, c.application_id) AS application_id,
+        c.assigned_to_user_id,
+        c.portfolio_region_id,
+        sp.region_id AS owner_region_id
+       FROM iset_case c
+       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      WHERE c.id = ?
+      LIMIT 1`,
+    [normalizedCaseId]
+  );
+  return row || null;
+}
+
+async function fetchCaseAccessRowByApplicationId(applicationId, connection = pool) {
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (!normalizedApplicationId) return null;
+  const [[linkedRow]] = await connection.query(
+    `SELECT
+        c.id,
+        c.client_id,
+        a.id AS application_id,
+        c.assigned_to_user_id,
+        c.portfolio_region_id,
+        sp.region_id AS owner_region_id
+       FROM iset_application a
+       JOIN iset_case c ON c.id = a.case_id
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      WHERE a.id = ?
+      LIMIT 1`,
+    [normalizedApplicationId]
+  );
+  if (linkedRow) return linkedRow;
+  const [[legacyRow]] = await connection.query(
+    `SELECT
+        c.id,
+        c.client_id,
+        c.application_id,
+        c.assigned_to_user_id,
+        c.portfolio_region_id,
+        sp.region_id AS owner_region_id
+       FROM iset_case c
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      WHERE c.application_id = ?
+      LIMIT 1`,
+    [normalizedApplicationId]
+  );
+  return legacyRow || null;
+}
+
+async function fetchCaseAccessRowByInterventionId(interventionId, connection = pool) {
+  const normalizedInterventionId = normalisePositiveInteger(interventionId);
+  if (!normalizedInterventionId) return null;
+  const [[row]] = await connection.query(
+    `SELECT
+        c.id,
+        c.client_id,
+        COALESCE(a.id, c.application_id) AS application_id,
+        c.assigned_to_user_id,
+        c.portfolio_region_id,
+        sp.region_id AS owner_region_id
+       FROM iset_case_intervention i
+       LEFT JOIN iset_case_action_plan ap ON ap.id = i.action_plan_id
+       JOIN iset_case c ON c.id = COALESCE(i.case_id, ap.case_id)
+       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      WHERE i.id = ?
+      LIMIT 1`,
+    [normalizedInterventionId]
+  );
+  return row || null;
+}
+
+async function fetchCaseAccessRowByActionPlanId(actionPlanId, connection = pool) {
+  const normalizedActionPlanId = normalisePositiveInteger(actionPlanId);
+  if (!normalizedActionPlanId) return null;
+  const [[row]] = await connection.query(
+    `SELECT
+        c.id,
+        c.client_id,
+        COALESCE(a.id, c.application_id) AS application_id,
+        c.assigned_to_user_id,
+        c.portfolio_region_id,
+        sp.region_id AS owner_region_id
+       FROM iset_case_action_plan ap
+       JOIN iset_case c ON c.id = ap.case_id
+       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      WHERE ap.id = ?
+      LIMIT 1`,
+    [normalizedActionPlanId]
+  );
+  return row || null;
+}
+
+async function validateCaseAccessByCaseId(req, caseId, connection = pool) {
+  const row = await fetchCaseAccessRowById(caseId, connection);
+  if (!row) {
+    return { status: 404, body: { error: 'case_not_found' } };
+  }
+  return validateCaseAccessForCaseRow(req, row);
+}
+
+async function validateCaseAccessByApplicationId(req, applicationId, connection = pool) {
+  const row = await fetchCaseAccessRowByApplicationId(applicationId, connection);
+  if (!row) {
+    return { status: 403, body: { error: 'forbidden', detail: 'application_case_scope_missing' } };
+  }
+  return validateCaseAccessForCaseRow(req, row);
+}
+
+async function validateCaseAccessByActionPlanId(req, actionPlanId, connection = pool) {
+  const row = await fetchCaseAccessRowByActionPlanId(actionPlanId, connection);
+  if (!row) {
+    return { status: 404, body: { error: 'action_plan_not_found' } };
+  }
+  return validateCaseAccessForCaseRow(req, row);
+}
+
+async function validateCaseAccessByInterventionId(req, interventionId, connection = pool) {
+  const row = await fetchCaseAccessRowByInterventionId(interventionId, connection);
+  if (!row) {
+    return { status: 404, body: { error: 'intervention_not_found' } };
+  }
+  return validateCaseAccessForCaseRow(req, row);
+}
+
+async function resolveApplicantUserIdForApplication(applicationId, connection = pool) {
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (!normalizedApplicationId) return null;
+  const [[row]] = await connection.query(
+    `SELECT s.user_id
+       FROM iset_application a
+       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+      WHERE a.id = ?
+      LIMIT 1`,
+    [normalizedApplicationId]
+  );
+  return normalisePositiveInteger(row?.user_id);
+}
+
+async function validateApplicantCaseBinding({ applicantId, caseId, applicationId, connection = pool } = {}) {
+  const normalizedApplicantId = normalisePositiveInteger(applicantId);
+  if (!normalizedApplicantId) return null;
+
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (normalizedApplicationId) {
+    const applicationApplicantId = await resolveApplicantUserIdForApplication(normalizedApplicationId, connection);
+    if (applicationApplicantId && applicationApplicantId !== normalizedApplicantId) {
+      return { status: 403, body: { error: 'forbidden', detail: 'applicant_application_mismatch' } };
+    }
+  }
+
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  if (normalizedCaseId) {
+    const context = await resolveCaseApplicantMessagingContext(normalizedCaseId);
+    if (context?.applicant_user_id && Number(context.applicant_user_id) !== normalizedApplicantId) {
+      return { status: 403, body: { error: 'forbidden', detail: 'applicant_case_mismatch' } };
+    }
+  }
+
+  return null;
+}
+
+async function validateApplicantDocumentContextAccess(req, {
+  applicantId,
+  caseId = null,
+  applicationId = null,
+  actionPlanId = null,
+  interventionId = null,
+  requireScopedContext = true,
+  connection = pool,
+} = {}) {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const normalizedActionPlanId = normalisePositiveInteger(actionPlanId);
+  const normalizedInterventionId = normalisePositiveInteger(interventionId);
+  const hasGlobalScopedDocumentAccess =
+    hasSystemOrNwacAdminAccess(req) || isFinancePaymentsRole(inferUserRole(req));
+
+  if (normalizedInterventionId) {
+    const caseRow = await fetchCaseAccessRowByInterventionId(normalizedInterventionId, connection);
+    if (!caseRow) return { status: 404, body: { error: 'intervention_not_found' } };
+    if (!hasGlobalScopedDocumentAccess) {
+      const accessError = validateCaseAccessForCaseRow(req, caseRow);
+      if (accessError) return accessError;
+    }
+    return validateApplicantCaseBinding({
+      applicantId,
+      caseId: caseRow.id,
+      applicationId: caseRow.application_id || normalizedApplicationId,
+      connection,
+    });
+  }
+
+  if (normalizedActionPlanId) {
+    const caseRow = await fetchCaseAccessRowByActionPlanId(normalizedActionPlanId, connection);
+    if (!caseRow) return { status: 404, body: { error: 'action_plan_not_found' } };
+    if (!hasGlobalScopedDocumentAccess) {
+      const accessError = validateCaseAccessForCaseRow(req, caseRow);
+      if (accessError) return accessError;
+    }
+    return validateApplicantCaseBinding({
+      applicantId,
+      caseId: caseRow.id,
+      applicationId: caseRow.application_id || normalizedApplicationId,
+      connection,
+    });
+  }
+
+  if (normalizedCaseId) {
+    if (!hasGlobalScopedDocumentAccess) {
+      const accessError = await validateCaseAccessByCaseId(req, normalizedCaseId, connection);
+      if (accessError) return accessError;
+    }
+    return validateApplicantCaseBinding({
+      applicantId,
+      caseId: normalizedCaseId,
+      applicationId: normalizedApplicationId,
+      connection,
+    });
+  }
+
+  if (normalizedApplicationId) {
+    const caseRow = await fetchCaseAccessRowByApplicationId(normalizedApplicationId, connection);
+    if (!caseRow) {
+      return { status: 403, body: { error: 'forbidden', detail: 'application_case_scope_missing' } };
+    }
+    if (!hasGlobalScopedDocumentAccess) {
+      const accessError = validateCaseAccessForCaseRow(req, caseRow);
+      if (accessError) return accessError;
+    }
+    return validateApplicantCaseBinding({
+      applicantId,
+      caseId: caseRow.id,
+      applicationId: normalizedApplicationId,
+      connection,
+    });
+  }
+
+  if (hasSystemOrNwacAdminAccess(req)) {
+    return null;
+  }
+
+  if (requireScopedContext) {
+    return { status: 400, body: { error: 'case_or_application_scope_required' } };
+  }
+
+  return null;
+}
+
+async function validateDocumentAttachmentContextAccess(req, {
+  caseId = null,
+  applicationId = null,
+  actionPlanId = null,
+  interventionIds = [],
+  requireScopedContext = false,
+  connection = pool,
+} = {}) {
+  const normalizedInterventionIds = Array.from(new Set(
+    (Array.isArray(interventionIds) ? interventionIds : [interventionIds])
+      .map(value => normalisePositiveInteger(value))
+      .filter(Boolean)
+  ));
+  const hasScopedTarget =
+    normalizedInterventionIds.length ||
+    normalisePositiveInteger(actionPlanId) ||
+    normalisePositiveInteger(caseId) ||
+    normalisePositiveInteger(applicationId);
+
+  if (hasSystemOrNwacAdminAccess(req) || isFinancePaymentsRole(inferUserRole(req))) {
+    if (requireScopedContext && !hasScopedTarget) {
+      return { status: 400, body: { error: 'case_or_application_scope_required' } };
+    }
+    return null;
+  }
+
+  for (const interventionId of normalizedInterventionIds) {
+    const accessError = await validateCaseAccessByInterventionId(req, interventionId, connection);
+    if (accessError) return accessError;
+  }
+
+  if (normalisePositiveInteger(actionPlanId)) {
+    const accessError = await validateCaseAccessByActionPlanId(req, actionPlanId, connection);
+    if (accessError) return accessError;
+  }
+
+  if (normalisePositiveInteger(caseId)) {
+    const accessError = await validateCaseAccessByCaseId(req, caseId, connection);
+    if (accessError) return accessError;
+  }
+
+  if (normalisePositiveInteger(applicationId)) {
+    const accessError = await validateCaseAccessByApplicationId(req, applicationId, connection);
+    if (accessError) return accessError;
+  }
+
+  if (
+    requireScopedContext &&
+    !hasScopedTarget
+  ) {
+    return { status: 400, body: { error: 'case_or_application_scope_required' } };
+  }
+
+  return null;
+}
+
+async function fetchCaseAccessRowsByIds(caseIds, connection = pool) {
+  const ids = Array.from(new Set(
+    (Array.isArray(caseIds) ? caseIds : [caseIds])
+      .map(value => normalisePositiveInteger(value))
+      .filter(Boolean)
+  ));
+  if (!ids.length) return [];
+  const placeholders = ids.map(() => '?').join(',');
+  const [rows] = await connection.query(
+    `SELECT
+        c.id,
+        c.client_id,
+        COALESCE(a.id, c.application_id) AS application_id,
+        c.assigned_to_user_id,
+        c.portfolio_region_id,
+        sp.region_id AS owner_region_id
+       FROM iset_case c
+       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      WHERE c.id IN (${placeholders})`,
+    ids
+  );
+  return rows || [];
+}
+
+async function fetchCaseAccessRowsByClientId(clientId, connection = pool) {
+  const normalizedClientId = normalisePositiveInteger(clientId);
+  if (!normalizedClientId) return [];
+  const [rows] = await connection.query(
+    `SELECT
+        c.id,
+        c.client_id,
+        COALESCE(a.id, c.application_id) AS application_id,
+        c.assigned_to_user_id,
+        c.portfolio_region_id,
+        sp.region_id AS owner_region_id
+       FROM iset_case c
+       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      WHERE c.client_id = ?`,
+    [normalizedClientId]
+  );
+  return rows || [];
+}
+
+async function fetchDocumentPaymentLinkCount(documentId, connection = pool) {
+  const normalizedDocumentId = normalisePositiveInteger(documentId);
+  if (!normalizedDocumentId) return 0;
+  const [[packetDocRow]] = await connection.query(
+    'SELECT COUNT(*) AS count FROM payment_packet_document WHERE document_id = ?',
+    [normalizedDocumentId]
+  );
+  const [[proofDocRow]] = await connection.query(
+    'SELECT COUNT(*) AS count FROM payment_packet_line WHERE payment_proof_document_id = ?',
+    [normalizedDocumentId]
+  );
+  return Number(packetDocRow?.count || 0) + Number(proofDocRow?.count || 0);
+}
+
+async function fetchCaseAccessRowsForDocument(documentRow, connection = pool) {
+  if (!documentRow) return [];
+  const caseIds = new Set();
+  const addCaseId = value => {
+    const id = normalisePositiveInteger(value);
+    if (id) caseIds.add(id);
+  };
+  addCaseId(documentRow.case_id);
+
+  const actionPlanCaseId = documentRow.action_plan_id
+    ? await resolveCaseIdForActionPlan(documentRow.action_plan_id, connection)
+    : null;
+  addCaseId(actionPlanCaseId);
+
+  const applicationCaseId = documentRow.application_id
+    ? await resolveCaseIdFromApplicationId(documentRow.application_id, connection)
+    : null;
+  addCaseId(applicationCaseId);
+
+  const normalizedDocumentId = normalisePositiveInteger(documentRow.id);
+  if (normalizedDocumentId) {
+    const [interventionRows] = await connection.query(
+      `SELECT DISTINCT COALESCE(i.case_id, ap.case_id) AS case_id
+         FROM iset_document_intervention di
+         LEFT JOIN iset_case_intervention i ON i.id = di.intervention_id
+         LEFT JOIN iset_case_action_plan ap ON ap.id = i.action_plan_id
+        WHERE di.document_id = ?`,
+      [normalizedDocumentId]
+    );
+    for (const row of interventionRows || []) addCaseId(row?.case_id);
+
+    const [paymentRows] = await connection.query(
+      `SELECT DISTINCT pp.case_id
+         FROM payment_packet_document ppd
+         JOIN payment_packet pp ON pp.id = ppd.payment_packet_id
+        WHERE ppd.document_id = ?
+       UNION
+       SELECT DISTINCT pp.case_id
+         FROM payment_packet_line ppl
+         JOIN payment_packet pp ON pp.id = ppl.payment_packet_id
+        WHERE ppl.payment_proof_document_id = ?`,
+      [normalizedDocumentId, normalizedDocumentId]
+    );
+    for (const row of paymentRows || []) addCaseId(row?.case_id);
+  }
+
+  let rows = await fetchCaseAccessRowsByIds(Array.from(caseIds), connection);
+  if (!rows.length && documentRow.client_id) {
+    rows = await fetchCaseAccessRowsByClientId(documentRow.client_id, connection);
+  }
+  return rows;
+}
+
+async function validateDocumentAccess(req, documentRow, { allowPaymentFinanceRoles = true, connection = pool } = {}) {
+  if (!documentRow) {
+    return { status: 404, body: { error: 'document_not_found' } };
+  }
+  if (hasSystemOrNwacAdminAccess(req)) return null;
+
+  if (allowPaymentFinanceRoles && isFinancePaymentsRole(inferUserRole(req))) {
+    const linkCount = await fetchDocumentPaymentLinkCount(documentRow.id, connection);
+    if (linkCount > 0) return null;
+  }
+
+  const caseRows = await fetchCaseAccessRowsForDocument(documentRow, connection);
+  for (const caseRow of caseRows) {
+    if (!validateCaseAccessForCaseRow(req, caseRow)) {
+      return null;
+    }
+  }
+
+  return { status: 403, body: { error: 'forbidden', detail: 'document_scope_mismatch' } };
 }
 
 function validateCaseAccessForIntervention(req, interventionRow) {
@@ -37172,6 +37629,63 @@ const fetchReminderById = async (reminderId) => {
   return rows.length ? mapReminderRow(rows[0]) : null;
 };
 
+async function validateReminderTargetAccess(req, {
+  caseId = null,
+  applicationId = null,
+  actionPlanId = null,
+  interventionId = null,
+  allowGlobal = false,
+  connection = pool,
+} = {}) {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const normalizedActionPlanId = normalisePositiveInteger(actionPlanId);
+  const normalizedInterventionId = normalisePositiveInteger(interventionId);
+
+  let hasScopedTarget = false;
+  if (normalizedInterventionId) {
+    hasScopedTarget = true;
+    const accessError = await validateCaseAccessByInterventionId(req, normalizedInterventionId, connection);
+    if (accessError) return accessError;
+  }
+  if (normalizedActionPlanId) {
+    hasScopedTarget = true;
+    const accessError = await validateCaseAccessByActionPlanId(req, normalizedActionPlanId, connection);
+    if (accessError) return accessError;
+  }
+  if (normalizedCaseId) {
+    hasScopedTarget = true;
+    const accessError = await validateCaseAccessByCaseId(req, normalizedCaseId, connection);
+    if (accessError) return accessError;
+  }
+  if (normalizedApplicationId) {
+    hasScopedTarget = true;
+    const accessError = await validateCaseAccessByApplicationId(req, normalizedApplicationId, connection);
+    if (accessError) return accessError;
+  }
+  if (hasScopedTarget) {
+    return null;
+  }
+  if (allowGlobal && hasSystemOrNwacAdminAccess(req)) {
+    return null;
+  }
+  return { status: allowGlobal ? 403 : 400, body: { error: allowGlobal ? 'forbidden' : 'case_or_application_scope_required' } };
+}
+
+async function validateReminderAccess(req, reminder, { allowGlobal = false, connection = pool } = {}) {
+  if (!reminder) {
+    return { status: 404, body: { error: 'reminder_not_found' } };
+  }
+  return validateReminderTargetAccess(req, {
+    caseId: reminder.caseId ?? reminder.case_id ?? null,
+    applicationId: reminder.applicationId ?? reminder.application_id ?? null,
+    actionPlanId: reminder.actionPlanId ?? reminder.action_plan_id ?? null,
+    interventionId: reminder.interventionId ?? reminder.intervention_id ?? null,
+    allowGlobal,
+    connection,
+  });
+}
+
 const emitReminderEvent = async ({ type, reminder, actorId, actorName }) => {
   if (!reminder || !reminder.caseId) return;
   const payload = {
@@ -41910,6 +42424,32 @@ function handleAdminDocumentUpload({ requireApplicant = false, applicantIdHint =
       } else if (metadataObj.scope_fallback) {
         delete metadataObj.scope_fallback;
       }
+
+      if (requireApplicant) {
+        const applicantAccessError = await validateApplicantDocumentContextAccess(req, {
+          applicantId,
+          caseId,
+          applicationId,
+          actionPlanId,
+          interventionId: interventionIds[0] || null,
+          requireScopedContext: true,
+        });
+        if (applicantAccessError) {
+          cleanupUploadedFile();
+          return res.status(applicantAccessError.status).json(applicantAccessError.body);
+        }
+      }
+      const targetAccessError = await validateDocumentAttachmentContextAccess(req, {
+        caseId,
+        applicationId,
+        actionPlanId,
+        interventionIds,
+        requireScopedContext: true,
+      });
+      if (targetAccessError) {
+        cleanupUploadedFile();
+        return res.status(targetAccessError.status).json(targetAccessError.body);
+      }
     } catch (err) {
       cleanupUploadedFile();
       const errorCode = err?.code || 'document_link_validation_failed';
@@ -42256,7 +42796,7 @@ app.put('/api/documents/:id', async (req, res) => {
   let existingRow = null;
   try {
     const [rows] = await pool.query(
-      'SELECT metadata, document_category, client_id, application_id, case_id, action_plan_id, applicant_user_id FROM iset_document WHERE id = ? LIMIT 1',
+      'SELECT id, metadata, document_category, client_id, application_id, case_id, action_plan_id, applicant_user_id FROM iset_document WHERE id = ? LIMIT 1',
       [documentId]
     );
     if (rows && rows[0]) {
@@ -42274,6 +42814,15 @@ app.put('/api/documents/:id', async (req, res) => {
   }
   if (!existingRow) {
     return res.status(404).json({ error: 'document_not_found' });
+  }
+  try {
+    const accessError = await validateDocumentAccess(req, { id: documentId, ...existingRow });
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
+    }
+  } catch (err) {
+    console.error('[admin:documents:update] access check failed', err);
+    return res.status(500).json({ error: 'document_access_check_failed' });
   }
   if (!metadataObj || typeof metadataObj !== 'object') metadataObj = {};
   metadataObj.label = label;
@@ -42327,6 +42876,26 @@ app.put('/api/documents/:id', async (req, res) => {
   } catch (err) {
     const errorCode = err?.code || 'document_link_validation_failed';
     return res.status(400).json({ error: errorCode });
+  }
+  try {
+    const targetAccessError = await validateDocumentAttachmentContextAccess(req, {
+      caseId: nextCaseId,
+      applicationId: nextApplicationId,
+      actionPlanId: nextActionPlanId,
+      interventionIds: nextInterventionIds,
+      requireScopedContext: Boolean(
+        nextCaseId ||
+        nextApplicationId ||
+        nextActionPlanId ||
+        (Array.isArray(nextInterventionIds) && nextInterventionIds.length)
+      ),
+    });
+    if (targetAccessError) {
+      return res.status(targetAccessError.status).json(targetAccessError.body);
+    }
+  } catch (err) {
+    console.error('[admin:documents:update] target access check failed', err);
+    return res.status(500).json({ error: 'document_target_access_check_failed' });
   }
   const metadata = JSON.stringify(metadataObj);
 
@@ -42419,7 +42988,10 @@ app.post('/api/documents/:id/link-interventions', async (req, res) => {
   let documentRow = null;
   try {
     const [rows] = await pool.query(
-      'SELECT id, document_category FROM iset_document WHERE id = ? LIMIT 1',
+      `SELECT id, case_id, application_id, action_plan_id, client_id, applicant_user_id, document_category
+         FROM iset_document
+        WHERE id = ? AND status = 'active'
+        LIMIT 1`,
       [documentId]
     );
     if (rows && rows[0]) documentRow = rows[0];
@@ -42429,6 +43001,15 @@ app.post('/api/documents/:id/link-interventions', async (req, res) => {
   }
   if (!documentRow) {
     return res.status(404).json({ error: 'document_not_found' });
+  }
+  try {
+    const accessError = await validateDocumentAccess(req, documentRow);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
+    }
+  } catch (err) {
+    console.error('[admin:documents:link-interventions] document access check failed', err);
+    return res.status(500).json({ error: 'document_access_check_failed' });
   }
 
   const docType = normaliseString(documentRow.document_category);
@@ -42464,6 +43045,13 @@ app.post('/api/documents/:id/link-interventions', async (req, res) => {
       const missing = interventionIds.filter(id => !rowMap.has(Number(id)));
       if (missing.length) {
         return res.status(400).json({ error: 'interventions_not_found', missingIds: missing });
+      }
+      const targetAccessError = await validateDocumentAttachmentContextAccess(req, {
+        interventionIds,
+        requireScopedContext: true,
+      });
+      if (targetAccessError) {
+        return res.status(targetAccessError.status).json(targetAccessError.body);
       }
     } catch (err) {
       console.error('[admin:documents:link-interventions] intervention lookup failed', err);
@@ -42537,6 +43125,10 @@ app.post('/api/documents/:id/duplicate', async (req, res) => {
     if (!doc) {
       return res.status(404).json({ error: 'document_not_found' });
     }
+    const sourceAccessError = await validateDocumentAccess(req, doc);
+    if (sourceAccessError) {
+      return res.status(sourceAccessError.status).json(sourceAccessError.body);
+    }
 
     const docType = docTypeOverride || doc.document_category || parseMetadata(doc.metadata)?.document_type || null;
     let docTypeScope = 'application';
@@ -42590,6 +43182,21 @@ app.post('/api/documents/:id/duplicate', async (req, res) => {
     } catch (err) {
       const errorCode = err?.code || 'document_link_validation_failed';
       return res.status(400).json({ error: errorCode });
+    }
+    const targetAccessError = await validateDocumentAttachmentContextAccess(req, {
+      caseId: nextCaseId,
+      applicationId: nextApplicationId,
+      actionPlanId: nextActionPlanId,
+      interventionIds: nextInterventionIds,
+      requireScopedContext: Boolean(
+        nextCaseId ||
+        nextApplicationId ||
+        nextActionPlanId ||
+        (Array.isArray(nextInterventionIds) && nextInterventionIds.length)
+      ),
+    });
+    if (targetAccessError) {
+      return res.status(targetAccessError.status).json(targetAccessError.body);
     }
     let resolvedClientId = null;
     try {
@@ -42678,10 +43285,24 @@ app.delete('/api/documents/:id', async (req, res) => {
     return res.status(400).json({ error: 'invalid_document_id' });
   }
   try {
+    const [[doc]] = await pool.query(
+      `SELECT id, case_id, application_id, action_plan_id, client_id, applicant_user_id
+         FROM iset_document
+        WHERE id = ? AND status = 'active'
+        LIMIT 1`,
+      [documentId]
+    );
+    if (!doc) {
+      return res.status(404).json({ error: 'document_not_found' });
+    }
+    const accessError = await validateDocumentAccess(req, doc);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
+    }
     const [result] = await pool.query(
       `UPDATE iset_document
          SET status = 'deleted', updated_at = NOW()
-       WHERE id = ?`,
+       WHERE id = ? AND status = 'active'`,
       [documentId]
     );
     if (!result || result.affectedRows === 0) {
@@ -42732,6 +43353,9 @@ app.get('/api/applicants/:id/applications', async (req, res) => {
       `SELECT
           c.id AS case_id,
           c.case_number,
+          c.assigned_to_user_id,
+          c.portfolio_region_id,
+          sp.region_id AS owner_region_id,
           a.id AS application_id,
           a.status AS application_status,
           a.created_at AS application_created_at,
@@ -42742,11 +43366,21 @@ app.get('/api/applicants/:id/applications', async (req, res) => {
        FROM iset_application_submission s
        JOIN iset_application a ON a.submission_id = s.id
        LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
       WHERE s.user_id = ?${archivedClause}
       ORDER BY a.created_at DESC`,
       [applicantId]
     );
-    const items = rows.map(r => ({
+    const scopedRows = (rows || []).filter(row => {
+      if (!row.case_id) return hasSystemOrNwacAdminAccess(req);
+      return !validateCaseAccessForCaseRow(req, {
+        id: row.case_id,
+        assigned_to_user_id: row.assigned_to_user_id,
+        portfolio_region_id: row.portfolio_region_id,
+        owner_region_id: row.owner_region_id,
+      });
+    });
+    const items = scopedRows.map(r => ({
       caseId: r.case_id || null,
       caseNumber: r.case_number || null,
       applicationId: r.application_id || null,
@@ -42764,12 +43398,23 @@ app.get('/api/applicants/:id/applications', async (req, res) => {
 app.get('/api/applicants/:id/document-checklist', async (req, res) => {
   const applicantId = normalisePositiveInteger(req.params.id);
   const applicationId = normalisePositiveInteger(req.query.applicationId);
+  const caseId = normalisePositiveInteger(req.query.caseId);
   const interventionId = normalisePositiveInteger(req.query.interventionId);
   const stageRaw = typeof req.query.stage === 'string' ? req.query.stage.trim().toLowerCase() : '';
   if (!applicantId) {
     return res.status(400).json({ error: 'invalid_applicant_id' });
   }
   try {
+    const contextAccessError = await validateApplicantDocumentContextAccess(req, {
+      applicantId,
+      caseId,
+      applicationId,
+      interventionId,
+      requireScopedContext: true,
+    });
+    if (contextAccessError) {
+      return res.status(contextAccessError.status).json(contextAccessError.body);
+    }
     const isIntervention = Boolean(interventionId);
     const checklistKey = isIntervention ? CHECKLIST_INTERVENTION_KEY : CHECKLIST_KEY;
     const templatePath = isIntervention ? CHECKLIST_INTERVENTION_FALLBACK_PATH : CHECKLIST_FALLBACK_PATH;
@@ -43542,6 +44187,16 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
     return res.status(400).json({ error: 'invalid_applicant_id' });
   }
   try {
+    const contextAccessError = await validateApplicantDocumentContextAccess(req, {
+      applicantId,
+      caseId: caseFilterId,
+      applicationId: applicationFilterId,
+      interventionId: interventionFilterId,
+      requireScopedContext: true,
+    });
+    if (contextAccessError) {
+      return res.status(contextAccessError.status).json(contextAccessError.body);
+    }
     const docTypeScopeMap = await loadDocumentTypeScopeMap();
     const whereClauses = ['d.applicant_user_id = ?', `d.status = 'active'`];
     const params = [applicantId];
@@ -43650,6 +44305,23 @@ app.get('/api/cases/:id/documents', async (req, res) => {
     return res.status(400).json({ error: 'invalid_case_id' });
   }
   try {
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
+    }
+    if (interventionFilterId) {
+      const interventionCaseRow = await fetchCaseAccessRowByInterventionId(interventionFilterId);
+      if (!interventionCaseRow) {
+        return res.status(404).json({ error: 'intervention_not_found' });
+      }
+      if (Number(interventionCaseRow.id) !== Number(caseId)) {
+        return res.status(400).json({ error: 'intervention_case_mismatch' });
+      }
+      const interventionAccessError = validateCaseAccessForCaseRow(req, interventionCaseRow);
+      if (interventionAccessError) {
+        return res.status(interventionAccessError.status).json(interventionAccessError.body);
+      }
+    }
     const [[caseRow]] = await pool.query(
       `SELECT c.id,
               c.client_id,
@@ -43760,6 +44432,7 @@ app.get('/api/documents/:id/presign-download', async (req, res) => {
   }
   const requestedMode = String(req.query.mode || '').trim().toLowerCase();
   const wantsOriginalDownload = requestedMode === 'original';
+  const paymentPacketId = parsePaymentPacketId(req.query.paymentPacketId || req.query.payment_packet_id);
   if (wantsOriginalDownload && !hasSystemOrNwacAdminAccess(req)) {
     return res.status(403).json({
       error: 'forbidden',
@@ -43768,11 +44441,30 @@ app.get('/api/documents/:id/presign-download', async (req, res) => {
   }
   try {
     const [[doc]] = await pool.query(
-      "SELECT id, file_name, file_path, mime_type, checksum_sha256 FROM iset_document WHERE id = ? AND status = 'active' LIMIT 1",
+      `SELECT id, case_id, application_id, action_plan_id, client_id, applicant_user_id,
+              file_name, file_path, mime_type, checksum_sha256
+         FROM iset_document
+        WHERE id = ? AND status = 'active'
+        LIMIT 1`,
       [documentId]
     );
     if (!doc) {
       return res.status(404).json({ error: 'document_not_found' });
+    }
+    let accessError = await validateDocumentAccess(req, doc);
+    if (accessError && Number.isFinite(paymentPacketId)) {
+      const paymentDocumentAccessError = await validatePaymentPacketDocumentAccess(req, {
+        packetId: paymentPacketId,
+        documentRow: doc,
+      });
+      if (!paymentDocumentAccessError) {
+        accessError = null;
+      } else if (paymentDocumentAccessError.status !== 409) {
+        accessError = paymentDocumentAccessError;
+      }
+    }
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
     }
     if (!doc.file_path) {
       return res.status(404).json({ error: 'file_missing' });
@@ -51118,43 +51810,18 @@ app.delete('/api/templates/:templateId', async (req, res) => {
 });
 
 app.get('/api/admin/messages', async (req, res) => {
-  try {
-    console.log("Fetching messages...");  // ???? Log request start
-
-    const [messages] = await pool.query(`
-          SELECT id, sender_id, recipient_id, subject, body, status, deleted, urgent, created_at 
-          FROM messages
-          ORDER BY urgent DESC, created_at DESC
-      `);
-
-    console.log("Messages fetched:", messages);  // ???? Log retrieved messages
-
-    res.json(messages);
-  } catch (error) {
-    console.error('Error fetching messages:', error);  // ???? Log error details
-    res.status(500).json({ error: error.message });  // ???? Send error details in response
-  }
+  return res.status(410).json({
+    error: 'retired_endpoint',
+    message: 'Use /api/cases/:id/messages for case-scoped secure messaging.'
+  });
 });
 
 
 app.post('/api/admin/messages', async (req, res) => {
-  const { sender_id, recipient_id, subject, body, urgent } = req.body;
-
-  if (!sender_id || !recipient_id || !subject || !body) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
-
-  try {
-    const [result] = await pool.query(`
-          INSERT INTO messages (sender_id, recipient_id, subject, body, status, deleted, urgent, created_at)
-          VALUES (?, ?, ?, ?, 'unread', FALSE, ?, NOW())
-      `, [sender_id, recipient_id, subject, body, urgent]);
-
-    res.status(201).json({ message: 'Message sent', messageId: result.insertId });
-  } catch (error) {
-    console.error('Error sending message:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
-  }
+  return res.status(410).json({
+    error: 'retired_endpoint',
+    message: 'Use /api/cases/:id/messages for case-scoped secure messaging.'
+  });
 });
 
 // Mark a message as deleted
@@ -51167,6 +51834,11 @@ app.put('/api/admin/messages/:id/delete', async (req, res) => {
     const ownerUserId = await resolveOrCreateUserIdFromAuth(req);
     if (!ownerUserId) return res.status(401).json({ error: 'unauthorized' });
     await ensureCaseMessageItemTable();
+    const messageRow = await fetchCaseSecureMessageRow(messageId);
+    const accessResult = await resolveCaseSecureMessageAccess(req, messageRow, { ownerUserId });
+    if (accessResult.error) {
+      return res.status(accessResult.error.status).json(accessResult.error.body);
+    }
     await seedCaseMessageItemForOwner({ messageId, ownerUserId });
     const [result] = await pool.query(
       `UPDATE message_item
@@ -51203,6 +51875,11 @@ app.put('/api/admin/messages/:id/status', async (req, res) => {
     const ownerUserId = await resolveOrCreateUserIdFromAuth(req);
     if (!ownerUserId) return res.status(401).json({ error: 'unauthorized' });
     await ensureCaseMessageItemTable();
+    const messageRow = await fetchCaseSecureMessageRow(messageId);
+    const accessResult = await resolveCaseSecureMessageAccess(req, messageRow, { ownerUserId });
+    if (accessResult.error) {
+      return res.status(accessResult.error.status).json(accessResult.error.body);
+    }
     await seedCaseMessageItemForOwner({ messageId, ownerUserId });
 
     const statusValue = String(status).trim().toLowerCase();
@@ -51354,6 +52031,96 @@ async function seedCaseMessageItemForOwner({ runner = pool, messageId, ownerUser
     ]
   );
   return Boolean(result?.affectedRows);
+}
+
+async function fetchCaseSecureMessageRow(messageId, connection = pool) {
+  const numericMessageId = normalisePositiveInteger(messageId);
+  if (!numericMessageId) return null;
+  const [[row]] = await connection.query(
+    `SELECT id, case_id, application_id, sender_id, recipient_id
+       FROM messages
+      WHERE id = ?
+      LIMIT 1`,
+    [numericMessageId]
+  );
+  return row || null;
+}
+
+function messageParticipantMatchesUser(messageRow, userId) {
+  const numericUserId = normalisePositiveInteger(userId);
+  if (!messageRow || !numericUserId) return false;
+  return (
+    Number(messageRow.sender_id) === Number(numericUserId) ||
+    Number(messageRow.recipient_id) === Number(numericUserId)
+  );
+}
+
+async function resolveCaseSecureMessageAccess(req, messageRow, {
+  requestedCaseId = null,
+  ownerUserId = null,
+  requireCaseScope = false,
+  connection = pool,
+} = {}) {
+  if (!messageRow) {
+    return { error: { status: 404, body: { error: 'message_not_found' } } };
+  }
+
+  const messageCaseId = normalisePositiveInteger(messageRow.case_id);
+  const queryCaseId = normalisePositiveInteger(requestedCaseId);
+  if (messageCaseId && queryCaseId && messageCaseId !== queryCaseId) {
+    return { error: { status: 400, body: { error: 'message_case_mismatch' } } };
+  }
+
+  const effectiveCaseId = messageCaseId || queryCaseId;
+  if (effectiveCaseId) {
+    const accessError = await validateCaseAccessByCaseId(req, effectiveCaseId, connection);
+    if (accessError) {
+      return { error: accessError };
+    }
+
+    const applicantContext = await resolveCaseApplicantMessagingContext(effectiveCaseId);
+    const applicantUserId = normalisePositiveInteger(applicantContext?.applicant_user_id);
+    if (!messageCaseId) {
+      const messageApplicationId = normalisePositiveInteger(messageRow.application_id);
+      const caseApplicationId = normalisePositiveInteger(applicantContext?.application_id);
+      if (messageApplicationId && caseApplicationId && messageApplicationId !== caseApplicationId) {
+        return { error: { status: 403, body: { error: 'forbidden', detail: 'message_application_scope_mismatch' } } };
+      }
+      const messageMatchesCaseApplicant =
+        applicantUserId &&
+        (Number(messageRow.sender_id) === Number(applicantUserId) ||
+          Number(messageRow.recipient_id) === Number(applicantUserId));
+      if (!messageMatchesCaseApplicant && !messageParticipantMatchesUser(messageRow, ownerUserId)) {
+        return { error: { status: 403, body: { error: 'forbidden', detail: 'message_case_scope_mismatch' } } };
+      }
+    }
+
+    return {
+      caseId: effectiveCaseId,
+      applicationId:
+        normalisePositiveInteger(applicantContext?.application_id) ||
+        normalisePositiveInteger(messageRow.application_id),
+      applicantUserId,
+    };
+  }
+
+  if (messageParticipantMatchesUser(messageRow, ownerUserId)) {
+    return {
+      caseId: null,
+      applicationId: normalisePositiveInteger(messageRow.application_id),
+      applicantUserId: null,
+    };
+  }
+
+  return {
+    error: {
+      status: requireCaseScope ? 400 : 403,
+      body: {
+        error: requireCaseScope ? 'message_case_scope_required' : 'forbidden',
+        detail: 'message_scope_mismatch',
+      },
+    },
+  };
 }
 
 app.get('/api/me/staff-profiles', async (req, res) => {
@@ -51933,6 +52700,21 @@ app.get('/api/reminders', async (req, res) => {
   }
 
   try {
+    if (includeGlobal && !hasSystemOrNwacAdminAccess(req)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    if (!Number.isInteger(caseId) && !Number.isInteger(applicationId) && !includeGlobal) {
+      return res.status(400).json({ error: 'case_or_application_scope_required' });
+    }
+    if (Number.isInteger(caseId) && caseId > 0) {
+      const accessError = await validateCaseAccessByCaseId(req, caseId);
+      if (accessError) return res.status(accessError.status).json(accessError.body);
+    }
+    if (Number.isInteger(applicationId) && applicationId > 0) {
+      const accessError = await validateCaseAccessByApplicationId(req, applicationId);
+      if (accessError) return res.status(accessError.status).json(accessError.body);
+    }
+
     const reminders = await listReminders({
       caseId,
       applicationId,
@@ -51961,6 +52743,8 @@ app.get('/api/reminders/:reminderId', async (req, res) => {
     if (!reminder) {
       return res.status(404).json({ error: 'reminder_not_found' });
     }
+    const accessError = await validateReminderAccess(req, reminder, { allowGlobal: true });
+    if (accessError) return res.status(accessError.status).json(accessError.body);
     return res.json(reminder);
   } catch (err) {
     if (isMissingTableErrorLocal(err)) {
@@ -52095,12 +52879,14 @@ app.post('/api/reminders', async (req, res) => {
   }
 
   try {
-    if (Number.isInteger(caseIdValue) && caseIdValue > 0) {
-      const caseExists = await ensureCaseExists(caseIdValue);
-      if (!caseExists) {
-        return res.status(404).json({ error: 'case_not_found' });
-      }
-    }
+    const accessError = await validateReminderTargetAccess(req, {
+      caseId: caseIdValue,
+      applicationId: applicationIdValue,
+      actionPlanId: actionPlanIdValue,
+      interventionId: interventionIdValue,
+      allowGlobal: true,
+    });
+    if (accessError) return res.status(accessError.status).json(accessError.body);
 
     const insertSql = `INSERT INTO iset_case_reminder
       (case_id, application_id, action_plan_id, intervention_id, title, description, category, status, due_at, completed_at, completed_by_staff_profile_id, assigned_staff_profile_id, metadata_json, created_by_staff_profile_id, updated_by_staff_profile_id)
@@ -52169,10 +52955,16 @@ app.put('/api/reminders/:reminderId', async (req, res) => {
   if (!existing) {
     return res.status(404).json({ error: 'reminder_not_found' });
   }
+  const existingAccessError = await validateReminderAccess(req, existing, { allowGlobal: true });
+  if (existingAccessError) return res.status(existingAccessError.status).json(existingAccessError.body);
 
   const updates = [];
   const params = [];
   const actingStaffProfileId = req.staffProfile?.id || null;
+  let nextCaseId = normalisePositiveInteger(existing.caseId);
+  let nextApplicationId = normalisePositiveInteger(existing.applicationId);
+  let nextActionPlanId = normalisePositiveInteger(existing.actionPlanId);
+  let nextInterventionId = normalisePositiveInteger(existing.interventionId);
 
   const caseIdProvided = hasOwn(body, 'caseId') || hasOwn(body, 'case_id');
   if (caseIdProvided) {
@@ -52180,14 +52972,9 @@ app.put('/api/reminders/:reminderId', async (req, res) => {
     if (Number.isNaN(caseIdValue)) {
       return res.status(400).json({ error: 'invalid_case_id' });
     }
-    if (Number.isInteger(caseIdValue) && caseIdValue > 0) {
-      const caseExists = await ensureCaseExists(caseIdValue);
-      if (!caseExists) {
-        return res.status(404).json({ error: 'case_not_found' });
-      }
-    }
+    nextCaseId = Number.isInteger(caseIdValue) ? caseIdValue : null;
     updates.push('case_id = ?');
-    params.push(Number.isInteger(caseIdValue) ? caseIdValue : null);
+    params.push(nextCaseId);
   }
 
   const applicationIdProvided = hasOwn(body, 'applicationId') || hasOwn(body, 'application_id');
@@ -52196,8 +52983,9 @@ app.put('/api/reminders/:reminderId', async (req, res) => {
     if (Number.isNaN(applicationIdValue)) {
       return res.status(400).json({ error: 'invalid_application_id' });
     }
+    nextApplicationId = Number.isInteger(applicationIdValue) ? applicationIdValue : null;
     updates.push('application_id = ?');
-    params.push(Number.isInteger(applicationIdValue) ? applicationIdValue : null);
+    params.push(nextApplicationId);
   }
 
   const actionPlanProvided = hasOwn(body, 'actionPlanId') || hasOwn(body, 'action_plan_id');
@@ -52206,8 +52994,9 @@ app.put('/api/reminders/:reminderId', async (req, res) => {
     if (Number.isNaN(actionPlanIdValue)) {
       return res.status(400).json({ error: 'invalid_action_plan_id' });
     }
+    nextActionPlanId = Number.isInteger(actionPlanIdValue) ? actionPlanIdValue : null;
     updates.push('action_plan_id = ?');
-    params.push(Number.isInteger(actionPlanIdValue) ? actionPlanIdValue : null);
+    params.push(nextActionPlanId);
   }
 
   const interventionProvided = hasOwn(body, 'interventionId') || hasOwn(body, 'intervention_id');
@@ -52216,8 +53005,9 @@ app.put('/api/reminders/:reminderId', async (req, res) => {
     if (Number.isNaN(interventionIdValue)) {
       return res.status(400).json({ error: 'invalid_intervention_id' });
     }
+    nextInterventionId = Number.isInteger(interventionIdValue) ? interventionIdValue : null;
     updates.push('intervention_id = ?');
-    params.push(Number.isInteger(interventionIdValue) ? interventionIdValue : null);
+    params.push(nextInterventionId);
   }
 
   if (hasOwn(body, 'title')) {
@@ -52402,6 +53192,17 @@ app.put('/api/reminders/:reminderId', async (req, res) => {
     return res.status(400).json({ error: 'no_fields_to_update' });
   }
 
+  if (caseIdProvided || applicationIdProvided || actionPlanProvided || interventionProvided) {
+    const targetAccessError = await validateReminderTargetAccess(req, {
+      caseId: nextCaseId,
+      applicationId: nextApplicationId,
+      actionPlanId: nextActionPlanId,
+      interventionId: nextInterventionId,
+      allowGlobal: true,
+    });
+    if (targetAccessError) return res.status(targetAccessError.status).json(targetAccessError.body);
+  }
+
   updates.push('updated_by_staff_profile_id = ?');
   params.push(actingStaffProfileId || null);
   updates.push('updated_at = CURRENT_TIMESTAMP');
@@ -52474,6 +53275,8 @@ app.post('/api/reminders/:reminderId/complete', async (req, res) => {
   if (!existing) {
     return res.status(404).json({ error: 'reminder_not_found' });
   }
+  const existingAccessError = await validateReminderAccess(req, existing, { allowGlobal: true });
+  if (existingAccessError) return res.status(existingAccessError.status).json(existingAccessError.body);
 
   if (!Number.isInteger(completedByValue) || completedByValue <= 0) {
     const existingCompletedBy = coerceOptionalPositiveInt(existing.completedByStaffProfileId);
@@ -52538,6 +53341,11 @@ app.post('/api/reminders/:reminderId/acknowledge', async (req, res) => {
       return res.status(404).json({ error: 'reminder_not_found' });
     }
     const reminderRow = rows[0];
+    const accessError = await validateReminderAccess(req, reminderRow, { allowGlobal: true, connection });
+    if (accessError) {
+      await connection.rollback();
+      return res.status(accessError.status).json(accessError.body);
+    }
     const metadata = safeJsonParse(reminderRow.metadata_json, {});
     const noteId = metadata?.case_note_id ? Number(metadata.case_note_id) : null;
     const caseIdValue = reminderRow.case_id || null;
@@ -52615,10 +53423,8 @@ app.get('/api/cases/:caseId/notes', async (req, res) => {
     return res.status(400).json({ error: 'invalid_case_id' });
   }
   try {
-    const caseExists = await ensureCaseExists(caseId);
-    if (!caseExists) {
-      return res.status(404).json({ error: 'case_not_found' });
-    }
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) return res.status(accessError.status).json(accessError.body);
     let notes = [];
     try {
       notes = await fetchCaseNotesForCase(caseId);
@@ -52666,6 +53472,9 @@ app.post('/api/cases/:caseId/notes', async (req, res) => {
   let connection;
   const pendingReminderCreates = [];
   try {
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) return res.status(accessError.status).json(accessError.body);
+
     connection = await pool.getConnection();
     await connection.beginTransaction();
     const authorUserId = await resolveExistingUserIdFromAuth(req, connection);
@@ -52796,6 +53605,9 @@ app.put('/api/cases/:caseId/notes/:noteId', async (req, res) => {
   let connection;
   const pendingReminderCreates = [];
   try {
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) return res.status(accessError.status).json(accessError.body);
+
     connection = await pool.getConnection();
     await connection.beginTransaction();
     const editorUserId = await resolveExistingUserIdFromAuth(req, connection);
@@ -52979,6 +53791,9 @@ app.delete('/api/cases/:caseId/notes/:noteId', async (req, res) => {
   const staffProfileId = resolveActiveStaffProfileId(req) || null;
   let connection;
   try {
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) return res.status(accessError.status).json(accessError.body);
+
     connection = await pool.getConnection();
     await connection.beginTransaction();
     const editorUserId = await resolveExistingUserIdFromAuth(req, connection);
@@ -53044,6 +53859,12 @@ app.get('/api/cases/:id/messages', async (req, res) => {
     const ownerUserId = await resolveOrCreateUserIdFromAuth(req);
     if (!ownerUserId) return res.status(401).json({ error: 'unauthorized' });
     await ensureCaseMessageItemTable();
+    const requesterRole = canonicaliseAccessRole(inferUserRole(req));
+    const isStaffRequester = req?.auth?.subjectType === 'staff' || Boolean(requesterRole);
+    if (isStaffRequester) {
+      const accessError = await validateCaseAccessByCaseId(req, caseId);
+      if (accessError) return res.status(accessError.status).json(accessError.body);
+    }
 
     // Resolve applicant user id for this case
     let applicantContext;
@@ -53062,8 +53883,6 @@ app.get('/api/cases/:id/messages', async (req, res) => {
       return res.status(404).json({ error: 'case_not_found' });
     }
     const applicantId = applicantContext?.applicant_user_id || null;
-    const requesterRole = canonicaliseAccessRole(inferUserRole(req));
-    const isStaffRequester = Boolean(requesterRole);
     if (!applicantId) {
       if (!isStaffRequester) {
         return res.status(403).json({ error: 'forbidden_case_access' });
@@ -53215,6 +54034,9 @@ const handlePostCaseSecureMessage = async (req, res) => {
     return res.status(400).json({ error: 'recipient_and_sender_names_required' });
   }
   try {
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) return res.status(accessError.status).json(accessError.body);
+
     // Resolve applicant user id
     const caseRow = await resolveCaseApplicantMessagingContext(caseId);
     if (!caseRow) return res.status(404).json({ error: 'case_not_found' });
@@ -55319,6 +56141,176 @@ function requirePaymentsRole(req, res) {
   if (role && PAYMENTS_ROLE_ALLOWLIST.has(role)) return null;
   res.status(403).json({ error: 'forbidden', message: 'Insufficient role for payments operations.' });
   return { denied: true };
+}
+
+function hasGlobalPaymentPacketAccess(req) {
+  return hasSystemOrNwacAdminAccess(req) || isFinancePaymentsRole(inferUserRole(req));
+}
+
+async function fetchPaymentPacketAccessRowById(packetId, connection = pool) {
+  const normalizedPacketId = normalisePositiveInteger(packetId);
+  if (!normalizedPacketId) return null;
+  const [[row]] = await connection.query(
+    `SELECT pp.id,
+            pp.case_id,
+            pp.client_id,
+            pp.intervention_id,
+            c.assigned_to_user_id,
+            c.portfolio_region_id,
+            sp.region_id AS owner_region_id
+       FROM payment_packet pp
+       LEFT JOIN iset_case c ON c.id = pp.case_id
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      WHERE pp.id = ?
+      LIMIT 1`,
+    [normalizedPacketId]
+  );
+  return row || null;
+}
+
+async function validatePaymentPacketAccess(req, packetOrId, { connection = pool } = {}) {
+  if (hasGlobalPaymentPacketAccess(req)) return null;
+
+  let packetRow = packetOrId;
+  if (!packetRow || typeof packetRow !== 'object') {
+    packetRow = await fetchPaymentPacketAccessRowById(packetOrId, connection);
+    if (!packetRow) {
+      return { status: 404, body: { error: 'payment_packet_not_found' } };
+    }
+  } else if (
+    packetRow.id &&
+    packetRow.case_id &&
+    typeof packetRow.assigned_to_user_id === 'undefined'
+  ) {
+    packetRow = await fetchPaymentPacketAccessRowById(packetRow.id, connection);
+    if (!packetRow) {
+      return { status: 404, body: { error: 'payment_packet_not_found' } };
+    }
+  }
+
+  const caseId = normalisePositiveInteger(packetRow.case_id || packetRow.caseId);
+  if (caseId) {
+    const caseRow = typeof packetRow.assigned_to_user_id === 'undefined'
+      ? await fetchCaseAccessRowById(caseId, connection)
+      : {
+          id: caseId,
+          assigned_to_user_id: packetRow.assigned_to_user_id,
+          portfolio_region_id: packetRow.portfolio_region_id,
+          owner_region_id: packetRow.owner_region_id,
+        };
+    if (!caseRow) {
+      return { status: 403, body: { error: 'forbidden', detail: 'payment_case_scope_missing' } };
+    }
+    const accessError = validateCaseAccessForCaseRow(req, caseRow);
+    if (!accessError) return null;
+    return accessError;
+  }
+
+  const interventionId = normalisePositiveInteger(packetRow.intervention_id || packetRow.interventionId);
+  if (interventionId) {
+    const accessError = await validateCaseAccessByInterventionId(req, interventionId, connection);
+    if (!accessError) return null;
+    return accessError;
+  }
+
+  const clientId = normalisePositiveInteger(packetRow.client_id || packetRow.clientId);
+  if (clientId) {
+    const caseRows = await fetchCaseAccessRowsByClientId(clientId, connection);
+    for (const caseRow of caseRows) {
+      if (!validateCaseAccessForCaseRow(req, caseRow)) {
+        return null;
+      }
+    }
+  }
+
+  return { status: 403, body: { error: 'forbidden', detail: 'payment_packet_scope_mismatch' } };
+}
+
+async function validatePaymentTargetAccess(req, {
+  caseId = null,
+  applicationId = null,
+  clientId = null,
+  interventionIds = [],
+  requireScopedContext = true,
+  connection = pool,
+} = {}) {
+  if (hasGlobalPaymentPacketAccess(req)) return null;
+
+  const normalizedInterventionIds = Array.from(new Set(
+    (Array.isArray(interventionIds) ? interventionIds : [interventionIds])
+      .map(value => normalisePositiveInteger(value))
+      .filter(Boolean)
+  ));
+  for (const interventionId of normalizedInterventionIds) {
+    const accessError = await validateCaseAccessByInterventionId(req, interventionId, connection);
+    if (accessError) return accessError;
+  }
+
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  if (normalizedCaseId) {
+    const accessError = await validateCaseAccessByCaseId(req, normalizedCaseId, connection);
+    if (accessError) return accessError;
+  }
+
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (normalizedApplicationId) {
+    const accessError = await validateCaseAccessByApplicationId(req, normalizedApplicationId, connection);
+    if (accessError) return accessError;
+  }
+
+  const normalizedClientId = normalisePositiveInteger(clientId);
+  if (normalizedClientId) {
+    const caseRows = await fetchCaseAccessRowsByClientId(normalizedClientId, connection);
+    if (!caseRows.length) {
+      return { status: 403, body: { error: 'forbidden', detail: 'client_case_scope_missing' } };
+    }
+    const hasClientCaseAccess = caseRows.some(caseRow => !validateCaseAccessForCaseRow(req, caseRow));
+    if (!hasClientCaseAccess) {
+      return { status: 403, body: { error: 'forbidden', detail: 'client_case_scope_mismatch' } };
+    }
+  }
+
+  if (
+    requireScopedContext &&
+    !normalizedInterventionIds.length &&
+    !normalizedCaseId &&
+    !normalizedApplicationId &&
+    !normalizedClientId
+  ) {
+    return { status: 400, body: { error: 'case_or_application_scope_required' } };
+  }
+
+  return null;
+}
+
+async function validatePaymentPacketDocumentAccess(req, {
+  packetId,
+  documentRow,
+  connection = pool,
+} = {}) {
+  const accessError = await validatePaymentPacketAccess(req, packetId, { connection });
+  if (accessError) return accessError;
+
+  const packetRow = await fetchPaymentPacketAccessRowById(packetId, connection);
+  if (!packetRow) {
+    return { status: 404, body: { error: 'payment_packet_not_found' } };
+  }
+
+  const packetClientId = normalisePositiveInteger(packetRow.client_id);
+  const documentClientId = normalisePositiveInteger(documentRow?.client_id);
+  if (packetClientId && documentClientId && packetClientId === documentClientId) {
+    return null;
+  }
+
+  const packetCaseId = normalisePositiveInteger(packetRow.case_id);
+  if (packetCaseId) {
+    const documentCaseRows = await fetchCaseAccessRowsForDocument(documentRow, connection);
+    if (documentCaseRows.some(row => Number(row.id) === Number(packetCaseId))) {
+      return null;
+    }
+  }
+
+  return { status: 409, body: { error: 'client_id_mismatch' } };
 }
 
 const FINANCE_EMAIL_ROUTING_SCOPE = 'finance';
@@ -68976,6 +69968,9 @@ app.get('/api/finance/payment-packets', async (req, res) => {
     const [rows] = await pool.query(
       `SELECT pp.*,
               c.case_number,
+              c.assigned_to_user_id,
+              c.portfolio_region_id,
+              case_owner_sp.region_id AS owner_region_id,
               COALESCE(a.id, c.application_id) AS application_id,
               cl.first_name AS client_first_name,
               cl.last_name AS client_last_name,
@@ -68991,6 +69986,7 @@ app.get('/api/finance/payment-packets', async (req, res) => {
               COALESCE(s.user_id, applicant_client_sub.id, applicant_client_email.id) AS applicant_user_id
          FROM payment_packet pp
          LEFT JOIN iset_case c ON c.id = pp.case_id
+         LEFT JOIN staff_profiles case_owner_sp ON case_owner_sp.id = c.assigned_to_user_id
          LEFT JOIN client cl ON cl.id = pp.client_id
          ${buildCasePrimaryApplicationJoinSql('c', 'a')}
          LEFT JOIN iset_application_submission s ON s.id = a.submission_id
@@ -69009,7 +70005,12 @@ app.get('/api/finance/payment-packets', async (req, res) => {
         LIMIT ?`,
       [...params, cappedLimit]
     );
-    const packets = await hydratePaymentPackets(rows);
+    const scopedRows = [];
+    for (const row of rows || []) {
+      const accessError = await validatePaymentPacketAccess(req, row);
+      if (!accessError) scopedRows.push(row);
+    }
+    const packets = await hydratePaymentPackets(scopedRows);
     await applyPostPayEvidenceHolds({ packets, connection: pool });
     res.status(200).json(packets);
   } catch (err) {
@@ -69028,6 +70029,10 @@ app.get('/api/finance/payment-packets/:id', async (req, res) => {
     const packet = await fetchPaymentPacketById(packetId);
     if (!packet) {
       return res.status(404).json({ error: 'payment_packet_not_found' });
+    }
+    const accessError = await validatePaymentPacketAccess(req, packetId);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
     }
     await applyPostPayEvidenceHolds({ packets: [packet], connection: pool });
     res.status(200).json(packet);
@@ -69051,6 +70056,10 @@ app.get('/api/finance/payment-packets/:id/pdf', async (req, res) => {
     const packet = await fetchPaymentPacketById(packetId);
     if (!packet) {
       return res.status(404).json({ error: 'payment_packet_not_found' });
+    }
+    const accessError = await validatePaymentPacketAccess(req, packetId);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
     }
     const payeeIdentity = await resolvePaymentPacketPayeeIdentity({
       packetId,
@@ -69095,6 +70104,10 @@ app.post('/api/finance/payment-packets/:id/audit-bundle', async (req, res) => {
     const packet = await fetchPaymentPacketById(packetId);
     if (!packet) {
       return res.status(404).json({ error: 'payment_packet_not_found' });
+    }
+    const accessError = await validatePaymentPacketAccess(req, packetId);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
     }
     const payeeIdentity = await resolvePaymentPacketPayeeIdentity({
       packetId,
@@ -69179,6 +70192,11 @@ app.post('/api/finance/payment-packets/:id/send-email', async (req, res) => {
       await conn.rollback();
       return res.status(404).json({ error: 'payment_packet_not_found' });
     }
+    const accessError = await validatePaymentPacketAccess(req, packetId, { connection: conn });
+    if (accessError) {
+      await conn.rollback();
+      return res.status(accessError.status).json(accessError.body);
+    }
     const packetStage = normalizePacketWorkflowStage(packetRow.status);
     if (packetStage !== 'draft') {
       await conn.rollback();
@@ -69232,6 +70250,15 @@ app.get('/api/finance/payment-communications', async (req, res) => {
   if (requirePaymentsRole(req, res)) return;
   const { packetId, limit } = req.query || {};
   try {
+    const scopedPacketId = parsePaymentPacketId(packetId);
+    if (Number.isFinite(scopedPacketId)) {
+      const accessError = await validatePaymentPacketAccess(req, scopedPacketId);
+      if (accessError) {
+        return res.status(accessError.status).json(accessError.body);
+      }
+    } else if (!hasGlobalPaymentPacketAccess(req)) {
+      return res.status(400).json({ error: 'payment_packet_scope_required' });
+    }
     const communications = await fetchPaymentCommunications({ packetId, limit });
     res.status(200).json(communications);
   } catch (err) {
@@ -69246,6 +70273,10 @@ app.post('/api/finance/payment-communications', async (req, res) => {
   const packetId = parsePaymentPacketId(body.packetId || body.payment_packet_id || body.paymentPacketId);
   if (!Number.isFinite(packetId)) {
     return res.status(400).json({ error: 'invalid_payment_packet_id' });
+  }
+  const accessError = await validatePaymentPacketAccess(req, packetId);
+  if (accessError) {
+    return res.status(accessError.status).json(accessError.body);
   }
   const direction = body.direction === 'inbound' ? 'inbound' : 'outbound';
   const subject = typeof body.subject === 'string' ? body.subject.trim() : null;
@@ -69367,6 +70398,16 @@ app.post('/api/finance/payment-packets', async (req, res) => {
         interventionIdsForPacket.add(lineInterventionId);
       }
     });
+  }
+  const targetAccessError = await validatePaymentTargetAccess(req, {
+    caseId,
+    applicationId,
+    clientId,
+    interventionIds: Array.from(interventionIdsForPacket),
+    requireScopedContext: true,
+  });
+  if (targetAccessError) {
+    return res.status(targetAccessError.status).json(targetAccessError.body);
   }
 
   const conn = await pool.getConnection();
@@ -69678,6 +70719,10 @@ app.put('/api/finance/payment-packets/:id', async (req, res) => {
     return res.status(400).json({ error: 'status_updates_require_status_endpoint' });
   }
   try {
+    const existingAccessError = await validatePaymentPacketAccess(req, packetId);
+    if (existingAccessError) {
+      return res.status(existingAccessError.status).json(existingAccessError.body);
+    }
     const fields = [];
     const params = [];
     const nextValues = {};
@@ -69730,6 +70775,21 @@ app.put('/api/finance/payment-packets/:id', async (req, res) => {
     if (!fields.length) {
       return res.status(400).json({ error: 'no_fields_to_update' });
     }
+    if (
+      Object.prototype.hasOwnProperty.call(nextValues, 'case_id') ||
+      Object.prototype.hasOwnProperty.call(nextValues, 'client_id') ||
+      Object.prototype.hasOwnProperty.call(nextValues, 'intervention_id')
+    ) {
+      const targetAccessError = await validatePaymentTargetAccess(req, {
+        caseId: nextValues.case_id,
+        clientId: nextValues.client_id,
+        interventionIds: nextValues.intervention_id ? [nextValues.intervention_id] : [],
+        requireScopedContext: Boolean(nextValues.case_id || nextValues.client_id || nextValues.intervention_id),
+      });
+      if (targetAccessError) {
+        return res.status(targetAccessError.status).json(targetAccessError.body);
+      }
+    }
     params.push(packetId);
     await pool.query(
       `UPDATE payment_packet SET ${fields.join(', ')}, updated_at = NOW() WHERE id = ?`,
@@ -69756,6 +70816,11 @@ app.delete('/api/finance/payment-packets/:id', async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
+    const accessError = await validatePaymentPacketAccess(req, packetId, { connection: conn });
+    if (accessError) {
+      await conn.rollback();
+      return res.status(accessError.status).json(accessError.body);
+    }
     const result = await deletePaymentPacket({ packetId, connection: conn });
     if (result.missing) {
       await conn.rollback();
@@ -69808,6 +70873,11 @@ app.post('/api/finance/payment-packets/:id/validate', async (req, res) => {
     if (!packetRow) {
       await conn.rollback();
       return res.status(404).json({ error: 'payment_packet_not_found' });
+    }
+    const accessError = await validatePaymentPacketAccess(req, packetId, { connection: conn });
+    if (accessError) {
+      await conn.rollback();
+      return res.status(accessError.status).json(accessError.body);
     }
     if (normalizePacketWorkflowStage(packetRow.status) !== 'draft') {
       await conn.rollback();
@@ -69969,6 +71039,11 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
     if (!packetRow) {
       await conn.rollback();
       return res.status(404).json({ error: 'payment_packet_not_found' });
+    }
+    const accessError = await validatePaymentPacketAccess(req, packetId, { connection: conn });
+    if (accessError) {
+      await conn.rollback();
+      return res.status(accessError.status).json(accessError.body);
     }
     const fromStatus = packetRow.status || null;
     const packetMeta = safeJsonParse(packetRow.metadata, {}) || {};
@@ -70514,6 +71589,11 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
       await conn.rollback();
       return res.status(404).json({ error: 'payment_packet_not_found' });
     }
+    const accessError = await validatePaymentPacketAccess(req, packetId, { connection: conn });
+    if (accessError) {
+      await conn.rollback();
+      return res.status(accessError.status).json(accessError.body);
+    }
 
     const lineErrors = [];
     const lineInputs = linesPayload.map((line, index) => {
@@ -70580,6 +71660,17 @@ app.post('/api/finance/payment-packets/:id/lines', async (req, res) => {
     if (lineErrors.length) {
       await conn.rollback();
       return res.status(400).json({ error: 'invalid_line_items', message: 'One or more payment line items are invalid.', details: lineErrors });
+    }
+    const lineTargetAccessError = await validatePaymentTargetAccess(req, {
+      caseId: packetRow.case_id,
+      clientId: packetRow.client_id,
+      interventionIds: lineInputs.map(line => line.interventionId).filter(Boolean),
+      requireScopedContext: true,
+      connection: conn,
+    });
+    if (lineTargetAccessError) {
+      await conn.rollback();
+      return res.status(lineTargetAccessError.status).json(lineTargetAccessError.body);
     }
 
     const potIds = Array.from(new Set(lineInputs.map(line => line.potId)));
@@ -70775,6 +71866,11 @@ app.post('/api/finance/payment-packets/:id/lines/recurring', async (req, res) =>
       await conn.rollback();
       return res.status(404).json({ error: 'payment_packet_not_found' });
     }
+    const accessError = await validatePaymentPacketAccess(req, packetId, { connection: conn });
+    if (accessError) {
+      await conn.rollback();
+      return res.status(accessError.status).json(accessError.body);
+    }
 
     let templateLine = null;
     if (Number.isFinite(templateLineId)) {
@@ -70828,6 +71924,17 @@ app.post('/api/finance/payment-packets/:id/lines/recurring', async (req, res) =>
     const interventionId = normalisePositiveInteger(
       body.interventionId || body.intervention_id || templateLine?.intervention_id || packetRow.intervention_id
     );
+    const targetAccessError = await validatePaymentTargetAccess(req, {
+      caseId: packetRow.case_id,
+      clientId: packetRow.client_id,
+      interventionIds: interventionId ? [interventionId] : [],
+      requireScopedContext: true,
+      connection: conn,
+    });
+    if (targetAccessError) {
+      await conn.rollback();
+      return res.status(targetAccessError.status).json(targetAccessError.body);
+    }
     const currency = body.currency || templateLine?.currency || 'CAD';
     const payeeProfileId = normalisePositiveInteger(
       body.payeeProfileId || body.payee_profile_id || templateLine?.payee_profile_id
@@ -71133,6 +72240,19 @@ app.delete('/api/finance/payment-lines/:id', async (req, res) => {
   let packetId = null;
   try {
     await conn.beginTransaction();
+    const [[lineRow]] = await conn.query(
+      'SELECT payment_packet_id FROM payment_packet_line WHERE id = ? LIMIT 1',
+      [lineId]
+    );
+    if (!lineRow) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'payment_line_not_found' });
+    }
+    const accessError = await validatePaymentPacketAccess(req, lineRow.payment_packet_id, { connection: conn });
+    if (accessError) {
+      await conn.rollback();
+      return res.status(accessError.status).json(accessError.body);
+    }
     const result = await deletePaymentLine({ lineId, connection: conn });
     if (result.missing) {
       await conn.rollback();
@@ -71286,10 +72406,26 @@ app.put('/api/finance/payment-lines/:id', async (req, res) => {
       'SELECT case_id, intervention_id, client_id FROM payment_packet WHERE id = ? LIMIT 1',
       [nextLine.payment_packet_id]
     );
+    if (!packetRow) {
+      return res.status(404).json({ error: 'payment_packet_not_found' });
+    }
+    const accessError = await validatePaymentPacketAccess(req, nextLine.payment_packet_id);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
+    }
     const policyRules = await readPaymentPolicyRules(pool);
     const recurrencePolicyByType = await readPaymentRecurrencePolicyByType(pool);
     const paymentTypeMap = await readPaymentInterventionMapping(pool);
     const primaryInterventionId = nextLine.intervention_id || packetRow?.intervention_id || null;
+    const targetAccessError = await validatePaymentTargetAccess(req, {
+      caseId: packetRow.case_id,
+      clientId: packetRow.client_id,
+      interventionIds: primaryInterventionId ? [primaryInterventionId] : [],
+      requireScopedContext: true,
+    });
+    if (targetAccessError) {
+      return res.status(targetAccessError.status).json(targetAccessError.body);
+    }
     const interventionMap = await fetchInterventionsById({
       ids: primaryInterventionId ? [primaryInterventionId] : [],
       connection: pool,
@@ -71442,6 +72578,11 @@ app.post('/api/finance/payment-lines/:id/status', async (req, res) => {
       await conn.rollback();
       return res.status(404).json({ error: 'payment_line_not_found' });
     }
+    const accessError = await validatePaymentPacketAccess(req, lineRow.payment_packet_id, { connection: conn });
+    if (accessError) {
+      await conn.rollback();
+      return res.status(accessError.status).json(accessError.body);
+    }
     const fromStatus = lineRow.status || null;
     const simplePaidWorkflow = SIMPLE_PAYMENT_WORKFLOW && nextStatus === 'paid';
     const resolvedPaidAt = simplePaidWorkflow ? (paidAt || new Date()) : paidAt;
@@ -71467,12 +72608,32 @@ app.post('/api/finance/payment-lines/:id/status', async (req, res) => {
         }
         if (resolvedProofDocumentId) {
           const [[docRow]] = await conn.query(
-            'SELECT id, checksum_sha256 FROM iset_document WHERE id = ? AND status = \"active\" LIMIT 1',
+            `SELECT id, checksum_sha256, client_id, case_id, application_id, action_plan_id, applicant_user_id
+               FROM iset_document
+              WHERE id = ? AND status = "active"
+              LIMIT 1`,
             [resolvedProofDocumentId]
           );
           if (!docRow) {
             await conn.rollback();
             return res.status(400).json({ error: 'payment_proof_document_not_found' });
+          }
+          let documentAccessError = await validateDocumentAccess(req, docRow, { connection: conn });
+          if (documentAccessError) {
+            const paymentDocumentAccessError = await validatePaymentPacketDocumentAccess(req, {
+              packetId: lineRow.payment_packet_id,
+              documentRow: docRow,
+              connection: conn,
+            });
+            documentAccessError = paymentDocumentAccessError || null;
+          }
+          if (documentAccessError) {
+            await conn.rollback();
+            return res.status(documentAccessError.status).json(documentAccessError.body);
+          }
+          if (docRow.client_id && lineRow.client_id && Number(docRow.client_id) !== Number(lineRow.client_id)) {
+            await conn.rollback();
+            return res.status(409).json({ error: 'client_id_mismatch' });
           }
           if (!docRow.checksum_sha256 || String(docRow.checksum_sha256).length !== 64) {
             await conn.rollback();
@@ -71861,18 +73022,36 @@ app.post('/api/finance/payment-packets/:id/documents', async (req, res) => {
 
   try {
     const [[packetRow]] = await pool.query(
-      'SELECT id, client_id FROM payment_packet WHERE id = ? LIMIT 1',
+      'SELECT id, case_id, client_id FROM payment_packet WHERE id = ? LIMIT 1',
       [packetId]
     );
     if (!packetRow) {
       return res.status(404).json({ error: 'payment_packet_not_found' });
     }
+    const packetAccessError = await validatePaymentPacketAccess(req, packetId);
+    if (packetAccessError) {
+      return res.status(packetAccessError.status).json(packetAccessError.body);
+    }
     const [[docRow]] = await pool.query(
-      'SELECT id, checksum_sha256, client_id FROM iset_document WHERE id = ? AND status = "active" LIMIT 1',
+      `SELECT id, checksum_sha256, client_id, case_id, application_id, action_plan_id, applicant_user_id
+         FROM iset_document
+        WHERE id = ? AND status = "active"
+        LIMIT 1`,
       [documentId]
     );
     if (!docRow) {
       return res.status(404).json({ error: 'document_not_found' });
+    }
+    let documentAccessError = await validateDocumentAccess(req, docRow);
+    if (documentAccessError) {
+      const paymentDocumentAccessError = await validatePaymentPacketDocumentAccess(req, {
+        packetId,
+        documentRow: docRow,
+      });
+      documentAccessError = paymentDocumentAccessError || null;
+    }
+    if (documentAccessError) {
+      return res.status(documentAccessError.status).json(documentAccessError.body);
     }
     if (!docRow.checksum_sha256 || String(docRow.checksum_sha256).length !== 64) {
       return res.status(400).json({ error: 'document_checksum_missing' });
@@ -71986,6 +73165,17 @@ app.put('/api/finance/payment-documents/:id', async (req, res) => {
   }
   params.push(documentLinkId);
   try {
+    const [[existingLink]] = await pool.query(
+      'SELECT payment_packet_id FROM payment_packet_document WHERE id = ? LIMIT 1',
+      [documentLinkId]
+    );
+    if (!existingLink) {
+      return res.status(404).json({ error: 'payment_document_not_found' });
+    }
+    const accessError = await validatePaymentPacketAccess(req, existingLink.payment_packet_id);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
+    }
     await pool.query(
       `UPDATE payment_packet_document SET ${fields.join(', ')} WHERE id = ?`,
       params
@@ -72027,6 +73217,10 @@ app.delete('/api/finance/payment-documents/:id', async (req, res) => {
     if (!row) {
       return res.status(404).json({ error: 'payment_document_not_found' });
     }
+    const accessError = await validatePaymentPacketAccess(req, row.payment_packet_id);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
+    }
     const [result] = await pool.query(
       'DELETE FROM payment_packet_document WHERE id = ?',
       [documentLinkId]
@@ -72046,6 +73240,9 @@ app.delete('/api/finance/payment-documents/:id', async (req, res) => {
 
 app.get('/api/finance/payment-batches', async (req, res) => {
   if (requirePaymentsRole(req, res)) return;
+  if (!hasGlobalPaymentPacketAccess(req)) {
+    return res.status(403).json({ error: 'forbidden', detail: 'finance_scope_required' });
+  }
   try {
     const status = normalizePaymentBatchStatus(req.query?.status);
     const limit = Math.min(Number(req.query?.limit) || 100, 200);
@@ -72064,6 +73261,9 @@ app.get('/api/finance/payment-batches', async (req, res) => {
 
 app.get('/api/finance/payment-batches/:id', async (req, res) => {
   if (requirePaymentsRole(req, res)) return;
+  if (!hasGlobalPaymentPacketAccess(req)) {
+    return res.status(403).json({ error: 'forbidden', detail: 'finance_scope_required' });
+  }
   const batchId = parsePaymentBatchId(req.params.id);
   if (!Number.isFinite(batchId)) {
     return res.status(400).json({ error: 'invalid_payment_batch_id' });
@@ -72082,6 +73282,9 @@ app.get('/api/finance/payment-batches/:id', async (req, res) => {
 
 app.post('/api/finance/payment-batches', async (req, res) => {
   if (requirePaymentsRole(req, res)) return;
+  if (!hasGlobalPaymentPacketAccess(req)) {
+    return res.status(403).json({ error: 'forbidden', detail: 'finance_scope_required' });
+  }
   const body = req.body || {};
   const lineIds = Array.isArray(body.lineIds || body.line_ids)
     ? (body.lineIds || body.line_ids)
@@ -72151,6 +73354,9 @@ app.post('/api/finance/payment-batches', async (req, res) => {
 
 app.post('/api/finance/payment-batches/:id/status', async (req, res) => {
   if (requirePaymentsRole(req, res)) return;
+  if (!hasGlobalPaymentPacketAccess(req)) {
+    return res.status(403).json({ error: 'forbidden', detail: 'finance_scope_required' });
+  }
   const batchId = parsePaymentBatchId(req.params.id);
   if (!Number.isFinite(batchId)) {
     return res.status(400).json({ error: 'invalid_payment_batch_id' });
@@ -72247,6 +73453,9 @@ app.post('/api/finance/payment-batches/:id/status', async (req, res) => {
 
 app.post('/api/finance/payment-batches/:id/export', async (req, res) => {
   if (requirePaymentsRole(req, res)) return;
+  if (!hasGlobalPaymentPacketAccess(req)) {
+    return res.status(403).json({ error: 'forbidden', detail: 'finance_scope_required' });
+  }
   const batchId = parsePaymentBatchId(req.params.id);
   if (!Number.isFinite(batchId)) {
     return res.status(400).json({ error: 'invalid_payment_batch_id' });
@@ -72308,6 +73517,9 @@ app.post('/api/finance/payment-batches/:id/export', async (req, res) => {
 
 app.get('/api/finance/payment-ledger-export', async (req, res) => {
   if (requirePaymentsRole(req, res)) return;
+  if (!hasGlobalPaymentPacketAccess(req)) {
+    return res.status(403).json({ error: 'forbidden', detail: 'finance_scope_required' });
+  }
   try {
     const rows = await fetchPaymentLedgerExportRows();
     const csv = buildPaymentLedgerCsv(rows);
@@ -74589,6 +75801,9 @@ app.get('/api/cases/:case_id/events', async (req, res) => {
     return res.status(400).json({ error: 'invalid_case_id' });
   }
   try {
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) return res.status(accessError.status).json(accessError.body);
+
     const { actorId } = resolveRequestActor(req);
     const limitParam = Number(req.query.limit);
     const offsetParam = Number(req.query.offset);
@@ -75341,77 +76556,56 @@ app.post('/api/render-njk', (req, res) => {
 });
 
 app.get('/api/admin/messages/:id/attachments', async (req, res) => {
-  const messageId = req.params.id;
-  const caseIdFromQuery = req.query.case_id ? parseInt(req.query.case_id, 10) : null;
+  const messageId = normalisePositiveInteger(req.params.id);
+  if (!messageId) return res.status(400).json({ error: 'invalid_message_id' });
+  const caseIdFromQuery = req.query.case_id ? normalisePositiveInteger(req.query.case_id) : null;
+  if (req.query.case_id && !caseIdFromQuery) {
+    return res.status(400).json({ error: 'invalid_case_id' });
+  }
   try {
     const ownerUserId = await resolveOrCreateUserIdFromAuth(req);
     if (!ownerUserId) return res.status(401).json({ error: 'unauthorized' });
     await ensureCaseMessageItemTable();
-    await seedCaseMessageItemForOwner({ messageId, ownerUserId });
+    const message = await fetchCaseSecureMessageRow(messageId);
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+    const accessResult = await resolveCaseSecureMessageAccess(req, message, {
+      requestedCaseId: caseIdFromQuery,
+      ownerUserId,
+      requireCaseScope: Boolean(req.query.case_id),
+    });
+    if (accessResult.error) {
+      return res.status(accessResult.error.status).json(accessResult.error.body);
+    }
 
-    // Get all attachments for this message
+    if (!accessResult.caseId) {
+      const [[itemRow]] = await pool.query(
+        `SELECT id
+           FROM message_item
+          WHERE message_id = ? AND owner_user_id = ? AND purged_at IS NULL
+          LIMIT 1`,
+        [messageId, ownerUserId]
+      );
+      if (!itemRow) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    }
+
+    // Get all attachments for this message after message/case access is established.
     const [attachments] = await pool.query(
       `SELECT id, message_id, file_path, original_filename, uploaded_at, user_id, application_id
        FROM message_attachment
-      
        WHERE message_id = ?
        ORDER BY uploaded_at ASC`,
       [messageId]
     );
 
-    // Get the message to determine sender/recipient
-    const [[message]] = await pool.query(
-      `SELECT * FROM messages WHERE id = ?`,
-      [messageId]
-    );
-    if (!message) {
-      return res.status(404).json({ error: 'Message not found' });
-    }
-    const [[itemRow]] = await pool.query(
-      `SELECT id
-         FROM message_item
-        WHERE message_id = ? AND owner_user_id = ? AND purged_at IS NULL
-        LIMIT 1`,
-      [messageId, ownerUserId]
-    );
-    if (!itemRow) {
-      return res.status(403).json({ error: 'forbidden' });
-    }
-
-    let caseId = caseIdFromQuery;
-    let caseApplicationId = null;
-    let applicantUserId = null;
-
-    if (caseId) {
-      try {
-        const [[caseRow]] = await pool.query(
-          `SELECT COALESCE(a.id, c.application_id) AS application_id
-             FROM iset_case c
-             ${buildCasePrimaryApplicationJoinSql('c', 'a')}
-            WHERE c.id = ?
-            LIMIT 1`,
-          [caseId]
-        );
-        if (caseRow && caseRow.application_id) {
-          caseApplicationId = caseRow.application_id;
-          const [[appRow]] = await pool.query(
-            'SELECT user_id FROM iset_application WHERE id = ? LIMIT 1',
-            [caseRow.application_id]
-          );
-          if (appRow && appRow.user_id) {
-            applicantUserId = appRow.user_id;
-          }
-        }
-      } catch (err) {
-        console.warn('[admin:attachments] failed to resolve application for case %s: %s', caseId, err.message);
-      }
-    }
-
-    const resolvedApplicationId = caseApplicationId || message.application_id || null;
+    const caseId = accessResult.caseId || null;
+    const resolvedApplicationId = accessResult.applicationId || message.application_id || null;
+    let applicantUserId = accessResult.applicantUserId || null;
     if (!applicantUserId) {
       applicantUserId =
-        message.applicant_user_id ||
-        message.applicantUserId ||
         message.sender_id ||
         message.recipient_id ||
         null;
@@ -75792,6 +76986,11 @@ app.delete('/api/admin/messages/:id/hard-delete', async (req, res) => {
     const ownerUserId = await resolveOrCreateUserIdFromAuth(req);
     if (!ownerUserId) return res.status(401).json({ error: 'unauthorized' });
     await ensureCaseMessageItemTable();
+    const messageRow = await fetchCaseSecureMessageRow(messageId);
+    const accessResult = await resolveCaseSecureMessageAccess(req, messageRow, { ownerUserId });
+    if (accessResult.error) {
+      return res.status(accessResult.error.status).json(accessResult.error.body);
+    }
     await seedCaseMessageItemForOwner({ messageId, ownerUserId });
 
     const [result] = await pool.query(

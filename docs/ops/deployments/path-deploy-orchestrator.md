@@ -162,9 +162,9 @@ Current autosave rollout note:
 
 - `prod`
   - Uses AWS profile `nwac-prod` by default in the Codex/operator control plane.
-  - `nwac-prod` now resolves to the reduced role `nwac-prod-codex-operator`; it covers `path:deploy`, prod SQL/dump helpers via SSM, ASG refresh, and the ALB `path-maintenance-fallback` flow, but not broader infra/admin operations such as WAF changes, SSM env parameter writes, uploads-bucket CORS changes, or Terraform/ACM changes. Current caveat from 2026-04-24: automatic restore-point capture is still blocked because the role lacks `rds:AddTagsToResource` on cluster snapshots.
+  - `nwac-prod` now resolves to the reduced role `nwac-prod-codex-operator`; it covers `path:deploy`, prod SQL/dump helpers via SSM, ASG refresh, automatic prod restore-point capture, and the ALB `path-maintenance-fallback` flow, but not broader infra/admin operations such as WAF changes, SSM env parameter writes, uploads-bucket CORS changes, or Terraform/ACM changes.
   - Captures an Aurora cluster snapshot restore point automatically when the planned run will apply canonical schema changes or allowlisted data promotion.
-  - If that restore-point step fails, only rerun with `--skip-schema --skip-data` when you have direct proof that no schema/data delta remains. Example from 2026-04-24: DEV and PROD checksums for workflow `21` plus `publish/workflow.schema.intake` were identical, so an app-only rerun was safe.
+  - If that restore-point step ever fails again, only rerun with `--skip-schema --skip-data` when you have direct proof that no schema/data delta remains. Example from 2026-04-24: DEV and PROD checksums for workflow `21` plus `publish/workflow.schema.intake` were identical, so an app-only rerun was safe. Follow-up validation from 2026-04-25: after the IAM policy update, release `20260425-100201` captured restore point `path-prod-20260425-100201-20260425100220` successfully under the normal full prod path.
   - Runs canonical schema work remotely through SSM on a PROD app host.
   - Optional config/data promotion uses `scripts/path-data-sync.js`.
   - App rollout uploads `shared`, `admin`, and `portal` artifacts, then waits for `refresh-prod`.

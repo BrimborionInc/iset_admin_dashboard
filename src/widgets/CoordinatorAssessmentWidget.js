@@ -4437,6 +4437,8 @@ const CoordinatorAssessmentWidget = forwardRef(
       const params = new URLSearchParams();
       if (applicationId) {
         params.set('applicationId', applicationId);
+      } else if (caseId) {
+        params.set('caseId', String(caseId));
       }
       if (currentStep === 'communication' || currentStep === FUNDING_DOCS_STEP_ID) {
         params.set('stage', COMMUNICATION_CHECKLIST_STAGE);
@@ -4459,7 +4461,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     } finally {
       setDocumentChecklistLoading(false);
     }
-  }, [applicantUserId, applicationId, currentStep]);
+  }, [applicantUserId, applicationId, caseId, currentStep]);
 
   useEffect(() => {
     if (wizardNavPriming) return;
@@ -6408,6 +6410,8 @@ const CoordinatorAssessmentWidget = forwardRef(
         const params = new URLSearchParams();
         if (applicationId) {
           params.set('applicationId', applicationId);
+        } else if (caseId) {
+          params.set('caseId', String(caseId));
         }
         if (stage) {
           params.set('stage', stage);
@@ -6439,7 +6443,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         setCheckingChecklist(false);
       }
     },
-    [applicantUserId, applicationId]
+    [applicantUserId, applicationId, caseId]
   );
   const handleSubmit = async () => {
     if (lockedByAnotherUser) {

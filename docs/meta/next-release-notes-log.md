@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next "What's New" update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-04-22
+Last Updated: 2026-04-25
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -37,6 +37,9 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ## Entries
 
+- 2026-04-25 | Release TBD | Security/Casework | Case Workspace secure messaging | Strengthened case-workspace secure-message access checks so staff can only read, send, open attachments, or update message state for cases they are authorized to access. | Broad legacy admin message list/create endpoints are retired; message attachment downloads now require the message's case context.
+- 2026-04-25 | Release TBD | Security/Casework | Case notes, reminders, and timeline | Strengthened case-workspace notes, reminders, and timeline access checks so narrative client information is only returned or changed after case-scope validation. | Reminder list/detail/mutation routes now require scoped case/application/action-plan/intervention context unless a global admin is working with global reminders.
+- 2026-04-25 | Release TBD | Security/Documents and Finance | Supporting documents and payment packets | Strengthened supporting-document and payment-packet access checks so staff actions are tied to authorized case, document, client, or payment context. | Document previews/downloads no longer rely on document ID alone, and casework payment roles are scoped to the cases they can access.
 - 2026-04-22 | Release TBD | UX/Finance | Batch Payments > outbound finance email | Made a change so finance payment-packet emails now send a lean AP-style summary with `Payee`, `Payment Instructions`, and `Coding` sections instead of a long case and evidence narrative. | The payment details now render as a compact line table, and optional PATH-entered values like requested payment date, invoice reference, and payee reference appear only when staff entered them.
 - 2026-04-20 | Release v0.5.9 | Fix/Agreements | Client Funding Agreement signer prefill | Fixed a bug where a CFA could pick up the name of the staff member who generated or sent it instead of the case's assigned case manager. | PATH now prefers the assigned case manager for CFA signer prefill and stores that signer name with the CFA version so later rerenders keep the same signer.
 - 2026-04-20 | Release v0.5.9 | Fix/Documents | Case manager assessment PDF signatures | Fixed a bug where submitted or approved assessment PDFs could show a staff email address in the signature panel instead of the person’s name. | Assessment PDFs now prefer the signer’s PATH staff display name and read signature history from the current shared event store before falling back to older legacy audit rows.

@@ -16,7 +16,7 @@ Do not run the app deploy commands from a WSL-only checkout such as `/root/ISET/
 - Use `path:deploy` for normal releases.
 - Use `test:db:refresh` only when you want to reset TEST.
 - In the current Codex sandbox, `nwac-prod` is the standard role-backed prod operator profile. `default` is only the bootstrap IAM user and direct prod resource calls through it are expected to fail.
-- The reduced `nwac-prod` role covers normal deploys, prod SQL/dumps via SSM, ASG refresh, and the ALB maintenance fallback. It does not cover broader infra/admin work such as WAF changes, SSM env parameter writes, uploads-bucket CORS changes, or Terraform/ACM changes. Important current caveat: as of 2026-04-24 the role still cannot complete restore-point snapshot capture because the RDS snapshot create path also needs `rds:AddTagsToResource` on the snapshot resource.
+- The reduced `nwac-prod` role covers normal deploys, prod SQL/dumps via SSM, ASG refresh, automatic prod restore-point snapshots, and the ALB maintenance fallback. It does not cover broader infra/admin work such as WAF changes, SSM env parameter writes, uploads-bucket CORS changes, or Terraform/ACM changes.
 - PROD deploys require `--yes`.
 - TEST deploys require `--yes` only when you include `--refresh-test-db`.
 - Deploys do not auto-bump `package.json` semver; instead, each frontend build now carries a visible release/build stamp.
@@ -75,12 +75,14 @@ Use this when:
 What this does:
 - verifies AWS prod identity
 - captures a prod DB restore point if DB mutation is planned
-- if that restore-point step fails under `nwac-prod` with `rds:AddTagsToResource`, stop treating it as a normal role capability; only continue with `--skip-schema --skip-data` when you have separately proved there is no real schema/data delta to apply
 - applies canonical schema work
 - applies allowlisted config/data only
 - deploys artifacts
 - waits for prod refresh
 - runs prod smoke checks
+
+Historical note:
+- On 2026-04-24 the reduced role briefly lacked `rds:AddTagsToResource`, which blocked automatic restore-point capture. That IAM gap was fixed, and release `20260425-100201` confirmed restore-point capture is working again under the normal prod path.
 
 For an admin-only PROD rollout with no schema/data/portal work and no shared-library changes:
 

@@ -571,6 +571,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         const params = new URLSearchParams();
         if (isCaseWorkspace && filterInterventionId) {
           params.set('interventionId', filterInterventionId);
+        } else if (isCaseWorkspace && caseId) {
+          params.set('caseId', String(caseId));
         } else if (!isCaseWorkspace && filterApplicationId) {
           params.set('applicationId', filterApplicationId);
         }

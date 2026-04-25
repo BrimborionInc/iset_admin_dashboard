@@ -1,5 +1,7 @@
 const {
+  evaluateCaseAccess,
   evaluateRegionalManagerCaseAccess,
+  getCaseAccessError,
   getRegionalManagerCaseAccessError,
 } = require('../src/lib/caseAccess');
 
@@ -92,5 +94,41 @@ describe('caseAccess', () => {
         },
       })
     ).toEqual({ allowed: true, reason: 'unassigned' });
+  });
+
+  test('allows an ISET Coordinator only on directly assigned cases', () => {
+    expect(
+      evaluateCaseAccess({
+        role: 'ISET Coordinator',
+        requesterId: 54,
+        caseRow: { assigned_to_user_id: 54 },
+      })
+    ).toEqual({ allowed: true, reason: 'direct_assignment' });
+
+    expect(
+      getCaseAccessError({
+        role: 'ISET Coordinator',
+        requesterId: 54,
+        caseRow: { assigned_to_user_id: 81 },
+      })
+    ).toEqual({
+      status: 403,
+      body: { error: 'forbidden', detail: 'assessor_scope_mismatch' },
+    });
+  });
+
+  test('normalizes Cognito-style role names for case access', () => {
+    expect(
+      evaluateCaseAccess({
+        role: 'Regional_Manager',
+        requesterId: 54,
+        regionIds: [7],
+        caseRow: {
+          assigned_to_user_id: 81,
+          portfolio_region_id: 7,
+          owner_region_id: null,
+        },
+      })
+    ).toEqual({ allowed: true, reason: 'portfolio_region' });
   });
 });

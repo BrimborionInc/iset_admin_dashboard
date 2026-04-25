@@ -2,7 +2,7 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-04-22
+Last Updated: 2026-04-25
 
 ## How to use
 
@@ -31,6 +31,22 @@ For each indexed thread/topic, keep:
 - `Status`: whether the note is current, partial, incomplete-title, or superseded
 
 ## Indexed Topics
+
+### Privacy and security systematic review after secure-message breach
+
+- Codex task title: `exact original task title not preserved`
+- Topic: post-incident privacy/security review focused on object-level authorization for client data, with hardening of supporting-document, finance payment-packet, admin secure-message, case-note, reminder, and event routes
+- Keywords: `privacy breach`, `secure message`, `SIN`, `client data exposure`, `document presign`, `supporting documents`, `payment packets`, `message_item`, `case notes`, `reminders`, `case events`, `object-level authorization`, `case_or_application_scope_required`, `document_scope_mismatch`, `payment_packet_scope_mismatch`, `message_case_mismatch`
+- When to open: the user references the post-2026-04-23 privacy/security audit, asks what was already reviewed after the secure-message breach, asks why document endpoints require case/application/intervention context, asks why finance payment packets are scoped differently for finance roles versus casework roles, asks why `/api/admin/messages` was retired, asks why reminders require scoped context, or asks for the remaining security review lanes
+- Primary docs:
+  - `docs/planning/privacy-security-systematic-review-2026-04-25.md`
+  - `docs/ops/path-portal-secure-message-incident-2026-04-23.txt`
+  - `sql/ops/prod-fix-applicant-message-recipient-collision-20260423.sql`
+  - `docs/AGENTS.md`
+  - `isetadminserver.js`
+  - `src/lib/caseAccess.js`
+- Status: current, incomplete-title as of 2026-04-25
+- Notes: this thread was opened after the serious 2026-04-23 public-portal secure-message breach where `staff_profiles.id` / `user.id` confusion misrouted applicant-origin messages containing sensitive data. The first review pass found and patched a separate object-level authorization class in admin supporting documents: document list/checklist, presigned download, upload, edit, link, duplicate, and delete paths must now prove case/application/action-plan/intervention/client/payment context instead of trusting staff auth plus a document ID or applicant ID. The same pass hardened finance payment-packet routes so finance/admin payment roles remain global but casework payment roles are case-scoped, and payment batch/full-ledger surfaces require finance/admin access. The next pass found and patched admin secure-message read/send/attachment/status/delete gaps: broad `/api/admin/messages` list/create behavior is retired, case-thread reads now validate case access before seeding `message_item`, and attachment presign/adoption validates the message's case context. The same pass added case-scope checks to case notes, reminder list/detail/create/update/complete/acknowledge paths, and case event timelines. Remaining lanes are recorded in the review note and include portal secure-message follow-up, escalations/signing/generated forms, public unauthenticated support routes, admin feedback attachments, SQL/reporting/export surfaces, and fuller route-level denial tests.
 
 ### Assessment request-changes notes, assessment PDF signatures/redlines, CFA signer ownership, and rollout
 
@@ -537,21 +553,24 @@ For each indexed thread/topic, keep:
 ### PROD feedback merge and follow-up fixes
 
 - Codex task title: `Merge TEST reports into PROD`
-- Topic: merging TEST admin feedback into the PROD bug/CR log, triaging the resulting queue against live code/data, and implementing the first low-risk follow-up fixes in DEV
-- Keywords: `Merge TEST reports into PROD`, `admin_feedback_report`, `TEST into PROD`, `report 40`, `report 46`, `report 47`, `funded clients`, `reminders overdue`, `secure messaging modal`
-- When to open: the user asks what happened during the TEST-to-PROD feedback merge, wants the queue triage outcomes for reports `#40`/`#41`/`#45`/`#46`/`#47`/`#48`, or wants to resume the low-risk DEV fixes that came out of that review
+- Topic: merging TEST admin feedback into the PROD bug/CR log, triaging the live PROD queue against code/data, updating report statuses/notes, and implementing/deploying low-risk follow-up fixes
+- Keywords: `Merge TEST reports into PROD`, `admin_feedback_report`, `TEST into PROD`, `report 40`, `report 46`, `report 47`, `report 49`, `report 51`, `report 52`, `funded clients`, `reminders overdue`, `secure messaging modal`, `Denise Chalifoux`, `application documents hidden`, `test feedback clear`
+- When to open: the user asks what happened during the TEST-to-PROD feedback merge, wants queue triage outcomes for reports `#40`/`#41`/`#45`/`#46`/`#47`/`#48`/`#49`/`#51`/`#52`, asks whether TEST feedback was cleared, or wants to recover the later data/code fixes that came out of that review
 - Primary docs:
   - `docs/AGENTS.md`
   - `docs/meta/codex-thread-index.md`
   - `sql/ops/prod-sync-test-feedback-20260422.sql`
+  - `sql/ops/test-clear-admin-feedback-log-20260424.sql`
+  - `sql/ops/prod-merge-denise-chalifoux-client-126-into-108-20260424.sql`
+  - `sql/ops/prod-resolve-feedback-49-document-visibility-20260425.sql`
   - `isetadminserver.js`
   - `src/pages/Caseworking/portfolio/widgets/CasesTableWidget.jsx`
   - `src/widgets/CaseNotesWidget.js`
   - `src/widgets/CaseCalendarWidget.js`
   - `src/widgets/SecureMessagingWidget.js`
   - `src/widgets/caseWorkspace/SecureMessagingWidget.js`
-- Status: current as of 2026-04-22
-- Notes: durable outcomes from this thread: the TEST feedback merge found no missing report/note/attachment rows to insert into PROD; the only data sync required was reopening report `#25` because TEST had a later status change than PROD. The queue was then reviewed one item at a time in PROD and the live `admin_feedback_report`, `admin_feedback_note`, and `admin_feedback_status_history` tables were updated during triage rather than only in chat. Confirmed low-risk code changes implemented in DEV from that pass were: report `#40` adding a `Show Funded Clients` filter plus relabelling the existing cases-list `active` filter to `Show Open Clients` without changing PATH status mechanics; report `#47` fixing reminder severity so future reminders no longer render overdue in notes/calendar views; and report `#46` preventing secure-message compose modals from closing on accidental backdrop/escape dismissal, with explicit cancel/discard confirmation instead. Report `#48` was intentionally left as a low-priority change request rather than implemented. This thread also corrected a deploy-process assumption: when Bill says `deploy to TEST` or `deploy to PROD`, the intended meaning is the full current awaiting-release state from the working checkout, including relevant code/config/runtime/schema promotion work, not a hand-picked subset from only the current chat. A narrower subset release should happen only if Bill explicitly asks for that scope. For release-note wording from this thread family, use neutral outcome-first bullets (`Fixed a bug...`, `Made a change...`) and keep PROD feedback-log status updates tied to actual deployment state rather than local code state.
+- Status: current as of 2026-04-25
+- Notes: durable outcomes from this thread: the original TEST feedback merge found no missing report/note/attachment rows to insert into PROD; the only data sync required was reopening report `#25` because TEST had a later status change than PROD. The queue was then reviewed one item at a time in PROD and the live `admin_feedback_report`, `admin_feedback_note`, and `admin_feedback_status_history` tables were updated during triage rather than only in chat. Confirmed low-risk code changes implemented from that pass were: report `#40` adding a `Show Funded Clients` filter plus relabelling the existing cases-list `active` filter to `Show Open Clients` without changing PATH status mechanics; report `#47` fixing reminder severity so future reminders no longer render overdue in notes/calendar views; and report `#46` preventing secure-message compose modals from closing on accidental backdrop/escape dismissal, with explicit cancel/discard confirmation instead. Report `#48` was intentionally left as a low-priority change request rather than implemented. A later 2026-04-24 recheck confirmed TEST had no new feedback beyond the already-merged 27-report set, then cleared the TEST feedback tables. The later open PROD triage resolved report `#51` with a guarded Denise Chalifoux duplicate-client merge after Amanda confirmed the correct email, closed report `#52` because the renaming issue could not be reproduced in current code, and fixed report `#49` by safely showing historical applicant-uploaded intake documents whose submission payload proves they belong to the current application; the `#49` fix was deployed through TEST and PROD and the PROD report was resolved. Dedicated detail entries below preserve the Denise merge, document-visibility fix, TEST clear, and deploy recovery records. This thread also corrected a deploy-process assumption: when Bill says `deploy to TEST` or `deploy to PROD`, the intended meaning is the full current awaiting-release state from the working checkout, including relevant code/config/runtime/schema promotion work, not a hand-picked subset from only the current chat. A narrower subset release should happen only if Bill explicitly asks for that scope. For release-note wording from this thread family, use neutral outcome-first bullets (`Fixed a bug...`, `Made a change...`) and keep PROD feedback-log status updates tied to actual deployment state rather than local code state.
 
 ### Portal secure-message recipient collision incident
 
@@ -660,8 +679,8 @@ For each indexed thread/topic, keep:
   - `docs/ops/deployments/path-deploy-orchestrator.md`
   - `tmp/path-deploy/prod/20260424-094558--2026-04-24T09-46-17-985Z.json`
   - `tmp/path-deploy/prod/20260424-094930--2026-04-24T09-49-30-815Z.json`
-- Status: completed on 2026-04-24
-- Notes: this PROD release was planned with a 10-minute warning and a 15-minute expected interruption window based on the prior TEST rollout plus normal PROD instance-refresh overhead. The first `path:deploy` run failed before any app rollout because `nwac-prod-codex-operator` could call `CreateDBClusterSnapshot` but not the implicit `rds:AddTagsToResource` on the cluster snapshot, so the automatic restore-point step aborted. Before rerunning, DEV and PROD were compared directly for the only allowlisted data unit in scope (`intake-release` for workflow `21`): the workflow row, `workflow_step`, `step`, `step_component`, `workflow_route`, `workflow_route_option`, and `iset_runtime_config(scope='publish', k='workflow.schema.intake')` all had identical SHA-256 digests between DEV and PROD. Because there was also no pending canonical schema migration, the safe recovery was an app-only rerun with `npm run path:deploy -- --env prod --skip-schema --skip-data --skip-build --yes`, which completed successfully as release `20260424-094930`. Final public verification after clearing maintenance: `https://nwac-console.awentech.ca/healthz`, `https://iset.nwac.ca/healthz`, and `https://nwac-public.awentech.ca/healthz` all returned `{"status":"ok"}`.
+- Status: completed on 2026-04-24; IAM follow-up validated on 2026-04-25
+- Notes: this PROD release was planned with a 10-minute warning and a 15-minute expected interruption window based on the prior TEST rollout plus normal PROD instance-refresh overhead. The first `path:deploy` run failed before any app rollout because `nwac-prod-codex-operator` could call `CreateDBClusterSnapshot` but not the implicit `rds:AddTagsToResource` on the cluster snapshot, so the automatic restore-point step aborted. Before rerunning, DEV and PROD were compared directly for the only allowlisted data unit in scope (`intake-release` for workflow `21`): the workflow row, `workflow_step`, `step`, `step_component`, `workflow_route`, `workflow_route_option`, and `iset_runtime_config(scope='publish', k='workflow.schema.intake')` all had identical SHA-256 digests between DEV and PROD. Because there was also no pending canonical schema migration, the safe recovery was an app-only rerun with `npm run path:deploy -- --env prod --skip-schema --skip-data --skip-build --yes`, which completed successfully as release `20260424-094930`. Final public verification after clearing maintenance: `https://nwac-console.awentech.ca/healthz`, `https://iset.nwac.ca/healthz`, and `https://nwac-public.awentech.ca/healthz` all returned `{"status":"ok"}`. The IAM repair was then validated the next day by a normal full PROD release, `20260425-100201`, which successfully auto-captured restore point `path-prod-20260425-100201-20260425100220` before completing its schema/data/app path and smoke checks.
 
 ### Review PROD and TEST feedback logs; clear TEST
 
@@ -700,8 +719,8 @@ For each indexed thread/topic, keep:
   - `src/lib/applicationSubmissionDocumentScope.js`
   - `tests/applicationSubmissionDocumentScope.test.js`
   - `../ISET-intake/server.js`
-- Status: fixed in DEV on 2026-04-24; pending TEST validation and later deploy
-- Notes: the confirmed live pattern on application `4` / case `86` was that original applicant intake uploads such as `Letter of Acceptance`, `Government ID`, `Status Card`, `Band Denial Letter`, and `Resume / CV` were present in `iset_document` with `source = 'application_submission'`, correct `applicant_user_id`, and `application_id = NULL` because the portal upload flow intentionally stores them before final submission without guessing a target application. The old admin application-document query only accepted rows already linked to the current `application_id`, so those historical intake files were hidden even though the data existed. The rejected broad fix was “show all null-application applicant documents,” because that would risk leaking the wrong files onto the wrong application for applicants with multiple files. The chosen safe fix mirrors the existing intake-side linker: it derives a set of upload `file_path` values from the current application's submission payload and treats only those matching unscoped `application_submission` docs as belonging to that application. That narrow proof rule now powers both `/api/applicants/:id/documents` and `/api/applicants/:id/document-checklist`, and the focused unit test in `tests/applicationSubmissionDocumentScope.test.js` covers nested payload path collection plus the “only unscoped application_submission docs may match” guard.
+- Status: fixed in DEV on 2026-04-24; deployed to TEST on 2026-04-24 and PROD on 2026-04-25
+- Notes: the confirmed live pattern on application `4` / case `86` was that original applicant intake uploads such as `Letter of Acceptance`, `Government ID`, `Status Card`, `Band Denial Letter`, and `Resume / CV` were present in `iset_document` with `source = 'application_submission'`, correct `applicant_user_id`, and `application_id = NULL` because the portal upload flow intentionally stores them before final submission without guessing a target application. The old admin application-document query only accepted rows already linked to the current `application_id`, so those historical intake files were hidden even though the data existed. The rejected broad fix was “show all null-application applicant documents,” because that would risk leaking the wrong files onto the wrong application for applicants with multiple files. The chosen safe fix mirrors the existing intake-side linker: it derives a set of upload `file_path` values from the current application's submission payload and treats only those matching unscoped `application_submission` docs as belonging to that application. That narrow proof rule now powers both `/api/applicants/:id/documents` and `/api/applicants/:id/document-checklist`, and the focused unit test in `tests/applicationSubmissionDocumentScope.test.js` covers nested payload path collection plus the “only unscoped application_submission docs may match” guard. It shipped in TEST release `20260424-150407` and PROD release `20260425-100201`; PROD feedback report `#49` was then resolved with `sql/ops/prod-resolve-feedback-49-document-visibility-20260425.sql`.
 
 ## Future improvements
 

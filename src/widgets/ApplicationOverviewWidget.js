@@ -765,7 +765,14 @@ const ApplicationOverviewWidget = ({
     }
     let cancelled = false;
     setChecklistLoading(true);
-    const query = application_id ? `?applicationId=${application_id}` : '';
+    const params = new URLSearchParams();
+    if (application_id) {
+      params.set('applicationId', String(application_id));
+    } else {
+      const caseId = caseData?.id ?? caseData?.case_id ?? null;
+      if (caseId) params.set('caseId', String(caseId));
+    }
+    const query = params.toString() ? `?${params.toString()}` : '';
     apiFetch(`/api/applicants/${applicantUserId}/document-checklist${query}`)
       .then(res => {
         if (!res.ok) throw new Error('Checklist lookup failed');
@@ -790,7 +797,7 @@ const ApplicationOverviewWidget = ({
     return () => {
       cancelled = true;
     };
-  }, [applicantUserId, application_id, checklistRefreshKey]);
+  }, [applicantUserId, application_id, caseData?.id, caseData?.case_id, checklistRefreshKey]);
 
   useEffect(() => {
     if (!applicantUserId || typeof window === 'undefined') return;
