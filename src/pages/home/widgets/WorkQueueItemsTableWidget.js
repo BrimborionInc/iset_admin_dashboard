@@ -37,6 +37,7 @@ import {
   normalizeApplicationStatus,
   normalizeStatusKey,
 } from '../../../utils/applicationStatus';
+import { resolveAssignedStaffProfileId } from '../../../utils/assignmentIdentity';
 import {
   getCaseStatusBadgeColor,
   getCaseStatusIndicatorType,
@@ -366,7 +367,7 @@ const getStatusInfo = (row) => {
     const rawStatus = normalizeCaseStatus(row.status || row.case_status || '');
     const isUnassignedCase =
       Boolean(row.case_id ?? row.caseId ?? row.id) &&
-      !row.assigned_user_id &&
+      !resolveAssignedStaffProfileId(row) &&
       rawStatus === 'intake';
     const qualifiers = [];
     if (isUnassignedCase) {
@@ -391,7 +392,7 @@ const getStatusInfo = (row) => {
     applicationLifecycleStatus: row.application_lifecycle_status ?? row.applicationLifecycleStatus ?? null,
     caseStatus: row.case_status || null,
     caseId: row.case_id ?? row.caseId ?? null,
-    assignedUserId: row.assigned_user_id,
+    assignedUserId: resolveAssignedStaffProfileId(row),
     assessmentEligibility: row.assessment_esdc_eligibility,
     decisionOutcome: row.decision_outcome ?? row.decisionOutcome ?? null,
     awaitingReason: row.application_awaiting_reason ?? row.applicationAwaitingReason ?? null,
@@ -1263,7 +1264,7 @@ const WorkQueueItemsTableWidget = ({
                 item,
                 slaTargets,
                 normalizeApplicationStatus(item.status || 'submitted'),
-                Boolean(item.assigned_user_id)
+                Boolean(resolveAssignedStaffProfileId(item))
               )
             )
           };
@@ -1366,7 +1367,7 @@ const WorkQueueItemsTableWidget = ({
                       );
                     }
                     const hasAssignedOwner =
-                      Number(item.assigned_user_id || 0) > 0 ||
+                      Boolean(resolveAssignedStaffProfileId(item)) ||
                       (typeof item.owner === 'string' &&
                         item.owner.trim() &&
                         item.owner.trim().toLowerCase() !== 'unassigned');

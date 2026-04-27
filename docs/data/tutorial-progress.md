@@ -7,7 +7,7 @@ Purpose: Document how the admin dashboard tracks Cloudscape hands-on tutorial co
 Use: Per-staff tutorial state so progress follows the staff member across browsers/devices.
 
 Columns (key fields):
-- `staff_profile_id` (INT, required): Links to the staff identity (`staff_profiles.id`) used by `/api/me/*` endpoints.
+- `staff_profile_id` (BIGINT UNSIGNED, required): FK to the staff identity (`staff_profiles.id`) used by `/api/me/*` endpoints.
 - `tutorial_id` (VARCHAR(128), required): Stable string ID for a tutorial (example: `iset-coordinator-intro-v2`).
 - `status` (VARCHAR(32), required): One of:
   - `completed` (user finished the tutorial)

@@ -2,7 +2,7 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-04-25
+Last Updated: 2026-04-26
 
 ## How to use
 
@@ -31,6 +31,26 @@ For each indexed thread/topic, keep:
 - `Status`: whether the note is current, partial, incomplete-title, or superseded
 
 ## Indexed Topics
+
+### Privacy ERM cleanup grand release plan
+
+- Codex task title: exact original task title not preserved
+- Topic: DEV-first cleanup plan for PATH entity relationships, secure-message privacy risk, staff/user identity-domain confusion, document/message attachment scope, stale backend experiments, and the eventual rehearsed PROD grand cleanup migration
+- Keywords: `privacy ERM cleanup`, `grand cleanup release`, `secure messaging`, `message_item`, `staff_profiles.id`, `user.id`, `assigned_to_user_id`, `case thread`, `document scope`, `message attachments`, `legacy experiments`, `govuk_component`, `jordan_application`, `stored procedures`, `DEV first`, `PROD migration`
+- When to open: the user asks how to tackle the broken old secure-message/entity model, asks for the durable plan to survive thread transitions, asks what Codex is using as the controlling plan for DEV cleanup before PROD migration, asks why secure messaging should be case-scoped instead of user-recipient scoped, or asks which odd schema/backend experiments should be removed as part of the privacy cleanup release
+- Primary docs:
+  - `docs/planning/privacy-erm-cleanup-grand-release-plan.md`
+  - `docs/planning/privacy-erm-cleanup-progress.md`
+  - `docs/data/privacy-erm-audits/dev-20260426.md`
+  - `scripts/privacy-erm-audit.js`
+  - `docs/planning/privacy-security-systematic-review-2026-04-25.md`
+  - `docs/planning/public-portal-legacy-fallback-security-review-2026-04-25.md`
+  - `docs/planning/client-case-application-target-model.md`
+  - `docs/AGENTS.md`
+  - `isetadminserver.js`
+  - `../ISET-intake/server.js`
+- Status: current as of 2026-04-26; incomplete-title
+- Notes: this plan was created after a DEV ERM/backend review found that the secure-message breach class is rooted in broader identity-domain and object-scope weaknesses, including `staff_profiles.id` stored in columns named `user_id`, unconstrained message/document relationships, unsafe `message_item` state, split staff/local-user identity, document rows missing scope, stale routes referencing missing tables, and old experiment tables/procedures. The agreed direction is DEV-first repair and target-model migration, then a carefully rehearsed PROD grand cleanup release with snapshot/restore point, before/after audits, privacy smokes, and guarded data migration. First execution pass on 2026-04-26 added `scripts/privacy-erm-audit.js`, generated `docs/data/privacy-erm-audits/dev-20260426.md`, patched admin case-message reads so authorized staff case viewers no longer create or trust nonparticipant `message_item` rows, applied DEV-only guarded cleanup that deleted 38 unsafe `message_item` rows after preserving them in `privacy_erm_message_item_cleanup_audit`, patched current public-portal attachment creation to persist `message_attachment.case_id`, retired obsolete admin GOV.UK component, old case-based application-version, and direct application-answer patch routes with explicit `410 retired_endpoint` responses, and applied DEV-only document-scope cleanup preserving old/new values in `privacy_erm_document_scope_cleanup_audit`. The next identity-domain pass added canonical migration `sql/migrations/20260426_0001_add_case_assigned_staff_profile_id.sql`, creating `iset_case.assigned_staff_profile_id` with an FK to `staff_profiles(id)`, backfilling it from valid legacy assignment values, normalizing invalid legacy values to unassigned, dual-writing case assignment updates in admin and portal code, extending the privacy audit to report explicit assignment counts and drift, and cutting high-risk admin/shared assignment reads, joins, filters, and comparisons over to explicit staff-profile semantics. The following secure-message bridge migration added `sql/migrations/20260426_0002_add_message_actor_domain_columns.sql`, creating typed sender/recipient actor fields on `messages` with FKs to `user(id)` and `staff_profiles(id)`, backfilling DEV messages to `staff_profile -> applicant_user`, updating admin and portal message writes to populate the new fields, and adding audit counts for missing actor-domain data or `local_user` fallbacks. Attachment hardening then added `sql/migrations/20260426_0003_harden_message_attachment_scope.sql`, adding `message_attachment.client_id`, fixing `application_id` typing, adding FKs to message/case/application/client/user, writing client scope from the public portal, and validating attachment scope during admin adoption into `iset_document`. The secure-message referential pass added `sql/migrations/20260426_0004_add_secure_message_referential_constraints.sql`, adding FKs for legacy message sender/recipient compatibility fields, message case/application scope, and `message_item` message/owner rows after DEV cleanup proved those relationships clean. The code cutover then moved public-portal applicant message reads/reply targeting and admin mailbox-state authority to typed actor fields plus case/application scope while preserving legacy response fields for frontend compatibility. The document reference pass added `sql/migrations/20260426_0005_harden_document_scope_references.sql`, normalizing document user/message ID column types and adding FKs for document user, applicant user, case, application, and origin message relationships. The case/application cleanup confirmed DEV core FKs are present and retired `POST /api/applications/ingest-from-submission` because it could create unscoped application rows. The response-contract cleanup moved admin secure-message widget classification to typed actors and stopped the public portal reply composer from sending legacy `recipient_id` for replies.
 
 ### Privacy and security systematic review after secure-message breach
 
@@ -738,6 +758,29 @@ For each indexed thread/topic, keep:
   - `../ISET-intake/server.js`
 - Status: fixed in DEV on 2026-04-24; deployed to TEST on 2026-04-24 and PROD on 2026-04-25
 - Notes: the confirmed live pattern on application `4` / case `86` was that original applicant intake uploads such as `Letter of Acceptance`, `Government ID`, `Status Card`, `Band Denial Letter`, and `Resume / CV` were present in `iset_document` with `source = 'application_submission'`, correct `applicant_user_id`, and `application_id = NULL` because the portal upload flow intentionally stores them before final submission without guessing a target application. The old admin application-document query only accepted rows already linked to the current `application_id`, so those historical intake files were hidden even though the data existed. The rejected broad fix was “show all null-application applicant documents,” because that would risk leaking the wrong files onto the wrong application for applicants with multiple files. The chosen safe fix mirrors the existing intake-side linker: it derives a set of upload `file_path` values from the current application's submission payload and treats only those matching unscoped `application_submission` docs as belonging to that application. That narrow proof rule now powers both `/api/applicants/:id/documents` and `/api/applicants/:id/document-checklist`, and the focused unit test in `tests/applicationSubmissionDocumentScope.test.js` covers nested payload path collection plus the “only unscoped application_submission docs may match” guard. It shipped in TEST release `20260424-150407` and PROD release `20260425-100201`; PROD feedback report `#49` was then resolved with `sql/ops/prod-resolve-feedback-49-document-visibility-20260425.sql`.
+
+### Privacy ERM cleanup execution
+
+- Codex task title: `OK continue the cleanup please`
+- Topic: continuing the DEV privacy ERM cleanup after the secure-message incident, with persistent plan/progress notes and staged migrations/code cutovers before TEST/PROD rollout.
+- Keywords: `privacy ERM cleanup`, `assigned_staff_profile_id`, `secure message actors`, `message attachment scope`, `document FKs`, `assigned_user_id`, `staff profile response contract`, `grand cleanup release`
+- When to open: continuing this refactor in a new thread, preparing TEST rehearsal, or reviewing why DEV now has explicit staff-profile assignment and typed secure-message/document constraints.
+- Primary docs:
+  - `docs/planning/privacy-erm-cleanup-progress.md`
+  - `docs/planning/privacy-erm-cleanup-grand-release-plan.md`
+  - `docs/data/privacy-erm-audits/dev-20260426.md`
+  - `scripts/privacy-erm-audit.js`
+  - `sql/migrations/20260426_0001_add_case_assigned_staff_profile_id.sql`
+  - `sql/migrations/20260426_0002_add_message_actor_domain_columns.sql`
+  - `sql/migrations/20260426_0003_harden_message_attachment_scope.sql`
+  - `sql/migrations/20260426_0004_add_secure_message_referential_constraints.sql`
+  - `sql/migrations/20260426_0005_harden_document_scope_references.sql`
+  - `sql/migrations/20260426_0006_harden_staff_profile_actor_references.sql`
+  - `sql/migrations/20260426_0007_harden_secure_message_scope_constraints.sql`
+  - `sql/migrations/20260426_0008_harden_signing_request_scope_references.sql`
+  - `sql/migrations/20260426_0009_harden_escalation_and_task_user_references.sql`
+- Status: in progress in DEV as of 2026-04-26; TEST/PROD migrations not yet run.
+- Notes: DEV has the additive assignment, secure-message, attachment, message FK, document FK, staff-profile actor FK, secure-message/document scope-constraint, signing-request FK, and escalation/task user FK migrations applied with `db:migrate:plan` showing 0 pending. Current code writes/reads case assignment through `assigned_staff_profile_id` while dual-writing legacy `assigned_to_user_id`, secure-message applicant/admin access uses typed actors plus case/application scope, main secure-message widgets classify by typed actor fields, portal replies no longer send legacy `recipient_id`, and high-risk application/work-queue/case overview responses now expose and consume `assigned_staff_profile_id` aliases. Migration `20260426_0007` requires case-scoped typed message actors, exactly one applicant actor, scoped message attachments, source-specific document lineage, and `RESTRICT` delete rules for privacy-sensitive relationships while preserving application-less manual-upload support. The first DEV apply attempt partially committed before MySQL rejected CHECK constraints over `ON DELETE SET NULL` document FKs; a later correction relaxed the manual-upload CHECK. The final migration is rerunnable and DEV has failed/superseded old-checksum ledger rows plus a successful final-checksum row. Migration `20260426_0008` adds signing-request FKs to workflow/case/participant user/creator user and the audit now reports wrong-applicant/message mismatch counts. Migration `20260426_0009` makes escalation creation require case scope, constrains escalation application/case/requester/current-owner/resolver IDs, adds the application current-escalation helper FK, and constrains case-task created/updated user IDs. The regenerated DEV audit now shows all staff-profile-like columns FKs except transitional `iset_case.assigned_to_user_id`, records the privacy FK/CHECK constraints, and has 0 message/document/signing-request/escalation/task scope anomalies under the typed actor model. Continue lower-risk response cleanup, TEST/PROD preflight/quarantine planning, and TEST rehearsal before any PROD grand cleanup release.
 
 ## Future improvements
 

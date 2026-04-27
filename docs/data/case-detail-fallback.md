@@ -10,7 +10,7 @@ Environments missing newer evaluator/assessment schema (`iset_evaluators`, added
 1. Attempts full enriched SELECT (joins evaluators, ptma, assessment fields).
 2. On `ER_NO_SUCH_TABLE` or `ER_BAD_FIELD_ERROR`, logs a warning and builds a dynamic minimal query:
    - Introspects existing `iset_case` columns via `information_schema`.
-   - Selects intersection of preferred fields (`id, application_id, assigned_to_user_id, status, priority, stage, opened_at, closed_at, last_activity_at`).
+   - Selects intersection of preferred fields (`id, application_id, assigned_staff_profile_id` or transitional `assigned_to_user_id`, `status`, `priority`, `stage`, `opened_at`, `closed_at`, `last_activity_at`).
    - Joins only `iset_application` + `user` to obtain applicant identity and tracking id.
 3. Returns the reduced row (never 500 for those schema gaps).
 

@@ -26,14 +26,21 @@ function normalizeRole(role) {
   return String(role).trim();
 }
 
+function resolveAssignedStaffProfileId(caseRow) {
+  return (
+    normalizePositiveInteger(caseRow?.assigned_staff_profile_id) ||
+    normalizePositiveInteger(caseRow?.assigned_to_user_id)
+  );
+}
+
 function evaluateRegionalManagerCaseAccess({ requesterId = null, regionIds = [], caseRow = null } = {}) {
-  const assignedToUserId = normalizePositiveInteger(caseRow?.assigned_to_user_id);
+  const assignedStaffProfileId = resolveAssignedStaffProfileId(caseRow);
   const normalizedRequesterId = normalizePositiveInteger(requesterId);
 
   if (
     normalizedRequesterId !== null &&
-    assignedToUserId !== null &&
-    normalizedRequesterId === assignedToUserId
+    assignedStaffProfileId !== null &&
+    normalizedRequesterId === assignedStaffProfileId
   ) {
     return { allowed: true, reason: 'direct_assignment' };
   }
@@ -43,7 +50,7 @@ function evaluateRegionalManagerCaseAccess({ requesterId = null, regionIds = [],
     return { allowed: false, detail: 'region_scope_missing' };
   }
 
-  if (assignedToUserId === null) {
+  if (assignedStaffProfileId === null) {
     return { allowed: true, reason: 'unassigned' };
   }
 
@@ -72,12 +79,12 @@ function evaluateCaseAccess({ role = null, requesterId = null, regionIds = [], c
   }
 
   if (normalizedRole === 'ISET Coordinator') {
-    const assignedToUserId = normalizePositiveInteger(caseRow?.assigned_to_user_id);
+    const assignedStaffProfileId = resolveAssignedStaffProfileId(caseRow);
     const normalizedRequesterId = normalizePositiveInteger(requesterId);
     if (normalizedRequesterId === null) {
       return { allowed: false, detail: 'assessor_scope_missing' };
     }
-    if (assignedToUserId !== null && assignedToUserId === normalizedRequesterId) {
+    if (assignedStaffProfileId !== null && assignedStaffProfileId === normalizedRequesterId) {
       return { allowed: true, reason: 'direct_assignment' };
     }
     return { allowed: false, detail: 'assessor_scope_mismatch' };
@@ -115,4 +122,5 @@ module.exports = {
   evaluateRegionalManagerCaseAccess,
   getCaseAccessError,
   getRegionalManagerCaseAccessError,
+  resolveAssignedStaffProfileId,
 };

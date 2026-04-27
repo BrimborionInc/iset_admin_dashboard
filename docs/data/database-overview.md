@@ -30,7 +30,8 @@ erDiagram
 ```
 Notes:
 - Relationships are logical and sourced from docs; verify enforcement and required columns in the schema dump.
-- `iset_document.client_id` is required; application/case/action plan links are optional and context-driven.
+- `iset_document.client_id` is required by current source-specific constraints for application submissions, manual uploads, secure-message attachments, and system-generated documents. Application/case/action-plan requirements depend on source and workflow context.
+- Secure messages are case-scoped typed-actor records. New message/document work should preserve the constraints documented in `docs/data/integrations/secure-messaging.md`.
 
 ## Domain table map (not exhaustive)
 - Intake submissions and applications: `iset_application_submission`, `iset_application`, `iset_application_version`, `iset_application_draft`, `iset_application_draft_dynamic`.

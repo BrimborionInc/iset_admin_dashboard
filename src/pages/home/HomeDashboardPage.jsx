@@ -15,6 +15,10 @@ import {
     isEligibilityPending,
 } from '../../utils/applicationSla';
 import { buildApplicationStatusInfo } from '../../utils/applicationStatus';
+import {
+    buildAssignedStaffProfileAliases,
+    resolveAssignedStaffProfileId,
+} from '../../utils/assignmentIdentity';
 import ProgramAdminWorkQueueWidget, { PROGRAM_ADMIN_BUCKETS, PROGRAM_ADMIN_SAMPLE_ITEMS } from './widgets/ProgramAdminWorkQueueWidget';
 import IsetCoordinatorWorkQueueWidget, { ISET_COORDINATOR_BUCKETS, ISET_COORDINATOR_SAMPLE_ITEMS } from './widgets/IsetCoordinatorWorkQueueWidget';
 import WorkQueueItemsTableWidget from './widgets/WorkQueueItemsTableWidget';
@@ -337,7 +341,7 @@ const buildApplicationQueueStatusFields = (row, fallbackStatus = 'submitted') =>
         applicationLifecycleStatus: row?.application_lifecycle_status ?? row?.applicationLifecycleStatus ?? null,
         caseStatus: row?.case_status || row?.caseStatus || null,
         caseId: row?.case_id ?? row?.caseId ?? null,
-        assignedUserId: row?.assigned_user_id ?? row?.assignedUserId ?? row?.assigned_to_user_id ?? null,
+        assignedUserId: resolveAssignedStaffProfileId(row),
         assessmentEligibility: row?.assessment_esdc_eligibility ?? row?.assessmentEsdcEligibility ?? null,
         decisionOutcome: row?.decision_outcome ?? row?.decisionOutcome ?? null,
         awaitingReason: row?.application_awaiting_reason ?? row?.applicationAwaitingReason ?? null,
@@ -361,7 +365,7 @@ const getApplicationQueueRawStatus = (row, fallbackStatus = 'submitted') =>
     buildApplicationQueueStatusFields(row, fallbackStatus).status;
 
 const isAssignedApplicationRow = row => {
-    const assignedId = row?.assigned_user_id ?? row?.assignedUserId ?? row?.assigned_to_user_id ?? null;
+    const assignedId = resolveAssignedStaffProfileId(row);
     if (Number(assignedId) > 0) return true;
     const assignedEmail = String(row?.assigned_user_email ?? row?.assignedUserEmail ?? '').trim();
     return Boolean(assignedEmail);
@@ -998,7 +1002,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                             row.ownerRegionCode ||
                             '—',
                         owner: row.owner_email || row.owner_name || row.ownerName || 'Unassigned',
-                        assigned_user_id: row.assigned_to_user_id || row.assignedToUserId || null,
+                        ...buildAssignedStaffProfileAliases(row),
                         status: row.status || 'Initiated',
                         dueDate: nextActionDueAt,
                         submittedAt: row.opened_at || row.openedAt || row.created_at || row.createdAt || null,
@@ -1074,7 +1078,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         region: row.region || row.address_province || '—',
                         address_province: row.address_province || row.region || null,
                         owner: row.assigned_user_email || 'Unassigned',
-                        assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
+                        ...buildAssignedStaffProfileAliases(row),
                         ...buildApplicationQueueStatusFields(row, 'submitted'),
                         docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
                         docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
@@ -1158,7 +1162,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                             row.ownerRegionCode ||
                             '—',
                         owner: row.owner_email || row.owner_name || row.ownerName || 'Unassigned',
-                        assigned_user_id: row.assigned_to_user_id || row.assignedToUserId || null,
+                        ...buildAssignedStaffProfileAliases(row),
                         status: row.status || 'Initiated',
                         dueDate: nextActionDueAt,
                         submittedAt: row.opened_at || row.openedAt || row.created_at || row.createdAt || null,
@@ -1216,7 +1220,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                     throw new Error('Unexpected response format while loading regional manager assigned applications.');
                 }
                 const assignedRows = payload.rows.filter(row => {
-                    const assignedId = row.assigned_user_id || row.assigned_to_user_id || null;
+                    const assignedId = resolveAssignedStaffProfileId(row);
                     const assignedEmail = row.assigned_user_email || row.assignedUserEmail || null;
                     if (currentStaffProfileIdValue && assignedId && String(assignedId) === currentStaffProfileIdValue) {
                         return true;
@@ -1255,7 +1259,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         region: row.region || row.address_province || '—',
                         address_province: row.address_province || row.region || null,
                         owner: row.assigned_user_email || 'You',
-                        assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
+                        ...buildAssignedStaffProfileAliases(row),
                         ...buildApplicationQueueStatusFields(row, 'submitted'),
                         docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
                         docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
@@ -1341,7 +1345,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         region: row.region || row.address_province || '—',
                         address_province: row.address_province || row.region || null,
                         owner: row.assigned_user_email || 'You',
-                        assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
+                        ...buildAssignedStaffProfileAliases(row),
                         ...buildApplicationQueueStatusFields(row, 'submitted'),
                         docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
                         docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
@@ -1427,7 +1431,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         region: row.region || row.address_province || '—',
                         address_province: row.address_province || row.region || null,
                         owner: row.assigned_user_email || 'You',
-                        assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
+                        ...buildAssignedStaffProfileAliases(row),
                         ...buildApplicationQueueStatusFields(row, 'docs_requested'),
                         docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
                         docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
@@ -1513,7 +1517,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         region: row.region || row.address_province || '—',
                         address_province: row.address_province || row.region || null,
                         owner: row.assigned_user_email || 'You',
-                        assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
+                        ...buildAssignedStaffProfileAliases(row),
                         ...buildApplicationQueueStatusFields(row, 'submitted'),
                         docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
                         docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
@@ -1599,7 +1603,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         region: row.region || row.address_province || '—',
                         address_province: row.address_province || row.region || null,
                         owner: row.assigned_user_email || 'You',
-                        assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
+                        ...buildAssignedStaffProfileAliases(row),
                         ...buildApplicationQueueStatusFields(row, 'submitted'),
                         dueDate: null,
                         submittedAt: submitted,
@@ -1680,7 +1684,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         region: row.region || row.address_province || '—',
                         address_province: row.address_province || row.region || null,
                         owner: row.assigned_user_email || 'You',
-                        assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
+                        ...buildAssignedStaffProfileAliases(row),
                         ...buildApplicationQueueStatusFields(row, 'pending_approval'),
                         docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
                         docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
@@ -1779,7 +1783,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         region: row.region || row.address_province || '—',
                         address_province: row.address_province || row.region || null,
                         owner: row.assigned_user_email || 'You',
-                        assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
+                        ...buildAssignedStaffProfileAliases(row),
                         ...buildApplicationQueueStatusFields(row, row.application_status || row.status || 'approved'),
                         docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
                         docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
@@ -1878,7 +1882,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         region: row.region || row.address_province || '—',
                         address_province: row.address_province || row.region || null,
                         owner: row.assigned_user_email || 'You',
-                        assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
+                        ...buildAssignedStaffProfileAliases(row),
                         status: row.intervention_effective_status || row.delivery_status || row.intervention_status || row.status || 'Active',
                         review_status: row.review_status || null,
                         delivery_status: row.delivery_status || null,
@@ -1992,7 +1996,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         region: row.region || row.address_province || '—',
                         address_province: row.address_province || row.region || null,
                         owner: row.assigned_user_email || 'You',
-                        assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
+                        ...buildAssignedStaffProfileAliases(row),
                         status: row.intervention_effective_status || row.delivery_status || row.intervention_status || row.status || 'Active',
                         review_status: row.review_status || null,
                         delivery_status: row.delivery_status || null,
@@ -2187,7 +2191,10 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         region: '—',
                         address_province: null,
                         owner: row?.owner?.email || row?.owner?.name || 'You',
-                        assigned_user_id: row?.owner?.id || null,
+                        ...buildAssignedStaffProfileAliases({
+                            ...row,
+                            assignedStaffProfileId: row?.owner?.staffProfileId || row?.owner?.staff_profile_id || row?.owner?.id,
+                        }),
                         status: row?.status || 'open',
                         dueDate,
                         submittedAt: row?.submittedAt || row?.openedAt || null,
@@ -2207,7 +2214,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                 const mappedApplications = rows
                     .map((row, idx) => {
                         const status = getApplicationQueueRawStatus(row, 'submitted');
-                        const meta = computeSlaMeta(row, slaTargets, status, Boolean(row.assigned_user_id));
+                        const meta = computeSlaMeta(row, slaTargets, status, Boolean(resolveAssignedStaffProfileId(row)));
                         const isOverdue = meta.status === 'critical-overdue' || meta.status === 'high-overdue';
                         if (!isOverdue) return null;
 
@@ -2244,7 +2251,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                             region: row.address_province || '—',
                             address_province: row.address_province || null,
                             owner: row.assigned_user_email || 'You',
-                            assigned_user_id: row.assigned_user_id || null,
+                            ...buildAssignedStaffProfileAliases(row),
                             ...buildApplicationQueueStatusFields(row, 'submitted'),
                             dueDate: meta.due ? meta.due.toISOString() : null,
                             submittedAt: row.submitted_at || row.created_at || null,
@@ -2333,7 +2340,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                             region: row.region || row.address_province || row.owner?.regionId || '—',
                             address_province: row.address_province || row['address-province'] || row.region || null,
                             owner: row.assigned_user_email || 'Unassigned',
-                            assigned_user_id: row.assigned_user_id || null,
+                            ...buildAssignedStaffProfileAliases(row),
                             ...buildApplicationQueueStatusFields(row, 'submitted'),
                             docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
                             docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
@@ -2505,7 +2512,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         address_province: row.address_province || null,
                         assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
                         owner: row.owner || row.assigned_user_email || 'Unassigned',
-                        assigned_user_id: row.assigned_user_id || null,
+                        ...buildAssignedStaffProfileAliases(row),
                         ...buildApplicationQueueStatusFields(row, rawStatus),
                         docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
                         docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
@@ -2597,7 +2604,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         region: row.region || row.address_province || '—',
                         address_province: row.address_province || null,
                         owner: row.assigned_user_email || 'Unassigned',
-                        assigned_user_id: row.assigned_user_id || null,
+                        ...buildAssignedStaffProfileAliases(row),
                         ...buildApplicationQueueStatusFields(row, row.application_status || row.status || 'approved'),
                         docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
                         docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
@@ -2675,7 +2682,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         region: row.address_province || '—',
                         address_province: row.address_province || null,
                         owner: row.owner || row.assigned_user_email || 'Unassigned',
-                        assigned_user_id: row.assigned_user_id || null,
+                        ...buildAssignedStaffProfileAliases(row),
                         status: row.status || 'Pending approval',
                         approvalRequestType: row.approval_request_type || row.approvalRequestType || 'new_application',
                         approvalRequestTypeLabel: row.approval_request_type_label || row.approvalRequestTypeLabel || 'New application assessment',
@@ -2778,7 +2785,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         region: row.address_province || '—',
                         address_province: row.address_province || null,
                         owner: row.owner || row.assigned_user_email || 'Unassigned',
-                        assigned_user_id: row.assigned_user_id || null,
+                        ...buildAssignedStaffProfileAliases(row),
                         status: row.review_status || row.status || 'Submitted',
                         approvalRequestType: row.approval_request_type || row.approvalRequestType || 'new_intervention',
                         approvalRequestTypeLabel: row.approval_request_type_label || row.approvalRequestTypeLabel || 'Additional intervention proposal',
@@ -2872,7 +2879,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         region: row.address_province || row.region || '—',
                         address_province: row.address_province || null,
                         owner: row.owner || row.assigned_user_email || 'Unassigned',
-                        assigned_user_id: row.assigned_user_id || row.assigned_to_user_id || null,
+                        ...buildAssignedStaffProfileAliases(row),
                         ...buildApplicationQueueStatusFields(row, 'submitted'),
                         sin: formattedSin,
                         notes: notes || null,
@@ -2943,7 +2950,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                 const overdueItems = rows
                     .map((row, idx) => {
                         const status = getApplicationQueueRawStatus(row, 'submitted');
-                        const meta = computeSlaMeta(row, slaTargets, status, Boolean(row.assigned_user_id));
+                        const meta = computeSlaMeta(row, slaTargets, status, Boolean(resolveAssignedStaffProfileId(row)));
                         const isOverdue = meta.status === 'critical-overdue' || meta.status === 'high-overdue';
                         if (!isOverdue) return null;
                         const id = row.tracking_id || row.case_id || row.application_id || `overdue-${idx}`;
@@ -2973,7 +2980,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                             region: row.address_province || '—',
                             address_province: row.address_province || null,
                             owner: row.assigned_user_email || 'Unassigned',
-                            assigned_user_id: row.assigned_user_id || null,
+                            ...buildAssignedStaffProfileAliases(row),
                             ...buildApplicationQueueStatusFields(row, 'submitted'),
                             docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
                             docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,

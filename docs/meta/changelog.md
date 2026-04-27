@@ -2,6 +2,24 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-04-26
+- Docs/Security: Added the privacy ERM cleanup grand-release plan, setting the DEV-first strategy for fixing secure-message identity-domain confusion, case/application/client scope, document/message attachment relationships, stale backend experiments, and the eventual rehearsed PROD data migration.
+- Security/Dev tooling: Added a read-only privacy ERM audit script and first DEV report covering ID-domain confusion, unconstrained message/document relationships, stale `message_item` rows, dead experiment tables/routes, and old stored procedures.
+- Security/Messaging: Stopped admin case secure-message reads from seeding nonparticipant `message_item` rows for staff case viewers, and blocked admin mailbox-state mutations for users who are not the message sender or recipient.
+- Data/DEV cleanup: Added preview/apply SQL for unsafe `message_item` rows and applied it in DEV, preserving 38 deleted rows in `privacy_erm_message_item_cleanup_audit` and leaving only sender/recipient mailbox rows.
+- Security/Portal: Public-portal secure-message attachments now persist `message_attachment.case_id` at insert time, reducing later case-scope inference during admin attachment adoption.
+- Security/API cleanup: Retired obsolete admin GOV.UK component routes, old case-based application-version routes, and the direct application-answer patch route so they return `410` instead of running missing-table or mismatched-column legacy SQL.
+- Data/DEV cleanup: Added preview/apply SQL for document scope and applied it in DEV, preserving old/new values while backfilling missing document client/case/application scope and clearing invalid document `user_id` values.
+- Data/Schema/DEV: Added `iset_case.assigned_staff_profile_id` with an FK to `staff_profiles(id)`, backfilled it from valid legacy assignments, normalized invalid legacy assignment values to unassigned, and updated admin/portal assignment writes plus the privacy audit to track drift during cutover.
+- Security/Case access: Cut high-risk admin/shared case-assignment reads over to explicit staff-profile semantics, including case-access helpers, RBAC predicates, coordinator/regional filters, staff joins, reporting filters, and owner-resolution comparisons.
+- Data/Schema/DEV: Added typed secure-message actor-domain columns with FKs to `user(id)` and `staff_profiles(id)`, backfilled existing DEV messages, and updated admin/portal message writes plus the privacy audit to track actor-domain gaps.
+- Data/Schema/DEV: Hardened secure-message attachment scope with `client_id`, corrected `application_id` typing, FKs to message/case/application/client/user, public-portal client-scope writes, and admin adoption mismatch checks.
+- Data/Schema/DEV: Added referential constraints for legacy secure-message sender/recipient, message case/application scope, and `message_item` message/owner rows after DEV cleanup proved those relationships clean.
+- Security/Messaging: Cut public-portal applicant secure-message reads and reply targeting over to typed actor plus case/application scope, and moved admin mailbox-state authority from legacy sender/recipient IDs to typed sender/recipient user fields.
+- Data/Schema/DEV: Hardened `iset_document` scope references by normalizing document user/message ID column types and adding FKs for user, applicant user, case, application, and origin message relationships.
+- Security/API cleanup: Retired the unscoped `POST /api/applications/ingest-from-submission` admin endpoint so applications are no longer created without client/case scope through that legacy path.
+- Security/Messaging: Updated admin secure-message widgets and the public-portal reply composer so message direction and reply targeting no longer depend on legacy `sender_id` / `recipient_id` response fields when typed actor data is available.
+
 ## 2026-04-25
 - Docs/Security: Added the public-portal legacy fallback security review, documenting remaining high-risk applicant-portal identity/linking fallbacks after the secure-message breach and the recommended next hardening pass.
 - Security/Portal: Hardened the current deployed public portal repo (`../ISET-intake`) against legacy identity fallback risks: Cognito/local-user linking no longer returns already-bound email matches, applicant data routes require the primary applicant portal Cognito client and reject staff/admin roles, client linking no longer claims existing clients by SIN/email/name fallback or overwrites another subject, staff message recipients no longer resolve by arbitrary email fallback, and legacy `POST /api/applications` now returns `410`.
@@ -888,3 +906,14 @@ Format: YYYY-MM-DD - Category: Short description
 - Security: Hardened case notes, reminders, and timeline events so narrative client data is returned or mutated only after case/reminder target scope validation.
 - Ops/Security: Fixed the public portal TEST deploy installer so the runtime `auth/` helper is copied to `/opt/nwac/portal/auth` alongside `server.js`; the stale helper had caused real TEST applicant-pool users to fail the new applicant-account gate with `applicant_account_required`.
 - Ops/Security: Promoted the public-portal auth helper and legacy-fallback hardening to PROD as portal-only release `portal-auth-helper-copy-20260425-prod`, with no schema/data/admin/shared changes and post-deploy health/runtime-file verification passing.
+
+## 2026-04-26
+- Security/DB: Started the DEV privacy ERM cleanup with additive migrations for `iset_case.assigned_staff_profile_id`, typed secure-message actors, message attachment scope, secure-message FKs, and document relationship FKs.
+- Security: Hardened secure-message applicant/admin access to typed actor plus case/application scope and moved the main admin/portal secure-message UI response contract away from legacy `sender_id` / `recipient_id` authority.
+- Security: Retired the unscoped admin `POST /api/applications/ingest-from-submission` endpoint to prevent new applications without client/case ownership.
+- Maintenance/Security: Added explicit staff-profile assignment aliases to high-risk admin API responses and updated the application list, home queues, work-queue table, and application overview to compare assignment through staff-profile IDs first.
+- Security/DB: Hardened remaining DEV staff-profile actor references with FKs for admin feedback, CFA, applicant-account invite/event, and tutorial-progress tables.
+- Security/DB: Added DEV secure-message/document privacy constraints requiring case-scoped typed message actors, exactly one applicant actor, scoped message attachments, source-specific document lineage, and `RESTRICT` delete rules for privacy-sensitive message/document relationships.
+- Security/DB: Hardened DEV signing requests with FKs to workflow, case, participant user, and creator user, plus audit coverage for wrong-applicant and message/case mismatch anomalies.
+- Security/DB: Hardened DEV escalation routing and case-task audit users with explicit application/case/user FKs, and made escalation creation fail closed when an application has no case scope.
+- Docs: Updated older case/work-queue/data notes to describe case ownership as `assigned_staff_profile_id`, with `assigned_to_user_id` documented only as a transitional legacy fallback.

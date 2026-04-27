@@ -1,36 +1,48 @@
-# Secure Messaging Integration (2025-09-25)
+# Secure Messaging Integration
+
+Updated: 2026-04-26
 
 ## Overview
-Secure messaging is shared between the public intake portal and the admin dashboard. Messages live in the shared MySQL database (`iset_intake.messages`) so both applications can render the same threads. A case-bound message must carry enough metadata for either side to resolve the applicant, case and submission tracking reference.
+Secure messaging is shared between the public intake portal and the admin dashboard. Messages live in the shared MySQL database (`iset_intake.messages`) so both applications can render the same case thread.
+
+The current model is case/application scoped. A secure message is not treated as a personal applicant-to-assigned-staff mailbox item. It must belong to the applicant's case, carry typed actor fields, and contain exactly one applicant actor.
 
 ## Database Fields
-- `messages.case_id` — nullable link to `iset_case.id`. Added in migration `20250925_add_case_columns_to_messages.sql`.
-- `messages.application_id` — nullable link to `iset_application.id` for cases where the row is known but a case has not yet been generated.
-- `message_attachment.case_id` — mirrors the owning message to support document adoption.
-- `iset_document.origin_message_id` — records the original message when an attachment is promoted into the case file.
+- `messages.case_id`: required link to `iset_case.id`.
+- `messages.application_id`: link to `iset_application.id` when the case has an application.
+- `messages.sender_actor_type` / `recipient_actor_type`: one of `applicant_user`, `staff_profile`, `local_user`, or `system`.
+- `messages.sender_user_id` / `recipient_user_id`: shared `user.id` actor values used for applicant/local-user mailbox state and staff compatibility.
+- `messages.sender_staff_profile_id` / `recipient_staff_profile_id`: `staff_profiles.id` for staff actors.
+- `message_item.message_id` / `owner_user_id`: per-user mailbox state for the typed message participants.
+- `message_attachment.message_id`, `case_id`, `client_id`, `application_id`, `user_id`: attachment lineage before adoption into the document model.
+- `iset_document.origin_message_id`: original message when a secure-message attachment is promoted into the case file.
 
-When both `case_id` and `application_id` exist the portal can recover the booking reference (`iset_application_submission.reference_number`) and display it in the message details view.
+## Constraints
+As of migration `20260426_0007_harden_secure_message_scope_constraints.sql` in DEV:
+
+- `messages.case_id`, `sender_actor_type`, and `recipient_actor_type` are required.
+- CHECK constraints require valid typed sender/recipient actor fields.
+- A message must have exactly one applicant actor.
+- Typed actor FKs use `ON DELETE RESTRICT` so actor deletion cannot silently detach message history.
+- `message_attachment.case_id`, `client_id`, and `user_id` are required.
+- `message_attachment.message_id` cascades when a message is deleted; attachment case/application/client/user parents are protected by `RESTRICT`.
+- `secure_message_attachment` documents require client/case/application/applicant/uploader/origin-message lineage.
 
 ## Message Flow
-1. **Admin dashboard** sends a message via `POST /api/cases/:id/messages`.
-   - The handler resolves the case, applicant user id, and application id.
-   - Inserts into `messages` with `case_id`, `application_id`, and standard fields (`sender_id`, `recipient_id`, `subject`, `body`, etc.).
-2. **Applicant portal** reads messages through `/api/messages/:id`.
-   - Joins `messages` -> `iset_case` -> `iset_application` -> `iset_application_submission` to grab the booking reference.
-   - Response includes `tracking_id`, allowing the UI to show "Booking reference" in the summary list.
-3. **Attachments** continue to adopt into `iset_document` when the admin widget hits `/api/admin/messages/:id/attachments?case_id=...`.
-   - Adoption now uses the stored `case_id` and `application_id`, so repeat openings repair missing metadata.
-
-## UI Behaviour (2025-09-25)
-- **Admin SecureMessagingWidget** requires a case context. It filters messages to the active case and can compose new replies. Because the backend now writes the case/application fields, all new messages satisfy the portal join requirements.
-- **Applicant MessageDetails page** renders a "Booking reference" row whenever `tracking_id` is present. With the new joins, any admin-originated message tied to a case displays that reference.
+1. Admin dashboard sends through `POST /api/cases/:id/messages`.
+   - The handler validates case access, resolves the case applicant user, derives the application from the case, and writes a `staff_profile -> applicant_user` message when the staff profile is known.
+2. Public portal sends through `/api/messages/reply` or `/api/messages/reply-with-attachments`.
+   - The backend derives the allowed case/application and staff recipient from the applicant messaging context or typed reply counterpart.
+   - The portal no longer supplies legacy recipient authority when replying to an existing message.
+3. Attachments are adopted into `iset_document` when the admin widget calls `/api/admin/messages/:id/attachments?case_id=...`.
+   - Adoption validates message/case access and rejects attachment case/application/client mismatches before inserting or repairing document rows.
 
 ## Operational Notes
-- Data purges should clear both `message_attachment` and `messages` (in that order) and optionally `iset_document` rows with `source='secure_message_attachment'`.
-- Environments must keep `messages.case_id` populated for staff replies; otherwise booking references disappear from the applicant view.
-- For applicants composing new messages directly in the portal, future work should ensure the composer forces selection of a case so the same metadata is captured.
+- Run `npm run audit:privacy-erm -- --out docs/data/privacy-erm-audits/<env-date>.md` before promoting secure-message migrations outside DEV.
+- Do not add new secure-message write paths that insert only legacy `sender_id` / `recipient_id`.
+- Do not infer applicant visibility from assigned staff. Applicant visibility is derived from the case/application/client and typed applicant actor.
+- Data purges should consider `message_item`, `message_attachment`, `messages`, and any `iset_document` rows with `source='secure_message_attachment'`; avoid broad hard deletes without an audit-preserving runbook.
 
-## Open Questions
-- Do we ever allow applicant-initiated messages outside of an active case? If not, the portal composer should be disabled until a submission exists.
-- Should we expose audit history (who sent what) in the admin UI beyond the current direction flag?
-- Should booking references also appear in the admin widget list rows for quick scanning?
+## Remaining Work
+- Retire compatibility dependence on legacy `sender_id` / `recipient_id` response fields after all consumers use typed actors.
+- Decide whether the long-term thread model remains evolved `messages` rows or moves to explicit case-thread tables.

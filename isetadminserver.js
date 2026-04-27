@@ -547,7 +547,59 @@ function buildCaseColumnSelectSql(columns = []) {
       .filter(value => /^[A-Za-z_][A-Za-z0-9_]*$/.test(value))
   ));
   const safeColumns = normalized.length ? normalized : ['id'];
-  return safeColumns.map(column => `c.${column} AS ${column}`).join(', ');
+  return safeColumns.map((column) => {
+    if (column === 'assigned_to_user_id') {
+      return `${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id`;
+    }
+    if (column === 'assigned_staff_profile_id') {
+      return `${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_staff_profile_id`;
+    }
+    return `c.${column} AS ${column}`;
+  }).join(', ');
+}
+
+function buildCaseAssignedStaffProfileIdSql(caseAlias = 'c') {
+  const alias = /^[A-Za-z_][A-Za-z0-9_]*$/.test(String(caseAlias || ''))
+    ? String(caseAlias)
+    : 'c';
+  return `COALESCE(${alias}.assigned_staff_profile_id, ${alias}.assigned_to_user_id)`;
+}
+
+function resolveCaseAssignedStaffProfileId(caseRow) {
+  if (!caseRow) return null;
+  return (
+    normalisePositiveInteger(caseRow.assigned_staff_profile_id) ||
+    normalisePositiveInteger(caseRow.assigned_to_user_id)
+  );
+}
+
+function resolveAssignedStaffProfileIdFromRow(row) {
+  if (!row || typeof row !== 'object') {
+    return normalisePositiveInteger(row) || null;
+  }
+  return (
+    normalisePositiveInteger(row.assigned_staff_profile_id) ||
+    normalisePositiveInteger(row.assignedStaffProfileId) ||
+    normalisePositiveInteger(row.staff_profile_id) ||
+    normalisePositiveInteger(row.staffProfileId) ||
+    normalisePositiveInteger(row.assigned_to_user_id) ||
+    normalisePositiveInteger(row.assignedToUserId) ||
+    normalisePositiveInteger(row.assigned_user_id) ||
+    normalisePositiveInteger(row.assignedUserId) ||
+    null
+  );
+}
+
+function buildAssignedStaffProfileResponseFields(rowOrId) {
+  const assignedStaffProfileId = resolveAssignedStaffProfileIdFromRow(rowOrId);
+  return {
+    assigned_staff_profile_id: assignedStaffProfileId,
+    assignedStaffProfileId: assignedStaffProfileId,
+    assigned_to_user_id: assignedStaffProfileId,
+    assignedToUserId: assignedStaffProfileId,
+    assigned_user_id: assignedStaffProfileId,
+    assignedUserId: assignedStaffProfileId,
+  };
 }
 
 function buildApplicationCaseJoinPredicate(caseAlias = 'c', applicationAlias = 'a') {
@@ -11340,17 +11392,18 @@ async function fetchAssignedCaseManagerForFundingAgreement(connection, caseId) {
   try {
     const [[row]] = await connection.query(
       `SELECT
-          c.assigned_to_user_id,
+          ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id,
+          c.assigned_staff_profile_id,
           sp.display_name,
           sp.name,
           sp.email
          FROM iset_case c
-         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+         LEFT JOIN staff_profiles sp ON sp.id = ${buildCaseAssignedStaffProfileIdSql('c')}
         WHERE c.id = ?
         LIMIT 1`,
       [caseId]
     );
-    const staffProfileId = normalisePositiveInteger(row?.assigned_to_user_id) || null;
+    const staffProfileId = resolveCaseAssignedStaffProfileId(row);
     const name = normaliseString(row?.display_name || row?.name || row?.email || null) || '';
     return { staffProfileId, name };
   } catch (err) {
@@ -13171,9 +13224,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   const interventionLabel = await fetchInterventionCodeLabel(connection, code);
   const now = new Date();
 
-  const assignedStaffProfileId = Number.isFinite(Number(caseRow.assigned_to_user_id))
-    ? Number(caseRow.assigned_to_user_id)
-    : null;
+  const assignedStaffProfileId = resolveCaseAssignedStaffProfileId(caseRow);
   let ownerStaffProfileId = assignedStaffProfileId;
   if (!ownerStaffProfileId && Number.isFinite(Number(approvalUserId))) {
     ownerStaffProfileId = await findStaffProfileIdByUserId(connection, Number(approvalUserId));
@@ -15448,7 +15499,8 @@ async function fetchCaseRow(caseId, connection = null) {
     `SELECT c.id,
             COALESCE(a.id, c.application_id) AS application_id,
             c.client_id,
-            c.assigned_to_user_id,
+            ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id,
+            c.assigned_staff_profile_id,
             c.status
        FROM iset_case c
        ${buildCasePrimaryApplicationJoinSql('c', 'a')}
@@ -15462,7 +15514,7 @@ async function fetchCaseRow(caseId, connection = null) {
 async function fetchPreferredCaseRowForClient(
   clientId,
   {
-    columns = ['id', 'application_id', 'client_id', 'case_number', 'status', 'lifecycle_status', 'assigned_to_user_id', 'portfolio_region_id'],
+    columns = ['id', 'application_id', 'client_id', 'case_number', 'status', 'lifecycle_status', 'assigned_to_user_id', 'assigned_staff_profile_id', 'portfolio_region_id'],
     connection = pool,
     forUpdate = false,
   } = {}
@@ -15553,6 +15605,7 @@ async function resolveOrCreateCaseForClient(
     'status',
     'lifecycle_status',
     'assigned_to_user_id',
+    'assigned_staff_profile_id',
     'portfolio_region_id',
   ];
 
@@ -15582,7 +15635,7 @@ async function resolveOrCreateCaseForClient(
   if (targetCase) {
     const updates = [];
     const params = [];
-    const previousAssignedToUserId = normalisePositiveInteger(targetCase.assigned_to_user_id);
+    const previousAssignedToUserId = resolveCaseAssignedStaffProfileId(targetCase);
 
     if (normalizedApplicationId && Number(targetCase.application_id || 0) !== normalizedApplicationId) {
       updates.push('application_id = ?');
@@ -15598,6 +15651,8 @@ async function resolveOrCreateCaseForClient(
     }
     if (normalizedAssigneeId && !previousAssignedToUserId) {
       updates.push('assigned_to_user_id = ?');
+      params.push(normalizedAssigneeId);
+      updates.push('assigned_staff_profile_id = ?');
       params.push(normalizedAssigneeId);
     }
     if (normalizedRegionId && !normalisePositiveInteger(targetCase.portfolio_region_id)) {
@@ -15637,6 +15692,7 @@ async function resolveOrCreateCaseForClient(
       created: false,
       assignmentUpdated: Boolean(normalizedAssigneeId && !previousAssignedToUserId),
       assignedToUserId: normalizedAssigneeId || previousAssignedToUserId || null,
+      assignedStaffProfileId: normalizedAssigneeId || previousAssignedToUserId || null,
       previousAssignedToUserId: previousAssignedToUserId || null,
       status: targetCase.status || null,
       lifecycleStatus: targetCase.lifecycle_status || null,
@@ -15645,12 +15701,13 @@ async function resolveOrCreateCaseForClient(
 
   const [insertCase] = await connection.query(
     `INSERT INTO iset_case
-      (application_id, case_number, client_id, assigned_to_user_id, status, lifecycle_status, stage, portfolio_region_id, opened_at, case_context_json, created_by_staff_profile_id, updated_by_staff_profile_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, NOW(), NOW())`,
+      (application_id, case_number, client_id, assigned_to_user_id, assigned_staff_profile_id, status, lifecycle_status, stage, portfolio_region_id, opened_at, case_context_json, created_by_staff_profile_id, updated_by_staff_profile_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, NOW(), NOW())`,
     [
       normalizedApplicationId || null,
       preferredCaseNumber || null,
       normalizedClientId,
+      normalizedAssigneeId || null,
       normalizedAssigneeId || null,
       status || null,
       lifecycleStatus || null,
@@ -15685,6 +15742,7 @@ async function resolveOrCreateCaseForClient(
     created: true,
     assignmentUpdated: Boolean(normalizedAssigneeId),
     assignedToUserId: normalizedAssigneeId || null,
+    assignedStaffProfileId: normalizedAssigneeId || null,
     previousAssignedToUserId: null,
     status: status || null,
     lifecycleStatus: lifecycleStatus || null,
@@ -15697,7 +15755,7 @@ async function fetchActionPlanWithCase(planId) {
        ap.*,
        ap.esdc_action_plan_json AS esdcActionPlanJson,
        bp.code AS budget_pot_code,
-       c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
        c.portfolio_region_id,
        sp.region_id AS owner_region_id,
        (
@@ -15708,7 +15766,7 @@ async function fetchActionPlanWithCase(planId) {
    FROM iset_case_action_plan ap
    JOIN iset_case c ON c.id = ap.case_id
    LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
-   LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+   LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
    WHERE ap.id = ?
    LIMIT 1`,
     [planId]
@@ -15725,13 +15783,13 @@ async function fetchInterventionWithCase(interventionId) {
        ap.case_id AS action_plan_case_id,
        ap.id AS action_plan_id,
        ap.funding_stream AS plan_funding_stream,
-       c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
        c.portfolio_region_id,
         sp.region_id AS owner_region_id
      FROM iset_case_intervention ci
      LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
      LEFT JOIN iset_case c ON c.id = ci.case_id
-     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+     LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
      WHERE ci.id = ?
      LIMIT 1`,
     [interventionId]
@@ -15937,7 +15995,7 @@ function validateCaseAccessForPlan(req, planRow) {
     if (!Number.isFinite(requesterId)) {
       return { status: 403, body: { error: 'forbidden', detail: 'assessor_scope_missing' } };
     }
-    if (Number(planRow.assigned_to_user_id) !== requesterId) {
+    if (resolveCaseAssignedStaffProfileId(planRow) !== requesterId) {
       return { status: 403, body: { error: 'forbidden' } };
     }
     return null;
@@ -15964,12 +16022,13 @@ async function fetchCaseAccessRowById(caseId, connection = pool) {
         c.id,
         c.client_id,
         COALESCE(a.id, c.application_id) AS application_id,
-        c.assigned_to_user_id,
+        ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id,
+        c.assigned_staff_profile_id,
         c.portfolio_region_id,
         sp.region_id AS owner_region_id
        FROM iset_case c
        ${buildCasePrimaryApplicationJoinSql('c', 'a')}
-       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       LEFT JOIN staff_profiles sp ON sp.id = ${buildCaseAssignedStaffProfileIdSql('c')}
       WHERE c.id = ?
       LIMIT 1`,
     [normalizedCaseId]
@@ -15985,12 +16044,13 @@ async function fetchCaseAccessRowByApplicationId(applicationId, connection = poo
         c.id,
         c.client_id,
         a.id AS application_id,
-        c.assigned_to_user_id,
+        ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id,
+        c.assigned_staff_profile_id,
         c.portfolio_region_id,
         sp.region_id AS owner_region_id
        FROM iset_application a
        JOIN iset_case c ON c.id = a.case_id
-       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       LEFT JOIN staff_profiles sp ON sp.id = ${buildCaseAssignedStaffProfileIdSql('c')}
       WHERE a.id = ?
       LIMIT 1`,
     [normalizedApplicationId]
@@ -16001,11 +16061,12 @@ async function fetchCaseAccessRowByApplicationId(applicationId, connection = poo
         c.id,
         c.client_id,
         c.application_id,
-        c.assigned_to_user_id,
+        ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id,
+        c.assigned_staff_profile_id,
         c.portfolio_region_id,
         sp.region_id AS owner_region_id
        FROM iset_case c
-       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       LEFT JOIN staff_profiles sp ON sp.id = ${buildCaseAssignedStaffProfileIdSql('c')}
       WHERE c.application_id = ?
       LIMIT 1`,
     [normalizedApplicationId]
@@ -16021,14 +16082,15 @@ async function fetchCaseAccessRowByInterventionId(interventionId, connection = p
         c.id,
         c.client_id,
         COALESCE(a.id, c.application_id) AS application_id,
-        c.assigned_to_user_id,
+        ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id,
+        c.assigned_staff_profile_id,
         c.portfolio_region_id,
         sp.region_id AS owner_region_id
        FROM iset_case_intervention i
        LEFT JOIN iset_case_action_plan ap ON ap.id = i.action_plan_id
        JOIN iset_case c ON c.id = COALESCE(i.case_id, ap.case_id)
        ${buildCasePrimaryApplicationJoinSql('c', 'a')}
-       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       LEFT JOIN staff_profiles sp ON sp.id = ${buildCaseAssignedStaffProfileIdSql('c')}
       WHERE i.id = ?
       LIMIT 1`,
     [normalizedInterventionId]
@@ -16044,13 +16106,14 @@ async function fetchCaseAccessRowByActionPlanId(actionPlanId, connection = pool)
         c.id,
         c.client_id,
         COALESCE(a.id, c.application_id) AS application_id,
-        c.assigned_to_user_id,
+        ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id,
+        c.assigned_staff_profile_id,
         c.portfolio_region_id,
         sp.region_id AS owner_region_id
        FROM iset_case_action_plan ap
        JOIN iset_case c ON c.id = ap.case_id
        ${buildCasePrimaryApplicationJoinSql('c', 'a')}
-       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       LEFT JOIN staff_profiles sp ON sp.id = ${buildCaseAssignedStaffProfileIdSql('c')}
       WHERE ap.id = ?
       LIMIT 1`,
     [normalizedActionPlanId]
@@ -16283,12 +16346,13 @@ async function fetchCaseAccessRowsByIds(caseIds, connection = pool) {
         c.id,
         c.client_id,
         COALESCE(a.id, c.application_id) AS application_id,
-        c.assigned_to_user_id,
+        ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id,
+        c.assigned_staff_profile_id,
         c.portfolio_region_id,
         sp.region_id AS owner_region_id
        FROM iset_case c
        ${buildCasePrimaryApplicationJoinSql('c', 'a')}
-       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       LEFT JOIN staff_profiles sp ON sp.id = ${buildCaseAssignedStaffProfileIdSql('c')}
       WHERE c.id IN (${placeholders})`,
     ids
   );
@@ -16303,12 +16367,13 @@ async function fetchCaseAccessRowsByClientId(clientId, connection = pool) {
         c.id,
         c.client_id,
         COALESCE(a.id, c.application_id) AS application_id,
-        c.assigned_to_user_id,
+        ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id,
+        c.assigned_staff_profile_id,
         c.portfolio_region_id,
         sp.region_id AS owner_region_id
        FROM iset_case c
        ${buildCasePrimaryApplicationJoinSql('c', 'a')}
-       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       LEFT JOIN staff_profiles sp ON sp.id = ${buildCaseAssignedStaffProfileIdSql('c')}
       WHERE c.client_id = ?`,
     [normalizedClientId]
   );
@@ -16428,7 +16493,7 @@ function validateCaseAccessForIntervention(req, interventionRow) {
     if (!Number.isFinite(requesterId)) {
       return { status: 403, body: { error: 'forbidden', detail: 'assessor_scope_missing' } };
     }
-    if (Number(interventionRow.assigned_to_user_id) !== requesterId) {
+    if (resolveCaseAssignedStaffProfileId(interventionRow) !== requesterId) {
       return { status: 403, body: { error: 'forbidden' } };
     }
     return null;
@@ -16546,8 +16611,8 @@ function ensureCanAssignCase(identity, targetStaff) {
 
 async function persistCaseAssignment(caseId, toUserId) {
   await pool.query(
-    'UPDATE iset_case SET assigned_to_user_id = ?, updated_at = NOW() WHERE id = ?',
-    [toUserId, caseId]
+    'UPDATE iset_case SET assigned_to_user_id = ?, assigned_staff_profile_id = ?, updated_at = NOW() WHERE id = ?',
+    [toUserId, toUserId, caseId]
   );
 }
 
@@ -18554,7 +18619,7 @@ async function syncDeniedIneligibleReportingArtifacts(connection, {
   if (!Number.isInteger(numericApplicationId) || numericApplicationId <= 0) return null;
 
   const [[caseRow]] = await connection.query(
-    `SELECT id, application_id, client_id, assigned_to_user_id, status, closed_at, case_context_json
+    `SELECT id, application_id, client_id, assigned_to_user_id, assigned_staff_profile_id, status, closed_at, case_context_json
        FROM iset_case
       WHERE id = ?
       LIMIT 1 FOR UPDATE`,
@@ -18751,7 +18816,7 @@ async function syncDeniedIneligibleReportingArtifacts(connection, {
         DENIED_INELIGIBLE_PLAN_NAME,
         agreementNumber,
         fundingStream,
-        caseRow.assigned_to_user_id || null,
+        resolveCaseAssignedStaffProfileId(caseRow) || null,
         resolvedDenialDate,
         resolvedDateTime,
         resolvedDateTime,
@@ -18777,7 +18842,7 @@ async function syncDeniedIneligibleReportingArtifacts(connection, {
         DENIED_INELIGIBLE_PLAN_NAME,
         agreementNumber,
         fundingStream,
-        caseRow.assigned_to_user_id || null,
+        resolveCaseAssignedStaffProfileId(caseRow) || null,
         resolvedDenialDate,
         resolvedDateTime,
         resolvedDateTime,
@@ -18858,7 +18923,7 @@ async function syncDeniedIneligibleReportingArtifacts(connection, {
         DENIED_INELIGIBLE_REPORTING_NOTE,
         interventionMetadata ? JSON.stringify(interventionMetadata) : null,
         interventionEsdcPayload ? JSON.stringify(interventionEsdcPayload) : null,
-        caseRow.assigned_to_user_id || null,
+        resolveCaseAssignedStaffProfileId(caseRow) || null,
         fundingStream,
         resolvedDateTime,
         interventionId
@@ -18879,7 +18944,7 @@ async function syncDeniedIneligibleReportingArtifacts(connection, {
         DENIED_INELIGIBLE_REPORTING_NOTE,
         interventionMetadata ? JSON.stringify(interventionMetadata) : null,
         interventionEsdcPayload ? JSON.stringify(interventionEsdcPayload) : null,
-        caseRow.assigned_to_user_id || null,
+        resolveCaseAssignedStaffProfileId(caseRow) || null,
         fundingStream,
         resolvedDateTime
       ]
@@ -19076,10 +19141,10 @@ async function findExistingClientCaseSummary(connection, { caseId, applicationId
   }
 
   const [caseRows] = await connection.query(
-    `SELECT c.id, c.status, c.case_number, c.assigned_to_user_id, c.updated_at,
+    `SELECT c.id, c.status, c.case_number, ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id, c.updated_at,
             sp.display_name, sp.name, sp.email
        FROM iset_case c
-       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
       WHERE c.client_id = ?
       ORDER BY c.updated_at DESC, c.id DESC`,
     [matchedClientId]
@@ -20748,7 +20813,7 @@ async function countProgramAdminNewSubmissions(pool) {
       `SELECT COUNT(*) AS total
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
-        WHERE (c.assigned_to_user_id IS NULL OR c.assigned_to_user_id = 0)
+        WHERE (COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NULL OR COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = 0)
           AND a.status IS NOT NULL
           AND LOWER(a.status) = 'submitted'`
     );
@@ -20767,8 +20832,8 @@ async function countProgramAdminUnassignedBacklog(pool) {
     const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
          JOIN iset_application a ON ${APPLICATION_CASE_JOIN_PREDICATE}
-        WHERE c.assigned_to_user_id IS NOT NULL
-          AND c.assigned_to_user_id <> 0
+        WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL
+          AND COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) <> 0
           AND a.status IS NOT NULL
           AND LOWER(a.status) = 'submitted'`;
     const [[row]] = await pool.query(sql);
@@ -21147,7 +21212,7 @@ async function countActiveCasesWithScope(pool, { regionId = null, regionIds = nu
     const params = [ACTION_PLAN_ACTIVE_STATUS];
 
     if (Number.isInteger(ownerId) && ownerId > 0) {
-      filters.push('c.assigned_to_user_id = ?');
+      filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
       params.push(ownerId);
     }
 
@@ -21161,7 +21226,7 @@ async function countActiveCasesWithScope(pool, { regionId = null, regionIds = nu
         filters.push(`sp.region_id IN (${placeholders})`);
         params.push(...regionList);
       }
-      filters.push('c.assigned_to_user_id IS NOT NULL');
+      filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL');
     }
 
     if (READY_TO_CLOSE_EXCLUDED_STATUSES.length) {
@@ -21173,7 +21238,7 @@ async function countActiveCasesWithScope(pool, { regionId = null, regionIds = nu
     const sql = `SELECT COUNT(DISTINCT c.id) AS total
            FROM iset_case c
            JOIN iset_case_action_plan ap ON ap.case_id = c.id
-           LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+           LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
           WHERE ${filters.join(' AND ')}
             AND ap.archived_at IS NULL`;
     const [[row]] = await pool.query(sql, params);
@@ -21209,7 +21274,7 @@ async function countInactiveCasesWithScope(pool, { regionId = null, regionIds = 
     const statusExpr = 'LOWER(TRIM(COALESCE(c.status, "")))';
 
     if (Number.isInteger(ownerId) && ownerId > 0) {
-      filters.push('c.assigned_to_user_id = ?');
+      filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
       params.push(ownerId);
     }
 
@@ -21223,7 +21288,7 @@ async function countInactiveCasesWithScope(pool, { regionId = null, regionIds = 
         filters.push(`sp.region_id IN (${placeholders})`);
         params.push(...regionList);
       }
-      filters.push('c.assigned_to_user_id IS NOT NULL');
+      filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL');
     }
 
     if (CASE_STATUS_TERMINAL_VALUES_LOWER.length) {
@@ -21248,7 +21313,7 @@ async function countInactiveCasesWithScope(pool, { regionId = null, regionIds = 
               COALESCE(intervention_summary.last_intervention_at, '1970-01-01')
             ) AS last_activity_at
           FROM iset_case c
-          LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+          LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
           LEFT JOIN (
             SELECT
               ap.case_id,
@@ -21328,7 +21393,7 @@ async function countReadyToCloseCasesWithScope(pool, { regionId = null, regionId
     const params = [CASE_STATUS_READY_TO_CLOSE, CASE_STATUS_DORMANT];
 
     if (Number.isInteger(ownerId) && ownerId > 0) {
-      filters.push('c.assigned_to_user_id = ?');
+      filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
       params.push(ownerId);
     }
 
@@ -21342,7 +21407,7 @@ async function countReadyToCloseCasesWithScope(pool, { regionId = null, regionId
         filters.push(`sp.region_id IN (${placeholders})`);
         params.push(...regionList);
       }
-      filters.push('c.assigned_to_user_id IS NOT NULL');
+      filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL');
     }
 
     if (READY_TO_CLOSE_EXCLUDED_STATUSES.length) {
@@ -21355,7 +21420,7 @@ async function countReadyToCloseCasesWithScope(pool, { regionId = null, regionId
     const sql = `
       SELECT COUNT(*) AS total
         FROM iset_case c
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
        WHERE ${filters.join(' AND ')}
          AND ${statusExpr} = ?
     `;
@@ -21400,13 +21465,13 @@ async function countNewIntakesWithScope(pool, { regionId = null, regionIds = nul
     const params = [];
 
     if (Number.isInteger(ownerId) && ownerId > 0) {
-      filters.push('c.assigned_to_user_id = ?');
+      filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
       params.push(ownerId);
     }
 
     const regionList = normalizeRegionIdInput(regionIds?.length ? regionIds : regionId);
     if (regionList.length) {
-      filters.push('c.assigned_to_user_id IS NOT NULL');
+      filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL');
       if (regionList.length === 1) {
         filters.push('sp.region_id = ?');
         params.push(regionList[0]);
@@ -21422,7 +21487,7 @@ async function countNewIntakesWithScope(pool, { regionId = null, regionIds = nul
         FROM client cl
         JOIN iset_case c ON c.client_id = cl.id
         ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
        WHERE ${filters.join(' AND ')}
     `;
     const [[row]] = await pool.query(sql, params);
@@ -21457,13 +21522,13 @@ async function countFollowUpsDueWithScope(pool, { regionId = null, regionIds = n
   const params = [...CASE_STATUS_TERMINAL_VALUES_LOWER];
 
   if (Number.isInteger(ownerId) && ownerId > 0) {
-    filters.push('c.assigned_to_user_id = ?');
+    filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
     params.push(ownerId);
   }
 
   const regionList = normalizeRegionIdInput(regionIds?.length ? regionIds : regionId);
   if (regionList.length) {
-    filters.push('c.assigned_to_user_id IS NOT NULL');
+    filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL');
     if (regionList.length === 1) {
       filters.push('sp.region_id = ?');
       params.push(regionList[0]);
@@ -21497,7 +21562,7 @@ async function countFollowUpsDueWithScope(pool, { regionId = null, regionIds = n
             AND t.deleted_at IS NULL
       ) AS task_count
     FROM iset_case c
-    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+    LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
     WHERE ${filters.join(' AND ')}
   `;
 
@@ -21535,13 +21600,13 @@ async function countIlmpIssuesWithScope(pool, { regionId = null, regionIds = nul
   const params = [...CASE_STATUS_TERMINAL_VALUES_LOWER];
 
   if (Number.isInteger(ownerId) && ownerId > 0) {
-    filters.push('c.assigned_to_user_id = ?');
+    filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
     params.push(ownerId);
   }
 
   const regionList = normalizeRegionIdInput(regionIds?.length ? regionIds : regionId);
   if (regionList.length) {
-    filters.push('c.assigned_to_user_id IS NOT NULL');
+    filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL');
     if (regionList.length === 1) {
       filters.push('sp.region_id = ?');
       params.push(regionList[0]);
@@ -21555,7 +21620,7 @@ async function countIlmpIssuesWithScope(pool, { regionId = null, regionIds = nul
   const sql = `
     SELECT COUNT(*) AS total
       FROM iset_case c
-      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
      WHERE ${filters.join(' AND ')}
        AND EXISTS (
          SELECT 1
@@ -21804,17 +21869,18 @@ async function resolveMetricsTimezone(regionId) {
 const applyMetricsScopeFilters = (filters, params, scope, options = {}) => {
   const caseAlias = options.caseAlias || 'c';
   const staffAlias = options.staffAlias || 'sp';
+  const assignedStaffProfileExpr = buildCaseAssignedStaffProfileIdSql(caseAlias);
   const ownerId = scope?.ownerId;
   const regionIds = Array.isArray(scope?.regionIds)
     ? scope.regionIds.map(value => normalisePositiveInteger(value)).filter(Boolean)
     : [];
   const regionId = scope?.regionId;
   if (Number.isInteger(ownerId) && ownerId > 0) {
-    filters.push(`${caseAlias}.assigned_to_user_id = ?`);
+    filters.push(`${assignedStaffProfileExpr} = ?`);
     params.push(ownerId);
   }
   if (regionIds.length > 0) {
-    filters.push(`${caseAlias}.assigned_to_user_id IS NOT NULL`);
+    filters.push(`${assignedStaffProfileExpr} IS NOT NULL`);
     if (regionIds.length === 1) {
       filters.push(`${staffAlias}.region_id = ?`);
       params.push(regionIds[0]);
@@ -21824,7 +21890,7 @@ const applyMetricsScopeFilters = (filters, params, scope, options = {}) => {
       params.push(...regionIds);
     }
   } else if (Number.isInteger(regionId) && regionId > 0) {
-    filters.push(`${caseAlias}.assigned_to_user_id IS NOT NULL`);
+    filters.push(`${assignedStaffProfileExpr} IS NOT NULL`);
     filters.push(`${staffAlias}.region_id = ?`);
     params.push(regionId);
   }
@@ -21876,7 +21942,7 @@ async function countMetricsNewApplications(pool, { start, end, scope }) {
         FROM iset_application_submission s
         JOIN iset_application a ON a.submission_id = s.id
         LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
        WHERE ${filters.join(' AND ')}
     `;
     const [[row]] = await pool.query(sql, params);
@@ -21905,7 +21971,7 @@ async function countMetricsApplicationDecisions(pool, { start, end, scope }) {
       SELECT COUNT(*) AS total
         FROM iset_application a
         LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
        WHERE ${filters.join(' AND ')}
     `;
     const [[row]] = await pool.query(sql, params);
@@ -21941,7 +22007,7 @@ async function countMetricsApplicationStatusBuckets(pool, { start, end, scope })
       SELECT ${statusExpr} AS status_key, COUNT(*) AS total
         FROM iset_application a
         LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
        WHERE ${filters.join(' AND ')}
        GROUP BY ${statusExpr}
     `;
@@ -21991,7 +22057,7 @@ async function countMetricsInterventionDecisions(pool, { start, end, scope }) {
       SELECT COUNT(*) AS total
         FROM iset_case_intervention ci
         JOIN iset_case c ON c.id = ci.case_id
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
        WHERE ${filters.join(' AND ')}
     `;
     const [[row]] = await pool.query(sql, params);
@@ -22015,7 +22081,7 @@ async function countMetricsActiveCases(pool, scope) {
     const sql = `
       SELECT COUNT(*) AS total
         FROM iset_case c
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
        WHERE ${filters.join(' AND ')}
     `;
     const [[row]] = await pool.query(sql, params);
@@ -22040,7 +22106,7 @@ async function countMetricsActionPlanStarts(pool, { start, end, scope }) {
       SELECT COUNT(*) AS total
         FROM iset_case_action_plan ap
         JOIN iset_case c ON c.id = ap.case_id
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
        WHERE ${filters.join(' AND ')}
     `;
     const [[row]] = await pool.query(sql, params);
@@ -22068,12 +22134,12 @@ async function countMetricsNewInterventionProposals(pool, { start, end, scope })
       FROM (
         SELECT
           p.id AS proposal_id,
-          c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
           sp.region_id AS region_id
         FROM iset_intervention_proposal p
         JOIN iset_case c ON c.id = p.case_id
         LEFT JOIN iset_case_intervention ci ON ci.id = p.legacy_intervention_id
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
         WHERE ${metricDateExpr} >= ?
           AND ${metricDateExpr} < ?
           AND ${proposalReviewStatusExpr} <> ?
@@ -22082,12 +22148,12 @@ async function countMetricsNewInterventionProposals(pool, { start, end, scope })
 
         SELECT
           ci.id AS proposal_id,
-          c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
           sp.region_id AS region_id
         FROM iset_case_intervention ci
         LEFT JOIN iset_intervention_proposal p_existing ON p_existing.legacy_intervention_id = ci.id
         JOIN iset_case c ON c.id = ci.case_id
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
         WHERE p_existing.id IS NULL
           AND ${legacyMetricDateExpr} >= ?
           AND ${legacyMetricDateExpr} < ?
@@ -22106,7 +22172,7 @@ async function countMetricsNewInterventionProposals(pool, { start, end, scope })
       SELECT COUNT(*) AS total
         FROM iset_case_intervention ci
         JOIN iset_case c ON c.id = ci.case_id
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
        WHERE ${legacyFilters.join(' AND ')}
     `;
     let row = null;
@@ -22142,7 +22208,7 @@ async function countMetricsCompletedInterventions(pool, { start, end, scope }) {
       SELECT COUNT(*) AS total
         FROM iset_case_intervention ci
         JOIN iset_case c ON c.id = ci.case_id
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
        WHERE ${filters.join(' AND ')}
     `;
     const [[row]] = await pool.query(sql, params);
@@ -22172,7 +22238,7 @@ async function sumMetricsApprovedInterventionAmounts(pool, { start, end, scope }
       SELECT COALESCE(SUM(COALESCE(ci.approved_amount, ci.budget_amount, ci.intervention_cost, 0)), 0) AS total
         FROM iset_case_intervention ci
         JOIN iset_case c ON c.id = ci.case_id
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
        WHERE ${filters.join(' AND ')}
     `;
     const [[row]] = await pool.query(sql, params);
@@ -22198,7 +22264,7 @@ async function countMetricsActionPlanOutcomeBuckets(pool, { start, end, scope })
       SELECT ap.result_code, COUNT(*) AS total
         FROM iset_case_action_plan ap
         JOIN iset_case c ON c.id = ap.case_id
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
        WHERE ${filters.join(' AND ')}
        GROUP BY ap.result_code
     `;
@@ -22236,7 +22302,7 @@ async function sumMetricsTransactions(pool, { start, end, scope, statuses }) {
       SELECT COALESCE(SUM(ft.amount), 0) AS total
         FROM finance_transaction ft
         JOIN iset_case c ON c.id = ft.case_id
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
        WHERE ${filters.join(' AND ')}
     `;
     const [[row]] = await pool.query(sql, params);
@@ -22382,7 +22448,7 @@ const mapMetricApplicationRows = (rows, { eventLabel = 'Updated' } = {}) => {
       applicant_name: applicantName,
       address_province: buildMetricProvince(row),
       owner: buildMetricOwnerLabel(row),
-      assigned_user_id: normalisePositiveInteger(row?.assigned_to_user_id) || null,
+      ...buildAssignedStaffProfileResponseFields(row),
       assigned_user_email: normaliseString(row?.assigned_user_email) || null,
       assigned_user_role: normaliseString(row?.assigned_user_role) || null,
       assigned_user_region_id: normalisePositiveInteger(row?.assigned_user_region_id) || null,
@@ -22425,7 +22491,7 @@ const mapMetricActionPlanRows = (rows, { eventLabel = 'Updated', subjectBuilder 
       applicant_name: applicantName,
       address_province: buildMetricProvince(row),
       owner: buildMetricOwnerLabel(row),
-      assigned_user_id: normalisePositiveInteger(row?.assigned_to_user_id) || null,
+      ...buildAssignedStaffProfileResponseFields(row),
       assigned_user_email: normaliseString(row?.assigned_user_email) || null,
       assigned_user_role: normaliseString(row?.assigned_user_role) || null,
       assigned_user_region_id: normalisePositiveInteger(row?.assigned_user_region_id) || null,
@@ -22475,7 +22541,7 @@ const mapMetricInterventionRows = (rows, { eventLabel = 'Updated' } = {}) => {
       applicant_name: applicantName,
       address_province: buildMetricProvince(row),
       owner: buildMetricOwnerLabel(row),
-      assigned_user_id: normalisePositiveInteger(row?.assigned_to_user_id) || null,
+      ...buildAssignedStaffProfileResponseFields(row),
       assigned_user_email: normaliseString(row?.assigned_user_email) || null,
       assigned_user_role: normaliseString(row?.assigned_user_role) || null,
       assigned_user_region_id: normalisePositiveInteger(row?.assigned_user_region_id) || null,
@@ -22525,7 +22591,7 @@ const mapMetricActiveCaseRows = rows => {
       applicant_name: applicantName,
       address_province: buildMetricProvince(row),
       owner: buildMetricOwnerLabel(row),
-      assigned_user_id: normalisePositiveInteger(row?.assigned_to_user_id) || null,
+      ...buildAssignedStaffProfileResponseFields(row),
       assigned_user_email: normaliseString(row?.assigned_user_email) || null,
       assigned_user_role: normaliseString(row?.assigned_user_role) || null,
       assigned_user_region_id: normalisePositiveInteger(row?.assigned_user_region_id) || null,
@@ -22563,7 +22629,7 @@ async function fetchMetricApplicationDetailRows(pool, { start, end, scope, statu
         c.id AS case_id,
         c.case_number,
         c.status AS case_status,
-        c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
         cl.first_name AS client_first_name,
         cl.last_name AS client_last_name,
         COALESCE(
@@ -22583,7 +22649,7 @@ async function fetchMetricApplicationDetailRows(pool, { start, end, scope, statu
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
       LEFT JOIN client cl ON cl.id = c.client_id
-      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
       WHERE ${filters.join(' AND ')}
       ORDER BY ${dateExpr} DESC, a.id DESC
       LIMIT ${METRICS_DETAIL_FETCH_LIMIT}
@@ -22623,7 +22689,7 @@ async function fetchMetricActionPlanDetailRows(pool, { start, end, scope, mode =
         ap.result_code,
         ${metricDateExpr} AS metric_event_at,
         c.case_number,
-        c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
         a.id AS application_id,
         cl.first_name AS client_first_name,
         cl.last_name AS client_last_name,
@@ -22645,7 +22711,7 @@ async function fetchMetricActionPlanDetailRows(pool, { start, end, scope, mode =
       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN client cl ON cl.id = c.client_id
-      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
       WHERE ${filters.join(' AND ')}
       ORDER BY ${metricDateExpr} DESC, ap.id DESC
       LIMIT ${METRICS_DETAIL_FETCH_LIMIT}
@@ -22690,7 +22756,7 @@ async function fetchMetricInterventionDetailRows(pool, { start, end, scope, mode
           JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.title')) AS intervention_title,
           ic.label AS intervention_label,
           c.case_number,
-          c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
           a.id AS application_id,
           cl.first_name AS client_first_name,
           cl.last_name AS client_last_name,
@@ -22712,7 +22778,7 @@ async function fetchMetricInterventionDetailRows(pool, { start, end, scope, mode
         ${buildCasePrimaryApplicationJoinSql('c', 'a')}
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         LEFT JOIN client cl ON cl.id = c.client_id
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
         LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
         WHERE ${filters.join(' AND ')}
         ORDER BY ${metricDateExpr} DESC, ci.id DESC
@@ -22755,7 +22821,7 @@ async function fetchMetricInterventionDetailRows(pool, { start, end, scope, mode
           ) AS intervention_title,
           ic.label AS intervention_label,
           c.case_number,
-          c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
           sp.region_id AS region_id,
           COALESCE(p.application_id, a.id) AS application_id,
           cl.first_name AS client_first_name,
@@ -22779,7 +22845,7 @@ async function fetchMetricInterventionDetailRows(pool, { start, end, scope, mode
         LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ${buildCasePrimaryApplicationIdSql('c')})
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         LEFT JOIN client cl ON cl.id = c.client_id
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
         LEFT JOIN esdc_intervention_code ic ON ic.code = COALESCE(p.intervention_code, ci.intervention_code)
         WHERE ${metricDateExpr} >= ?
           AND ${metricDateExpr} < ?
@@ -22801,7 +22867,7 @@ async function fetchMetricInterventionDetailRows(pool, { start, end, scope, mode
           JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.title')) AS intervention_title,
           ic.label AS intervention_label,
           c.case_number,
-          c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
           sp.region_id AS region_id,
           a.id AS application_id,
           cl.first_name AS client_first_name,
@@ -22825,7 +22891,7 @@ async function fetchMetricInterventionDetailRows(pool, { start, end, scope, mode
         ${buildCasePrimaryApplicationJoinSql('c', 'a')}
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         LEFT JOIN client cl ON cl.id = c.client_id
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
         LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
         WHERE p_existing.id IS NULL
           AND ${legacyMetricDateExpr} >= ?
@@ -22858,7 +22924,7 @@ async function fetchMetricInterventionDetailRows(pool, { start, end, scope, mode
         JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.title')) AS intervention_title,
         ic.label AS intervention_label,
         c.case_number,
-        c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
         a.id AS application_id,
         cl.first_name AS client_first_name,
         cl.last_name AS client_last_name,
@@ -22880,7 +22946,7 @@ async function fetchMetricInterventionDetailRows(pool, { start, end, scope, mode
       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN client cl ON cl.id = c.client_id
-      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
       LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
       WHERE ${legacyFilters.join(' AND ')}
       ORDER BY ${legacyMetricDateExpr} DESC, ci.id DESC
@@ -22927,7 +22993,7 @@ async function fetchMetricActiveCaseDetailRows(pool, { scope }) {
         c.opened_at,
         c.created_at,
         c.updated_at,
-        c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
         a.id AS application_id,
         cl.first_name AS client_first_name,
         cl.last_name AS client_last_name,
@@ -22949,7 +23015,7 @@ async function fetchMetricActiveCaseDetailRows(pool, { scope }) {
       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN client cl ON cl.id = c.client_id
-      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
       WHERE ${filters.join(' AND ')}
       ORDER BY COALESCE(c.updated_at, c.opened_at, c.created_at) DESC, c.id DESC
       LIMIT ${METRICS_DETAIL_FETCH_LIMIT}
@@ -23138,7 +23204,7 @@ async function markCaseReadyToClose({ caseId, connection = null }) {
               c.status,
               COALESCE(a.id, c.application_id) AS application_id,
               c.case_context_json,
-              c.assigned_to_user_id
+              COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a')}
         WHERE c.id = ?
@@ -23262,7 +23328,7 @@ async function countRegionalAssignedToRegion(pool, staffIds, context = {}) {
   const params = [];
 
   if (Number.isInteger(coordinatorId) && coordinatorId > 0) {
-    filters.push('c.assigned_to_user_id = ?');
+    filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
     params.push(coordinatorId);
   }
 
@@ -23279,7 +23345,7 @@ async function countRegionalAssignedToRegion(pool, staffIds, context = {}) {
 
   if (!filters.length && ids.length) {
     const placeholders = ids.map(() => '?').join(',');
-    filters.push(`c.assigned_to_user_id IN (${placeholders})`);
+    filters.push(`COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IN (${placeholders})`);
     params.push(...ids);
   }
 
@@ -23294,8 +23360,8 @@ async function countRegionalAssignedToRegion(pool, staffIds, context = {}) {
 
   const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
-         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
-        WHERE c.assigned_to_user_id IS NOT NULL
+         LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL
           AND (${filters.join(' OR ')})
           AND ${statusCondition}`;
   const [[row]] = await pool.query(sql, params);
@@ -23316,7 +23382,7 @@ async function countRegionalNeedsReassignment(pool, staffProfileId) {
   }
   const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
-        WHERE c.assigned_to_user_id = ?
+        WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?
           AND ${statusCondition}`;
   const [[row]] = await pool.query(sql, params);
   return Number(row?.total ?? 0);
@@ -23331,7 +23397,7 @@ async function countRegionalAwaitingApplicantInfo(pool, staffIds) {
   const params = [...ids, ...CASE_STATUS_HOLD_VALUES_LOWER];
   const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
-        WHERE c.assigned_to_user_id IN (${staffPlaceholders})
+        WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IN (${staffPlaceholders})
           AND c.status IS NOT NULL
           AND LOWER(c.status) IN (${holdPlaceholders})`;
   const [[row]] = await pool.query(sql, params);
@@ -23344,7 +23410,7 @@ async function fetchApplicationSlaRowsForAssignedStaff(pool, staffIds) {
   const placeholders = ids.map(() => '?').join(',');
   const sql = `SELECT
          c.id AS case_id,
-         c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
          a.status AS application_status,
          COALESCE(s.created_at, a.created_at) AS submitted_at,
          a.created_at,
@@ -23353,7 +23419,7 @@ async function fetchApplicationSlaRowsForAssignedStaff(pool, staffIds) {
        ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
        LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
-      WHERE c.assigned_to_user_id IN (${placeholders})`;
+      WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IN (${placeholders})`;
   try {
     const [rows] = await pool.query(sql, ids);
     return Array.isArray(rows) ? rows : [];
@@ -23368,7 +23434,7 @@ async function fetchApplicationSlaRowsForAssignedStaff(pool, staffIds) {
 async function fetchAllAssignedApplicationSlaRows(pool) {
   const sql = `SELECT
          c.id AS case_id,
-         c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
          a.status AS application_status,
          COALESCE(s.created_at, a.created_at) AS submitted_at,
          a.created_at,
@@ -23377,8 +23443,8 @@ async function fetchAllAssignedApplicationSlaRows(pool) {
        ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
        LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
-      WHERE c.assigned_to_user_id IS NOT NULL
-        AND c.assigned_to_user_id <> 0`;
+      WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL
+        AND COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) <> 0`;
   try {
     const [rows] = await pool.query(sql);
     return Array.isArray(rows) ? rows : [];
@@ -23447,7 +23513,7 @@ async function countRegionalPendingApproval(pool, staffIds) {
   const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
-        WHERE c.assigned_to_user_id IN (${staffPlaceholders})
+        WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IN (${staffPlaceholders})
           AND a.status IS NOT NULL
           AND LOWER(a.status) IN (${statusPlaceholders})`;
   const [[row]] = await pool.query(sql, params);
@@ -23466,7 +23532,7 @@ async function countAssessorAssignedToMe(pool, staffProfileId) {
   }
   const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
-        WHERE c.assigned_to_user_id = ?
+        WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?
           AND ${statusCondition}`;
   const [[row]] = await pool.query(sql, params);
   return Number(row?.total ?? 0);
@@ -23480,7 +23546,7 @@ async function countAssessorAwaitingApplicantResponse(pool, staffProfileId) {
   const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
-        WHERE c.assigned_to_user_id = ?
+        WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?
           AND a.status IS NOT NULL
           AND LOWER(a.status) IN (${statusPlaceholders})`;
   const params = [assessorId, ...APPLICATION_STATUS_HOLD_VALUES_LOWER];
@@ -23789,7 +23855,8 @@ app.patch('/api/cases/:id/assign', async (req, res) => {
     const [[caseRow]] = await pool.query(
       `SELECT c.id,
               COALESCE(a.id, c.application_id) AS application_id,
-              c.assigned_to_user_id
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+              c.assigned_staff_profile_id
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a')}
         WHERE c.id = ?
@@ -23797,7 +23864,7 @@ app.patch('/api/cases/:id/assign', async (req, res) => {
       [caseId]
     );
     if (!caseRow) return res.status(404).json({ error: 'case_not_found' });
-    const previousAssigneeId = caseRow.assigned_to_user_id != null ? Number(caseRow.assigned_to_user_id) : null;
+    const previousAssigneeId = resolveCaseAssignedStaffProfileId(caseRow);
     let previousAssigneeMeta = null;
     if (previousAssigneeId) {
       const [[prevMeta]] = await pool.query('SELECT id, display_name, email FROM staff_profiles WHERE id=? LIMIT 1', [previousAssigneeId]);
@@ -23812,7 +23879,10 @@ app.patch('/api/cases/:id/assign', async (req, res) => {
       return res.status(400).json({ error: 'assignee_required' });
     }
     const normalizedAssignId = assignId != null ? Number(assignId) : null;
-    await pool.query('UPDATE iset_case SET assigned_to_user_id=?, updated_at=NOW() WHERE id=?', [normalizedAssignId, caseId]);
+    await pool.query(
+      'UPDATE iset_case SET assigned_to_user_id=?, assigned_staff_profile_id=?, updated_at=NOW() WHERE id=?',
+      [normalizedAssignId, normalizedAssignId, caseId]
+    );
     let newAssigneeMeta = null;
     if (normalizedAssignId) {
       const [[nextMeta]] = await pool.query('SELECT id, display_name, email FROM staff_profiles WHERE id=? LIMIT 1', [normalizedAssignId]);
@@ -23863,7 +23933,12 @@ app.patch('/api/cases/:id/assign', async (req, res) => {
         });
       } catch (_) {}
     }
-    return res.json({ ok: true, case_id: caseId, assigned_to_user_id: normalizedAssignId });
+    return res.json({
+      ok: true,
+      case_id: caseId,
+      assigned_to_user_id: normalizedAssignId,
+      assigned_staff_profile_id: normalizedAssignId,
+    });
   } catch (e) {
     console.error('PATCH /api/cases/:id/assign failed:', e.message);
     res.status(500).json({ error: 'assign_failed', message: e.message });
@@ -26600,7 +26675,7 @@ async function fetchReportingApplicationActivityDrilldown({
         c.id AS case_id,
         c.case_number,
         c.status AS case_status,
-        c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
         cl.first_name AS client_first_name,
         cl.last_name AS client_last_name,
         COALESCE(
@@ -26620,7 +26695,7 @@ async function fetchReportingApplicationActivityDrilldown({
       LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
       LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
       LEFT JOIN client cl ON cl.id = c.client_id
-      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
       WHERE ${dateExpr} IS NOT NULL
         AND DATE(${dateExpr}) BETWEEN ? AND ?
         ${statusFilterSql}
@@ -26688,7 +26763,7 @@ async function fetchReportingInterventionDrilldown({
         ci.start_date AS started_on,
         COALESCE(ci.end_date, DATE(ci.closed_at)) AS ended_on,
         c.case_number,
-        c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
         a.id AS application_id,
         cl.first_name AS client_first_name,
         cl.last_name AS client_last_name,
@@ -26711,7 +26786,7 @@ async function fetchReportingInterventionDrilldown({
       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
       LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
       LEFT JOIN client cl ON cl.id = c.client_id
-      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
       LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
       WHERE ci.intervention_code IS NOT NULL
         AND (
@@ -26803,7 +26878,7 @@ async function fetchReportingInterventionDrilldown({
           applicant_name: applicantName,
           address_province: buildMetricProvince(row),
           owner: buildMetricOwnerLabel(row),
-          assigned_user_id: normalisePositiveInteger(row?.assigned_to_user_id) || null,
+          ...buildAssignedStaffProfileResponseFields(row),
           assigned_user_email: normaliseString(row?.assigned_user_email) || null,
           assigned_user_role: normaliseString(row?.assigned_user_role) || null,
           assigned_user_region_id: normalisePositiveInteger(row?.assigned_user_region_id) || null,
@@ -27139,7 +27214,7 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
           REPLACE(LOWER(TRIM(a.status)), ' ', '_') AS status_key,
           ias.submitted_at,
           COALESCE(a.updated_at, a.created_at) AS status_observed_at,
-          c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
           ${REPORTING_ADDRESS_PROVINCE_EXPR} AS address_province
         FROM iset_application a
         LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
@@ -27168,7 +27243,7 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
           ci.actual_amount,
           ci.start_date AS started_on,
           COALESCE(ci.end_date, DATE(ci.closed_at)) AS ended_on,
-          c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
           ${REPORTING_ADDRESS_PROVINCE_EXPR} AS address_province
         FROM iset_case_intervention ci
         JOIN iset_case c ON c.id = ci.case_id
@@ -27199,7 +27274,7 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
           DATE(ap.created_at) AS created_on,
           ap.result_code,
           ap.result_date,
-          c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
           ${REPORTING_ADDRESS_PROVINCE_EXPR} AS address_province
         FROM iset_case_action_plan ap
         JOIN iset_case c ON c.id = ap.case_id
@@ -27218,7 +27293,7 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
           eps.action_plan_id,
           eps.readiness_status,
           COALESCE(eps.last_validated_at, eps.updated_at, eps.created_at) AS observed_at,
-          c.assigned_to_user_id
+          COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id
         FROM esdc_participant_submission eps
         JOIN iset_case c ON c.id = eps.case_id
         WHERE COALESCE(eps.last_validated_at, eps.updated_at, eps.created_at) <= ?
@@ -27232,7 +27307,7 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
           h.occurred_at,
           eps.case_id,
           eps.action_plan_id,
-          c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
           ${REPORTING_ADDRESS_PROVINCE_EXPR} AS address_province
         FROM esdc_participant_submission_history h
         JOIN esdc_participant_submission eps ON eps.id = h.participant_submission_id
@@ -33476,9 +33551,9 @@ app.post('/api/ai/create-dummy-case-payments', async (req, res) => {
 
         const [caseResult] = await conn.query(
           `INSERT INTO iset_case
-            (application_id, client_id, assigned_to_user_id, status, lifecycle_status, stage, sub_stage, priority, opened_at, risk_rating, portfolio_region_id, created_by_staff_profile_id, updated_by_staff_profile_id, created_at, updated_at)
-           VALUES (?, ?, ?, 'active', 'active', 'service_delivery', 'payment_draft', 'normal', NOW(), 'low', ?, ?, ?, NOW(), NOW())`,
-          [applicationId, clientId, ownerStaffProfileId, regionId, ownerStaffProfileId, ownerStaffProfileId]
+            (application_id, client_id, assigned_to_user_id, assigned_staff_profile_id, status, lifecycle_status, stage, sub_stage, priority, opened_at, risk_rating, portfolio_region_id, created_by_staff_profile_id, updated_by_staff_profile_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'active', 'active', 'service_delivery', 'payment_draft', 'normal', NOW(), 'low', ?, ?, ?, NOW(), NOW())`,
+          [applicationId, clientId, ownerStaffProfileId, ownerStaffProfileId, regionId, ownerStaffProfileId, ownerStaffProfileId]
         );
         const caseId = Number(caseResult.insertId);
         const caseNumber = `CASE-${new Date().getFullYear()}-${String(caseId).padStart(7, '0')}`;
@@ -34622,7 +34697,7 @@ async function fetchDashboardOpenClientCases({ regionIds = [], assignedStaffProf
   const baseFrom = `
     FROM iset_case c
     LEFT JOIN client cl ON cl.id = c.client_id
-    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+    LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
     LEFT JOIN canada_region portfolio_region ON portfolio_region.region_id = c.portfolio_region_id
     LEFT JOIN canada_region owner_region ON owner_region.region_id = sp.region_id
     ${buildCasePrimaryApplicationJoinSql('c', 'a')}
@@ -34652,13 +34727,13 @@ async function fetchDashboardOpenClientCases({ regionIds = [], assignedStaffProf
       `c.portfolio_region_id IN (${regionPlaceholders})`,
     ];
     if (hasAssignedScope) {
-      scopeClauses.unshift('c.assigned_to_user_id = ?');
+      scopeClauses.unshift('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
       queryParams.push(numericAssignedStaffProfileId);
     }
     whereClauses.push(`(${scopeClauses.join(' OR ')})`);
     queryParams.push(...normalizedRegionIds, ...normalizedRegionIds);
   } else if (hasAssignedScope) {
-    whereClauses.push('c.assigned_to_user_id = ?');
+    whereClauses.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
     queryParams.push(numericAssignedStaffProfileId);
   }
 
@@ -34669,7 +34744,7 @@ async function fetchDashboardOpenClientCases({ regionIds = [], assignedStaffProf
       c.application_id,
       c.client_id,
       c.case_number,
-      c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
       c.status,
       c.portfolio_region_id,
       COALESCE(c.next_action_due_at, reminder_next.next_reminder_due_at) AS next_action_due_at,
@@ -34733,7 +34808,7 @@ async function fetchDashboardOpenClientCases({ regionIds = [], assignedStaffProf
         normaliseString(row?.case_number) ||
         (row?.case_id ? `CASE-${row.case_id}` : null),
       client_name: clientName,
-      assigned_to_user_id: row?.assigned_to_user_id || null,
+      ...buildAssignedStaffProfileResponseFields(row),
       owner_name: normaliseString(row?.owner_name) || null,
       owner_email: normaliseString(row?.owner_email) || null,
       status: normaliseCaseStatusValue(row?.status) || null,
@@ -35153,8 +35228,8 @@ app.get('/api/dashboard/ei-eligibility-items', async (req, res) => {
   const regionId = regionIds.length ? regionIds[0] : null;
   const filters = [
     '(ca.esdc_eligibility IS NULL OR ca.esdc_eligibility = \'\')',
-    'c.assigned_to_user_id IS NOT NULL',
-    'c.assigned_to_user_id <> 0',
+    'COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL',
+    'COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) <> 0',
   ];
   const params = [];
   const applicationLifecycleStatusExpr = buildApplicationLifecycleStatusExpr('a');
@@ -35188,7 +35263,7 @@ app.get('/api/dashboard/ei-eligibility-items', async (req, res) => {
       a.created_at AS submitted_at,
       a.updated_at AS application_updated_at,
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
-      c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
       sp.email AS assigned_user_email,
       sp.primary_role AS assigned_user_role,
       sp.region_id AS assigned_user_region_id,
@@ -35202,7 +35277,7 @@ app.get('/api/dashboard/ei-eligibility-items', async (req, res) => {
     ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
     LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+    LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
     ${where}
     ORDER BY a.created_at DESC
     LIMIT 200
@@ -35233,7 +35308,7 @@ app.get('/api/dashboard/ei-eligibility-items', async (req, res) => {
         application_closure_reason: normaliseString(r.application_closure_reason) || null,
         submittedAt: r.submitted_at ? new Date(r.submitted_at).toISOString() : null,
         owner: r.assigned_user_email || null,
-        assigned_user_id: r.assigned_to_user_id || null,
+        ...buildAssignedStaffProfileResponseFields(r),
         assigned_user_email: r.assigned_user_email || null,
         assigned_user_role: r.assigned_user_role || null,
         assigned_user_region_id: r.assigned_user_region_id || null
@@ -35288,7 +35363,7 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
       a.created_at AS submitted_at,
       a.updated_at AS approval_queued_at,
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
-      c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
       sp.email AS assigned_user_email,
       sp.primary_role AS assigned_user_role,
       sp.region_id AS assigned_user_region_id,
@@ -35309,7 +35384,7 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
     ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
     LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+    LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
     LEFT JOIN esdc_intervention_code ic ON ic.code = ca.intervention_code
     LEFT JOIN budget_pot bp ON bp.id = ca.intervention_budget_pot_id
     ${where}
@@ -35369,7 +35444,7 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
         submittedAt: r.submitted_at ? new Date(r.submitted_at).toISOString() : null,
         approvalQueuedAt: r.approval_queued_at ? new Date(r.approval_queued_at).toISOString() : null,
         owner: r.assigned_user_email || null,
-        assigned_user_id: r.assigned_to_user_id || null,
+        ...buildAssignedStaffProfileResponseFields(r),
         assigned_user_email: r.assigned_user_email || null,
         assigned_user_role: r.assigned_user_role || null,
         assigned_user_region_id: r.assigned_user_region_id || null,
@@ -35471,7 +35546,7 @@ app.get('/api/dashboard/watchlist-hit-items', async (req, res) => {
           JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')),
           s.reference_number
         ) AS tracking_id,
-        c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
         sp.email AS assigned_user_email,
         sp.primary_role AS assigned_user_role,
         sp.region_id AS assigned_user_region_id,
@@ -35483,7 +35558,7 @@ app.get('/api/dashboard/watchlist-hit-items', async (req, res) => {
       FROM iset_application a
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
-      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
       ${where}
     ) q
     JOIN iset_applicant_watchlist w ON w.sin_hash = SHA2(q.sin_digits, 256)
@@ -35517,7 +35592,7 @@ app.get('/api/dashboard/watchlist-hit-items', async (req, res) => {
         application_closure_reason: normaliseString(r.application_closure_reason) || null,
         submittedAt: r.submitted_at ? new Date(r.submitted_at).toISOString() : null,
         owner: r.assigned_user_email || null,
-        assigned_user_id: r.assigned_to_user_id || null,
+        ...buildAssignedStaffProfileResponseFields(r),
         assigned_user_email: r.assigned_user_email || null,
         assigned_user_role: r.assigned_user_role || null,
         assigned_user_region_id: r.assigned_user_region_id || null,
@@ -35603,7 +35678,7 @@ app.get('/api/dashboard/marked-for-closure-items', async (req, res) => {
       a.created_at AS submitted_at,
       a.updated_at AS application_updated_at,
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
-      c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
       sp.email AS assigned_user_email,
       sp.primary_role AS assigned_user_role,
       sp.region_id AS assigned_user_region_id,
@@ -35614,7 +35689,7 @@ app.get('/api/dashboard/marked-for-closure-items', async (req, res) => {
     FROM iset_case c
     ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+    LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
     ${where}
     ORDER BY a.updated_at DESC, a.created_at DESC
     LIMIT 200
@@ -35643,7 +35718,7 @@ app.get('/api/dashboard/marked-for-closure-items', async (req, res) => {
         application_closure_reason: normaliseString(r.application_closure_reason) || null,
         submittedAt: r.submitted_at ? new Date(r.submitted_at).toISOString() : null,
         owner: r.assigned_user_email || null,
-        assigned_user_id: r.assigned_to_user_id || null,
+        ...buildAssignedStaffProfileResponseFields(r),
         assigned_user_email: r.assigned_user_email || null,
         assigned_user_role: r.assigned_user_role || null,
         assigned_user_region_id: r.assigned_user_region_id || null
@@ -35712,7 +35787,7 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
       COALESCE(ci.intervention_cost, ci.budget_amount, ci.approved_amount) AS intervention_cost_total,
       COALESCE(ci.updated_at, ci.created_at) AS submitted_at,
       c.case_number,
-      c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
       sp.email AS assigned_user_email,
       sp.primary_role AS assigned_user_role,
       sp.region_id AS assigned_user_region_id,
@@ -35737,7 +35812,7 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
     LEFT JOIN client cl ON cl.id = c.client_id
     ${buildCasePrimaryApplicationJoinSql('c', 'a')}
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+    LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
     LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
     LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
     ${legacyWhere}
@@ -35768,7 +35843,7 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
           COALESCE(p.proposed_cost, ci.intervention_cost, ci.budget_amount, ci.approved_amount) AS intervention_cost_total,
           COALESCE(p.submitted_at, p.created_at, ci.updated_at, ci.created_at) AS submitted_at,
           c.case_number,
-          c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
           sp.email AS assigned_user_email,
           sp.primary_role AS assigned_user_role,
           sp.region_id AS assigned_user_region_id,
@@ -35794,7 +35869,7 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
         LEFT JOIN client cl ON cl.id = c.client_id
         LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ${buildCasePrimaryApplicationIdSql('c')})
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
         LEFT JOIN esdc_intervention_code ic ON ic.code = COALESCE(p.intervention_code, ci.intervention_code)
         LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
         WHERE ${proposalReviewStatusExpr} IN (?, ?)
@@ -35818,7 +35893,7 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
           COALESCE(ci.intervention_cost, ci.budget_amount, ci.approved_amount) AS intervention_cost_total,
           COALESCE(ci.updated_at, ci.created_at) AS submitted_at,
           c.case_number,
-          c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
           sp.email AS assigned_user_email,
           sp.primary_role AS assigned_user_role,
           sp.region_id AS assigned_user_region_id,
@@ -35844,7 +35919,7 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
         LEFT JOIN client cl ON cl.id = c.client_id
         ${buildCasePrimaryApplicationJoinSql('c', 'a')}
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
         LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
         LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
         WHERE p_existing.id IS NULL
@@ -35969,7 +36044,7 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
         intervention_effective_status: normaliseString(r.intervention_effective_status) || null,
         submittedAt: r.submitted_at ? new Date(r.submitted_at).toISOString() : null,
         owner: r.assigned_user_email || null,
-        assigned_user_id: r.assigned_to_user_id || null,
+        ...buildAssignedStaffProfileResponseFields(r),
         assigned_user_email: r.assigned_user_email || null,
         assigned_user_role: r.assigned_user_role || null,
         assigned_user_region_id: r.assigned_user_region_id || null,
@@ -36034,7 +36109,7 @@ app.get('/api/dashboard/intervention-milestone-items', async (req, res) => {
       ci.end_date AS intervention_end_date,
       COALESCE(ci.updated_at, ci.created_at) AS submitted_at,
       c.case_number,
-      c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
       sp.email AS assigned_user_email,
       sp.primary_role AS assigned_user_role,
       a.id AS application_id,
@@ -36048,9 +36123,9 @@ app.get('/api/dashboard/intervention-milestone-items', async (req, res) => {
     JOIN iset_case c ON c.id = ci.case_id
     ${buildCasePrimaryApplicationJoinSql('c', 'a')}
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+    LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
     LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
-    WHERE c.assigned_to_user_id = ?
+    WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?
       AND ${interventionDeliveryStatusExpr} IN (?, ?)
       AND (ci.start_date IS NOT NULL OR ci.end_date IS NOT NULL)
       AND (
@@ -36085,7 +36160,7 @@ app.get('/api/dashboard/intervention-milestone-items', async (req, res) => {
         intervention_effective_status: normaliseString(r.intervention_effective_status) || null,
         submittedAt: r.submitted_at ? new Date(r.submitted_at).toISOString() : null,
         owner: r.assigned_user_email || null,
-        assigned_user_id: r.assigned_to_user_id || null,
+        ...buildAssignedStaffProfileResponseFields(r),
         assigned_user_email: r.assigned_user_email || null,
         assigned_user_role: r.assigned_user_role || null,
         intervention_code: r.intervention_code || null,
@@ -36127,7 +36202,7 @@ app.get('/api/dashboard/payment-proof-due-items', async (req, res) => {
       pp.updated_at AS payment_packet_updated_at,
       pp.case_id,
       c.case_number,
-      c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
       a.id AS application_id,
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."first-name"')) AS submission_first_name,
@@ -36153,7 +36228,7 @@ app.get('/api/dashboard/payment-proof-due-items', async (req, res) => {
     LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
     ${buildCasePrimaryApplicationJoinSql('c', 'a')}
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-    WHERE c.assigned_to_user_id = ?
+    WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?
     ORDER BY COALESCE(pp.updated_at, pp.created_at) DESC, pp.id DESC, ppl.id ASC
     LIMIT 300
   `;
@@ -36641,6 +36716,10 @@ app.post('/api/escalations', async (req, res) => {
     if (!caseId) {
       caseId = await resolveCaseIdFromApplicationId(applicationId, conn);
     }
+    if (!caseId) {
+      await conn.rollback();
+      return res.status(409).json({ error: 'case_scope_required' });
+    }
 
     if (targetRoleKey === 'regional_manager') {
       const regionParam = requesterRegionId ? [requesterRegionId] : [];
@@ -37125,7 +37204,7 @@ app.get('/api/escalations', async (req, res) => {
          a.current_escalation_id,
          COALESCE(c.case_number, CONCAT('APP-', e.application_id)) AS tracking_id,
          c.status AS case_status,
-         c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
          sp.email AS assigned_user_email,
          sp.display_name AS assigned_user_display_name,
          sp.region_id AS assigned_user_region_id,
@@ -37136,7 +37215,7 @@ app.get('/api/escalations', async (req, res) => {
        FROM iset_application_escalation e
        JOIN iset_application a ON a.id = e.application_id
        LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
-       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
        ${whereSql}
        ORDER BY e.updated_at DESC
@@ -37163,14 +37242,14 @@ app.get('/api/escalations', async (req, res) => {
          a.status AS application_status,
          COALESCE(c.case_number, CONCAT('APP-', e.application_id)) AS tracking_id,
          c.status AS case_status,
-         c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
          sp.email AS assigned_user_email,
          sp.display_name AS assigned_user_display_name,
          sp.region_id AS assigned_user_region_id
        FROM iset_application_escalation e
        JOIN iset_application a ON a.id = e.application_id
        LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
-       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
        ${whereSql}
        ORDER BY e.updated_at DESC
        LIMIT 500`;
@@ -37201,6 +37280,7 @@ app.get('/api/escalations', async (req, res) => {
         });
       return {
         ...row,
+        ...buildAssignedStaffProfileResponseFields(row),
         applicant_name: applicantName,
         notes: noteParts.join(' • ') || null,
         notes_list: noteParts
@@ -42106,28 +42186,10 @@ app.post('/api/cases', async (req, res) => {
  * Idempotent: returns existing working application if already ingested.
  */
 app.post('/api/applications/ingest-from-submission', async (req, res) => {
-  const { submission_id } = req.body || {};
-  if (!submission_id) return res.status(400).json({ error: 'submission_id_required' });
-  try {
-    const [existing] = await pool.query('SELECT id FROM iset_application WHERE submission_id = ? LIMIT 1', [submission_id]);
-    if (existing.length > 0) {
-      return res.status(200).json({ message: 'already_ingested', application_id: existing[0].id });
-    }
-    const [subRows] = await pool.query('SELECT * FROM iset_application_submission WHERE id = ? LIMIT 1', [submission_id]);
-    if (subRows.length === 0) return res.status(404).json({ error: 'submission_not_found' });
-    const submission = subRows[0];
-    const payload = { source: 'submission_ingest_manual', ingested_at: new Date().toISOString(), submission_snapshot: submission };
-    const [insertApp] = await pool.query(
-      `INSERT INTO iset_application
-        (submission_id, payload_json, status, lifecycle_status, awaiting_reason, version, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,NOW(),NOW())`,
-      [submission_id, JSON.stringify(payload), 'active', 'submitted', 'none', 1]
-    );
-    return res.status(201).json({ message: 'ingested', application_id: insertApp.insertId });
-  } catch (err) {
-    console.error('Error ingesting submission:', err);
-    return res.status(500).json({ error: 'internal_error', detail: err.message });
-  }
+  return res.status(410).json({
+    error: 'retired_endpoint',
+    message: 'Use POST /api/cases with client_id and optional submission_id/application_id so applications are created with client/case scope.'
+  });
 });
 
 
@@ -43353,7 +43415,7 @@ app.get('/api/applicants/:id/applications', async (req, res) => {
       `SELECT
           c.id AS case_id,
           c.case_number,
-          c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
           c.portfolio_region_id,
           sp.region_id AS owner_region_id,
           a.id AS application_id,
@@ -43366,7 +43428,7 @@ app.get('/api/applicants/:id/applications', async (req, res) => {
        FROM iset_application_submission s
        JOIN iset_application a ON a.submission_id = s.id
        LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
-       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
       WHERE s.user_id = ?${archivedClause}
       ORDER BY a.created_at DESC`,
       [applicantId]
@@ -44662,7 +44724,7 @@ app.get('/api/cases', async (req, res) => {
       .map(token => Number.parseInt(token, 10))
       .filter(Number.isFinite);
     if (ownerFilters.length) {
-      whereClauses.push(`c.assigned_to_user_id IN (${ownerFilters.map(() => '?').join(', ')})`);
+      whereClauses.push(`COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IN (${ownerFilters.map(() => '?').join(', ')})`);
       params.push(...ownerFilters);
     }
 
@@ -44732,18 +44794,18 @@ app.get('/api/cases', async (req, res) => {
           return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
         }
         if (requesterRegionIds.length === 1) {
-          whereClauses.push('(sp.region_id = ? OR c.assigned_to_user_id IS NULL)');
+          whereClauses.push('(sp.region_id = ? OR COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NULL)');
           params.push(requesterRegionIds[0]);
         } else {
           const placeholders = requesterRegionIds.map(() => '?').join(',');
-          whereClauses.push(`(sp.region_id IN (${placeholders}) OR c.assigned_to_user_id IS NULL)`);
+          whereClauses.push(`(sp.region_id IN (${placeholders}) OR COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NULL)`);
           params.push(...requesterRegionIds);
         }
       } else if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
         if (!Number.isFinite(requesterId)) {
           return res.status(403).json({ error: 'forbidden', detail: 'assessor_scope_missing' });
         }
-        whereClauses.push('c.assigned_to_user_id = ?');
+        whereClauses.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
         params.push(requesterId);
       } else {
         return res.status(403).json({ error: 'forbidden' });
@@ -44766,7 +44828,7 @@ app.get('/api/cases', async (req, res) => {
       LEFT JOIN client cl ON c.client_id = cl.id
       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-      LEFT JOIN staff_profiles sp ON c.assigned_to_user_id = sp.id
+      LEFT JOIN staff_profiles sp ON COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = sp.id
 	      LEFT JOIN (
 	        SELECT
 	          case_id,
@@ -44848,7 +44910,7 @@ app.get('/api/cases', async (req, res) => {
 	        COALESCE(intervention_counts.total_intervention_count, 0) AS total_intervention_count,
 	        c.application_id,
         c.client_id,
-        c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
         c.created_at,
         c.updated_at,
         sp.id AS owner_id,
@@ -44939,6 +45001,8 @@ app.get('/api/cases', async (req, res) => {
         row.owner_id || row.owner_email
           ? {
               id: row.owner_id || null,
+              staffProfileId: row.owner_id || null,
+              staff_profile_id: row.owner_id || null,
               name: row.owner_name || row.owner_email || null,
               email: row.owner_email || null,
               role: row.owner_role || null,
@@ -44963,6 +45027,7 @@ app.get('/api/cases', async (req, res) => {
       const totalInterventions = Number.isFinite(Number(row.total_intervention_count))
         ? Number(row.total_intervention_count)
         : 0;
+      const assignmentFields = buildAssignedStaffProfileResponseFields(row);
 
       const counts = {
         openTasks,
@@ -44983,9 +45048,10 @@ app.get('/api/cases', async (req, res) => {
 	        lastActivityAt: toIsoString(row.updated_at),
 	        nextActionDueAt: toIsoString(row.next_action_due_at),
 	        nextOverdueTaskDueAt: toIsoString(row.next_overdue_task_due_at),
-	        applicationId: row.application_id || null,
-	        trackingId:
-	          row.tracking_id ||
+        applicationId: row.application_id || null,
+        ...assignmentFields,
+        trackingId:
+          row.tracking_id ||
 	          row.case_number ||
 	          payloadSubmission.reference_number ||
           (row.id ? `CASE-${row.id}` : null),
@@ -45087,13 +45153,15 @@ async function handleAssignmentRequest(req, res, { requireExistingAssignee = fal
       return res.status(404).json({ error: 'case_not_found' });
     }
 
-    if (requireExistingAssignee && !caseRow.assigned_to_user_id) {
+    const currentAssignedStaffProfileId = resolveCaseAssignedStaffProfileId(caseRow);
+
+    if (requireExistingAssignee && !currentAssignedStaffProfileId) {
       return res.status(409).json({ error: 'no_current_assignee' });
     }
 
     const requesterIsCurrentAssignee =
       Number.isFinite(identity.staffProfileId) &&
-      Number(caseRow.assigned_to_user_id) === Number(identity.staffProfileId);
+      currentAssignedStaffProfileId === Number(identity.staffProfileId);
     if (disallowSelfReassign && requesterIsCurrentAssignee) {
       return res.status(403).json({ error: 'forbidden', detail: 'self_reassign_not_allowed' });
     }
@@ -45107,10 +45175,9 @@ async function handleAssignmentRequest(req, res, { requireExistingAssignee = fal
       return res.status(403).json({ error: 'forbidden', detail: 'assignment_not_permitted' });
     }
 
-    const previousStaff =
-      caseRow.assigned_to_user_id != null
-        ? await fetchStaffProfileById(Number(caseRow.assigned_to_user_id))
-        : null;
+    const previousStaff = currentAssignedStaffProfileId
+      ? await fetchStaffProfileById(currentAssignedStaffProfileId)
+      : null;
 
     if (previousStaff?.id && Number(previousStaff.id) === Number(toUserId)) {
       return res.status(200).json({
@@ -45152,97 +45219,16 @@ app.post('/api/cases/:id/reassign', (req, res) =>
   handleAssignmentRequest(req, res, { requireExistingAssignee: true, disallowSelfReassign: true })
 );
 
-// -------------------------------------------------------------
-// Application Versioning (Working Copy) Endpoints (Initial Draft)
-// -------------------------------------------------------------
-// GET /api/cases/:case_id/application/versions  -> list metadata of versions
-// GET /api/cases/:case_id/application/current   -> current working version payload
-// POST /api/cases/:case_id/application/versions -> create new version (full payload replace for now)
+function sendRetiredCaseApplicationVersionResponse(req, res) {
+  return res.status(410).json({
+    error: 'retired_endpoint',
+    message: 'Case-based application version routes were retired. Use /api/applications/:id/versions for application-based version history.'
+  });
+}
 
-app.get('/api/cases/:case_id/application/versions', async (req, res) => {
-  const caseId = Number(req.params.case_id);
-  if (!caseId) return res.status(400).json({ error: 'invalid_case_id' });
-  try {
-    const [rows] = await pool.query(
-      `SELECT id, version_number, created_at, source_type, change_summary, is_current
-         FROM iset_application_version
-        WHERE case_id = ?
-        ORDER BY version_number ASC`,
-      [caseId]
-    );
-    return res.json(rows);
-  } catch (e) {
-    console.error('[versions:list] error', e);
-    return res.status(500).json({ error: 'failed_to_list_versions' });
-  }
-});
-
-app.get('/api/cases/:case_id/application/current', async (req, res) => {
-  const caseId = Number(req.params.case_id);
-  if (!caseId) return res.status(400).json({ error: 'invalid_case_id' });
-  try {
-    const [[row]] = await pool.query(
-      `SELECT id, version_number, payload_json, created_at, source_type, change_summary
-         FROM iset_application_version
-        WHERE case_id = ? AND is_current = 1
-        LIMIT 1`,
-      [caseId]
-    );
-    if (!row) return res.status(404).json({ error: 'no_current_version' });
-    return res.json(row);
-  } catch (e) {
-    console.error('[versions:current] error', e);
-    return res.status(500).json({ error: 'failed_to_fetch_current_version' });
-  }
-});
-
-app.post('/api/cases/:case_id/application/versions', async (req, res) => {
-  const caseId = Number(req.params.case_id);
-  if (!caseId) return res.status(400).json({ error: 'invalid_case_id' });
-  const { payload, changeSummary, sourceType = 'manual_edit' } = req.body || {};
-  if (!payload || typeof payload !== 'object') return res.status(400).json({ error: 'payload_required' });
-  try {
-    // Fetch current version
-    const [[current]] = await pool.query(
-      `SELECT id, version_number, payload_json, submission_id
-         FROM iset_application_version
-        WHERE case_id = ? AND is_current = 1
-        LIMIT 1`,
-      [caseId]
-    );
-    if (!current) {
-      return res.status(409).json({ error: 'no_initial_version', message: 'Initial version not seeded yet.' });
-    }
-    const nextVersion = current.version_number + 1;
-    const crypto = require('crypto');
-    const canonical = JSON.stringify(payload);
-    const hash = crypto.createHash('sha256').update(canonical).digest('hex');
-    // Mark old current
-    await pool.query('UPDATE iset_application_version SET is_current = 0 WHERE id = ?', [current.id]);
-    // Insert new
-    await pool.query(
-      `INSERT INTO iset_application_version (
-         case_id, submission_id, version_number, payload_json, created_by_evaluator_id, change_summary, source_type, previous_version_id, payload_hash, is_current
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-      [
-        caseId,
-        current.submission_id,
-        nextVersion,
-        JSON.stringify(payload),
-        null, // TODO: link staff user (legacy column name)
-        changeSummary || null,
-        sourceType,
-        current.id,
-        hash
-      ]
-    );
-    await markEsdcParticipantSubmissionNeedsReview(null, caseId, { resetSnapshot: true, resetSubmissionStatus: true });
-    return res.status(201).json({ message: 'version_created', version_number: nextVersion, hash });
-  } catch (e) {
-    console.error('[versions:create] error', e);
-    return res.status(500).json({ error: 'failed_to_create_version' });
-  }
-});
+app.get('/api/cases/:case_id/application/versions', sendRetiredCaseApplicationVersionResponse);
+app.get('/api/cases/:case_id/application/current', sendRetiredCaseApplicationVersionResponse);
+app.post('/api/cases/:case_id/application/versions', sendRetiredCaseApplicationVersionResponse);
 
 
 async function resolveCaseApplicantMessagingContext(caseId) {
@@ -45326,7 +45312,8 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
         c.id,
         COALESCE(c.application_id, a.id) AS application_id,
         c.client_id,
-        c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+        COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_staff_profile_id,
         c.case_number,
         c.status,
         c.lifecycle_status AS case_lifecycle_status,
@@ -45390,7 +45377,7 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
         applicant_submission.email AS applicant_email
       FROM iset_case c
       LEFT JOIN client cl ON cl.id = c.client_id
-      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
       LEFT JOIN canada_region cr ON cr.region_id = c.portfolio_region_id
       LEFT JOIN canada_region owner_region ON owner_region.region_id = sp.region_id
       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
@@ -45470,7 +45457,7 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
         if (!Number.isFinite(requesterId)) {
           return res.status(403).json({ error: 'forbidden', detail: 'assessor_scope_missing' });
         }
-        if (Number(row.assigned_to_user_id) !== requesterId) {
+        if (resolveCaseAssignedStaffProfileId(row) !== requesterId) {
           return res.status(403).json({ error: 'forbidden' });
         }
       } else {
@@ -46121,6 +46108,7 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
         ? rawPathAccountStatus
         : 'no_account';
 
+    const assignmentFields = buildAssignedStaffProfileResponseFields(row);
     const response = {
       id: row.id,
       caseNumber,
@@ -46164,6 +46152,7 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
       nextActionDueAt: toIsoDateTime(row.next_action_due_at),
       trackingId,
       applicationId: row.application_id || null,
+      ...assignmentFields,
       submittedAt: toIsoDateTime(row.case_created_at),
       client: {
         id: row.client_id || null,
@@ -46186,7 +46175,9 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
         activatedAt: toIsoDateTime(row.client_applicant_activated_at),
       },
       owner: {
-        id: row.assigned_to_user_id || null,
+        id: assignmentFields.assignedStaffProfileId || null,
+        staffProfileId: assignmentFields.assignedStaffProfileId || null,
+        staff_profile_id: assignmentFields.assignedStaffProfileId || null,
         name: ownerName,
         email: row.owner_email || null,
         role: row.owner_role || null,
@@ -46607,13 +46598,13 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
     const [[caseRow]] = await connection.query(
       `SELECT
          COALESCE(a.id, c.application_id) AS application_id,
-         c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
          c.portfolio_region_id,
          c.case_context_json,
          sp.region_id AS owner_region_id
        FROM iset_case c
        ${buildCasePrimaryApplicationJoinSql('c', 'a')}
-       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
        WHERE c.id = ?
        LIMIT 1`,
       [caseId]
@@ -46646,7 +46637,7 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
         if (!Number.isFinite(requesterId)) {
           return res.status(403).json({ error: 'forbidden', detail: 'assessor_scope_missing' });
         }
-        if (Number(caseRow.assigned_to_user_id) !== requesterId) {
+        if (resolveCaseAssignedStaffProfileId(caseRow) !== requesterId) {
           return res.status(403).json({ error: 'forbidden' });
         }
       } else {
@@ -47348,12 +47339,12 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
   const [[caseRow]] = await pool.query(
     `SELECT
        c.application_id,
-       c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
        c.portfolio_region_id,
        c.case_number,
        sp.region_id AS owner_region_id
      FROM iset_case c
-     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+     LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
      WHERE c.id = ?
      LIMIT 1`,
     [caseId]
@@ -47389,7 +47380,7 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
       if (!Number.isFinite(requesterId)) {
         return res.status(403).json({ error: 'forbidden', detail: 'assessor_scope_missing' });
       }
-      if (Number(caseRow.assigned_to_user_id) !== requesterId) {
+      if (resolveCaseAssignedStaffProfileId(caseRow) !== requesterId) {
         return res.status(403).json({ error: 'forbidden' });
       }
     } else {
@@ -47409,8 +47400,9 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
   if (resolvedOwnerStaffProfileId === null && Number.isFinite(identity.staffProfileId)) {
     resolvedOwnerStaffProfileId = Number(identity.staffProfileId);
   }
-  if (resolvedOwnerStaffProfileId === null && Number.isFinite(caseRow.assigned_to_user_id)) {
-    resolvedOwnerStaffProfileId = Number(caseRow.assigned_to_user_id);
+  const currentCaseAssignedStaffProfileId = resolveCaseAssignedStaffProfileId(caseRow);
+  if (resolvedOwnerStaffProfileId === null && currentCaseAssignedStaffProfileId) {
+    resolvedOwnerStaffProfileId = currentCaseAssignedStaffProfileId;
   }
 
   const planStatus = isBackloadMode
@@ -47882,9 +47874,9 @@ app.get('/api/cases/:id/cfa-versions', async (req, res) => {
   }
   try {
     const [[caseRow]] = await pool.query(
-      `SELECT c.id, c.assigned_to_user_id, c.portfolio_region_id, sp.region_id AS owner_region_id
+      `SELECT c.id, ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id, c.portfolio_region_id, sp.region_id AS owner_region_id
          FROM iset_case c
-         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+         LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
         WHERE c.id = ?
         LIMIT 1`,
       [caseId]
@@ -49138,7 +49130,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
           }
         } else if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
           const requesterId = Number.isFinite(identity.staffProfileId) ? Number(identity.staffProfileId) : null;
-          if (!Number.isFinite(requesterId) || Number(caseRow.assigned_to_user_id) !== requesterId) {
+          if (!Number.isFinite(requesterId) || resolveCaseAssignedStaffProfileId(caseRow) !== requesterId) {
             return res.status(403).json({ error: 'forbidden' });
           }
         } else {
@@ -50924,7 +50916,8 @@ app.get('/api/cases/:id', async (req, res) => {
         c.id,
         COALESCE(c.application_id, a.id) AS application_id,
         c.client_id,
-        c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+        COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_staff_profile_id,
         sp.display_name AS assigned_user_display_name,
         sp.email AS assigned_user_email,
         c.status,
@@ -51000,7 +50993,7 @@ app.get('/api/cases/:id', async (req, res) => {
       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
       LEFT JOIN application_lock al ON al.application_id = a.id AND al.expires_at > NOW()
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
       LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
       LEFT JOIN iset_case_conflict_declaration cd
         ON cd.case_id = c.id
@@ -51085,7 +51078,7 @@ app.get('/api/cases/:id', async (req, res) => {
           : 'FROM iset_case c';
 
         const staffJoin = (hasStaffEmail && existingCols.includes('assigned_to_user_id'))
-          ? 'LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id'
+          ? 'LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)'
           : '';
 
         caseSelectParts.push(staffJoin && hasStaffDisplayName ? 'sp.display_name AS assigned_user_display_name' : 'NULL AS assigned_user_display_name');
@@ -51150,6 +51143,7 @@ app.get('/api/cases/:id', async (req, res) => {
     row.applicationAwaitingReason = row.application_awaiting_reason || null;
     row.application_closure_reason = row.application_closure_reason || null;
     row.applicationClosureReason = row.application_closure_reason || null;
+    Object.assign(row, buildAssignedStaffProfileResponseFields(row));
 
     try {
       const existingClientSummary = await findExistingClientCaseSummary(pool, {
@@ -51839,6 +51833,9 @@ app.put('/api/admin/messages/:id/delete', async (req, res) => {
     if (accessResult.error) {
       return res.status(accessResult.error.status).json(accessResult.error.body);
     }
+    if (!messageParticipantMatchesUser(messageRow, ownerUserId)) {
+      return res.status(403).json({ error: 'message_mailbox_state_not_available' });
+    }
     await seedCaseMessageItemForOwner({ messageId, ownerUserId });
     const [result] = await pool.query(
       `UPDATE message_item
@@ -51880,6 +51877,9 @@ app.put('/api/admin/messages/:id/status', async (req, res) => {
     if (accessResult.error) {
       return res.status(accessResult.error.status).json(accessResult.error.body);
     }
+    if (!messageParticipantMatchesUser(messageRow, ownerUserId)) {
+      return res.status(403).json({ error: 'message_mailbox_state_not_available' });
+    }
     await seedCaseMessageItemForOwner({ messageId, ownerUserId });
 
     const statusValue = String(status).trim().toLowerCase();
@@ -51920,7 +51920,7 @@ app.put('/api/admin/messages/:id/status', async (req, res) => {
         `UPDATE messages
             SET status = ?
           WHERE id = ?
-            AND recipient_id = ?`,
+            AND recipient_user_id = ?`,
         [statusValue, messageId, ownerUserId]
       );
     }
@@ -52002,16 +52002,16 @@ async function seedCaseMessageItemForOwner({ runner = pool, messageId, ownerUser
        ?,
        CASE
          WHEN COALESCE(m.deleted, 0) = 1 THEN 'deleted'
-         WHEN m.sender_id = ? THEN 'sent'
+         WHEN m.sender_user_id = ? THEN 'sent'
          ELSE 'inbox'
        END AS folder,
        CASE
          WHEN COALESCE(m.deleted, 0) = 1
-           THEN CASE WHEN m.sender_id = ? THEN 'sent' ELSE 'inbox' END
+           THEN CASE WHEN m.sender_user_id = ? THEN 'sent' ELSE 'inbox' END
          ELSE NULL
        END AS folder_before_deleted,
        CASE
-         WHEN m.sender_id = ? THEN COALESCE(m.created_at, NOW())
+         WHEN m.sender_user_id = ? THEN COALESCE(m.created_at, NOW())
          WHEN LOWER(COALESCE(m.status, '')) IN ('read', 'replied') THEN COALESCE(m.created_at, NOW())
          ELSE NULL
        END AS read_at,
@@ -52019,7 +52019,7 @@ async function seedCaseMessageItemForOwner({ runner = pool, messageId, ownerUser
        NULL AS purged_at
      FROM messages m
     WHERE m.id = ?
-      AND (m.sender_id = ? OR m.recipient_id = ?)`,
+      AND (m.sender_user_id = ? OR m.recipient_user_id = ?)`,
     [
       numericOwnerUserId,
       numericOwnerUserId,
@@ -52037,7 +52037,17 @@ async function fetchCaseSecureMessageRow(messageId, connection = pool) {
   const numericMessageId = normalisePositiveInteger(messageId);
   if (!numericMessageId) return null;
   const [[row]] = await connection.query(
-    `SELECT id, case_id, application_id, sender_id, recipient_id
+    `SELECT id,
+            case_id,
+            application_id,
+            sender_id,
+            recipient_id,
+            sender_actor_type,
+            sender_user_id,
+            sender_staff_profile_id,
+            recipient_actor_type,
+            recipient_user_id,
+            recipient_staff_profile_id
        FROM messages
       WHERE id = ?
       LIMIT 1`,
@@ -52050,8 +52060,17 @@ function messageParticipantMatchesUser(messageRow, userId) {
   const numericUserId = normalisePositiveInteger(userId);
   if (!messageRow || !numericUserId) return false;
   return (
-    Number(messageRow.sender_id) === Number(numericUserId) ||
-    Number(messageRow.recipient_id) === Number(numericUserId)
+    Number(messageRow.sender_user_id) === Number(numericUserId) ||
+    Number(messageRow.recipient_user_id) === Number(numericUserId)
+  );
+}
+
+function messageActorMatchesUser(messageRow, prefix, actorType, userId) {
+  const numericUserId = normalisePositiveInteger(userId);
+  if (!messageRow || !numericUserId || !prefix || !actorType) return false;
+  return (
+    String(messageRow[`${prefix}_actor_type`] || '') === actorType &&
+    Number(messageRow[`${prefix}_user_id`]) === Number(numericUserId)
   );
 }
 
@@ -52088,8 +52107,8 @@ async function resolveCaseSecureMessageAccess(req, messageRow, {
       }
       const messageMatchesCaseApplicant =
         applicantUserId &&
-        (Number(messageRow.sender_id) === Number(applicantUserId) ||
-          Number(messageRow.recipient_id) === Number(applicantUserId));
+        (messageActorMatchesUser(messageRow, 'sender', 'applicant_user', applicantUserId) ||
+          messageActorMatchesUser(messageRow, 'recipient', 'applicant_user', applicantUserId));
       if (!messageMatchesCaseApplicant && !messageParticipantMatchesUser(messageRow, ownerUserId)) {
         return { error: { status: 403, body: { error: 'forbidden', detail: 'message_case_scope_mismatch' } } };
       }
@@ -53896,35 +53915,7 @@ app.get('/api/cases/:id/messages', async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit || '200', 10) || 200, 1), 1000);
     const offset = Math.max(parseInt(req.query.offset || '0', 10) || 0, 0);
 
-    // Best-effort seed for messages created before mailbox-item model for this owner.
-    await pool.query(
-      `INSERT IGNORE INTO message_item (message_id, owner_user_id, folder, folder_before_deleted, read_at, deleted_at, purged_at)
-       SELECT
-         m.id,
-         ?,
-         CASE
-           WHEN COALESCE(m.deleted, 0) = 1 THEN 'deleted'
-           WHEN m.sender_id = ? THEN 'sent'
-           ELSE 'inbox'
-         END AS folder,
-         CASE
-           WHEN COALESCE(m.deleted, 0) = 1
-             THEN CASE WHEN m.sender_id = ? THEN 'sent' ELSE 'inbox' END
-           ELSE NULL
-         END AS folder_before_deleted,
-         CASE
-           WHEN m.sender_id = ? THEN COALESCE(m.created_at, NOW())
-           WHEN LOWER(COALESCE(m.status, '')) IN ('read', 'replied') THEN COALESCE(m.created_at, NOW())
-           ELSE NULL
-         END AS read_at,
-       CASE WHEN COALESCE(m.deleted, 0) = 1 THEN COALESCE(m.created_at, NOW()) ELSE NULL END AS deleted_at,
-        NULL AS purged_at
-       FROM messages m
-      WHERE m.case_id = ?
-      `,
-      [ownerUserId, ownerUserId, ownerUserId, ownerUserId, caseId]
-    );
-
+    const includeAllCaseMessages = isStaffRequester ? 1 : 0;
     const [rows] = await pool.query(
       `SELECT
           m.id,
@@ -53932,34 +53923,55 @@ app.get('/api/cases/:id/messages', async (req, res) => {
           m.application_id,
           m.sender_id,
           m.recipient_id,
+          m.sender_actor_type,
+          m.sender_user_id,
+          m.sender_staff_profile_id,
+          m.recipient_actor_type,
+          m.recipient_user_id,
+          m.recipient_staff_profile_id,
           m.subject,
           m.body,
           m.status AS recipient_status,
           CASE
             WHEN mi.folder = 'inbox' AND mi.read_at IS NULL THEN 'unread'
+            WHEN mi.id IS NULL AND m.recipient_user_id = ? AND LOWER(COALESCE(m.status, '')) = 'unread' THEN 'unread'
             ELSE 'read'
           END AS mailbox_status,
           CASE
             WHEN mi.folder = 'inbox' AND mi.read_at IS NULL THEN 'unread'
+            WHEN mi.id IS NULL AND m.recipient_user_id = ? AND LOWER(COALESCE(m.status, '')) = 'unread' THEN 'unread'
             ELSE 'read'
           END AS status,
           CASE WHEN mi.folder = 'deleted' THEN 1 ELSE 0 END AS deleted,
           m.urgent,
           m.created_at,
-          mi.folder,
+          COALESCE(mi.folder, CASE WHEN m.sender_user_id = ? THEN 'sent' ELSE 'inbox' END) AS folder,
           mi.folder_before_deleted,
           mi.read_at,
           mi.deleted_at,
           mi.purged_at
          FROM messages m
-         JOIN message_item mi
+         LEFT JOIN message_item mi
            ON mi.message_id = m.id
           AND mi.owner_user_id = ?
+          AND mi.owner_user_id IN (m.sender_user_id, m.recipient_user_id)
           AND mi.purged_at IS NULL
         WHERE m.case_id = ?
-        ORDER BY created_at ASC
+          AND (? = 1 OR m.sender_user_id = ? OR m.recipient_user_id = ?)
+        ORDER BY m.created_at ASC, m.id ASC
         LIMIT ? OFFSET ?`,
-      [ownerUserId, caseId, limit, offset]
+      [
+        ownerUserId,
+        ownerUserId,
+        ownerUserId,
+        ownerUserId,
+        caseId,
+        includeAllCaseMessages,
+        ownerUserId,
+        ownerUserId,
+        limit,
+        offset,
+      ]
     );
 
     const messageIds = rows.map(r => r.id);
@@ -54545,11 +54557,8 @@ const handlePostCaseSecureMessage = async (req, res) => {
 
     const requestedApplicationId = normalisePositiveInteger(req.body?.applicationId);
     const caseApplicationId = normalisePositiveInteger(caseRow?.application_id);
-    const messageApplicationId =
-      requestedApplicationId && caseApplicationId && requestedApplicationId === caseApplicationId
-        ? requestedApplicationId
-        : null;
-    if (requestedApplicationId && messageApplicationId === null) {
+    const messageApplicationId = caseApplicationId || null;
+    if (requestedApplicationId && requestedApplicationId !== messageApplicationId) {
       console.warn(
         '[messages] ignoring applicationId mismatch for case %s (requested %s, case %s)',
         caseId,
@@ -54558,10 +54567,27 @@ const handlePostCaseSecureMessage = async (req, res) => {
       );
     }
 
+    const senderStaffProfileId =
+      resolveActiveStaffProfileId(req) ||
+      await findStaffProfileIdByUserId(pool, Number(senderId));
+    const senderActorType = senderStaffProfileId ? 'staff_profile' : 'local_user';
     const [result] = await pool.query(
-      `INSERT INTO messages (sender_id, recipient_id, case_id, application_id, subject, body, status, deleted, urgent, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'unread', FALSE, ?, NOW())`,
-      [senderId, recipientId, caseId, messageApplicationId, subjectValue, bodyValue, !!urgent]
+      `INSERT INTO messages
+         (sender_id, recipient_id, sender_actor_type, sender_user_id, sender_staff_profile_id, recipient_actor_type, recipient_user_id, recipient_staff_profile_id, case_id, application_id, subject, body, status, deleted, urgent, created_at)
+       VALUES (?, ?, ?, ?, ?, 'applicant_user', ?, NULL, ?, ?, ?, ?, 'unread', FALSE, ?, NOW())`,
+      [
+        senderId,
+        recipientId,
+        senderActorType,
+        senderId,
+        senderStaffProfileId || null,
+        recipientId,
+        caseId,
+        messageApplicationId,
+        subjectValue,
+        bodyValue,
+        !!urgent,
+      ]
     );
     await ensureCaseMessageItemTable();
     const deliveryRows = [];
@@ -54749,8 +54775,6 @@ const handlePostCaseSecureMessage = async (req, res) => {
       actorName ||
       req?.auth?.name ||
       null;
-    const senderStaffProfileId = resolveActiveStaffProfileId(req);
-
     const docsRequestedEligibleDocType = docTypeValue => {
       const normalized = String(docTypeValue || '').trim().toLowerCase();
       if (!normalized) return false;
@@ -55113,7 +55137,7 @@ app.get('/api/me/case-watches', async (req, res) => {
         `SELECT
             c.id,
             c.status,
-            c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
             c.updated_at,
             c.case_number,
             sub.reference_number AS submission_reference,
@@ -55124,7 +55148,7 @@ app.get('/api/me/case-watches', async (req, res) => {
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a')}
          LEFT JOIN iset_application_submission sub ON sub.id = a.submission_id
-         LEFT JOIN staff_profiles staff ON staff.id = c.assigned_to_user_id
+         LEFT JOIN staff_profiles staff ON staff.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
         WHERE c.id IN (${placeholders})`,
         caseIds
       );
@@ -55201,7 +55225,7 @@ app.post('/api/cases/:caseId/watch', async (req, res) => {
       `SELECT
           c.id,
           c.status,
-          c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
           c.updated_at,
           c.case_number,
           c.case_context_json,
@@ -55210,7 +55234,7 @@ app.post('/api/cases/:caseId/watch', async (req, res) => {
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a')}
          LEFT JOIN iset_application_submission sub ON sub.id = a.submission_id
-         LEFT JOIN staff_profiles staff ON staff.id = c.assigned_to_user_id
+         LEFT JOIN staff_profiles staff ON staff.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
         WHERE c.id = ?
         LIMIT 1`,
       [caseId]
@@ -56155,12 +56179,12 @@ async function fetchPaymentPacketAccessRowById(packetId, connection = pool) {
             pp.case_id,
             pp.client_id,
             pp.intervention_id,
-            c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
             c.portfolio_region_id,
             sp.region_id AS owner_region_id
        FROM payment_packet pp
        LEFT JOIN iset_case c ON c.id = pp.case_id
-       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+       LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
       WHERE pp.id = ?
       LIMIT 1`,
     [normalizedPacketId]
@@ -57912,8 +57936,8 @@ async function createCaseForImportedClient(connection, clientId, normalized = {}
 
   const [insertCase] = await connection.query(
     `INSERT INTO iset_case
-      (application_id, client_id, assigned_to_user_id, status, lifecycle_status, portfolio_region_id, opened_at, case_context_json, created_by_staff_profile_id, updated_by_staff_profile_id, created_at, updated_at)
-     VALUES (NULL, ?, NULL, ?, ?, ?, NOW(), ?, ?, ?, NOW(), NOW())`,
+      (application_id, client_id, assigned_to_user_id, assigned_staff_profile_id, status, lifecycle_status, portfolio_region_id, opened_at, case_context_json, created_by_staff_profile_id, updated_by_staff_profile_id, created_at, updated_at)
+     VALUES (NULL, ?, NULL, NULL, ?, ?, ?, NOW(), ?, ?, ?, NOW(), NOW())`,
     [
       clientId,
       CASE_STATUS_DERIVED_VALUES.initiated,
@@ -58339,12 +58363,12 @@ async function resolvePaymentPacketCaseManagerMailbox(packetRow, connection = nu
   }
   try {
     const [[row]] = await runner.query(
-      `SELECT c.assigned_to_user_id,
+      `SELECT ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id,
               sp.display_name,
               sp.name,
               sp.email
          FROM iset_case c
-         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+         LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
         WHERE c.id = ?
         LIMIT 1`,
       [caseId]
@@ -67191,7 +67215,7 @@ async function readFinanceInterventionReportRawRows(
         ci.*,
         c.case_number,
         c.client_id,
-        c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
         COALESCE(CAST(c.client_id AS CHAR), CONCAT('case-', c.id)) AS participant_key,
         cl.first_name AS client_first_name,
         cl.last_name AS client_last_name,
@@ -67220,7 +67244,7 @@ async function readFinanceInterventionReportRawRows(
       LEFT JOIN client cl ON cl.id = c.client_id
       LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
       LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
-      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
       LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
       LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
@@ -69968,7 +69992,7 @@ app.get('/api/finance/payment-packets', async (req, res) => {
     const [rows] = await pool.query(
       `SELECT pp.*,
               c.case_number,
-              c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
               c.portfolio_region_id,
               case_owner_sp.region_id AS owner_region_id,
               COALESCE(a.id, c.application_id) AS application_id,
@@ -69986,7 +70010,7 @@ app.get('/api/finance/payment-packets', async (req, res) => {
               COALESCE(s.user_id, applicant_client_sub.id, applicant_client_email.id) AS applicant_user_id
          FROM payment_packet pp
          LEFT JOIN iset_case c ON c.id = pp.case_id
-         LEFT JOIN staff_profiles case_owner_sp ON case_owner_sp.id = c.assigned_to_user_id
+         LEFT JOIN staff_profiles case_owner_sp ON case_owner_sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
          LEFT JOIN client cl ON cl.id = pp.client_id
          ${buildCasePrimaryApplicationJoinSql('c', 'a')}
          LEFT JOIN iset_application_submission s ON s.id = a.submission_id
@@ -74841,95 +74865,11 @@ app.put('/api/applications/:id/ptma-case-summary', async (req, res) => {
   }
 });
 
-// PATCH /api/applications/:id/answers
-// Body: { answers: { key: newValue, ... } }
-// Merges into payload_json.answers without overwriting unspecified keys; does not modify submission snapshot.
-app.patch('/api/applications/:id/answers', async (req, res) => {
-  const applicationId = req.params.id;
-  const { answers } = req.body || {};
-  if (!answers || typeof answers !== 'object' || Array.isArray(answers)) {
-    return res.status(400).json({ error: 'Missing or invalid answers object in body' });
-  }
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-    // Load current payload plus submission id
-    const [[row]] = await connection.query('SELECT payload_json, submission_id, status FROM iset_application WHERE id = ? LIMIT 1 FOR UPDATE', [applicationId]);
-    if (!row) {
-      await connection.rollback();
-      return res.status(404).json({ error: 'Application not found' });
-    }
-    if (!canViewArchivedApplications(req) && isArchivedApplicationStatus(row.status)) {
-      await connection.rollback();
-      return res.status(404).json({ error: 'Application not found' });
-    }
-    let payload = row.payload_json;
-    if (payload && typeof payload === 'string') { try { payload = JSON.parse(payload); } catch { payload = {}; } }
-    if (!payload || typeof payload !== 'object') payload = {};
-    if (!payload.answers || typeof payload.answers !== 'object') payload.answers = {};
-
-    // Determine candidate submission id (prefer column, else payload_json.submission_snapshot.id)
-    let candidateSubmissionId = row.submission_id;
-    if (!candidateSubmissionId) {
-      try {
-        if (payload.submission_snapshot && payload.submission_snapshot.id) {
-          candidateSubmissionId = payload.submission_snapshot.id;
-        }
-      } catch(_) { /* ignore */ }
-    }
-
-    // Bootstrap missing keys from immutable submission snapshot so we don't lose fields when saving a single edit.
-    try {
-      if (candidateSubmissionId) {
-        const [[sub]] = await connection.query('SELECT intake_payload FROM iset_application_submission WHERE id = ? LIMIT 1', [candidateSubmissionId]);
-        if (sub && sub.intake_payload) {
-          let intake = sub.intake_payload;
-            if (typeof intake === 'string') { try { intake = JSON.parse(intake); } catch { intake = {}; } }
-          if (intake && typeof intake === 'object') {
-            const sourceAnswers = intake.answers || intake.form_answers || intake.data || intake;
-            if (sourceAnswers && typeof sourceAnswers === 'object') {
-              const existingKeyCount = Object.keys(payload.answers).length;
-              const sourceKeyCount = Object.keys(sourceAnswers).length;
-              // If existing answers look minimal compared to source, hydrate all keys (allow overwrite of sparse placeholder)
-              const hydrateAll = existingKeyCount === 0 || (existingKeyCount < 5 && sourceKeyCount > existingKeyCount);
-              for (const [k,v] of Object.entries(sourceAnswers)) {
-                if (hydrateAll || payload.answers[k] === undefined) payload.answers[k] = v;
-              }
-            }
-          }
-        }
-      }
-    } catch (bootstrapErr) {
-      console.warn('[answers:patch] bootstrap from submission failed:', bootstrapErr.code || bootstrapErr.message);
-    }
-
-    // Apply provided updates
-    for (const [k, v] of Object.entries(answers)) {
-      payload.answers[k] = v;
-    }
-
-    const serialized = JSON.stringify(payload);
-
-    // Optional lightweight versioning: if version table exists, store previous payload before update
-    try {
-      await connection.query('INSERT INTO iset_application_version (application_id, previous_payload_json) VALUES (?, ?)', [applicationId, row.payload_json]);
-    } catch (verErr) {
-      // table may not exist yet; ignore
-    }
-
-    await connection.query('UPDATE iset_application SET payload_json = ? WHERE id = ?', [serialized, applicationId]);
-    await syncDeniedIneligibleReportingForApplicationIfNeeded(connection, {
-      applicationId,
-    });
-    await connection.commit();
-    res.status(200).json({ updated: Object.keys(answers), answers: payload.answers });
-  } catch (err) {
-    try { await connection.rollback(); } catch (_) {}
-    console.error('Error patching application answers:', err);
-    res.status(500).json({ error: 'Failed to update application answers' });
-  } finally {
-    connection.release();
-  }
+app.patch('/api/applications/:id/answers', (req, res) => {
+  return res.status(410).json({
+    error: 'retired_endpoint',
+    message: 'Direct application-answer patching was retired. Use POST /api/applications/:id/versions so edits use row-version locking and application version history.'
+  });
 });
 
 app.get('/api/applications/:id/versions', async (req, res) => {
@@ -75940,7 +75880,7 @@ app.get('/api/applications', async (req, res) => {
       a.docs_requested_cleared_at AS docs_requested_cleared_at,
       a.docs_requested_source AS docs_requested_source,
       a.updated_at AS application_updated_at,
-      c.status AS case_status, c.assigned_to_user_id,
+      c.status AS case_status, COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
       c.created_at AS opened_at, c.updated_at AS last_activity_at,
       sp.email AS assigned_user_email, sp.primary_role AS assigned_user_role,
       sp.id AS staff_profile_id,
@@ -75975,7 +75915,7 @@ app.get('/api/applications', async (req, res) => {
       ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
       LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
       LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
-      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id
+      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
       LEFT JOIN application_lock al ON al.application_id = a.id AND al.expires_at > NOW()`;
 
     const where = [];
@@ -76009,7 +75949,7 @@ app.get('/api/applications', async (req, res) => {
 
     if (role === 'ISET Coordinator') {
       if (!req.staffProfile?.id) return res.json({ count: 0, rows: [] });
-      where.push('c.assigned_to_user_id = ?'); params.push(req.staffProfile.id);
+      where.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?'); params.push(req.staffProfile.id);
     } else if (role === 'Regional Manager') {
       // Filter by regions (multi) OR assignments directly to coordinator
       if (regionIds.length) {
@@ -76017,14 +75957,14 @@ app.get('/api/applications', async (req, res) => {
         const regionPlaceholders = regionIds.map(() => '?').join(',');
         if (regionCodes.length) {
           const codePlaceholders = regionCodes.map(() => '?').join(',');
-          where.push(`(sp.region_id IN (${regionPlaceholders}) OR c.assigned_to_user_id = ? OR ((c.assigned_to_user_id IS NULL OR c.assigned_to_user_id = 0) AND LOWER(${addressProvinceExpr}) IN (${codePlaceholders})))`);
+          where.push(`(sp.region_id IN (${regionPlaceholders}) OR COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ? OR ((COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NULL OR COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = 0) AND LOWER(${addressProvinceExpr}) IN (${codePlaceholders})))`);
           params.push(...regionIds, coordinatorId, ...regionCodes);
         } else {
-          where.push(`(sp.region_id IN (${regionPlaceholders}) OR c.assigned_to_user_id = ?)`);
+          where.push(`(sp.region_id IN (${regionPlaceholders}) OR COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?)`);
           params.push(...regionIds, coordinatorId);
         }
       } else if (req.staffProfile?.id) {
-        where.push('c.assigned_to_user_id = ?'); params.push(req.staffProfile.id);
+        where.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?'); params.push(req.staffProfile.id);
       } else {
         return res.json({ count: 0, rows: [] });
       }
@@ -76109,7 +76049,7 @@ app.get('/api/applications', async (req, res) => {
     let count = rows.length;
     try {
       if (role === 'NWAC Administrator' || role === 'System Administrator') {
-        let countCaseSql = `SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c ${buildCasePrimaryApplicationJoinSql('c', 'a', true)} LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id`;
+        let countCaseSql = `SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c ${buildCasePrimaryApplicationJoinSql('c', 'a', true)} LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)`;
         if (where.length) countCaseSql += ' WHERE ' + where.join(' AND ');
         const [[caseCnt]] = await pool.query(countCaseSql, params);
         const unassignedWhereClauses = ['c2.id IS NULL'];
@@ -76130,7 +76070,7 @@ app.get('/api/applications', async (req, res) => {
         const [[unassignedCnt]] = await pool.query(unassignedSql, unassignedParams);
         count = (caseCnt?.cnt || 0) + (unassignedCnt?.cnt || 0);
       } else {
-        let countSql = `SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c ${buildCasePrimaryApplicationJoinSql('c', 'a', true)} LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_to_user_id`;
+        let countSql = `SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c ${buildCasePrimaryApplicationJoinSql('c', 'a', true)} LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)`;
         if (where.length) countSql += ' WHERE ' + where.join(' AND ');
         const [[cRow]] = await pool.query(countSql, params);
         if (cRow && typeof cRow.cnt === 'number') count = cRow.cnt;
@@ -76190,7 +76130,7 @@ app.get('/api/applications', async (req, res) => {
         docs_requested_at: docsRequestedAt,
         docs_requested_cleared_at: docsRequestedClearedAt,
         docs_requested_source: docsRequestedSource,
-        assigned_user_id: r.assigned_to_user_id,
+        ...buildAssignedStaffProfileResponseFields(r),
         assigned_user_email: r.assigned_user_email || null,
         assigned_user_role: r.assigned_user_role || null,
         submitted_at: r.submitted_at,
@@ -76446,68 +76386,18 @@ app.post('/api/save-njk-file', requireUnsafeAdminDebugAccess, (req, res) => {
   });
 });
 
-// Endpoint to fetch all components
-app.get('/api/govuk-components', async (req, res) => {
-  try {
-    const [components] = await pool.query('SELECT * FROM govuk_component');
-    res.status(200).json(components);
-  } catch (error) {
-    console.error('Error fetching components:', error);
-    res.status(500).json({ message: 'Failed to fetch components' });
-  }
-});
+function sendRetiredGovukComponentResponse(req, res) {
+  return res.status(410).json({
+    error: 'retired_endpoint',
+    message: 'The legacy GOV.UK component experiment has been retired.'
+  });
+}
 
-// Endpoint to fetch a single component by ID
-app.get('/api/govuk-components/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const [components] = await pool.query('SELECT * FROM govuk_component WHERE id = ?', [id]);
-    if (components.length === 0) {
-      return res.status(404).json({ message: 'Component not found' });
-    }
-    res.status(200).json(components[0]);
-  } catch (error) {
-    console.error('Error fetching component:', error);
-    res.status(500).json({ message: 'Failed to fetch component' });
-  }
-});
-
-// Endpoint to create a new component
-app.post('/api/govuk-components', async (req, res) => {
-  const { type, label, props } = req.body;
-  try {
-    const [result] = await pool.query('INSERT INTO govuk_component (type, label, props) VALUES (?, ?, ?)', [type, label, JSON.stringify(props)]);
-    res.status(201).json({ id: result.insertId, type, label, props });
-  } catch (error) {
-    console.error('Error creating component:', error);
-    res.status(500).json({ message: 'Failed to create component' });
-  }
-});
-
-// Endpoint to update an existing component
-app.put('/api/govuk-components/:id', async (req, res) => {
-  const { id } = req.params;
-  const { type, label, props } = req.body;
-  try {
-    await pool.query('UPDATE govuk_component SET type = ?, label = ?, props = ? WHERE id = ?', [type, label, JSON.stringify(props), id]);
-    res.status(200).json({ id, type, label, props });
-  } catch (error) {
-    console.error('Error updating component:', error);
-    res.status(500).json({ message: 'Failed to update component' });
-  }
-});
-
-// Endpoint to delete a component
-app.delete('/api/govuk-components/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    await pool.query('DELETE FROM govuk_component WHERE id = ?', [id]);
-    res.status(200).json({ message: 'Component deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting component:', error);
-    res.status(500).json({ message: 'Failed to delete component' });
-  }
-});
+app.get('/api/govuk-components', sendRetiredGovukComponentResponse);
+app.get('/api/govuk-components/:id', sendRetiredGovukComponentResponse);
+app.post('/api/govuk-components', sendRetiredGovukComponentResponse);
+app.put('/api/govuk-components/:id', sendRetiredGovukComponentResponse);
+app.delete('/api/govuk-components/:id', sendRetiredGovukComponentResponse);
 
 app.get('/api/load-blockstep-json', requireUnsafeAdminDebugAccess, (req, res) => {
   const { path: jsonPath } = req.query;
@@ -76594,7 +76484,7 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
 
     // Get all attachments for this message after message/case access is established.
     const [attachments] = await pool.query(
-      `SELECT id, message_id, file_path, original_filename, uploaded_at, user_id, application_id
+      `SELECT id, message_id, case_id, client_id, file_path, original_filename, uploaded_at, user_id, application_id
        FROM message_attachment
        WHERE message_id = ?
        ORDER BY uploaded_at ASC`,
@@ -76605,10 +76495,11 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
     const resolvedApplicationId = accessResult.applicationId || message.application_id || null;
     let applicantUserId = accessResult.applicantUserId || null;
     if (!applicantUserId) {
-      applicantUserId =
-        message.sender_id ||
-        message.recipient_id ||
-        null;
+      if (messageActorMatchesUser(message, 'sender', 'applicant_user', message.sender_user_id)) {
+        applicantUserId = message.sender_user_id;
+      } else if (messageActorMatchesUser(message, 'recipient', 'applicant_user', message.recipient_user_id)) {
+        applicantUserId = message.recipient_user_id;
+      }
     }
 
     const adoptedAttachments = [];
@@ -76629,14 +76520,28 @@ app.get('/api/admin/messages/:id/attachments', async (req, res) => {
         return res.status(400).json({ error: errorCode });
       }
       for (const att of attachments) {
+        const attachmentCaseId = normalisePositiveInteger(att.case_id);
+        if (attachmentCaseId && caseId && attachmentCaseId !== Number(caseId)) {
+          return res.status(409).json({ error: 'attachment_case_scope_mismatch', attachment_id: att.id });
+        }
+        const attachmentApplicationId = normalisePositiveInteger(att.application_id);
+        if (
+          attachmentApplicationId &&
+          resolvedApplicationId &&
+          attachmentApplicationId !== Number(resolvedApplicationId)
+        ) {
+          return res.status(409).json({ error: 'attachment_application_scope_mismatch', attachment_id: att.id });
+        }
+        const attachmentClientId = normalisePositiveInteger(att.client_id);
+        if (attachmentClientId && resolvedClientId && attachmentClientId !== Number(resolvedClientId)) {
+          return res.status(409).json({ error: 'attachment_client_scope_mismatch', attachment_id: att.id });
+        }
         const docApplicantUserId =
           applicantUserId ||
           att.applicant_user_id ||
           att.user_id ||
-          message.sender_id ||
-          message.recipient_id ||
           null;
-        const docUserId = att.user_id || message.sender_id || message.recipient_id || null;
+        const docUserId = att.user_id || applicantUserId || null;
 
         let relativeFilePath = att.file_path.replace(/\\/g, '/');
         const uploadsIndex = relativeFilePath.lastIndexOf('uploads/');
@@ -76991,6 +76896,9 @@ app.delete('/api/admin/messages/:id/hard-delete', async (req, res) => {
     if (accessResult.error) {
       return res.status(accessResult.error.status).json(accessResult.error.body);
     }
+    if (!messageParticipantMatchesUser(messageRow, ownerUserId)) {
+      return res.status(403).json({ error: 'message_mailbox_state_not_available' });
+    }
     await seedCaseMessageItemForOwner({ messageId, ownerUserId });
 
     const [result] = await pool.query(
@@ -77173,7 +77081,7 @@ app.put('/api/cases/:id', async (req, res) => {
               c.closure_reason,
               COALESCE(c.application_id, a.id) AS application_id,
               c.client_id,
-              c.assigned_to_user_id,
+COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
               c.case_context_json,
               a.status AS application_status,
               a.lifecycle_status AS application_lifecycle_status,

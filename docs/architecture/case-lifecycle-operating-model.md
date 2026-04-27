@@ -167,8 +167,8 @@ Order:
 
 ### 5.5 Concurrency & Race Conditions
 Problem: Multiple workers / retries could double-assign. Strategy:
-- Use single SQL `UPDATE iset_case SET assigned_user_id=?, assigned_role=?, updated_at=NOW() WHERE id=? AND assigned_user_id IS NULL` (for first assignment) and check affected row count.
-- For reassignment path ensure optimistic concurrency (WHERE assigned_user_id = expectedCurrentUserId) to prevent stale overrides.
+- Use single SQL `UPDATE iset_case SET assigned_staff_profile_id=?, assigned_role=?, updated_at=NOW() WHERE id=? AND assigned_staff_profile_id IS NULL` (for first assignment) and check affected row count.
+- For reassignment path ensure optimistic concurrency (`WHERE assigned_staff_profile_id = expectedCurrentStaffProfileId`) to prevent stale overrides.
 - Wrap in transaction when also inserting AssignmentHistory to guarantee ordering; AssignmentHistory has FK to case.
 - Add unique partial index approach later if needed (not required if single column null-guard update used).
 
@@ -231,7 +231,7 @@ Transitional Approach: Minimize disruption—augment existing `iset_case` until 
 ### 7.1 Core Tables (Proposed Additions / Adjustments)
 1. iset_case (existing) ADD columns (if not present):
   - status ENUM('RECEIVED','ASSIGNED','IN_ASSESSMENT','ASSESSMENT_SUBMITTED','REVISION_REQUESTED','DECISION_RECORDED','CLOSED')
-  - assigned_user_id BIGINT NULL (FK user.id)
+  - assigned_staff_profile_id BIGINT UNSIGNED NULL (FK staff_profiles.id)
   - assigned_role ENUM('PA','RC','AA') NULL
   - sla_due_at DATETIME NULL
   - decision_outcome ENUM('APPROVED','DENIED','OTHER') NULL
@@ -273,7 +273,7 @@ Transitional Approach: Minimize disruption—augment existing `iset_case` until 
 - Aging (UI) computed client/server difference days: FLOOR((NOW() - created_at)/86400).
 
 ### 7.3 Index Plan (Phase 1)
-- iset_case: INDEX(status, province), INDEX(assigned_user_id, status), INDEX(sla_due_at, status), INDEX(status, sla_due_at)
+- iset_case: INDEX(status, province), INDEX(assigned_staff_profile_id, status), INDEX(sla_due_at, status), INDEX(status, sla_due_at)
 - assignment_history: already covered above
 - assessment: INDEX(case_id, status)
 - case_event: handled; consider composite index (case_id, type, created_at) for filtered retrieval.

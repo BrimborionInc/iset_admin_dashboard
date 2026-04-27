@@ -35,6 +35,7 @@ import {
   normalizeApplicationStatus,
   normalizeStatusKey,
 } from '../utils/applicationStatus';
+import { resolveAssignedStaffProfileId } from '../utils/assignmentIdentity';
 import ApplicationsWidgetHelp from '../helpPanelContents/applicationsWidgetHelp';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
@@ -175,7 +176,7 @@ const getStatusInfo = (row) => {
     applicationLifecycleStatus: row.application_lifecycle_status ?? row.applicationLifecycleStatus ?? null,
     caseStatus: row.case_status || null,
     caseId: row.case_id,
-    assignedUserId: row.assigned_user_id,
+    assignedUserId: resolveAssignedStaffProfileId(row),
     assessmentEligibility: row.assessment_esdc_eligibility,
     decisionOutcome: row.decision_outcome ?? row.decisionOutcome ?? null,
     awaitingReason: row.application_awaiting_reason ?? row.applicationAwaitingReason ?? null,
@@ -302,7 +303,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
       }
       case 'sla_risk': {
         const statusInfo = getStatusInfo(item);
-        const meta = computeSlaMeta(item, slaTargets, statusInfo.rawStatus, Boolean(item.assigned_user_id));
+        const meta = computeSlaMeta(item, slaTargets, statusInfo.rawStatus, Boolean(resolveAssignedStaffProfileId(item)));
         if (meta.deltaDays !== null && meta.deltaDays !== undefined) {
           return meta.deltaDays;
         }
@@ -422,7 +423,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
         header: 'Overdue',
         cell: i => {
           const statusInfo = getStatusInfo(i);
-          const meta = computeSlaMeta(i, slaTargets, statusInfo.rawStatus, Boolean(i.assigned_user_id));
+          const meta = computeSlaMeta(i, slaTargets, statusInfo.rawStatus, Boolean(resolveAssignedStaffProfileId(i)));
           const badge = (() => {
             switch (meta.status) {
               case 'critical-overdue':
@@ -633,7 +634,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
 
     const currentApplicationStatus = (assignTargetCase.application_status || assignTargetCase.status || '').toLowerCase();
     const shouldPromoteStatus = false; // do not auto-change status on assignment
-    const isReassign = Boolean(assignTargetCase?.assigned_user_id);
+    const isReassign = Boolean(resolveAssignedStaffProfileId(assignTargetCase));
     const trackingLabel = assignTargetCase?.tracking_id || assignTargetCase?.case_id;
     const assigneeLabel = selectedAssignee?.label;
     try {
@@ -838,10 +839,11 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
       const caseStatusLower = normalizeApplicationStatus(item.application_status || item.status || '');
       const unassigned =
         item.case_id &&
-        !item.assigned_user_id &&
+        !resolveAssignedStaffProfileId(item) &&
         !COMPLETED_APPLICATION_STATUSES.has(caseStatusLower);
       const reassignRoles = ['NWAC Administrator','Regional Manager','System Administrator'];
-      const canReassign = item.case_id && item.assigned_user_id && reassignRoles.includes(normalizedUserRole);
+      const assignedStaffProfileId = resolveAssignedStaffProfileId(item);
+      const canReassign = item.case_id && assignedStaffProfileId && reassignRoles.includes(normalizedUserRole);
       const lockOwnerId = item.lock_owner_id ? String(item.lock_owner_id) : null;
       const lockOwnerName = item.lock_owner_name || item.lock_owner_email || (lockOwnerId ? `User ${lockOwnerId}` : null);
       const lockedByMe = lockOwnerId && currentUserId && lockOwnerId === currentUserId;
@@ -909,7 +911,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
           {canReassign && (
             <Button
               variant="inline-link"
-              onClick={() => openAssignModal(item, item.assigned_user_id, { lockBlocked: lockedByAnother, reason: lockMessage })}
+              onClick={() => openAssignModal(item, assignedStaffProfileId, { lockBlocked: lockedByAnother, reason: lockMessage })}
               disabled={lockedByAnother}
               ariaLabel={lockedByAnother ? `Reassign disabled: ${lockMessage}` : undefined}
             >

@@ -50,7 +50,7 @@ Last Updated: 2026-04-14
 
 - Program Administrator: global scope
 - Regional Coordinator: all resolved `regionIds` from the current staff context
-- Application Assessor: assigned-owner scope (`assigned_to_user_id`)
+- Application Assessor: assigned-owner scope (`assigned_staff_profile_id`, with legacy `assigned_to_user_id` fallback during transition)
 
 Important:
 

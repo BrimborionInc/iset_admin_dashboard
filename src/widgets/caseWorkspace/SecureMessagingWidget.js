@@ -69,9 +69,25 @@ const isMessageDeleted = message => {
 };
 
 const isSentToApplicant = (message, applicantUserId) => {
+  return isApplicantRecipient(message, applicantUserId) && !isApplicantSender(message, applicantUserId);
+};
+
+const isApplicantSender = (message, applicantUserId) => {
   const applicantId = Number(applicantUserId);
   if (!message || !Number.isFinite(applicantId) || applicantId <= 0) return false;
-  return Number(message.recipient_id) === applicantId && Number(message.sender_id) !== applicantId;
+  if (message.sender_actor_type === 'applicant_user') {
+    return Number(message.sender_user_id) === applicantId;
+  }
+  return Number(message.sender_id) === applicantId;
+};
+
+const isApplicantRecipient = (message, applicantUserId) => {
+  const applicantId = Number(applicantUserId);
+  if (!message || !Number.isFinite(applicantId) || applicantId <= 0) return false;
+  if (message.recipient_actor_type === 'applicant_user') {
+    return Number(message.recipient_user_id) === applicantId;
+  }
+  return Number(message.recipient_id) === applicantId;
 };
 
 const getMailboxStatusKey = message => normalizeStatusKey(message?.mailbox_status || message?.status);
@@ -217,7 +233,7 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
   const getSenderName = useCallback(
     message => {
       if (!message) return '';
-      if (applicantUserId && message.sender_id === applicantUserId) {
+      if (isApplicantSender(message, applicantUserId)) {
         return message.sender_name || applicantName;
       }
       return message.sender_name || 'Staff';
@@ -228,7 +244,7 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
   const getRecipientName = useCallback(
     message => {
       if (!message) return '';
-      if (applicantUserId && message.recipient_id === applicantUserId) {
+      if (isApplicantRecipient(message, applicantUserId)) {
         return message.recipient_name || applicantName;
       }
       return message.recipient_name || 'Staff';
@@ -239,14 +255,14 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
   const inboxMessages = useMemo(() => {
     if (!applicantUserId) return messages.filter(msg => !isMessageDeleted(msg));
     return messages.filter(
-      msg => msg && msg.sender_id === applicantUserId && !isMessageDeleted(msg)
+      msg => msg && isApplicantSender(msg, applicantUserId) && !isMessageDeleted(msg)
     );
   }, [messages, applicantUserId]);
 
   const sentMessages = useMemo(() => {
     if (!applicantUserId) return messages.filter(msg => !isMessageDeleted(msg));
     return messages.filter(
-      msg => msg && msg.recipient_id === applicantUserId && !isMessageDeleted(msg)
+      msg => msg && isApplicantRecipient(msg, applicantUserId) && !isMessageDeleted(msg)
     );
   }, [messages, applicantUserId]);
 
@@ -283,7 +299,7 @@ const SecureMessagingWidget = ({ actions = {}, toggleHelpPanel, caseData }) => {
       if (!message) return;
       setSelectedMessage(message);
       setViewModalOpen(true);
-      if (applicantUserId && message.sender_id === applicantUserId && isUnread(message)) {
+      if (isApplicantSender(message, applicantUserId) && isUnread(message)) {
         try {
           const response = await apiFetch(`/api/admin/messages/${message.id}/status`, {
             method: 'PUT',

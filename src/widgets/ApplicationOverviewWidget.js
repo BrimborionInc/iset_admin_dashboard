@@ -51,6 +51,7 @@ import {
   mapWorkflowStatusToPersistenceStatus,
   normalizeApplicationStatus,
 } from '../utils/applicationStatus';
+import { resolveAssignedStaffProfileId } from '../utils/assignmentIdentity';
 
 function formatDateTime(value) {
   if (!value) return '';
@@ -123,7 +124,7 @@ const getStatusInfo = (row) => {
     applicationLifecycleStatus: row.application_lifecycle_status ?? row.applicationLifecycleStatus ?? null,
     caseStatus: row.case_status || null,
     caseId: row.case_id,
-    assignedUserId: row.assigned_user_id,
+    assignedUserId: resolveAssignedStaffProfileId(row),
     assessmentEligibility: row.assessment_esdc_eligibility,
     decisionOutcome: row.decision_outcome ?? row.decisionOutcome ?? null,
     awaitingReason: row.application_awaiting_reason ?? row.applicationAwaitingReason ?? null,
@@ -981,10 +982,20 @@ const ApplicationOverviewWidget = ({
       }));
       setAssignableStaff(options);
       const currentOwnerId =
-        caseData?.assigned_user_id ??
-        caseData?.assigned_to_user_id ??
-        caseData?.assignedUserId ??
-        caseData?.owner?.id ??
+        resolveAssignedStaffProfileId({
+          assignedStaffProfileId: caseData?.assignedStaffProfileId,
+          assigned_staff_profile_id: caseData?.assigned_staff_profile_id,
+          assignedUserId: caseData?.assignedUserId,
+          assigned_user_id: caseData?.assigned_user_id,
+          assignedToUserId: caseData?.assignedToUserId,
+          assigned_to_user_id: caseData?.assigned_to_user_id,
+        }) ??
+        resolveAssignedStaffProfileId({
+          staffProfileId:
+            caseData?.owner?.staffProfileId ||
+            caseData?.owner?.staff_profile_id ||
+            caseData?.owner?.id,
+        }) ??
         null;
       if (currentOwnerId && options.some(option => option.value === String(currentOwnerId))) {
         setSelectedAssignee(options.find(option => option.value === String(currentOwnerId)) || null);
@@ -996,9 +1007,14 @@ const ApplicationOverviewWidget = ({
       setAssignLoading(false);
     }
   }, [
-    caseData?.assigned_user_id,
-    caseData?.assigned_to_user_id,
+    caseData?.assignedStaffProfileId,
+    caseData?.assigned_staff_profile_id,
     caseData?.assignedUserId,
+    caseData?.assigned_user_id,
+    caseData?.assignedToUserId,
+    caseData?.assigned_to_user_id,
+    caseData?.owner?.staffProfileId,
+    caseData?.owner?.staff_profile_id,
     caseData?.owner?.id,
     currentUserRegionId,
     currentUserRegionIds,
@@ -1809,13 +1825,16 @@ const ApplicationOverviewWidget = ({
   const preferredName = answers['preferred-name'];
   const contactEmail = caseData?.applicant_email || answers['contact-email-address'] || answers.email;
   const phoneNumber = caseData?.applicant_phone || answers['telephone-day'] || answers['telephone-alt'];
-  const assignedUserId = caseData?.assigned_user_id ?? caseData?.assigned_to_user_id ?? application?.assigned_to_user_id ?? null;
+  const assignedStaffProfileId =
+    resolveAssignedStaffProfileId(caseData) ||
+    resolveAssignedStaffProfileId(application) ||
+    null;
   const assignedDisplayName = typeof caseData?.assigned_user_display_name === 'string'
     ? caseData.assigned_user_display_name.trim()
     : '';
   const assignedEmail = caseData?.assigned_user_email;
   const isCaseManagerCurrentUser = Boolean(
-    (assignedUserId != null && currentStaffProfileId && String(assignedUserId) === String(currentStaffProfileId)) ||
+    (assignedStaffProfileId != null && currentStaffProfileId && String(assignedStaffProfileId) === String(currentStaffProfileId)) ||
     (
       typeof assignedEmail === 'string' &&
       assignedEmail.trim() &&
@@ -1833,12 +1852,7 @@ const ApplicationOverviewWidget = ({
 
   let slaValue = null;
   if (application) {
-    const assigned = Boolean(
-      caseData?.assigned_user_id ||
-      caseData?.assigned_to_user_id ||
-      application?.assigned_user_id ||
-      application?.assigned_to_user_id
-    );
+    const assigned = Boolean(assignedStaffProfileId);
     const statusInfo = getStatusInfo({
       application_status: application?.status || fallbackStatus,
       application_lifecycle_status:
@@ -1870,7 +1884,7 @@ const ApplicationOverviewWidget = ({
         null,
       case_status: caseData?.status || null,
       case_id: caseData?.id ?? application?.case_id ?? null,
-      assigned_user_id: assigned ? 1 : null,
+      assigned_user_id: assignedStaffProfileId,
       assessment_esdc_eligibility:
         application?.assessment_esdc_eligibility ??
         caseData?.assessment_esdc_eligibility ??

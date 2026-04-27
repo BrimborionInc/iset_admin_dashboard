@@ -1,6 +1,6 @@
 Purpose: Define the cross-app document signing capability so case managers can send participant-facing intake workflows (authored in the intake workflow studio) for review and signature, reusing the intake renderer and `signature-ack`.
 Audience: Product, engineering, security, ops.
-Last Updated: 2025-12-10
+Last Updated: 2026-04-26
 
 ## Goals
 - Case managers send intake workflows (single-step or mini-workflow) for signature from the admin dashboard with status tracking and audit history.
@@ -41,9 +41,12 @@ Last Updated: 2025-12-10
   - Message POST supports `attachments: [{ workflow_id, due_at?, checklist_doc_type? }]` for consent workflows; backend creates `signing_request` rows with status `pending` and links them to the message.
   - Message GET returns `attachments` per message: `[ { id (signing_request_id), workflow_id, workflow_name, workflow_type, status } ]` for UI display.
   - Signing request DB shape: `id, workflow_id, workflow_name, workflow_type, case_id, participant_user_id, created_by_user_id, status(pending/viewed/signed/cancelled/expired), due_at, resolved_schema_json, signed_payload_json, artifact_url, checklist_doc_type, timestamps`.
+  - Current DB constraints require `workflow_id -> workflow.id`, `case_id -> iset_case.id`, `participant_user_id -> user.id`, and `created_by_user_id -> user.id`, all with `ON DELETE RESTRICT`.
+  - Signing requests must remain linked to the message that created them through `message_signing_request`; the privacy audit checks for missing links, message/case mismatches, and participant users who are not the case applicant.
 
 ## Request model (DB/API shape)
-- Table `signing_request`: `id`, `template_id`, `participant_id`, `case_manager_id`, `status` (draft|pending|viewed|signed|cancelled|expired), `due_at`, `sent_at`, `viewed_at`, `signed_at`, `prefill_payload_json` (case-manager-entered, read-only to participant), `resolved_schema_json` (schema with merges applied), `signed_payload_json` (final normalized values), `signature_artifact_url` (PDF), `audit_trail` (JSON events), `hash` (artifact checksum), `cancelled_by`, timestamps.
+- Current table `signing_request`: `id`, `workflow_id`, `workflow_name`, `workflow_type`, `case_id`, `participant_user_id`, `created_by_user_id`, `status`, `signed_at`, `due_at`, `resolved_schema_json`, `signed_payload_json`, `artifact_url`, `checklist_doc_type`, timestamps.
+- Historical/proposed fields such as `template_id`, `case_manager_id`, `prefill_payload_json`, `signature_artifact_url`, `audit_trail`, `hash`, and `cancelled_by` are not current schema columns; add them through explicit migrations if the product design needs them.
 - Optional later: `co_signer_user_id`, `co_signer_status`, `co_signer_signed_at`.
 
 ## APIs (proposed)
@@ -60,7 +63,7 @@ Last Updated: 2025-12-10
 - EN/FR text stays in the template; renderer chooses by user locale as intake does.
 
 ## Controls & integrity
-- AuthZ: participant-only access to their requests; admin-only creation/cancel. If email links are used, pair with one-time token plus DOB/identifier check.
+- AuthZ: participant-only access to their requests; admin creation flows must validate case access before creating the secure message and signing request. If email links are used, pair with one-time token plus DOB/identifier check.
 - Audit: log every send/view/sign/cancel with actor, timestamp, IP, user agent.
 - Immutability: after signing, freeze payload, store PDF, and compute checksum hash; block edits.
 - Storage: signed PDF and raw signature payload stored in MinIO/S3; avoid keeping base64 blobs inline in primary tables.

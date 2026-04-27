@@ -6,6 +6,7 @@ Purpose: Single entrypoint for database documentation across the admin dashboard
 - `docs/data/database-overview.md` - Quick orientation, logical relationships, and demo-data guidance.
 - `docs/data/case-finance-data-architecture.md` - Case/finance ERM narrative and key table relationships.
 - `docs/data/documents-model.md` - Unified document model and linking rules.
+- `docs/data/integrations/secure-messaging.md` - Shared admin/public secure-message schema, typed actor rules, and attachment/document lineage.
 - `docs/data/applicant-account-activation.md` - Applicant Cognito account linkage, invitation workflow fields on `client`, and applicant-account event audit records.
 - `docs/data/finance-regional-salaries.md` - Annual province/territory salary entry records used by the Budgets and Finance salaries dashboard.
 - `docs/data/regional-snapshot-reporting.md` - Saved Board-style regional snapshot report records and manual-input schema.

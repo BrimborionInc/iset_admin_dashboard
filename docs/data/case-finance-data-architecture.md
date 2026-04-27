@@ -29,7 +29,7 @@ The current database supports initial case tracking (linking applications to cas
 
 | Table | Purpose | Key Columns (selected) | Relationships |
 |-------|---------|------------------------|---------------|
-| `iset_case` | Root case record linked to client and still carrying a current application anchor | `id`, `application_id`, `client_id`, `assigned_to_user_id`, `status` | FK → `iset_application.id`, `client.id`; target model is one case per client |
+| `iset_case` | Root case record linked to client and still carrying a current application anchor | `id`, `application_id`, `client_id`, `assigned_staff_profile_id`, `status` | FK → `iset_application.id`, `client.id`, `staff_profiles.id`; target model is one case per client |
 | `iset_case_assessment` | Assessment snapshot (single row per case) | `employment_goals`, `esdc_eligibility`, `employment_barriers` (JSON), `itp_payload`, `wage_payload` | PK = `case_id` |
 | `iset_case_action_plan` | Early action plan scaffold | `case_id`, `name`, `status`, `effective_date`, `review_date`, `metadata_json` | FK → `iset_case.id`, optional owner FKs |
 | `iset_case_intervention` | Intervention scaffold tied to case/action plan | `case_id`, `action_plan_id`, `intervention_code`, `status`, `funding_stream`, amounts | FK → `iset_case`, `iset_case_action_plan` |
@@ -80,7 +80,7 @@ Application answers (stored in `iset_application.payload_json.answers`) are used
 |--------|-------------|----------------|---------------|
 | **Client** (`client`) | Single person or organization served | Demographics, SIN, region, contact | `Client` ⟷ `Application` (1:M), `Client` ⟷ `Case` (1:M) |
 | **Application** (`iset_application`, versions) | Submitted intake application | `payload_json` (answers), submission status, attachments | Links to `Case` (optional until converted) |
-| **Case** (`iset_case`) | Primary record for caseworking | `status`, `assigned_to_user_id`, `portfolio_region_id`, `agreement_id` (FK to FundingAgreement once approved) | 1:M to assessments, action plans, events |
+| **Case** (`iset_case`) | Primary record for caseworking | `status`, `assigned_staff_profile_id`, `portfolio_region_id`, `agreement_id` (FK to FundingAgreement once approved) | 1:M to assessments, action plans, events |
 | **CaseAssessment** (extend `iset_case_assessment`) | Time-versioned assessments | Move to versioned table (PK surrogate + `case_id`, `version`, `is_current`) storing all ILMP-related evaluation fields | Case 1:M CaseAssessment |
 | **ActionPlan** (`iset_case_action_plan`) | Strategic plan for case | Add `agreement_id` (FK), `result_code`, `result_date`, `closed_at`, `outcome_summary`, `version_no`; enforce max one active (non-closed) plan per case | Case 1:M ActionPlan (active constraint) |
 | **ActionPlanRevision** (new) | Snapshot per plan edit | `action_plan_id`, `revision_no`, `effective_date`, `data_json`, `created_by` | Supports plan history & ILMP export reproducibility |

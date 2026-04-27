@@ -2,7 +2,7 @@
 
 **Purpose:** Capture design for escalating problem applications/cases and addressing them across tiers.
 **Audience:** Admin dashboard engineers and product owners.
-**Last Updated:** 2025-03-17
+**Last Updated:** 2026-04-26
 
 ## Overview
 ISET coordinators should be able to escalate cases to regional managers, who can respond with guidance, take ownership, reassign, or escalate further to Program Admins. The flow must remain auditable, role-gated, and visible in dashboards/work queues.
@@ -25,6 +25,7 @@ ISET coordinators should be able to escalate cases to regional managers, who can
 - Desired outcome (guidance, reassignment, ownership transfer, escalate further).
 - Decision/outcome notes, final disposition, and any reassignment/ownership changes applied.
 - Audit trail entry per transition (who, when, what changed).
+- Current DB rule: escalation records are application- and case-scoped. `requester_user_id`, `current_owner_user_id`, and `resolved_by_user_id` are shared `user.id` values, not `staff_profiles.id` values.
 
 ## UX Entry Points
 - **Application Overview widget:** show current escalation state and a focused “Escalate” / “Address escalation” action (role-gated).
@@ -82,6 +83,7 @@ ISET coordinators should be able to escalate cases to regional managers, who can
   - `POST /api/escalations/:id/respond`: respond/escalate/resolve (role-gated to current owner; lock-enforced; emits escalation events; clears helper flags on resolve).
   - `GET /api/escalations`: list escalations (defaults to owner=current role and state != resolved unless `includeResolved=true`; supports filters for state/ownerRole/requesterRole/applicationId; returns application/case status slices for homepage wiring).
 - 2025-03-17: Application Overview quick actions now role/status-gated with escalation flows (escalate/respond/resolve) using lock enforcement and the new API; modals collect required notes and emit events via the backend.
+- 2026-04-26: Privacy ERM cleanup added FKs for `iset_application_escalation.application_id`, `case_id`, requester/current-owner/resolver users, plus the `iset_application.current_escalation_id` helper pointer. Escalation creation now fails closed if the application cannot resolve to a case.
 
 ## Decisions
 - 2025-03-17: Keep application lifecycle status canonical (submitted → in_review → pending_approval → final states). Model escalation separately via a dedicated escalation record/table + event log; optionally add `current_escalation_id` / `has_open_escalation` on `iset_application` for fast filtering. This preserves lifecycle logic while allowing a state machine for escalation ownership and history.

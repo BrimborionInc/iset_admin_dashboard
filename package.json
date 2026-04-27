@@ -79,6 +79,7 @@
     "dump:dev-schema": "env-cmd -f .env node scripts/dump-dev-db-structure.js",
     "lint": "eslint --ext .js,.jsx src",
     "audit:parity": "node scripts/parity-audit.js",
+    "audit:privacy-erm": "node scripts/privacy-erm-audit.js",
     "workflow:apply-upload-camera-chooser": "node scripts/apply-intake-upload-camera-chooser.js",
     "workflow:set-file-upload-max-size-floor": "node scripts/set-file-upload-max-size-floor.js",
     "fixtures:workflows": "node scripts/generate-workflow-fixtures.js",

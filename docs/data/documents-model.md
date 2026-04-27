@@ -1,6 +1,6 @@
 # Unified Documents Model (iset_document)
 
-Date: 2026-04-10
+Date: 2026-04-26
 
 ## Summary
 The unified `iset_document` table now anchors every document to a single `client_id`, with optional links to applications, cases, or action plans. Intervention links are stored in the `iset_document_intervention` join table, and payment evidence attachments live in `payment_packet_document`.
@@ -16,8 +16,8 @@ The unified `iset_document` table now anchors every document to a single `client
 ## Table Definition
 See migration script: `sql/20250919_create_iset_document.sql`.
 Key columns:
-- `client_id` (required) for ownership; every document belongs to exactly one client.
-- `applicant_user_id` plus optional `application_id`, `case_id`, or `action_plan_id` for scoping.
+- `client_id` for ownership; current source-specific constraints require it for application submissions, manual uploads, secure-message attachments, and system-generated documents.
+- `applicant_user_id` plus `application_id`, `case_id`, or `action_plan_id` for scoping.
 - `origin_message_id` + `source` to trace provenance.
 - `file_path` canonical relative path (unique) + `file_name` original display name.
 - `status` for archival / soft delete.
@@ -31,6 +31,12 @@ Related tables:
 - Action plan documents attach to `action_plan_id` and optionally link to one or more interventions via `iset_document_intervention`.
 - Case documents attach to `case_id`.
 - Application documents normally attach to `application_id`, but in case-based uploads for imported/application-less files they can fall back to `action_plan_id` when a plan is selected, or `case_id` otherwise. The requested scope is preserved in document metadata as a fallback note; PATH does not fabricate an application row.
+- Source-specific database CHECK constraints now protect privacy-sensitive lineage:
+  - `application_submission` requires `client_id`, `case_id`, `application_id`, and `applicant_user_id`.
+  - `manual_upload` requires `client_id` and `case_id`; when it is linked to an application, it also requires `applicant_user_id`.
+  - `secure_message_attachment` requires `client_id`, `case_id`, `application_id`, `applicant_user_id`, `user_id`, and `origin_message_id`.
+  - `system_generated` requires `client_id` and `case_id`; applicant scope remains a cleanup target for older generated artifacts.
+- Privacy-sensitive document FKs for user, applicant user, client, case, application, and origin message use `ON DELETE RESTRICT` so parent deletion cannot silently un-scope document records.
 
 ## Source Values
 - `application_submission`: Uploaded or generated as part of the original application submission.
@@ -47,7 +53,7 @@ Related tables:
 - `PUT /api/documents/:id` and `/api/documents/:id/duplicate` update action plan + intervention associations (no `linked_intervention_id`) and preserve the same application-scope fallback rules in case-based mode.
 - `GET /api/documents/:id/presign-download` now treats Word documents specially: for `.doc` / `.docx`, the admin backend generates or reuses a cached PDF preview under the object-storage prefix `WORD_PREVIEW_OBJECT_PREFIX` (default `previews/word`) and returns a presigned URL for that preview instead of the original Office object. Preview artifacts stay out of `iset_document`.
 - `GET /api/documents/:id/presign-download?mode=original` is a separate staff-admin path that bypasses Word preview substitution and forces attachment download of the original stored object. It is server-side restricted to `System Administrator` / `NWAC Administrator`.
-- `GET /api/admin/messages/:id/attachments` upserts attachments into `iset_document` with `client_id` + case/application context when a `case_id` query param is provided.
+- `GET /api/admin/messages/:id/attachments` upserts attachments into `iset_document` with message, client, case, application, applicant, and uploader context when a `case_id` query param is provided.
 - `POST /api/finance/payment-packets/:id/documents` validates `iset_document.client_id` matches the packet.
 
 ## Widget Updates
@@ -67,6 +73,7 @@ Admin-side manual uploads now also allow Word files (`.doc`, `.docx`) in additio
 - Attachments adoption only occurs when the attachments endpoint is called with `?case_id=...`.
 - Applicant linkage derived via `case -> application -> user` resolution; `client_id` is resolved from the case/application/applicant_user_id chain.
 - Idempotency: enforced via `UNIQUE (file_path)` + `ON DUPLICATE KEY UPDATE` for applicant/application/user/origin fields so re-opening a message repairs missing metadata.
+- Secure-message attachment adoption now rejects case/application/client scope mismatches before inserting or repairing an `iset_document` row.
 
 ## Future Enhancements
 - Add checksum calculation on file write for dedupe.
@@ -107,4 +114,4 @@ If legacy rows existed in `iset_case_document` prior to its drop, they can be re
 
 ## Security Considerations
 - Do not trust `file_path` from client requests; all creation done server-side.
-- Before exposing streaming/download endpoint, add authorization guard verifying user access to the referenced case/application.
+- Do not expose streaming/download by raw document ID alone. Verify access through case/application/action-plan/intervention/client/payment scope before metadata or presign return.

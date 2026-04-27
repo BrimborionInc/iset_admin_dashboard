@@ -63,7 +63,7 @@ The page-level province/territory and case-manager filters apply to `Intake and 
 - Approved applications use `iset_application.updated_at` as the current decision-month proxy when status is `approved` or `completed`.
 - Denied applications use `iset_application.updated_at` as the current decision-month proxy when status is `rejected` or `declined`.
 - Participant geography is resolved from the application payload with fallback to the submission payload, using the same participant home province/territory field as the rest of the report.
-- Case-manager filtering uses `iset_case.assigned_to_user_id` when a linked case exists.
+- Case-manager filtering uses `iset_case.assigned_staff_profile_id` when a linked case exists, with `assigned_to_user_id` kept only as a transitional legacy fallback.
 
 Important limitation:
 
