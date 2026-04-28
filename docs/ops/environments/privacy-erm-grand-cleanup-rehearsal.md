@@ -358,6 +358,7 @@ Final pre-window checks:
 - `scripts/path-deploy.js` creates the PROD restore point with `aws rds create-db-cluster-snapshot`, waits for `db-cluster-snapshot-available`, then describes the snapshot before continuing to schema apply.
 - Read-only AWS check confirmed PROD cluster `nwac-prod-db` is `available`, engine `aurora-mysql`, backup retention `30` days, latest restorable time `2026-04-28T22:07:05.633000+00:00`.
 - Latest manual PROD cluster snapshot at preflight time was `path-prod-20260425-114853-20260425114911`, status `available`, created `2026-04-25T11:49:13.398000+00:00`.
+- Final read-only service health pass returned `{"status":"ok"}` from `https://nwac-console.awentech.ca/healthz`, `https://iset.nwac.ca/healthz`, and `https://nwac-public.awentech.ca/healthz`. AWS identity remained `arn:aws:sts::468278742295:assumed-role/nwac-prod-codex-operator/codex-prod-operator`.
 
 ## 2026-04-28 PROD Maintenance Warning
 
