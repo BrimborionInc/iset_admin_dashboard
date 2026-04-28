@@ -4,12 +4,12 @@ Purpose: define the agreed PATH entity model for `client`, `case`, and `applicat
 
 Audience: product, engineering, reporting/data, and migration planning.
 
-Last Updated: 2026-04-16
+Last Updated: 2026-04-27
 
 ## Status
 
 - Target model agreed in design discussion.
-- Current implementation remains hybrid.
+- DEV now enforces explicit `iset_application.client_id` and `iset_application.case_id` for submitted applications.
 - This note is the canonical planning record for future schema/workflow changes in this area.
 - Migration planning is tracked in `docs/planning/client-case-application-migration-plan.md`.
 - Target status architecture is tracked in `docs/planning/status-architecture-overhaul.md`.
@@ -59,16 +59,14 @@ Last Updated: 2026-04-16
 
 Verified from current schema and code:
 
-- Public portal `POST /api/intake/complete` already resolves or creates `client`, creates or reuses the working `application`, and creates or updates an application-backed `case`.
-- Manual application intake already creates `client` and `iset_case`.
+- Public portal `POST /api/intake/complete` resolves or creates `client`, resolves or creates the client's `case`, then inserts or updates the working `application` with `client_id` and `case_id`.
+- Manual application intake creates `client`, resolves or creates `iset_case`, then inserts `iset_application` with `client_id` and `case_id`.
 - Client Batch Import already supports `client` plus application-less `iset_case`.
-- The system is still hybrid because:
-  - `iset_application` does not currently store `client_id` or `case_id`.
-  - `iset_case` still carries a single `application_id` anchor.
-  - case creation and lookup paths commonly treat `application_id` as the primary case lookup key.
+- Remaining non-final pieces:
+  - TEST/PROD still need the DEV backfill/retirement/hardening migrations rehearsed against live data.
+  - Some workflows still accept `application_id` as an entry parameter, but they now resolve the case through `iset_application.case_id` instead of a case-side pointer.
   - same-client prior-case detection is warning-only rather than enforced case reuse.
-  - `iset_case_action_plan` is case-owned, but has no `application_id` provenance field.
-  - many workspace, dashboard, and document flows still infer application context through `iset_case.application_id`.
+  - Some dashboards and documents still expose an `application_id` field in response payloads for compatibility, derived from `iset_application.case_id`.
 
 ## Schema Target
 
@@ -78,12 +76,12 @@ Verified from current schema and code:
 - `iset_case`
   - `client_id` required
   - one row per client
-  - if a direct application reference is still needed, it should be treated as provenance only (for example `originating_application_id`), not as the ownership anchor
+  - no direct application ownership pointer
 
 - `iset_application`
-  - add `client_id`
-  - add `case_id`
-  - both required for submitted rows
+  - keep `client_id`
+  - keep `case_id`
+  - both required for submitted rows; DEV enforces this as `NOT NULL`
   - application ownership must no longer depend on `iset_case.application_id`
 
 - `iset_case_action_plan`
@@ -98,17 +96,18 @@ Verified from current schema and code:
 
 1. Audit PROD data for duplicate clients and multiple cases per client.
 2. Choose the canonical case per client and define merge rules for any parallel case rows.
-3. Backfill `iset_application.client_id` and `iset_application.case_id`.
+3. Backfill `iset_application.client_id` and `iset_application.case_id`. DEV has completed this shape, physically retired `iset_case.application_id`, and made both application ownership columns `NOT NULL`; TEST/PROD still need preflight/backfill rehearsal.
 4. Change write paths so intake/import flows resolve by client first, then case, then application.
 5. Change read paths and reporting to stop assuming `iset_case.application_id` is the only application join path.
 6. Add and enforce one-case-per-client constraints after data cleanup.
-7. Retire or repurpose `iset_case.application_id` once no core flow depends on it as the primary relationship anchor.
+7. Retire or repurpose `iset_case.application_id` once no core flow depends on it as the primary relationship anchor. Completed in DEV by migration `20260427_0013_retire_legacy_case_application_pointer.sql`.
+8. Harden application ownership after the backfill is clean. Completed in DEV by migration `20260427_0014_harden_application_case_scope.sql`.
 
 ## Current Verified Gaps To Resolve
 
-- Portal submission currently creates a case keyed by `application_id` when no row exists for that application; it does not yet automatically reuse an existing same-client case.
-- Admin `POST /api/cases` checks for an existing case by `application_id`, not by `client_id`.
-- Application workspace routes and many dashboard docs still describe application lookup through `iset_case.application_id`.
+- TEST/PROD still need rehearsal for the `20260427_0013` and `20260427_0014` migrations because live rows may contain duplicate, missing, nullable, or mismatched legacy case/application ownership data that DEV trash data does not.
+- Admin `POST /api/cases` and related manual-intake paths still need product review for strict one-case-per-client enforcement rather than warning-only reuse.
+- Some dashboard/docs language still says "case application" where the implementation now means "latest application in the case."
 - Status and workflow logic are already partly split between application lifecycle and case lifecycle, but the relational model has not fully caught up.
 
 ## Non-Goals

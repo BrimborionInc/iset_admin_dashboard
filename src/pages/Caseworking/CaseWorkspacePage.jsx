@@ -122,7 +122,7 @@ const widgetRegistry = {
     defaultColumnSpan: 4,
     component: InterventionAssessmentWidget,
     title: "Intervention assessment",
-    description: "Propose new interventions for approval.",
+    description: "Draft, update, and review intervention proposals.",
     helpComponent: CaseWorkspaceProposedInterventionsHelp,
     helpTitle: "Proposed interventions",
     aiContext: CaseWorkspaceProposedInterventionsHelp.aiContext,

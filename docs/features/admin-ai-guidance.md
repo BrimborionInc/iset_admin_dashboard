@@ -5,6 +5,7 @@ Purpose: move PATH workflow grounding for the embedded admin help chat out of br
 ## Current design
 
 - The embedded help chat still keeps a small system-prompt layer for answer style and safety.
+- The admin AI proxy is for workflow guidance and template-style copy help, not for processing live applicant records.
 - When the help chat calls `POST /api/ai/chat`, it now sends a `chatContext` object containing:
   - `surface`
   - `pathname`
@@ -12,6 +13,9 @@ Purpose: move PATH workflow grounding for the embedded admin help chat out of br
   - `aiContext`
   - `role`
 - The server uses that metadata plus the latest user question to retrieve matching guidance rows and prepend a grounded system message before calling the model.
+- Before calling OpenRouter, the server blocks obvious raw identifiers and secrets in the submitted messages and chat context, including SIN-style values, PATH reference numbers, email/phone values, credentials, and JSON fields such as `applicant_name`, `tracking_id`, or `case_number` with live values.
+- Denial-letter drafts use the local decision-letter template path. They do not send applicant denial context to OpenRouter.
+- AI-backed dummy-data generators are local-dev/demo utilities only and require `ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES=true` plus System Administrator access.
 
 ## Tables
 

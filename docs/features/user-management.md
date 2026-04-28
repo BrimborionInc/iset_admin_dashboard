@@ -1,6 +1,6 @@
 # User Management Overview
 
-_Last updated: 10 April 2026_
+_Last updated: 27 April 2026_
 
 ## High-level flow
 
@@ -9,6 +9,7 @@ _Last updated: 10 April 2026_
   - `Applicant Accounts` for imported participant account creation, invitation, and activation tracking
 * Staff/admin CRUD actions call `/api/admin/users…` endpoints implemented in `src/routes/admin/users.js`.
 * Applicant-account actions call `/api/admin/applicants…` endpoints implemented in `src/routes/admin/applicants.js`.
+* Legacy generic `/api/users` shared-table endpoints are retired. Do not use the mixed `user` table as a staff/applicant directory surface.
 * Cognito remains the source of truth for authentication + group membership. MySQL tables (e.g. `staff_profiles`, `staff_region`) hold the operational mapping, staff identity details, and staff-region access used throughout the admin experience.
 * For applicant accounts, `client` is the workflow anchor and the legacy `user` table remains the public-portal identity principal.
 
@@ -105,9 +106,9 @@ ISET Coordinator     → cannot manage administrative users
    ```
 3. Verify case visibility with:
    ```sql
-   SELECT id, application_id, assigned_to_user_id FROM iset_case;
+   SELECT id, client_id, assigned_staff_profile_id FROM iset_case;
    ```
-   and compare `assigned_to_user_id` to `staff_profiles.id`.
+   and compare `assigned_staff_profile_id` to `staff_profiles.id`.
 4. If assignments look wrong, verify there are no stale duplicate `staff_profiles` rows keyed by email instead of Cognito `sub`, then have each user sign in again.
 
 ## Open considerations

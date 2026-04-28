@@ -19,7 +19,8 @@ Date: 2026-04-05
 
 ## What the schema allows
 
-- `iset_case.application_id` is nullable, while `client_id` remains the real ownership link.
+- `iset_case` has no direct `application_id` pointer in DEV; `client_id` is the real ownership link.
+- Application-backed cases are discovered through `iset_application.case_id`.
 - `iset_case_assessment` is keyed by `case_id`.
 - `iset_case_action_plan` is keyed by `case_id`.
 - `iset_case_intervention` is keyed by `case_id` and optionally linked to an action plan.
@@ -75,7 +76,7 @@ This means the database does not require a fake intake history just to preserve 
 
 - Treat spreadsheet backloads like this as client-file imports, not historical-application imports.
 - Create or match the `client` first.
-- Create a real `iset_case` for that client with `application_id = NULL`.
+- Create a real `iset_case` for that client without fabricating any application row.
 - Seed `case_context_json` with the participant profile fields imported from the spreadsheet.
 - Create a `user` only when an email is present and there is an actual business reason to support login, secure messaging, or applicant-linked document flows.
 - Leave assessment rows absent unless they truly existed and need to be modeled explicitly.

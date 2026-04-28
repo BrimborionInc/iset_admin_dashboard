@@ -59,7 +59,7 @@ Purpose: Living reference of structure, core modules, and cross-cutting concerns
 ### Shell notifications
 - `src/AppContent.js` owns the global admin shell (`AppLayout`) and renders the page-top notifications rail through `AppLayout.notifications`.
 - Staff bell alerts load from `/api/me/notifications` and are rendered as a stacked Cloudscape `Flashbar` from `src/AppContent.js`.
-- `src/internalNotifications.js` reads `iset_internal_notification` plus `iset_internal_notification_dismissal`; current filtering already supports `global`, `role`, and `user` audiences and scheduled windows via `starts_at` / `expires_at`.
+- `src/internalNotifications.js` reads `iset_internal_notification` plus `iset_internal_notification_dismissal`; current filtering supports `global`, `role`, and typed direct staff/applicant audiences plus scheduled windows via `starts_at` / `expires_at`.
 - `src/layouts/SideNavigation.js` footer item `Notifications` is a shell refresh affordance only, not a routed notification center.
 - Service-wide maintenance warnings now use the separate runtime-config key `iset_runtime_config(scope='runtime', k='service.announcement')` instead of the bell-notification tables.
 - `src/AppContent.js` polls `/api/service-announcement/current` every 15 seconds and renders the active maintenance warning as a non-dismissible `Flashbar` item ahead of bell alerts, with a local 1-second countdown once loaded.

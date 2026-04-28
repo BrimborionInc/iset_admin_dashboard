@@ -84,6 +84,7 @@ ISET coordinators should be able to escalate cases to regional managers, who can
   - `GET /api/escalations`: list escalations (defaults to owner=current role and state != resolved unless `includeResolved=true`; supports filters for state/ownerRole/requesterRole/applicationId; returns application/case status slices for homepage wiring).
 - 2025-03-17: Application Overview quick actions now role/status-gated with escalation flows (escalate/respond/resolve) using lock enforcement and the new API; modals collect required notes and emit events via the backend.
 - 2026-04-26: Privacy ERM cleanup added FKs for `iset_application_escalation.application_id`, `case_id`, requester/current-owner/resolver users, plus the `iset_application.current_escalation_id` helper pointer. Escalation creation now fails closed if the application cannot resolve to a case.
+- 2026-04-27: Escalation create/respond now validates application visibility through the owning case before mutating, and escalation list results are filtered through case access before returning role queue metadata. Role/owner filters are not sufficient access authority by themselves.
 
 ## Decisions
 - 2025-03-17: Keep application lifecycle status canonical (submitted → in_review → pending_approval → final states). Model escalation separately via a dedicated escalation record/table + event log; optionally add `current_escalation_id` / `has_open_escalation` on `iset_application` for fast filtering. This preserves lifecycle logic while allowing a state machine for escalation ownership and history.

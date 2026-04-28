@@ -22,7 +22,7 @@
    - Load config via `readAutoAssignmentConfig`.
    - Build facts with `extractAutoAssignmentFacts(intakePayload)`.
    - Choose assignee with `pickAutoAssignment` (first-match by priority).
-   - If a valid `assigneeId` is found (must exist in `staff_profiles`), the new `iset_case` is created with `assigned_to_user_id` set and events logged (`auto_assigned`).
+   - If a valid `assigneeId` is found (must exist in `staff_profiles`), the new `iset_case` is created with `assigned_staff_profile_id` set and events logged (`auto_assigned`). In DEV, the old physical `assigned_to_user_id` case shadow has been retired; any legacy response aliases are derived from `assigned_staff_profile_id`.
 4. No re-evaluation occurs after ingest; edits in admin do not trigger auto assignment.
 
 ## Operational Notes

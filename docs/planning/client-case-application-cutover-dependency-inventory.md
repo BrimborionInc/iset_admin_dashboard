@@ -4,12 +4,13 @@ Purpose: inventory the current code, workflow, and status dependencies that must
 
 Audience: engineering, product, release planning, QA/UAT, and production migration planning.
 
-Last Updated: 2026-04-16
+Last Updated: 2026-04-27
 
 ## Status
 
-- Planning draft based on the initial code inspection snapshot.
-- Many of the main admin-server compatibility-read hotspots listed here were addressed in DEV on 2026-04-16; treat this note as the baseline inventory, not a claim that every listed dependency is still unresolved.
+- Historical planning draft based on the initial code inspection snapshot.
+- Many of the main admin-server compatibility-read hotspots listed here were addressed in DEV on 2026-04-16, the case-side `iset_case.application_id` pointer was physically retired in DEV on 2026-04-27 by migration `20260427_0013_retire_legacy_case_application_pointer.sql`, and application ownership was hardened by `20260427_0014_harden_application_case_scope.sql`.
+- Treat this note as the baseline inventory and TEST/PROD rehearsal checklist, not a claim that every listed dependency is still unresolved in DEV.
 - This note complements:
   - `docs/planning/client-case-application-target-model.md`
   - `docs/planning/client-case-application-migration-plan.md`

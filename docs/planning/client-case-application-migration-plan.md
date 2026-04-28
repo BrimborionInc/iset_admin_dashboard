@@ -4,13 +4,14 @@ Purpose: plan the database and data migration from the current hybrid PATH model
 
 Audience: engineering, product, operations, and release planning.
 
-Last Updated: 2026-04-16
+Last Updated: 2026-04-27
 
 ## Status
 
 - Planning draft based on current development schema and current code paths.
 - Assumes production is in early live use and must be migrated carefully.
 - This note is the canonical migration-planning companion to `docs/planning/client-case-application-target-model.md`.
+- 2026-04-27 DEV update: `iset_case.application_id` has been physically retired in DEV by `sql/migrations/20260427_0013_retire_legacy_case_application_pointer.sql`, and `iset_application.client_id` / `case_id` are required by `sql/migrations/20260427_0014_harden_application_case_scope.sql`. Older sections below that describe the case-side pointer or nullable application ownership are historical baseline context for TEST/PROD rehearsal and should not be read as current DEV state.
 - Status-overhaul planning is tracked in `docs/planning/status-architecture-overhaul.md`.
 - The route/query/widget dependency ledger for cutover is tracked in `docs/planning/client-case-application-cutover-dependency-inventory.md`.
 - Initial dev-only Release 1 schema artifacts are now drafted in `sql/migrations/20260416_0001_add_application_ownership_and_status_columns.sql` through `sql/migrations/20260416_0004_create_client_case_merge_audit_tables.sql`. Initial Release 2 rehearsal SQL is drafted in `sql/ops/20260416_release2_client_case_application_backfill_preview.sql` and `sql/ops/20260416_release2_client_case_application_backfill_apply.sql`.
@@ -38,6 +39,7 @@ Last Updated: 2026-04-16
 - A full TEST rehearsal was executed on 2026-04-16 against a PROD-like dataset: TEST was backed up, restored from a sanitized PROD dump, safety SQL was applied, TEST staff Cognito links were relinked, the refactored code/schema were deployed, and the Release 2 backfill apply SQL was executed successfully. Post-backfill preview checks on TEST reached zero for application ownership gaps, zero for case lifecycle gaps, zero for action-plan application provenance gaps, zero for intervention proposal/delivery backfill gaps, and both TEST target groups remained healthy.
 - The same TEST rehearsal confirmed that the current production-like dataset still contains three clients with multiple cases. That is not a blocker for the current additive deployment/backfill release, but it remains a required manual-review / merge queue before PATH can safely enforce one-case-per-client at the database level.
 - The same TEST rehearsal also confirmed that active documents missing `client_id` are limited to seeded placeholder `application_submission` rows (`metadata.placeholderUpload = true`), not live participant records. The remaining active documents without `case_id` / `application_id` are therefore a document-model cleanup concern, not an immediate blocker for the current production cutover.
+- A later 2026-04-28 privacy ERM PROD-like TEST rehearsal exposed four duplicate client case groups after the final schema shape: Ashlee Barner, Erica Christian, Hailey Lafrance-Chaput, and Shelly Van Loon. The follow-up ops scripts `sql/ops/privacy-erm-duplicate-case-consolidation-preview.sql` and `sql/ops/privacy-erm-duplicate-case-consolidation-apply.sql` now implement the planned historical consolidation step. Rollback-only validation on TEST reported 4 merge pairs, 0 blockers, 18 rows to repoint, 0 remaining case-owned references, and 0 remaining duplicate client case groups.
 
 ## Migration Goal
 
@@ -258,7 +260,8 @@ Operational note from the 2026-04-16 rehearsal setup:
 - We captured a fresh PROD dump plus a reversible TEST backup, but a raw PROD -> TEST clone was intentionally not treated as the final restore artifact for UAT.
 - TEST still has live SES credentials and the admin backend runs reminder/doc-request/allocation pollers in memory, so restoring raw PROD data without a post-load safety pass risks outbound side effects.
 - Raw PROD identity-link fields also do not automatically match the TEST Cognito pools, so TEST staff/applicant sign-in assumptions can drift immediately after a blind clone.
-- Use `docs/ops/environments/test-prod-migration-rehearsal.md` plus `sql/ops/test-prod-like-restore-postload.sql` as the current operator baseline before doing the destructive TEST overwrite.
+- Use `docs/ops/environments/test-prod-migration-rehearsal.md` plus `sql/ops/test-prod-like-restore-postload.sql` as the immediate side-effect guard after the destructive TEST overwrite.
+- Run `sql/ops/test-prod-like-restore-identity-overlay.sql` only after the migration/backfill scripts have used restored PROD Cognito subjects to populate typed actor references, and before TEST apps are restarted.
 
 ## Production Migration Plan
 
@@ -440,6 +443,7 @@ The rollout is not complete until these are true:
 - every submitted `application` has `client_id` and `case_id`
 - every live `case` has `client_id`
 - no client has more than one live case
+- historical duplicate case rows have been consolidated through a reviewed `iset_case_merge_audit`-recorded script, with merged-away case rows detached from `client_id`
 - portal resubmission for an existing client reuses the case
 - manual intake for an existing client reuses the case
 - client batch import still supports valid application-less historical case files

@@ -73,6 +73,8 @@ Risk: if the staff local user row is missing, stale, or misbound, a staff profil
 
 Fix pass status: addressed locally on 2026-04-25 in `../ISET-intake/server.js`. Staff recipient resolution now requires `staff_profiles.cognito_sub`, resolves by that subject, creates a staff local user with that subject when needed, and refuses duplicate-email fallback instead of returning an arbitrary shared `user` row.
 
+Follow-up status: tightened again in DEV on 2026-04-27. The portal helper that maps an existing shared `user.id` back to `staff_profiles.id`, the secure-message staff display-name fallback, and the signed-CFA creator display fallback now use `user.cognito_sub` only. They no longer staff-map a local user by email.
+
 ### 4. High/Medium - Legacy application create endpoint trusts caller-supplied `user_id`
 
 `POST /api/applications` is a legacy route and the current portal frontend does not appear to call it. The route still accepts `user_id` from `req.body`, requires it, and inserts that value into `iset_application`.

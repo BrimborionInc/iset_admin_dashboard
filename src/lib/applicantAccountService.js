@@ -634,7 +634,7 @@ async function fetchApplicantAccountRows(dbPool, { q = '', clientId = null, limi
       LEFT JOIN canada_region r
         ON r.region_id = lc.portfolio_region_id
       LEFT JOIN staff_profiles sp
-        ON sp.id = COALESCE(lc.assigned_staff_profile_id, lc.assigned_to_user_id)
+        ON sp.id = lc.assigned_staff_profile_id
       ${whereSql}
       ORDER BY
         CASE

@@ -1,6 +1,6 @@
 # Template Editor Dashboard
 
-Last updated: 2025-11-06
+Last updated: 2026-04-27
 
 ## Purpose
 Provide administrators with a focused workspace for drafting, localising, and validating notification templates before they are assigned to events and roles via the Notification Settings dashboard.
@@ -20,6 +20,7 @@ Provide administrators with a focused workspace for drafting, localising, and va
 
 ## Behavioural Notes
 - This dashboard no longer shares space with Notification Settings. After saving, use the link (top of the page) to return to `/manage-notifications` and assign templates to events.
+- Template read/write/delete APIs are restricted server-side to System Administrator and NWAC Administrator roles, matching the route access matrix.
 - Formatting tokens (`[b]`, `[i]`, `[u]`, `[ul]`, `[ol]`, `[li]`, `[link url="..."]`) remain visible in the textarea but render as styled HTML in the preview and downstream SES pipeline.
 - Link modal enforces `https://` URLs and inserts `[link url="..."]text[/link]` tokens; editing within the textarea is possible but the toolbar provides the safest path.
 

@@ -81,6 +81,7 @@ Provide an in-app way for signed-in PATH staff to report admin-console bugs and 
 - Storage path uses the shared object-store layer already used by PATH uploads:
   - DEV: MinIO-backed S3-compatible path when configured
   - TEST / PROD: S3
+- Download links are not exposed through a raw attachment route. The System Administrator report-detail endpoint loads attachments for the selected report and returns short-lived presigned URLs.
 
 ## Backend contract
 

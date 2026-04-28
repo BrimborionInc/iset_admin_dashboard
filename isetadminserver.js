@@ -548,6 +548,9 @@ function buildCaseColumnSelectSql(columns = []) {
   ));
   const safeColumns = normalized.length ? normalized : ['id'];
   return safeColumns.map((column) => {
+    if (column === 'application_id') {
+      return `${buildCasePrimaryApplicationIdSql('c')} AS application_id`;
+    }
     if (column === 'assigned_to_user_id') {
       return `${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id`;
     }
@@ -562,15 +565,12 @@ function buildCaseAssignedStaffProfileIdSql(caseAlias = 'c') {
   const alias = /^[A-Za-z_][A-Za-z0-9_]*$/.test(String(caseAlias || ''))
     ? String(caseAlias)
     : 'c';
-  return `COALESCE(${alias}.assigned_staff_profile_id, ${alias}.assigned_to_user_id)`;
+  return `${alias}.assigned_staff_profile_id`;
 }
 
 function resolveCaseAssignedStaffProfileId(caseRow) {
   if (!caseRow) return null;
-  return (
-    normalisePositiveInteger(caseRow.assigned_staff_profile_id) ||
-    normalisePositiveInteger(caseRow.assigned_to_user_id)
-  );
+  return normalisePositiveInteger(caseRow.assigned_staff_profile_id);
 }
 
 function resolveAssignedStaffProfileIdFromRow(row) {
@@ -582,10 +582,14 @@ function resolveAssignedStaffProfileIdFromRow(row) {
     normalisePositiveInteger(row.assignedStaffProfileId) ||
     normalisePositiveInteger(row.staff_profile_id) ||
     normalisePositiveInteger(row.staffProfileId) ||
-    normalisePositiveInteger(row.assigned_to_user_id) ||
-    normalisePositiveInteger(row.assignedToUserId) ||
+    normalisePositiveInteger(row.assigned_to_staff_profile_id) ||
+    normalisePositiveInteger(row.assignedToStaffProfileId) ||
+    normalisePositiveInteger(row.assignee_staff_profile_id) ||
+    normalisePositiveInteger(row.assigneeStaffProfileId) ||
     normalisePositiveInteger(row.assigned_user_id) ||
     normalisePositiveInteger(row.assignedUserId) ||
+    normalisePositiveInteger(row.assigned_to_user_id) ||
+    normalisePositiveInteger(row.assignedToUserId) ||
     null
   );
 }
@@ -603,17 +607,17 @@ function buildAssignedStaffProfileResponseFields(rowOrId) {
 }
 
 function buildApplicationCaseJoinPredicate(caseAlias = 'c', applicationAlias = 'a') {
-  return `(${caseAlias}.id = ${applicationAlias}.case_id OR (${applicationAlias}.case_id IS NULL AND ${caseAlias}.application_id = ${applicationAlias}.id))`;
+  return `${caseAlias}.id = ${applicationAlias}.case_id`;
 }
 
 function buildCasePrimaryApplicationIdSql(caseAlias = 'c') {
-  return `COALESCE(${caseAlias}.application_id, (
+  return `(
     SELECT a_case.id
       FROM iset_application a_case
      WHERE a_case.case_id = ${caseAlias}.id
      ORDER BY COALESCE(a_case.updated_at, a_case.created_at) DESC, a_case.id DESC
      LIMIT 1
-  ))`;
+  )`;
 }
 
 function buildCasePrimaryApplicationJoinSql(caseAlias = 'c', applicationAlias = 'a', required = false) {
@@ -643,14 +647,7 @@ async function fetchCaseRowForApplicationId(
     [normalizedApplicationId]
   );
   if (linkedRow) return linkedRow;
-  const [[legacyRow]] = await connection.query(
-    `SELECT ${selectSql}
-       FROM iset_case c
-      WHERE c.application_id = ?
-      LIMIT 1${lockSql}`,
-    [normalizedApplicationId]
-  );
-  return legacyRow || null;
+  return null;
 }
 
 async function resolveCaseIdFromApplicationId(applicationId, connection = pool, options = {}) {
@@ -749,7 +746,7 @@ async function resolveApplicationIdForCaseId(caseId, connection = pool) {
   const normalizedCaseId = normalisePositiveInteger(caseId);
   if (!normalizedCaseId) return null;
   const [[row]] = await connection.query(
-    `SELECT COALESCE(a.id, c.application_id) AS application_id
+    `SELECT a.id AS application_id
        FROM iset_case c
        ${buildCasePrimaryApplicationJoinSql('c', 'a')}
       WHERE c.id = ?
@@ -785,17 +782,58 @@ async function resolveDocumentAttachmentContext({
     return nextActionPlanId;
   };
 
+  const ensureCaseIdForApplication = async () => {
+    if (!nextApplicationId) return nextCaseId;
+    const applicationCaseId = await resolveCaseIdFromApplicationId(nextApplicationId, connection);
+    if (!applicationCaseId) return nextCaseId;
+    if (nextCaseId && Number(nextCaseId) !== Number(applicationCaseId)) {
+      const err = new Error('application_case_mismatch');
+      err.code = 'application_case_mismatch';
+      err.details = { caseId: nextCaseId, applicationId: nextApplicationId, applicationCaseId };
+      throw err;
+    }
+    nextCaseId = applicationCaseId;
+    return nextCaseId;
+  };
+
   const ensureCaseId = async () => {
-    if (!nextCaseId) {
-      const planId = await ensureActionPlanId();
-      if (planId) {
-        nextCaseId = await resolveCaseIdForActionPlan(planId, connection);
+    const planId = await ensureActionPlanId();
+    if (planId) {
+      const planCaseId = await resolveCaseIdForActionPlan(planId, connection);
+      if (planCaseId && nextCaseId && Number(nextCaseId) !== Number(planCaseId)) {
+        const err = new Error('action_plan_case_mismatch');
+        err.code = 'action_plan_case_mismatch';
+        err.details = { caseId: nextCaseId, actionPlanId: planId, actionPlanCaseId: planCaseId };
+        throw err;
       }
+      if (planCaseId) {
+        nextCaseId = planCaseId;
+      }
+    }
+    if (nextApplicationId) {
+      await ensureCaseIdForApplication();
     }
     return nextCaseId;
   };
 
-  if (normalizedScope === 'client' || normalizedScope === 'payment_packet') {
+  if (normalizedScope === 'client') {
+    await ensureCaseId();
+    if (!nextCaseId) {
+      const err = new Error('case_required_for_document');
+      err.code = 'case_required_for_document';
+      throw err;
+    }
+    return {
+      caseId: nextCaseId,
+      applicationId: null,
+      actionPlanId: null,
+      interventionIds: [],
+      effectiveStorageScope: normalizedScope,
+      usedApplicationFallback,
+    };
+  }
+
+  if (normalizedScope === 'payment_packet') {
     return {
       caseId: null,
       applicationId: null,
@@ -830,13 +868,19 @@ async function resolveDocumentAttachmentContext({
       err.code = 'action_plan_required_for_document';
       throw err;
     }
+    await ensureCaseId();
+    if (!nextCaseId) {
+      const err = new Error('case_required_for_document');
+      err.code = 'case_required_for_document';
+      throw err;
+    }
     nextInterventionIds = await ensureInterventionsBelongToActionPlan({
       actionPlanId: nextActionPlanId,
       interventionIds: nextInterventionIds,
       connection,
     });
     return {
-      caseId: null,
+      caseId: nextCaseId,
       applicationId: null,
       actionPlanId: nextActionPlanId,
       interventionIds: nextInterventionIds,
@@ -853,8 +897,14 @@ async function resolveDocumentAttachmentContext({
       }
     }
     if (nextApplicationId) {
+      await ensureCaseId();
+      if (!nextCaseId) {
+        const err = new Error('case_required_for_document');
+        err.code = 'case_required_for_document';
+        throw err;
+      }
       return {
-        caseId: null,
+        caseId: nextCaseId,
         applicationId: nextApplicationId,
         actionPlanId: null,
         interventionIds: [],
@@ -865,13 +915,19 @@ async function resolveDocumentAttachmentContext({
 
     await ensureActionPlanId();
     if (nextActionPlanId) {
+      await ensureCaseId();
+      if (!nextCaseId) {
+        const err = new Error('case_required_for_document');
+        err.code = 'case_required_for_document';
+        throw err;
+      }
       nextInterventionIds = await ensureInterventionsBelongToActionPlan({
         actionPlanId: nextActionPlanId,
         interventionIds: nextInterventionIds,
         connection,
       });
       return {
-        caseId: null,
+        caseId: nextCaseId,
         applicationId: null,
         actionPlanId: nextActionPlanId,
         interventionIds: nextInterventionIds,
@@ -1953,10 +2009,13 @@ async function storeAssessmentPdfDocument({
   archivePreviousActive = true,
   replaceExistingVersion = false
 }) {
-  if (!applicationId || !pdfBuffer) return null;
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  if ((!normalizedApplicationId && !normalizedCaseId) || !pdfBuffer) return null;
   const normalizedVersionNumber = normalisePositiveInteger(versionNumber);
   const versionSuffix = normalizedVersionNumber ? `-v${normalizedVersionNumber}` : '';
-  const displayName = `${fileNamePrefix}${versionSuffix}-${trackingId || applicationId}.pdf`;
+  const documentReference = normaliseString(trackingId) || normalizedApplicationId || normalizedCaseId;
+  const displayName = `${fileNamePrefix}${versionSuffix}-${documentReference}.pdf`;
   const sizeBytes = Number.isFinite(Number(pdfBuffer?.length)) ? Number(pdfBuffer.length) : null;
   const checksum = pdfBuffer ? crypto.createHash('sha256').update(pdfBuffer).digest('hex') : null;
   const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
@@ -1982,22 +2041,28 @@ async function storeAssessmentPdfDocument({
   }
 
   if (archivePreviousActive) {
+    const scopeColumn = normalizedApplicationId ? 'application_id' : 'case_id';
+    const scopeValue = normalizedApplicationId || normalizedCaseId;
     await pool.query(
       `UPDATE iset_document
           SET status = 'archived', updated_at = NOW()
-        WHERE application_id = ?
+        WHERE ${scopeColumn} = ?
+          ${normalizedApplicationId ? '' : 'AND application_id IS NULL'}
           AND document_category = ?
           AND status = 'active'`,
-      [applicationId, documentType]
+      [scopeValue, documentType]
     );
   } else if (replaceExistingVersion && normalizedVersionNumber) {
+    const scopeColumn = normalizedApplicationId ? 'application_id' : 'case_id';
+    const scopeValue = normalizedApplicationId || normalizedCaseId;
     const [existingRows] = await pool.query(
       `SELECT id, metadata
          FROM iset_document
-        WHERE application_id = ?
+        WHERE ${scopeColumn} = ?
+          ${normalizedApplicationId ? '' : 'AND application_id IS NULL'}
           AND document_category = ?
           AND status = 'active'`,
-      [applicationId, documentType]
+      [scopeValue, documentType]
     );
     const idsToArchive = (Array.isArray(existingRows) ? existingRows : [])
       .map(row => ({ id: normalisePositiveInteger(row?.id), info: parseAssessmentDocumentInfo(row) }))
@@ -2023,8 +2088,8 @@ async function storeAssessmentPdfDocument({
     snapshot
   });
   const insertPayload = [
-    caseId || null,
-    applicationId,
+    normalizedCaseId || null,
+    normalizedApplicationId || null,
     normalizedClientId,
     normalizedApplicantUserId,
     normalizedActorUserId,
@@ -2369,37 +2434,82 @@ async function storeGeneratedDocument({
   metadata,
   actorUserId,
   caseId,
+  applicationId = null,
+  actionPlanId = null,
+  clientId = null,
+  applicantUserId = null,
+  connection = pool,
 }) {
+  const runner = connection || pool;
   if (!buffer || !fileName || !contentType) {
     throw new Error('missing_document_payload');
   }
+  let normalizedCaseId = normalisePositiveInteger(caseId);
+  let normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const normalizedActionPlanId = normalisePositiveInteger(actionPlanId);
+  let normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
+  if (normalizedApplicationId) {
+    const applicationCaseId = await resolveCaseIdFromApplicationId(normalizedApplicationId, runner);
+    if (applicationCaseId && normalizedCaseId && Number(applicationCaseId) !== Number(normalizedCaseId)) {
+      const err = new Error('application_case_mismatch');
+      err.code = 'application_case_mismatch';
+      err.details = { caseId: normalizedCaseId, applicationId: normalizedApplicationId, applicationCaseId };
+      throw err;
+    }
+    normalizedCaseId = normalizedCaseId || applicationCaseId;
+  }
+  if (!normalizedApplicationId && normalizedCaseId) {
+    normalizedApplicationId = await resolveApplicationIdForCaseId(normalizedCaseId, runner);
+  }
+  if (!normalizedApplicantUserId && normalizedApplicationId) {
+    normalizedApplicantUserId = await resolveApplicantUserIdForApplication(normalizedApplicationId, runner);
+  }
+  if (normalizedApplicationId && !normalizedApplicantUserId) {
+    const err = new Error('applicant_user_required_for_generated_application_document');
+    err.code = 'applicant_user_required_for_generated_application_document';
+    err.details = { applicationId: normalizedApplicationId, caseId: normalizedCaseId || null };
+    throw err;
+  }
+  if (!normalizedCaseId) {
+    const err = new Error('case_required_for_generated_document');
+    err.code = 'case_required_for_generated_document';
+    throw err;
+  }
+  const resolvedClientId = await resolveClientIdForDocument({
+    clientId,
+    applicantUserId: normalizedApplicantUserId,
+    caseId: normalizedCaseId,
+    actionPlanId: normalizedActionPlanId,
+    applicationId: normalizedApplicationId,
+    connection: runner,
+  });
+  if (!resolvedClientId) {
+    const err = new Error('client_id_required_for_generated_document');
+    err.code = 'client_id_required_for_generated_document';
+    throw err;
+  }
   const sizeBytes = Number.isFinite(Number(buffer?.length)) ? Number(buffer.length) : null;
   const checksum = buffer ? crypto.createHash('sha256').update(buffer).digest('hex') : null;
-  let relativePath = null;
-  const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
-  if (DRIVER !== 's3') {
-    throw new Error('s3_upload_unavailable');
-  }
-  const key = generateKey(actorUserId || 'admin', fileName);
-  const presigned = await presignPut({ key, contentType });
-  await axios.put(presigned.url, buffer, {
-    headers: {
-      ...(presigned.headers || {}),
-      'Content-Type': contentType,
-      ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
-    }
+  const storedObject = await storeGeneratedObject({
+    buffer,
+    fileName,
+    contentType,
+    storageOwnerId: normalizedApplicantUserId || actorUserId || 'admin',
+    checksum,
+    sizeBytes,
   });
-  relativePath = key;
-  if (!relativePath) {
-    throw new Error('path_resolution_failed');
-  }
+  const relativePath = storedObject.filePath;
   const metadataPayload = JSON.stringify(metadata || {});
-  const [result] = await pool.query(
+  const [result] = await runner.query(
     `INSERT INTO iset_document
-       (case_id, application_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
-     VALUES (?, NULL, NULL, ?, 'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+       (case_id, application_id, action_plan_id, client_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
+     VALUES (?, ?, ?, ?, ?, ?, 'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
     [
-      caseId || null,
+      normalizedCaseId,
+      normalizedApplicationId || null,
+      normalizedActionPlanId || null,
+      resolvedClientId,
+      normalizedApplicantUserId || null,
       normalisePositiveInteger(actorUserId) || null,
       fileName,
       relativePath,
@@ -2415,6 +2525,46 @@ async function storeGeneratedDocument({
     documentId: result?.insertId || null,
     checksum,
     filePath: relativePath,
+  };
+}
+
+async function storeGeneratedObject({
+  buffer,
+  fileName,
+  contentType,
+  storageOwnerId = 'admin',
+  checksum = null,
+  sizeBytes = null,
+}) {
+  if (!buffer || !fileName || !contentType) {
+    throw new Error('missing_object_payload');
+  }
+  const normalizedSizeBytes = Number.isFinite(Number(sizeBytes))
+    ? Number(sizeBytes)
+    : Number.isFinite(Number(buffer?.length))
+      ? Number(buffer.length)
+      : null;
+  const normalizedChecksum = checksum || crypto.createHash('sha256').update(buffer).digest('hex');
+  const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+  if (DRIVER !== 's3') {
+    throw new Error('s3_upload_unavailable');
+  }
+  const key = generateKey(storageOwnerId || 'admin', fileName);
+  const presigned = await presignPut({ key, contentType });
+  await axios.put(presigned.url, buffer, {
+    headers: {
+      ...(presigned.headers || {}),
+      'Content-Type': contentType,
+      ...(normalizedSizeBytes ? { 'Content-Length': normalizedSizeBytes } : {})
+    }
+  });
+  if (!key) {
+    throw new Error('path_resolution_failed');
+  }
+  return {
+    checksum: normalizedChecksum,
+    filePath: key,
+    sizeBytes: normalizedSizeBytes,
   };
 }
 
@@ -5244,8 +5394,6 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'esdc_participant_submission',
   'esdc_reporting_note',
   'esdc_reporting_package',
-  'jordan_application_draft',
-  'jordan_application',
   'system_config_audit',
   'iset_case',
   'client',
@@ -11118,7 +11266,7 @@ async function buildCfaSnapshot({ connection, caseId, actionPlanId }) {
   const [[caseRow]] = await connection.query(
     `SELECT c.id,
             c.case_number,
-            COALESCE(c.application_id, a.id) AS application_id,
+            a.id AS application_id,
             c.client_id,
             c.case_context_json,
             s.user_id AS applicant_user_id,
@@ -11210,7 +11358,7 @@ async function buildCfaSnapshotFromAssessment({ connection, caseId }) {
   const [[caseRow]] = await connection.query(
     `SELECT c.id,
             c.case_number,
-            COALESCE(c.application_id, a.id) AS application_id,
+            a.id AS application_id,
             c.client_id,
             c.case_context_json,
             s.user_id AS applicant_user_id,
@@ -11449,20 +11597,20 @@ async function resolveFundingAgreementCaseManager({
   if (createdByUserId) {
     try {
       const [[senderUser]] = await runner.query(
-        `SELECT email, name
+        `SELECT email, name, cognito_sub
            FROM user
           WHERE id = ?
           LIMIT 1`,
         [createdByUserId]
       );
-      const senderEmail = normaliseString(senderUser?.email || '');
-      if (senderEmail) {
+      const senderSub = normaliseString(senderUser?.cognito_sub || '');
+      if (senderSub) {
         const [[senderStaff]] = await runner.query(
           `SELECT display_name, name, email
              FROM staff_profiles
-            WHERE LOWER(email) = LOWER(?)
+            WHERE cognito_sub = ?
             LIMIT 1`,
-          [senderEmail]
+          [senderSub]
         );
         const senderStaffName =
           normaliseString(senderStaff?.display_name || senderStaff?.name || senderStaff?.email || null) || '';
@@ -11707,9 +11855,17 @@ async function regenerateSignedCfaDocument({
   const caseId = normalisePositiveInteger(versionRow.case_id);
   if (!caseId) return null;
   const [[caseRow]] = await runner.query(
-    `SELECT id, application_id, client_id, applicant_user_id, assigned_to_user_id, reference_number, case_number
-       FROM iset_case
-      WHERE id = ?
+    `SELECT c.id,
+            a.id AS application_id,
+            c.client_id,
+            s.user_id AS applicant_user_id,
+            c.assigned_staff_profile_id AS assigned_to_user_id,
+            s.reference_number,
+            c.case_number
+       FROM iset_case c
+       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+      WHERE c.id = ?
       LIMIT 1`,
     [caseId]
   );
@@ -12247,6 +12403,56 @@ const computeProposedInterventionsTotal = (interventions) => {
   return hasAmount ? total : null;
 };
 
+const resolveInterventionAssessmentPreviousIsetValue = ({
+  metadata = {},
+  fallbackSnapshot = null,
+  defaultValue = 'yes',
+} = {}) => {
+  const snapshot = metadata?.snapshot && typeof metadata.snapshot === 'object' ? metadata.snapshot : {};
+  return (
+    normalizeYesNoValue(
+      metadata.previouslyFundedIset ??
+        metadata.previously_funded_iset ??
+        metadata.previousIset ??
+        metadata.previous_iset ??
+        snapshot.previouslyFundedIset ??
+        snapshot.previously_funded_iset ??
+        snapshot.previousIset ??
+        snapshot.previous_iset ??
+        null
+    ) ||
+    normalizeYesNoValue(
+      fallbackSnapshot?.previously_funded_iset ??
+        fallbackSnapshot?.previousIset ??
+        fallbackSnapshot?.previous_iset ??
+        fallbackSnapshot?.assessment_previous_iset ??
+        null
+    ) ||
+    defaultValue
+  );
+};
+
+const resolveInterventionAssessmentCoordinatorAgreement = ({ interventionRow, metadata = {}, approved = false } = {}) => {
+  const reviewMetadata = metadata?.review && typeof metadata.review === 'object' ? metadata.review : {};
+  const decisionValue = normaliseString(
+    reviewMetadata.decision ||
+      reviewMetadata.decisionStatus ||
+      reviewMetadata.decision_status ||
+      interventionRow?.review_status ||
+      interventionRow?.proposal_review_status ||
+      interventionRow?.status ||
+      null
+  );
+  const normalizedDecision = decisionValue ? decisionValue.toLowerCase().replace(/[\s-]+/g, '_') : '';
+  if (['rejected', 'reject', 'denied', 'deny', 'declined', 'decline'].includes(normalizedDecision)) {
+    return 'disagree';
+  }
+  if (approved || ['approved', 'approve', 'in_progress', 'suspended', 'completed'].includes(normalizedDecision)) {
+    return 'agree';
+  }
+  return '';
+};
+
 const buildAssessmentSnapshotInterventionMatchKey = intervention => {
   const normalized = normalizeProposedIntervention(intervention);
   if (!normalized) return '';
@@ -12310,15 +12516,20 @@ async function buildRevisionAssessmentSnapshot({
   const metadata = revisionMetadata && typeof revisionMetadata === 'object'
     ? revisionMetadata
     : {};
+  const nextSnapshot = JSON.parse(JSON.stringify(baselineSnapshot));
+  nextSnapshot.previously_funded_iset = resolveInterventionAssessmentPreviousIsetValue({
+    metadata,
+    fallbackSnapshot: baselineSnapshot,
+    defaultValue: 'yes',
+  });
   const revisedIntervention = buildRevisionAssessmentPrimaryIntervention({
     revisionMetadata: metadata,
     sourceInterventionRow: sourceRow
   });
   if (!revisedIntervention) {
-    return JSON.parse(JSON.stringify(baselineSnapshot));
+    return nextSnapshot;
   }
 
-  const nextSnapshot = JSON.parse(JSON.stringify(baselineSnapshot));
   const currentInterventions = normalizeAssessmentProposedInterventions(nextSnapshot.proposed_interventions);
   const sourcePayload = sourceRow ? (mapInterventionRow(sourceRow) || {}) : {};
   const sourceCandidate = normalizeProposedIntervention({
@@ -12490,136 +12701,358 @@ async function buildRevisionAssessmentSnapshot({
   return nextSnapshot;
 }
 
-async function generateAndStoreRevisionAssessmentPdf({
-  caseId,
-  sourceInterventionRow,
-  revisionInterventionRow,
-  actorUserId = null,
-  submittedSignature = null,
-  connection = pool
-} = {}) {
-  const normalizedCaseId = normalisePositiveInteger(caseId || sourceInterventionRow?.case_id || revisionInterventionRow?.case_id || null);
-  if (!normalizedCaseId || !sourceInterventionRow || !revisionInterventionRow) {
-    return null;
-  }
-
-  const [[caseContextRow]] = await connection.query(
-    `SELECT c.client_id,
-            COALESCE(a.id, c.application_id) AS application_id
+async function fetchInterventionAssessmentContext({ caseId, interventionRow, connection = pool } = {}) {
+  const normalizedCaseId = normalisePositiveInteger(caseId || interventionRow?.case_id || null);
+  if (!normalizedCaseId) return null;
+  const [[row]] = await connection.query(
+    `SELECT c.id AS case_id,
+            c.case_number,
+            c.client_id,
+            NULL AS legacy_application_id,
+            a.id AS application_id,
+            ap.id AS action_plan_id,
+            ap.funding_stream,
+            ap.budget_pot,
+            ap.notes AS action_plan_notes,
+            ap.metadata_json AS action_plan_metadata_json,
+            bp.code AS budget_pot_code,
+            bp.name AS budget_pot_name,
+            cl.first_name AS client_first_name,
+            cl.last_name AS client_last_name
        FROM iset_case c
        ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+       LEFT JOIN iset_case_action_plan ap ON ap.id = ?
+       LEFT JOIN budget_pot bp ON bp.id = COALESCE(?, ap.budget_pot)
+       LEFT JOIN client cl ON cl.id = c.client_id
       WHERE c.id = ?
       LIMIT 1`,
-    [normalizedCaseId]
+    [
+      normalisePositiveInteger(interventionRow?.action_plan_id) || null,
+      normalisePositiveInteger(interventionRow?.pot_id) || normalisePositiveInteger(interventionRow?.budget_pot) || null,
+      normalizedCaseId
+    ]
   );
-  const applicationId = normalisePositiveInteger(caseContextRow?.application_id);
-  if (!applicationId) {
+  if (!row) return null;
+  const applicationId = normalisePositiveInteger(row.application_id);
+  const applicantContext = applicationId
+    ? await fetchAssessmentApplicantContext({ applicationId })
+    : { applicantName: null, trackingId: null, applicantUserId: null };
+  const clientName =
+    normaliseString(applicantContext.applicantName) ||
+    [row.client_first_name, row.client_last_name].map(normaliseString).filter(Boolean).join(' ') ||
+    null;
+  return {
+    caseId: normalizedCaseId,
+    applicationId,
+    clientId: normalisePositiveInteger(row.client_id),
+    applicantUserId: applicantContext.applicantUserId || null,
+    applicantName: clientName,
+    referenceNumber: normaliseString(applicantContext.trackingId) || normaliseString(row.case_number) || String(normalizedCaseId),
+    caseNumber: normaliseString(row.case_number) || null,
+    actionPlanRow: row
+  };
+}
+
+async function fetchInterventionSubmittedSignatureFallback({
+  interventionRow,
+  connection = pool
+} = {}) {
+  const interventionId = normalisePositiveInteger(interventionRow?.id);
+  if (!interventionId) return null;
+  try {
+    const [[row]] = await connection.query(
+      `SELECT COALESCE(
+                NULLIF(TRIM(submitter.display_name), ''),
+                NULLIF(TRIM(submitter.name), ''),
+                NULLIF(TRIM(submitter.email), ''),
+                NULLIF(TRIM(creator.display_name), ''),
+                NULLIF(TRIM(creator.name), ''),
+                NULLIF(TRIM(creator.email), '')
+              ) AS signer_name,
+              COALESCE(p.submitted_at, ci.updated_at, ci.created_at) AS signed_at
+         FROM iset_case_intervention ci
+         LEFT JOIN iset_intervention_proposal p ON p.legacy_intervention_id = ci.id
+         LEFT JOIN staff_profiles submitter ON submitter.id = p.submitted_by_staff_profile_id
+         LEFT JOIN staff_profiles creator ON creator.id = ci.created_by_staff_profile_id
+        WHERE ci.id = ?
+        LIMIT 1`,
+      [interventionId]
+    );
+    const signerName = normaliseString(row?.signer_name) || null;
+    const signedAt = toIsoDateTime(row?.signed_at);
+    if (!signerName && !signedAt) return null;
+    return { signerName, signedAt };
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err)) {
+      console.warn('[assessment-pdf] intervention signature lookup failed', err?.message || err);
+    }
     return null;
   }
+}
+
+async function buildInterventionAssessmentSnapshot({
+  interventionRow,
+  baselineSnapshot = null,
+  sourceInterventionRow = null,
+  context = null,
+  approved = false,
+  connection = pool
+} = {}) {
+  if (!interventionRow) return null;
+  const metadata = safeJsonParse(interventionRow.metadata_json, {}) || {};
+  const sourceMetadata = sourceInterventionRow
+    ? (safeJsonParse(sourceInterventionRow.metadata_json, {}) || {})
+    : {};
+  const revisionInfo =
+    metadata.revision && typeof metadata.revision === 'object'
+      ? metadata.revision
+      : null;
+  const sourceRevisionInfo =
+    sourceMetadata.revision && typeof sourceMetadata.revision === 'object'
+      ? sourceMetadata.revision
+      : null;
+  const revisionMetadata = revisionInfo ? metadata : sourceRevisionInfo ? sourceMetadata : null;
+  if (revisionMetadata && hasAssessmentSnapshotContent(baselineSnapshot)) {
+    return buildRevisionAssessmentSnapshot({
+      baselineSnapshot,
+      sourceInterventionRow: revisionInfo ? (sourceInterventionRow || interventionRow) : interventionRow,
+      revisionMetadata,
+      connection
+    });
+  }
+
+  const mappedIntervention = mapInterventionRow(interventionRow) || {};
+  let proposedInterventions = normalizeAssessmentProposedInterventions(
+    metadata.proposedInterventions ?? metadata.proposed_interventions ?? null
+  );
+  if (!proposedInterventions.length) {
+    proposedInterventions = normalizeAssessmentProposedInterventions([{
+      code: mappedIntervention.code || interventionRow.intervention_code || null,
+      label: mappedIntervention.title || metadata.title || null,
+      startDate: mappedIntervention.startDate || toDateOnly(interventionRow.start_date),
+      endDate: mappedIntervention.endDate || toDateOnly(interventionRow.end_date),
+      deliveryMode: mappedIntervention.deliveryMode || metadata.deliveryMode || null,
+      institution: mappedIntervention.institution || metadata.institution || metadata.snapshot?.institution || null,
+      programName: mappedIntervention.programName || metadata.programName || metadata.snapshot?.programName || null,
+      itpDetails: mappedIntervention.itpDetails || metadata.itpDetails || metadata.snapshot?.itpDetails || null,
+      wageSubsidyDetails: mappedIntervention.wageSubsidyDetails || metadata.wageSubsidyDetails || metadata.snapshot?.wageSubsidyDetails || null,
+      interventionNoc: mappedIntervention.noc || interventionRow.related_noc || null,
+      interventionNocVersion: mappedIntervention.nocVersion || interventionRow.related_noc_version || null,
+      costLines: Array.isArray(metadata.costLines) ? metadata.costLines : Array.isArray(metadata.snapshot?.costLines) ? metadata.snapshot.costLines : [],
+      cost: interventionRow.intervention_cost ?? interventionRow.budget_amount ?? interventionRow.approved_amount ?? null,
+    }]);
+  }
+  const labelMap = await fetchInterventionCodeLabels(
+    connection,
+    proposedInterventions.map(item => item?.code).filter(Boolean)
+  );
+  const interventionLabelLookup = Object.fromEntries(labelMap);
+  const primaryIntervention = proposedInterventions[0] || null;
+  const primaryCode = primaryIntervention?.code || normaliseString(interventionRow.intervention_code) || '';
+  const primaryLabel =
+    (primaryCode ? labelMap.get(String(primaryCode)) : null) ||
+    normaliseString(primaryIntervention?.label || metadata.title || mappedIntervention.title || null) ||
+    null;
+  const primaryDurationDays = primaryIntervention
+    ? calculateDurationDaysFromDates(primaryIntervention.startDate, primaryIntervention.endDate)
+    : null;
+  const proposedTotal = computeProposedInterventionsTotal(proposedInterventions);
+  const fallbackTotal = parseCurrencyValue(
+    interventionRow.intervention_cost ?? interventionRow.budget_amount ?? interventionRow.approved_amount ?? null
+  );
+  const actionPlanRow = context?.actionPlanRow || {};
+  const planMetadata = safeJsonParse(actionPlanRow.action_plan_metadata_json, {}) || {};
+  const otherFundingDetails = metadata.otherFundingDetails && typeof metadata.otherFundingDetails === 'object'
+    ? formatAssessmentOtherFundingDetailsForPdf(metadata.otherFundingDetails)
+    : '';
+  const childcareNeed = normalizeYesNoValue(metadata.childcareNeed);
+  const reviewMetadata = metadata.review && typeof metadata.review === 'object' ? metadata.review : {};
+  const esdcEligibility =
+    normalizeEsdcEligibilityValue(reviewMetadata.eiStatus || reviewMetadata.ei_status || null) ||
+    normalizeEsdcEligibilityValue(metadata.esdcEligibility || metadata.esdc_eligibility || null) ||
+    (String(actionPlanRow.funding_stream || '').trim().toUpperCase() === 'CRF' ? 'crf' : '');
+  const postingContext =
+    normalizePostingContext(metadata.postingContext || metadata.posting_context || planMetadata.postingContext || null) || '';
+  const budgetPotLabel =
+    normaliseString(actionPlanRow.budget_pot_code) ||
+    normaliseString(actionPlanRow.budget_pot_name) ||
+    normaliseString(metadata.budgetPotCode || metadata.budgetPotLabel || null) ||
+    '';
+
+  return {
+    reference_number: context?.referenceNumber || context?.caseNumber || '',
+    date_of_assessment: toDateOnlyString(interventionRow.updated_at || interventionRow.created_at || new Date()),
+    client_name: context?.applicantName || '',
+    conflict_declaration_signed: true,
+    conflict_choice_no: true,
+    conflict_choice_yes: false,
+    conflict_details: '',
+    client_application_overview:
+      normaliseString(metadata.clientApplicationOverview || metadata.client_application_overview || metadata.rationale || metadata.notes || interventionRow.notes || '') || '',
+    training_employment_goal:
+      normaliseString(metadata.trainingEmploymentGoal || metadata.training_employment_goal || actionPlanRow.action_plan_notes || '') || '',
+    previously_funded_iset: resolveInterventionAssessmentPreviousIsetValue({
+      metadata,
+      fallbackSnapshot: null,
+      defaultValue: 'yes',
+    }),
+    previously_funded_iset_details: normaliseString(metadata.previouslyFundedIsetDetails || metadata.previously_funded_iset_details || '') || '',
+    other_funding_sources_details: otherFundingDetails,
+    esdc_eligibility: esdcEligibility,
+    proposed_interventions: proposedInterventions,
+    intervention_label_lookup: interventionLabelLookup,
+    intervention_code: primaryLabel ? `${primaryLabel}${primaryCode ? ` (${primaryCode})` : ''}` : primaryCode,
+    delivery_mode: resolveDeliveryModeLabel(primaryIntervention?.deliveryMode) || '',
+    intervention_start_date: primaryIntervention?.startDate || '',
+    intervention_end_date: primaryIntervention?.endDate || '',
+    intervention_duration_days: primaryDurationDays === null ? '' : String(primaryDurationDays),
+    training_institution_or_employer: primaryIntervention?.institution || '',
+    program_name: primaryIntervention?.programName || '',
+    intervention_noc: primaryIntervention?.noc || '',
+    intervention_noc_version: primaryIntervention?.nocVersion || '',
+    itp_details: primaryIntervention?.itpDetails || '',
+    wage_subsidy_details: primaryIntervention?.wageSubsidyDetails || '',
+    childcare_need_yes: childcareNeed === 'yes',
+    childcare_need_no: childcareNeed === 'no',
+    childcare_funding_details: normaliseString(metadata.childcareFunding || metadata.childcare_funding_details || '') || '',
+    intervention_cost_total_raw: proposedTotal ?? (Number.isFinite(fallbackTotal) ? fallbackTotal : null),
+    intervention_count: String(proposedInterventions.length),
+    budget_pot_label: budgetPotLabel,
+    posting_context: postingContext,
+    recommendation: 'fund',
+    recommendation_justification: normaliseString(metadata.rationale || interventionRow.notes || '') || '',
+    agree_with_coordinator: resolveInterventionAssessmentCoordinatorAgreement({ interventionRow, metadata, approved }),
+    denial_reason: '',
+    barriers_other_specify: normaliseString(metadata.barriersOtherDetails || metadata.barriers_other_details || '') || ''
+  };
+}
+
+async function generateAndStoreInterventionAssessmentPdf({
+  caseId,
+  interventionRow,
+  sourceInterventionRow = null,
+  actorUserId = null,
+  submittedSignature = null,
+  approvedSignature = null,
+  approved = false,
+  connection = pool
+} = {}) {
+  const normalizedCaseId = normalisePositiveInteger(caseId || interventionRow?.case_id || sourceInterventionRow?.case_id || null);
+  if (!normalizedCaseId || !interventionRow) return null;
+  const context = await fetchInterventionAssessmentContext({
+    caseId: normalizedCaseId,
+    interventionRow,
+    connection
+  });
+  if (!context) return null;
 
   const latestSubmittedDoc = await fetchLatestAssessmentDocumentInfo({
-    applicationId,
+    applicationId: context.applicationId,
     caseId: normalizedCaseId,
     documentTypes: ['case_assessment'],
     connection
   });
   const latestVersionedDoc = await fetchLatestAssessmentDocumentInfo({
-    applicationId,
+    applicationId: context.applicationId,
     caseId: normalizedCaseId,
     documentTypes: ['case_assessment', 'case_assessment_approved'],
     connection
   });
   const baselineSnapshot = latestSubmittedDoc?.snapshot || latestVersionedDoc?.snapshot || null;
-  if (!hasAssessmentSnapshotContent(baselineSnapshot)) {
-    return null;
-  }
-
-  const revisionMetadata = safeJsonParse(revisionInterventionRow.metadata_json, {}) || {};
-  const currentSnapshot = await buildRevisionAssessmentSnapshot({
-    baselineSnapshot,
+  const currentSnapshot = await buildInterventionAssessmentSnapshot({
+    interventionRow,
     sourceInterventionRow,
-    revisionMetadata,
+    baselineSnapshot,
+    context,
+    approved,
     connection
   });
-  if (!hasAssessmentSnapshotContent(currentSnapshot)) {
-    return null;
+  if (!hasAssessmentSnapshotContent(currentSnapshot)) return null;
+  if (approved) {
+    currentSnapshot.agree_with_coordinator =
+      currentSnapshot.agree_with_coordinator ||
+      resolveInterventionAssessmentCoordinatorAgreement({ interventionRow, approved: true });
   }
 
-  const applicantContext = await fetchAssessmentApplicantContext({
-    applicationId
-  });
-  const signatureContext = {
-    submittedSignature:
-      await fetchLatestCaseEventSignature(connection, { caseId: normalizedCaseId, eventType: 'assessment_submitted' }) ||
-      submittedSignature ||
-      null,
-    approvedSignature: null
-  };
-  const assessmentVersionNumber = (latestVersionedDoc?.versionNumber || 0) + 1;
-  const previousSubmittedVersionNumber = latestSubmittedDoc?.versionNumber || null;
-  const previousSubmittedSnapshot = latestSubmittedDoc?.snapshot || null;
-  const referenceNumber =
-    applicantContext.trackingId ||
-    normaliseString(currentSnapshot.reference_number || null) ||
+  const submittedFallback =
+    submittedSignature ||
+    await fetchInterventionSubmittedSignatureFallback({ interventionRow, connection }) ||
     null;
+  const submittedSignatureResolved =
+    submittedFallback ||
+    await fetchLatestCaseEventSignature(connection, { caseId: normalizedCaseId, eventType: 'assessment_submitted' }) ||
+    null;
+  const signatureContext = {
+    submittedSignature: submittedSignatureResolved,
+    approvedSignature: approved ? (approvedSignature || null) : null
+  };
+  const assessmentVersionNumber = approved
+    ? (latestSubmittedDoc?.versionNumber || latestVersionedDoc?.versionNumber || 1)
+    : ((latestVersionedDoc?.versionNumber || 0) + 1);
+  const documentType = approved ? 'case_assessment_approved' : 'case_assessment';
+  const label = approved
+    ? `Approved case manager assessment v${assessmentVersionNumber}`
+    : `Case manager assessment v${assessmentVersionNumber}`;
+  const fileNamePrefix = approved ? 'approved-case-manager-assessment' : 'case-manager-assessment';
+  const variant = approved ? 'approved' : 'submitted';
 
   const pdfBuffer = await generateAssessmentPdfBuffer({
-    caseRow: sourceInterventionRow,
-    applicantName: applicantContext.applicantName,
-    referenceNumber,
+    caseRow: interventionRow,
+    applicantName: context.applicantName,
+    referenceNumber: context.referenceNumber,
     snapshotOverride: currentSnapshot,
     recommendationSignature: signatureContext.submittedSignature,
-    approvalSignature: null,
-    includeAgreementSection: false,
+    approvalSignature: signatureContext.approvedSignature,
+    includeAgreementSection: approved,
     versionNumber: assessmentVersionNumber,
-    variant: 'submitted'
+    variant
   });
   await storeAssessmentPdfDocument({
-    applicationId,
+    applicationId: context.applicationId,
     caseId: normalizedCaseId,
-    clientId: caseContextRow?.client_id || null,
-    applicantUserId: applicantContext.applicantUserId,
+    clientId: context.clientId,
+    applicantUserId: context.applicantUserId,
     actorUserId,
-    trackingId: referenceNumber,
+    trackingId: context.referenceNumber,
     pdfBuffer,
-    documentType: 'case_assessment',
-    label: `Case manager assessment v${assessmentVersionNumber}`,
-    fileNamePrefix: 'case-manager-assessment',
+    documentType,
+    label,
+    fileNamePrefix,
     versionNumber: assessmentVersionNumber,
-    variant: 'submitted',
+    variant,
     snapshot: currentSnapshot,
     archivePreviousActive: false,
     replaceExistingVersion: true
   });
 
-  if (previousSubmittedVersionNumber && hasAssessmentSnapshotContent(previousSubmittedSnapshot)) {
+  if (!approved && latestSubmittedDoc?.versionNumber && hasAssessmentSnapshotContent(latestSubmittedDoc?.snapshot)) {
     const redlineBuffer = await generateAssessmentPdfBuffer({
-      caseRow: sourceInterventionRow,
-      applicantName: applicantContext.applicantName,
-      referenceNumber,
+      caseRow: interventionRow,
+      applicantName: context.applicantName,
+      referenceNumber: context.referenceNumber,
       snapshotOverride: currentSnapshot,
       recommendationSignature: signatureContext.submittedSignature,
       approvalSignature: null,
       includeAgreementSection: false,
       versionNumber: assessmentVersionNumber,
       variant: 'redline',
-      previousVersionNumber: previousSubmittedVersionNumber,
-      redlineBaseSnapshot: previousSubmittedSnapshot
+      previousVersionNumber: latestSubmittedDoc.versionNumber,
+      redlineBaseSnapshot: latestSubmittedDoc.snapshot
     });
     await storeAssessmentPdfDocument({
-      applicationId,
+      applicationId: context.applicationId,
       caseId: normalizedCaseId,
-      clientId: caseContextRow?.client_id || null,
-      applicantUserId: applicantContext.applicantUserId,
+      clientId: context.clientId,
+      applicantUserId: context.applicantUserId,
       actorUserId,
-      trackingId: referenceNumber,
+      trackingId: context.referenceNumber,
       pdfBuffer: redlineBuffer,
       documentType: 'case_assessment_redline',
       label: `Case manager assessment redline v${assessmentVersionNumber}`,
       fileNamePrefix: 'case-manager-assessment-redline',
       versionNumber: assessmentVersionNumber,
       variant: 'redline',
-      previousVersionNumber: previousSubmittedVersionNumber,
+      previousVersionNumber: latestSubmittedDoc.versionNumber,
       snapshot: currentSnapshot,
       archivePreviousActive: false,
       replaceExistingVersion: true
@@ -12628,8 +13061,27 @@ async function generateAndStoreRevisionAssessmentPdf({
 
   return {
     versionNumber: assessmentVersionNumber,
-    previousVersionNumber: previousSubmittedVersionNumber,
+    previousVersionNumber: latestSubmittedDoc?.versionNumber || null
   };
+}
+
+async function generateAndStoreRevisionAssessmentPdf({
+  caseId,
+  sourceInterventionRow,
+  revisionInterventionRow,
+  actorUserId = null,
+  submittedSignature = null,
+  connection = pool
+} = {}) {
+  return generateAndStoreInterventionAssessmentPdf({
+    caseId,
+    interventionRow: revisionInterventionRow,
+    sourceInterventionRow,
+    actorUserId,
+    submittedSignature,
+    approved: false,
+    connection
+  });
 }
 
 function syncInterventionMetadataCompatibilityFromProposedInterventions(metadata) {
@@ -12743,7 +13195,7 @@ async function findStaffProfileIdByUserId(connection, userId) {
   if (!Number.isFinite(userId)) return null;
 
   const [[userRow]] = await connection.query(
-    'SELECT cognito_sub, email FROM user WHERE id = ? LIMIT 1',
+    'SELECT cognito_sub FROM user WHERE id = ? LIMIT 1',
     [userId]
   );
   if (!userRow) return null;
@@ -12755,16 +13207,6 @@ async function findStaffProfileIdByUserId(connection, userId) {
     );
     if (bySub && bySub.id) {
       return Number(bySub.id);
-    }
-  }
-
-  if (userRow.email) {
-    const [[byEmail]] = await connection.query(
-      'SELECT id FROM staff_profiles WHERE LOWER(email) = LOWER(?) LIMIT 1',
-      [userRow.email]
-    );
-    if (byEmail && byEmail.id) {
-      return Number(byEmail.id);
     }
   }
 
@@ -12842,52 +13284,25 @@ async function fetchLatestEventEntrySignature(connection, { caseId, eventType, o
   try {
     const [[row]] = await connection.query(
       `SELECT
-          e.captured_at AS occurred_at,
-          COALESCE(
-            CASE
-              WHEN e.actor_type = 'staff' THEN (
-                SELECT COALESCE(
-                  NULLIF(TRIM(sp.display_name), ''),
-                  NULLIF(TRIM(sp.name), ''),
-                  NULLIF(TRIM(sp.email), '')
-                )
-                  FROM staff_profiles sp
-                 WHERE sp.cognito_sub = e.actor_id
-                    OR LOWER(sp.email) = LOWER(e.actor_id)
-                 ORDER BY sp.id DESC
-                 LIMIT 1
-              )
-              ELSE (
-                SELECT COALESCE(
-                  NULLIF(TRIM(u.name), ''),
-                  NULLIF(TRIM(u.email), '')
-                )
-                  FROM user u
-                 WHERE CAST(u.id AS CHAR) = e.actor_id
-                    OR u.cognito_sub = e.actor_id
-                    OR LOWER(u.email) = LOWER(e.actor_id)
-                 ORDER BY u.id DESC
-                 LIMIT 1
-              )
-            END,
-            CASE
-              WHEN e.actor_type = 'staff' THEN (
-                SELECT COALESCE(
-                  NULLIF(TRIM(u.name), ''),
-                  NULLIF(TRIM(u.email), '')
-                )
-                  FROM user u
-                 WHERE CAST(u.id AS CHAR) = e.actor_id
-                    OR u.cognito_sub = e.actor_id
-                    OR LOWER(u.email) = LOWER(e.actor_id)
-                 ORDER BY u.id DESC
-                 LIMIT 1
-              )
-              ELSE NULL
-            END,
-            NULLIF(TRIM(e.actor_display_name), '')
-          ) AS signer_name
+              e.captured_at AS occurred_at,
+              COALESCE(
+                CASE
+                  WHEN e.actor_type = 'staff' THEN COALESCE(
+                    NULLIF(TRIM(sp.display_name), ''),
+                    NULLIF(TRIM(sp.name), ''),
+                    NULLIF(TRIM(sp.email), '')
+                  )
+                  WHEN e.actor_type = 'applicant' THEN COALESCE(
+                    NULLIF(TRIM(u.name), ''),
+                    NULLIF(TRIM(u.email), '')
+                  )
+                  ELSE NULL
+                END,
+                NULLIF(TRIM(e.actor_display_name), '')
+              ) AS signer_name
          FROM iset_event_entry e
+         LEFT JOIN staff_profiles sp ON sp.id = e.actor_staff_profile_id
+         LEFT JOIN user u ON u.id = e.actor_applicant_user_id
         WHERE ${whereClauses.join(' AND ')}
         ORDER BY e.captured_at DESC, e.ingested_at DESC, e.id DESC
         LIMIT 1`,
@@ -15193,8 +15608,7 @@ const CLEAR_TEST_OBJECT_KEY_SOURCES = [
   { table: 'iset_intake.message_attachment', column: 'file_path' },
   { table: 'pending_uploads', column: 'object_key' },
   { table: 'documents', column: 'file_path' },
-  { table: 'documents', column: 'storage_key' },
-  { table: 'zzz_legacy_documents', column: 'storage_key' }
+  { table: 'documents', column: 'storage_key' }
 ];
 
 function normalizeObjectKeyForPurge(rawValue) {
@@ -15472,7 +15886,7 @@ async function dispatchMessageReceivedEmail({ pool, event, logger = console }) {
     );
     if (!settings || settings.length === 0) return;
 
-    const resolvedUserId = toUserId || event.actor_id || null;
+    const resolvedUserId = toUserId || null;
     if (!resolvedUserId) {
       logger.warn('[notifications] message_received event missing recipient user id');
       return;
@@ -15497,7 +15911,7 @@ async function fetchCaseRow(caseId, connection = null) {
   const runner = connection || pool;
   const [[row]] = await runner.query(
     `SELECT c.id,
-            COALESCE(a.id, c.application_id) AS application_id,
+            a.id AS application_id,
             c.client_id,
             ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id,
             c.assigned_staff_profile_id,
@@ -15568,6 +15982,7 @@ async function resolveOrCreateCaseForClient(
     clientId,
     applicationId = null,
     preferredCaseNumber = null,
+    assignedStaffProfileId = null,
     assignedToUserId = null,
     status = CASE_STATUS_DERIVED_VALUES.initiated,
     lifecycleStatus = CASE_STATUS_DERIVED_VALUES.initiated,
@@ -15587,7 +16002,7 @@ async function resolveOrCreateCaseForClient(
   }
 
   const normalizedApplicationId = normalisePositiveInteger(applicationId);
-  const normalizedAssigneeId = normalisePositiveInteger(assignedToUserId);
+  const normalizedAssigneeId = normalisePositiveInteger(assignedStaffProfileId ?? assignedToUserId);
   const normalizedRegionId = normalisePositiveInteger(portfolioRegionId);
   const normalizedCreatedByStaffProfileId = normalisePositiveInteger(createdByStaffProfileId);
   const normalizedUpdatedByStaffProfileId = normalisePositiveInteger(updatedByStaffProfileId);
@@ -15637,10 +16052,6 @@ async function resolveOrCreateCaseForClient(
     const params = [];
     const previousAssignedToUserId = resolveCaseAssignedStaffProfileId(targetCase);
 
-    if (normalizedApplicationId && Number(targetCase.application_id || 0) !== normalizedApplicationId) {
-      updates.push('application_id = ?');
-      params.push(normalizedApplicationId);
-    }
     if (Number(targetCase.client_id || 0) !== normalizedClientId) {
       updates.push('client_id = ?');
       params.push(normalizedClientId);
@@ -15650,8 +16061,6 @@ async function resolveOrCreateCaseForClient(
       params.push(preferredCaseNumber);
     }
     if (normalizedAssigneeId && !previousAssignedToUserId) {
-      updates.push('assigned_to_user_id = ?');
-      params.push(normalizedAssigneeId);
       updates.push('assigned_staff_profile_id = ?');
       params.push(normalizedAssigneeId);
     }
@@ -15686,14 +16095,18 @@ async function resolveOrCreateCaseForClient(
       });
     }
 
+    const resolvedAssignedStaffProfileId = normalizedAssigneeId || previousAssignedToUserId || null;
     return {
       caseId: Number(targetCase.id),
       caseNumber: normaliseString(targetCase.case_number) || preferredCaseNumber || null,
       created: false,
       assignmentUpdated: Boolean(normalizedAssigneeId && !previousAssignedToUserId),
-      assignedToUserId: normalizedAssigneeId || previousAssignedToUserId || null,
-      assignedStaffProfileId: normalizedAssigneeId || previousAssignedToUserId || null,
+      assignedToUserId: resolvedAssignedStaffProfileId,
+      assignedStaffProfileId: resolvedAssignedStaffProfileId,
+      assigned_to_user_id: resolvedAssignedStaffProfileId,
+      assigned_staff_profile_id: resolvedAssignedStaffProfileId,
       previousAssignedToUserId: previousAssignedToUserId || null,
+      previousAssignedStaffProfileId: previousAssignedToUserId || null,
       status: targetCase.status || null,
       lifecycleStatus: targetCase.lifecycle_status || null,
     };
@@ -15701,13 +16114,11 @@ async function resolveOrCreateCaseForClient(
 
   const [insertCase] = await connection.query(
     `INSERT INTO iset_case
-      (application_id, case_number, client_id, assigned_to_user_id, assigned_staff_profile_id, status, lifecycle_status, stage, portfolio_region_id, opened_at, case_context_json, created_by_staff_profile_id, updated_by_staff_profile_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, NOW(), NOW())`,
+      (case_number, client_id, assigned_staff_profile_id, status, lifecycle_status, stage, portfolio_region_id, opened_at, case_context_json, created_by_staff_profile_id, updated_by_staff_profile_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, NOW(), NOW())`,
     [
-      normalizedApplicationId || null,
       preferredCaseNumber || null,
       normalizedClientId,
-      normalizedAssigneeId || null,
       normalizedAssigneeId || null,
       status || null,
       lifecycleStatus || null,
@@ -15736,14 +16147,18 @@ async function resolveOrCreateCaseForClient(
     });
   }
 
+  const resolvedAssignedStaffProfileId = normalizedAssigneeId || null;
   return {
     caseId: createdCaseId,
     caseNumber: nextCaseNumber,
     created: true,
     assignmentUpdated: Boolean(normalizedAssigneeId),
-    assignedToUserId: normalizedAssigneeId || null,
-    assignedStaffProfileId: normalizedAssigneeId || null,
+    assignedToUserId: resolvedAssignedStaffProfileId,
+    assignedStaffProfileId: resolvedAssignedStaffProfileId,
+    assigned_to_user_id: resolvedAssignedStaffProfileId,
+    assigned_staff_profile_id: resolvedAssignedStaffProfileId,
     previousAssignedToUserId: null,
+    previousAssignedStaffProfileId: null,
     status: status || null,
     lifecycleStatus: lifecycleStatus || null,
   };
@@ -15755,7 +16170,7 @@ async function fetchActionPlanWithCase(planId) {
        ap.*,
        ap.esdc_action_plan_json AS esdcActionPlanJson,
        bp.code AS budget_pot_code,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
        c.portfolio_region_id,
        sp.region_id AS owner_region_id,
        (
@@ -15766,7 +16181,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
    FROM iset_case_action_plan ap
    JOIN iset_case c ON c.id = ap.case_id
    LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
-   LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+   LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
    WHERE ap.id = ?
    LIMIT 1`,
     [planId]
@@ -15783,13 +16198,13 @@ async function fetchInterventionWithCase(interventionId) {
        ap.case_id AS action_plan_case_id,
        ap.id AS action_plan_id,
        ap.funding_stream AS plan_funding_stream,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
        c.portfolio_region_id,
         sp.region_id AS owner_region_id
      FROM iset_case_intervention ci
      LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
      LEFT JOIN iset_case c ON c.id = ci.case_id
-     LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
      WHERE ci.id = ?
      LIMIT 1`,
     [interventionId]
@@ -16021,7 +16436,7 @@ async function fetchCaseAccessRowById(caseId, connection = pool) {
     `SELECT
         c.id,
         c.client_id,
-        COALESCE(a.id, c.application_id) AS application_id,
+        a.id AS application_id,
         ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id,
         c.assigned_staff_profile_id,
         c.portfolio_region_id,
@@ -16055,23 +16470,7 @@ async function fetchCaseAccessRowByApplicationId(applicationId, connection = poo
       LIMIT 1`,
     [normalizedApplicationId]
   );
-  if (linkedRow) return linkedRow;
-  const [[legacyRow]] = await connection.query(
-    `SELECT
-        c.id,
-        c.client_id,
-        c.application_id,
-        ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id,
-        c.assigned_staff_profile_id,
-        c.portfolio_region_id,
-        sp.region_id AS owner_region_id
-       FROM iset_case c
-       LEFT JOIN staff_profiles sp ON sp.id = ${buildCaseAssignedStaffProfileIdSql('c')}
-      WHERE c.application_id = ?
-      LIMIT 1`,
-    [normalizedApplicationId]
-  );
-  return legacyRow || null;
+  return linkedRow || null;
 }
 
 async function fetchCaseAccessRowByInterventionId(interventionId, connection = pool) {
@@ -16081,7 +16480,7 @@ async function fetchCaseAccessRowByInterventionId(interventionId, connection = p
     `SELECT
         c.id,
         c.client_id,
-        COALESCE(a.id, c.application_id) AS application_id,
+        a.id AS application_id,
         ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id,
         c.assigned_staff_profile_id,
         c.portfolio_region_id,
@@ -16105,7 +16504,7 @@ async function fetchCaseAccessRowByActionPlanId(actionPlanId, connection = pool)
     `SELECT
         c.id,
         c.client_id,
-        COALESCE(a.id, c.application_id) AS application_id,
+        a.id AS application_id,
         ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id,
         c.assigned_staff_profile_id,
         c.portfolio_region_id,
@@ -16345,7 +16744,7 @@ async function fetchCaseAccessRowsByIds(caseIds, connection = pool) {
     `SELECT
         c.id,
         c.client_id,
-        COALESCE(a.id, c.application_id) AS application_id,
+        a.id AS application_id,
         ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id,
         c.assigned_staff_profile_id,
         c.portfolio_region_id,
@@ -16366,7 +16765,7 @@ async function fetchCaseAccessRowsByClientId(clientId, connection = pool) {
     `SELECT
         c.id,
         c.client_id,
-        COALESCE(a.id, c.application_id) AS application_id,
+        a.id AS application_id,
         ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id,
         c.assigned_staff_profile_id,
         c.portfolio_region_id,
@@ -16609,10 +17008,10 @@ function ensureCanAssignCase(identity, targetStaff) {
   return false;
 }
 
-async function persistCaseAssignment(caseId, toUserId) {
+async function persistCaseAssignment(caseId, assignedStaffProfileId) {
   await pool.query(
-    'UPDATE iset_case SET assigned_to_user_id = ?, assigned_staff_profile_id = ?, updated_at = NOW() WHERE id = ?',
-    [toUserId, toUserId, caseId]
+    'UPDATE iset_case SET assigned_staff_profile_id = ?, updated_at = NOW() WHERE id = ?',
+    [assignedStaffProfileId, caseId]
   );
 }
 
@@ -16621,9 +17020,12 @@ async function publishAssignmentEvent({ caseId, applicationId, previousStaff, ne
   const payload = {
     tracking_id: trackingId,
     from_assignee_id: previousStaff?.id ?? null,
+    from_assignee_staff_profile_id: previousStaff?.id ?? null,
     from_assignee_email: previousStaff?.email ?? null,
     from_assignee_name: previousStaff?.name ?? null,
     to_assignee_id: nextStaff?.id ?? null,
+    to_assignee_staff_profile_id: nextStaff?.id ?? null,
+    assigned_staff_profile_id: nextStaff?.id ?? null,
     to_assignee_email: nextStaff?.email ?? null,
     to_assignee_name: nextStaff?.name ?? null,
   };
@@ -16850,12 +17252,29 @@ function resolveStaffRole(req) {
   return role || null;
 }
 
-async function captureCaseEvent({ type, caseId, payload, actorId, actorName, actorType = 'staff', trackingId, correlationId }) {
+async function captureCaseEvent({
+  type,
+  caseId,
+  payload,
+  actorId,
+  actorName,
+  actorType = 'staff',
+  actorStaffProfileId = null,
+  actorApplicantUserId = null,
+  trackingId,
+  correlationId
+}) {
   try {
     await emitCaseEventSdk({
       type,
       caseId,
-      actor: { type: actorType, id: actorId || null, displayName: actorName || null },
+      actor: {
+        type: actorType,
+        id: actorId || null,
+        displayName: actorName || null,
+        staffProfileId: actorStaffProfileId || null,
+        applicantUserId: actorApplicantUserId || null,
+      },
       payload,
       trackingId,
       correlationId,
@@ -16870,6 +17289,7 @@ async function captureCaseEvent({ type, caseId, payload, actorId, actorName, act
 
 }
 let applicationVersionTableEnsured = false;
+let applicationVersionTypedAuthorColumns = null;
 async function ensureApplicationVersionTable() {
   if (applicationVersionTableEnsured) return;
   const createSql = `
@@ -16879,13 +17299,19 @@ async function ensureApplicationVersionTable() {
       version int NOT NULL,
       payload_json json NOT NULL,
       change_summary text,
-      created_by_id varchar(128),
+      created_by_staff_profile_id bigint unsigned NULL,
+      created_by_user_id int NULL,
       created_by_name varchar(255),
       restored_from_version int DEFAULT NULL,
       created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (id),
       UNIQUE KEY uq_application_version (application_id, version),
-      KEY idx_application_version_created (created_at)
+      KEY idx_application_version_created_by_staff_profile (created_by_staff_profile_id),
+      KEY idx_application_version_created_by_user (created_by_user_id),
+      KEY idx_application_version_created (created_at),
+      CONSTRAINT fk_iset_application_version_application FOREIGN KEY (application_id) REFERENCES iset_application(id) ON DELETE RESTRICT,
+      CONSTRAINT fk_iset_application_version_created_staff_profile FOREIGN KEY (created_by_staff_profile_id) REFERENCES staff_profiles(id) ON DELETE RESTRICT,
+      CONSTRAINT fk_iset_application_version_created_user FOREIGN KEY (created_by_user_id) REFERENCES user(id) ON DELETE RESTRICT
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
   `;
   try {
@@ -16895,6 +17321,24 @@ async function ensureApplicationVersionTable() {
     console.error('[versions] failed to ensure version table', err.message || err);
     throw err;
   }
+}
+
+async function getApplicationVersionTypedAuthorColumns(connection = pool) {
+  if (applicationVersionTypedAuthorColumns) return applicationVersionTypedAuthorColumns;
+  await ensureApplicationVersionTable();
+  const [rows] = await connection.query(
+    `SELECT column_name
+       FROM information_schema.columns
+      WHERE table_schema = DATABASE()
+        AND table_name = 'iset_application_version'
+        AND column_name IN ('created_by_staff_profile_id', 'created_by_user_id')`
+  );
+  const columns = new Set((rows || []).map(row => row.column_name || row.COLUMN_NAME));
+  applicationVersionTypedAuthorColumns = {
+    staffProfile: columns.has('created_by_staff_profile_id'),
+    user: columns.has('created_by_user_id'),
+  };
+  return applicationVersionTypedAuthorColumns;
 }
 
 function sanitiseAnswersPayload(answers = {}) {
@@ -18202,7 +18646,7 @@ async function recomputeCaseStatus(caseId, connection = null, options = {}) {
       `SELECT c.id,
               c.status,
               c.lifecycle_status,
-              COALESCE(a.id, c.application_id) AS application_id
+        a.id AS application_id
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a')}
         WHERE c.id = ?
@@ -18619,11 +19063,11 @@ async function syncDeniedIneligibleReportingArtifacts(connection, {
   if (!Number.isInteger(numericApplicationId) || numericApplicationId <= 0) return null;
 
   const [[caseRow]] = await connection.query(
-    `SELECT id, application_id, client_id, assigned_to_user_id, assigned_staff_profile_id, status, closed_at, case_context_json
+    `SELECT id, ? AS application_id, client_id, assigned_staff_profile_id AS assigned_to_user_id, assigned_staff_profile_id, status, closed_at, case_context_json
        FROM iset_case
       WHERE id = ?
       LIMIT 1 FOR UPDATE`,
-    [numericCaseId]
+    [numericApplicationId, numericCaseId]
   );
   if (!caseRow) return null;
 
@@ -19144,7 +19588,7 @@ async function findExistingClientCaseSummary(connection, { caseId, applicationId
     `SELECT c.id, c.status, c.case_number, ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id, c.updated_at,
             sp.display_name, sp.name, sp.email
        FROM iset_case c
-       LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
       WHERE c.client_id = ?
       ORDER BY c.updated_at DESC, c.id DESC`,
     [matchedClientId]
@@ -19383,74 +19827,122 @@ async function getHighestApplicationVersion(connection, applicationId, fallbackC
   return Math.max(Number(fallbackCurrentVersion || 0), maxVersion);
 }
 
+async function insertApplicationVersionRow(connection, {
+  applicationId,
+  version,
+  payloadObj,
+  changeSummary = null,
+  actorStaffProfileId = null,
+  actorUserId = null,
+  actorName = null,
+  restoredFromVersion = null,
+} = {}) {
+  await ensureApplicationVersionTable();
+  const typedAuthorColumns = await getApplicationVersionTypedAuthorColumns(connection);
+  const columns = [
+    'application_id',
+    'version',
+    'payload_json',
+    'change_summary',
+  ];
+  const values = [
+    applicationId,
+    version,
+    JSON.stringify(payloadObj ?? {}),
+    changeSummary || null,
+  ];
+
+  if (typedAuthorColumns.staffProfile) {
+    columns.push('created_by_staff_profile_id');
+    values.push(actorStaffProfileId || null);
+  }
+  if (typedAuthorColumns.user) {
+    columns.push('created_by_user_id');
+    values.push(actorUserId || null);
+  }
+
+  columns.push('created_by_name', 'restored_from_version');
+  values.push(actorName || null, restoredFromVersion || null);
+
+  await connection.query(
+    `INSERT INTO iset_application_version (${columns.join(', ')})
+     VALUES (${columns.map(() => '?').join(', ')})`,
+    values
+  );
+}
+
 async function ensureVersionSnapshotExists(connection, applicationId, version, payloadObj, actorMeta) {
   await ensureApplicationVersionTable();
   const [[exists]] = await connection.query('SELECT id FROM iset_application_version WHERE application_id = ? AND version = ? LIMIT 1', [applicationId, version]);
   if (exists) return;
-  const serialised = JSON.stringify(payloadObj ?? {});
-  await connection.query(
-    'INSERT INTO iset_application_version (application_id, version, payload_json, change_summary, created_by_id, created_by_name, restored_from_version) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [applicationId, version, serialised, actorMeta?.changeSummary || null, actorMeta?.actorId || null, actorMeta?.actorName || null, null]
-  );
+  await insertApplicationVersionRow(connection, {
+    applicationId,
+    version,
+    payloadObj,
+    changeSummary: actorMeta?.changeSummary || null,
+    actorStaffProfileId: actorMeta?.actorStaffProfileId || null,
+    actorUserId: actorMeta?.actorUserId || null,
+    actorName: actorMeta?.actorName || null,
+    restoredFromVersion: null,
+  });
 }
 
 async function insertNewVersionEntry(connection, applicationId, version, payloadObj, metadata = {}) {
-  await ensureApplicationVersionTable();
-  const serialised = JSON.stringify(payloadObj ?? {});
-  await connection.query(
-    'INSERT INTO iset_application_version (application_id, version, payload_json, change_summary, created_by_id, created_by_name, restored_from_version) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [
-      applicationId,
-      version,
-      serialised,
-      metadata.changeSummary || null,
-      metadata.actorId || null,
-      metadata.actorName || null,
-      metadata.restoredFromVersion || null
-    ]
-  );
+  await insertApplicationVersionRow(connection, {
+    applicationId,
+    version,
+    payloadObj,
+    changeSummary: metadata.changeSummary || null,
+    actorStaffProfileId: metadata.actorStaffProfileId || null,
+    actorUserId: metadata.actorUserId || null,
+    actorName: metadata.actorName || null,
+    restoredFromVersion: metadata.restoredFromVersion || null,
+  });
 }
 
 async function resolveVersionSavedByLabels(connection, versionRows = []) {
-  const ids = Array.from(
+  const staffProfileIds = Array.from(
     new Set(
       (Array.isArray(versionRows) ? versionRows : [])
-        .map(row => (row?.created_by_id == null ? '' : String(row.created_by_id).trim()))
-        .filter(Boolean)
+        .map(row => Number(row?.created_by_staff_profile_id || 0))
+        .filter(value => Number.isInteger(value) && value > 0)
     )
   );
-  if (!ids.length) return new Map();
-
-  const cognitoSubs = ids.filter(id => /[A-Za-z-]/.test(id));
-  const numericIds = ids.filter(id => /^\d+$/.test(id));
-  const clauses = [];
-  const params = [];
-  if (cognitoSubs.length) {
-    clauses.push(`cognito_sub IN (${cognitoSubs.map(() => '?').join(',')})`);
-    params.push(...cognitoSubs);
-  }
-  if (numericIds.length) {
-    clauses.push(`CAST(id AS CHAR) IN (${numericIds.map(() => '?').join(',')})`);
-    params.push(...numericIds);
-  }
-  if (!clauses.length) return new Map();
-
-  const [rows] = await connection.query(
-    `SELECT CAST(id AS CHAR) AS id_char, cognito_sub, display_name, email
-       FROM staff_profiles
-      WHERE ${clauses.join(' OR ')}`,
-    params
+  const userIds = Array.from(
+    new Set(
+      (Array.isArray(versionRows) ? versionRows : [])
+        .map(row => Number(row?.created_by_user_id || 0))
+        .filter(value => Number.isInteger(value) && value > 0)
+    )
   );
-
   const byKey = new Map();
-  for (const row of rows || []) {
-    const label = normaliseString(row?.display_name) || normaliseString(row?.email) || null;
-    if (!label) continue;
-    const sub = normaliseString(row?.cognito_sub);
-    const idChar = normaliseString(row?.id_char);
-    if (sub) byKey.set(sub, label);
-    if (idChar) byKey.set(idChar, label);
+
+  if (staffProfileIds.length) {
+    const [staffRows] = await connection.query(
+      `SELECT id, display_name, email
+         FROM staff_profiles
+        WHERE id IN (${staffProfileIds.map(() => '?').join(',')})`,
+      staffProfileIds
+    );
+    for (const row of staffRows || []) {
+      const label = normaliseString(row?.display_name) || normaliseString(row?.email) || null;
+      if (label) byKey.set(`staff:${row.id}`, label);
+    }
   }
+
+  if (userIds.length) {
+    const [userRows] = await connection.query(
+      `SELECT id, name, email
+         FROM user
+        WHERE id IN (${userIds.map(() => '?').join(',')})`,
+      userIds
+    );
+    for (const row of userRows || []) {
+      const label = normaliseString(row?.name) || normaliseString(row?.email) || null;
+      if (label) byKey.set(`user:${row.id}`, label);
+    }
+  }
+
   return byKey;
 }
 
@@ -20428,13 +20920,14 @@ async function staffProfileMiddleware(req, res, next) {
       cognito_sub VARCHAR(64) NOT NULL UNIQUE,
       email VARCHAR(320) NULL,
       primary_role VARCHAR(64) NULL,
-      /* region_id optional ??? legacy tables may not have it */
+      region_id TINYINT UNSIGNED NULL,
       last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      INDEX idx_role (primary_role)
+      INDEX idx_role (primary_role),
+      INDEX idx_region (region_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`);
     // Attempt to add region_id if supported (ignore failures / old MySQL not supporting IF NOT EXISTS)
-    try { await pool.query('ALTER TABLE staff_profiles ADD COLUMN region_id INT NULL'); } catch(_) {}
+    try { await pool.query('ALTER TABLE staff_profiles ADD COLUMN region_id TINYINT UNSIGNED NULL'); } catch(_) {}
     try { await pool.query('ALTER TABLE staff_profiles ADD INDEX idx_region (region_id)'); } catch(_) {}
     // Determine if region_id column exists (cache per process)
     if (typeof global.__HAS_REGION_ID_COL === 'undefined') {
@@ -20813,7 +21306,7 @@ async function countProgramAdminNewSubmissions(pool) {
       `SELECT COUNT(*) AS total
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
-        WHERE (COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NULL OR COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = 0)
+        WHERE (c.assigned_staff_profile_id IS NULL OR c.assigned_staff_profile_id = 0)
           AND a.status IS NOT NULL
           AND LOWER(a.status) = 'submitted'`
     );
@@ -20832,8 +21325,8 @@ async function countProgramAdminUnassignedBacklog(pool) {
     const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
          JOIN iset_application a ON ${APPLICATION_CASE_JOIN_PREDICATE}
-        WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL
-          AND COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) <> 0
+        WHERE c.assigned_staff_profile_id IS NOT NULL
+          AND c.assigned_staff_profile_id <> 0
           AND a.status IS NOT NULL
           AND LOWER(a.status) = 'submitted'`;
     const [[row]] = await pool.query(sql);
@@ -21212,7 +21705,7 @@ async function countActiveCasesWithScope(pool, { regionId = null, regionIds = nu
     const params = [ACTION_PLAN_ACTIVE_STATUS];
 
     if (Number.isInteger(ownerId) && ownerId > 0) {
-      filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
+      filters.push('c.assigned_staff_profile_id = ?');
       params.push(ownerId);
     }
 
@@ -21226,7 +21719,7 @@ async function countActiveCasesWithScope(pool, { regionId = null, regionIds = nu
         filters.push(`sp.region_id IN (${placeholders})`);
         params.push(...regionList);
       }
-      filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL');
+      filters.push('c.assigned_staff_profile_id IS NOT NULL');
     }
 
     if (READY_TO_CLOSE_EXCLUDED_STATUSES.length) {
@@ -21238,7 +21731,7 @@ async function countActiveCasesWithScope(pool, { regionId = null, regionIds = nu
     const sql = `SELECT COUNT(DISTINCT c.id) AS total
            FROM iset_case c
            JOIN iset_case_action_plan ap ON ap.case_id = c.id
-           LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+           LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
           WHERE ${filters.join(' AND ')}
             AND ap.archived_at IS NULL`;
     const [[row]] = await pool.query(sql, params);
@@ -21274,7 +21767,7 @@ async function countInactiveCasesWithScope(pool, { regionId = null, regionIds = 
     const statusExpr = 'LOWER(TRIM(COALESCE(c.status, "")))';
 
     if (Number.isInteger(ownerId) && ownerId > 0) {
-      filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
+      filters.push('c.assigned_staff_profile_id = ?');
       params.push(ownerId);
     }
 
@@ -21288,7 +21781,7 @@ async function countInactiveCasesWithScope(pool, { regionId = null, regionIds = 
         filters.push(`sp.region_id IN (${placeholders})`);
         params.push(...regionList);
       }
-      filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL');
+      filters.push('c.assigned_staff_profile_id IS NOT NULL');
     }
 
     if (CASE_STATUS_TERMINAL_VALUES_LOWER.length) {
@@ -21313,7 +21806,7 @@ async function countInactiveCasesWithScope(pool, { regionId = null, regionIds = 
               COALESCE(intervention_summary.last_intervention_at, '1970-01-01')
             ) AS last_activity_at
           FROM iset_case c
-          LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+          LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
           LEFT JOIN (
             SELECT
               ap.case_id,
@@ -21393,7 +21886,7 @@ async function countReadyToCloseCasesWithScope(pool, { regionId = null, regionId
     const params = [CASE_STATUS_READY_TO_CLOSE, CASE_STATUS_DORMANT];
 
     if (Number.isInteger(ownerId) && ownerId > 0) {
-      filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
+      filters.push('c.assigned_staff_profile_id = ?');
       params.push(ownerId);
     }
 
@@ -21407,7 +21900,7 @@ async function countReadyToCloseCasesWithScope(pool, { regionId = null, regionId
         filters.push(`sp.region_id IN (${placeholders})`);
         params.push(...regionList);
       }
-      filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL');
+      filters.push('c.assigned_staff_profile_id IS NOT NULL');
     }
 
     if (READY_TO_CLOSE_EXCLUDED_STATUSES.length) {
@@ -21420,7 +21913,7 @@ async function countReadyToCloseCasesWithScope(pool, { regionId = null, regionId
     const sql = `
       SELECT COUNT(*) AS total
         FROM iset_case c
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
        WHERE ${filters.join(' AND ')}
          AND ${statusExpr} = ?
     `;
@@ -21465,13 +21958,13 @@ async function countNewIntakesWithScope(pool, { regionId = null, regionIds = nul
     const params = [];
 
     if (Number.isInteger(ownerId) && ownerId > 0) {
-      filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
+      filters.push('c.assigned_staff_profile_id = ?');
       params.push(ownerId);
     }
 
     const regionList = normalizeRegionIdInput(regionIds?.length ? regionIds : regionId);
     if (regionList.length) {
-      filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL');
+      filters.push('c.assigned_staff_profile_id IS NOT NULL');
       if (regionList.length === 1) {
         filters.push('sp.region_id = ?');
         params.push(regionList[0]);
@@ -21487,7 +21980,7 @@ async function countNewIntakesWithScope(pool, { regionId = null, regionIds = nul
         FROM client cl
         JOIN iset_case c ON c.client_id = cl.id
         ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
        WHERE ${filters.join(' AND ')}
     `;
     const [[row]] = await pool.query(sql, params);
@@ -21522,13 +22015,13 @@ async function countFollowUpsDueWithScope(pool, { regionId = null, regionIds = n
   const params = [...CASE_STATUS_TERMINAL_VALUES_LOWER];
 
   if (Number.isInteger(ownerId) && ownerId > 0) {
-    filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
+    filters.push('c.assigned_staff_profile_id = ?');
     params.push(ownerId);
   }
 
   const regionList = normalizeRegionIdInput(regionIds?.length ? regionIds : regionId);
   if (regionList.length) {
-    filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL');
+    filters.push('c.assigned_staff_profile_id IS NOT NULL');
     if (regionList.length === 1) {
       filters.push('sp.region_id = ?');
       params.push(regionList[0]);
@@ -21562,7 +22055,7 @@ async function countFollowUpsDueWithScope(pool, { regionId = null, regionIds = n
             AND t.deleted_at IS NULL
       ) AS task_count
     FROM iset_case c
-    LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
     WHERE ${filters.join(' AND ')}
   `;
 
@@ -21600,13 +22093,13 @@ async function countIlmpIssuesWithScope(pool, { regionId = null, regionIds = nul
   const params = [...CASE_STATUS_TERMINAL_VALUES_LOWER];
 
   if (Number.isInteger(ownerId) && ownerId > 0) {
-    filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
+    filters.push('c.assigned_staff_profile_id = ?');
     params.push(ownerId);
   }
 
   const regionList = normalizeRegionIdInput(regionIds?.length ? regionIds : regionId);
   if (regionList.length) {
-    filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL');
+    filters.push('c.assigned_staff_profile_id IS NOT NULL');
     if (regionList.length === 1) {
       filters.push('sp.region_id = ?');
       params.push(regionList[0]);
@@ -21620,7 +22113,7 @@ async function countIlmpIssuesWithScope(pool, { regionId = null, regionIds = nul
   const sql = `
     SELECT COUNT(*) AS total
       FROM iset_case c
-      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
      WHERE ${filters.join(' AND ')}
        AND EXISTS (
          SELECT 1
@@ -21942,7 +22435,7 @@ async function countMetricsNewApplications(pool, { start, end, scope }) {
         FROM iset_application_submission s
         JOIN iset_application a ON a.submission_id = s.id
         LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
        WHERE ${filters.join(' AND ')}
     `;
     const [[row]] = await pool.query(sql, params);
@@ -21971,7 +22464,7 @@ async function countMetricsApplicationDecisions(pool, { start, end, scope }) {
       SELECT COUNT(*) AS total
         FROM iset_application a
         LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
        WHERE ${filters.join(' AND ')}
     `;
     const [[row]] = await pool.query(sql, params);
@@ -22007,7 +22500,7 @@ async function countMetricsApplicationStatusBuckets(pool, { start, end, scope })
       SELECT ${statusExpr} AS status_key, COUNT(*) AS total
         FROM iset_application a
         LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
        WHERE ${filters.join(' AND ')}
        GROUP BY ${statusExpr}
     `;
@@ -22057,7 +22550,7 @@ async function countMetricsInterventionDecisions(pool, { start, end, scope }) {
       SELECT COUNT(*) AS total
         FROM iset_case_intervention ci
         JOIN iset_case c ON c.id = ci.case_id
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
        WHERE ${filters.join(' AND ')}
     `;
     const [[row]] = await pool.query(sql, params);
@@ -22081,7 +22574,7 @@ async function countMetricsActiveCases(pool, scope) {
     const sql = `
       SELECT COUNT(*) AS total
         FROM iset_case c
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
        WHERE ${filters.join(' AND ')}
     `;
     const [[row]] = await pool.query(sql, params);
@@ -22106,7 +22599,7 @@ async function countMetricsActionPlanStarts(pool, { start, end, scope }) {
       SELECT COUNT(*) AS total
         FROM iset_case_action_plan ap
         JOIN iset_case c ON c.id = ap.case_id
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
        WHERE ${filters.join(' AND ')}
     `;
     const [[row]] = await pool.query(sql, params);
@@ -22134,12 +22627,12 @@ async function countMetricsNewInterventionProposals(pool, { start, end, scope })
       FROM (
         SELECT
           p.id AS proposal_id,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
           sp.region_id AS region_id
         FROM iset_intervention_proposal p
         JOIN iset_case c ON c.id = p.case_id
         LEFT JOIN iset_case_intervention ci ON ci.id = p.legacy_intervention_id
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
         WHERE ${metricDateExpr} >= ?
           AND ${metricDateExpr} < ?
           AND ${proposalReviewStatusExpr} <> ?
@@ -22148,12 +22641,12 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
 
         SELECT
           ci.id AS proposal_id,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
           sp.region_id AS region_id
         FROM iset_case_intervention ci
         LEFT JOIN iset_intervention_proposal p_existing ON p_existing.legacy_intervention_id = ci.id
         JOIN iset_case c ON c.id = ci.case_id
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
         WHERE p_existing.id IS NULL
           AND ${legacyMetricDateExpr} >= ?
           AND ${legacyMetricDateExpr} < ?
@@ -22172,7 +22665,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
       SELECT COUNT(*) AS total
         FROM iset_case_intervention ci
         JOIN iset_case c ON c.id = ci.case_id
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
        WHERE ${legacyFilters.join(' AND ')}
     `;
     let row = null;
@@ -22208,7 +22701,7 @@ async function countMetricsCompletedInterventions(pool, { start, end, scope }) {
       SELECT COUNT(*) AS total
         FROM iset_case_intervention ci
         JOIN iset_case c ON c.id = ci.case_id
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
        WHERE ${filters.join(' AND ')}
     `;
     const [[row]] = await pool.query(sql, params);
@@ -22238,7 +22731,7 @@ async function sumMetricsApprovedInterventionAmounts(pool, { start, end, scope }
       SELECT COALESCE(SUM(COALESCE(ci.approved_amount, ci.budget_amount, ci.intervention_cost, 0)), 0) AS total
         FROM iset_case_intervention ci
         JOIN iset_case c ON c.id = ci.case_id
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
        WHERE ${filters.join(' AND ')}
     `;
     const [[row]] = await pool.query(sql, params);
@@ -22264,7 +22757,7 @@ async function countMetricsActionPlanOutcomeBuckets(pool, { start, end, scope })
       SELECT ap.result_code, COUNT(*) AS total
         FROM iset_case_action_plan ap
         JOIN iset_case c ON c.id = ap.case_id
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
        WHERE ${filters.join(' AND ')}
        GROUP BY ap.result_code
     `;
@@ -22302,7 +22795,7 @@ async function sumMetricsTransactions(pool, { start, end, scope, statuses }) {
       SELECT COALESCE(SUM(ft.amount), 0) AS total
         FROM finance_transaction ft
         JOIN iset_case c ON c.id = ft.case_id
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
        WHERE ${filters.join(' AND ')}
     `;
     const [[row]] = await pool.query(sql, params);
@@ -22629,7 +23122,7 @@ async function fetchMetricApplicationDetailRows(pool, { start, end, scope, statu
         c.id AS case_id,
         c.case_number,
         c.status AS case_status,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
         cl.first_name AS client_first_name,
         cl.last_name AS client_last_name,
         COALESCE(
@@ -22649,7 +23142,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
       LEFT JOIN client cl ON cl.id = c.client_id
-      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
       WHERE ${filters.join(' AND ')}
       ORDER BY ${dateExpr} DESC, a.id DESC
       LIMIT ${METRICS_DETAIL_FETCH_LIMIT}
@@ -22689,7 +23182,7 @@ async function fetchMetricActionPlanDetailRows(pool, { start, end, scope, mode =
         ap.result_code,
         ${metricDateExpr} AS metric_event_at,
         c.case_number,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
         a.id AS application_id,
         cl.first_name AS client_first_name,
         cl.last_name AS client_last_name,
@@ -22711,7 +23204,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN client cl ON cl.id = c.client_id
-      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
       WHERE ${filters.join(' AND ')}
       ORDER BY ${metricDateExpr} DESC, ap.id DESC
       LIMIT ${METRICS_DETAIL_FETCH_LIMIT}
@@ -22756,7 +23249,7 @@ async function fetchMetricInterventionDetailRows(pool, { start, end, scope, mode
           JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.title')) AS intervention_title,
           ic.label AS intervention_label,
           c.case_number,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
           a.id AS application_id,
           cl.first_name AS client_first_name,
           cl.last_name AS client_last_name,
@@ -22778,7 +23271,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
         ${buildCasePrimaryApplicationJoinSql('c', 'a')}
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         LEFT JOIN client cl ON cl.id = c.client_id
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
         LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
         WHERE ${filters.join(' AND ')}
         ORDER BY ${metricDateExpr} DESC, ci.id DESC
@@ -22821,7 +23314,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
           ) AS intervention_title,
           ic.label AS intervention_label,
           c.case_number,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
           sp.region_id AS region_id,
           COALESCE(p.application_id, a.id) AS application_id,
           cl.first_name AS client_first_name,
@@ -22845,7 +23338,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
         LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ${buildCasePrimaryApplicationIdSql('c')})
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         LEFT JOIN client cl ON cl.id = c.client_id
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
         LEFT JOIN esdc_intervention_code ic ON ic.code = COALESCE(p.intervention_code, ci.intervention_code)
         WHERE ${metricDateExpr} >= ?
           AND ${metricDateExpr} < ?
@@ -22867,7 +23360,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
           JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.title')) AS intervention_title,
           ic.label AS intervention_label,
           c.case_number,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
           sp.region_id AS region_id,
           a.id AS application_id,
           cl.first_name AS client_first_name,
@@ -22891,7 +23384,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
         ${buildCasePrimaryApplicationJoinSql('c', 'a')}
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         LEFT JOIN client cl ON cl.id = c.client_id
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
         LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
         WHERE p_existing.id IS NULL
           AND ${legacyMetricDateExpr} >= ?
@@ -22924,7 +23417,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
         JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.title')) AS intervention_title,
         ic.label AS intervention_label,
         c.case_number,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
         a.id AS application_id,
         cl.first_name AS client_first_name,
         cl.last_name AS client_last_name,
@@ -22946,7 +23439,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN client cl ON cl.id = c.client_id
-      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
       LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
       WHERE ${legacyFilters.join(' AND ')}
       ORDER BY ${legacyMetricDateExpr} DESC, ci.id DESC
@@ -22993,7 +23486,7 @@ async function fetchMetricActiveCaseDetailRows(pool, { scope }) {
         c.opened_at,
         c.created_at,
         c.updated_at,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
         a.id AS application_id,
         cl.first_name AS client_first_name,
         cl.last_name AS client_last_name,
@@ -23015,7 +23508,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN client cl ON cl.id = c.client_id
-      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
       WHERE ${filters.join(' AND ')}
       ORDER BY COALESCE(c.updated_at, c.opened_at, c.created_at) DESC, c.id DESC
       LIMIT ${METRICS_DETAIL_FETCH_LIMIT}
@@ -23202,9 +23695,9 @@ async function markCaseReadyToClose({ caseId, connection = null }) {
     const [[caseRow]] = await conn.query(
       `SELECT c.id,
               c.status,
-              COALESCE(a.id, c.application_id) AS application_id,
+        a.id AS application_id,
               c.case_context_json,
-              COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id
+              c.assigned_staff_profile_id AS assigned_to_user_id
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a')}
         WHERE c.id = ?
@@ -23328,7 +23821,7 @@ async function countRegionalAssignedToRegion(pool, staffIds, context = {}) {
   const params = [];
 
   if (Number.isInteger(coordinatorId) && coordinatorId > 0) {
-    filters.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
+    filters.push('c.assigned_staff_profile_id = ?');
     params.push(coordinatorId);
   }
 
@@ -23345,7 +23838,7 @@ async function countRegionalAssignedToRegion(pool, staffIds, context = {}) {
 
   if (!filters.length && ids.length) {
     const placeholders = ids.map(() => '?').join(',');
-    filters.push(`COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IN (${placeholders})`);
+    filters.push(`c.assigned_staff_profile_id IN (${placeholders})`);
     params.push(...ids);
   }
 
@@ -23360,8 +23853,8 @@ async function countRegionalAssignedToRegion(pool, staffIds, context = {}) {
 
   const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
-         LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
-        WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL
+         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
+        WHERE c.assigned_staff_profile_id IS NOT NULL
           AND (${filters.join(' OR ')})
           AND ${statusCondition}`;
   const [[row]] = await pool.query(sql, params);
@@ -23382,7 +23875,7 @@ async function countRegionalNeedsReassignment(pool, staffProfileId) {
   }
   const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
-        WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?
+        WHERE c.assigned_staff_profile_id = ?
           AND ${statusCondition}`;
   const [[row]] = await pool.query(sql, params);
   return Number(row?.total ?? 0);
@@ -23397,7 +23890,7 @@ async function countRegionalAwaitingApplicantInfo(pool, staffIds) {
   const params = [...ids, ...CASE_STATUS_HOLD_VALUES_LOWER];
   const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
-        WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IN (${staffPlaceholders})
+        WHERE c.assigned_staff_profile_id IN (${staffPlaceholders})
           AND c.status IS NOT NULL
           AND LOWER(c.status) IN (${holdPlaceholders})`;
   const [[row]] = await pool.query(sql, params);
@@ -23410,7 +23903,7 @@ async function fetchApplicationSlaRowsForAssignedStaff(pool, staffIds) {
   const placeholders = ids.map(() => '?').join(',');
   const sql = `SELECT
          c.id AS case_id,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
          a.status AS application_status,
          COALESCE(s.created_at, a.created_at) AS submitted_at,
          a.created_at,
@@ -23419,7 +23912,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
        ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
        LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
-      WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IN (${placeholders})`;
+      WHERE c.assigned_staff_profile_id IN (${placeholders})`;
   try {
     const [rows] = await pool.query(sql, ids);
     return Array.isArray(rows) ? rows : [];
@@ -23434,7 +23927,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
 async function fetchAllAssignedApplicationSlaRows(pool) {
   const sql = `SELECT
          c.id AS case_id,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
          a.status AS application_status,
          COALESCE(s.created_at, a.created_at) AS submitted_at,
          a.created_at,
@@ -23443,8 +23936,8 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
        ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
        LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
-      WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL
-        AND COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) <> 0`;
+      WHERE c.assigned_staff_profile_id IS NOT NULL
+        AND c.assigned_staff_profile_id <> 0`;
   try {
     const [rows] = await pool.query(sql);
     return Array.isArray(rows) ? rows : [];
@@ -23513,7 +24006,7 @@ async function countRegionalPendingApproval(pool, staffIds) {
   const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
-        WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IN (${staffPlaceholders})
+        WHERE c.assigned_staff_profile_id IN (${staffPlaceholders})
           AND a.status IS NOT NULL
           AND LOWER(a.status) IN (${statusPlaceholders})`;
   const [[row]] = await pool.query(sql, params);
@@ -23532,7 +24025,7 @@ async function countAssessorAssignedToMe(pool, staffProfileId) {
   }
   const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
-        WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?
+        WHERE c.assigned_staff_profile_id = ?
           AND ${statusCondition}`;
   const [[row]] = await pool.query(sql, params);
   return Number(row?.total ?? 0);
@@ -23546,7 +24039,7 @@ async function countAssessorAwaitingApplicantResponse(pool, staffProfileId) {
   const sql = `SELECT COUNT(*) AS total
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
-        WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?
+        WHERE c.assigned_staff_profile_id = ?
           AND a.status IS NOT NULL
           AND LOWER(a.status) IN (${statusPlaceholders})`;
   const params = [assessorId, ...APPLICATION_STATUS_HOLD_VALUES_LOWER];
@@ -23619,16 +24112,31 @@ function buildArchivedApplicationFilter(req, alias = 'a') {
 }
 
 async function enforceApplicationVisibility(req, applicationId, connection = pool) {
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (!normalizedApplicationId) return { ok: false, reason: 'not_found', status: 404, body: { error: 'Application not found' } };
+  const accessError = await validateCaseAccessByApplicationId(req, normalizedApplicationId, connection);
+  if (accessError) {
+    return {
+      ok: false,
+      reason: 'case_scope_denied',
+      status: accessError.status,
+      body: accessError.body,
+    };
+  }
   if (canViewArchivedApplications(req)) return { ok: true };
   const [[row]] = await connection.query(
     'SELECT status FROM iset_application WHERE id = ? LIMIT 1',
-    [applicationId]
+    [normalizedApplicationId]
   );
-  if (!row) return { ok: false, reason: 'not_found' };
+  if (!row) return { ok: false, reason: 'not_found', status: 404, body: { error: 'Application not found' } };
   if (isArchivedApplicationStatus(row.status)) {
-    return { ok: false, reason: 'archived' };
+    return { ok: false, reason: 'archived', status: 404, body: { error: 'Application not found' } };
   }
   return { ok: true };
+}
+
+function sendApplicationVisibilityFailure(res, visibility, fallbackError = 'Application not found') {
+  return res.status(visibility?.status || 404).json(visibility?.body || { error: fallbackError });
 }
 
 function hasSlaAdminAccess(req) {
@@ -23852,10 +24360,11 @@ app.patch('/api/cases/:id/assign', async (req, res) => {
   if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
   const { assignee_id } = req.body || {};
   try {
+    const identity = getRequesterIdentity(req);
     const [[caseRow]] = await pool.query(
       `SELECT c.id,
-              COALESCE(a.id, c.application_id) AS application_id,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+        a.id AS application_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
               c.assigned_staff_profile_id
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a')}
@@ -23864,6 +24373,8 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
       [caseId]
     );
     if (!caseRow) return res.status(404).json({ error: 'case_not_found' });
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) return res.status(accessError.status).json(accessError.body);
     const previousAssigneeId = resolveCaseAssignedStaffProfileId(caseRow);
     let previousAssigneeMeta = null;
     if (previousAssigneeId) {
@@ -23871,17 +24382,22 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
       previousAssigneeMeta = prevMeta || null;
     }
     let assignId = null;
+    let targetStaff = null;
     if (assignee_id) {
-      const [[staff]] = await pool.query('SELECT id FROM staff_profiles WHERE id=? LIMIT 1', [assignee_id]);
+      const [[staff]] = await pool.query('SELECT id, display_name AS name, email, region_id AS regionId FROM staff_profiles WHERE id=? LIMIT 1', [assignee_id]);
       if (!staff) return res.status(400).json({ error: 'staff_not_found' });
+      targetStaff = staff;
       assignId = staff.id;
     } else {
       return res.status(400).json({ error: 'assignee_required' });
     }
+    if (!ensureCanAssignCase(identity, targetStaff)) {
+      return res.status(403).json({ error: 'forbidden', detail: 'assignment_not_permitted' });
+    }
     const normalizedAssignId = assignId != null ? Number(assignId) : null;
     await pool.query(
-      'UPDATE iset_case SET assigned_to_user_id=?, assigned_staff_profile_id=?, updated_at=NOW() WHERE id=?',
-      [normalizedAssignId, normalizedAssignId, caseId]
+      'UPDATE iset_case SET assigned_staff_profile_id=?, updated_at=NOW() WHERE id=?',
+      [normalizedAssignId, caseId]
     );
     let newAssigneeMeta = null;
     if (normalizedAssignId) {
@@ -23907,9 +24423,12 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
       const payload = {
         tracking_id: trackingId,
         from_assignee_id: previousAssigneeMeta?.id ?? null,
+        from_assignee_staff_profile_id: previousAssigneeMeta?.id ?? null,
         from_assignee_email: previousAssigneeMeta?.email ?? null,
         from_assignee_name: previousAssigneeMeta?.display_name ?? null,
         to_assignee_id: newAssigneeMeta?.id ?? null,
+        to_assignee_staff_profile_id: newAssigneeMeta?.id ?? null,
+        assigned_staff_profile_id: newAssigneeMeta?.id ?? null,
         to_assignee_email: newAssigneeMeta?.email ?? null,
         to_assignee_name: newAssigneeMeta?.display_name ?? null,
       };
@@ -23936,8 +24455,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
     return res.json({
       ok: true,
       case_id: caseId,
-      assigned_to_user_id: normalizedAssignId,
-      assigned_staff_profile_id: normalizedAssignId,
+      ...buildAssignedStaffProfileResponseFields(normalizedAssignId),
     });
   } catch (e) {
     console.error('PATCH /api/cases/:id/assign failed:', e.message);
@@ -23956,6 +24474,9 @@ app.post('/api/cases/:id/conflicts/revoke', async (req, res) => {
     return res.status(403).json({ error: 'forbidden' });
   }
   try {
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) return res.status(accessError.status).json(accessError.body);
+
     if (role === 'Regional Manager') {
       const regionIds = resolveRequestRegionIds(req);
       if (!regionIds.length) {
@@ -23994,6 +24515,9 @@ app.post('/api/cases/:id/conflicts/resolve', async (req, res) => {
     return res.status(403).json({ error: 'forbidden' });
   }
   try {
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) return res.status(accessError.status).json(accessError.body);
+
     const [[conflictRow]] = await pool.query(`
       SELECT
         cd.case_id,
@@ -26675,7 +27199,7 @@ async function fetchReportingApplicationActivityDrilldown({
         c.id AS case_id,
         c.case_number,
         c.status AS case_status,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
         cl.first_name AS client_first_name,
         cl.last_name AS client_last_name,
         COALESCE(
@@ -26695,7 +27219,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
       LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
       LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
       LEFT JOIN client cl ON cl.id = c.client_id
-      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
       WHERE ${dateExpr} IS NOT NULL
         AND DATE(${dateExpr}) BETWEEN ? AND ?
         ${statusFilterSql}
@@ -26763,7 +27287,7 @@ async function fetchReportingInterventionDrilldown({
         ci.start_date AS started_on,
         COALESCE(ci.end_date, DATE(ci.closed_at)) AS ended_on,
         c.case_number,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
         a.id AS application_id,
         cl.first_name AS client_first_name,
         cl.last_name AS client_last_name,
@@ -26786,7 +27310,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
       LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
       LEFT JOIN client cl ON cl.id = c.client_id
-      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
       LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
       WHERE ci.intervention_code IS NOT NULL
         AND (
@@ -27214,7 +27738,7 @@ app.get('/api/reporting/data-and-results/live-report', async (req, res) => {
           REPLACE(LOWER(TRIM(a.status)), ' ', '_') AS status_key,
           ias.submitted_at,
           COALESCE(a.updated_at, a.created_at) AS status_observed_at,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
           ${REPORTING_ADDRESS_PROVINCE_EXPR} AS address_province
         FROM iset_application a
         LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
@@ -27243,7 +27767,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
           ci.actual_amount,
           ci.start_date AS started_on,
           COALESCE(ci.end_date, DATE(ci.closed_at)) AS ended_on,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
           ${REPORTING_ADDRESS_PROVINCE_EXPR} AS address_province
         FROM iset_case_intervention ci
         JOIN iset_case c ON c.id = ci.case_id
@@ -27274,7 +27798,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
           DATE(ap.created_at) AS created_on,
           ap.result_code,
           ap.result_date,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
           ${REPORTING_ADDRESS_PROVINCE_EXPR} AS address_province
         FROM iset_case_action_plan ap
         JOIN iset_case c ON c.id = ap.case_id
@@ -27293,7 +27817,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
           eps.action_plan_id,
           eps.readiness_status,
           COALESCE(eps.last_validated_at, eps.updated_at, eps.created_at) AS observed_at,
-          COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id
+          c.assigned_staff_profile_id AS assigned_to_user_id
         FROM esdc_participant_submission eps
         JOIN iset_case c ON c.id = eps.case_id
         WHERE COALESCE(eps.last_validated_at, eps.updated_at, eps.created_at) <= ?
@@ -27307,7 +27831,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
           h.occurred_at,
           eps.case_id,
           eps.action_plan_id,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
           ${REPORTING_ADDRESS_PROVINCE_EXPR} AS address_province
         FROM esdc_participant_submission_history h
         JOIN esdc_participant_submission eps ON eps.id = h.participant_submission_id
@@ -29049,6 +29573,29 @@ function isModelAllowed(modelId) {
   }
   return false;
 }
+
+function detectAdminAiExternalSensitiveContent(value) {
+  const text = String(value || '');
+  if (!text.trim()) return false;
+  const sensitivePatterns = [
+    /\b\d{3}[-\s]?\d{3}[-\s]?\d{3}\b/u,
+    /\bISET-\d{8}-[A-Z0-9]{4,12}\b/iu,
+    /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/iu,
+    /\b(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}\b/u,
+    /\b(?:password|passcode|one[-\s]?time code|verification code|mfa code|2fa code|reset code)\b\s*(?:is|=|:)\s*\S+/iu,
+    /\b(?:credit card|card number|cvv|cvc|bank account|routing number|transit number|institution number)\b[^.\n\r]{0,80}\d{3,}/iu,
+    /\b(?:date of birth|dob|birthdate|birthday)\b\s*(?:is|=|:)?\s*(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})\b/iu,
+    /"(?:applicant_(?:name|full_name|email|phone|date_of_birth)|client_(?:name|email|phone)|case_number|tracking_id|sin|social_insurance_number)"\s*:\s*"(?!\s*(?:null|n\/a|client|applicant|sample|example|<[^>]+>))[^"]{2,}"/iu,
+  ];
+  return sensitivePatterns.some(pattern => pattern.test(text));
+}
+
+function adminAiMessagesContainSensitiveContent(messages = []) {
+  return (Array.isArray(messages) ? messages : []).some(message =>
+    detectAdminAiExternalSensitiveContent(message?.content)
+  );
+}
+
 // GET /api/ai/models -> dynamic model catalog (role not strictly required but we may restrict later)
 app.get('/api/ai/models', async (req, res) => {
   try {
@@ -29091,6 +29638,18 @@ app.post('/api/ai/chat', async (req, res) => {
         role: ['system','user','assistant'].includes(String(m.role).toLowerCase()) ? String(m.role).toLowerCase() : 'user',
         content: String(m.content ?? '').slice(0, 8000)
       }));
+    if (adminAiMessagesContainSensitiveContent(safeMessages)) {
+      return res.status(400).json({
+        error: 'sensitive_ai_content',
+        message: 'Remove applicant/client identifiers, credentials, or contact details before using the AI assistant.'
+      });
+    }
+    if (chatContext && detectAdminAiExternalSensitiveContent(JSON.stringify(chatContext).slice(0, 12000))) {
+      return res.status(400).json({
+        error: 'sensitive_ai_content',
+        message: 'Remove applicant/client identifiers, credentials, or contact details before using the AI assistant.'
+      });
+    }
     let effectiveMessages = safeMessages;
     if (chatContext && pool) {
       try {
@@ -30355,7 +30914,12 @@ function splitSqlStatements(rawSql = '') {
   return statements;
 }
 
-const QUERY_EDITOR_EXPORT_EXCLUDED_SCHEMAS = new Set(['information_schema', 'performance_schema']);
+const QUERY_EDITOR_EXPORT_EXCLUDED_SCHEMAS = new Set([
+  'information_schema',
+  'performance_schema',
+  'mysql',
+  'sys',
+]);
 let queryEditorDumpBinaryCache = Object.create(null);
 let queryEditorWindowsUserProfileCache = undefined;
 
@@ -30370,6 +30934,17 @@ function createQueryEditorError(statusCode, code, message, extra = {}) {
 function getQueryEditorDefaultDatabaseName() {
   const configured = typeof process.env.DB_NAME === 'string' ? process.env.DB_NAME.trim() : '';
   return configured || '';
+}
+
+async function queryEditorResolveAllowedExportDatabaseName(executor = pool) {
+  const configuredDatabase = getQueryEditorDefaultDatabaseName();
+  if (configuredDatabase) {
+    return configuredDatabase;
+  }
+
+  const [[row]] = await executor.query('SELECT DATABASE() AS name');
+  const currentDatabase = typeof row?.name === 'string' ? row.name.trim() : '';
+  return currentDatabase || '';
 }
 
 function queryEditorFormatDateStamp(date = new Date()) {
@@ -30651,26 +31226,24 @@ function queryEditorResolveDumpBinary(preferredPathFormat = 'any') {
 }
 
 async function queryEditorListExportDatabases(executor = pool) {
-  const preferredDatabase = getQueryEditorDefaultDatabaseName();
+  const allowedDatabase = await queryEditorResolveAllowedExportDatabaseName(executor);
+  if (!allowedDatabase || QUERY_EDITOR_EXPORT_EXCLUDED_SCHEMAS.has(allowedDatabase.toLowerCase())) {
+    return [];
+  }
   const [rows] = await executor.query(
     `SELECT schema_name AS name
        FROM information_schema.schemata
-      WHERE schema_name NOT IN ('information_schema', 'performance_schema')
-      ORDER BY
-        CASE
-          WHEN schema_name = ? THEN 0
-          WHEN schema_name IN ('mysql', 'sys') THEN 2
-          ELSE 1
-        END,
-        schema_name ASC`,
-    [preferredDatabase],
+      WHERE schema_name = ?
+      ORDER BY schema_name ASC`,
+    [allowedDatabase],
   );
   return (rows || []).map(row => {
     const name = String(row?.name || '').trim();
+    const normalizedName = name.toLowerCase();
     return {
       name,
       label: name,
-      isSystemSchema: QUERY_EDITOR_EXPORT_EXCLUDED_SCHEMAS.has(name) || name === 'mysql' || name === 'sys',
+      isSystemSchema: QUERY_EDITOR_EXPORT_EXCLUDED_SCHEMAS.has(normalizedName),
     };
   }).filter(entry => entry.name);
 }
@@ -30701,9 +31274,17 @@ async function queryEditorBuildExportMetadata(requestedDatabase, executor = pool
     throw createQueryEditorError(404, 'databases_unavailable', 'No databases are available for server export.');
   }
 
-  const preferredDatabase = getQueryEditorDefaultDatabaseName();
+  const activeDatabase = databases[0].name;
+  const preferredDatabase = getQueryEditorDefaultDatabaseName() || activeDatabase;
   const requested = typeof requestedDatabase === 'string' ? requestedDatabase.trim() : '';
-  const selectedDatabase = requested || preferredDatabase || databases[0].name;
+  if (requested && requested !== activeDatabase) {
+    throw createQueryEditorError(
+      400,
+      'database_not_allowed',
+      'Server export is limited to the active PATH database for this environment.',
+    );
+  }
+  const selectedDatabase = activeDatabase;
   const matchedDatabase = databases.find(entry => entry.name === selectedDatabase);
   if (!matchedDatabase) {
     throw createQueryEditorError(400, 'database_not_found', `Database not found: ${selectedDatabase}`);
@@ -31415,35 +31996,6 @@ async function seedDummyDraftUploadMetadata({ schemaSteps, payloadData, userId }
             documentType,
             mimeType,
             'admin_ai_dummy_draft_placeholder'
-          ]
-        );
-        await pool.query(
-          `INSERT INTO iset_document
-             (applicant_user_id, application_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category, visibility)
-           VALUES (?, NULL, 'application_submission', ?, ?, ?, ?, ?, ?, NULL, 'active', ?, 'internal')
-           ON DUPLICATE KEY UPDATE
-             updated_at = CURRENT_TIMESTAMP,
-             status = 'active',
-             mime_type = VALUES(mime_type),
-             label = VALUES(label),
-             metadata = VALUES(metadata),
-             size_bytes = VALUES(size_bytes),
-             document_category = VALUES(document_category)`,
-          [
-            normalizedUserId,
-            displayName,
-            filePath,
-            mimeType,
-            label,
-            JSON.stringify({
-              label,
-              document_type: documentType || null,
-              generatedBy: 'admin_ai_dummy_draft',
-              placeholderUpload: true,
-              storageSeeded: false
-            }),
-            sizeBytes,
-            documentType || null
           ]
         );
       } catch (err) {
@@ -32750,7 +33302,7 @@ app.get('/api/regions/canada', async (_req, res) => {
 // POST /api/ai/create-dummy-draft
 // Body: { province?: string, userId?: number, stepCursor?: string, workflowId?: string, additionalRequestDetails?: string }
 // Query: ?stream=1 to receive NDJSON progress events per chunk and final result.
-app.post('/api/ai/create-dummy-draft', async (req, res) => {
+app.post('/api/ai/create-dummy-draft', requireUnsafeAdminDebugAccess, async (req, res) => {
   const stream = req.query.stream === '1';
   const body = req.body || {};
   const userId = Number(body.userId) || 48; // enforce single test user by default
@@ -32758,6 +33310,12 @@ app.post('/api/ai/create-dummy-draft', async (req, res) => {
   const requestedStepCursor = String(body.stepCursor || 'summary-page');
   const province = body.province || body.provinceCode || body.regionCode;
   const additionalRequestDetails = typeof body.additionalRequestDetails === 'string' ? body.additionalRequestDetails : '';
+  if (detectAdminAiExternalSensitiveContent(additionalRequestDetails)) {
+    return res.status(400).json({
+      error: 'sensitive_ai_content',
+      message: 'Remove applicant/client identifiers, credentials, or contact details from dummy-generation guidance.'
+    });
+  }
 
   const sendEvent = (obj) => {
     if (!stream) return;
@@ -32841,7 +33399,7 @@ app.post('/api/ai/create-dummy-draft', async (req, res) => {
 // POST /api/create-dummy-draft
 // Body (optional): { userId?: number, stepCursor?: string, workflowId?: string }
 // Inserts or updates a single-row draft (table has UNIQUE user_id) to speed portal testing.
-app.post('/api/create-dummy-draft', async (req, res) => {
+app.post('/api/create-dummy-draft', requireUnsafeAdminDebugAccess, async (req, res) => {
   try {
     const body = req.body || {};
     const userId = Number(body.userId) || 48;               // default test applicant
@@ -33307,7 +33865,7 @@ async function tryGenerateCasePaymentProfilesViaAi({
 // POST /api/ai/create-dummy-case-payments
 // Body: { clients?: number, interventionsPerClient?: number, interventionTypes?: number[], additionalRequestDetails?: string }
 // Query: ?stream=1 to receive NDJSON progress events.
-app.post('/api/ai/create-dummy-case-payments', async (req, res) => {
+app.post('/api/ai/create-dummy-case-payments', requireUnsafeAdminDebugAccess, async (req, res) => {
   const stream = req.query.stream === '1';
   const body = req.body || {};
   const clients = clampIntegerRange(
@@ -33323,6 +33881,12 @@ app.post('/api/ai/create-dummy-case-payments', async (req, res) => {
     DUMMY_CASE_PAYMENTS_DEFAULT_INTERVENTIONS_PER_CLIENT
   );
   const additionalRequestDetails = typeof body.additionalRequestDetails === 'string' ? body.additionalRequestDetails.trim() : '';
+  if (detectAdminAiExternalSensitiveContent(additionalRequestDetails)) {
+    return res.status(400).json({
+      error: 'sensitive_ai_content',
+      message: 'Remove applicant/client identifiers, credentials, or contact details from dummy-generation guidance.'
+    });
+  }
   const requestedInterventionTypesRaw = Array.isArray(body.interventionTypes)
     ? body.interventionTypes
     : Array.isArray(body.intervention_codes)
@@ -33509,19 +34073,6 @@ app.post('/api/ai/create-dummy-case-payments', async (req, res) => {
         );
         const submissionId = Number(submissionResult.insertId);
 
-        const applicationPayload = {
-          source: 'dummy_case_payment_generator',
-          ingested_at: new Date().toISOString(),
-          submission_snapshot: submissionPayload,
-        };
-        const [applicationResult] = await conn.query(
-          `INSERT INTO iset_application
-            (submission_id, payload_json, status, lifecycle_status, awaiting_reason, version, created_at, updated_at)
-           VALUES (?, CAST(? AS JSON), 'active', 'submitted', 'none', 1, NOW(), NOW())`,
-          [submissionId, JSON.stringify(applicationPayload)]
-        );
-        const applicationId = Number(applicationResult.insertId);
-
         const addressPayload = {
           address: {
             street: `${100 + clientIndex} Demo Street`,
@@ -33551,23 +34102,26 @@ app.post('/api/ai/create-dummy-case-payments', async (req, res) => {
 
         const [caseResult] = await conn.query(
           `INSERT INTO iset_case
-            (application_id, client_id, assigned_to_user_id, assigned_staff_profile_id, status, lifecycle_status, stage, sub_stage, priority, opened_at, risk_rating, portfolio_region_id, created_by_staff_profile_id, updated_by_staff_profile_id, created_at, updated_at)
-           VALUES (?, ?, ?, ?, 'active', 'active', 'service_delivery', 'payment_draft', 'normal', NOW(), 'low', ?, ?, ?, NOW(), NOW())`,
-          [applicationId, clientId, ownerStaffProfileId, ownerStaffProfileId, regionId, ownerStaffProfileId, ownerStaffProfileId]
+            (client_id, assigned_staff_profile_id, status, lifecycle_status, stage, sub_stage, priority, opened_at, risk_rating, portfolio_region_id, created_by_staff_profile_id, updated_by_staff_profile_id, created_at, updated_at)
+           VALUES (?, ?, 'active', 'active', 'service_delivery', 'payment_draft', 'normal', NOW(), 'low', ?, ?, ?, NOW(), NOW())`,
+          [clientId, ownerStaffProfileId, regionId, ownerStaffProfileId, ownerStaffProfileId]
         );
         const caseId = Number(caseResult.insertId);
         const caseNumber = `CASE-${new Date().getFullYear()}-${String(caseId).padStart(7, '0')}`;
         await conn.query('UPDATE iset_case SET case_number = ? WHERE id = ?', [caseNumber, caseId]);
-        await conn.query(
-          `UPDATE iset_application
-              SET client_id = COALESCE(client_id, ?),
-                  case_id = COALESCE(case_id, ?),
-                  lifecycle_status = COALESCE(lifecycle_status, 'submitted'),
-                  awaiting_reason = COALESCE(awaiting_reason, 'none'),
-                  updated_at = NOW()
-            WHERE id = ?`,
-          [clientId, caseId, applicationId]
+
+        const applicationPayload = {
+          source: 'dummy_case_payment_generator',
+          ingested_at: new Date().toISOString(),
+          submission_snapshot: submissionPayload,
+        };
+        const [applicationResult] = await conn.query(
+          `INSERT INTO iset_application
+            (submission_id, client_id, case_id, payload_json, status, lifecycle_status, awaiting_reason, version, created_at, updated_at)
+           VALUES (?, ?, ?, CAST(? AS JSON), 'active', 'submitted', 'none', 1, NOW(), NOW())`,
+          [submissionId, clientId, caseId, JSON.stringify(applicationPayload)]
         );
+        const applicationId = Number(applicationResult.insertId);
 
         const [planResult] = await conn.query(
           `INSERT INTO iset_case_action_plan
@@ -34215,6 +34769,11 @@ app.post('/api/locks/application/:id', async (req, res) => {
     let reusedExisting = false;
     try {
       await connection.beginTransaction();
+      const visibility = await enforceApplicationVisibility(req, applicationId, connection);
+      if (!visibility.ok) {
+        await connection.rollback();
+        return sendApplicationVisibilityFailure(res, visibility, 'Application not found');
+      }
       const [[applicationRow]] = await connection.query(
         'SELECT id FROM iset_application WHERE id = ? LIMIT 1 FOR UPDATE',
         [applicationId]
@@ -34307,6 +34866,11 @@ app.delete('/api/locks/application/:id', async (req, res) => {
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
+      const visibility = await enforceApplicationVisibility(req, applicationId, connection);
+      if (!visibility.ok) {
+        await connection.rollback();
+        return sendApplicationVisibilityFailure(res, visibility, 'Application not found');
+      }
       const [[applicationRow]] = await connection.query(
         'SELECT id FROM iset_application WHERE id = ? LIMIT 1 FOR UPDATE',
         [applicationId]
@@ -34697,7 +35261,7 @@ async function fetchDashboardOpenClientCases({ regionIds = [], assignedStaffProf
   const baseFrom = `
     FROM iset_case c
     LEFT JOIN client cl ON cl.id = c.client_id
-    LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
     LEFT JOIN canada_region portfolio_region ON portfolio_region.region_id = c.portfolio_region_id
     LEFT JOIN canada_region owner_region ON owner_region.region_id = sp.region_id
     ${buildCasePrimaryApplicationJoinSql('c', 'a')}
@@ -34727,13 +35291,13 @@ async function fetchDashboardOpenClientCases({ regionIds = [], assignedStaffProf
       `c.portfolio_region_id IN (${regionPlaceholders})`,
     ];
     if (hasAssignedScope) {
-      scopeClauses.unshift('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
+      scopeClauses.unshift('c.assigned_staff_profile_id = ?');
       queryParams.push(numericAssignedStaffProfileId);
     }
     whereClauses.push(`(${scopeClauses.join(' OR ')})`);
     queryParams.push(...normalizedRegionIds, ...normalizedRegionIds);
   } else if (hasAssignedScope) {
-    whereClauses.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
+    whereClauses.push('c.assigned_staff_profile_id = ?');
     queryParams.push(numericAssignedStaffProfileId);
   }
 
@@ -34741,10 +35305,10 @@ async function fetchDashboardOpenClientCases({ regionIds = [], assignedStaffProf
   const selectSql = `
     SELECT
       c.id AS case_id,
-      c.application_id,
+      a.id AS application_id,
       c.client_id,
       c.case_number,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
       c.status,
       c.portfolio_region_id,
       COALESCE(c.next_action_due_at, reminder_next.next_reminder_due_at) AS next_action_due_at,
@@ -35228,8 +35792,8 @@ app.get('/api/dashboard/ei-eligibility-items', async (req, res) => {
   const regionId = regionIds.length ? regionIds[0] : null;
   const filters = [
     '(ca.esdc_eligibility IS NULL OR ca.esdc_eligibility = \'\')',
-    'COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NOT NULL',
-    'COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) <> 0',
+    'c.assigned_staff_profile_id IS NOT NULL',
+    'c.assigned_staff_profile_id <> 0',
   ];
   const params = [];
   const applicationLifecycleStatusExpr = buildApplicationLifecycleStatusExpr('a');
@@ -35263,7 +35827,7 @@ app.get('/api/dashboard/ei-eligibility-items', async (req, res) => {
       a.created_at AS submitted_at,
       a.updated_at AS application_updated_at,
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
       sp.email AS assigned_user_email,
       sp.primary_role AS assigned_user_role,
       sp.region_id AS assigned_user_region_id,
@@ -35277,7 +35841,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
     ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
     LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-    LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
     ${where}
     ORDER BY a.created_at DESC
     LIMIT 200
@@ -35363,7 +35927,7 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
       a.created_at AS submitted_at,
       a.updated_at AS approval_queued_at,
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
       sp.email AS assigned_user_email,
       sp.primary_role AS assigned_user_role,
       sp.region_id AS assigned_user_region_id,
@@ -35384,7 +35948,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
     ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
     LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-    LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
     LEFT JOIN esdc_intervention_code ic ON ic.code = ca.intervention_code
     LEFT JOIN budget_pot bp ON bp.id = ca.intervention_budget_pot_id
     ${where}
@@ -35546,7 +36110,7 @@ app.get('/api/dashboard/watchlist-hit-items', async (req, res) => {
           JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')),
           s.reference_number
         ) AS tracking_id,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
         sp.email AS assigned_user_email,
         sp.primary_role AS assigned_user_role,
         sp.region_id AS assigned_user_region_id,
@@ -35558,7 +36122,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
       FROM iset_application a
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
-      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
       ${where}
     ) q
     JOIN iset_applicant_watchlist w ON w.sin_hash = SHA2(q.sin_digits, 256)
@@ -35678,7 +36242,7 @@ app.get('/api/dashboard/marked-for-closure-items', async (req, res) => {
       a.created_at AS submitted_at,
       a.updated_at AS application_updated_at,
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
       sp.email AS assigned_user_email,
       sp.primary_role AS assigned_user_role,
       sp.region_id AS assigned_user_region_id,
@@ -35689,7 +36253,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
     FROM iset_case c
     ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-    LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
     ${where}
     ORDER BY a.updated_at DESC, a.created_at DESC
     LIMIT 200
@@ -35787,7 +36351,7 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
       COALESCE(ci.intervention_cost, ci.budget_amount, ci.approved_amount) AS intervention_cost_total,
       COALESCE(ci.updated_at, ci.created_at) AS submitted_at,
       c.case_number,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
       sp.email AS assigned_user_email,
       sp.primary_role AS assigned_user_role,
       sp.region_id AS assigned_user_region_id,
@@ -35804,6 +36368,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"last-name\"')) AS submission_last_name,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"address-province\"')) AS submission_address_province,
+      JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.address.province')) AS client_address_province,
       ic.label AS intervention_label
     FROM iset_case_intervention ci
     JOIN iset_case c ON c.id = ci.case_id
@@ -35812,7 +36377,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
     LEFT JOIN client cl ON cl.id = c.client_id
     ${buildCasePrimaryApplicationJoinSql('c', 'a')}
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-    LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
     LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
     LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
     ${legacyWhere}
@@ -35843,7 +36408,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
           COALESCE(p.proposed_cost, ci.intervention_cost, ci.budget_amount, ci.approved_amount) AS intervention_cost_total,
           COALESCE(p.submitted_at, p.created_at, ci.updated_at, ci.created_at) AS submitted_at,
           c.case_number,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
           sp.email AS assigned_user_email,
           sp.primary_role AS assigned_user_role,
           sp.region_id AS assigned_user_region_id,
@@ -35860,6 +36425,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
           JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"last-name\"')) AS submission_last_name,
           JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
           JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"address-province\"')) AS submission_address_province,
+          JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.address.province')) AS client_address_province,
           ic.label AS intervention_label
         FROM iset_intervention_proposal p
         JOIN iset_case c ON c.id = p.case_id
@@ -35869,7 +36435,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
         LEFT JOIN client cl ON cl.id = c.client_id
         LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ${buildCasePrimaryApplicationIdSql('c')})
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
         LEFT JOIN esdc_intervention_code ic ON ic.code = COALESCE(p.intervention_code, ci.intervention_code)
         LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
         WHERE ${proposalReviewStatusExpr} IN (?, ?)
@@ -35893,7 +36459,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
           COALESCE(ci.intervention_cost, ci.budget_amount, ci.approved_amount) AS intervention_cost_total,
           COALESCE(ci.updated_at, ci.created_at) AS submitted_at,
           c.case_number,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
           sp.email AS assigned_user_email,
           sp.primary_role AS assigned_user_role,
           sp.region_id AS assigned_user_region_id,
@@ -35910,6 +36476,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
           JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"last-name\"')) AS submission_last_name,
           JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
           JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"address-province\"')) AS submission_address_province,
+          JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.address.province')) AS client_address_province,
           ic.label AS intervention_label
         FROM iset_case_intervention ci
         LEFT JOIN iset_intervention_proposal p_existing ON p_existing.legacy_intervention_id = ci.id
@@ -35919,7 +36486,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
         LEFT JOIN client cl ON cl.id = c.client_id
         ${buildCasePrimaryApplicationJoinSql('c', 'a')}
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-        LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+        LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
         LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
         LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
         WHERE p_existing.id IS NULL
@@ -36037,7 +36604,10 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
         trackingId: r.tracking_id || null,
         applicantName,
         applicant_name: applicantName,
-        address_province: normaliseString(r.submission_address_province) || null,
+        address_province:
+          normaliseString(r.submission_address_province) ||
+          normaliseString(r.client_address_province) ||
+          null,
         status: normaliseString(r.intervention_review_status) || normaliseString(r.intervention_status) || null,
         review_status: normaliseString(r.intervention_review_status) || null,
         delivery_status: normaliseString(r.intervention_delivery_status) || null,
@@ -36109,7 +36679,7 @@ app.get('/api/dashboard/intervention-milestone-items', async (req, res) => {
       ci.end_date AS intervention_end_date,
       COALESCE(ci.updated_at, ci.created_at) AS submitted_at,
       c.case_number,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
       sp.email AS assigned_user_email,
       sp.primary_role AS assigned_user_role,
       a.id AS application_id,
@@ -36123,9 +36693,9 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
     JOIN iset_case c ON c.id = ci.case_id
     ${buildCasePrimaryApplicationJoinSql('c', 'a')}
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-    LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
     LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
-    WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?
+    WHERE c.assigned_staff_profile_id = ?
       AND ${interventionDeliveryStatusExpr} IN (?, ?)
       AND (ci.start_date IS NOT NULL OR ci.end_date IS NOT NULL)
       AND (
@@ -36202,7 +36772,7 @@ app.get('/api/dashboard/payment-proof-due-items', async (req, res) => {
       pp.updated_at AS payment_packet_updated_at,
       pp.case_id,
       c.case_number,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
       a.id AS application_id,
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$."first-name"')) AS submission_first_name,
@@ -36228,7 +36798,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
     LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
     ${buildCasePrimaryApplicationJoinSql('c', 'a')}
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-    WHERE COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?
+    WHERE c.assigned_staff_profile_id = ?
     ORDER BY COALESCE(pp.updated_at, pp.created_at) DESC, pp.id DESC, ppl.id ASC
     LIMIT 300
   `;
@@ -36688,6 +37258,12 @@ app.post('/api/escalations', async (req, res) => {
     await conn.beginTransaction();
     authorUserId = await resolveExistingUserIdFromAuth(req, conn);
 
+    const visibility = await enforceApplicationVisibility(req, applicationId, conn);
+    if (!visibility.ok) {
+      await conn.rollback();
+      return sendApplicationVisibilityFailure(res, visibility, 'application_not_found');
+    }
+
     const [[appRow]] = await conn.query(
       `SELECT id, status, has_open_escalation, current_escalation_id FROM iset_application WHERE id = ? LIMIT 1 FOR UPDATE`,
       [applicationId]
@@ -36953,6 +37529,11 @@ app.post('/api/escalations/:id/respond', async (req, res) => {
       await conn.rollback();
       return res.status(404).json({ error: 'escalation_not_found' });
     }
+    const visibility = await enforceApplicationVisibility(req, escRow.application_id, conn);
+    if (!visibility.ok) {
+      await conn.rollback();
+      return sendApplicationVisibilityFailure(res, visibility, 'escalation_not_found');
+    }
     if (escRow.state === ESCALATION_STATES.resolved) {
       await conn.rollback();
       return res.status(409).json({ error: 'escalation_closed' });
@@ -37202,9 +37783,12 @@ app.get('/api/escalations', async (req, res) => {
          a.status AS application_status,
          a.has_open_escalation,
          a.current_escalation_id,
+         c.id AS resolved_case_id,
+         c.client_id,
+         c.portfolio_region_id,
          COALESCE(c.case_number, CONCAT('APP-', e.application_id)) AS tracking_id,
          c.status AS case_status,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
          sp.email AS assigned_user_email,
          sp.display_name AS assigned_user_display_name,
          sp.region_id AS assigned_user_region_id,
@@ -37215,7 +37799,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
        FROM iset_application_escalation e
        JOIN iset_application a ON a.id = e.application_id
        LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
-       LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
        ${whereSql}
        ORDER BY e.updated_at DESC
@@ -37240,16 +37824,19 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
          e.resolved_by_user_id,
          e.resolved_by_role,
          a.status AS application_status,
+         c.id AS resolved_case_id,
+         c.client_id,
+         c.portfolio_region_id,
          COALESCE(c.case_number, CONCAT('APP-', e.application_id)) AS tracking_id,
          c.status AS case_status,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
          sp.email AS assigned_user_email,
          sp.display_name AS assigned_user_display_name,
          sp.region_id AS assigned_user_region_id
        FROM iset_application_escalation e
        JOIN iset_application a ON a.id = e.application_id
        LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
-       LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
        ${whereSql}
        ORDER BY e.updated_at DESC
        LIMIT 500`;
@@ -37265,7 +37852,31 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
       }
     }
 
-    const mapped = Array.isArray(rows) ? rows.map((row) => {
+    const listRole = inferUserRole(req);
+    const hasGlobalEscalationScope =
+      listRole === 'System Administrator' ||
+      listRole === 'NWAC Administrator';
+
+    const visibleRows = Array.isArray(rows)
+      ? rows.filter((row) => {
+          const resolvedCaseId = normalisePositiveInteger(row.resolved_case_id);
+          if (!resolvedCaseId && !hasGlobalEscalationScope) {
+            return false;
+          }
+          const accessError = validateCaseAccessForCaseRow(req, {
+            id: resolvedCaseId || row.case_id || null,
+            client_id: row.client_id || null,
+            application_id: row.application_id || null,
+            assigned_to_user_id: row.assigned_to_user_id || null,
+            assigned_staff_profile_id: row.assigned_staff_profile_id || row.assigned_to_user_id || null,
+            portfolio_region_id: row.portfolio_region_id || null,
+            owner_region_id: row.assigned_user_region_id || null,
+          });
+          return !accessError;
+        })
+      : [];
+
+    const mapped = visibleRows.map((row) => {
       const preferred = normaliseString(row.submission_preferred_name) || null;
       const first = normaliseString(row.submission_first_name) || null;
       const last = normaliseString(row.submission_last_name) || null;
@@ -37285,7 +37896,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
         notes: noteParts.join(' • ') || null,
         notes_list: noteParts
       };
-    }) : [];
+    });
 
     return res.json({ count: mapped.length, items: mapped });
   } catch (err) {
@@ -38470,7 +39081,7 @@ const buildNoteReminderMetadata = (noteId) =>
 const loadCaseIdentifiers = async (connection, caseId) => {
   const [[row]] = await connection.query(
     `SELECT c.id,
-            COALESCE(a.id, c.application_id) AS application_id
+            a.id AS application_id
        FROM iset_case c
        ${buildCasePrimaryApplicationJoinSql('c', 'a')}
       WHERE c.id = ?
@@ -38923,6 +39534,7 @@ function normalizeTemplateRow(row) {
 // GET /api/component-templates?templateKey=character-count&includeTemplate=1
 // Returns normalized rows; if templateKey provided, filters to latest active version of that key.
 app.get('/api/component-templates', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
   try {
     const { templateKey, includeTemplate } = req.query || {};
     let rows = await selectComponentTemplates();
@@ -38969,6 +39581,7 @@ app.get('/api/component-templates', async (req, res) => {
 // Removed earlier simple list handler; consolidated logic lives later in file (includes augmentation & version filtering)
 
 app.put('/api/component-templates/:id', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
   const { id } = req.params;
   const body = req.body || {};
   // Accept both legacy and canonical field names from client
@@ -39058,6 +39671,7 @@ app.put('/api/component-templates/:id', async (req, res) => {
 
 // Targeted fix endpoint to normalize "Confirmation Panel" -> "Panel" and ensure proper fields.
 app.post('/api/component-templates/fix/panel-normalize', async (_req, res) => {
+  if (!ensureStepEditor(_req, res)) return;
   try {
     const rows = await selectComponentTemplates();
     const candidates = rows.filter(r => {
@@ -39093,6 +39707,7 @@ app.post('/api/component-templates/fix/panel-normalize', async (_req, res) => {
 
 // Migration: prune prefix/suffix props from character-count templates (should not be translatable)
 app.post('/api/component-templates/fix/character-count-prune-prefix-suffix', async (_req, res) => {
+  if (!ensureStepEditor(_req, res)) return;
   try {
     const [rows] = await pool.query(`SELECT id, default_props, prop_schema FROM iset_intake.component_template WHERE template_key='character-count'`);
     let updated = 0;
@@ -39128,6 +39743,7 @@ app.post('/api/component-templates/fix/character-count-prune-prefix-suffix', asy
 // One-off migration endpoint to persist label.classes insertion and legacy required removal.
 // Safe to run multiple times (idempotent) ??? it will only update rows needing changes.
 app.post('/api/component-templates/migrate/label-required-cleanup', async (_req, res) => {
+  if (!ensureStepEditor(_req, res)) return;
   try {
     const [rows] = await pool.query(`SELECT id, template_key, type, default_props, prop_schema FROM iset_intake.component_template`);
     const labelClassOptions = [ 'govuk-label', 'govuk-label--s', 'govuk-label--m', 'govuk-label--l', 'govuk-label--xl' ];
@@ -39177,6 +39793,7 @@ app.post('/api/component-templates/migrate/label-required-cleanup', async (_req,
 // POST /api/component-templates/migrate/backfill-props
 // Persists any runtime-backfilled props & editable_fields for input-like templates missing schema (idempotent)
 app.post('/api/component-templates/migrate/backfill-props', async (_req, res) => {
+  if (!ensureStepEditor(_req, res)) return;
   try {
     const targets = ['character-count','input','textarea','select','file-upload','password-input'];
     const [rows] = await pool.query(`SELECT id, type, default_props, prop_schema FROM iset_intake.component_template`);
@@ -40026,6 +40643,7 @@ app.post('/api/preview/step', async (req, res) => {
 // Body: { templateKey?, version?, templateId?, props: {...} }
 // Returns raw HTML rendered via the template's export_njk_template and provided props.
 app.post('/api/render/component', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
   try {
     const { templateKey, version, templateId, props } = req.body || {};
     if (!props) return res.status(400).json({ error: 'props required' });
@@ -40185,6 +40803,7 @@ app.post('/api/dev/seed-text-template', async (req, res) => {
 // GET /api/audit/parity-sample?templateKey=radio
 // Renders the latest active template and performs basic GOV.UK structure checks.
 app.get('/api/audit/parity-sample', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
   try {
     const { templateKey } = req.query;
     if (!templateKey) return res.status(400).json({ error: 'templateKey required' });
@@ -40234,6 +40853,7 @@ app.get('/api/audit/parity-sample', async (req, res) => {
 // Creates a new version of the panel template (id provided or discovered by template_key='panel')
 // Adds support for html body (html vs text) while retaining titleText.
 app.post('/api/component-templates/panel/version', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
   try {
     // Find current latest active panel template
     const [[row]] = await pool.query(`SELECT * FROM iset_intake.component_template WHERE template_key='panel' AND status='active' ORDER BY version DESC LIMIT 1`);
@@ -40290,6 +40910,7 @@ app.post('/api/component-templates/panel/version', async (req, res) => {
 // POST /api/component-templates/character-count/version2
 // Creates a new version (v2) of the character-count template with expanded schema & i18n-aware text fields.
 app.post('/api/component-templates/character-count/version2', async (_req, res) => {
+  if (!ensureStepEditor(_req, res)) return;
   try {
     const [[row]] = await pool.query(`SELECT * FROM iset_intake.component_template WHERE template_key='character-count' AND status='active' ORDER BY version DESC LIMIT 1`);
     const currentVersion = row ? Number(row.version || 0) : 0;
@@ -40358,6 +40979,7 @@ app.post('/api/component-templates/character-count/version2', async (_req, res) 
 // POST /api/component-templates/textarea/version2
 // Creates a new version (v2) of the textarea template with bilingual-ready defaults and expanded schema.
 app.post('/api/component-templates/textarea/version2', async (_req, res) => {
+  if (!ensureStepEditor(_req, res)) return;
   try {
     const [[row]] = await pool.query(`SELECT * FROM iset_intake.component_template WHERE template_key='textarea' AND status='active' ORDER BY version DESC LIMIT 1`);
     const currentVersion = row ? Number(row.version || 0) : 0;
@@ -40415,6 +41037,7 @@ app.post('/api/component-templates/textarea/version2', async (_req, res) => {
 // POST /api/component-templates/prune-old
 // Marks older active versions (status='active') of each template_key as 'inactive', keeping only the highest version active.
 app.post('/api/component-templates/prune-old', async (_req, res) => {
+  if (!ensureStepEditor(_req, res)) return;
   try {
     const [rows] = await pool.query(`SELECT template_key, MAX(version) AS maxv FROM iset_intake.component_template WHERE status='active' GROUP BY template_key`);
     let totalUpdated = 0;
@@ -40528,6 +41151,7 @@ function parityChecks($, type, props) {
 // GET /api/audit/parity-all?limit=50
 // Iterate active component templates and report basic parity issues per type
 app.get('/api/audit/parity-all', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
   try {
     const limit = Math.max(0, parseInt(req.query.limit || '0', 10)) || null;
     const [rows] = await pool.query(
@@ -40612,6 +41236,7 @@ app.get('/api/audit/parity-all', async (req, res) => {
 // GET /api/audit/parity-portal?templateKey=radios
 // Compare NJK structure with a derived portal component shape for a single template
 app.get('/api/audit/parity-portal', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
   try {
     const { templateKey } = req.query;
     if (!templateKey) return res.status(400).json({ error: 'templateKey required' });
@@ -40738,6 +41363,7 @@ function getByPath(obj, path) {
 // GET /api/audit/component-templates
 // Optional query: ?limit=nn
 app.get('/api/audit/component-templates', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
   try {
     const limit = Math.max(0, parseInt(req.query.limit || '0', 10)) || null;
     const [rows] = await pool.query(
@@ -40860,7 +41486,7 @@ const STEP_EDITOR_ROLES = new Set(['System Administrator', 'NWAC Administrator',
 
 function ensureStepEditor(req, res) {
   const groups = Array.isArray(req.auth?.groups) ? req.auth.groups : [];
-  const role = req.auth?.role || null;
+  const role = canonicaliseAccessRole(inferUserRole(req) || req.auth?.role || req.staffProfile?.primary_role || null);
   if (groups.some(g => STEP_EDITOR_GROUPS.has(g)) || (role && STEP_EDITOR_ROLES.has(role))) {
     return true;
   }
@@ -41050,6 +41676,7 @@ app.get('/api/workflows', async (req, res) => {
 
 // Get a single workflow with steps and routes
 app.get('/api/workflows/:id', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
   const { id } = req.params;
   try {
     const wf = await getWorkflowDetails(id);
@@ -41064,6 +41691,7 @@ app.get('/api/workflows/:id', async (req, res) => {
 // Create workflow
 // Body: { name: string, status?: 'draft'|'active'|'inactive', steps: number[], start_step_id: number, routes?: [ { source_step_id, mode, field_key?, default_next_step_id?, options?: [{ option_value, next_step_id }] } ] }
 app.post('/api/workflows', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
   const {
     name,
     status = 'draft',
@@ -41153,6 +41781,7 @@ app.post('/api/workflows', async (req, res) => {
 // Update workflow
 // Body: { name?: string, status?: string, steps?: number[], start_step_id?: number, routes?: [...] }
 app.put('/api/workflows/:id', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
   const { id } = req.params;
   const {
     name,
@@ -41263,6 +41892,7 @@ app.put('/api/workflows/:id', async (req, res) => {
 
 // Delete workflow (cascade removes children via FK)
 app.delete('/api/workflows/:id', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
   const { id } = req.params;
   try {
     const [r] = await pool.query(`DELETE FROM iset_intake.workflow WHERE id = ?`, [id]);
@@ -41277,6 +41907,7 @@ app.delete('/api/workflows/:id', async (req, res) => {
 // --- Runtime Preview (normalized schema) --------------------------------------
 // GET /api/workflows/:id/preview -> { steps, meta }
 app.get('/api/workflows/:id/preview', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
   if (!buildWorkflowSchema) return res.status(500).json({ error: 'preview_unavailable', message: 'Normalization module not loaded' });
   const { id } = req.params;
   const audit = String(req.query.auditTemplates || 'false').toLowerCase() === 'true';
@@ -41321,6 +41952,7 @@ app.get('/api/workflows/published/intake-schema', async (_req, res) => {
 
 // Dev: validate workflow contract without fetching steps manually
 app.get('/api/workflows/:id/validate', async (req,res) => {
+  if (!ensureStepEditor(req, res)) return;
   if (!buildWorkflowSchema || !validateWorkflow) return res.status(500).json({ error:'validator_unavailable' });
   try {
     const out = await buildWorkflowSchema({ pool, workflowId: req.params.id });
@@ -41343,6 +41975,7 @@ app.get('/api/meta/supported-component-types', (_req, res) => {
 // --- Component Templates API (for Step Editor library) ---------------------
 // Returns the catalogue of reusable component templates (active only by default)
 app.get('/api/component-templates', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
   try {
     const onlyActive = (req.query.status ?? 'active') === 'active';
     const where = onlyActive ? "WHERE status = 'active'" : '';
@@ -41989,7 +42622,10 @@ app.delete('/api/steps/:id', async (req, res) => {
  *   submission_id?: number
  *   application_id?: number
  *   client_id: number
- *   assigned_to_user_id?: number | null
+ *   assigned_staff_profile_id?: number | null
+ *   assignedStaffProfileId?: number | null
+ *   assigned_to_user_id?: number | null Legacy alias; treated as a staff profile ID.
+ *   assignedToUserId?: number | null Legacy alias; treated as a staff profile ID.
  */
 app.post('/api/cases', async (req, res) => {
   const {
@@ -41997,6 +42633,8 @@ app.post('/api/cases', async (req, res) => {
     application_id,
     client_id,
     clientId,
+    assigned_staff_profile_id,
+    assignedStaffProfileId,
     assigned_to_user_id,
     assignedToUserId,
     status,
@@ -42018,11 +42656,13 @@ app.post('/api/cases', async (req, res) => {
   try {
     await conn.beginTransaction();
 
-    const assignedUserId =
-      assigned_to_user_id ?? assignedToUserId ?? null;
+    const assignedStaffProfileIdInput =
+      assigned_staff_profile_id ?? assignedStaffProfileId ?? assigned_to_user_id ?? assignedToUserId ?? null;
     let assignTargetId = null;
 
     let workingApplicationId = application_id || null;
+    let pendingApplicationSubmissionId = null;
+    let pendingApplicationPayloadJson = null;
 
     if (!workingApplicationId && submission_id) {
       const [existingApp] = await conn.query(
@@ -42046,13 +42686,8 @@ app.post('/api/cases', async (req, res) => {
           ingested_at: new Date().toISOString(),
           submission_snapshot: submission,
         };
-        const [insertApp] = await conn.query(
-          `INSERT INTO iset_application
-            (submission_id, client_id, payload_json, status, lifecycle_status, awaiting_reason, version, created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,NOW(),NOW())`,
-          [submission_id, resolvedClientId, JSON.stringify(payload), 'active', 'submitted', 'none', 1]
-        );
-        workingApplicationId = insertApp.insertId;
+        pendingApplicationSubmissionId = submission_id;
+        pendingApplicationPayloadJson = JSON.stringify(payload);
       }
     }
 
@@ -42076,8 +42711,8 @@ app.post('/api/cases', async (req, res) => {
       }
     }
 
-    if (assignedUserId !== null && typeof assignedUserId !== 'undefined') {
-      const parsedAssignee = Number.parseInt(assignedUserId, 10);
+    if (assignedStaffProfileIdInput !== null && typeof assignedStaffProfileIdInput !== 'undefined') {
+      const parsedAssignee = Number.parseInt(assignedStaffProfileIdInput, 10);
       if (!Number.isInteger(parsedAssignee) || parsedAssignee < 1) {
         await conn.rollback();
         return res.status(422).json({ error: 'invalid_assigned_user_id' });
@@ -42102,7 +42737,8 @@ app.post('/api/cases', async (req, res) => {
       );
     }
 
-    const defaultStatus = workingApplicationId || submission_id
+    const hasApplicationContext = Boolean(workingApplicationId || pendingApplicationSubmissionId);
+    const defaultStatus = hasApplicationContext
       ? 'open'
       : CASE_STATUS_DERIVED_VALUES.initiated;
     const normalizedStatus = typeof status === 'string' && status.trim()
@@ -42118,18 +42754,18 @@ app.post('/api/cases', async (req, res) => {
       normalizedLegacyStatus === CASE_STATUS_DERIVED_VALUES.archived
     )
       ? normalizedLegacyStatus
-      : (workingApplicationId || submission_id ? 'intake' : CASE_STATUS_DERIVED_VALUES.initiated);
+      : (hasApplicationContext ? 'intake' : CASE_STATUS_DERIVED_VALUES.initiated);
 
     let caseResolution;
     try {
       caseResolution = await resolveOrCreateCaseForClient(conn, {
         clientId: resolvedClientId,
         applicationId: workingApplicationId,
-        assignedToUserId: assignTargetId,
+        assignedStaffProfileId: assignTargetId,
         status: normalizedStatus,
         lifecycleStatus: normalizedLifecycleStatus,
         portfolioRegionId,
-        generateCaseNumberIfMissing: !workingApplicationId,
+        generateCaseNumberIfMissing: !hasApplicationContext,
       });
     } catch (caseErr) {
       await conn.rollback();
@@ -42141,6 +42777,25 @@ app.post('/api/cases', async (req, res) => {
         });
       }
       throw caseErr;
+    }
+
+    if (pendingApplicationSubmissionId) {
+      const [insertApp] = await conn.query(
+        `INSERT INTO iset_application
+          (submission_id, client_id, case_id, payload_json, status, lifecycle_status, awaiting_reason, version, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,NOW(),NOW())`,
+        [
+          pendingApplicationSubmissionId,
+          resolvedClientId,
+          caseResolution.caseId,
+          pendingApplicationPayloadJson,
+          'active',
+          'submitted',
+          'none',
+          1,
+        ]
+      );
+      workingApplicationId = insertApp.insertId;
     }
 
     await conn.commit();
@@ -42161,12 +42816,16 @@ app.post('/api/cases', async (req, res) => {
       }
     }
 
+    const assignmentFields = buildAssignedStaffProfileResponseFields(
+      caseResolution.assignedStaffProfileId || assignTargetId || null
+    );
+
     return res.status(caseResolution.created ? 201 : 200).json({
       message: caseResolution.created ? 'case_created' : 'case_reused',
       case_id: caseResolution.caseId,
       application_id: workingApplicationId,
       client_id: resolvedClientId,
-      assigned_to_user_id: caseResolution.assignedToUserId || assignTargetId || null,
+      ...assignmentFields,
       status: caseResolution.status || normalizedStatus,
       case_number: caseResolution.caseNumber || null,
       reused: !caseResolution.created,
@@ -42700,7 +43359,172 @@ app.post(
   handleAdminDocumentUpload({ requireApplicant: false })
 );
 
+const FINANCE_ALLOCATION_EVIDENCE_DOCUMENT_TYPE = 'finance_allocation_evidence';
+
+function generateFinanceEvidenceUploadId() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
+function normalizeFinanceEvidenceObjectKey(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed || /^https?:\/\//i.test(trimmed)) return null;
+  const key = trimmed.replace(/^\/+/, '').replace(/\\/g, '/');
+  if (!key || key.includes('..')) return null;
+  if (!/^uploads\/\d{4}\/\d{2}\/\d{2}\/allocations(?:\/\d+)?\/[0-9a-f-]{36}-[^/]+$/i.test(key)) {
+    return null;
+  }
+  return key;
+}
+
+async function persistFinanceEvidencePendingUpload({
+  uploadId,
+  userId,
+  fileName,
+  objectKey,
+  contentType,
+  sizeBytes,
+  connection = pool,
+}) {
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+  await connection.query(
+    `INSERT INTO pending_uploads
+       (upload_id, user_id, file_name, object_key, content_type, size_bytes, document_type, policy_json, mode, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), 's3', ?)
+     ON DUPLICATE KEY UPDATE
+       user_id = VALUES(user_id),
+       file_name = VALUES(file_name),
+       object_key = VALUES(object_key),
+       content_type = VALUES(content_type),
+       size_bytes = VALUES(size_bytes),
+       document_type = VALUES(document_type),
+       policy_json = VALUES(policy_json),
+       mode = VALUES(mode),
+       expires_at = VALUES(expires_at)`,
+    [
+      uploadId,
+      userId,
+      fileName,
+      objectKey,
+      contentType || null,
+      Number.isFinite(Number(sizeBytes)) ? Number(sizeBytes) : null,
+      FINANCE_ALLOCATION_EVIDENCE_DOCUMENT_TYPE,
+      JSON.stringify({ source: 'finance_allocation_evidence' }),
+      expiresAt,
+    ]
+  );
+}
+
+async function fetchOwnedFinanceEvidencePendingUpload({ key, uploadId = null, userId, connection = pool }) {
+  const normalizedKey = normalizeFinanceEvidenceObjectKey(key);
+  const normalizedUserId = normalisePositiveInteger(userId);
+  if (!normalizedKey || !normalizedUserId) return null;
+  const params = [normalizedUserId, FINANCE_ALLOCATION_EVIDENCE_DOCUMENT_TYPE, normalizedKey];
+  let uploadFilter = '';
+  if (uploadId) {
+    uploadFilter = ' AND upload_id = ?';
+    params.push(String(uploadId));
+  }
+  const [[row]] = await connection.query(
+    `SELECT upload_id, object_key, file_name
+       FROM pending_uploads
+      WHERE user_id = ?
+        AND document_type = ?
+        AND object_key = ?
+        AND expires_at > NOW()
+        ${uploadFilter}
+      LIMIT 1`,
+    params
+  );
+  return row || null;
+}
+
+async function findFinanceEvidenceObjectReference(key, connection = pool) {
+  const normalizedKey = normalizeFinanceEvidenceObjectKey(key);
+  if (!normalizedKey) return null;
+
+  const attachmentJsonTable = `
+    JSON_TABLE(COALESCE(%s.metadata, JSON_OBJECT()), '$.evidence[*].attachments[*]'
+      COLUMNS (
+        attachment_key VARCHAR(512) PATH '$.key' NULL ON EMPTY NULL ON ERROR,
+        attachment_url VARCHAR(512) PATH '$.url' NULL ON EMPTY NULL ON ERROR
+      )
+    )`;
+
+  const [allocationRows] = await connection.query(
+    `SELECT ba.id
+       FROM budget_allocation ba
+       JOIN ${attachmentJsonTable.replace('%s', 'ba')} att
+      WHERE TRIM(LEADING '/' FROM COALESCE(att.attachment_key, '')) = ?
+         OR TRIM(LEADING '/' FROM COALESCE(att.attachment_url, '')) = ?
+      LIMIT 1`,
+    [normalizedKey, normalizedKey]
+  );
+  if (allocationRows && allocationRows[0]) {
+    return { source: 'budget_allocation', id: allocationRows[0].id };
+  }
+
+  const [potRows] = await connection.query(
+    `SELECT bp.id
+       FROM budget_pot bp
+       JOIN ${attachmentJsonTable.replace('%s', 'bp')} att
+      WHERE TRIM(LEADING '/' FROM COALESCE(att.attachment_key, '')) = ?
+         OR TRIM(LEADING '/' FROM COALESCE(att.attachment_url, '')) = ?
+      LIMIT 1`,
+    [normalizedKey, normalizedKey]
+  );
+  if (potRows && potRows[0]) {
+    return { source: 'budget_pot', id: potRows[0].id };
+  }
+
+  return null;
+}
+
+async function ensureFinanceEvidenceObjectAccess(req, {
+  key,
+  uploadId = null,
+  allowPending = false,
+  connection = pool,
+} = {}) {
+  const normalizedKey = normalizeFinanceEvidenceObjectKey(key);
+  if (!normalizedKey) {
+    return { error: { status: 400, body: { error: 'key_required' } } };
+  }
+
+  const reference = await findFinanceEvidenceObjectReference(normalizedKey, connection);
+  if (reference) {
+    return { key: normalizedKey, reference };
+  }
+
+  if (allowPending) {
+    const actorUserId = await resolveFinanceRouteActorUserId(req, connection);
+    if (!actorUserId) {
+      return { error: { status: 400, body: { error: 'actor_user_required' } } };
+    }
+    const pending = await fetchOwnedFinanceEvidencePendingUpload({
+      key: normalizedKey,
+      uploadId,
+      userId: actorUserId,
+      connection,
+    });
+    if (pending) {
+      return { key: normalizedKey, pending, actorUserId };
+    }
+  }
+
+  return {
+    error: {
+      status: 403,
+      body: {
+        error: 'forbidden',
+        detail: 'finance_evidence_scope_mismatch',
+      },
+    },
+  };
+}
+
 app.post('/api/allocations/evidence/upload', (req, res) => {
+  if (requireFinanceRole(req, res)) return;
   adminDocumentUpload.single('file')(req, res, async err => {
     if (err) {
       const isMulterError = err instanceof multer.MulterError;
@@ -42738,13 +43562,19 @@ app.post('/api/allocations/evidence/upload', (req, res) => {
     const sizeBytes = Number.isFinite(Number(file.size)) ? Number(file.size) : null;
     const originalNameRaw = typeof file.originalname === 'string' ? file.originalname.trim() : '';
     const fileNameForDb = (originalNameRaw || file.filename || 'document').slice(0, 255);
+    const actorUserId = await resolveFinanceRouteActorUserId(req);
+    if (!actorUserId) {
+      cleanupUploadedFile();
+      return res.status(400).json({ error: 'actor_user_required' });
+    }
     let relativePath = null;
+    const uploadId = generateFinanceEvidenceUploadId();
     try {
       const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
       if (DRIVER !== 's3') {
         throw new Error('s3 driver not configured');
       }
-      const key = generateKey('allocations', originalNameRaw || fileNameForDb);
+      const key = generateKey(`allocations/${actorUserId}`, originalNameRaw || fileNameForDb);
       const contentType = mimeType || 'application/octet-stream';
       const presigned = await presignPut({ key, contentType });
       await axios.put(presigned.url, fs.createReadStream(file.path), {
@@ -42755,6 +43585,14 @@ app.post('/api/allocations/evidence/upload', (req, res) => {
         }
       });
       relativePath = key;
+      await persistFinanceEvidencePendingUpload({
+        uploadId,
+        userId: actorUserId,
+        fileName: fileNameForDb,
+        objectKey: relativePath,
+        contentType,
+        sizeBytes,
+      });
       cleanupUploadedFile();
     } catch (uploadErr) {
       cleanupUploadedFile();
@@ -42764,6 +43602,7 @@ app.post('/api/allocations/evidence/upload', (req, res) => {
 
     return res.status(200).json({
       ok: true,
+      uploadId,
       key: relativePath,
       url: null,
       name: fileNameForDb,
@@ -42776,14 +43615,36 @@ app.post('/api/allocations/evidence/upload', (req, res) => {
 });
 
 app.post('/api/allocations/evidence/delete', async (req, res) => {
-  const key = typeof req.body?.key === 'string' ? req.body.key.trim() : '';
-  if (!key || key.includes('..')) {
+  if (requireFinanceRole(req, res)) return;
+  const key = normalizeFinanceEvidenceObjectKey(req.body?.key);
+  if (!key) {
     return res.status(400).json({ error: 'key_required' });
   }
+  const uploadId = typeof req.body?.uploadId === 'string' ? req.body.uploadId.trim() : null;
   try {
+    const access = await ensureFinanceEvidenceObjectAccess(req, {
+      key,
+      uploadId,
+      allowPending: true,
+    });
+    if (access.error) {
+      return res.status(access.error.status).json(access.error.body);
+    }
+    if (access.reference) {
+      return res.status(409).json({
+        error: 'finance_evidence_in_use',
+        reference: access.reference,
+      });
+    }
     const { deleteObject, DRIVER } = require('../ISET-intake/s3Provider');
     if (DRIVER === 's3' && typeof deleteObject === 'function') {
       await deleteObject(key);
+    }
+    if (access.pending?.upload_id) {
+      await pool.query(
+        'DELETE FROM pending_uploads WHERE upload_id = ? AND user_id = ? AND document_type = ?',
+        [access.pending.upload_id, access.actorUserId, FINANCE_ALLOCATION_EVIDENCE_DOCUMENT_TYPE]
+      );
     }
     return res.json({ ok: true });
   } catch (err) {
@@ -42793,12 +43654,21 @@ app.post('/api/allocations/evidence/delete', async (req, res) => {
 });
 
 app.post('/api/allocations/evidence/presign-download', async (req, res) => {
-  const keyRaw = typeof req.body?.key === 'string' ? req.body.key.trim() : '';
-  const key = keyRaw.replace(/^\/+/, '');
-  if (!key || key.includes('..')) {
+  if (requireFinanceRole(req, res)) return;
+  const key = normalizeFinanceEvidenceObjectKey(req.body?.key);
+  if (!key) {
     return res.status(400).json({ error: 'key_required' });
   }
+  const uploadId = typeof req.body?.uploadId === 'string' ? req.body.uploadId.trim() : null;
   try {
+    const access = await ensureFinanceEvidenceObjectAccess(req, {
+      key,
+      uploadId,
+      allowPending: true,
+    });
+    if (access.error) {
+      return res.status(access.error.status).json(access.error.body);
+    }
     const { presignGet, DRIVER } = require('../ISET-intake/s3Provider');
     if (DRIVER !== 's3' || typeof presignGet !== 'function') {
       return res.status(500).json({ error: 'presign_unavailable' });
@@ -43415,7 +44285,7 @@ app.get('/api/applicants/:id/applications', async (req, res) => {
       `SELECT
           c.id AS case_id,
           c.case_number,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
           c.portfolio_region_id,
           sp.region_id AS owner_region_id,
           a.id AS application_id,
@@ -43428,7 +44298,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
        FROM iset_application_submission s
        JOIN iset_application a ON a.submission_id = s.id
        LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
-       LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
       WHERE s.user_id = ?${archivedClause}
       ORDER BY a.created_at DESC`,
       [applicantId]
@@ -43446,6 +44316,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
       caseId: r.case_id || null,
       caseNumber: r.case_number || null,
       applicationId: r.application_id || null,
+      ...buildAssignedStaffProfileResponseFields(r),
       applicationStatus: r.application_status || null,
       referenceNumber: r.reference_number || null,
       createdAt: r.application_created_at || null
@@ -43502,7 +44373,7 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
               d.case_id,
               d.action_plan_id,
               apc.id AS action_plan_case_id,
-              apc.application_id AS action_plan_application_id,
+              ${buildCasePrimaryApplicationIdSql('apc')} AS action_plan_application_id,
               d.created_at AS uploaded_at
          FROM iset_document d
          LEFT JOIN iset_case_action_plan ap ON ap.id = d.action_plan_id
@@ -43522,7 +44393,7 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
                 i.metadata_json,
                 i.case_id,
                 i.action_plan_id,
-                c.application_id
+                ${buildCasePrimaryApplicationIdSql('c')} AS application_id
            FROM iset_case_intervention i
            LEFT JOIN iset_case c ON c.id = i.case_id
           WHERE i.id = ?
@@ -43576,7 +44447,7 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
           scopeParams.push(checklistCaseId);
         }
         if (checklistApplicationId) {
-          scopePredicates.push('(check_case.application_id = ? OR linked_message.application_id = ?)');
+          scopePredicates.push(`(${buildCasePrimaryApplicationIdSql('check_case')} = ? OR linked_message.application_id = ?)`);
           scopeParams.push(checklistApplicationId, checklistApplicationId);
         }
         const [signedRequestRows] = await pool.query(
@@ -44291,7 +45162,7 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
       const matchedFilePaths = Array.from(applicationDocumentScope.submissionPayloadFilePaths);
       if (matchedFilePaths.length) {
         whereClauses.push(
-          `(d.application_id = ? OR ac.application_id = ? OR (
+          `(d.application_id = ? OR ${buildCasePrimaryApplicationIdSql('ac')} = ? OR (
               d.application_id IS NULL
               AND d.case_id IS NULL
               AND d.action_plan_id IS NULL
@@ -44301,7 +45172,7 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
         );
         params.push(applicationFilterId, applicationFilterId, ...matchedFilePaths);
       } else {
-        whereClauses.push('(d.application_id = ? OR ac.application_id = ?)');
+        whereClauses.push(`(d.application_id = ? OR ${buildCasePrimaryApplicationIdSql('ac')} = ?)`);
         params.push(applicationFilterId, applicationFilterId);
       }
     }
@@ -44387,7 +45258,7 @@ app.get('/api/cases/:id/documents', async (req, res) => {
     const [[caseRow]] = await pool.query(
       `SELECT c.id,
               c.client_id,
-              COALESCE(a.id, c.application_id) AS application_id,
+              a.id AS application_id,
               c.case_number
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a')}
@@ -44724,7 +45595,7 @@ app.get('/api/cases', async (req, res) => {
       .map(token => Number.parseInt(token, 10))
       .filter(Number.isFinite);
     if (ownerFilters.length) {
-      whereClauses.push(`COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IN (${ownerFilters.map(() => '?').join(', ')})`);
+      whereClauses.push(`c.assigned_staff_profile_id IN (${ownerFilters.map(() => '?').join(', ')})`);
       params.push(...ownerFilters);
     }
 
@@ -44794,18 +45665,18 @@ app.get('/api/cases', async (req, res) => {
           return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
         }
         if (requesterRegionIds.length === 1) {
-          whereClauses.push('(sp.region_id = ? OR COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NULL)');
+          whereClauses.push('(sp.region_id = ? OR c.assigned_staff_profile_id IS NULL)');
           params.push(requesterRegionIds[0]);
         } else {
           const placeholders = requesterRegionIds.map(() => '?').join(',');
-          whereClauses.push(`(sp.region_id IN (${placeholders}) OR COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NULL)`);
+          whereClauses.push(`(sp.region_id IN (${placeholders}) OR c.assigned_staff_profile_id IS NULL)`);
           params.push(...requesterRegionIds);
         }
       } else if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
         if (!Number.isFinite(requesterId)) {
           return res.status(403).json({ error: 'forbidden', detail: 'assessor_scope_missing' });
         }
-        whereClauses.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?');
+        whereClauses.push('c.assigned_staff_profile_id = ?');
         params.push(requesterId);
       } else {
         return res.status(403).json({ error: 'forbidden' });
@@ -44828,7 +45699,7 @@ app.get('/api/cases', async (req, res) => {
       LEFT JOIN client cl ON c.client_id = cl.id
       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-      LEFT JOIN staff_profiles sp ON COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = sp.id
+      LEFT JOIN staff_profiles sp ON c.assigned_staff_profile_id = sp.id
 	      LEFT JOIN (
 	        SELECT
 	          case_id,
@@ -44908,9 +45779,9 @@ app.get('/api/cases', async (req, res) => {
 	        task_counts.next_overdue_task_due_at AS next_overdue_task_due_at,
 	        COALESCE(intervention_counts.open_intervention_count, 0) AS open_intervention_count,
 	        COALESCE(intervention_counts.total_intervention_count, 0) AS total_intervention_count,
-	        c.application_id,
+		        a.id AS application_id,
         c.client_id,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
         c.created_at,
         c.updated_at,
         sp.id AS owner_id,
@@ -45140,9 +46011,17 @@ async function handleAssignmentRequest(req, res, { requireExistingAssignee = fal
     return res.status(400).json({ error: 'invalid_case_id' });
   }
 
-  const toUserIdRaw = req.body?.toUserId ?? req.body?.assigneeId ?? req.body?.assignedToUserId ?? null;
-  const toUserId = Number.parseInt(toUserIdRaw, 10);
-  if (!Number.isInteger(toUserId) || toUserId < 1) {
+  const targetStaffProfileIdRaw =
+    req.body?.toStaffProfileId ??
+    req.body?.assigneeStaffProfileId ??
+    req.body?.assignedStaffProfileId ??
+    req.body?.assigned_staff_profile_id ??
+    req.body?.toUserId ??
+    req.body?.assigneeId ??
+    req.body?.assignedToUserId ??
+    null;
+  const targetStaffProfileId = Number.parseInt(targetStaffProfileIdRaw, 10);
+  if (!Number.isInteger(targetStaffProfileId) || targetStaffProfileId < 1) {
     return res.status(422).json({ error: 'invalid_target_user' });
   }
 
@@ -45151,6 +46030,10 @@ async function handleAssignmentRequest(req, res, { requireExistingAssignee = fal
     const caseRow = await fetchCaseRow(caseId);
     if (!caseRow) {
       return res.status(404).json({ error: 'case_not_found' });
+    }
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
     }
 
     const currentAssignedStaffProfileId = resolveCaseAssignedStaffProfileId(caseRow);
@@ -45166,7 +46049,7 @@ async function handleAssignmentRequest(req, res, { requireExistingAssignee = fal
       return res.status(403).json({ error: 'forbidden', detail: 'self_reassign_not_allowed' });
     }
 
-    const targetStaff = await fetchStaffProfileById(toUserId);
+    const targetStaff = await fetchStaffProfileById(targetStaffProfileId);
     if (!targetStaff) {
       return res.status(404).json({ error: 'staff_not_found' });
     }
@@ -45179,16 +46062,16 @@ async function handleAssignmentRequest(req, res, { requireExistingAssignee = fal
       ? await fetchStaffProfileById(currentAssignedStaffProfileId)
       : null;
 
-    if (previousStaff?.id && Number(previousStaff.id) === Number(toUserId)) {
+    if (previousStaff?.id && Number(previousStaff.id) === Number(targetStaffProfileId)) {
       return res.status(200).json({
         ok: true,
         caseId,
-        assignedToUserId: toUserId,
+        ...buildAssignedStaffProfileResponseFields(targetStaffProfileId),
         unchanged: true,
       });
     }
 
-    await persistCaseAssignment(caseId, toUserId);
+    await persistCaseAssignment(caseId, targetStaffProfileId);
 
     await publishAssignmentEvent({
       caseId,
@@ -45201,7 +46084,7 @@ async function handleAssignmentRequest(req, res, { requireExistingAssignee = fal
     return res.status(200).json({
       ok: true,
       caseId,
-      assignedToUserId: toUserId,
+      ...buildAssignedStaffProfileResponseFields(targetStaffProfileId),
     });
   } catch (error) {
     console.error('Assignment request failed:', error);
@@ -45240,7 +46123,7 @@ async function resolveCaseApplicantMessagingContext(caseId) {
   const [[row] = []] = await pool.query(
     `SELECT
        c.id AS case_id,
-       c.application_id,
+       a.id AS application_id,
        c.case_number,
        c.case_context_json,
        c.status AS case_status,
@@ -45310,10 +46193,10 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
     const sql = `
       SELECT
         c.id,
-        COALESCE(c.application_id, a.id) AS application_id,
+        a.id AS application_id,
         c.client_id,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
-        COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_staff_profile_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
+        c.assigned_staff_profile_id AS assigned_staff_profile_id,
         c.case_number,
         c.status,
         c.lifecycle_status AS case_lifecycle_status,
@@ -45377,7 +46260,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
         applicant_submission.email AS applicant_email
       FROM iset_case c
       LEFT JOIN client cl ON cl.id = c.client_id
-      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
       LEFT JOIN canada_region cr ON cr.region_id = c.portfolio_region_id
       LEFT JOIN canada_region owner_region ON owner_region.region_id = sp.region_id
       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
@@ -46447,9 +47330,12 @@ app.post('/api/cases/:id/validate-ilmp', async (req, res) => {
   }
 
   try {
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) return res.status(accessError.status).json(accessError.body);
+
     const [[caseRow]] = await pool.query(
       `SELECT c.id,
-              COALESCE(a.id, c.application_id) AS application_id
+              a.id AS application_id
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a')}
         WHERE c.id = ?
@@ -46502,6 +47388,9 @@ app.post('/api/cases/:id/ready-to-close', async (req, res) => {
   }
 
   try {
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) return res.status(accessError.status).json(accessError.body);
+
     const result = await markCaseReadyToClose({ caseId });
     return res.json({
       success: true,
@@ -46526,9 +47415,12 @@ app.post('/api/cases/:id/prepare-ilmp', async (req, res) => {
   }
 
   try {
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) return res.status(accessError.status).json(accessError.body);
+
     const [[caseRow]] = await pool.query(
       `SELECT c.id,
-              COALESCE(a.id, c.application_id) AS application_id
+              a.id AS application_id
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a')}
         WHERE c.id = ?
@@ -46597,14 +47489,14 @@ app.get('/api/cases/:id/action-plan/context', async (req, res) => {
 
     const [[caseRow]] = await connection.query(
       `SELECT
-         COALESCE(a.id, c.application_id) AS application_id,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+         a.id AS application_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
          c.portfolio_region_id,
          c.case_context_json,
          sp.region_id AS owner_region_id
        FROM iset_case c
        ${buildCasePrimaryApplicationJoinSql('c', 'a')}
-       LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
        WHERE c.id = ?
        LIMIT 1`,
       [caseId]
@@ -47338,13 +48230,14 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
 
   const [[caseRow]] = await pool.query(
     `SELECT
-       c.application_id,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+       a.id AS application_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
        c.portfolio_region_id,
        c.case_number,
        sp.region_id AS owner_region_id
      FROM iset_case c
-     LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+     ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
      WHERE c.id = ?
      LIMIT 1`,
     [caseId]
@@ -47876,7 +48769,7 @@ app.get('/api/cases/:id/cfa-versions', async (req, res) => {
     const [[caseRow]] = await pool.query(
       `SELECT c.id, ${buildCaseAssignedStaffProfileIdSql('c')} AS assigned_to_user_id, c.portfolio_region_id, sp.region_id AS owner_region_id
          FROM iset_case c
-         LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
         WHERE c.id = ?
         LIMIT 1`,
       [caseId]
@@ -48524,6 +49417,30 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     const interventionId = result.insertId;
     const interventionRow = await fetchInterventionWithCase(interventionId);
     await syncInterventionProposalCompatibility(interventionRow);
+    if (
+      !isBackloadMode &&
+      createInterventionState.reviewStatus === 'submitted'
+    ) {
+      try {
+        const { actorName } = resolveRequestActor(req);
+        const actorDisplayName = await resolveStaffDisplayName(pool, req) || actorName || null;
+        const submittedSignatureFallback = {
+          signerName: actorDisplayName || actorName || null,
+          signedAt: new Date().toISOString()
+        };
+        const actorUserId = await resolveOrCreateUserIdFromAuth(req);
+        await generateAndStoreInterventionAssessmentPdf({
+          caseId: planRow.case_id,
+          interventionRow,
+          actorUserId,
+          submittedSignature: submittedSignatureFallback,
+          approved: false,
+          connection: pool
+        });
+      } catch (err) {
+        console.error('[assessment-pdf] intervention assessment generation failed:', err?.message || err);
+      }
+    }
     const payload = mapInterventionRow(interventionRow);
     if (isBackloadMode) {
       try {
@@ -49629,14 +50546,15 @@ app.patch('/api/interventions/:id', async (req, res) => {
     const revisionSourceInterventionId = normalisePositiveInteger(
       updatedRevisionInfo?.sourceInterventionId || updatedRevisionInfo?.source_intervention_id || null
     );
-    const shouldGenerateRevisionAssessmentPdf =
-      revisionSourceInterventionId &&
+    const shouldGenerateSubmittedAssessmentPdf =
       previousInterventionState.reviewStatus !== 'submitted' &&
       nextInterventionState.reviewStatus === 'submitted';
-    if (shouldGenerateRevisionAssessmentPdf) {
+    if (shouldGenerateSubmittedAssessmentPdf) {
       try {
-        const sourceInterventionRow = await fetchInterventionWithCase(revisionSourceInterventionId);
-        if (sourceInterventionRow) {
+        const sourceInterventionRow = revisionSourceInterventionId
+          ? await fetchInterventionWithCase(revisionSourceInterventionId)
+          : null;
+        if (!revisionSourceInterventionId || sourceInterventionRow) {
           const { actorName } = resolveRequestActor(req);
           const actorDisplayName = await resolveStaffDisplayName(pool, req) || actorName || null;
           const submittedSignatureFallback = {
@@ -49644,12 +50562,13 @@ app.patch('/api/interventions/:id', async (req, res) => {
             signedAt: new Date().toISOString()
           };
           const actorUserId = await resolveOrCreateUserIdFromAuth(req);
-          await generateAndStoreRevisionAssessmentPdf({
+          await generateAndStoreInterventionAssessmentPdf({
             caseId: updatedRow?.case_id || interventionRow?.case_id || null,
+            interventionRow: updatedRow,
             sourceInterventionRow,
-            revisionInterventionRow: updatedRow,
             actorUserId,
             submittedSignature: submittedSignatureFallback,
+            approved: false,
             connection: pool
           });
         } else {
@@ -49659,7 +50578,35 @@ app.patch('/api/interventions/:id', async (req, res) => {
           });
         }
       } catch (err) {
-        console.error('[assessment-pdf] revision assessment generation failed:', err?.message || err);
+        console.error('[assessment-pdf] intervention assessment generation failed:', err?.message || err);
+      }
+    }
+    const shouldGenerateApprovedAssessmentPdf =
+      (
+        previousInterventionState.reviewStatus !== 'approved' &&
+        nextInterventionState.reviewStatus === 'approved'
+      ) ||
+      isApplyingApprovedRevision;
+    if (shouldGenerateApprovedAssessmentPdf) {
+      try {
+        const { actorName } = resolveRequestActor(req);
+        const actorDisplayName = await resolveStaffDisplayName(pool, req) || actorName || null;
+        const approvedSignatureFallback = {
+          signerName: actorDisplayName || actorName || null,
+          signedAt: new Date().toISOString()
+        };
+        const actorUserId = await resolveOrCreateUserIdFromAuth(req);
+        await generateAndStoreInterventionAssessmentPdf({
+          caseId: updatedRow?.case_id || interventionRow?.case_id || null,
+          interventionRow: updatedRow,
+          sourceInterventionRow: isApplyingApprovedRevision ? revisionDraftRow : null,
+          actorUserId,
+          approvedSignature: approvedSignatureFallback,
+          approved: true,
+          connection: pool
+        });
+      } catch (err) {
+        console.error('[assessment-pdf] approved intervention assessment generation failed:', err?.message || err);
       }
     }
     const nextPlanFundingStream =
@@ -50899,7 +51846,10 @@ app.patch('/api/action-plans/:id', async (req, res) => {
 });
 
 app.get('/api/cases/:id', async (req, res) => {
-  const caseId = req.params.id;
+  const caseId = normalisePositiveInteger(req.params.id);
+  if (!caseId) {
+    return res.status(400).json({ error: 'invalid_case_id' });
+  }
   const traceId = `case-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const startedAt = Date.now();
   const staffProfileIdRaw = req?.staffProfile?.id ?? req?.auth?.staffProfileId ?? null;
@@ -50909,15 +51859,19 @@ app.get('/api/cases/:id', async (req, res) => {
   let fallbackReason = null;
   try {
     console.info('[case:detail] start', { traceId, caseId, conflictJoinStaffId });
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) {
+      return res.status(accessError.status).json(accessError.body);
+    }
     await ensureAssessmentBudgetPotColumn();
     // Fetch case core details + assessment snapshot
     const baseSql = `
       SELECT
         c.id,
-        COALESCE(c.application_id, a.id) AS application_id,
+        a.id AS application_id,
         c.client_id,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
-        COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_staff_profile_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
+        c.assigned_staff_profile_id AS assigned_staff_profile_id,
         sp.display_name AS assigned_user_display_name,
         sp.email AS assigned_user_email,
         c.status,
@@ -50993,7 +51947,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
       LEFT JOIN application_lock al ON al.application_id = a.id AND al.expires_at > NOW()
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
       LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
       LEFT JOIN iset_case_conflict_declaration cd
         ON cd.case_id = c.id
@@ -51077,8 +52031,8 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
           ? `FROM iset_case c ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}`
           : 'FROM iset_case c';
 
-        const staffJoin = (hasStaffEmail && existingCols.includes('assigned_to_user_id'))
-          ? 'LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)'
+        const staffJoin = (hasStaffEmail && existingCols.includes('assigned_staff_profile_id'))
+          ? 'LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id'
           : '';
 
         caseSelectParts.push(staffJoin && hasStaffDisplayName ? 'sp.display_name AS assigned_user_display_name' : 'NULL AS assigned_user_display_name');
@@ -51270,22 +52224,12 @@ app.post('/api/dev/backfill-documents', async (req, res) => {
 
 
 // --- Basic Users and Roles for Admin UI pages (lightweight) ---------------
-// List basic users from the user table for demo/admin views
+// Retired: the shared user table contains mixed applicant/staff identities.
 app.get('/api/users', async (_req, res) => {
-  try {
-    const [rows] = await pool.query(
-      `SELECT id, name, email
-         FROM user
-        ORDER BY id DESC
-        LIMIT 500`
-    );
-    // Shape to match UI expectations (includes a role field even if null)
-    const out = rows.map(r => ({ id: r.id, name: r.name, email: r.email, role: r.role || null }));
-    res.status(200).json(out);
-  } catch (err) {
-    console.error('Error fetching users:', err);
-    res.status(500).json({ error: 'Failed to fetch users' });
-  }
+  return res.status(410).json({
+    error: 'retired_endpoint',
+    message: 'Use /api/admin/users for staff administration or /api/admin/applicants for applicant-account lookup.'
+  });
 });
 
 // Static role catalogue for the Roles table in Manage Users
@@ -51368,7 +52312,7 @@ app.get('/api/notifications/summary', async (_req, res) => {
 });
 
 
-app.get('/api/blocksteps/:id', async (req, res) => {
+app.get('/api/blocksteps/:id', requireUnsafeAdminDebugAccess, async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -51398,7 +52342,7 @@ app.get('/api/blocksteps/:id', async (req, res) => {
 
 
 // GET endpoint to retrieve all BlockSteps from the database
-app.get('/api/blocksteps', async (req, res) => {
+app.get('/api/blocksteps', requireUnsafeAdminDebugAccess, async (req, res) => {
   try {
     // Query the database for all BlockSteps
     const [blocksteps] = await pool.query(
@@ -51414,7 +52358,7 @@ app.get('/api/blocksteps', async (req, res) => {
   }
 });
 
-app.post('/api/blocksteps', async (req, res) => {
+app.post('/api/blocksteps', requireUnsafeAdminDebugAccess, async (req, res) => {
   const { name, status, components, njkContent } = req.body;
 
   if (!name || !components || components.length === 0 || !njkContent) {
@@ -51448,7 +52392,7 @@ app.post('/api/blocksteps', async (req, res) => {
   }
 });
 
-app.put('/api/blocksteps/:id', async (req, res) => {
+app.put('/api/blocksteps/:id', requireUnsafeAdminDebugAccess, async (req, res) => {
   const { id } = req.params;
   const { name, status } = req.body;
 
@@ -51470,7 +52414,7 @@ app.put('/api/blocksteps/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/blocksteps/:id', async (req, res) => {
+app.delete('/api/blocksteps/:id', requireUnsafeAdminDebugAccess, async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -51671,8 +52615,17 @@ const fetchTemplateById = async (templateId) => {
   return rows;
 };
 
+function requireNotificationConfigAccess(req, res) {
+  if (!hasSystemOrNwacAdminAccess(req)) {
+    res.status(403).json({ error: 'forbidden' });
+    return false;
+  }
+  return true;
+}
+
 // Get all templates
 app.get('/api/templates', async (req, res) => {
+  if (!requireNotificationConfigAccess(req, res)) return;
   try {
     const [rows] = await pool.query(`
       SELECT id, name, type, status, language, subject, content, localized, created_at, updated_at
@@ -51688,6 +52641,7 @@ app.get('/api/templates', async (req, res) => {
 
 // Get a template by ID
 app.get('/api/templates/:templateId', async (req, res) => {
+  if (!requireNotificationConfigAccess(req, res)) return;
   const templateId = req.params.templateId;
   try {
     const rows = await fetchTemplateById(templateId);
@@ -51703,6 +52657,7 @@ app.get('/api/templates/:templateId', async (req, res) => {
 
 // Save (create or update) a template by ID
 app.post('/api/templates/:templateId', async (req, res) => {
+  if (!requireNotificationConfigAccess(req, res)) return;
   const templateId = req.params.templateId;
   const { name } = req.body || {};
 
@@ -51787,6 +52742,7 @@ app.post('/api/templates/:templateId', async (req, res) => {
 
 // Delete a template by ID
 app.delete('/api/templates/:templateId', async (req, res) => {
+  if (!requireNotificationConfigAccess(req, res)) return;
   const templateId = req.params.templateId;
   try {
     const [result] = await pool.query(
@@ -52040,8 +52996,6 @@ async function fetchCaseSecureMessageRow(messageId, connection = pool) {
     `SELECT id,
             case_id,
             application_id,
-            sender_id,
-            recipient_id,
             sender_actor_type,
             sender_user_id,
             sender_staff_profile_id,
@@ -52072,6 +53026,63 @@ function messageActorMatchesUser(messageRow, prefix, actorType, userId) {
     String(messageRow[`${prefix}_actor_type`] || '') === actorType &&
     Number(messageRow[`${prefix}_user_id`]) === Number(numericUserId)
   );
+}
+
+function buildSecureMessageActorResponse(messageRow, prefix) {
+  const actorType = normaliseString(messageRow?.[`${prefix}_actor_type`] || null) || null;
+  const userId = normalisePositiveInteger(messageRow?.[`${prefix}_user_id`]);
+  const staffProfileId = normalisePositiveInteger(messageRow?.[`${prefix}_staff_profile_id`]);
+  return {
+    actorType,
+    actor_type: actorType,
+    userId,
+    user_id: userId,
+    staffProfileId,
+    staff_profile_id: staffProfileId,
+    applicantUserId: actorType === 'applicant_user' ? userId : null,
+    applicant_user_id: actorType === 'applicant_user' ? userId : null,
+  };
+}
+
+function buildSecureMessageThreadResponse(messageRow, { applicantUserId = null } = {}) {
+  const caseId = normalisePositiveInteger(messageRow?.case_id);
+  const applicationId = normalisePositiveInteger(messageRow?.application_id);
+  const resolvedApplicantUserId = normalisePositiveInteger(applicantUserId);
+  return {
+    type: 'case_application',
+    caseId,
+    case_id: caseId,
+    applicationId,
+    application_id: applicationId,
+    applicantUserId: resolvedApplicantUserId,
+    applicant_user_id: resolvedApplicantUserId,
+  };
+}
+
+function mapCaseSecureMessageResponse(row, { applicantUserId = null } = {}) {
+  const sender = buildSecureMessageActorResponse(row, 'sender');
+  const recipient = buildSecureMessageActorResponse(row, 'recipient');
+  const thread = buildSecureMessageThreadResponse(row, { applicantUserId });
+  const applicantId = normalisePositiveInteger(applicantUserId);
+  const applicantIsSender =
+    applicantId &&
+    sender.actorType === 'applicant_user' &&
+    Number(sender.userId) === Number(applicantId);
+  const applicantIsRecipient =
+    applicantId &&
+    recipient.actorType === 'applicant_user' &&
+    Number(recipient.userId) === Number(applicantId);
+  return {
+    ...row,
+    sender,
+    recipient,
+    thread,
+    senderActor: sender,
+    recipientActor: recipient,
+    messageThread: thread,
+    applicantActorRole: applicantIsSender ? 'sender' : applicantIsRecipient ? 'recipient' : null,
+    direction: applicantIsSender ? 'received' : applicantIsRecipient ? 'sent' : null,
+  };
 }
 
 async function resolveCaseSecureMessageAccess(req, messageRow, {
@@ -53921,8 +54932,6 @@ app.get('/api/cases/:id/messages', async (req, res) => {
           m.id,
           m.case_id,
           m.application_id,
-          m.sender_id,
-          m.recipient_id,
           m.sender_actor_type,
           m.sender_user_id,
           m.sender_staff_profile_id,
@@ -53998,12 +55007,28 @@ app.get('/api/cases/:id/messages', async (req, res) => {
       }, new Map());
     }
 
-    const withAttachments = rows.map(r => ({
-      ...r,
-      attachments: attachmentsByMsg.get(r.id) || []
-    }));
+    const withAttachments = rows.map(r => mapCaseSecureMessageResponse(
+      {
+        ...r,
+        attachments: attachmentsByMsg.get(r.id) || []
+      },
+      { applicantUserId: applicantId }
+    ));
 
-    res.json({ applicant_user_id: applicantId, items: withAttachments });
+    res.json({
+      applicant_user_id: applicantId,
+      applicantUserId: applicantId,
+      thread: {
+        type: 'case_application',
+        caseId,
+        case_id: caseId,
+        applicationId: normalisePositiveInteger(applicantContext?.application_id),
+        application_id: normalisePositiveInteger(applicantContext?.application_id),
+        applicantUserId: applicantId,
+        applicant_user_id: applicantId,
+      },
+      items: withAttachments
+    });
   } catch (e) {
     console.error('GET /api/cases/:id/messages failed:', e.message);
     res.status(500).json({ error: 'failed_to_fetch_messages' });
@@ -54573,11 +55598,9 @@ const handlePostCaseSecureMessage = async (req, res) => {
     const senderActorType = senderStaffProfileId ? 'staff_profile' : 'local_user';
     const [result] = await pool.query(
       `INSERT INTO messages
-         (sender_id, recipient_id, sender_actor_type, sender_user_id, sender_staff_profile_id, recipient_actor_type, recipient_user_id, recipient_staff_profile_id, case_id, application_id, subject, body, status, deleted, urgent, created_at)
-       VALUES (?, ?, ?, ?, ?, 'applicant_user', ?, NULL, ?, ?, ?, ?, 'unread', FALSE, ?, NOW())`,
+         (sender_actor_type, sender_user_id, sender_staff_profile_id, recipient_actor_type, recipient_user_id, recipient_staff_profile_id, case_id, application_id, subject, body, status, deleted, urgent, created_at)
+       VALUES (?, ?, ?, 'applicant_user', ?, NULL, ?, ?, ?, ?, 'unread', FALSE, ?, NOW())`,
       [
-        senderId,
-        recipientId,
         senderActorType,
         senderId,
         senderStaffProfileId || null,
@@ -54768,7 +55791,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
         [staffProfileId, cfaDraft.id]
       );
     }
-    const { actorName } = resolveRequestActor(req);
+    const { actorId: requestActorId, actorName } = resolveRequestActor(req);
     const assessorDisplayName =
       req?.staffProfile?.display_name ||
       req?.staffProfile?.name ||
@@ -54811,8 +55834,14 @@ const handlePostCaseSecureMessage = async (req, res) => {
         payload: {
           message_id: result.insertId,
           message_subject: subjectValue || null,
-          recipient_id: recipientId,
+          sender_actor_type: senderActorType,
+          sender_user_id: senderId,
+          sender_staff_profile_id: senderStaffProfileId || null,
+          recipient_actor_type: 'applicant_user',
+          recipient_user_id: recipientId,
+          recipient_applicant_user_id: recipientId,
           recipient_display_name: toNameValue || null,
+          recipient_id: recipientId,
           to_user_id: recipientId,
           to_display_name: toNameValue || null,
           from_display_name: fromNameValue || assessorDisplayName || null,
@@ -54821,8 +55850,9 @@ const handlePostCaseSecureMessage = async (req, res) => {
           tracking_id: trackingReference || null,
         },
         trackingId: trackingReference || null,
-        actorId: senderId,
+        actorId: requestActorId || null,
         actorName: assessorDisplayName,
+        actorStaffProfileId: senderStaffProfileId || null,
       });
     } catch (notifyErr) {
       console.error('[events] message_received emit failed', notifyErr?.message || notifyErr);
@@ -55129,15 +56159,23 @@ app.get('/api/me/case-watches', async (req, res) => {
           .filter((value) => Number.isFinite(value) && value > 0)
       )
     );
+    const accessibleCaseIds = [];
+    for (const caseId of caseIds) {
+      const accessError = await validateCaseAccessByCaseId(req, caseId);
+      if (!accessError) accessibleCaseIds.push(caseId);
+    }
+    if (!accessibleCaseIds.length) {
+      return res.status(200).json([]);
+    }
 
     let caseMap = new Map();
-    if (caseIds.length) {
-      const placeholders = caseIds.map(() => '?').join(',');
+    if (accessibleCaseIds.length) {
+      const placeholders = accessibleCaseIds.map(() => '?').join(',');
       const [caseRows] = await pool.query(
         `SELECT
             c.id,
             c.status,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+            c.assigned_staff_profile_id AS assigned_to_user_id,
             c.updated_at,
             c.case_number,
             sub.reference_number AS submission_reference,
@@ -55148,14 +56186,14 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a')}
          LEFT JOIN iset_application_submission sub ON sub.id = a.submission_id
-         LEFT JOIN staff_profiles staff ON staff.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+         LEFT JOIN staff_profiles staff ON staff.id = c.assigned_staff_profile_id
         WHERE c.id IN (${placeholders})`,
-        caseIds
+        accessibleCaseIds
       );
       caseMap = new Map(caseRows.map((row) => [Number(row.id), row]));
     }
 
-    const payload = watches.map((watch) => {
+    const payload = watches.filter((watch) => caseMap.has(Number(watch.caseId))).map((watch) => {
       const caseId = Number(watch.caseId);
       const match = caseMap.get(caseId) || {};
       const assignedRaw = match.assigned_to_user_id;
@@ -55221,11 +56259,14 @@ app.post('/api/cases/:caseId/watch', async (req, res) => {
       return res.status(404).json({ error: 'staff_profile_not_found' });
     }
 
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) return res.status(accessError.status).json(accessError.body);
+
     const [[caseRow]] = await pool.query(
       `SELECT
           c.id,
           c.status,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+          c.assigned_staff_profile_id AS assigned_to_user_id,
           c.updated_at,
           c.case_number,
           c.case_context_json,
@@ -55234,7 +56275,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a')}
          LEFT JOIN iset_application_submission sub ON sub.id = a.submission_id
-         LEFT JOIN staff_profiles staff ON staff.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+         LEFT JOIN staff_profiles staff ON staff.id = c.assigned_staff_profile_id
         WHERE c.id = ?
         LIMIT 1`,
       [caseId]
@@ -55338,6 +56379,9 @@ app.delete('/api/cases/:caseId/watch', async (req, res) => {
     if (!staffRow) {
       return res.status(404).json({ error: 'staff_profile_not_found' });
     }
+
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) return res.status(accessError.status).json(accessError.body);
 
     const [[caseRow]] = await pool.query(
       'SELECT id FROM iset_case WHERE id = ? LIMIT 1',
@@ -55647,7 +56691,7 @@ app.post('/api/applicant-watchlist', async (req, res) => {
     let payloadJson = null;
     if (caseId) {
       const [[row]] = await pool.query(
-        `SELECT c.id, COALESCE(c.application_id, a.id) AS application_id, c.case_context_json, a.payload_json
+        `SELECT c.id, a.id AS application_id, c.case_context_json, a.payload_json
            FROM iset_case c
            ${buildCasePrimaryApplicationJoinSql('c', 'a')}
           WHERE c.id = ?
@@ -56062,7 +57106,7 @@ function mapAllocationRow(row) {
 }
 
 function requireFinanceRole(req, res) {
-  const role = req.auth?.role || req.staffProfile?.primary_role;
+  const role = inferUserRole(req);
   const allowed = new Set(['System Administrator', 'NWAC Administrator']);
   if (role && allowed.has(role)) return null;
   res.status(403).json({ error: 'forbidden', message: 'Insufficient role for finance operations.' });
@@ -56179,12 +57223,12 @@ async function fetchPaymentPacketAccessRowById(packetId, connection = pool) {
             pp.case_id,
             pp.client_id,
             pp.intervention_id,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
             c.portfolio_region_id,
             sp.region_id AS owner_region_id
        FROM payment_packet pp
        LEFT JOIN iset_case c ON c.id = pp.case_id
-       LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
       WHERE pp.id = ?
       LIMIT 1`,
     [normalizedPacketId]
@@ -57600,10 +58644,14 @@ async function findClientFileImportClientCandidates(connection, normalized = {})
 
 async function loadClientFileImportCaseRows(connection, clientId) {
   const [rows] = await connection.query(
-    `SELECT id, case_number, status, application_id, updated_at
-       FROM iset_case
-      WHERE client_id = ?
-      ORDER BY updated_at DESC, id DESC`,
+    `SELECT c.id,
+            c.case_number,
+            c.status,
+            ${buildCasePrimaryApplicationIdSql('c')} AS application_id,
+            c.updated_at
+       FROM iset_case c
+      WHERE c.client_id = ?
+      ORDER BY c.updated_at DESC, c.id DESC`,
     [clientId]
   );
   return Array.isArray(rows) ? rows : [];
@@ -57936,8 +58984,8 @@ async function createCaseForImportedClient(connection, clientId, normalized = {}
 
   const [insertCase] = await connection.query(
     `INSERT INTO iset_case
-      (application_id, client_id, assigned_to_user_id, assigned_staff_profile_id, status, lifecycle_status, portfolio_region_id, opened_at, case_context_json, created_by_staff_profile_id, updated_by_staff_profile_id, created_at, updated_at)
-     VALUES (NULL, ?, NULL, NULL, ?, ?, ?, NOW(), ?, ?, ?, NOW(), NOW())`,
+      (client_id, assigned_staff_profile_id, status, lifecycle_status, portfolio_region_id, opened_at, case_context_json, created_by_staff_profile_id, updated_by_staff_profile_id, created_at, updated_at)
+     VALUES (?, NULL, ?, ?, ?, NOW(), ?, ?, ?, NOW(), NOW())`,
     [
       clientId,
       CASE_STATUS_DERIVED_VALUES.initiated,
@@ -58368,7 +59416,7 @@ async function resolvePaymentPacketCaseManagerMailbox(packetRow, connection = nu
               sp.name,
               sp.email
          FROM iset_case c
-         LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
         WHERE c.id = ?
         LIMIT 1`,
       [caseId]
@@ -60161,7 +61209,7 @@ async function fetchSupportingDocumentsForPayment({
 
   if (!normalizedApplicationId && normalizedCaseId) {
     const [[caseRow]] = await connection.query(
-      `SELECT COALESCE(a.id, c.application_id) AS application_id
+      `SELECT a.id AS application_id
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a')}
         WHERE c.id = ?
@@ -63717,7 +64765,7 @@ async function fetchPaymentPacketById(packetId, connection = null) {
   const [[row]] = await runner.query(
     `SELECT pp.*,
             c.case_number,
-            COALESCE(a.id, c.application_id) AS application_id,
+            a.id AS application_id,
             cl.first_name AS client_first_name,
             cl.last_name AS client_last_name,
             ci.metadata_json AS intervention_metadata_json,
@@ -64294,6 +65342,9 @@ const buildPaymentPacketBundleDocument = async ({ packetId, packet, actorUserId,
     metadata: { packetId: String(packetId), generatedAt },
     actorUserId,
     caseId: resolvedPacket.caseId ? Number(resolvedPacket.caseId) : null,
+    applicationId: resolvedPacket.applicationId ? Number(resolvedPacket.applicationId) : null,
+    clientId: resolvedPacket.clientId ? Number(resolvedPacket.clientId) : null,
+    applicantUserId: resolvedPacket.applicantUserId ? Number(resolvedPacket.applicantUserId) : null,
   });
   if (!stored?.filePath) return null;
   return { ...stored, fileName: filename };
@@ -67215,7 +68266,7 @@ async function readFinanceInterventionReportRawRows(
         ci.*,
         c.case_number,
         c.client_id,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
         COALESCE(CAST(c.client_id AS CHAR), CONCAT('case-', c.id)) AS participant_key,
         cl.first_name AS client_first_name,
         cl.last_name AS client_last_name,
@@ -67244,7 +68295,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
       LEFT JOIN client cl ON cl.id = c.client_id
       LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
       LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
-      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
       LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
       LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
@@ -69992,10 +71043,10 @@ app.get('/api/finance/payment-packets', async (req, res) => {
     const [rows] = await pool.query(
       `SELECT pp.*,
               c.case_number,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
               c.portfolio_region_id,
               case_owner_sp.region_id AS owner_region_id,
-              COALESCE(a.id, c.application_id) AS application_id,
+              a.id AS application_id,
               cl.first_name AS client_first_name,
               cl.last_name AS client_last_name,
               ci.metadata_json AS intervention_metadata_json,
@@ -70010,7 +71061,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
               COALESCE(s.user_id, applicant_client_sub.id, applicant_client_email.id) AS applicant_user_id
          FROM payment_packet pp
          LEFT JOIN iset_case c ON c.id = pp.case_id
-         LEFT JOIN staff_profiles case_owner_sp ON case_owner_sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+         LEFT JOIN staff_profiles case_owner_sp ON case_owner_sp.id = c.assigned_staff_profile_id
          LEFT JOIN client cl ON cl.id = pp.client_id
          ${buildCasePrimaryApplicationJoinSql('c', 'a')}
          LEFT JOIN iset_application_submission s ON s.id = a.submission_id
@@ -70104,6 +71155,9 @@ app.get('/api/finance/payment-packets/:id/pdf', async (req, res) => {
       metadata: { packetId: String(packetId), generatedAt: new Date().toISOString() },
       actorUserId,
       caseId: packet.caseId ? Number(packet.caseId) : null,
+      applicationId: packet.applicationId ? Number(packet.applicationId) : null,
+      clientId: packet.clientId ? Number(packet.clientId) : null,
+      applicantUserId: packet.applicantUserId ? Number(packet.applicantUserId) : null,
     });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -70188,6 +71242,9 @@ app.post('/api/finance/payment-packets/:id/audit-bundle', async (req, res) => {
       metadata: { packetId: String(packetId), generatedAt: new Date().toISOString() },
       actorUserId,
       caseId: packet.caseId ? Number(packet.caseId) : null,
+      applicationId: packet.applicationId ? Number(packet.applicationId) : null,
+      clientId: packet.clientId ? Number(packet.clientId) : null,
+      applicantUserId: packet.applicantUserId ? Number(packet.applicantUserId) : null,
     });
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -73501,15 +74558,11 @@ app.post('/api/finance/payment-batches/:id/export', async (req, res) => {
       exportedAt: new Date().toISOString(),
       rows: rows.length,
     };
-    const stored = await storeGeneratedDocument({
+    const stored = await storeGeneratedObject({
       buffer,
       fileName: filename,
       contentType: 'text/csv',
-      label: 'Payment batch export',
-      category: 'payment_batch_export',
-      metadata: exportMeta,
-      actorUserId,
-      caseId: null,
+      storageOwnerId: actorUserId || 'finance-batch',
     });
     const [[batchRow]] = await pool.query(
       'SELECT export_metadata FROM payment_batch WHERE id = ? LIMIT 1',
@@ -73520,7 +74573,7 @@ app.post('/api/finance/payment-batches/:id/export', async (req, res) => {
       ...existingMeta,
       lastExport: {
         filename,
-        documentId: stored.documentId,
+        documentId: null,
         checksum: stored.checksum,
         filePath: stored.filePath,
         exportedAt: exportMeta.exportedAt,
@@ -74370,6 +75423,23 @@ app.post('/api/applications/manual-intake', async (req, res) => {
       addressPayload
     });
 
+    const portfolioRegionId = await resolveRegionIdFromProvinceValue(
+      applicantSeed.province || null,
+      connection
+    );
+
+    const caseResolution = await resolveOrCreateCaseForClient(connection, {
+      clientId,
+      preferredCaseNumber: referenceNumber,
+      status: 'submitted',
+      lifecycleStatus: 'intake',
+      stage: 'intake',
+      portfolioRegionId,
+      createdByStaffProfileId,
+      updatedByStaffProfileId: createdByStaffProfileId,
+    });
+    const caseId = caseResolution.caseId;
+
     const applicationPayload = {
       source: 'admin_manual_intake',
       ingested_at: nowIso,
@@ -74382,29 +75452,11 @@ app.post('/api/applications/manual-intake', async (req, res) => {
     };
     const [applicationResult] = await connection.query(
       `INSERT INTO iset_application
-        (submission_id, client_id, payload_json, status, lifecycle_status, awaiting_reason, version, created_at, updated_at)
-       VALUES (?, ?, ?, 'submitted', 'submitted', 'none', 1, NOW(), NOW())`,
-      [submissionId, clientId, JSON.stringify(applicationPayload)]
+        (submission_id, client_id, case_id, payload_json, status, lifecycle_status, awaiting_reason, version, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'submitted', 'submitted', 'none', 1, NOW(), NOW())`,
+      [submissionId, clientId, caseId, JSON.stringify(applicationPayload)]
     );
     const applicationId = Number(applicationResult.insertId);
-
-    const portfolioRegionId = await resolveRegionIdFromProvinceValue(
-      applicantSeed.province || null,
-      connection
-    );
-
-    const caseResolution = await resolveOrCreateCaseForClient(connection, {
-      clientId,
-      applicationId,
-      preferredCaseNumber: referenceNumber,
-      status: 'submitted',
-      lifecycleStatus: 'intake',
-      stage: 'intake',
-      portfolioRegionId,
-      createdByStaffProfileId,
-      updatedByStaffProfileId: createdByStaffProfileId,
-    });
-    const caseId = caseResolution.caseId;
 
     await connection.commit();
 
@@ -74417,6 +75469,7 @@ app.post('/api/applications/manual-intake', async (req, res) => {
       trackingId: referenceNumber,
       payload: {
         submission_id: submissionId,
+        application_id: applicationId,
         reference_number: referenceNumber,
         workflow_id: workflowId,
         ip: sourceIp,
@@ -74679,6 +75732,10 @@ app.post('/api/imports/client-files/commit', async (req, res) => {
 app.get('/api/applications/:id', async (req, res) => {
   const applicationId = req.params.id;
   try {
+    const visibility = await enforceApplicationVisibility(req, applicationId);
+    if (!visibility.ok) {
+      return sendApplicationVisibilityFailure(res, visibility, 'Application not found');
+    }
     // Get application data
     let appSql = 'SELECT * FROM iset_application a WHERE a.id = ?';
     const appParams = [applicationId];
@@ -74757,7 +75814,7 @@ app.get('/api/applications/:id', async (req, res) => {
     }
 
     // Get case info (if exists) with defensive column detection (legacy schemas may lack some fields)
-    const caseBaseCols = ['id','assigned_to_user_id','status'];
+    const caseBaseCols = ['id', 'assigned_staff_profile_id AS assigned_to_user_id', 'status'];
     const optionalCols = ['priority','program_type','case_summary','opened_at','closed_at','last_activity_at','ptma_id'];
     const presentOptional = [];
     for (const col of optionalCols) {
@@ -74838,7 +75895,7 @@ app.put('/api/applications/:id/ptma-case-summary', async (req, res) => {
   try {
     const visibility = await enforceApplicationVisibility(req, applicationId);
     if (!visibility.ok) {
-      return res.status(404).json({ error: 'Case not found for this application' });
+      return sendApplicationVisibilityFailure(res, visibility, 'Case not found for this application');
     }
     const linkedCaseId = await resolveCaseIdFromApplicationId(applicationId);
     if (!linkedCaseId) {
@@ -74879,6 +75936,10 @@ app.get('/api/applications/:id/versions', async (req, res) => {
   }
   const connection = await pool.getConnection();
   try {
+    const visibility = await enforceApplicationVisibility(req, applicationId, connection);
+    if (!visibility.ok) {
+      return sendApplicationVisibilityFailure(res, visibility, 'Application not found');
+    }
     const current = await readApplicationPayload(connection, applicationId);
     if (!current) {
       return res.status(404).json({ error: 'Application not found' });
@@ -74887,21 +75948,32 @@ app.get('/api/applications/:id/versions', async (req, res) => {
       return res.status(404).json({ error: 'Application not found' });
     }
     await ensureApplicationVersionTable();
+    const typedAuthorColumns = await getApplicationVersionTypedAuthorColumns(connection);
     const [rows] = await connection.query(
-      'SELECT id, application_id, version, change_summary, created_by_id, created_by_name, restored_from_version, created_at FROM iset_application_version WHERE application_id = ? ORDER BY version DESC, id DESC',
+      `SELECT id, application_id, version, change_summary,
+              ${typedAuthorColumns.staffProfile ? 'created_by_staff_profile_id' : 'NULL AS created_by_staff_profile_id'},
+              ${typedAuthorColumns.user ? 'created_by_user_id' : 'NULL AS created_by_user_id'},
+              created_by_name, restored_from_version, created_at
+         FROM iset_application_version
+        WHERE application_id = ?
+        ORDER BY version DESC, id DESC`,
       [applicationId]
     );
     const savedByLookup = await resolveVersionSavedByLabels(connection, rows);
     const currentVersionNumber = Number(current.row.version || 1);
     const versions = rows.map(row => {
       const versionNumber = Number(row.version);
-      const actorId = row.created_by_id == null ? null : String(row.created_by_id).trim();
+      const staffProfileKey = row.created_by_staff_profile_id ? `staff:${row.created_by_staff_profile_id}` : null;
+      const userKey = row.created_by_user_id ? `user:${row.created_by_user_id}` : null;
+      const savedById = staffProfileKey || userKey || null;
       return {
         id: row.id,
         version: versionNumber,
         changeSummary: row.change_summary || null,
-        savedById: row.created_by_id || null,
-        savedBy: (actorId ? savedByLookup.get(actorId) : null) || null,
+        savedById,
+        savedByStaffProfileId: row.created_by_staff_profile_id || null,
+        savedByUserId: row.created_by_user_id || null,
+        savedBy: (staffProfileKey ? savedByLookup.get(staffProfileKey) : null) || (userKey ? savedByLookup.get(userKey) : null) || row.created_by_name || null,
         restoredFromVersion: row.restored_from_version === null ? null : Number(row.restored_from_version),
         savedAt: row.created_at,
         isCurrent: false,
@@ -74946,6 +76018,10 @@ app.get('/api/applications/:id/versions/:versionId', async (req, res) => {
   }
   const connection = await pool.getConnection();
   try {
+    const visibility = await enforceApplicationVisibility(req, applicationId, connection);
+    if (!visibility.ok) {
+      return sendApplicationVisibilityFailure(res, visibility, 'Application not found');
+    }
     const current = await readApplicationPayload(connection, applicationId);
     if (!current) {
       return res.status(404).json({ error: 'Application not found' });
@@ -74973,8 +76049,15 @@ app.get('/api/applications/:id/versions/:versionId', async (req, res) => {
       return res.status(400).json({ error: 'invalid_version_id' });
     }
     await ensureApplicationVersionTable();
+    const typedAuthorColumns = await getApplicationVersionTypedAuthorColumns(connection);
     const [[versionRow]] = await connection.query(
-      'SELECT id, application_id, version, payload_json, change_summary, created_by_id, created_by_name, restored_from_version, created_at FROM iset_application_version WHERE id = ? AND application_id = ? LIMIT 1',
+      `SELECT id, application_id, version, payload_json, change_summary,
+              ${typedAuthorColumns.staffProfile ? 'created_by_staff_profile_id' : 'NULL AS created_by_staff_profile_id'},
+              ${typedAuthorColumns.user ? 'created_by_user_id' : 'NULL AS created_by_user_id'},
+              created_by_name, restored_from_version, created_at
+         FROM iset_application_version
+        WHERE id = ? AND application_id = ?
+        LIMIT 1`,
       [numericId, applicationId]
     );
     if (!versionRow) {
@@ -74985,15 +76068,19 @@ app.get('/api/applications/:id/versions/:versionId', async (req, res) => {
       try { payload = JSON.parse(payload); } catch { payload = {}; }
     }
     const savedByLookup = await resolveVersionSavedByLabels(connection, [versionRow]);
-    const actorId = versionRow.created_by_id == null ? null : String(versionRow.created_by_id).trim();
+    const staffProfileKey = versionRow.created_by_staff_profile_id ? `staff:${versionRow.created_by_staff_profile_id}` : null;
+    const userKey = versionRow.created_by_user_id ? `user:${versionRow.created_by_user_id}` : null;
+    const savedById = staffProfileKey || userKey || null;
     res.json({
       id: versionRow.id,
       applicationId,
       version: Number(versionRow.version),
       payload: payload || {},
       changeSummary: versionRow.change_summary || null,
-      savedById: versionRow.created_by_id || null,
-      savedBy: (actorId ? savedByLookup.get(actorId) : null) || null,
+      savedById,
+      savedByStaffProfileId: versionRow.created_by_staff_profile_id || null,
+      savedByUserId: versionRow.created_by_user_id || null,
+      savedBy: (staffProfileKey ? savedByLookup.get(staffProfileKey) : null) || (userKey ? savedByLookup.get(userKey) : null) || versionRow.created_by_name || null,
       restoredFromVersion: versionRow.restored_from_version === null ? null : Number(versionRow.restored_from_version),
       savedAt: versionRow.created_at,
       isCurrent: Number(versionRow.version) === currentVersionNumber
@@ -75006,11 +76093,26 @@ app.get('/api/applications/:id/versions/:versionId', async (req, res) => {
   }
 });
 
+async function requireGeneratedPdfApplicationAccess(req, res, applicationId) {
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (!normalizedApplicationId) {
+    res.status(400).json({ error: 'invalid_application_id' });
+    return null;
+  }
+
+  const visibility = await enforceApplicationVisibility(req, normalizedApplicationId);
+  if (!visibility.ok) {
+    sendApplicationVisibilityFailure(res, visibility, 'Application not found');
+    return null;
+  }
+
+  return normalizedApplicationId;
+}
+
 app.post('/api/consent-letter/pdf', async (req, res) => {
   const { applicationId, consentSigned, consentSignedName, consentSignedAt } = req.body || {};
-  if (!applicationId) {
-    return res.status(400).json({ error: 'applicationId is required' });
-  }
+  const scopedApplicationId = await requireGeneratedPdfApplicationAccess(req, res, applicationId);
+  if (!scopedApplicationId) return;
 
   const signed = Boolean(consentSigned);
   const signatureName = signed ? (consentSignedName || 'Not provided') : 'Not signed';
@@ -75079,7 +76181,7 @@ app.post('/api/consent-letter/pdf', async (req, res) => {
     });
     await page.close();
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="consent-${applicationId}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="consent-${scopedApplicationId}.pdf"`);
     return res.end(pdfBuffer);
   } catch (err) {
     console.error('[consent-pdf] failed to generate PDF:', err);
@@ -75093,9 +76195,8 @@ app.post('/api/consent-letter/pdf', async (req, res) => {
 
 app.post('/api/authorization-release/pdf', async (req, res) => {
   const { applicationId, declarationSigned, declarationSignedName, declarationSignedAt } = req.body || {};
-  if (!applicationId) {
-    return res.status(400).json({ error: 'applicationId is required' });
-  }
+  const scopedApplicationId = await requireGeneratedPdfApplicationAccess(req, res, applicationId);
+  if (!scopedApplicationId) return;
 
   const signed = Boolean(declarationSigned);
   const rawSignatureName = typeof declarationSignedName === 'string' ? declarationSignedName.trim() : '';
@@ -75164,7 +76265,7 @@ app.post('/api/authorization-release/pdf', async (req, res) => {
     });
     await page.close();
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="authorization-release-iset-client-information-${applicationId}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="authorization-release-iset-client-information-${scopedApplicationId}.pdf"`);
     return res.end(pdfBuffer);
   } catch (err) {
     console.error('[authorization-release-pdf] failed to generate PDF:', err);
@@ -75178,9 +76279,8 @@ app.post('/api/authorization-release/pdf', async (req, res) => {
 
 app.post('/api/client-acknowledgement/pdf', async (req, res) => {
   const { applicationId, declarationSigned, declarationSignedName, declarationSignedAt } = req.body || {};
-  if (!applicationId) {
-    return res.status(400).json({ error: 'applicationId is required' });
-  }
+  const scopedApplicationId = await requireGeneratedPdfApplicationAccess(req, res, applicationId);
+  if (!scopedApplicationId) return;
 
   const signed = Boolean(declarationSigned);
   const rawSignatureName = typeof declarationSignedName === 'string' ? declarationSignedName.trim() : '';
@@ -75247,7 +76347,7 @@ app.post('/api/client-acknowledgement/pdf', async (req, res) => {
     });
     await page.close();
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="client-acknowledgement-of-funding-source-${applicationId}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="client-acknowledgement-of-funding-source-${scopedApplicationId}.pdf"`);
     return res.end(pdfBuffer);
   } catch (err) {
     console.error('[client-acknowledgement-pdf] failed to generate PDF:', err);
@@ -75261,9 +76361,8 @@ app.post('/api/client-acknowledgement/pdf', async (req, res) => {
 
 app.post('/api/indigenous-declaration/pdf', async (req, res) => {
   const { applicationId, declarationSigned, declarationSignedName, declarationSignedAt, affiliation } = req.body || {};
-  if (!applicationId) {
-    return res.status(400).json({ error: 'applicationId is required' });
-  }
+  const scopedApplicationId = await requireGeneratedPdfApplicationAccess(req, res, applicationId);
+  if (!scopedApplicationId) return;
 
   const signed = Boolean(declarationSigned);
   const rawSignatureName = typeof declarationSignedName === 'string' ? declarationSignedName.trim() : '';
@@ -75348,7 +76447,7 @@ app.post('/api/indigenous-declaration/pdf', async (req, res) => {
     });
     await page.close();
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="indigenous-declaration-${applicationId}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="indigenous-declaration-${scopedApplicationId}.pdf"`);
     return res.end(pdfBuffer);
   } catch (err) {
     console.error('[indigenous-declaration-pdf] failed to generate PDF:', err);
@@ -75370,9 +76469,8 @@ app.post('/api/conflict-declaration/pdf', async (req, res) => {
     optionLabel,
     explanation
   } = req.body || {};
-  if (!applicationId) {
-    return res.status(400).json({ error: 'applicationId is required' });
-  }
+  const scopedApplicationId = await requireGeneratedPdfApplicationAccess(req, res, applicationId);
+  if (!scopedApplicationId) return;
 
   const signed = Boolean(declarationSigned);
   const rawSignatureName = typeof declarationSignedName === 'string' ? declarationSignedName.trim() : '';
@@ -75474,7 +76572,7 @@ app.post('/api/conflict-declaration/pdf', async (req, res) => {
     });
     await page.close();
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="conflict-declaration-${applicationId}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="conflict-declaration-${scopedApplicationId}.pdf"`);
     return res.end(pdfBuffer);
   } catch (err) {
     console.error('[conflict-declaration-pdf] failed to generate PDF:', err);
@@ -75505,6 +76603,11 @@ app.post('/api/applications/:id/versions', async (req, res) => {
   let lockCheck = { ok: true, reason: 'not_checked', lock: null };
   try {
     await connection.beginTransaction();
+    const visibility = await enforceApplicationVisibility(req, applicationId, connection);
+    if (!visibility.ok) {
+      await connection.rollback();
+      return sendApplicationVisibilityFailure(res, visibility, 'Application not found');
+    }
     lockCheck = await enforceApplicationLock(connection, applicationId, req, lockConfig);
     if (!lockCheck.ok) {
       await connection.rollback();
@@ -75518,9 +76621,18 @@ app.post('/api/applications/:id/versions', async (req, res) => {
       });
     }
     const actor = resolveRequestActor(req);
+    const actorStaffProfileId = resolveActiveStaffProfileId(req) || null;
+    let actorUserId = null;
+    try {
+      actorUserId = await resolveExistingUserIdFromAuth(req, connection);
+    } catch (actorUserErr) {
+      console.warn('[versions] failed to resolve local actor user id', actorUserErr?.message || actorUserErr);
+    }
     const summaryText = typeof changeSummary === 'string' ? changeSummary.trim() : '';
     const actorMeta = {
       actorId: actor.actorId || null,
+      actorStaffProfileId,
+      actorUserId,
       actorName: actor.actorName || null,
       changeSummary: summaryText ? summaryText.slice(0, 1000) : null
     };
@@ -75641,6 +76753,11 @@ app.post('/api/applications/:id/versions/:versionId/restore', async (req, res) =
   let lockCheck = { ok: true, reason: 'not_checked', lock: null };
   try {
     await connection.beginTransaction();
+    const visibility = await enforceApplicationVisibility(req, applicationId, connection);
+    if (!visibility.ok) {
+      await connection.rollback();
+      return sendApplicationVisibilityFailure(res, visibility, 'Application not found');
+    }
     const current = await readApplicationPayload(connection, applicationId);
     if (!current) {
       await connection.rollback();
@@ -75668,7 +76785,7 @@ app.post('/api/applications/:id/versions/:versionId/restore', async (req, res) =
     }
     await ensureApplicationVersionTable();
     const [[versionRow]] = await connection.query(
-      'SELECT id, application_id, version, payload_json, change_summary, created_by_id, created_by_name, restored_from_version, created_at FROM iset_application_version WHERE id = ? AND application_id = ? LIMIT 1',
+      'SELECT id, application_id, version, payload_json, change_summary, created_by_name, restored_from_version, created_at FROM iset_application_version WHERE id = ? AND application_id = ? LIMIT 1',
       [numericId, applicationId]
     );
     if (!versionRow) {
@@ -75762,9 +76879,11 @@ app.get('/api/cases/:case_id/events', async (req, res) => {
       return res.status(400).json({ error: 'invalid_until' });
     }
 
+    const requesterStaffProfileId = resolveActiveStaffProfileId(req) || null;
     const items = await getCaseEvents({
       caseId,
       requesterId: actorId,
+      requesterStaffProfileId,
       limit,
       offset,
       types: typeFilter,
@@ -75812,6 +76931,24 @@ app.get('/api/applications', async (req, res) => {
       JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."address-province"')),
       JSON_UNQUOTE(JSON_EXTRACT(ias.intake_payload, '$."address-province"'))
     )`;
+    const caseContextStringExpr = path =>
+      `NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '${path}')), ''), 'null')`;
+    const denialDecisionLetterSentExpr = `CASE
+      WHEN COALESCE(
+        ${caseContextStringExpr('$.decisionLetterSent.denial')},
+        ${caseContextStringExpr('$.decision_letter_sent.denial')}
+      ) IS NOT NULL THEN 1
+      WHEN LOWER(COALESCE(
+        ${caseContextStringExpr('$.decisionLetterSentType')},
+        ${caseContextStringExpr('$.decision_letter_sent_type')},
+        ''
+      )) = 'denial'
+      AND COALESCE(
+        ${caseContextStringExpr('$.decisionLetterSentAt')},
+        ${caseContextStringExpr('$.decision_letter_sent_at')}
+      ) IS NOT NULL THEN 1
+      ELSE 0
+    END`;
     const preferredNameExpr = `JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."preferred-name"'))`;
     const applicantFirstNameExpr = `JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."first-name"'))`;
     const applicantLastNameExpr = `JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."last-name"'))`;
@@ -75880,7 +77017,7 @@ app.get('/api/applications', async (req, res) => {
       a.docs_requested_cleared_at AS docs_requested_cleared_at,
       a.docs_requested_source AS docs_requested_source,
       a.updated_at AS application_updated_at,
-      c.status AS case_status, COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+      c.status AS case_status, c.assigned_staff_profile_id AS assigned_to_user_id,
       c.created_at AS opened_at, c.updated_at AS last_activity_at,
       sp.email AS assigned_user_email, sp.primary_role AS assigned_user_role,
       sp.id AS staff_profile_id,
@@ -75900,6 +77037,7 @@ app.get('/api/applications', async (req, res) => {
            AND dfa.document_category = 'funding_agreement'
            AND (dfa.application_id = a.id OR dfa.case_id = c.id)
       ) AS funding_agreement_count,
+      ${denialDecisionLetterSentExpr} AS denial_decision_letter_sent,
       a.created_at AS submitted_at,
       ${preferredNameExpr} AS preferred_name,
       ${applicantFirstNameExpr} AS applicant_first_name,
@@ -75915,7 +77053,7 @@ app.get('/api/applications', async (req, res) => {
       ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
       LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
       LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
-      LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)
+      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
       LEFT JOIN application_lock al ON al.application_id = a.id AND al.expires_at > NOW()`;
 
     const where = [];
@@ -75949,7 +77087,7 @@ app.get('/api/applications', async (req, res) => {
 
     if (role === 'ISET Coordinator') {
       if (!req.staffProfile?.id) return res.json({ count: 0, rows: [] });
-      where.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?'); params.push(req.staffProfile.id);
+      where.push('c.assigned_staff_profile_id = ?'); params.push(req.staffProfile.id);
     } else if (role === 'Regional Manager') {
       // Filter by regions (multi) OR assignments directly to coordinator
       if (regionIds.length) {
@@ -75957,14 +77095,14 @@ app.get('/api/applications', async (req, res) => {
         const regionPlaceholders = regionIds.map(() => '?').join(',');
         if (regionCodes.length) {
           const codePlaceholders = regionCodes.map(() => '?').join(',');
-          where.push(`(sp.region_id IN (${regionPlaceholders}) OR COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ? OR ((COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) IS NULL OR COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = 0) AND LOWER(${addressProvinceExpr}) IN (${codePlaceholders})))`);
+          where.push(`(sp.region_id IN (${regionPlaceholders}) OR c.assigned_staff_profile_id = ? OR ((c.assigned_staff_profile_id IS NULL OR c.assigned_staff_profile_id = 0) AND LOWER(${addressProvinceExpr}) IN (${codePlaceholders})))`);
           params.push(...regionIds, coordinatorId, ...regionCodes);
         } else {
-          where.push(`(sp.region_id IN (${regionPlaceholders}) OR COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?)`);
+          where.push(`(sp.region_id IN (${regionPlaceholders}) OR c.assigned_staff_profile_id = ?)`);
           params.push(...regionIds, coordinatorId);
         }
       } else if (req.staffProfile?.id) {
-        where.push('COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) = ?'); params.push(req.staffProfile.id);
+        where.push('c.assigned_staff_profile_id = ?'); params.push(req.staffProfile.id);
       } else {
         return res.json({ count: 0, rows: [] });
       }
@@ -76016,6 +77154,7 @@ app.get('/api/applications', async (req, res) => {
         NULL AS assessment_intervention_cost_total,
         NULL AS assessment_intervention_pot_id,
         0 AS funding_agreement_count,
+        0 AS denial_decision_letter_sent,
         a.created_at AS submitted_at,
         ${preferredNameExpr} AS preferred_name,
         ${applicantFirstNameExpr} AS applicant_first_name,
@@ -76049,7 +77188,7 @@ app.get('/api/applications', async (req, res) => {
     let count = rows.length;
     try {
       if (role === 'NWAC Administrator' || role === 'System Administrator') {
-        let countCaseSql = `SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c ${buildCasePrimaryApplicationJoinSql('c', 'a', true)} LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)`;
+        let countCaseSql = `SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c ${buildCasePrimaryApplicationJoinSql('c', 'a', true)} LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id`;
         if (where.length) countCaseSql += ' WHERE ' + where.join(' AND ');
         const [[caseCnt]] = await pool.query(countCaseSql, params);
         const unassignedWhereClauses = ['c2.id IS NULL'];
@@ -76070,7 +77209,7 @@ app.get('/api/applications', async (req, res) => {
         const [[unassignedCnt]] = await pool.query(unassignedSql, unassignedParams);
         count = (caseCnt?.cnt || 0) + (unassignedCnt?.cnt || 0);
       } else {
-        let countSql = `SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c ${buildCasePrimaryApplicationJoinSql('c', 'a', true)} LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN staff_profiles sp ON sp.id = COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)`;
+        let countSql = `SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c ${buildCasePrimaryApplicationJoinSql('c', 'a', true)} LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id`;
         if (where.length) countSql += ' WHERE ' + where.join(' AND ');
         const [[cRow]] = await pool.query(countSql, params);
         if (cRow && typeof cRow.cnt === 'number') count = cRow.cnt;
@@ -76150,7 +77289,9 @@ app.get('/api/applications', async (req, res) => {
         assessment_esdc_eligibility: r.assessment_esdc_eligibility || null,
         assessment_intervention_cost_total: r.assessment_intervention_cost_total ?? null,
         assessment_intervention_pot_id: r.assessment_intervention_pot_id ?? null,
-        funding_agreement_count: r.funding_agreement_count ?? 0
+        funding_agreement_count: r.funding_agreement_count ?? 0,
+        denial_decision_letter_sent: Number(r.denial_decision_letter_sent || 0) === 1,
+        decisionLetterSentDenial: Number(r.denial_decision_letter_sent || 0) === 1
       };
     });
     res.json({ count, rows: rowsOut });
@@ -76251,7 +77392,7 @@ app.get('/api/blockstep-json', requireUnsafeAdminDebugAccess, (req, res) => {
   });
 });
 
-app.post('/api/generate-static-njk-template', (req, res) => {
+app.post('/api/generate-static-njk-template', requireUnsafeAdminDebugAccess, (req, res) => {
   const { components } = req.body;
 
   if (!Array.isArray(components)) {
@@ -76429,7 +77570,7 @@ app.get('/api/load-blockstep-json', requireUnsafeAdminDebugAccess, (req, res) =>
   });
 });
 
-app.post('/api/render-njk', (req, res) => {
+app.post('/api/render-njk', requireUnsafeAdminDebugAccess, (req, res) => {
   const { template, props } = req.body;
 
   if (!template || typeof template !== 'string') {
@@ -76802,7 +77943,7 @@ app.post('/api/signing-requests/:id/sign', async (req, res) => {
       const normalizeStatusKey = value =>
         (value || '').toString().trim().toLowerCase().replace(/[\s-]+/g, '_');
       const [[caseRow]] = await pool.query(
-        `SELECT COALESCE(c.application_id, a.id) AS application_id,
+        `SELECT a.id AS application_id,
                 a.status AS application_status,
                 a.docs_requested_active AS docs_requested_active,
                 a.docs_requested_at AS docs_requested_at,
@@ -77071,6 +78212,11 @@ app.put('/api/cases/:id', async (req, res) => {
   let pushBackCaseNoteBody = null;
 
   try {
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) {
+      return res.status(accessError.status).json({ success: false, ...accessError.body, lock: null });
+    }
+
     conn = await pool.getConnection();
     await conn.beginTransaction();
     await ensureAssessmentBudgetPotColumn(conn);
@@ -77079,9 +78225,9 @@ app.put('/api/cases/:id', async (req, res) => {
       `SELECT c.status,
               c.lifecycle_status,
               c.closure_reason,
-              COALESCE(c.application_id, a.id) AS application_id,
+              a.id AS application_id,
               c.client_id,
-COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user_id,
+c.assigned_staff_profile_id AS assigned_to_user_id,
               c.case_context_json,
               a.status AS application_status,
               a.lifecycle_status AS application_lifecycle_status,
@@ -77443,7 +78589,17 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
     const requestedFinalApplicationDecision =
       requestedApplicationDecisionStatus === 'approved' ||
       requestedApplicationDecisionStatus === 'rejected';
-    if ((assessmentReviewStatusProvided || requestedFinalApplicationDecision) && !canRecordApplicationDecision(req)) {
+    const requestedFinalApplicationDecisionNoop =
+      requestedFinalApplicationDecision &&
+      !assessmentReviewStatusProvided &&
+      requestedApplicationDecisionStatus === beforeApplicationStatus;
+    if (
+      (
+        assessmentReviewStatusProvided ||
+        (requestedFinalApplicationDecision && !requestedFinalApplicationDecisionNoop)
+      ) &&
+      !canRecordApplicationDecision(req)
+    ) {
       await conn.rollback();
       return res.status(403).json({
         success: false,
@@ -77451,6 +78607,13 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
         message: 'Only System Administrators and NWAC Administrators can record application decisions.',
         lock: lockCheck.lock || null
       });
+    }
+    if (requestedFinalApplicationDecisionNoop) {
+      applicationStatusToPersist = null;
+      applicationLifecycleStatusToPersist = null;
+      applicationDecisionOutcomeToPersist = null;
+      applicationAwaitingReasonToPersist = null;
+      applicationClosureReasonToPersist = null;
     }
 
     const canonicalRoleForApproval = canonicaliseAccessRole(identity.role);
@@ -77954,7 +79117,7 @@ COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id) AS assigned_to_user
       `SELECT c.status,
               c.lifecycle_status AS case_lifecycle_status,
               c.closure_reason AS case_closure_reason,
-              COALESCE(a.id, c.application_id) AS application_id,
+              a.id AS application_id,
               c.client_id,
               c.case_context_json,
               a.status AS application_status,
@@ -78759,10 +79922,45 @@ async function resolveDashboardActorLabels(actorIds = []) {
   if (!normalizedIds.length) {
     return new Map();
   }
-  return resolveVersionSavedByLabels(
-    pool,
-    normalizedIds.map(id => ({ created_by_id: id }))
+  const clauses = [];
+  const params = [];
+  const numericIds = normalizedIds.filter(id => /^\d+$/.test(id));
+  const subjectIds = normalizedIds.filter(id => !/^\d+$/.test(id) && !id.includes('@'));
+  const emailIds = normalizedIds.filter(id => id.includes('@'));
+  if (numericIds.length) {
+    clauses.push(`CAST(id AS CHAR) IN (${numericIds.map(() => '?').join(',')})`);
+    params.push(...numericIds);
+  }
+  if (subjectIds.length) {
+    clauses.push(`cognito_sub IN (${subjectIds.map(() => '?').join(',')})`);
+    params.push(...subjectIds);
+  }
+  if (emailIds.length) {
+    clauses.push(`LOWER(email COLLATE utf8mb4_unicode_ci) IN (${emailIds.map(() => 'LOWER(? COLLATE utf8mb4_unicode_ci)').join(',')})`);
+    params.push(...emailIds);
+  }
+  if (!clauses.length) {
+    return new Map();
+  }
+
+  const [rows] = await pool.query(
+    `SELECT CAST(id AS CHAR) AS id_char, cognito_sub, email, display_name, name
+       FROM staff_profiles
+      WHERE ${clauses.join(' OR ')}`,
+    params
   );
+  const labels = new Map();
+  for (const row of rows || []) {
+    const label = normaliseString(row?.display_name) || normaliseString(row?.name) || normaliseString(row?.email) || null;
+    if (!label) continue;
+    const idChar = normaliseString(row?.id_char);
+    const cognitoSub = normaliseString(row?.cognito_sub);
+    const email = normaliseString(row?.email);
+    if (idChar) labels.set(idChar, label);
+    if (cognitoSub) labels.set(cognitoSub, label);
+    if (email) labels.set(email, label);
+  }
+  return labels;
 }
 
 async function loadSystemAdminConfigActivityItems() {
@@ -78906,11 +80104,12 @@ async function loadSystemAdminConfigActivityItems() {
   }
 }
 
-async function loadSystemAdminEventActivityItems(requesterId, limit) {
+async function loadSystemAdminEventActivityItems(requesterId, limit, requesterStaffProfileId = null) {
   try {
     const events = await getEventFeed({
       limit: Math.max(limit * 2, 10),
       requesterId,
+      requesterStaffProfileId,
       types: SYSTEM_ADMIN_ACTIVITY_EVENT_TYPES,
       subjectType: ['case', 'category'],
     });
@@ -79551,9 +80750,10 @@ app.get('/api/dashboard/system-admin-recent-activity', async (req, res) => {
 
   try {
     const { actorId } = resolveRequestActor(req);
+    const requesterStaffProfileId = resolveActiveStaffProfileId(req) || null;
     const [configItems, eventItems] = await Promise.all([
       loadSystemAdminConfigActivityItems(),
-      loadSystemAdminEventActivityItems(actorId, limit),
+      loadSystemAdminEventActivityItems(actorId, limit, requesterStaffProfileId),
     ]);
 
     const items = [...configItems, ...eventItems]
@@ -79593,6 +80793,7 @@ app.get('/api/events/feed', async (req, res) => {
 
   try {
     const { actorId } = resolveRequestActor(req);
+    const requesterStaffProfileId = resolveActiveStaffProfileId(req) || null;
     const canAccessApplicantWatchlist = await requestHasRouteMatrixAccess(req, APPLICANT_WATCHLIST_MANAGER_ROUTE);
     let items = [];
 
@@ -79601,6 +80802,7 @@ app.get('/api/events/feed', async (req, res) => {
         limit,
         offset,
         requesterId: actorId,
+        requesterStaffProfileId,
         types: typeFilter,
         categories: categoryFilter,
         subjectType: subjectTypeFilter,
@@ -79618,6 +80820,7 @@ app.get('/api/events/feed', async (req, res) => {
           limit: batchSize,
           offset: rawOffset,
           requesterId: actorId,
+          requesterStaffProfileId,
           types: typeFilter,
           categories: categoryFilter,
           subjectType: subjectTypeFilter,
@@ -79681,6 +80884,7 @@ app.post('/api/events', async (req, res) => {
   const actor = body.actor || {
     type: body.actorType || 'staff',
     id: body.actorId || actorId || null,
+    staffProfileId: resolveActiveStaffProfileId(req) || null,
     displayName: body.actorName || actorName || null,
   };
 
@@ -79706,6 +80910,7 @@ app.post('/api/events', async (req, res) => {
 app.patch('/api/events/:eventId/read', async (req, res) => {
   const eventId = req.params.eventId;
   const { actorId } = resolveRequestActor(req);
+  const requesterStaffProfileId = resolveActiveStaffProfileId(req) || null;
   if (!eventId) {
     return res.status(400).json({ error: 'event_id_required' });
   }
@@ -79713,7 +80918,7 @@ app.patch('/api/events/:eventId/read', async (req, res) => {
     return res.status(400).json({ error: 'actor_required' });
   }
   try {
-    const updated = await markEventRead({ eventId, requesterId: actorId });
+    const updated = await markEventRead({ eventId, requesterId: actorId, requesterStaffProfileId });
     if (!updated) {
       return res.status(404).json({ error: 'event_not_found' });
     }
@@ -79726,6 +80931,7 @@ app.patch('/api/events/:eventId/read', async (req, res) => {
 
 // Notification Settings Endpoints
 app.get('/api/config/notifications/email-settings', async (req, res) => {
+    if (!requireNotificationConfigAccess(req, res)) return;
     try {
         const settings = await readNotificationEmailSettings();
         res.json(settings);
@@ -79736,6 +80942,7 @@ app.get('/api/config/notifications/email-settings', async (req, res) => {
 });
 
 app.patch('/api/config/notifications/email-settings', async (req, res) => {
+    if (!requireNotificationConfigAccess(req, res)) return;
     try {
         const { senderEmail = null, senderName = null, replyTo = null } = req.body || {};
         const trimmedSenderEmail = senderEmail === null || senderEmail === undefined
@@ -79767,6 +80974,7 @@ app.patch('/api/config/notifications/email-settings', async (req, res) => {
 
 // GET all notification settings with template info
 app.get('/api/notifications', async (req, res) => {
+    if (!requireNotificationConfigAccess(req, res)) return;
     try {
         const [rows] = await pool.query(`
             SELECT ns.*, nt.name as template_name, nt.language as template_language
@@ -79783,6 +80991,7 @@ app.get('/api/notifications', async (req, res) => {
 
 // POST create or update a notification setting
 app.post('/api/notifications', async (req, res) => {
+    if (!requireNotificationConfigAccess(req, res)) return;
     const { id, event, role, template_id, language, enabled, email_alert, bell_alert } = req.body;
     try {
         if (id) {
@@ -79808,6 +81017,7 @@ app.post('/api/notifications', async (req, res) => {
 
 // DELETE a notification setting
 app.delete('/api/notifications/:id', async (req, res) => {
+    if (!requireNotificationConfigAccess(req, res)) return;
     const { id } = req.params;
     try {
         await pool.query(`DELETE FROM notification_setting WHERE id=?`, [id]);
@@ -79831,66 +81041,53 @@ app.get('/api/roles', async (_req, res) => {
 
 // New endpoints for users and roles
 app.get('/api/users', async (req, res) => {
-  try {
-    const [users] = await pool.query(`
-      SELECT u.id, u.name, u.email, GROUP_CONCAT(r.RoleName) as role
-      FROM user u
-      LEFT JOIN user_role_link ur ON u.id = ur.UserID
-      LEFT JOIN role r ON ur.RoleID = r.RoleID
-      GROUP BY u.id
-    `);
-
-    // Anonymise user names
-    const anonymisedUsers = users.map(user => ({
-      ...user,
-      name: maskName(user.name)
-    }));
-
-    res.status(200).send(anonymisedUsers);
-  } catch (error) {
-    console.error('Error fetching users:', error);
-    res.status(500).send({ message: 'Failed to fetch users' });
-  }
+  return res.status(410).json({
+    error: 'retired_endpoint',
+    message: 'Use /api/admin/users for staff administration or /api/admin/applicants for applicant-account lookup.'
+  });
 });
 
 app.get('/api/users/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const [user] = await pool.query('SELECT id, name FROM user WHERE id = ?', [id]);
-    if (user.length === 0) {
-      return res.status(404).send({ message: 'User not found' });
-    }
-    res.status(200).send(user[0]);
-  } catch (error) {
-    console.error('Error fetching user:', error);
-    res.status(500).send({ message: 'Failed to fetch user' });
-  }
+  return res.status(410).json({
+    error: 'retired_endpoint',
+    message: 'Use scoped staff/applicant account APIs instead of shared-user lookup.'
+  });
 });
 
 // --- Internal Notifications API ---
+function buildInternalNotificationAuthContext(req) {
+  const { actorId } = resolveRequestActor(req);
+  const staffProfileId = normalisePositiveInteger(req.staffProfile?.id || req.auth?.staffProfileId || null);
+  const applicantUserId = req.auth?.subjectType === 'applicant'
+    ? normalisePositiveInteger(req.user?.id || req.auth?.user_id || req.auth?.userId || req.auth?.id || null)
+    : null;
+  const legacyNumericActorId = normalisePositiveInteger(actorId);
+  const fallbackUserId = staffProfileId || applicantUserId || legacyNumericActorId || null;
+  const authContext = req.auth ? { ...req.auth } : {};
+
+  if (staffProfileId) {
+    authContext.subjectType = 'staff';
+    authContext.staffProfileId = staffProfileId;
+    authContext.staff_profile_id = staffProfileId;
+  }
+  if (applicantUserId) {
+    authContext.subjectType = authContext.subjectType || 'applicant';
+    authContext.applicantUserId = applicantUserId;
+    authContext.applicant_user_id = applicantUserId;
+  }
+  if (fallbackUserId && !authContext.user_id && !authContext.userId && !authContext.id) {
+    authContext.user_id = fallbackUserId;
+  }
+  if (!authContext.role && req.staffProfile?.primary_role) {
+    authContext.role = req.staffProfile.primary_role;
+  }
+
+  return authContext;
+}
+
 app.get('/api/me/notifications', async (req, res) => {
   try {
-    const { actorId } = resolveRequestActor(req);
-    const staffProfileId = req.staffProfile?.id || null;
-    const candidateIds = [staffProfileId, actorId];
-    let normalizedUserId = null;
-    for (const value of candidateIds) {
-      if (value === null || typeof value === 'undefined') continue;
-      const numeric = Number(value);
-      if (!Number.isNaN(numeric) && numeric > 0) {
-        normalizedUserId = numeric;
-        break;
-      }
-    }
-
-    let authContext = req.auth ? { ...req.auth } : {};
-    if (normalizedUserId && !authContext.user_id && !authContext.userId && !authContext.id) {
-      authContext.user_id = normalizedUserId;
-    }
-    if (!authContext.role && req.staffProfile?.primary_role) {
-      authContext.role = req.staffProfile.primary_role;
-    }
-
+    const authContext = buildInternalNotificationAuthContext(req);
     const notifications = await getInternalNotifications(pool, authContext);
     res.status(200).json(notifications);
   } catch (error) {
@@ -79906,33 +81103,9 @@ app.post('/api/me/notifications/:id/dismiss', async (req, res) => {
     return res.status(400).json({ error: 'Invalid notification id' });
   }
 
-  const { actorId } = resolveRequestActor(req);
-  const staffProfileId = req.staffProfile?.id || null;
-  const candidateIds = [staffProfileId, actorId];
-  let normalizedUserId = null;
-  for (const value of candidateIds) {
-    if (value === null || typeof value === 'undefined') continue;
-    const numeric = Number(value);
-    if (!Number.isNaN(numeric) && numeric > 0) {
-      normalizedUserId = numeric;
-      break;
-    }
-  }
-
-  let authContext = req.auth ? { ...req.auth } : null;
-  if (!authContext) {
-    authContext = normalizedUserId ? { user_id: normalizedUserId } : null;
-  } else if (!authContext.user_id && !authContext.userId && !authContext.id && normalizedUserId) {
-    authContext.user_id = normalizedUserId;
-  }
-  if (authContext) {
-    if (!authContext.role && req.staffProfile?.primary_role) {
-      authContext.role = req.staffProfile.primary_role;
-    }
-  }
-
-  const resolvedUserId = authContext?.user_id || authContext?.userId || authContext?.id || null;
-  if (!resolvedUserId) {
+  const authContext = buildInternalNotificationAuthContext(req);
+  const resolvedViewerId = authContext?.staffProfileId || authContext?.applicantUserId || authContext?.user_id || authContext?.userId || authContext?.id || null;
+  if (!resolvedViewerId) {
     return res.status(401).json({ error: 'User context not available' });
   }
 

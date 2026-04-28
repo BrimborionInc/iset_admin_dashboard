@@ -2264,6 +2264,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const roleKey = normalizedRole.replace(/[\s_-]+/g, '');
   const normalizedUserEmail = (currentUserEmail || '').trim().toLowerCase();
   const isProgramAdminRole = PROGRAM_ADMIN_ROLE_KEYS.has(roleKey);
+  const isNwacAdministrator = isProgramAdminRole || groupKeys.includes('nwac_administrator');
   const canOverrideProgramAdminLimit = normalizedUserEmail === PROGRAM_ADMIN_APPROVER_EMAIL;
   const eligibilityRoleAllowlist = new Set([
     'systemadministrator',
@@ -3161,7 +3162,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   );
   const hasDraftDeclaredConflict = normalizedDraftConflictChoice === 'conflict';
   const hasPersistedDeclaredConflict = normalizedPersistedConflictChoice === 'conflict';
-  const isDeclarationGateActive = !conflictDeclarationSigned || hasPersistedDeclaredConflict;
+  const isDeclarationGateActive = !isNwacAdministrator && (!conflictDeclarationSigned || hasPersistedDeclaredConflict);
   const eligibilitySet = Boolean(assessment.esdcEligibility);
   const isEligibilityGateActive = isDeclarationGateActive || !eligibilitySet;
   const showCommunicationStep = isPostDecisionStatus;
@@ -3907,6 +3908,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const isClientLetterTab = !showApprovalLetterPackTabs || approvalLetterPackTabId === 'client';
   const letterWorkflowId = activeLetterKey ? letterWorkflows?.[activeLetterKey] : null;
   const letterAlreadySent = Boolean(activeLetterKey && decisionLetterSent?.[activeLetterKey]);
+  const deniedApplicationCloseoutComplete = decisionOutcome === 'denied' && letterAlreadySent;
   const isLetterEditingDisabled = lockedByAnotherUser || isCompletedStatus || letterAlreadySent;
   const canGenerateLetterDraft = Boolean(activeLetterKey) && !isLetterEditingDisabled && !draftingLetter;
   const canSaveLetterDraft = Boolean(activeLetterKey) && isClientLetterTab && !isLetterEditingDisabled;
@@ -7267,6 +7269,25 @@ ${JSON.stringify(aiContext, null, 2)}`;
             otherFundingSummary
           })
         : null;
+      if (isDenialDraft && denialTemplateDraft) {
+        setLetterDrafts(prev => {
+          const current = prev?.[activeLetterKey] || buildEmptyDecisionLetterDraft();
+          return {
+            ...prev,
+            [activeLetterKey]: {
+              ...current,
+              decision_date: decisionDate,
+              letter_title: 'Letter of Denial',
+              decision_label: 'Not approved',
+              decision_intro: denialTemplateDraft.decision_intro || current.decision_intro,
+              decision_reason: denialTemplateDraft.decision_reason || current.decision_reason,
+              next_step_1: '',
+              next_step_2: ''
+            }
+          };
+        });
+        return;
+      }
       const approvedInterventions = interventions.map(item => ({
         label: resolveInterventionLabel(item?.code) || null,
         program_name: item?.programName || null,
@@ -8227,7 +8248,41 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     const letterResult = await handleSendDecisionLetter();
     if (!letterResult.ok) return;
     if (decisionOutcome === 'denied') {
-      if (normalizedApplicationStatus === 'rejected') {
+      let latestApplicationStatus = normalizedApplicationStatus;
+      let latestDecisionOutcome = persistedDecisionOutcome || decisionOutcome;
+      if (typeof actions?.refreshCaseData === 'function') {
+        try {
+          const refreshedCaseData = await actions.refreshCaseData();
+          if (refreshedCaseData && typeof refreshedCaseData === 'object') {
+            const refreshedRawApplicationStatus =
+              refreshedCaseData.applicationStatus ?? refreshedCaseData.application_status ?? null;
+            const refreshedRawCaseStatus = refreshedCaseData.status ?? refreshedCaseData.case_status ?? '';
+            const refreshedApplicationStatusContext = getApplicationStatusContext(refreshedRawApplicationStatus);
+            const refreshedCaseStatusContext = getApplicationStatusContext(refreshedRawCaseStatus);
+            const refreshedCaseDerivedApplicationStatus = LEGACY_APPLICATION_FALLBACK_STATUSES.has(
+              refreshedCaseStatusContext.canonicalStatus
+            )
+              ? refreshedCaseStatusContext.canonicalStatus
+              : '';
+            latestApplicationStatus =
+              refreshedApplicationStatusContext.canonicalStatus ||
+              refreshedCaseDerivedApplicationStatus ||
+              latestApplicationStatus;
+            latestDecisionOutcome =
+              deriveApplicationDecisionOutcome({
+                applicationStatus: latestApplicationStatus || refreshedRawApplicationStatus,
+                caseStatus: refreshedRawCaseStatus || rawCaseStatusSnapshot,
+                decisionOutcome: refreshedCaseData.decision_outcome ?? refreshedCaseData.decisionOutcome ?? null,
+                reviewStatus:
+                  refreshedCaseData.assessment_nwac_review_status ??
+                  refreshedCaseData.assessment_nwac_review ??
+                  null,
+              }) ||
+              latestDecisionOutcome;
+          }
+        } catch (_) {}
+      }
+      if (latestDecisionOutcome === 'denied' && APPLICATION_FINAL_STATUSES.has(latestApplicationStatus)) {
         setHasSubmitted(false);
         scrollAfterAction();
         return;
@@ -9670,7 +9725,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                 disabled={!canGenerateLetterDraft || letterWorkflowsLoading}
                 loading={draftingLetter}
                 iconAlign="left"
-                iconName="gen-ai"
+                iconName={activeLetterKey === 'approval' ? 'gen-ai' : 'edit'}
               >
                 {activeLetterKey === 'approval' ? 'Generate drafts' : 'Generate draft'}
               </Button>
@@ -9704,6 +9759,11 @@ ${JSON.stringify(contextPayload, null, 2)}`;
         {!activeLetterKey && (
           <Alert type="info" statusIconAriaLabel="Info">
             Decision letters are available once an approval or denial has been recorded.
+          </Alert>
+        )}
+        {deniedApplicationCloseoutComplete && (
+          <Alert type="success" statusIconAriaLabel="Success">
+            Denial letter sent. No further completion action is required for this denied application.
           </Alert>
         )}
         {activeLetterKey && (
@@ -10619,7 +10679,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
         setDenialReasonModalVisible(false);
         setDenialReasonErrors({});
       }}
-      header="Denial reason for AI draft"
+      header="Denial reason for draft"
       footer={
         <SpaceBetween direction="horizontal" size="xs">
           <Button variant="link" onClick={() => setDenialReasonModalVisible(false)} disabled={draftingLetter}>
@@ -10627,7 +10687,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
           </Button>
           <Button
             iconAlign="left"
-            iconName="gen-ai"
+            iconName="edit"
             onClick={handleConfirmDenialReason}
             disabled={draftingLetter}
           >
@@ -10809,7 +10869,11 @@ ${JSON.stringify(contextPayload, null, 2)}`;
               </Hotspot>
             </SpaceBetween>
           </FormField>
-          <FormField label="Assessment Assurance" errorText={showDecisionErrors && fieldErrors.nwacReview ? fieldErrors.nwacReview : undefined}>
+          <FormField
+            label="Assessment Assurance"
+            description="Indicate whether you agree or disagree with the case manager's recommendation."
+            errorText={showDecisionErrors && fieldErrors.nwacReview ? fieldErrors.nwacReview : undefined}
+          >
             <Hotspot hotspotId="nwac-assessment-assurance" direction="right">
               <Select
                 selectedOption={assessment.nwacReview ? { label: assessment.nwacReview, value: assessment.nwacReview } : null}
@@ -11002,9 +11066,11 @@ ${JSON.stringify(contextPayload, null, 2)}`;
   const wizardSubmitText =
     isCommunicationSending || isSubmittingAssessment || checkingChecklist
       ? 'Working'
-      : (wizardSubmitHandler
+      : (deniedApplicationCloseoutComplete
+        ? 'Denial letter sent'
+        : (wizardSubmitHandler
         ? wizardSubmitLabel
-        : (isFundingDocsStep ? wizardSubmitLabel : (hideWizardActions ? undefined : wizardReadOnlyLabel)));
+        : (isFundingDocsStep ? wizardSubmitLabel : (hideWizardActions ? undefined : wizardReadOnlyLabel))));
   const submitDocumentConflictModal = (
     <Modal
       visible={submitDocumentConflictModalVisible}

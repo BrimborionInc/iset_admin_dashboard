@@ -12,8 +12,6 @@ const {
   getCanonicalMigrationFiles,
   planPendingSharedSchemaMigrations,
   applyPendingSharedSchemaMigrations,
-  splitStatements,
-  isSkippableStatementError,
 } = require('../src/lib/sharedSchemaMigrationRunner');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -521,19 +519,7 @@ function applyPendingRemoteSharedSchemaMigrations(remoteConfig, options = {}) {
     let errorSnippet = null;
 
     try {
-      const statements = splitStatements(migration.content);
-      for (const statement of statements) {
-        try {
-          runRemoteSql(remoteConfig, `${statement};`);
-        } catch (innerError) {
-          const classification = isSkippableStatementError(innerError);
-          if (classification.skippable) {
-            logger.warn(`[migrations] Skipping ${classification.reason} statement in ${migration.file}`);
-            continue;
-          }
-          throw innerError;
-        }
-      }
+      runRemoteSql(remoteConfig, migration.content);
       success = true;
       logger.log(`[migrations] Applied ${migration.file} to ${remoteConfig.targetEnv}`);
     } catch (error) {

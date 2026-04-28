@@ -53,7 +53,8 @@ Last Updated: 2026-04-23
   - `Open workspace` continues to pass explicit decision-entry context so the target workspace opens in a review-focused board layout and the relevant decision step instead of restoring a stale personal board or wizard position
 - `Pending Completion`
   - contains decision-recorded application files that still need post-decision follow-through before the application workflow is complete
-  - currently includes approved and denied/declined outcomes from `/api/applications`, because those records still need letters, funding-form/signature follow-through, or other closeout work
+  - currently includes approved outcomes from `/api/applications`, plus denied/declined outcomes only until the denial letter has been sent
+  - sending the denial letter is the terminal follow-up action for denied applications, so records with `decisionLetterSent.denial` in case context are excluded from this queue
   - is visible across the admin/manager shared pipeline and as the renamed coordinator `funding-agreements` queue so the post-decision stage is represented consistently across role homepages
 
 ## NWAC Administrator scope rule
@@ -61,7 +62,7 @@ Last Updated: 2026-04-23
 - `All Cases` includes open client cases visible through `/api/dashboard/all-client-cases`.
 - `All Cases` is case-based, not deduped by client, so multiple open files for one client count separately.
 - The case queue excludes only `closed` and `archived` statuses. `Dormant` and `ready_to_close` remain in scope.
-- `Pending Completion` is the exception to the non-terminal-only rule for the pipeline cards: it intentionally surfaces decision-recorded application files that still need post-decision work even when the underlying application outcome is `approved`, `rejected`, or `declined`.
+- `Pending Completion` is the exception to the non-terminal-only rule for the pipeline cards: it intentionally surfaces decision-recorded application files that still need post-decision work even when the underlying application outcome is `approved`, `rejected`, or `declined`. Denied/rejected files are removed after the denial letter is sent.
 
 ## Regional Manager scope rule
 

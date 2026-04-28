@@ -25,6 +25,12 @@ What it does:
 - Writes a release manifest under `tmp/path-deploy/test/`
 - Current dependency-install safeguard: the TEST admin and portal deploy scripts now clear the deployed `node_modules` tree before running remote `npm ci/install`, mirroring the existing PROD bootstrap behavior and avoiding stale-filesystem `ENOTEMPTY` failures on rerun.
 
+Current SES safety guard:
+- Before the PROD-data migration rehearsal, TEST SES was checked in `ca-central-1` and was still sandboxed (`ProductionAccessEnabled=false`), but the TEST account has several verified recipient identities.
+- The deployed TEST app env includes an explicit AWS access key for IAM user `SES_backend`, so SES safety cannot be inferred from the EC2 instance role alone.
+- Inline IAM policy `DenySesSendDuringProdDataRehearsal` is now attached to both IAM user `SES_backend` and role `nwac-test-app-role`, denying `ses:Send*` on `*`. IAM simulation confirmed `explicitDeny` for `ses:SendEmail`, `ses:SendRawEmail`, templated send, and bulk send actions.
+- Leave this deny in place while TEST may contain copied PROD data. Remove it only deliberately when email delivery testing is required, then restore it before any further PROD-data rehearsal.
+
 For a non-destructive preflight first:
 
 ```powershell

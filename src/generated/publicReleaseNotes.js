@@ -1,15 +1,16 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-04-25T14:12:19.351Z",
-  "releaseId": "",
-  "releaseLabel": "Current build",
-  "releaseDateEn": "25th April 2026",
-  "releaseDateFr": "25 avril 2026",
+  "generatedAt": "2026-04-28T08:08:57.059Z",
+  "releaseId": "20260428-test-pending-completion-denial-fix",
+  "releaseLabel": "Release 20260428-test-pending-completion-denial-fix",
+  "releaseDateEn": "28th April 2026",
+  "releaseDateFr": "28 avril 2026",
   "en": {
     "sectionEyebrow": "Optional reading",
     "description": "Recent PATH changes are summarized here for staff who want them before signing in.",
     "featuresHeading": "What changed",
     "features": [
-      "Approval items now open the correct review layout and decision step in both the application and case workspaces instead of dropping staff back into an old personal board or remembered wizard step.",
+      "Approval items now open the correct review layout and decision step in both the application and case workspaces, while still allowing staff to click back through earlier review steps.",
+      "Denied applications now leave Pending Completion once the denial letter has been sent, so staff no longer see a finished denial file as still needing follow-up.",
       "Application and intervention proposal decisions are now restricted to NWAC Administrators, so Regional Managers can monitor approval queues without committing approvals or denials.",
       "Historical intake uploads now stay visible in the application workspace and checklist even on older files where the original applicant documents were saved before PATH linked them to the final application record.",
       "Application, intervention, and revision wizards now use clearer phase-based headings and guidance so staff can tell more easily whether they are drafting, reviewing, or completing follow-up work.",
@@ -37,7 +38,8 @@ const publicReleaseNotes = {
     "description": "Les changements recents de PATH sont resumes ici pour le personnel qui souhaite les consulter avant de se connecter.",
     "featuresHeading": "Ce qui a change",
     "features": [
-      "Les elements d'approbation ouvrent maintenant la bonne disposition de revision et la bonne etape de decision dans les espaces de travail des demandes et des dossiers, au lieu de ramener le personnel a une ancienne disposition personnelle ou a une etape memorisee.",
+      "Les elements d'approbation ouvrent maintenant la bonne disposition de revision et la bonne etape de decision dans les espaces de travail des demandes et des dossiers, tout en permettant au personnel de revenir aux etapes de revision precedentes.",
+      "Les demandes refusees quittent maintenant la file de suivi une fois que la lettre de refus a ete envoyee, afin qu'un dossier de refus termine ne semble plus necessiter une action.",
       "Les assistants de demande, d'intervention et de revision utilisent maintenant des titres et des indications mieux adaptes a la phase en cours, afin qu'il soit plus facile de voir si le personnel prepare, revise ou termine un suivi.",
       "Les soumissions de revision d'intervention generent maintenant un nouveau PDF d'evaluation du gestionnaire de cas, et les ententes de financement revisees peuvent maintenant afficher les modifications par rapport a l'entente precedente immediate de la serie.",
       "Le traitement des decisions d'approbation des demandes est plus coherent: les decisions ecrivent immediatement le bon resultat, les notes de demande de changements apparaissent tout de suite et les etapes de suivi se comportent de facon plus uniforme.",

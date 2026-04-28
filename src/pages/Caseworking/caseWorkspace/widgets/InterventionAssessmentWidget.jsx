@@ -2276,7 +2276,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     if (!keyChanged && !stepsChanged) return;
     wizardStepRestoreKeyRef.current = wizardStepKey;
     wizardStepRestoreStepsRef.current = stepSignature;
-    const requestedStep = pendingApprovalStepRef.current || approvalRequestedStep || null;
+    const requestedStep = pendingApprovalStepRef.current || null;
     if (requestedStep && activeStepIds.includes(requestedStep)) {
       if (requestedStep !== currentStep) {
         setCurrentStep(requestedStep);
@@ -2291,10 +2291,10 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     if (stepsChanged && !activeStepIds.includes(currentStep)) {
       setCurrentStep(BASE_STEP_IDS[0]);
     }
-  }, [wizardStepKey, activeStepIds, approvalRequestedStep, currentStep, resolveStoredStep]);
+  }, [wizardStepKey, activeStepIds, currentStep, resolveStoredStep]);
 
   useEffect(() => {
-    const requestedStep = pendingApprovalStepRef.current || approvalRequestedStep || null;
+    const requestedStep = pendingApprovalStepRef.current || null;
     if (!wizardStepKey || !requestedStep) return;
     if (!activeStepIds.includes(requestedStep)) return;
     const requestedInterventionId = approvalWorkspaceEntry?.interventionId
@@ -2317,7 +2317,6 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     pendingApprovalStepRef.current = null;
   }, [
     activeStepIds,
-    approvalRequestedStep,
     approvalWorkspaceEntry,
     currentStep,
     hydratedDraftId,
@@ -3636,7 +3635,6 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       const requestedStep =
         detail.requestedStep ||
         pendingApprovalStepRef.current ||
-        approvalRequestedStep ||
         null;
       pendingApprovalStepRef.current = requestedStep;
       const selectionKey = caseId ? `${caseId}:${interventionId}` : null;
@@ -3714,7 +3712,6 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     };
   }, [
     activeStepIds,
-    approvalRequestedStep,
     caseId,
     hasBlockingProposal,
     resolveStoredStep,
@@ -3884,7 +3881,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         ? [...BASE_STEP_IDS, ...SUBMITTED_STEP_IDS]
         : BASE_STEP_IDS;
       const storedStep = resolveStoredStep(storedStepKey, stepIds);
-      const requestedStep = pendingApprovalStepRef.current || approvalRequestedStep || null;
+      const requestedStep = pendingApprovalStepRef.current || null;
       const nextStep =
         (requestedStep && stepIds.includes(requestedStep) ? requestedStep : null) ||
         storedStep ||

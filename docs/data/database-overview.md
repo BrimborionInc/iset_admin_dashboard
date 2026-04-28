@@ -17,21 +17,38 @@ Purpose: Quick map for Codex and developers. Use this for first-pass answers, th
 ```mermaid
 erDiagram
   ISET_APPLICATION_SUBMISSION ||--o| ISET_APPLICATION : "submission_id"
-  ISET_APPLICATION ||--o| ISET_CASE : "application_id"
+  ISET_CASE ||--o{ ISET_APPLICATION : "case_id"
+  ISET_APPLICATION ||--o{ ISET_APPLICATION_VERSION : "application_id"
   CLIENT ||--o{ ISET_CASE : "client_id"
   ISET_CASE ||--o{ ISET_CASE_ACTION_PLAN : "case_id"
   ISET_CASE_ACTION_PLAN ||--o{ ISET_CASE_INTERVENTION : "action_plan_id"
+  CLIENT ||--o{ CLIENT_APPLICANT_ACCOUNT_EVENT : "client_id"
+  CLIENT ||--o{ INPUT_JSON_STATE : "client_id"
   CLIENT ||--o{ ISET_DOCUMENT : "client_id"
   ISET_APPLICATION ||--o{ ISET_DOCUMENT : "application_id (optional)"
   ISET_CASE ||--o{ ISET_DOCUMENT : "case_id (optional)"
   ISET_CASE_ACTION_PLAN ||--o{ ISET_DOCUMENT : "action_plan_id (optional)"
+  BUDGET_POT ||--o{ ISET_CASE_ASSESSMENT : "intervention_budget_pot_id"
+  ISET_CASE_ACTION_PLAN ||--o{ ISET_CASE_REMINDER : "action_plan_id"
+  CANADA_REGION ||--o{ STAFF_PROFILES : "region_id"
   ISET_DOCUMENT ||--o{ ISET_DOCUMENT_INTERVENTION : "document_id"
   ISET_CASE_INTERVENTION ||--o{ ISET_DOCUMENT_INTERVENTION : "intervention_id"
+  ISET_CASE ||--o{ CFA_SERIES : "case_id"
+  CFA_SERIES ||--o{ CFA_VERSION : "series_id"
+  CFA_VERSION ||--o{ CFA_VERSION_DOCUMENTS : "cfa_version_id"
+  ISET_DOCUMENT ||--o{ CFA_VERSION_DOCUMENTS : "document_id"
 ```
 Notes:
 - Relationships are logical and sourced from docs; verify enforcement and required columns in the schema dump.
-- `iset_document.client_id` is required by current source-specific constraints for application submissions, manual uploads, secure-message attachments, and system-generated documents. Application/case/action-plan requirements depend on source and workflow context.
+- `iset_document.client_id` is required by current source-specific constraints for application submissions, manual uploads, secure-message attachments, and system-generated documents. Manual uploads and system-generated documents also require a real `case_id`; application-linked rows keep both `application_id` and the owning `case_id`, and must carry `applicant_user_id`.
 - Secure messages are case-scoped typed-actor records. New message/document work should preserve the constraints documented in `docs/data/integrations/secure-messaging.md`.
+- Shared event actors and read receipts now use typed references: `iset_event_entry.actor_staff_profile_id` / `actor_applicant_user_id` and `iset_event_receipt.viewer_staff_profile_id` / `viewer_applicant_user_id`. Legacy `iset_event_entry.actor_id` remains opaque audit text and staff/applicant events are CHECK-hardened to typed refs; legacy event receipt `recipient_id` is retired in DEV.
+- DEV physically retired `iset_case.application_id`; derive case application context from `iset_application.case_id`. `iset_application.client_id` and `iset_application.case_id` are required in DEV.
+- DEV physically retired `iset_application_version.created_by_id`; derive version author display from `created_by_staff_profile_id` / `created_by_user_id`.
+- DEV constrains application submission/version lineage and CFA case/version/document/participant relationships. CFA agreement documents must resolve to the same case/client as their CFA series.
+- DEV constrains the remaining deterministic relationship gaps for `client_applicant_account_event.client_id`, `input_json_state.client_id`, `iset_case_assessment.intervention_budget_pot_id`, `iset_case_reminder.action_plan_id`, and `staff_profiles.region_id`. Workflow `workflow_id` fields remain string runtime keys such as `iset-v1`, not numeric `workflow.id` FKs.
+- DEV retired the empty `zzz_legacy_documents` experiment table. Do not use it as a fallback document source; all supporting-document work should go through `iset_document` plus the scoped attachment/document relationships above.
+- Finance allocation evidence object keys are not standalone access authority. Allocation evidence presign/delete must prove the key is referenced by `budget_allocation`/`budget_pot` evidence metadata or is an unexpired `pending_uploads` row owned by the current local staff user with `document_type = finance_allocation_evidence`.
 
 ## Domain table map (not exhaustive)
 - Intake submissions and applications: `iset_application_submission`, `iset_application`, `iset_application_version`, `iset_application_draft`, `iset_application_draft_dynamic`.
@@ -42,16 +59,16 @@ Notes:
 - Hands-on tutorials: `staff_tutorial_progress`.
 - Finance and payments: `payment_packet`, `payment_packet_line`, `payment_batch`, `payment_batch_line`, `payment_line_transaction`, `payment_status_event`, `payee_profile`, `finance_transaction`, `finance_saved_view`, `budget_*`, `funding_stream`, `payment_override`, `payment_packet_communication`.
 - Workflow authoring: `workflow`, `workflow_step`, `workflow_route`, `workflow_route_option`, `step`, `step_component`, `component`, `component_template`, `component_template_backup`, `blockstep`.
-- Runtime/config/audit: `iset_runtime_config`, `system_config`, `system_config_audit`, `__migrations`, `schema_migrations`, `iset_migration`.
-- Notifications: `iset_internal_notification`, `iset_internal_notification_dismissal`, `notification_setting`, `notification_template`.
+- Events/runtime/config/audit: `iset_event_entry`, `iset_event_outbox`, `iset_event_receipt`, `iset_runtime_config`, `system_config`, `system_config_audit`, `__migrations`, `schema_migrations`, `iset_migration`.
+- Notifications: `iset_internal_notification`, `iset_internal_notification_dismissal`, `notification_setting`, `notification_template`. Direct bell-alert audiences/viewers are typed as staff-profile or applicant-user subjects; legacy `audience_user_id` / dismissal `user_id` columns are retired in DEV.
 - ESDC/ILMP: `esdc_participant_submission`, `esdc_participant_submission_history`, `esdc_reporting_package`, `esdc_reporting_note`, `esdc_intervention_code`, `esdc_intervention_outcome`, `noc_code`, `noc_version`.
 
 ## Demo data guidance (common Q&A)
 - Prefer API flows (intake submit, admin create actions) to avoid missing derived rows and audit events.
 - When manually seeding demo data, confirm required columns in `docs/data/DB-Structure-Dump/` and then follow a dependency order like this (typical for application + client + intervention demos):
 1. Identity and routing: `user` (applicant), `client`, optional `organization` or `ptma` if routing or scoping is needed.
-2. Submission and application: `iset_application_submission` (immutable snapshot) then `iset_application` (working copy tied to submission).
-3. Case: `iset_case` (link to `application_id` and `client_id`), plus `iset_case_event` for timeline visibility if needed.
+2. Submission: `iset_application_submission` (immutable snapshot).
+3. Case and application: create or resolve `iset_case` (linked to `client_id`), then insert `iset_application` with both `client_id` and `case_id`, plus `iset_case_event` for timeline visibility if needed.
 4. Assessment: `iset_case_assessment` if the workspace expects assessment payloads.
 5. Plans and interventions: `iset_case_action_plan` then `iset_case_intervention` (link to case + plan). Reference lookup tables (`funding_stream`, `esdc_intervention_code`, `esdc_intervention_outcome`, `noc_code`, `noc_version`) when the UI requires those fields.
 6. Documents: `iset_document` (client_id required) plus `iset_document_intervention` for intervention links; use `payment_packet_document` for payment evidence.

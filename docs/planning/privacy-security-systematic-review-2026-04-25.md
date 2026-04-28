@@ -112,9 +112,9 @@ These changes close high-severity client-data exposure paths and were promoted a
 
 ## Remaining Review Lanes
 
-- Public portal unauthenticated/support endpoints, especially AI support prompt handling and sensitive-data filtering.
-- Public portal secure-message routes should still be reviewed as a separate lane, even though the initial scan found them substantially safer after the 2026-04-23 incident fix.
-- Escalations, generated forms, and signing-request routes for object-level scope consistency.
-- Admin feedback attachments and diagnostic/debug endpoints.
-- SQL/reporting/export surfaces that can aggregate client data outside the case workspace.
+- Public portal unauthenticated/support endpoints still need live review, but DEV now tightens AI support prompt/history sensitive-data filtering before OpenRouter calls.
+- Public portal secure-message routes should still get live denial tests, even though the initial scan found them substantially safer after the 2026-04-23 incident fix and DEV now removes checked shared-user-to-staff-profile email fallbacks.
+- Escalations and generated consent/declaration forms have now been covered in DEV route-scope hardening; signing-request detail/sign scope is covered by the static smoke, but live denial tests are still needed.
+- Admin feedback attachments now have an initial DEV pass: presigned attachment URLs are generated only from report-detail rows and that detail route is System Administrator-only. Admin AI/debug surfaces now have an initial DEV pass: admin AI chat blocks obvious raw identifiers before OpenRouter, denial-letter drafts use local templates, and AI dummy-data generators require the unsafe debug gate. Notification template/routing configuration APIs now enforce System/NWAC Administrator access server-side, and legacy generic `/api/users` shared-table directory endpoints are retired. Broader diagnostic/debug endpoint live denial tests are still needed.
+- SQL/reporting/export surfaces have an initial DEV pass: Query Editor export is active-database only, reporting dashboards are admin-only, and finance payment exports use finance/global or packet-scope guards. Live denial/export tests are still needed.
 - Full automated route-level regression coverage for document, payment, message, note, reminder, and event object-scope denial cases.

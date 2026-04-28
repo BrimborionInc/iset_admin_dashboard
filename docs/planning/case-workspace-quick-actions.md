@@ -2,7 +2,7 @@
 
 Purpose: Capture the design decisions, rules, and implementation notes for Case Workspace quick actions.
 Audience: Caseworking feature owners, frontend engineers, and QA.
-Last Updated: 2026-03-31
+Last Updated: 2026-04-28
 Status: Complete
 
 ## Scope
@@ -17,7 +17,7 @@ Display/conversation roles (Cognito group names are inconsistent; map to these l
 
 ## Master Action List (Draft)
 - Assign / reassign
-- Propose new intervention
+- Propose new intervention / resume current proposal
 - Manage plans and interventions
 - View notes and case calendar
 - Documents and messages
@@ -40,6 +40,7 @@ Display/conversation roles (Cognito group names are inconsistent; map to these l
 - Assign / reassign status gating: available for all statuses except `archived` (archived locks the case).
 - Assign / reassign should emit an event per the events catalog/emitter.
 - Propose new intervention visibility: all roles see/use this action.
+- Propose new intervention label: when an intervention proposal is already open, the quick action relabels to resume, update, or view the pending intervention proposal/change instead of advertising a new proposal.
 - Manage plans and interventions visibility: all roles (board layout action).
 - Manage plans and interventions status gating: all statuses (layout-only action).
 - View notes and case calendar visibility: all roles (board layout action).
@@ -84,6 +85,7 @@ Display/conversation roles (Cognito group names are inconsistent; map to these l
 - Reopen case status gating: allowed for `ready_to_close` and `closed` (System Administrator + Program Administrator); `archived` allowed only for System Administrator.
 - Reopen case target status: `dormant`.
 - Quick actions visibility behavior: hide actions that are not allowed for the current role/status (no disabled menu items).
+- Quick action proposal behavior: if an open proposal exists, selecting the action opens that proposal in the intervention assessment widget; it only starts a new proposal when no draft, submitted, in-review, or changes-requested proposal exists.
 - Ready-to-close behavior: layout-only quick actions remain available.
 - Quick actions ordering: use the master list order (Assign/Reassign → Propose → Manage Plans/Interventions → Notes/Calendar → Documents/Messages → View Audit Trail → ESDC Validation → Mark Ready to Close → Close → Archive → Reopen).
 - Archive case confirmation: yes (confirm modal required).

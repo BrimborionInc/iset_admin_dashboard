@@ -2,7 +2,7 @@
 
 Purpose: Summarize the technical safeguards built into the public intake portal and API.  
 Scope: Runtime code under `X:\ISET\ISET-intake` (frontend, backend, shared services).  
-Last Updated: 2025-10-07
+Last Updated: 2026-04-27
 
 ## Authentication & Session Control
 - **RS256 JWT validation** – `server.js:2014-2640` and `src/auth/verifyJwt.js` enforce issuer, audience, and JWKS signature checks, with fallback to trusted pool overrides when multiple Cognito clients are allowed.
@@ -20,6 +20,7 @@ Last Updated: 2025-10-07
 - **Server-side intake state** – Dynamic intake steps keep answers off the client by combining an in-memory cache with a shared database table (`input_json_state`). The table is keyed by `(user_id, session_token)` and automatically prunes via `expires_at` so data exists only during the session (defaults to ~30 minutes). Lifecycle hooks clear both memory and DB entries on logout, save-and-finish-later, successful submission, or session timeout (`server.js:1660-2100`). TTL duration remains configurable via `iset_runtime_config` (`scope='runtime', k='intake.ephemeral_ttl_minutes'`).
 - **Aggregate JSON controls** – `/api/intake-json` now persists merge patches to `input_json_state` (`server.js:1719-1905`), ensuring load-balanced instances read the same state without ever exposing history in browser storage.
 - **Sensitive env segregation** – Runtime pulls configuration from `.env` with secrets excluded from source control (`docs/ops/env-vars.md`), keeping credentials out of the bundle.
+- **Public AI support filtering** - `/api/ai-support` is intentionally public, but validates prompt length, rate limits by client/language, and rejects both the current prompt and recent chat history if they contain obvious sensitive patterns before sending anything to OpenRouter.
 
 ## File Upload Protection
 - **Policy enforcement** – `uploadPolicy.js` centrally defines size/type limits, and `server.js:7086-7246` enforces them per request, returning explicit error codes.

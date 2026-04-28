@@ -616,16 +616,18 @@ const AppRoutes = ({
       </Route>
 
       <Route path="/modify-component/:id">
-        {renderContent(
-          ModifyComponent,
-          [
-            { text: 'Home', href: '/' },
-            { text: 'Manage Intake Steps', href: '/manage-components' },
-            { text: 'Modify Intake Step', href: '/modify-component/:id' }
-          ],
-          'Modify Intake Step',
-          <ModifyIntakeStepHelp />
-        )}
+        <Guard path="/modify-component/:id">
+          {renderContent(
+            ModifyComponent,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Manage Intake Steps', href: '/manage-components' },
+              { text: 'Modify Intake Step', href: '/modify-component/:id' }
+            ],
+            'Modify Intake Step',
+            <ModifyIntakeStepHelp />
+          )}
+        </Guard>
       </Route>
 
       <Route path="/manage-security-options">

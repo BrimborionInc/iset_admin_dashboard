@@ -66,12 +66,14 @@ Example response:
   - Failure: `423` (`{ error: 'locked', reason: 'owned_by_other', lock: {...} }`) or `400 lock_identity_missing`
   - Side effects:
     * Validates staff identity (`resolveLockIdentity`).
+    * Validates application visibility through the owning case before reading or writing the lock row.
     * Deletes expired locks before claiming a new one.
     * Force option available only to SysAdmins.
 
 - `DELETE /api/locks/application/:id`
   - Releases the current owner’s lock, or force deletes when permitted.
   - Returns `423` if another user owns the lock and force is not set.
+  - Also validates application visibility through the owning case before releasing the lock.
 
 Locks are stored with `owner_user_id`, `owner_display_name`, `owner_email`, and `expires_at`. TTL enforcement happens in SQL using `NOW()` comparisons.
 
@@ -86,7 +88,7 @@ Locks are stored with `owner_user_id`, `owner_display_name`, `owner_email`, and 
 | `missing/expired`  | 423 / `lock_required`        | Lock must be reacquired.                    |
 | `owned_by_other`   | 423 / `locked`             | Someone else owns the lock; payload contains holder metadata. |
 
-All write handlers still return `409 row_version_conflict` if the optimistic token mismatches after the lock check succeeds.
+All write handlers still return `409 row_version_conflict` if the optimistic token mismatches after the lock check succeeds. A lock is concurrency state, not access authority: application and case routes must still validate case/application visibility before acquiring, releasing, or enforcing locks.
 
 ### 4.3 Lock metadata propagation
 

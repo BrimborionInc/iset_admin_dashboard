@@ -34,6 +34,8 @@ export function buildAssignedStaffProfileAliases(row) {
   return {
     assigned_staff_profile_id: assignedStaffProfileId,
     assignedStaffProfileId: assignedStaffProfileId,
+    assigned_to_user_id: assignedStaffProfileId,
+    assignedToUserId: assignedStaffProfileId,
     assigned_user_id: assignedStaffProfileId,
     assignedUserId: assignedStaffProfileId,
   };

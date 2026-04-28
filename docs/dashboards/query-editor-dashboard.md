@@ -1,6 +1,6 @@
 # Query Editor Dashboard
 
-Last updated: 2026-03-25
+Last updated: 2026-04-27
 
 ## Purpose
 Provide System Administrators with a focused workspace for running ad hoc SQL text against the current environment database for diagnostics, validation, and controlled operational updates.
@@ -25,7 +25,7 @@ Provide System Administrators with a focused workspace for running ad hoc SQL te
 - `SELECT` results are capped at 100 rows per statement and flagged as truncated when more rows exist.
 - Write statements return `rowsAffected` plus a status message.
 - When multiple statements produce results, the results widget shows a statement selector.
-- `Server Export` reads available databases and base tables from the current server connection through `GET /api/admin/query-editor/export-metadata`.
+- `Server Export` reads base tables for the active environment PATH database through `GET /api/admin/query-editor/export-metadata`.
 - `Server Export` writes one self-contained dump file through `POST /api/admin/query-editor/export`.
 - The environment widget reads `/api/config/runtime` and displays `env.nodeEnv`.
 
@@ -39,7 +39,7 @@ Provide System Administrators with a focused workspace for running ad hoc SQL te
 
 ## Server export support
 - The server export tab is intended to mimic the core MySQL Workbench `Data Export` object-selection flow with a reduced option set.
-- Users select one database and any subset of base tables from that database.
+- Users select any subset of base tables from the active environment PATH database. The backend rejects non-active database names even if the DB login can see other schemas.
 - Export mode is fixed to:
   - `Dump Structure and Data`
   - `Export to a Self-Contained File`
@@ -51,7 +51,7 @@ Provide System Administrators with a focused workspace for running ad hoc SQL te
 ## Current limitations
 - No saved queries or query history.
 - No confirmation workflow or dry-run mode for write statements.
-- The dashboard executes against the current environment database connection; there is no environment override in the UI.
+- The dashboard executes and exports against the current environment database connection; there is no environment or schema override in the UI.
 
 ## Implementation direction
 - Keep a single execution path.

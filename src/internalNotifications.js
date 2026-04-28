@@ -9,22 +9,45 @@ function getRoleFromAuth(auth) {
   return auth.role || auth.RoleName || auth.Role || null;
 }
 
-function getUserIdFromAuth(auth) {
+function normalizePositiveInt(value) {
+  if (value === null || typeof value === 'undefined') return null;
+  const numeric = Number(value);
+  if (!Number.isInteger(numeric) || numeric <= 0) return null;
+  return numeric;
+}
+
+function getStaffProfileIdFromAuth(auth) {
   if (!auth) return null;
-  return auth.user_id || auth.userId || auth.id || null;
+  return normalizePositiveInt(
+    auth.staff_profile_id ||
+    auth.staffProfileId ||
+    null
+  );
+}
+
+function getApplicantUserIdFromAuth(auth) {
+  if (!auth) return null;
+  return normalizePositiveInt(
+    auth.applicant_user_id ||
+    auth.applicantUserId ||
+    (auth.subjectType === 'applicant' ? (auth.user_id || auth.userId || auth.id) : null)
+  );
 }
 
 async function getInternalNotifications(pool, auth) {
   const role = getRoleFromAuth(auth);
-  const userId = getUserIdFromAuth(auth);
+  const staffProfileId = getStaffProfileIdFromAuth(auth);
+  const applicantUserId = getApplicantUserIdFromAuth(auth);
 
-  if (!role && !userId) {
+  if (!role && !staffProfileId && !applicantUserId) {
     return [];
   }
 
   const now = new Date();
   const params = [];
   const conditions = [];
+  const dismissalConditions = [];
+  const dismissalParams = [];
 
   conditions.push(`audience_type = '${NOTIFICATION_AUDIENCE.GLOBAL}'`);
 
@@ -33,45 +56,76 @@ async function getInternalNotifications(pool, auth) {
     params.push(role);
   }
 
-  if (userId) {
-    conditions.push(`(audience_type = '${NOTIFICATION_AUDIENCE.USER}' AND audience_user_id = ?)`);
-    params.push(userId);
+  if (staffProfileId) {
+    conditions.push(`(audience_type = '${NOTIFICATION_AUDIENCE.USER}' AND audience_actor_type = 'staff_profile' AND audience_staff_profile_id = ?)`);
+    params.push(staffProfileId);
+    dismissalConditions.push(`(d.viewer_actor_type = 'staff_profile' AND d.viewer_staff_profile_id = ?)`);
+    dismissalParams.push(staffProfileId);
   }
 
-  let sql = `SELECT id, event_key, severity, title, message, audience_type, audience_role, audience_user_id,
+  if (applicantUserId) {
+    conditions.push(`(audience_type = '${NOTIFICATION_AUDIENCE.USER}' AND audience_actor_type = 'applicant_user' AND audience_applicant_user_id = ?)`);
+    params.push(applicantUserId);
+    dismissalConditions.push(`(d.viewer_actor_type = 'applicant_user' AND d.viewer_applicant_user_id = ?)`);
+    dismissalParams.push(applicantUserId);
+  }
+
+  let sql = `SELECT id, event_key, severity, title, message, audience_type, audience_actor_type, audience_role,
+    audience_staff_profile_id, audience_applicant_user_id,
     dismissible, requires_ack, starts_at, expires_at, metadata, created_by, created_at, updated_at, delivered_at
-    FROM iset_internal_notification
+    FROM iset_internal_notification n
     WHERE (${conditions.join(' OR ')})
-      AND (starts_at IS NULL OR starts_at <= ?)
-      AND (expires_at IS NULL OR expires_at >= ?)`;
+      AND (n.starts_at IS NULL OR n.starts_at <= ?)
+      AND (n.expires_at IS NULL OR n.expires_at >= ?)`;
 
   params.push(now);
   params.push(now);
 
-  sql += ` AND id NOT IN (
-      SELECT notification_id FROM iset_internal_notification_dismissal WHERE user_id = ?
+  if (dismissalConditions.length) {
+    sql += ` AND NOT EXISTS (
+      SELECT 1
+        FROM iset_internal_notification_dismissal d
+       WHERE d.notification_id = n.id
+         AND (${dismissalConditions.join(' OR ')})
     )`;
+    params.push(...dismissalParams);
+  }
 
-  params.push(userId || 0);
-
-  sql += ' ORDER BY severity DESC, created_at DESC';
+  sql += ' ORDER BY n.severity DESC, n.created_at DESC';
 
   const [rows] = await pool.query(sql, params);
   return rows || [];
 }
 
 async function dismissInternalNotification(pool, auth, notificationId) {
-  const userId = getUserIdFromAuth(auth);
-  if (!userId) {
-    const err = new Error('User context not available');
+  const staffProfileId = getStaffProfileIdFromAuth(auth);
+  const applicantUserId = getApplicantUserIdFromAuth(auth);
+  const viewer = staffProfileId
+    ? { actorType: 'staff_profile', staffProfileId, applicantUserId: null }
+    : applicantUserId
+      ? { actorType: 'applicant_user', staffProfileId: null, applicantUserId }
+      : null;
+
+  if (!viewer) {
+    const err = new Error('Typed notification viewer context not available');
     err.statusCode = 401;
     throw err;
   }
 
   const [results] = await pool.query(
-    `INSERT IGNORE INTO iset_internal_notification_dismissal (notification_id, user_id)
-     VALUES (?, ?)`,
-    [notificationId, userId]
+    `INSERT IGNORE INTO iset_internal_notification_dismissal (
+       notification_id,
+       viewer_actor_type,
+       viewer_staff_profile_id,
+       viewer_applicant_user_id
+     )
+     VALUES (?, ?, ?, ?)`,
+    [
+      notificationId,
+      viewer.actorType,
+      viewer.staffProfileId,
+      viewer.applicantUserId
+    ]
   );
 
   if (!results || results.affectedRows === 0) {

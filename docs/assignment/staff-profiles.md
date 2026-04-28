@@ -17,12 +17,17 @@ This document summarizes the current behavior of `staff_profiles` and the relate
 
 ## Application visibility rules (RBAC)
 - **System Administrator / Program Administrator**: full access to all cases (including unassigned submissions).
-- **Regional Coordinator**: sees cases assigned to their region or directly assigned to their staff profile (`sp.region_id = regionId OR assigned_to_user_id = staffProfileId`).
+- **Regional Coordinator**: sees cases assigned to their region or directly assigned to their staff profile (`sp.region_id = regionId OR assigned_staff_profile_id = staffProfileId`).
 - **Application Assessor**: sees only cases assigned to their `staff_profiles.id`.
 
 Because the API depends on accurate `staff_profiles.region_id` and `staff_region` mappings, ensure each coordinator signs in through Cognito at least once after account creation so the local operational row is present.
 
+## Assignment API naming
+- New backend code should read/write `assigned_staff_profile_id` / `assignedStaffProfileId` for case ownership.
+- In DEV, migration `20260427_0010_retire_legacy_case_assignment_shadow.sql` physically retires the old `iset_case.assigned_to_user_id` column after recording aggregate 0-drift counts. `assigned_to_user_id`, `assignedToUserId`, `assigned_user_id`, and `assignedUserId` remain response/request compatibility aliases only; they carry a `staff_profiles.id` value when emitted.
+- Assignment event payloads should prefer `to_assignee_staff_profile_id`, `from_assignee_staff_profile_id`, and `assigned_staff_profile_id`. Older `to_assignee_id` / `from_assignee_id` payload keys are retained only for existing notification templates and historical events.
+
 ## Tips for testing
 - After adding a new Cognito user, confirm the `staff_profiles` row exists and sign in once to verify the auth context + assignment flows.
-- Run `SELECT id, application_id, assigned_to_user_id FROM iset_case;` to verify assignments line up with the expected staff profile IDs.
+- Run `SELECT id, client_id, assigned_staff_profile_id FROM iset_case;` to verify assignments line up with the expected staff profile IDs.
 - Use `fetch('/api/auth/me', { credentials: 'include' })` in the browser console to inspect the current auth context (role, region, sub) without opening the network tab.

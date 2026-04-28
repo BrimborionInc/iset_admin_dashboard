@@ -1,6 +1,6 @@
 # Supporting Documents widget
 
-Date: 2026-04-10
+Date: 2026-04-27
 
 ## Workflow
 
@@ -44,6 +44,7 @@ manual uploads, and generated forms, then compares them against the relevant che
 - Upload flow:
   - opens a label/document-type modal first
   - enforces `document_type.scope` rules (`client`, `application`, `case`, `action_plan`, `payment_packet`)
+  - the backend resolver must preserve or resolve the real `case_id` for manual uploads, including application-scoped uploads that also write `application_id`
   - then uploads through either:
     - `/api/applicants/:applicant_user_id/documents/upload` for applicant/application mode
     - `/api/cases/:case_id/documents/upload` for application-less case mode
@@ -59,7 +60,7 @@ manual uploads, and generated forms, then compares them against the relevant che
   - it calls `GET /api/documents/:id/presign-download?mode=original`, which forces an attachment download of the original stored object instead of the preview path
 - Imported/application-less case mode:
   - enables upload and refresh without `applicant_user_id`
-  - also remains the correct mode when the imported client has a linked PATH account but the case still has no linked `application_id`
+  - also remains the correct mode when the imported client has a linked PATH account but no `iset_application` row points at the case
   - allows `client`, `case`, `action_plan`, and `application` document categories
   - stores application-type uploads against a real application when one exists, or falls them back to an action plan / case when the file has no linked application
   - hides the checklist tab
@@ -68,15 +69,15 @@ manual uploads, and generated forms, then compares them against the relevant che
 ## Critical derived state
 
 - `applicant_user_id` is resolved from the workspace/case payload.
-- `caseId` and `applicationId` are also derived from the workspace/case payload and are used to prefill upload associations.
+- `caseId` and `applicationId` are also derived from the workspace/case payload and are used to prefill upload associations. When an upload has an `applicationId`, the backend still resolves and stores that application's real `case_id`.
 - In Case Workspace, a linked `applicationId` is what decides whether the widget uses applicant/application mode with checklist support.
 - When the case has no linked `applicationId`, the widget uses case-based document mode even if `applicant_user_id` exists because the client already has a PATH account.
 - The checklist tab is intentionally unavailable in case-based mode because there is no applicant/application checklist context.
 
 ## Client-file import support
 
-- Client Batch Import intentionally creates `iset_case` rows with `application_id = NULL`.
-- Those imported cases may or may not later have a linked applicant account, but they still remain application-less until a real `application_id` exists.
+- Client Batch Import intentionally creates `iset_case` rows without application records.
+- Those imported cases may or may not later have a linked applicant account, but they still remain application-less until a real application exists for that case.
 - The widget handles those cases directly through case-based document mode instead of disabling upload or forcing application selection.
 - Application-style paper forms and assessments can still be uploaded on those files without fabricating an application record.
 - This is not caused by missing assessments, action plans, or interventions.
@@ -89,4 +90,5 @@ manual uploads, and generated forms, then compares them against the relevant che
 - If a privileged user reports that `Download` is missing, verify their canonical role/group resolves to `System Administrator` / `NWAC Administrator` (`System_Administrator` / `NWAC_Administrator`) before debugging the widget.
 - If a case-backed upload fails, inspect `caseData.id`, the selected document type scope, and the `/api/cases/:id/documents/upload` response code first.
 - If a normal applicant-backed case cannot upload or refresh, inspect `caseData.applicant_user_id` / `caseData.applicantUserId` and the `/api/applicants/:id/*` endpoints.
+- If `chk_iset_document_manual_upload_scope` fails for a staff upload, treat it as a backend context-resolution bug first. Manual uploads must carry `client_id` and `case_id`; application-linked uploads must also carry `application_id` and `applicant_user_id`.
 - Do not add placeholder application, assessment, or action-plan rows just to make document management work.

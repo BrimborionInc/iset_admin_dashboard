@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next "What's New" update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-04-25
+Last Updated: 2026-04-28
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -19,6 +19,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+2026-04-28 | Release TBD | Fix/Approvals | Case Workspace > Review intervention proposal | Fixed a bug where intervention approvals opened from Pending Decision could get stuck on Record of decision. | Queue launches still open on the decision step, but the requested step is now consumed once so approvers can click earlier wizard steps for review.
+2026-04-28 | Release TBD | Fix/Homepage | Work Queue > Pending Completion | Fixed a bug where denied applications could remain stuck in Pending Completion after the denial letter was already sent. | Denied files now leave the queue once the denial letter is recorded as sent, without changing the recorded denied outcome.
 2026-04-21 | Release v0.5.9 | UX/Approvals | Homepage Approvals queue + Application/Case Workspace | Fixed a bug where opening an approval item could still bounce approvers back to step 1 or another stale wizard step instead of the decision step. | Explicit approval-entry step intent now overrides local wizard-step restore state in both the application and intervention approval widgets.
 2026-04-21 | Release v0.5.9 | UX/Approvals | Homepage Approvals queue + Application/Case Workspace | Fixed a bug where opening an approval item could land on the wrong board layout, while `Reset layout` and the board quick-action layouts stopped working afterward. | Approval-mode workspaces now start on the review board without overwriting the saved normal board, and normal board quick actions/reset keep working after launch.
 2026-04-21 | Release v0.5.9 | UX/Workflow | Application Assessment + Intervention Assessment | Made the wizard headings and lead-in text match the phase staff are in, so proposal, approval, and follow-up states no longer keep draft-era labels. | Application workflow now reads as assessment vs approval vs follow-up; intervention workflow now reads as propose/update vs review vs follow-up.
@@ -229,7 +231,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Approval items now open the correct review layout and decision step in both the application and case workspaces instead of dropping staff back into an old personal board or remembered wizard step.
+- Approval items now open the correct review layout and decision step in both the application and case workspaces, while still allowing staff to click back through earlier review steps.
+- Denied applications now leave Pending Completion once the denial letter has been sent, so staff no longer see a finished denial file as still needing follow-up.
 - Application and intervention proposal decisions are now restricted to NWAC Administrators, so Regional Managers can monitor approval queues without committing approvals or denials.
 - Historical intake uploads now stay visible in the application workspace and checklist even on older files where the original applicant documents were saved before PATH linked them to the final application record.
 - Application, intervention, and revision wizards now use clearer phase-based headings and guidance so staff can tell more easily whether they are drafting, reviewing, or completing follow-up work.
@@ -253,7 +256,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Nouveautes (brouillon - FR)
 
-- Les elements d'approbation ouvrent maintenant la bonne disposition de revision et la bonne etape de decision dans les espaces de travail des demandes et des dossiers, au lieu de ramener le personnel a une ancienne disposition personnelle ou a une etape memorisee.
+- Les elements d'approbation ouvrent maintenant la bonne disposition de revision et la bonne etape de decision dans les espaces de travail des demandes et des dossiers, tout en permettant au personnel de revenir aux etapes de revision precedentes.
+- Les demandes refusees quittent maintenant la file de suivi une fois que la lettre de refus a ete envoyee, afin qu'un dossier de refus termine ne semble plus necessiter une action.
 - Les assistants de demande, d'intervention et de revision utilisent maintenant des titres et des indications mieux adaptes a la phase en cours, afin qu'il soit plus facile de voir si le personnel prepare, revise ou termine un suivi.
 - Les soumissions de revision d'intervention generent maintenant un nouveau PDF d'evaluation du gestionnaire de cas, et les ententes de financement revisees peuvent maintenant afficher les modifications par rapport a l'entente precedente immediate de la serie.
 - Le traitement des decisions d'approbation des demandes est plus coherent: les decisions ecrivent immediatement le bon resultat, les notes de demande de changements apparaissent tout de suite et les etapes de suivi se comportent de facon plus uniforme.

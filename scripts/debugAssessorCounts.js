@@ -24,11 +24,11 @@ async function main() {
     `SELECT sp.id, sp.email, COALESCE(c.total, 0) AS assigned_cases
        FROM staff_profiles sp
        LEFT JOIN (
-         SELECT assigned_to_user_id, COUNT(*) AS total
+         SELECT assigned_staff_profile_id, COUNT(*) AS total
            FROM iset_case
-          WHERE assigned_to_user_id IS NOT NULL
-          GROUP BY assigned_to_user_id
-       ) c ON c.assigned_to_user_id = sp.id
+          WHERE assigned_staff_profile_id IS NOT NULL
+          GROUP BY assigned_staff_profile_id
+       ) c ON c.assigned_staff_profile_id = sp.id
       WHERE LOWER(REPLACE(sp.primary_role, ' ', '')) = 'applicationassessor'
       ORDER BY assigned_cases DESC, sp.id ASC`
   );
@@ -39,9 +39,9 @@ async function main() {
   for (const row of assessorSummary) {
     if (Number(row.assigned_cases) <= 0) continue;
     const [cases] = await pool.query(
-      `SELECT id, status, assigned_to_user_id, updated_at
+      `SELECT id, status, assigned_staff_profile_id AS assigned_to_user_id, updated_at
          FROM iset_case
-        WHERE assigned_to_user_id = ?
+        WHERE assigned_staff_profile_id = ?
         ORDER BY updated_at DESC
         LIMIT 10`,
       [row.id]
@@ -66,20 +66,30 @@ async function main() {
   const assessorId = assessorMeta.id;
   console.log(`\nInspecting cases for assessor ${assessorId} (${assessorMeta.email})`);
   const [cases] = await pool.query(
-    `SELECT id, application_id, status, assigned_to_user_id, updated_at
-     FROM iset_case
-     WHERE assigned_to_user_id = ?
-     ORDER BY updated_at DESC
+    `SELECT c.id,
+            (
+              SELECT a_case.id
+                FROM iset_application a_case
+               WHERE a_case.case_id = c.id
+               ORDER BY COALESCE(a_case.updated_at, a_case.created_at) DESC, a_case.id DESC
+               LIMIT 1
+            ) AS application_id,
+            c.status,
+            c.assigned_staff_profile_id AS assigned_to_user_id,
+            c.updated_at
+     FROM iset_case c
+     WHERE c.assigned_staff_profile_id = ?
+     ORDER BY c.updated_at DESC
      LIMIT 20`,
     [assessorId]
   );
   console.table(cases);
 
   const [assignmentSummary] = await pool.query(
-    `SELECT assigned_to_user_id AS assignee, COUNT(*) AS total
+    `SELECT assigned_staff_profile_id AS assignee, COUNT(*) AS total
        FROM iset_case
-      WHERE assigned_to_user_id IS NOT NULL
-      GROUP BY assigned_to_user_id
+      WHERE assigned_staff_profile_id IS NOT NULL
+      GROUP BY assigned_staff_profile_id
       ORDER BY total DESC
       LIMIT 20`
   );
@@ -90,8 +100,8 @@ async function main() {
   const placeholders = ['docs requested','action required','pending info','pending information','info requested','information requested','on hold','on_hold'];
   const [agg] = await pool.query(
     `SELECT
-        SUM(CASE WHEN assigned_to_user_id = ? THEN 1 ELSE 0 END) AS assigned,
-        SUM(CASE WHEN assigned_to_user_id = ? AND status IS NOT NULL AND LOWER(status) IN (${placeholders.map(()=>'?' ).join(',')} ) THEN 1 ELSE 0 END) AS awaiting_applicant
+        SUM(CASE WHEN assigned_staff_profile_id = ? THEN 1 ELSE 0 END) AS assigned,
+        SUM(CASE WHEN assigned_staff_profile_id = ? AND status IS NOT NULL AND LOWER(status) IN (${placeholders.map(()=>'?' ).join(',')} ) THEN 1 ELSE 0 END) AS awaiting_applicant
      FROM iset_case`,
     [assessorId, assessorId, ...placeholders]
   );

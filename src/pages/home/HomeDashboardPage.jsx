@@ -14,7 +14,11 @@ import {
     isEligibilityComplete,
     isEligibilityPending,
 } from '../../utils/applicationSla';
-import { buildApplicationStatusInfo } from '../../utils/applicationStatus';
+import {
+    buildApplicationStatusInfo,
+    normalizeApplicationStatus,
+    normalizeDecisionOutcome,
+} from '../../utils/applicationStatus';
 import {
     buildAssignedStaffProfileAliases,
     resolveAssignedStaffProfileId,
@@ -269,6 +273,30 @@ const WORK_QUEUE_IN_ASSESSMENT_FILTER = [
 
 const buildDevHeaders = (role) => {
     return { Accept: 'application/json' };
+};
+
+const isTruthyQueueFlag = (value) => {
+    if (value === true) return true;
+    if (value === false || value === null || typeof value === 'undefined') return false;
+    if (typeof value === 'number') return value === 1;
+    const normalized = String(value).trim().toLowerCase();
+    return ['1', 'true', 'yes', 'y'].includes(normalized);
+};
+
+const hasDenialDecisionLetterSent = (row = {}) =>
+    isTruthyQueueFlag(
+        row.denial_decision_letter_sent ??
+        row.denialDecisionLetterSent ??
+        row.decisionLetterSentDenial ??
+        row.decision_letter_sent_denial
+    );
+
+const isDeniedCompletionRow = (row = {}) => {
+    const decisionOutcome = normalizeDecisionOutcome(row.decision_outcome ?? row.decisionOutcome);
+    if (decisionOutcome === 'denied') {
+        return true;
+    }
+    return normalizeApplicationStatus(row.application_status ?? row.applicationStatus ?? row.status) === 'rejected';
 };
 
 const MS_PER_DAY = 86400000;
@@ -1741,6 +1769,9 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                     throw new Error('Unexpected response format while loading funding agreements.');
                 }
                 const rows = payload.rows.filter(row => {
+                    if (isDeniedCompletionRow(row) && hasDenialDecisionLetterSent(row)) {
+                        return false;
+                    }
                     const costRaw =
                         row.assessment_intervention_cost_total ??
                         row.intervention_cost_total ??
@@ -1793,14 +1824,14 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         submittedAt: submitted,
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
                         summary: (() => {
-                            const statusKey = String(row.application_status || row.status || '').trim().toLowerCase();
+                            const statusKey = normalizeApplicationStatus(row.application_status || row.status || '');
                             const hasFundingAgreement = Number(row.funding_agreement_count || 0) > 0;
                             if (statusKey === 'approved') {
                                 return hasFundingAgreement
                                     ? 'Approved file still needs funding-form or signature follow-through before completion.'
                                     : 'Approved file still needs post-decision follow-through before completion.';
                             }
-                            if (['rejected', 'declined', 'denied'].includes(statusKey)) {
+                            if (isDeniedCompletionRow(row)) {
                                 return 'Denied file still needs post-decision closeout.';
                             }
                             return 'Decision-recorded file still needs post-decision follow-through before completion.';
@@ -2571,7 +2602,8 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                 if (!payload || !Array.isArray(payload.rows)) {
                     throw new Error('Unexpected response format while loading pending-completion applications.');
                 }
-                const mapped = payload.rows.map((row, idx) => {
+                const rows = payload.rows.filter(row => !(isDeniedCompletionRow(row) && hasDenialDecisionLetterSent(row)));
+                const mapped = rows.map((row, idx) => {
                     const tracking = row.tracking_id || row.case_id || row.application_id || `completion-${idx}`;
                     const applicantName =
                         row.applicant_name ||
@@ -2579,14 +2611,14 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         tracking ||
                         'Applicant';
                     const submitted = row.submitted_at || row.created_at || null;
-                    const statusKey = String(row.application_status || row.status || '').trim().toLowerCase();
+                    const statusKey = normalizeApplicationStatus(row.application_status || row.status || '');
                     const hasFundingAgreement = Number(row.funding_agreement_count || 0) > 0;
                     let summary = 'Decision-recorded file still needs post-decision follow-through before completion.';
                     if (statusKey === 'approved') {
                         summary = hasFundingAgreement
                             ? 'Approved file still needs funding-form or signature follow-through before completion.'
                             : 'Approved file still needs post-decision follow-through before completion.';
-                    } else if (['rejected', 'declined', 'denied'].includes(statusKey)) {
+                    } else if (isDeniedCompletionRow(row)) {
                         summary = 'Denied file still needs post-decision closeout.';
                     } else if (statusKey === 'decision_ready') {
                         summary = 'Decision-recorded file still needs post-decision follow-through before completion.';

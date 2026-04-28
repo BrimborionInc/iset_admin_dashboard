@@ -29,13 +29,13 @@ The current database supports initial case tracking (linking applications to cas
 
 | Table | Purpose | Key Columns (selected) | Relationships |
 |-------|---------|------------------------|---------------|
-| `iset_case` | Root case record linked to client and still carrying a current application anchor | `id`, `application_id`, `client_id`, `assigned_staff_profile_id`, `status` | FK → `iset_application.id`, `client.id`, `staff_profiles.id`; target model is one case per client |
+| `iset_case` | Root case record linked to client | `id`, `client_id`, `assigned_staff_profile_id`, `status` | FK → `client.id`, `staff_profiles.id`; target model is one case per client |
 | `iset_case_assessment` | Assessment snapshot (single row per case) | `employment_goals`, `esdc_eligibility`, `employment_barriers` (JSON), `itp_payload`, `wage_payload` | PK = `case_id` |
 | `iset_case_action_plan` | Early action plan scaffold | `case_id`, `name`, `status`, `effective_date`, `review_date`, `metadata_json` | FK → `iset_case.id`, optional owner FKs |
 | `iset_case_intervention` | Intervention scaffold tied to case/action plan | `case_id`, `action_plan_id`, `intervention_code`, `status`, `funding_stream`, amounts | FK → `iset_case`, `iset_case_action_plan` |
 | `iset_case_financial_snapshot` | Rolling totals per case | `allocated_amount`, `committed_amount`, `spent_amount`, `variance_amount` | FK → `iset_case.id` |
 | `iset_case_task`, `iset_case_note`, `iset_case_event`, `iset_case_watch`, `iset_case_action_item`, `iset_case_compliance_check` | Ancillary workflow activity spanning tasks, notes, timeline entries, watchers, action items, and compliance verifications | Standard audit columns + soft-delete timestamps where applicable | FK → `iset_case.id`, optional assignee FKs → `staff_profiles.id`/`user.id` |
-| `iset_application`, `iset_application_version` | Source application payloads (immutable snapshot for audit) | `payload_json` (answers, submission data) | Current implementation often joins via `iset_case.application_id`; target model is for each submitted application to carry its own `client_id` and `case_id` |
+| `iset_application`, `iset_application_version` | Source application payloads (immutable snapshot for audit) | `client_id`, `case_id`, `payload_json` (answers, submission data) | Submitted applications carry their owning `client_id` and `case_id`; DEV no longer has a case-side application pointer |
 | `esdc_participant_submission` | Participant readiness + payload snapshot for ILMP exports | `case_id`, `application_id`, `readiness_status`, `submission_status`, `payload_snapshot`, `payload_checksum`, `rejection_reason` | FK → `iset_case.id`, `iset_application.id`, `user.id` (submitter) |
 | `esdc_participant_submission_history` | Timeline of validation/export events | `participant_submission_id`, `event_type`, `actor_user_id`, `event_details`, `occurred_at` | FK → `esdc_participant_submission.id`, `user.id` |
 | `esdc_reporting_package`, `esdc_reporting_note` | Reporting package lifecycle + internal collaboration | `reporting_period`, `due_date`, `status`, `checklist_state`, `note_text` | FK → `user.id` (submitter/author) |
@@ -48,6 +48,8 @@ The current database supports initial case tracking (linking applications to cas
 - `/api/cases/:id/action-plans` (POST) inserts minimal record into `iset_case_action_plan` (name, dates, owner, metadata JSON).
 
 Financial APIs are not yet exposed; finance UI widgets use mocked data or rely on snapshots. ESDC submission endpoints exist (`/api/esdc/reporting-packages`) but operate separately from action plans/interventions.
+
+Finance allocation evidence note (2026-04-27): the current DEV finance allocation evidence helper routes are not general document-store routes. `/api/allocations/evidence/upload`, `/delete`, and `/presign-download` are finance-role guarded; new uploads are tracked as actor-owned `pending_uploads` rows with `document_type = finance_allocation_evidence`; presign/delete requires either allocation/pot evidence metadata provenance or ownership of the pending upload. Do not add raw object-key download or delete paths for finance evidence.
 
 ### 2.3 Application Payload Insights
 

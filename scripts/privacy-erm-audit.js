@@ -15,13 +15,18 @@ const DEFAULT_TABLES = [
   'messages',
   'message_item',
   'message_attachment',
+  'iset_internal_notification',
+  'iset_internal_notification_dismissal',
+  'pending_uploads',
+  'application_lock',
+  'iset_event_receipt',
+  'user_session_audit',
+  'client_applicant_account_event',
   'staff_message',
   'staff_message_item',
   'staff_message_thread',
   'staff_message_thread_participant',
   'contact_message',
-  'jordan_application',
-  'jordan_application_draft',
 ];
 
 const LEGACY_TABLES = [
@@ -33,6 +38,7 @@ const LEGACY_TABLES = [
   'slot',
   'queue',
   'ticket_counter',
+  'zzz_legacy_documents',
 ];
 
 function parseArgs(argv) {
@@ -82,6 +88,19 @@ function quoteIdent(name) {
     throw new Error(`Unsafe identifier: ${name}`);
   }
   return `\`${name}\``;
+}
+
+function casePrimaryApplicationIdSql(caseAlias = 'c') {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(caseAlias)) {
+    throw new Error(`Unsafe case alias: ${caseAlias}`);
+  }
+  return `(
+    SELECT a_case.id
+      FROM iset_application a_case
+     WHERE a_case.case_id = ${caseAlias}.id
+     ORDER BY COALESCE(a_case.updated_at, a_case.created_at) DESC, a_case.id DESC
+     LIMIT 1
+  )`;
 }
 
 function escapeCell(value) {
@@ -225,18 +244,20 @@ async function applicationVersionColumnStatus(conn) {
   }
 
   const expected = [
-    'application_id',
-    'version',
-    'payload_json',
-    'change_summary',
-    'created_by_id',
-    'created_by_name',
-    'restored_from_version',
-    'case_id',
-    'version_number',
-    'source_type',
-    'is_current',
-    'previous_payload_json',
+    { columnName: 'application_id' },
+    { columnName: 'version' },
+    { columnName: 'payload_json' },
+    { columnName: 'change_summary' },
+    { columnName: 'created_by_id', retiredWhenMissing: true },
+    { columnName: 'created_by_staff_profile_id' },
+    { columnName: 'created_by_user_id' },
+    { columnName: 'created_by_name' },
+    { columnName: 'restored_from_version' },
+    { columnName: 'case_id' },
+    { columnName: 'version_number' },
+    { columnName: 'source_type' },
+    { columnName: 'is_current' },
+    { columnName: 'previous_payload_json' },
   ];
 
   const [columns] = await conn.query(
@@ -246,27 +267,333 @@ async function applicationVersionColumnStatus(conn) {
         AND table_name = 'iset_application_version'`
   );
   const present = new Set(columns.map((row) => row.column_name || row.COLUMN_NAME));
-  return expected.map((columnName) => ({
-    table_name: 'iset_application_version',
-    column_name: columnName,
-    status: present.has(columnName) ? 'present' : 'missing',
-  }));
+  return expected.map(({ columnName, retiredWhenMissing = false }) => {
+    const isPresent = present.has(columnName);
+    return {
+      table_name: 'iset_application_version',
+      column_name: columnName,
+      status: isPresent ? 'present' : (retiredWhenMissing ? 'retired' : 'missing'),
+    };
+  });
+}
+
+async function legacyShadowRetirementInventory(conn) {
+  const rows = [];
+
+  const addMissing = (tableName, columnName, canonicalField, classification, retirementGate, status = 'missing') => {
+    rows.push({
+      table_name: tableName,
+      column_name: columnName,
+      canonical_field: canonicalField,
+      classification,
+      rows_total: status,
+      shadow_values: '',
+      canonical_values: '',
+      matched_canonical_values: '',
+      mismatches_or_unresolved: '',
+      retirement_gate: retirementGate,
+    });
+  };
+
+  const addRow = (base, counts) => {
+    rows.push({
+      table_name: base.tableName,
+      column_name: base.columnName,
+      canonical_field: base.canonicalField,
+      classification: base.classification,
+      rows_total: Number(counts?.rows_total || 0),
+      shadow_values: Number(counts?.shadow_values || 0),
+      canonical_values: Number(counts?.canonical_values || 0),
+      matched_canonical_values: Number(counts?.matched_canonical_values || 0),
+      mismatches_or_unresolved: Number(counts?.mismatches_or_unresolved || 0),
+      retirement_gate: base.retirementGate,
+    });
+  };
+
+  const runSingle = async (base, sql, requires) => {
+    for (const [tableName, columnNames] of Object.entries(requires || {})) {
+      if (!(await tableExists(conn, tableName))) {
+        addMissing(base.tableName, base.columnName, base.canonicalField, base.classification, base.retirementGate);
+        return;
+      }
+      for (const columnName of columnNames) {
+        if (!(await columnExists(conn, tableName, columnName))) {
+          const retired =
+            base.retiredWhenMissing &&
+            tableName === base.tableName &&
+            columnName === base.columnName;
+          addMissing(
+            base.tableName,
+            base.columnName,
+            base.canonicalField,
+            retired ? `${base.classification} (physically retired in this schema)` : base.classification,
+            base.retirementGate,
+            retired ? 'retired' : 'missing'
+          );
+          return;
+        }
+      }
+    }
+
+    const [queryRows] = await conn.query(sql);
+    addRow(base, queryRows[0] || {});
+  };
+
+  await runSingle(
+    {
+      tableName: 'messages',
+      columnName: 'sender_id',
+      canonicalField: 'sender_actor_type + sender_user_id + sender_staff_profile_id',
+      classification: 'legacy sender shared-user shadow',
+      retiredWhenMissing: true,
+      retirementGate: 'Retire after all admin/portal/shared writers and response consumers stop selecting or writing sender_id, and TEST/PROD migration confirms 0 drift.',
+    },
+    `
+      SELECT
+        COUNT(*) AS rows_total,
+        COALESCE(SUM(sender_id IS NOT NULL), 0) AS shadow_values,
+        COALESCE(SUM(sender_user_id IS NOT NULL), 0) AS canonical_values,
+        COALESCE(SUM(sender_id IS NOT NULL AND sender_user_id IS NOT NULL AND sender_id = sender_user_id), 0) AS matched_canonical_values,
+        COALESCE(SUM(sender_id IS NOT NULL AND (sender_user_id IS NULL OR sender_id <> sender_user_id)), 0) AS mismatches_or_unresolved
+      FROM messages
+    `,
+    { messages: ['sender_id', 'sender_user_id', 'sender_actor_type', 'sender_staff_profile_id'] }
+  );
+
+  await runSingle(
+    {
+      tableName: 'messages',
+      columnName: 'recipient_id',
+      canonicalField: 'recipient_actor_type + recipient_user_id + recipient_staff_profile_id',
+      classification: 'legacy recipient shared-user shadow',
+      retiredWhenMissing: true,
+      retirementGate: 'Retire after all admin/portal/shared writers and response consumers stop selecting or writing recipient_id, and TEST/PROD migration confirms 0 drift.',
+    },
+    `
+      SELECT
+        COUNT(*) AS rows_total,
+        COALESCE(SUM(recipient_id IS NOT NULL), 0) AS shadow_values,
+        COALESCE(SUM(recipient_user_id IS NOT NULL), 0) AS canonical_values,
+        COALESCE(SUM(recipient_id IS NOT NULL AND recipient_user_id IS NOT NULL AND recipient_id = recipient_user_id), 0) AS matched_canonical_values,
+        COALESCE(SUM(recipient_id IS NOT NULL AND (recipient_user_id IS NULL OR recipient_id <> recipient_user_id)), 0) AS mismatches_or_unresolved
+      FROM messages
+    `,
+    { messages: ['recipient_id', 'recipient_user_id', 'recipient_actor_type', 'recipient_staff_profile_id'] }
+  );
+
+  await runSingle(
+    {
+      tableName: 'iset_case',
+      columnName: 'assigned_to_user_id',
+      canonicalField: 'assigned_staff_profile_id',
+      classification: 'legacy staff-profile assignment shadow',
+      retiredWhenMissing: true,
+      retirementGate: 'Retire after admin/portal/shared assignment code no longer uses the legacy name for writes, joins, filters, or response aliases, and TEST/PROD migration confirms 0 drift.',
+    },
+    `
+      SELECT
+        COUNT(*) AS rows_total,
+        COALESCE(SUM(assigned_to_user_id IS NOT NULL), 0) AS shadow_values,
+        COALESCE(SUM(assigned_staff_profile_id IS NOT NULL), 0) AS canonical_values,
+        COALESCE(SUM(assigned_to_user_id IS NOT NULL AND assigned_staff_profile_id IS NOT NULL AND assigned_to_user_id = assigned_staff_profile_id), 0) AS matched_canonical_values,
+        COALESCE(SUM(assigned_to_user_id IS NOT NULL AND (assigned_staff_profile_id IS NULL OR assigned_to_user_id <> assigned_staff_profile_id)), 0) AS mismatches_or_unresolved
+      FROM iset_case
+    `,
+    { iset_case: ['assigned_to_user_id', 'assigned_staff_profile_id'] }
+  );
+
+  await runSingle(
+    {
+      tableName: 'iset_internal_notification',
+      columnName: 'audience_user_id',
+      canonicalField: 'audience_actor_type + audience_staff_profile_id + audience_applicant_user_id',
+      classification: 'legacy typed notification audience shadow',
+      retiredWhenMissing: true,
+      retirementGate: 'Retire after notification insert/dedupe/query code uses typed audience keys and a typed unique index replaces audience_user_id compatibility matching.',
+    },
+    `
+      SELECT
+        COUNT(*) AS rows_total,
+        COALESCE(SUM(audience_user_id IS NOT NULL), 0) AS shadow_values,
+        COALESCE(SUM(audience_staff_profile_id IS NOT NULL OR audience_applicant_user_id IS NOT NULL), 0) AS canonical_values,
+        COALESCE(SUM(
+          audience_user_id IS NOT NULL
+          AND (
+            (audience_actor_type = 'staff_profile' AND audience_user_id = audience_staff_profile_id)
+            OR (audience_actor_type = 'applicant_user' AND audience_user_id = audience_applicant_user_id)
+          )
+        ), 0) AS matched_canonical_values,
+        COALESCE(SUM(
+          audience_user_id IS NOT NULL
+          AND NOT (
+            (audience_actor_type = 'staff_profile' AND audience_user_id = audience_staff_profile_id)
+            OR (audience_actor_type = 'applicant_user' AND audience_user_id = audience_applicant_user_id)
+          )
+        ), 0) AS mismatches_or_unresolved
+      FROM iset_internal_notification
+    `,
+    { iset_internal_notification: ['audience_user_id', 'audience_actor_type', 'audience_staff_profile_id', 'audience_applicant_user_id'] }
+  );
+
+  await runSingle(
+    {
+      tableName: 'iset_internal_notification_dismissal',
+      columnName: 'user_id',
+      canonicalField: 'viewer_actor_type + viewer_staff_profile_id + viewer_applicant_user_id',
+      classification: 'legacy typed notification dismissal shadow',
+      retiredWhenMissing: true,
+      retirementGate: 'Retire after dismissal lookup/insert code uses typed viewer keys and legacy user_id is removed from uniqueness assumptions.',
+    },
+    `
+      SELECT
+        COUNT(*) AS rows_total,
+        COALESCE(SUM(user_id IS NOT NULL), 0) AS shadow_values,
+        COALESCE(SUM(viewer_staff_profile_id IS NOT NULL OR viewer_applicant_user_id IS NOT NULL), 0) AS canonical_values,
+        COALESCE(SUM(
+          user_id IS NOT NULL
+          AND (
+            (viewer_actor_type = 'staff_profile' AND user_id = viewer_staff_profile_id)
+            OR (viewer_actor_type = 'applicant_user' AND user_id = viewer_applicant_user_id)
+          )
+        ), 0) AS matched_canonical_values,
+        COALESCE(SUM(
+          user_id IS NOT NULL
+          AND NOT (
+            (viewer_actor_type = 'staff_profile' AND user_id = viewer_staff_profile_id)
+            OR (viewer_actor_type = 'applicant_user' AND user_id = viewer_applicant_user_id)
+          )
+        ), 0) AS mismatches_or_unresolved
+      FROM iset_internal_notification_dismissal
+    `,
+    { iset_internal_notification_dismissal: ['user_id', 'viewer_actor_type', 'viewer_staff_profile_id', 'viewer_applicant_user_id'] }
+  );
+
+  await runSingle(
+    {
+      tableName: 'iset_event_receipt',
+      columnName: 'recipient_id',
+      canonicalField: 'viewer_staff_profile_id + viewer_applicant_user_id',
+      classification: 'legacy event read-state principal shadow',
+      retiredWhenMissing: true,
+      retirementGate: 'Retire only after event receipt primary/unique keys and shared emitter queries move to typed viewer fields; unresolved legacy recipients must be quarantined rather than guessed.',
+    },
+    `
+      SELECT
+        COUNT(*) AS rows_total,
+        COALESCE(SUM(recipient_id IS NOT NULL AND recipient_id <> ''), 0) AS shadow_values,
+        COALESCE(SUM(viewer_staff_profile_id IS NOT NULL OR viewer_applicant_user_id IS NOT NULL), 0) AS canonical_values,
+        COALESCE(SUM(recipient_id IS NOT NULL AND recipient_id <> '' AND (viewer_staff_profile_id IS NOT NULL OR viewer_applicant_user_id IS NOT NULL)), 0) AS matched_canonical_values,
+        COALESCE(SUM(viewer_staff_profile_id IS NULL AND viewer_applicant_user_id IS NULL), 0) AS mismatches_or_unresolved
+      FROM iset_event_receipt
+    `,
+    { iset_event_receipt: ['recipient_id', 'viewer_staff_profile_id', 'viewer_applicant_user_id'] }
+  );
+
+  await runSingle(
+    {
+      tableName: 'iset_event_entry',
+      columnName: 'actor_id',
+      canonicalField: 'actor_staff_profile_id + actor_applicant_user_id',
+      classification: 'audit actor principal with typed references',
+      retirementGate: 'Do not drop as a simple cleanup. actor_id may be an audit-retained Cognito/system principal; decide rename/redaction only through an audit-retention design.',
+    },
+    `
+      SELECT
+        COUNT(*) AS rows_total,
+        COALESCE(SUM(actor_id IS NOT NULL AND actor_id <> ''), 0) AS shadow_values,
+        COALESCE(SUM(actor_staff_profile_id IS NOT NULL OR actor_applicant_user_id IS NOT NULL), 0) AS canonical_values,
+        COALESCE(SUM(actor_id IS NOT NULL AND actor_id <> '' AND (actor_staff_profile_id IS NOT NULL OR actor_applicant_user_id IS NOT NULL)), 0) AS matched_canonical_values,
+        COALESCE(SUM(
+          (actor_type = 'staff' AND actor_staff_profile_id IS NULL)
+          OR (actor_type = 'applicant' AND actor_applicant_user_id IS NULL)
+        ), 0) AS mismatches_or_unresolved
+      FROM iset_event_entry
+    `,
+    { iset_event_entry: ['actor_id', 'actor_type', 'actor_staff_profile_id', 'actor_applicant_user_id'] }
+  );
+
+  await runSingle(
+    {
+      tableName: 'iset_application_version',
+      columnName: 'created_by_id',
+      canonicalField: 'created_by_staff_profile_id + created_by_user_id',
+      classification: 'legacy/opaque version author principal',
+      retiredWhenMissing: true,
+      retirementGate: 'Retire after version display and restore paths use typed author fields exclusively, and TEST/PROD migration confirms no unresolved historical opaque author values.',
+    },
+    `
+      SELECT
+        COUNT(*) AS rows_total,
+        COALESCE(SUM(created_by_id IS NOT NULL AND created_by_id <> ''), 0) AS shadow_values,
+        COALESCE(SUM(created_by_staff_profile_id IS NOT NULL OR created_by_user_id IS NOT NULL), 0) AS canonical_values,
+        COALESCE(SUM(created_by_id IS NOT NULL AND created_by_id <> '' AND (created_by_staff_profile_id IS NOT NULL OR created_by_user_id IS NOT NULL)), 0) AS matched_canonical_values,
+        COALESCE(SUM(created_by_id IS NOT NULL AND created_by_id <> '' AND created_by_staff_profile_id IS NULL AND created_by_user_id IS NULL), 0) AS mismatches_or_unresolved
+      FROM iset_application_version
+    `,
+    { iset_application_version: ['created_by_id', 'created_by_staff_profile_id', 'created_by_user_id'] }
+  );
+
+  await runSingle(
+    {
+      tableName: 'iset_case',
+      columnName: 'application_id',
+      canonicalField: 'iset_application.case_id',
+      classification: 'legacy case-side primary application pointer',
+      retirementGate: 'Retire after reads use iset_application.case_id for the one-case-many-applications model and TEST/PROD reports no bidirectional mismatches.',
+      retiredWhenMissing: true,
+    },
+    `
+      SELECT
+        COUNT(*) AS rows_total,
+        COALESCE(SUM(c.application_id IS NOT NULL), 0) AS shadow_values,
+        (SELECT COALESCE(SUM(a.case_id IS NOT NULL), 0) FROM iset_application a) AS canonical_values,
+        COALESCE(SUM(c.application_id IS NOT NULL AND a.id IS NOT NULL AND a.case_id = c.id), 0) AS matched_canonical_values,
+        COALESCE(SUM(c.application_id IS NOT NULL AND (a.id IS NULL OR a.case_id <> c.id)), 0) AS mismatches_or_unresolved
+      FROM iset_case c
+      LEFT JOIN iset_application a ON a.id = c.application_id
+    `,
+    { iset_case: ['application_id'], iset_application: ['case_id'] }
+  );
+
+  return rows;
 }
 
 async function buildChecks(conn) {
   const checks = [];
   const hasCaseAssignedStaffProfileId = await columnExists(conn, 'iset_case', 'assigned_staff_profile_id');
+  const hasCaseLegacyAssignedToUserId = await columnExists(conn, 'iset_case', 'assigned_to_user_id');
+  const hasCaseLegacyApplicationId = await columnExists(conn, 'iset_case', 'application_id');
   const hasMessageActorColumns = await columnExists(conn, 'messages', 'sender_actor_type')
     && await columnExists(conn, 'messages', 'recipient_actor_type')
     && await columnExists(conn, 'messages', 'sender_user_id')
     && await columnExists(conn, 'messages', 'recipient_user_id')
     && await columnExists(conn, 'messages', 'sender_staff_profile_id')
     && await columnExists(conn, 'messages', 'recipient_staff_profile_id');
+  const hasMessageLegacyParticipantColumns = await columnExists(conn, 'messages', 'sender_id')
+    && await columnExists(conn, 'messages', 'recipient_id');
   const hasMessageAttachmentClientId = await columnExists(conn, 'message_attachment', 'client_id');
+  const hasInternalNotificationTypedAudience = await columnExists(conn, 'iset_internal_notification', 'audience_actor_type')
+    && await columnExists(conn, 'iset_internal_notification', 'audience_staff_profile_id')
+    && await columnExists(conn, 'iset_internal_notification', 'audience_applicant_user_id')
+    && await columnExists(conn, 'iset_internal_notification_dismissal', 'viewer_actor_type')
+    && await columnExists(conn, 'iset_internal_notification_dismissal', 'viewer_staff_profile_id')
+    && await columnExists(conn, 'iset_internal_notification_dismissal', 'viewer_applicant_user_id');
+  const hasInternalNotificationAudienceShadow = await columnExists(conn, 'iset_internal_notification', 'audience_user_id');
+  const hasInternalNotificationDismissalShadow = await columnExists(conn, 'iset_internal_notification_dismissal', 'user_id');
+  const hasEventEntryTypedActorRefs = await columnExists(conn, 'iset_event_entry', 'actor_staff_profile_id')
+    && await columnExists(conn, 'iset_event_entry', 'actor_applicant_user_id');
+  const hasEventReceiptTypedViewerRefs = await columnExists(conn, 'iset_event_receipt', 'viewer_staff_profile_id')
+    && await columnExists(conn, 'iset_event_receipt', 'viewer_applicant_user_id');
+  const hasEventReceiptLegacyRecipientId = await columnExists(conn, 'iset_event_receipt', 'recipient_id');
+  const hasApplicationVersionTypedAuthorRefs = await columnExists(conn, 'iset_application_version', 'created_by_staff_profile_id')
+    && await columnExists(conn, 'iset_application_version', 'created_by_user_id');
+  const hasApplicationVersionLegacyCreatedById = await columnExists(conn, 'iset_application_version', 'created_by_id');
   const caseAssignedStaffJoinExpr = hasCaseAssignedStaffProfileId
-    ? 'COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)'
+    ? (hasCaseLegacyAssignedToUserId
+      ? 'COALESCE(c.assigned_staff_profile_id, c.assigned_to_user_id)'
+      : 'c.assigned_staff_profile_id')
     : 'c.assigned_to_user_id';
-  const caseAssignmentDomainSql = hasCaseAssignedStaffProfileId
+  const caseAssignmentDomainSql = hasCaseAssignedStaffProfileId && hasCaseLegacyAssignedToUserId
     ? `
       SELECT
         COUNT(*) AS total_cases,
@@ -285,6 +612,24 @@ async function buildChecks(conn) {
       LEFT JOIN staff_profiles sp_explicit ON sp_explicit.id = c.assigned_staff_profile_id
       LEFT JOIN staff_profiles sp_legacy ON sp_legacy.id = c.assigned_to_user_id
       LEFT JOIN \`user\` u_legacy ON u_legacy.id = c.assigned_to_user_id
+    `
+    : hasCaseAssignedStaffProfileId
+      ? `
+      SELECT
+        COUNT(*) AS total_cases,
+        0 AS legacy_assigned_cases,
+        SUM(c.assigned_staff_profile_id IS NOT NULL) AS explicit_assigned_cases,
+        SUM(c.assigned_staff_profile_id IS NOT NULL AND sp_explicit.id IS NOT NULL) AS explicit_matches_staff_profile,
+        SUM(c.assigned_staff_profile_id IS NOT NULL AND sp_explicit.id IS NULL) AS explicit_matches_no_staff_profile,
+        0 AS legacy_matches_staff_profile,
+        0 AS legacy_matches_shared_user,
+        0 AS legacy_matches_both_domains,
+        0 AS legacy_matches_neither_domain,
+        0 AS legacy_only_assigned,
+        SUM(c.assigned_staff_profile_id IS NOT NULL) AS explicit_only_assigned,
+        0 AS assignment_column_drift
+      FROM iset_case c
+      LEFT JOIN staff_profiles sp_explicit ON sp_explicit.id = c.assigned_staff_profile_id
     `
     : `
       SELECT
@@ -323,6 +668,197 @@ async function buildChecks(conn) {
     totalRows: 0,
   });
 
+  checks.push({
+    title: 'Legacy compatibility shadow retirement inventory',
+    severity: 'medium',
+    description: 'Retirement readiness for known compatibility shadows. Zero mismatches means data is aligned; it does not mean the field is safe to drop until the listed code and migration gate is complete.',
+    rows: await legacyShadowRetirementInventory(conn),
+    totalRows: 0,
+  });
+
+  if (await tableExists(conn, 'iset_application_version')) {
+    if (hasApplicationVersionTypedAuthorRefs) {
+      await runCheck(conn, checks, {
+        title: 'Application version typed author counts',
+        severity: 'medium',
+        description: hasApplicationVersionLegacyCreatedById
+          ? 'Application version authors should use typed staff-profile/local-user references; created_by_id remains compatibility text until retired.'
+          : 'Application version authors use typed staff-profile/local-user references; legacy created_by_id is physically retired in this schema.',
+        requires: ['iset_application_version', 'staff_profiles', 'user'],
+        sql: `
+          SELECT
+            COUNT(*) AS versions,
+            COALESCE(SUM(created_by_staff_profile_id IS NOT NULL), 0) AS staff_profile_author_refs,
+            COALESCE(SUM(created_by_user_id IS NOT NULL), 0) AS local_user_author_refs,
+            ${hasApplicationVersionLegacyCreatedById
+              ? "COALESCE(SUM(created_by_id IS NOT NULL AND created_by_id <> ''), 0)"
+              : '0'} AS legacy_created_by_id_values,
+            ${hasApplicationVersionLegacyCreatedById
+              ? "COALESCE(SUM(created_by_id REGEXP '^[0-9]+$'), 0)"
+              : '0'} AS legacy_numeric_created_by_id_values,
+            COALESCE(SUM(created_by_staff_profile_id IS NOT NULL AND sp.id IS NULL), 0) AS missing_staff_profile_author,
+            COALESCE(SUM(created_by_user_id IS NOT NULL AND u.id IS NULL), 0) AS missing_user_author,
+            ${hasApplicationVersionLegacyCreatedById
+              ? "COALESCE(SUM(created_by_id IS NOT NULL AND created_by_id <> '' AND created_by_staff_profile_id IS NULL AND created_by_user_id IS NULL), 0)"
+              : '0'} AS unresolved_legacy_author_values
+          FROM iset_application_version v
+          LEFT JOIN staff_profiles sp ON sp.id = v.created_by_staff_profile_id
+          LEFT JOIN \`user\` u ON u.id = v.created_by_user_id
+        `,
+      });
+    } else {
+      checks.push({
+        title: 'Application version typed author counts',
+        severity: 'medium',
+        description: 'Application version typed author columns are not present in this database yet.',
+        rows: [{ status: 'typed author columns missing' }],
+        totalRows: 1,
+      });
+    }
+  }
+
+  await runCheck(conn, checks, {
+    title: 'Application and CFA lineage relationship counts',
+    severity: 'high',
+    description: 'Counts missing application submission/version links and CFA case/version/document/participant targets before FK hardening.',
+    requires: [
+      'iset_application',
+      'iset_application_submission',
+      'iset_application_version',
+      'cfa_series',
+      'cfa_version',
+      'cfa_version_documents',
+      'iset_case',
+      'iset_document',
+      'user',
+    ],
+    sql: `
+      SELECT
+        (SELECT COUNT(*)
+           FROM iset_application a
+           LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+          WHERE a.submission_id IS NOT NULL
+            AND s.id IS NULL) AS applications_missing_submission,
+        (SELECT COUNT(*)
+           FROM iset_application_version av
+           LEFT JOIN iset_application a ON a.id = av.application_id
+          WHERE a.id IS NULL) AS application_versions_missing_application,
+        (SELECT COUNT(*)
+           FROM cfa_series cs
+           LEFT JOIN iset_case c ON c.id = cs.case_id
+          WHERE c.id IS NULL) AS cfa_series_missing_case,
+        (SELECT COUNT(*)
+           FROM cfa_version cv
+           LEFT JOIN cfa_series cs ON cs.id = cv.series_id
+          WHERE cs.id IS NULL) AS cfa_versions_missing_series,
+        (SELECT COUNT(*)
+           FROM cfa_version cv
+           LEFT JOIN cfa_version sup ON sup.id = cv.supersedes_version_id
+          WHERE cv.supersedes_version_id IS NOT NULL
+            AND sup.id IS NULL) AS cfa_versions_missing_supersedes_version,
+        (SELECT COUNT(*)
+           FROM cfa_version cv
+           LEFT JOIN \`user\` u ON u.id = cv.signed_by_participant_id
+          WHERE cv.signed_by_participant_id IS NOT NULL
+            AND u.id IS NULL) AS cfa_versions_missing_signed_participant,
+        (SELECT COUNT(*)
+           FROM cfa_version_documents cvd
+           LEFT JOIN cfa_version cv ON cv.id = cvd.cfa_version_id
+          WHERE cv.id IS NULL) AS cfa_documents_missing_version,
+        (SELECT COUNT(*)
+           FROM cfa_version_documents cvd
+           LEFT JOIN iset_document d ON d.id = cvd.document_id
+          WHERE d.id IS NULL) AS cfa_documents_missing_document,
+        (SELECT COUNT(*)
+           FROM cfa_version_documents cvd
+           JOIN cfa_version cv ON cv.id = cvd.cfa_version_id
+           JOIN cfa_series cs ON cs.id = cv.series_id
+           JOIN iset_case c ON c.id = cs.case_id
+           JOIN iset_document d ON d.id = cvd.document_id
+          WHERE d.case_id IS NULL
+             OR d.client_id IS NULL
+             OR d.case_id <> cs.case_id
+             OR d.client_id <> c.client_id) AS cfa_documents_case_or_client_mismatch
+    `,
+  });
+
+  await runCheck(conn, checks, {
+    title: 'Remaining relationship hardening counts',
+    severity: 'high',
+    description: 'Counts missing targets for the next FK-hardening relationships. Workflow IDs are reported separately because current portal runtime stores string workflow keys such as iset-v1, not numeric workflow table IDs.',
+    requires: [
+      'client_applicant_account_event',
+      'client',
+      'input_json_state',
+      'iset_case_assessment',
+      'budget_pot',
+      'iset_case_reminder',
+      'iset_case_action_plan',
+      'staff_profiles',
+      'canada_region',
+      'iset_application_submission',
+      'iset_application_draft_dynamic',
+      'workflow',
+    ],
+    sql: `
+      SELECT
+        (SELECT COUNT(*)
+           FROM client_applicant_account_event e
+           LEFT JOIN client c ON c.id = e.client_id
+          WHERE c.id IS NULL) AS client_account_events_missing_client,
+        (SELECT COUNT(*)
+           FROM input_json_state s
+           LEFT JOIN client c ON c.id = s.client_id
+          WHERE s.client_id IS NOT NULL
+            AND c.id IS NULL) AS input_json_state_missing_client,
+        (SELECT COUNT(*)
+           FROM iset_case_assessment a
+           LEFT JOIN budget_pot bp ON bp.id = a.intervention_budget_pot_id
+          WHERE a.intervention_budget_pot_id IS NOT NULL
+            AND bp.id IS NULL) AS case_assessments_missing_intervention_budget_pot,
+        (SELECT COUNT(*)
+           FROM iset_case_reminder r
+           LEFT JOIN iset_case_action_plan ap ON ap.id = r.action_plan_id
+          WHERE r.action_plan_id IS NOT NULL
+            AND ap.id IS NULL) AS case_reminders_missing_action_plan,
+        (SELECT COUNT(*)
+           FROM staff_profiles sp
+           LEFT JOIN canada_region cr ON cr.region_id = sp.region_id
+          WHERE sp.region_id IS NOT NULL
+            AND cr.region_id IS NULL) AS staff_profiles_missing_region,
+        (SELECT COUNT(*)
+           FROM iset_application_submission s
+           LEFT JOIN workflow wid
+             ON CONVERT(CAST(wid.id AS CHAR) USING utf8mb4) COLLATE utf8mb4_unicode_ci
+              = CONVERT(s.workflow_id USING utf8mb4) COLLATE utf8mb4_unicode_ci
+           LEFT JOIN workflow wn
+             ON CONVERT(wn.name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+              = CONVERT(s.workflow_id USING utf8mb4) COLLATE utf8mb4_unicode_ci
+          WHERE wid.id IS NULL
+            AND wn.id IS NULL) AS application_submission_workflow_string_unmatched,
+        (SELECT COUNT(*)
+           FROM input_json_state s
+           LEFT JOIN workflow wid
+             ON CONVERT(CAST(wid.id AS CHAR) USING utf8mb4) COLLATE utf8mb4_unicode_ci
+              = CONVERT(s.workflow_id USING utf8mb4) COLLATE utf8mb4_unicode_ci
+           LEFT JOIN workflow wn
+             ON CONVERT(wn.name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+              = CONVERT(s.workflow_id USING utf8mb4) COLLATE utf8mb4_unicode_ci
+          WHERE wid.id IS NULL
+            AND wn.id IS NULL) AS input_json_state_workflow_string_unmatched,
+        (SELECT COUNT(*)
+           FROM iset_application_draft_dynamic d
+           LEFT JOIN workflow wid
+             ON CONVERT(CAST(wid.id AS CHAR) USING utf8mb4) COLLATE utf8mb4_unicode_ci
+              = CONVERT(d.workflow_id USING utf8mb4) COLLATE utf8mb4_unicode_ci
+           LEFT JOIN workflow wn
+             ON CONVERT(wn.name USING utf8mb4) COLLATE utf8mb4_unicode_ci
+              = CONVERT(d.workflow_id USING utf8mb4) COLLATE utf8mb4_unicode_ci
+          WHERE wid.id IS NULL
+            AND wn.id IS NULL) AS draft_dynamic_workflow_string_unmatched
+    `,
+  });
+
   await runCheck(conn, checks, {
     title: 'Database object summary',
     severity: 'info',
@@ -338,7 +874,7 @@ async function buildChecks(conn) {
   await runCheck(conn, checks, {
     title: 'Privacy-sensitive FK delete rules',
     severity: 'high',
-    description: 'Delete rules for scope-preserving message, document, signing-request, escalation, and task relationships. SET NULL here can silently detach private records from their case/client/applicant context.',
+    description: 'Delete rules for scope-preserving message, document, signing-request, escalation, task, notification, upload, lock, application, and CFA relationships. SET NULL here can silently detach private records from their case/client/applicant context or turn targeted records into broad records.',
     sql: `
       SELECT table_name, constraint_name, referenced_table_name, delete_rule
         FROM information_schema.referential_constraints
@@ -351,6 +887,35 @@ async function buildChecks(conn) {
              'fk_messages_recipient_user',
              'fk_messages_sender_staff_profile',
              'fk_messages_recipient_staff_profile'
+           ))
+           OR (table_name = 'iset_case' AND constraint_name IN (
+             'fk_iset_case_assigned_staff_profile',
+             'fk_iset_case_legacy_assigned_staff_profile'
+           ))
+           OR (table_name = 'iset_application' AND constraint_name IN (
+             'fk_iset_application_submission_id',
+             'fk_iset_application_client_id',
+             'fk_iset_application_case_id'
+           ))
+           OR (table_name = 'iset_application_version' AND constraint_name IN (
+             'fk_iset_application_version_application',
+             'fk_iset_application_version_created_staff_profile',
+             'fk_iset_application_version_created_user'
+           ))
+           OR (table_name = 'cfa_series' AND constraint_name IN (
+             'fk_cfa_series_case',
+             'fk_cfa_series_created_by_staff_profile'
+           ))
+           OR (table_name = 'cfa_version' AND constraint_name IN (
+             'fk_cfa_version_series',
+             'fk_cfa_version_supersedes',
+             'fk_cfa_version_signed_participant',
+             'fk_cfa_version_created_by_staff_profile',
+             'fk_cfa_version_sent_by_staff_profile'
+           ))
+           OR (table_name = 'cfa_version_documents' AND constraint_name IN (
+             'fk_cfa_version_documents_version',
+             'fk_cfa_version_documents_document'
            ))
            OR (table_name = 'message_attachment' AND constraint_name IN (
              'fk_message_attachment_message',
@@ -384,15 +949,55 @@ async function buildChecks(conn) {
              'fk_case_task_created_by_user',
              'fk_case_task_updated_by_user'
            ))
+           OR (table_name = 'iset_internal_notification' AND constraint_name IN (
+             'fk_internal_notification_staff_profile',
+             'fk_internal_notification_applicant_user'
+           ))
+           OR (table_name = 'iset_internal_notification_dismissal' AND constraint_name IN (
+             'fk_internal_notification_dismissal_notification',
+             'fk_internal_notification_dismissal_staff_profile',
+             'fk_internal_notification_dismissal_applicant_user'
+           ))
+           OR (table_name = 'pending_uploads' AND constraint_name IN (
+             'fk_pending_uploads_user'
+           ))
+           OR (table_name = 'application_lock' AND constraint_name IN (
+             'fk_application_lock_application'
+           ))
+           OR (table_name = 'client_applicant_account_event' AND constraint_name IN (
+             'fk_client_applicant_account_event_client',
+             'fk_client_applicant_account_event_actor_staff'
+           ))
+           OR (table_name = 'input_json_state' AND constraint_name IN (
+             'fk_input_json_state_user',
+             'fk_input_json_state_client'
+           ))
+           OR (table_name = 'iset_case_assessment' AND constraint_name IN (
+             'fk_iset_case_assessment_case',
+             'fk_case_assessment_intervention_budget_pot'
+           ))
+           OR (table_name = 'iset_case_reminder' AND constraint_name IN (
+             'fk_case_reminder_case',
+             'fk_case_reminder_application',
+             'fk_case_reminder_action_plan',
+             'fk_case_reminder_intervention',
+             'fk_case_reminder_assigned_to',
+             'fk_case_reminder_completed_by',
+             'fk_case_reminder_created_by',
+             'fk_case_reminder_updated_by'
+           ))
+           OR (table_name = 'staff_profiles' AND constraint_name IN (
+             'fk_staff_profiles_region'
+           ))
          )
        ORDER BY table_name, constraint_name
     `,
   });
 
   await runCheck(conn, checks, {
-    title: 'Message/document privacy CHECK constraints',
+    title: 'Privacy CHECK constraints',
     severity: 'high',
-    description: 'CHECK constraints that prevent unscoped secure messages, ambiguous message actors, and privacy-sensitive documents without required lineage.',
+    description: 'CHECK constraints that prevent unscoped secure messages, ambiguous message/notification/event actors, and privacy-sensitive documents without required lineage.',
     sql: `
       SELECT tc.table_name, cc.constraint_name
         FROM information_schema.table_constraints tc
@@ -408,7 +1013,12 @@ async function buildChecks(conn) {
            'chk_iset_document_application_submission_scope',
            'chk_iset_document_manual_upload_scope',
            'chk_iset_document_secure_message_attachment_scope',
-           'chk_iset_document_system_generated_scope'
+           'chk_iset_document_system_generated_scope',
+           'chk_internal_notification_audience_scope',
+           'chk_internal_notification_audience_typed_scope',
+           'chk_internal_notification_dismissal_viewer_scope',
+           'chk_internal_notification_dismissal_typed_viewer_scope',
+           'chk_iset_event_entry_typed_actor_scope'
          )
        ORDER BY tc.table_name, cc.constraint_name
     `,
@@ -429,13 +1039,55 @@ async function buildChecks(conn) {
   await runCheck(conn, checks, {
     title: 'ID-like columns without foreign keys',
     severity: 'high',
-    description: 'Relationship-looking columns with no FK. This is an inventory, not proof every column needs a constraint.',
+    description: 'Relationship-looking columns with no FK. The classification column separates row relationships from runtime keys, external references, audit principals, and legacy surfaces.',
     sql: `
       SELECT
         c.table_name,
         c.column_name,
         c.column_type,
         c.is_nullable,
+        CASE
+          WHEN c.table_name = 'application_lock' AND c.column_name = 'owner_user_id'
+            THEN 'opaque lock owner principal'
+          WHEN c.table_name IN ('input_json_state', 'iset_application_draft_dynamic', 'iset_application_submission') AND c.column_name = 'workflow_id'
+            THEN 'runtime workflow string key'
+          WHEN c.table_name = 'iset_event_entry' AND c.column_name = 'actor_id'
+            THEN 'audit actor principal text'
+          WHEN c.table_name = 'iset_event_entry' AND c.column_name = 'subject_id'
+            THEN 'polymorphic event subject id'
+          WHEN c.table_name = 'iset_event_entry' AND c.column_name IN ('correlation_id', 'tracking_id')
+            THEN 'event correlation/reference token'
+          WHEN c.table_name IN ('budget_pot', 'budget_snapshot_pot') AND c.column_name = 'agreement_id'
+            THEN 'external agreement/reference label'
+          WHEN c.table_name = 'ptma' AND c.column_name = 'iset_agreement_id'
+            THEN 'external ISET agreement reference'
+          WHEN c.table_name = 'finance_saved_view' AND c.column_name = 'budget_version_id'
+            THEN 'saved-view budget version key'
+          WHEN c.table_name = 'payment_packet_communication' AND c.column_name = 'provider_message_id'
+            THEN 'external provider message id'
+          WHEN c.table_name = 'pending_uploads' AND c.column_name = 'upload_id'
+            THEN 'opaque upload token primary key'
+          WHEN c.table_name = 'staff_tutorial_progress' AND c.column_name = 'tutorial_id'
+            THEN 'static tutorial definition key'
+          WHEN c.table_name = 'user_session_audit' AND c.column_name = 'user_id'
+            THEN 'opaque session principal'
+          WHEN c.table_name = 'canada_region' AND c.column_name = 'region_id'
+            THEN 'lookup table primary key'
+          WHEN c.table_name = 'zzz_legacy_documents'
+            THEN 'retired legacy document upload experiment'
+          ELSE 'unclassified relationship-looking id'
+        END AS classification,
+        CASE
+          WHEN c.table_name IN ('input_json_state', 'iset_application_draft_dynamic', 'iset_application_submission') AND c.column_name = 'workflow_id'
+            THEN 'Do not coerce to workflow.id; add an explicit workflow key model before constraining.'
+          WHEN c.table_name = 'zzz_legacy_documents'
+            THEN 'Fail-closed retirement migration drops the table only when empty.'
+          WHEN c.table_name IN ('application_lock', 'iset_event_entry', 'user_session_audit')
+            THEN 'Retain as audit/runtime principal text unless a separate retention design renames or redacts it.'
+          WHEN c.table_name IN ('budget_pot', 'budget_snapshot_pot', 'ptma', 'finance_saved_view', 'payment_packet_communication', 'pending_uploads', 'staff_tutorial_progress', 'canada_region')
+            THEN 'Document as non-row identifier; no FK expected.'
+          ELSE 'Review before adding any FK.'
+        END AS next_action,
         COALESCE(GROUP_CONCAT(DISTINCT s.index_name ORDER BY s.index_name SEPARATOR ', '), '') AS indexes
       FROM information_schema.columns c
       LEFT JOIN information_schema.key_column_usage k
@@ -460,13 +1112,32 @@ async function buildChecks(conn) {
   await runCheck(conn, checks, {
     title: 'User-like columns without a user-table FK',
     severity: 'high',
-    description: 'Columns that read like shared user IDs, sender/recipient IDs, or owner user IDs but are not constrained to user(id).',
+    description: 'Columns that read like shared user IDs, sender/recipient IDs, or owner user IDs but are not constrained to user(id). Classification separates staff-profile shadows and opaque actor IDs from unresolved risks.',
     sql: `
       SELECT
         c.table_name,
         c.column_name,
         c.column_type,
         COALESCE(MAX(k.referenced_table_name), '') AS referenced_table,
+        CASE
+          WHEN c.table_name = 'iset_case' AND c.column_name = 'assigned_to_user_id'
+            THEN 'legacy staff-profile assignment shadow'
+          WHEN c.table_name = 'iset_internal_notification' AND c.column_name = 'audience_user_id'
+            THEN 'legacy typed notification audience shadow'
+          WHEN c.table_name = 'iset_internal_notification_dismissal' AND c.column_name = 'user_id'
+            THEN 'legacy typed notification viewer shadow'
+          WHEN c.table_name = 'application_lock' AND c.column_name = 'owner_user_id'
+            THEN 'opaque lock owner principal'
+          WHEN c.table_name = 'iset_event_receipt' AND c.column_name = 'recipient_id'
+            THEN 'legacy event read-state principal shadow'
+          WHEN c.table_name = 'user_session_audit' AND c.column_name = 'user_id'
+            THEN 'opaque session principal'
+          WHEN c.table_name = 'iset_application_version' AND c.column_name = 'created_by_id'
+            THEN 'opaque version actor principal'
+          WHEN c.table_name IN ('jordan_application', 'jordan_application_draft')
+            THEN 'retired legacy jordan application identity'
+          ELSE 'unclassified'
+        END AS classification,
         COALESCE(GROUP_CONCAT(DISTINCT s.index_name ORDER BY s.index_name SEPARATOR ', '), '') AS indexes
       FROM information_schema.columns c
       LEFT JOIN information_schema.key_column_usage k
@@ -617,15 +1288,15 @@ async function buildChecks(conn) {
     sql: `
       SELECT
         COUNT(*) AS messages,
-        SUM(su.id IS NULL) AS missing_sender_user,
-        SUM(ru.id IS NULL) AS missing_recipient_user,
+        SUM(m.sender_user_id IS NOT NULL AND su.id IS NULL) AS missing_sender_user,
+        SUM(m.recipient_user_id IS NOT NULL AND ru.id IS NULL) AS missing_recipient_user,
         SUM(m.case_id IS NULL) AS messages_without_case_id,
         SUM(m.application_id IS NULL) AS messages_without_application_id,
         SUM(m.case_id IS NOT NULL AND c.id IS NULL) AS missing_case,
         SUM(m.application_id IS NOT NULL AND a.id IS NULL) AS missing_application
       FROM messages m
-      LEFT JOIN \`user\` su ON su.id = m.sender_id
-      LEFT JOIN \`user\` ru ON ru.id = m.recipient_id
+      LEFT JOIN \`user\` su ON su.id = m.sender_user_id
+      LEFT JOIN \`user\` ru ON ru.id = m.recipient_user_id
       LEFT JOIN iset_case c ON c.id = m.case_id
       LEFT JOIN iset_application a ON a.id = m.application_id
     `,
@@ -726,7 +1397,7 @@ async function buildChecks(conn) {
         SUM(NOT ${typedCaseMessageSideValid('recipient')}) AS recipient_actor_not_case_applicant_or_staff
       FROM messages m
       JOIN iset_case c ON c.id = m.case_id
-      LEFT JOIN iset_application a ON a.id = COALESCE(m.application_id, c.application_id)
+      LEFT JOIN iset_application a ON a.id = COALESCE(m.application_id, ${casePrimaryApplicationIdSql('c')})
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN client cl ON cl.id = COALESCE(a.client_id, c.client_id)
       LEFT JOIN staff_profiles sender_sp ON sender_sp.id = m.sender_staff_profile_id
@@ -762,7 +1433,7 @@ async function buildChecks(conn) {
         ) AS recipient_not_current_case_candidate
       FROM messages m
       JOIN iset_case c ON c.id = m.case_id
-      LEFT JOIN iset_application a ON a.id = COALESCE(m.application_id, c.application_id)
+      LEFT JOIN iset_application a ON a.id = COALESCE(m.application_id, ${casePrimaryApplicationIdSql('c')})
       LEFT JOIN client cl ON cl.id = COALESCE(a.client_id, c.client_id)
       LEFT JOIN staff_profiles sp ON sp.id = ${caseAssignedStaffJoinExpr}
       LEFT JOIN \`user\` staff_user_by_sub
@@ -788,6 +1459,64 @@ async function buildChecks(conn) {
     sql: caseMessageParticipantSql,
   });
 
+  const messageItemOwnerNotCanonicalParticipantExpr = hasMessageActorColumns
+    ? `SUM(
+        m.id IS NOT NULL
+        AND NOT (
+          COALESCE(mi.owner_user_id = m.sender_user_id, 0)
+          OR COALESCE(mi.owner_user_id = m.recipient_user_id, 0)
+        )
+      )`
+    : hasMessageLegacyParticipantColumns
+      ? `SUM(
+          m.id IS NOT NULL
+          AND NOT (
+            COALESCE(mi.owner_user_id = m.sender_id, 0)
+            OR COALESCE(mi.owner_user_id = m.recipient_id, 0)
+          )
+        )`
+      : 'NULL';
+  const messageItemOwnerNotLegacyParticipantExpr = hasMessageLegacyParticipantColumns
+    ? `SUM(
+        m.id IS NOT NULL
+        AND NOT (
+          COALESCE(mi.owner_user_id = m.sender_id, 0)
+          OR COALESCE(mi.owner_user_id = m.recipient_id, 0)
+        )
+      )`
+    : 'NULL';
+  const messageItemSampleLegacyColumns = hasMessageLegacyParticipantColumns
+    ? 'm.sender_id, m.recipient_id,'
+    : 'NULL AS sender_id, NULL AS recipient_id,';
+  const messageItemSampleCanonicalAnomaly = hasMessageActorColumns
+    ? `WHEN NOT (
+          COALESCE(mi.owner_user_id = m.sender_user_id, 0)
+          OR COALESCE(mi.owner_user_id = m.recipient_user_id, 0)
+        ) THEN 'owner_not_typed_user_participant'`
+    : hasMessageLegacyParticipantColumns
+      ? `WHEN NOT (
+            COALESCE(mi.owner_user_id = m.sender_id, 0)
+            OR COALESCE(mi.owner_user_id = m.recipient_id, 0)
+          ) THEN 'owner_not_sender_or_recipient'`
+      : '';
+  const messageItemSampleWhereParticipantAnomaly = hasMessageActorColumns
+    ? `OR (
+         m.id IS NOT NULL
+         AND NOT (
+           COALESCE(mi.owner_user_id = m.sender_user_id, 0)
+           OR COALESCE(mi.owner_user_id = m.recipient_user_id, 0)
+         )
+       )`
+    : hasMessageLegacyParticipantColumns
+      ? `OR (
+           m.id IS NOT NULL
+           AND NOT (
+             COALESCE(mi.owner_user_id = m.sender_id, 0)
+             OR COALESCE(mi.owner_user_id = m.recipient_id, 0)
+           )
+         )`
+      : '';
+
   await runCheck(conn, checks, {
     title: 'Message item anomaly counts',
     severity: 'high',
@@ -798,22 +1527,9 @@ async function buildChecks(conn) {
         COUNT(*) AS message_items,
         SUM(m.id IS NULL) AS message_items_missing_message,
         SUM(u.id IS NULL) AS message_items_missing_owner_user,
-        SUM(
-          m.id IS NOT NULL
-          AND NOT (
-            COALESCE(mi.owner_user_id = m.sender_id, 0)
-            OR COALESCE(mi.owner_user_id = m.recipient_id, 0)
-          )
-        ) AS message_items_owner_not_sender_or_recipient,
-        ${hasMessageActorColumns
-          ? `SUM(
-              m.id IS NOT NULL
-              AND NOT (
-                COALESCE(mi.owner_user_id = m.sender_user_id, 0)
-                OR COALESCE(mi.owner_user_id = m.recipient_user_id, 0)
-              )
-            )`
-          : 'NULL'} AS message_items_owner_not_typed_user_participant
+        ${messageItemOwnerNotCanonicalParticipantExpr} AS message_items_owner_not_sender_or_recipient,
+        ${hasMessageActorColumns ? messageItemOwnerNotCanonicalParticipantExpr : 'NULL'} AS message_items_owner_not_typed_user_participant,
+        ${messageItemOwnerNotLegacyParticipantExpr} AS message_items_owner_not_legacy_sender_or_recipient
       FROM message_item mi
       LEFT JOIN messages m ON m.id = mi.message_id
       LEFT JOIN \`user\` u ON u.id = mi.owner_user_id
@@ -830,22 +1546,12 @@ async function buildChecks(conn) {
         mi.id AS message_item_id,
         mi.message_id,
         mi.owner_user_id,
-        m.sender_id,
-        m.recipient_id,
+        ${messageItemSampleLegacyColumns}
         ${hasMessageActorColumns ? 'm.sender_user_id, m.recipient_user_id,' : ''}
         CASE
           WHEN m.id IS NULL THEN 'missing_message'
           WHEN u.id IS NULL THEN 'missing_owner_user'
-          ${hasMessageActorColumns
-            ? `WHEN NOT (
-                   COALESCE(mi.owner_user_id = m.sender_user_id, 0)
-                   OR COALESCE(mi.owner_user_id = m.recipient_user_id, 0)
-                 ) THEN 'owner_not_typed_user_participant'`
-            : ''}
-          WHEN NOT (
-                 COALESCE(mi.owner_user_id = m.sender_id, 0)
-                 OR COALESCE(mi.owner_user_id = m.recipient_id, 0)
-               ) THEN 'owner_not_sender_or_recipient'
+          ${messageItemSampleCanonicalAnomaly}
           ELSE 'ok'
         END AS anomaly
       FROM message_item mi
@@ -853,22 +1559,7 @@ async function buildChecks(conn) {
       LEFT JOIN \`user\` u ON u.id = mi.owner_user_id
       WHERE m.id IS NULL
          OR u.id IS NULL
-         ${hasMessageActorColumns
-           ? `OR (
-                m.id IS NOT NULL
-                AND NOT (
-                  COALESCE(mi.owner_user_id = m.sender_user_id, 0)
-                  OR COALESCE(mi.owner_user_id = m.recipient_user_id, 0)
-                )
-              )`
-           : ''}
-         OR (
-              m.id IS NOT NULL
-              AND NOT (
-                COALESCE(mi.owner_user_id = m.sender_id, 0)
-                OR COALESCE(mi.owner_user_id = m.recipient_id, 0)
-              )
-            )
+         ${messageItemSampleWhereParticipantAnomaly}
       ORDER BY mi.id
       LIMIT 50
     `,
@@ -926,7 +1617,7 @@ async function buildChecks(conn) {
       FROM signing_request sr
       LEFT JOIN workflow w ON w.id = sr.workflow_id
       LEFT JOIN iset_case c ON c.id = sr.case_id
-      LEFT JOIN iset_application a ON a.id = c.application_id
+      LEFT JOIN iset_application a ON a.id = ${casePrimaryApplicationIdSql('c')}
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN client cl ON cl.id = COALESCE(a.client_id, c.client_id)
       LEFT JOIN \`user\` participant_user ON participant_user.id = sr.participant_user_id
@@ -1001,6 +1692,253 @@ async function buildChecks(conn) {
   });
 
   await runCheck(conn, checks, {
+    title: 'Internal notification audience and viewer identity counts',
+    severity: 'high',
+    description: 'Internal bell alerts should target typed staff-profile or applicant-user subjects. Legacy audience_user_id/user_id columns are compatibility shadows only where still present.',
+    requires: ['iset_internal_notification', 'iset_internal_notification_dismissal', 'staff_profiles', 'user'],
+    sql: hasInternalNotificationTypedAudience
+      ? `
+      SELECT
+        (SELECT COUNT(*) FROM iset_internal_notification) AS notifications,
+        (SELECT COUNT(*) FROM iset_internal_notification WHERE audience_type = 'user') AS user_audience_notifications,
+        (SELECT COUNT(*) FROM iset_internal_notification WHERE audience_type = 'user' AND audience_actor_type = 'staff_profile') AS staff_profile_audience_notifications,
+        (SELECT COUNT(*) FROM iset_internal_notification WHERE audience_type = 'user' AND audience_actor_type = 'applicant_user') AS applicant_user_audience_notifications,
+        (SELECT COUNT(*)
+           FROM iset_internal_notification n
+           LEFT JOIN staff_profiles sp ON sp.id = n.audience_staff_profile_id
+          WHERE n.audience_actor_type = 'staff_profile'
+            AND sp.id IS NULL) AS missing_audience_staff_profile,
+        (SELECT COUNT(*)
+           FROM iset_internal_notification n
+           LEFT JOIN \`user\` u ON u.id = n.audience_applicant_user_id
+          WHERE n.audience_actor_type = 'applicant_user'
+            AND u.id IS NULL) AS missing_audience_applicant_user,
+        ${hasInternalNotificationAudienceShadow
+          ? `(SELECT COUNT(*)
+           FROM iset_internal_notification n
+          WHERE n.audience_type = 'user'
+            AND (
+              (n.audience_actor_type = 'staff_profile' AND n.audience_user_id <> n.audience_staff_profile_id)
+              OR (n.audience_actor_type = 'applicant_user' AND n.audience_user_id <> n.audience_applicant_user_id)
+              OR n.audience_actor_type IS NULL
+            ))`
+          : '0'} AS legacy_audience_shadow_mismatches,
+        (SELECT COUNT(*) FROM iset_internal_notification_dismissal) AS dismissals,
+        (SELECT COUNT(*) FROM iset_internal_notification_dismissal WHERE viewer_actor_type = 'staff_profile') AS staff_profile_dismissals,
+        (SELECT COUNT(*) FROM iset_internal_notification_dismissal WHERE viewer_actor_type = 'applicant_user') AS applicant_user_dismissals,
+        (SELECT COUNT(*)
+           FROM iset_internal_notification_dismissal d
+           LEFT JOIN staff_profiles sp ON sp.id = d.viewer_staff_profile_id
+          WHERE d.viewer_actor_type = 'staff_profile'
+            AND sp.id IS NULL) AS missing_viewer_staff_profile,
+        (SELECT COUNT(*)
+           FROM iset_internal_notification_dismissal d
+           LEFT JOIN \`user\` u ON u.id = d.viewer_applicant_user_id
+          WHERE d.viewer_actor_type = 'applicant_user'
+            AND u.id IS NULL) AS missing_viewer_applicant_user,
+        ${hasInternalNotificationDismissalShadow
+          ? `(SELECT COUNT(*)
+           FROM iset_internal_notification_dismissal d
+          WHERE (d.viewer_actor_type = 'staff_profile' AND d.user_id <> d.viewer_staff_profile_id)
+             OR (d.viewer_actor_type = 'applicant_user' AND d.user_id <> d.viewer_applicant_user_id)
+             OR d.viewer_actor_type IS NULL)`
+          : '0'} AS legacy_dismissal_shadow_mismatches
+    `
+      : `
+      SELECT
+        (SELECT COUNT(*) FROM iset_internal_notification) AS notifications,
+        (SELECT COUNT(*) FROM iset_internal_notification WHERE audience_type = 'user') AS user_audience_notifications,
+        (SELECT COUNT(*)
+           FROM iset_internal_notification n
+           JOIN staff_profiles sp ON sp.id = n.audience_user_id
+          WHERE n.audience_type = 'user') AS legacy_user_audiences_matching_staff_profile,
+        (SELECT COUNT(*)
+           FROM iset_internal_notification n
+           JOIN \`user\` u ON u.id = n.audience_user_id
+          WHERE n.audience_type = 'user') AS legacy_user_audiences_matching_shared_user,
+        (SELECT COUNT(*)
+           FROM iset_internal_notification n
+           LEFT JOIN staff_profiles sp ON sp.id = n.audience_user_id
+           LEFT JOIN \`user\` u ON u.id = n.audience_user_id
+          WHERE n.audience_type = 'user'
+            AND sp.id IS NULL
+            AND u.id IS NULL) AS legacy_user_audiences_matching_neither,
+        (SELECT COUNT(*) FROM iset_internal_notification_dismissal) AS dismissals,
+        (SELECT COUNT(*)
+           FROM iset_internal_notification_dismissal d
+           JOIN staff_profiles sp ON sp.id = d.user_id) AS legacy_dismissals_matching_staff_profile,
+        (SELECT COUNT(*)
+           FROM iset_internal_notification_dismissal d
+           JOIN \`user\` u ON u.id = d.user_id) AS legacy_dismissals_matching_shared_user,
+        (SELECT COUNT(*)
+           FROM iset_internal_notification_dismissal d
+           LEFT JOIN staff_profiles sp ON sp.id = d.user_id
+           LEFT JOIN \`user\` u ON u.id = d.user_id
+          WHERE sp.id IS NULL
+            AND u.id IS NULL) AS legacy_dismissals_matching_neither
+    `,
+  });
+
+  await runCheck(conn, checks, {
+    title: 'Pending upload user ownership counts',
+    severity: 'high',
+    description: 'Pending upload rows are temporary applicant-owned private upload tokens and should remain constrained to shared user(id).',
+    requires: ['pending_uploads', 'user'],
+    sql: `
+      SELECT
+        COUNT(*) AS pending_uploads,
+        COALESCE(SUM(u.id IS NULL), 0) AS missing_user,
+        COALESCE(SUM(p.expires_at <= NOW()), 0) AS expired_rows
+      FROM pending_uploads p
+      LEFT JOIN \`user\` u ON u.id = p.user_id
+    `,
+  });
+
+  if (await tableExists(conn, 'iset_event_entry')) {
+    if (hasEventEntryTypedActorRefs) {
+      await runCheck(conn, checks, {
+        title: 'Event entry typed actor reference counts',
+        severity: 'medium',
+        description: 'Event actors are typed as staff-profile, applicant-user, or unresolved legacy/system actors. Unresolved staff actors should not be used for authorization.',
+        requires: ['iset_event_entry', 'staff_profiles', 'user'],
+        sql: `
+          SELECT
+            actor_type,
+            COUNT(*) AS rows_total,
+            COALESCE(SUM(actor_staff_profile_id IS NOT NULL), 0) AS typed_staff_profile_refs,
+            COALESCE(SUM(actor_applicant_user_id IS NOT NULL), 0) AS typed_applicant_user_refs,
+            COALESCE(SUM(actor_type = 'staff' AND actor_staff_profile_id IS NULL), 0) AS unresolved_staff_actor_refs,
+            COALESCE(SUM(actor_type = 'applicant' AND actor_applicant_user_id IS NULL), 0) AS unresolved_applicant_actor_refs,
+            COALESCE(SUM(actor_type = 'staff' AND actor_id REGEXP '^[0-9]+$'), 0) AS legacy_numeric_staff_actor_ids,
+            COALESCE(SUM(actor_type = 'staff' AND actor_id IS NOT NULL AND actor_id NOT REGEXP '^[0-9]+$'), 0) AS staff_actor_subject_ids,
+            COALESCE(SUM(actor_type = 'applicant' AND actor_id REGEXP '^[0-9]+$'), 0) AS applicant_numeric_actor_ids
+          FROM iset_event_entry
+          GROUP BY actor_type
+          ORDER BY actor_type
+        `,
+      });
+
+      await runCheck(conn, checks, {
+        title: 'Event entry unresolved actor samples by type',
+        severity: 'medium',
+        description: 'Aggregated event types still lacking typed actor references, without names or payload content.',
+        requires: ['iset_event_entry'],
+        sql: `
+          SELECT
+            event_type,
+            actor_type,
+            actor_id REGEXP '^[0-9]+$' AS actor_id_is_numeric,
+            COUNT(*) AS rows_total
+          FROM iset_event_entry
+          WHERE (actor_type = 'staff' AND actor_staff_profile_id IS NULL)
+             OR (actor_type = 'applicant' AND actor_applicant_user_id IS NULL)
+          GROUP BY event_type, actor_type, actor_id_is_numeric
+          ORDER BY rows_total DESC, event_type
+        `,
+      });
+    } else {
+      checks.push({
+        title: 'Event entry typed actor reference counts',
+        severity: 'medium',
+        description: 'Event actor typed-reference columns are not present in this database yet.',
+        rows: [{ status: 'typed actor columns missing' }],
+        totalRows: 1,
+      });
+    }
+  }
+
+  if (await tableExists(conn, 'iset_event_receipt')) {
+    if (hasEventReceiptTypedViewerRefs) {
+      await runCheck(conn, checks, {
+        title: 'Event receipt typed viewer counts',
+        severity: 'medium',
+        description: 'Event read receipts now keep typed viewer references. Legacy recipient_id is a compatibility shadow only where still present and must not be treated as a shared user-table FK.',
+        requires: ['iset_event_receipt', 'staff_profiles', 'user'],
+        sql: `
+          SELECT
+            COUNT(*) AS receipts,
+            COALESCE(SUM(viewer_staff_profile_id IS NOT NULL), 0) AS staff_profile_viewer_refs,
+            COALESCE(SUM(viewer_applicant_user_id IS NOT NULL), 0) AS applicant_user_viewer_refs,
+            ${hasEventReceiptLegacyRecipientId
+              ? 'COALESCE(SUM(recipient_id IS NOT NULL), 0)'
+              : '0'} AS legacy_recipient_id_values,
+            COALESCE(SUM(viewer_staff_profile_id IS NULL AND viewer_applicant_user_id IS NULL), 0) AS unresolved_legacy_viewer_values,
+            COALESCE(SUM(viewer_staff_profile_id IS NOT NULL AND sp.id IS NULL), 0) AS missing_staff_profile_viewer,
+            COALESCE(SUM(viewer_applicant_user_id IS NOT NULL AND u.id IS NULL), 0) AS missing_applicant_user_viewer
+          FROM iset_event_receipt r
+          LEFT JOIN staff_profiles sp ON sp.id = r.viewer_staff_profile_id
+          LEFT JOIN \`user\` u ON u.id = r.viewer_applicant_user_id
+        `,
+      });
+    } else {
+      checks.push({
+        title: 'Event receipt typed viewer counts',
+        severity: 'medium',
+        description: 'Event receipt typed-viewer columns are not present in this database yet.',
+        rows: [{ status: 'typed viewer columns missing' }],
+        totalRows: 1,
+      });
+    }
+  }
+
+  await runCheck(conn, checks, {
+    title: 'Opaque actor identifier inventory',
+    severity: 'medium',
+    description: 'Known opaque identifiers that are intentionally not shared user(id) FKs without a separate redesign.',
+    requires: ['application_lock', 'iset_event_receipt', 'user_session_audit', 'user'],
+    sql: `
+      SELECT
+        'application_lock' AS table_name,
+        'owner_user_id' AS column_name,
+        'opaque lock owner principal, normally Cognito subject/auth actor' AS classification,
+        COUNT(*) AS rows_total,
+        COALESCE(SUM(owner_user_id REGEXP '^[0-9]+$'), 0) AS numeric_values,
+        COALESCE(SUM(owner_user_id NOT REGEXP '^[0-9]+$'), 0) AS nonnumeric_values,
+        (SELECT COUNT(*)
+           FROM application_lock al
+           JOIN \`user\` u ON CAST(al.owner_user_id AS UNSIGNED) = u.id
+          WHERE al.owner_user_id REGEXP '^[0-9]+$') AS numeric_values_matching_shared_user
+      FROM application_lock
+      UNION ALL
+      ${hasEventReceiptLegacyRecipientId
+        ? `SELECT
+        'iset_event_receipt' AS table_name,
+        'recipient_id' AS column_name,
+        'legacy event read-state principal shadow, typed viewer columns are canonical when present' AS classification,
+        COUNT(*) AS rows_total,
+        COALESCE(SUM(recipient_id REGEXP '^[0-9]+$'), 0) AS numeric_values,
+        COALESCE(SUM(recipient_id NOT REGEXP '^[0-9]+$'), 0) AS nonnumeric_values,
+        (SELECT COUNT(*)
+           FROM iset_event_receipt er
+           JOIN \`user\` u ON CAST(er.recipient_id AS UNSIGNED) = u.id
+          WHERE er.recipient_id REGEXP '^[0-9]+$') AS numeric_values_matching_shared_user
+      FROM iset_event_receipt`
+        : `SELECT
+        'iset_event_receipt' AS table_name,
+        'recipient_id' AS column_name,
+        'legacy event read-state principal shadow (physically retired in this schema)' AS classification,
+        COUNT(*) AS rows_total,
+        0 AS numeric_values,
+        0 AS nonnumeric_values,
+        0 AS numeric_values_matching_shared_user
+      FROM iset_event_receipt`}
+      UNION ALL
+      SELECT
+        'user_session_audit' AS table_name,
+        'user_id' AS column_name,
+        'session-audit auth principal, usually Cognito subject/session identity' AS classification,
+        COUNT(*) AS rows_total,
+        COALESCE(SUM(user_id REGEXP '^[0-9]+$'), 0) AS numeric_values,
+        COALESCE(SUM(user_id NOT REGEXP '^[0-9]+$'), 0) AS nonnumeric_values,
+        (SELECT COUNT(*)
+           FROM user_session_audit usa
+           JOIN \`user\` u ON CAST(usa.user_id AS UNSIGNED) = u.id
+          WHERE usa.user_id REGEXP '^[0-9]+$') AS numeric_values_matching_shared_user
+      FROM user_session_audit
+    `,
+  });
+
+  await runCheck(conn, checks, {
     title: 'Document scope counts by source',
     severity: 'high',
     description: 'Documents missing client, case, application, or applicant-user scope by source.',
@@ -1035,10 +1973,10 @@ async function buildChecks(conn) {
           client_id IS NULL OR case_id IS NULL OR (application_id IS NOT NULL AND applicant_user_id IS NULL)
         )) AS manual_upload_scope_violations,
         SUM(source = 'secure_message_attachment' AND (
-          client_id IS NULL OR case_id IS NULL OR application_id IS NULL OR applicant_user_id IS NULL OR user_id IS NULL OR origin_message_id IS NULL
+          client_id IS NULL OR case_id IS NULL OR applicant_user_id IS NULL OR user_id IS NULL OR origin_message_id IS NULL
         )) AS secure_message_attachment_scope_violations,
         SUM(source = 'system_generated' AND (
-          client_id IS NULL OR case_id IS NULL
+          client_id IS NULL OR case_id IS NULL OR (application_id IS NOT NULL AND applicant_user_id IS NULL)
         )) AS system_generated_scope_violations
       FROM iset_document
     `,
@@ -1113,13 +2051,27 @@ async function buildChecks(conn) {
         (SELECT COUNT(*) FROM iset_application) AS applications,
         (SELECT SUM(client_id IS NULL) FROM iset_application) AS applications_missing_client_id,
         (SELECT SUM(case_id IS NULL) FROM iset_application) AS applications_missing_case_id,
-        (SELECT COUNT(*) FROM iset_case) AS cases,
-        (SELECT SUM(client_id IS NULL) FROM iset_case) AS cases_missing_client_id,
-        (SELECT SUM(application_id IS NOT NULL) FROM iset_case) AS cases_with_application_id,
         (SELECT COUNT(*)
            FROM iset_application a
            JOIN iset_case c ON c.id = a.case_id
-          WHERE c.application_id IS NOT NULL AND c.application_id <> a.id) AS application_case_bidirectional_mismatches,
+          WHERE c.client_id IS NULL) AS applications_missing_case_client_id,
+        (SELECT COUNT(*)
+           FROM iset_application a
+           JOIN iset_case c ON c.id = a.case_id
+          WHERE a.client_id IS NOT NULL
+            AND c.client_id IS NOT NULL
+            AND a.client_id <> c.client_id) AS application_case_client_mismatches,
+        (SELECT COUNT(*) FROM iset_case) AS cases,
+        (SELECT SUM(client_id IS NULL) FROM iset_case) AS cases_missing_client_id,
+        ${hasCaseLegacyApplicationId
+          ? '(SELECT SUM(application_id IS NOT NULL) FROM iset_case)'
+          : '0'} AS cases_with_application_id,
+        ${hasCaseLegacyApplicationId
+          ? `(SELECT COUNT(*)
+               FROM iset_application a
+               JOIN iset_case c ON c.id = a.case_id
+              WHERE c.application_id IS NOT NULL AND c.application_id <> a.id)`
+          : '0'} AS application_case_bidirectional_mismatches,
         (SELECT COUNT(*)
            FROM (SELECT case_id FROM iset_application WHERE case_id IS NOT NULL GROUP BY case_id HAVING COUNT(*) > 1) x) AS cases_with_multiple_applications
     `,
@@ -1128,19 +2080,21 @@ async function buildChecks(conn) {
   await runCheck(conn, checks, {
     title: 'Case/application mismatch samples',
     severity: 'medium',
-    description: 'Sample rows where bidirectional case/application links disagree. IDs only.',
+    description: 'Sample rows where case/application ownership links are missing or disagree. IDs only.',
     requires: ['iset_case', 'iset_application'],
     sql: `
       SELECT
         a.id AS application_id,
         a.case_id AS application_case_id,
         a.client_id AS application_client_id,
-        c.application_id AS case_application_id,
+        ${hasCaseLegacyApplicationId ? 'c.application_id' : 'NULL'} AS case_application_id,
         c.client_id AS case_client_id
       FROM iset_application a
       JOIN iset_case c ON c.id = a.case_id
-      WHERE (c.application_id IS NOT NULL AND c.application_id <> a.id)
-         OR (a.client_id IS NOT NULL AND c.client_id IS NOT NULL AND a.client_id <> c.client_id)
+      WHERE c.client_id IS NULL
+         OR ${hasCaseLegacyApplicationId
+        ? '(c.application_id IS NOT NULL AND c.application_id <> a.id) OR '
+        : ''}(a.client_id IS NOT NULL AND c.client_id IS NOT NULL AND a.client_id <> c.client_id)
       ORDER BY a.id
       LIMIT 50
     `,

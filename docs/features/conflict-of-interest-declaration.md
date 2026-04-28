@@ -2,7 +2,7 @@
 
 Purpose: capture how the assessment workspace records conflict-of-interest attestations now that signing is tracked per staff member. Reference this when updating the coordinator assessment widget, API handlers, or data extracts.
 
-Last Updated: 2026-01-07
+Last Updated: 2026-04-28
 
 ## Key Changes
 
@@ -28,7 +28,8 @@ Last Updated: 2026-01-07
 
 ## UI Requirements
 
-- Coordinator Assessment widget keeps the gate but evaluates it per user (the case unlocks only after **you** sign).
+- Coordinator Assessment widget keeps the gate for case managers and evaluates it per user (the case unlocks only after **you** sign).
+- Members of the NWAC Administrator group are exempt from the widget gate during approval review; their approval workflow is blocked by EI eligibility and normal decision permissions, not by a per-case conflict declaration.
 - Declaration flow must let coordinators explicitly choose between “no conflict” and “I have a potential conflict”, requiring a text disclosure when a conflict is declared.
 - After signing, the widget stores the returned timestamp and the declared choice so it can show “Conflict declaration signed on YYYY-MM-DD (no conflict|conflict declared)”.
 - Info copy under the declaration reminds coordinators that signatures are personal and must be re-done after reassignment.

@@ -26,7 +26,10 @@ import { usePaymentsData } from "../../../finance/widgets/PaymentsDataContext.js
 import { buildApplicantWatchlistIdentity, formatSinDisplay } from "../../../../utils/applicantWatchlist.js";
 import { buildLockConflictMessage } from "../../../../hooks/useApplicationLock.js";
 import { getCaseStatusLabel, normalizeCaseStatus } from "../../../../utils/caseStatus.js";
-import { resolveInterventionStateFields } from "../../../../utils/interventionStatus.js";
+import {
+  isInterventionProposalStatus,
+  resolveInterventionStateFields,
+} from "../../../../utils/interventionStatus.js";
 import ExistingActionPlanModal from "../modals/ExistingActionPlanModal.jsx";
 import ExistingInterventionModal from "../modals/ExistingInterventionModal.jsx";
 
@@ -36,6 +39,95 @@ const AWAITING_SUBMISSION_STATUSES = new Set([
   "awaiting_trigger",
   "released",
 ]);
+
+const parseMetadataObject = value => {
+  if (!value) return null;
+  if (typeof value === "object") return value;
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const interventionTimestamp = intervention => {
+  const candidates = [
+    intervention?.updatedAt,
+    intervention?.updated_at,
+    intervention?.submittedAt,
+    intervention?.submitted_at,
+    intervention?.createdAt,
+    intervention?.created_at,
+  ];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const time = new Date(candidate).getTime();
+    if (Number.isFinite(time)) return time;
+  }
+  return 0;
+};
+
+const isRevisionProposal = intervention => {
+  const metadata = parseMetadataObject(intervention?.metadata);
+  const revision = metadata?.revision && typeof metadata.revision === "object" ? metadata.revision : null;
+  const sourceInterventionId =
+    intervention?.sourceInterventionId ??
+    intervention?.source_intervention_id ??
+    intervention?.revisionSourceInterventionId ??
+    intervention?.revision_source_intervention_id ??
+    revision?.sourceInterventionId ??
+    revision?.source_intervention_id ??
+    null;
+  const proposalKind = String(
+    intervention?.proposalKind ??
+      intervention?.proposal_kind ??
+      metadata?.proposalKind ??
+      metadata?.proposal_kind ??
+      ""
+  )
+    .trim()
+    .toLowerCase();
+  return proposalKind === "revision" || Boolean(sourceInterventionId);
+};
+
+const findLatestOpenInterventionProposal = actionPlans => {
+  let latest = null;
+  const plans = Array.isArray(actionPlans) ? actionPlans : [];
+  plans.forEach(plan => {
+    const interventions = Array.isArray(plan?.interventions) ? plan.interventions : [];
+    interventions.forEach(intervention => {
+      if (!isInterventionProposalStatus(intervention)) return;
+      const state = resolveInterventionStateFields(intervention, { fallbackStatus: null });
+      const reviewStatus = state.reviewStatus || null;
+      if (!reviewStatus) return;
+      const time = interventionTimestamp(intervention);
+      const idScore = Number.isFinite(Number(intervention?.id)) ? Number(intervention.id) : 0;
+      if (latest && (time < latest.time || (time === latest.time && idScore < latest.idScore))) return;
+      latest = {
+        interventionId: intervention?.id ?? null,
+        planId: plan?.id ?? intervention?.actionPlanId ?? intervention?.action_plan_id ?? null,
+        reviewStatus,
+        isRevision: isRevisionProposal(intervention),
+        time,
+        idScore,
+      };
+    });
+  });
+  return latest;
+};
+
+const getInterventionProposalActionLabel = proposal => {
+  if (!proposal) return "Propose new intervention";
+  const target = proposal.isRevision ? "intervention change" : "intervention proposal";
+  if (proposal.reviewStatus === "draft") return `Resume ${target}`;
+  if (proposal.reviewStatus === "changes_requested") return `Update ${target}`;
+  if (proposal.reviewStatus === "submitted" || proposal.reviewStatus === "in_review") {
+    return `View pending ${target}`;
+  }
+  return `Open ${target}`;
+};
 
 const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const {
@@ -525,6 +617,14 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       </Box>
     );
   }, [interventionRollup]);
+  const openInterventionProposalAction = useMemo(
+    () => findLatestOpenInterventionProposal(caseData?.actionPlans),
+    [caseData?.actionPlans]
+  );
+  const interventionProposalActionLabel = useMemo(
+    () => getInterventionProposalActionLabel(openInterventionProposalAction),
+    [openInterventionProposalAction]
+  );
   const quickActions = useMemo(() => {
     const items = [];
     const hasCase = Boolean(caseData?.id);
@@ -551,7 +651,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       items.push({ id: "assign", text: "Assign / reassign" });
     }
     if (canPropose) {
-      items.push({ id: "propose-intervention", text: "Propose new intervention" });
+      items.push({ id: "propose-intervention", text: interventionProposalActionLabel });
     }
     if (isBackloadEligible) {
       items.push({ id: "backload-action-plan", text: "Add existing action plan" });
@@ -599,6 +699,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     isProgramAdmin,
     isRegionalManager,
     canAddToWatchlist,
+    interventionProposalActionLabel,
     caseData?.client?.id,
     pathAccount?.email,
     pathAccountStatusKey,
@@ -1070,12 +1171,24 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         setArchiveModalOpen(true);
       } else if (detail.id === "propose-intervention") {
         setActionError(null);
-        const planId = selectedActionPlanId || caseData?.actionPlans?.[0]?.id || null;
+        const existingProposal = openInterventionProposalAction;
+        const planId = existingProposal?.planId || selectedActionPlanId || caseData?.actionPlans?.[0]?.id || null;
         if (!planId) {
           setActionError("Select an action plan before proposing an intervention.");
           return;
         }
         if (typeof window !== "undefined") {
+          if (existingProposal?.interventionId) {
+            window.dispatchEvent(
+              new CustomEvent("iset:intervention-assessment:select", {
+                detail: {
+                  interventionId: existingProposal.interventionId,
+                  planId,
+                },
+              })
+            );
+            return;
+          }
           window.dispatchEvent(
             new CustomEvent("iset:intervention-assessment:new", {
               detail: { planId },
@@ -1215,6 +1328,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       buildValidationSummary,
       focusFirstAwaitingSubmissionIntervention,
       loadAssignable,
+      openInterventionProposalAction,
       selectedActionPlanId,
       caseData,
       pathAccount?.email,

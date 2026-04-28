@@ -1,7 +1,7 @@
 # Workflow Studio (Intake Authoring)
 **Purpose:** How the admin console builds and edits intake workflows (step library, canvas, props, preview, runtime schema).  
 **Audience:** Engineers extending workflow authoring or adding component props.  
-**Last Updated:** 2026-04-14
+**Last Updated:** 2026-04-27
 
 ## High-level flow
 - **Manage Workflows page** (`src/pages/manageWorkflows.js`): Cloudscape board with four widgets:
@@ -30,6 +30,11 @@
 - **File-upload preview rule**: the real applicant runtime now uses one `Upload` button that conditionally opens `Take photo` plus `Choose file` on likely mobile camera-capable devices; admin previews show a static explanation of that chooser instead of trying to invoke camera/file pickers from the editor surface.
 - **Runtime schema widget** shows the server-generated schema for the selected workflow for sanity checks.
 - **DEV publish parity**: verified on 2026-04-14 that workflow `21` authoring rows rebuild the same `iset_runtime_config(scope='publish', k='workflow.schema.intake')` payload through `buildWorkflowSchema` / `scripts/publish-workflow.js` once timestamp/checksum fields are ignored, so the step library, workflow library, and published runtime row are back in sync for that intake.
+
+## Access Guardrails
+- Workflow/component authoring endpoints are step-editor-only. This includes component template list/update/fix/version/prune, component render/audit endpoints, workflow detail/mutation/preview/validate, and the `/modify-component/:id` frontend route.
+- `GET /api/workflows` remains broadly available because casework widgets use it to select workflow attachments, but workflow detail and mutations require step-editor access.
+- Legacy blockstep and raw Nunjucks generator/render endpoints are old debug surfaces. Keep them behind unsafe-admin-debug enablement plus System Administrator access; do not use them as normal authoring APIs.
 
 ## Persistence & storage keys
 - Board layout on Manage Workflows: `manageWorkflows.board.items.v1` (localStorage).

@@ -39,3 +39,4 @@ Case-linked secure communications with attachments.
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.
 - In staff-facing Secure Messaging, `Inbox` unread/read remains the current viewer's mailbox state, while `Sent` status is applicant-facing and now reads as `Sent`, `Read by applicant`, or `Applicant replied`.
+- The widget derives applicant direction, inbox/sent buckets, display names, and read-state authority from the canonical `sender`, `recipient`, and `thread` objects returned by `/api/cases/:id/messages`, or their typed actor field aliases. Raw `sender_id` / `recipient_id` values are compatibility-only and must not be used as applicant/staff routing authority.

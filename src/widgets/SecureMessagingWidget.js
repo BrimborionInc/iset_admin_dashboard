@@ -74,19 +74,17 @@ const isSentToApplicant = (message, applicantUserId) => {
 const isApplicantSender = (message, applicantUserId) => {
   const applicantId = Number(applicantUserId);
   if (!message || !Number.isFinite(applicantId) || applicantId <= 0) return false;
-  if (message.sender_actor_type === 'applicant_user') {
-    return Number(message.sender_user_id) === applicantId;
-  }
-  return Number(message.sender_id) === applicantId;
+  const senderActorType = message.sender?.actorType || message.sender?.actor_type || message.sender_actor_type;
+  const senderUserId = message.sender?.userId ?? message.sender?.user_id ?? message.sender_user_id;
+  return senderActorType === 'applicant_user' && Number(senderUserId) === applicantId;
 };
 
 const isApplicantRecipient = (message, applicantUserId) => {
   const applicantId = Number(applicantUserId);
   if (!message || !Number.isFinite(applicantId) || applicantId <= 0) return false;
-  if (message.recipient_actor_type === 'applicant_user') {
-    return Number(message.recipient_user_id) === applicantId;
-  }
-  return Number(message.recipient_id) === applicantId;
+  const recipientActorType = message.recipient?.actorType || message.recipient?.actor_type || message.recipient_actor_type;
+  const recipientUserId = message.recipient?.userId ?? message.recipient?.user_id ?? message.recipient_user_id;
+  return recipientActorType === 'applicant_user' && Number(recipientUserId) === applicantId;
 };
 
 const getMailboxStatusKey = message => normalizeStatusValue(message?.mailbox_status || message?.status);
