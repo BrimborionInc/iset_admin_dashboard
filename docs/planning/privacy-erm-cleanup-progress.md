@@ -1543,6 +1543,38 @@ Duplicate-case follow-up before second rehearsal:
 - The preview currently proposes four merge pairs with zero blockers. Ashlee Barner is the only group with case-owned rows to repoint from the merged case: 1 application, 1 assessment, 1 conflict declaration, and 15 documents. Erica Christian, Hailey Lafrance-Chaput, and Shelly Van Loon have empty shell duplicate cases to detach.
 - A rollback-only TEST validation of the apply script reported 4 merge pairs, 0 remaining case-owned references, and 0 remaining duplicate client groups, then rolled back. Follow-up checks confirmed current TEST still has 4 duplicate groups and 0 `iset_case_merge_audit` rows.
 
+## 2026-04-28 Second TEST rehearsal result
+
+The second PROD-like TEST rehearsal applied the duplicate-case consolidation step for real and completed the privacy ERM release path through app deploy and target-group recovery.
+
+Measured disruptive window:
+
+- TEST apps stopped at `10:03:24` America/New_York.
+- Post-deploy target-group smoke passed at `10:42:05` America/New_York.
+- Observed downtime from app stop through healthy admin/portal target groups: approximately `38m 41s`.
+
+Database outcomes:
+
+- Canonical migration apply covered 33 migrations through `20260427_0020_allow_casefile_secure_message_document_scope.sql` in `10m 37s`.
+- `npm run db:migrate:plan -- --target-env test` reported 0 pending after apply.
+- Duplicate-case consolidation merged the four known duplicate groups with 0 blockers, 0 dangling case-owned references, and 0 remaining duplicate client-case groups.
+- Erica Christian now has only case `107` attached; old case `38` is archived, detached from the client, and marked `merged_duplicate`.
+- SSM DB smokes were clean for retired tables/columns, required FKs/CHECKs, relationship hardening, event actor scope, message mailbox rows, secure-message scope, document source scope, application ownership, client-account events, duplicate cases, and identity overlay bindings.
+
+Operational outcomes:
+
+- Admin and portal app build/deploy took `12m 29s`.
+- The first target-group smoke immediately after deploy failed because one portal target was still warming up. Local instance curl returned `200`; both portal targets became healthy without changes and `npm run path:deploy:smoke -- --env test` then passed.
+- `npm run smoke:privacy-routes` passed. `npm run smoke:privacy-denials` had no live tokens and reported 26 skips, 0 failures.
+
+Second-rehearsal fix:
+
+- `privacy-erm-message-item-cleanup-preview.sql` and `privacy-erm-message-item-cleanup-apply.sql` initially assumed post-migration message participant columns while the runbook correctly executes them before canonical migrations. They now dynamically use legacy `messages.sender_id` / `recipient_id` before migration and typed `sender_user_id` / `recipient_user_id` after migration.
+
+Pre-PROD note:
+
+- Commit the second-rehearsal SQL/doc changes before building PROD artifacts. The TEST admin build correctly reflected the current code but marked the admin checkout as dirty because the rehearsal fix and documentation were made after the user's `Pre 2nd Rehersal` commit.
+
 Migration additions discovered by rehearsal:
 
 - `20260426_0007_add_legacy_intake_document_source.sql` adds `legacy_intake_upload` and quarantines historical portal uploads that predate deterministic application/case materialisation.

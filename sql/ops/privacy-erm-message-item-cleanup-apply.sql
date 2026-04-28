@@ -25,6 +25,36 @@ CREATE TABLE IF NOT EXISTS privacy_erm_message_item_cleanup_audit (
 
 SET @privacy_erm_cleanup_run_id = CONCAT('message-item-', DATE_FORMAT(UTC_TIMESTAMP(), '%Y%m%d%H%i%s'));
 
+SET @privacy_erm_has_message_actor_columns = (
+  SELECT COUNT(*) = 2
+  FROM information_schema.columns
+  WHERE table_schema = DATABASE()
+    AND table_name = 'messages'
+    AND column_name IN ('sender_user_id', 'recipient_user_id')
+);
+
+SET @privacy_erm_has_message_legacy_columns = (
+  SELECT COUNT(*) = 2
+  FROM information_schema.columns
+  WHERE table_schema = DATABASE()
+    AND table_name = 'messages'
+    AND column_name IN ('sender_id', 'recipient_id')
+);
+
+SET @privacy_erm_message_participants_sql = IF(
+  @privacy_erm_has_message_actor_columns,
+  'CREATE TEMPORARY TABLE tmp_privacy_erm_message_participants AS SELECT id AS message_id, sender_user_id, recipient_user_id FROM messages',
+  IF(
+    @privacy_erm_has_message_legacy_columns,
+    'CREATE TEMPORARY TABLE tmp_privacy_erm_message_participants AS SELECT id AS message_id, sender_id AS sender_user_id, recipient_id AS recipient_user_id FROM messages',
+    'SIGNAL SQLSTATE ''45000'' SET MESSAGE_TEXT = ''messages lacks expected participant columns'''
+  )
+);
+
+PREPARE privacy_erm_message_participants_stmt FROM @privacy_erm_message_participants_sql;
+EXECUTE privacy_erm_message_participants_stmt;
+DEALLOCATE PREPARE privacy_erm_message_participants_stmt;
+
 START TRANSACTION;
 
 CREATE TEMPORARY TABLE tmp_privacy_erm_message_item_cleanup AS
@@ -37,25 +67,25 @@ SELECT
   mi.read_at,
   mi.deleted_at,
   mi.purged_at,
-  m.sender_user_id AS message_sender_id,
-  m.recipient_user_id AS message_recipient_id,
+  mp.sender_user_id AS message_sender_id,
+  mp.recipient_user_id AS message_recipient_id,
   CASE
-    WHEN m.id IS NULL THEN 'missing_message'
+    WHEN mp.message_id IS NULL THEN 'missing_message'
     WHEN u.id IS NULL THEN 'missing_owner_user'
     WHEN
-      (m.sender_user_id IS NULL OR mi.owner_user_id <> m.sender_user_id)
-      AND (m.recipient_user_id IS NULL OR mi.owner_user_id <> m.recipient_user_id)
+      (mp.sender_user_id IS NULL OR mi.owner_user_id <> mp.sender_user_id)
+      AND (mp.recipient_user_id IS NULL OR mi.owner_user_id <> mp.recipient_user_id)
       THEN 'owner_not_sender_or_recipient'
     ELSE 'ok'
   END AS cleanup_reason
 FROM message_item mi
-LEFT JOIN messages m ON m.id = mi.message_id
+LEFT JOIN tmp_privacy_erm_message_participants mp ON mp.message_id = mi.message_id
 LEFT JOIN `user` u ON u.id = mi.owner_user_id
-WHERE m.id IS NULL
+WHERE mp.message_id IS NULL
    OR u.id IS NULL
    OR (
-        (m.sender_user_id IS NULL OR mi.owner_user_id <> m.sender_user_id)
-    AND (m.recipient_user_id IS NULL OR mi.owner_user_id <> m.recipient_user_id)
+        (mp.sender_user_id IS NULL OR mi.owner_user_id <> mp.sender_user_id)
+    AND (mp.recipient_user_id IS NULL OR mi.owner_user_id <> mp.recipient_user_id)
    );
 
 SELECT cleanup_reason, COUNT(*) AS rows_to_delete

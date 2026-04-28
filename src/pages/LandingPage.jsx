@@ -343,34 +343,42 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
               onChange={({ detail }) => setReleaseNotesExpanded(detail.expanded)}
               variant="container"
             >
-              <p className="landing-release-notes__description">
-                {releaseNotes?.description || ''}
-              </p>
+              {releaseNotes?.description ? (
+                <p className="landing-release-notes__description">
+                  {releaseNotes.description}
+                </p>
+              ) : null}
               <div className="landing-card-grid">
-                <article className="landing-card">
-                  <h3 className="release-notes-heading">{releaseNotes?.featuresHeading || ''}</h3>
-                  <ul className="landing-release-notes__list">
-                    {(releaseNotes?.features || []).map(item => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                </article>
-                <article className="landing-card">
-                  <h3 className="release-notes-heading">{releaseNotes?.knownIssuesHeading || ''}</h3>
-                  <ul className="landing-release-notes__list">
-                    {(releaseNotes?.knownIssues || []).map(item => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                </article>
-                <article className="landing-card">
-                  <h3 className="release-notes-heading">{releaseNotes?.comingNextHeading || ''}</h3>
-                  <ul className="landing-release-notes__list">
-                    {(releaseNotes?.comingNext || []).map(item => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                </article>
+                {(releaseNotes?.features || []).length > 0 ? (
+                  <article className="landing-card">
+                    <h3 className="release-notes-heading">{releaseNotes?.featuresHeading || ''}</h3>
+                    <ul className="landing-release-notes__list">
+                      {(releaseNotes?.features || []).map(item => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </article>
+                ) : null}
+                {(releaseNotes?.knownIssues || []).length > 0 ? (
+                  <article className="landing-card">
+                    <h3 className="release-notes-heading">{releaseNotes?.knownIssuesHeading || ''}</h3>
+                    <ul className="landing-release-notes__list">
+                      {(releaseNotes?.knownIssues || []).map(item => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </article>
+                ) : null}
+                {(releaseNotes?.comingNext || []).length > 0 ? (
+                  <article className="landing-card">
+                    <h3 className="release-notes-heading">{releaseNotes?.comingNextHeading || ''}</h3>
+                    <ul className="landing-release-notes__list">
+                      {(releaseNotes?.comingNext || []).map(item => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </article>
+                ) : null}
               </div>
             </ExpandableSection>
           </div>

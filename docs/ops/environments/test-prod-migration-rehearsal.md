@@ -73,7 +73,58 @@ Identity overlay:
 
 ## Executed rehearsal result
 
-Executed on 2026-04-28 for the privacy ERM grand-cleanup release:
+Second rehearsal executed on 2026-04-28 for the privacy ERM grand-cleanup release, against the same sanitized PROD-like restore artifact used in the first rehearsal.
+
+- Admin console checkout: `085938ac5a43677d3b95a560f3720263502629c2` (`Pre 2nd Rehersal`)
+- Public portal checkout: `e8015e4cd6a47ff336aca7c463a0d14b059d45db` (`Pre 2nd Rehersal`)
+- Restore artifact: `s3://nwac-test-artifacts/db-refresh/20260428-021742-prod-like-test-rehearsal.sanitized.sql.gz`
+- PM2 stop began at `10:03:24` America/New_York.
+- Post-deploy target-group smoke passed at `10:42:05` America/New_York.
+- Measured TEST downtime window, from deliberate app stop through healthy target groups: approximately `38m 41s`.
+
+Second rehearsal timings:
+
+| Phase | Timing |
+| --- | ---: |
+| Stop TEST PM2 apps on both hosts | `7s` |
+| Restore sanitized PROD-like dump | `27s` |
+| Apply post-load safety guard | `12s` |
+| Preview deterministic pre-cleanups after script fix | `37s` |
+| Apply message/document/client-account pre-cleanups | `28s` |
+| Re-preview gates plus second document-scope pass | `1m 08s` |
+| Apply 33 canonical migrations through `20260427_0020` | `10m 37s` |
+| Duplicate-case preview and apply | `18s` |
+| Apply TEST identity overlay | `8s` |
+| SSM DB smoke batch | `6s` |
+| Admin and portal app build/deploy | `12m 29s` |
+| ALB target recovery after initial portal smoke miss | about `2m 47s` |
+
+Second rehearsal data outcomes:
+
+- Duplicate-case consolidation merged the four known duplicate client case groups with zero blockers and zero dangling case-owned references.
+- `iset_case_merge_audit` now has four rows: Ashlee Barner `100 -> 36`, Erica Christian `38 -> 107`, Shelly Van Loon `66 -> 85`, and Hailey Lafrance-Chaput `80 -> 98`.
+- Erica Christian now has one attached case in TEST: case `107`; old case `38` is archived, detached from the client, and marked `merged_duplicate`.
+- `npm run db:migrate:plan -- --target-env test` reported 0 pending migrations after apply.
+- SSM DB smoke checks reported 0 duplicate client-case groups, 0 retired legacy tables/columns, 0 missing required FKs/CHECKs, 0 relationship/event/message/secure-message/document/application/account-event anomalies, and 0 imported identity bindings outside the two explicit TEST staff overlays.
+- `legacy_intake_upload` quarantine count remained `121`, as expected.
+- `npm run smoke:privacy-routes` passed.
+- `npm run smoke:privacy-denials` was run without live tokens and reported 26 skips, 0 failures.
+
+Second rehearsal learning:
+
+- `privacy-erm-message-item-cleanup-preview.sql` and `privacy-erm-message-item-cleanup-apply.sql` initially assumed the post-migration `messages.sender_user_id` / `recipient_user_id` columns even though the runbook correctly places this cleanup before canonical migrations. They were updated during the rehearsal to choose legacy `sender_id` / `recipient_id` before migration and typed participant columns after migration.
+- The app deploy initially failed the immediate target-group smoke because one portal target had not yet passed ALB health checks, while local `curl` on the instance already returned `200`. The target recovered without a code or DB change and the rerun smoke passed.
+- The admin build metadata reported `085938ac-dirty` because this second rehearsal changed SQL/docs after the user's `Pre 2nd Rehersal` commit. Commit the rehearsal script/doc changes before any PROD build so release metadata is clean.
+
+Post-rehearsal validation on 2026-04-28:
+
+- Two schema-adaptive migration edits made after the second rehearsal changed the checksums for `20260426_0007_add_legacy_intake_document_source.sql` and `20260427_0016_reconcile_event_actor_scope_audit.sql`.
+- `npm run db:migrate:plan -- --target-env test` correctly reported those two files pending by checksum; a targeted TEST apply of only those two migrations succeeded.
+- Follow-up `npm run db:migrate:plan -- --target-env test` reported 0 pending migrations.
+- SSM DB checks still reported 0 duplicate client-case groups, 0 retired `iset_case.application_id` columns, 0 document scope blockers, and 0 event actor blockers.
+- Both TEST target groups were healthy after the targeted apply: `nwac-test-admin-tg` on port 5001 and `nwac-test-portal-tg` on port 5000.
+
+First privacy ERM rehearsal executed on 2026-04-28:
 
 Artifacts:
 

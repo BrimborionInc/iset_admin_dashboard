@@ -94,7 +94,8 @@ function buildDisplayLabel(buildInfo) {
   return parts.join(' | ') || `build v${buildInfo.packageVersion}`;
 }
 
-function extractBulletSection(markdown, heading) {
+function extractBulletSection(markdown, heading, options = {}) {
+  const required = options.required !== false;
   const lines = String(markdown || '').split(/\r?\n/);
   const targetHeading = `### ${heading}`;
   const startIndex = lines.findIndex(line => line.trim() === targetHeading);
@@ -112,6 +113,9 @@ function extractBulletSection(markdown, heading) {
     }
   }
   if (!items.length) {
+    if (!required) {
+      return [];
+    }
     throw new Error(`Release-notes draft section is empty: ${heading}`);
   }
   return items;
@@ -144,11 +148,11 @@ function formatReleaseDate(dateValue, locale) {
 function buildPublicReleaseNotes({ builtAt, releaseId }) {
   const markdown = fs.readFileSync(RELEASE_NOTES_LOG_PATH, 'utf8');
   const enFeatures = extractBulletSection(markdown, "What's New (draft bullets - EN)");
-  const enKnownIssues = extractBulletSection(markdown, 'Known Bugs (draft bullets - EN)');
-  const enComingNext = extractBulletSection(markdown, 'Coming Soon (draft bullets - EN)');
+  const enKnownIssues = extractBulletSection(markdown, 'Known Bugs (draft bullets - EN)', { required: false });
+  const enComingNext = extractBulletSection(markdown, 'Coming Soon (draft bullets - EN)', { required: false });
   const frFeatures = extractBulletSection(markdown, 'Nouveautes (brouillon - FR)');
-  const frKnownIssues = extractBulletSection(markdown, 'Problemes connus (brouillon - FR)');
-  const frComingNext = extractBulletSection(markdown, 'A venir (brouillon - FR)');
+  const frKnownIssues = extractBulletSection(markdown, 'Problemes connus (brouillon - FR)', { required: false });
+  const frComingNext = extractBulletSection(markdown, 'A venir (brouillon - FR)', { required: false });
   const releaseLabel = releaseId ? `Release ${releaseId}` : 'Current build';
 
   return {
@@ -159,7 +163,7 @@ function buildPublicReleaseNotes({ builtAt, releaseId }) {
     releaseDateFr: formatReleaseDate(builtAt, 'fr'),
     en: {
       sectionEyebrow: 'Optional reading',
-      description: 'Recent PATH changes are summarized here for staff who want them before signing in.',
+      description: '',
       featuresHeading: 'What changed',
       features: enFeatures,
       knownIssuesHeading: 'Known issues',
@@ -169,7 +173,7 @@ function buildPublicReleaseNotes({ builtAt, releaseId }) {
     },
     fr: {
       sectionEyebrow: 'Lecture optionnelle',
-      description: 'Les changements recents de PATH sont resumes ici pour le personnel qui souhaite les consulter avant de se connecter.',
+      description: '',
       featuresHeading: 'Ce qui a change',
       features: frFeatures,
       knownIssuesHeading: 'Points connus',

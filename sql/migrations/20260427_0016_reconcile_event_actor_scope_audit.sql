@@ -1,5 +1,5 @@
 UPDATE privacy_erm_event_actor_scope_hardening_audit a
-JOIN iset_event_entry e ON e.id = a.event_id
+JOIN iset_event_entry e ON e.id = CONVERT(a.event_id USING utf8mb4) COLLATE utf8mb4_unicode_ci
    SET a.actor_staff_profile_id = e.actor_staff_profile_id,
        a.actor_applicant_user_id = e.actor_applicant_user_id,
        a.missing_required_typed_actor = CASE

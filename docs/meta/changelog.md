@@ -3,6 +3,9 @@
 Format: YYYY-MM-DD - Category: Short description
 
 ## 2026-04-28
+- Fix/Application workspace: Stabilized the application workspace Secure Messaging widget so global maintenance-announcement countdown renders do not retrigger message reloads every second.
+- Ops/TEST rehearsal: Completed the second PROD-like privacy ERM rehearsal in TEST, including duplicate-case consolidation. Measured app-stop-to-healthy-targets downtime was about 38m41s; canonical migrations took 10m37s and app build/deploy took 12m29s.
+- Ops/SQL: Made the message-item cleanup preview/apply SQL schema-adaptive so it works before canonical migrations with legacy `messages.sender_id` / `recipient_id` and after migrations with typed `sender_user_id` / `recipient_user_id`.
 - Ops/Data rehearsal: Added duplicate-case consolidation preview/apply SQL for the one-client/one-case model after the PROD-like TEST privacy ERM rehearsal exposed four duplicate client case groups. The rollback-only TEST validation reported four merge pairs, zero blockers, and zero remaining duplicate groups or dangling case references after the scripted consolidation.
 
 ## 2026-04-27
@@ -985,3 +988,7 @@ Format: YYYY-MM-DD - Category: Short description
 - Fix: Public portal signing-request completion now materializes embedded applicant upload fields, such as the EFT voided-cheque upload, into scoped `iset_document` rows. The generated signed form PDF and the applicant-provided attachment now both appear in Supporting Documents/checklist scope when the signing request is linked to a case/application.
 - Ops/Security: Completed the PROD-like TEST rehearsal for the privacy ERM grand-cleanup release. TEST was restored from sanitized PROD data, side-effect guarded, migrated through `20260427_0020_allow_casefile_secure_message_document_scope.sql`, identity-overlaid for TEST Cognito, and deployed as release `prod-like-privacy-erm-test`; both TEST target groups are healthy and SSM DB smoke checks are clean.
 - Security/DB: Added rehearsal-discovered migrations for historical pre-materialisation portal uploads (`legacy_intake_upload` quarantine), application-linked manual/system document applicant-scope backfill, unresolved event actor system reclassification, event actor audit reconciliation, and application-less case-file secure-message document scope.
+- Fix/Assessment/DEV: Application assessment submission now fails closed if the required generated PDFs cannot be created and recorded before the Pending Decision status transition commits.
+- Ops/Data: Repaired Wabanang Polson's PROD pending-decision application by generating the missing system PDFs for case manager assessment, application form, and financial overview, then verified both DB rows and S3 objects.
+- Fix/Migrations/DEV: Made the pending document-scope and event-actor audit reconciliation migrations tolerant of the current one-client/one-case schema by removing the retired `iset_case.application_id` dependency and normalizing the audit/event ID collation comparison; local DEV migrations now plan clean with 0 pending.
+- UX/Release Notes/DEV: Regenerated the v0.6.0 landing-page release notes from the PROD feedback queue, replaced inferred Known Issues/Coming Next copy with feedback-derived bullets, removed the pre-sign-in summary sentence, and made optional release-note sections hide when empty.

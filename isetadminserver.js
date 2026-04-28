@@ -2007,8 +2007,10 @@ async function storeAssessmentPdfDocument({
   previousVersionNumber = null,
   snapshot = null,
   archivePreviousActive = true,
-  replaceExistingVersion = false
+  replaceExistingVersion = false,
+  connection = pool
 }) {
+  const runner = connection || pool;
   const normalizedApplicationId = normalisePositiveInteger(applicationId);
   const normalizedCaseId = normalisePositiveInteger(caseId);
   if ((!normalizedApplicationId && !normalizedCaseId) || !pdfBuffer) return null;
@@ -2043,7 +2045,7 @@ async function storeAssessmentPdfDocument({
   if (archivePreviousActive) {
     const scopeColumn = normalizedApplicationId ? 'application_id' : 'case_id';
     const scopeValue = normalizedApplicationId || normalizedCaseId;
-    await pool.query(
+    await runner.query(
       `UPDATE iset_document
           SET status = 'archived', updated_at = NOW()
         WHERE ${scopeColumn} = ?
@@ -2055,7 +2057,7 @@ async function storeAssessmentPdfDocument({
   } else if (replaceExistingVersion && normalizedVersionNumber) {
     const scopeColumn = normalizedApplicationId ? 'application_id' : 'case_id';
     const scopeValue = normalizedApplicationId || normalizedCaseId;
-    const [existingRows] = await pool.query(
+    const [existingRows] = await runner.query(
       `SELECT id, metadata
          FROM iset_document
         WHERE ${scopeColumn} = ?
@@ -2070,7 +2072,7 @@ async function storeAssessmentPdfDocument({
       .map(item => item.id);
     if (idsToArchive.length) {
       const idPlaceholders = idsToArchive.map(() => '?').join(',');
-      await pool.query(
+      await runner.query(
         `UPDATE iset_document
             SET status = 'archived', updated_at = NOW()
           WHERE id IN (${idPlaceholders})`,
@@ -2102,7 +2104,7 @@ async function storeAssessmentPdfDocument({
     checksum,
     documentType
   ];
-  const [result] = await pool.query(
+  const [result] = await runner.query(
     `INSERT INTO iset_document
        (case_id, application_id, client_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
      VALUES (?,?,?,?,?, 'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
@@ -2118,8 +2120,10 @@ async function storeApplicationFormPdfDocument({
   applicantUserId,
   actorUserId,
   referenceNumber,
-  pdfBuffer
+  pdfBuffer,
+  connection = pool
 }) {
+  const runner = connection || pool;
   if (!applicationId || !pdfBuffer) return null;
   const documentType = 'application_form';
   const label = 'Application form';
@@ -2148,7 +2152,7 @@ async function storeApplicationFormPdfDocument({
     throw new Error('path_resolution_failed');
   }
 
-  await pool.query(
+  await runner.query(
     `UPDATE iset_document
         SET status = 'archived', updated_at = NOW()
       WHERE application_id = ?
@@ -2173,7 +2177,7 @@ async function storeApplicationFormPdfDocument({
     checksum,
     documentType
   ];
-  const [result] = await pool.query(
+  const [result] = await runner.query(
     `INSERT INTO iset_document
        (case_id, application_id, client_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
      VALUES (?,?,?,?,?, 'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
@@ -2189,8 +2193,10 @@ async function storeFinancialOverviewPdfDocument({
   applicantUserId,
   actorUserId,
   referenceNumber,
-  pdfBuffer
+  pdfBuffer,
+  connection = pool
 }) {
+  const runner = connection || pool;
   if (!applicationId || !pdfBuffer) return null;
   const documentType = 'financial_overview';
   const label = 'Financial overview/budget';
@@ -2219,7 +2225,7 @@ async function storeFinancialOverviewPdfDocument({
     throw new Error('path_resolution_failed');
   }
 
-  await pool.query(
+  await runner.query(
     `UPDATE iset_document
         SET status = 'archived', updated_at = NOW()
       WHERE application_id = ?
@@ -2244,7 +2250,7 @@ async function storeFinancialOverviewPdfDocument({
     checksum,
     documentType
   ];
-  const [result] = await pool.query(
+  const [result] = await runner.query(
     `INSERT INTO iset_document
        (case_id, application_id, client_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
      VALUES (?,?,?,?,?, 'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
@@ -13022,7 +13028,8 @@ async function generateAndStoreInterventionAssessmentPdf({
     variant,
     snapshot: currentSnapshot,
     archivePreviousActive: false,
-    replaceExistingVersion: true
+    replaceExistingVersion: true,
+    connection
   });
 
   if (!approved && latestSubmittedDoc?.versionNumber && hasAssessmentSnapshotContent(latestSubmittedDoc?.snapshot)) {
@@ -13055,7 +13062,8 @@ async function generateAndStoreInterventionAssessmentPdf({
       previousVersionNumber: latestSubmittedDoc.versionNumber,
       snapshot: currentSnapshot,
       archivePreviousActive: false,
-      replaceExistingVersion: true
+      replaceExistingVersion: true,
+      connection
     });
   }
 
@@ -78210,6 +78218,7 @@ app.put('/api/cases/:id', async (req, res) => {
   let conflictDeclarationDetails = null;
   let pushBackCaseNoteId = null;
   let pushBackCaseNoteBody = null;
+  let requiredAssessmentDocsGenerated = false;
 
   try {
     const accessError = await validateCaseAccessByCaseId(req, caseId);
@@ -79067,6 +79076,395 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       }
     }
 
+    const submitActionRawForRequiredDocs = body.assessment_submit_action;
+    const submitActionForRequiredDocs =
+      submitActionRawForRequiredDocs === true ||
+      submitActionRawForRequiredDocs === 1 ||
+      submitActionRawForRequiredDocs === '1' ||
+      (typeof submitActionRawForRequiredDocs === 'string' && submitActionRawForRequiredDocs.toLowerCase() === 'true');
+    const assessmentSubmittedForRequiredDocs =
+      !assessmentReviewStatusProvided &&
+      Boolean(body.assessment_recommendation) &&
+      Boolean(body.assessment_justification) &&
+      (
+        submitActionForRequiredDocs ||
+        (typeof body.status !== 'undefined' && body.status !== null && body.status !== '')
+      );
+    const submittedCaseLifecycleStatusForRequiredDocs = normaliseCaseLifecycleStatusValue(body.status, { preserveUnknown: true });
+    const submittedApplicationStatusForRequiredDocs = normaliseApplicationStatusValue(body.applicationStatus);
+    const submittedApplicationLifecycleStatusForRequiredDocs = normaliseApplicationLifecycleStatusValue(body.applicationStatus, {
+      preserveUnknown: true,
+    });
+    const shouldGenerateRequiredAssessmentDocs =
+      assessmentSubmittedForRequiredDocs &&
+      Boolean(normalisePositiveInteger(applicationId)) &&
+      (
+        submittedApplicationStatusForRequiredDocs === 'pending_approval' ||
+        submittedApplicationLifecycleStatusForRequiredDocs === 'pending_decision' ||
+        (submittedCaseLifecycleStatusForRequiredDocs === CASE_STATUS_DERIVED_VALUES.intake && submittedApplicationStatusForRequiredDocs === null)
+      );
+
+    if (shouldGenerateRequiredAssessmentDocs) {
+      const normalizeAssessmentDocumentCaseRow = (row) => {
+        if (!row) return row;
+        const parseArray = value => {
+          if (Array.isArray(value)) return value;
+          if (typeof value === 'string' && value.trim()) {
+            try {
+              const parsed = JSON.parse(value);
+              return Array.isArray(parsed) ? parsed : [];
+            } catch (_) {
+              return [];
+            }
+          }
+          return [];
+        };
+        const parseObject = (value, fallback) => {
+          if (value && typeof value === 'object') return value;
+          if (typeof value === 'string' && value.trim()) {
+            try {
+              const parsed = JSON.parse(value);
+              return parsed && typeof parsed === 'object' ? parsed : fallback;
+            } catch (_) {
+              return fallback;
+            }
+          }
+          return fallback;
+        };
+        row.assessment_employment_barriers = parseArray(row.assessment_employment_barriers);
+        row.assessment_local_area_priorities = parseArray(row.assessment_local_area_priorities);
+        row.assessment_itp = parseObject(row.assessment_itp, { tuition: '', books: '', materials: '', living: '', childcare: '', otherLabel: '', otherAmount: '', details: '' });
+        row.assessment_wage = parseObject(row.assessment_wage, { wages: '', mercs: '', nonwages: '', other1Label: '', other1Amount: '', other2Label: '', other2Amount: '', subsidyDetails: '' });
+        [
+          'assessment_employment_barriers_other_details',
+          'assessment_intervention_related_noc',
+          'assessment_intervention_related_noc_version',
+          'assessment_intervention_label',
+          'assessment_intervention_pot_code',
+          'assessment_intervention_pot_name',
+          'assessment_posting_context',
+          'case_context_json',
+          'assessment_childcare_funding_details',
+          'assessment_action_plan_result_code',
+          'assessment_conflict_declaration_choice',
+          'assessment_conflict_declaration_details'
+        ].forEach(key => {
+          if (typeof row[key] === 'string') {
+            const trimmed = row[key].trim();
+            row[key] = trimmed || null;
+          } else if (row[key] === undefined) {
+            row[key] = null;
+          }
+        });
+        ['assessment_intervention_code', 'assessment_intervention_outcome_code', 'assessment_intervention_duration_days', 'assessment_intervention_cost_total', 'assessment_intervention_pot_id'].forEach(key => {
+          if (row[key] !== null && row[key] !== undefined) {
+            const value = Number(row[key]);
+            row[key] = Number.isNaN(value) ? String(row[key]) : String(value);
+          }
+        });
+        if (row.assessment_childcare_need !== null && row.assessment_childcare_need !== undefined) {
+          const need = Number(row.assessment_childcare_need);
+          row.assessment_childcare_need = Number.isNaN(need) ? null : (need === 1 ? 'yes' : need === 0 ? 'no' : null);
+        }
+        if (row.assessment_action_plan_result_date) {
+          const dateValue = row.assessment_action_plan_result_date;
+          row.assessment_action_plan_result_date = dateValue instanceof Date
+            ? (Number.isNaN(dateValue.getTime()) ? null : dateValue.toISOString().slice(0, 10))
+            : (typeof dateValue === 'string' ? dateValue.slice(0, 10) : null);
+        }
+        if (Object.prototype.hasOwnProperty.call(row, 'assessment_conflict_declaration_signed')) {
+          row.assessment_conflict_declaration_signed =
+            row.assessment_conflict_declaration_signed === null || row.assessment_conflict_declaration_signed === undefined
+              ? null
+              : Number(row.assessment_conflict_declaration_signed) === 1;
+        }
+        if (row.assessment_conflict_declaration_signed_at instanceof Date) {
+          row.assessment_conflict_declaration_signed_at = Number.isNaN(row.assessment_conflict_declaration_signed_at.getTime())
+            ? null
+            : row.assessment_conflict_declaration_signed_at.toISOString();
+        } else if (typeof row.assessment_conflict_declaration_signed_at !== 'string') {
+          row.assessment_conflict_declaration_signed_at = null;
+        }
+        const signedBy = row.assessment_conflict_declaration_signed_by;
+        row.assessment_conflict_declaration_signed_by =
+          signedBy === null || signedBy === undefined || Number.isNaN(Number(signedBy)) ? null : Number(signedBy);
+        return row;
+      };
+
+      const resolvedConflictSummaryStaffId = resolveActiveStaffProfileId(req);
+      const conflictSummaryStaffId = Number.isFinite(resolvedConflictSummaryStaffId)
+        ? Number(resolvedConflictSummaryStaffId)
+        : (Number.isFinite(identity.staffProfileId) ? Number(identity.staffProfileId) : 0);
+      const [[documentCaseRowRaw]] = await conn.query(
+        `SELECT c.status,
+                c.lifecycle_status AS case_lifecycle_status,
+                c.closure_reason AS case_closure_reason,
+                a.id AS application_id,
+                c.client_id,
+                c.case_context_json,
+                a.status AS application_status,
+                a.lifecycle_status AS application_lifecycle_status,
+                a.decision_outcome AS application_decision_outcome,
+                a.awaiting_reason AS application_awaiting_reason,
+                a.closure_reason AS application_closure_reason,
+                a.docs_requested_active AS docs_requested_active,
+                a.docs_requested_at AS docs_requested_at,
+                a.docs_requested_cleared_at AS docs_requested_cleared_at,
+                a.docs_requested_source AS docs_requested_source,
+                COALESCE(s.user_id, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.user_id'))) AS applicant_user_id,
+                COALESCE(s.reference_number, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) AS tracking_id,
+                a.row_version AS application_row_version,
+                ca.date_of_assessment AS assessment_date_of_assessment,
+                ca.overview AS case_summary,
+                ca.employment_goals AS assessment_employment_goals,
+                ca.previous_iset AS assessment_previous_iset,
+                ca.previous_iset_details AS assessment_previous_iset_details,
+                ca.employment_barriers AS assessment_employment_barriers,
+                ca.employment_barriers_other_details AS assessment_employment_barriers_other_details,
+                ca.local_area_priorities AS assessment_local_area_priorities,
+                ca.other_funding_details AS assessment_other_funding_details,
+                ca.esdc_eligibility AS assessment_esdc_eligibility,
+                ca.intervention_start_date AS assessment_intervention_start_date,
+                ca.intervention_end_date AS assessment_intervention_end_date,
+                ca.institution AS assessment_institution,
+                ca.program_name AS assessment_program_name,
+                ca.itp_payload AS assessment_itp,
+                ca.wage_payload AS assessment_wage,
+                ca.recommendation AS assessment_recommendation,
+                ca.justification AS assessment_justification,
+                ca.nwac_review AS assessment_nwac_review,
+                ca.nwac_reason AS assessment_nwac_reason,
+                ca.intervention_code AS assessment_intervention_code,
+                ic.label AS assessment_intervention_label,
+                ca.intervention_outcome_code AS assessment_intervention_outcome_code,
+                ca.intervention_duration_days AS assessment_intervention_duration_days,
+                ca.intervention_cost_total AS assessment_intervention_cost_total,
+                ca.intervention_related_noc AS assessment_intervention_related_noc,
+                ca.intervention_related_noc_version AS assessment_intervention_related_noc_version,
+                ca.proposed_interventions AS assessment_proposed_interventions,
+                ca.intervention_budget_pot_id AS assessment_intervention_pot_id,
+                bp.code AS assessment_intervention_pot_code,
+                bp.name AS assessment_intervention_pot_name,
+                ca.posting_context AS assessment_posting_context,
+                ca.childcare_need AS assessment_childcare_need,
+                ca.childcare_funding_details AS assessment_childcare_funding_details,
+                ca.action_plan_result_code AS assessment_action_plan_result_code,
+                ca.action_plan_result_date AS assessment_action_plan_result_date,
+                CASE WHEN cd2.id IS NULL THEN 0 ELSE 1 END AS assessment_conflict_declaration_signed,
+                cd2.signed_at AS assessment_conflict_declaration_signed_at,
+                cd2.staff_profile_id AS assessment_conflict_declaration_signed_by,
+                cd2.declaration_choice AS assessment_conflict_declaration_choice,
+                cd2.conflict_details AS assessment_conflict_declaration_details
+           FROM iset_case c
+           ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+           LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+           LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
+           LEFT JOIN esdc_intervention_code ic ON ic.code = ca.intervention_code
+           LEFT JOIN budget_pot bp ON bp.id = ca.intervention_budget_pot_id
+           LEFT JOIN iset_case_conflict_declaration cd2
+             ON cd2.case_id = c.id
+            AND cd2.staff_profile_id = ?
+            AND cd2.revoked_at IS NULL
+          WHERE c.id = ?`,
+        [conflictSummaryStaffId, caseId]
+      );
+      const documentCaseRow = normalizeAssessmentDocumentCaseRow(documentCaseRowRaw);
+      if (!documentCaseRow?.application_id) {
+        throw new Error('assessment_required_documents_missing_application');
+      }
+      const requestSignatureTimestamp = new Date().toISOString();
+      const { actorId, actorName } = resolveRequestActor(req);
+      const actorDisplayName = await resolveStaffDisplayName(pool, req) || actorName || null;
+      const submittedSignatureFallback = {
+        signerName: actorDisplayName || actorName || null,
+        signedAt: requestSignatureTimestamp
+      };
+      const trackingId = documentCaseRow?.tracking_id || null;
+      const afterCaseContext = safeJsonParse(documentCaseRow?.case_context_json, null);
+      const preserveExistingApplicationForm = parseBooleanFlag(
+        body.assessment_preserve_existing_application_form ??
+        body.preserveExistingApplicationForm ??
+        body.preserveExistingApplicationFormDocument,
+        false
+      );
+      const preserveExistingFinancialOverview = parseBooleanFlag(
+        body.assessment_preserve_existing_financial_overview ??
+        body.preserveExistingFinancialOverview ??
+        body.preserveExistingFinancialOverviewDocument,
+        false
+      );
+
+      const applicantContext = await fetchAssessmentApplicantContext({
+        applicationId: documentCaseRow.application_id,
+        applicantUserId: documentCaseRow.applicant_user_id
+      });
+      const latestSubmittedDoc = await fetchLatestAssessmentDocumentInfo({
+        applicationId: documentCaseRow.application_id,
+        caseId,
+        documentTypes: ['case_assessment'],
+        connection: conn
+      });
+      const latestVersionedDoc = await fetchLatestAssessmentDocumentInfo({
+        applicationId: documentCaseRow.application_id,
+        caseId,
+        documentTypes: ['case_assessment', 'case_assessment_approved'],
+        connection: conn
+      });
+      const assessmentVersionNumber = ((latestVersionedDoc?.versionNumber || 0) + 1);
+      const previousSubmittedVersionNumber = latestSubmittedDoc?.versionNumber || null;
+      const previousSubmittedSnapshot = latestSubmittedDoc?.snapshot || null;
+      const referenceNumber = applicantContext.trackingId || trackingId;
+      const currentSnapshot = await buildAssessmentPdfSnapshot({
+        caseRow: documentCaseRow,
+        applicantName: applicantContext.applicantName,
+        referenceNumber,
+        caseContext: afterCaseContext
+      });
+      const pdfBuffer = await generateAssessmentPdfBuffer({
+        caseRow: documentCaseRow,
+        applicantName: applicantContext.applicantName,
+        referenceNumber,
+        caseContext: afterCaseContext,
+        recommendationSignature: submittedSignatureFallback,
+        approvalSignature: null,
+        includeAgreementSection: false,
+        versionNumber: assessmentVersionNumber,
+        variant: 'submitted'
+      });
+      const assessmentDocId = await storeAssessmentPdfDocument({
+        applicationId: documentCaseRow.application_id,
+        caseId,
+        clientId: documentCaseRow.client_id,
+        applicantUserId: applicantContext.applicantUserId,
+        actorUserId: actorId,
+        trackingId: referenceNumber,
+        pdfBuffer,
+        documentType: 'case_assessment',
+        label: `Case manager assessment v${assessmentVersionNumber}`,
+        fileNamePrefix: 'case-manager-assessment',
+        versionNumber: assessmentVersionNumber,
+        variant: 'submitted',
+        snapshot: currentSnapshot,
+        archivePreviousActive: false,
+        replaceExistingVersion: true,
+        connection: conn
+      });
+      if (!assessmentDocId) {
+        throw new Error('assessment_required_documents_failed');
+      }
+      if (previousSubmittedVersionNumber && hasAssessmentSnapshotContent(previousSubmittedSnapshot)) {
+        const redlineBuffer = await generateAssessmentPdfBuffer({
+          caseRow: documentCaseRow,
+          applicantName: applicantContext.applicantName,
+          referenceNumber,
+          caseContext: afterCaseContext,
+          recommendationSignature: submittedSignatureFallback,
+          approvalSignature: null,
+          includeAgreementSection: false,
+          versionNumber: assessmentVersionNumber,
+          variant: 'redline',
+          previousVersionNumber: previousSubmittedVersionNumber,
+          redlineBaseSnapshot: previousSubmittedSnapshot
+        });
+        await storeAssessmentPdfDocument({
+          applicationId: documentCaseRow.application_id,
+          caseId,
+          clientId: documentCaseRow.client_id,
+          applicantUserId: applicantContext.applicantUserId,
+          actorUserId: actorId,
+          trackingId: referenceNumber,
+          pdfBuffer: redlineBuffer,
+          documentType: 'case_assessment_redline',
+          label: `Case manager assessment redline v${assessmentVersionNumber}`,
+          fileNamePrefix: 'case-manager-assessment-redline',
+          versionNumber: assessmentVersionNumber,
+          variant: 'redline',
+          previousVersionNumber: previousSubmittedVersionNumber,
+          snapshot: currentSnapshot,
+          archivePreviousActive: false,
+          replaceExistingVersion: true,
+          connection: conn
+        });
+      }
+
+      const requiredCategories = ['case_assessment', 'application_form', 'financial_overview'];
+      if (!preserveExistingApplicationForm || !preserveExistingFinancialOverview) {
+        const applicationPayload = await readApplicationPayload(conn, documentCaseRow.application_id, { forUpdate: false });
+        if (!applicationPayload) {
+          throw new Error('application_payload_missing');
+        }
+        const payload = applicationPayload.payload || {};
+        const rawAnswers = payload.answers || payload.intake_answers || payload;
+        const answers = rawAnswers && typeof rawAnswers === 'object' ? rawAnswers : {};
+        if (!preserveExistingApplicationForm) {
+          const appPdfBuffer = await generateApplicationFormPdfBuffer({
+            applicationRow: applicationPayload.row,
+            payload,
+            answers,
+            applicantName: applicantContext.applicantName,
+            referenceNumber,
+            receivedAt: applicationPayload.row?.created_at
+          });
+          const appDocId = await storeApplicationFormPdfDocument({
+            applicationId: documentCaseRow.application_id,
+            caseId,
+            clientId: documentCaseRow.client_id,
+            applicantUserId: applicantContext.applicantUserId,
+            actorUserId: actorId,
+            referenceNumber,
+            pdfBuffer: appPdfBuffer,
+            connection: conn
+          });
+          if (!appDocId) {
+            throw new Error('assessment_required_documents_failed');
+          }
+        }
+        if (!preserveExistingFinancialOverview) {
+          const financialPdfBuffer = await generateFinancialOverviewPdfBuffer({
+            applicationRow: applicationPayload.row,
+            payload,
+            answers,
+            applicantName: applicantContext.applicantName,
+            referenceNumber,
+            receivedAt: applicationPayload.row?.created_at
+          });
+          const financialDocId = await storeFinancialOverviewPdfDocument({
+            applicationId: documentCaseRow.application_id,
+            caseId,
+            clientId: documentCaseRow.client_id,
+            applicantUserId: applicantContext.applicantUserId,
+            actorUserId: actorId,
+            referenceNumber,
+            pdfBuffer: financialPdfBuffer,
+            connection: conn
+          });
+          if (!financialDocId) {
+            throw new Error('assessment_required_documents_failed');
+          }
+        }
+      }
+      const placeholders = requiredCategories.map(() => '?').join(',');
+      const [generatedDocRows] = await conn.query(
+        `SELECT document_category, COUNT(*) AS count
+           FROM iset_document
+          WHERE application_id = ?
+            AND document_category IN (${placeholders})
+            AND status = 'active'
+          GROUP BY document_category`,
+        [documentCaseRow.application_id, ...requiredCategories]
+      );
+      const foundCategories = new Set((Array.isArray(generatedDocRows) ? generatedDocRows : [])
+        .filter(row => Number(row.count || 0) > 0)
+        .map(row => row.document_category));
+      const missingCategories = requiredCategories.filter(category => !foundCategories.has(category));
+      if (missingCategories.length) {
+        const err = new Error('assessment_required_documents_missing');
+        err.missingDocumentCategories = missingCategories;
+        throw err;
+      }
+      requiredAssessmentDocsGenerated = true;
+    }
+
     await conn.commit();
   } catch (error) {
     if (conn) {
@@ -79539,7 +79937,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       body.preserveExistingFinancialOverviewDocument,
       false
     );
-    const assessmentHasApplicationId = Number.isFinite(Number(caseRow?.application_id));
+    const assessmentHasApplicationId = Boolean(normalisePositiveInteger(caseRow?.application_id));
     const shouldGenerateAssessmentPdf =
       assessmentSubmitted &&
       assessmentHasApplicationId &&
@@ -79685,7 +80083,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       return applicantContext;
     };
 
-    if (shouldGenerateAssessmentPdf) {
+    if (shouldGenerateAssessmentPdf && !requiredAssessmentDocsGenerated) {
       try {
         const applicantContext = await generateAndStoreAssessmentPdf({
           submittedSignature: submittedSignatureFallback

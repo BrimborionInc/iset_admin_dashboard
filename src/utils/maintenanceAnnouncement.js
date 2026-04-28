@@ -8,7 +8,6 @@ const TEXT = {
     upcomingWithCountdown: countdown => `PATH will be unavailable for maintenance in ${countdown}.`,
     activeDefault: 'PATH is currently undergoing maintenance.',
     activeOverdue: 'PATH is still undergoing maintenance and is taking longer than expected.',
-    saveProgress: 'Save your progress now.',
     expectedDowntime: duration => `Expected downtime: ${duration}.`,
     startingSoon: 'starting soon',
   },
@@ -81,9 +80,6 @@ export function buildMaintenanceAnnouncementDisplay(announcement, { now = new Da
   const detailParts = [];
   if (durationText) {
     detailParts.push(copy.expectedDowntime(durationText));
-  }
-  if (phase === 'scheduled') {
-    detailParts.push(copy.saveProgress);
   }
 
   return {

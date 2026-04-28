@@ -281,3 +281,159 @@ Post-rehearsal duplicate-case follow-up:
 - TEST showed four clients with two cases each after the first privacy ERM rehearsal: Ashlee Barner, Erica Christian, Hailey Lafrance-Chaput, and Shelly Van Loon.
 - `sql/ops/privacy-erm-duplicate-case-consolidation-preview.sql` now proposes deterministic survivor/merged pairs using the documented canonical-case rules: open action-plan/intervention history first, then richest case history, then assigned/open case, then recency.
 - A rollback-only validation of `sql/ops/privacy-erm-duplicate-case-consolidation-apply.sql` on TEST reported `4` merge pairs, `0` remaining duplicate clients, and `0` remaining dangling case-owned references, then rolled back. Current TEST was unchanged by that validation.
+
+## 2026-04-28 Second TEST Rehearsal Outcome
+
+The second TEST rehearsal applied the added duplicate-case consolidation step for real on the restored PROD-like TEST dataset and completed without data-shape blockers.
+
+Measured disruptive window:
+
+- PM2 app stop began at `10:03:24` America/New_York.
+- Target-group smoke passed after recovery at `10:42:05` America/New_York.
+- Observed TEST downtime from app stop to healthy target groups was approximately `38m 41s`.
+
+Key timings:
+
+- canonical migrations: `10m 37s`
+- duplicate-case preview/apply: `18s`
+- TEST identity overlay: `8s`
+- admin and portal app build/deploy: `12m 29s`
+- immediate post-deploy target recovery buffer: about `2m 47s`
+
+Key outcomes:
+
+- `npm run db:migrate:plan -- --target-env test` reported 0 pending migrations after apply.
+- Duplicate-case consolidation merged the four known duplicate groups and left 0 duplicate client-case groups.
+- Erica Christian now has one attached case in TEST: case `107`; old case `38` is archived, detached from the client, and marked `merged_duplicate`.
+- SSM DB smokes reported 0 retired-surface, FK/CHECK, relationship, event actor, message mailbox, secure-message, document scope, application ownership, client-account orphan, identity-overlay, and duplicate-case anomalies.
+- Admin and portal target groups both recovered to healthy; the immediate deploy smoke initially caught one portal target still warming up, then the smoke rerun passed.
+- `npm run smoke:privacy-routes` passed. Live denial smoke tokens were not present, so `npm run smoke:privacy-denials` reported 26 skips and 0 failures.
+
+Second-rehearsal fix:
+
+- `privacy-erm-message-item-cleanup-preview.sql` and `privacy-erm-message-item-cleanup-apply.sql` were made schema-adaptive. They now use legacy `messages.sender_id` / `recipient_id` before canonical migrations and typed `sender_user_id` / `recipient_user_id` after canonical migrations.
+
+Post-rehearsal checksum validation on 2026-04-28:
+
+- After the second rehearsal, two migration files were hardened for schema-adaptive reruns: `20260426_0007_add_legacy_intake_document_source.sql` no longer depends on retired `iset_case.application_id`, and `20260427_0016_reconcile_event_actor_scope_audit.sql` normalizes the audit/event ID collation comparison.
+- Because canonical migration tracking keys on filename plus checksum, TEST correctly showed those two edited files as pending even though earlier checksums had been applied during rehearsal.
+- A targeted TEST apply of the two edited files succeeded; follow-up TEST plan reported 0 pending migrations.
+- Targeted SSM DB checks remained clean for duplicate client cases, retired case/application pointer, document scope blockers, and event actor blockers.
+
+## 2026-04-28 PROD Preflight
+
+Read-only PROD preflight was run before the planned 9:00 PM EDT maintenance window.
+
+Environment and migration state:
+
+- PROD admin target group `nwac-prod-admin-tg` was healthy on port 5001.
+- PROD portal target group `nwac-prod-portal-tg` was healthy on port 5000.
+- `npm run db:migrate:plan -- --target-env prod` reported the expected 33 pending canonical migrations, from `20260426_0001_add_case_assigned_staff_profile_id.sql` through `20260427_0020_allow_casefile_secure_message_document_scope.sql`.
+- PROD restore-point capture is built into `path:deploy` for DB-affecting PROD runs; do not start mutation without a captured Aurora cluster snapshot or an explicitly recorded manual restore point.
+
+Pre-cleanup previews:
+
+- `privacy-erm-message-item-cleanup-preview.sql` reported 81 unsafe `message_item` rows to remove during the deterministic cleanup: 4 `missing_owner_user` and 77 `owner_not_sender_or_recipient`; 200 rows were already OK.
+- `privacy-erm-document-scope-preview.sql` reported the same class of scope gaps rehearsed on TEST. Most rows are backfillable; historical pre-materialisation `application_submission` rows without deterministic case/application candidates should be quarantined as `legacy_intake_upload`, not forced into fabricated application scope.
+- `privacy-erm-client-account-event-orphan-preview.sql` reported 5 orphan client-account events with missing client rows: 1 `account_created`, 1 `invitation_sent`, and 3 `activated`; these match the deterministic orphan cleanup class rehearsed on TEST.
+- `privacy-erm-staff-shared-user-identity-preview.sql` reported 11 staff profiles, 0 missing Cognito subjects, 0 missing emails, 0 duplicate Cognito-sub groups, and 0 duplicate staff-email groups. It reported one email-overlap mismatch for `bill@sillery.co.uk`, but a separate shared `user` row exists with the exact staff Cognito subject and placeholder email, so subject-only staff resolution has a deterministic path and does not require email fallback.
+
+Duplicate-case preview:
+
+- The post-migration duplicate-case preview script cannot run before canonical migrations because current PROD does not yet have `iset_case.assigned_staff_profile_id`.
+- A pre-migration duplicate-case query showed exactly the same four duplicate client case groups as the second TEST rehearsal:
+  - Ashlee Barner: cases `36` and `100`
+  - Erica Christian: cases `38` and `107`
+  - Hailey Lafrance-Chaput: cases `80` and `98`
+  - Shelly Van Loon: cases `66` and `85`
+- Run `privacy-erm-duplicate-case-consolidation-preview.sql` after canonical migrations and before applying the duplicate-case consolidation step during the outage.
+
+## 2026-04-28 PROD Maintenance Warning
+
+At Bill's request, a scheduled maintenance warning was published to PROD runtime config for both admin and public portal surfaces:
+
+- runtime row: `iset_runtime_config(scope='runtime', k='service.announcement')`
+- surfaces: `admin`, `portal`
+- visible start time: 9:00 PM EDT on Tuesday, April 28, 2026
+- stored `startsAt`: `null`, deliberately, so current deployed clients do not append the scheduled-warning stock phrase `Save your progress now.`
+- expected end: `2026-04-29T03:00:00.000Z` / 11:00 PM EDT
+- expected duration: 120 minutes
+- English body: `PATH will go offline for scheduled maintenance at 9:00 PM EDT on Tuesday, April 28.`
+
+Verification:
+
+- `nwac-public.awentech.ca/api/service-announcement/current` and `iset.nwac.ca/api/service-announcement/current` returned the stored announcement.
+- `nwac-console.awentech.ca/api/service-announcement/current` returned `401 Missing bearer token` to unauthenticated curl, as expected for the admin surface; the stored payload includes the `admin` surface for authenticated admin clients.
+- `path:maintenance:fallback status --env prod --surfaces all` showed all PROD host rules still forwarding normally. No ALB fixed-response maintenance page has been enabled yet.
+- The admin and public portal source utilities were also updated locally to stop adding the save-progress stock phrase for future maintenance warnings; that code change will take effect on the next app deploy.
+
+## 2026-04-28 TEST UI Validation Findings
+
+During guided TEST UI validation, Wabanang Polson's pending-approval application exposed a release/data-quality finding:
+
+- application: `2`
+- case: `84` / `ISET-20260409-A85F59`
+- status: `pending_approval`
+- lifecycle: `pending_decision`
+- event history includes `assessment_submitted` on `2026-04-16 14:21:04.362`
+- supporting-document library has no active `system_generated` `case_assessment`, `application_form`, or `financial_overview` rows for the application/case
+- control record Hailey Lafrance-Chaput (`application_id=16`, `case_id=98`) has all three expected generated rows
+
+This appears to be an existing data/workflow gap also visible on PROD, not a duplicate-case consolidation issue. Treat it as a pre-PROD-release repair candidate: either regenerate the missing assessment/application/financial overview documents for Wabanang through a reviewed script or confirm a deliberate business reason they should remain absent before cutover.
+
+Follow-up code fix started in DEV:
+
+- Backend route `PUT /api/cases/:id` now treats generated assessment-submission documents as required when an application assessment is being submitted into Pending Decision.
+- The route generates the case manager assessment, application form, and financial overview before committing the status transition. If any required document cannot be generated or recorded as an active `iset_document` row, the transaction fails and the application should not land in Pending Decision without those documents.
+- The three generated-document storage helpers now accept the active DB connection so their document rows participate in the same transaction as the status update.
+
+PROD data repair completed:
+
+- A guarded one-off runner generated Wabanang Polson's missing PROD generated-document set for application `2`, case `84`, reference `ISET-20260409-A85F59`.
+- Dry-run guard confirmed the target application was still `pending_approval` / `pending_decision` and that exactly `case_assessment`, `application_form`, and `financial_overview` were missing.
+- Inserted active `system_generated` document rows:
+  - `1499` `case_assessment`: `case-manager-assessment-v1-ISET-20260409-A85F59.pdf`
+  - `1500` `application_form`: `application-form-ISET-20260409-A85F59.pdf`
+  - `1501` `financial_overview`: `financial-overview-ISET-20260409-A85F59.pdf`
+- Post-repair PROD SQL verification showed one active row for each of the three categories, all linked to application `2`, case `84`, client `89`, applicant user `99`.
+- S3 `headObject` verification confirmed all three object keys exist as `application/pdf` with sizes matching the DB rows.
+- Repair caveat: while loading the deployed admin server helpers for the first dry-run/apply, the deployed server's startup component-template sync updated a small number of component templates from its filesystem source of truth. The final repair runner suppresses those startup sync calls.
+
+## 2026-04-28 PROD Public-Portal Signed-Form PDF Gap Trace
+
+TEST validation also exposed that early PROD public-portal submissions had signed consent/declaration payload data but no generated signed-form PDF rows in `iset_document`.
+
+Evidence from PROD:
+
+- Affected ISET public-portal submissions from `ISET-20260409-A85F59` through `ISET-20260416-628C50` have signed payload fields such as `consent.signed`, `auth_froici_sing.signed`, `sig_caofs.signed`, `indigenous_declaration.signed`, and `conflict_applicant_signature.signed`.
+- Those same submissions have 0 active `iset_document` rows with `source='application_submission'` and document categories `ei_consent`, `iset_client_info_release`, `client_acknowledgement`, `indigenous_declaration`, or `conflict_of_interest`.
+- The first active generated signed-form rows appear for `ISET-20260418-D6CEEE` / application `27` / case `109` / applicant user `100` at `2026-04-18 00:06:43` UTC. Five rows were created together: `ei_consent`, `iset_client_info_release`, `client_acknowledgement`, `indigenous_declaration`, and `conflict_of_interest`.
+- Public-portal submissions immediately after that point also have five signed-form rows, confirming the behavior had started working for new submissions.
+
+Deployment trace:
+
+- The source feature was not newly added in April. The portal signed-form generation function was originally added in `../ISET-intake` commit `f796937f04a8109daf2d2f11c19851b3b7b1aa28` on `2025-12-09` (`Signed forms stored in the supporting documents folder.`), and both pre-release portal commit `268827fe` and release commit `880f3a85` contain that function.
+- The release that aligns with the behavior change is PROD deployment `prod-client-case-application-20260416`, manifest `tmp/path-deploy/prod/prod-client-case-application-20260416--2026-04-17T02-10-02-689Z.json`.
+- That deployment completed successfully at `2026-04-17T02:30:15.493Z`, deployed portal git head `880f3a85e530acc7bf5e9437b1ac293c0564d3c3` and admin/schema git head `6b8811b17c0d64614281b1d06d378c07b8957633`, and applied the `20260416_0001` through `20260416_0004` schema migrations between `2026-04-17 02:14:51` and `2026-04-17 02:16:21` UTC.
+- `20260416_0001_add_application_ownership_and_status_columns.sql` added durable `iset_application.client_id` and `iset_application.case_id`. The matching portal commit updates `/api/intake/complete` to insert/persist that client/case/application ownership linkage before the generated signed-form documents are written.
+- A later portal-only PROD deploy, `20260417-prod-portal-imported-message-reply`, completed at `2026-04-17T17:21:18.457Z` and redeployed the same portal git head `880f3a85`. The first successful signed-form rows were created after both deployments, so the data proves the fix was in place by then; the underlying schema/code change entered PROD in `prod-client-case-application-20260416`.
+
+Proof limit:
+
+- Historical CloudWatch/app logs for the pre-fix submissions were not available to the current operator role, so the exact swallowed exception from the old runtime was not recovered.
+- The defensible conclusion is that pre-`2026-04-17` PROD was not materializing generated public-portal signed forms into scoped `iset_document` rows even though the signature data existed in the submission payload. The behavior starts immediately with the first public-portal ISET submission after the client/case/application ownership release.
+
+PROD repair completed:
+
+- Repair runner: `scripts/repair-missing-portal-signed-form-docs.js`, executed on PROD app host `i-08ac3b26965466f3f` using deployed portal root `/opt/nwac/portal`.
+- Dry-run before apply: scanned `38` portal-origin applications, found `22` affected applications and `109` missing signed-form documents, with `0` errors.
+- Apply run ID: `signed-form-repair-2026-04-28T20-48-43-389Z`.
+- Apply result: created `109` active `iset_document` rows, skipped `80` already-existing rows, and reported `0` errors.
+- Created rows by document category:
+  - `ei_consent`: `21`
+  - `iset_client_info_release`: `22`
+  - `client_acknowledgement`: `22`
+  - `indigenous_declaration`: `22`
+  - `conflict_of_interest`: `22`
+- SQL verification for that repair run showed `109` total rows, created between `2026-04-28 20:48:54` and `2026-04-28 20:52:37` UTC.
+- Post-repair dry-run: scanned `38` portal-origin applications, found `0` affected applications, `0` missing documents, and `0` errors.

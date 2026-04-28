@@ -29,11 +29,33 @@ JOIN iset_application a ON a.id = d.application_id
 UPDATE iset_document d
 JOIN iset_case c ON c.id = d.case_id
    SET d.client_id = COALESCE(d.client_id, c.client_id),
-       d.application_id = COALESCE(d.application_id, c.application_id),
        d.updated_at = CURRENT_TIMESTAMP
  WHERE d.source = 'application_submission'
-   AND (d.client_id IS NULL OR d.application_id IS NULL)
-   AND (c.client_id IS NOT NULL OR c.application_id IS NOT NULL);
+   AND d.client_id IS NULL
+   AND c.client_id IS NOT NULL;
+
+UPDATE iset_document d
+JOIN (
+  SELECT resolved.document_id, resolved.application_id
+    FROM (
+      SELECT
+        d2.id AS document_id,
+        MIN(a.id) AS application_id
+      FROM iset_document d2
+      JOIN iset_application a
+        ON a.case_id = d2.case_id
+       AND (d2.client_id IS NULL OR a.client_id = d2.client_id)
+      WHERE d2.source = 'application_submission'
+        AND d2.application_id IS NULL
+        AND d2.case_id IS NOT NULL
+      GROUP BY d2.id
+      HAVING COUNT(DISTINCT a.id) = 1
+    ) resolved
+) app_scope ON app_scope.document_id = d.id
+   SET d.application_id = COALESCE(d.application_id, app_scope.application_id),
+       d.updated_at = CURRENT_TIMESTAMP
+ WHERE d.source = 'application_submission'
+   AND d.application_id IS NULL;
 
 INSERT INTO privacy_erm_legacy_intake_document_quarantine_audit (
   document_id,

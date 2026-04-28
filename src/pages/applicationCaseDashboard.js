@@ -411,14 +411,14 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
     applyLayout(approvalReviewLayout);
   }, [applyLayout, id, isApprovalEntry, workspaceEntry]);
 
-  const handleCaseUpdate = updates => {
+  const handleCaseUpdate = useCallback(updates => {
     setCaseData(prev => {
       if (!prev) return prev;
       const next = { ...prev, ...updates };
       if (updates && Object.prototype.hasOwnProperty.call(updates, 'application_row_version')) {
         const incomingVersion = Number(updates.application_row_version || 0);
-        if (incomingVersion && incomingVersion > appRowVersion) {
-          setAppRowVersion(incomingVersion);
+        if (incomingVersion) {
+          setAppRowVersion(current => (incomingVersion > current ? incomingVersion : current));
         }
       }
       const key = prev.id || id;
@@ -427,9 +427,9 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
       }
       return next;
     });
-  };
+  }, [id]);
 
-  const applyCaseDataIfNewer = (key, nextData) => {
+  const applyCaseDataIfNewer = useCallback((key, nextData) => {
     const current = cacheRef.current.get(key);
     const currentVersion = Number(current?.application_row_version ?? 0) || 0;
     const nextVersion = Number(nextData?.application_row_version ?? 0) || 0;
@@ -438,11 +438,11 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
       return current || nextData;
     }
     cacheRef.current.set(key, nextData);
-    if (nextVersion && nextVersion > appRowVersion) {
-      setAppRowVersion(nextVersion);
+    if (nextVersion) {
+      setAppRowVersion(current => (nextVersion > current ? nextVersion : current));
     }
     return nextData;
-  };
+  }, []);
 
   const loadCaseResponse = useCallback(async (caseId, { retries = 3 } = {}) => {
     let attempt = 0;
@@ -498,8 +498,8 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
       const applied = applyCaseDataIfNewer(String(id), normalised);
       setCaseData(applied);
       const incomingVersion = Number(normalised.application_row_version || 0);
-      if (incomingVersion && incomingVersion > appRowVersion) {
-        setAppRowVersion(incomingVersion);
+      if (incomingVersion) {
+        setAppRowVersion(current => (incomingVersion > current ? incomingVersion : current));
       }
       setLoadError(null);
       return applied;
@@ -514,7 +514,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
       setLoadError(message);
       return null;
     }
-  }, [id, location?.state?.assessorEmail, loadCaseResponse]);
+  }, [id, location?.state?.assessorEmail, applyCaseDataIfNewer, loadCaseResponse]);
 
   useEffect(() => {
     if (!id) return;
@@ -548,8 +548,8 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
         const applied = applyCaseDataIfNewer(key, normalised);
         setCaseData(applied);
         const incomingVersion = Number(normalised.application_row_version || 0);
-        if (incomingVersion && incomingVersion > appRowVersion) {
-          setAppRowVersion(incomingVersion);
+        if (incomingVersion) {
+          setAppRowVersion(current => (incomingVersion > current ? incomingVersion : current));
         }
         setLoadError(null);
         if (updateBreadcrumbs) {
@@ -609,7 +609,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
     return () => {
       isMounted = false;
     };
-  }, [id, location?.state?.assessorEmail, updateBreadcrumbs]);
+  }, [id, location?.state?.assessorEmail, applyCaseDataIfNewer, loadCaseResponse, updateBreadcrumbs]);
 
   useEffect(() => {
     setLayout(current => current); // ensure board rerenders when caseData changes
