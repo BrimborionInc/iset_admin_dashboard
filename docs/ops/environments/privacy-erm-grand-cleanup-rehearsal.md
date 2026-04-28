@@ -348,6 +348,17 @@ Duplicate-case preview:
   - Shelly Van Loon: cases `66` and `85`
 - Run `privacy-erm-duplicate-case-consolidation-preview.sql` after canonical migrations and before applying the duplicate-case consolidation step during the outage.
 
+Final pre-window checks:
+
+- Admin repo local release commit: `c6186e8` on `backup-main` (`Prepare v0.6.0 privacy ERM rollout`).
+- Public portal repo local release commit: `4953407` on `main` (`Remove maintenance save-progress copy`).
+- GitHub push from this operator shell failed for both repos because the shell has no interactive HTTPS credentials: `fatal: could not read Username for 'https://github.com': No such device or address`. The local commits are present; push from a credentialed shell before or during release handoff if remote traceability is required.
+- `npm run path:deploy:plan -- --env prod --release-id v0.6.0` succeeded from the committed admin state. It confirmed account `468278742295`, schema pending `33`, app deploy `shared=true admin=true portal=true`, and smoke targets `3`.
+- The planned PROD restore point from that plan was `path-prod-v0-6-0-20260428220959` with reason `schema`. This plan does not create the snapshot; snapshot creation happens inside `path:deploy run` before mutation.
+- `scripts/path-deploy.js` creates the PROD restore point with `aws rds create-db-cluster-snapshot`, waits for `db-cluster-snapshot-available`, then describes the snapshot before continuing to schema apply.
+- Read-only AWS check confirmed PROD cluster `nwac-prod-db` is `available`, engine `aurora-mysql`, backup retention `30` days, latest restorable time `2026-04-28T22:07:05.633000+00:00`.
+- Latest manual PROD cluster snapshot at preflight time was `path-prod-20260425-114853-20260425114911`, status `available`, created `2026-04-25T11:49:13.398000+00:00`.
+
 ## 2026-04-28 PROD Maintenance Warning
 
 At Bill's request, a scheduled maintenance warning was published to PROD runtime config for both admin and public portal surfaces:
