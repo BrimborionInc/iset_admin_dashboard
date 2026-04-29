@@ -1,6 +1,9 @@
 # Data Docs And Reference Artifacts
 
 Status: mixed maintained documentation, generated/reference artifacts, and temporary source data.
+Last reviewed: 2026-04-29 during data-artifact retention cleanup.
+
+Current artifact retention policy: `docs/meta/data-artifact-retention-2026-04-29.md`.
 
 This directory is not a single source of truth. It contains current domain docs, database overview material, generated schema dumps, source spreadsheets, reference standards, and temporary import/backload artifacts.
 
@@ -15,7 +18,7 @@ This directory is not a single source of truth. It contains current domain docs,
 
 ## Generated Or Snapshot Material
 
-- `DB-Structure-Dump/` contains schema dump snapshots. Verify against `sql/migrations/`, live DB checks, or regenerated dumps before relying on it.
+- `DB-Structure-Dump/` contains legacy tracked schema dump snapshots. Verify against `sql/migrations/`, live DB checks, or regenerated local dumps before relying on it; do not commit routine dump refreshes.
 - `NOC 2016/` and `NOC 2021/` contain external reference CSVs.
 - `temp/` contains tracked temporary/source artifacts and has its own README gate. Do not use those files as durable project guidance.
 

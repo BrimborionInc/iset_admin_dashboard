@@ -18,6 +18,18 @@ Format: YYYY-MM-DD - Category: Short description
 - Docs/Tooling: Added `scripts/check-doc-links.py`, a read-only local Markdown reference checker for the docs tree, and documented it in the project-memory maintenance guidance.
 - Docs/Ops: Moved DB/TEST/PROD/AWS profile command detail from `docs/AGENTS.md` into `docs/ops/agent-operational-access.md` so the agent entry point stays shorter while preserving operational access notes.
 - Docs/Data: Added a README gate to `docs/data/temp/` to classify tracked binary source artifacts and defer any keep/archive/delete decision to a focused cleanup.
+- Docs/Meta: Added `docs/meta/documentation-cleanup-plan-2026-04-29.md` as the active progress tracker for the broader docbase cleanup effort, including completion criteria and the next work queue.
+- Docs/Meta: Expanded the documentation cleanup plan scope to include the sibling public portal docbase at `../ISET-intake/docs` as part of the same cross-app Codex memory base.
+- Docs/Meta: Extended `scripts/check-doc-links.py` to scan both admin and public-portal docbases, added README gates across `../ISET-intake/docs`, and recorded the portal first-pass inventory in the cleanup plan.
+- Docs/Meta: Compacted `docs/AGENTS.md` by replacing duplicated subsystem status blocks with canonical dashboard, feature, data, and ops doc pointers.
+- Docs/Ops: Added `Status` and `Last reviewed` metadata to every admin and portal ops Markdown doc, checked documented deploy/data/migration command names against current package scripts, and marked historical TEST/prod environment notes so they are not mistaken for live runbooks.
+- Docs/Security: Redacted literal DB password values from historical docs and strengthened the standing directive so future doc cleanup redacts credentials/tokens/secrets instead of preserving them.
+- Docs/Meta: Added `docs/meta/planning-cr-archive-triage-2026-04-29.md` as the first-pass classification index for planning docs, change requests, DOCX source artifacts, and portal archive docs, with initial delete/archive candidates recorded but not deleted.
+- Docs/Data: Added `docs/meta/data-artifact-retention-2026-04-29.md` and `docs/data/DB-Structure-Dump/README.md` to classify generated schema dumps and tracked temp binaries as generated/source artifacts, not maintained agent guidance; the dump directory ignore rule now permits the README gate while keeping dump files ignored.
+- Docs/Meta: Added `docs/meta/meta-log-retention-2026-04-29.md` to define search, update, retention, and future split rules for large admin and portal meta logs.
+- Docs/Planning: Replaced superseded Query Editor, document-model ERM, and public-intake renderer planning notes with redirect stubs pointing to current docs/source; the public-intake renderer stub also removes the old file's invalid text encoding.
+- Docs/Meta: Marked the 2026-04-29 cross-app documentation cleanup pass complete in `docs/meta/documentation-cleanup-plan-2026-04-29.md`, with remaining work framed as ongoing maintenance rather than unfinished cleanup blockers.
+- Docs/Meta: Indexed this cleanup/context-persistence thread in `docs/meta/codex-thread-index.md` under the exact Task History title `Clarify thread context persistence`.
 
 ## 2026-04-28
 - Fix/Application workspace: Stabilized the application workspace Secure Messaging widget so global maintenance-announcement countdown renders do not retrigger message reloads every second.

@@ -2,6 +2,8 @@
 
 Status: historical/source material unless a current doc explicitly says otherwise.
 
+First-pass triage index: `docs/meta/planning-cr-archive-triage-2026-04-29.md`.
+
 This directory contains older CR writeups, addenda, implementation notes, and original DOCX source artifacts. These files are useful for intent and provenance, but they are not current implementation truth.
 
 ## How To Use

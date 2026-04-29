@@ -1,5 +1,8 @@
 # NWAC Test Environment Configuration Map
 
+Status: TEST environment config reference. Verify against current SSM values, deploy scripts, and live AWS outputs before changing TEST.
+Last reviewed: 2026-04-29 during ops documentation cleanup.
+
 This guide documents every environment variable and secret the test environment must supply, along with the Terraform outputs or AWS services that will back each value. Use it as the source of truth when generating `.env.test` files, SSM parameters, and deployment scripts.
 
 ---
@@ -126,5 +129,5 @@ Deployment scripts should:
 - Validate that no static AWS access keys remain once EC2/containers assume roles.
 - Maintain CAA records for root + subdomains to allow ACM: `0 issue "amazon.com"` (already provisioned for `awentech.ca`, `nwac-console-test.awentech.ca`, `nwac-public-test.awentech.ca`).
 
-Document owner: _(add name)_  
-Last updated: _(add date)_
+Document owner: Codex-maintained operational reference
+Last reviewed: 2026-04-29 during ops documentation cleanup

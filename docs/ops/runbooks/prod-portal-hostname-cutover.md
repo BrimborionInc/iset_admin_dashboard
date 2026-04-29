@@ -1,5 +1,8 @@
 # Prod Portal Hostname Cutover
 
+Status: point-in-time elevated cutover runbook. Verify current DNS, ACM, WAF, SSM, and Terraform state before acting.
+Last reviewed: 2026-04-29 during ops documentation cleanup.
+
 Goal: serve the prod public portal on `https://iset.nwac.ca` while keeping `https://nwac-public.awentech.ca` working.
 
 Access note:

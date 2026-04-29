@@ -2,6 +2,8 @@
 
 Status: mixed current and historical material.
 
+First-pass triage index: `docs/meta/planning-cr-archive-triage-2026-04-29.md`.
+
 This directory contains active plans, execution logs, historical design notes, one-off thread handoffs, and review packs. Do not treat every file in this directory as current implementation truth.
 
 ## How To Use

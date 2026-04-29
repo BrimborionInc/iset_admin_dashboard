@@ -1,5 +1,8 @@
 # NWAC Test Environment - Current Progress (2025-10-08)
 
+Status: historical TEST environment build/progress log. Do not treat embedded resource state as current without live AWS verification.
+Last reviewed: 2026-04-29 during ops documentation cleanup; literal DB credential redacted.
+
 This log captures the state of the infrastructure setup so work can resume quickly if the session is interrupted.
 
 ## Domains & Certificates
@@ -64,7 +67,7 @@ This log captures the state of the infrastructure setup so work can resume quick
 ### 2025-10-09 (Cluster Rebuild)
 - Destroyed the test Aurora cluster and related security/secrets resources (no snapshot) per directive; updated the Terraform data module to honour `skip_final_snapshot` so future destroys succeed without manual CLI calls.
 - Re-ran `terraform apply -var-file=nwac-test.tfvars` to recreate the subnet group, security group, cluster, and the `nwac-test-db-credentials` secret (new ARN suffix `ZHQOaz`).
-- Captured the regenerated master password (`iNmVn0zIFUP16QeJ-^zE`) and pushed it into `/nwac/test/admin/env` and `/nwac/test/portal/env`.
+- Captured the regenerated master password and pushed it into `/nwac/test/admin/env` and `/nwac/test/portal/env`; the literal value was removed from this historical note. Retrieve current credentials from AWS secrets/SSM only.
 - From a freshly launched app instance, confirmed connectivity with the new credentials, then recreated the host-specific grant: `GRANT ALL ON iset_intake.* TO 'app_admin'@'10.48.%'` (role grant still blocked, but schema privileges now in place).
 - Full, untargeted Terraform apply run afterward to reinstate the app->DB security-group ingress rule and sync launch template metadata.
 - Refactored the compute Terraform module so the ALB now manages dedicated admin (port 5001) and portal (port 5000) target groups, attaches both to the ASG, and adds host-based listener rules; the legacy `nwac-test-tg` target group has been removed.

@@ -1,5 +1,8 @@
 # Terraform Initial Runbook – NWAC Test Environment
 
+Status: historical TEST Terraform bootstrap runbook. Verify current Terraform state and AWS resources before acting.
+Last reviewed: 2026-04-29 during ops documentation cleanup.
+
 ## 1. Bootstrap Remote State
 1. cd infra/terraform/environments/test
 2. Temporarily edit backend.hcl bucket/table names if different.

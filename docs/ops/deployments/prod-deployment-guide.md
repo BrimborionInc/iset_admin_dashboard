@@ -1,5 +1,8 @@
 # Prod Deployment Guide
 
+Status: current PROD deployment guide. Verify live AWS state before any mutating command.
+Last reviewed: 2026-04-29 during ops documentation cleanup; command names checked against current admin and portal `package.json` files.
+
 For the shortest operator commands, start with `docs/ops/deployments/deployment-quick-guide.md`.
 
 This is the shortest safe path to deploy the current prod stack.

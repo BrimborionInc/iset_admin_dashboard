@@ -8,6 +8,8 @@ This directory contains the documents that govern how future agents recover cont
 
 - `standing-directive.md`: durable project-memory maintenance contract.
 - `documentation-audit-2026-04-29.md`: current documentation cleanup audit and queue.
+- `documentation-cleanup-plan-2026-04-29.md`: active execution tracker for the broader cross-app docbase cleanup effort, including `../ISET-intake/docs`.
+- `meta-log-retention-2026-04-29.md`: retention/use policy for large meta logs.
 - `project-map.md`: repo/module map.
 - `codex-thread-index.md`: cross-thread recovery index.
 - `changelog.md`: technical/user-visible change log.
@@ -20,4 +22,4 @@ This directory contains the documents that govern how future agents recover cont
 
 ## Cleanup Rule
 
-Do not add broad subsystem detail here unless it controls future-agent behavior. Prefer pointers to domain docs over duplicating implementation detail.
+Do not add broad subsystem detail here unless it controls future-agent behavior. Prefer pointers to domain docs over duplicating implementation detail. Search large logs with targeted terms instead of reading them front to back.

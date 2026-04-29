@@ -1,5 +1,8 @@
 # Production Environment Guide (NWAC / ISET)
 
+Status: production environment snapshot with newer deployment/hostname notes folded in. Verify live AWS state before operations.
+Last reviewed: 2026-04-29 during ops documentation cleanup; prefer `docs/ops/deployments/deployment-quick-guide.md` for current deploy commands.
+
 Last updated: January 26, 2026
 
 This guide summarizes what is currently deployed in the production environment, how it fits together, and where to look when you need to operate or change it. Each section starts with a non-technical overview, followed by technical details.
@@ -28,7 +31,8 @@ Non-technical overview
 There are two public-facing sites: one for applicants (public portal) and one for staff (admin console).
 
 Technical details  
-- Public portal: `https://nwac-public.awentech.ca/`  
+- Public portal primary: `https://iset.nwac.ca/`
+- Public portal legacy/alias: `https://nwac-public.awentech.ca/`
 - Admin console: `https://nwac-console.awentech.ca/`  
 - Cognito Hosted UI domains:  
   - Admin: `https://nwac-prod-admin-458181.auth.ca-central-1.amazoncognito.com`  
@@ -123,8 +127,8 @@ The public portal uses a CAPTCHA to reduce automated signups.
 Technical details  
 - CAPTCHA is AWS WAF CAPTCHA SDK.  
 - A prod API key is configured for the prod domains.  
-- If CAPTCHA fails, verify the API key token domains include `nwac-public.awentech.ca`.  
-- As of January 26, 2026 there are no WAF WebACLs configured in prod.
+- If CAPTCHA fails, verify the API key token domains include both `iset.nwac.ca` and `nwac-public.awentech.ca`.
+- The January 26, 2026 snapshot said there were no WAF WebACLs configured in prod; verify live WAF state before relying on that.
 
 ## 11) DNS and Certificates
 
@@ -132,7 +136,7 @@ Non-technical overview
 DNS maps the production domains to AWS. TLS is handled by AWS certificates.
 
 Technical details  
-- DNS is managed in HostPapa for `awentech.ca`.  
+- DNS is managed in HostPapa for `awentech.ca`; `iset.nwac.ca` depends on the NWAC DNS path.
 - The production CNAME records point to the AWS load balancer.  
 
 ## 12) How the Pieces Fit Together

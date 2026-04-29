@@ -38,7 +38,7 @@ Verified from `package.json` on 2026-04-29.
 - `npm run smoke:privacy-erm`: privacy ERM DB integrity smoke.
 - `npm run smoke:privacy-routes`: static route-scope guard smoke.
 - `npm run smoke:privacy-denials`: live route-denial smoke after seeding fresh tokens.
-- `python3 scripts/check-doc-links.py`: read-only local Markdown reference check for `docs/`.
+- `python3 scripts/check-doc-links.py`: read-only local Markdown reference check for admin and portal docs.
 
 ## Documentation Map
 
@@ -49,7 +49,7 @@ Verified from `package.json` on 2026-04-29.
 - `docs/meta/codex-thread-index.md`: Cross-thread recovery index.
 - `docs/meta/changelog.md`: Technical/user-visible change log.
 - `docs/meta/next-release-notes-log.md`: Working log for user-facing "What's New" content.
-- `scripts/check-doc-links.py`: Read-only guard for broken local Markdown references in the docbase.
+- `scripts/check-doc-links.py`: Read-only guard for broken local Markdown references across admin and portal docbases.
 
 ## Safety Notes
 

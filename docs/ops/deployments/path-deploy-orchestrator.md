@@ -1,5 +1,8 @@
 # PATH Deploy Orchestrator
 
+Status: current deployment control-plane reference.
+Last reviewed: 2026-04-29 during ops documentation cleanup; command names checked against current `package.json`.
+
 Start with the short operator runbook in `docs/ops/deployments/deployment-quick-guide.md` if you just need the normal commands.
 
 The PATH deployment control plane now lives in `admin-dashboard` and is operated through `scripts/path-deploy.js`.

@@ -2,7 +2,7 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-04-28
+Last Updated: 2026-04-29
 
 ## How to use
 
@@ -31,6 +31,26 @@ For each indexed thread/topic, keep:
 - `Status`: whether the note is current, partial, incomplete-title, or superseded
 
 ## Indexed Topics
+
+### Clarify thread context persistence
+
+- Codex task title: `Clarify thread context persistence`
+- Topic: clarified Codex cross-thread persistence limits, confirmed `docs/AGENTS.md` as the future thread entry point, and completed the initial cross-app documentation cleanup pass for admin and portal docs
+- Keywords: `Clarify thread context persistence`, `persistent context`, `docbase cleanup`, `documentation cleanup`, `memory base`, `thread index`, `AGENTS.md`, `documentation-cleanup-plan`, `ISET-intake docs`, `portal docbase`, `stale docs`, `schema dumps`, `meta logs`
+- When to open: the user asks why future threads need to read `docs/AGENTS.md`, asks whether the docs are now safe/useful for Codex, asks what happened in the documentation cleanup thread, asks where the cleanup plan or triage indexes live, asks whether portal docs are in scope, or asks how to continue/prune the docbase
+- Primary docs:
+  - `docs/AGENTS.md`
+  - `docs/meta/standing-directive.md`
+  - `docs/meta/documentation-cleanup-plan-2026-04-29.md`
+  - `docs/meta/documentation-audit-2026-04-29.md`
+  - `docs/meta/project-map.md`
+  - `docs/meta/planning-cr-archive-triage-2026-04-29.md`
+  - `docs/meta/data-artifact-retention-2026-04-29.md`
+  - `docs/meta/meta-log-retention-2026-04-29.md`
+  - `scripts/check-doc-links.py`
+  - `../ISET-intake/docs/AGENTS.md`
+- Status: current as of 2026-04-29
+- Notes: this thread began by clarifying that Codex does not carry hidden durable project context across new chat threads and needs a repo-backed memory base. Bill confirmed the desired model: short task-based threads, with `docs/AGENTS.md` as the entry point and a maintained docbase/thread index to preserve project know-how. The thread then performed the initial cross-app documentation cleanup pass across `admin-dashboard/docs` and `../ISET-intake/docs`: added README gates, compacted `docs/AGENTS.md`, expanded the doc-link checker across both repos, audited ops docs, redacted literal DB passwords from historical notes, classified planning/change-request/archive docs, added data-artifact and meta-log retention policies, replaced three superseded planning docs with redirect stubs, and marked the cleanup pass complete in the persistent cleanup plan. Future threads can normally start with `X:\ISET\admin-dashboard\docs\AGENTS.md`; broad docbase cleanup continuation should also open `docs/meta/documentation-cleanup-plan-2026-04-29.md`.
 
 ### Recover task thread
 

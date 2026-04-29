@@ -46,7 +46,8 @@ Thumbs.db
 *.code-workspace
 
 # Database structure dumps
-docs/data/DB-Structure-Dump/
+docs/data/DB-Structure-Dump/*
+!docs/data/DB-Structure-Dump/README.md
 
 # Temporary local artifacts, snapshots, logs, and env captures
 /tmp/

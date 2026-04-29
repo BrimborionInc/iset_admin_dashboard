@@ -1,6 +1,7 @@
 # Operations Docs
 
 Status: operational guidance and runbooks. Verify before acting.
+Last reviewed: 2026-04-29 during ops documentation cleanup.
 
 This directory contains deployment guides, environment guides, migration-runner notes, incident notes, and infrastructure runbooks. Operational docs can become dangerous when stale, so treat code, package scripts, AWS/DB live checks, and current `docs/AGENTS.md` guardrails as higher authority.
 

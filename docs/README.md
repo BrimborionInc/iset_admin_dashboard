@@ -32,6 +32,6 @@ When a directory has its own `README.md`, read that gate before reading individu
 
 ## Maintenance Checks
 
-- Run `python3 scripts/check-doc-links.py` after reference-heavy documentation cleanup.
+- Run `python3 scripts/check-doc-links.py` after reference-heavy documentation cleanup. It scans both this admin docbase and `../ISET-intake/docs`.
 - Run `git diff --check` before handing off documentation edits.
 - Treat the link checker as a guardrail, not proof that a document is current; source/code verification still wins.

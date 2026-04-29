@@ -1,5 +1,8 @@
 # PATH Data Promotion Catalog
 
+Status: current allowlisted data/config promotion policy for PATH deployments.
+Last reviewed: 2026-04-29 during ops documentation cleanup; commands checked against `package.json`.
+
 Purpose: define which database data can move across environments, which data must never be promoted into prod, and which explicit commands are approved for Codex-operated promotion work.
 
 Last updated: 2026-04-04

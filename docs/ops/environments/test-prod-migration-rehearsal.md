@@ -1,5 +1,8 @@
 # TEST PROD-Like Migration Rehearsal
 
+Status: historical rehearsal record plus reusable safety pattern. Do not treat the executed artifact list as a current command queue.
+Last reviewed: 2026-04-29 during ops documentation cleanup.
+
 Purpose: rehearse the client/case/application migration on a production-like TEST dataset without doing a dangerous raw PROD clone that immediately re-enables PROD-linked identities and automated outbound side effects.
 
 Last Updated: 2026-04-28

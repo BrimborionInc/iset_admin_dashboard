@@ -1,5 +1,8 @@
 # Thread Handoff - 2026-03-02
 
+Status: historical handoff. Verify against current code, schema, and `docs/AGENTS.md` before acting.
+Last reviewed: 2026-04-29 during documentation cleanup; literal DB credential redacted.
+
 Last updated: 2026-03-02
 Audience: New chat/session with no prior context
 Scope: Consolidated decisions and intent from this conversation, with implementation-ready constraints.
@@ -13,7 +16,7 @@ The user explicitly requested a self-contained handoff because context-window lo
   - `DB_HOST=localhost`
   - `DB_PORT=3306`
   - `DB_USER=root`
-  - `DB_PASS=3^ochThR3&d`
+  - `DB_PASS=<redacted; use repo-root .env instead of docs>`
   - `DB_NAME=iset_intake`
 - DB editing guidance is in `docs/AGENTS.md` under **DB interaction (dev)**.
 - User direction: system is in dev; prioritize clean design over legacy data compatibility.

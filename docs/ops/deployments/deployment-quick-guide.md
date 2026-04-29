@@ -1,5 +1,8 @@
 # PATH Deployment Quick Guide
 
+Status: current primary operator guide for normal TEST/PROD PATH deploys.
+Last reviewed: 2026-04-29 during ops documentation cleanup; command names checked against current `package.json`.
+
 This is the shortest operator guide for normal PATH deployments.
 
 Work from:

@@ -1,5 +1,8 @@
 # AWS Test Environment Requirements
 
+Status: historical TEST environment requirements/design snapshot. Use current deploy/runbook docs and live AWS checks for operations.
+Last reviewed: 2026-04-29 during ops documentation cleanup.
+
 ## 1. Purpose
 - Validate the full ISET intake platform end to end: workflow authoring in the admin console, publish and render via public portal, applicant submissions, secure messaging, and adjudication.
 - Enable a small internal user group to rehearse production-scale scenarios ahead of go-live, including higher-volume applicant/admin simulations.
@@ -20,7 +23,6 @@
 - Outbound messaging via Amazon SES; current implementation sends system emails for submission/secure-messaging/approval events with future expansion to configurable notifications.
 - Shared assets and modules under `X:\ISET\` (e.g., workflow templates, block steps, Terraform scaffolding) are consumed by both applications; deployment pipeline must package these shared pieces for the test environment.
 - Terraform provisions all AWS resources from scratch (Cognito pools, SES identities, RDS/Aurora, VPC guardrails) using a consistent prefix (e.g., `nwac-test-`) for traceability.
-- Terraform provisions all AWS resources from scratch (Cognito pools, SES identities, RDS/Aurora, VPC guardrails); apply a consistent naming prefix (e.g., `nwac-test-`) for easy identification.
 - _Topology diagram pending - to capture VPC, subnets, load balancers, database tier, and endpoints._
 - Test environment will live alongside dev in the existing company AWS account; isolation handled via dedicated VPCs, tagging, and IAM boundaries rather than separate accounts.
 
@@ -82,5 +84,4 @@
 ---
 
 _Version:_ 0.1  
-_Last updated by:_ _(add name)_  
-_Last updated on:_ _(add date)_
+_Last reviewed:_ 2026-04-29 during ops documentation cleanup. Historical requirements snapshot; verify against live AWS and current runbooks before acting.

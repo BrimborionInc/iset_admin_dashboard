@@ -1,5 +1,8 @@
 # Test Environment Deployment Notes
 
+Status: current TEST deployment notes. Prefer `deployment-quick-guide.md` for the shortest operator commands.
+Last reviewed: 2026-04-29 during ops documentation cleanup; command names checked against current admin and portal `package.json` files.
+
 For the shortest operator commands, start with `docs/ops/deployments/deployment-quick-guide.md`.
 
 ## One-command deploy (recommended)

@@ -1,5 +1,8 @@
 # Terraform Initial Runbook – NWAC Prod Environment
 
+Status: elevated prod Terraform/bootstrap runbook. Not a normal reduced-role `nwac-prod` deploy path.
+Last reviewed: 2026-04-29 during ops documentation cleanup.
+
 For the public portal cutover to `iset.nwac.ca` while retaining `nwac-public.awentech.ca`, see [prod-portal-hostname-cutover.md](prod-portal-hostname-cutover.md).
 
 ## 0. Authenticate to the Prod Account

@@ -1,12 +1,13 @@
 # Documentation Audit - 2026-04-29
 
-Purpose: first-pass inventory and cleanup strategy for the agent-facing project memory layer. This is not a full truth audit of every document. It records the current shape of `docs/`, the immediate risks, and the next cleanup order.
+Purpose: first-pass inventory and cleanup strategy for the agent-facing project memory layer. This is not a full truth audit of every document. It records the current shape of the admin `docs/`, the immediate risks, and the next cleanup order. The active execution tracker is `docs/meta/documentation-cleanup-plan-2026-04-29.md`, and it now explicitly includes the sibling public portal docbase at `../ISET-intake/docs/`.
 
 ## Verified Inventory
 
 Checked from `/mnt/x/ISET/admin-dashboard` on 2026-04-29.
 
 - `docs/` contains 402 files.
+- The sibling public portal docbase `../ISET-intake/docs/` is also in scope for the broader cleanup plan. First-pass portal inventory on 2026-04-29 found 50 files: 49 Markdown and 1 HTML reference example. README gates have now been added across the portal docs directory tree.
 - File types: 236 Markdown, 132 SQL, 8 DOCX, 6 PDF, 6 CSV, 5 XLSX, 4 TXT, 2 XSD, 2 XML, 1 SCH.
 - Largest project-memory files:
   - `docs/meta/codex-thread-index.md` around 166 KB.
@@ -43,6 +44,7 @@ Use these classes while curating docs:
 - Many planning docs likely describe intended or historical behavior. Future agents must verify those claims against code, migrations, package scripts, and database checks.
 - Generated/reference files under `docs/data/DB-Structure-Dump`, `docs/data/NOC*`, `docs/requirements`, `docs/training`, and `docs/financial reporting requirements` should not be mixed mentally with maintained agent guidance.
 - Large legacy planning and tracker docs remain the next major source of stale guidance risk.
+- The ops audit found literal DB password values in historical docs; those have been redacted. Future cleanup should treat any discovered credentials/tokens/API keys as defects to redact, not context to preserve.
 
 ## Cleanup Strategy
 
@@ -101,3 +103,12 @@ Use these classes while curating docs:
 - Added `scripts/check-doc-links.py` as a reusable read-only local Markdown reference check for future docbase cleanup threads.
 - Moved DB/TEST/PROD/AWS profile command detail out of `docs/AGENTS.md` into `docs/ops/agent-operational-access.md`, leaving the entry point with concise guardrails and pointers.
 - Added a README gate to `docs/data/temp/` so tracked binary source artifacts are not mistaken for maintained guidance.
+- Added `docs/meta/documentation-cleanup-plan-2026-04-29.md` as the persistent progress tracker for the broader cleanup effort.
+- Expanded the cleanup plan scope to include `../ISET-intake/docs` as part of the same cross-app Codex memory base.
+- Added README gates across `../ISET-intake/docs`, fixed a stale portal-to-admin intake-authoring reference, and extended `scripts/check-doc-links.py` to validate both docbases.
+- Compacted `docs/AGENTS.md` by replacing duplicated subsystem status sections with canonical doc pointers, reducing the entry point to roughly 300 lines.
+- Added status/review metadata across admin and portal ops runbooks, checked documented deploy/data/migration command names against current package scripts, marked historical TEST/prod environment records, redacted literal DB credentials from historical notes, and updated PROD portal hostname references to include `iset.nwac.ca`.
+- Added `docs/meta/planning-cr-archive-triage-2026-04-29.md` to classify the planning, change-request, and portal archive layer into current sources, current references, historical sources, superseded docs, source artifacts, and delete/archive candidates.
+- Added `docs/meta/data-artifact-retention-2026-04-29.md` plus a `docs/data/DB-Structure-Dump/README.md` gate so generated schema snapshots and tracked temp binaries are classified as source/generated artifacts rather than maintained agent guidance.
+- Added `docs/meta/meta-log-retention-2026-04-29.md` to set search/update/split rules for the large admin and portal meta logs without prematurely splitting them.
+- Replaced the superseded Query Editor, document-model ERM, and public-intake renderer planning notes with redirect stubs to reduce duplicate stale guidance while preserving discoverable paths.

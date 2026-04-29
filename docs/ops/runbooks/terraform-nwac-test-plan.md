@@ -1,5 +1,8 @@
 # Terraform Delivery Plan – NWAC Test Environment
 
+Status: historical TEST Terraform delivery plan. Use live Terraform state/AWS checks and current deployment runbooks before acting.
+Last reviewed: 2026-04-29 during ops documentation cleanup.
+
 ## 1. Goals
 - Stand up the complete AWS test footprint (networking, identity, data, compute, monitoring) from scratch in the existing company account.
 - Bake CCCS Medium guardrails directly into Terraform so every stack is compliant-by-design.
@@ -91,5 +94,5 @@ infra/
 - Determine if Audit Manager CCCS library is fully automatable or needs manual evidence uploads.
 - Clarify how SES sandbox limitations affect applicant notifications; may need test recipient allow list.
 
-Document owner: _(add name)_  
-Last updated: _(add date)_
+Document owner: Codex-maintained historical ops note
+Last reviewed: 2026-04-29 during ops documentation cleanup

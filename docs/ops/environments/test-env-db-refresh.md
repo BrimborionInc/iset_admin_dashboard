@@ -1,5 +1,8 @@
 # Test Environment Database Refresh Workflow
 
+Status: current TEST database refresh operator workflow, with older Terraform target-state notes retained for context.
+Last reviewed: 2026-04-29 during ops documentation cleanup; current commands checked against `package.json`.
+
 Goal: Load a scrubbed MySQL snapshot into the Aurora test cluster reliably and audibly, without manual RDS console steps.
 
 Current implementation note (2026-04-04):

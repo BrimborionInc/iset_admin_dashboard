@@ -1,5 +1,8 @@
 # Admin Console Migration Runner
 
+Status: current canonical PATH shared-schema migration guidance.
+Last reviewed: 2026-04-29 during ops documentation cleanup.
+
 The admin console owns the canonical PATH shared-schema migration runner. This note documents the canonical runner used by `isetadminserver.js` startup and by the explicit CLI in `scripts/path-schema-migrate.js`.
 
 ## Where migrations live

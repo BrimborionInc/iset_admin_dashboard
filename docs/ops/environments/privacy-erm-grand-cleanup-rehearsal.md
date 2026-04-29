@@ -1,5 +1,8 @@
 # Privacy ERM Grand Cleanup Rehearsal
 
+Status: point-in-time cleanup rehearsal plan from 2026-04-27/2026-04-28. Verify target migration state and current branch before acting.
+Last reviewed: 2026-04-29 during ops documentation cleanup.
+
 Purpose: operational rehearsal plan for promoting the DEV privacy ERM cleanup to TEST and eventually PROD without guessing on live data.
 
 Last Updated: 2026-04-27

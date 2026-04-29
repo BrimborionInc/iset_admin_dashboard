@@ -11,7 +11,7 @@ Last reviewed for documentation cleanup: 2026-04-29.
 - `apps/`: Secondary app/package workspace material where present.
 - `docs/`: Agent-facing project memory plus source/reference artifacts.
 - `scripts/`: Build, deploy, migration, smoke-test, data-sync, and repair utilities.
-- `scripts/check-doc-links.py`: Read-only local Markdown reference checker for `docs/` and current sibling portal doc paths.
+- `scripts/check-doc-links.py`: Read-only local Markdown reference checker for both admin `docs/` and sibling portal `../ISET-intake/docs`.
 - `templates/`: Nunjucks / HTML templates used in workflow/document preview (if any shared with portal).
 - `blocksteps/`: JSON + Nunjucks definitions for workflow steps (authoring assets).
 - `workflow_dev_blocksteps/` & `workflow_dev_workflows/`: Development / draft workflow definitions.
@@ -161,13 +161,23 @@ Portal Runtime (ISET-intake) Integration (summary):
 - `docs/AGENTS.md`: Required project entry point for AI coding agents and high-level project-memory map.
 - `docs/meta/standing-directive.md`: Durable project-memory maintenance contract for future short task-based threads.
 - `docs/meta/documentation-audit-2026-04-29.md`: Current first-pass documentation inventory, risk classification, and cleanup queue.
+- `docs/meta/documentation-cleanup-plan-2026-04-29.md`: Active execution tracker for the broader documentation cleanup effort.
+- `docs/meta/planning-cr-archive-triage-2026-04-29.md`: First-pass classification index for planning docs, change requests, and portal archive docs.
+- `docs/meta/data-artifact-retention-2026-04-29.md`: First-pass retention policy for generated schema dumps and tracked source/temp data artifacts.
+- `docs/meta/meta-log-retention-2026-04-29.md`: First-pass search/update/split policy for large admin and portal meta logs.
+- `../ISET-intake/docs/AGENTS.md`: Public portal documentation entry point; in scope for the cross-app Codex memory cleanup plan.
 - `docs/meta/codex-thread-index.md`: Searchable cross-thread recovery index for durable handoff notes, runbooks, and prior-thread findings that future chats may need to rediscover quickly.
 - `docs/planning/README.md`: Directory gate explaining current-vs-historical handling for planning notes.
 - `docs/change-requests/README.md`: Directory gate explaining historical/source handling for CR notes and DOCX artifacts.
 - `docs/data/README.md`: Directory gate distinguishing maintained data docs from generated dumps, reference datasets, and temporary source artifacts.
+- `docs/data/DB-Structure-Dump/README.md`: Gate for legacy generated schema snapshot files; not authoritative schema guidance.
 - `docs/data/temp/README.md`: Gate for tracked binary source artifacts that are not maintained guidance.
 - `docs/ops/README.md`: Directory gate for deployment, environment, migration, and infrastructure runbooks.
 - `docs/ops/agent-operational-access.md`: Codex/WSL DB access, TEST SQL, PROD start/stop, and AWS profile notes moved out of the agent entry point.
+- `docs/ops/deployments/deployment-quick-guide.md`: Shortest current TEST/PROD deployment command guide.
+- `docs/ops/deployments/path-deploy-orchestrator.md`: Current deployment control-plane reference for schema/data/app rollout and smoke checks.
+- `docs/ops/environments/prod-env-guide.md`: PROD environment snapshot; verify live AWS state before operations.
+- `../ISET-intake/docs/system/ops/prod-portal-deployment.md`: Portal-specific PROD deployment pointer that links back to the admin orchestrator docs.
 - `docs/guides/README.md`: Directory gate for maintained how-to docs that still require code/script verification.
 - `docs/requirements/README.md`: Directory gate for source requirements, specs, and applicant form artifacts.
 - `docs/training/README.md`: Directory gate for staff training source material and help-panel guidance inputs.
@@ -219,7 +229,11 @@ Portal Runtime (ISET-intake) Integration (summary):
 - v0.4k: Added data, requirements, and training directory gates to separate maintained guidance from generated dumps, source artifacts, and reference material.
 - v0.4l: Added ops and guides directory gates so future agents verify operational commands and how-to assumptions before acting.
 - v0.4m: Added a top-level docs index plus gates for architecture, assignment, auth, components, dashboards, features, financial reporting requirements, inventory, meta, prompts, runtime, testing, widgets, and workflows.
-- v0.4n: Corrected stale local and cross-repo doc references, marked the nForm extraction plan/scope notes as historical/planned, updated planned-status component docs for `signature-ack` and conditional visibility, cleaned up broken intake-authoring/finance/ESDC/runbook references found by a broader scan, added a reusable doc-link checker, moved operational access command detail out of `docs/AGENTS.md`, and gated `docs/data/temp/`.
+- v0.4n: Corrected stale local and cross-repo doc references, marked the nForm extraction plan/scope notes as historical/planned, updated planned-status component docs for `signature-ack` and conditional visibility, cleaned up broken intake-authoring/finance/ESDC/runbook references found by a broader scan, added a reusable cross-app doc-link checker, moved operational access command detail out of `docs/AGENTS.md`, gated `docs/data/temp/`, added the active cleanup execution tracker, expanded cleanup scope to include `../ISET-intake/docs`, completed first-pass portal doc gates, and compacted the agent entry point.
+- v0.4o: Completed the first ops-doc audit pass by adding status/review metadata across admin and portal ops runbooks, checking documented deployment/data/migration command names against package scripts, marking historical TEST/prod environment records, redacting literal DB credentials from historical notes, and updating PROD portal hostname references.
+- v0.4p: Added the first planning/change-request/archive triage index, linked it from directory gates, classified CR DOCX files as source artifacts, and recorded initial delete/archive candidates without deleting them.
+- v0.4q: Added the first data-artifact retention policy, gated `docs/data/DB-Structure-Dump/`, and clarified that tracked temp binaries are source artifacts that may contain sensitive data.
+- v0.4r: Added the first meta-log retention policy, keeping current large logs searchable in place while defining when and how to split them later.
 
 ---
 Maintenance: keep this map current when work changes repo structure, major modules, lifecycle hooks, cross-cutting architecture, or documentation organization. Do not expand it with subsystem detail that belongs in a canonical domain doc.

@@ -1,5 +1,8 @@
 # Test Environment Deployment Automation – Outline
 
+Status: historical TEST deployment automation outline. Current operator entry points are `path:deploy`, `deploy-admin-to-test`, and `deploy-portal-to-test`.
+Last reviewed: 2026-04-29 during ops documentation cleanup.
+
 This note describes how the refreshed `deploy-test.ps1` scripts will render environment files, sync application assets, and restart services in AWS while keeping secrets in SSM/Secrets Manager.
 
 ## 1. Prerequisites
@@ -86,5 +89,5 @@ Outstanding items before automation proceeds:
 - Terraform provisions `nwac-test-artifacts`; ensure IAM access and upload artifacts per release.
 - Wire CodeDeploy or SSM automation documents accordingly.
 
-Owner: _(add name)_  
-Last updated: _(add date)_
+Owner: Codex-maintained historical ops note
+Last reviewed: 2026-04-29 during ops documentation cleanup

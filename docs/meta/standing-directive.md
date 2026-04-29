@@ -14,6 +14,7 @@ This repo uses `docs/` as persistent project memory. Future agents do not have h
 - Revise, merge, archive, or delete stale/conflicting docs. Do not preserve obsolete wording just because it already exists.
 - Sensitive files may be inspected or edited only when genuinely needed for the task and allowed by the current session's tool policy.
 - Keep credentials, secrets, tokens, and unnecessary sensitive personal data out of docs.
+- If a doc already contains a literal credential, token, or secret value, redact it during cleanup and note the redaction instead of preserving the value for history.
 
 ## Source Of Truth Order
 
@@ -36,7 +37,7 @@ Historical docs can explain intent, but they do not prove current behavior.
 - Update `docs/meta/changelog.md` for user-visible, operational, security, schema, or deployment-relevant changes.
 - Update `docs/meta/next-release-notes-log.md` for changes that may belong in the next user-facing "What's New" update.
 - Update `docs/meta/project-map.md` when repo structure, major modules, cross-cutting architecture, or documentation organization changes.
-- Run `python3 scripts/check-doc-links.py` after reference-heavy documentation cleanup, and run `git diff --check` before handoff.
+- Run `python3 scripts/check-doc-links.py` after reference-heavy documentation cleanup, and run `git diff --check` before handoff. If portal docs were touched, also run `git -C ../ISET-intake diff --check`.
 
 ## Cleanup Rules
 
@@ -48,4 +49,4 @@ Historical docs can explain intent, but they do not prove current behavior.
 
 ## Current Cleanup Baseline
 
-The current documentation audit is `docs/meta/documentation-audit-2026-04-29.md`. Use it as the starting point for docbase cleanup until it is superseded by a newer audit. The current read-only doc-link checker is `scripts/check-doc-links.py`.
+The current documentation audit is `docs/meta/documentation-audit-2026-04-29.md`. Use it as the starting point for docbase cleanup until it is superseded by a newer audit. The active cleanup tracker is `docs/meta/documentation-cleanup-plan-2026-04-29.md`, and the current read-only cross-app doc-link checker is `scripts/check-doc-links.py`.
