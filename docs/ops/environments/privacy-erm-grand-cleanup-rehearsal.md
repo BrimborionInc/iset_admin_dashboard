@@ -379,6 +379,60 @@ Verification:
 - `path:maintenance:fallback status --env prod --surfaces all` showed all PROD host rules still forwarding normally. No ALB fixed-response maintenance page has been enabled yet.
 - The admin and public portal source utilities were also updated locally to stop adding the save-progress stock phrase for future maintenance warnings; that code change will take effect on the next app deploy.
 
+## 2026-04-28 PROD Rollout Outcome
+
+Execution gate:
+
+- Bill explicitly opened the PROD execution gate at approximately 9:00 PM EDT with "OK go."
+- Hard ALB maintenance fallback was enabled for admin and both public portal hostnames before DB mutation.
+- PROD restore snapshot captured and waited to `available`: `path-prod-v0-6-0-20260429010341`, created `2026-04-29T01:03:42.481000+00:00`.
+
+Database apply:
+
+- Pre-migration cleanup applied:
+  - `privacy-erm-message-item-cleanup-apply.sql`: deleted `81` unsafe `message_item` rows (`4` missing owner users, `77` owner not sender/recipient).
+  - `privacy-erm-document-scope-apply.sql`: updated `1132` documents from `1248` candidates.
+  - `privacy-erm-client-account-event-orphan-apply.sql`: deleted `5` orphan client-account events.
+- Canonical migrations initially stopped at `20260426_0007_harden_secure_message_scope_constraints.sql` because `chk_iset_document_manual_upload_scope` found `9` manual-upload documents whose `case_id` became deterministic only after the early `iset_application.case_id` backfill.
+- Narrow repair applied under audit run `document-scope-post-app-case-20260429011422`: updated exactly `9` `manual_upload` documents, setting `iset_document.case_id = iset_application.case_id`; follow-up manual-upload scope violations were `0`.
+- Canonical migration apply then resumed and completed through `20260427_0020_allow_casefile_secure_message_document_scope.sql`.
+- Follow-up migration plan reported `Pending migrations: 0`.
+- Duplicate-case consolidation preview reported the expected `4` merge pairs and `0` blockers.
+- Duplicate-case consolidation apply run `duplicate-case-consolidation-20260429012409` merged `4` case pairs and reported `remaining_case_refs=0`, `remaining_duplicate_clients=0`.
+
+Post-DB checks:
+
+- Duplicate client-case groups: `0`.
+- Retired `iset_case.application_id` column: `0` remaining.
+- Document source-scope blockers for manual upload, application submission, system-generated, and secure-message attachments: all `0`.
+- Client applicant-account event orphans: `0`.
+- Message mailbox cleanup preview: `ok=200`, no unsafe rows.
+- Duplicate-case preview after apply: `merge_pairs=0`, `blocker_rows=0`, `rows_that_would_be_repointed=0`.
+
+App deploy:
+
+- Deployed release `v0.6.0` under manifest `tmp/path-deploy/prod/v0.6.0--2026-04-29T01-25-23-679Z.json`.
+- Shared artifact uploaded to `s3://nwac-prod-artifacts/shared/shared-latest.zip`.
+- Admin artifact built from release stamp `v0.6.0 | 9ce25a5f` and uploaded to `s3://nwac-prod-artifacts/admin/admin-dashboard-latest.zip`.
+- Portal artifact built from release stamp `v0.1.0 | v0.6.0 | 49534071 | production` and uploaded to `s3://nwac-prod-artifacts/portal/portal-latest.zip`.
+- PROD instance refresh `30154c46-1b6f-4315-9322-d92088033903` completed `Successful` at `2026-04-29T01:35:56+00:00`.
+- During refresh, fallback maintenance had to be cleared before the ASG could complete because the portal target group reported `Target.NotInUse` while ALB rules were fixed responses. After fallback clear, both PROD target groups reported healthy on replacement instance `i-07ce08779486e2032`.
+
+Completion checks:
+
+- `npm run path:deploy:smoke -- --env prod` returned `200` for:
+  - `https://nwac-console.awentech.ca/healthz`
+  - `https://iset.nwac.ca/healthz`
+  - `https://nwac-public.awentech.ca/healthz`
+- Direct curl checks returned `{"status":"ok"}` from all three health endpoints.
+- ALB fallback status returned normal forwarding for admin and both portal hostnames.
+- Runtime maintenance warning was cleared; `iset_runtime_config(scope='runtime', k='service.announcement')` row count was `0`, and public service-announcement endpoints returned the default disabled payload.
+- Final target group checks showed replacement instance `i-07ce08779486e2032` healthy on admin port `5001` and portal port `5000`.
+
+Outstanding operational note:
+
+- Local GitHub push still requires credentials from an interactive shell. Admin remains ahead of origin by the local rollout/preflight documentation commits, and portal remains ahead by the local maintenance-copy commit.
+
 ## 2026-04-28 TEST UI Validation Findings
 
 During guided TEST UI validation, Wabanang Polson's pending-approval application exposed a release/data-quality finding:
