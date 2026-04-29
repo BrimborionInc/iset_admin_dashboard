@@ -433,6 +433,26 @@ Outstanding operational note:
 
 - Local GitHub push still requires credentials from an interactive shell. Admin remains ahead of origin by the local rollout/preflight documentation commits, and portal remains ahead by the local maintenance-copy commit.
 
+Post-rollout approved assessment PDF audit and corrected repair:
+
+- After PROD rollout, a corrected audit separated real approval-workflow decisions from imported/application-less `manual_backload` existing interventions.
+- The first audit had over-counted backloaded existing interventions because compatibility rows in `iset_intervention_proposal` can have `review_status='approved'`; `metadata.source='manual_backload'` and `metadata.entryMode='existing'` identify those as silent historical backloads, not proposal approvals requiring assessment PDFs.
+- Initial corrected PROD repair target:
+  - Katrina Woodgate, application `6`, case `88` / `MI-MNT3JPF0-5BFEF1`: submitted assessment PDF already existed as document `774`; approved dual-signed assessment PDF was missing.
+  - Erica Christian, proposal `30`, intervention `15`, application `25`, case `107` / `ISET-20260416-5490A4`: both submitted and approved assessment PDFs were missing.
+- Repair runner: `tmp/prod-repair-approved-assessment-pdfs-20260428/repair-approved-assessment-pdfs.js`, staged through `s3://nwac-prod-artifacts/ssm-sql/prod-repair-approved-assessment-pdfs-20260428/repair-approved-assessment-pdfs.js` and executed on PROD app host `i-07ce08779486e2032`.
+- Apply run ID: `approved-assessment-backfill-20260428`.
+- The run inserted document rows `1668`, `1669`, and `1670`, but the signature evidence was wrong:
+  - Katrina's generated approved assessment incorrectly used the later Madison Coppola approval-transaction `assessment_submitted` event as the case manager signature, even though the existing submitted assessment document `774` was created by Amanda Curtis and shows Amanda as case manager.
+  - Erica's generated approved assessment used Amanda Curtis as both case manager and approver because the legacy proposal/intervention rows both store staff profile `54`; case `107` has no separate approval event evidence.
+- Bill rejected those generated artefacts. The generated document rows `1668`, `1669`, and `1670` were hard-deleted from `iset_document` and `iset_document_intervention`; follow-up SQL verification showed `0` remaining rows for those ids. The corresponding S3 objects could not be deleted by the available PROD app-host role because `nwac-prod-app-role` lacks `s3:DeleteObject` on `nwac-prod-uploads-b6bb`; they are unreferenced orphan objects and are not visible through PATH.
+- The repair runner was corrected so Katrina's approved assessment uses the owner of the existing submitted assessment document `774` as the case-manager signature source, instead of the later approval-transaction `assessment_submitted` event.
+- Corrected PROD generation completed on `2026-04-29 02:47 UTC`:
+  - Katrina Woodgate document `1671`: `case_assessment_approved`, label `Approved case manager assessment v1`, application `6`, case `88`, path `uploads/2026/04/29/116/775e71c7-c33c-4317-af68-e89c3012436b-approved-case-manager-assessment-v1-mi-mnt3jpf0-5bfef1.pdf`. Signature metadata: case manager Amanda Curtis signed `2026-04-17T22:01:35.000Z`; approver Madison Coppola signed `2026-04-21T13:15:14.344Z`.
+  - Erica Christian document `1672`: `case_assessment`, label `Case manager assessment v1`, application `25`, case `107`, action plan `9`, intervention `15`, path `uploads/2026/04/29/41/51373c9f-7ec4-47e2-b7a4-74093801ed9e-case-manager-assessment-v1-iset-20260416-5490a4.pdf`. Signature metadata: case manager Amanda Curtis signed `2026-04-20T17:47:29.000Z`.
+  - Erica Christian document `1673`: `case_assessment_approved`, label `Approved case manager assessment v1`, application `25`, case `107`, action plan `9`, intervention `15`, path `uploads/2026/04/29/41/ef983c55-268e-439d-b921-b2d6f7d3a4f0-approved-case-manager-assessment-v1-iset-20260416-5490a4.pdf`. Signature metadata: case manager Amanda Curtis signed `2026-04-20T17:47:29.000Z`; approver Amanda Curtis signed `2026-04-20T17:48:09.000Z`.
+- Erica's approved PDF reflects the legacy data evidence in PROD: both `iset_intervention_proposal.id=30` and `iset_case_intervention.id=15` store staff profile `54` / Amanda Curtis for the submit/review path, and no separate case `107` approval event was found.
+
 ## 2026-04-28 TEST UI Validation Findings
 
 During guided TEST UI validation, Wabanang Polson's pending-approval application exposed a release/data-quality finding:
@@ -452,6 +472,12 @@ Follow-up code fix started in DEV:
 - Backend route `PUT /api/cases/:id` now treats generated assessment-submission documents as required when an application assessment is being submitted into Pending Decision.
 - The route generates the case manager assessment, application form, and financial overview before committing the status transition. If any required document cannot be generated or recorded as an active `iset_document` row, the transaction fails and the application should not land in Pending Decision without those documents.
 - The three generated-document storage helpers now accept the active DB connection so their document rows participate in the same transaction as the status update.
+
+Post-rollout assurance note:
+
+- Read-only PROD SQL check after the `v0.6.0` rollout found no live `assessment_submitted` or `nwac_review_submitted` events after the rollout window; the only assessment PDFs created after `2026-04-29 01:00:00 UTC` were the explicit repair rows `1671`, `1672`, and `1673` with `metadata.ops_repair.run_id='approved-assessment-backfill-20260428'`.
+- Therefore the new live PROD UI path has not yet been exercised by staff after rollout. Current confidence is based on deployed-code inspection plus the TEST rehearsal, not on a post-rollout PROD user transaction.
+- Recommended first-production-use smoke: use a controlled internal/test applicant record, submit one new application assessment through the UI, verify active `system_generated` `case_assessment`, `application_form`, and `financial_overview` rows/signatures, then commit an approval and verify active `system_generated` `case_assessment_approved` with the assessor as recommendation signer and the NWAC approver as approval signer.
 
 PROD data repair completed:
 

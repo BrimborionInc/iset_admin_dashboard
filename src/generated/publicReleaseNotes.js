@@ -1,63 +1,67 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-04-28T08:08:57.059Z",
-  "releaseId": "20260428-test-pending-completion-denial-fix",
-  "releaseLabel": "Release 20260428-test-pending-completion-denial-fix",
-  "releaseDateEn": "28th April 2026",
-  "releaseDateFr": "28 avril 2026",
+  "generatedAt": "2026-04-29T03:19:32.643Z",
+  "releaseId": "admin-supporting-docs-copy-hotfix-20260429-2",
+  "releaseLabel": "Release admin-supporting-docs-copy-hotfix-20260429-2",
+  "releaseDateEn": "29th April 2026",
+  "releaseDateFr": "29 avril 2026",
   "en": {
     "sectionEyebrow": "Optional reading",
-    "description": "Recent PATH changes are summarized here for staff who want them before signing in.",
+    "description": "",
     "featuresHeading": "What changed",
     "features": [
-      "Approval items now open the correct review layout and decision step in both the application and case workspaces, while still allowing staff to click back through earlier review steps.",
-      "Denied applications now leave Pending Completion once the denial letter has been sent, so staff no longer see a finished denial file as still needing follow-up.",
-      "Application and intervention proposal decisions are now restricted to NWAC Administrators, so Regional Managers can monitor approval queues without committing approvals or denials.",
-      "Historical intake uploads now stay visible in the application workspace and checklist even on older files where the original applicant documents were saved before PATH linked them to the final application record.",
-      "Application, intervention, and revision wizards now use clearer phase-based headings and guidance so staff can tell more easily whether they are drafting, reviewing, or completing follow-up work.",
-      "Revised intervention submissions now generate a fresh case-manager assessment PDF, and revised client funding agreements can now redline against the immediately previous agreement in the series.",
-      "Application approval handling is more coherent: decisions now write real outcome statuses right away, request-changes notes appear immediately, and follow-up communication steps behave more consistently.",
-      "Finance packet routing is more flexible: province finance addresses can use multiple recipients, and case-manager sender, reply-to, and CC details are now carried through when available.",
-      "Client and case views now resolve participant names more consistently across the Clients table, case header, and applicant details displays, reducing mismatches between different workspace surfaces.",
-      "The homepage Work Queue now shows a clearer application pipeline for NWAC Administrators and Regional Managers, separating new files, assigned-but-not-started files, active assessment work, and pending decisions.",
-      "Approval queues now show clearer request types for new applications, additional interventions, and proposed intervention changes, with more stable launch behavior from the homepage.",
-      "The public landing page now publishes release notes from this log and stamps them with the deployed release ID/date so the published notes and the visible build line stay in sync."
+      "Client files now follow a cleaner one-client, one-case model. Historical duplicate case records are consolidated into the surviving client file while keeping action plans, interventions, documents, notes, and message history attached.",
+      "Secure Messaging, Supporting Documents, Notes, Timeline, and payment-packet access have been tightened so staff actions stay scoped to the case, application, client, or payment record they are authorized to use.",
+      "Older public-portal applications that were missing generated signed consent/declaration PDFs have been repaired, and new submissions continue to store the signed forms in Supporting Documents.",
+      "Assessment submission now fails clearly if required generated PDFs cannot be created before a file moves to Pending Decision, reducing the chance of a decision file missing its assessment, application, or financial overview PDFs.",
+      "Approval and pending-completion flows are more stable: approval items open the intended review step, staff can look back through the wizard, and denied files leave Pending Completion once the denial letter is sent.",
+      "Historical intake uploads are easier to recover in the application workspace and checklist, including older files where uploads were saved before PATH linked them to the final application record.",
+      "The application-workspace Secure Messaging widget no longer flashes or reloads messages repeatedly while a global maintenance warning countdown is visible.",
+      "Maintenance warnings now use shorter, more direct wording and can be shown before planned downtime without adding extra save-progress language."
     ],
     "knownIssuesHeading": "Known issues",
     "knownIssues": [
-      "No major release-blocking issues are currently logged for this release.",
-      "Some labels and workflow wording are still being refined as the new approval and revision flows settle into everyday use."
+      "Some staff may still see Supporting Documents load errors or confusing empty results when document filters are active.",
+      "Some New Applications may not show the expected assignment or reassignment action, especially where EI verification is overdue.",
+      "Secure-message notification coverage for messages in client files is still under review.",
+      "The admin upload-client/intake entry point needs review because staff may not always see the expected upload tab.",
+      "Some updated case-manager assessment records still need review where staff expect a refreshed assessment PDF to appear in Supporting Documents."
     ],
     "comingNextHeading": "Coming next",
     "comingNext": [
-      "Further cleanup of approval and revision status wording so staff can see more clearly whether PATH is dealing with a new application, an additional intervention, or a proposed change to an approved intervention.",
-      "Continued finance and document workflow hardening around payment packets, supporting evidence, and generated client correspondence."
+      "Clearer workflow options for applications that are withdrawn or paused while waiting for external funding or other information.",
+      "A review of Supporting Documents filters so staff can tell the difference between no matching documents and a real load failure.",
+      "Follow-up on New Application assignment and reassignment behaviour after EI verification becomes overdue.",
+      "Follow-up on message notification behaviour for application and case secure messages."
     ]
   },
   "fr": {
     "sectionEyebrow": "Lecture optionnelle",
-    "description": "Les changements recents de PATH sont resumes ici pour le personnel qui souhaite les consulter avant de se connecter.",
+    "description": "",
     "featuresHeading": "Ce qui a change",
     "features": [
-      "Les elements d'approbation ouvrent maintenant la bonne disposition de revision et la bonne etape de decision dans les espaces de travail des demandes et des dossiers, tout en permettant au personnel de revenir aux etapes de revision precedentes.",
-      "Les demandes refusees quittent maintenant la file de suivi une fois que la lettre de refus a ete envoyee, afin qu'un dossier de refus termine ne semble plus necessiter une action.",
-      "Les assistants de demande, d'intervention et de revision utilisent maintenant des titres et des indications mieux adaptes a la phase en cours, afin qu'il soit plus facile de voir si le personnel prepare, revise ou termine un suivi.",
-      "Les soumissions de revision d'intervention generent maintenant un nouveau PDF d'evaluation du gestionnaire de cas, et les ententes de financement revisees peuvent maintenant afficher les modifications par rapport a l'entente precedente immediate de la serie.",
-      "Le traitement des decisions d'approbation des demandes est plus coherent: les decisions ecrivent immediatement le bon resultat, les notes de demande de changements apparaissent tout de suite et les etapes de suivi se comportent de facon plus uniforme.",
-      "Les courriels de lots de paiement prennent maintenant en charge l'acheminement par province, ainsi que l'expediteur, le repondre-a, la copie conforme et plusieurs adresses pour le gestionnaire de cas lorsque ces adresses sont configurees.",
-      "Les vues client et dossier resolvent maintenant plus uniformement le nom de la participante dans le tableau Clients, l'en-tete du dossier et les details de la demandeuse, ce qui reduit les ecarts entre les ecrans.",
-      "La file de travail de la page d'accueil presente maintenant un pipeline de demandes plus clair pour les administrateurs de la NWAC et les gestionnaires regionaux, en separant les nouveaux dossiers, les dossiers assignes non commences, les dossiers en evaluation et les decisions en attente.",
-      "Les files d'attente d'approbation affichent maintenant des types de demande plus clairs pour les nouvelles demandes, les interventions additionnelles et les changements proposes aux interventions approuvees, avec un lancement plus fiable depuis la page d'accueil.",
-      "La page d'accueil publique publie maintenant les notes de version a partir de ce journal et les marque avec l'identifiant et la date de la version deployee afin que les notes publiees et la ligne de build visible restent synchronisees."
+      "Les dossiers clients suivent maintenant un modele plus clair: un client, un dossier. Les anciens dossiers en double sont consolides dans le dossier client conserve, tout en gardant les plans d'action, interventions, documents, notes et messages.",
+      "La messagerie securisee, les documents justificatifs, les notes, la chronologie et les lots de paiement sont mieux limites aux dossiers, demandes, clients ou paiements que le personnel est autorise a utiliser.",
+      "Les anciennes demandes du portail public auxquelles il manquait des PDF signes de consentement et de declaration ont ete reparees, et les nouvelles soumissions continuent d'enregistrer ces formulaires signes dans les documents justificatifs.",
+      "La soumission d'une evaluation echoue maintenant clairement si les PDF requis ne peuvent pas etre crees avant qu'un dossier passe a la file de decision, ce qui reduit les dossiers de decision incomplets.",
+      "Les flux d'approbation et de suivi sont plus stables: les elements d'approbation ouvrent l'etape de revision attendue, le personnel peut revenir aux etapes precedentes, et les refus quittent la file de suivi apres l'envoi de la lettre.",
+      "Les anciens televersements d'admission sont plus faciles a retrouver dans l'espace de travail de la demande et la liste de controle, y compris lorsque les fichiers avaient ete enregistres avant le lien final avec la demande.",
+      "Le widget Messagerie securisee de l'espace de travail de la demande ne clignote plus et ne recharge plus les messages en boucle lorsqu'un avis de maintenance avec compte a rebours est visible.",
+      "Les avis de maintenance utilisent maintenant un texte plus court et plus direct, sans ajouter de consigne supplementaire de sauvegarde du travail."
     ],
     "knownIssuesHeading": "Points connus",
     "knownIssues": [
-      "Aucun probleme bloquant majeur n'est actuellement consigne pour cette version.",
-      "Certains libelles et certaines formulations de flux de travail continuent d'etre affines pendant que les nouveaux flux d'approbation et de revision se stabilisent."
+      "Certains membres du personnel peuvent encore voir des erreurs de chargement ou des resultats vides confus dans Documents justificatifs lorsque des filtres sont actifs.",
+      "Certaines nouvelles demandes peuvent ne pas afficher l'action d'affectation ou de reaffectation attendue, surtout lorsque la verification AE est en retard.",
+      "La couverture des notifications de messagerie securisee pour les messages dans les dossiers clients est encore en cours d'examen.",
+      "Le point d'entree d'admission ou de televersement d'un client dans l'administration doit etre revu, car le personnel peut ne pas toujours voir l'onglet attendu.",
+      "Certains dossiers d'evaluation par le gestionnaire de cas doivent encore etre verifies lorsque le personnel s'attend a voir un nouveau PDF d'evaluation dans Documents justificatifs."
     ],
     "comingNextHeading": "A venir",
     "comingNext": [
-      "Poursuivre le nettoyage du libelle des statuts d'approbation et de revision afin que le personnel voie plus clairement si PATH traite une nouvelle demande, une intervention additionnelle ou un changement propose a une intervention approuvee.",
-      "Poursuivre le renforcement des flux de travail financiers et documentaires autour des lots de paiement, des pieces justificatives et de la correspondance client generee."
+      "Des options de flux de travail plus claires pour les demandes retirees ou mises en pause pendant l'attente d'un financement externe ou d'autres renseignements.",
+      "Une revision des filtres de Documents justificatifs afin que le personnel distingue mieux une absence de documents correspondants d'une vraie erreur de chargement.",
+      "Un suivi du comportement d'affectation et de reaffectation des nouvelles demandes lorsque la verification AE est en retard.",
+      "Un suivi du comportement des notifications pour les messages securises lies aux demandes et aux dossiers."
     ]
   }
 };

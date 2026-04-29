@@ -1,13 +1,16 @@
 # File Upload Conditional Rules – Completion Plan
 
-Task ID: t7  
-Category: Conditional Visibility  
-Status: Planned (initial)
+Task ID: t7
+Category: Conditional Visibility
+Status: Partially implemented; remaining grouped-logic proposal
+Last reviewed: 2026-04-29 against `src/utils/intakeConditionalVisibility.js`, `src/widgets/WorkflowPreviewWidget.js`, `src/pages/modifyIntakeStep.js`, `isetadminserver.js`, and `../ISET-intake/src/pages/DynamicTest.js`.
 
 ## Current State
-- Only `AND` semantics: multiple rule objects must all evaluate truthy for a `file-upload` component to be shown.
-- Supported operators: `exists`, `notExists`, `equals`, `notEquals`, `>`, `<` (per prior analysis).
-- Engine: Inline evaluation function(s) in `DynamicTest.js` (intake portal) and mirrored logic in `WorkflowPreviewWidget.js` (admin author preview). Hidden components lead to answer clearing to avoid stale data.
+- Conditions still use `AND` semantics through `conditions.all`; multiple rule objects must all evaluate truthy for the conditional component to be shown.
+- Supported operators are now `exists`, `notExists`, `emptyOrZero`, `equals`, `notEquals`, `contains`, `notContains`, `containsAny`, `notContainsAny`, `containsAll`, `>`, and `<`.
+- Conditional visibility now applies beyond file uploads to supported target types including radio/radios, checkbox/checkboxes, input, textarea, character-count, warning-text, inset-text, and paragraph components.
+- Admin authoring/preview uses the shared `src/utils/intakeConditionalVisibility.js` helper. The public portal currently carries equivalent inline logic in `../ISET-intake/src/pages/DynamicTest.js`.
+- Hidden components lead to answer clearing to avoid stale data.
 
 ## Gaps / Pain Points
 1. No `OR` / grouping results in verbose duplication of shared predicates across steps.
@@ -15,6 +18,7 @@ Status: Planned (initial)
 3. Missing `is null` (or `isNull`) operator: Distinction between field absent vs empty string vs explicit null not expressible.
 4. Authoring schema lacks a concise way to express mixed precedence (e.g., `(A && B) || (C && !D)`).
 5. Bilingual author messages not auto-generated for complex rule explanations (future improvement).
+6. The portal evaluator should eventually be consolidated with the admin helper to reduce drift.
 
 ## Target Enhancements
 - Introduce explicit logical combinators: `all`, `any`, `none` (maps to AND, OR, NOR) at a group level.
@@ -79,13 +83,13 @@ function evalCond(node, answers) {
 3. Migration script (optional): Provide CLI to wrap existing arrays into `{ "all": [...] }` for clarity.
 
 ## Implementation Steps
-1. Introduce shared utility `evaluateConditionalGroup` in a new file (e.g., `shared/conditions.js`).
-2. Refactor `DynamicTest.js` and `WorkflowPreviewWidget.js` to call shared evaluator.
-3. Add new operators to whitelist.
-4. Update clearing logic to use new evaluator unchanged (no semantic difference for hide/show action).
+1. Introduce grouped-condition evaluation while preserving the existing `conditions.all` shape.
+2. Consolidate public portal and admin evaluation into a shared or deliberately mirrored utility.
+3. Add `isNull` / `isNotNull` only if product/runtime requirements need explicit null semantics.
+4. Update clearing logic to use the grouped evaluator unchanged.
 5. Write unit tests for nested combinations and backward compatibility.
-6. Update documentation: this file & project map reference.
-7. (Optional) Add dev warning if legacy AND array’s length > 1, suggesting migration.
+6. Update documentation: this file, the project map, and portal conditional-visibility docs.
+7. Optional: add a dev warning if a legacy AND array's length is greater than 1 and grouped logic would be clearer.
 
 ## Testing Matrix
 | Scenario | Input | Expected |
@@ -118,4 +122,4 @@ function evalCond(node, answers) {
 - Expression serialization preview (human-readable string).
 
 ---
-Initial draft created. Update as implementation proceeds.
+Initial draft created before the partial implementation. Current-state facts corrected during the 2026-04-29 documentation cleanup.

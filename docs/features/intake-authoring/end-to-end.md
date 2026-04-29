@@ -28,7 +28,7 @@ Every component shares a baseline contract: `type`, `props`, and (optionally) `v
 - **Behaviour**: Component-specific props (radio option source mode, default values, input types, character count thresholds, dynamic data endpoints, conditional reveal linkage via `conditionalChildId`).
 - **Accessibility**: Visually hidden labels, ARIA descriptions, autocomplete tokens, spellcheck toggles.
 
-Refer to the component pattern docs in this directory (`component-*.md`) for deeper guidance on each type.
+Refer to the component pattern docs under `docs/components/patterns/` for deeper guidance on each type.
 
 ## Translations & Localisation
 - All user-facing copy supports bilingual authoring. Structured text fields display an EN/FR toggle; inline edits prompt for both languages when saved.
@@ -75,7 +75,7 @@ Refer to the component pattern docs in this directory (`component-*.md`) for dee
 ## Testing
 - Run `npm test -- --watch=false` (Jest via `react-scripts`) after any authoring UI change. This exercises smoke suites in `src/**/*.test.js` and must stay green before publish.
 - When signature-related components change, exercise the interactive preview (drag a signature step into a test workflow) and confirm `WorkflowPreviewWidget` transitions through unsigned -> signed -> cleared states.
-- For workflow normalization or publish-pipeline updates, run the portal smoke suite (documented in `ISET-intake/docs/features/intake-form.md`).
+- For workflow normalization or publish-pipeline updates, run the portal smoke suite (documented in `../ISET-intake/docs/portal/intake/intake-form.md`).
 - The public portal dynamic runner fetches `/api/runtime/workflow-schema` at runtime, sharing the same normalised payload as admin preview.
 - Meta data stored alongside the payload feeds smoke tests (`utils/validatePublishedSchema.js`, runtime warning states) and dashboard statistics.
 - Use the portal `SchemaPreview` route or Jest tests to confirm published changes before deployment.
@@ -90,7 +90,7 @@ Refer to the component pattern docs in this directory (`component-*.md`) for dee
 - [ ] Publish output pushed to the intake repo with accompanying meta updates and smoke tests run.
 
 ## Related References
-- Component pattern specs: `component-*.md`
-- Normalization design: `workflow-normalization.md`
-- Conditional embedding RCA: `workflow-publication-conditional-components.md`
+- Component pattern specs: `docs/components/patterns/`
+- Normalization design: `docs/runtime/workflows/normalization.md`
+- Conditional embedding RCA: `docs/runtime/workflows/publication-conditional-components.md`
 - Intake portal runtime map: `../ISET-intake/docs/meta/project-map.md`

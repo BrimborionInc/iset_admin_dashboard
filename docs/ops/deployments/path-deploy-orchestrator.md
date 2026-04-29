@@ -85,6 +85,7 @@ Current behavior:
 - Portal polls the same endpoint and renders one global GOV.UK notification banner below the shared header.
 - Polling runs every 15 seconds with a local 1-second countdown after load, so operators should use a 2 to 5 minute warning window instead of relying on precise sub-minute delivery.
 - This command does not currently automate the ALB fixed-response `503` hard-maintenance fallback.
+- PROD app rollouts are user-impacting unless the plan proves otherwise. Any rollout that refreshes ASG instances, restarts app processes, rotates target groups, changes ALB routing, or can surface transient `502 Bad Gateway` responses needs a scoped warning first, even when the change is admin-only, portal-only, or code-only.
 
 For the hard maintenance page itself, use the separate ALB helper:
 
@@ -116,6 +117,7 @@ Guidance:
 - Size `--expected-duration` to the likely user-facing interruption window, not the total operator runtime of the release.
 - For normal rolling releases, prefer no banner or a short `brief interruptions possible` warning and keep the ALB `503` fallback as contingency only.
 - For admin-only or portal-only hotfixes, prefer a scoped announcement instead of a global banner so unaffected users are not warned unnecessarily.
+- Do not assume "hotfix", "code-only", or "admin-only" means "no user impact" in PROD. The deciding factor is the rollout primitive. ASG refresh, app restart, target-group change, or known transient gateway risk requires a warning or an explicit operator decision to proceed without one.
 
 ## Feature-Flagged Portal Rollouts
 

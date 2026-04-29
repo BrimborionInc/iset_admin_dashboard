@@ -1,6 +1,6 @@
 # Terraform Initial Runbook – NWAC Prod Environment
 
-For the public portal cutover to `iset.nwac.ca` while retaining `nwac-public.awentech.ca`, see [prod-portal-hostname-cutover.md](/mnt/x/ISET/admin-dashboard/docs/ops/runbooks/prod-portal-hostname-cutover.md).
+For the public portal cutover to `iset.nwac.ca` while retaining `nwac-public.awentech.ca`, see [prod-portal-hostname-cutover.md](prod-portal-hostname-cutover.md).
 
 ## 0. Authenticate to the Prod Account
 1. Assume the Organizations role in account 468278742295 and export credentials into your shell.

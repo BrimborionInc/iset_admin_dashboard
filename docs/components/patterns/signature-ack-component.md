@@ -1,8 +1,20 @@
 # Signature Acknowledgment Component (signature-ack)
 
-Status: Planned  
-Task ID: t8  
+Status: Implemented with follow-up caveats
+Last reviewed: 2026-04-29 against admin source anchors listed below.
+Task ID: t8
 Category: Component Library
+
+This file began as an implementation plan. Do not treat the original high-level checklist as current work remaining. Current source anchors are:
+- `src/component-lib/signature-ack.template.json`
+- `src/component-lib/schemas/signature-ack.schema.json`
+- `src/server-macros/signature-ack.njk`
+- `src/server/componentRenderRegistry.js`
+- `src/widgets/WorkflowPreviewWidget.js`
+- `src/pages/modifyIntakeStep.js`
+- `isetadminserver.js` template sync, validation, supported-type, and dev-sync branches
+
+Remaining caveat: verify required-value enforcement and audit semantics against the active portal runtime before relying on this component for a legally significant attestation.
 
 ## Purpose
 Provide a positive, explicit acknowledgment interaction beyond implicit "Next" navigation: user types their name then clicks a configurable action (e.g., "Sign Now"). After signing the field locks and displays a handwriting-like font. User may clear to re-enter before submission.
@@ -77,7 +89,10 @@ Normalization hook ensures if value present with `signed: true` then `name` stri
 ## Validation Integration
 Existing validation pipeline should treat `signature-ack` with custom rule: if `required` and either no value or `signed !== true` -> error.
 
-## Implementation Steps (High Level)
+## Historical Implementation Checklist
+
+The steps below are retained as provenance for how the component was planned. They are not a current task list.
+
 1. Extend component templates (`componentTemplates.json`) with `signature-ack` entry.
 2. Add renderer in intake portal `renderer/renderers.js` mapping `signature-ack` to new component implementation.
 3. Implement React component with internal local state bound to form value adapter.
@@ -94,4 +109,4 @@ Existing validation pipeline should treat `signature-ack` with custom rule: if `
 - Digital hash/seal for tamper verification.
 
 ---
-Initial spec drafted. Update upon implementation.
+Initial spec drafted before implementation; status corrected during the 2026-04-29 documentation cleanup.

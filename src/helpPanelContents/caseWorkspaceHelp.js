@@ -64,12 +64,12 @@ const CaseWorkspaceHelp = ({ tutorial, onRestartTutorial, onEndTutorial }) => {
         <li>When an intervention ends, capture outcomes, complete required follow-up, and close the file properly instead of letting it drift.</li>
       </ol>
 
-      <h3>Imported client-file backloads</h3>
+      <h3>Historical records</h3>
       <ul>
-        <li>Use the Case Header backload quick actions only when the plan, intervention, or document already existed before PATH go-live or before the client had a real PATH application.</li>
-        <li>These backload actions are silent historical entry points: they do not start approval routing, checklist progression, payment packets, or applicant notifications.</li>
+        <li>Use the Case Header quick actions only when the plan, intervention, or document already existed before PATH go-live or before the client had a PATH application.</li>
+        <li>These actions add historical records only; they do not send messages to applicants or start approval routing.</li>
         <li>Backloaded interventions still have to match the action-plan lifecycle. Archived plans are blocked, closed plans only accept completed or cancelled interventions, and in-progress or suspended interventions require an active plan.</li>
-        <li>Historic supporting documents stay case-based when no linked application exists. Application-type documents can still be stored against the action plan or case instead of creating a fake application.</li>
+        <li>Add historical supporting documents to the relevant client file, action plan, or case.</li>
       </ul>
 
       <h3>What matters most</h3>

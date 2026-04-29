@@ -34,7 +34,6 @@ const CASE_DOCUMENT_SCOPES = new Set(['client', 'case', 'action_plan', 'applicat
 
 const PREFERENCES_STORAGE_KEY = 'supporting-documents-table-preferences-v3';
 const COLUMN_WIDTHS_STORAGE_KEY = 'supporting-documents-table-widths-v2';
-const CASE_MODE_INFO_DISMISSED_KEY = 'supporting-documents-case-mode-info-dismissed-v1';
 const ALL_COLUMN_IDS = ['label', 'uploaded_at', 'file_name', 'case_number', 'scope', 'source', 'actions'];
 const REQUIRED_COLUMN_IDS = ['actions'];
 const DEFAULT_VISIBLE_COLUMN_IDS = ['label', 'uploaded_at', 'source', 'actions'];
@@ -284,15 +283,6 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     }
   });
   const [sortingState, setSortingState] = useState({ columnId: 'uploaded_at', isDescending: true });
-  const [showCaseModeInfo, setShowCaseModeInfo] = useState(() => {
-    if (typeof window === 'undefined') return true;
-    try {
-      return window.localStorage.getItem(CASE_MODE_INFO_DISMISSED_KEY) !== 'true';
-    } catch (err) {
-      console.error('[SupportingDocuments] failed to read case mode info preference', err);
-      return true;
-    }
-  });
   const fileInputRef = useRef(null);
   const nextUploadLabelRef = useRef('');
   const nextUploadCategoryRef = useRef('');
@@ -351,7 +341,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     : 'Unable to upload until an applicant is selected.';
   const widgetTitle = isCaseDocumentMode ? 'Case Documents' : 'Supporting Documents';
   const widgetSummary = isCaseDocumentMode
-    ? 'This widget shows documents attached to the client file, case, action plans, and linked interventions for imported or application-less cases.'
+    ? 'View and manage documents attached to this client file.'
     : 'This widget displays documents related to the applicant, including application, action plan, payment packet, and secure message attachments.';
   const interventionOptions = useMemo(() => {
     const plans = caseData?.actionPlans || [];
@@ -1525,16 +1515,6 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       loadChecklist();
     }
   };
-
-  const handleDismissCaseModeInfo = useCallback(() => {
-    setShowCaseModeInfo(false);
-    if (typeof window === 'undefined') return;
-    try {
-      window.localStorage.setItem(CASE_MODE_INFO_DISMISSED_KEY, 'true');
-    } catch (err) {
-      console.error('[SupportingDocuments] failed to persist case mode info preference', err);
-    }
-  }, []);
 
   const handleApplicationFilterChange = useCallback(
     ({ detail }) => {
@@ -2710,13 +2690,6 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         <Box variant="small">
           {widgetSummary}
         </Box>
-        {isCaseDocumentMode && showCaseModeInfo ? (
-          <Alert type="info" dismissible onDismiss={handleDismissCaseModeInfo}>
-            Imported or application-less client files use case-based documents here. Uploads are silent and do not drive
-            applicant checklist workflow, approvals, or client notifications. Application-type documents can still be
-            uploaded and will be stored under an action plan or the case when no linked application exists.
-          </Alert>
-        ) : null}
         {error && (
           <Alert type="error" dismissible onDismiss={() => setError(null)}>
             {error}

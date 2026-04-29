@@ -38,7 +38,7 @@ This note describes how the refreshed `deploy-test.ps1` scripts will render envi
   - `Expand-NwacEnvTemplate` - injects values into template files.
   - `Publish-NwacArtifact` - uploads zipped build to S3 with metadata tags.
   - `Invoke-NwacCodeDeploy` - triggers CodeDeploy deployment with wait.
-- Optional Node.js helper to verify `.env` matches schema defined in `docs/test-env-config-map.md`.
+- Optional Node.js helper to verify `.env` matches schema defined in `docs/ops/environments/test-env-config-map.md`.
 
 ## 3a. EC2 Bootstrap Requirements (Admin & Portal)
 

@@ -139,6 +139,11 @@ Key rule:
   - Use `--env test` or `--env prod` for remote targets.
   - Prod mutations require `--yes`.
   - The command updates the single runtime-config row directly; it does not currently toggle the ALB `503` hard-maintenance fallback.
+- PROD deploy guardrail:
+  - Treat ASG instance refreshes, app restarts, target-group rotations, and ALB rule changes as user-impacting unless the deploy plan proves they cannot interrupt active users.
+  - "Admin-only", "portal-only", and "code-only" do not by themselves mean "no warning needed".
+  - If the affected surface can show a transient `502 Bad Gateway` or unavailable response, set the scoped maintenance warning before the deploy and wait the 2 to 5 minute polling window.
+  - If a hard outage is expected, enable the ALB fixed-response maintenance page so users see an intentional maintenance message.
 - Current fallback implementation notes:
   - The ALB helper modifies the matching HTTPS listener rules in place for the selected hostnames and restores them back to their admin/portal target groups on `clear`.
   - This is the operator path for showing a meaningful static maintenance page instead of a generic browser error during hard downtime.

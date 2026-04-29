@@ -1,5 +1,16 @@
 # Level 0: Document Checklist Widget (Notes)
 
+Status: historical implementation log. Do not treat this file as current document-model or document-type guidance.
+
+Use current docs instead:
+
+- `docs/data/documents-model.md`
+- `docs/planning/path-document-type-canonical-review.md`
+- `docs/planning/path-document-type-canonical-review-issues.csv`
+- `docs/planning/document-checklist-config-widget.md`
+
+This file is retained because newer review artifacts cite it as an older-note source. Its "current facts" section reflects the state when this log was last maintained, not the current implementation.
+
 ## Purpose
 Working log for implementing document labeling and future checklist support across admin + portal. Use this to resume work if context is lost.
 
@@ -8,7 +19,7 @@ Working log for implementing document labeling and future checklist support acro
 - Persist label (and future metadata container) in API/database.
 - Plan for portal intake and secure messaging adoption (later).
 
-## Current facts
+## Historical facts at last update
 - Admin manual upload endpoint `/api/applicants/:id/documents/upload` accepts `label` + `documentType` and writes `label`, `document_category`, and `metadata.document_type` into `iset_document`.
 - SupportingDocumentsWidget shows label-first, inline editable; actions View/Delete; upload/edit modals collect label + document type; delete gated by “delete” confirm.
 - Secure message attachment adoption still hardcodes label `"Secure Message Attachment"`; caseworkers can relabel in Supporting Documents.

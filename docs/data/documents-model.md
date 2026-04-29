@@ -1,6 +1,7 @@
 # Unified Documents Model (iset_document)
 
 Date: 2026-04-27
+Status: current model overview with explicitly historical sections marked below.
 
 ## Summary
 The unified `iset_document` table now anchors every document to a single `client_id`, with optional links to applications, cases, or action plans. Intervention links are stored in the `iset_document_intervention` join table, and payment evidence attachments live in `payment_packet_document`.
@@ -10,7 +11,7 @@ The unified `iset_document` table now anchors every document to a single `client
 ## Drivers
 - Need a single list of all supporting documents for an applicant regardless of origin.
 - Support auto-adoption of secure message attachments into the case file.
-- Prepare for future manual staff uploads and application-ingest artifacts.
+- Support manual staff uploads and application-ingest artifacts.
 - Provide traceability (source + origin_message_id) and future extensibility (checksums, MIME types, status lifecycle).
 
 ## Table Definition
@@ -79,8 +80,8 @@ Admin-side manual uploads now also allow Word files (`.doc`, `.docx`) in additio
 
 ## Future Enhancements
 - Add checksum calculation on file write for dedupe.
-- Enforce authorization checks (scope applicant/case) in endpoints (current implementation assumes prior auth middleware + future scoping additions).
-- Optionally move storage to S3; `file_path` can become object key.
+- Keep route-level authorization denial tests and smoke checks current as document scope rules evolve.
+- Continue tightening object-storage metadata and retention rules where workflow-specific artifacts should stay outside `iset_document`.
 
 ## Topology & Integration Notes (Updated: Shared DB Confirmed 2025-09-19)
 The public intake portal and the admin dashboard SHARE the same MySQL database cluster. This simplifies integration:
@@ -90,27 +91,20 @@ The public intake portal and the admin dashboard SHARE the same MySQL database c
 - Consistency approach: Uploads must resolve `client_id` before accepting a portal file, but `source='application_submission'` rows are written to `iset_document` only after full application/case scope is available. If a scoped insert fails, the upload or submission should fail and surface the error.
 - Removal / soft delete: Portal deletion (or mark-removed) operations should update `iset_document.status='deleted'` rather than hard deleting the unified record.
 
-### Planned Portal Changes
-1. Resolve or create the `client_id` before uploads (via intake JSON + Cognito fallback), and store it in `input_json_state` for reuse.
-2. Insert into `iset_document` in the same upload flow with:
-	- `client_id` (required)
-	- `applicant_user_id` (from session context)
-	- `application_id`
-	- `case_id`
-	- `file_path` (canonical relative path used today in portal storage)
-	- `file_name`
-	- `source='application_submission'`
-	- `status='active'`
-3. Add soft delete path: On removal, attempt `UPDATE iset_document SET status='deleted', updated_at=NOW() WHERE file_path=?`.
-4. Backfill job: not planned for dev (no legacy documents expected).
+### Historical Portal Plan
+This section was previously titled `Planned Portal Changes`. The current portal model no longer writes every upload directly into `iset_document` at upload time. Pre-submission portal uploads remain in intake upload state (`iset_application_file` plus intake `doc_refs`) until the application/case scope is deterministic; completion then materializes those scoped references into `iset_document`.
+
+Do not revive direct pre-submission `iset_document` writes unless the route can prove full client/case/application/applicant scope at insert time.
 
 ### Deprecation Considerations
-Once portal writes reliably populate `iset_document`, UI or services needing applicant documents should stop querying `iset_application_file` directly. That table can remain for historical audit until confidence is established.
+`iset_application_file` remains part of the portal intake upload pipeline before deterministic case/application scope exists. Do not remove it merely because `iset_document` is the unified supporting-document table after materialization.
 
 ## Migration / Backfill
 If legacy rows existed in `iset_case_document` prior to its drop, they can be re-imported (none currently retained after destructive reset). A historical backfill from `message_attachment` can be performed by re-calling the attachments endpoint for each message with a case context.
 
-## Rollback Plan
+## Historical Rollback Sketch
+This is not a current rollback plan for the hardened privacy/document model. Do not use it for TEST/PROD without a reviewed migration and privacy/security plan.
+
 1. Drop `iset_document`.
 2. Recreate minimal legacy `iset_case_document` (see historical schema) and revert endpoint queries.
 3. Remove `source` column rendering in widget.

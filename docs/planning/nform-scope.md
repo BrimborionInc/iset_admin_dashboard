@@ -2,8 +2,8 @@
 
 Purpose: Define what belongs to reusable nForm platform core versus what belongs to PATH/ISET solution logic.
 Audience: Engineering and product owners shaping extraction and module boundaries.
-Last Updated: 2026-02-26
-Status: Draft for review
+Last Updated: 2026-04-29
+Status: Historical draft. Treat the follow-up files named at the end as planned outputs unless they are created in a later nForm extraction thread.
 
 ## Working Definition
 - `nForm`: Domain-agnostic platform for intake, workflow, notifications, events, storage, administration, and configurable workspaces.
@@ -74,6 +74,6 @@ When classifying code during manifest creation:
 - Data model ownership: define exact boundary between platform entities and solution entities in DB schema.
 
 ## Immediate Follow-up
-1. Build `nform-dependency-map.md` with concrete file/module references.
-2. Build `nform-copy-manifest.md` tagging `keep` / `optional` / `drop` by path.
-3. Record unresolved items in `needs-decision` with owner and due date.
+1. Confirm whether the nForm extraction is still active.
+2. If active, build `nform-dependency-map.md` with concrete file/module references.
+3. Then build `nform-copy-manifest.md` tagging `keep` / `optional` / `drop` by path and record unresolved items in `needs-decision` with owner and due date.

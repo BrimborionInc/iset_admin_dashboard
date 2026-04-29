@@ -64,12 +64,8 @@ const SupportingDocumentsHelp = () => (
     <h3>Uploading and managing documents</h3>
     <ul>
       <li>
-        <strong>Upload:</strong> Choose a label and document type, then attach it to the correct record. In normal
-        application workflows that usually means an application, client file, case, or action plan. In
-        imported/application-less client files, uploads can attach to the client, case, or action plan directly. The
-        <strong>Case header &gt; Upload existing documents</strong> quick action opens this same workflow as the intended
-        backload path for historic records. Application-type documents can still be uploaded there; PATH stores them
-        against an action plan when selected, or the case file if there is no linked application.
+        <strong>Upload:</strong> Choose a label and document type, then attach the file to the correct record. Use
+        <strong>Case header &gt; Upload existing documents</strong> when adding historical files to a client file.
       </li>
       <li>
         <strong>Duplicate:</strong> Use this to reuse the same file across applications or interventions. The option
@@ -121,13 +117,9 @@ Clarify sources (applicant upload, secure message attachment, signed form, staff
 application, case, and action plan), and how to upload, edit, duplicate, view, or delete documents. Note that duplicate
 only appears when reuse is possible and delete requires typing "delete". Mention that the document list columns are
 sortable, with Uploaded shown near the front by default, and that column preferences and resizing are available.
-Clarify the two modes: normal applicant/application document management versus case-based documents for imported or
-application-less client files. In case-based mode, uploads can attach to the client, case, or action plan, and
-application-type documents can still be uploaded by storing them against an action plan or the case when no linked
-application exists. Mention that in Case Workspace the \`Case header > Upload existing documents\` quick action is the
-intended backload entry point for historic records. This case-based mode still applies when an imported client has a
-linked PATH account but no linked application. The checklist tab is intentionally hidden there, and uploads are silent
-backload actions that do not trigger applicant notifications or approvals. Offer troubleshooting for missing checklist
+For historical client-file documents, keep the guidance practical: use \`Case header > Upload existing documents\`,
+choose the label and document type, and attach the file to the correct client, case, or action-plan record. Avoid
+implementation explanations unless the staff member specifically asks for them. Offer troubleshooting for missing checklist
 counts and unavailable files.
 `;
 

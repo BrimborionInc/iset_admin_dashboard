@@ -76,8 +76,8 @@
 
 ## 14. Open Questions
 - _Unresolved decisions, follow-ups, and blockers._
-- Track Terraform implementation details in `docs/terraform-nwac-test-plan.md`; revise both documents together as decisions finalize.
-- Env and secrets mapping captured in `docs/test-env-config-map.md`; use it when building `.env.test` and SSM parameter automation.
+- Track Terraform implementation details in `docs/ops/runbooks/terraform-nwac-test-plan.md`; revise both documents together as decisions finalize.
+- Env and secrets mapping captured in `docs/ops/environments/test-env-config-map.md`; use it when building `.env.test` and SSM parameter automation.
 
 ---
 

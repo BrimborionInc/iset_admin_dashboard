@@ -2,6 +2,23 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-04-29
+- Docs/Meta: Added a root `AGENTS.md` entry point, refreshed the project-memory standing directive, linked the current documentation audit from `docs/AGENTS.md`, and recorded the first-pass docs inventory and cleanup queue in `docs/meta/documentation-audit-2026-04-29.md`.
+- Docs/Meta: Replaced the stale Create React App root README and refreshed verified parts of the project map, including homepage structure, signature-ack macro infrastructure, cross-cutting session-state wording, and the legacy development-tracker caveat.
+- Docs/Meta: Superseded the older `docs/meta/codex-crib-sheet.md` quick-start so future searches redirect to the maintained entry path instead of stale onboarding notes.
+- Docs/Meta: Marked `docs/meta/level0-document-checklist.md` as historical and pointed future document-model work to the current unified documents model and canonical document-type review.
+- Docs/Meta: Added `docs/planning/README.md` and `docs/change-requests/README.md` as directory gates for mixed current/historical planning and CR source material.
+- Docs/Meta: Added `docs/data/README.md`, `docs/requirements/README.md`, and `docs/training/README.md` as directory gates for generated dumps, source artifacts, reference standards, and training material.
+- Docs/Meta: Added `docs/ops/README.md` and `docs/guides/README.md` as directory gates for operational runbooks and how-to guides, requiring command/path verification before acting.
+- Docs/Meta: Added `docs/README.md` plus README gates for the remaining top-level docs directories, including `docs/meta`, so every major docs area now advertises its status and verification requirements.
+- Docs/Data/Security: Corrected stale document-model, public-portal security, and application-assessment dashboard notes that referenced future document scoping, missing env/auth docs, or retired `iset_case.application_id` behavior as current.
+- Docs/Meta: Corrected stale local and cross-repo documentation references in database docs, public-portal security, file uploads, intake authoring, AWS TEST environment, and input-JSON CR notes; marked the nForm extraction plan and scope note as historical/planned so missing phase deliverables are not mistaken for lost files.
+- Docs/Components: Updated the `signature-ack` component pattern and file-upload conditional-rules plan so their status matches the implemented source anchors and remaining grouped-logic/null-semantics work.
+- Docs/Meta: Cleaned up additional broken doc references found by a broader scan, including intake-authoring runtime links, finance CR paths, ESDC gap-analysis evidence paths, a PROD Terraform runbook link, and an older runtime-config changelog path.
+- Docs/Tooling: Added `scripts/check-doc-links.py`, a read-only local Markdown reference checker for the docs tree, and documented it in the project-memory maintenance guidance.
+- Docs/Ops: Moved DB/TEST/PROD/AWS profile command detail from `docs/AGENTS.md` into `docs/ops/agent-operational-access.md` so the agent entry point stays shorter while preserving operational access notes.
+- Docs/Data: Added a README gate to `docs/data/temp/` to classify tracked binary source artifacts and defer any keep/archive/delete decision to a focused cleanup.
+
 ## 2026-04-28
 - Fix/Application workspace: Stabilized the application workspace Secure Messaging widget so global maintenance-announcement countdown renders do not retrigger message reloads every second.
 - Ops/TEST rehearsal: Completed the second PROD-like privacy ERM rehearsal in TEST, including duplicate-case consolidation. Measured app-stop-to-healthy-targets downtime was about 38m41s; canonical migrations took 10m37s and app build/deploy took 12m29s.
@@ -843,7 +860,7 @@ Format: YYYY-MM-DD - Category: Short description
 ## 2025-09-18
 - Feature: AI settings widget now persists to shared DB (`iset_runtime_config`) so the public portal respects admin-chosen model/params/fallbacks.
 - Fix: Corrected SQL for fallbacks upsert (JSON array via CAST) and idempotent table creation.
-- Docs: Added `ai-runtime-config.md` and updated project map notes (cross-app config flow).
+- Docs: Added `docs/data/runtime-config/ai-runtime-config.md` and updated project map notes (cross-app config flow).
 
 ## 2025-12-03
 - Admin application form: collapsed intake registration number variants (sfn/nsfn/metis/inuit) into a single Registration number field and ignore the UI-only key in diffs so saving updates the correct stored key.

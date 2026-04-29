@@ -4,10 +4,10 @@ Status: Draft (shared across Admin + Public)
 Owners: Admin Intake Editor + Case Management
 Scope: Admin intake authoring, preview/testing, and future case dashboards
 
-Refer to the primary spec in `ISET-intake/docs/features/file-uploads/architecture.md`. This copy highlights admin-specific needs. Terminal step mandate (pilot): all applicant uploads live only in a single `supporting-documents` step immediately before summary; omission = no uploads.
+Refer to the primary portal spec in `../ISET-intake/docs/portal/intake/file-uploads/architecture.md`. This copy highlights admin-specific needs. Terminal step mandate (pilot): all applicant uploads live only in a single `supporting-documents` step immediately before summary; omission = no uploads.
 
 Reminder: Active TODO list
-- Shared uploads TODO lives at `ISET-intake/docs/uploads-TODO.md`.
+- Current portal upload behavior is documented in `../ISET-intake/docs/portal/intake/document-uploads.md`; older shared TODO files were retired.
 
 ## Admin-specific considerations (Pilot + Forward)
 - Document Type Catalog authoring
@@ -90,8 +90,8 @@ Key code pointers (backend integration reference)
   - POST `/api/documents/finalize`
   - GET `/api/documents`
   - GET `/api/documents/:id/download-presign`
-- Policy reference (allowed types and caps): `ISET-intake/upload/policy.js`
-- Storage adapter (for understanding presign): `ISET-intake/storage/s3Provider.js`
+- Policy reference (allowed types and caps): `../ISET-intake/upload/policy.js`
+- Storage adapter (for understanding presign): `../ISET-intake/storage/s3Provider.js`
 
 Governance & RBAC reminders
 - No program-level overrides. All rules authored at component level; environment defaults just bound maxima and toggles.

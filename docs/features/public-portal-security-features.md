@@ -3,12 +3,13 @@
 Purpose: Summarize the technical safeguards built into the public intake portal and API.  
 Scope: Runtime code under `X:\ISET\ISET-intake` (frontend, backend, shared services).  
 Last Updated: 2026-04-27
+Status: repo-based security feature catalog; verify line numbers against `../ISET-intake` before acting because portal code moves independently.
 
 ## Authentication & Session Control
 - **RS256 JWT validation** – `server.js:2014-2640` and `src/auth/verifyJwt.js` enforce issuer, audience, and JWKS signature checks, with fallback to trusted pool overrides when multiple Cognito clients are allowed.
 - **Suspension-aware user upsert** – `server.js:2324-2484` links Cognito users to local records, blocks suspended accounts, and records last login timestamps; `src/auth/suspensionCache.js` caches suspension state securely.
 - **Session auditing** – `server.js:2520-2604` hashes IP and user-agent details into `user_session_audit`, enabling traceability without storing raw personal data.
-- **Secure token storage** – Auth callbacks set HttpOnly cookies (`server.js:40-120`, `docs/auth/cognito-vs-legacy.md`) eliminating token exposure to frontend scripts.
+- **Secure token storage** – Auth callbacks set HttpOnly cookies (`server.js:40-120`; see `../ISET-intake/auth/cognitoAuth.js` for current Cognito helper behavior), eliminating token exposure to frontend scripts.
 - **Dev bypass guardrails** – `server.js:2050-2134` only permits the X-Dev bypass headers on loopback requests when `DEV_BYPASS_ENABLED` is true, reducing accidental production use.
 
 ## Access Enforcement
@@ -19,7 +20,7 @@ Last Updated: 2026-04-27
 ## Data Handling & Privacy
 - **Server-side intake state** – Dynamic intake steps keep answers off the client by combining an in-memory cache with a shared database table (`input_json_state`). The table is keyed by `(user_id, session_token)` and automatically prunes via `expires_at` so data exists only during the session (defaults to ~30 minutes). Lifecycle hooks clear both memory and DB entries on logout, save-and-finish-later, successful submission, or session timeout (`server.js:1660-2100`). TTL duration remains configurable via `iset_runtime_config` (`scope='runtime', k='intake.ephemeral_ttl_minutes'`).
 - **Aggregate JSON controls** – `/api/intake-json` now persists merge patches to `input_json_state` (`server.js:1719-1905`), ensuring load-balanced instances read the same state without ever exposing history in browser storage.
-- **Sensitive env segregation** – Runtime pulls configuration from `.env` with secrets excluded from source control (`docs/ops/env-vars.md`), keeping credentials out of the bundle.
+- **Sensitive env segregation** – Runtime pulls configuration from environment files/variables with secrets excluded from source control, keeping credentials out of the bundle. Verify the current variable set from the deployed portal environment and deploy scripts rather than relying on a static env-var doc.
 - **Public AI support filtering** - `/api/ai-support` is intentionally public, but validates prompt length, rate limits by client/language, and rejects both the current prompt and recent chat history if they contain obvious sensitive patterns before sending anything to OpenRouter.
 
 ## File Upload Protection
@@ -29,7 +30,7 @@ Last Updated: 2026-04-27
 - **Upload auditing** - Each accepted file is logged through the shared event emitter into `iset_event_entry` with status flags (`server.js:7232-7240`), supporting downstream malware scanning workflows.
 
 ## Audit & Monitoring
-- **Event catalog** – `logCaseEvent` (`server.js:929-946`) annotates activity with consistent messages, and `docs/data/key-tables.md:13-33` describes the audit tables consumed by ops tooling.
+- **Event catalog** – `logCaseEvent` (`server.js:929-946`) annotates activity with consistent messages, and `../ISET-intake/docs/system/data/key-tables.md` describes the portal-side audit tables consumed by ops tooling.
 - **Notification dispatch** – `server.js:198-246` wires portal events into `shared/events` for internal alerts, ensuring security-relevant actions (submissions, errors) generate notifications.
 - **Password reset throttling** – `server.js:4268-4340` adds in-memory caps on reset attempts per user or IP, laying groundwork for distributed rate limiting.
 

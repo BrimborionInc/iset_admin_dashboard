@@ -21,6 +21,7 @@ Do not run the app deploy commands from a WSL-only checkout such as `/root/ISET/
 - TEST deploys require `--yes` only when you include `--refresh-test-db`.
 - Deploys do not auto-bump `package.json` semver; instead, each frontend build now carries a visible release/build stamp.
 - App deploys package the current working tree. If you mean “deploy only the staged subset,” stage the intended files and stash the rest before running `path:deploy`.
+- PROD app rollouts are user-impacting unless the plan proves otherwise. Any PROD deploy that refreshes ASG instances, restarts app processes, rotates target groups, or can produce transient `502 Bad Gateway` responses needs a scoped warning first, even if it is admin-only, portal-only, or code-only.
 - Current dependency-reinstall safeguard: in-place TEST deploy scripts now clear the deployed `node_modules` tree before running remote `npm ci/install`, and the PROD bootstrap path already does the same during instance boot. Keep that rule in any future deploy helper to avoid stale-filesystem `ENOTEMPTY` failures during runtime dependency replacement.
 
 ## Most Common Commands
@@ -89,6 +90,14 @@ For an admin-only PROD rollout with no schema/data/portal work and no shared-lib
 ```powershell
 npm run path:deploy -- --env prod --skip-schema --skip-data --skip-portal --skip-shared --release-id <release-id> --yes
 ```
+
+Before running that shortcut, set an admin-scoped warning if the rollout will refresh PROD instances or can cause a brief gateway error:
+
+```powershell
+npm run path:maintenance -- set --env prod --surfaces admin --start-in 5m --expected-duration 5m --yes
+```
+
+Wait through the warning window, then deploy. Clear the warning only after smoke passes.
 
 ## Feature-Flagged Portal Changes
 
@@ -197,6 +206,7 @@ Notes:
 - Admin and portal clients poll every 15 seconds and render the countdown locally, so this is an operator warning tool, not a precise sub-minute push channel.
 - Set `expected-duration` to the likely user-visible interruption window, not the full end-to-end deploy runtime. Rolling app deploys often take several minutes in the operator console while causing little or no visible disruption.
 - If the service must be fully unavailable during cutover, the warning can be combined with the separate ALB `503` maintenance fallback.
+- A generic `502 Bad Gateway` during PROD deploy is not acceptable planned behavior. If the release can expose that state, either warn users first or put the affected surface behind the ALB maintenance page.
 
 ## App-Coupling Rule
 

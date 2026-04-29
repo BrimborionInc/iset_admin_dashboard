@@ -1,11 +1,22 @@
 # Admin Dashboard Assistant Context
 
+This file is the required project entry point for AI coding agents. Read it first, follow the linked reading order, and do not make code, database, deployment, or documentation changes until you have applied the relevant project guidance below.
+
 Purpose: persistent context for future threads.
 
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-04-27
+Last Updated: 2026-04-29
+
+## Project memory layer
+
+- This repository uses `docs/` as persistent project memory for future short task-based AI threads.
+- The root `AGENTS.md` exists only to point agents here; `docs/AGENTS.md` is the canonical entry point.
+- Code, schema, migrations, config, tests, and live database evidence are the source of truth. Docs are operational guidance and must be verified before being treated as proof.
+- Maintain the memory layer as part of normal work: update affected docs when code, schema, architecture, workflows, operations, or active project state changes.
+- Prefer concise, current, task-useful docs. Revise, merge, archive, or delete stale/conflicting documentation instead of preserving old wording because it might be useful.
+- Follow `docs/meta/standing-directive.md` for the durable maintenance contract and `docs/meta/documentation-audit-2026-04-29.md` for the current documentation cleanup inventory.
 
 ## Working relationship (design dialog)
 
@@ -33,7 +44,8 @@ Last Updated: 2026-04-27
 - Use this as a starting context map, then verify details in code before making claims.
 - Treat linked docs as the source of truth for deeper implementation details.
 - Keep this file focused on practical orientation (what matters, where to look, what commonly breaks).
-- Treat `docs/AGENTS.md` as the entry point for standing directives. If a durable workflow/style/how-to guide lives somewhere else in `docs/`, add or maintain an explicit pointer here so a new thread can find it from this file first.
+- Treat this file as the entry point for standing directives. If a durable workflow/style/how-to guide lives somewhere else in `docs/`, add or maintain an explicit pointer here so a new thread can find it from this file first.
+- Keep entry-point guidance high signal. If a detail belongs only to one subsystem or one historical thread, link to the canonical doc instead of expanding this file.
 
 ## Thread-start checklist
 
@@ -48,7 +60,7 @@ Last Updated: 2026-04-27
 
 ## For future Codex threads
 
-Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current project context for this repo. If the user references prior-thread work, notes, or "something we already figured out", check [codex-thread-index.md](./meta/codex-thread-index.md) before searching blindly. As you work, keep the docbase current: update [AGENTS.md](./AGENTS.md) with durable context pointers, guardrails, and architecture notes that would help future chats; update [codex-thread-index.md](./meta/codex-thread-index.md) whenever you add or materially revise a durable handoff/how-to note that a future thread may need to rediscover; update affected live docs under [`docs/`](./) when behavior changes; and record notable shipped changes in [changelog.md](./meta/changelog.md) and [next-release-notes-log.md](./meta/next-release-notes-log.md). The goal is that a new thread can recover the current state of the system from the repo docs without depending on prior chat history.
+Treat this file as the current project context for this repo. If the user references prior-thread work, notes, or "something we already figured out", check [codex-thread-index.md](./meta/codex-thread-index.md) before searching blindly. As you work, keep the project memory layer current: update [AGENTS.md](./AGENTS.md) with durable context pointers, guardrails, and architecture notes that would help future chats; update [codex-thread-index.md](./meta/codex-thread-index.md) whenever you add or materially revise a durable handoff/how-to note that a future thread may need to rediscover and the exact task-history title is known; update affected live docs under [`docs/`](./) when behavior changes; and record notable shipped changes in [changelog.md](./meta/changelog.md) and [next-release-notes-log.md](./meta/next-release-notes-log.md). The goal is that a new thread can recover the current state of the system from the repo docs without depending on prior chat history.
 
 - Standing operational rule for PROD bug/change triage: if a thread investigates, fixes, deploys, or otherwise materially resolves a PROD item that came through the in-app feedback system, update the live PROD feedback log before closing the thread. That means keeping `admin_feedback_report.status`, `admin_feedback_status_history`, and `admin_feedback_note` in sync with the real outcome instead of leaving the resolution only in chat, code comments, or repo docs.
 - Current user-requested bug/CR triage workflow (2026-04-17): when Bill asks Codex to triage bugs or change requests, the expected outcome is not just queue cleanup. Codex should review the live queue, inspect each item's available context, add internal notes, change statuses where warranted, and then present Bill with a prioritized analysis so implementation planning can happen against the real queue state.
@@ -123,6 +135,8 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 ## High-value repo map
 
 - Docs base path: `X:\ISET\admin-dashboard\docs` (WSL: `/mnt/x/ISET/admin-dashboard/docs`)
+- Project memory standing directive: `docs/meta/standing-directive.md`
+- Documentation cleanup audit: `docs/meta/documentation-audit-2026-04-29.md`
 - Codex thread/context recovery index: `docs/meta/codex-thread-index.md`
 - Applicant-account activation data model: `docs/data/applicant-account-activation.md`
 - Client/case/application target model: `docs/planning/client-case-application-target-model.md`
@@ -176,7 +190,17 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 ## Documentation gateway
 
 - Start here for current orientation, then go deeper into the docs below rather than relying on planning notes alone.
+- Docs directory index: `docs/README.md`
+- Project memory maintenance rules: `docs/meta/standing-directive.md`
+- Documentation cleanup inventory: `docs/meta/documentation-audit-2026-04-29.md`
 - Cross-thread context recovery index: `docs/meta/codex-thread-index.md`
+- Planning directory gate: `docs/planning/README.md`
+- Change-request directory gate: `docs/change-requests/README.md`
+- Data/reference directory gate: `docs/data/README.md`
+- Operations directory gate: `docs/ops/README.md`
+- Guides directory gate: `docs/guides/README.md`
+- Requirements directory gate: `docs/requirements/README.md`
+- Training directory gate: `docs/training/README.md`
 - Live dashboard behavior: `docs/dashboards/*`
 - Import and data-backload constraints: `docs/guides/client-file-imports.md`
 - Client/case/application target model: `docs/planning/client-case-application-target-model.md`
@@ -188,6 +212,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Workflow-level docs index: `docs/workflows/admin/README.md`
 - Project structure / architecture map: `docs/meta/project-map.md`
 - Historical plans and design notes: `docs/planning/*` (useful for intent/history, but verify against code before treating as current behavior)
+- Historical change-request source material: `docs/change-requests/*` (useful for provenance, not current behavior unless a current doc says so)
 
 ## Query Editor status
 
@@ -287,6 +312,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Recommended workflow when active coding happens in WSL: make the code changes in the WSL repo, sync the changed files into `X:\ISET\admin-dashboard`, then run the documented deploy command there.
 - Deploy-intent rule (2026-04-22): when Bill says `deploy to TEST` or `deploy to PROD`, interpret that as deploying the full current release state awaiting deployment from the working checkout, not just the subset of files touched in the current chat. That includes relevant app code, config, generated runtime artifacts, and required schema/config promotion steps unless Bill explicitly narrows the release. Do not treat this as permission to overwrite live client/case/applicant data; data resets, DB restores, and one-off data mutation still require explicit intent.
 - Release-scope check rule: before TEST/PROD rollout, inspect both `git status --short` and the intended release contents and call out if the working tree contains unrelated local changes. The default action is to ship the whole awaiting-release state when Bill requested a deploy; only isolate a narrower subset if he explicitly asks for a partial release or confirms that narrowing after the risk is surfaced.
+- PROD user-impact guardrail (added 2026-04-29 after an admin-only hotfix caused visible `502 Bad Gateway` responses during ASG refresh): treat any PROD deploy that restarts app processes, replaces instances, runs an ASG instance refresh, rotates target groups, or changes ALB routing as user-impacting unless the execution plan proves otherwise. Before starting it, set an appropriately scoped maintenance/brief-interruption warning and wait the documented 2 to 5 minute polling window; for any expected hard outage, enable the ALB `503` maintenance fallback so users see a deliberate maintenance page, not a generic gateway error. Do not run repeated PROD refreshes without an active warning or explicit user confirmation that no warning is acceptable for that exact action.
 - TEST destructive reset entry points: `npm run test:db:refresh:plan -- --source-env dev` and `npm run test:db:refresh -- --source-env dev --yes`. Manual `--snapshot-file` / `--snapshot-key` inputs still work when needed.
 - Canonical schema preflight/apply now supports remote targets: `npm run db:migrate:plan -- --target-env test|prod` and `npm run db:migrate:apply -- --target-env test|prod`.
 - Current deploy orchestration order is: AWS identity preflight -> optional TEST DB refresh/reset -> prod restore point when DB mutation is planned -> canonical schema apply -> optional allowlisted data sync -> app rollout primitives -> smoke checks -> local release manifest under `tmp/path-deploy/<env>/`.
@@ -314,6 +340,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Current maintenance-announcement delivery model: clients poll `/api/service-announcement/current` every 15 seconds and render their own 1-second local countdown after load. Treat this as an operational 2 to 5 minute warning tool, not a precise sub-minute push channel.
 - Current planned-maintenance operator flow: set the warning with `npm run path:maintenance -- set --env test|prod --start-in 5m --expected-duration <user-impact window> [--yes for prod]`, wait through the warning window, run `path:deploy`, optionally enable the ALB `503` fallback for the hard cutover, then clear the warning with `npm run path:maintenance -- clear --env test|prod [--yes for prod]`.
 - Current maintenance-warning sizing rule: set `expected-duration` to the likely user-facing interruption window, not the full operator/runtime length of the deploy. For normal rolling app/config releases, prefer no banner or a short `brief interruptions possible` warning of about 5 minutes; reserve longer windows and the ALB `503` fallback for releases that truly require downtime.
+- Current PROD hotfix rule: "admin-only", "portal-only", and "code-only" are not the same as "no user impact" in PROD. If the rollout uses PROD ASG refresh or otherwise risks transient `502`/unavailable responses, issue the scoped warning first; use `--surfaces admin` or `--surfaces portal` rather than skipping the warning.
 - Current ALB maintenance-page operator flow: `npm run path:maintenance:fallback -- set|clear --env test|prod --surfaces admin|portal|all [--yes for prod]`. This modifies the selected HTTPS host rules in place and returns a static HTML `503` page from the ALB so users see a deliberate maintenance message instead of a browser error while the app is unavailable.
 - Current TEST maintenance-validation note (2026-04-11): release `20260411-test-maintenance-smoke` deployed successfully to TEST, both target groups were healthy, the live portal backend returned the stored maintenance payload, and the deployed portal bundle rendered the expected banner copy when exercised from an on-instance browser context. Codex still cannot visually verify the public TEST hosts directly because the TEST front door returns `403` to this sandbox, and the signed-in admin-console flashbar still requires a real staff browser session for final visual confirmation.
 - Current maintenance-mode precedent: prod portal hostname `iset.nwac.ca` has previously been placed behind an ALB fixed-response `503` rule for a temporary maintenance/go-live hold. Treat that as the hard-cutover fallback for portal unavailability, not as the primary pre-shutdown warning pattern for signed-in users.
@@ -369,6 +396,7 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 - Current homepage pending-decision rule: the shared `Pending Decision` queue drives `Pending Decision Items`, which combines submitted application assessments plus new and revised intervention proposals, shows `Province`, `EI status`, and a compact `Timeline target` badge, and exposes `Open workspace` as the only row action. The `Item` subtext starts with the request type (`New application assessment`, `Additional intervention proposal`, `Proposed change to intervention`) before any funded-cost breakdown. Decisions are completed inside the workspace, and `Open workspace` passes decision-entry context so the application workspace starts on the approval-review layout at `Application Assessment > Approval and decision`, while the case workspace starts on a four-widget intervention approval layout (`Case header`, `Proposed new intervention`, `Participant details`, `Supporting documents`) with the selected proposal at `Intervention assessment > Record of decision`. That approval-starting layout no longer overwrites the user's saved normal board layout, and the usual board quick actions/reset continue to work after launch. Explicit approval-entry step intent also beats local wizard-step memory in both workflows, including the old Cloudscape navigation-priming path in `CoordinatorAssessmentWidget` and the intervention widget's selection/hydration restore path. For intervention proposals, `Record of decision` is now the decision commit point; letters are a separate follow-up and are no longer a wizard step in the approver flow.
 - Current homepage pending-completion rule: the shared `Pending Completion` queue is now visible on NWAC Administrator and Regional Manager homepages, and the coordinator's former `funding-agreements` queue has been relabelled to the same concept. It surfaces decision-recorded application files that still need post-decision follow-through before completion, including letter sending, funding-form/signature follow-through, and denied-file closeout. Denied/rejected files leave this queue once the case context records `decisionLetterSent.denial`, because sending the denial letter is the terminal follow-up action for denied applications. In the shared admin/manager table, `Pending Completion` is a workspace-only queue like `Pending Decision`, so it does not expose inline assignment actions.
 - Current UX rule for workflow screens: avoid adding development-oriented instructional banners, "opened from X" alerts, or other explanatory screen clutter when the UI can simply open in the correct state. Prefer silent routing/layout behavior and keep in-screen messaging for true warnings, blockers, or user-action-required states.
+- Current UI copy rule: do not clutter PATH screens with AI-slop style over-messaging, implementation explanations, or defensive notes about how the system works internally. User-facing copy should be short, plain, task-relevant, and aimed at the staff member's real next action; internal workflow constraints belong in help docs, logs, or developer notes unless the user must act on them immediately.
 - Current drilldown rule: count metrics in the Metrics widget open the existing `Work Queue Items` widget in a dedicated metric-results mode; currency metrics do not open a row list.
 - Current implementation rule: do not fake metric drilldown as another queue bucket. `Work Queue Items` now has separate queue mode and metric-results mode.
 - Current scoping rule: Program Administrators see global metrics, Regional Coordinators must honor all resolved `regionIds`, and Application Assessors are owner-scoped.
@@ -456,6 +484,11 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 
 ## Documentation maintenance
 
+- Treat documentation maintenance as part of task completion, not optional cleanup. Keep docs optimized for future agents who lack prior chat history.
+- Before changing docs, distinguish source-of-truth artifacts from guidance: code, schema, migrations, package scripts, config, tests, and live database checks outrank narrative docs.
+- Do not let stale docs accumulate. If a doc is contradicted by code or a newer canonical note, revise it, merge it, mark it historical, or delete it.
+- Keep `docs/AGENTS.md` as an entry point and map. Avoid turning it into a transcript or dumping ground.
+- Use `docs/meta/standing-directive.md` for the project-memory maintenance contract and `docs/meta/documentation-audit-2026-04-29.md` for the current cleanup strategy.
 - Update `docs/meta/changelog.md` for user-visible or operational changes.
 - Record major structural doc reorganizations in `docs/meta/project-map.md`.
 - Maintain `docs/meta/next-release-notes-log.md` as a standing running log for the next Landing Page "What's New" update.
@@ -479,88 +512,10 @@ Before making changes, read [AGENTS.md](./AGENTS.md) and treat it as the current
 
 - Start at `docs/data/database-documentation.md` for DB index and cross-app pointers.
 - When tables/columns/relationships change, update the index and linked domain docs.
-- Regenerate schema dump after schema changes (do not commit dump files):
-  `npm run dump:dev-schema`
-
-### DB interaction from WSL (dev)
-
-- MySQL runs on the Windows host and accepts local connections.
-- Verified on 2026-04-04: the new shared-schema CLI can reach DEV from the sandbox via the repo `.env` when invoked through the Windows Node runtime:
-  `"/mnt/c/Program Files/nodejs/node.exe" scripts/path-schema-migrate.js plan`
-- Use Windows MySQL client from WSL (not Linux `mysql`):
-  `"/mnt/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe" -h localhost -P 3306 -u root -p"<from .env>" -D iset_intake -e "SELECT 1;"`
-- Read credentials from `.env`: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`, `DB_NAME`.
-- Connectivity check:
-  `"/mnt/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe" -h localhost -P 3306 -u root -p"<from .env>" -D iset_intake -e "SELECT DATABASE() AS db, @@hostname AS host, @@port AS port;"`
-- Schema discovery:
-  - Tables: `... -e "SHOW TABLES;"`
-  - Table DDL: `... -e "SHOW CREATE TABLE <table_name>\\G"`
-  - Recent rows: `... -e "SELECT * FROM <table_name> ORDER BY id DESC LIMIT 10;"`
-- Safe write workflow for test data:
-  - Confirm table/columns with `SHOW CREATE TABLE`.
-  - Wrap writes in `START TRANSACTION; ...; COMMIT;` (or `ROLLBACK;`).
-  - Use clearly tagged dummy values like `DUMMY_` and `TEST_`.
-
-### Test DB interaction from Codex/WSL
-
-- Verified on 2026-03-28: the Codex sandbox can run SQL against TEST indirectly through SSM on a live `nwac-test-app` EC2 instance using AWS profile `nwac-test`.
-- Do not assume direct network access from the sandbox to the Aurora cluster. The test DB security group only allows MySQL from the app security group, so the normal Codex path is remote execution on the app host.
-- Preferred helper for future chats: `scripts/run-test-sql-via-ssm.sh`
-- Preferred config/data promotion entry point: `npm run data:sync:plan -- --dataset <name> ...` followed by `npm run data:sync:apply -- --target-env test ...`
-- Preferred full TEST reset entry points: `npm run test:db:refresh:plan -- --source-env dev` and `npm run test:db:refresh -- --source-env dev --yes`
-- Supporting guide: `docs/guides/test-db-access-from-codex.md`
-- Current caveat: older scripts such as `scripts/deploy-test-db.ps1` reference retired test instance IDs; re-check live AWS resources before trusting those IDs.
-- Current schema rule: treat `admin-dashboard/sql/migrations/` -> `iset_migration` as the canonical PATH shared-schema path. Treat `admin-dashboard/sql/ops/` as manual-only SQL, `admin-dashboard/db/migrations/` as legacy archive, and the portal-side `__migrations` / `schema_migrations` paths as retired for deployed PATH schema work unless a thread explicitly proves otherwise.
-- Current privacy ERM rule: secure messages are case-scoped typed-actor records, not applicant-to-assigned-staff personal messages. Preserve `messages.case_id`, typed sender/recipient actor fields, exactly-one-applicant semantics, scoped `message_attachment` rows, source-specific `iset_document` lineage constraints, signing-request case/participant FKs, and escalation/task shared-user FKs when changing messaging, document, form-signing, escalation, or task flows.
-- Current route-denial smoke rule: use `npm run smoke:privacy-denials` for live wrong-token/wrong-owner checks. It must use real Cognito bearer tokens from env vars only; do not introduce header impersonation, simulated users, or production-reachable auth bypasses to exercise these paths. For local DEV only, `npm run seed:privacy-denials` can create synthetic wrong-owner fixtures and write ignored IDs under `tmp/`; do not treat that seeder as a TEST/PROD migration.
-- Current internal-notification identity rule: DEV migration `20260427_0011_retire_internal_notification_legacy_identity_shadows.sql` physically retires `iset_internal_notification.audience_user_id` and `iset_internal_notification_dismissal.user_id`. New bell-alert code must use `audience_actor_type` plus `audience_staff_profile_id` / `audience_applicant_user_id`, and dismissal code must use `viewer_actor_type` plus `viewer_staff_profile_id` / `viewer_applicant_user_id`. Staff bell alerts target `staff_profiles.id`; applicant-targeted alerts target shared `user.id`. Do not convert `application_lock.owner_user_id` or `user_session_audit.user_id` into shared-user FKs without a dedicated actor/session principal redesign.
-- Current event-receipt identity rule: DEV migration `20260427_0012_retire_event_receipt_legacy_recipient_shadow.sql` physically retires `iset_event_receipt.recipient_id`. Event read-state code must use `viewer_staff_profile_id` or `viewer_applicant_user_id`, and each receipt must have exactly one typed viewer.
-- Never run destructive broad statements unless explicitly requested.
-- If host DB access fails from WSL, run `npm run dump:dev-schema` and continue with read-only analysis from docs.
-
-## Prod start/stop reference (NWAC, ca-central-1)
-
-Use these commands to shut down or restart prod for cost savings (all in `ca-central-1`).
-
-Shutdown:
-- Scale ASG to zero:
-  - `aws autoscaling update-auto-scaling-group --region ca-central-1 --auto-scaling-group-name nwac-prod-asg --min-size 0 --desired-capacity 0`
-- Stop Aurora cluster:
-  - `aws rds stop-db-cluster --region ca-central-1 --db-cluster-identifier nwac-prod-db`
-- Verify:
-  - `aws autoscaling describe-auto-scaling-groups --region ca-central-1 --auto-scaling-group-names nwac-prod-asg --query 'AutoScalingGroups[0].{Min:MinSize,Desired:DesiredCapacity,Instances:Instances[].[InstanceId,LifecycleState,HealthStatus]}' --output table`
-  - `aws rds describe-db-clusters --region ca-central-1 --db-cluster-identifier nwac-prod-db --query 'DBClusters[0].Status' --output text`
-
-Restart:
-- Start Aurora cluster:
-  - `aws rds start-db-cluster --region ca-central-1 --db-cluster-identifier nwac-prod-db`
-- Scale ASG back up:
-  - `aws autoscaling update-auto-scaling-group --region ca-central-1 --auto-scaling-group-name nwac-prod-asg --min-size 1 --desired-capacity 1`
-- Optional: after uploading new `admin-dashboard-latest.zip`, force replacement so new artifact is pulled:
-- `aws autoscaling start-instance-refresh --region ca-central-1 --auto-scaling-group-name nwac-prod-asg --preferences MinHealthyPercentage=100,InstanceWarmup=180,SkipMatching=false`
-- Verify:
-  - `aws autoscaling describe-auto-scaling-groups --region ca-central-1 --auto-scaling-group-names nwac-prod-asg --query 'AutoScalingGroups[0].{Min:MinSize,Desired:DesiredCapacity,Instances:Instances[].[InstanceId,LifecycleState,HealthStatus]}' --output table`
-  - `aws rds describe-db-clusters --region ca-central-1 --db-cluster-identifier nwac-prod-db --query 'DBClusters[0].Status' --output text`
-
-Notes:
-- This stops compute + database, but ALB/NAT/EIP/VPC endpoint costs may remain.
-- Confirm target AWS account before running commands:
-  `aws sts get-caller-identity`
-- Do not use deploy-script `-SkipBuild` for admin or portal unless you have already inspected the current `build/` output and confirmed it was compiled for the target environment. The compiled React bundle bakes Cognito domains, client IDs, and portal/admin links, so a stale test build can ship test sign-in targets to prod even when prod SSM/runtime env is correct.
-
-### AWS CLI profile/account mapping (Codex sandbox)
-
-- Keep prod and test identities as separate AWS CLI profiles; never rely on implicit defaults.
-- Current known mappings in this Codex environment (re-verified 2026-04-20 after the prod-role cutover):
-  - `default` -> `arn:aws:iam::468278742295:user/nwac-prod-automation` (bootstrap identity only; direct prod resource access is intentionally denied)
-  - `nwac-prod` -> `arn:aws:sts::468278742295:assumed-role/nwac-prod-codex-operator/codex-prod-operator` when assumed from `default`
-  - `nwac-prod-codex-operator` -> `arn:aws:sts::468278742295:assumed-role/nwac-prod-codex-operator/codex-prod-operator` when assumed from `default`
-  - `nwac-test` -> `arn:aws:iam::124355655255:user/CODEX_CLI_Admin` (test account `124355655255`)
-- Reduced prod operator role added 2026-04-20 and widened 2026-04-20 for the full repo-driven deploy/migration path: `nwac-prod-codex-operator` / `nwac-prod` cover artifact uploads in `nwac-prod-artifacts` (`admin/*`, `portal/*`, `shared/*`, `ssm-sql/*`, `db-dumps/*`), prod SSM SQL/dump execution, ASG refresh, prod DB restore-point snapshots, and the ALB `path-maintenance-fallback` flow. They still do not allow direct `secretsmanager:GetSecretValue` on `nwac-prod-db-credentials`.
-- Windows/npm processes do not share the same AWS config home as bash/WSL. For Windows-side deploy scripts, first export credentials from the bash/WSL role-backed profile into the child-process env. `scripts/path-deploy.js` already does this through `seedWindowsAwsCredentials()`.
-- Always pass `--profile` for AWS commands in threads that touch infra or storage:
-  - Test example: `aws s3api get-bucket-encryption --bucket nwac-test-uploads-20251014 --region ca-central-1 --profile nwac-test`
-  - Prod example: `aws sts get-caller-identity --profile nwac-prod`
+- Operational access details now live in `docs/ops/agent-operational-access.md`; read that doc before DB, TEST, PROD, or AWS profile work.
+- Regenerate schema dump after schema changes, but do not commit dump files: `npm run dump:dev-schema`.
+- Never run destructive broad SQL or cloud operations unless explicitly requested and verified against the current environment.
+- If DB access fails from WSL, prefer read-only analysis from generated schema/docs until the access path is fixed.
 
 ## Cross-app boundaries
 

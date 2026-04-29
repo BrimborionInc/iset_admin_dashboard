@@ -2,11 +2,13 @@
 
 Author: system assistant
 Created: 2025-09-20
+Last reviewed for stale model references: 2026-04-29
+Status: partially current dashboard reference. Verify against source before relying on entity-model details.
 
 ## Purpose
-Operational dashboard for reviewing and adjudicating individual ISET applications. Anchored to an `iset_case` record (route: `/application-case/:id`).
+Operational dashboard for reviewing and adjudicating individual ISET applications. The route remains case-keyed (`/application-case/:id`) and resolves application context from the current case/application relationship.
 
-> Current implementation note: this route is still keyed by `case` id and typically resolves application context through `iset_case.application_id`. The agreed target entity model is tracked in `docs/planning/client-case-application-target-model.md`.
+> Current implementation note: DEV has retired physical `iset_case.application_id`; current code derives the primary application context from `iset_application.case_id` where needed. The agreed target entity model is tracked in `docs/planning/client-case-application-target-model.md`.
 
 ## Current Board Items (production)
 | Title | File | Purpose / scope |
@@ -29,7 +31,7 @@ Operational dashboard for reviewing and adjudicating individual ISET application
 | Summary snapshot | Concise top-level summary | Needs design | Deferred |
 
 ## Data Sources
-- Application: current implementation joins `iset_application` via `iset_case.application_id`; this is not the long-term target relationship model.
+- Application: current implementation should derive application context from `iset_application.case_id`; do not add new dependencies on a physical `iset_case.application_id` column.
 - Submission reference: `iset_application_submission` (hydration + `schema_snapshot.fields`).
 - Documents: `iset_document` (linked by application / submission) [SupportingDocumentsWidget].
 - Case metadata: `iset_case`.

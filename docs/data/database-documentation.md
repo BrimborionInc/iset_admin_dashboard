@@ -14,7 +14,7 @@ Purpose: Single entrypoint for database documentation across the admin dashboard
 - `docs/planning/document-model-erm-adjustment.md` - ERM changes and rationale for document relationships.
 - `docs/data/record-locking.md` - `application_lock` and optimistic/pessimistic concurrency tables.
 - `docs/architecture/integrations/public-admin-integration-notes.md` - Cross-app data flow and shared-DB context.
-- `../ISET-intake/docs/data/key-tables.md` - Portal-focused key tables and notes.
+- `../ISET-intake/docs/system/data/key-tables.md` - Portal-focused key tables and notes.
 
 ## Schema source of truth
 - Canonical PATH shared-schema migrations live in `sql/migrations/` and are tracked in `iset_migration`. In deployed TEST/PROD environments they should be applied through the explicit deploy/migration commands, not relied on via app startup. See `docs/ops/migration-runner.md`.

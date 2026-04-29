@@ -72,4 +72,4 @@ Context: Finance dashboards/widgets are scaffolded with mock data. This map name
 
 ## Upkeep
 - Keep this file current as each flow gains real data/API wiring and as states/policies are finalized.
-- Cross-check with: `docs/change-requests/CR-0003-Implementation-Log.md`, `CR-0003-Financial-Management-User-Guide.md`, `CR-0003-Addendum-Plan.md`, and `docs/guides/configurable-dashboard-notes.md` for dashboard guardrails.
+- Cross-check with: `docs/change-requests/CR-0003-Implementation-Log.md`, `docs/change-requests/CR-0003-Financial-Management-User-Guide.md`, `docs/change-requests/CR-0003-Addendum-Plan.md`, and `docs/guides/configurable-dashboard-notes.md` for dashboard guardrails.

@@ -2,8 +2,8 @@
 
 Purpose: Define a repeatable plan to extract nForm-related functionality from the current PATH-aligned workspace into a new standalone workspace at `X:\nForm` (`/mnt/x/nForm`).
 Audience: Engineering and operations teams maintaining PATH, nForm, and shared services.
-Last Updated: 2026-02-26
-Status: Planned
+Last Updated: 2026-04-29
+Status: Historical extraction plan. Treat the phase deliverables below as planned outputs unless the named files already exist; as of the 2026-04-29 docbase audit, only `docs/planning/nform-scope.md` and this plan were present in the admin docbase.
 
 ## Context Snapshot
 Current top-level workspace (`/mnt/x/ISET`) includes multiple repositories/folders:
@@ -63,7 +63,7 @@ Exit Criteria:
 - Scope reviewed and approved.
 
 ### Phase 2: Dependency Inventory
-Deliverables:
+Planned deliverables:
 - `docs/planning/nform-dependency-map.md`
 
 Actions:
@@ -75,7 +75,7 @@ Exit Criteria:
 - Known runtime and build dependencies documented.
 
 ### Phase 3: Copy Manifest
-Deliverables:
+Planned deliverables:
 - `docs/planning/nform-copy-manifest.md`
 - `docs/planning/nform-copy-manifest.json`
 
@@ -88,7 +88,7 @@ Exit Criteria:
 - Manifest approved for dry run.
 
 ### Phase 4: Dry-Run Extraction
-Deliverables:
+Planned deliverables:
 - Dry-run copy log
 - `docs/planning/nform-extraction-dry-run.md`
 
@@ -101,7 +101,7 @@ Exit Criteria:
 - Dry run completes with a runnable baseline in `/mnt/x/nForm`.
 
 ### Phase 5: Selective Prune (A -> B)
-Deliverables:
+Planned deliverables:
 - `docs/planning/nform-prune-manifest.md`
 - `docs/planning/nform-prune-log.md`
 
@@ -114,7 +114,7 @@ Exit Criteria:
 - PATH/ISET-specific code is removed or isolated; nForm core remains runnable.
 
 ### Phase 6: Standalone Stabilization
-Deliverables:
+Planned deliverables:
 - Working `nForm` workspace with updated local config
 - `docs/planning/nform-stabilization-notes.md`
 
@@ -127,7 +127,7 @@ Exit Criteria:
 - Local install/build/start succeeds for core nForm flows.
 
 ### Phase 7: Validation and Cleanup
-Deliverables:
+Planned deliverables:
 - `docs/planning/nform-validation-report.md`
 - `docs/planning/nform-cruft-removal-log.md`
 
@@ -140,7 +140,7 @@ Exit Criteria:
 - No blocker defects for baseline nForm operation.
 
 ### Phase 8: Handoff and Next Modernization Step
-Deliverables:
+Planned deliverables:
 - `docs/planning/nform-handoff-summary.md`
 - Optional `docs/planning/nform-vite-migration-plan.md`
 
@@ -173,6 +173,6 @@ Exit Criteria:
 - Validate with workflow-focused smoke tests before declaring cutover readiness.
 
 ## Immediate Next Steps
-1. Produce `nform-scope.md` with in/out classification.
-2. Build dependency map across relevant repos.
-3. Draft copy manifest for approval before performing copy.
+1. Confirm whether the nForm extraction is still active before creating or relying on the planned deliverables above.
+2. If active, resume from `docs/planning/nform-scope.md` and then build the dependency map across relevant repos.
+3. Draft copy/prune manifests before performing any copy or delete action.

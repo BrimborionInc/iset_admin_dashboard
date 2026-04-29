@@ -1,40 +1,51 @@
-If you don't understand, are foced to make assumptions, lack information the only i can provide or have any questions ask them now - one at a time and allow me to responsd to each before progressing to your next question.  Only proceed with the task once you have sufficient inofrmation to complete it sucessfully in the first attempt, and do it in a single pass.
+# Project Memory Standing Directive
 
-You have complete oversight responsibility for code.  Please avoid asking me for decisions about the code-base because I don't have a complete knowledge of it, and respecting my answers may lead to inconsitencies in coding or deviant approaches.
+Purpose: durable operating contract for maintaining this repository's agent-facing project memory across short task-based AI threads.
 
-If my prompt raises any issues with the coding structure - of if you disagree with the instructions - then please challenge me before implementation.
+This repo uses `docs/` as persistent project memory. Future agents do not have hidden continuity from prior chats, so useful project knowledge must be captured in the repo itself.
 
-You have permission to work with sensitive files, including .env files.
+## Required Behavior
 
-Please create and maintain documentation as you go including achitectures, specs, impelementation plans and to do lists as you see fit.
----
-Standing AI Assistant Directive (Session Behavior Contract)
+- Read `docs/AGENTS.md` before making code, database, deployment, or documentation changes.
+- Use `docs/AGENTS.md` as the entry point, not as the only source of truth.
+- Verify important claims against source code, migrations, config, package scripts, tests, or live database evidence before acting on them.
+- Maintain docs as part of normal task completion when behavior, schema, workflows, architecture, operations, or active project state changes.
+- Keep documentation concise, operational, and useful for a future agent starting without prior chat history.
+- Revise, merge, archive, or delete stale/conflicting docs. Do not preserve obsolete wording just because it already exists.
+- Sensitive files may be inspected or edited only when genuinely needed for the task and allowed by the current session's tool policy.
+- Keep credentials, secrets, tokens, and unnecessary sensitive personal data out of docs.
 
-1. Only perform the explicitly requested action. Do not suggest options, next steps, alternatives, or enhancements unless I explicitly write: "REQUEST SUGGESTIONS".
-2. Keep responses minimal: no more than necessary to confirm completion or to ask a single clarifying yes/no question if truly required.
-3. Do not generate plans or TODOs unless I explicitly request a plan.
-4. If instructions are ambiguous, ask exactly one concise clarifying question and wait.
-5. Do not restate unchanged prior context.
-6. Never add advisory, speculative, or optional commentary.
-7. If a constraint conflicts with system or safety rules, state: "Cannot comply due to higher-level rule" and stop.
-8.  You have my permission to work with .env files and other files that may contain sensitive content.
+## Source Of Truth Order
 
-Acknowledgement of this directive is implicit; do not echo it back once stored.
+Use this order when docs and implementation disagree:
 
-Addendum 2025-09-15:
-- Do NOT present "options" or "next options" after completing routine sub-steps. Proceed autonomously unless an irreversible architectural/destructive decision is required or user explicitly writes "REQUEST SUGGESTIONS".
+1. Current code and tests.
+2. Current schema migrations, ops SQL, and generated runtime/config artifacts.
+3. Live environment checks when the task requires environment-specific truth.
+4. Current canonical docs linked from `docs/AGENTS.md`.
+5. Historical planning notes, change requests, old thread notes, and scaffolds.
 
-Addendum 2025-09-15 (B):
-- Validation Panel: Show the standard validation panel for `file-upload` components so required rules can be authored.
+Historical docs can explain intent, but they do not prove current behavior.
 
-Addendum 2025-09-15 (C):
-- The user will not answer technical / codebase implementation questions. The assistant must proceed using its own analysis, inspecting code directly without relying on user confirmation for technical details.
-- The user may provide input and guidance limited to product intent, UI / UX behavior, copy, and visual preferences.
-- The assistant retains lasting permission for this session to access and edit any files it deems necessary, including sensitive or environment configuration files (e.g., `.env`), in service of task completion while maintaining security best practices.
-- The assistant should only ask the user clarifying questions when information is strictly unavailable from the repository and essential to avoid incorrect implementation.
- - Before making any change, the assistant will re-examine relevant existing patterns (pages, widgets, layout tiers, help panel integrations) to ensure adherence to established architecture (e.g., avoid introducing nested AppLayout instances or alternate help panel tiers).
+## Maintenance Workflow
 
-Addendum 2025-09-20 (A-B-C):
-- a) Do not ask the user for coding decisions; assistant owns implementation choices.
-- b) No data migration of legacy records is required; existing DB contents are disposable test data unless explicitly stated otherwise.
-- c) Chat responses must remain concise (minimal confirmation or result only); avoid verbose explanation or training commentary.
+- Start each substantial thread by reading the relevant entry docs and then inspecting the code or DB surfaces touched by the request.
+- Before editing docs, identify whether the target file is core memory, operational guidance, current domain documentation, planning history, or reference material.
+- After meaningful work, update the smallest set of docs needed for future continuity.
+- Update `docs/meta/codex-thread-index.md` only when the work creates durable recovery context and the exact Codex Task History title is known.
+- Update `docs/meta/changelog.md` for user-visible, operational, security, schema, or deployment-relevant changes.
+- Update `docs/meta/next-release-notes-log.md` for changes that may belong in the next user-facing "What's New" update.
+- Update `docs/meta/project-map.md` when repo structure, major modules, cross-cutting architecture, or documentation organization changes.
+- Run `python3 scripts/check-doc-links.py` after reference-heavy documentation cleanup, and run `git diff --check` before handoff.
+
+## Cleanup Rules
+
+- Prefer a clear deletion or replacement over adding a new competing explanation.
+- Mark historical or superseded docs explicitly when deleting them would lose useful context.
+- Keep generated/reference artifacts separate in meaning from maintained guidance.
+- Do not let `docs/AGENTS.md` become a transcript. It should remain an entry point, guardrail list, and pointer map.
+- Do not ask the user for codebase implementation decisions that can be answered by inspecting the repo or database. Ask only for product intent, UX expectations, or business rules that are genuinely unavailable from evidence.
+
+## Current Cleanup Baseline
+
+The current documentation audit is `docs/meta/documentation-audit-2026-04-29.md`. Use it as the starting point for docbase cleanup until it is superseded by a newer audit. The current read-only doc-link checker is `scripts/check-doc-links.py`.
