@@ -1622,6 +1622,16 @@ function sanitizeAdminFeedbackDashboardTypeFilter(rawValue) {
   return ADMIN_FEEDBACK_REPORT_TYPES.has(normalized) ? normalized : 'all';
 }
 
+const ADMIN_FEEDBACK_REVIEW_ROLES = new Set([
+  'System Administrator',
+  'NWAC Administrator',
+  'Regional Manager',
+]);
+
+function canReviewAdminFeedback(req) {
+  return ADMIN_FEEDBACK_REVIEW_ROLES.has(inferUserRole(req));
+}
+
 function buildAdminFeedbackActorSnapshot(req) {
   const staffProfileId = resolveActiveStaffProfileId(req) || null;
   const name = (
@@ -28961,8 +28971,8 @@ async function loadAdminFeedbackReportDetail(reportId) {
   };
 }
 
-app.get('/api/dashboard/system-admin-feedback-reports', async (req, res) => {
-  if (inferUserRole(req) !== 'System Administrator') {
+app.get(['/api/dashboard/system-admin-feedback-reports', '/api/dashboard/admin-feedback-reports'], async (req, res) => {
+  if (!canReviewAdminFeedback(req)) {
     return res.status(403).json({ error: 'forbidden' });
   }
 
@@ -29084,16 +29094,16 @@ app.get('/api/dashboard/system-admin-feedback-reports', async (req, res) => {
         message: 'Admin feedback storage is not available in this environment.',
       });
     }
-    console.error('[dashboard] failed to load system admin feedback reports', err);
+    console.error('[dashboard] failed to load admin feedback reports', err);
     return res.status(500).json({
-      error: 'system_admin_feedback_reports_failed',
+      error: 'admin_feedback_reports_failed',
       message: err?.message || 'Unable to load admin feedback reports.',
     });
   }
 });
 
 app.get('/api/admin/feedback-reports/:id', async (req, res) => {
-  if (inferUserRole(req) !== 'System Administrator') {
+  if (!canReviewAdminFeedback(req)) {
     return res.status(403).json({ error: 'forbidden' });
   }
 
@@ -29124,7 +29134,7 @@ app.get('/api/admin/feedback-reports/:id', async (req, res) => {
 });
 
 app.patch('/api/admin/feedback-reports/:id/status', async (req, res) => {
-  if (inferUserRole(req) !== 'System Administrator') {
+  if (!canReviewAdminFeedback(req)) {
     return res.status(403).json({ error: 'forbidden' });
   }
 
@@ -29204,7 +29214,7 @@ app.patch('/api/admin/feedback-reports/:id/status', async (req, res) => {
 });
 
 app.post('/api/admin/feedback-reports/:id/notes', async (req, res) => {
-  if (inferUserRole(req) !== 'System Administrator') {
+  if (!canReviewAdminFeedback(req)) {
     return res.status(403).json({ error: 'forbidden' });
   }
 
@@ -45141,12 +45151,42 @@ app.get('/api/applicants/:id/documents', async (req, res) => {
     const docTypeScopeMap = await loadDocumentTypeScopeMap();
     const whereClauses = ['d.applicant_user_id = ?', `d.status = 'active'`];
     const params = [applicantId];
-    const applicationDocumentScope = applicationFilterId
-      ? await loadApplicationSubmissionDocumentScope(applicationFilterId)
+    let caseApplicationScopeId = null;
+    if (caseFilterId && !applicationFilterId) {
+      caseApplicationScopeId = await resolveApplicationIdForCaseId(caseFilterId);
+    }
+    const effectiveApplicationScopeId = applicationFilterId || caseApplicationScopeId || null;
+    const applicationDocumentScope = effectiveApplicationScopeId
+      ? await loadApplicationSubmissionDocumentScope(effectiveApplicationScopeId)
       : buildEmptyApplicationSubmissionDocumentScope();
     if (caseFilterId) {
-      whereClauses.push('(d.case_id = ? OR ap.case_id = ?)');
-      params.push(caseFilterId, caseFilterId);
+      const matchedFilePaths = Array.from(applicationDocumentScope.submissionPayloadFilePaths);
+      const primaryApplicationSql = buildCasePrimaryApplicationIdSql('scope_case');
+      if (matchedFilePaths.length) {
+        whereClauses.push(
+          `(d.case_id = ? OR ap.case_id = ? OR d.application_id = (
+              SELECT ${primaryApplicationSql}
+                FROM iset_case scope_case
+               WHERE scope_case.id = ?
+            ) OR (
+              d.application_id IS NULL
+              AND d.case_id IS NULL
+              AND d.action_plan_id IS NULL
+              AND d.source = 'application_submission'
+              AND d.file_path IN (${matchedFilePaths.map(() => '?').join(',')})
+            ))`
+        );
+        params.push(caseFilterId, caseFilterId, caseFilterId, ...matchedFilePaths);
+      } else {
+        whereClauses.push(
+          `(d.case_id = ? OR ap.case_id = ? OR d.application_id = (
+              SELECT ${primaryApplicationSql}
+                FROM iset_case scope_case
+               WHERE scope_case.id = ?
+            ))`
+        );
+        params.push(caseFilterId, caseFilterId, caseFilterId);
+      }
     } else if (interventionFilterId) {
       whereClauses.push(
         `(EXISTS (

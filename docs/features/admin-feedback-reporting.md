@@ -1,6 +1,6 @@
 # Admin Feedback Reporting
 
-Status: implemented in admin shell on 2026-04-05, with System Administrator homepage triage added on 2026-04-05
+Status: implemented in admin shell on 2026-04-05, with shared admin/manager triage dashboard added on 2026-04-30
 
 ## Purpose
 
@@ -24,10 +24,11 @@ Provide an in-app way for signed-in PATH staff to report admin-console bugs and 
 - Successful submission now closes the floating report window and opens a shell-level confirmation modal.
 - Submission failures remain inline in the floating report window so staff can correct and resubmit without reopening it.
 
-## System Administrator triage surface
+## Triage surfaces
 
-- The System Administrator homepage now includes a `Bug & Change Requests` widget.
-- The widget is backed by `GET /api/dashboard/system-admin-feedback-reports`.
+- The System Administrator homepage includes the `Bugs and Change Requests` widget.
+- A dedicated `Support > Bugs and Change Requests` dashboard reuses the same widget so `System Administrator`, `NWAC Administrator`, and `Regional Manager` users can view and update the queue.
+- The widget is backed by `GET /api/dashboard/admin-feedback-reports`, with the older `GET /api/dashboard/system-admin-feedback-reports` path retained as a compatibility alias.
 - Opening a report from that widget launches a second non-modal floating panel for triage/review.
 - The review panel is backed by:
   - `GET /api/admin/feedback-reports/:id`
@@ -133,9 +134,11 @@ Deliberate design choice:
 - Top-nav integration: `src/layouts/TopNavigation.js`
 - Shell state/event listener: `src/AppContent.js`
 - System Administrator homepage widget: `src/pages/home/widgets/SystemAdminFeedbackQueueWidget.jsx`
+- Dedicated dashboard: `src/pages/support/BugsChangeRequestsDashboard.jsx`
+- Navigation route: `/support/bugs-change-requests`
+- Access Control matrix label/default route: `src/widgets/AccessControlMatrix.jsx`, `src/config/roleMatrix.json`
 
 ## Follow-on work
 
-- Add an admin review/triage dashboard for submitted reports if PATH staff need to manage them in-app.
 - Decide whether report-status changes should emit internal notifications.
-- Add presigned download endpoints and review UI for stored attachments when a triage surface is built.
+- Consider whether the dedicated dashboard should add saved dashboard preferences or additional grouping once the queue grows.

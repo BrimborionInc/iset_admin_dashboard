@@ -118,6 +118,7 @@ Technical details
 - Upload bucket: `nwac-prod-uploads-b6bb`  
 - Default encryption: SSE-KMS (AWS KMS key; prod policy requirement).  
 - Access is via presigned URLs configured in the portal environment (`UPLOAD_MODE=s3`).
+- The reduced `nwac-prod` operator role is not a general uploads-bucket admin role. Direct reads such as bucket encryption/public-access configuration and raw `HeadObject` can be denied even when the deployed app can write/read objects through its configured `s3Provider`; for one-off generated-document repairs, verify uploaded objects from the PROD app host through `/opt/nwac/portal/s3Provider.headObject()` via SSM.
 
 ## 10) Captcha / Bot Protection
 

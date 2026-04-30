@@ -115,10 +115,29 @@ async function main() {
 }
 
 async function fetchFixtureRegions(connection, staffPayload) {
-  const staffRegionId =
-    positiveInteger(staffPayload.region_id) ||
-    positiveInteger(staffPayload['custom:region_id']) ||
-    11;
+  const staffSub = normalizeString(staffPayload.sub);
+  let staffRegionId = null;
+  if (staffSub) {
+    const [[mappedRegion]] = await connection.query(
+      `SELECT sr.region_id
+         FROM staff_profiles sp
+         JOIN staff_region sr ON sr.staff_profile_id = sp.id
+        WHERE sp.cognito_sub = ?
+        ORDER BY sr.region_id ASC
+        LIMIT 1`,
+      [staffSub]
+    );
+    staffRegionId = positiveInteger(mappedRegion?.region_id);
+
+    if (!staffRegionId) {
+      const [[profileRegion]] = await connection.query(
+        'SELECT region_id FROM staff_profiles WHERE cognito_sub = ? LIMIT 1',
+        [staffSub]
+      );
+      staffRegionId = positiveInteger(profileRegion?.region_id);
+    }
+  }
+  staffRegionId = staffRegionId || 11;
   const [[otherRegion]] = await connection.query(
     'SELECT region_id FROM canada_region WHERE region_id <> ? ORDER BY region_id ASC LIMIT 1',
     [staffRegionId]

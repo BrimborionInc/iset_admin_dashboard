@@ -107,7 +107,7 @@ export default function SystemAdminFeedbackQueueWidget({
         params.set('search', debouncedSearch);
       }
       const payload = await parseJson(
-        await apiFetch(`/api/dashboard/system-admin-feedback-reports?${params.toString()}`)
+        await apiFetch(`/api/dashboard/admin-feedback-reports?${params.toString()}`)
       );
       setReports(Array.isArray(payload?.items) ? payload.items : []);
       setMetrics(payload?.metrics || null);
@@ -139,7 +139,7 @@ export default function SystemAdminFeedbackQueueWidget({
         event.preventDefault();
         toggleHelpPanel(
           <HomeSystemAdminFeedbackQueueHelp />,
-          'Bug & Change Requests',
+          'Bugs and Change Requests',
           HomeSystemAdminFeedbackQueueHelp.aiContext || ''
         );
       }}
@@ -291,13 +291,13 @@ export default function SystemAdminFeedbackQueueWidget({
             </SpaceBetween>
           )}
         >
-          Bug & Change Requests
+          Bugs and Change Requests
         </Header>
       )}
       settings={
         actions?.removeItem ? (
           <ButtonDropdown
-            ariaLabel="Bug & Change Requests settings"
+            ariaLabel="Bugs and Change Requests settings"
             variant="icon"
             items={[{ id: 'remove', text: 'Remove widget' }]}
             onItemClick={({ detail }) => {

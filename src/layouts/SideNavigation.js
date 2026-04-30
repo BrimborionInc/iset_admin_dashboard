@@ -208,6 +208,7 @@ const SideNavigation = ({ showTutorialHotspots = false, notificationCount = 0, r
       defaultExpanded: false,
       items: [
         { type: 'link', text: 'Guidance', href: '/documentation' },
+        { type: 'link', text: 'Bugs and Change Requests', href: '/support/bugs-change-requests' },
         {
           type: 'link',
           text: 'Tutorials',

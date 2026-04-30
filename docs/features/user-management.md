@@ -1,6 +1,6 @@
 # User Management Overview
 
-_Last updated: 27 April 2026_
+_Last updated: 30 April 2026_
 
 ## High-level flow
 
@@ -61,7 +61,7 @@ ISET Coordinator     → cannot manage administrative users
 ```
 * `normalizeRoleKey` canonicalises friendly labels ("Program Administrator", "System Admin", etc.) before applying the guard.
 * The server now resolves the target user's actual Cognito admin group with Cognito `AdminListGroupsForUser` before applying guards. Administrative routes no longer trust `role` or `currentRole` values sent from the browser.
-* Staff region access for admin users is DB-backed. For staff/admin accounts, treat `staff_profiles.region_id` plus `staff_region` as the operational source of truth; do not rely on Cognito `custom:region_id`.
+* Staff region access and staff-profile identity for admin users are DB-backed. For staff/admin accounts, treat `staff_profiles.region_id` plus `staff_region` as the operational region source of truth, and `staff_profiles.id` as the staff identity source after Cognito-sub hydration. Do not rely on Cognito `custom:region_id` or `custom:user_id`. The admin auth middleware ignores those legacy staff token claims so missing DB assignments must be repaired in the database/user-management flow, not by signing in.
 
 ### Endpoints
 * **GET /users** – lists Cognito users, enriched with role, status, MFA flag, last sign-in, and region access from `staff_profiles` / `staff_region`. The response is scoped to roles the current actor is allowed to manage. If Cognito admin configuration is missing, the endpoint fails explicitly instead of returning mock users.
@@ -93,11 +93,11 @@ ISET Coordinator     → cannot manage administrative users
 * The portal wraps Cognito’s forgot-password flow in activation wording and marks the linked client as `activated` on the first successful authenticated session.
 ## Relationship to staff_profiles
 * Creating users seeds `staff_profiles` with identity details (`name`, `display_name`) at creation time, keyed by Cognito `sub`.
-* `staffProfileMiddleware` still upserts operational fields on authenticated requests (cognito `sub`, email, role) and resolves the effective `staff_profiles.id`, `region_id`, and `regionIds` from the database-backed staff model without nulling existing region assignments when tokens lack legacy region claims.
+* `staffProfileMiddleware` still upserts operational identity fields on authenticated requests (Cognito `sub`, email, role) and resolves the effective `staff_profiles.id`, `region_id`, and `regionIds` from the database-backed staff model. It must not backfill staff identity or region access from Cognito custom token claims.
 * `/api/staff/assignable` also ensures staff profiles exist when listing assignable users. Recent fixes ensure we merge into the existing row instead of creating duplicates and prefer the Cognito GUID for `cognito_sub`.
 
 ## Testing tips
-1. Ensure new Cognito users sign in once so `staff_profiles` captures their GUID and region.
+1. New Cognito users are seeded into `staff_profiles` at creation time; if an older user lacks a row, have them sign in once so the profile captures their Cognito GUID, then assign regions through Manage Users or a reviewed DB repair.
 2. Use the browser console to inspect the current auth context:
    ```js
    fetch('/api/auth/me', { credentials: 'include' })

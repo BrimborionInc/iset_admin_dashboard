@@ -1,4 +1,5 @@
 // Dual-pool Cognito support (staff + applicant). Chooses issuer dynamically and maps groups -> role.
+// Staff region/identity scope is intentionally DB-backed; do not hydrate it from Cognito custom claims.
 const { createRemoteJWKSet, jwtVerify } = require('jose');
 
 // Env (staff): COGNITO_STAFF_USER_POOL_ID, COGNITO_STAFF_CLIENT_ID
@@ -88,12 +89,13 @@ function extractAuthFromClaims(claims, poolType) {
       }
     }
   }
-  const regionId = claims.region_id != null ? Number(claims.region_id) : (claims['custom:region_id'] != null ? Number(claims['custom:region_id']) : null);
-  const userId = claims.user_id != null ? String(claims.user_id) : (claims['custom:user_id'] != null ? String(claims['custom:user_id']) : null);
+  const userId = poolType === 'staff'
+    ? null
+    : (claims.user_id != null ? String(claims.user_id) : (claims['custom:user_id'] != null ? String(claims['custom:user_id']) : null));
   return {
     sub: String(claims.sub || ''),
     role: mappedRole,
-    regionId: Number.isFinite(regionId) ? regionId : null,
+    regionId: null,
     userId: userId || null,
     email: claims.email || claims.Email || null,
     name: claims.name || claims.Name || null,

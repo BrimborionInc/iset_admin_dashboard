@@ -39,6 +39,7 @@ manual uploads, and generated forms, then compares them against the relevant che
 
 - Shared widget: the same component is used in both Application Workspace and Case Workspace.
 - Application Workspace filter: loads applicant applications and filters documents by `application_id`.
+- Application Workspace `All documents` still sends scoped context for non-admin-safe document reads. When the current case is known, the widget queries applicant documents with `caseId`; the backend treats that as the authorized case document set and includes documents linked directly to the case, action plans, the case's primary application, and narrow historical intake-upload matches proven by the primary application's submission payload.
 - Case Workspace filter: builds intervention options from `caseData.actionPlans[].interventions` and narrows the list to documents relevant to the selected intervention; it is a view filter, not an attachment target.
 - Checklist in applicant-backed Case Workspace: only loads after an intervention is selected.
 - Upload flow:

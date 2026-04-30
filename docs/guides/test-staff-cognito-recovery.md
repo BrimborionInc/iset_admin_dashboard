@@ -2,7 +2,7 @@
 
 Purpose: recover TEST admin/staff accounts when the Admin Users widget shows only a primary region, when Cognito invitation/reset emails do not arrive, or when a staff account is stuck in `FORCE_CHANGE_PASSWORD`.
 
-Last Updated: 2026-04-10
+Last Updated: 2026-04-30
 
 ## When to use this
 
@@ -26,7 +26,9 @@ Implication: a staff user must have `email` plus `email_verified=true` in Cognit
 
 ## Root cause 1: `staff_profiles.cognito_sub` drift
 
-The Admin Users API enriches multi-region access by matching Cognito users to `staff_profiles` on `cognito_sub`, then loading `staff_region` memberships. If the `cognito_sub` in `staff_profiles` is stale, the UI can miss the DB-backed region mappings and show incomplete region access.
+The Admin Users API enriches multi-region access by matching Cognito users to `staff_profiles` on `cognito_sub`, then loading `staff_profiles.region_id` and `staff_region` memberships. If the `cognito_sub` in `staff_profiles` is stale, the UI can miss the DB-backed region mappings and show incomplete or missing region access.
+
+The admin backend must not use Cognito `custom:region_id` as a fallback for staff scope. If a Cognito user still carries that legacy custom attribute, treat it as historical metadata only and repair the DB-backed assignment deliberately.
 
 Relevant code:
 
@@ -144,6 +146,6 @@ This restored proper multi-region display for Regional Managers whose `staff_reg
 
 1. Verify the Cognito user attributes and status.
 2. If `email` / `email_verified` are missing, add them first.
-3. If the app UI is showing only a primary region, compare Cognito `sub` to `staff_profiles.cognito_sub` and sync the DB row if needed.
+3. If the app UI is showing missing or incomplete regions, compare Cognito `sub` to `staff_profiles.cognito_sub` and sync the DB row if needed.
 4. If the user is in `FORCE_CHANGE_PASSWORD`, use `admin-create-user --message-action RESEND`.
 5. If mail still does not arrive, use `admin-set-user-password --no-permanent` and give the temporary password directly.

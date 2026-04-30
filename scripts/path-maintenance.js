@@ -46,6 +46,9 @@ function usage() {
     '  --starts-at ISO        Absolute UTC/local timestamp for maintenance start',
     '  --expected-duration D  Expected downtime (examples: 20m, 45m, 2h)',
     '  --surfaces LIST        admin, portal, or all. Default: all',
+    '  --title TEXT           Optional English banner title',
+    '  --body TEXT            Optional English banner body',
+    '  --message TEXT         Alias for --body',
     '  --unscheduled          Mark the event as unscheduled',
     '  --yes                  Required for prod mutations',
     '  --json                 Emit machine-readable JSON',
@@ -65,12 +68,13 @@ function parseArgs(argv) {
     startsAt: null,
     expectedDuration: null,
     surfaces: 'all',
+    title: null,
+    body: null,
     unscheduled: false,
     yes: false,
     json: false,
   };
 
-  const positional = [];
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (token === '--env') {
@@ -91,6 +95,10 @@ function parseArgs(argv) {
       args.expectedDuration = argv[++index];
     } else if (token === '--surfaces') {
       args.surfaces = argv[++index];
+    } else if (token === '--title') {
+      args.title = argv[++index];
+    } else if (token === '--body' || token === '--message') {
+      args.body = argv[++index];
     } else if (token === '--unscheduled') {
       args.unscheduled = true;
     } else if (token === '--yes') {
@@ -99,14 +107,15 @@ function parseArgs(argv) {
       args.json = true;
     } else if (token === '--help' || token === '-h') {
       args.command = 'help';
+    } else if (token.startsWith('-')) {
+      throw new Error(`Unknown option: ${token}`);
+    } else if (!args.command) {
+      args.command = token;
     } else {
-      positional.push(token);
+      throw new Error(`Unexpected argument: ${token}`);
     }
   }
 
-  if (!args.command && positional.length) {
-    args.command = positional[0];
-  }
   return args;
 }
 
@@ -210,6 +219,9 @@ function buildAnnouncementPayload(args) {
     surfaces: args.surfaces || 'all',
     startsAt,
     expectedDurationMinutes,
+    title: { en: args.title || '' },
+    body: { en: args.body || '' },
+    updatedAt: new Date().toISOString(),
   });
   return payload;
 }

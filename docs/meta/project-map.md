@@ -78,7 +78,8 @@ Last reviewed for documentation cleanup: 2026-04-29.
 - File: `src/pages/home/HomeDashboardPage.jsx`.
 - Features: role-aware board layouts with work queues, queue drilldowns, metrics, recent activity, watchlist/tagged applications, System Administrator operations widgets, feedback queue, and Development Tracker.
 - Some homepage widgets still carry sample/fallback data paths for empty/error states; verify each widget before assuming a metric is live.
-- System Administrator operational widgets now include `Operations Snapshot`, `Bug & Change Requests`, `AWS Environment Status`, `Users & Access Alerts`, and `Recent Admin Activity`.
+- System Administrator operational widgets now include `Operations Snapshot`, `Bugs and Change Requests`, `AWS Environment Status`, `Users & Access Alerts`, and `Recent Admin Activity`.
+- Dedicated support triage dashboard: `src/pages/support/BugsChangeRequestsDashboard.jsx`, route `/support/bugs-change-requests`.
 - Development Tracker widget: `src/pages/home/widgets/DevTaskTrackerWidget.jsx` (Cloudscape `SegmentedControl`, modal task detail, status persistence in `sessionStorage.devTasks` with enrichment merge when new tasks shipped).
 - Dev task metadata central source: `src/devTasksData.js`.
 

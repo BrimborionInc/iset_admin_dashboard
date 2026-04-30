@@ -565,6 +565,10 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           params.set('caseId', String(caseId));
         } else if (!isCaseWorkspace && filterApplicationId) {
           params.set('applicationId', filterApplicationId);
+        } else if (!isCaseWorkspace && caseId) {
+          params.set('caseId', String(caseId));
+        } else if (!isCaseWorkspace && applicationId) {
+          params.set('applicationId', String(applicationId));
         }
         const query = params.toString() ? `?${params.toString()}` : '';
         const endpoint = canUseApplicantDocumentMode
@@ -589,6 +593,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       canUploadDocuments,
       canUseApplicantDocumentMode,
       caseId,
+      applicationId,
       isCaseDocumentMode,
       isCaseWorkspace,
       selectedApplicationFilter,

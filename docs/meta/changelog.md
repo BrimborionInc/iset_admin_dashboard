@@ -2,6 +2,19 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-04-30
+- Fix/Auth: Stopped admin staff authentication from hydrating staff scope or identity from legacy Cognito `region_id`, `custom:region_id`, `user_id`, or `custom:user_id` claims; staff region access now stays DB-backed through `staff_profiles` / `staff_region` and missing assignments require explicit data/user-management repair.
+- Ops/Auth: Added a dry-run-first staff Cognito legacy attribute cleanup helper and guide for auditing or clearing per-user `custom:region_id` / `custom:user_id` values after DB-backed assignments are verified.
+- Ops/DEV/Auth: Cleared remaining per-user `custom:region_id` values from the DEV staff Cognito pool after code stopped relying on those legacy custom claims; TEST and PROD Cognito attributes were not changed.
+- Docs/Ops: Strengthened TEST deployment guidance so TEST rehearses PROD maintenance behavior: planned TEST deploys that can interrupt service or expose raw `502 Bad Gateway` responses must use a scoped maintenance warning or ALB maintenance page.
+- Docs/Ops: Added a TEST maintenance-copy rule requiring warnings to use the user-facing name `Test and Training environment` and explicitly state that Production is not affected.
+- Ops/Tooling: Updated `path:maintenance` so operator-supplied `--title` / `--message` copy is written into the service-announcement payload and unknown options fail loudly instead of being ignored.
+- Ops/Tooling: Fixed `path:deploy:smoke` output for TEST target-group health checks so it prints each target and health state instead of `undefined undefined`.
+- Ops/TEST/Auth: Deployed admin-only release `20260430-auth-region-db-test` to the Test and Training environment with no schema/data/portal changes and no Cognito attribute cleanup; rollout used an admin-scoped maintenance warning plus ALB maintenance page, then cleared both after target health and on-instance `/healthz` checks passed.
+- Ops/Data: Repaired Sarah Froese's PROD intervention-proposal assessment documents by backfilling `Case manager assessment v2` and `Case manager assessment redline v2` for case `40` / proposal `2` / intervention `11` after a TEST rehearsal, preserving Amanda Curtis's original `2026-04-17 12:20:49 UTC` submission signature.
+- UX/Homepage/DEV: New Applications queue rows now use the applicant name as the workspace link, hide the redundant inline `Open workspace` action, and show `Assign` or `Reassign` based on whether the file already has an owner.
+- UX/Support/DEV: Added a dedicated `Support > Bugs and Change Requests` dashboard that reuses the existing feedback triage widget and defaults access to System Administrators, NWAC Administrators, and Regional Managers.
+
 ## 2026-04-29
 - Docs/Meta: Added a root `AGENTS.md` entry point, refreshed the project-memory standing directive, linked the current documentation audit from `docs/AGENTS.md`, and recorded the first-pass docs inventory and cleanup queue in `docs/meta/documentation-audit-2026-04-29.md`.
 - Docs/Meta: Replaced the stale Create React App root README and refreshed verified parts of the project map, including homepage structure, signature-ack macro infrastructure, cross-cutting session-state wording, and the legacy development-tracker caveat.
@@ -1021,3 +1034,9 @@ Format: YYYY-MM-DD - Category: Short description
 - Ops/Data: Repaired Wabanang Polson's PROD pending-decision application by generating the missing system PDFs for case manager assessment, application form, and financial overview, then verified both DB rows and S3 objects.
 - Fix/Migrations/DEV: Made the pending document-scope and event-actor audit reconciliation migrations tolerant of the current one-client/one-case schema by removing the retired `iset_case.application_id` dependency and normalizing the audit/event ID collation comparison; local DEV migrations now plan clean with 0 pending.
 - UX/Release Notes/DEV: Regenerated the v0.6.0 landing-page release notes from the PROD feedback queue, replaced inferred Known Issues/Coming Next copy with feedback-derived bullets, removed the pre-sign-in summary sentence, and made optional release-note sections hide when empty.
+
+## 2026-04-30
+- Fix/TEST: Deployed `regional-manager-doc-scope-test-20260430` to the admin console so Application Workspace `All documents` sends case scope for Regional Managers and the backend includes the case's primary application documents in case-scoped applicant document reads.
+- Ops/Data: Backfilled Hailey Lafrance-Chaput's PROD pending-decision assessment PDFs for application `16` / case `98` (`ISET-20260414-53A087`), generating `Case manager assessment v2` and `Case manager assessment redline v2` with Kelly Hyde's original 2026-04-20 submission signature.
+- Ops/Data: Submitted Felicia Erickson's PROD amended application assessment for application `10` / case `92` (`MI-MNTBETVR-00DF7C`) as a repair, generating `Case manager assessment v3` and `Case manager assessment redline v3` signed as case manager Amanda Curtis and moving the application back to Pending Decision.
+- Ops/Data: Deleted Felicia Erickson's erroneous duplicate PROD case-workspace intervention proposal `13` / intervention `12` with run id `felicia-delete-duplicate-intervention-proposal-prod-20260430` after the earlier withdrawn state still appeared as a resumable draft in Case Workspace; linked document `1384` was archived and the application assessment v3 remains the active Pending Decision item.

@@ -2,7 +2,7 @@
 
 Purpose: document the live homepage Work Queue widget and the queues that drive the shared `Work Queue Items` table.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-04-23
+Last Updated: 2026-04-30
 
 ## Scope
 
@@ -37,6 +37,8 @@ Last Updated: 2026-04-23
 - `New Applications`
   - contains non-terminal applications whose normalized lifecycle status is still `submitted` and that are not yet in active assessment
   - this now includes both unassigned files and assigned files whose EI status has already been verified but that have not yet moved into `in_review`
+  - the item/applicant name opens the application workspace, so the inline `Open workspace` action is hidden in this queue
+  - inline actions show `Assign` for unassigned rows and `Reassign` for rows that already have an owner; assigned rows can also show `Set Eligibility` when EI status is still pending
 - `Pending Assessment`
   - contains assigned non-terminal applications whose normalized lifecycle status is still `submitted` and whose EI status is still pending
   - this queue is currently visible to `Regional Manager` under the label `EI Check Needed`; for `NWAC Administrator`, those files are folded into `New Applications` instead of shown as a separate queue

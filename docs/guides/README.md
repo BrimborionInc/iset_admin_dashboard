@@ -13,6 +13,7 @@ This directory contains implementation and workflow guides used by agents during
 - For status model work, start with `status-lifecycle-implementation.md` and the planning docs linked from `docs/AGENTS.md`.
 - For DB access from Codex/WSL, use `test-db-access-from-codex.md`.
 - For Cognito staff recovery, use `test-staff-cognito-recovery.md`.
+- For retiring old staff Cognito custom region/user-id values, use `staff-cognito-legacy-attribute-cleanup.md`.
 
 ## Cleanup Rule
 

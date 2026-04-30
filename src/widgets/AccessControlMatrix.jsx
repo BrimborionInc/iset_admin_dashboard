@@ -108,6 +108,7 @@ const NAV_SECTIONS = [
     section: 'Support',
     items: [
       { href: '/documentation', label: 'Guidance' },
+      { href: '/support/bugs-change-requests', label: 'Bugs and Change Requests' },
       { href: '/tutorials-dashboard', label: 'Tutorials' },
       { href: '/help-support-dashboard', label: 'Help and Support' },
     ],
@@ -191,6 +192,7 @@ const ROUTE_LABELS = {
   '/reporting/regional-snapshot': 'Regional Snapshot',
   '/reporting/data-and-results': 'Data and Results',
   '/reporting-and-monitoring-dashboard': 'Reporting and Monitoring',
+  '/support/bugs-change-requests': 'Bugs and Change Requests',
   '/tutorials-dashboard': 'Tutorials',
   '/user-management-dashboard': 'User Management',
   '/visual-settings': 'Visual Settings'

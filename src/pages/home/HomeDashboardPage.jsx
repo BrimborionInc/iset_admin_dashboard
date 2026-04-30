@@ -181,8 +181,8 @@ const WIDGET_REGISTRY = {
     'system-admin-feedback-queue': {
         id: 'system-admin-feedback-queue',
         component: SystemAdminFeedbackQueueWidget,
-        title: 'Bug & Change Requests',
-        description: 'System Administrator triage queue for internal bug reports and change requests.',
+        title: 'Bugs and Change Requests',
+        description: 'Triage queue for internal bug reports and change requests.',
         defaultRowSpan: 8,
         defaultColumnSpan: 4
     },

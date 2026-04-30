@@ -101,8 +101,10 @@ import EsdcSubmissionDashboardHelp from '../helpPanelContents/esdcSubmissionDash
 import DataAndResultsDashboardHelp from '../helpPanelContents/dataAndResultsDashboardHelp.js';
 import DocumentationLibrary from '../pages/documentation/DocumentationLibrary.jsx';
 import HomeDashboardHelp from '../helpPanelContents/homeDashboardHelp.js';
+import BugsChangeRequestsDashboard from '../pages/support/BugsChangeRequestsDashboard.jsx';
 import TutorialsDashboardPage from '../pages/support/TutorialsDashboardPage.jsx';
 import TutorialsDashboardHelp from '../helpPanelContents/tutorialsDashboardHelp.js';
+import HomeSystemAdminFeedbackQueueHelp from '../helpPanelContents/homeSystemAdminFeedbackQueueHelp.js';
 
 function Guard({
   children,
@@ -1486,6 +1488,24 @@ const AppRoutes = ({
             null,
             TutorialsDashboardHelp.aiContext,
             'Reset tutorial progress so tours may prompt again when visiting supported pages.'
+          )}
+        </Guard>
+      </Route>
+
+      <Route path="/support/bugs-change-requests">
+        <Guard path="/support/bugs-change-requests">
+          {renderContent(
+            BugsChangeRequestsDashboard,
+            [
+              { text: 'Home', href: '/' },
+              { text: 'Support', href: '/help-support-dashboard' },
+              { text: 'Bugs and Change Requests', href: '/support/bugs-change-requests' }
+            ],
+            'Bugs and Change Requests',
+            <HomeSystemAdminFeedbackQueueHelp />,
+            null,
+            HomeSystemAdminFeedbackQueueHelp.aiContext,
+            'Review, triage, and update internal PATH bug reports and change requests.'
           )}
         </Guard>
       </Route>

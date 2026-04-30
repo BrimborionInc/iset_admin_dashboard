@@ -103,6 +103,16 @@ const getWorkspacePath = item => {
   return `/application-case/${caseId}`;
 };
 
+const hasAssignedOwner = item =>
+  Boolean(resolveAssignedStaffProfileId(item)) ||
+  Boolean(
+    typeof item?.owner === 'string' &&
+      item.owner.trim() &&
+      !['unassigned', '—', '-'].includes(item.owner.trim().toLowerCase())
+  );
+
+const getAssignmentActionLabel = item => (hasAssignedOwner(item) ? 'Reassign' : 'Assign');
+
 const resolveCaseId = item => {
   const raw = item?.case_id ?? item?.caseId ?? item?.caseID ?? null;
   const numeric = Number(raw);
@@ -1283,6 +1293,7 @@ const WorkQueueItemsTableWidget = ({
             width: widthOverride,
             cell: item => {
               const workspacePath = getWorkspacePath(item);
+              const showWorkspaceAction = item.bucketId !== 'new-applications';
               if (isMetricMode) {
                 return (
                   <Link
@@ -1299,16 +1310,18 @@ const WorkQueueItemsTableWidget = ({
               }
               return (
                 <SpaceBetween size="xs" direction="horizontal" alignItems="center">
-                  <Link
-                    href={workspacePath || '#'}
-                    onFollow={event => {
-                      if (!workspacePath) {
-                        event.preventDefault();
-                      }
-                    }}
-                  >
-                    Open workspace
-                  </Link>
+                  {showWorkspaceAction ? (
+                    <Link
+                      href={workspacePath || '#'}
+                      onFollow={event => {
+                        if (!workspacePath) {
+                          event.preventDefault();
+                        }
+                      }}
+                    >
+                      Open workspace
+                    </Link>
+                  ) : null}
                   {(() => {
                     const isEscalationBucket = item.bucketId === 'exceptions-escalations';
                     const canEscalationActions = role === 'NWAC Administrator' || role === 'Regional Manager';
@@ -1348,9 +1361,7 @@ const WorkQueueItemsTableWidget = ({
                       );
                     }
                     if (item.bucketId === 'unresolved-conflicts') {
-                      const ownerText = (item.owner || '').toString().trim().toLowerCase();
-                      const hasOwner = Boolean(ownerText) && ownerText !== 'unassigned' && ownerText !== '—' && ownerText !== '-';
-                      const assignLabel = hasOwner ? 'Reassign' : 'Assign';
+                      const assignLabel = getAssignmentActionLabel(item);
                       return (
                         <SpaceBetween size="xxs" direction="horizontal">
                           <Link
@@ -1366,15 +1377,61 @@ const WorkQueueItemsTableWidget = ({
                         </SpaceBetween>
                       );
                     }
-                    const hasAssignedOwner =
-                      Boolean(resolveAssignedStaffProfileId(item)) ||
-                      (typeof item.owner === 'string' &&
-                        item.owner.trim() &&
-                        item.owner.trim().toLowerCase() !== 'unassigned');
+                    const assignedOwner = hasAssignedOwner(item);
+                    if (item.bucketId === 'new-applications') {
+                      if (isAssessor) {
+                        return null;
+                      }
+                      const canSetEligibility =
+                        assignedOwner &&
+                        isEligibilityPending(item.assessment_esdc_eligibility) &&
+                        canManageEiEligibility;
+                      return (
+                        <SpaceBetween size="xxs" direction="horizontal">
+                          <Link
+                            href="#"
+                            onFollow={event => {
+                              event.preventDefault();
+                              setAssignTarget(item);
+                              setAssignModalVisible(true);
+                            }}
+                          >
+                            {getAssignmentActionLabel(item)}
+                          </Link>
+                          {canSetEligibility ? (
+                            <Link
+                              href="#"
+                              onFollow={event => {
+                                event.preventDefault();
+                                setEligibilityTarget(item);
+                                setSelectedEligibility(
+                                  item.assessment_esdc_eligibility
+                                    ? { value: item.assessment_esdc_eligibility, label: item.assessment_esdc_eligibility }
+                                    : null
+                                );
+                                const applicantIdFromItem =
+                                  item.applicant_user_id ||
+                                  item.applicantUserId ||
+                                  item.user_id ||
+                                  item.userId ||
+                                  null;
+                                setEligibilityApplicantId(applicantIdFromItem);
+                                setEligibilityFile(null);
+                                setEligibilityFileError(null);
+                                setEligibilityError(null);
+                                setEligibilityModalVisible(true);
+                              }}
+                            >
+                              Set Eligibility
+                            </Link>
+                          ) : null}
+                        </SpaceBetween>
+                      );
+                    }
                     const canSetEligibilityFromPipeline =
                       (
                         ['pending-assessment', 'in-assessment'].includes(item.bucketId) ||
-                        (item.bucketId === 'new-applications' && hasAssignedOwner)
+                        (item.bucketId === 'new-applications' && assignedOwner)
                       ) &&
                       isEligibilityPending(item.assessment_esdc_eligibility);
                     if (canSetEligibilityFromPipeline) {
@@ -1883,7 +1940,7 @@ const WorkQueueItemsTableWidget = ({
           setSelectedAssignee(null);
           setAssignError(null);
         }}
-        header={`Assign ${assignTarget?.trackingId || assignTarget?.title || 'item'}`}
+        header={`${getAssignmentActionLabel(assignTarget)} ${assignTarget?.trackingId || assignTarget?.title || 'item'}`}
         closeAriaLabel="Close assign modal"
         footer={
           <SpaceBetween size="xs" direction="horizontal">
@@ -1903,7 +1960,7 @@ const WorkQueueItemsTableWidget = ({
               disabled={!selectedAssignee?.value}
               onClick={handleAssignSubmit}
             >
-              Assign
+              {getAssignmentActionLabel(assignTarget)}
             </Button>
           </SpaceBetween>
         }

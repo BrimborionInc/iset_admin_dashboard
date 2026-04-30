@@ -995,6 +995,13 @@ async function handleSmoke(args, envConfig) {
     return;
   }
   results.forEach(result => {
+    if (result.targetGroupName) {
+      const targetSummary = (result.targets || [])
+        .map(target => `${target.id}:${target.port}=${target.state}`)
+        .join(', ');
+      console.log(`${result.service} target-group ${result.targetGroupName}: ${targetSummary || 'healthy'}`);
+      return;
+    }
     console.log(`${result.statusCode} ${result.url}`);
   });
 }

@@ -3,9 +3,9 @@ import { Box, SpaceBetween } from '@cloudscape-design/components';
 
 const HomeSystemAdminFeedbackQueueHelp = () => (
   <SpaceBetween size="s">
-    <Box variant="h3">Bug & Change Requests</Box>
+    <Box variant="h3">Bugs and Change Requests</Box>
     <Box>
-      This System Administrator widget is the homepage triage queue for internal PATH bug reports and change requests.
+      This dashboard is the triage queue for internal PATH bug reports and change requests.
     </Box>
     <Box>
       Use the summary counts, filters, and search box to focus on newly submitted, in-progress, or high-priority items.
@@ -22,7 +22,7 @@ const HomeSystemAdminFeedbackQueueHelp = () => (
 );
 
 HomeSystemAdminFeedbackQueueHelp.aiContext = `
-You are assisting with the System Administrator Bug & Change Requests widget on the PATH homepage.
+You are assisting with the Bugs and Change Requests dashboard in PATH.
 Explain that it is the internal triage queue for bug reports and change requests, with filters for open/high-priority items and a floating review panel for status changes, attachments, page context, and internal notes.
 `;
 

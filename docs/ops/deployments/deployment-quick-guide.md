@@ -24,6 +24,7 @@ Do not run the app deploy commands from a WSL-only checkout such as `/root/ISET/
 - TEST deploys require `--yes` only when you include `--refresh-test-db`.
 - Deploys do not auto-bump `package.json` semver; instead, each frontend build now carries a visible release/build stamp.
 - App deploys package the current working tree. If you mean “deploy only the staged subset,” stage the intended files and stash the rest before running `path:deploy`.
+- TEST app rollouts should rehearse PROD user-facing maintenance behavior. Any TEST deploy that can restart app processes, make a surface unavailable, or produce transient `502 Bad Gateway` responses needs a scoped warning first or the affected surface behind the ALB maintenance page. TEST remains less strict than PROD because ordinary app deploys do not require `--yes`, but raw 502s are not an acceptable planned TEST experience. TEST maintenance copy must use the user-facing name `Test and Training environment` and explicitly state that Production is not affected.
 - PROD app rollouts are user-impacting unless the plan proves otherwise. Any PROD deploy that refreshes ASG instances, restarts app processes, rotates target groups, or can produce transient `502 Bad Gateway` responses needs a scoped warning first, even if it is admin-only, portal-only, or code-only.
 - Current dependency-reinstall safeguard: in-place TEST deploy scripts now clear the deployed `node_modules` tree before running remote `npm ci/install`, and the PROD bootstrap path already does the same during instance boot. Keep that rule in any future deploy helper to avoid stale-filesystem `ENOTEMPTY` failures during runtime dependency replacement.
 
@@ -44,6 +45,16 @@ For an admin-only TEST rollout with no schema/data/portal work:
 ```powershell
 npm run path:deploy -- --env test --skip-schema --skip-data --skip-portal --release-id <release-id>
 ```
+
+Before running that shortcut, set an admin-scoped TEST warning or use the ALB maintenance page if the rollout may restart the admin app or briefly expose a gateway error:
+
+```powershell
+npm run path:maintenance -- set --env test --surfaces admin --start-in 5m --expected-duration 5m --title "Test and Training maintenance" --message "The Test and Training environment is temporarily unavailable for maintenance. Production is not affected."
+```
+
+Use TEST-specific copy, for example: `The Test and Training environment is temporarily unavailable for maintenance. Production is not affected.`
+
+Wait through the warning window when practical, then deploy. Clear the warning only after smoke passes.
 
 Use that admin-only shortcut only when the change is truly confined to the admin repo. Do not use `--skip-portal` when the admin backend depends on sibling code under `..\ISET-intake` or `..\shared` for the changed runtime path. Current concrete example: assignment/reassignment notification email delivery uses `../shared/events/notificationDispatcher.js` plus `../ISET-intake/notifications/templateRenderer.js`, so that fix must ship as an `admin + portal` TEST rollout, not as admin-only.
 
@@ -209,6 +220,7 @@ Notes:
 - Admin and portal clients poll every 15 seconds and render the countdown locally, so this is an operator warning tool, not a precise sub-minute push channel.
 - Set `expected-duration` to the likely user-visible interruption window, not the full end-to-end deploy runtime. Rolling app deploys often take several minutes in the operator console while causing little or no visible disruption.
 - If the service must be fully unavailable during cutover, the warning can be combined with the separate ALB `503` maintenance fallback.
+- A generic `502 Bad Gateway` during TEST deploy is not an acceptable planned rehearsal behavior. If the release can expose that state, either warn users first or put the affected TEST surface behind the ALB maintenance page.
 - A generic `502 Bad Gateway` during PROD deploy is not acceptable planned behavior. If the release can expose that state, either warn users first or put the affected surface behind the ALB maintenance page.
 
 ## App-Coupling Rule

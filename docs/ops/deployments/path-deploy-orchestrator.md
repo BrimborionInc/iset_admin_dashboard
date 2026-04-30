@@ -66,7 +66,7 @@ npm run path:deploy:smoke -- --env prod
 The deploy control plane now has a companion operator command for scoped admin and/or portal maintenance warnings:
 
 ```powershell
-npm run path:maintenance -- set --env test --surfaces admin --start-in 5m --expected-duration 20m
+npm run path:maintenance -- set --env test --surfaces admin --start-in 5m --expected-duration 20m --title "Test and Training maintenance" --message "The Test and Training environment is temporarily unavailable for maintenance. Production is not affected."
 npm run path:maintenance -- set --env test --surfaces portal --start-in 5m --expected-duration 20m
 npm run path:maintenance -- set --env test --surfaces all --start-in 5m --expected-duration 20m
 npm run path:maintenance -- set --env prod --surfaces admin --start-in 5m --expected-duration 20m --yes
@@ -88,6 +88,7 @@ Current behavior:
 - Portal polls the same endpoint and renders one global GOV.UK notification banner below the shared header.
 - Polling runs every 15 seconds with a local 1-second countdown after load, so operators should use a 2 to 5 minute warning window instead of relying on precise sub-minute delivery.
 - This command does not currently automate the ALB fixed-response `503` hard-maintenance fallback.
+- TEST app rollouts should rehearse PROD user-facing maintenance behavior. Any rollout that restarts app processes, changes target routing, makes a surface unavailable, or can surface transient `502 Bad Gateway` responses needs a scoped warning first or the affected TEST surface behind the ALB fixed-response maintenance page. TEST does not require PROD's `--yes` approval gate for ordinary app deploys, but it should not intentionally show raw 502s while down. TEST maintenance warnings must use the user-facing name `Test and Training environment` and state that Production is not affected.
 - PROD app rollouts are user-impacting unless the plan proves otherwise. Any rollout that refreshes ASG instances, restarts app processes, rotates target groups, changes ALB routing, or can surface transient `502 Bad Gateway` responses needs a scoped warning first, even when the change is admin-only, portal-only, or code-only.
 
 For the hard maintenance page itself, use the separate ALB helper:
@@ -118,9 +119,9 @@ Recommended planned-maintenance sequence:
 
 Guidance:
 - Size `--expected-duration` to the likely user-facing interruption window, not the total operator runtime of the release.
-- For normal rolling releases, prefer no banner or a short `brief interruptions possible` warning and keep the ALB `503` fallback as contingency only.
+- For normal rolling releases that are proven not to interrupt service, no banner is acceptable. If a TEST or PROD rollout may produce raw 502s or make a surface unavailable, use a short `brief interruptions possible` warning or the ALB `503` fallback before starting.
 - For admin-only or portal-only hotfixes, prefer a scoped announcement instead of a global banner so unaffected users are not warned unnecessarily.
-- Do not assume "hotfix", "code-only", or "admin-only" means "no user impact" in PROD. The deciding factor is the rollout primitive. ASG refresh, app restart, target-group change, or known transient gateway risk requires a warning or an explicit operator decision to proceed without one.
+- Do not assume "hotfix", "code-only", or "admin-only" means "no user impact". The deciding factor is the rollout primitive. ASG refresh, app restart, target-group change, or known transient gateway risk requires warning/fallback handling; in PROD this also requires the explicit prod approval gates.
 
 ## Feature-Flagged Portal Rollouts
 

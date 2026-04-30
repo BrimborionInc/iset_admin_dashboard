@@ -1,13 +1,13 @@
 # CR-0016: Multi-Region Regional Managers (Dev)
 
-Status: In Progress
+Status: Historical implementation note; core multi-region behavior has shipped
 Owner: Codex + Wilson
-Last updated: 2026-01-27
+Last updated: 2026-04-30
 
 ## Goal
 Enable Regional Managers to be assigned to multiple provinces/territories and have that scope applied everywhere region-based access is enforced (lists, dashboards, assignments, escalations, action plans, interventions, etc.). ISET Coordinators remain single-province.
 
-## Current behavior (baseline)
+## Historical baseline
 - A single `custom:region_id` flows from Cognito -> `req.auth.regionId` -> `staff_profiles.region_id`.
 - Regional Manager (Regional Coordinator role in backend) scoping uses a single `region_id` in multiple places:
   - RBAC helpers (`src/lib/rbac.js`, `src/lib/dbScope.js`).
@@ -15,6 +15,8 @@ Enable Regional Managers to be assigned to multiple provinces/territories and ha
   - Case/app listing endpoints and dashboard widgets.
   - Escalations and other queue endpoints.
 - Regions are province/territory rows in `canada_region`.
+
+Current implementation note: staff region access is DB-backed. Cognito `custom:region_id` is historical metadata only and must not be used as an auth or profile backfill fallback.
 
 ## Requirements
 - Regional Managers can have **multiple** provinces/territories.
@@ -75,3 +77,4 @@ Enable Regional Managers to be assigned to multiple provinces/territories and ha
 
 ## Progress
 - 2026-01-27: Added `staff_region` migration + backfill, updated backend scoping for regional roles, and extended admin user management to support multi-region assignments.
+- 2026-04-30: Removed the remaining auth middleware fallback that could hydrate staff region scope from Cognito `region_id` / `custom:region_id` claims.

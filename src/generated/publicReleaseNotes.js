@@ -1,9 +1,9 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-04-29T03:19:32.643Z",
-  "releaseId": "admin-supporting-docs-copy-hotfix-20260429-2",
-  "releaseLabel": "Release admin-supporting-docs-copy-hotfix-20260429-2",
-  "releaseDateEn": "29th April 2026",
-  "releaseDateFr": "29 avril 2026",
+  "generatedAt": "2026-04-30T14:40:42.886Z",
+  "releaseId": "20260430-auth-region-db-test",
+  "releaseLabel": "Release 20260430-auth-region-db-test",
+  "releaseDateEn": "30th April 2026",
+  "releaseDateFr": "30 avril 2026",
   "en": {
     "sectionEyebrow": "Optional reading",
     "description": "",

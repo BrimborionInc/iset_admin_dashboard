@@ -13,9 +13,8 @@ const HomeWorkQueueItemsHelp = () => (
       columns and row actions change depending on the queue or metric currently being viewed.
     </Box>
     <Box>
-      Every row includes <strong>Open workspace</strong>. In coordinator workflows, the most common next
-      step is to open the file and then handle notes, documents, applicant messaging, or assessment
-      inside the workspace itself.
+      Click the applicant or item name to open the workspace. Queue-specific row actions appear only
+      when there is a direct action to take from the table.
     </Box>
     <Box>
       In the <strong>Pending Decision</strong> queue, use <strong>Open workspace</strong> to complete the
@@ -38,9 +37,10 @@ Explain that the table is usually driven by the selected queue but can also show
 
 Keep answers operational:
 - Help the user identify which row to open next.
-- Mention search, sort, column resizing, Open workspace, and tagging.
+- Mention search, sort, column resizing, item-name workspace links, and tagging.
 - In coordinator-focused answers, emphasize that this table is a launching point into the detailed application or case workspace where notes, messaging, documents, and assessment are actually handled.
 - Clarify that the Pending Decision queue uses Open workspace only and that approval decisions happen inside the workspace.
+- Clarify that New Applications rows use Assign/Reassign inline actions, while the applicant name opens the workspace.
 - Mention queue-specific inline actions only when they are visible for the current queue.
 - Mention Back to work queue when the table is showing metric results.
 `;

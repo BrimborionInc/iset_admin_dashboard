@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next "What's New" update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-04-28
+Last Updated: 2026-04-30
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -19,6 +19,9 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+2026-04-30 | Release TBD | Fix/Auth | Manage Users and staff sign-in | Fixed legacy sign-in fallbacks that could copy old Cognito custom identity or region values into staff access context. | Staff regional access now stays tied to PATH's database-backed staff profile and staff-region assignments; a separate dry-run cleanup helper can audit remaining legacy Cognito values.
+2026-04-30 | Release TBD | UX/Homepage | Work Queue > New Applications | Made a change so New Applications rows show Assign or Reassign directly in the table, while the applicant name remains the workspace link. | The redundant Open workspace row action is hidden for this queue to leave room for assignment actions.
+2026-04-30 | Release TBD | UX/Support | Bugs and Change Requests | Added a dedicated Support dashboard for reviewing and updating PATH bug reports and change requests. | System Administrators, NWAC Administrators, and Regional Managers can use the same queue and review panel that was previously only on the System Administrator homepage.
 2026-04-28 | Release TBD | Fix/Approvals | Case Workspace > Review intervention proposal | Fixed a bug where intervention approvals opened from Pending Decision could get stuck on Record of decision. | Queue launches still open on the decision step, but the requested step is now consumed once so approvers can click earlier wizard steps for review.
 2026-04-28 | Release TBD | Fix/Homepage | Work Queue > Pending Completion | Fixed a bug where denied applications could remain stuck in Pending Completion after the denial letter was already sent. | Denied files now leave the queue once the denial letter is recorded as sent, without changing the recorded denied outcome.
 2026-04-21 | Release v0.5.9 | UX/Approvals | Homepage Approvals queue + Application/Case Workspace | Fixed a bug where opening an approval item could still bounce approvers back to step 1 or another stale wizard step instead of the decision step. | Explicit approval-entry step intent now overrides local wizard-step restore state in both the application and intervention approval widgets.
@@ -241,13 +244,14 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Assessment submission now fails clearly if required generated PDFs cannot be created before a file moves to Pending Decision, reducing the chance of a decision file missing its assessment, application, or financial overview PDFs.
 - Approval and pending-completion flows are more stable: approval items open the intended review step, staff can look back through the wizard, and denied files leave Pending Completion once the denial letter is sent.
 - Historical intake uploads are easier to recover in the application workspace and checklist, including older files where uploads were saved before PATH linked them to the final application record.
+- New Applications rows now show Assign or Reassign directly in the queue, and the applicant name still opens the workspace.
+- Bugs and change requests now have a dedicated Support dashboard so administrators and managers can review the queue and update report status.
 - The application-workspace Secure Messaging widget no longer flashes or reloads messages repeatedly while a global maintenance warning countdown is visible.
 - Maintenance warnings now use shorter, more direct wording and can be shown before planned downtime without adding extra save-progress language.
 
 ### Known Bugs (draft bullets - EN)
 
 - Some staff may still see Supporting Documents load errors or confusing empty results when document filters are active.
-- Some New Applications may not show the expected assignment or reassignment action, especially where EI verification is overdue.
 - Secure-message notification coverage for messages in client files is still under review.
 - The admin upload-client/intake entry point needs review because staff may not always see the expected upload tab.
 - Some updated case-manager assessment records still need review where staff expect a refreshed assessment PDF to appear in Supporting Documents.
@@ -256,7 +260,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 - Clearer workflow options for applications that are withdrawn or paused while waiting for external funding or other information.
 - A review of Supporting Documents filters so staff can tell the difference between no matching documents and a real load failure.
-- Follow-up on New Application assignment and reassignment behaviour after EI verification becomes overdue.
 - Follow-up on message notification behaviour for application and case secure messages.
 
 ### Nouveautes (brouillon - FR)
@@ -267,13 +270,14 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - La soumission d'une evaluation echoue maintenant clairement si les PDF requis ne peuvent pas etre crees avant qu'un dossier passe a la file de decision, ce qui reduit les dossiers de decision incomplets.
 - Les flux d'approbation et de suivi sont plus stables: les elements d'approbation ouvrent l'etape de revision attendue, le personnel peut revenir aux etapes precedentes, et les refus quittent la file de suivi apres l'envoi de la lettre.
 - Les anciens televersements d'admission sont plus faciles a retrouver dans l'espace de travail de la demande et la liste de controle, y compris lorsque les fichiers avaient ete enregistres avant le lien final avec la demande.
+- Les nouvelles demandes affichent maintenant Affecter ou Reaffecter directement dans la file, et le nom de la personne ouvre toujours l'espace de travail.
+- Les bogues et demandes de changement ont maintenant un tableau de bord dedie dans Support afin que les administrateurs et gestionnaires puissent examiner la file et mettre a jour le statut.
 - Le widget Messagerie securisee de l'espace de travail de la demande ne clignote plus et ne recharge plus les messages en boucle lorsqu'un avis de maintenance avec compte a rebours est visible.
 - Les avis de maintenance utilisent maintenant un texte plus court et plus direct, sans ajouter de consigne supplementaire de sauvegarde du travail.
 
 ### Problemes connus (brouillon - FR)
 
 - Certains membres du personnel peuvent encore voir des erreurs de chargement ou des resultats vides confus dans Documents justificatifs lorsque des filtres sont actifs.
-- Certaines nouvelles demandes peuvent ne pas afficher l'action d'affectation ou de reaffectation attendue, surtout lorsque la verification AE est en retard.
 - La couverture des notifications de messagerie securisee pour les messages dans les dossiers clients est encore en cours d'examen.
 - Le point d'entree d'admission ou de televersement d'un client dans l'administration doit etre revu, car le personnel peut ne pas toujours voir l'onglet attendu.
 - Certains dossiers d'evaluation par le gestionnaire de cas doivent encore etre verifies lorsque le personnel s'attend a voir un nouveau PDF d'evaluation dans Documents justificatifs.
@@ -282,5 +286,4 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 - Des options de flux de travail plus claires pour les demandes retirees ou mises en pause pendant l'attente d'un financement externe ou d'autres renseignements.
 - Une revision des filtres de Documents justificatifs afin que le personnel distingue mieux une absence de documents correspondants d'une vraie erreur de chargement.
-- Un suivi du comportement d'affectation et de reaffectation des nouvelles demandes lorsque la verification AE est en retard.
 - Un suivi du comportement des notifications pour les messages securises lies aux demandes et aux dossiers.

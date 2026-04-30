@@ -4,7 +4,7 @@ This document summarizes the current behavior of `staff_profiles` and the relate
 
 ## When `staff_profiles` rows are created
 - When an admin creates a staff user via the Manage Users dashboard, the backend seeds `staff_profiles` with `name` / `display_name` keyed by Cognito `sub` so identity fields exist before first sign-in.
-- Every authenticated staff request passes through `staffProfileMiddleware`. That middleware upserts the staff row from the real Cognito token context, keeps `cognito_sub`, email, and primary role aligned with the signed-in user, preserves existing DB-backed region assignments when tokens lack legacy region claims, and resolves effective `userId`, `region_id`, and `regionIds` from `staff_profiles` / `staff_region`.
+- Every authenticated staff request passes through `staffProfileMiddleware`. That middleware upserts the staff row from the real Cognito token context, keeps `cognito_sub`, email, and primary role aligned with the signed-in user, and resolves effective `userId`, `region_id`, and `regionIds` from `staff_profiles` / `staff_region`. Legacy Cognito `custom:region_id` and `custom:user_id` values are not staff authorization or identity sources.
 - There is no longer an IAM-off or dev-bypass path for admin users. Placeholder identities should not be created or relied on.
 
 ## Why duplicate rows appeared previously
@@ -20,7 +20,7 @@ This document summarizes the current behavior of `staff_profiles` and the relate
 - **Regional Coordinator**: sees cases assigned to their region or directly assigned to their staff profile (`sp.region_id = regionId OR assigned_staff_profile_id = staffProfileId`).
 - **Application Assessor**: sees only cases assigned to their `staff_profiles.id`.
 
-Because the API depends on accurate `staff_profiles.region_id` and `staff_region` mappings, ensure each coordinator signs in through Cognito at least once after account creation so the local operational row is present.
+Because the API depends on accurate `staff_profiles.region_id` and `staff_region` mappings, ensure each coordinator has a local operational row and assign region access through Manage Users or reviewed DB repair. Do not rely on Cognito custom region attributes to seed access.
 
 ## Assignment API naming
 - New backend code should read/write `assigned_staff_profile_id` / `assignedStaffProfileId` for case ownership.
@@ -30,4 +30,4 @@ Because the API depends on accurate `staff_profiles.region_id` and `staff_region
 ## Tips for testing
 - After adding a new Cognito user, confirm the `staff_profiles` row exists and sign in once to verify the auth context + assignment flows.
 - Run `SELECT id, client_id, assigned_staff_profile_id FROM iset_case;` to verify assignments line up with the expected staff profile IDs.
-- Use `fetch('/api/auth/me', { credentials: 'include' })` in the browser console to inspect the current auth context (role, region, sub) without opening the network tab.
+- Use `fetch('/api/auth/me', { credentials: 'include' })` in the browser console to inspect the current auth context (role, DB-backed region, sub) without opening the network tab.

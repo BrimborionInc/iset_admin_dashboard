@@ -142,6 +142,11 @@
       "Regional Manager",
       "ISET Coordinator"
     ],
+    "/support/bugs-change-requests": [
+      "System Administrator",
+      "NWAC Administrator",
+      "Regional Manager"
+    ],
     "/language-settings-dashboard": [
       "System Administrator"
     ],
