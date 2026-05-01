@@ -164,7 +164,7 @@ const normaliseTemplateSelection = (option) => {
 
 const normaliseEmailInput = (value) => {
   if (value === null || value === undefined) return '';
-  return String(value).trim().toLowerCase();
+  return String(value).trim();
 };
 
 const normaliseTextInput = (value) => {

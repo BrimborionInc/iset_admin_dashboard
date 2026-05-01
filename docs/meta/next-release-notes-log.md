@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next "What's New" update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-04-30
+Last Updated: 2026-05-01
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -18,6 +18,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 ## Entry format
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
+
+- 2026-05-01 | Release TBD | Notifications | Manage Notifications | Staff email notification settings now apply to non-assignment events, with NWAC review split by approval, denial, and changes-requested outcomes. | Enabled staff rows with `email_alert=1` and a template send through SES once per deduped recipient; assignment emails keep their existing behavior, and TEST remains blocked from real sends.
 
 2026-04-30 | Release TBD | Fix/Auth | Manage Users and staff sign-in | Fixed legacy sign-in fallbacks that could copy old Cognito custom identity or region values into staff access context. | Staff regional access now stays tied to PATH's database-backed staff profile and staff-region assignments; a separate dry-run cleanup helper can audit remaining legacy Cognito values.
 2026-04-30 | Release TBD | UX/Homepage | Work Queue > New Applications | Made a change so New Applications rows show Assign or Reassign directly in the table, while the applicant name remains the workspace link. | The redundant Open workspace row action is hidden for this queue to leave room for assignment actions.
@@ -209,6 +211,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - 2026-03-10 | Release v0.5.4 | UX | Application Workspace + Case Workspace > Proposed Intervention Cost Items | Cost-item add/edit modal now includes early payee capture fields (`payee type`, `payee name`, optional `reference`) without adding a new table column. | Payee remains optional at costing-step progression time.
 - 2026-03-10 | Release v0.5.4 | Workflow/Validation | Batch Payments > Payment Packet Detail | Packet validation now blocks submission when payee details are missing and surfaces both top-level block messaging and line-level `Payee missing` indicators. | New validation code path emits line-addressable `payee_missing` policy errors.
 - 2026-04-21 | Release TBD | UX | Batch Payments dashboard | Reworked Batch Payments into a cleaner oversight view: single-packet selection now drives detail, finance-side edit/send actions were removed, communications clearly scope to the selected packet or all packets, and SLA snapshot now starts in the palette instead of the default layout. | Aligns the finance dashboard with its oversight purpose and removes the misleading multi-select/detail coupling.
+- 2026-05-01 | Release TBD | UX/Notifications | Template Editor dashboard | Expanded the notification template editor with a grouped field catalog, subject field insertion, scenario-based preview, and warnings for unknown or scenario-mismatched placeholders. | Makes it easier to author staff and applicant email templates for assignment, NWAC review, secure message, decision, and generic staff notification events.
 - 2026-04-23 | Release TBD | Security/Messaging | Applicant Secure Messages | Fixed portal applicant message routing so assigned case managers resolve through staff user accounts instead of overlapping staff profile IDs. | Prevents applicant-origin messages from landing in unrelated applicant inboxes when `user.id` values overlap `staff_profiles.id`; companion PROD repair script corrects existing wrong-recipient mailbox rows before portal reopening.
 - 2026-04-25 | Release TBD | Security/Public Portal | Applicant account routing | Hardened applicant portal identity checks and fixed TEST portal packaging so the deployed auth helper matches the new applicant-account gate. | Prevents legacy identity fallbacks from linking applicants, staff recipients, or clients through obsolete shared-user assumptions; TEST deploy now installs the runtime `auth/` helper instead of leaving a stale copy behind.
 - 2026-04-23 | Release TBD | UX/Homepage | Work Queue | Reworked the NWAC Administrator and Regional Manager homepage Work Queue into a clearer application pipeline with `New Applications`, `In Assessment`, `Pending Decision`, and `Pending Completion`. | `Pending Decision` continues to combine submitted application assessments with new and revised intervention proposals, while `Pending Completion` covers decided application files that still need post-decision follow-through before completion.
@@ -240,6 +243,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 - Made a change so New Applications rows show Assign or Reassign directly in the queue.
 - Made a change so Bugs and Change Requests now has a dedicated dashboard under Support.
+- Made a change so staff email notification settings can send configured emails for non-assignment events, with NWAC review split by approval, denial, and changes-requested outcomes.
+- Made the Template Editor more powerful with grouped fields, scenario previews, and warnings for unsupported placeholders.
 - Fixed missing generated assessment documents on a small number of pending-decision records so the expected case manager assessment and redline PDFs are now available.
 - Fixed a bug where Regional Managers could see a Supporting Documents load error when Application Workspace was set to All documents.
 
@@ -251,6 +256,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 - Les nouvelles demandes affichent maintenant Affecter ou Reaffecter directement dans la file.
 - Les bogues et demandes de changement ont maintenant un tableau de bord dedie dans Support.
+- Les parametres de courriel du personnel peuvent maintenant envoyer des courriels configures pour les evenements qui ne sont pas des affectations, avec la revue NWAC separee par approbation, refus et demandes de changements.
+- L'editeur de modeles est plus complet, avec des champs groupes, des apercus par scenario et des avertissements pour les variables non prises en charge.
 - Les documents d'evaluation generes qui manquaient pour un petit nombre de dossiers en attente de decision ont ete ajoutes, y compris les PDF d'evaluation du gestionnaire de cas et de redline attendus.
 - Correction d'un probleme ou les gestionnaires regionaux pouvaient voir une erreur de chargement des documents justificatifs lorsque l'espace de travail de la demande etait regle sur Tous les documents.
 

@@ -34,6 +34,7 @@ Current SES safety guard:
 - Before the PROD-data migration rehearsal, TEST SES was checked in `ca-central-1` and was still sandboxed (`ProductionAccessEnabled=false`), but the TEST account has several verified recipient identities.
 - The deployed TEST app env includes an explicit AWS access key for IAM user `SES_backend`, so SES safety cannot be inferred from the EC2 instance role alone.
 - Inline IAM policy `DenySesSendDuringProdDataRehearsal` is now attached to both IAM user `SES_backend` and role `nwac-test-app-role`, denying `ses:Send*` on `*`. IAM simulation confirmed `explicitDeny` for `ses:SendEmail`, `ses:SendRawEmail`, templated send, and bulk send actions.
+- DEV local `.env` now uses separate IAM user `SES_backend_dev` with SES `SendEmail` / `SendRawEmail` and scoped DEV Cognito permissions. Do not remove the TEST deny from `SES_backend` when DEV email delivery needs to work; rotate or update the DEV-specific credential instead.
 - Leave this deny in place while TEST may contain copied PROD data. Remove it only deliberately when email delivery testing is required, then restore it before any further PROD-data rehearsal.
 
 For a non-destructive preflight first:

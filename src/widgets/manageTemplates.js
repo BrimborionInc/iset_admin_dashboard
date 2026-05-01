@@ -5,8 +5,6 @@ import {
   Box,
   Button,
   ButtonDropdown,
-  ColumnLayout,
-  Container,
   ExpandableSection,
   FormField,
   Grid,
@@ -25,24 +23,366 @@ import { TextB, TextItalic, TextUnderline, LinkSimple, ListBullets, ListNumbers 
 import { apiFetch } from '../auth/apiClient';
 import ManageTemplatesWidgetHelp from '../helpPanelContents/manageTemplatesWidgetHelp';
 
-const tokenOptions = [
-  { label: 'Applicant Name', value: '{applicant_name}' },
-  { label: 'Application ID', value: '{application_id}' },
-  { label: 'Tracking ID', value: '{tracking_id}' },
-  { label: 'Submission Date', value: '{submission_date}' },
-  { label: 'Assessor Name', value: '{assessor_name}' },
+const TOKEN_GROUPS = [
   {
-    label: 'Portal Sign-in Link',
-    value: '[link url="{portal_dashboard_url}"]Sign in to your account[/link]'
+    id: 'case',
+    label: 'Case and applicant',
+    description: 'Use these for applicant-facing templates and staff alerts that identify the file.',
+    tokens: [
+      {
+        id: 'applicant_name',
+        label: 'Applicant name',
+        value: '{applicant_name}',
+        description: 'Primary applicant display name.'
+      },
+      {
+        id: 'application_id',
+        label: 'Application ID',
+        value: '{application_id}',
+        description: 'Internal application identifier when available.'
+      },
+      {
+        id: 'tracking_id',
+        label: 'Tracking ID',
+        value: '{tracking_id}',
+        description: 'Applicant-facing PATH tracking code.'
+      },
+      {
+        id: 'submission_date',
+        label: 'Submission date',
+        value: '{submission_date}',
+        description: 'Date the application or workflow item was submitted.'
+      }
+    ]
   },
-  { label: 'Portal Dashboard URL (raw)', value: '{portal_dashboard_url}' },
-  { label: 'Support Email', value: '{support_email}' },
-  { label: 'Message Subject', value: '{message_subject}' },
-  { label: 'Decision Outcome', value: '{decision_outcome}' },
-  { label: 'Decision Outcome (Label)', value: '{decision_outcome_label}' },
-  { label: 'Message To Name', value: '{message_to_name}' },
-  { label: 'Message From Name', value: '{message_from_name}' }
+  {
+    id: 'staff',
+    label: 'Staff and event',
+    description: 'Useful for internal staff emails, secure-message notifications, and workflow handoffs.',
+    tokens: [
+      {
+        id: 'assessor_name',
+        label: 'Assessor name',
+        value: '{assessor_name}',
+        description: 'Assigned assessor or staff owner when supplied by the event.'
+      },
+      {
+        id: 'actor_name',
+        label: 'Actor name',
+        value: '{actor_name}',
+        description: 'Staff member or system actor that caused the event.'
+      },
+      {
+        id: 'event_message',
+        label: 'Event message',
+        value: '{event_message}',
+        description: 'Short dispatcher-provided summary of what happened.'
+      },
+      {
+        id: 'message_subject',
+        label: 'Message subject',
+        value: '{message_subject}',
+        description: 'Secure message subject when the event is message-related.'
+      },
+      {
+        id: 'message_to_name',
+        label: 'Message to name',
+        value: '{message_to_name}',
+        description: 'Recipient display name for message events.'
+      },
+      {
+        id: 'message_from_name',
+        label: 'Message from name',
+        value: '{message_from_name}',
+        description: 'Sender display name for message events.'
+      }
+    ]
+  },
+  {
+    id: 'nwac',
+    label: 'NWAC review',
+    description: 'Fields sent by NWAC review approval, denial, and changes-requested events.',
+    tokens: [
+      {
+        id: 'review_outcome',
+        label: 'Review outcome code',
+        value: '{review_outcome}',
+        description: 'Raw outcome value such as approve, reject, or request_changes.'
+      },
+      {
+        id: 'review_outcome_label',
+        label: 'Review outcome label',
+        value: '{review_outcome_label}',
+        description: 'Readable outcome label such as Approved or Changes requested.'
+      },
+      {
+        id: 'review_reason',
+        label: 'Review reason',
+        value: '{review_reason}',
+        description: 'Reviewer-entered rationale or requested change notes.'
+      },
+      {
+        id: 'approval_cost_total',
+        label: 'Approval cost total',
+        value: '{approval_cost_total}',
+        description: 'Approved or reviewed cost total supplied with the review event.'
+      },
+      {
+        id: 'budget_pot_code',
+        label: 'Budget pot code',
+        value: '{budget_pot_code}',
+        description: 'Funding pot code attached to the review context.'
+      },
+      {
+        id: 'budget_pot_name',
+        label: 'Budget pot name',
+        value: '{budget_pot_name}',
+        description: 'Funding pot display name attached to the review context.'
+      },
+      {
+        id: 'posting_context',
+        label: 'Posting context',
+        value: '{posting_context}',
+        description: 'Short accounting or posting context from the review event.'
+      }
+    ]
+  },
+  {
+    id: 'decision',
+    label: 'Decision',
+    description: 'Decision fields used by applicant decision and status-change notifications.',
+    tokens: [
+      {
+        id: 'decision_outcome',
+        label: 'Decision outcome code',
+        value: '{decision_outcome}',
+        description: 'Raw decision outcome value.'
+      },
+      {
+        id: 'decision_outcome_label',
+        label: 'Decision outcome label',
+        value: '{decision_outcome_label}',
+        description: 'Readable decision label such as Approved or Not eligible.'
+      }
+    ]
+  },
+  {
+    id: 'links',
+    label: 'Links and support',
+    description: 'Use link tokens instead of pasted URLs when the target comes from configuration.',
+    tokens: [
+      {
+        id: 'portal_signin_link',
+        label: 'Portal sign-in link',
+        value: '[link url="{portal_dashboard_url}"]Sign in to your account[/link]',
+        description: 'Formatted link to the applicant portal dashboard.'
+      },
+      {
+        id: 'portal_dashboard_url',
+        label: 'Portal dashboard URL',
+        value: '{portal_dashboard_url}',
+        description: 'Raw portal dashboard URL. Prefer the formatted link token in body copy.'
+      },
+      {
+        id: 'support_email',
+        label: 'Support email',
+        value: '{support_email}',
+        description: 'Configured support mailbox.'
+      }
+    ]
+  }
 ];
+
+const tokenOptions = TOKEN_GROUPS.flatMap((group) =>
+  group.tokens.map((token) => ({
+    ...token,
+    groupId: group.id,
+    groupLabel: group.label,
+    label: `${group.label}: ${token.label}`
+  }))
+);
+
+const tokenNamesFromValue = (value = '') =>
+  Array.from(value.matchAll(/\{([^}]+)\}/g)).map((match) => match[1]);
+
+const KNOWN_TOKEN_NAMES = new Set(
+  tokenOptions.flatMap((option) => tokenNamesFromValue(option.value))
+);
+
+const TOKEN_ID_BY_NAME = tokenOptions.reduce((acc, option) => {
+  tokenNamesFromValue(option.value).forEach((tokenName) => {
+    acc[tokenName] = option.id;
+  });
+  return acc;
+}, {});
+
+const BASE_PREVIEW_SAMPLE = {
+  applicant_name: 'Jamie Applicant',
+  application_id: 'APP-2042',
+  tracking_id: 'NWAC-1A2B3C',
+  submission_date: 'Oct 24, 2025',
+  assessor_name: 'Casey Assessor',
+  actor_name: 'Morgan Reviewer',
+  event_message: 'A review update was recorded on this file.',
+  portal_dashboard_url: 'https://portal.sample/dashboard',
+  support_email: 'support@example.ca',
+  message_subject: 'Follow-up question about your file',
+  decision_outcome: 'approved',
+  decision_outcome_label: 'Approved',
+  message_to_name: 'Jamie Applicant',
+  message_from_name: 'Casey Assessor',
+  review_outcome: 'request_changes',
+  review_outcome_label: 'Changes requested',
+  review_reason: 'Please confirm the training dates and attach the updated cost estimate.',
+  approval_cost_total: '$4,250.00',
+  budget_pot_code: 'PATH-TRAINING',
+  budget_pot_name: 'Training supports',
+  posting_context: 'Review queue'
+};
+
+const PREVIEW_SCENARIOS = [
+  {
+    id: 'nwac_changes_requested',
+    label: 'NWAC changes requested',
+    description: 'Staff review email with rationale, budget, and case fields.',
+    tokenIds: [
+      'applicant_name',
+      'tracking_id',
+      'actor_name',
+      'review_outcome_label',
+      'review_reason',
+      'approval_cost_total',
+      'budget_pot_code',
+      'budget_pot_name',
+      'posting_context'
+    ],
+    sample: {
+      ...BASE_PREVIEW_SAMPLE,
+      event_message: 'NWAC requested changes before this file can move forward.',
+      review_outcome: 'request_changes',
+      review_outcome_label: 'Changes requested'
+    }
+  },
+  {
+    id: 'nwac_approved',
+    label: 'NWAC approved',
+    description: 'Staff review email for an approved NWAC review outcome.',
+    tokenIds: [
+      'applicant_name',
+      'tracking_id',
+      'actor_name',
+      'review_outcome_label',
+      'review_reason',
+      'approval_cost_total',
+      'budget_pot_code',
+      'budget_pot_name'
+    ],
+    sample: {
+      ...BASE_PREVIEW_SAMPLE,
+      event_message: 'NWAC approved this file.',
+      review_outcome: 'approve',
+      review_outcome_label: 'Approved',
+      review_reason: 'Approved for posting to the selected budget pot.'
+    }
+  },
+  {
+    id: 'nwac_denied',
+    label: 'NWAC denied',
+    description: 'Staff review email for a denied NWAC review outcome.',
+    tokenIds: [
+      'applicant_name',
+      'tracking_id',
+      'actor_name',
+      'review_outcome_label',
+      'review_reason',
+      'approval_cost_total',
+      'budget_pot_code',
+      'budget_pot_name'
+    ],
+    sample: {
+      ...BASE_PREVIEW_SAMPLE,
+      event_message: 'NWAC denied this file.',
+      review_outcome: 'reject',
+      review_outcome_label: 'Denied',
+      review_reason: 'The request does not meet the current funding criteria.'
+    }
+  },
+  {
+    id: 'secure_message',
+    label: 'Secure message',
+    description: 'Applicant or staff message notification.',
+    tokenIds: [
+      'applicant_name',
+      'tracking_id',
+      'message_subject',
+      'message_to_name',
+      'message_from_name',
+      'portal_signin_link',
+      'portal_dashboard_url',
+      'support_email'
+    ],
+    sample: {
+      ...BASE_PREVIEW_SAMPLE,
+      event_message: 'A secure message was added to this file.'
+    }
+  },
+  {
+    id: 'applicant_submission',
+    label: 'Applicant submission',
+    description: 'Initial application or submission acknowledgement.',
+    tokenIds: [
+      'applicant_name',
+      'application_id',
+      'tracking_id',
+      'submission_date',
+      'portal_signin_link',
+      'portal_dashboard_url',
+      'support_email'
+    ],
+    sample: {
+      ...BASE_PREVIEW_SAMPLE,
+      event_message: 'A new application was submitted.'
+    }
+  },
+  {
+    id: 'decision_approved',
+    label: 'Decision approved',
+    description: 'Applicant-facing decision notification.',
+    tokenIds: [
+      'applicant_name',
+      'tracking_id',
+      'decision_outcome',
+      'decision_outcome_label',
+      'portal_signin_link',
+      'portal_dashboard_url',
+      'support_email'
+    ],
+    sample: {
+      ...BASE_PREVIEW_SAMPLE,
+      decision_outcome: 'approved',
+      decision_outcome_label: 'Approved',
+      event_message: 'A program decision was recorded.'
+    }
+  },
+  {
+    id: 'generic_staff',
+    label: 'Generic staff alert',
+    description: 'Broad staff notification when only basic case and event context is guaranteed.',
+    tokenIds: [
+      'applicant_name',
+      'tracking_id',
+      'actor_name',
+      'event_message',
+      'assessor_name'
+    ],
+    sample: {
+      ...BASE_PREVIEW_SAMPLE,
+      event_message: 'A PATH staff notification was dispatched for this file.'
+    }
+  }
+];
+
+const DEFAULT_PREVIEW_SCENARIO_ID = 'nwac_changes_requested';
 
 const languages = [
   { id: 'en', label: 'English' },
@@ -66,6 +406,56 @@ const escapeHtml = (value = '') =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+
+const replacePlaceholders = (value = '', sample = {}) =>
+  value.replace(/\{([^}]+)\}/g, (_, token) =>
+    sample[token] !== undefined ? sample[token] : `{${token}}`
+  );
+
+const collectTokenNames = (value = '') =>
+  Array.from(new Set(tokenNamesFromValue(value || '')));
+
+const collectLocalizedTokenNames = (localized = {}) => {
+  const allText = Object.values(localized)
+    .map((entry) => `${entry?.subject || ''}\n${entry?.textBody || ''}`)
+    .join('\n');
+  return collectTokenNames(allText);
+};
+
+const getScenarioById = (scenarioId) =>
+  PREVIEW_SCENARIOS.find((scenario) => scenario.id === scenarioId) || PREVIEW_SCENARIOS[0];
+
+const buildTemplateDiagnostics = (localized = {}, scenario = PREVIEW_SCENARIOS[0]) => {
+  const tokenNames = collectLocalizedTokenNames(localized);
+  const unknownTokens = tokenNames.filter((tokenName) => !KNOWN_TOKEN_NAMES.has(tokenName));
+  const scenarioTokenIds = new Set(scenario?.tokenIds || []);
+  const scenarioTokens = tokenNames
+    .filter((tokenName) => KNOWN_TOKEN_NAMES.has(tokenName))
+    .map((tokenName) => ({
+      tokenName,
+      tokenId: TOKEN_ID_BY_NAME[tokenName] || tokenName
+    }))
+    .filter(({ tokenId }) => !scenarioTokenIds.has(tokenId));
+
+  return {
+    tokenNames,
+    unknownTokens,
+    scenarioTokens: Array.from(
+      new Map(scenarioTokens.map((item) => [item.tokenName, item])).values()
+    )
+  };
+};
+
+const formatTemplateDate = (value) => {
+  if (!value) return 'Not recorded';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Not recorded';
+  return new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  }).format(date);
+};
 
 const defaultLocalizedContent = () => ({
   en: { subject: '', textBody: '' },
@@ -192,6 +582,7 @@ const TemplateEditorProvider = ({ children, toggleHelpPanel }) => {
   const [translateModal, setTranslateModal] = useState(null); // { mode: 'missing'|'confirm', fromLang, targetLang, fromLabel, targetLabel, message }
   const [feedbackModal, setFeedbackModal] = useState(null); // { status: 'success'|'error', message: string }
   const [linkModal, setLinkModal] = useState(null); // { url, text, selection: { lang, start, end }, error? }
+  const [previewScenarioId, setPreviewScenarioId] = useState(DEFAULT_PREVIEW_SCENARIO_ID);
   const textAreaRef = useRef(null);
   const selectionRef = useRef({
     en: { start: 0, end: 0 },
@@ -247,6 +638,7 @@ const TemplateEditorProvider = ({ children, toggleHelpPanel }) => {
       });
       setLocalizedContent(localized);
       setActiveLanguage(stored.activeLanguage || 'en');
+      setPreviewScenarioId(stored.previewScenarioId || DEFAULT_PREVIEW_SCENARIO_ID);
       selectionRef.current = {
         en: { start: 0, end: 0 },
         fr: { start: 0, end: 0 }
@@ -275,6 +667,7 @@ const TemplateEditorProvider = ({ children, toggleHelpPanel }) => {
         localized.fr.textBody = data.localized?.fr?.textBody || '';
         setLocalizedContent(localized);
         setActiveLanguage(draftOverride?.activeLanguage || 'en');
+        setPreviewScenarioId(draftOverride?.previewScenarioId || DEFAULT_PREVIEW_SCENARIO_ID);
         selectionRef.current = {
           en: { start: 0, end: 0 },
           fr: { start: 0, end: 0 }
@@ -523,11 +916,12 @@ const TemplateEditorProvider = ({ children, toggleHelpPanel }) => {
       name: selectedTemplate.name || '',
       localized: localizedContent,
       baseline: baselineTemplate,
-      activeLanguage
+      activeLanguage,
+      previewScenarioId
     };
     storedSelectionRef.current = payload;
     writeStoredSelection(payload);
-  }, [selectedTemplate, localizedContent, baselineTemplate, activeLanguage]);
+  }, [selectedTemplate, localizedContent, baselineTemplate, activeLanguage, previewScenarioId]);
 
   const templateFocusKey = selectedTemplate ? (selectedTemplate.id ?? 'new') : null;
 
@@ -561,6 +955,7 @@ const TemplateEditorProvider = ({ children, toggleHelpPanel }) => {
       fr: { subject: '', textBody: '' }
     });
     setActiveLanguage('en');
+    setPreviewScenarioId(DEFAULT_PREVIEW_SCENARIO_ID);
     selectionRef.current = {
       en: { start: 0, end: 0 },
       fr: { start: 0, end: 0 }
@@ -662,20 +1057,17 @@ const TemplateEditorProvider = ({ children, toggleHelpPanel }) => {
       });
   };
 
-  const previewSample = useMemo(() => ({
-    applicant_name: 'Jamie Applicant',
-    application_id: 'APP-2042',
-    tracking_id: 'NWAC-1A2B3C',
-    submission_date: 'Oct 24, 2025',
-    assessor_name: 'Casey Assessor',
-    portal_dashboard_url: 'https://portal.sample/dashboard',
-    support_email: 'support@example.ca',
-    message_subject: 'Follow-up question about your file',
-    decision_outcome: 'approved',
-    decision_outcome_label: 'Approved',
-    message_to_name: 'Jamie Applicant',
-    message_from_name: 'Casey Assessor'
-  }), []);
+  const previewScenario = useMemo(
+    () => getScenarioById(previewScenarioId),
+    [previewScenarioId]
+  );
+
+  const previewSample = useMemo(
+    () => previewScenario?.sample || BASE_PREVIEW_SAMPLE,
+    [previewScenario]
+  );
+
+  const renderPreviewText = (value = '') => replacePlaceholders(value, previewSample);
 
   const renderPreviewHtml = (body) => {
     if (!body || !body.trim()) {
@@ -732,8 +1124,10 @@ const TemplateEditorProvider = ({ children, toggleHelpPanel }) => {
       .replace(/<br \/><\/ol>/g, '</ol>');
 
     linkMatches.forEach(({ sentinel, href, text }) => {
-      const safeHref = normalizeLinkUrl(href) || '#';
-      const linkText = escapeHtml(text || href).replace(/\n/g, '<br />');
+      const resolvedHref = replacePlaceholders(href, previewSample);
+      const resolvedText = replacePlaceholders(text || href, previewSample);
+      const safeHref = normalizeLinkUrl(resolvedHref) || '#';
+      const linkText = escapeHtml(resolvedText).replace(/\n/g, '<br />');
       html = html.replace(
         new RegExp(escapeRegExp(sentinel), 'g'),
         `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${linkText}</a>`
@@ -898,6 +1292,7 @@ const TemplateEditorProvider = ({ children, toggleHelpPanel }) => {
     openTranslateModal,
     translating,
     renderPreviewHtml,
+    renderPreviewText,
     handleToolbarAction,
     handleInsertToken,
     captureSelection,
@@ -907,11 +1302,16 @@ const TemplateEditorProvider = ({ children, toggleHelpPanel }) => {
     isDirty,
     languages,
     tokenOptions,
+    tokenGroups: TOKEN_GROUPS,
+    previewScenarios: PREVIEW_SCENARIOS,
+    previewScenario,
+    previewScenarioId,
+    setPreviewScenarioId,
+    diagnostics: buildTemplateDiagnostics(localizedContent, previewScenario),
     linkModal,
     setLinkModal,
     confirmLinkModal,
-    closeLinkModal,
-    handleToolbarAction
+    closeLinkModal
   };
 
   return (
@@ -938,6 +1338,7 @@ const TemplateEditorProvider = ({ children, toggleHelpPanel }) => {
               <Input
                 placeholder="https://example.com"
                 value={linkModal.url ?? ''}
+                spellcheck={false}
                 onChange={({ detail }) =>
                   setLinkModal((prev) => (prev ? { ...prev, url: detail.value, error: '' } : prev))
                 }
@@ -946,6 +1347,7 @@ const TemplateEditorProvider = ({ children, toggleHelpPanel }) => {
             <FormField label="Display text" description="Optional">
               <Input
                 value={linkModal.text ?? ''}
+                spellcheck
                 onChange={({ detail }) =>
                   setLinkModal((prev) => (prev ? { ...prev, text: detail.value } : prev))
                 }
@@ -1044,17 +1446,28 @@ const TemplateLibraryWidget = ({ actions, dragHandleAriaLabel, i18nStrings }) =>
   const {
     templates,
     loading,
+    selectedTemplate,
     handleTemplateSelection,
     handleNewTemplate,
     promptDeleteTemplate
   } = useTemplateEditor();
+  const [libraryFilter, setLibraryFilter] = useState('');
+  const filteredTemplates = useMemo(() => {
+    const query = libraryFilter.trim().toLowerCase();
+    if (!query) return templates;
+    return templates.filter((template) =>
+      [template.name, template.subject, template.type, template.status]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query))
+    );
+  }, [templates, libraryFilter]);
 
   return (
     <BoardItem
       header={
         <Header
           variant="h2"
-          description="Select a template to load it into the editor. Use the action column to remove unused entries."
+          description="Find and load notification templates. Edits happen in the Editor widget."
           actions={<Button onClick={handleNewTemplate}>New Template</Button>}
         >
           Library
@@ -1071,38 +1484,122 @@ const TemplateLibraryWidget = ({ actions, dragHandleAriaLabel, i18nStrings }) =>
         />
       }
     >
-      <Table
-        items={templates}
-        loading={loading}
-        trackBy="id"
-        stripedRows
-        variant="embedded"
-        header={null}
-        columnDefinitions={[
-          {
-            id: 'name',
-            header: 'Name',
-            cell: item => (
-              <Link onClick={() => handleTemplateSelection(item.id)}>
-                {item.name}
-              </Link>
-            )
-          },
-          {
-            id: 'actions',
-            header: 'Actions',
-            cell: item => (
-              <Button
-                variant="icon"
-                iconName="close"
-                ariaLabel={`Delete ${item.name}`}
-                onClick={() => promptDeleteTemplate(item)}
-              />
-            )
+      <SpaceBetween size="m">
+        <Input
+          type="search"
+          ariaLabel="Search templates"
+          placeholder="Search templates"
+          value={libraryFilter}
+          spellcheck={false}
+          onChange={({ detail }) => setLibraryFilter(detail.value)}
+        />
+        <Table
+          items={filteredTemplates}
+          loading={loading}
+          trackBy="id"
+          stripedRows
+          variant="embedded"
+          header={null}
+          empty={
+            <Box textAlign="center" color="inherit">
+              <b>No templates found</b>
+              <Box padding={{ top: 's' }} variant="p" color="inherit">
+                Adjust the search or create a new template.
+              </Box>
+            </Box>
           }
-        ]}
-      />
+          columnDefinitions={[
+            {
+              id: 'name',
+              header: 'Template',
+              cell: item => (
+                <SpaceBetween size="xxs">
+                  <Link onFollow={() => handleTemplateSelection(item.id)}>
+                    {item.name}
+                  </Link>
+                  {selectedTemplate?.id === item.id ? (
+                    <Badge color="blue">Loaded</Badge>
+                  ) : null}
+                </SpaceBetween>
+              )
+            },
+            {
+              id: 'updated',
+              header: 'Updated',
+              cell: item => formatTemplateDate(item.updated_at || item.created_at)
+            },
+            {
+              id: 'actions',
+              header: 'Actions',
+              cell: item => (
+                <SpaceBetween direction="horizontal" size="xs">
+                  <Button onClick={() => handleTemplateSelection(item.id)}>
+                    Edit
+                  </Button>
+                  <Button
+                    variant="icon"
+                    iconName="close"
+                    ariaLabel={`Delete ${item.name}`}
+                    onClick={() => promptDeleteTemplate(item)}
+                  />
+                </SpaceBetween>
+              )
+            }
+          ]}
+        />
+      </SpaceBetween>
     </BoardItem>
+  );
+};
+
+const CompactFieldReference = ({ tokenGroups, previewScenario, onInsert, captureSelection }) => {
+  const scenarioTokenIds = new Set(previewScenario?.tokenIds || []);
+
+  return (
+    <ExpandableSection headerText="Field reference" defaultExpanded={false}>
+      <SpaceBetween size="m">
+        {tokenGroups.map((group) => (
+          <SpaceBetween key={group.id} size="xs">
+            <Box variant="strong">{group.label}</Box>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: '8px'
+              }}
+            >
+              {group.tokens.map((token) => (
+                <div
+                  key={token.id}
+                  style={{
+                    border: '1px solid var(--color-border-divider-default)',
+                    borderRadius: '6px',
+                    padding: '8px',
+                    minWidth: 0
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    <Button
+                      variant="inline-link"
+                      onMouseDown={() => captureSelection()}
+                      onClick={() => onInsert({ value: token.value })}
+                    >
+                      {token.label}
+                    </Button>
+                    {scenarioTokenIds.has(token.id) ? (
+                      <Badge color="green">Typical</Badge>
+                    ) : null}
+                  </div>
+                  <Box variant="small" color="text-body-secondary">
+                    <code style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{token.value}</code>
+                  </Box>
+                </div>
+              ))}
+            </div>
+          </SpaceBetween>
+        ))}
+      </SpaceBetween>
+    </ExpandableSection>
   );
 };
 
@@ -1119,6 +1616,7 @@ const TemplateEditorWidget = ({ actions, dragHandleAriaLabel, i18nStrings }) => 
     openTranslateModal,
     translating,
     renderPreviewHtml,
+    renderPreviewText,
     handleInsertToken,
     handleToolbarAction,
     captureSelection,
@@ -1127,27 +1625,91 @@ const TemplateEditorWidget = ({ actions, dragHandleAriaLabel, i18nStrings }) => 
     handleRevertChanges,
     isDirty,
     languages,
-    tokenOptions
+    tokenOptions,
+    tokenGroups,
+    previewScenarios,
+    previewScenario,
+    previewScenarioId,
+    setPreviewScenarioId,
+    diagnostics
   } = useTemplateEditor();
 
   const [tokenSelectOption, setTokenSelectOption] = useState(null);
+  const [subjectTokenSelectOption, setSubjectTokenSelectOption] = useState(null);
+  const previewScenarioOptions = useMemo(
+    () => previewScenarios.map((scenario) => ({
+      label: scenario.label,
+      value: scenario.id,
+      description: scenario.description
+    })),
+    [previewScenarios]
+  );
+  const subjectTokenOptions = useMemo(
+    () => tokenOptions
+      .filter((option) => !option.value.includes('[link'))
+      .map((option) => ({
+        label: option.label,
+        value: option.value,
+        description: option.description
+      })),
+    [tokenOptions]
+  );
+  const selectedPreviewScenarioOption =
+    previewScenarioOptions.find((option) => option.value === previewScenarioId) || previewScenarioOptions[0];
+  const frenchMissing = selectedTemplate && (
+    !localizedContent.fr?.subject?.trim() ||
+    !localizedContent.fr?.textBody?.trim()
+  );
 
   const renderLanguageSection = (lang) => {
     if (lang !== activeLanguage) {
       return null;
     }
     const langLabel = languages.find((l) => l.id === lang)?.label || lang;
-    const targetLang = lang === 'en' ? 'fr' : 'en';
-    const targetLabel = languages.find((l) => l.id === targetLang)?.label || targetLang;
-    const content = localizedContent[lang];
+    const content = localizedContent[lang] || { subject: '', textBody: '' };
+    const scenarioTokenNames = diagnostics.scenarioTokens.map((item) => `{${item.tokenName}}`);
+    const unknownTokenNames = diagnostics.unknownTokens.map((tokenName) => `{${tokenName}}`);
     return (
       <SpaceBetween size="m">
-        <Grid gridDefinition={[{ colspan: 9 }, { colspan: 3 }]}
-          className="subject-row" alignItems="end">
+        <Grid
+          gridDefinition={[{ colspan: 8 }, { colspan: 4 }]}
+          className="subject-row"
+          alignItems="end"
+        >
           <FormField label={`Subject (${langLabel})`}>
-            <Input value={content.subject} onChange={({ detail }) => handleSubjectChange(lang, detail.value)} />
+            <Input
+              value={content.subject}
+              spellcheck
+              onChange={({ detail }) => handleSubjectChange(lang, detail.value)}
+            />
           </FormField>
-          <Box display="flex" alignItems="center" justifyContent="flex-end">
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(180px, 1fr) auto',
+              gap: '12px',
+              alignItems: 'end'
+            }}
+          >
+            <FormField label="Insert in subject">
+              <Select
+                expandToViewport
+                filteringType="auto"
+                placeholder="Field"
+                selectedOption={subjectTokenSelectOption}
+                options={subjectTokenOptions}
+                onChange={({ detail }) => {
+                  const option = detail.selectedOption;
+                  if (!option?.value) {
+                    setSubjectTokenSelectOption(null);
+                    return;
+                  }
+                  const separator = content.subject && !content.subject.endsWith(' ') ? ' ' : '';
+                  handleSubjectChange(lang, `${content.subject || ''}${separator}${option.value}`);
+                  setSubjectTokenSelectOption(null);
+                }}
+              />
+            </FormField>
             <Button
               onClick={() => openTranslateModal(lang)}
               iconName="gen-ai"
@@ -1155,10 +1717,10 @@ const TemplateEditorWidget = ({ actions, dragHandleAriaLabel, i18nStrings }) => 
             >
               {lang === 'en' ? 'Translate to French' : 'Traduire en anglais'}
             </Button>
-          </Box>
+          </div>
         </Grid>
-        <ColumnLayout columns={2} variant="text-grid">
-          <div style={{ border: '1px solid var(--color-border-divider-default)', borderRadius: '8px', padding: '16px', backgroundColor: 'var(--color-background-container-content)', minHeight: 280 }}>
+        <Grid gridDefinition={[{ colspan: 7 }, { colspan: 5 }]}>
+          <SpaceBetween size="s">
             <FormField label={`Email body (${langLabel})`}>
               <textarea
                 ref={lang === activeLanguage ? textAreaRef : null}
@@ -1176,7 +1738,8 @@ const TemplateEditorWidget = ({ actions, dragHandleAriaLabel, i18nStrings }) => 
                 onFocus={captureSelection}
                 onMouseUp={captureSelection}
                 placeholder="Write the message applicants or staff will receive."
-                style={{ width: '100%', minHeight: 201.6, padding: '12px', borderRadius: '8px', border: '1px solid var(--color-border-input-default)' }}
+                spellCheck
+                style={{ width: '100%', minHeight: 360, padding: '12px', borderRadius: '6px', border: '1px solid var(--color-border-input-default)' }}
               />
             </FormField>
             <div
@@ -1186,7 +1749,7 @@ const TemplateEditorWidget = ({ actions, dragHandleAriaLabel, i18nStrings }) => 
                 justifyContent: 'space-between',
                 marginTop: '8px',
                 gap: '12px',
-                flexWrap: 'nowrap'
+                flexWrap: 'wrap'
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
@@ -1218,9 +1781,14 @@ const TemplateEditorWidget = ({ actions, dragHandleAriaLabel, i18nStrings }) => 
               <div style={{ flexGrow: 1, minWidth: '200px', maxWidth: '320px' }}>
                 <Select
                   expandToViewport
+                  filteringType="auto"
                   placeholder="Insert field"
                   selectedOption={tokenSelectOption}
-                  options={tokenOptions.map((option) => ({ label: option.label, value: option.value }))}
+                  options={tokenOptions.map((option) => ({
+                    label: option.label,
+                    value: option.value,
+                    description: option.description
+                  }))}
                   onChange={({ detail }) => {
                     const option = detail.selectedOption;
                     if (!option?.value) {
@@ -1234,17 +1802,65 @@ const TemplateEditorWidget = ({ actions, dragHandleAriaLabel, i18nStrings }) => 
                 />
               </div>
             </div>
-          </div>
-          <div style={{ border: '1px solid var(--color-border-divider-default)', borderRadius: '8px', padding: '16px', backgroundColor: 'var(--color-background-container-content)', minHeight: 280 }}>
-            <Header variant="h4">Preview</Header>
-            <Box padding="m" style={{ backgroundColor: 'var(--color-background-layout-panel, #f8f8f8)', minHeight: 220 }}>
-              <div
-                style={{ fontFamily: 'inherit', whiteSpace: 'normal' }}
-                dangerouslySetInnerHTML={{ __html: renderPreviewHtml(content.textBody || '') }}
+          </SpaceBetween>
+          <SpaceBetween size="m">
+              <Header
+                variant="h4"
+                actions={
+                  <div style={{ minWidth: 260 }}>
+                    <Select
+                      expandToViewport
+                      filteringType="auto"
+                      ariaLabel="Preview scenario"
+                      selectedOption={selectedPreviewScenarioOption}
+                      options={previewScenarioOptions}
+                      onChange={({ detail }) => {
+                        setPreviewScenarioId(detail.selectedOption?.value || DEFAULT_PREVIEW_SCENARIO_ID);
+                      }}
+                    />
+                  </div>
+                }
+              >
+                Preview
+              </Header>
+              <Box variant="small" color="text-body-secondary">
+                {previewScenario.description}
+              </Box>
+              {unknownTokenNames.length ? (
+                <Alert type="warning" header="Unknown fields">
+                  {unknownTokenNames.join(', ')}
+                </Alert>
+              ) : null}
+              {scenarioTokenNames.length ? (
+                <Box variant="small" color="text-body-secondary">
+                  {scenarioTokenNames.length} field{scenarioTokenNames.length === 1 ? '' : 's'} outside this preview scenario:
+                  {' '}
+                  {scenarioTokenNames.join(', ')}
+                </Box>
+              ) : null}
+              <div style={{ border: '1px solid var(--color-border-divider-default)', borderRadius: '6px', padding: '12px', backgroundColor: 'var(--color-background-layout-panel, #f8f8f8)' }}>
+                <Box variant="awsui-key-label">Subject preview</Box>
+                <Box margin={{ top: 'xs' }}>
+                  {renderPreviewText(content.subject || 'No subject yet.')}
+                </Box>
+              </div>
+              <div style={{ border: '1px solid var(--color-border-divider-default)', borderRadius: '6px', padding: '12px', backgroundColor: 'var(--color-background-layout-panel, #f8f8f8)', minHeight: 260 }}>
+                <Box variant="awsui-key-label">Body preview</Box>
+                <Box margin={{ top: 's' }}>
+                  <div
+                    style={{ fontFamily: 'inherit', whiteSpace: 'normal' }}
+                    dangerouslySetInnerHTML={{ __html: renderPreviewHtml(content.textBody || '') }}
+                  />
+                </Box>
+              </div>
+              <CompactFieldReference
+                tokenGroups={tokenGroups}
+                previewScenario={previewScenario}
+                onInsert={handleInsertToken}
+                captureSelection={captureSelection}
               />
-            </Box>
-          </div>
-        </ColumnLayout>
+          </SpaceBetween>
+        </Grid>
       </SpaceBetween>
     );
   };
@@ -1312,9 +1928,17 @@ const TemplateEditorWidget = ({ actions, dragHandleAriaLabel, i18nStrings }) => 
             <FormField label="Template name">
               <Input
                 value={selectedTemplate.name}
+                spellcheck={false}
                 onChange={({ detail }) => setSelectedTemplate({ ...selectedTemplate, name: detail.value })}
               />
             </FormField>
+            {frenchMissing ? (
+              <Box variant="small" color="text-body-secondary">
+                <Badge color="red">French incomplete</Badge>
+                {' '}
+                Add the French subject and body before assigning this template to bilingual notifications.
+              </Box>
+            ) : null}
             <Tabs
               activeTabId={activeLanguage}
               onChange={({ detail }) => setActiveLanguage(detail.activeTabId)}

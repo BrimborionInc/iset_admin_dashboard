@@ -2,6 +2,13 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-05-01
+- Notifications/DEV: Added generic staff SES delivery for non-assignment notification events. Enabled `notification_setting` staff rows with `email_alert=1` and an assigned template now resolve role/case/watch recipients, render through `notification_template`, and send once per deduped staff recipient; assignment-family emails keep their existing assignee/watcher path.
+- Notifications/DEV: Hardened duplicate notification settings by ordering dispatcher and renderer lookups toward enabled email rows with assigned templates, so stale duplicate rows do not suppress active configuration or create duplicate sends.
+- Notifications/DEV: Split NWAC review notification routing into outcome-specific event keys for approved, denied, and changes-requested reviews so the Manage Notifications matrix can configure each outcome separately.
+- Ops/Safety: Added a SES runtime guard that suppresses notification emails when the app is running against TEST environment markers or the TEST DB host, preserving the Test and Training environment blocker while allowing DEV SES sends.
+- UX/Notifications/DEV: Overhauled the Template Editor dashboard with a grouped notification field catalog, subject-safe field insertion, scenario-based subject/body preview, unknown-field warnings, scenario-fit guidance, and updated help-panel copy for authoring staff and applicant notification templates.
+
 ## 2026-04-30
 - Ops/PROD/Release: Deployed admin-only release `20260430-admin-whatsnew-prod` to PROD after a 10-minute admin + public portal runtime maintenance countdown; schema/data/shared/portal deploy steps and DB restore point were skipped, ASG refresh `0ac8bc30-2a15-494a-86d1-84cedaa9c6cb` completed, admin and portal health smoke returned `200`, the runtime maintenance warning was cleared, and ALB fallback routing stayed on normal forwarding.
 - Ops/TEST/Data: Refreshed TEST from a sanitized current PROD database dump for application/case experimentation, preserving TEST Cognito pools, rebinding `bill@sillery.co.uk` and `program.admin@awentech.ca` through the TEST identity overlay, leaving PROD supporting-document S3 objects uncopied, and clearing maintenance after both TEST admin and portal target groups were healthy.

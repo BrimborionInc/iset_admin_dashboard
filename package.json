@@ -75,7 +75,7 @@
     "build:production": "node scripts/write-build-info.js --build-target production && env-cmd -f .env.production react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "server": "node isetadminserver.js",
+    "server": "set ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES=true&& nodemon isetadminserver.js",
     "dump:dev-schema": "env-cmd -f .env node scripts/dump-dev-db-structure.js",
     "lint": "eslint --ext .js,.jsx src",
     "audit:parity": "node scripts/parity-audit.js",

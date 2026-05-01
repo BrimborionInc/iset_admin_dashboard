@@ -5,22 +5,26 @@ const TemplateEditorDashboardHelp = () => (
   <div>
     <SpaceBetween direction="vertical" size="s">
       <Alert type="info" header="Template Editor dashboard">
-        Use this dashboard to create, localize, and test notification templates before linking
-        them to workflow events. Changes you publish here are immediately available to the
-        Notification Settings dashboard.
+        Use this dashboard to create, localize, preview, and validate notification templates
+        before linking them to workflow events. Saved templates are immediately available in
+        Notification Settings.
       </Alert>
     </SpaceBetween>
     <h2>How to work here</h2>
     <p>
       Pick a template from the library, edit the bilingual subject and body tabs, and use the
-      formatting toolbar (bold, italic, underline, lists, links) to keep styling consistent. You can
-      also translate between English and French, insert placeholders, and preview the rendered copy
-      with sample data before saving.
+      searchable field pickers to insert supported placeholders. Open the collapsed field reference
+      only when you need to browse every available field.
     </p>
     <p>
-      After saving, switch to the Notification Settings dashboard to assign the refreshed template to
-      specific events and roles. Keeping authoring and routing separate helps avoid accidental
-      regressions while you iterate on copy.
+      Choose a preview scenario that matches the notification family you are authoring for. Scenario
+      warnings are advisory: they tell you that a valid field may not usually be supplied by that
+      event family. Unknown-field warnings should be fixed before assigning the template.
+    </p>
+    <p>
+      After saving, switch to the Notification Settings dashboard to assign the refreshed template
+      to specific events and roles. Authoring copy here does not change routing until Notification
+      Settings points an event/role row at the template.
     </p>
   </div>
 );

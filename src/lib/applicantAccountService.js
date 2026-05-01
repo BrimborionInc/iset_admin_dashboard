@@ -38,6 +38,12 @@ function normalizeEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) ? normalized : null;
 }
 
+function normalizeEmailIdentity(value) {
+  const trimmed = normaliseString(value);
+  if (!trimmed) return null;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ? trimmed : null;
+}
+
 function normalizeDisplayName(value) {
   if (value === null || typeof value === 'undefined') return null;
   const compact = String(value).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -46,7 +52,7 @@ function normalizeDisplayName(value) {
 }
 
 function resolveReplyToFallback() {
-  return normalizeEmail(
+  return normalizeEmailIdentity(
     process.env.NOTIFICATION_SUPPORT_EMAIL ||
     process.env.SUPPORT_EMAIL ||
     process.env.DEFAULT_SUPPORT_EMAIL ||
@@ -61,7 +67,7 @@ function formatSesSource(senderEmail, senderName) {
 }
 
 async function resolveConfiguredSenderConfig(dbPool) {
-  const envSender = normalizeEmail(process.env.SES_SENDER_EMAIL);
+  const envSender = normalizeEmailIdentity(process.env.SES_SENDER_EMAIL);
   const fallbackSenderEmail = envSender || DEFAULT_SENDER_EMAIL;
   const fallbackSenderName = normalizeDisplayName(process.env.SES_SENDER_NAME) || DEFAULT_SENDER_NAME;
   const fallbackReplyTo = resolveReplyToFallback();
@@ -80,9 +86,9 @@ async function resolveConfiguredSenderConfig(dbPool) {
     const raw = rows?.[0]?.v;
     const payload = safeJsonParse(raw, null);
     const configuredEmail =
-      normalizeEmail(payload?.senderEmail) ||
-      normalizeEmail(payload?.sender_email) ||
-      normalizeEmail(payload?.fromEmail);
+      normalizeEmailIdentity(payload?.senderEmail) ||
+      normalizeEmailIdentity(payload?.sender_email) ||
+      normalizeEmailIdentity(payload?.fromEmail);
     const configuredSenderName =
       normalizeDisplayName(payload?.senderName) ||
       normalizeDisplayName(payload?.sender_name) ||
@@ -90,10 +96,10 @@ async function resolveConfiguredSenderConfig(dbPool) {
       normalizeDisplayName(payload?.displayName) ||
       fallbackSenderName;
     const configuredReplyTo =
-      normalizeEmail(payload?.replyTo) ||
-      normalizeEmail(payload?.reply_to) ||
-      normalizeEmail(payload?.replyToEmail) ||
-      normalizeEmail(payload?.supportEmail) ||
+      normalizeEmailIdentity(payload?.replyTo) ||
+      normalizeEmailIdentity(payload?.reply_to) ||
+      normalizeEmailIdentity(payload?.replyToEmail) ||
+      normalizeEmailIdentity(payload?.supportEmail) ||
       fallbackReplyTo ||
       null;
     return {

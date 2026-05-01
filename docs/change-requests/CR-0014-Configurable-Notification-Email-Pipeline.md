@@ -85,6 +85,7 @@ Notification toggles, templates, and applicant rows already exist in the admin d
 - [x] Implement intake-side template renderer (loads `notification_setting` + `notification_template`, applies token substitutions, provides fallback copy) and replace the hard-coded SES copy path for applicant submission emails.
 - [x] Extend renderer integration to secure message + decision notifications (ensure logging/fallbacks remain consistent).
 - [x] Add unit/integration tests plus structured logging to cover renderer fallbacks, missing templates, and token substitution failures.
+- [x] Implement generic staff SES dispatch for non-assignment events using `notification_setting.email_alert`, `template_id`, role/audience resolution, language preference, and event context while preserving assignment-family behavior.
 
 ## 9. Progress Log
 
@@ -95,6 +96,8 @@ Notification toggles, templates, and applicant rows already exist in the admin d
 - 2025-11-09: Secure message + decision notifications now use the shared renderer (event-driven context, placeholder support, fallbacks). Admin dashboard token palette updated with the new placeholders.
 - 2025-11-10: Documented the token contract & caching plan, added structured renderer logging + `node:test` coverage (`notifications/__tests__/templateRenderer.test.js`), and exposed `npm run test:renderer` for smoke checks.
 - 2025-11-14: Resolved test SES send failures by rotating the IAM access keys (`SES_backend`) and updating `/nwac/test/portal/.env` so AWS credentials deploy with the portal; portal + admin PM2 processes confirmed healthy afterward.
+- 2026-05-01: Added the generic staff email path in `shared/events/notificationDispatcher.js`. Assignment-family events still use the existing assignee/watcher flow; other staff events now resolve enabled email settings, render the configured template, send through SES once per deduped staff recipient, and remain blocked in TEST by settings plus the SES runtime guard. The renderer now prefers enabled email/template rows when duplicate event/role/language settings exist.
+- 2026-05-01: Split NWAC review email routing into outcome-specific event keys: `nwac_review_approved`, `nwac_review_denied`, and `nwac_review_changes_requested`.
 
 ---
 

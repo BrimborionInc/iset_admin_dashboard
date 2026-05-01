@@ -13396,6 +13396,7 @@ async function fetchAssessmentPdfSignatureContext({
     submittedFallback ||
     null;
   const approvedSignature =
+    await fetchLatestCaseEventSignature(connection, { caseId, eventType: 'nwac_review_approved' }) ||
     await fetchLatestCaseEventSignature(connection, { caseId, eventType: 'nwac_review_submitted', outcome: 'approve' }) ||
     approvedFallback ||
     null;
@@ -57451,6 +57452,14 @@ const normalizeEmailAddress = (value) => {
   return lowered;
 };
 
+const normalizeEmailIdentityAddress = (value) => {
+  if (!value) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmed)) return null;
+  return trimmed;
+};
+
 const normalizeNotificationSenderName = (value) => {
   if (value === null || typeof value === 'undefined') return null;
   const compact = String(value).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -59231,7 +59240,7 @@ async function writeFinanceEmailRouting(next, connection = null) {
 function sanitizeNotificationEmailSettings(raw) {
   const payload = raw && typeof raw === 'object' ? raw : {};
   return {
-    senderEmail: normalizeEmailAddress(
+    senderEmail: normalizeEmailIdentityAddress(
       payload.senderEmail || payload.sender_email || payload.fromEmail || ''
     ),
     senderName: normalizeNotificationSenderName(
@@ -59241,7 +59250,7 @@ function sanitizeNotificationEmailSettings(raw) {
       payload.displayName ||
       ''
     ),
-    replyTo: normalizeEmailAddress(
+    replyTo: normalizeEmailIdentityAddress(
       payload.replyTo ||
       payload.reply_to ||
       payload.replyToEmail ||
@@ -59253,7 +59262,7 @@ function sanitizeNotificationEmailSettings(raw) {
 
 async function readNotificationEmailSettings(connection = null) {
   const runner = connection || pool;
-  const envSender = normalizeEmailAddress(process.env.SES_SENDER_EMAIL);
+  const envSender = normalizeEmailIdentityAddress(process.env.SES_SENDER_EMAIL);
   const fallbackSenderEmail = envSender || DEFAULT_NOTIFICATION_SENDER_EMAIL;
   const fallbackSenderName =
     normalizeNotificationSenderName(process.env.SES_SENDER_NAME) || DEFAULT_NOTIFICATION_SENDER_NAME;
@@ -59320,7 +59329,7 @@ async function readNotificationEmailSettings(connection = null) {
 
 async function writeNotificationEmailSettings(next, connection = null) {
   const runner = connection || pool;
-  const envSender = normalizeEmailAddress(process.env.SES_SENDER_EMAIL);
+  const envSender = normalizeEmailIdentityAddress(process.env.SES_SENDER_EMAIL);
   const fallbackSenderEmail = envSender || DEFAULT_NOTIFICATION_SENDER_EMAIL;
   const fallbackSenderName =
     normalizeNotificationSenderName(process.env.SES_SENDER_NAME) || DEFAULT_NOTIFICATION_SENDER_NAME;
@@ -80232,8 +80241,14 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
               : outcome
                 ? String(outcome).replace(/[_-]+/g, ' ').trim()
                 : 'submitted';
+	      const nwacReviewEventType =
+	        outcome === 'approve'
+	          ? 'nwac_review_approved'
+	          : outcome === 'reject'
+	            ? 'nwac_review_denied'
+	            : 'nwac_review_changes_requested';
 	      await captureCaseEvent({
-        type: 'nwac_review_submitted',
+        type: nwacReviewEventType,
         caseId,
         payload: {
           tracking_id: trackingId,
@@ -80320,7 +80335,9 @@ const SYSTEM_ADMIN_ACTIVITY_EVENT_TYPES = Object.freeze([
   'case_assigned',
   'case_unassigned',
   'assessment_submitted',
-  'nwac_review_submitted',
+  'nwac_review_approved',
+  'nwac_review_denied',
+  'nwac_review_changes_requested',
   'document_request_set',
   'document_request_cleared',
   'escalation_created',
@@ -80892,7 +80909,7 @@ async function loadSystemAdminCognitoServiceStatus({
 }
 
 function buildSystemAdminSesIdentityCandidates(senderEmail) {
-  const normalizedSender = normalizeEmailAddress(senderEmail);
+  const normalizedSender = normalizeEmailIdentityAddress(senderEmail);
   if (!normalizedSender) return [];
   const candidates = [normalizedSender];
   const domain = normalizedSender.split('@')[1];
@@ -80915,8 +80932,8 @@ function formatSystemAdminSesVerificationStatus(status) {
 
 async function loadSystemAdminSesMailStatus() {
   const settings = await readNotificationEmailSettings();
-  const configuredSender = normalizeEmailAddress(settings?.senderEmail);
-  const fallbackSender = normalizeEmailAddress(settings?.fallbackSenderEmail);
+  const configuredSender = normalizeEmailIdentityAddress(settings?.senderEmail);
+  const fallbackSender = normalizeEmailIdentityAddress(settings?.fallbackSenderEmail);
   const activeSender = configuredSender || fallbackSender || null;
   const senderSource = configuredSender ? 'runtime config' : (fallbackSender ? 'fallback sender' : 'missing');
   const region = SES_REGION || process.env.AWS_REGION || process.env.COGNITO_REGION || null;
