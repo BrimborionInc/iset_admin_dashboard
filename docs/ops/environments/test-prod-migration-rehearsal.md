@@ -44,11 +44,13 @@ Implications:
 ## Recommended rehearsal path
 
 1. Stop the TEST PM2 apps (`nwac-admin`, `nwac-portal`) on the TEST app hosts.
-2. Restore the fresh PROD dump into TEST.
+2. Restore the fresh PROD database dump into TEST. This is a database-only refresh for application and case records; do not copy PROD upload/supporting-document S3 objects into TEST.
 3. Immediately run [`sql/ops/test-prod-like-restore-postload.sql`](../../../sql/ops/test-prod-like-restore-postload.sql) to disable side effects and clear transient queues.
 4. Run migration SQL / backfill / compatibility checks while the restored PROD Cognito subjects are still present, because several migrations use those subjects to backfill typed actor references.
 5. Run [`sql/ops/test-prod-like-restore-identity-overlay.sql`](../../../sql/ops/test-prod-like-restore-identity-overlay.sql) to neutralize imported PROD identity bindings and rebind the approved TEST staff identities.
 6. Only then bring TEST back up for admin UAT.
+
+Expected document behavior after a database-only PROD-like restore: `iset_document` rows may point at PROD object keys that are absent from the TEST uploads bucket. Missing-object / `not found` errors are acceptable when opening those historical supporting documents in TEST. Do not sync PROD supporting-document files into TEST unless a separate privacy-reviewed, explicitly approved artifact-copy task exists.
 
 ## Post-load safety SQL
 
@@ -72,9 +74,33 @@ Identity overlay:
 - Rebinds these TEST staff identities:
   - `bill@sillery.co.uk` -> `System Administrator`
   - `program.admin@awentech.ca` -> `NWAC Administrator`
+- The overlay updates or creates the `program.admin@awentech.ca` `staff_profiles` row as an active NWAC Administrator; it is not deleted by the restore procedure.
 - Do not add broad email-based rebinding; any extra TEST login identity needs an explicit Cognito-sub overlay.
 
 ## Executed rehearsal result
+
+PROD-like TEST refresh executed on 2026-04-30 to give TEST a current application/case dataset for experimentation.
+
+- TEST was put behind the runtime maintenance warning and ALB fixed-response maintenance page for admin and portal before apps were stopped. The ALB fallback was cleared after final target-group smoke.
+- `nwac-admin` and `nwac-portal` were stopped on both TEST app hosts before the restore and restarted afterward.
+- TEST pre-restore backup:
+  - `s3://nwac-test-artifacts/db-dumps/test/20260430-154754-pre-prod-like-restore.sql.gz`
+- PROD source dump:
+  - `s3://nwac-prod-artifacts/db-dumps/prod/20260430-154754-prod-like-test-refresh.sql.gz`
+- Sanitized TEST restore artifact:
+  - `s3://nwac-test-artifacts/db-refresh/20260430-154754-prod-like-test-refresh.sanitized.sql.gz`
+- The refresh was database-only. PROD upload/supporting-document S3 objects were not copied into TEST; missing-object errors for historical `iset_document` rows remain expected.
+- `test-prod-like-restore-postload.sql` was applied immediately after restore.
+- Canonical migration plan reported `0` pending migrations after restore.
+- `test-prod-like-restore-identity-overlay.sql` rebound TEST staff overlays:
+  - `bill@sillery.co.uk` -> `staff_profiles.id = 1`, System Administrator.
+  - `program.admin@awentech.ca` -> `staff_profiles.id = 149385`, NWAC Administrator.
+  - Shared `user.id` for `program.admin@awentech.ca` was active as `201`.
+- Identity verification reported `0` non-overlay `user.cognito_sub` rows, `0` client applicant Cognito bindings, and `0` non-overlay staff Cognito subjects.
+- Post-refresh counts: `53` applications, `130` cases, `156` clients, and `1631` document rows.
+- First post-restart target-group smoke caught one admin target before ALB health recovered; local `/healthz` was already `200`. Final smoke passed for both TEST target groups on both instances:
+  - `nwac-test-admin-tg`: `i-0a8be782ed8604211:5001` and `i-09fe8c219a4564040:5001` healthy.
+  - `nwac-test-portal-tg`: `i-0a8be782ed8604211:5000` and `i-09fe8c219a4564040:5000` healthy.
 
 Second rehearsal executed on 2026-04-28 for the privacy ERM grand-cleanup release, against the same sanitized PROD-like restore artifact used in the first rehearsal.
 

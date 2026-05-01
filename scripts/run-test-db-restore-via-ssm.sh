@@ -164,7 +164,7 @@ REMOTE_COMMANDS=(
   "DB_PASS=\$(printf '%s' \"\$SECRET_PAYLOAD\" | \$PY_BIN -c 'import json,sys; print(json.loads(sys.stdin.read()).get(\"password\", \"\"))')"
   "test -n \"\$DB_USER\" && test -n \"\$DB_PASS\" || { echo 'secret missing username/password' >&2; exit 1; }"
   "MYSQL_PWD=\"\$DB_PASS\" mysql --protocol TCP --ssl -h $(shell_quote "$DB_HOST") -P $(shell_quote "$DB_PORT") -u \"\$DB_USER\" -e \"DROP DATABASE IF EXISTS \\\`$DB_NAME\\\`; CREATE DATABASE \\\`$DB_NAME\\\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\""
-  "if [[ $(shell_quote "$REMOTE_SNAPSHOT") == *.gz ]]; then gzip -dc $(shell_quote "$REMOTE_SNAPSHOT") | sed -E 's/DEFINER=\`[^\\`]+\`@\`[^\\`]+\`//g' | MYSQL_PWD=\"\$DB_PASS\" mysql --protocol TCP --ssl -h $(shell_quote "$DB_HOST") -P $(shell_quote "$DB_PORT") -u \"\$DB_USER\" $(shell_quote "$DB_NAME"); else sed -E 's/DEFINER=\`[^\\`]+\`@\`[^\\`]+\`//g' $(shell_quote "$REMOTE_SNAPSHOT") | MYSQL_PWD=\"\$DB_PASS\" mysql --protocol TCP --ssl -h $(shell_quote "$DB_HOST") -P $(shell_quote "$DB_PORT") -u \"\$DB_USER\" $(shell_quote "$DB_NAME"); fi"
+  "if [[ $(shell_quote "$REMOTE_SNAPSHOT") == *.gz ]]; then gzip -dc $(shell_quote "$REMOTE_SNAPSHOT") | sed -E 's/DEFINER=[^ ]+//g' | MYSQL_PWD=\"\$DB_PASS\" mysql --protocol TCP --ssl -h $(shell_quote "$DB_HOST") -P $(shell_quote "$DB_PORT") -u \"\$DB_USER\" $(shell_quote "$DB_NAME"); else sed -E 's/DEFINER=[^ ]+//g' $(shell_quote "$REMOTE_SNAPSHOT") | MYSQL_PWD=\"\$DB_PASS\" mysql --protocol TCP --ssl -h $(shell_quote "$DB_HOST") -P $(shell_quote "$DB_PORT") -u \"\$DB_USER\" $(shell_quote "$DB_NAME"); fi"
   "rm -f $(shell_quote "$REMOTE_SNAPSHOT")"
 )
 

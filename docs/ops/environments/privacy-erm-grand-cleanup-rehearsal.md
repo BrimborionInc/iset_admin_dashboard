@@ -94,6 +94,8 @@ scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/test-prod-like-restore-postlo
 
 Do not clear restored Cognito subjects yet. Several cleanup migrations use those PROD subjects to backfill typed staff/applicant actor references. TEST app processes must stay stopped until identity neutralisation is complete.
 
+This PROD-like TEST refresh is database-only. Do not copy PROD upload/supporting-document S3 objects into TEST as part of the rehearsal. Historical `iset_document` rows from PROD may reference objects missing from the TEST uploads bucket, and document-open `not found` errors are acceptable for those records.
+
 4. Run the read-only audit and preview scripts:
 
 ```bash
