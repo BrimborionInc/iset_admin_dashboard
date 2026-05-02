@@ -3,6 +3,8 @@
 Format: YYYY-MM-DD - Category: Short description
 
 ## 2026-05-01
+- Fix/Application workflow/DEV: Hardened case-to-application selection so active/in-review applications win over closed/completed historical applications, even when old rows receive later client-file updates; case saves now refuse to move terminal applications back into review or document-request queues while still allowing the approved-to-completed finish step.
+- Ops/TEST/Release: Replaced the earlier landing-page-only TEST rollout with full release `20260501-dev-sync-test`; schema had 0 pending migrations, `intake-release` workflow/data promotion applied for workflow `21`, admin and portal apps deployed from the current DEV heads, both TEST target groups are healthy, the maintenance notice was cleared, and on-instance verification confirmed the new admin/portal bundles plus the Template Editor refactor strings in the deployed admin bundle.
 - Notifications/DEV: Added generic staff SES delivery for non-assignment notification events. Enabled `notification_setting` staff rows with `email_alert=1` and an assigned template now resolve role/case/watch recipients, render through `notification_template`, and send once per deduped staff recipient; assignment-family emails keep their existing assignee/watcher path.
 - Notifications/DEV: Hardened duplicate notification settings by ordering dispatcher and renderer lookups toward enabled email rows with assigned templates, so stale duplicate rows do not suppress active configuration or create duplicate sends.
 - Notifications/DEV: Split NWAC review notification routing into outcome-specific event keys for approved, denied, and changes-requested reviews so the Manage Notifications matrix can configure each outcome separately.

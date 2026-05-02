@@ -1,5 +1,5 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-05-01T18:01:25.041Z",
+  "generatedAt": "2026-05-01T20:55:31.268Z",
   "releaseId": "",
   "releaseLabel": "Current build",
   "releaseDateEn": "1st May 2026",

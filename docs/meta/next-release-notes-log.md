@@ -21,6 +21,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 - 2026-05-01 | Release TBD | Notifications | Manage Notifications | Staff email notification settings now apply to non-assignment events, with NWAC review split by approval, denial, and changes-requested outcomes. | Enabled staff rows with `email_alert=1` and a template send through SES once per deduped recipient; assignment emails keep their existing behavior, and TEST remains blocked from real sends.
 
+2026-05-01 | Release TBD | Fix/Application workflow | Case and Application Workspaces | Fixed a bug where an older completed application on a client file could become the active application queue target after later client-file updates. | PATH now prefers open/current applications when resolving the case's primary application and blocks terminal applications from being moved back into review or document-request queues through case saves.
 2026-04-30 | Release TBD | Fix/Auth | Manage Users and staff sign-in | Fixed legacy sign-in fallbacks that could copy old Cognito custom identity or region values into staff access context. | Staff regional access now stays tied to PATH's database-backed staff profile and staff-region assignments; a separate dry-run cleanup helper can audit remaining legacy Cognito values.
 2026-04-30 | Release TBD | UX/Homepage | Work Queue > New Applications | Made a change so New Applications rows show Assign or Reassign directly in the table, while the applicant name remains the workspace link. | The redundant Open workspace row action is hidden for this queue to leave room for assignment actions.
 2026-04-30 | Release TBD | UX/Support | Bugs and Change Requests | Added a dedicated Support dashboard for reviewing and updating PATH bug reports and change requests. | System Administrators, NWAC Administrators, and Regional Managers can use the same queue and review panel that was previously only on the System Administrator homepage.
@@ -245,6 +246,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Made a change so Bugs and Change Requests now has a dedicated dashboard under Support.
 - Made a change so staff email notification settings can send configured emails for non-assignment events, with NWAC review split by approval, denial, and changes-requested outcomes.
 - Made the Template Editor more powerful with grouped fields, scenario previews, and warnings for unsupported placeholders.
+- Fixed a bug where an older completed application on a client file could return to application queues after later client-file updates.
 - Fixed missing generated assessment documents on a small number of pending-decision records so the expected case manager assessment and redline PDFs are now available.
 - Fixed a bug where Regional Managers could see a Supporting Documents load error when Application Workspace was set to All documents.
 
@@ -258,6 +260,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les bogues et demandes de changement ont maintenant un tableau de bord dedie dans Support.
 - Les parametres de courriel du personnel peuvent maintenant envoyer des courriels configures pour les evenements qui ne sont pas des affectations, avec la revue NWAC separee par approbation, refus et demandes de changements.
 - L'editeur de modeles est plus complet, avec des champs groupes, des apercus par scenario et des avertissements pour les variables non prises en charge.
+- Correction d'un probleme ou une ancienne demande completee dans un dossier client pouvait revenir dans les files de demandes apres des mises a jour du dossier client.
 - Les documents d'evaluation generes qui manquaient pour un petit nombre de dossiers en attente de decision ont ete ajoutes, y compris les PDF d'evaluation du gestionnaire de cas et de redline attendus.
 - Correction d'un probleme ou les gestionnaires regionaux pouvaient voir une erreur de chargement des documents justificatifs lorsque l'espace de travail de la demande etait regle sur Tous les documents.
 

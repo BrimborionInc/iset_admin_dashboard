@@ -4,7 +4,7 @@ Purpose: define the agreed PATH entity model for `client`, `case`, and `applicat
 
 Audience: product, engineering, reporting/data, and migration planning.
 
-Last Updated: 2026-04-27
+Last Updated: 2026-05-01
 
 ## Status
 
@@ -62,6 +62,8 @@ Verified from current schema and code:
 - Public portal `POST /api/intake/complete` resolves or creates `client`, resolves or creates the client's `case`, then inserts or updates the working `application` with `client_id` and `case_id`.
 - Manual application intake creates `client`, resolves or creates `iset_case`, then inserts `iset_application` with `client_id` and `case_id`.
 - Client Batch Import already supports `client` plus application-less `iset_case`.
+- Case-level "primary application" joins now prefer non-terminal application rows before terminal rows (`approved`, `completed`, denied/withdrawn/cancelled/closed/archived states), so late client-file or document updates on historical completed applications do not make those applications the current queue target when a newer active application exists.
+- `PUT /api/cases/:id` rejects attempts to move a terminal application back into review or document-request queues; the approved-to-completed finish transition remains allowed.
 - Remaining non-final pieces:
   - TEST/PROD still need the DEV backfill/retirement/hardening migrations rehearsed against live data.
   - Some workflows still accept `application_id` as an entry parameter, but they now resolve the case through `iset_application.case_id` instead of a case-side pointer.

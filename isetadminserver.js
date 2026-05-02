@@ -610,12 +610,44 @@ function buildApplicationCaseJoinPredicate(caseAlias = 'c', applicationAlias = '
   return `${caseAlias}.id = ${applicationAlias}.case_id`;
 }
 
+const APPLICATION_TERMINAL_STATUS_KEYS = [
+  'approved',
+  'completed',
+  'complete',
+  'rejected',
+  'declined',
+  'denied',
+  'withdrawn',
+  'cancelled',
+  'closed',
+  'archived'
+];
+const APPLICATION_TERMINAL_STATUS_SQL_LIST = APPLICATION_TERMINAL_STATUS_KEYS
+  .map(status => `'${String(status).replace(/'/g, "''")}'`)
+  .join(', ');
+
+function buildNormalisedStatusSql(columnExpression) {
+  return `REPLACE(REPLACE(LOWER(TRIM(COALESCE(${columnExpression}, ''))), '-', '_'), ' ', '_')`;
+}
+
+function buildApplicationTerminalRankSql(applicationAlias = 'a') {
+  const normalisedStatus = buildNormalisedStatusSql(`${applicationAlias}.status`);
+  const normalisedLifecycleStatus = buildNormalisedStatusSql(`${applicationAlias}.lifecycle_status`);
+  return `CASE
+      WHEN ${normalisedStatus} IN (${APPLICATION_TERMINAL_STATUS_SQL_LIST})
+        OR ${normalisedLifecycleStatus} IN ('closed', 'archived')
+      THEN 1 ELSE 0
+    END`;
+}
+
 function buildCasePrimaryApplicationIdSql(caseAlias = 'c') {
   return `(
     SELECT a_case.id
       FROM iset_application a_case
      WHERE a_case.case_id = ${caseAlias}.id
-     ORDER BY COALESCE(a_case.updated_at, a_case.created_at) DESC, a_case.id DESC
+     ORDER BY ${buildApplicationTerminalRankSql('a_case')} ASC,
+              COALESCE(a_case.updated_at, a_case.created_at) DESC,
+              a_case.id DESC
      LIMIT 1
   )`;
 }
@@ -17144,18 +17176,7 @@ function firstQueryValue(raw) {
   return raw;
 }
 
-const TERMINAL_APPLICATION_STATUSES = new Set([
-  'approved',
-  'completed',
-  'complete',
-  'rejected',
-  'declined',
-  'denied',
-  'withdrawn',
-  'cancelled',
-  'closed',
-  'archived'
-]);
+const TERMINAL_APPLICATION_STATUSES = new Set(APPLICATION_TERMINAL_STATUS_KEYS);
 const APPROVAL_COST_THRESHOLD = 15000;
 const PROGRAM_ADMIN_APPROVAL_THRESHOLD = 25000;
 const PROGRAM_ADMIN_APPROVER_EMAIL = 'sstacey@nwac.ca';
@@ -17252,6 +17273,15 @@ function buildApplicationStatusPersistence(status, current = {}) {
 function isTerminalApplicationStatus(status) {
   const key = normaliseApplicationStatusValue(status);
   return key ? TERMINAL_APPLICATION_STATUSES.has(key) : false;
+}
+function isTerminalApplicationLifecycleStatus(status) {
+  const key =
+    normaliseApplicationLifecycleStatusValue(status, { preserveUnknown: true }) ||
+    normaliseApplicationStatusValue(status);
+  return key === 'closed' || key === 'archived';
+}
+function isTerminalApplicationState(status, lifecycleStatus) {
+  return isTerminalApplicationStatus(status) || isTerminalApplicationLifecycleStatus(lifecycleStatus);
 }
 function normaliseRoleValue(role) {
   if (!role) return null;
@@ -78512,6 +78542,24 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         applicationStatusToPersist = 'docs_requested';
       } else if (beforeApplicationStatus === 'docs_requested') {
         applicationStatusToPersist = 'in_review';
+      }
+    }
+
+    if (applicationId && isTerminalApplicationState(beforeApplicationStatus, beforeApplicationLifecycleStatus)) {
+      const requestedApplicationStatusChange =
+        Boolean(applicationStatusToPersist) && applicationStatusToPersist !== beforeApplicationStatus;
+      const allowedTerminalStatusChange =
+        beforeApplicationStatus === 'approved' && applicationStatusToPersist === 'completed';
+      const requestedDocsRequestedChange =
+        docsRequestedFieldPresent && Number(docsRequestedValue || 0) !== (beforeDocsRequestedActive ? 1 : 0);
+      if ((requestedApplicationStatusChange && !allowedTerminalStatusChange) || requestedDocsRequestedChange) {
+        await conn.rollback();
+        return res.status(409).json({
+          success: false,
+          error: 'terminal_application_not_mutable',
+          message: 'Closed or completed applications cannot be reopened or moved back into application queues from the client file.',
+          lock: lockCheck.lock || null
+        });
       }
     }
 
