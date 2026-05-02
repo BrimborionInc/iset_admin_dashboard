@@ -2,7 +2,7 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-04-30
+Last Updated: 2026-05-02
 
 ## How to use
 
@@ -32,11 +32,44 @@ For each indexed thread/topic, keep:
 
 ## Indexed Topics
 
+### Locate templates chat history
+
+- Codex task title: `Locate templates chat history`
+- Topic: notification template discovery and production rollout for secure-message notification splitting, owner-scoped applicant-message alerts, staff template/email delivery, Administrative Users profile-name editing, and SES/maintenance operational fixes
+- Keywords: `Locate templates chat history`, `templates page`, `notification_template`, `New secure message from applicant`, `Approval Pushback Email`, `Illegal mix of collations`, `applicant_secure_message_received`, `staff_secure_message_sent`, `message_received`, `owner-scoped email dispatch`, `case watchers`, `SES_backend`, `DenySesSendDuringProdDataRehearsal`, `program.admin@awentech.ca`, `bill@sillery.co.uk`, `Administrative Users`, `Name`, `Display Name`, `20260502-225259`, `Bad Gateway`, `maintenance fallback`
+- When to open: the user asks where the templates-page improvement chat was indexed, asks whether templates are stored in the database, asks for SQL to add notification templates to PROD, asks why secure-message notifications emailed staff/applicants, asks about inbound vs outbound secure-message notification events, asks why applicant secure-message alerts should go only to owners/watchers, asks why DEV SES was blocked by AWS, asks about configuring Administrative Users `Name` / `Display Name`, or asks what happened in the 2026-05-02 PROD rollout.
+- Primary docs:
+  - `docs/AGENTS.md`
+  - `docs/dashboards/manage-notifications-dashboard.md`
+  - `docs/dashboards/template-editor-dashboard.md`
+  - `docs/features/user-management.md`
+  - `docs/assignment/staff-profiles.md`
+  - `docs/ops/agent-operational-access.md`
+  - `docs/ops/deployments/deployment-quick-guide.md`
+  - `docs/ops/deployments/path-deploy-orchestrator.md`
+  - `docs/meta/changelog.md`
+  - `docs/meta/next-release-notes-log.md`
+  - `../ISET-intake/docs/system/runtime/notifications.md`
+  - `../shared/events/catalog.js`
+  - `../shared/events/notificationDispatcher.js`
+  - `../ISET-intake/server.js`
+  - `../ISET-intake/notifications/applicantEmailNotifications.js`
+  - `../ISET-intake/sesMailer.js`
+  - `src/widgets/manageTemplates.js`
+  - `src/pages/manageUsers.js`
+  - `src/routes/admin/users.js`
+  - `sql/migrations/20260502_0001_split_secure_message_notification_events.sql`
+  - `scripts/run-prod-sql-via-ssm.sh`
+- Status: current as of 2026-05-02. Deployed to PROD as release `20260502-225259`.
+- Notes: this thread first confirmed notification templates are database-backed in `notification_template`, listed the DEV templates, produced PROD-safe SQL patterns that avoid template-name collation failures, and created the DEV `New secure message from applicant` template without including secure-message body content in email. Runtime log analysis showed that the old generic `message_received` setting caused staff and applicant notification paths to share one event. The durable fix split secure-message notifications into `applicant_secure_message_received` for public-portal applicant-to-staff messages and `staff_secure_message_sent` for admin staff-to-applicant messages, with `applicant_secure_message_received` owner-scoped for bell alerts and emails. The assigned case/application owner receives through their actual role setting, case watchers receive through the `ISET Coordinator` row, and the event no longer broadcasts to every System/NWAC/Regional/ISET staff user just because that role row is enabled. The thread also added configurable staff `Name` and `Display name` fields to the Administrative Users profile view, backed by `staff_profiles` updates.
+- Notes: the SES investigation proved the attempted `program.admin@awentech.ca` and `bill@sillery.co.uk` identities in the AWS error were recipient staff identities, not the configured PATH sender. DEV/test AWS account `124355655255` had verified SES identities and sending enabled, but IAM user `SES_backend` had an explicit inline deny policy named `DenySesSendDuringProdDataRehearsal` (`ses:Send*` on `*`). That leftover safety policy was removed from `SES_backend`; the attached `AllowSESSendOnly` policy remained. SES in that account was still sandboxed at that time, so DEV/test sending remained limited to verified identities.
+- Notes: PROD release `20260502-225259` deployed shared/admin/portal changes, applied `20260502_0001_split_secure_message_notification_events.sql`, inserted PROD template id `14` for `New secure message from applicant`, verified the split `notification_setting` rows, and passed final health smoke for `https://nwac-console.awentech.ca/healthz`, `https://iset.nwac.ca/healthz`, and `https://nwac-public.awentech.ca/healthz`. Operational incident from the rollout: only the in-app maintenance warning was set before the ASG refresh, so users briefly saw raw `502 Bad Gateway`; the runbook required the ALB hard maintenance fallback for any PROD rollout that might surface 502s. The fallback was enabled during the refresh and later cleared after the ASG was healthy. Future PROD deploys using ASG refresh must set the ALB fallback before starting the refresh, not only the in-app warning.
+
 ### Find secure message event
 
 - Codex task title: `Find secure message event`
-- Topic: code-confirmed secure-message event key, notification dashboard label, and bell-alert targeting behavior for applicant-origin secure messages
-- Keywords: `Find secure message event`, `message_received`, `Secure message posted`, `secure message bell alert`, `Regional Manager notifications`, `ISET Coordinator notifications`, `case watchers`, `tag case`, `message_received bell_alert`, `notification_setting`, `iset_internal_notification`, `emitApplicantSecureMessageReceivedEvent`
+- Topic: code-confirmed secure-message event keys, notification dashboard labels, and bell-alert targeting behavior for applicant-origin secure messages
+- Keywords: `Find secure message event`, `applicant_secure_message_received`, `staff_secure_message_sent`, `message_received`, `Applicant secure message received`, `Staff secure message sent`, `secure message bell alert`, `Regional Manager notifications`, `ISET Coordinator notifications`, `case watchers`, `tag case`, `notification_setting`, `iset_internal_notification`, `emitApplicantSecureMessageReceivedEvent`
 - When to open: the user asks what event applicants trigger when sending a secure message from the public portal, asks what it is called in Manage Notifications, asks whether Regional Managers or ISET Coordinators receive bell alerts for secure messages, asks whether alerts are role-wide or case-assignee scoped, or asks whether an RM must tag/watch a case to keep getting alerts after assigning it to a team member
 - Primary docs:
   - `../ISET-intake/server.js`
@@ -46,8 +79,8 @@ For each indexed thread/topic, keep:
   - `src/internalNotifications.js`
   - `src/widgets/notificationSettingsWidget.js`
   - `isetadminserver.js`
-- Status: current as of 2026-04-30
-- Notes: the public portal emits `message_received` through `emitApplicantSecureMessageReceivedEvent()` after both legacy text replies and the current `reply-with-attachments` compose/reply endpoint. The Manage Notifications dashboard lists this event as `Secure message posted`. Enabled bell settings create `iset_internal_notification` rows through `dispatchInternalNotifications()`. For `Regional Manager` and `ISET Coordinator` settings, the dispatcher does not broadcast to everyone in that role or to everyone in the case region; it resolves the audience to the case `assigned_staff_profile_id`. Therefore an RM gets secure-message bell alerts only for cases assigned to that RM. If the RM assigns the case to a team member and still wants alerts, they need to watch/tag the case. The ISET Coordinator bell path also adds `iset_case_watch` watchers as additional user audiences, so watched cases can alert the watcher as well as the assigned staff member.
+- Status: current as of 2026-05-02
+- Notes: as of 2026-05-02, secure-message notification events are direction-specific. The public portal emits `applicant_secure_message_received` after applicant-to-staff case messages; the admin case workspace emits `staff_secure_message_sent` after staff-to-applicant messages. The legacy `message_received` key may still appear in older event history, but new notification matrix configuration should use the split event keys. Enabled bell settings create `iset_internal_notification` rows through `dispatchInternalNotifications()`, and enabled staff email rows render through `dispatchGenericStaffNotificationEmails()`. `applicant_secure_message_received` is owner-scoped for both bells and emails: the assigned owner receives it through the notification row for their actual staff role, while `iset_case_watch` watchers receive it through the `ISET Coordinator` row. The event does not broadcast to every System Administrator, NWAC Administrator, Regional Manager, or ISET Coordinator just because a role row is enabled. If an RM assigns the case to a team member and still wants alerts, they need to watch/tag the case. If a case is unassigned, watchers can still receive alerts when the `ISET Coordinator` row is configured.
 
 ### Clarify thread context persistence
 

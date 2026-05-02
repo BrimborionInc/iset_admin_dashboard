@@ -15916,11 +15916,11 @@ function getRequesterIdentity(req) {
   };
 }
 
-const MESSAGE_EVENT_TYPE = 'message_received';
+const STAFF_SECURE_MESSAGE_SENT_EVENT_TYPE = 'staff_secure_message_sent';
 
-async function dispatchMessageReceivedEmail({ pool, event, logger = console }) {
+async function dispatchStaffSecureMessageSentEmail({ pool, event, logger = console }) {
   try {
-    if (!event || event.event_type !== MESSAGE_EVENT_TYPE) return;
+    if (!event || event.event_type !== STAFF_SECURE_MESSAGE_SENT_EVENT_TYPE) return;
     const payload = event.event_data || {};
     const toUserId = payload.to_user_id || payload.recipient_id || null;
     const trackingId = payload.tracking_id || event.tracking_id || null;
@@ -15932,14 +15932,17 @@ async function dispatchMessageReceivedEmail({ pool, event, logger = console }) {
 
     const [settings] = await pool.query(
       `SELECT 1 FROM notification_setting
-         WHERE event = ? AND enabled = 1 AND COALESCE(email_alert,0) <> 0`,
-      [MESSAGE_EVENT_TYPE]
+         WHERE event COLLATE utf8mb4_unicode_ci = ?
+           AND LOWER(role) COLLATE utf8mb4_unicode_ci = 'applicant'
+           AND enabled = 1
+           AND COALESCE(email_alert,0) <> 0`,
+      [STAFF_SECURE_MESSAGE_SENT_EVENT_TYPE]
     );
     if (!settings || settings.length === 0) return;
 
     const resolvedUserId = toUserId || null;
     if (!resolvedUserId) {
-      logger.warn('[notifications] message_received event missing recipient user id');
+      logger.warn('[notifications] staff_secure_message_sent event missing recipient user id');
       return;
     }
 
@@ -15952,9 +15955,10 @@ async function dispatchMessageReceivedEmail({ pool, event, logger = console }) {
       assessorName,
       recipientDisplayName,
       senderDisplayName,
+      messageReceivedAt: event.created_at,
     });
   } catch (err) {
-    logger.error('[notifications] message_received email dispatch failed', err?.message || err);
+    logger.error('[notifications] staff_secure_message_sent email dispatch failed', err?.message || err);
   }
 }
 
@@ -37190,7 +37194,7 @@ const eventService = createEventService({ pool, logger: console });
 registerNotificationHook(async (event) => {
   await dispatchInternalNotifications({ pool, event, logger: console });
   await dispatchAssignmentNotificationEmails({ pool, event, logger: console });
-  await dispatchMessageReceivedEmail({ pool, event, logger: console });
+  await dispatchStaffSecureMessageSentEmail({ pool, event, logger: console });
 });
 
 const emitEvent = eventService.emit;
@@ -55908,7 +55912,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
     const effectiveAssessorName = fromNameValue || assessorDisplayName || null;
     try {
       await captureCaseEvent({
-        type: MESSAGE_EVENT_TYPE,
+        type: STAFF_SECURE_MESSAGE_SENT_EVENT_TYPE,
         caseId,
         payload: {
           message_id: result.insertId,
@@ -55934,7 +55938,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
         actorStaffProfileId: senderStaffProfileId || null,
       });
     } catch (notifyErr) {
-      console.error('[events] message_received emit failed', notifyErr?.message || notifyErr);
+      console.error('[events] staff_secure_message_sent emit failed', notifyErr?.message || notifyErr);
     }
     res.status(201).json({ message: 'Message sent', messageId: result.insertId });
   } catch (e) {

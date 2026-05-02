@@ -298,6 +298,36 @@ async function syncStaffProfilePrimaryRole(pool, cognitoSub, roleKey) {
   }
 }
 
+async function syncStaffProfileIdentity(pool, { cognitoSub, email, roleKey, name, displayName }) {
+  if (!pool || typeof pool.query !== 'function') {
+    throw buildHttpError(503, 'db_unavailable', 'Database connection is required to manage staff profiles');
+  }
+  if (!cognitoSub) {
+    throw buildHttpError(409, 'staff_profile_sync_failed', 'Cannot map this Cognito user to a staff profile');
+  }
+  const safeName = typeof name === 'string' ? name.trim() : '';
+  const safeDisplayName = typeof displayName === 'string' ? displayName.trim() : '';
+  if (!safeName) {
+    throw buildHttpError(400, 'name_required', 'Name is required');
+  }
+  const finalDisplayName = safeDisplayName || safeName;
+  const primaryRole = mapAdminRoleKeyToStaffPrimaryRole(roleKey);
+  await pool.query(
+    `INSERT INTO staff_profiles (cognito_sub, email, name, display_name, primary_role)
+       VALUES (?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         email = VALUES(email),
+         name = VALUES(name),
+         display_name = VALUES(display_name),
+         primary_role = COALESCE(VALUES(primary_role), primary_role)`,
+    [cognitoSub, email || null, safeName, finalDisplayName, primaryRole]
+  );
+  return {
+    name: safeName,
+    displayName: finalDisplayName,
+  };
+}
+
 async function listUsersInGroupAll(client, groupName) {
   const users = [];
   let nextToken = null;
@@ -354,6 +384,8 @@ async function loadAdminUsers({ pool = null, q = '', actorRoleKey = null } = {})
         const candidate = {
           username: user.Username,
           email: attr.email || user.Username,
+          name: attr.name || '',
+          displayName: attr['custom:display_name'] || attr.name || attr.email || user.Username,
           role: groupName,
           status: getOperationalUserStatus(rawStatus, enabled),
           rawStatus,
@@ -394,6 +426,8 @@ async function loadAdminUsers({ pool = null, q = '', actorRoleKey = null } = {})
       userMap.set(user.Username, {
         ...existing,
         email: attr.email || existing.email,
+        name: attr.name || existing.name || '',
+        displayName: attr['custom:display_name'] || attr.name || existing.displayName || attr.email || existing.email,
         status: getOperationalUserStatus(rawStatus, enabled),
         rawStatus,
         enabled,
@@ -434,7 +468,7 @@ async function loadAdminUsers({ pool = null, q = '', actorRoleKey = null } = {})
       if (subs.length) {
         const placeholders = subs.map(() => '?').join(',');
         [profiles] = await pool.query(
-          `SELECT id, cognito_sub, email, region_id FROM staff_profiles WHERE cognito_sub IN (${placeholders})`,
+          `SELECT id, cognito_sub, email, name, display_name, region_id FROM staff_profiles WHERE cognito_sub IN (${placeholders})`,
           subs
         );
       }
@@ -474,6 +508,8 @@ async function loadAdminUsers({ pool = null, q = '', actorRoleKey = null } = {})
         return {
           username: user.username,
           email: user.email,
+          name: profile?.name || user.name || '',
+          displayName: profile?.display_name || profile?.name || user.displayName || user.email,
           role: user.role,
           status: user.status,
           enabled: user.enabled,
@@ -491,6 +527,8 @@ async function loadAdminUsers({ pool = null, q = '', actorRoleKey = null } = {})
     users = users.map(user => ({
       username: user.username,
       email: user.email,
+      name: user.name || '',
+      displayName: user.displayName || user.name || user.email,
       role: user.role,
       status: user.status,
       enabled: user.enabled,
@@ -506,7 +544,7 @@ async function loadAdminUsers({ pool = null, q = '', actorRoleKey = null } = {})
     return users;
   }
 
-  return users.filter(user => [user.username, user.email, user.role].some(value => value && value.toLowerCase().includes(query)));
+  return users.filter(user => [user.username, user.email, user.name, user.displayName, user.role].some(value => value && value.toLowerCase().includes(query)));
 }
 
 async function upsertStaffProfile(pool, { cognitoSub, email, name, displayName, primaryRole, regionId }) {
@@ -763,6 +801,34 @@ router.post('/users', requireRole('System Administrator', 'NWAC Administrator', 
       });
     } catch (e) {
       return sendRouteError(res, e, 'Failed to update attributes');
+    }
+  });
+
+  router.patch('/users/:username/profile', requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager'), async (req, res) => {
+    try {
+      const { name, display_name, displayName } = req.body || {};
+      const username = req.params.username;
+      const actorKey = normalizeRoleKey(req?.auth?.role);
+      const client = getClient();
+      const targetUser = await resolveTargetAdminUser(client, username);
+      ensureActorCanManageTarget(actorKey, targetUser.roleKey);
+      const pool = getDbPoolFromRequest(req);
+      const updated = await syncStaffProfileIdentity(pool, {
+        cognitoSub: targetUser.cognitoSub,
+        email: targetUser.email || username,
+        roleKey: targetUser.roleKey,
+        name,
+        displayName: displayName ?? display_name,
+      });
+
+      res.json({
+        message: 'User profile updated',
+        name: updated.name,
+        displayName: updated.displayName,
+        display_name: updated.displayName,
+      });
+    } catch (e) {
+      return sendRouteError(res, e, 'Failed to update profile');
     }
   });
 

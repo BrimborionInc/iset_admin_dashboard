@@ -221,7 +221,7 @@ export default function UserManagementDashboard() {
   const filtered = useMemo(() => {
     const ft = filteringText.trim().toLowerCase();
     const active = QUICK_FILTERS.find(f => f.id === quickFilter) || QUICK_FILTERS[0];
-    return users.filter(u => active.predicate(u)).filter(u => !ft || [u.username, u.email, u.role].some(v => String(v).toLowerCase().includes(ft)));
+    return users.filter(u => active.predicate(u)).filter(u => !ft || [u.username, u.email, u.name, u.displayName, u.role].some(v => String(v).toLowerCase().includes(ft)));
   }, [filteringText, users, quickFilter, QUICK_FILTERS]);
 
   const quickFilterCounts = useMemo(() => {
@@ -560,6 +560,34 @@ export default function UserManagementDashboard() {
     }
   }
 
+  async function saveProfileEdit(user, values) {
+    const username = user?.username;
+    const name = String(values?.name || '').trim();
+    const displayName = String(values?.displayName || '').trim() || name;
+    if (!username) return null;
+    if (!name) {
+      throw new Error('Name is required');
+    }
+
+    const resp = await apiFetch(`/api/admin/users/${encodeURIComponent(username)}/profile`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, display_name: displayName })
+    });
+    if (!resp.ok) throw new Error(await getResponseErrorMessage(resp));
+    const json = await resp.json().catch(() => null);
+    const nextName = json?.name || name;
+    const nextDisplayName = json?.displayName || json?.display_name || displayName || nextName;
+    updateUsersByUsername([username], current => ({
+      ...current,
+      name: nextName,
+      displayName: nextDisplayName,
+    }));
+    recordAudit({ action: 'profile-update', actor: 'you', detail: 'Updated staff profile', target: username });
+    pushFlash('success', `Updated profile for ${username}`);
+    return { name: nextName, displayName: nextDisplayName };
+  }
+
   async function doRoleChange() {
     if (!roleChangeTarget?.username || !roleChangeTarget?.newRole) return;
     setRoleChanging(true);
@@ -625,7 +653,7 @@ export default function UserManagementDashboard() {
       if (!resp.ok) throw new Error(await getResponseErrorMessage(resp));
       // Optimistically add user for immediate feedback
       const primaryRegionId = regionIds.length ? regionIds[0] : (Number.isFinite(regionId) ? regionId : null);
-      setUsers(cur => ([...cur, { username: email, email, role: form.role, status: 'FORCE_CHANGE_PASSWORD', regionId: primaryRegionId, regionIds: regionIds.length ? regionIds : null, mfa: false, lastSignIn: null }]));
+      setUsers(cur => ([...cur, { username: email, email, name, displayName, role: form.role, status: 'FORCE_CHANGE_PASSWORD', regionId: primaryRegionId, regionIds: regionIds.length ? regionIds : null, mfa: false, lastSignIn: null }]));
       recordAudit({ action: 'create', actor: 'you', detail: `Created user as ${form.role}`, target: email });
       pushFlash('success', `Created ${email} as ${form.role}`);
       setShowCreate(false);
@@ -860,6 +888,7 @@ export default function UserManagementDashboard() {
                         onChangeRole={(username, currentRole) => { setShowRoleChange(true); setRoleChangeTarget({ username, newRole: currentRole }); }}
                         resolveRegionLabel={resolveUserRegionLabel}
                         onEditRegions={openRegionEdit}
+                        onSaveProfile={saveProfileEdit}
                       />
                     )}
                   </SpaceBetween>
@@ -1114,8 +1143,49 @@ function mapRoleToPermissions(role) {
   }
 }
 
-function UserInspector({ user, onClose, onChangeRole, resolveRegionLabel, onEditRegions }) {
+function UserInspector({ user, onClose, onChangeRole, resolveRegionLabel, onEditRegions, onSaveProfile }) {
   const canEditRegions = ['Regional_Manager', 'ISET_Coordinator'].includes(user.role);
+  const initialProfileForm = useMemo(() => ({
+    name: user.name || '',
+    displayName: user.displayName || user.name || '',
+  }), [user.displayName, user.name]);
+  const [profileForm, setProfileForm] = useState(initialProfileForm);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState('');
+
+  useEffect(() => {
+    setProfileForm(initialProfileForm);
+    setProfileError('');
+  }, [initialProfileForm]);
+
+  const profileDirty = profileForm.name !== initialProfileForm.name
+    || profileForm.displayName !== initialProfileForm.displayName;
+
+  async function handleProfileSave() {
+    if (!onSaveProfile || profileSaving) return;
+    const name = profileForm.name.trim();
+    const displayName = profileForm.displayName.trim();
+    if (!name) {
+      setProfileError('Name is required');
+      return;
+    }
+    setProfileSaving(true);
+    setProfileError('');
+    try {
+      const updated = await onSaveProfile(user, { name, displayName });
+      if (updated) {
+        setProfileForm({
+          name: updated.name || name,
+          displayName: updated.displayName || displayName || updated.name || name,
+        });
+      }
+    } catch (error) {
+      setProfileError(error.message || 'Profile update failed');
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
   const profileRows = [
     { label: 'Username', value: user.username },
     { label: 'Email', value: user.email },
@@ -1143,8 +1213,48 @@ function UserInspector({ user, onClose, onChangeRole, resolveRegionLabel, onEdit
     </ColumnLayout>
   );
 
+  const profileContent = (
+    <SpaceBetween size="m">
+      {tabContent(profileRows)}
+      <ColumnLayout columns={2}>
+        <FormField label="Name" errorText={profileError}>
+          <Input
+            value={profileForm.name}
+            onChange={event => setProfileForm(current => ({ ...current, name: event.detail.value }))}
+            spellcheck={false}
+          />
+        </FormField>
+        <FormField label="Display name">
+          <Input
+            value={profileForm.displayName}
+            onChange={event => setProfileForm(current => ({ ...current, displayName: event.detail.value }))}
+            spellcheck={false}
+          />
+        </FormField>
+      </ColumnLayout>
+      <SpaceBetween direction="horizontal" size="xs">
+        <Button
+          variant="primary"
+          onClick={handleProfileSave}
+          disabled={!profileDirty || profileSaving}
+        >
+          {profileSaving ? <Spinner size="normal" /> : 'Save profile'}
+        </Button>
+        <Button
+          onClick={() => {
+            setProfileForm(initialProfileForm);
+            setProfileError('');
+          }}
+          disabled={!profileDirty || profileSaving}
+        >
+          Reset
+        </Button>
+      </SpaceBetween>
+    </SpaceBetween>
+  );
+
   const tabs = [
-    { id: 'profile', label: 'Profile', content: tabContent(profileRows) },
+    { id: 'profile', label: 'Profile', content: profileContent },
     { id: 'roles', label: 'Roles & Groups', content: tabContent(roleRows) },
     { id: 'security', label: 'MFA & Security', content: tabContent(securityRows) },
     { id: 'activity', label: 'Activity', content: tabContent(activityRows) }

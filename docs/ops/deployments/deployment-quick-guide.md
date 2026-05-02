@@ -160,6 +160,13 @@ For a portal-only PROD hotfix with no schema/data/admin/shared work:
 npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-shared --release-id <release-id> --yes
 ```
 
+The deploy command records smoke-check details in the release manifest even when the console only prints the final summary. If you need operator-visible smoke lines before clearing the maintenance warning, run:
+
+```powershell
+npm run path:deploy:smoke -- --env test --skip-admin
+npm run path:deploy:smoke -- --env prod --skip-admin --skip-shared
+```
+
 ## Safe Preflight Commands
 
 Plan TEST:

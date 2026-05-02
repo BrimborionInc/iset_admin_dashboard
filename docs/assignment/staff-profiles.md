@@ -4,6 +4,7 @@ This document summarizes the current behavior of `staff_profiles` and the relate
 
 ## When `staff_profiles` rows are created
 - When an admin creates a staff user via the Manage Users dashboard, the backend seeds `staff_profiles` with `name` / `display_name` keyed by Cognito `sub` so identity fields exist before first sign-in.
+- The Manage Users > Administrative Users profile inspector can update `staff_profiles.name` and `staff_profiles.display_name` for an existing staff account. Those labels are DB-backed operational identity fields, not Cognito custom attributes.
 - Every authenticated staff request passes through `staffProfileMiddleware`. That middleware upserts the staff row from the real Cognito token context, keeps `cognito_sub`, email, and primary role aligned with the signed-in user, and resolves effective `userId`, `region_id`, and `regionIds` from `staff_profiles` / `staff_region`. Legacy Cognito `custom:region_id` and `custom:user_id` values are not staff authorization or identity sources.
 - There is no longer an IAM-off or dev-bypass path for admin users. Placeholder identities should not be created or relied on.
 

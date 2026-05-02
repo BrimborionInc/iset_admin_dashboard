@@ -1,6 +1,6 @@
 # Manage Notifications Dashboard
 
-Last updated: 2026-05-01
+Last updated: 2026-05-02
 
 > **Quick patch (2025-10-02):** Applicant email alerts for submissions, secure messages, and decisions are temporarily hardwired while the dashboard toggles remain read-only.
 
@@ -25,6 +25,8 @@ Last updated: 2026-05-01
 - Templates are optional. When none is selected the backend stores `NULL`; bell notifications continue to use stock text, while email delivery suppresses that event/role until a template is assigned.
 - `bell_alert` toggles drive staff-facing internal notifications via `shared/events/notificationDispatcher`. `email_alert` now drives staff SES delivery from the same `notification_setting` + `notification_template` rows, using the shared runtime sender settings stored in `iset_runtime_config`.
 - Staff email delivery is generic for non-assignment events. NWAC review notifications are split into `nwac_review_approved`, `nwac_review_denied`, and `nwac_review_changes_requested` so each outcome can have its own role routing and template. Enabled staff rows with `email_alert=1` and a renderable template resolve recipients from the configured role/audience, case assignee context, and case watchers where the `ISET Coordinator` row applies. Recipients are deduplicated by staff profile/email so duplicate settings or overlapping audiences do not create duplicate sends.
+- Secure-message notification routing is direction-specific. `Applicant secure message received` (`applicant_secure_message_received`) is emitted when the public portal sends a message into a case and is the staff-facing event for templates such as `New secure message from applicant`; `Staff secure message sent` (`staff_secure_message_sent`) is emitted when staff send a case-workspace message to the applicant and is the applicant-facing event for templates such as `"You've got secure mail" email`. Do not configure applicant-origin staff templates on the outbound staff event.
+- `Applicant secure message received` is owner-scoped for both bell alerts and emails. The assigned case/application owner receives it through the setting row for their actual staff role, case watchers receive it through the `ISET Coordinator` row, and broad System/NWAC/Regional role rows do not broadcast the event to every user in that role. If a case has no owner, watchers can still receive the alert when the `ISET Coordinator` row is enabled.
 - The renderer also prefers enabled email rows with an assigned template when duplicate event/role/language settings exist, so stale disabled duplicates do not suppress an active configured row.
 - TEST remains protected from real SES delivery by the TEST post-load blocker that clears `email_alert` values, plus a SES runtime guard for TEST environment markers / TEST DB hosts. DEV may send through SES when settings are enabled and SES sandbox identities are verified.
 - When the runtime config leaves sender name blank, PATH falls back to `NWAC PATH`. When the runtime config leaves `Reply-To` blank, PATH falls back to the support mailbox env vars if present (`NOTIFICATION_SUPPORT_EMAIL`, `SUPPORT_EMAIL`, `DEFAULT_SUPPORT_EMAIL`).

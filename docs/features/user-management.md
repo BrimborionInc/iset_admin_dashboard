@@ -1,6 +1,6 @@
 # User Management Overview
 
-_Last updated: 30 April 2026_
+_Last updated: 2 May 2026_
 
 ## High-level flow
 
@@ -31,6 +31,7 @@ _Last updated: 30 April 2026_
 * **Force password reset** – `PATCH /api/admin/users/:username/force-reset`. This is intended for active accounts; users already in `FORCE_CHANGE_PASSWORD` should use `Resend invite` instead.
 * **Resend invite** – `POST /api/admin/users/:username/resend-invite`. This now performs a real Cognito resend for users still in `FORCE_CHANGE_PASSWORD`, using Cognito `AdminCreateUser` with `MessageAction: RESEND`.
 * **Change role** – opens a modal calling `PATCH /api/admin/users/:username/role`, removing all current admin-role groups and adding the selected new one.
+* **Edit profile name** – when one Administrative Users row is selected, the Profile tab lets staff edit the DB-backed `staff_profiles.name` and `staff_profiles.display_name` values through `PATCH /api/admin/users/:username/profile`.
 * Role change and creation forms show only the roles the current actor is allowed to manage, and enforce entering a region for regional roles.
 * Flashbar errors now show the route `detail` message returned by the API instead of generic HTTP-only failures.
 
@@ -68,6 +69,7 @@ ISET Coordinator     → cannot manage administrative users
   * Disabled-state note: Cognito models disabled accounts with `Enabled=false` while `UserStatus` may still read `CONFIRMED` or `FORCE_CHANGE_PASSWORD`. The admin API now normalizes those rows to `status = DISABLED` so the dashboard filters/actions stay correct.
 * **POST /users** – uses `AdminCreateUser`, adds the user to the requested admin group, and persists the user's region access in `staff_profiles` / `staff_region`. Region is mandatory for regional roles.
 * **PATCH /users/:username/attributes** – updates DB-backed region access for Regional Managers and ISET Coordinators, with target-role authorization resolved server-side.
+* **PATCH /users/:username/profile** – updates DB-backed staff profile identity labels (`name`, `display_name`) after resolving the target user's actual Cognito admin group and applying the same manage-target guard as role and region edits.
 * **PATCH /users/:username/role** – removes all existing admin-role groups from the user and adds the target group (normalised keys).
 * **PATCH /users/:username/disable|enable** – toggles Cognito user status, with state checks to reject already-disabled or already-enabled rows.
 * **DELETE /users/:username/role** – removes all admin-role groups from the user (no new group added).

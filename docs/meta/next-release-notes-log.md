@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next "What's New" update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-05-01
+Last Updated: 2026-05-02
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -21,6 +21,11 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 - 2026-05-01 | Release TBD | Notifications | Manage Notifications | Staff email notification settings now apply to non-assignment events, with NWAC review split by approval, denial, and changes-requested outcomes. | Enabled staff rows with `email_alert=1` and a template send through SES once per deduped recipient; assignment emails keep their existing behavior, and TEST remains blocked from real sends.
 
+2026-05-02 | Release TBD | Notifications | Template Editor dashboard | Added explicit event timestamp fields for staff notification templates and a new `New secure message from applicant` DEV template that alerts staff without exposing secure-message content in email. | Supports safe staff email alerts for applicant-origin secure messages.
+2026-05-02 | Release TBD | Notifications | Manage Notifications | Split secure-message notification events into applicant-to-staff and staff-to-applicant directions. | Staff templates now belong on `Applicant secure message received`, while the applicant `"You've got secure mail"` template belongs on `Staff secure message sent`.
+2026-05-02 | Release TBD | Notifications | Secure messaging | Limited applicant-origin secure-message staff alerts to the assigned file owner plus case watchers when configured. | The inbound event no longer emails or bell-alerts every System/NWAC/Regional user just because that role row is enabled.
+2026-05-02 | Release TBD | UX/Auth | Manage Users > Administrative Users | Added editable staff Name and Display name fields to the selected user Profile tab. | Saves to the DB-backed staff profile so assignment, audit, and generated-document labels can be corrected without direct SQL.
+2026-05-02 | Release TBD | UX/Auth | Public portal registration | Made the existing-account message clearer for applicants whose case manager may have already set up their PATH account. | The registration page now points them to sign in if they know the password or use Reset or set password to activate access.
 2026-05-01 | Release TBD | Fix/Application workflow | Case and Application Workspaces | Fixed a bug where an older completed application on a client file could become the active application queue target after later client-file updates. | PATH now prefers open/current applications when resolving the case's primary application and blocks terminal applications from being moved back into review or document-request queues through case saves.
 2026-04-30 | Release TBD | Fix/Auth | Manage Users and staff sign-in | Fixed legacy sign-in fallbacks that could copy old Cognito custom identity or region values into staff access context. | Staff regional access now stays tied to PATH's database-backed staff profile and staff-region assignments; a separate dry-run cleanup helper can audit remaining legacy Cognito values.
 2026-04-30 | Release TBD | UX/Homepage | Work Queue > New Applications | Made a change so New Applications rows show Assign or Reassign directly in the table, while the applicant name remains the workspace link. | The redundant Open workspace row action is hidden for this queue to leave room for assignment actions.
@@ -246,6 +251,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Made a change so Bugs and Change Requests now has a dedicated dashboard under Support.
 - Made a change so staff email notification settings can send configured emails for non-assignment events, with NWAC review split by approval, denial, and changes-requested outcomes.
 - Made the Template Editor more powerful with grouped fields, scenario previews, and warnings for unsupported placeholders.
+- Made applicant-origin secure-message alerts go only to the assigned file owner plus configured case watchers.
+- Made staff Name and Display name editable from Administrative Users.
 - Fixed a bug where an older completed application on a client file could return to application queues after later client-file updates.
 - Fixed missing generated assessment documents on a small number of pending-decision records so the expected case manager assessment and redline PDFs are now available.
 - Fixed a bug where Regional Managers could see a Supporting Documents load error when Application Workspace was set to All documents.
@@ -260,6 +267,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les bogues et demandes de changement ont maintenant un tableau de bord dedie dans Support.
 - Les parametres de courriel du personnel peuvent maintenant envoyer des courriels configures pour les evenements qui ne sont pas des affectations, avec la revue NWAC separee par approbation, refus et demandes de changements.
 - L'editeur de modeles est plus complet, avec des champs groupes, des apercus par scenario et des avertissements pour les variables non prises en charge.
+- Les alertes de message securise provenant d'une personne candidate sont maintenant envoyees seulement au responsable du dossier et aux observateurs configures.
+- Le nom et le nom d'affichage du personnel peuvent maintenant etre modifies dans Utilisateurs administratifs.
 - Correction d'un probleme ou une ancienne demande completee dans un dossier client pouvait revenir dans les files de demandes apres des mises a jour du dossier client.
 - Les documents d'evaluation generes qui manquaient pour un petit nombre de dossiers en attente de decision ont ete ajoutes, y compris les PDF d'evaluation du gestionnaire de cas et de redline attendus.
 - Correction d'un probleme ou les gestionnaires regionaux pouvaient voir une erreur de chargement des documents justificatifs lorsque l'espace de travail de la demande etait regle sur Tous les documents.

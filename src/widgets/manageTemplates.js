@@ -52,6 +52,12 @@ const TOKEN_GROUPS = [
         label: 'Submission date',
         value: '{submission_date}',
         description: 'Date the application or workflow item was submitted.'
+      },
+      {
+        id: 'event_datetime',
+        label: 'Event date and time',
+        value: '{event_datetime}',
+        description: 'Date and time the notification event was recorded.'
       }
     ]
   },
@@ -95,6 +101,12 @@ const TOKEN_GROUPS = [
         label: 'Message from name',
         value: '{message_from_name}',
         description: 'Sender display name for message events.'
+      },
+      {
+        id: 'message_received_at',
+        label: 'Message received at',
+        value: '{message_received_at}',
+        description: 'Date and time a secure-message event was received.'
       }
     ]
   },
@@ -221,12 +233,14 @@ const BASE_PREVIEW_SAMPLE = {
   application_id: 'APP-2042',
   tracking_id: 'NWAC-1A2B3C',
   submission_date: 'Oct 24, 2025',
+  event_datetime: 'October 24, 2025 at 2:35 p.m. EDT',
   assessor_name: 'Casey Assessor',
   actor_name: 'Morgan Reviewer',
   event_message: 'A review update was recorded on this file.',
   portal_dashboard_url: 'https://portal.sample/dashboard',
   support_email: 'support@example.ca',
   message_subject: 'Follow-up question about your file',
+  message_received_at: 'October 24, 2025 at 2:35 p.m. EDT',
   decision_outcome: 'approved',
   decision_outcome_label: 'Approved',
   message_to_name: 'Jamie Applicant',
@@ -314,6 +328,8 @@ const PREVIEW_SCENARIOS = [
     tokenIds: [
       'applicant_name',
       'tracking_id',
+      'message_received_at',
+      'event_datetime',
       'message_subject',
       'message_to_name',
       'message_from_name',
