@@ -20,6 +20,7 @@ const ApplicationsWidgetHelp = () => (
 
     <h3>Working practice</h3>
     <ul>
+      <li>Use the list selector in the widget header to switch between active, new, assessment, pending-decision, decision-recorded, approved, denied, closed, flagged, or all applications.</li>
       <li>Search or sort the table when you need to find a specific applicant, tracking number, owner, province, or status.</li>
       <li>Refresh the widget after assignment changes or major updates made by another staff member.</li>
       <li>Use the Application Workspace for the real work: request documents, message the applicant, write notes, and complete the assessment there.</li>
@@ -41,6 +42,7 @@ For coordinators, treat this table as the place to identify which assigned appli
 
 Important guidance:
 - Explain the meaning of the main columns in staff language: status, Docs Requested age, timeline status, owner, and received date.
+- Explain that the header selector filters the server-paginated list by application status group, including Active, New, In Assessment, Pending Decision, Decision Recorded, Approved, Denied, Closed, My Flagged, and All.
 - Tell users to use View to open /application-case/{case_id} for detailed work.
 - Mention that coordinators only see applications assigned to them; regional managers and NWAC admins have broader scope.
 - Mention Assign/Reassign only when the user has a role that can see those actions.

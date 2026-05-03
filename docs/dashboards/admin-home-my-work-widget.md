@@ -2,7 +2,7 @@
 
 Purpose: document the live homepage Work Queue widget and the queues that drive the shared `Work Queue Items` table.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-04-30
+Last Updated: 2026-05-03
 
 ## Scope
 
@@ -15,6 +15,15 @@ Last Updated: 2026-04-30
   - `src/pages/home/widgets/IsetCoordinatorWorkQueueWidget.js`
   - `src/pages/home/widgets/WorkQueueItemsTableWidget.js`
 - Backend implementation: `isetadminserver.js`
+
+## Inline action policy
+
+- The item/applicant name in the `Item` column is the workspace link.
+- `Open workspace` is not shown as an inline action because it repeats the item link.
+- The `Actions` column is hidden when the selected queue has no secondary inline actions.
+- Rows show at most two inline actions.
+- `Assign` / `Reassign` is generally available for assignable application, case, watchlist, and conflict rows. It is suppressed for queues where assignment is not the row-level job, including decision, completion, approval, funding agreement, milestone/check-in, payment/proof, overdue, and escalation queues.
+- Assignment action labels are owner-aware: unassigned rows show `Assign`, and rows with an owner show `Reassign`.
 
 ## Current role behavior
 
@@ -37,27 +46,43 @@ Last Updated: 2026-04-30
 - `New Applications`
   - contains non-terminal applications whose normalized lifecycle status is still `submitted` and that are not yet in active assessment
   - this now includes both unassigned files and assigned files whose EI status has already been verified but that have not yet moved into `in_review`
-  - the item/applicant name opens the application workspace, so the inline `Open workspace` action is hidden in this queue
   - inline actions show `Assign` for unassigned rows and `Reassign` for rows that already have an owner; assigned rows can also show `Set Eligibility` when EI status is still pending
 - `Pending Assessment`
   - contains assigned non-terminal applications whose normalized lifecycle status is still `submitted` and whose EI status is still pending
   - this queue is currently visible to `Regional Manager` under the label `EI Check Needed`; for `NWAC Administrator`, those files are folded into `New Applications` instead of shown as a separate queue
   - `Awaiting EI status verification` is now a status qualifier within this queue instead of its own top-level queue card
+  - inline actions can show `Assign` / `Reassign` and `Set Eligibility`, capped at two actions
 - `In Assessment`
   - contains applications whose normalized lifecycle status is `in_review` or `awaiting_applicant`
   - applicant-wait states such as docs requested / closure-response now remain in this queue as qualifiers instead of their own top-level queue cards
+  - inline actions can show `Assign` / `Reassign` and, while EI status is pending, `Set Eligibility`
 - `Pending Decision`
   - is the final decision-stage queue in this pipeline
   - combines submitted application assessments plus new and revised intervention proposals waiting for decision
   - selecting it drives the shared items table into `Pending Decision Items` mode rather than opening a separate widget
   - detailed behavior for that table is documented in `docs/dashboards/admin-home-approvals-items-widget.md`
-  - decision actions are still completed from the workspace after opening the selected row
-  - `Open workspace` continues to pass explicit decision-entry context so the target workspace opens in a review-focused board layout and the relevant decision step instead of restoring a stale personal board or wizard position
+  - decision actions are completed from the workspace after opening the selected row from the `Item` column
+  - the selected row still passes explicit decision-entry context so the target workspace opens in a review-focused board layout and the relevant decision step instead of restoring a stale personal board or wizard position
 - `Pending Completion`
   - contains decision-recorded application files that still need post-decision follow-through before the application workflow is complete
   - currently includes approved outcomes from `/api/applications`, plus denied/declined outcomes only until the denial letter has been sent
   - sending the denial letter is the terminal follow-up action for denied applications, so records with `decisionLetterSent.denial` in case context are excluded from this queue
   - is visible across the admin/manager shared pipeline and as the renamed coordinator `funding-agreements` queue so the post-decision stage is represented consistently across role homepages
+  - has no inline action by default; staff open the workspace through the item link
+
+## Shared exception queues
+
+- `Unresolved Conflicts`
+  - inline actions are `Assign` / `Reassign` and `Resolve`
+  - reassigning a conflict row uses the normal case assignment modal and then revokes the declaring staff member's conflict where possible
+- `Exceptions & Escalations`
+  - assignment is suppressed because the queue action is escalation handling, not ownership management
+  - `NWAC Administrator` rows show `Respond` and `Resolve`
+  - `Regional Manager` rows show `Respond` and `Escalate to NWAC Administrator`
+- `Watchlist Hits`
+  - keeps assignment available so staff can route a matched file for manual review
+- `Overdue`
+  - has no inline action by default; staff open the workspace through the item link and handle the overdue work in context
 
 ## NWAC Administrator scope rule
 

@@ -2,6 +2,10 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-05-03
+- UX/Casework/DEV: Added a Case Management-style header selector to the Manage ISET Applications table so staff can filter the server-paginated application list by active, new, assessment, pending-decision, decision-recorded, approved, denied, closed, flagged, or all applications.
+- UX/Homepage/DEV: Cleaned up Work Queue inline row actions so item names are the workspace link, redundant `Open workspace` actions are removed, the `Actions` column hides when no secondary row actions exist, rows expose at most two inline actions, and assignable rows use owner-aware `Assign` / `Reassign` labels.
+
 ## 2026-05-02
 - UX/API/Auth/DEV: Administrative Users profile details now return and edit DB-backed staff `name` and `display_name` values from the selected user Profile tab, using a guarded profile-update endpoint instead of Cognito custom attributes.
 - Notifications/DEV: Split secure-message notification events by direction. Public-portal applicant-to-staff messages now emit `applicant_secure_message_received`, while admin case-workspace staff-to-applicant messages emit `staff_secure_message_sent`; DEV notification settings were moved so staff templates fire only for inbound applicant messages and applicant templates fire only for outbound staff messages.

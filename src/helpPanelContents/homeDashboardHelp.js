@@ -111,7 +111,7 @@ const HomeDashboardHelp = () => {
         <li>Use Work queue preferences to choose which queue cards are visible for your role.</li>
         <li>Use the tag icon in Work Queue Items to add or remove tagged items from your list.</li>
         {(isRegionalManager || isNwacAdmin) ? (
-          <li>Queue actions vary by role. In the Pending Decision queue, use <strong>Open workspace</strong> and complete the decision inside the workspace rather than from the table.</li>
+          <li>Queue actions vary by role. In the Pending Decision queue, open the row from the item name and complete the decision inside the workspace rather than from the table.</li>
         ) : null}
       </ul>
 

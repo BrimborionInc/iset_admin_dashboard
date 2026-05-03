@@ -41,6 +41,18 @@ import ApplicationsWidgetHelp from '../helpPanelContents/applicationsWidgetHelp'
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 const DEFAULT_VISIBLE_COLUMNS = ['watch','applicant_name','address_province','tracking_id','status','sla_risk','assigned_user_email','submitted_at','lock_state','actions'];
 const COLUMN_WIDTHS_STORAGE_KEY = 'applications-widget-column-widths';
+const APPLICATION_LIST_VIEW_OPTIONS = [
+  { label: 'Show Active Applications', value: 'active' },
+  { label: 'Show New Applications', value: 'submitted' },
+  { label: 'Show In Assessment', value: 'assessment' },
+  { label: 'Show Pending Decision', value: 'pending_decision' },
+  { label: 'Show Decision Recorded', value: 'decision_recorded' },
+  { label: 'Show Approved Applications', value: 'approved' },
+  { label: 'Show Denied Applications', value: 'denied' },
+  { label: 'Show Closed Applications', value: 'closed' },
+  { label: 'Show My Flagged Applications', value: 'flagged' },
+  { label: 'Show All Applications', value: 'all' },
+];
 const redactApplicantDisplay = (value) => {
   if (!value) {
     return '-';
@@ -221,7 +233,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
   const [watchMap, setWatchMap] = useState(() => new Map());
   const [watchLoading, setWatchLoading] = useState(true);
   const [watchPending, setWatchPending] = useState(new Set());
-  const [showWatchedOnly, setShowWatchedOnly] = useState(false);
+  const [applicationListView, setApplicationListView] = useState(APPLICATION_LIST_VIEW_OPTIONS[0]);
   const [alerts, setAlerts] = useState([]);
   const [slaTargets, setSlaTargets] = useState(SLA_DEFAULT_DAYS);
   const [autoAssignStatus, setAutoAssignStatus] = useState({ loading: true, enabled: null, error: null, rules: [] });
@@ -487,6 +499,37 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
     if (serverSearchText) {
       params.set('search', serverSearchText);
     }
+    switch (applicationListView?.value) {
+      case 'active':
+        params.set('excludeTerminal', 'true');
+        break;
+      case 'submitted':
+        params.set('statusGroup', 'submitted');
+        break;
+      case 'assessment':
+        params.set('statusGroup', 'assessment');
+        break;
+      case 'pending_decision':
+        params.set('statusGroup', 'pending_decision');
+        break;
+      case 'decision_recorded':
+        params.set('statusGroup', 'decision_recorded');
+        break;
+      case 'approved':
+        params.set('statusGroup', 'approved');
+        break;
+      case 'denied':
+        params.set('statusGroup', 'denied');
+        break;
+      case 'closed':
+        params.set('statusGroup', 'closed');
+        break;
+      case 'flagged':
+        params.set('watchedOnly', 'true');
+        break;
+      default:
+        break;
+    }
     setLoading(true); setError(null);
     apiFetch(`/api/applications?${params.toString()}`)
       .then(res => { if (!res.ok) throw new Error('Fetch failed'); return res.json(); })
@@ -494,7 +537,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
       .catch(() => { if (!cancelled) setError('Failed to load applications'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [pageSize, currentPageIndex, serverSearchText]);
+  }, [pageSize, currentPageIndex, serverSearchText, applicationListView]);
 
   useEffect(() => {
     const c = load();
@@ -791,7 +834,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
       ];
       return fields.some(v => v && String(v).toLowerCase().includes(s));
     })
-    .filter(i => !showWatchedOnly || i.__isWatched);
+    .filter(Boolean);
 
   const sortedItems = useMemo(() => {
     const { columnId, isDescending } = sortingState;
@@ -1039,7 +1082,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
     }
   }, [columnDefinitionsForTable, mergeColumnWidths]);
 
-  const effectiveTotal = showWatchedOnly ? sortedItems.length : totalCount;
+  const effectiveTotal = totalCount;
   const pagesCount = Math.max(1, Math.ceil(effectiveTotal / pageSize));
   const preferences = {
     pageSize,
@@ -1124,7 +1167,20 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
       }
       actions={
         <SpaceBetween direction="horizontal" size="xs">
-          {autoAssignBadge}
+          <div style={{ display: 'flex', alignItems: 'center', minHeight: '32px' }}>
+            {autoAssignBadge}
+          </div>
+          <Select
+            selectedOption={applicationListView}
+            options={APPLICATION_LIST_VIEW_OPTIONS}
+            disabled={applicationListView?.value === 'flagged' && watchLoading}
+            onChange={({ detail }) => {
+              setApplicationListView(detail.selectedOption || APPLICATION_LIST_VIEW_OPTIONS[0]);
+              setCurrentPageIndex(1);
+            }}
+            ariaLabel="Application list filter"
+            selectedAriaLabel="selected"
+          />
           <Button
             iconName="refresh"
             onClick={() => { setCurrentPageIndex(1); load(); }}

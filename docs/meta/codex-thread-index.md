@@ -2,7 +2,7 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-05-02
+Last Updated: 2026-05-03
 
 ## How to use
 
@@ -31,6 +31,25 @@ For each indexed thread/topic, keep:
 - `Status`: whether the note is current, partial, incomplete-title, or superseded
 
 ## Indexed Topics
+
+### Locate chat evidence
+
+- Codex task title: `Locate chat evidence`
+- Topic: recovery search for prior discussion about Manage ISET Applications filtering, followed by implementation of a Case Management-style application status selector on the ISET Applications widget
+- Keywords: `Locate chat evidence`, `Manage ISET Applications`, `ISET Applications`, `case-assignment-dashboard`, `ApplicationsWidget`, `Application list filter`, `Show Active Applications`, `Show Approved Applications`, `Show Denied Applications`, `Show My Flagged Applications`, `statusGroup`, `watchedOnly`, `Auto assignment on`, `Search`
+- When to open: the user asks whether there was prior chat evidence for application-list filtering, asks why the Manage ISET Applications table has a header selector, wants to adjust the status filter options/order/placement, asks what the Applications table Search box searches, or wants to compare the applications table selector with the `/iset/cases` Case Management selector.
+- Primary docs:
+  - `docs/AGENTS.md`
+  - `docs/meta/changelog.md`
+  - `src/widgets/ApplicationsWidget.js`
+  - `isetadminserver.js`
+  - `src/server/caseWatchRepository.js`
+  - `src/helpPanelContents/applicationsWidgetHelp.js`
+  - `src/helpPanelContents/caseAssignmentDashboardHelp.js`
+  - `src/pages/Caseworking/portfolio/widgets/CasesTableWidget.jsx`
+- Status: current as of 2026-05-03
+- Notes: this thread first checked `docs/meta/codex-thread-index.md` and related docs for evidence of an earlier chat about better filtering in the ISET Applications widget on `/case-assignment-dashboard`. No direct indexed prior-thread evidence was found. The closest historical evidence was `docs/change-requests/CR-0001-watchlist.md`, which documented a “My watched cases” filter, and code in `src/widgets/ApplicationsWidget.js` that still had watch/filter state from that era. Bill then clarified the desired pattern by pointing to `/iset/cases`, where `CasesTableWidget` puts a Cloudscape `Select` in the `Header` actions. The DEV implementation added an equivalent header action selector to `ApplicationsWidget`, ordered as auto-assignment badge, selector, refresh button, with light flex centering around the badge. The selector options are `Show Active Applications`, `Show New Applications`, `Show In Assessment`, `Show Pending Decision`, `Show Decision Recorded`, `Show Approved Applications`, `Show Denied Applications`, `Show Closed Applications`, `Show My Flagged Applications`, and `Show All Applications`.
+- Notes: backend support was added to `/api/applications` through `statusGroup` and `watchedOnly` query parameters so filtering stays server-side with pagination/counts. `statusGroup` maps to application lifecycle/status/decision filters for submitted, assessment, pending decision, decision recorded, approved, denied, and closed/archived. The flagged view uses `iset_case_watch` via the exported `resolveWatchColumn()` helper to preserve compatibility with the table's current `staff_profile_id`/legacy `user_id` column shape. The existing Search box remains a text search over practical table-facing fields: tracking ID, applicant name/source-name variants, application/case status text, assigned owner email, lock owner name/email, and province; it does not meaningfully search computed overdue label, received date, flag state, or arbitrary application payload answers.
 
 ### Locate templates chat history
 
@@ -452,6 +471,22 @@ For each indexed thread/topic, keep:
   - `docs/AGENTS.md`
 - Status: current as of 2026-04-05
 - Notes: the current operating rule is that client-file import creates only the client plus application-less case, while historical plans/interventions are added later through Case Header backload actions. Those backload actions stay silent, and `manual_backload` interventions stay silent on later edit/close flows too: no approval routing, checklist progression, notifications, payment-packet generation, or finance-email side effects. They must still preserve real lifecycle state: archived plans are read-only, closed plans can receive only completed/cancelled interventions, in-progress or suspended interventions require an active plan, and historical start/result/end dates now seed the stored lifecycle timestamps used by the workspace. Finance handling is now history-only: `actual amount` on a backloaded intervention writes a posted historical ledger entry for reporting/budget burn, while unpaid remainder should move into a new live intervention. Coordinator-facing Case Workspace help panels and embedded AI chat context now explicitly coach staff through these backload actions instead of assuming only normal post-approval casework.
+
+### Locate quick action display rules
+
+- Codex task title: `Locate quick action display rules`
+- Topic: current Case Header display gate for `Add existing action plan` and `Add existing intervention`, plus future design note about allowing historical backload on application-backed cases
+- Keywords: `Locate quick action display rules`, `backload eligible`, `Add existing action plan`, `Add existing intervention`, `application-backed case`, `application-less case`, `manual_backload`, `historical action plan`, `historical intervention`, `quick action gate`, `caseData.applicationId`
+- When to open: the user asks why the existing-plan or existing-intervention quick actions are hidden, asks what "backload eligible" means, asks whether to remove the no-linked-application condition, or asks for prior reasoning about historical backload on cases that also have applications.
+- Primary docs:
+  - `docs/planning/case-workspace-quick-actions.md`
+  - `docs/guides/client-file-imports.md`
+  - `docs/widgets/admin/case-header-widget.md`
+  - `docs/AGENTS.md`
+  - `src/pages/Caseworking/caseWorkspace/widgets/CaseHeaderWidget.jsx`
+  - `isetadminserver.js`
+- Status: discussion captured only; no code behavior changed as of 2026-05-03
+- Notes: current UI behavior is controlled in `CaseHeaderWidget.jsx`: the backload actions show when the case exists, the case is not archived, and the workspace payload has no `applicationId` / `application_id`. The backend workspace payload derives `application_id` from the primary `iset_application` row whose `case_id` points at the case; `iset_case.application_id` is not the active model. The discussion concluded there is no obvious hard data-model reason to keep the application-less UI gate for existing action plans/interventions, because action plans and interventions are case-level records and the backend backload submit paths already use case/action-plan scope. The real risks are product/reporting meaning and workflow bypass: `manual_backload` records are real case records that can affect case history, ILMP validation/export readiness, budget burn, finance reporting, and active-plan conflicts while intentionally skipping approval routing, assessment PDFs, CFA versions, payment packets, checklist progression, and applicant notifications. If this is implemented later, prefer explicit historical labels/copy, preserve `metadata.source = 'manual_backload'` and `metadata.entryMode = 'existing'`, keep lifecycle/payment guardrails, and decide separately whether `Upload existing documents` should also be widened because it currently shares the same eligibility flag.
 
 ### Application-less case documents with linked PATH accounts
 

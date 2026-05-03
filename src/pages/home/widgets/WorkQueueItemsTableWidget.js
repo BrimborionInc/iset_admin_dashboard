@@ -61,6 +61,26 @@ const EI_ELIGIBILITY_ROLE_KEYS = new Set([
   'nwacadministrator',
   'regionalmanager'
 ]);
+const MAX_INLINE_ACTIONS = 2;
+const NO_ASSIGNMENT_BUCKET_IDS = new Set([
+  'active-clients-checkins',
+  'approvals-pipeline',
+  'exceptions-escalations',
+  'followups-closure',
+  'funding-agreements',
+  'overdue',
+  'payments-issues',
+  'payments-proof-due',
+  'pending-completion',
+  'pending-decision'
+]);
+const NO_ASSIGNMENT_ITEM_TYPES = new Set([
+  'Agreement',
+  'AwaitingApproval',
+  'InterventionApproval',
+  'InterventionMilestone',
+  'Payment'
+]);
 const normalizeRoleKey = value =>
   String(value || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
 
@@ -118,6 +138,8 @@ const resolveCaseId = item => {
   const numeric = Number(raw);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
 };
+
+const resolveConflictStaffProfileId = item => item?.staffProfileId || item?.staff_profile_id || null;
 
 const PROVINCE_LABELS = {
   ab: 'Alberta',
@@ -626,18 +648,7 @@ const columnDefinitionsByKey = {
   actions: {
     id: 'actions',
     header: 'Actions',
-    cell: item => (
-      <Link
-        href={getWorkspacePath(item) || '#'}
-        onFollow={event => {
-          if (!getWorkspacePath(item)) {
-            event.preventDefault();
-          }
-        }}
-      >
-        Open workspace
-      </Link>
-    )
+    cell: () => null
   }
 };
 
@@ -801,7 +812,7 @@ const WorkQueueItemsTableWidget = ({
   const shouldWrapLines = !isMetricMode && selectedBucket && ['exceptions-escalations', 'unresolved-conflicts'].includes(selectedBucket.id);
   const sourceItems = isMetricMode ? metricItems : items;
   const queueDescription = !isMetricMode && selectedBucketId === 'pending-decision'
-    ? 'Application assessments, new intervention proposals, and proposed intervention changes waiting for a decision. Use Open workspace to open the review layout and record the decision in the workspace.'
+    ? 'Application assessments, new intervention proposals, and proposed intervention changes waiting for a decision. Select an item to open the review layout and record the decision in the workspace.'
     : selectedBucket?.description || selectedBucket?.label;
 
   const decoratedItems = useMemo(() => {
@@ -890,6 +901,190 @@ const WorkQueueItemsTableWidget = ({
     setEscalationNote('');
     setEscalationError(null);
   }, []);
+
+  const openEligibilityModal = useCallback((item) => {
+    setEligibilityTarget(item);
+    setSelectedEligibility(
+      item.assessment_esdc_eligibility
+        ? { value: item.assessment_esdc_eligibility, label: item.assessment_esdc_eligibility }
+        : null
+    );
+    const applicantIdFromItem =
+      item.applicant_user_id ||
+      item.applicantUserId ||
+      item.user_id ||
+      item.userId ||
+      null;
+    setEligibilityApplicantId(applicantIdFromItem);
+    setEligibilityFile(null);
+    setEligibilityFileError(null);
+    setEligibilityError(null);
+    setEligibilityModalVisible(true);
+  }, []);
+
+  const canOfferAssignmentAction = useCallback((item) => {
+    if (isAssessor) return false;
+    if (!resolveCaseId(item)) return false;
+    if (NO_ASSIGNMENT_BUCKET_IDS.has(item?.bucketId)) return false;
+    if (NO_ASSIGNMENT_ITEM_TYPES.has(item?.type)) return false;
+    return true;
+  }, [isAssessor]);
+
+  const getInlineActionKeys = useCallback((item) => {
+    const actionKeys = [];
+    const addAction = key => {
+      if (!key || actionKeys.includes(key) || actionKeys.length >= MAX_INLINE_ACTIONS) return;
+      actionKeys.push(key);
+    };
+    const bucketId = item?.bucketId;
+    const assignedOwner = hasAssignedOwner(item);
+
+    if (bucketId === 'exceptions-escalations') {
+      if (role !== 'NWAC Administrator' && role !== 'Regional Manager') {
+        return actionKeys;
+      }
+      addAction('respond-escalation');
+      addAction(role === 'Regional Manager' ? 'escalate-up' : 'resolve-escalation');
+      return actionKeys;
+    }
+
+    if (bucketId === 'unresolved-conflicts') {
+      if (canOfferAssignmentAction(item)) {
+        addAction('assign');
+      }
+      if (resolveCaseId(item) && resolveConflictStaffProfileId(item)) {
+        addAction('resolve-conflict');
+      }
+      return actionKeys;
+    }
+
+    if (bucketId === 'new-applications') {
+      if (canOfferAssignmentAction(item)) {
+        addAction('assign');
+      }
+      if (
+        assignedOwner &&
+        isEligibilityPending(item.assessment_esdc_eligibility) &&
+        canManageEiEligibility
+      ) {
+        addAction('set-eligibility');
+      }
+      return actionKeys;
+    }
+
+    const canSetEligibilityFromPipeline =
+      ['pending-assessment', 'in-assessment'].includes(bucketId) &&
+      isEligibilityPending(item.assessment_esdc_eligibility);
+    if (canSetEligibilityFromPipeline) {
+      if (canOfferAssignmentAction(item)) {
+        addAction('assign');
+      }
+      if (canManageEiEligibility) {
+        addAction('set-eligibility');
+      }
+      return actionKeys;
+    }
+
+    if (canOfferAssignmentAction(item)) {
+      addAction('assign');
+    }
+    return actionKeys;
+  }, [canManageEiEligibility, canOfferAssignmentAction, role]);
+
+  const renderInlineAction = useCallback((actionKey, item) => {
+    if (actionKey === 'assign') {
+      return (
+        <Link
+          key="assign"
+          href="#"
+          onFollow={event => {
+            event.preventDefault();
+            setAssignTarget(item);
+            setAssignModalVisible(true);
+          }}
+        >
+          {getAssignmentActionLabel(item)}
+        </Link>
+      );
+    }
+    if (actionKey === 'set-eligibility') {
+      return (
+        <Link
+          key="set-eligibility"
+          href="#"
+          onFollow={event => {
+            event.preventDefault();
+            openEligibilityModal(item);
+          }}
+        >
+          Set Eligibility
+        </Link>
+      );
+    }
+    if (actionKey === 'respond-escalation') {
+      return (
+        <Link
+          key="respond-escalation"
+          href="#"
+          onFollow={event => {
+            event.preventDefault();
+            openEscalationModal(item, 'respond');
+          }}
+        >
+          Respond
+        </Link>
+      );
+    }
+    if (actionKey === 'escalate-up') {
+      return (
+        <Link
+          key="escalate-up"
+          href="#"
+          onFollow={event => {
+            event.preventDefault();
+            openEscalationModal(item, 'escalate_up');
+          }}
+        >
+          Escalate to NWAC Administrator
+        </Link>
+      );
+    }
+    if (actionKey === 'resolve-escalation') {
+      return (
+        <Link
+          key="resolve-escalation"
+          href="#"
+          onFollow={event => {
+            event.preventDefault();
+            openEscalationModal(item, 'resolve');
+          }}
+        >
+          Resolve
+        </Link>
+      );
+    }
+    if (actionKey === 'resolve-conflict') {
+      return (
+        <Link
+          key="resolve-conflict"
+          href="#"
+          onFollow={event => {
+            event.preventDefault();
+            setResolveTarget(item);
+          }}
+        >
+          Resolve
+        </Link>
+      );
+    }
+    return null;
+  }, [openEligibilityModal, openEscalationModal]);
+
+  const hasInlineActions = useMemo(
+    () => !isMetricMode && tableItems.some(item => getInlineActionKeys(item).length > 0),
+    [getInlineActionKeys, isMetricMode, tableItems]
+  );
+
   const resolveEscalationId = item => item?.escalation_id || item?.escalationId || null;
   const resolveEscalationApplicationId = item => item?.application_id || item?.applicationId || null;
   const handleEscalationSubmit = useCallback(async () => {
@@ -1168,6 +1363,9 @@ const WorkQueueItemsTableWidget = ({
         }
         const base = columnDefinitionsByKey[key];
         if (!base) return null;
+        if (base.id === 'actions' && !hasInlineActions) {
+          return null;
+        }
         const widthOverride = widthsMap.get(base.id);
         if (base.id === 'metricSubject') {
           return {
@@ -1292,209 +1490,11 @@ const WorkQueueItemsTableWidget = ({
             ...base,
             width: widthOverride,
             cell: item => {
-              const workspacePath = getWorkspacePath(item);
-              const showWorkspaceAction = item.bucketId !== 'new-applications';
-              if (isMetricMode) {
-                return (
-                  <Link
-                    href={workspacePath || '#'}
-                    onFollow={event => {
-                      if (!workspacePath) {
-                        event.preventDefault();
-                      }
-                    }}
-                  >
-                    Open workspace
-                  </Link>
-                );
-              }
+              const actionKeys = getInlineActionKeys(item);
+              if (!actionKeys.length) return null;
               return (
                 <SpaceBetween size="xs" direction="horizontal" alignItems="center">
-                  {showWorkspaceAction ? (
-                    <Link
-                      href={workspacePath || '#'}
-                      onFollow={event => {
-                        if (!workspacePath) {
-                          event.preventDefault();
-                        }
-                      }}
-                    >
-                      Open workspace
-                    </Link>
-                  ) : null}
-                  {(() => {
-                    const isEscalationBucket = item.bucketId === 'exceptions-escalations';
-                    const canEscalationActions = role === 'NWAC Administrator' || role === 'Regional Manager';
-                    if (isEscalationBucket && canEscalationActions) {
-                      return (
-                        <SpaceBetween size="xxs" direction="horizontal">
-                          <Link
-                            href="#"
-                            onFollow={event => {
-                              event.preventDefault();
-                              openEscalationModal(item, 'respond');
-                            }}
-                          >
-                            Respond
-                          </Link>
-                          {role === 'Regional Manager' && (
-                            <Link
-                              href="#"
-                              onFollow={event => {
-                                event.preventDefault();
-                                openEscalationModal(item, 'escalate_up');
-                              }}
-                            >
-                              Escalate to NWAC Administrator
-                            </Link>
-                          )}
-                          <Link
-                            href="#"
-                            onFollow={event => {
-                              event.preventDefault();
-                              openEscalationModal(item, 'resolve');
-                            }}
-                          >
-                            Resolve
-                          </Link>
-                        </SpaceBetween>
-                      );
-                    }
-                    if (item.bucketId === 'unresolved-conflicts') {
-                      const assignLabel = getAssignmentActionLabel(item);
-                      return (
-                        <SpaceBetween size="xxs" direction="horizontal">
-                          <Link
-                            href="#"
-                            onFollow={event => {
-                              event.preventDefault();
-                              setAssignTarget(item);
-                              setAssignModalVisible(true);
-                            }}
-                          >
-                            {assignLabel}
-                          </Link>
-                        </SpaceBetween>
-                      );
-                    }
-                    const assignedOwner = hasAssignedOwner(item);
-                    if (item.bucketId === 'new-applications') {
-                      if (isAssessor) {
-                        return null;
-                      }
-                      const canSetEligibility =
-                        assignedOwner &&
-                        isEligibilityPending(item.assessment_esdc_eligibility) &&
-                        canManageEiEligibility;
-                      return (
-                        <SpaceBetween size="xxs" direction="horizontal">
-                          <Link
-                            href="#"
-                            onFollow={event => {
-                              event.preventDefault();
-                              setAssignTarget(item);
-                              setAssignModalVisible(true);
-                            }}
-                          >
-                            {getAssignmentActionLabel(item)}
-                          </Link>
-                          {canSetEligibility ? (
-                            <Link
-                              href="#"
-                              onFollow={event => {
-                                event.preventDefault();
-                                setEligibilityTarget(item);
-                                setSelectedEligibility(
-                                  item.assessment_esdc_eligibility
-                                    ? { value: item.assessment_esdc_eligibility, label: item.assessment_esdc_eligibility }
-                                    : null
-                                );
-                                const applicantIdFromItem =
-                                  item.applicant_user_id ||
-                                  item.applicantUserId ||
-                                  item.user_id ||
-                                  item.userId ||
-                                  null;
-                                setEligibilityApplicantId(applicantIdFromItem);
-                                setEligibilityFile(null);
-                                setEligibilityFileError(null);
-                                setEligibilityError(null);
-                                setEligibilityModalVisible(true);
-                              }}
-                            >
-                              Set Eligibility
-                            </Link>
-                          ) : null}
-                        </SpaceBetween>
-                      );
-                    }
-                    const canSetEligibilityFromPipeline =
-                      (
-                        ['pending-assessment', 'in-assessment'].includes(item.bucketId) ||
-                        (item.bucketId === 'new-applications' && assignedOwner)
-                      ) &&
-                      isEligibilityPending(item.assessment_esdc_eligibility);
-                    if (canSetEligibilityFromPipeline) {
-                      if (!canManageEiEligibility) {
-                        return null;
-                      }
-                      return (
-                        <SpaceBetween size="xxs" direction="horizontal">
-                          <Link
-                            href="#"
-                            onFollow={event => {
-                              event.preventDefault();
-                              setEligibilityTarget(item);
-                              setSelectedEligibility(
-                                item.assessment_esdc_eligibility
-                                  ? { value: item.assessment_esdc_eligibility, label: item.assessment_esdc_eligibility }
-                                  : null
-                              );
-                              const applicantIdFromItem =
-                                item.applicant_user_id ||
-                                item.applicantUserId ||
-                                item.user_id ||
-                                item.userId ||
-                                null;
-                              setEligibilityApplicantId(applicantIdFromItem);
-                              setEligibilityFile(null);
-                              setEligibilityFileError(null);
-                              setEligibilityError(null);
-                              setEligibilityModalVisible(true);
-                            }}
-                          >
-                            Set Eligibility
-                          </Link>
-                        </SpaceBetween>
-                      );
-                    }
-                    if (
-                      item.bucketId === 'pending-decision' ||
-                      item.bucketId === 'pending-completion' ||
-                      item.type === 'AwaitingApproval' ||
-                      item.type === 'InterventionApproval'
-                    ) {
-                      return null;
-                    }
-                    if (item.bucketId === 'overdue') {
-                      return null;
-                    }
-                    if (isAssessor) {
-                      return null;
-                    }
-                    return (
-                      <Link
-                        href="#"
-                        onFollow={event => {
-                          event.preventDefault();
-                          setAssignTarget(item);
-                          setAssignModalVisible(true);
-                        }}
-                      >
-                        Assign
-                      </Link>
-                    );
-                  })()}
+                  {actionKeys.map(actionKey => renderInlineAction(actionKey, item))}
                 </SpaceBetween>
               );
             }
@@ -1512,10 +1512,10 @@ const WorkQueueItemsTableWidget = ({
     selectedBucketId,
     slaTargets,
     columnWidths,
-    role,
     isAssessor,
-    canManageEiEligibility,
-    openEscalationModal,
+    hasInlineActions,
+    getInlineActionKeys,
+    renderInlineAction,
     watchPending,
     handleToggleWatch
   ]);
@@ -1531,7 +1531,7 @@ const WorkQueueItemsTableWidget = ({
       : 'Select a work queue to see items.';
 
   useEffect(() => {
-    if (!assignModalVisible || !assignTarget || !(assignTarget.case_id || assignTarget.caseId)) {
+    if (!assignModalVisible || !assignTarget || !resolveCaseId(assignTarget)) {
       return undefined;
     }
     let cancelled = false;
@@ -1567,7 +1567,7 @@ const WorkQueueItemsTableWidget = ({
   }, [assignModalVisible, assignTarget]);
 
   const handleAssignSubmit = async () => {
-    const caseId = assignTarget?.case_id || assignTarget?.caseId;
+    const caseId = resolveCaseId(assignTarget);
     if (!caseId || !selectedAssignee?.value) {
       setAssignError('Select an assignee.');
       return;
@@ -1583,12 +1583,13 @@ const WorkQueueItemsTableWidget = ({
       if (!response.ok) {
         throw new Error('assign_failed');
       }
-      if (assignTarget?.bucketId === 'unresolved-conflicts' && assignTarget?.staffProfileId) {
+      const conflictStaffProfileId = resolveConflictStaffProfileId(assignTarget);
+      if (assignTarget?.bucketId === 'unresolved-conflicts' && conflictStaffProfileId) {
         try {
           await apiFetch(`/api/cases/${caseId}/conflicts/revoke`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ staff_profile_id: assignTarget.staffProfileId })
+            body: JSON.stringify({ staff_profile_id: conflictStaffProfileId })
           });
         } catch (_) {
           // non-fatal
@@ -1732,16 +1733,18 @@ const WorkQueueItemsTableWidget = ({
   };
 
   const handleResolveConfirm = async () => {
-    if (!resolveTarget?.case_id || !resolveTarget?.staffProfileId) {
+    const caseId = resolveCaseId(resolveTarget);
+    const conflictStaffProfileId = resolveConflictStaffProfileId(resolveTarget);
+    if (!caseId || !conflictStaffProfileId) {
       setResolveTarget(null);
       return;
     }
     setResolveSubmitting(true);
     try {
-      const resp = await apiFetch(`/api/cases/${resolveTarget.case_id}/conflicts/resolve`, {
+      const resp = await apiFetch(`/api/cases/${caseId}/conflicts/resolve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ staff_profile_id: resolveTarget.staffProfileId })
+        body: JSON.stringify({ staff_profile_id: conflictStaffProfileId })
       });
       if (!resp.ok) {
         throw new Error('resolve_failed');

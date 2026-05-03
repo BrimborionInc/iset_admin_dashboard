@@ -17,7 +17,7 @@ const HomeWorkQueueItemsHelp = () => (
       when there is a direct action to take from the table.
     </Box>
     <Box>
-      In the <strong>Pending Decision</strong> queue, use <strong>Open workspace</strong> to complete the
+      In the <strong>Pending Decision</strong> queue, select the applicant or item name to complete the
       review. Approval decisions are handled inside the workspace rather than as inline table actions.
     </Box>
     <Box>
@@ -39,8 +39,8 @@ Keep answers operational:
 - Help the user identify which row to open next.
 - Mention search, sort, column resizing, item-name workspace links, and tagging.
 - In coordinator-focused answers, emphasize that this table is a launching point into the detailed application or case workspace where notes, messaging, documents, and assessment are actually handled.
-- Clarify that the Pending Decision queue uses Open workspace only and that approval decisions happen inside the workspace.
-- Clarify that New Applications rows use Assign/Reassign inline actions, while the applicant name opens the workspace.
+- Clarify that the Pending Decision queue opens through the applicant/item name and that approval decisions happen inside the workspace.
+- Clarify that assignable rows can use Assign/Reassign inline actions, while the applicant or item name opens the workspace.
 - Mention queue-specific inline actions only when they are visible for the current queue.
 - Mention Back to work queue when the table is showing metric results.
 `;

@@ -27,6 +27,7 @@ const {
   createCaseWatch,
   deleteCaseWatch,
   listCaseWatchesForUser,
+  resolveWatchColumn,
 } = require('./src/server/caseWatchRepository');
 const {
   dispatchInternalNotifications,
@@ -77005,6 +77006,8 @@ app.get('/api/applications', async (req, res) => {
     const { status, limit = 50, offset = 0 } = req.query;
     const searchText = String(firstQueryValue(req.query.search) || '').trim();
     const searchTerm = searchText ? `%${searchText.toLowerCase()}%` : null;
+    const statusGroup = String(firstQueryValue(req.query.statusGroup) || '').trim().toLowerCase();
+    const watchedOnly = ['1', 'true', 'yes'].includes(String(firstQueryValue(req.query.watchedOnly) || '').trim().toLowerCase());
     const excludeTerminalRaw = firstQueryValue(req.query.excludeTerminal);
     const excludeTerminal = ['1', 'true', 'yes'].includes(String(excludeTerminalRaw || '').trim().toLowerCase());
     const role = req.auth.role;
@@ -77054,6 +77057,7 @@ app.get('/api/applications', async (req, res) => {
     const submissionFullNameExpr = `TRIM(CONCAT_WS(' ', ${submissionFirstNameExpr}, ${submissionLastNameExpr}))`;
     const normalizedApplicationLifecycleSearchExpr = `LOWER(REPLACE(TRIM(COALESCE(${applicationLifecycleStatusExpr}, '')), '_', ' '))`;
     const normalizedApplicationStatusSearchExpr = `LOWER(REPLACE(TRIM(COALESCE(a.status, '')), '_', ' '))`;
+    const normalizedDecisionOutcomeExpr = `LOWER(REPLACE(TRIM(COALESCE(a.decision_outcome, '')), ' ', '_'))`;
     const normalizedCaseStatusSearchExpr = `LOWER(REPLACE(TRIM(COALESCE(c.status, '')), '_', ' '))`;
     const asSearchableLower = expression => `LOWER(COALESCE(${expression}, ''))`;
     const baseSearchClauses = [
@@ -77094,6 +77098,41 @@ app.get('/api/applications', async (req, res) => {
       `${normalizedApplicationLifecycleSearchExpr} LIKE ?`,
       `${normalizedApplicationStatusSearchExpr} LIKE ?`
     ];
+    const addStatusGroupFilter = (clauses, values) => {
+      switch (statusGroup) {
+        case 'submitted':
+          clauses.push(`${applicationLifecycleStatusExpr} = ?`);
+          values.push('submitted');
+          break;
+        case 'assessment':
+          clauses.push(`${applicationLifecycleStatusExpr} IN (?, ?)`);
+          values.push('in_review', 'awaiting_applicant');
+          break;
+        case 'pending_decision':
+          clauses.push(`${applicationLifecycleStatusExpr} = ?`);
+          values.push('pending_decision');
+          break;
+        case 'decision_recorded':
+          clauses.push(`${applicationLifecycleStatusExpr} = ?`);
+          values.push('decision_recorded');
+          break;
+        case 'approved':
+          clauses.push(`(${normalizedDecisionOutcomeExpr} IN (?, ?) OR ${applicationStatusExpr} IN (?, ?))`);
+          values.push('approved', 'approve', 'approved', 'completed');
+          break;
+        case 'denied':
+          clauses.push(`(${normalizedDecisionOutcomeExpr} IN (?, ?, ?, ?) OR ${applicationStatusExpr} IN (?, ?, ?, ?))`);
+          values.push('denied', 'deny', 'rejected', 'declined', 'denied', 'deny', 'rejected', 'declined');
+          break;
+        case 'closed':
+          clauses.push(`${applicationLifecycleStatusExpr} IN (?, ?)`);
+          values.push('closed', 'archived');
+          break;
+        default:
+          break;
+      }
+    };
+    const watchColumnName = watchedOnly ? await resolveWatchColumn(pool) : null;
 
     // Base case + application join using new lean model.
     // Assignment user now from staff_profiles (nullable); tracking_id fallback derived from payload_json->submission_snapshot.reference_number if tracking_id column absent.
@@ -77157,6 +77196,12 @@ app.get('/api/applications', async (req, res) => {
       where.push(`(${baseSearchClauses.join(' OR ')})`);
       params.push(...baseSearchClauses.map(() => searchTerm));
     }
+    addStatusGroupFilter(where, params);
+    if (watchedOnly) {
+      if (!req.staffProfile?.id) return res.json({ count: 0, rows: [] });
+      where.push(`EXISTS (SELECT 1 FROM iset_case_watch cw_filter WHERE cw_filter.case_id = c.id AND cw_filter.${watchColumnName} = ?)`);
+      params.push(req.staffProfile.id);
+    }
     if (archivedFilter) {
       where.push(archivedFilter);
     }
@@ -77215,6 +77260,10 @@ app.get('/api/applications', async (req, res) => {
       if (searchText) {
         unassignedWhereClauses.push(`(${unassignedSearchClauses.join(' OR ')})`);
         unassignedParams.push(...unassignedSearchClauses.map(() => searchTerm));
+      }
+      addStatusGroupFilter(unassignedWhereClauses, unassignedParams);
+      if (watchedOnly) {
+        unassignedWhereClauses.push('1 = 0');
       }
       if (archivedFilter) {
         unassignedWhereClauses.push(archivedFilter);
@@ -77287,6 +77336,10 @@ app.get('/api/applications', async (req, res) => {
         if (searchText) {
           unassignedWhereClauses.push(`(${unassignedSearchClauses.join(' OR ')})`);
           unassignedParams.push(...unassignedSearchClauses.map(() => searchTerm));
+        }
+        addStatusGroupFilter(unassignedWhereClauses, unassignedParams);
+        if (watchedOnly) {
+          unassignedWhereClauses.push('1 = 0');
         }
         if (archivedFilter) {
           unassignedWhereClauses.push(archivedFilter);

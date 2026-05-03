@@ -2,8 +2,8 @@
 
 Purpose: Capture the design decisions, rules, and implementation notes for Case Workspace quick actions.
 Audience: Caseworking feature owners, frontend engineers, and QA.
-Last Updated: 2026-04-28
-Status: Complete
+Last Updated: 2026-05-03
+Status: Complete for current behavior; future backload-scope consideration open
 
 ## Scope
 Define a master list of quick actions for the Case Workspace header and map each action to role + case status rules, including actions that reconfigure the Cloudscape board layout.
@@ -18,6 +18,8 @@ Display/conversation roles (Cognito group names are inconsistent; map to these l
 ## Master Action List (Draft)
 - Assign / reassign
 - Propose new intervention / resume current proposal
+- Add existing action plan (current UI gate: application-less, non-archived cases)
+- Add existing intervention (current UI gate: application-less, non-archived cases)
 - Manage plans and interventions
 - View notes and case calendar
 - Documents and messages
@@ -41,6 +43,8 @@ Display/conversation roles (Cognito group names are inconsistent; map to these l
 - Assign / reassign should emit an event per the events catalog/emitter.
 - Propose new intervention visibility: all roles see/use this action.
 - Propose new intervention label: when an intervention proposal is already open, the quick action relabels to resume, update, or view the pending intervention proposal/change instead of advertising a new proposal.
+- Backload quick-action current visibility: `Add existing action plan`, `Add existing intervention`, and `Upload existing documents` are shown only when the case exists, the case is not `archived`, and the workspace payload has no linked `applicationId` / `application_id`.
+- Backload quick-action current data meaning: a missing `application_id` means no `iset_application` row currently points at the case through `iset_application.case_id`; application-backed case context is derived from that relationship, not from `iset_case.application_id`.
 - Manage plans and interventions visibility: all roles (board layout action).
 - Manage plans and interventions status gating: all statuses (layout-only action).
 - View notes and case calendar visibility: all roles (board layout action).
@@ -93,6 +97,8 @@ Display/conversation roles (Cognito group names are inconsistent; map to these l
 
 ## Deferred Items
 - Clarify whether `dormant` is intended to imply all action plans/interventions are terminal; note that `ready_to_close` is a distinct status in code and the ready-to-close API validates open plans/interventions.
+- Future consideration: users have asked for the flexibility to add old action plans and old interventions to cases that also have applications. There is no obvious hard data-model blocker because action plans and interventions are case-level records, and the backend backload submit paths already key to case/action-plan scope rather than requiring an application-less case. The main risk is product/reporting meaning: `manual_backload` records are real case records that can affect case history, ILMP validation/export readiness, budget burn, finance reporting, and active-plan conflicts while intentionally skipping approval routing, assessment PDFs, CFA versions, payment packets, checklist progression, and applicant notifications.
+- If the application-less condition is removed later, do not make it a blind menu unlock. Preferred direction from the 2026-05-03 design discussion: make the labels and modal copy explicitly historical, keep `metadata.source = 'manual_backload'` and `metadata.entryMode = 'existing'`, keep payment-packet blocking and lifecycle validation, and decide whether `Upload existing documents` should be extended separately because it currently shares the same UI eligibility flag.
 
 ## Implementation Progress
 - [x] Add quick action layout presets and layout-switch event handler.

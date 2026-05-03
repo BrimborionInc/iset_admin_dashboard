@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next "What's New" update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-05-02
+Last Updated: 2026-05-03
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -26,9 +26,9 @@ Landing-page release-notes model: the build now generates the landing-page notes
 2026-05-02 | Release TBD | Notifications | Secure messaging | Limited applicant-origin secure-message staff alerts to the assigned file owner plus case watchers when configured. | The inbound event no longer emails or bell-alerts every System/NWAC/Regional user just because that role row is enabled.
 2026-05-02 | Release TBD | UX/Auth | Manage Users > Administrative Users | Added editable staff Name and Display name fields to the selected user Profile tab. | Saves to the DB-backed staff profile so assignment, audit, and generated-document labels can be corrected without direct SQL.
 2026-05-02 | Release TBD | UX/Auth | Public portal registration | Made the existing-account message clearer for applicants whose case manager may have already set up their PATH account. | The registration page now points them to sign in if they know the password or use Reset or set password to activate access.
+2026-05-03 | Release TBD | UX/Homepage | Work Queue row actions | Cleaned up homepage Work Queue row actions so item names are the workspace link, redundant `Open workspace` actions are removed, rows show at most two inline actions, and assigned rows say `Reassign` instead of `Assign`. | The Actions column now appears only when the selected queue has secondary row actions; EI-pending rows can show assignment plus Set Eligibility, and conflict rows can show assignment plus Resolve.
 2026-05-01 | Release TBD | Fix/Application workflow | Case and Application Workspaces | Fixed a bug where an older completed application on a client file could become the active application queue target after later client-file updates. | PATH now prefers open/current applications when resolving the case's primary application and blocks terminal applications from being moved back into review or document-request queues through case saves.
 2026-04-30 | Release TBD | Fix/Auth | Manage Users and staff sign-in | Fixed legacy sign-in fallbacks that could copy old Cognito custom identity or region values into staff access context. | Staff regional access now stays tied to PATH's database-backed staff profile and staff-region assignments; a separate dry-run cleanup helper can audit remaining legacy Cognito values.
-2026-04-30 | Release TBD | UX/Homepage | Work Queue > New Applications | Made a change so New Applications rows show Assign or Reassign directly in the table, while the applicant name remains the workspace link. | The redundant Open workspace row action is hidden for this queue to leave room for assignment actions.
 2026-04-30 | Release TBD | UX/Support | Bugs and Change Requests | Added a dedicated Support dashboard for reviewing and updating PATH bug reports and change requests. | System Administrators, NWAC Administrators, and Regional Managers can use the same queue and review panel that was previously only on the System Administrator homepage.
 2026-04-28 | Release TBD | Fix/Approvals | Case Workspace > Review intervention proposal | Fixed a bug where intervention approvals opened from Pending Decision could get stuck on Record of decision. | Queue launches still open on the decision step, but the requested step is now consumed once so approvers can click earlier wizard steps for review.
 2026-04-28 | Release TBD | Fix/Homepage | Work Queue > Pending Completion | Fixed a bug where denied applications could remain stuck in Pending Completion after the denial letter was already sent. | Denied files now leave the queue once the denial letter is recorded as sent, without changing the recorded denied outcome.
@@ -247,7 +247,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Made a change so New Applications rows show Assign or Reassign directly in the queue.
+- Made a change so Work Queue rows use the item name as the workspace link and show only useful row actions like Assign, Reassign, Set Eligibility, or Resolve.
 - Made a change so Bugs and Change Requests now has a dedicated dashboard under Support.
 - Made a change so staff email notification settings can send configured emails for non-assignment events, with NWAC review split by approval, denial, and changes-requested outcomes.
 - Made the Template Editor more powerful with grouped fields, scenario previews, and warnings for unsupported placeholders.
@@ -263,7 +263,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Nouveautes (brouillon - FR)
 
-- Les nouvelles demandes affichent maintenant Affecter ou Reaffecter directement dans la file.
+- Les lignes de la file de travail utilisent maintenant le nom de l'element comme lien vers l'espace de travail et affichent seulement les actions utiles, comme Affecter, Reaffecter, Definir l'admissibilite ou Resoudre.
 - Les bogues et demandes de changement ont maintenant un tableau de bord dedie dans Support.
 - Les parametres de courriel du personnel peuvent maintenant envoyer des courriels configures pour les evenements qui ne sont pas des affectations, avec la revue NWAC separee par approbation, refus et demandes de changements.
 - L'editeur de modeles est plus complet, avec des champs groupes, des apercus par scenario et des avertissements pour les variables non prises en charge.

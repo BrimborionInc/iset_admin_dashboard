@@ -160,5 +160,6 @@ module.exports = {
   deleteCaseWatch,
   listCaseWatchesForUser,
   listWatchersForCase,
+  resolveWatchColumn,
   resetWatchColumnCache,
 };
