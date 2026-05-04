@@ -55,6 +55,7 @@ Widget references:
 - ESDC participant submission endpoints.
 - ILMP validation and payload generation.
 - Reporting package and notes persistence.
+- Intervention/action-plan close-out rules are status-driven: planned end dates on non-terminal interventions stay out of ILMP close-out XML, while completed/cancelled interventions require end date + outcome.
 
 ## Role Notes
 

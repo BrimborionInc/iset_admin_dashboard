@@ -2,7 +2,14 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-05-04
+- API/ILMP: Changed ILMP action-plan/intervention close-out validation to be status-driven instead of date-driven, so planned intervention end dates no longer require outcomes or emit close-out XML unless the intervention is completed/cancelled.
+- Ops/PROD/Data repair: Completed guarded duplicate-record merge for Jodie Stephens after restore point `path-prod-jodie-stephens-merge-20260504122704`; run `jodie-stephens-merge-20260504123533` kept public-portal client `156` / user `199` / case `134` / application `56` as the survivor, retired imported client `72` / case `72`, suspended old user `75`, seeded a draft assessment from proposal `84`, moved 25 manual-upload documents with source metadata preserved, used an application lock plus admin maintenance warning during the repair, and made no hard deletes.
+- Docs/Meta: Added a PROD duplicate applicant identity merge guide and indexed the Task History title `Locate PROD case merge thread` so future chats can recover the detection and guarded repair pattern for imported-client/public-portal duplicate identity cases.
+
 ## 2026-05-03
+- UX/Casework/DEV: Split Application and Case Workspace header menus into `Quick layouts` for board/view presets and `Quick actions` for mutating workflow actions.
+- UX/API/Casework/DEV: Widened Case Header historical-entry actions (`Add existing action plan`, `Add existing intervention`, `Upload existing documents`) to non-archived application-backed cases for System Administrators, NWAC Administrators, and Regional Managers, with a historical-record warning and backend role enforcement for manual backload submissions.
 - UX/Casework/DEV: Added a Case Management-style header selector to the Manage ISET Applications table so staff can filter the server-paginated application list by active, new, assessment, pending-decision, decision-recorded, approved, denied, closed, flagged, or all applications.
 - UX/Homepage/DEV: Cleaned up Work Queue inline row actions so item names are the workspace link, redundant `Open workspace` actions are removed, the `Actions` column hides when no secondary row actions exist, rows expose at most two inline actions, and assignable rows use owner-aware `Assign` / `Reassign` labels.
 

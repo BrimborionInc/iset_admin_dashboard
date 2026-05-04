@@ -1,7 +1,7 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-05-03T20:51:31.451Z",
-  "releaseId": "",
-  "releaseLabel": "Current build",
+  "generatedAt": "2026-05-03T22:07:05.147Z",
+  "releaseId": "20260503-220048",
+  "releaseLabel": "Release 20260503-220048",
   "releaseDateEn": "3rd May 2026",
   "releaseDateFr": "3 mai 2026",
   "en": {
@@ -9,7 +9,7 @@ const publicReleaseNotes = {
     "description": "",
     "featuresHeading": "What changed",
     "features": [
-      "Made a change so New Applications rows show Assign or Reassign directly in the queue.",
+      "Made a change so Work Queue rows use the item name as the workspace link and show only useful row actions like Assign, Reassign, Set Eligibility, or Resolve.",
       "Made a change so Bugs and Change Requests now has a dedicated dashboard under Support.",
       "Made a change so staff email notification settings can send configured emails for non-assignment events, with NWAC review split by approval, denial, and changes-requested outcomes.",
       "Made the Template Editor more powerful with grouped fields, scenario previews, and warnings for unsupported placeholders.",
@@ -29,7 +29,7 @@ const publicReleaseNotes = {
     "description": "",
     "featuresHeading": "Ce qui a change",
     "features": [
-      "Les nouvelles demandes affichent maintenant Affecter ou Reaffecter directement dans la file.",
+      "Les lignes de la file de travail utilisent maintenant le nom de l'element comme lien vers l'espace de travail et affichent seulement les actions utiles, comme Affecter, Reaffecter, Definir l'admissibilite ou Resoudre.",
       "Les bogues et demandes de changement ont maintenant un tableau de bord dedie dans Support.",
       "Les parametres de courriel du personnel peuvent maintenant envoyer des courriels configures pour les evenements qui ne sont pas des affectations, avec la revue NWAC separee par approbation, refus et demandes de changements.",
       "L'editeur de modeles est plus complet, avec des champs groupes, des apercus par scenario et des avertissements pour les variables non prises en charge.",

@@ -21,7 +21,6 @@ import useCurrentUser from "../../../../hooks/useCurrentUser.js";
 import { formatCurrencyDisplay, getCurrencyInputDisplayValue } from "../../../../utils/currencyFormat.js";
 import {
   formatInterventionStatusLabel,
-  INTERVENTION_CLOSED_STATUSES,
   INTERVENTION_OPEN_STATUSES,
   isInterventionClosedStatus,
   normalizeInterventionStatus,
@@ -450,7 +449,6 @@ const InterventionModal = ({
   }, [isClosing]);
 
   const interventionState = resolveModalInterventionState(intervention, "approved");
-  const interventionStatus = interventionState.effectiveStatus || normalizeInterventionStatus(intervention?.status, "approved");
   const isClosedIntervention = isInterventionClosedStatus(interventionState);
   const isAccessReadOnly = Boolean(readOnly || (mode === "edit" && isClosedIntervention && !canClose));
   const isViewMode = mode === "edit" && !isEditing;
@@ -890,15 +888,6 @@ const InterventionModal = ({
         errors.endDate = "End date must be within 60 months of start date.";
       }
     }
-    if (
-      form.endDate &&
-      !errors.endDate &&
-      !INTERVENTION_CLOSED_STATUSES.has(statusState.deliveryStatus || statusNormalized)
-    ) {
-      errors.endDate =
-        'Use "Close intervention" to set completion date and final outcome.';
-    }
-
     const durationValue =
       form.durationDays === "" ? null : Number(form.durationDays.replace(/\s+/g, ""));
     if (form.durationDays !== "" && !Number.isFinite(durationValue)) {
@@ -1125,7 +1114,7 @@ const InterventionModal = ({
           </Alert>
         )}
         <Box color="text-body-secondary" fontSize="body-s">
-          All fields can be updated while the intervention remains in an approved, in-progress, or suspended state. Use "Close intervention" to record the final outcome and actual spend. Activating an intervention will also activate its parent action plan if it is still in draft.
+          Dates can be planned while the intervention remains approved, in progress, or suspended. Use "Close intervention" to record the final outcome, completion date, and actual spend. Activating an intervention will also activate its parent action plan if it is still in draft.
         </Box>
         {mode === "edit" && (isClosing || isClosedIntervention) && (
           <SpaceBetween size="s">

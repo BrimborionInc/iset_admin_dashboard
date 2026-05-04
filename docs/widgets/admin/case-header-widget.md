@@ -14,15 +14,16 @@ Case Management
 
 ## Purpose
 
-Top-level case identity, status, ownership, and quick actions.
+Top-level case identity, status, ownership, quick layouts, and quick actions.
 
 ## User Actions (observed)
 
 - Open and inspect widget state for current case/submission/packet context.
 - Use widget controls to progress work for the owning workflow.
 - Navigate to linked records or execute relevant operational actions.
-- Switch the board to focused layouts such as `View audit trail`.
-- For application-less imported client files, the quick actions menu also exposes:
+- Switch the board through `Quick layouts`, including plans/interventions, payments, notes/calendar, documents/messages, audit trail, and ILMP validation.
+- Use `Quick actions` for mutating or workflow-launching actions such as reassignment, intervention proposal, PATH account activation, case status changes, watchlist, lock release, and historical entry.
+- For non-archived cases, System Administrator, NWAC Administrator, and Regional Manager can use historical-entry actions:
   - `Add existing action plan`
   - `Add existing intervention`
   - `Upload existing documents`
@@ -43,7 +44,7 @@ Top-level case identity, status, ownership, and quick actions.
 
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
 - The funding line now distinguishes `Approved`, `Committed`, and `Actual` instead of using `Committed` as a stand-in for approved intervention funding.
-- Imported/application-less cases use these quick actions as silent backload entry points. They record current-state action plans, interventions, and documents without starting approvals, checklist progression, or applicant notifications.
+- Historical-entry actions are silent backload entry points. They record current-state action plans, interventions, and documents without starting approvals, checklist progression, payment packets, signing workflows, or applicant notifications.
 - Existing-intervention backload is lifecycle-aware: archived plans are blocked, closed plans accept only completed/cancelled interventions, and in-progress/suspended interventions require an active plan.
 - Backloaded intervention `actual amount` is now finance-history only: it can write a posted historical ledger entry for reporting/budget burn, but the intervention cannot create payment packets or enter the live finance submission workflow.
 - `View audit trail` now reconfigures the case workspace to show `Case header`, `Participant details`, and `Events timeline`.

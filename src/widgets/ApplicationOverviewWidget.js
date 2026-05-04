@@ -881,15 +881,10 @@ const ApplicationOverviewWidget = ({
   const canEscalateUp = hasOpenEscalation && isEscalationOwner && roleKey === 'regional_manager';
   const canRespondEscalation = hasOpenEscalation && isEscalationOwner;
   const canResolveEscalation = hasOpenEscalation && isEscalationOwner;
+  const quickLayoutItems = useMemo(() => APPLICATION_LAYOUT_ACTIONS, []);
+
   const quickActionItems = useMemo(() => {
-    const layoutActions = APPLICATION_LAYOUT_ACTIONS.reduce((acc, action) => {
-      acc[action.id] = action;
-      return acc;
-    }, {});
     const actionsById = {
-      'review-assessment': layoutActions['review-assessment'] || null,
-      'documents-messages': layoutActions['documents-messages'] || null,
-      'notes-calendar': layoutActions['notes-calendar'] || null,
       'add-watchlist': canAddToWatchlist ? { id: 'add-watchlist', text: 'Add applicant to watchlist' } : null,
       assign: canAssign ? { id: 'assign', text: 'Assign / reassign' } : null,
       'resume-review': canResumeReview ? { id: 'resume-review', text: 'Resume review' } : null,
@@ -901,13 +896,9 @@ const ApplicationOverviewWidget = ({
       close: canCloseApplication ? { id: 'close', text: 'Close application' } : null,
       archive: canArchiveApplication ? { id: 'archive', text: 'Archive application' } : null,
       reopen: canReopenApplication ? { id: 'reopen', text: 'Reopen application' } : null,
-      'audit-trail': layoutActions['audit-trail'] || null,
       'release-lock': canReleaseLock ? { id: 'release-lock', text: 'Release lock' } : null,
     };
     const order = [
-      'review-assessment',
-      'documents-messages',
-      'notes-calendar',
       'add-watchlist',
       'assign',
       'resume-review',
@@ -919,7 +910,6 @@ const ApplicationOverviewWidget = ({
       'close',
       'archive',
       'reopen',
-      'audit-trail',
       'release-lock',
     ];
     return order.reduce((acc, id) => {
@@ -1125,6 +1115,13 @@ const ApplicationOverviewWidget = ({
       })
     );
   }, []);
+
+  const handleQuickLayoutSelect = useCallback(({ detail }) => {
+    const layoutId = APPLICATION_LAYOUT_ACTION_MAP[detail?.id];
+    if (layoutId) {
+      requestLayoutSwitch(layoutId);
+    }
+  }, [requestLayoutSwitch]);
 
   const releaseApplicationLockNow = useCallback(async () => {
     if (!application_id) {
@@ -2009,9 +2006,18 @@ const ApplicationOverviewWidget = ({
         <Header
           actions={
             (
-              <SpaceBetween direction="horizontal" size="xs">
-                {quickActionItems.length ? (
-                  <Hotspot hotspotId="app-workspace-quick-actions" direction="left">
+              <Hotspot hotspotId="app-workspace-quick-actions" direction="left">
+                <SpaceBetween direction="horizontal" size="xs">
+                  <ButtonDropdown
+                    items={quickLayoutItems}
+                    onItemClick={handleQuickLayoutSelect}
+                    ariaLabel="Quick layouts"
+                    expandToViewport
+                    disabled={savingStatus}
+                  >
+                    Quick layouts
+                  </ButtonDropdown>
+                  {quickActionItems.length ? (
                     <ButtonDropdown
                       items={quickActionItems}
                       onItemClick={handleQuickActionSelect}
@@ -2021,9 +2027,9 @@ const ApplicationOverviewWidget = ({
                     >
                       Quick actions
                     </ButtonDropdown>
-                  </Hotspot>
-                ) : null}
-              </SpaceBetween>
+                  ) : null}
+                </SpaceBetween>
+              </Hotspot>
             )
           }
           info={

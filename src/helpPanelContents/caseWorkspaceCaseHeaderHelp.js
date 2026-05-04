@@ -13,7 +13,8 @@ const CaseWorkspaceCaseHeaderHelp = () => (
       <li><strong>PATH account status:</strong> whether the participant can already use PATH or still needs activation support.</li>
       <li><strong>Agreement snapshot:</strong> agreement number, status, and key dates.</li>
       <li><strong>Ownership:</strong> who is responsible for the case right now.</li>
-      <li><strong>Quick actions:</strong> actions such as reassignment, PATH account activation, <strong>View audit trail</strong>, or on imported/application-less files the backload actions <strong>Add existing action plan</strong>, <strong>Add existing intervention</strong>, and <strong>Upload existing documents</strong>.</li>
+      <li><strong>Quick layouts:</strong> fast workspace views such as plans/interventions, payments, notes/calendar, documents/messages, audit trail, and ILMP validation.</li>
+      <li><strong>Quick actions:</strong> actions such as reassignment, PATH account activation, case status changes, and historical-entry actions like <strong>Add existing action plan</strong>, <strong>Add existing intervention</strong>, and <strong>Upload existing documents</strong> when your role allows them.</li>
     </ul>
 
     <h3>Best practice</h3>
@@ -21,14 +22,14 @@ const CaseWorkspaceCaseHeaderHelp = () => (
       <li>Confirm you have the correct case before editing plans or finances.</li>
       <li>Update ownership after hand-offs so reminders and dashboards stay accurate.</li>
       <li>Use the PATH account status to decide whether secure online interaction with the participant is available yet.</li>
-      <li>On imported or application-less client files, use the backload quick actions here to record historical plans, interventions, and documents instead of creating fake intake history somewhere else.</li>
+      <li>Use the add-existing actions only to record historical plans, interventions, and documents instead of creating fake intake or approval history somewhere else.</li>
       <li>Remember that these backload actions are historical only: they save the record without starting approval, checklist, or applicant-notification workflow.</li>
-      <li>Use <strong>View audit trail</strong> when you need the case record of status changes, reminders, and key actions.</li>
+      <li>Use <strong>Quick layouts &gt; View audit trail</strong> when you need the case record of status changes, reminders, and key actions.</li>
       <li>Refresh if another teammate has made changes elsewhere in the workspace.</li>
     </ul>
   </div>
 );
 
-CaseWorkspaceCaseHeaderHelp.aiContext = `You are helping a case manager using the case header widget in the Case Workspace. Explain it as the quick orientation panel for confirming the right participant, agreement context, ownership, and PATH account status before deeper casework begins. Mention reassignment, PATH account activation, and the audit-trail quick action only when they are relevant to the visible controls. When the file is imported or application-less, also explain that this header exposes the backload quick actions \`Add existing action plan\`, \`Add existing intervention\`, and \`Upload existing documents\` for recording pre-PATH history silently without starting approvals, checklist progression, or applicant notifications.`;
+CaseWorkspaceCaseHeaderHelp.aiContext = `You are helping a case manager using the case header widget in the Case Workspace. Explain it as the quick orientation panel for confirming the right participant, agreement context, ownership, and PATH account status before deeper casework begins. Explain that Quick layouts switch the board view, while Quick actions change data or launch workflows. Mention reassignment, PATH account activation, and the audit-trail layout only when they are relevant to the visible controls. When add-existing actions are visible, explain that \`Add existing action plan\`, \`Add existing intervention\`, and \`Upload existing documents\` record historical case history silently without starting approvals, checklist progression, payment packets, signing workflows, or applicant notifications.`;
 
 export default CaseWorkspaceCaseHeaderHelp;

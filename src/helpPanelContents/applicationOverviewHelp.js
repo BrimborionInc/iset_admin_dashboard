@@ -36,8 +36,8 @@ const ApplicationOverviewHelp = () => (
         including blocking issues that must be fixed in Application Workspace before the record can enter the reporting queue.
       </li>
       <li>
-        <strong>Act quickly:</strong> The Quick actions menu includes assignment, closure notice, escalation,
-        and layout presets for common review flows.
+        <strong>Act quickly:</strong> Use Quick layouts for common review views. Use Quick actions for
+        assignment, closure notice, escalation, and other workflow actions when they are available.
       </li>
     </ul>
 
@@ -54,7 +54,7 @@ const ApplicationOverviewHelp = () => (
 
 ApplicationOverviewHelp.aiContext = `
 You are assisting an ISET program coordinator using the Application Overview widget. Explain the status badge and
-selector, including that the manual status selector in this widget is available to System Administrators and NWAC Administrators, plus timeline status, assignment and escalation quick actions, document checklist summary, the ESDC/ILMP reporting status shown for denied-ineligible records, and where to confirm identifiers and contact details.
+selector, including that the manual status selector in this widget is available to System Administrators and NWAC Administrators, plus timeline status, Quick layouts, assignment and escalation quick actions, document checklist summary, the ESDC/ILMP reporting status shown for denied-ineligible records, and where to confirm identifiers and contact details.
 Keep guidance operational and aligned with the visible controls. Treat this widget as the first orientation point in the file, not as a substitute for reviewing the underlying application, documents, notes, and assessment.
 `;
 

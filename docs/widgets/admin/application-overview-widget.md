@@ -14,13 +14,15 @@ Application Assessment
 
 ## Purpose
 
-Case summary, status context, quick actions, and layout shortcuts.
+Case summary, status context, quick layouts, and quick actions.
 
 ## User Actions (observed)
 
 - Open and inspect widget state for current case/submission/packet context.
 - Use widget controls to progress work for the owning workflow.
 - Navigate to linked records or execute relevant operational actions.
+- Use `Quick layouts` for review, documents/messages, notes/calendar, and audit trail views.
+- Use `Quick actions` for mutating or workflow-launching actions such as assignment, watchlist, escalation, closure notice, close/archive/reopen, and lock release.
 
 ## Inputs / Dependencies
 

@@ -48,8 +48,8 @@ const CaseWorkspaceHelp = ({ tutorial, onRestartTutorial, onEndTutorial }) => {
         the decision is recorded.
       </p>
       <p>
-        For imported or application-less client files, this workspace is also where staff backload pre-PATH
-        history. Use the <strong>Case header</strong> quick actions <strong>Add existing action plan</strong>,{" "}
+        This workspace is also where authorized staff record historical casework that already existed outside PATH.
+        Use the <strong>Case header</strong> quick actions <strong>Add existing action plan</strong>,{" "}
         <strong>Add existing intervention</strong>, and <strong>Upload existing documents</strong> to record
         historical plans, supports, and evidence without fabricating intake or approval records.
       </p>
@@ -66,7 +66,7 @@ const CaseWorkspaceHelp = ({ tutorial, onRestartTutorial, onEndTutorial }) => {
 
       <h3>Historical records</h3>
       <ul>
-        <li>Use the Case Header quick actions only when the plan, intervention, or document already existed before PATH go-live or before the client had a PATH application.</li>
+        <li>Use the Case Header add-existing actions only when the plan, intervention, or document already existed outside PATH.</li>
         <li>These actions add historical records only; they do not send messages to applicants or start approval routing.</li>
         <li>Backloaded interventions still have to match the action-plan lifecycle. Archived plans are blocked, closed plans only accept completed or cancelled interventions, and in-progress or suspended interventions require an active plan.</li>
         <li>Add historical supporting documents to the relevant client file, action plan, or case.</li>
@@ -124,7 +124,7 @@ Focus on the staff workflow:
 - manage action plans and interventions against the client's goals;
 - if the file was opened from the Pending Decision queue, explain that the workspace is intentionally focused on the selected proposal, the approver should use Intervention assessment > Record of decision, and any decision-letter follow-up happens separately after the decision is committed;
 - record notes, documents, and client contact;
-- for imported or application-less client files, explain that the Case Header quick actions \`Add existing action plan\`, \`Add existing intervention\`, and \`Upload existing documents\` are the approved way to backload pre-PATH history without inventing intake or approval records;
+- explain that authorized users can use the Case Header quick actions \`Add existing action plan\`, \`Add existing intervention\`, and \`Upload existing documents\` to backload historical casework without inventing intake or approval records;
 - when backload questions come up, mention the key guardrails: archived plans cannot receive existing interventions, closed plans only accept completed/cancelled interventions, in-progress or suspended interventions require an active plan, and historic documents stay case-based when there is no linked application;
 - use reminders and calendar dates to stay on top of check-ins and milestones;
 - use the events timeline when you need the case audit trail or need to confirm what changed and who changed it;

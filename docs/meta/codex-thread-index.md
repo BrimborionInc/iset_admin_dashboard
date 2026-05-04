@@ -2,7 +2,7 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-05-03
+Last Updated: 2026-05-04
 
 ## How to use
 
@@ -31,6 +31,24 @@ For each indexed thread/topic, keep:
 - `Status`: whether the note is current, partial, incomplete-title, or superseded
 
 ## Indexed Topics
+
+### Locate PROD case merge thread
+
+- Codex task title: `Locate PROD case merge thread`
+- Topic: PROD repair for duplicate imported/public-portal applicant identities, using Jodie Stephens as the first fully documented case
+- Keywords: `Locate PROD case merge thread`, `Jodie Stephens`, `Jodies Stephens`, `CASE-2026-0000072`, `ISET-20260501-9AEC9C`, `duplicate applicant identity`, `public portal canonical`, `client file import`, `client_file_import`, `application lock`, `manual_upload`, `application_submission`, `proposal 84`, `assessment draft`, `jodie-stephens-merge-20260504123533`, `path-prod-jodie-stephens-merge-20260504122704`
+- When to open: the user asks about the PROD merge where an imported client/case and a public portal application represented the same applicant, asks how to detect or repair this duplicate-identity pattern, asks why the portal created a second Jodie identity, asks how to preserve staff draft intervention work while keeping the portal application canonical, or asks for the Jodie Stephens repair details.
+- Primary docs:
+  - `docs/guides/prod-duplicate-applicant-identity-merge.md`
+  - `sql/ops/prod-merge-jodie-stephens-client-case-20260504.sql`
+  - `docs/ops/agent-operational-access.md`
+  - `docs/meta/changelog.md`
+  - `docs/data/record-locking.md`
+  - `docs/guides/client-file-imports.md`
+  - `docs/planning/client-case-application-target-model.md`
+- Status: current as of 2026-05-04
+- Notes: this thread first tried to locate an earlier merge thread and found no matching indexed entry, then verified PROD DB access through `scripts/run-prod-sql-via-ssm.sh` and improved the operational access docs. The live data investigation found an imported SMU-email client/case and a later activated Gmail public-portal application for the same applicant. The root cause was the intended hardened portal identity behavior: public portal account linking does not fuzzy-match by name, DOB, SIN, or alternate email to an imported client. Bill chose the portal application as the truth for personal details/email and asked that Amanda's unsubmitted intervention proposal work be carried forward into the application assessment context.
+- Notes: the PROD repair used Aurora snapshot `path-prod-jodie-stephens-merge-20260504122704`, an application lock, and an admin maintenance warning. The successful guarded SQL run `jodie-stephens-merge-20260504123533` kept public portal client `156` / user `199` / case `134` / application `56` as the survivor, retired imported client `72` / case `72`, suspended old user `75`, seeded a draft assessment from proposal `84`, moved 25 manual-upload documents while preserving source metadata, left 21 portal-submitted documents distinguishable as `application_submission`, inserted client/case merge audit rows, and made no hard deletes. The first apply attempt failed on the manual-upload document scope CHECK and rolled back cleanly; the corrected script populated `applicant_user_id` for moved application-linked manual uploads.
 
 ### Locate chat evidence
 
@@ -475,18 +493,21 @@ For each indexed thread/topic, keep:
 ### Locate quick action display rules
 
 - Codex task title: `Locate quick action display rules`
-- Topic: current Case Header display gate for `Add existing action plan` and `Add existing intervention`, plus future design note about allowing historical backload on application-backed cases
-- Keywords: `Locate quick action display rules`, `backload eligible`, `Add existing action plan`, `Add existing intervention`, `application-backed case`, `application-less case`, `manual_backload`, `historical action plan`, `historical intervention`, `quick action gate`, `caseData.applicationId`
-- When to open: the user asks why the existing-plan or existing-intervention quick actions are hidden, asks what "backload eligible" means, asks whether to remove the no-linked-application condition, or asks for prior reasoning about historical backload on cases that also have applications.
+- Topic: Case Header display gate for historical-entry actions, the 2026-05-04 widening to application-backed cases, and the split of workspace header controls into `Quick layouts` and `Quick actions`
+- Keywords: `Locate quick action display rules`, `Locate quick action display notes`, `backload eligible`, `Add existing action plan`, `Add existing intervention`, `Upload existing documents`, `application-backed case`, `application-less case`, `manual_backload`, `historical action plan`, `historical intervention`, `quick action gate`, `caseData.applicationId`, `Quick layouts`, `Quick actions`
+- When to open: the user asks why the existing-plan, existing-intervention, or upload-existing-documents quick actions are hidden; asks what "backload eligible" means; asks whether historical backload is allowed on cases with applications; asks about the historical-record warning; asks which roles can use manual backload; or asks why Application/Case Workspace header menus are split into `Quick layouts` and `Quick actions`.
 - Primary docs:
   - `docs/planning/case-workspace-quick-actions.md`
+  - `docs/planning/application-workspace-quick-actions.md`
   - `docs/guides/client-file-imports.md`
   - `docs/widgets/admin/case-header-widget.md`
+  - `docs/widgets/admin/application-overview-widget.md`
   - `docs/AGENTS.md`
   - `src/pages/Caseworking/caseWorkspace/widgets/CaseHeaderWidget.jsx`
+  - `src/widgets/ApplicationOverviewWidget.js`
   - `isetadminserver.js`
-- Status: discussion captured only; no code behavior changed as of 2026-05-03
-- Notes: current UI behavior is controlled in `CaseHeaderWidget.jsx`: the backload actions show when the case exists, the case is not archived, and the workspace payload has no `applicationId` / `application_id`. The backend workspace payload derives `application_id` from the primary `iset_application` row whose `case_id` points at the case; `iset_case.application_id` is not the active model. The discussion concluded there is no obvious hard data-model reason to keep the application-less UI gate for existing action plans/interventions, because action plans and interventions are case-level records and the backend backload submit paths already use case/action-plan scope. The real risks are product/reporting meaning and workflow bypass: `manual_backload` records are real case records that can affect case history, ILMP validation/export readiness, budget burn, finance reporting, and active-plan conflicts while intentionally skipping approval routing, assessment PDFs, CFA versions, payment packets, checklist progression, and applicant notifications. If this is implemented later, prefer explicit historical labels/copy, preserve `metadata.source = 'manual_backload'` and `metadata.entryMode = 'existing'`, keep lifecycle/payment guardrails, and decide separately whether `Upload existing documents` should also be widened because it currently shares the same eligibility flag.
+- Status: implemented in DEV as of 2026-05-04
+- Notes: original behavior was controlled in `CaseHeaderWidget.jsx`: backload actions showed only when the case existed, the case was not archived, and the workspace payload had no `applicationId` / `application_id`; that payload is derived from the primary `iset_application` row whose `case_id` points at the case, not from retired `iset_case.application_id`. The 2026-05-04 follow-on changed the UI gate: `Add existing action plan`, `Add existing intervention`, and `Upload existing documents` now show on non-archived cases for `System Administrator`, `NWAC Administrator`, and `Regional Manager`, including application-backed cases. The three actions show a historical-record warning before opening, and backend `backloadMode` / `entryMode=backload` submits are role-gated to those roles. The design decisions recorded in `docs/planning/case-workspace-quick-actions.md`: workflow bypass is acceptable for historical entry with role restriction and warning; backloaded records should be included in operational/service/ILMP/budget/finance reporting using their real dates; `Upload existing documents` is widened together with plans/interventions; and existing `manual_backload` guardrails remain required (`metadata.source = 'manual_backload'`, `metadata.entryMode = 'existing'`, lifecycle validation, payment-packet blocking, and silent/no-notification behavior). The same implementation split both Case Workspace and Application Workspace header controls into `Quick layouts` for non-mutating board/view presets and `Quick actions` for mutating or workflow-launching actions.
 
 ### Application-less case documents with linked PATH accounts
 

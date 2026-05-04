@@ -169,6 +169,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const [watchlistSaving, setWatchlistSaving] = useState(false);
   const [existingActionPlanModalOpen, setExistingActionPlanModalOpen] = useState(false);
   const [existingInterventionModalOpen, setExistingInterventionModalOpen] = useState(false);
+  const [historicalActionWarning, setHistoricalActionWarning] = useState(null);
   const canonicalRole = toCanonicalRole(currentUser?.role || null);
   const isSystemAdmin = canonicalRole === "System Administrator";
   const isProgramAdmin = canonicalRole === "NWAC Administrator";
@@ -625,6 +626,18 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     () => getInterventionProposalActionLabel(openInterventionProposalAction),
     [openInterventionProposalAction]
   );
+  const quickLayoutItems = useMemo(
+    () => [
+      { id: "manage-plans-interventions", text: "View plans and interventions" },
+      { id: "manage-payments", text: "View payments" },
+      { id: "view-notes-calendar", text: "View notes and calendar" },
+      { id: "documents-messages", text: "View documents and messages" },
+      { id: "audit-trail", text: "View audit trail" },
+      { id: "esdc-validation", text: "ILMP Validation and Export" },
+    ],
+    []
+  );
+
   const quickActions = useMemo(() => {
     const items = [];
     const hasCase = Boolean(caseData?.id);
@@ -643,7 +656,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     const canReopenClosed = hasCase && (isReadyToClose || isClosed) && (isSystemAdmin || isProgramAdmin);
     const canReopenArchived = hasCase && isArchived && isSystemAdmin;
     const canReopen = canReopenClosed || canReopenArchived;
-    const isBackloadEligible = hasCase && !lockApplicationId && !isArchived;
+    const canUseHistoricalEntry = hasCase && !isArchived && (isSystemAdmin || isProgramAdmin || isRegionalManager);
     const canManagePathAccount = hasCase && Boolean(caseData?.client?.id) && !isArchived;
     const hasPathAccountEmail = Boolean(pathAccount?.email);
 
@@ -653,7 +666,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     if (canPropose) {
       items.push({ id: "propose-intervention", text: interventionProposalActionLabel });
     }
-    if (isBackloadEligible) {
+    if (canUseHistoricalEntry) {
       items.push({ id: "backload-action-plan", text: "Add existing action plan" });
       items.push({ id: "backload-intervention", text: "Add existing intervention" });
       items.push({ id: "backload-documents", text: "Upload existing documents" });
@@ -664,12 +677,6 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         text: pathAccountStatusKey === "invitation_sent" ? "Resend PATH activation" : "Activate PATH account",
       });
     }
-    items.push({ id: "manage-plans-interventions", text: "View plans and interventions" });
-    items.push({ id: "manage-payments", text: "View payments" });
-    items.push({ id: "view-notes-calendar", text: "View notes and calendar" });
-    items.push({ id: "documents-messages", text: "View documents and messages" });
-    items.push({ id: "audit-trail", text: "View audit trail" });
-    items.push({ id: "esdc-validation", text: "ILMP Validation and Export" });
     if (canAddToWatchlist) {
       items.push({ id: "add-watchlist", text: "Add client SIN to watchlist" });
     }
@@ -1032,6 +1039,62 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     );
   }, []);
 
+  const openHistoricalAction = useCallback((actionId) => {
+    setActionError(null);
+    setActionNotice(null);
+    if (actionId === "backload-action-plan") {
+      setExistingActionPlanModalOpen(true);
+      return;
+    }
+    if (actionId === "backload-intervention") {
+      setExistingInterventionModalOpen(true);
+      return;
+    }
+    if (actionId === "backload-documents") {
+      requestLayoutSwitch("documentsMessages");
+      if (typeof window !== "undefined") {
+        window.setTimeout(() => {
+          window.dispatchEvent(
+            new CustomEvent("iset:supporting-documents:open-upload", {
+              detail: { caseId: caseData?.id || null },
+            })
+          );
+        }, 0);
+      }
+    }
+  }, [caseData?.id, requestLayoutSwitch]);
+
+  const handleQuickLayout = useCallback(
+    ({ detail }) => {
+      if (!detail?.id) return;
+      if (detail.id === "manage-plans-interventions") {
+        requestLayoutSwitch("managePlans");
+      } else if (detail.id === "manage-payments") {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("iset-case-workspace:manage-payments", {
+              detail: { caseId: caseData?.id || null },
+            })
+          );
+        }
+        pendingManagePaymentsRef.current = true;
+        if (focusFirstAwaitingSubmissionIntervention()) {
+          pendingManagePaymentsRef.current = false;
+        }
+        requestLayoutSwitch("managePayments");
+      } else if (detail.id === "view-notes-calendar") {
+        requestLayoutSwitch("notesCalendar");
+      } else if (detail.id === "documents-messages") {
+        requestLayoutSwitch("documentsMessages");
+      } else if (detail.id === "audit-trail") {
+        requestLayoutSwitch("auditTrail");
+      } else if (detail.id === "esdc-validation") {
+        requestLayoutSwitch("esdcValidation");
+      }
+    },
+    [caseData?.id, focusFirstAwaitingSubmissionIntervention, requestLayoutSwitch]
+  );
+
   const handleExistingActionPlanCreated = useCallback(
     async createdPlan => {
       setExistingActionPlanModalOpen(false);
@@ -1196,26 +1259,11 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
           );
         }
       } else if (detail.id === "backload-action-plan") {
-        setActionError(null);
-        setActionNotice(null);
-        setExistingActionPlanModalOpen(true);
+        setHistoricalActionWarning({ actionId: detail.id, label: "add an existing action plan" });
       } else if (detail.id === "backload-intervention") {
-        setActionError(null);
-        setActionNotice(null);
-        setExistingInterventionModalOpen(true);
+        setHistoricalActionWarning({ actionId: detail.id, label: "add an existing intervention" });
       } else if (detail.id === "backload-documents") {
-        setActionError(null);
-        setActionNotice(null);
-        requestLayoutSwitch("documentsMessages");
-        if (typeof window !== "undefined") {
-          window.setTimeout(() => {
-            window.dispatchEvent(
-              new CustomEvent("iset:supporting-documents:open-upload", {
-                detail: { caseId: caseData?.id || null },
-              })
-            );
-          }, 0);
-        }
+        setHistoricalActionWarning({ actionId: detail.id, label: "upload existing documents" });
       } else if (detail.id === "manage-plans-interventions") {
         requestLayoutSwitch("managePlans");
       } else if (detail.id === "manage-payments") {
@@ -1347,13 +1395,24 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
           description={metadata.description}
           actions={
             <Hotspot hotspotId="case-workspace-quick-actions" direction="left">
-              <ButtonDropdown
-                ariaLabel="Case actions"
-                items={quickActions}
-                onItemClick={handleQuickAction}
-              >
-                Quick actions
-              </ButtonDropdown>
+              <SpaceBetween direction="horizontal" size="xs">
+                <ButtonDropdown
+                  ariaLabel="Case quick layouts"
+                  items={quickLayoutItems}
+                  onItemClick={handleQuickLayout}
+                >
+                  Quick layouts
+                </ButtonDropdown>
+                {quickActions.length ? (
+                  <ButtonDropdown
+                    ariaLabel="Case quick actions"
+                    items={quickActions}
+                    onItemClick={handleQuickAction}
+                  >
+                    Quick actions
+                  </ButtonDropdown>
+                ) : null}
+              </SpaceBetween>
             </Hotspot>
           }
         >
@@ -1424,6 +1483,38 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
           onDismiss={() => setExistingInterventionModalOpen(false)}
           onCreated={handleExistingInterventionCreated}
         />
+        <Modal
+          visible={Boolean(historicalActionWarning)}
+          onDismiss={() => setHistoricalActionWarning(null)}
+          header="Historical record only"
+          closeAriaLabel="Close historical record warning"
+          footer={
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button onClick={() => setHistoricalActionWarning(null)}>Cancel</Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  const actionId = historicalActionWarning?.actionId;
+                  setHistoricalActionWarning(null);
+                  if (actionId) {
+                    openHistoricalAction(actionId);
+                  }
+                }}
+              >
+                Continue
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="s">
+            <Box>
+              Use this only to {historicalActionWarning?.label || "record existing history"} when the work or document already existed outside PATH.
+            </Box>
+            <Alert type="warning">
+              This creates real case history, but it does not start approval routing, checklist steps, payment packets, applicant notifications, signing workflows, or generated approval documents. For new or current work that needs approval, use the normal proposal workflow.
+            </Alert>
+          </SpaceBetween>
+        </Modal>
         <Modal
           visible={assignModalVisible}
           onDismiss={() => {

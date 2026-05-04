@@ -27,6 +27,9 @@ Landing-page release-notes model: the build now generates the landing-page notes
 2026-05-02 | Release TBD | UX/Auth | Manage Users > Administrative Users | Added editable staff Name and Display name fields to the selected user Profile tab. | Saves to the DB-backed staff profile so assignment, audit, and generated-document labels can be corrected without direct SQL.
 2026-05-02 | Release TBD | UX/Auth | Public portal registration | Made the existing-account message clearer for applicants whose case manager may have already set up their PATH account. | The registration page now points them to sign in if they know the password or use Reset or set password to activate access.
 2026-05-03 | Release TBD | UX/Homepage | Work Queue row actions | Cleaned up homepage Work Queue row actions so item names are the workspace link, redundant `Open workspace` actions are removed, rows show at most two inline actions, and assigned rows say `Reassign` instead of `Assign`. | The Actions column now appears only when the selected queue has secondary row actions; EI-pending rows can show assignment plus Set Eligibility, and conflict rows can show assignment plus Resolve.
+2026-05-04 | Release TBD | Fix/ILMP | ILMP participant exports | Changed close-out validation to use intervention/action-plan status instead of any end date. | Planned intervention end dates can be entered before completion without requiring an outcome or being exported as ILMP close-out fields; completed/cancelled interventions still require end date and outcome.
+2026-05-04 | Release TBD | UX/Casework | Application and Case Workspaces | Split workspace header shortcuts into `Quick layouts` for changing the board view and `Quick actions` for workflow changes. | This separates navigation from actions that change records, such as assignment, escalation, status changes, or historical entry.
+2026-05-04 | Release TBD | UX/Casework | Case Workspace historical entry | Made historical-entry actions available on application-backed cases for authorized managers and admins. | Add existing action plan, Add existing intervention, and Upload existing documents now show a historical-record warning and stay outside approval, payment, signing, and notification workflows.
 2026-05-01 | Release TBD | Fix/Application workflow | Case and Application Workspaces | Fixed a bug where an older completed application on a client file could become the active application queue target after later client-file updates. | PATH now prefers open/current applications when resolving the case's primary application and blocks terminal applications from being moved back into review or document-request queues through case saves.
 2026-04-30 | Release TBD | Fix/Auth | Manage Users and staff sign-in | Fixed legacy sign-in fallbacks that could copy old Cognito custom identity or region values into staff access context. | Staff regional access now stays tied to PATH's database-backed staff profile and staff-region assignments; a separate dry-run cleanup helper can audit remaining legacy Cognito values.
 2026-04-30 | Release TBD | UX/Support | Bugs and Change Requests | Added a dedicated Support dashboard for reviewing and updating PATH bug reports and change requests. | System Administrators, NWAC Administrators, and Regional Managers can use the same queue and review panel that was previously only on the System Administrator homepage.
@@ -247,7 +250,10 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
+- Planned intervention end dates no longer force ILMP close-out outcomes until the intervention is completed or cancelled.
 - Made a change so Work Queue rows use the item name as the workspace link and show only useful row actions like Assign, Reassign, Set Eligibility, or Resolve.
+- Split Application and Case Workspace shortcuts into Quick layouts and Quick actions.
+- Made historical-entry actions available on application-backed cases for authorized managers and admins.
 - Made a change so Bugs and Change Requests now has a dedicated dashboard under Support.
 - Made a change so staff email notification settings can send configured emails for non-assignment events, with NWAC review split by approval, denial, and changes-requested outcomes.
 - Made the Template Editor more powerful with grouped fields, scenario previews, and warnings for unsupported placeholders.
@@ -263,7 +269,10 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Nouveautes (brouillon - FR)
 
+- Les dates de fin prevues des interventions n'exigent plus de resultat de cloture ILMP tant que l'intervention n'est pas terminee ou annulee.
 - Les lignes de la file de travail utilisent maintenant le nom de l'element comme lien vers l'espace de travail et affichent seulement les actions utiles, comme Affecter, Reaffecter, Definir l'admissibilite ou Resoudre.
+- Les raccourcis des espaces de travail Demande et Dossier sont maintenant separes entre Mises en page rapides et Actions rapides.
+- Les actions de saisie historique sont maintenant disponibles dans les dossiers avec demande pour les gestionnaires et administrateurs autorises.
 - Les bogues et demandes de changement ont maintenant un tableau de bord dedie dans Support.
 - Les parametres de courriel du personnel peuvent maintenant envoyer des courriels configures pour les evenements qui ne sont pas des affectations, avec la revue NWAC separee par approbation, refus et demandes de changements.
 - L'editeur de modeles est plus complet, avec des champs groupes, des apercus par scenario et des avertissements pour les variables non prises en charge.

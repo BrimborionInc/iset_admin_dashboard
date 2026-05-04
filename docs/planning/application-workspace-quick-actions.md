@@ -2,11 +2,17 @@
 
 Purpose: Capture requirements for non-layout quick actions in the Application Workspace.
 Audience: Application management owners, frontend engineers, QA.
-Last Updated: 2025-12-26
+Last Updated: 2026-05-04
 Status: In progress
 
 ## Scope
 Define non-layout quick actions for the Application Workspace header, including role visibility, status gating, backend support, and confirmation requirements.
+
+## Current UI split
+
+- `Quick layouts` contains non-mutating board/view presets: Review application, Documents and messages, Notes and case calendar, and View audit trail.
+- `Quick actions` contains mutating or workflow-launching actions: Add applicant to watchlist, Assign / reassign, Resume review, escalation actions, Put on closure notice, Close application, Archive application, Reopen application, and Release lock.
+- Keep layout switches out of the mutating action menu so staff can distinguish navigation from workflow changes.
 
 ## Actions to confirm
 - Assign / reassign

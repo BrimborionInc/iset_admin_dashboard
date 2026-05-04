@@ -188,6 +188,13 @@ const checklistCacheByKey = new Map();
 const checklistTemplateCache = new Map();
 let hasAssessmentBudgetPotColumn = null;
 const ILMP_SCHEMA_VERSION = '1.4';
+const ILMP_TERMINAL_ACTION_PLAN_STATUSES = new Set(['closed', 'ready_to_close']);
+const normalizeIlmpStatusKey = value =>
+  typeof value === 'string' ? value.trim().toLowerCase().replace(/[\s-]+/g, '_') : '';
+const isIlmpTerminalActionPlanStatus = value =>
+  ILMP_TERMINAL_ACTION_PLAN_STATUSES.has(normalizeIlmpStatusKey(value));
+const isIlmpTerminalInterventionStatus = record =>
+  ESDC_TERMINAL_INTERVENTION_DELIVERY_STATUSES.has(resolveEsdcInterventionDeliveryStatus(record));
 
 async function ensureAssessmentBudgetPotColumn(executor = pool) {
   if (!executor || typeof executor.query !== 'function') return false;
@@ -7309,11 +7316,13 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
     const esdc = safeJsonParse(intervention.esdc_intervention_json || intervention.esdcInterventionJson, null) || {};
     const startDate = intervention.startDate ? formatDateValue(intervention.startDate) : null;
     const endDate = intervention.endDate ? formatDateValue(intervention.endDate) : null;
+    const isClosedStatus = ESDC_TERMINAL_INTERVENTION_DELIVERY_STATUSES.has(statusNormalized);
+    const ilmpEndDate = isClosedStatus ? endDate : null;
 
     let duration = null;
-    if (startDate && endDate) {
+    if (startDate && ilmpEndDate) {
       const start = parseDate(startDate);
-      const end = parseDate(endDate);
+      const end = parseDate(ilmpEndDate);
       if (start && end) {
         const diffDays = Math.round((end - start) / (1000 * 60 * 60 * 24));
         if (Number.isFinite(diffDays) && diffDays >= 0 && diffDays <= 999) {
@@ -7323,7 +7332,7 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
     } else {
       duration = null;
     }
-    if (!duration && endDate) {
+    if (!duration && ilmpEndDate) {
       if (Number.isFinite(intervention.durationDays)) {
         duration = normaliseNumericString(intervention.durationDays, { min: 0, max: 999 });
       } else if (Number.isFinite(metadata.durationDays)) {
@@ -7366,11 +7375,10 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
       null;
     const code = normaliseNumericString(codeCandidate, { min: 1, max: 999 });
 
-    const isClosedStatus = ['completed', 'cancelled'].includes(statusNormalized);
     let outcome = mapInterventionOutcome(
       intervention.outcome ?? intervention.outcomeCode ?? esdc.interventionOutcome ?? metadata.outcome
     );
-    if (!isClosedStatus && !endDate) {
+    if (!isClosedStatus) {
       outcome = null;
     }
 
@@ -7411,7 +7419,7 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
       clientStatus?.nocVersion ||
       null;
 
-    if (!code && !startDate && !endDate && !outcome && !duration && !cost && !notes.length && !supports.length) {
+    if (!code && !startDate && !ilmpEndDate && !outcome && !duration && !cost && !notes.length && !supports.length) {
       return null;
     }
 
@@ -7421,7 +7429,7 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
       code,
       description: metadata.title || intervention.title || intervention.description || null,
       startDate,
-      endDate,
+      endDate: ilmpEndDate,
       outcome,
       duration,
       cost,
@@ -8240,6 +8248,8 @@ function runIlmpValidation(context) {
   eligiblePlans.forEach(plan => {
     const planId = plan.id || plan.action_plan_id || 'plan';
     const planPrefix = `[actionPlan-${planId}]`;
+    const planStatusNormalized = normalizeIlmpStatusKey(plan.status || plan.Status || '');
+    const planIsTerminal = isIlmpTerminalActionPlanStatus(planStatusNormalized);
     const planStartStr = plan.startDate || plan.ActionPlanStartDate || plan.actionPlanStartDate || null;
     const planResultStr = plan.resultDate || plan.ActionPlanResultDate || plan.actionPlanResultDate || null;
     const planStart = planStartStr ? parseDate(planStartStr) : null;
@@ -8347,7 +8357,7 @@ function runIlmpValidation(context) {
     let latestEnd = null;
     interventions.forEach(intv => {
       const s = intv.startDate ? parseDate(intv.startDate) : null;
-      const e = intv.endDate ? parseDate(intv.endDate) : null;
+      const e = isIlmpTerminalInterventionStatus(intv) && intv.endDate ? parseDate(intv.endDate) : null;
       if (s && (!earliestStart || s < earliestStart)) earliestStart = s;
       if (e && (!latestEnd || e > latestEnd)) {
         latestEnd = e;
@@ -8521,9 +8531,22 @@ function runIlmpValidation(context) {
       }
     }
 
-    if (planResultCode) {
+    if (planIsTerminal) {
+      if (!planResultCode) {
+        const msg = 'Action plan result code is required when an action plan is closed.';
+        blockingIssues.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-result-code-required`,
+          label: 'Action plan result code',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: null
+        });
+      }
       if (!planResultStr || !planResultDate) {
-        const msg = 'Action plan result date is required when a result code is present.';
+        const msg = 'Action plan result date is required when an action plan is closed.';
         blockingIssues.push(`${planPrefix} ${msg}`);
         ruleResults.push({
           id: `${planPrefix}-result-date-required`,
@@ -8658,7 +8681,7 @@ function runIlmpValidation(context) {
       }
     }
 
-    if (planStart && planResultDate) {
+    if (planIsTerminal && planStart && planResultDate) {
       const diffDays = Math.round((planResultDate - planStart) / (1000 * 60 * 60 * 24));
       if (diffDays > 1095) {
         const msg = 'Action plan duration is unusually long; confirm timelines.';
@@ -8696,6 +8719,7 @@ function runIlmpValidation(context) {
       const endStr = intv.endDate || null;
       const startDate = startStr ? parseDate(startStr) : null;
       const endDate = endStr ? parseDate(endStr) : null;
+      const interventionIsTerminal = isIlmpTerminalInterventionStatus(intv);
 
       if (!startStr) {
         const msg = 'Intervention start date is required.';
@@ -8763,21 +8787,21 @@ function runIlmpValidation(context) {
         }
       }
 
+      if (interventionIsTerminal && !endStr) {
+        const msg = 'Intervention end date is required when intervention is completed or cancelled.';
+        blockingIssues.push(`${prefix} ${msg}`);
+        ruleResults.push({
+          id: `${prefix}-end-required`,
+          label: 'Intervention end date',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: null
+        });
+      }
+
       if (endStr) {
-        const statusNormalized = normaliseInterventionStatus(intv.status);
-        if (!['completed', 'cancelled'].includes(statusNormalized)) {
-          const msg = 'Intervention with an end date must be marked completed or cancelled.';
-          blockingIssues.push(`${prefix} ${msg}`);
-          ruleResults.push({
-            id: `${prefix}-end-status-mismatch`,
-            label: 'Intervention end date',
-            category: 'mandatory',
-            severity: 'blocking',
-            passed: false,
-            message: msg,
-            detail: { status: statusNormalized, end: endStr }
-          });
-        }
         if (!endDate || !/^\d{4}-\d{2}-\d{2}$/.test(String(endStr).trim())) {
           const msg = 'Intervention end date must be in YYYY-MM-DD format.';
           blockingIssues.push(`${prefix} ${msg}`);
@@ -8804,7 +8828,7 @@ function runIlmpValidation(context) {
               detail: { start: startStr, end: endStr }
             });
           }
-          if (planResultDate && endDate > planResultDate) {
+          if (interventionIsTerminal && planResultDate && endDate > planResultDate) {
             const msg = 'Intervention end date must be on/before the action plan result date.';
             blockingIssues.push(`${prefix} ${msg}`);
             ruleResults.push({
@@ -8817,20 +8841,22 @@ function runIlmpValidation(context) {
               detail: { end: endStr, planResult: planResultStr }
             });
           }
-          const maxEnd = new Date(startDate);
-          maxEnd.setMonth(maxEnd.getMonth() + 60);
-          if (endDate > maxEnd) {
-            const msg = 'Intervention end date must be within 60 months of the start date.';
-            blockingIssues.push(`${prefix} ${msg}`);
-            ruleResults.push({
-              id: `${prefix}-end-too-far`,
-              label: 'Intervention end date',
-              category: 'mandatory',
-              severity: 'blocking',
-              passed: false,
-              message: msg,
-              detail: { start: startStr, end: endStr, maxEnd: maxEnd.toISOString().slice(0,10) }
-            });
+          if (startDate) {
+            const maxEnd = new Date(startDate);
+            maxEnd.setMonth(maxEnd.getMonth() + 60);
+            if (endDate > maxEnd) {
+              const msg = 'Intervention end date must be within 60 months of the start date.';
+              blockingIssues.push(`${prefix} ${msg}`);
+              ruleResults.push({
+                id: `${prefix}-end-too-far`,
+                label: 'Intervention end date',
+                category: 'mandatory',
+                severity: 'blocking',
+                passed: false,
+                message: msg,
+                detail: { start: startStr, end: endStr, maxEnd: maxEnd.toISOString().slice(0,10) }
+              });
+            }
           }
         }
       }
@@ -8840,10 +8866,8 @@ function runIlmpValidation(context) {
         blockingIssues.push(`${prefix} ${msg}`);
       }
 
-      if ((planResultDate || endStr) && !intv.outcome) {
-        const msg = planResultDate
-          ? 'Intervention outcome code is required when action plan result date is set.'
-          : 'Intervention outcome code is required when end date is set.';
+      if (interventionIsTerminal && !intv.outcome) {
+        const msg = 'Intervention outcome code is required when intervention is completed or cancelled.';
         blockingIssues.push(`${prefix} ${msg}`);
         ruleResults.push({
           id: `${prefix}-outcome-required`,
@@ -14740,6 +14764,7 @@ function buildIlmpParticipantPayload(context) {
     const nodes = actionPlans
       .filter(plan => (plan?.status || '').toLowerCase() !== 'draft')
       .map(plan => {
+        const planIsTerminal = isIlmpTerminalActionPlanStatus(plan.status || plan.Status || '');
         const {
           startDate,
           resultDate,
@@ -14767,21 +14792,24 @@ function buildIlmpParticipantPayload(context) {
         const hasInterventions = Array.isArray(interventions) && interventions.length > 0;
         const interventionNode = hasInterventions
           ? {
-              Intervention: interventions.map(entry => ({
-                InterventionCode: entry.code || null,
-                InterventionDescription: entry.description || null,
-                InterventionStartDate: entry.startDate || null,
-                InterventionEndDate: entry.endDate || null,
-                InterventionOutcome: mapOutcomeCode(entry.outcome) || entry.outcome || null,
-                InterventionDuration: entry.duration || null,
-                InterventionRelatedNOC: entry.relatedNoc || null,
-                InterventionRelatedNOCVersion: entry.relatedNocVersion || null,
-                InterventionCost: entry.cost || null,
-                Status: entry.status || null,
-                id: entry.id || null,
-                RequestedSupports: entry.supports && entry.supports.length ? { Support: entry.supports } : null,
-                Notes: entry.notes && entry.notes.length ? { Note: entry.notes } : null
-              }))
+              Intervention: interventions.map(entry => {
+                const interventionIsTerminal = isIlmpTerminalInterventionStatus(entry);
+                return {
+                  InterventionCode: entry.code || null,
+                  InterventionDescription: entry.description || null,
+                  InterventionStartDate: entry.startDate || null,
+                  InterventionEndDate: interventionIsTerminal ? entry.endDate || null : null,
+                  InterventionOutcome: interventionIsTerminal ? mapOutcomeCode(entry.outcome) || entry.outcome || null : null,
+                  InterventionDuration: interventionIsTerminal ? entry.duration || null : null,
+                  InterventionRelatedNOC: entry.relatedNoc || null,
+                  InterventionRelatedNOCVersion: entry.relatedNocVersion || null,
+                  InterventionCost: interventionIsTerminal ? entry.cost || null : null,
+                  Status: entry.status || null,
+                  id: entry.id || null,
+                  RequestedSupports: entry.supports && entry.supports.length ? { Support: entry.supports } : null,
+                  Notes: entry.notes && entry.notes.length ? { Note: entry.notes } : null
+                };
+              })
             }
           : null;
         if (
@@ -14802,14 +14830,14 @@ function buildIlmpParticipantPayload(context) {
           educationProvince: educationProvince || null,
           agreementNumber: planAgreementNumber || null,
           ActionPlanStartDate: startDate || null,
-          ActionPlanResultDate: resultDate || null,
-          ActionPlanResultCode: resultCode || null,
-          actionPlanResultEducationLevel: resultEducationLevel || null,
-          actionPlanFutureEducationLevel: futureEducationLevel || null,
-          resultEducationLevel: resultEducationLevel || null,
-          futureEducationLevel: futureEducationLevel || null,
-          ActionPlanResultRelatedNOC: resultNoc || null,
-          ActionPlanResultRelatedNOCVersion: resultNocVersion || null,
+          ActionPlanResultDate: planIsTerminal ? resultDate || null : null,
+          ActionPlanResultCode: planIsTerminal ? resultCode || null : null,
+          actionPlanResultEducationLevel: planIsTerminal ? resultEducationLevel || null : null,
+          actionPlanFutureEducationLevel: planIsTerminal ? futureEducationLevel || null : null,
+          resultEducationLevel: planIsTerminal ? resultEducationLevel || null : null,
+          futureEducationLevel: planIsTerminal ? futureEducationLevel || null : null,
+          ActionPlanResultRelatedNOC: planIsTerminal ? resultNoc || null : null,
+          ActionPlanResultRelatedNOCVersion: planIsTerminal ? resultNocVersion || null : null,
           EIClaimant: actionPlanEiClaimantCode || null,
           actionPlanPreviousEmployment: toCode(prevEmployment, CODE_MAPS.prevEmployment) || null,
           actionPlanPreviousEmploymentNoc: prevEmploymentNoc || null,
@@ -14916,11 +14944,14 @@ function buildIlmpParticipantPayload(context) {
   const appendIntervention = (intervention, indent) => {
     if (!intervention) return;
     const pad = '  '.repeat(indent);
+    const interventionIsTerminal = isIlmpTerminalInterventionStatus(intervention);
     lines.push(`${pad}<intervention>`);
     add(indent + 1, 'interventionCode', intervention.code || null);
     add(indent + 1, 'interventionStartDate', intervention.startDate || null);
-    add(indent + 1, 'interventionEndDate', intervention.endDate || null);
-    add(indent + 1, 'interventionOutcome', intervention.outcome || null);
+    if (interventionIsTerminal) {
+      add(indent + 1, 'interventionEndDate', intervention.endDate || null);
+      add(indent + 1, 'interventionOutcome', intervention.outcome || null);
+    }
     add(indent + 1, 'interventionRelatedNOC', intervention.relatedNoc || null);
     add(indent + 1, 'interventionRelatedNOCVersion', intervention.relatedNocVersion || null);
     const intStatus = normaliseStatusShort(intervention.status || intervention.Status || '');
@@ -14940,6 +14971,7 @@ function buildIlmpParticipantPayload(context) {
   const appendActionPlan = (plan, indent) => {
     if (!plan) return;
     const pad = '  '.repeat(indent);
+    const planIsTerminal = isIlmpTerminalActionPlanStatus(plan.status || plan.Status || '');
     const resolveEiClaimant = value => {
       const coded = toCode(value, CODE_MAPS.eiClaimant);
       if (coded) return coded;
@@ -15047,17 +15079,17 @@ function buildIlmpParticipantPayload(context) {
       plan.ActionPlanResultRelatedNOCVersion ||
       null;
     add(indent + 1, 'actionPlanStartDate', planStart);
-    add(indent + 1, 'actionPlanResultCode', planResultCode);
-    if (planResultCode === '2') {
-      add(indent + 1, 'actionPlanResultRelatedNOC', planResultNoc || plan.interventions?.[0]?.relatedNoc || null);
-      add(indent + 1, 'actionPlanResultRelatedNOCVersion', planResultNocVersion || plan.interventions?.[0]?.relatedNocVersion || null);
-    }
-    if (planResultCode || planResultDate) {
+    if (planIsTerminal) {
+      add(indent + 1, 'actionPlanResultCode', planResultCode);
+      if (planResultCode === '2') {
+        add(indent + 1, 'actionPlanResultRelatedNOC', planResultNoc || plan.interventions?.[0]?.relatedNoc || null);
+        add(indent + 1, 'actionPlanResultRelatedNOCVersion', planResultNocVersion || plan.interventions?.[0]?.relatedNocVersion || null);
+      }
       add(indent + 1, 'actionPlanResultEducationLevel', resolvedPlanResultEducationCode);
-    }
-    add(indent + 1, 'actionPlanResultDate', planResultDate);
-    if (planResultCode === '4') {
-      add(indent + 1, 'actionPlanFutureEducationLevel', planFutureEducationCode);
+      add(indent + 1, 'actionPlanResultDate', planResultDate);
+      if (planResultCode === '4') {
+        add(indent + 1, 'actionPlanFutureEducationLevel', planFutureEducationCode);
+      }
     }
     add(indent + 1, 'actionPlanChildCareNeed', toCode(plan.childcareNeed, CODE_MAPS.childcareNeed) || null);
     add(indent + 1, 'actionPlanChildCareFundedCode', toCode(plan.childcareFunding, CODE_MAPS.childcareFunding) || null);
@@ -20513,6 +20545,11 @@ function canRecordApplicationDecision(req) {
 
 function canRecordInterventionProposalDecision(req) {
   return hasSystemOrNwacAdminAccess(req);
+}
+
+function canCreateManualBackloadRecord(req) {
+  const role = canonicaliseAccessRole(inferUserRole(req));
+  return role === 'System Administrator' || role === 'NWAC Administrator' || role === 'Regional Manager';
 }
 
 const UNSAFE_ADMIN_DEBUG_ROUTES_ENABLED = ['1', 'true', 'yes', 'on'].includes(
@@ -48312,6 +48349,13 @@ app.post('/api/cases/:id/action-plans', async (req, res) => {
   const role = inferUserRole(req);
   const identity = getRequesterIdentity(req);
 
+  if (isBackloadMode && !canCreateManualBackloadRecord(req)) {
+    return res.status(403).json({
+      error: 'manual_backload_forbidden',
+      message: 'Only System Administrators, NWAC Administrators, and Regional Managers can add existing historical records.',
+    });
+  }
+
   const [[caseRow]] = await pool.query(
     `SELECT
        a.id AS application_id,
@@ -49049,6 +49093,13 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
   const isBackloadMode =
     backloadMode === true ||
     String(entryMode || '').trim().toLowerCase() === 'backload';
+
+  if (isBackloadMode && !canCreateManualBackloadRecord(req)) {
+    return res.status(403).json({
+      error: 'manual_backload_forbidden',
+      message: 'Only System Administrators, NWAC Administrators, and Regional Managers can add existing historical records.',
+    });
+  }
 
   const trimmedCode = normalizeInterventionCodeValue(code) || '';
   if (!trimmedCode) {
@@ -50213,6 +50264,12 @@ app.patch('/api/interventions/:id', async (req, res) => {
       }
     }
     const isClosedStatusUpdate = ['completed', 'cancelled'].includes(nextStatusForValidation);
+    if (isClosedStatusUpdate && !nextEndDate) {
+      return res.status(422).json({
+        error: 'end_date_required',
+        message: 'End date is required when recording a completed or cancelled intervention.'
+      });
+    }
     if (isClosedStatusUpdate && !nextOutcome) {
       return res.status(422).json({
         error: 'outcome_required',
