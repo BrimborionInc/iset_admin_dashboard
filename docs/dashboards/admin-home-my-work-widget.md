@@ -2,7 +2,7 @@
 
 Purpose: document the live homepage Work Queue widget and the queues that drive the shared `Work Queue Items` table.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-05-03
+Last Updated: 2026-05-05
 
 ## Scope
 
@@ -39,6 +39,7 @@ Last Updated: 2026-05-03
   - then sees the remaining shared admin/manager exception queues
 - `ISET Coordinator`
   - sees the coordinator-specific queue set from `IsetCoordinatorWorkQueueWidget`
+  - `My Applications` remains first and `My Clients` appears second
 
 ## Current shared application pipeline
 
@@ -65,8 +66,10 @@ Last Updated: 2026-05-03
   - the selected row still passes explicit decision-entry context so the target workspace opens in a review-focused board layout and the relevant decision step instead of restoring a stale personal board or wizard position
 - `Pending Completion`
   - contains decision-recorded application files that still need post-decision follow-through before the application workflow is complete
-  - currently includes approved outcomes from `/api/applications`, plus denied/declined outcomes only until the denial letter has been sent
-  - sending the denial letter is the terminal follow-up action for denied applications, so records with `decisionLetterSent.denial` in case context are excluded from this queue
+  - includes approved and denied application assessment outcomes until the application is actually completed/closed
+  - application rows open Application Workspace with a post-decision step intent: `Approval letters` before the approval letter is sent, then `Funding forms and signatures` after an approval letter is recorded as sent
+  - includes approved new intervention proposals and approved intervention revisions from `/api/dashboard/intervention-completion-items` until the intervention-scoped approval letter is sent
+  - does not include ordinary approved/planned interventions, historical/backloaded interventions, or `auto_assessment` interventions created by an application approval, even when those rows have compatibility proposal records
   - is visible across the admin/manager shared pipeline and as the renamed coordinator `funding-agreements` queue so the post-decision stage is represented consistently across role homepages
   - has no inline action by default; staff open the workspace through the item link
 
@@ -89,7 +92,7 @@ Last Updated: 2026-05-03
 - `All Cases` includes open client cases visible through `/api/dashboard/all-client-cases`.
 - `All Cases` is case-based, not deduped by client, so multiple open files for one client count separately.
 - The case queue excludes only `closed` and `archived` statuses. `Dormant` and `ready_to_close` remain in scope.
-- `Pending Completion` is the exception to the non-terminal-only rule for the pipeline cards: it intentionally surfaces decision-recorded application files that still need post-decision work even when the underlying application outcome is `approved`, `rejected`, or `declined`. Denied/rejected files are removed after the denial letter is sent.
+- `Pending Completion` is the exception to the non-terminal-only rule for the pipeline cards: it intentionally surfaces decision-recorded application files that still need post-decision work even when the underlying application outcome is `approved`, `rejected`, or `declined`. These rows remain until the application is completed/closed, not merely until a decision letter is sent.
 
 ## Regional Manager scope rule
 
@@ -108,9 +111,18 @@ Last Updated: 2026-05-03
 - The client-case queue excludes only `closed` and `archived` statuses. `Dormant` and `ready_to_close` remain in scope.
 - The applications queue excludes terminal application statuses, including normalized terminal variants such as `approved`, `completed`, `withdrawn`, `cancelled`, `closed`, and `archived`.
 
+## ISET Coordinator scope rule
+
+- `My Applications` includes assigned application rows loaded through `/api/applications` for the coordinator's application workflow statuses.
+- `My Clients` includes open client case files assigned directly to the signed-in coordinator through `/api/dashboard/my-client-cases`.
+- `My Clients` uses `iset_case.assigned_staff_profile_id` as the assignment source and is case-based, not deduped by client.
+- The client-case queue excludes only `closed` and `archived` statuses. `Dormant` and `ready_to_close` remain in scope.
+- `My Clients` is a case-navigation queue, so assignment/reassignment is suppressed in its row actions.
+
 ## Widget settings behavior
 
 - Queue cards are removable from the homepage board like other widgets.
 - Within the widget, `Work queue preferences` controls which queue cards are visible.
 - The current bucket preference storage key is `home-work-queue-preferences-v5`.
 - The version was bumped again when the shared application pipeline was reworked so existing browsers pick up the new queue IDs and ordering by default.
+- The ISET Coordinator bucket preference key is `home-iset-coordinator-work-queue-preferences-v2`; it was bumped when `My Clients` was added so existing browsers pick up the new second-position queue by default.

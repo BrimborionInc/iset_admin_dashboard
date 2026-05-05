@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../../../auth/apiClient.js";
 import {
+  normalizeInterventionReviewStatus,
   resolveInterventionStateFields,
 } from "../../../utils/interventionStatus.js";
 import { resolveApplicationStateFields } from "../../../utils/applicationStatus.js";
@@ -28,6 +29,11 @@ const toNumberOrNull = value => {
   }
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
+};
+
+const toPositiveIntegerOrNull = value => {
+  const numeric = toNumberOrNull(value);
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
 };
 
 const normalizeInterventionCostLine = raw => {
@@ -111,6 +117,41 @@ const buildInterventionFromApi = (planId, payload = {}) => {
       : { ilmp: "pending", finance: "pending" };
   const interventionState = resolveInterventionStateFields(payload, { fallbackStatus: "draft" });
   const status = interventionState.effectiveStatus || "draft";
+  const proposalId = toPositiveIntegerOrNull(
+    payload.proposalId ??
+    payload.proposal_id ??
+    payload.interventionProposalId ??
+    payload.intervention_proposal_id
+  );
+  const proposalReviewStatus =
+    normalizeInterventionReviewStatus(
+      payload.proposalReviewStatus ??
+      payload.proposal_review_status ??
+      payload.interventionProposalReviewStatus ??
+      payload.intervention_proposal_review_status,
+      null
+    ) ||
+    interventionState.proposalReviewStatus ||
+    interventionState.reviewStatus ||
+    null;
+  const proposalKind =
+    payload.proposalKind ??
+    payload.proposal_kind ??
+    payload.interventionProposalKind ??
+    payload.intervention_proposal_kind ??
+    null;
+  const proposalReviewedAt =
+    payload.proposalReviewedAt ??
+    payload.proposal_reviewed_at ??
+    payload.interventionProposalReviewedAt ??
+    payload.intervention_proposal_reviewed_at ??
+    null;
+  const proposalSourceInterventionId = toPositiveIntegerOrNull(
+    payload.proposalSourceInterventionId ??
+    payload.proposal_source_intervention_id ??
+    payload.sourceInterventionId ??
+    payload.source_intervention_id
+  );
   const snapshot =
     resolvedMetadata?.snapshot && typeof resolvedMetadata.snapshot === "object"
       ? resolvedMetadata.snapshot
@@ -164,8 +205,16 @@ const buildInterventionFromApi = (planId, payload = {}) => {
     status,
     reviewStatus: interventionState.reviewStatus || null,
     review_status: interventionState.reviewStatus || null,
-    proposalReviewStatus: interventionState.reviewStatus || null,
-    proposal_review_status: interventionState.reviewStatus || null,
+    proposalId,
+    proposal_id: proposalId,
+    proposalKind,
+    proposal_kind: proposalKind,
+    proposalReviewStatus,
+    proposal_review_status: proposalReviewStatus,
+    proposalReviewedAt,
+    proposal_reviewed_at: proposalReviewedAt,
+    proposalSourceInterventionId,
+    proposal_source_intervention_id: proposalSourceInterventionId,
     deliveryStatus: interventionState.deliveryStatus || null,
     delivery_status: interventionState.deliveryStatus || null,
     startDate: payload.startDate || null,

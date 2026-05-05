@@ -32,6 +32,54 @@ const CANONICAL_INTERVENTION_STATUS_SET = new Set(CANONICAL_INTERVENTION_STATUSE
 const CANONICAL_INTERVENTION_REVIEW_STATUS_SET = new Set(CANONICAL_INTERVENTION_REVIEW_STATUSES);
 const CANONICAL_INTERVENTION_DELIVERY_STATUS_SET = new Set(CANONICAL_INTERVENTION_DELIVERY_STATUSES);
 
+const normalizeWorkflowKey = value =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+const normalizePositiveInteger = value => {
+  if (value === null || typeof value === "undefined" || value === "") return null;
+  const numeric = Number(value);
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
+};
+
+const parseMetadataObject = value => {
+  if (!value) return {};
+  if (typeof value === "object") return value;
+  if (typeof value !== "string") return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const hasAppliedRevisionMetadata = metadata => {
+  if (!metadata || typeof metadata !== "object") return false;
+  if (metadata.lastAppliedRevision && typeof metadata.lastAppliedRevision === "object") return true;
+  return Array.isArray(metadata.revisionHistory) && metadata.revisionHistory.length > 0;
+};
+
+const isManualBackloadMetadata = metadata => {
+  if (!metadata || typeof metadata !== "object") return false;
+  const source = normalizeWorkflowKey(metadata.source);
+  const entryMode = normalizeWorkflowKey(metadata.entryMode ?? metadata.entry_mode);
+  return source === "manual_backload" || source === "auto_assessment" || entryMode === "existing";
+};
+
+const resolveApprovalLetterFollowUpMetadata = metadata => {
+  if (!metadata || typeof metadata !== "object") return {};
+  const candidates = [
+    metadata.approvalLetterFollowUp,
+    metadata.approval_letter_follow_up,
+    metadata.letterFollowUp,
+    metadata.letter_follow_up,
+  ];
+  return candidates.find(candidate => candidate && typeof candidate === "object") || {};
+};
+
 export const INTERVENTION_PROPOSAL_STATUSES = new Set([
   "draft",
   "submitted",
@@ -207,3 +255,73 @@ export const isInterventionClosableStatus = status =>
 
 export const isInterventionDeletableStatus = status =>
   INTERVENTION_DELETABLE_STATUSES.has(resolveInterventionStateFields(status).effectiveStatus);
+
+export const resolveInterventionApprovalLetterFollowUp = intervention => {
+  if (!intervention || typeof intervention !== "object") {
+    return { eligible: false, isRevision: false };
+  }
+  const state = resolveInterventionStateFields(intervention, { fallbackStatus: null });
+  if (state.reviewStatus !== "approved") {
+    return { eligible: false, isRevision: false };
+  }
+
+  const metadata = parseMetadataObject(intervention.metadata ?? intervention.metadata_json);
+  const appliedRevision = hasAppliedRevisionMetadata(metadata);
+  const letterFollowUp = resolveApprovalLetterFollowUpMetadata(metadata);
+  const letterSentAt =
+    letterFollowUp.approvalLetterSentAt ||
+    letterFollowUp.approval_letter_sent_at ||
+    letterFollowUp.sentAt ||
+    letterFollowUp.sent_at ||
+    letterFollowUp.completedAt ||
+    letterFollowUp.completed_at ||
+    null;
+  const letterSent =
+    Boolean(letterSentAt) ||
+    normalizeWorkflowKey(letterFollowUp.status) === "sent" ||
+    letterFollowUp.completed === true;
+  const proposalId = normalizePositiveInteger(intervention.proposalId ?? intervention.proposal_id);
+  const proposalReviewStatus = normalizeInterventionReviewStatus(
+    intervention.proposalReviewStatus ?? intervention.proposal_review_status,
+    null
+  );
+  const proposalKind = normalizeWorkflowKey(intervention.proposalKind ?? intervention.proposal_kind);
+  const approvedProposalLinked =
+    proposalId &&
+    proposalReviewStatus === "approved" &&
+    !isManualBackloadMetadata(metadata);
+
+  if (!appliedRevision && !approvedProposalLinked) {
+    return { eligible: false, isRevision: false };
+  }
+
+  const isRevision = appliedRevision || proposalKind === "revision";
+  const applied = metadata.lastAppliedRevision && typeof metadata.lastAppliedRevision === "object"
+    ? metadata.lastAppliedRevision
+    : {};
+  const title =
+    applied.sourceTitle ||
+    metadata.title ||
+    intervention.title ||
+    (intervention.code ? `Intervention ${intervention.code}` : "this approved intervention");
+
+  return {
+    eligible: true,
+    isRevision,
+    letterSent,
+    letterSentAt,
+    pendingLetter: !letterSent,
+    sourceTitle: title,
+    sourceInterventionId: intervention.id || intervention.intervention_id || null,
+    sourceActionPlanId: intervention.actionPlanId || intervention.action_plan_id || null,
+    sourceStatus: state.effectiveStatus || "approved",
+  };
+};
+
+export const isInterventionApprovalLetterFollowUpEligible = intervention =>
+  resolveInterventionApprovalLetterFollowUp(intervention).eligible;
+
+export const isInterventionApprovalLetterFollowUpPending = intervention => {
+  const followUp = resolveInterventionApprovalLetterFollowUp(intervention);
+  return followUp.eligible && !followUp.letterSent;
+};

@@ -41,7 +41,7 @@ export const PROGRAM_ADMIN_BUCKETS = [
   {
     id: 'pending-completion',
     label: 'Pending Completion',
-    description: 'Decision-recorded application files that still need post-decision follow-through before the application workflow is complete.'
+    description: 'Post-decision application and intervention proposal work still waiting on letters, documents, signatures, or final completion.'
   },
   {
     id: 'unresolved-conflicts',

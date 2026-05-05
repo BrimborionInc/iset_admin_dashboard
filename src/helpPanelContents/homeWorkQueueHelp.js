@@ -14,8 +14,9 @@ const HomeWorkQueueHelp = () => (
       <strong> All Cases</strong>. Those queues roll up application work and open client cases
       across the full portfolio. <strong>Pending Decision</strong> is the decision stage in that
       pipeline and combines submitted application assessments, new intervention proposals, and
-      proposed intervention changes. <strong>Pending Completion</strong> covers files where the
-      decision is recorded but post-decision follow-through is still outstanding.
+      proposed intervention changes. <strong>Pending Completion</strong> covers files and approved
+      intervention proposal/revision follow-ups where the decision is recorded but post-decision
+      work is still outstanding.
     </Box>
     <Box>
       Regional Managers see <strong>Applications in My Region</strong> first. It rolls up all non-terminal
@@ -28,8 +29,9 @@ const HomeWorkQueueHelp = () => (
       client-case queue is case-based rather than deduped by person and still includes dormant files. <strong>Pending Decision</strong>
       is the final stage in the shared application pipeline and combines submitted application assessments, new
       intervention proposals, and proposed intervention changes. <strong>Pending Completion</strong> is the
-      post-decision stage for files that still need letters, funding-form follow-through, signatures, or other
-      closeout work. Regional Managers can monitor the decision queue, but NWAC Administrators record the decision.
+      post-decision stage for files and approved intervention proposal/revision follow-ups that still need letters,
+      funding-form follow-through, signatures, or other closeout work. Regional Managers can monitor the decision queue,
+      but NWAC Administrators record the decision.
     </Box>
     <Box>
       Select a queue to drive the Work Queue Items table and focus the next actions for that queue.
@@ -39,8 +41,8 @@ const HomeWorkQueueHelp = () => (
       Use it to scan province, EI status, and timeline target, then open the workspace to review the item. NWAC Administrators complete the decision there.
     </Box>
     <Box>
-      When you select <strong>Pending Completion</strong>, the shared table shows decision-recorded application files
-      that still need post-decision follow-through before the application workflow is complete.
+      When you select <strong>Pending Completion</strong>, the shared table shows decision-recorded applications and
+      approved intervention proposal/revision letter follow-ups that are not complete yet.
     </Box>
     <Box>
       Use <strong>Work queue preferences</strong> in the widget header to choose which queues are visible. Preferences
@@ -54,7 +56,7 @@ const HomeWorkQueueHelp = () => (
 
 HomeWorkQueueHelp.aiContext = `
 You are assisting with the Work Queue widget on the NWAC ISET homepage.
-Explain that queues are role-scoped, selecting one updates the Work Queue Items table, and Work queue preferences lets users show/hide queues with browser-saved settings. Mention that NWAC Administrators now start with New Applications, In Assessment, Pending Decision, and Pending Completion, then All Cases; Regional Managers get Applications in My Region first, My Applications second, then the shared application-pipeline queues, then Clients in My Region. Regional Managers still keep EI Check Needed as the EI-verification hold stage, while NWAC Administrators do not see that queue separately because those files are folded into New Applications. All Cases counts open client cases across the portfolio, including dormant files, and is case-based rather than deduped by person. Applications in My Region includes non-terminal applications in the manager's assigned provinces and territories; Clients in My Region counts open client cases in their regional portfolio, including dormant files, and is case-based rather than deduped by person. Clarify that the shared Pending Decision queue combines submitted application assessments, new intervention proposals, and proposed intervention changes, and that Pending Completion is the post-decision follow-through stage. NWAC Administrators complete decisions from the workspace after opening the selected row. If a queue appears disabled, clarify it is intentionally non-selectable in the current release.
+Explain that queues are role-scoped, selecting one updates the Work Queue Items table, and Work queue preferences lets users show/hide queues with browser-saved settings. Mention that NWAC Administrators now start with New Applications, In Assessment, Pending Decision, and Pending Completion, then All Cases; Regional Managers get Applications in My Region first, My Applications second, then the shared application-pipeline queues, then Clients in My Region. Regional Managers still keep EI Check Needed as the EI-verification hold stage, while NWAC Administrators do not see that queue separately because those files are folded into New Applications. All Cases counts open client cases across the portfolio, including dormant files, and is case-based rather than deduped by person. Applications in My Region includes non-terminal applications in the manager's assigned provinces and territories; Clients in My Region counts open client cases in their regional portfolio, including dormant files, and is case-based rather than deduped by person. Clarify that the shared Pending Decision queue combines submitted application assessments, new intervention proposals, and proposed intervention changes, and that Pending Completion is the post-decision follow-through stage for applications plus approved intervention proposal/revision approval-letter follow-up. NWAC Administrators complete decisions from the workspace after opening the selected row. If a queue appears disabled, clarify it is intentionally non-selectable in the current release.
 `;
 
 export default HomeWorkQueueHelp;

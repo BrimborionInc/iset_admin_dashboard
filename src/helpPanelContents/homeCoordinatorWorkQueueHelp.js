@@ -16,11 +16,12 @@ const HomeCoordinatorWorkQueueHelp = () => (
       Common coordinator queues include:
       <ul>
         <li><strong>My Applications:</strong> assigned application files that need review.</li>
+        <li><strong>My Clients:</strong> assigned client case files, including files that no longer have an active application task.</li>
         <li><strong>EI Verification Pending:</strong> cases waiting for EI consent or verification before the assessment can move forward.</li>
         <li><strong>Ready to assess:</strong> files that appear ready for the assessment and recommendation work.</li>
         <li><strong>Missing Docs / Follow-ups Needed:</strong> applications waiting on the applicant.</li>
-        <li><strong>Awaiting Approval:</strong> recommendations already submitted to NWAC.</li>
-        <li><strong>Pending Completion:</strong> decision-recorded files that still need letters, funding forms, signatures, or other post-decision follow-through before completion.</li>
+        <li><strong>Awaiting Approval:</strong> application assessments and new/revised intervention proposals you submitted to NWAC.</li>
+        <li><strong>Pending Completion:</strong> approved or denied application assessments, plus approved intervention proposals/revisions, that still need letters, documents, signatures, or final completion.</li>
         <li><strong>Active Clients</strong>, <strong>Payments &amp; Proof Due</strong>, and <strong>Follow-ups &amp; File Closure Due:</strong> active case-management work after approval.</li>
       </ul>
     </Box>
@@ -35,11 +36,12 @@ HomeCoordinatorWorkQueueHelp.aiContext = `
 You are assisting with the ISET Coordinator Work Queue widget on the NWAC ISET homepage.
 Explain the coordinator queue cards in staff language and connect them to the next job step, not just the UI:
 - My Applications -> open the assigned file and review it.
+- My Clients -> open an assigned client case file in Case Workspace.
 - EI Verification Pending -> check consent/verification requirements before assessment.
 - Ready to assess -> complete the assessment and recommendation.
 - Missing Docs / Follow-ups Needed -> contact the applicant, request missing items, and document the attempt.
-- Awaiting Approval -> monitor files submitted to NWAC.
-- Pending Completion / Active Clients / Payments / Follow-ups -> continue post-decision and active case-management work after approval or denial.
+- Awaiting Approval -> monitor application assessments and intervention proposals/revisions submitted to NWAC.
+- Pending Completion / Active Clients / Payments / Follow-ups -> continue post-decision and active case-management work after approval or denial, including approved intervention proposal/revision approval-letter follow-up.
 
 Always mention that the selected card drives the Work Queue Items table, and that Work queue preferences lets the user show or hide queue cards in this browser.
 `;

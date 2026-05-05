@@ -38,3 +38,5 @@ Manage interventions under the active action plan.
 
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.
+- Approved new/revised intervention proposals with pending approval-letter follow-up still count as an in-progress proposal for quick actions. They block starting another proposal or revision until the intervention-scoped approval letter has been sent and the persisted `approvalLetterFollowUp` marker is present.
+- Activating an already approved intervention is a delivery transition (`delivery_status = in_progress`). It must not be treated as recording a proposal approval/denial/pushback decision and must remain available to the authorized case owner/manager path.

@@ -4,7 +4,7 @@ Purpose: Track requirements, decisions, and progress for wiring the ISET Coordin
 
 Audience: Admin dashboard engineers and reviewers.
 
-Last Updated: 2025-12-27
+Last Updated: 2026-05-05
 
 ## Scope
 - Wire the ISET Coordinator view of `src/pages/home` from scaffold to functional UI.
@@ -39,6 +39,7 @@ Last Updated: 2025-12-27
 - 2025-10-11: Updated status lifecycle guide to reflect current application status set (closure_notice, legacy terminal values, hold variants).
 - 2025-10-11: Re-listed application statuses for alignment and re-asked scope question on including closed/archived items.
 - 2025-10-11: Confirmed "Applications assigned to me" includes submitted, in_review, docs_requested, closure_notice, pending_approval statuses.
+- 2026-05-05: Added `My Clients` as the second ISET Coordinator queue after `My Applications`, backed by open cases assigned to the signed-in coordinator through `/api/dashboard/my-client-cases`.
 - 2025-10-11: Updated Applications widget empty-state text and user-facing hint copy.
 - 2025-10-11: Shortened coordinator bucket label, simplified hint text, and hid Owner column for assessor queue items.
 - 2025-10-11: Clarified scope difference between My Applications and Missing Docs queues; gathering Missing Docs status criteria.
@@ -65,6 +66,7 @@ Last Updated: 2025-12-27
 - 2025-10-11: Clarified File Complete vs Approvals Pipeline: pre-approval processing due vs post-assessment approvals workflow.
 - 2025-10-11: Renamed File Complete queue to “Ready to assess,” updated hint text, enabled bucket, and filtered to assigned submitted/in_review items with completed EI eligibility.
 - 2025-10-11: Renamed Approvals Pipeline to “Awaiting Approval,” updated hint text, enabled the bucket, and wired it to pending approval items.
+- 2026-05-05: Extended `Awaiting Approval` so ISET Coordinators see both submitted application assessments and their own submitted new/revised intervention proposals while NWAC review is pending. The intervention approval API remains decision-scoped for approvers and owner-scoped for coordinators.
 - 2025-10-11: Added automatic status revert from docs_requested to in_review when all secure-message signing requests are signed.
 - 2025-10-11: Fixed missing useRef import for SecureMessagingWidget after adding signed-forms status update.
 - 2025-10-11: Added backend status flip on signing_request completion to update queues without opening the workspace.

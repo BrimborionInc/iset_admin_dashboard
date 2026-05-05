@@ -7,7 +7,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-05-02
+Last Updated: 2026-05-05
 
 ## Project memory layer
 
@@ -57,6 +57,7 @@ Last Updated: 2026-05-02
 - For coordinator-facing PATH help-panel or AI-context work, use `docs/training/TRAINING_MODULES_September_2025_extracted.md` as the baseline for staff workflow expectations and write guidance as a job aid, not a product tour.
 - Keep doc updates in the same change when behavior or structure changes.
 - If blocked by tooling, permissions, or environment access, call it out immediately.
+- For TEST/PROD deploys, apply the deployment runbook as an execution checklist, not as background reading. Before `path:deploy`, state the maintenance sequence being used. If the deploy will restart admin/portal processes, refresh ASG instances, reinstall dependencies, change target routing, or otherwise risk a raw `502 Bad Gateway`, set the scoped in-app warning, wait through the warning window when practical, then enable the ALB fixed-response maintenance fallback before starting the deploy. Clear fallback only after smoke is green, then clear the warning.
 
 ## For future Codex threads
 

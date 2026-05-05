@@ -1,7 +1,7 @@
 # PATH Deployment Quick Guide
 
 Status: current primary operator guide for normal TEST/PROD PATH deploys.
-Last reviewed: 2026-04-29 during ops documentation cleanup; command names checked against current `package.json`.
+Last reviewed: 2026-05-05 after TEST deploy maintenance-fallback miss; command names checked against current `package.json`.
 
 This is the shortest operator guide for normal PATH deployments.
 
@@ -24,8 +24,9 @@ Do not run the app deploy commands from a WSL-only checkout such as `/root/ISET/
 - TEST deploys require `--yes` only when you include `--refresh-test-db`.
 - Deploys do not auto-bump `package.json` semver; instead, each frontend build now carries a visible release/build stamp.
 - App deploys package the current working tree. If you mean “deploy only the staged subset,” stage the intended files and stash the rest before running `path:deploy`.
-- TEST app rollouts should rehearse PROD user-facing maintenance behavior. Any TEST deploy that can restart app processes, make a surface unavailable, or produce transient `502 Bad Gateway` responses needs a scoped warning first or the affected surface behind the ALB maintenance page. TEST remains less strict than PROD because ordinary app deploys do not require `--yes`, but raw 502s are not an acceptable planned TEST experience. TEST maintenance copy must use the user-facing name `Test and Training environment` and explicitly state that Production is not affected.
-- PROD app rollouts are user-impacting unless the plan proves otherwise. Any PROD deploy that refreshes ASG instances, restarts app processes, rotates target groups, or can produce transient `502 Bad Gateway` responses needs a scoped warning first, even if it is admin-only, portal-only, or code-only.
+- TEST app rollouts should rehearse PROD user-facing maintenance behavior. Any TEST deploy that can restart app processes, make a surface unavailable, or produce transient `502 Bad Gateway` responses needs a scoped warning first and the affected surface behind the ALB maintenance page before deploy starts. TEST remains less strict than PROD because ordinary app deploys do not require `--yes`, but raw 502s are not an acceptable planned TEST experience. TEST maintenance copy must use the user-facing name `Test and Training environment` and explicitly state that Production is not affected.
+- PROD app rollouts are user-impacting unless the plan proves otherwise. Any PROD deploy that refreshes ASG instances, restarts app processes, rotates target groups, or can produce transient `502 Bad Gateway` responses needs a scoped warning first and the affected surface behind the ALB maintenance page before deploy starts, even if it is admin-only, portal-only, or code-only.
+- Operator checklist rule: before running `path:deploy`, state the exact maintenance sequence. For normal app rollouts that restart admin or portal, use `warning -> wait -> ALB 503 fallback -> deploy -> smoke -> clear fallback -> clear warning`. Do not treat the in-app warning as a substitute for the ALB fallback when target health may drop.
 - Current dependency-reinstall safeguard: in-place TEST deploy scripts now clear the deployed `node_modules` tree before running remote `npm ci/install`, and the PROD bootstrap path already does the same during instance boot. Keep that rule in any future deploy helper to avoid stale-filesystem `ENOTEMPTY` failures during runtime dependency replacement.
 
 ## Most Common Commands
@@ -55,6 +56,18 @@ npm run path:maintenance -- set --env test --surfaces admin --start-in 5m --expe
 Use TEST-specific copy, for example: `The Test and Training environment is temporarily unavailable for maintenance. Production is not affected.`
 
 Wait through the warning window when practical, then deploy. Clear the warning only after smoke passes.
+
+If the shortcut may restart the admin app or briefly expose a gateway error, enable the ALB fallback after the warning window and before deploy:
+
+```powershell
+npm run path:maintenance:fallback -- set --env test --surfaces admin
+```
+
+Clear it only after smoke is green:
+
+```powershell
+npm run path:maintenance:fallback -- clear --env test --surfaces admin
+```
 
 Use that admin-only shortcut only when the change is truly confined to the admin repo. Do not use `--skip-portal` when the admin backend depends on sibling code under `..\ISET-intake` or `..\shared` for the changed runtime path. Current concrete example: assignment/reassignment notification email delivery uses `../shared/events/notificationDispatcher.js` plus `../ISET-intake/notifications/templateRenderer.js`, so that fix must ship as an `admin + portal` TEST rollout, not as admin-only.
 

@@ -45,7 +45,7 @@ const HomeDashboardHelp = () => {
           <li>Use the Pending Decision queue to review submitted application assessments, new intervention proposals, and proposed intervention changes, then complete the decision inside the workspace.</li>
         ) : null}
         {(isRegionalManager || isNwacAdmin || isCoordinator) ? (
-          <li>Use Pending Completion to catch decision-recorded files that still need letters, funding-form follow-through, signatures, or other post-decision completion work.</li>
+          <li>Use Pending Completion to catch post-decision applications and approved intervention proposal/revision follow-ups that still need letters, documents, signatures, or final completion.</li>
         ) : null}
         {isSystemAdmin ? (
           <li>Use the operations snapshot to triage reporting blockers, applicant-account backlog, and staff access hygiene before opening deeper admin tools.</li>
@@ -69,7 +69,7 @@ const HomeDashboardHelp = () => {
           <li><strong>Pending Decision Items</strong> - the decision-focused view of Work Queue Items, showing applicant province, EI status, timeline target, and workspace access for approval decisions.</li>
         ) : null}
         {(isRegionalManager || isNwacAdmin || isCoordinator) ? (
-          <li><strong>Pending Completion</strong> - the post-decision application queue for files that are decided but not yet fully completed.</li>
+          <li><strong>Pending Completion</strong> - the post-decision queue for decided applications and approved intervention proposal/revision letter follow-ups that are not yet fully completed.</li>
         ) : null}
         {!isSystemAdmin ? (
           <li><strong>Metrics</strong> - activity totals for the selected period; count values open the contributing records below.</li>
@@ -154,7 +154,7 @@ How to answer:
 - When helping coordinators, connect queue names to training expectations such as prompt acknowledgement of new applications, documented follow-up attempts for missing information, keeping all files tracked, and following active cases through check-ins and closure.
 - Explain that metrics can drill into the same Work Queue Items table, while tagging is a personal follow-up tool.
 - For NWAC Administrators and Regional Managers, mention that the Pending Decision queue opens a decision-focused table. Clarify that approval decisions are completed inside the workspace by NWAC Administrators.
-- For coordinators, NWAC Administrators, and Regional Managers, explain that Pending Completion is the post-decision stage for letters, funding-form follow-through, signatures, and other completion tasks before the application workflow is fully done.
+- For coordinators, NWAC Administrators, and Regional Managers, explain that Pending Completion is the post-decision stage for application completion and approved intervention proposal/revision approval-letter follow-up.
 - Mention Add widget and Reset layout only as secondary page controls, not the main purpose of the page.
 - Avoid product-tour language unless the user specifically asks about layout or mechanics.`;
 

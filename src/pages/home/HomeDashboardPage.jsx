@@ -202,7 +202,7 @@ const ISET_COORDINATOR_STATUS_FILTER = ['submitted', 'in_review', 'docs_requeste
 const ISET_COORDINATOR_EI_ELIGIBILITY_FILTER = ['submitted', 'in_review', 'docs_requested', 'closure_notice'].join(',');
 const ISET_COORDINATOR_READY_TO_ASSESS_FILTER = ['submitted', 'in_review'].join(',');
 const ISET_COORDINATOR_APPROVALS_FILTER = ['pending_approval'].join(',');
-const ISET_COORDINATOR_FUNDING_AGREEMENTS_FILTER = ['decision_ready', 'approved', 'rejected', 'declined'].join(',');
+const PENDING_COMPLETION_APPLICATION_QUERY = 'statusGroup=decision_recorded&limit=200&offset=0';
 const ISET_COORDINATOR_MILESTONE_WINDOW_DAYS = 14;
 const ISET_COORDINATOR_MISSING_DOCS_FILTER = [
     'docs_requested',
@@ -275,22 +275,6 @@ const buildDevHeaders = (role) => {
     return { Accept: 'application/json' };
 };
 
-const isTruthyQueueFlag = (value) => {
-    if (value === true) return true;
-    if (value === false || value === null || typeof value === 'undefined') return false;
-    if (typeof value === 'number') return value === 1;
-    const normalized = String(value).trim().toLowerCase();
-    return ['1', 'true', 'yes', 'y'].includes(normalized);
-};
-
-const hasDenialDecisionLetterSent = (row = {}) =>
-    isTruthyQueueFlag(
-        row.denial_decision_letter_sent ??
-        row.denialDecisionLetterSent ??
-        row.decisionLetterSentDenial ??
-        row.decision_letter_sent_denial
-    );
-
 const isDeniedCompletionRow = (row = {}) => {
     const decisionOutcome = normalizeDecisionOutcome(row.decision_outcome ?? row.decisionOutcome);
     if (decisionOutcome === 'denied') {
@@ -298,6 +282,134 @@ const isDeniedCompletionRow = (row = {}) => {
     }
     return normalizeApplicationStatus(row.application_status ?? row.applicationStatus ?? row.status) === 'rejected';
 };
+
+const isPendingCompletionApplicationRow = (row = {}) => {
+    const statusKey = normalizeApplicationStatus(row.application_status ?? row.applicationStatus ?? row.status ?? '');
+    const lifecycleKey = normalizeApplicationStatus(
+        row.application_lifecycle_status ?? row.applicationLifecycleStatus ?? ''
+    );
+    if (['completed', 'closed', 'archived', 'withdrawn', 'cancelled'].includes(statusKey)) {
+        return false;
+    }
+    if (['closed', 'archived'].includes(lifecycleKey)) {
+        return false;
+    }
+    const decisionOutcome = normalizeDecisionOutcome(row.decision_outcome ?? row.decisionOutcome);
+    return (
+        lifecycleKey === 'decision_recorded' ||
+        ['approved', 'rejected'].includes(statusKey) ||
+        decisionOutcome === 'approved' ||
+        decisionOutcome === 'denied'
+    );
+};
+
+const buildPendingCompletionApplicationSummary = (row = {}) => {
+    const statusKey = normalizeApplicationStatus(row.application_status || row.status || '');
+    if (statusKey === 'approved') {
+        return 'Approved file still needs approval-letter, document/signature, or final checklist follow-through before completion.';
+    }
+    if (isDeniedCompletionRow(row)) {
+        return 'Denied file still needs post-decision closeout before completion.';
+    }
+    return 'Decision-recorded file still needs post-decision follow-through before completion.';
+};
+
+const isApprovalDecisionLetterSent = (row = {}) =>
+    row.approval_decision_letter_sent === true ||
+    row.decisionLetterSentApproval === true ||
+    row.approvalDecisionLetterSent === true ||
+    row.decision_letter_sent_approval === true ||
+    Number(row.approval_decision_letter_sent || 0) === 1 ||
+    Number(row.decisionLetterSentApproval || 0) === 1 ||
+    Number(row.approvalDecisionLetterSent || 0) === 1 ||
+    Number(row.decision_letter_sent_approval || 0) === 1;
+
+const resolvePendingCompletionApplicationStep = (row = {}) => {
+    const decisionOutcome = normalizeDecisionOutcome(row.decision_outcome ?? row.decisionOutcome);
+    const statusKey = normalizeApplicationStatus(row.application_status ?? row.applicationStatus ?? row.status ?? '');
+    const isApproved = decisionOutcome === 'approved' || statusKey === 'approved';
+    if (isApproved && isApprovalDecisionLetterSent(row)) {
+        return 'fundingDocs';
+    }
+    return 'communication';
+};
+
+const mapPendingCompletionInterventionItems = (items = [], bucketId = 'pending-completion') =>
+    (Array.isArray(items) ? items : []).map((row, idx) => {
+        const tracking =
+            row.trackingId ||
+            row.tracking_id ||
+            row.caseNumber ||
+            row.case_number ||
+            row.caseId ||
+            row.case_id ||
+            `INTC-${idx}`;
+        const applicantName =
+            row.applicant_name ||
+            row.applicantName ||
+            tracking ||
+            'Applicant';
+        const interventionLabel =
+            row.intervention_label ||
+            row.interventionLabel ||
+            row.intervention_title ||
+            row.interventionTitle ||
+            null;
+        const interventionId = row.interventionId || row.intervention_id || null;
+        const actionPlanId = row.actionPlanId || row.action_plan_id || null;
+        const caseId = row.caseId || row.case_id || null;
+        const approvalRequestType = row.approval_request_type || row.approvalRequestType || 'new_intervention';
+        const isRevision = approvalRequestType === 'revised_intervention';
+        return {
+            id: `intervention-completion-${interventionId || row.proposalId || row.proposal_id || caseId || idx}`,
+            title: applicantName,
+            trackingId: tracking,
+            titleSecondaryText: interventionLabel || row.approval_request_type_label || row.approvalRequestTypeLabel || '',
+            case_id: caseId,
+            application_id: row.applicationId || row.application_id || null,
+            interventionId,
+            actionPlanId,
+            bucketId,
+            type: 'InterventionCompletion',
+            applicant: applicantName,
+            applicant_name: applicantName,
+            region: row.address_province || '—',
+            address_province: row.address_province || null,
+            owner: row.owner || row.assigned_user_email || 'Unassigned',
+            ...buildAssignedStaffProfileAliases(row),
+            status: row.review_status || row.status || 'approved',
+            approvalRequestType,
+            approvalRequestTypeLabel:
+                row.approval_request_type_label ||
+                row.approvalRequestTypeLabel ||
+                (isRevision ? 'Approved intervention revision' : 'Approved intervention proposal'),
+            review_status: row.review_status || 'approved',
+            delivery_status: row.delivery_status || null,
+            intervention_effective_status: row.intervention_effective_status || 'approved',
+            intervention_code: row.intervention_code || null,
+            intervention_label: interventionLabel,
+            intervention_cost_total: row.intervention_cost_total || null,
+            intervention_start_date: row.intervention_start_date || null,
+            assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+            budgetPotCode: row.budgetPotCode || row.budget_pot_code || null,
+            budget_pot_code: row.budgetPotCode || row.budget_pot_code || null,
+            approvalQueuedAt: row.approvedAt || row.approved_at || row.submittedAt || row.submitted_at || null,
+            dueDate: null,
+            submittedAt: row.approvedAt || row.approved_at || row.submittedAt || row.submitted_at || null,
+            summary: isRevision
+                ? 'Approved intervention revision is waiting for the client approval letter.'
+                : 'Approved intervention proposal is waiting for the client approval letter.',
+            workspacePath: caseId
+                ? buildApprovalWorkspacePath({
+                    basePath: `/cases/${caseId}`,
+                    approvalType: 'intervention',
+                    step: 'communication',
+                    interventionId,
+                    planId: actionPlanId
+                })
+                : '/case-assignment-dashboard'
+        };
+    });
 
 const MS_PER_DAY = 86400000;
 
@@ -845,10 +957,6 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
     );
     const coordinatorApprovalsParam = useMemo(
         () => encodeURIComponent(ISET_COORDINATOR_APPROVALS_FILTER),
-        []
-    );
-    const coordinatorFundingAgreementsParam = useMemo(
-        () => encodeURIComponent(ISET_COORDINATOR_FUNDING_AGREEMENTS_FILTER),
         []
     );
     const coordinatorMilestoneWindowParam = useMemo(
@@ -1417,6 +1525,82 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
             return;
         }
         let ignore = false;
+        const loadAssignedClientCases = async () => {
+            try {
+                const response = await apiFetch('/api/dashboard/my-client-cases?limit=200&offset=0', {
+                    headers: buildDevHeaders(role)
+                });
+                if (!response.ok) {
+                    throw new Error(`Request failed: ${response.status}`);
+                }
+                const payload = await response.json();
+                if (ignore) return;
+                if (!payload || !Array.isArray(payload.items)) {
+                    throw new Error('Unexpected response format while loading assigned client cases.');
+                }
+                const mapped = payload.items.map((row, idx) => {
+                    const caseId = row.case_id || row.caseId || row.id || null;
+                    const clientName =
+                        row.client_name ||
+                        row.clientName ||
+                        [row.client?.firstName, row.client?.lastName].filter(Boolean).join(' ') ||
+                        row.applicant_name ||
+                        row.applicantName ||
+                        row.tracking_id ||
+                        (caseId ? `Case ${caseId}` : `Client ${idx + 1}`);
+                    const nextActionDueAt = row.next_action_due_at || row.nextActionDueAt || null;
+                    return {
+                        id: caseId ? `my-client-case-${caseId}` : `my-client-case-${idx}`,
+                        title: clientName,
+                        trackingId: row.tracking_id || row.trackingId || row.case_number || row.caseNumber || null,
+                        application_id: row.application_id || row.applicationId || null,
+                        case_id: caseId,
+                        bucketId: 'my-clients',
+                        type: 'Case',
+                        applicant: clientName,
+                        applicant_name: clientName,
+                        region:
+                            row.region_name ||
+                            row.regionName ||
+                            row.region_code ||
+                            row.regionCode ||
+                            row.owner_region_name ||
+                            row.ownerRegionName ||
+                            row.owner_region_code ||
+                            row.ownerRegionCode ||
+                            '—',
+                        owner: row.owner_email || row.owner_name || row.ownerName || 'You',
+                        ...buildAssignedStaffProfileAliases(row),
+                        status: row.status || 'Initiated',
+                        dueDate: nextActionDueAt,
+                        submittedAt: row.opened_at || row.openedAt || row.created_at || row.createdAt || null,
+                        updatedAt: row.updated_at || row.updatedAt || row.last_activity_at || row.lastActivityAt || null,
+                        summary: 'Assigned client case file.',
+                        workspacePath: caseId ? `/cases/${caseId}` : '/case-assignment-dashboard'
+                    };
+                });
+                const totalCount = Number(payload.totalCount);
+                setProgramAdminItems(current => {
+                    const nonClientCases = current.filter(item => item.bucketId !== 'my-clients');
+                    return [...mapped, ...nonClientCases];
+                });
+                setProgramAdminCounts(current => ({
+                    ...current,
+                    'my-clients': Number.isFinite(totalCount) ? totalCount : mapped.length
+                }));
+            } catch (_) {
+                // keep existing items on failure
+            }
+        };
+        loadAssignedClientCases();
+        return () => { ignore = true; };
+    }, [role, programAdminRefresh, isIsetCoordinatorRole]);
+
+    useEffect(() => {
+        if (!isIsetCoordinatorRole) {
+            return;
+        }
+        let ignore = false;
         const loadMissingDocs = async () => {
             try {
                 const response = await apiFetch(`/api/applications?status=${coordinatorMissingDocsParam}&limit=200&offset=0`, {
@@ -1672,18 +1856,30 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         let ignore = false;
         const loadAwaitingApproval = async () => {
             try {
-                const response = await apiFetch(`/api/applications?status=${coordinatorApprovalsParam}&limit=200&offset=0`, {
-                    headers: buildDevHeaders(role)
-                });
+                const [response, interventionResponse] = await Promise.all([
+                    apiFetch(`/api/applications?status=${coordinatorApprovalsParam}&limit=200&offset=0`, {
+                        headers: buildDevHeaders(role)
+                    }),
+                    apiFetch('/api/dashboard/intervention-approval-items', {
+                        headers: buildDevHeaders(role)
+                    })
+                ]);
                 if (!response.ok) {
                     throw new Error(`Request failed: ${response.status}`);
                 }
+                if (!interventionResponse.ok) {
+                    throw new Error(`Request failed: ${interventionResponse.status}`);
+                }
                 const payload = await response.json();
+                const interventionPayload = await interventionResponse.json();
+                const interventionRows = Array.isArray(interventionPayload?.items)
+                    ? interventionPayload.items
+                    : [];
                 if (ignore) return;
                 if (!payload || !Array.isArray(payload.rows)) {
                     throw new Error('Unexpected response format while loading awaiting approval items.');
                 }
-                const mapped = payload.rows.map((row, idx) => {
+                const applicationItems = payload.rows.map((row, idx) => {
                     const id = row.tracking_id || row.case_id || row.application_id || `approval-${idx}`;
                     const applicantName =
                         row.applicant_name ||
@@ -1726,6 +1922,84 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
                     };
                 });
+                const interventionItems = interventionRows.map((row, idx) => {
+                    const tracking =
+                        row.trackingId ||
+                        row.tracking_id ||
+                        row.caseNumber ||
+                        row.case_number ||
+                        row.caseId ||
+                        row.case_id ||
+                        `INT-${idx}`;
+                    const applicantName =
+                        row.applicant_name ||
+                        row.applicantName ||
+                        tracking ||
+                        'Applicant';
+                    const interventionLabel =
+                        row.intervention_label ||
+                        row.interventionLabel ||
+                        row.intervention_title ||
+                        row.interventionTitle ||
+                        null;
+                    const interventionId = row.interventionId || row.intervention_id || null;
+                    const actionPlanId = row.actionPlanId || row.action_plan_id || null;
+                    const caseId = row.caseId || row.case_id || null;
+                    const approvalQueuedAt =
+                        row.approvalQueuedAt ||
+                        row.approval_queued_at ||
+                        row.submittedAt ||
+                        row.submitted_at ||
+                        null;
+                    return {
+                        id: interventionId ? `INT-${interventionId}` : String(tracking),
+                        title: applicantName,
+                        trackingId: tracking,
+                        titleSecondaryText: '',
+                        titleSecondaryContent: buildApprovalInterventionBreakdownContent(row),
+                        case_id: caseId,
+                        application_id: row.applicationId || row.application_id || null,
+                        interventionId,
+                        actionPlanId,
+                        bucketId: 'approvals-pipeline',
+                        type: 'InterventionApproval',
+                        applicant: applicantName,
+                        applicant_name: applicantName,
+                        region: row.address_province || '—',
+                        address_province: row.address_province || null,
+                        owner: row.owner || row.assigned_user_email || 'You',
+                        ...buildAssignedStaffProfileAliases(row),
+                        status: row.review_status || row.status || 'Submitted',
+                        approvalRequestType: row.approval_request_type || row.approvalRequestType || 'new_intervention',
+                        approvalRequestTypeLabel: row.approval_request_type_label || row.approvalRequestTypeLabel || 'Additional intervention proposal',
+                        review_status: row.review_status || null,
+                        delivery_status: row.delivery_status || null,
+                        intervention_effective_status: row.intervention_effective_status || null,
+                        intervention_code: row.intervention_code || null,
+                        intervention_label: interventionLabel,
+                        intervention_cost_total: row.intervention_cost_total || null,
+                        interventionGroups: row.interventionGroups || row.intervention_groups || [],
+                        interventionSummaries: row.interventionSummaries || row.intervention_summaries || [],
+                        intervention_start_date: row.intervention_start_date || null,
+                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                        budgetPotCode: row.budgetPotCode || row.budget_pot_code || null,
+                        budget_pot_code: row.budgetPotCode || row.budget_pot_code || null,
+                        approvalQueuedAt,
+                        dueDate: null,
+                        submittedAt: row.submittedAt || row.submitted_at || null,
+                        summary: 'Intervention proposal submitted for approval.',
+                        workspacePath: caseId
+                            ? buildApprovalWorkspacePath({
+                                basePath: `/cases/${caseId}`,
+                                approvalType: 'intervention',
+                                step: 'decision',
+                                interventionId,
+                                planId: actionPlanId
+                            })
+                            : '/case-assignment-dashboard'
+                    };
+                });
+                const mapped = [...applicationItems, ...interventionItems];
                 setProgramAdminItems(current => {
                     const nonApproval = current.filter(item => item.bucketId !== 'approvals-pipeline');
                     return [...mapped, ...nonApproval];
@@ -1757,35 +2031,33 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         let ignore = false;
         const loadFundingAgreements = async () => {
             try {
-                const response = await apiFetch(`/api/applications?status=${coordinatorFundingAgreementsParam}&limit=200&offset=0`, {
+                const response = await apiFetch(`/api/applications?${PENDING_COMPLETION_APPLICATION_QUERY}`, {
                     headers: buildDevHeaders(role)
                 });
                 if (!response.ok) {
                     throw new Error(`Request failed: ${response.status}`);
                 }
                 const payload = await response.json();
+                let interventionCompletionItems = [];
+                try {
+                    const interventionResponse = await apiFetch('/api/dashboard/intervention-completion-items', {
+                        headers: buildDevHeaders(role)
+                    });
+                    if (interventionResponse.ok) {
+                        const interventionPayload = await interventionResponse.json();
+                        interventionCompletionItems = Array.isArray(interventionPayload?.items)
+                            ? interventionPayload.items
+                            : [];
+                    }
+                } catch (_) {
+                    interventionCompletionItems = [];
+                }
                 if (ignore) return;
                 if (!payload || !Array.isArray(payload.rows)) {
                     throw new Error('Unexpected response format while loading funding agreements.');
                 }
-                const rows = payload.rows.filter(row => {
-                    if (isDeniedCompletionRow(row) && hasDenialDecisionLetterSent(row)) {
-                        return false;
-                    }
-                    const costRaw =
-                        row.assessment_intervention_cost_total ??
-                        row.intervention_cost_total ??
-                        null;
-                    const costValue = Number(costRaw);
-                    const potId =
-                        row.assessment_intervention_pot_id ??
-                        row.intervention_pot_id ??
-                        row.intervention_budget_pot_id ??
-                        null;
-                    const agreementCount = Number(row.funding_agreement_count ?? row.fundingAgreementCount ?? 0);
-                    return Number.isFinite(costValue) && costValue > 0 && potId && agreementCount === 0;
-                });
-                const mapped = rows.map((row, idx) => {
+                const rows = payload.rows.filter(isPendingCompletionApplicationRow);
+                const applicationItems = rows.map((row, idx) => {
                     const id = row.tracking_id || row.case_id || row.application_id || `funding-agreement-${idx}`;
                     const applicantName =
                         row.applicant_name ||
@@ -1823,25 +2095,26 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         dueDate: null,
                         submittedAt: submitted,
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
-                        summary: (() => {
-                            const statusKey = normalizeApplicationStatus(row.application_status || row.status || '');
-                            const hasFundingAgreement = Number(row.funding_agreement_count || 0) > 0;
-                            if (statusKey === 'approved') {
-                                return hasFundingAgreement
-                                    ? 'Approved file still needs funding-form or signature follow-through before completion.'
-                                    : 'Approved file still needs post-decision follow-through before completion.';
-                            }
-                            if (isDeniedCompletionRow(row)) {
-                                return 'Denied file still needs post-decision closeout.';
-                            }
-                            return 'Decision-recorded file still needs post-decision follow-through before completion.';
-                        })(),
+                        summary: buildPendingCompletionApplicationSummary(row),
                         assessment_intervention_cost_total: row.assessment_intervention_cost_total ?? null,
                         assessment_intervention_pot_id: row.assessment_intervention_pot_id ?? null,
                         funding_agreement_count: row.funding_agreement_count ?? 0,
-                        workspacePath: row.case_id ? `/cases/${row.case_id}` : '/case-assignment-dashboard'
+                        approval_decision_letter_sent: row.approval_decision_letter_sent ?? false,
+                        decisionLetterSentApproval: row.decisionLetterSentApproval ?? false,
+                        workspacePath: row.case_id
+                            ? buildApprovalWorkspacePath({
+                                basePath: `/application-case/${row.case_id}`,
+                                approvalType: 'application',
+                                step: resolvePendingCompletionApplicationStep(row)
+                            })
+                            : '/case-assignment-dashboard'
                     };
                 });
+                const interventionItems = mapPendingCompletionInterventionItems(
+                    interventionCompletionItems,
+                    'funding-agreements'
+                );
+                const mapped = [...applicationItems, ...interventionItems];
                 setProgramAdminItems(current => {
                     const nonFunding = current.filter(item => item.bucketId !== 'funding-agreements');
                     return [...mapped, ...nonFunding];
@@ -1864,7 +2137,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadFundingAgreements();
         return () => { ignore = true; };
-    }, [role, programAdminRefresh, isIsetCoordinatorRole, coordinatorFundingAgreementsParam]);
+    }, [role, programAdminRefresh, isIsetCoordinatorRole]);
 
     useEffect(() => {
         if (!isIsetCoordinatorRole) {
@@ -2591,19 +2864,33 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         let ignore = false;
         const loadPendingCompletionApplications = async () => {
             try {
-                const response = await apiFetch('/api/applications?status=decision_ready,approved,rejected,declined&limit=200&offset=0', {
+                const response = await apiFetch(`/api/applications?${PENDING_COMPLETION_APPLICATION_QUERY}`, {
                     headers: buildDevHeaders(role)
                 });
                 if (!response.ok) {
                     throw new Error(`Request failed: ${response.status}`);
                 }
                 const payload = await response.json();
+                let interventionCompletionItems = [];
+                try {
+                    const interventionResponse = await apiFetch('/api/dashboard/intervention-completion-items', {
+                        headers: buildDevHeaders(role)
+                    });
+                    if (interventionResponse.ok) {
+                        const interventionPayload = await interventionResponse.json();
+                        interventionCompletionItems = Array.isArray(interventionPayload?.items)
+                            ? interventionPayload.items
+                            : [];
+                    }
+                } catch (_) {
+                    interventionCompletionItems = [];
+                }
                 if (ignore) return;
                 if (!payload || !Array.isArray(payload.rows)) {
                     throw new Error('Unexpected response format while loading pending-completion applications.');
                 }
-                const rows = payload.rows.filter(row => !(isDeniedCompletionRow(row) && hasDenialDecisionLetterSent(row)));
-                const mapped = rows.map((row, idx) => {
+                const rows = payload.rows.filter(isPendingCompletionApplicationRow);
+                const applicationItems = rows.map((row, idx) => {
                     const tracking = row.tracking_id || row.case_id || row.application_id || `completion-${idx}`;
                     const applicantName =
                         row.applicant_name ||
@@ -2611,18 +2898,6 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         tracking ||
                         'Applicant';
                     const submitted = row.submitted_at || row.created_at || null;
-                    const statusKey = normalizeApplicationStatus(row.application_status || row.status || '');
-                    const hasFundingAgreement = Number(row.funding_agreement_count || 0) > 0;
-                    let summary = 'Decision-recorded file still needs post-decision follow-through before completion.';
-                    if (statusKey === 'approved') {
-                        summary = hasFundingAgreement
-                            ? 'Approved file still needs funding-form or signature follow-through before completion.'
-                            : 'Approved file still needs post-decision follow-through before completion.';
-                    } else if (isDeniedCompletionRow(row)) {
-                        summary = 'Denied file still needs post-decision closeout.';
-                    } else if (statusKey === 'decision_ready') {
-                        summary = 'Decision-recorded file still needs post-decision follow-through before completion.';
-                    }
                     return {
                         id: tracking,
                         title: applicantName,
@@ -2645,12 +2920,17 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         dueDate: null,
                         submittedAt: submitted,
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
-                        summary,
+                        summary: buildPendingCompletionApplicationSummary(row),
                         assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
                         funding_agreement_count: row.funding_agreement_count ?? 0,
                         workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
                     };
                 });
+                const interventionItems = mapPendingCompletionInterventionItems(
+                    interventionCompletionItems,
+                    'pending-completion'
+                );
+                const mapped = [...applicationItems, ...interventionItems];
                 setProgramAdminItems(current => {
                     const nonCompletion = current.filter(item => item.bucketId !== 'pending-completion');
                     return [...mapped, ...nonCompletion];

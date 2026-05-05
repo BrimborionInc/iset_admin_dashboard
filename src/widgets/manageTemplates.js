@@ -156,6 +156,24 @@ const TOKEN_GROUPS = [
         label: 'Posting context',
         value: '{posting_context}',
         description: 'Short accounting or posting context from the review event.'
+      },
+      {
+        id: 'intervention_title',
+        label: 'Intervention title',
+        value: '{intervention_title}',
+        description: 'Title or label for an intervention proposal or revision event.'
+      },
+      {
+        id: 'proposal_type',
+        label: 'Proposal type',
+        value: '{proposal_type}',
+        description: 'Proposal kind, such as new or revision.'
+      },
+      {
+        id: 'approval_request_type',
+        label: 'Approval request type',
+        value: '{approval_request_type}',
+        description: 'Queue/workflow type for an intervention approval event.'
       }
     ]
   },
@@ -251,7 +269,10 @@ const BASE_PREVIEW_SAMPLE = {
   approval_cost_total: '$4,250.00',
   budget_pot_code: 'PATH-TRAINING',
   budget_pot_name: 'Training supports',
-  posting_context: 'Review queue'
+  posting_context: 'Review queue',
+  intervention_title: 'Skills training support',
+  proposal_type: 'new',
+  approval_request_type: 'new_intervention'
 };
 
 const PREVIEW_SCENARIOS = [
@@ -319,6 +340,31 @@ const PREVIEW_SCENARIOS = [
       review_outcome: 'reject',
       review_outcome_label: 'Denied',
       review_reason: 'The request does not meet the current funding criteria.'
+    }
+  },
+  {
+    id: 'intervention_proposal_approved',
+    label: 'Intervention proposal approved',
+    description: 'Staff email for a new or revised intervention proposal decision.',
+    tokenIds: [
+      'applicant_name',
+      'tracking_id',
+      'actor_name',
+      'intervention_title',
+      'proposal_type',
+      'review_outcome_label',
+      'approval_cost_total',
+      'budget_pot_code',
+      'posting_context'
+    ],
+    sample: {
+      ...BASE_PREVIEW_SAMPLE,
+      event_message: 'NWAC approved an intervention proposal.',
+      review_outcome: 'approve',
+      review_outcome_label: 'Approved',
+      intervention_title: 'Skills training support',
+      proposal_type: 'new',
+      approval_request_type: 'new_intervention'
     }
   },
   {

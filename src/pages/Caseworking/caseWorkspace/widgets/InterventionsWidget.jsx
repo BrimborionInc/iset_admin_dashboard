@@ -27,6 +27,8 @@ import {
   isInterventionClosableStatus,
   isInterventionDeletableStatus,
   isInterventionProposalStatus,
+  isInterventionApprovalLetterFollowUpPending,
+  resolveInterventionApprovalLetterFollowUp,
   normalizeInterventionStatus,
   resolveInterventionStateFields,
 } from "../../../../utils/interventionStatus.js";
@@ -120,6 +122,12 @@ const getStatusDisplayLabel = item => {
     const eiStatusLabel = formatEiStatusLabel(getEiStatusValue(item));
     return `Submitted - ${eiStatusLabel || "Awaiting EI status verification"}`;
   }
+  const approvalLetterFollowUp = resolveInterventionApprovalLetterFollowUp(item);
+  if (approvalLetterFollowUp.eligible && !approvalLetterFollowUp.letterSent) {
+    return approvalLetterFollowUp.isRevision
+      ? "Revision approved - letter pending"
+      : "Approved - letter pending";
+  }
   return formatInterventionStatusLabel(item);
 };
 
@@ -156,11 +164,15 @@ const getComparableStatus = item => {
   return state.effectiveStatus || normalizeInterventionStatus(item?.status ?? item, null);
 };
 const isDraftStatus = status => resolveInterventionStateFields(status).reviewStatus === "draft";
-const isBlockingProposalStatus = status => isInterventionProposalStatus(status);
+const isProposalWorkflowOpen = intervention =>
+  isInterventionProposalStatus(intervention) ||
+  isInterventionApprovalLetterFollowUpPending(intervention);
+const isBlockingProposalStatus = intervention => isProposalWorkflowOpen(intervention);
 const isRevisionEligibleStatus = status =>
   ["approved", "in_progress", "suspended"].includes(getComparableStatus(status));
 
 const statusIndicatorType = status => {
+  if (isInterventionApprovalLetterFollowUpPending(status)) return "warning";
   const value = getComparableStatus(status);
   if (value === "completed") return "success";
   if (value === "cancelled") return "stopped";
@@ -435,13 +447,13 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const hasBlockingProposal = useMemo(() => {
     const plans = caseData?.actionPlans || [];
     return plans.some(plan =>
-      (plan.interventions || []).some(intervention => isBlockingProposalStatus(intervention?.status))
+      (plan.interventions || []).some(intervention => isBlockingProposalStatus(intervention))
     );
   }, [caseData]);
   const hasOpenProposal = useMemo(() => {
     const plans = caseData?.actionPlans || [];
     return plans.some(plan =>
-      (plan.interventions || []).some(intervention => isInterventionProposalStatus(intervention))
+      (plan.interventions || []).some(intervention => isProposalWorkflowOpen(intervention))
     );
   }, [caseData]);
   const latestBlockingProposal = useMemo(() => {
@@ -449,7 +461,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     let selected = null;
     plans.forEach(plan => {
       (plan.interventions || []).forEach(intervention => {
-        if (!isInterventionProposalStatus(intervention)) return;
+        if (!isProposalWorkflowOpen(intervention)) return;
         const score =
           toTimestamp(intervention?.updatedAt) ??
           toTimestamp(intervention?.createdAt) ??
@@ -766,7 +778,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const activePlanHasBlockingProposal = useMemo(
     () =>
       !!activePlan &&
-      (activePlan.interventions || []).some(intervention => isInterventionProposalStatus(intervention)),
+      (activePlan.interventions || []).some(intervention => isProposalWorkflowOpen(intervention)),
     [activePlan]
   );
 
@@ -844,6 +856,17 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         ];
       }
       const items = [{ id: "view", text: "View intervention" }];
+      const approvalLetterFollowUp = resolveInterventionApprovalLetterFollowUp(intervention);
+      if (approvalLetterFollowUp.eligible) {
+        items.push({
+          id: "approval-letter",
+          text: approvalLetterFollowUp.letterSent
+            ? "View approval follow-up"
+            : approvalLetterFollowUp.isRevision
+              ? "Prepare funding revision letter"
+              : "Prepare approval letters",
+        });
+      }
       if (canModify) {
         const normalized = getComparableStatus(intervention);
         const matchingRevisionDraft = intervention?.id
@@ -1046,7 +1069,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     setErrorMessage(null);
     setSuccessMessage(null);
     try {
-      const updated = await updateIntervention(activePlan.id, target.id, { status: "in_progress" });
+      const updated = await updateIntervention(activePlan.id, target.id, { deliveryStatus: "in_progress" });
       setSuccessMessage(
         `Intervention "${updated?.title || updated?.code || target.id}" activated.`
       );
@@ -1223,6 +1246,8 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                     handleReviseIntervention(item);
                   } else if (detail?.id === "view") {
                     openWizardView(item);
+                  } else if (detail?.id === "approval-letter") {
+                    openInterventionInWizard(item);
                   } else if (detail?.id === "close") {
                     openCloseModal(item);
                   } else if (detail?.id === "activate") {
@@ -1255,6 +1280,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     handleReviseIntervention,
     openRevisionDraftsBySourceId,
     openWizardView,
+    openInterventionInWizard,
     openCloseModal,
     resumeDraft,
     setSelectedInterventionId,
@@ -1473,11 +1499,11 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
               latestBlockingProposal?.planId &&
               latestBlockingProposal?.interventionId &&
               !activePlanHasBlockingProposal ? (
-                <Button onClick={focusBlockingProposal}>Go to draft proposal</Button>
+                <Button onClick={focusBlockingProposal}>Go to proposal</Button>
               ) : null
             }
           >
-            A proposal is already in progress for this case. Resume it from the table before starting another.
+            A proposal is already in progress for this case. Complete its approval-letter follow-up before starting another proposal or revision.
           </Alert>
         )}
         {activePlan ? (

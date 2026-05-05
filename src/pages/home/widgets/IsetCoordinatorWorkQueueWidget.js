@@ -19,6 +19,11 @@ export const ISET_COORDINATOR_BUCKETS = [
     description: 'Applications assigned to you.'
   },
   {
+    id: 'my-clients',
+    label: 'My Clients',
+    description: 'Client case files assigned to you.'
+  },
+  {
     id: 'ei-consent-verification',
     label: 'EI Verification Pending',
     description: 'Applications waiting on EI consent or verification before they can move forward.'
@@ -41,7 +46,7 @@ export const ISET_COORDINATOR_BUCKETS = [
   {
     id: 'funding-agreements',
     label: 'Pending Completion',
-    description: 'Decision-recorded application files that still need post-decision follow-through before completion.'
+    description: 'Post-decision application and intervention proposal work still waiting on letters, documents, signatures, or final completion.'
   },
   {
     id: 'active-clients-checkins',
@@ -67,6 +72,7 @@ export const ISET_COORDINATOR_BUCKETS = [
 
 const ENABLED_BUCKET_IDS = new Set([
   'my-new-applications',
+  'my-clients',
   'ei-consent-verification',
   'file-complete-processing-due',
   'missing-docs',
@@ -81,7 +87,7 @@ const DISABLED_BUCKET_IDS = new Set(
   ISET_COORDINATOR_BUCKETS.map(bucket => bucket.id).filter(id => !ENABLED_BUCKET_IDS.has(id))
 );
 
-const BUCKET_PREFERENCES_STORAGE_KEY = 'home-iset-coordinator-work-queue-preferences-v1';
+const BUCKET_PREFERENCES_STORAGE_KEY = 'home-iset-coordinator-work-queue-preferences-v2';
 const DEFAULT_VISIBLE_BUCKET_IDS = ISET_COORDINATOR_BUCKETS.map(bucket => bucket.id);
 
 const loadStoredBucketPreferences = () => {
@@ -146,6 +152,20 @@ export const ISET_COORDINATOR_SAMPLE_ITEMS = [
     submittedAt: '2025-03-17',
     summary: 'Assigned application awaiting review.',
     workspacePath: '/case-assignment-dashboard'
+  },
+  {
+    id: 'CASE-2017',
+    title: 'CASE-2017 · A. Simon',
+    bucketId: 'my-clients',
+    type: 'Case',
+    applicant: 'A. Simon',
+    region: 'Quebec',
+    owner: 'You',
+    status: 'Active',
+    dueDate: '2025-03-27',
+    submittedAt: '2025-02-06',
+    summary: 'Assigned client case file.',
+    workspacePath: '/cases/2017'
   },
   {
     id: 'APP-2980',

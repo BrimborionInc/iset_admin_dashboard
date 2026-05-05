@@ -68,6 +68,7 @@ const NO_ASSIGNMENT_BUCKET_IDS = new Set([
   'exceptions-escalations',
   'followups-closure',
   'funding-agreements',
+  'my-clients',
   'overdue',
   'payments-issues',
   'payments-proof-due',
@@ -78,6 +79,7 @@ const NO_ASSIGNMENT_ITEM_TYPES = new Set([
   'Agreement',
   'AwaitingApproval',
   'InterventionApproval',
+  'InterventionCompletion',
   'InterventionMilestone',
   'Payment'
 ]);
@@ -664,6 +666,7 @@ const columnKeysByType = {
   Eligibility: ['title', 'sin', 'region', 'owner', 'status', 'dueDate', 'actions'],
   AwaitingApproval: ['title', 'owner', 'recommendation', 'intervention', 'cost', 'startDate', 'status', 'dueDate', 'actions'],
   InterventionApproval: ['title', 'owner', 'intervention', 'cost', 'startDate', 'status', 'dueDate', 'actions'],
+  InterventionCompletion: ['title', 'owner', 'intervention', 'cost', 'startDate', 'status', 'dueDate', 'actions'],
   Exception: ['title', 'notes', 'region', 'owner', 'status', 'dueDate', 'actions'],
   Escalation: ['title', 'notes', 'region', 'owner', 'status', 'dueDate', 'actions'],
   WatchlistHit: ['title', 'sin', 'region', 'owner', 'status', 'notes', 'actions']
@@ -679,7 +682,7 @@ const metricColumnKeysByPreset = {
 };
 
 const buildColumns = (types = [], selectedBucketId = null) => {
-  if (selectedBucketId === 'pending-decision') {
+  if (selectedBucketId === 'pending-decision' || selectedBucketId === 'approvals-pipeline') {
     return approvalColumnKeys;
   }
   if (!types || types.length === 0) {
@@ -791,11 +794,12 @@ const WorkQueueItemsTableWidget = ({
       () => (isMetricMode ? null : bucketDefinitions.find(bucket => bucket.id === selectedBucketId) || bucketDefinitions[0] || null),
       [bucketDefinitions, isMetricMode, selectedBucketId]
     );
-  const helpContent = !isMetricMode && selectedBucketId === 'pending-decision'
+  const isApprovalQueue = !isMetricMode && (selectedBucketId === 'pending-decision' || selectedBucketId === 'approvals-pipeline');
+  const helpContent = isApprovalQueue
     ? <HomeApprovalsItemsHelp />
     : <HomeWorkQueueItemsHelp />;
-  const helpTitle = !isMetricMode && selectedBucketId === 'pending-decision' ? 'Pending Decision Items' : 'Work Queue Items';
-  const helpAiContext = !isMetricMode && selectedBucketId === 'pending-decision'
+  const helpTitle = isApprovalQueue ? 'Approval Items' : 'Work Queue Items';
+  const helpAiContext = isApprovalQueue
     ? HomeApprovalsItemsHelp.aiContext
     : HomeWorkQueueItemsHelp.aiContext;
   const infoLink = toggleHelpPanel ? (
@@ -811,8 +815,8 @@ const WorkQueueItemsTableWidget = ({
   ) : undefined;
   const shouldWrapLines = !isMetricMode && selectedBucket && ['exceptions-escalations', 'unresolved-conflicts'].includes(selectedBucket.id);
   const sourceItems = isMetricMode ? metricItems : items;
-  const queueDescription = !isMetricMode && selectedBucketId === 'pending-decision'
-    ? 'Application assessments, new intervention proposals, and proposed intervention changes waiting for a decision. Select an item to open the review layout and record the decision in the workspace.'
+  const queueDescription = isApprovalQueue
+    ? 'Application assessments, new intervention proposals, and proposed intervention changes waiting for a decision. Select an item to open the review layout.'
     : selectedBucket?.description || selectedBucket?.label;
 
   const decoratedItems = useMemo(() => {

@@ -98,6 +98,7 @@ Notification toggles, templates, and applicant rows already exist in the admin d
 - 2025-11-14: Resolved test SES send failures by rotating the IAM access keys (`SES_backend`) and updating `/nwac/test/portal/.env` so AWS credentials deploy with the portal; portal + admin PM2 processes confirmed healthy afterward.
 - 2026-05-01: Added the generic staff email path in `shared/events/notificationDispatcher.js`. Assignment-family events still use the existing assignee/watcher flow; other staff events now resolve enabled email settings, render the configured template, send through SES once per deduped staff recipient, and remain blocked in TEST by settings plus the SES runtime guard. The renderer now prefers enabled email/template rows when duplicate event/role/language settings exist.
 - 2026-05-01: Split NWAC review email routing into outcome-specific event keys: `nwac_review_approved`, `nwac_review_denied`, and `nwac_review_changes_requested`.
+- 2026-05-05: Added outcome-specific intervention proposal notification events for new proposals and revised proposals: `intervention_proposal_approved`, `intervention_proposal_denied`, `intervention_proposal_changes_requested`, `intervention_revision_approved`, `intervention_revision_denied`, and `intervention_revision_changes_requested`. The events use the shared case-event/notification dispatcher path so notification settings, bell alerts, staff email templates, events panel, and audit history see the decision without changing the schema.
 
 ---
 
