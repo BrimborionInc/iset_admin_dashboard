@@ -14,15 +14,13 @@ import {
   Modal,
   Container,
   Input,
-  Textarea,
-  Checkbox,
-  Multiselect,
   Hotspot
 } from '@cloudscape-design/components';
 import { apiFetch } from '../auth/apiClient';
 import SecureMessagesHelpPanelContent from '../helpPanelContents/secureMessagesHelpPanelContent';
 import { useCaseWorkspace } from '../pages/Caseworking/caseWorkspace/CaseWorkspaceContext.jsx';
 import { resolveApplicationStateFields } from '../utils/applicationStatus';
+import { openSecureMessageCompose, SECURE_MESSAGE_REFRESH_EVENT } from './SecureMessageComposePanel.jsx';
 
 const TAB_IDS = {
   inbox: 'inbox',
@@ -118,8 +116,6 @@ const normalizeStatusValue = (value) => {
   if (!value) return '';
   return String(value).trim().toLowerCase().replace(/[\s-]+/g, '_');
 };
-
-const LETTER_DOC_TYPES = new Set(['assessment_approval_letter', 'assessment_denial_letter']);
 
 const buildAttachmentUrl = attachment => {
   const directUrl = attachment?.download_url || '';
@@ -238,12 +234,6 @@ const SecureMessagingWidget = ({
     workspaceCaseData?.status,
   ]);
   const canonicalApplicationStatus = applicationState.applicationStatus || null;
-  const decisionOutcome = applicationState.decisionOutcome || null;
-  const allowedLetterDocTypes = useMemo(() => {
-    if (decisionOutcome === 'approved') return new Set(['assessment_approval_letter']);
-    if (decisionOutcome === 'denied') return new Set(['assessment_denial_letter']);
-    return new Set();
-  }, [decisionOutcome]);
 
   const rawApplicantUserId =
     caseData?.applicant_user_id ??
@@ -282,6 +272,17 @@ const SecureMessagingWidget = ({
     workspace?.assigned_to_name ??
     workspace?.assignedToName ??
     '';
+  const caseReference =
+    caseData?.case_number ??
+    caseData?.caseNumber ??
+    caseData?.submission_reference ??
+    caseData?.submissionReference ??
+    workspaceCaseData?.case_number ??
+    workspaceCaseData?.caseNumber ??
+    workspaceCaseData?.submission_reference ??
+    workspaceCaseData?.submissionReference ??
+    null;
+  const currentStaffName = useMemo(() => assignedToName || '', [assignedToName]);
 
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -294,96 +295,15 @@ const SecureMessagingWidget = ({
   const [attachments, setAttachments] = useState([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [attachmentsError, setAttachmentsError] = useState(null);
-  const [composeModalOpen, setComposeModalOpen] = useState(false);
-  const [composeSubject, setComposeSubject] = useState('');
-  const [composeBody, setComposeBody] = useState('');
-  const [composeUrgent, setComposeUrgent] = useState(false);
-  const [composeSending, setComposeSending] = useState(false);
-  const [composeError, setComposeError] = useState(null);
-  const [composeToName, setComposeToName] = useState('Applicant');
-  const [composeFromName, setComposeFromName] = useState('Case Worker');
   const [showHardDeleteModal, setShowHardDeleteModal] = useState(false);
   const [showEmptyDeletedModal, setShowEmptyDeletedModal] = useState(false);
   const [emptyConfirmText, setEmptyConfirmText] = useState('');
   const [emptyDeleting, setEmptyDeleting] = useState(false);
-  const [workflowOptions, setWorkflowOptions] = useState([]);
-  const [workflowsLoading, setWorkflowsLoading] = useState(false);
-  const [workflowsError, setWorkflowsError] = useState(null);
-  const [selectedWorkflowIds, setSelectedWorkflowIds] = useState([]);
   const reviewResumeInFlight = useRef(false);
   const resumeReviewStatuses = useMemo(
     () => new Set(['docs_requested', 'action_required', 'action_required_(docs_requested)']),
     []
   );
-
-  const updateStatusToDocsRequested = useCallback(async () => {
-    if (!caseId) return;
-    const statusKey = canonicalApplicationStatus || '';
-    const shouldUpdateStatus = ['submitted', 'in_review'].includes(statusKey);
-    let releaseLock = false;
-    try {
-      if (applicationId) {
-        const lockResponse = await apiFetch(`/api/locks/application/${applicationId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({})
-        });
-        if (!lockResponse.ok) {
-          return;
-        }
-        releaseLock = true;
-      }
-      const payload = {
-        docsRequested: true,
-        docsRequestedSource: 'secure_message'
-      };
-      if (shouldUpdateStatus) {
-        payload.applicationStatus = 'docs_requested';
-      }
-      const rowVersion =
-        Number(caseData?.application_row_version ?? caseData?.applicationRowVersion ?? applicationRowVersion ?? 0) || 0;
-      if (rowVersion > 0) {
-        payload.expectedRowVersion = rowVersion;
-      }
-      const response = await apiFetch(`/api/cases/${caseId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!response.ok) {
-        return;
-      }
-      if (typeof refreshCaseData === 'function') {
-        try { await refreshCaseData(); } catch (_) {}
-      } else if (typeof onCaseUpdate === 'function') {
-        onCaseUpdate({
-          applicationStatus: 'docs_requested',
-          application_status: 'docs_requested',
-          docs_requested_active: true,
-          docs_requested_at: new Date().toISOString()
-        });
-      }
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('case-events-refresh', { detail: { caseId } }));
-        window.dispatchEvent(new CustomEvent('case-reminders-refresh', { detail: { caseId } }));
-      }
-    } finally {
-      if (applicationId && releaseLock) {
-        try {
-          await apiFetch(`/api/locks/application/${applicationId}`, { method: 'DELETE' });
-        } catch (_) {}
-      }
-    }
-  }, [
-    caseId,
-    applicationId,
-    canonicalApplicationStatus,
-    caseData?.applicationRowVersion,
-    caseData?.application_row_version,
-    applicationRowVersion,
-    refreshCaseData,
-    onCaseUpdate
-  ]);
 
   const updateStatusToInReview = useCallback(async () => {
     if (!caseId) return;
@@ -512,48 +432,43 @@ const SecureMessagingWidget = ({
     loadMessages();
   }, [caseId, loadMessages, messagingAvailable]);
 
-  // Load eligible workflows for attachments
-  const loadWorkflows = useCallback(async () => {
-    setWorkflowsLoading(true);
-    setWorkflowsError(null);
-    try {
-      const resp = await apiFetch('/api/workflows');
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json().catch(() => []);
-      const rows = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
-      const filtered = rows
-        .map(r => ({
-          id: r.id,
-          name: r.name || `Workflow ${r.id}`,
-          type: (r.workflow_type || r.workflowType || '').trim(),
-          documentType: (r.document_type || r.documentType || '').trim()
-        }))
-        .filter(r => r.type === 'consent-no-prefill' || r.type === 'consent-cm-prefill');
-      setWorkflowOptions(filtered);
-    } catch (e) {
-      setWorkflowsError(e?.message || 'Failed to load workflows');
-      setWorkflowOptions([]);
-    } finally {
-      setWorkflowsLoading(false);
-    }
-  }, []);
-  const filteredWorkflowOptions = useMemo(
-    () =>
-      workflowOptions.filter(wf => {
-        if (!wf.documentType) return true;
-        if (!LETTER_DOC_TYPES.has(wf.documentType)) return true;
-        return allowedLetterDocTypes.has(wf.documentType);
-      }),
-    [allowedLetterDocTypes, workflowOptions]
-  );
   useEffect(() => {
-    if (!selectedWorkflowIds.length) return;
-    const allowedIds = new Set(filteredWorkflowOptions.map(wf => wf.id));
-    setSelectedWorkflowIds(prev => {
-      const next = prev.filter(id => allowedIds.has(id));
-      return next.length === prev.length ? prev : next;
-    });
-  }, [filteredWorkflowOptions, selectedWorkflowIds.length]);
+    if (typeof window === 'undefined') return undefined;
+    const handleRefreshEvent = event => {
+      const targetCaseId = Number(event?.detail?.caseId || 0);
+      if (!caseId || (targetCaseId && targetCaseId !== caseId)) return;
+      loadMessages({ silent: true });
+    };
+    window.addEventListener(SECURE_MESSAGE_REFRESH_EVENT, handleRefreshEvent);
+    return () => {
+      window.removeEventListener(SECURE_MESSAGE_REFRESH_EVENT, handleRefreshEvent);
+    };
+  }, [caseId, loadMessages]);
+
+  const createComposeContext = useCallback(
+    ({ mode = 'new', toName = null } = {}) => ({
+      mode,
+      caseId,
+      applicationId,
+      applicantUserId,
+      applicantName: applicantName || 'Applicant',
+      toName: toName || applicantName || 'Applicant',
+      fromName: currentStaffName || 'Case Worker',
+      caseReference: caseReference || (caseId ? `Case ${caseId}` : null),
+      interventionId: isCaseWorkspace ? interventionId : null,
+      isCaseWorkspace
+    }),
+    [
+      applicantName,
+      applicantUserId,
+      applicationId,
+      caseId,
+      caseReference,
+      currentStaffName,
+      interventionId,
+      isCaseWorkspace
+    ]
+  );
 
   const handleInfoClick = () => {
     if (typeof toggleHelpPanel === 'function') {
@@ -810,15 +725,7 @@ const SecureMessagingWidget = ({
 
   const handleNewMessage = () => {
     if (!caseId || !messagingAvailable) return;
-    setComposeSubject('');
-    setComposeBody('');
-    setComposeUrgent(false);
-    setComposeError(null);
-    setComposeToName(applicantName || 'Applicant');
-    setComposeFromName(currentStaffName || 'Case Worker');
-    setSelectedWorkflowIds([]);
-    loadWorkflows();
-    setComposeModalOpen(true);
+    openSecureMessageCompose(createComposeContext({ mode: 'new' }));
   };
 
   const handleReply = () => {
@@ -831,89 +738,16 @@ const SecureMessagingWidget = ({
           .map(line => `> ${line}`)
           .join('\n')
       : '';
-    setComposeSubject(subject);
-    setComposeBody(`\n\n${quotedBody}`);
-    setComposeUrgent(false);
-    setComposeError(null);
-    setComposeToName(getSenderName(selectedMessage) || applicantName || 'Applicant');
-    setComposeFromName(currentStaffName || 'Case Worker');
-    setSelectedWorkflowIds([]);
-    loadWorkflows();
-    setComposeModalOpen(true);
-  };
-
-  const handleCancelCompose = () => {
-    if (composeSending) return;
-    const hasDraft =
-      composeSubject.trim() ||
-      composeBody.trim() ||
-      composeToName.trim() !== (applicantName || 'Applicant').trim() ||
-      composeFromName.trim() !== (currentStaffName || 'Case Worker').trim() ||
-      selectedWorkflowIds.length > 0 ||
-      Boolean(composeUrgent);
-    if (hasDraft && typeof window !== 'undefined') {
-      const confirmed = window.confirm('Discard this draft message?');
-      if (!confirmed) return;
-    }
-    setComposeModalOpen(false);
-  };
-
-  const handleSendMessage = async () => {
-    if (!caseId) return;
-    const subject = composeSubject.trim();
-    const body = composeBody.trim();
-    const toName = composeToName.trim();
-    const fromName = composeFromName.trim();
-    if (!subject || !body) {
-      setComposeError('Subject and message are required.');
-      return;
-    }
-    if (!toName || !fromName) {
-      setComposeError('"To" and "From" names are required.');
-      return;
-    }
-    setComposeSending(true);
-    setComposeError(null);
-    try {
-      const attachmentsPayload = selectedWorkflowIds.map(id => ({ workflow_id: id }));
-      const payload = {
-        subject,
-        body,
-        urgent: composeUrgent,
-        toDisplayName: toName,
-        fromDisplayName: fromName,
-        attachments: attachmentsPayload
-      };
-      if (!isCaseWorkspace && applicationId) {
-        payload.applicationId = applicationId;
-      }
-      if (isCaseWorkspace && interventionId) {
-        payload.interventionId = interventionId;
-      }
-      const response = await apiFetch(`/api/cases/${caseId}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!response.ok) {
-        const detail = await response.text().catch(() => '');
-        throw new Error(detail || 'Failed to send message');
-      }
-      if (attachmentsPayload.length > 0) {
-        await updateStatusToDocsRequested();
-      }
-      setComposeModalOpen(false);
-      setComposeSubject('');
-      setComposeBody('');
-      setComposeToName(applicantName || 'Applicant');
-      setComposeFromName(currentStaffName || 'Case Worker');
-      setComposeUrgent(false);
-      setSelectedWorkflowIds([]);
-      await loadMessages({ silent: true });
-    } catch (err) {
-      setComposeError(err?.message || 'Failed to send message');
-    } finally {
-      setComposeSending(false);
+    const replyToName = getSenderName(selectedMessage) || applicantName || 'Applicant';
+    const nextContext = createComposeContext({ mode: 'reply', toName: replyToName });
+    const opened = openSecureMessageCompose({
+      ...nextContext,
+      subject,
+      body: `\n\n${quotedBody}`,
+      urgent: false
+    });
+    if (opened) {
+      setViewModalOpen(false);
     }
   };
 
@@ -996,8 +830,6 @@ const SecureMessagingWidget = ({
     if (!caseId) return;
     loadMessages({ silent: true });
   };
-
-  const currentStaffName = useMemo(() => assignedToName || '', [assignedToName]);
 
   const renderTabContent = tabId => {
     const baseItems =
@@ -1252,127 +1084,6 @@ const SecureMessagingWidget = ({
         }
       >
         {renderMessageDetails()}
-      </Modal>
-      <Modal
-        visible={composeModalOpen}
-        onDismiss={() => {}}
-        header="New Message"
-        footer={
-          <SpaceBetween direction="horizontal" size="xs">
-            <Button
-              variant="primary"
-              onClick={handleSendMessage}
-              loading={composeSending}
-              disabled={
-                composeSending ||
-                !composeSubject.trim() ||
-                !composeBody.trim() ||
-                !composeToName.trim() ||
-                !composeFromName.trim()
-              }
-            >
-              Send
-            </Button>
-            <Button
-              variant="normal"
-              onClick={handleCancelCompose}
-              disabled={composeSending}
-            >
-              Cancel
-            </Button>
-          </SpaceBetween>
-        }
-      >
-        <SpaceBetween size="s">
-          <div>
-            <label style={{ fontWeight: 'bold' }}>To:</label>
-            <Input
-              value={composeToName}
-              placeholder="Applicant"
-              onChange={({ detail }) => setComposeToName(detail.value)}
-              spellcheck={false}
-              disabled={composeSending}
-            />
-          </div>
-          <div>
-            <label style={{ fontWeight: 'bold' }}>From:</label>
-            <Input
-              value={composeFromName}
-              placeholder="Case Worker"
-              onChange={({ detail }) => setComposeFromName(detail.value)}
-              spellcheck={false}
-              disabled={composeSending}
-            />
-          </div>
-          <div>
-            <label style={{ fontWeight: 'bold' }}>Subject:</label>
-            <Input
-              value={composeSubject}
-              onChange={({ detail }) => setComposeSubject(detail.value)}
-              placeholder="Subject"
-              spellcheck={true}
-              disabled={composeSending}
-            />
-          </div>
-          <div>
-            <label style={{ fontWeight: 'bold' }}>Message:</label>
-            <Textarea
-              value={composeBody}
-              onChange={({ detail }) => setComposeBody(detail.value)}
-              rows={6}
-              placeholder="Write your message"
-              spellcheck={true}
-              disabled={composeSending}
-            />
-          </div>
-          <div>
-            <label style={{ fontWeight: 'bold' }}>Attach form(s) to send:</label>
-            {workflowsLoading ? (
-              <Box><Spinner size="normal" /> Loading forms…</Box>
-            ) : workflowsError ? (
-              <Box color="text-status-critical">{workflowsError}</Box>
-            ) : filteredWorkflowOptions.length === 0 ? (
-              <Box color="text-body-secondary">No eligible forms (type “Form”) available.</Box>
-            ) : (
-              <Multiselect
-                placeholder="Select form(s)…"
-                inlineTokens
-                tokenLimit={0}
-                disableBrowserAutocorrect
-                selectedOptions={filteredWorkflowOptions
-                  .filter(wf => selectedWorkflowIds.includes(wf.id))
-                  .map(wf => ({
-                    label: wf.name,
-                    value: wf.id,
-                    description: wf.type === 'consent-cm-prefill' ? 'Form (CM prefill)' : 'Form (No prefill)'
-                  }))}
-                options={filteredWorkflowOptions.map(wf => ({
-                  label: wf.name,
-                  value: wf.id,
-                  description: wf.type === 'consent-cm-prefill' ? 'Form (CM prefill)' : 'Form (No prefill)'
-                }))}
-                keepOpen={false} 
-                onChange={({ detail }) => {
-                  setSelectedWorkflowIds(detail.selectedOptions.map(opt => opt.value));
-                }}
-                disabled={composeSending}
-              />
-            )}
-            {filteredWorkflowOptions.length === 0 && workflowOptions.some(wf => LETTER_DOC_TYPES.has(wf.documentType)) && (
-              <Box color="text-body-secondary" fontSize="body-s">
-                Decision letter forms are available only after a decision has been recorded.
-              </Box>
-            )}
-          </div>
-          <Checkbox
-            checked={!!composeUrgent}
-            onChange={({ detail }) => setComposeUrgent(detail.checked)}
-            disabled={composeSending}
-          >
-            Mark as urgent
-          </Checkbox>
-          {composeError ? <Box color="text-status-critical">{composeError}</Box> : null}
-        </SpaceBetween>
       </Modal>
       <Modal
         visible={showHardDeleteModal}

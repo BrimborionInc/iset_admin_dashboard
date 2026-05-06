@@ -19,8 +19,8 @@ Application,supporting_evidence,Supporting evidence,yes,application,,,no,,no,,no
 Application,client_acknowledgement,Client Acknowledgement of Funding Source,yes,application,compliance|intervention,,no,,no,,no
 Application,media_consent,Media consent form,yes,application,compliance|intervention,,no,,no,,no
 Application,financial_overview,Financial overview/budget,yes,application,compliance|intervention,FinancialOverview,yes,Generated financial-overview PDF uses this type explicitly.,no,,no
-Application,evidence_income,Income evidence,yes,application,,,no,,no,,no
-Application,evidence_expense,Expense evidence,yes,application,,,no,,no,,no
+Application,evidence_income,Income evidence,yes,application,compliance|intervention,,no,"Canonical active income-evidence checklist type after 2026-05-06 PROD runtime repair.",no,,no
+Application,evidence_expense,Expense evidence,yes,application,compliance|intervention,,no,"Canonical active expense-evidence checklist type after 2026-05-06 PROD runtime repair.",no,,no
 Application,student_financial_assistance_statement,Student financial assistance statement,yes,application,,,no,,no,,no
 Application,acceptance_letter,Letter of acceptance to program,yes,application,compliance|intervention,AcceptanceLetter,no,,no,,no
 Application,band_funding_confirmation,Band funding confirmation,yes,application,compliance|intervention,,no,,no,,no

@@ -18,6 +18,7 @@ import {
   Link,
   Input,
   Textarea,
+  DatePicker,
   StatusIndicator,
   Toggle,
   Hotspot
@@ -44,8 +45,10 @@ import {
   requiresFinalApplicationStatusConfirmation,
 } from '../utils/rbac';
 import {
+  APPLICATION_HOLD_AWAITING_REASONS,
   APPLICATION_STATUS_OPTIONS,
   buildApplicationStatusInfo,
+  getApplicationAwaitingReasonLabel,
   getApplicationStatusBadgeColor,
   getApplicationStatusLabel,
   mapWorkflowStatusToPersistenceStatus,
@@ -83,10 +86,32 @@ function formatDaysAgo(value) {
 
 const APPLICATION_TERMINAL_STATUSES = new Set(['approved', 'completed', 'rejected', 'declined', 'cancelled', 'closed', 'archived']);
 const ASSIGN_BLOCKED_STATUSES = new Set(['approved', 'archived', 'closed']);
-const CLOSURE_NOTICE_ELIGIBLE_STATUSES = new Set(['submitted', 'in_review', 'docs_requested', 'pending_approval']);
-const RESUME_REVIEW_STATUSES = new Set(['docs_requested', 'closure_notice']);
-const CLOSE_ALLOWED_STATUSES = new Set(['submitted', 'in_review', 'docs_requested', 'pending_approval', 'closure_notice']);
+const CLOSURE_NOTICE_ELIGIBLE_STATUSES = new Set(['submitted', 'in_review', 'docs_requested', 'pending_approval', 'on_hold']);
+const PARK_ALLOWED_STATUSES = new Set(['submitted', 'in_review', 'docs_requested', 'pending_approval', 'closure_notice']);
+const RESUME_REVIEW_STATUSES = new Set(['docs_requested', 'closure_notice', 'on_hold']);
+const CLOSE_ALLOWED_STATUSES = new Set(['submitted', 'in_review', 'docs_requested', 'pending_approval', 'closure_notice', 'on_hold']);
 const ARCHIVE_ALLOWED_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed']);
+const HOLD_REVIEW_DEFAULT_DAYS = 30;
+
+const HOLD_REASON_OPTIONS = [
+  { label: APPLICATION_HOLD_AWAITING_REASONS.external_funding, value: 'external_funding' },
+  { label: APPLICATION_HOLD_AWAITING_REASONS.future_start, value: 'future_start' },
+  { label: APPLICATION_HOLD_AWAITING_REASONS.applicant_pause, value: 'applicant_pause' },
+  { label: APPLICATION_HOLD_AWAITING_REASONS.internal_follow_up, value: 'internal_follow_up' },
+  { label: APPLICATION_HOLD_AWAITING_REASONS.other_hold, value: 'other_hold' },
+];
+
+const getDatePickerValueDaysFromNow = days => {
+  const date = new Date(Date.now() + days * 86400000);
+  return date.toISOString().slice(0, 10);
+};
+
+const toReminderIsoFromDateInput = value => {
+  if (!value) return null;
+  const trimmed = String(value).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
+  return `${trimmed}T09:00:00.000Z`;
+};
 
 const APPLICATION_LAYOUT_ACTIONS = [
   {
@@ -258,6 +283,8 @@ const ApplicationOverviewWidget = ({
   const [escalation, setEscalation] = useState(null);
   const [escalationLoading, setEscalationLoading] = useState(false);
   const [quickActionNote, setQuickActionNote] = useState('');
+  const [quickActionHoldReason, setQuickActionHoldReason] = useState(HOLD_REASON_OPTIONS[0]);
+  const [quickActionReviewDate, setQuickActionReviewDate] = useState('');
   const [assignModalVisible, setAssignModalVisible] = useState(false);
   const [assignableStaff, setAssignableStaff] = useState([]);
   const [assignLoading, setAssignLoading] = useState(false);
@@ -870,6 +897,7 @@ const ApplicationOverviewWidget = ({
   const hasCaseId = Boolean(caseData?.id);
   const canAssign = hasCaseId && !ASSIGN_BLOCKED_STATUSES.has(normalizedStatusKey) && (isAdminRole || isRegionalCoordinatorRole);
   const canPutOnClosureNotice = hasCaseId && CLOSURE_NOTICE_ELIGIBLE_STATUSES.has(normalizedStatusKey);
+  const canPutOnHold = hasCaseId && PARK_ALLOWED_STATUSES.has(normalizedStatusKey);
   const canResumeReview = hasCaseId && RESUME_REVIEW_STATUSES.has(normalizedStatusKey);
   const canCloseApplication = hasCaseId && CLOSE_ALLOWED_STATUSES.has(normalizedStatusKey) && (isAdminRole || isRegionalCoordinatorRole);
   const canArchiveApplication = hasCaseId && ARCHIVE_ALLOWED_STATUSES.has(normalizedStatusKey) && isAdminRole;
@@ -888,6 +916,7 @@ const ApplicationOverviewWidget = ({
       'add-watchlist': canAddToWatchlist ? { id: 'add-watchlist', text: 'Add applicant to watchlist' } : null,
       assign: canAssign ? { id: 'assign', text: 'Assign / reassign' } : null,
       'resume-review': canResumeReview ? { id: 'resume-review', text: 'Resume review' } : null,
+      'put-on-hold': canPutOnHold ? { id: 'put-on-hold', text: 'Put on hold' } : null,
       escalate: canEscalate ? { id: 'escalate', text: `Escalate to ${escalationTargetRoleLabel}` } : null,
       'respond-escalation': canRespondEscalation ? { id: 'respond-escalation', text: 'Respond to escalation' } : null,
       'resolve-escalation': canResolveEscalation ? { id: 'resolve-escalation', text: 'Resolve escalation' } : null,
@@ -902,6 +931,7 @@ const ApplicationOverviewWidget = ({
       'add-watchlist',
       'assign',
       'resume-review',
+      'put-on-hold',
       'escalate',
       'respond-escalation',
       'resolve-escalation',
@@ -921,6 +951,7 @@ const ApplicationOverviewWidget = ({
     canAssign,
     canAddToWatchlist,
     canPutOnClosureNotice,
+    canPutOnHold,
     canResumeReview,
     canCloseApplication,
     canArchiveApplication,
@@ -936,6 +967,14 @@ const ApplicationOverviewWidget = ({
   const handleConfirmDismiss = () => setConfirmStatusChange(null);
   const [quickActionConfirm, setQuickActionConfirm] = useState(null);
   const [quickActionConfirmInput, setQuickActionConfirmInput] = useState('');
+
+  const resetQuickActionState = () => {
+    setQuickActionConfirm(null);
+    setQuickActionConfirmInput('');
+    setQuickActionNote('');
+    setQuickActionHoldReason(HOLD_REASON_OPTIONS[0]);
+    setQuickActionReviewDate('');
+  };
 
   const selectOptionByValue = value =>
     APPLICATION_STATUS_OPTIONS.find(option => option.value === value) ||
@@ -1226,6 +1265,22 @@ const ApplicationOverviewWidget = ({
       return;
     }
 
+    if (actionId === 'put-on-hold') {
+      setQuickActionConfirmInput('');
+      setQuickActionNote('');
+      setQuickActionHoldReason(HOLD_REASON_OPTIONS[0]);
+      setQuickActionReviewDate(getDatePickerValueDaysFromNow(HOLD_REVIEW_DEFAULT_DAYS));
+      setQuickActionConfirm(buildConfirm({
+        title: 'Put application on hold',
+        body: 'Use this when the application should stay open but leave active assessment and decision queues while PATH waits for an external answer, future start date, applicant pause, or internal follow-up.',
+        targetStatus: 'on_hold',
+        actionLabel: 'Put on hold',
+        noteHint: 'Add enough context so the next reviewer knows what PATH is waiting for.',
+        requireNote: false,
+      }));
+      return;
+    }
+
     if (actionId === 'resume-review') {
       setQuickActionConfirmInput('');
       setQuickActionNote('');
@@ -1378,6 +1433,48 @@ const ApplicationOverviewWidget = ({
     return true;
   };
 
+  const createHoldReviewReminder = async ({ caseId, applicationId, dueDate, reasonLabel, note }) => {
+    const dueAt = toReminderIsoFromDateInput(dueDate);
+    if (!dueAt || !caseId) return true;
+    const assignedStaffProfileId = resolveAssignedStaffProfileId({
+      assignedStaffProfileId: caseData?.assignedStaffProfileId,
+      assigned_staff_profile_id: caseData?.assigned_staff_profile_id,
+      assignedUserId: caseData?.assignedUserId,
+      assigned_user_id: caseData?.assigned_user_id,
+      assignedToUserId: caseData?.assignedToUserId,
+      assigned_to_user_id: caseData?.assigned_to_user_id,
+    });
+    const response = await apiFetch('/api/reminders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        caseId,
+        applicationId: applicationId || application_id || null,
+        title: 'Review parked application',
+        description: [
+          reasonLabel ? `Reason: ${reasonLabel}` : null,
+          note ? `Context: ${note}` : null,
+        ].filter(Boolean).join('\n') || null,
+        category: 'Application hold review',
+        status: 'open',
+        dueAt,
+        assignedStaffProfileId: assignedStaffProfileId || null,
+        metadata: {
+          source: 'application_on_hold_quick_action',
+          reason: reasonLabel || null,
+        },
+      }),
+    });
+    if (!response.ok) {
+      throw new Error('hold_review_reminder_save_failed');
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('case-reminders-refresh', { detail: { caseId } }));
+      window.dispatchEvent(new CustomEvent('case-events-refresh', { detail: { caseId } }));
+    }
+    return true;
+  };
+
   const resolveEscalationIfNeeded = async (note) => {
     if (!hasOpenEscalation || !escalation?.id) return;
     const response = await apiFetch(`/api/escalations/${escalation.id}/respond`, {
@@ -1398,6 +1495,9 @@ const ApplicationOverviewWidget = ({
       actionLabel = '',
       resolveEscalation = false,
       blockOnEscalation = false,
+      applicationAwaitingReason = null,
+      holdReviewDate = null,
+      holdReasonLabel = '',
     } = options;
     if (!caseData?.id) {
       setStatusFeedback({ type: 'error', content: 'Case details are unavailable; cannot update status.' });
@@ -1456,6 +1556,9 @@ const ApplicationOverviewWidget = ({
             null,
         }) || nextStatus,
       };
+      if (applicationAwaitingReason) {
+        payload.applicationAwaitingReason = applicationAwaitingReason;
+      }
       if (expectedRowVersion > 0) {
         payload.expectedRowVersion = expectedRowVersion;
       }
@@ -1517,6 +1620,20 @@ const ApplicationOverviewWidget = ({
       } catch (_) {
         noteSaved = false;
       }
+      let reminderSaved = true;
+      if (nextStatus === 'on_hold' && holdReviewDate) {
+        try {
+          await createHoldReviewReminder({
+            caseId: caseData.id,
+            applicationId: application?.id || application_id || caseData?.application_id || null,
+            dueDate: holdReviewDate,
+            reasonLabel: holdReasonLabel,
+            note,
+          });
+        } catch (_) {
+          reminderSaved = false;
+        }
+      }
 
       await fetchLatestApplication();
       try {
@@ -1528,10 +1645,12 @@ const ApplicationOverviewWidget = ({
         window.dispatchEvent(new CustomEvent('case-events-refresh', { detail: { caseId: caseData.id } }));
       }
       await fetchEscalation().catch(() => {});
-      if (!noteSaved) {
+      if (!noteSaved || !reminderSaved) {
         setStatusFeedback({
           type: 'warning',
-          content: `Application status updated to ${label}, but the note could not be saved. Please add the note manually.`,
+          content: !noteSaved
+            ? `Application status updated to ${label}, but the note could not be saved. Please add the note manually.`
+            : `Application status updated to ${label}, but the review reminder could not be saved. Please add the reminder manually.`,
         });
       } else {
         setStatusFeedback({ type: 'success', content: `Application status updated to ${label}.` });
@@ -2276,21 +2395,13 @@ const ApplicationOverviewWidget = ({
         {quickModalVisible && (
           <Modal
             visible={quickModalVisible}
-            onDismiss={() => {
-              setQuickActionConfirm(null);
-              setQuickActionConfirmInput('');
-              setQuickActionNote('');
-            }}
+            onDismiss={resetQuickActionState}
             closeAriaLabel="Close quick action confirmation"
             header={quickActionConfirm?.title || 'Confirm action'}
             footer={
               <SpaceBetween direction="horizontal" size="xs">
                 <Button
-                  onClick={() => {
-                    setQuickActionConfirm(null);
-                    setQuickActionConfirmInput('');
-                    setQuickActionNote('');
-                  }}
+                  onClick={resetQuickActionState}
                   disabled={savingStatus}
                 >
                   Cancel
@@ -2301,31 +2412,37 @@ const ApplicationOverviewWidget = ({
                     if (quickActionConfirm?.type === 'escalation') {
                       const actionId = quickActionConfirm?.actionId;
                       const note = quickActionNote;
-                      setQuickActionConfirm(null);
-                      setQuickActionConfirmInput('');
-                      setQuickActionNote('');
+                      resetQuickActionState();
                       runEscalationAction(actionId, { note });
                       return;
                     }
                     if (!quickActionConfirm?.targetStatus) {
-                      setQuickActionConfirm(null);
-                      setQuickActionConfirmInput('');
-                      setQuickActionNote('');
+                      resetQuickActionState();
                       return;
                     }
                     const targetOption = quickActionConfirm?.targetOption;
-                    const note = quickActionNote;
+                    const isHoldAction = quickActionConfirm?.targetStatus === 'on_hold';
+                    const holdReason = isHoldAction ? quickActionHoldReason?.value : null;
+                    const holdReasonLabel = holdReason ? getApplicationAwaitingReasonLabel(holdReason) : '';
+                    const reviewDate = isHoldAction ? quickActionReviewDate : null;
+                    const holdContext = [
+                      holdReasonLabel ? `Reason: ${holdReasonLabel}` : null,
+                      reviewDate ? `Review date: ${reviewDate}` : null,
+                      quickActionNote?.trim() ? quickActionNote.trim() : null,
+                    ].filter(Boolean).join('\n');
+                    const note = isHoldAction ? holdContext : quickActionNote;
                     const actionLabel = quickActionConfirm?.actionLabel;
                     const resolveEscalation = Boolean(quickActionConfirm?.resolveEscalation);
                     const blockOnEscalation = Boolean(quickActionConfirm?.blockOnEscalation);
-                    setQuickActionConfirm(null);
-                    setQuickActionConfirmInput('');
-                    setQuickActionNote('');
+                    resetQuickActionState();
                     runStatusUpdate(quickActionConfirm.targetStatus, targetOption, {
                       note,
                       actionLabel,
                       resolveEscalation,
                       blockOnEscalation,
+                      applicationAwaitingReason: holdReason,
+                      holdReviewDate: reviewDate,
+                      holdReasonLabel,
                     });
                   }}
                   loading={savingStatus}
@@ -2333,7 +2450,8 @@ const ApplicationOverviewWidget = ({
                     savingStatus ||
                     (quickActionConfirm?.confirmWord &&
                       quickActionConfirmInput.trim().toLowerCase() !== quickActionConfirm.confirmWord) ||
-                    (quickActionConfirm?.requireNote && !quickActionNote.trim())
+                    (quickActionConfirm?.requireNote && !quickActionNote.trim()) ||
+                    (quickActionConfirm?.targetStatus === 'on_hold' && (!quickActionHoldReason?.value || !quickActionReviewDate))
                   }
                 >
                   Confirm
@@ -2348,7 +2466,45 @@ const ApplicationOverviewWidget = ({
                   This will set status to {quickActionConfirm.targetOption.label}.
                 </Box>
               ) : null}
+              {quickActionConfirm?.targetStatus === 'on_hold' ? (
+                <>
+                  <FormField
+                    label="Hold reason"
+                    description="Used for the On Hold queue and status detail."
+                  >
+                    <Select
+                      selectedOption={quickActionHoldReason}
+                      options={HOLD_REASON_OPTIONS}
+                      onChange={({ detail }) => setQuickActionHoldReason(detail.selectedOption)}
+                      placeholder="Select a reason"
+                      expandToViewport
+                    />
+                  </FormField>
+                  <FormField
+                    label="Review date"
+                    description="Creates a case reminder so the file is revisited."
+                  >
+                    <DatePicker
+                      value={quickActionReviewDate}
+                      onChange={({ detail }) => setQuickActionReviewDate(detail.value)}
+                      placeholder="YYYY-MM-DD"
+                    />
+                  </FormField>
+                </>
+              ) : null}
               {quickActionConfirm?.requireNote ? (
+                <FormField
+                  label="Notes"
+                  description={quickActionConfirm?.noteHint || 'Provide context for this action.'}
+                >
+                  <Textarea
+                    value={quickActionNote}
+                    onChange={e => setQuickActionNote(e.detail.value || '')}
+                    rows={3}
+                    spellcheck={true}
+                  />
+                </FormField>
+              ) : quickActionConfirm?.targetStatus === 'on_hold' ? (
                 <FormField
                   label="Notes"
                   description={quickActionConfirm?.noteHint || 'Provide context for this action.'}

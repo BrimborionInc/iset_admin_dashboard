@@ -7,6 +7,7 @@ import ApplicationOverviewWidget from '../widgets/ApplicationOverviewWidget';
 import IsetApplicationFormWidget from '../widgets/IsetApplicationFormWidget';
 import CoordinatorAssessmentWidget from '../widgets/CoordinatorAssessmentWidget';
 import SupportingDocumentsWidget from '../widgets/SupportingDocumentsWidget';
+import SecureMessageComposePanel from '../widgets/SecureMessageComposePanel.jsx';
 import SecureMessagingWidget from '../widgets/SecureMessagingWidget';
 import CaseNotesWidget from '../widgets/CaseNotesWidget';
 import ApplicationEvents from '../widgets/applicationEvents';
@@ -678,6 +679,13 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
           empty={<Box>No widgets</Box>}
         />
       </SpaceBetween>
+      <SecureMessageComposePanel
+        caseId={id}
+        caseData={caseData}
+        refreshCaseData={refreshCaseData}
+        onCaseUpdate={handleCaseUpdate}
+        applicationRowVersion={appRowVersion}
+      />
     </ContentLayout>
   );
 };

@@ -16,6 +16,7 @@ import {
 } from '../../utils/applicationSla';
 import {
     buildApplicationStatusInfo,
+    getApplicationAwaitingReasonLabel,
     normalizeApplicationStatus,
     normalizeDecisionOutcome,
 } from '../../utils/applicationStatus';
@@ -215,9 +216,11 @@ const ISET_COORDINATOR_MISSING_DOCS_FILTER = [
     'pending info',
     'pending information',
     'info requested',
-    'information requested',
-    'on hold',
-    'on_hold'
+    'information requested'
+].join(',');
+const ISET_COORDINATOR_ON_HOLD_FILTER = [
+    'on_hold',
+    'on hold'
 ].join(',');
 const NWAC_ADMIN_CLIENT_CASES_BUCKET = {
     id: 'all-client-cases',
@@ -238,12 +241,14 @@ const SHARED_PROGRAM_ADMIN_PIPELINE_BUCKET_IDS = Object.freeze([
     'new-applications',
     'pending-assessment',
     'in-assessment',
+    'on-hold',
     'pending-decision',
     'pending-completion',
 ]);
 const NWAC_ADMIN_PIPELINE_BUCKET_IDS = Object.freeze([
     'new-applications',
     'in-assessment',
+    'on-hold',
     'pending-decision',
     'pending-completion',
 ]);
@@ -266,9 +271,11 @@ const WORK_QUEUE_IN_ASSESSMENT_FILTER = [
     'pending info',
     'pending information',
     'info requested',
-    'information requested',
-    'on hold',
-    'on_hold'
+    'information requested'
+].join(',');
+const WORK_QUEUE_ON_HOLD_FILTER = [
+    'on_hold',
+    'on hold'
 ].join(',');
 
 const buildDevHeaders = (role) => {
@@ -521,6 +528,9 @@ const resolveApplicationPipelineBucketId = row => {
     }
     if (rawStatus === 'in_review' || rawStatus === 'awaiting_applicant') {
         return 'in-assessment';
+    }
+    if (rawStatus === 'on_hold') {
+        return 'on-hold';
     }
     if (rawStatus === 'pending_decision') {
         return 'pending-decision';
@@ -945,6 +955,10 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
     );
     const coordinatorMissingDocsParam = useMemo(
         () => encodeURIComponent(ISET_COORDINATOR_MISSING_DOCS_FILTER),
+        []
+    );
+    const coordinatorOnHoldParam = useMemo(
+        () => encodeURIComponent(ISET_COORDINATOR_ON_HOLD_FILTER),
         []
     );
     const coordinatorEiEligibilityParam = useMemo(
@@ -2704,6 +2718,92 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         loadSubmittedApplicationsPipeline();
         return () => { ignore = true; };
     }, [role, programAdminRefresh, isWorkQueueRole]);
+
+    useEffect(() => {
+        if (!isWorkQueueRole && !isIsetCoordinatorRole) {
+            return;
+        }
+        let ignore = false;
+        const loadOnHoldApplications = async () => {
+            try {
+                const statusParam = isIsetCoordinatorRole
+                    ? coordinatorOnHoldParam
+                    : encodeURIComponent(WORK_QUEUE_ON_HOLD_FILTER);
+                const response = await apiFetch(`/api/applications?status=${statusParam}&limit=200&offset=0`, {
+                    headers: buildDevHeaders(role)
+                });
+                if (!response.ok) {
+                    throw new Error(`Request failed: ${response.status}`);
+                }
+                const payload = await response.json();
+                if (ignore) return;
+                if (!payload || !Array.isArray(payload.rows)) {
+                    throw new Error('Unexpected response format while loading on-hold applications.');
+                }
+                const mapped = payload.rows
+                    .filter(row => resolveApplicationPipelineBucketId(row) === 'on-hold')
+                    .map((row, idx) => {
+                        const tracking = row.trackingId || row.tracking_id || row.caseId || `on-hold-${idx}`;
+                        const caseId = row.caseId || row.case_id || null;
+                        const applicantName =
+                            row.applicant_name ||
+                            row.applicantName ||
+                            tracking ||
+                            'Applicant';
+                        const submitted = row.submittedAt || row.submitted_at || null;
+                        const awaitingReason = row.application_awaiting_reason || row.applicationAwaitingReason || 'on_hold';
+                        const reasonLabel = getApplicationAwaitingReasonLabel(awaitingReason);
+                        return {
+                            id: tracking,
+                            title: applicantName,
+                            trackingId: tracking,
+                            case_id: caseId,
+                            application_id: row.applicationId || row.application_id || null,
+                            bucketId: 'on-hold',
+                            type: 'Application',
+                            applicant: applicantName,
+                            applicant_name: applicantName,
+                            region: row.address_province || '—',
+                            address_province: row.address_province || null,
+                            assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                            owner: row.owner || row.assigned_user_email || 'Unassigned',
+                            ...buildAssignedStaffProfileAliases(row),
+                            ...buildApplicationQueueStatusFields(row, 'on_hold'),
+                            docs_requested_active: row.docs_requested_active ?? row.docsRequestedActive ?? false,
+                            docs_requested_at: row.docs_requested_at ?? row.docsRequestedAt ?? null,
+                            docs_requested_cleared_at: row.docs_requested_cleared_at ?? row.docsRequestedClearedAt ?? null,
+                            docs_requested_source: row.docs_requested_source ?? row.docsRequestedSource ?? null,
+                            dueDate: null,
+                            submittedAt: submitted,
+                            updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
+                            summary: reasonLabel ? `Parked: ${reasonLabel}.` : 'Parked for follow-up.',
+                            workspacePath: caseId ? `/application-case/${caseId}` : '/case-assignment-dashboard'
+                        };
+                    });
+                setProgramAdminItems(current => {
+                    const nonOnHold = current.filter(item => item.bucketId !== 'on-hold');
+                    return [...mapped, ...nonOnHold];
+                });
+                setProgramAdminCounts(current => ({
+                    ...current,
+                    'on-hold': mapped.length
+                }));
+                if (mapped.length) {
+                    setProgramAdminBucketId(bucket => bucket || 'on-hold');
+                    setProgramAdminSelectedItemId(current => {
+                        if (mapped.some(item => item.id === current)) {
+                            return current;
+                        }
+                        return mapped[0].id;
+                    });
+                }
+            } catch (_) {
+                // keep existing data on failure
+            }
+        };
+        loadOnHoldApplications();
+        return () => { ignore = true; };
+    }, [role, programAdminRefresh, isWorkQueueRole, isIsetCoordinatorRole, coordinatorOnHoldParam]);
 
     useEffect(() => {
         if (!isWorkQueueRole) {

@@ -140,6 +140,11 @@ Recommended `application.awaiting_reason` values:
 - `documents`
 - `closure_response`
 - `information`
+- `external_funding`
+- `future_start`
+- `applicant_pause`
+- `internal_follow_up`
+- `other_hold`
 - `none`
 
 Recommended `application.closure_reason` values:
@@ -321,6 +326,12 @@ Examples:
 
 - `Awaiting applicant`
   - applications where `lifecycle_status = awaiting_applicant`
+  - excludes raw workflow status `on_hold` when the UI presents the separate parking bucket
+
+- `On Hold`
+  - applications where raw workflow `status = on_hold`
+  - still uses `lifecycle_status = awaiting_applicant` because parking is a blocker/queue state, not a terminal lifecycle
+  - uses `awaiting_reason` to distinguish external funding, future start timing, applicant pause, internal follow-up, and other hold reasons
 
 - `Unassigned applications`
   - applications where `lifecycle_status = submitted` and no owner is assigned
@@ -366,6 +377,7 @@ Current `iset_application.status` -> target fields:
 | `in_review` | `in_review` | `null` | `none` | `null` |
 | `docs_requested` | `awaiting_applicant` | `null` | `documents` | `null` |
 | `closure_notice` | `awaiting_applicant` | `null` | `closure_response` | `null` |
+| `on_hold` | `awaiting_applicant` | `null` | hold reason such as `external_funding` / `future_start` | `null` |
 | `pending_approval` | `pending_decision` | `null` | `none` | `null` |
 | `decision_ready` | `pending_decision` | `null` | `none` | `null` |
 | `approved` | `decision_recorded` | `approved` | `none` | `null` |

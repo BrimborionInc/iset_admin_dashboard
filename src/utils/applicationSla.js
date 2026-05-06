@@ -33,6 +33,11 @@ export const DECISION_APPLICATION_STATUSES = new Set([
   'decision_ready',
 ]);
 
+export const HELD_APPLICATION_STATUSES = new Set([
+  'on_hold',
+  'on hold',
+]);
+
 export const ASSESSMENT_APPLICATION_STATUSES = new Set([
   'in_review',
   'in review',
@@ -72,6 +77,9 @@ export function getApplicationSlaStageKey({
 }) {
   const statusKey = normalizeClosedStatus(rawStatus || '');
   if (COMPLETED_APPLICATION_STATUSES.has(statusKey)) {
+    return null;
+  }
+  if (HELD_APPLICATION_STATUSES.has(statusKey)) {
     return null;
   }
   if (DECISION_APPLICATION_STATUSES.has(statusKey)) {

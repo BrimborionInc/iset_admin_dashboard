@@ -33,6 +33,7 @@ export const APPLICATION_PENDING_DECISION_STATUSES = new Set([
 export const APPLICATION_STATUS_SYNONYMS = Object.freeze({
   complete: 'completed',
   withdrawn: 'closed',
+  on_hold: 'on_hold',
   action_required: 'docs_requested',
   'action_required_(docs_requested)': 'docs_requested',
   assessed_pending_approval: 'pending_approval',
@@ -64,10 +65,22 @@ const APPROVED_CASE_DECISION_STATUSES = new Set([
 
 const DENIED_CASE_DECISION_STATUSES = new Set(['rejected']);
 
+export const APPLICATION_HOLD_AWAITING_REASONS = Object.freeze({
+  on_hold: 'On hold',
+  external_funding: 'External funding pending',
+  future_start: 'Future program or school start',
+  applicant_pause: 'Applicant requested pause',
+  internal_follow_up: 'Internal follow-up needed',
+  other_hold: 'Other hold reason',
+});
+
+export const APPLICATION_HOLD_AWAITING_REASON_KEYS = new Set(Object.keys(APPLICATION_HOLD_AWAITING_REASONS));
+
 export const APPLICATION_STATUS_OPTIONS = Object.freeze([
   { label: 'Submitted', value: 'submitted' },
   { label: 'In Review', value: 'in_review' },
   { label: 'Awaiting Applicant', value: 'awaiting_applicant' },
+  { label: 'On Hold', value: 'on_hold' },
   { label: 'Pending Decision', value: 'pending_decision' },
   { label: 'Closed', value: 'closed' },
   { label: 'Archived', value: 'archived' },
@@ -90,6 +103,7 @@ APPLICATION_STATUS_LABEL_MAP.rejected = 'Decision Recorded';
 APPLICATION_STATUS_LABEL_MAP.declined = 'Decision Recorded';
 APPLICATION_STATUS_LABEL_MAP.denied = 'Decision Recorded';
 APPLICATION_STATUS_LABEL_MAP.awaiting_applicant = 'Awaiting Applicant';
+APPLICATION_STATUS_LABEL_MAP.on_hold = 'On Hold';
 APPLICATION_STATUS_LABEL_MAP.pending_decision = 'Pending Decision';
 APPLICATION_STATUS_LABEL_MAP.decision_recorded = 'Decision Recorded';
 
@@ -123,6 +137,23 @@ export function getApplicationStatusLabel(status) {
     .join(' ');
 }
 
+export function getApplicationAwaitingReasonLabel(reason) {
+  const normalized = normalizeStatusKey(reason);
+  if (APPLICATION_HOLD_AWAITING_REASONS[normalized]) {
+    return APPLICATION_HOLD_AWAITING_REASONS[normalized];
+  }
+  if (normalized === 'closure_response') return 'Closure response';
+  if (normalized === 'documents') return 'Documents';
+  if (normalized === 'information') return 'Information';
+  return normalized
+    ? normalized
+        .split(/[_-]+/g)
+        .filter(Boolean)
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ')
+    : '';
+}
+
 export function deriveApplicationStatusFromState({
   applicationStatus,
   applicationLifecycleStatus,
@@ -135,7 +166,7 @@ export function deriveApplicationStatusFromState({
 } = {}) {
   const lifecycleKey = normalizeStatusKey(applicationLifecycleStatus || lifecycleStatus);
   const awaitingKey = normalizeStatusKey(awaitingReason);
-  const closureKey = normalizeStatusKey(closureReason);
+  const explicitStatus = normalizeApplicationStatus(applicationStatus);
   const explicitDecision =
     normalizeDecisionOutcome(decisionOutcome) ||
     normalizeDecisionOutcome(reviewStatus);
@@ -146,6 +177,9 @@ export function deriveApplicationStatusFromState({
     case 'in_review':
       return 'in_review';
     case 'awaiting_applicant':
+      if (explicitStatus === 'on_hold' || APPLICATION_HOLD_AWAITING_REASON_KEYS.has(awaitingKey)) {
+        return 'on_hold';
+      }
       return 'awaiting_applicant';
     case 'pending_decision':
       return 'pending_decision';
@@ -159,12 +193,13 @@ export function deriveApplicationStatusFromState({
       break;
   }
 
-  const explicitStatus = normalizeApplicationStatus(applicationStatus);
   switch (explicitStatus) {
     case 'submitted':
       return 'submitted';
     case 'in_review':
       return 'in_review';
+    case 'on_hold':
+      return 'on_hold';
     case 'docs_requested':
     case 'closure_notice':
       return 'awaiting_applicant';
@@ -358,6 +393,8 @@ export function mapWorkflowStatusToPersistenceStatus(
   const decisionKey = normalizeDecisionOutcome(decisionOutcome);
 
   switch (normalizedStatus) {
+    case 'on_hold':
+      return 'on_hold';
     case 'awaiting_applicant':
       if (awaitingKey === 'closure_response' || currentKey === 'closure_notice') {
         return 'closure_notice';
@@ -393,6 +430,7 @@ export function getApplicationStatusIndicatorType(
   if (statusKey === 'rejected') return 'error';
   if (['closed', 'cancelled', 'archived'].includes(statusKey)) return 'info';
   if (eligibilityMissing) return 'warning';
+  if (statusKey === 'on_hold') return 'warning';
   if (['awaiting_applicant', 'docs_requested', 'closure_notice'].includes(statusKey)) return 'warning';
   return isUnassigned || statusKey === 'new' ? 'pending' : 'info';
 }
@@ -411,6 +449,7 @@ export function getApplicationStatusBadgeColor(
   if (statusKey === 'approved' || statusKey === 'completed') return 'green';
   if (statusKey === 'rejected') return 'red';
   if (['closed', 'inactive', 'archived', 'cancelled'].includes(statusKey)) return 'grey';
+  if (statusKey === 'on_hold') return 'severity-medium';
   if (eligibilityMissing || ['awaiting_applicant', 'docs_requested', 'closure_notice'].includes(statusKey)) {
     return 'severity-high';
   }
@@ -483,6 +522,12 @@ export function buildApplicationStatusInfo({
       qualifiers.push('Information');
     } else {
       qualifiers.push('Documents');
+    }
+  }
+  if (rawStatus === 'on_hold') {
+    const holdLabel = getApplicationAwaitingReasonLabel(awaitingKey);
+    if (holdLabel && holdLabel !== 'On hold') {
+      qualifiers.push(holdLabel);
     }
   }
   if (rawStatus === 'decision_recorded') {

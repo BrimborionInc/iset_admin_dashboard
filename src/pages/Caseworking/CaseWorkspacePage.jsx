@@ -4,6 +4,7 @@ import Board from "@cloudscape-design/board-components/board";
 import { Box, SpaceBetween } from "@cloudscape-design/components";
 import CaseHeaderWidget from "./caseWorkspace/widgets/CaseHeaderWidget.jsx";
 import SupportingDocumentsWidget from "../../widgets/SupportingDocumentsWidget";
+import SecureMessageComposePanel from "../../widgets/SecureMessageComposePanel.jsx";
 import SecureMessagingWidget from "../../widgets/SecureMessagingWidget";
 import CaseNotesWidget from "../../widgets/CaseNotesWidget";
 import CaseCalendarWidget from "../../widgets/CaseCalendarWidget";
@@ -30,7 +31,7 @@ import CaseWorkspaceParticipantDetailsHelp from "../../helpPanelContents/caseWor
 import CaseWorkspaceExportPreviewHelp from "../../helpPanelContents/caseWorkspaceExportPreviewHelp.js";
 import CaseWorkspaceTimelineHelp from "../../helpPanelContents/caseWorkspaceTimelineHelp.js";
 import CaseWorkspaceHelp from "../../helpPanelContents/caseWorkspaceHelp.js";
-import { CaseWorkspaceProvider } from "./caseWorkspace/CaseWorkspaceContext.jsx";
+import { CaseWorkspaceProvider, useCaseWorkspace } from "./caseWorkspace/CaseWorkspaceContext.jsx";
 import { PaymentsDataProvider } from "../finance/widgets/PaymentsDataContext.jsx";
 import CaseApplicationEventsWidget from "./caseWorkspace/widgets/CaseApplicationEventsWidget.jsx";
 import { parseWorkspaceEntry } from "../../utils/approvalWorkspaceEntry.js";
@@ -388,6 +389,19 @@ const boardI18nStrings = {
   navigationItemAriaLabel: item => (item ? item.data.title : "Empty"),
 };
 
+const CaseWorkspaceSecureMessageComposePanel = () => {
+  const workspace = useCaseWorkspace();
+  return (
+    <SecureMessageComposePanel
+      caseId={workspace.caseId}
+      caseData={workspace.caseData}
+      isCaseWorkspace
+      selectedInterventionId={workspace.selectedInterventionId}
+      refreshCaseData={workspace.refresh}
+    />
+  );
+};
+
 const CaseWorkspacePage = ({
   updateBreadcrumbs,
   setAvailableItems,
@@ -621,6 +635,7 @@ const CaseWorkspacePage = ({
             empty={<Box padding="m">No widgets configured.</Box>}
           />
         </SpaceBetween>
+        <CaseWorkspaceSecureMessageComposePanel />
       </PaymentsDataProvider>
     </CaseWorkspaceProvider>
   );

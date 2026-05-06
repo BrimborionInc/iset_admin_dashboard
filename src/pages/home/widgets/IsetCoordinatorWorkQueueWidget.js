@@ -39,6 +39,11 @@ export const ISET_COORDINATOR_BUCKETS = [
     description: 'Applications waiting on documents or a response from the applicant.'
   },
   {
+    id: 'on-hold',
+    label: 'On Hold',
+    description: 'Parked applications waiting for a scheduled follow-up.'
+  },
+  {
     id: 'approvals-pipeline',
     label: 'Awaiting Approval',
     description: 'Assessments submitted for review and approval.'
@@ -76,6 +81,7 @@ const ENABLED_BUCKET_IDS = new Set([
   'ei-consent-verification',
   'file-complete-processing-due',
   'missing-docs',
+  'on-hold',
   'approvals-pipeline',
   'funding-agreements',
   'active-clients-checkins',

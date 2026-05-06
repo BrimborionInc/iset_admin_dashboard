@@ -1,11 +1,22 @@
 Purpose: Capture the UX, data model, and implementation decisions for a configuration widget that lets SysAdmins edit the runtime document checklist by status gate.
 Audience: Admin dashboard engineers, product owners, and operators configuring checklist requirements.
-Last Updated: 2026-01-20
+Last Updated: 2026-05-06
 
 ## Background
 - The runtime checklist is stored in `iset_runtime_config` under `scope='checklist'` and key `checklist.compliance.iset`.
 - Admin UIs consume `/api/applicants/:id/document-checklist`, which loads the runtime config and computes per-item status.
-- There is no admin-facing editor today; updates require manual DB edits or file fallback updates.
+- System Administrators can edit the checklist from Configuration Settings > Document checklists. Direct DB edits are still used for guarded PROD repairs when the live config itself is broken.
+- Runtime config source of truth remains `iset_runtime_config`; fallback JSON under `src/server/config/checklists/` should be kept aligned so new environments do not reintroduce repaired drift.
+
+## Current Runtime Guardrails
+
+- Checklist item `id` values are behavioral, not just display keys. `/api/applicants/:id/document-checklist` uses specific IDs to apply conditional required logic.
+- For income/expense evidence, use these conditional item IDs:
+  - `financial-records` with document type `evidence_income`
+  - `financial-evidence` with document type `evidence_expense`
+- Do not use ad hoc IDs such as `evidence-of-income-submit-assessment` or `evidence-of-expense-submit-assessment` unless backend aliases are added; those IDs bypass the conditional logic and make the items always required.
+- `band_funding_decision` is the merged Band/Nation decision-letter type. Checklist configs should accept it anywhere they still accept historical `band_funding_confirmation` / `band_funding_denial`.
+- 2026-05-06 PROD repair: feedback reports `#78` and `#82` were resolved by updating live runtime config so application assessment income/expense evidence uses the conditional IDs above, intervention proposal Band/Nation checklist items accept `band_funding_decision`, and intervention financial evidence uses active document type `evidence_expense` instead of inactive `financial_evidence`.
 
 ## Goals
 - Let System Administrators edit the checklist JSON via a configuration settings widget.

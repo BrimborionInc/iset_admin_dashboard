@@ -149,7 +149,7 @@
           "notes": "Required only if the client is requesting funding related to disability support."
         },
         {
-          "id": "evidence-of-expense",
+          "id": "financial-evidence",
           "label": "Evidence of Expense (lease/mortgage statement; 3 months of utility bills, childcare, etc.)",
           "scope": "per assessment (application or new intervention proposal)",
           "sources": [
@@ -159,12 +159,12 @@
           ],
           "required": true,
           "documentTypes": [
-            "financial_evidence"
+            "evidence_expense"
           ],
           "notes": "Checked during assessment to ensure there were no omissions."
         },
         {
-          "id": "evidence-of-income",
+          "id": "financial-records",
           "label": "Evidence of Income (paystubs; CTB statement; ROE, T4s, etc.)",
           "scope": "per assessment (application or new intervention proposal)",
           "sources": [
@@ -174,7 +174,7 @@
           ],
           "required": true,
           "documentTypes": [
-            "financial_records"
+            "evidence_income"
           ],
           "notes": "What is mandatory depends on what was declared in the application (e.g., spousal income)."
         }
@@ -248,7 +248,7 @@
       ],
       "items": [
         {
-          "id": "evidence-of-expense-submit-assessment",
+          "id": "financial-evidence",
           "label": "Evidence of Expense (lease/mortgage statement; 3 months of utility bills, childcare, etc.)",
           "scope": "per assessment (application or new intervention proposal)",
           "sources": [
@@ -258,12 +258,12 @@
           ],
           "required": true,
           "documentTypes": [
-            "financial_evidence"
+            "evidence_expense"
           ],
           "notes": "Checked during assessment to ensure there were no omissions."
         },
         {
-          "id": "evidence-of-income-submit-assessment",
+          "id": "financial-records",
           "label": "Evidence of Income (paystubs; CTB statement; ROE, T4s, etc.)",
           "scope": "per assessment (application or new intervention proposal)",
           "sources": [
@@ -273,7 +273,7 @@
           ],
           "required": true,
           "documentTypes": [
-            "financial_records"
+            "evidence_income"
           ],
           "notes": "What is mandatory depends on what was declared in the application (e.g., spousal income)."
         },

@@ -27,6 +27,7 @@ Stored in `iset_application.status` (varchar). Canonical values:
 | `in_review` | Case staff has claimed the application and is performing assessment work. | Manual assignment or clerical updates (optional). |
 | `docs_requested` (aka “Action Required”) | Additional information is needed from the applicant. | Manual status update from Application Overview widget. |
 | `closure_notice` | Closure notice sent; awaiting applicant response before closing. | Application Overview quick action. |
+| `on_hold` | Application is intentionally parked while PATH waits on an external funding answer, future start date, applicant-requested pause, internal follow-up, or other scheduled hold reason. | Application Overview `Put on hold` quick action. |
 | `pending_approval` | Assessor submitted their review; awaiting NWAC outcome decision. | `CoordinatorAssessmentWidget.handleSubmit`. |
 | `approved` | NWAC outcome approved; approval correspondence and funding-signature follow-up may still be outstanding. | `CoordinatorAssessmentWidget.handleComplete` with `approve`. |
 | `completed` | Post-approval correspondence and required funding-form/signature follow-up are complete. | `CoordinatorAssessmentWidget.handleFundingDocsComplete`. |
@@ -37,7 +38,7 @@ Stored in `iset_application.status` (varchar). Canonical values:
 | `archived` | Historical record retained, no further action. | Manual administrative action. |
 | `withdrawn` | Applicant withdrew; normalized to `closed` in UI. | Legacy/imported records or portal withdrawal. |
 
-> **Normalization:** `getApplicationStatusContext()` (in `src/utils/rbac.js`) lowercases/underscores incoming values and maps `withdrawn` to `closed`. SLA and queue logic also treat hold variants (`action_required`, `docs requested`, `closure notice`, `pending info`, `information requested`, `on_hold`) as assessment/hold states (see `APPLICATION_STATUS_HOLD_VALUES` in `isetadminserver.js`).
+> **Normalization:** `getApplicationStatusContext()` (in `src/utils/rbac.js`) lowercases/underscores incoming values and maps `withdrawn` to `closed`. `on_hold` persists as the raw workflow status but normalizes to application lifecycle `awaiting_applicant`; homepage queue logic gives it a dedicated `On Hold` bucket instead of mixing it into active assessment. SLA timing returns no active stage while an application is parked.
 > **Note:** `docs_requested` remains an application status option, but document-request timing is now tracked separately (see below) so requests can overlap any status.
 > **DEV migration note:** the development branch now also writes `application_lifecycle_status`, `decision_outcome`, `application_awaiting_reason`, and `application_closure_reason`. `iset_application.status` remains in place as the legacy compatibility field until rollout and backfill are complete.
 
@@ -58,7 +59,18 @@ Document requests are recorded on `iset_application` to allow "docs requested" t
 - `document_request_set` and `document_request_cleared` emitted on toggle/set/clear.
 - `document_request_reminder_due` and `document_request_closure_due` reserved for background jobs (thresholds configured via SLA settings).
 
-### 2.2A Application SLA Stages
+### 2.2A Application On Hold / Parking
+
+`on_hold` is an application workflow status for open files that should be revisited later without closing, denying, or leaving them in active assessment/decision queues.
+
+- Persistence: `iset_application.status = 'on_hold'`, `iset_application.lifecycle_status = 'awaiting_applicant'`.
+- Reason: `iset_application.awaiting_reason` stores one of `external_funding`, `future_start`, `applicant_pause`, `internal_follow_up`, `other_hold`, or generic `on_hold`.
+- Entry point: Application Overview `Quick actions > Put on hold`.
+- The quick action asks for a reason, optional note, and review date; the review date creates an `iset_case_reminder` with category `Application hold review`.
+- Queue behavior: homepage `On Hold` buckets use raw workflow status `on_hold`; active `In Assessment`, `Missing Docs`, and SLA-stage queues exclude parked files.
+- Exit path: `Resume review` moves the application back to `in_review`.
+
+### 2.2B Application SLA Stages
 PATH currently derives the active application SLA stage from live record state rather than storing a separate SLA-stage column.
 
 | SLA Stage | Derived When | Current Helper |

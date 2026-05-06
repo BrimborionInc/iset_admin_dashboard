@@ -114,8 +114,10 @@ Recommended planned-maintenance sequence:
 2. Wait through the warning window.
 3. If a hard outage is required, enable the ALB fixed-response maintenance page.
 4. Run `path:deploy`.
-5. Clear the warning after smoke passes.
+5. Confirm deploy smoke passes while the maintenance page is still protecting users.
 6. Clear the ALB fixed-response maintenance page if you enabled it.
+7. Run smoke again with normal routing restored.
+8. Clear the warning.
 
 Guidance:
 - Size `--expected-duration` to the likely user-facing interruption window, not the total operator runtime of the release.

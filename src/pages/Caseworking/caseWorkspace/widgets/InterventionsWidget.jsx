@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useHistory } from "react-router-dom";
 import { BoardItem } from "@cloudscape-design/board-components";
 import {
   Alert,
@@ -20,6 +21,7 @@ import {
 import { boardItemI18nStrings } from "../../widgets/common";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
 import InterventionModal from "../modals/InterventionModal.jsx";
+import { buildApprovalWorkspacePath } from "../../../../utils/approvalWorkspaceEntry.js";
 import {
   formatInterventionStatusLabel,
   isInterventionActivatableStatus,
@@ -378,7 +380,9 @@ const persistColumnWidths = widths => {
 };
 
 const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
+  const history = useHistory();
   const {
+    caseId,
     caseData,
     selectedActionPlanId,
     createIntervention,
@@ -791,6 +795,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             detail: {
               interventionId: intervention.id,
               planId: activePlan?.id ?? null,
+              requestedStep: intervention.requestedStep || null,
             },
           })
         );
@@ -809,6 +814,44 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       dispatchWizardSelection(intervention);
     },
     [dispatchWizardSelection, setSelectedInterventionId]
+  );
+
+  const openApprovalLetterFollowUp = useCallback(
+    intervention => {
+      if (!intervention?.id) return;
+      const resolvedCaseId = caseId || caseData?.id || intervention.caseId || intervention.case_id;
+      const resolvedPlanId =
+        activePlan?.id ||
+        intervention.actionPlanId ||
+        intervention.action_plan_id ||
+        selectedActionPlanId ||
+        null;
+      const path = buildApprovalWorkspacePath({
+        basePath: resolvedCaseId ? `/cases/${resolvedCaseId}` : null,
+        approvalType: "intervention",
+        step: "communication",
+        interventionId: intervention.id,
+        planId: resolvedPlanId,
+      });
+      if (path) {
+        history.push(path);
+        return;
+      }
+      setSelectedInterventionId(intervention.id);
+      setFormMode(null);
+      setStartInCloseMode(false);
+      setForceReadOnly(false);
+      dispatchWizardSelection({ ...intervention, requestedStep: "communication" });
+    },
+    [
+      activePlan?.id,
+      caseData?.id,
+      caseId,
+      dispatchWizardSelection,
+      history,
+      selectedActionPlanId,
+      setSelectedInterventionId,
+    ]
   );
 
   const focusIntervention = useCallback(
@@ -1247,7 +1290,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                   } else if (detail?.id === "view") {
                     openWizardView(item);
                   } else if (detail?.id === "approval-letter") {
-                    openInterventionInWizard(item);
+                    openApprovalLetterFollowUp(item);
                   } else if (detail?.id === "close") {
                     openCloseModal(item);
                   } else if (detail?.id === "activate") {
@@ -1275,12 +1318,14 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   }, [
     codeLabelMap,
     columnWidthsMap,
+    getTypeLabel,
     getInterventionActionItems,
     formMode,
+    handleActivate,
     handleReviseIntervention,
     openRevisionDraftsBySourceId,
+    openApprovalLetterFollowUp,
     openWizardView,
-    openInterventionInWizard,
     openCloseModal,
     resumeDraft,
     setSelectedInterventionId,

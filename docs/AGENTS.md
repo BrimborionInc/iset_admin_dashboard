@@ -7,7 +7,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-05-05
+Last Updated: 2026-05-06
 
 ## Project memory layer
 
@@ -53,6 +53,7 @@ Last Updated: 2026-05-05
 - If the user references a previous chat, prior note, or missing historical context, search `docs/meta/codex-thread-index.md` first and then open the linked canonical doc(s).
 - Confirm real behavior from code/API payloads before changing UI.
 - For dashboard/widget work, read `docs/guides/configurable-dashboard-notes.md` first.
+- For document checklist configuration, runtime checklist JSON, or checklist-required/missing-document bugs, read `docs/planning/document-checklist-config-widget.md` first.
 - For homepage Metrics or Items work, read `docs/dashboards/admin-home-metrics-widget.md`.
 - For coordinator-facing PATH help-panel or AI-context work, use `docs/training/TRAINING_MODULES_September_2025_extracted.md` as the baseline for staff workflow expectations and write guidance as a job aid, not a product tour.
 - Keep doc updates in the same change when behavior or structure changes.
@@ -150,6 +151,7 @@ Treat this file as the current project context for this repo. If the user refere
 - Client/case/application migration plan: `docs/planning/client-case-application-migration-plan.md`
 - Client/case/application cutover dependency inventory: `docs/planning/client-case-application-cutover-dependency-inventory.md`
 - Status architecture overhaul: `docs/planning/status-architecture-overhaul.md`
+- Document checklist configuration guardrails: `docs/planning/document-checklist-config-widget.md`
 - Privacy/security systematic review: `docs/planning/privacy-security-systematic-review-2026-04-25.md`
 - Public portal legacy fallback security review: `docs/planning/public-portal-legacy-fallback-security-review-2026-04-25.md`
 - Privacy ERM cleanup grand release plan: `docs/planning/privacy-erm-cleanup-grand-release-plan.md`

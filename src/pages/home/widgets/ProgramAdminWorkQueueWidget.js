@@ -31,7 +31,12 @@ export const PROGRAM_ADMIN_BUCKETS = [
   {
     id: 'in-assessment',
     label: 'In Assessment',
-    description: 'Applications currently being assessed, including files waiting on applicant documents or responses.'
+    description: 'Applications currently being assessed, excluding files that have been intentionally parked.'
+  },
+  {
+    id: 'on-hold',
+    label: 'On Hold',
+    description: 'Parked applications waiting on an external answer, future start timing, applicant pause, or internal follow-up.'
   },
   {
     id: 'pending-decision',

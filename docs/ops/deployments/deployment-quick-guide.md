@@ -69,6 +69,8 @@ Clear it only after smoke is green:
 npm run path:maintenance:fallback -- clear --env test --surfaces admin
 ```
 
+After clearing the fallback, run `path:deploy:smoke` once more before clearing the in-app warning so the final check covers normal target-group routing, not just protected maintenance-page routing.
+
 Use that admin-only shortcut only when the change is truly confined to the admin repo. Do not use `--skip-portal` when the admin backend depends on sibling code under `..\ISET-intake` or `..\shared` for the changed runtime path. Current concrete example: assignment/reassignment notification email delivery uses `../shared/events/notificationDispatcher.js` plus `../ISET-intake/notifications/templateRenderer.js`, so that fix must ship as an `admin + portal` TEST rollout, not as admin-only.
 
 ### 2. Reset TEST from the current DEV baseline, then deploy
@@ -228,7 +230,7 @@ npm run path:maintenance -- set --env test --start-now --expected-duration 5m --
 npm run path:maintenance -- set --env prod --start-now --expected-duration 5m --unscheduled --yes
 ```
 
-Clear the warning after smoke passes:
+Clear the warning after smoke passes. If you enabled the ALB fallback, clear the fallback first, run smoke again with normal routing restored, then clear the warning:
 
 ```powershell
 npm run path:maintenance -- clear --env test

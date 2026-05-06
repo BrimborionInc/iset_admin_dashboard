@@ -7,6 +7,7 @@ Application Assessment; Case Management
 ## Source
 
 - src/widgets/SecureMessagingWidget.js
+- src/widgets/SecureMessageComposePanel.jsx
 
 ## Primary Route Context
 
@@ -40,3 +41,4 @@ Case-linked secure communications with attachments.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.
 - In staff-facing Secure Messaging, `Inbox` unread/read remains the current viewer's mailbox state, while `Sent` status is applicant-facing and now reads as `Sent`, `Read by applicant`, or `Applicant replied`.
 - The widget derives applicant direction, inbox/sent buckets, display names, and read-state authority from the canonical `sender`, `recipient`, and `thread` objects returned by `/api/cases/:id/messages`, or their typed actor field aliases. Raw `sender_id` / `recipient_id` values are compatibility-only and must not be used as applicant/staff routing authority.
+- Secure-message compose opens in a floating non-modal panel owned by the Application Workspace / Case Workspace shell, not by the board widget. It stays open if quick layouts remove Secure Messaging from the board. The draft is only held in component state while the panel is open; there is no persisted draft retrieval. If the staff user changes to another case/applicant record while composing, the floating draft is closed and a warning is shown.

@@ -17235,6 +17235,24 @@ function normaliseApplicationStatusValue(status) {
   if (status === undefined || status === null) return null;
   return String(status).trim().toLowerCase().replace(/[\s-]+/g, '_');
 }
+const APPLICATION_HOLD_AWAITING_REASONS = new Set([
+  'on_hold',
+  'external_funding',
+  'future_start',
+  'applicant_pause',
+  'internal_follow_up',
+  'other_hold',
+]);
+function normaliseApplicationAwaitingReasonValue(reason) {
+  const key = normaliseApplicationStatusValue(reason);
+  if (!key) return null;
+  if (key === 'external_funding_pending') return 'external_funding';
+  if (key === 'program_start' || key === 'school_start' || key === 'future_program_start') return 'future_start';
+  if (key === 'applicant_requested_pause') return 'applicant_pause';
+  if (key === 'internal_followup') return 'internal_follow_up';
+  if (key === 'other') return 'other_hold';
+  return key;
+}
 function normaliseApplicationLifecycleStatusValue(status, { preserveUnknown = false } = {}) {
   const key = normaliseApplicationStatusValue(status);
   if (!key) return null;
@@ -17248,6 +17266,7 @@ function normaliseApplicationLifecycleStatusValue(status, { preserveUnknown = fa
       return 'in_review';
     case 'docs_requested':
     case 'closure_notice':
+    case 'on_hold':
       return 'awaiting_applicant';
     case 'pending_approval':
     case 'decision_ready':
@@ -17283,6 +17302,7 @@ function deriveApplicationAwaitingReason(status) {
   if (!key) return null;
   if (key === 'docs_requested') return 'documents';
   if (key === 'closure_notice') return 'closure_response';
+  if (key === 'on_hold') return 'on_hold';
   return 'none';
 }
 function deriveApplicationClosureReason(status) {
@@ -17294,6 +17314,7 @@ function deriveApplicationClosureReason(status) {
 }
 function buildApplicationStatusPersistence(status, current = {}) {
   const normalizedStatus = normaliseApplicationStatusValue(status);
+  const requestedAwaitingReason = normaliseApplicationAwaitingReasonValue(current.incomingAwaitingReason);
   if (!normalizedStatus) {
     return {
       legacyStatus: null,
@@ -17308,7 +17329,18 @@ function buildApplicationStatusPersistence(status, current = {}) {
     current.lifecycleStatus ||
     null;
   const decisionOutcome = normaliseApplicationDecisionOutcomeValue(normalizedStatus);
-  const awaitingReason = deriveApplicationAwaitingReason(normalizedStatus);
+  let awaitingReason = deriveApplicationAwaitingReason(normalizedStatus);
+  if (normalizedStatus === 'on_hold') {
+    const currentAwaitingReason = normaliseApplicationAwaitingReasonValue(current.awaitingReason);
+    awaitingReason =
+      (requestedAwaitingReason && APPLICATION_HOLD_AWAITING_REASONS.has(requestedAwaitingReason)
+        ? requestedAwaitingReason
+        : null) ||
+      (currentAwaitingReason && APPLICATION_HOLD_AWAITING_REASONS.has(currentAwaitingReason)
+        ? currentAwaitingReason
+        : null) ||
+      'on_hold';
+  }
   const closureReason = deriveApplicationClosureReason(normalizedStatus);
   return {
     legacyStatus: normalizedStatus,
@@ -18720,8 +18752,6 @@ const CASE_STATUS_HOLD_VALUES = [
   'pending information',
   'info requested',
   'information requested',
-  'on hold',
-  'on_hold',
 ];
 const CASE_STATUS_EXCLUDED_FOR_ASSESSMENT = Array.from(new Set([
   ...CASE_STATUS_TERMINAL_VALUES,
@@ -18820,6 +18850,9 @@ function isAssignedStaffProfileId(value) {
 function getApplicationSlaStageKey({ applicationStatus, assignedToUserId, assessmentEligibility }) {
   const statusKey = normaliseApplicationStatusValue(applicationStatus);
   if (statusKey && TERMINAL_APPLICATION_STATUSES.has(statusKey)) {
+    return null;
+  }
+  if (statusKey === 'on_hold') {
     return null;
   }
   if (statusKey && APPLICATION_DECISION_STATUSES.has(statusKey)) {
@@ -18963,7 +18996,7 @@ function buildApplicationLifecycleStatusExpr(applicationAlias = 'a') {
         THEN 'submitted'
       WHEN ${normalizedStatusExpr} = 'in_review'
         THEN 'in_review'
-      WHEN ${normalizedStatusExpr} IN ('docs_requested', 'closure_notice')
+      WHEN ${normalizedStatusExpr} IN ('docs_requested', 'closure_notice', 'on_hold')
         THEN 'awaiting_applicant'
       WHEN ${normalizedStatusExpr} IN ('pending_approval', 'decision_ready')
         THEN 'pending_decision'
@@ -18986,6 +19019,8 @@ function buildApplicationAwaitingReasonExpr(applicationAlias = 'a') {
         THEN 'documents'
       WHEN ${normalizedStatusExpr} = 'closure_notice'
         THEN 'closure_response'
+      WHEN ${normalizedStatusExpr} = 'on_hold'
+        THEN 'on_hold'
       ELSE 'none'
     END
   `.replace(/\s+/g, ' ').trim();
@@ -21687,8 +21722,8 @@ const WORK_QUEUE_BUCKET_META = {
     description: 'Applications in active review by their owners.'
   },
   'on-hold': {
-    label: 'On hold / info requested',
-    description: 'Applicants have been asked for more information.'
+    label: 'On Hold',
+    description: 'Applications intentionally parked for follow-up.'
   }
 };
 async function countProgramAdminNewSubmissions(pool) {
@@ -21810,33 +21845,10 @@ async function countProgramAdminDecisionsMade(pool) {
 
 async function countProgramAdminOnHold(pool) {
   try {
-    const holdValues = CASE_STATUS_HOLD_VALUES.map(v => v.toLowerCase());
-    if (!holdValues.length) return 0;
-    const placeholders = holdValues.map(() => '?').join(',');
     const sql = `SELECT COUNT(*) AS total
-         FROM iset_case c
-        WHERE c.status IS NOT NULL
-          AND LOWER(c.status) IN (${placeholders})`;
-    const [[row]] = await pool.query(sql, holdValues);
-    return Number(row?.total ?? 0);
-  } catch (err) {
-    if (isMissingTableErrorLocal(err)) {
-      return 0;
-    }
-    throw err;
-  }
-}
-
-
-async function countProgramAdminOnHold(pool) {
-  try {
-    if (!CASE_STATUS_HOLD_VALUES.length) return 0;
-    const placeholders = CASE_STATUS_HOLD_VALUES.map(() => '?').join(',');
-    const sql = `SELECT COUNT(*) AS total
-         FROM iset_case c
-        WHERE c.status IS NOT NULL
-          AND LOWER(c.status) IN (${placeholders})`;
-    const [[row]] = await pool.query(sql, CASE_STATUS_HOLD_VALUES);
+         FROM iset_application a
+        WHERE REPLACE(REPLACE(LOWER(TRIM(COALESCE(a.status, ''))), '-', '_'), ' ', '_') = 'on_hold'`;
+    const [[row]] = await pool.query(sql);
     return Number(row?.total ?? 0);
   } catch (err) {
     if (isMissingTableErrorLocal(err)) {
@@ -79167,6 +79179,8 @@ app.put('/api/cases/:id', async (req, res) => {
   let applicationLifecycleStatusToPersist = null;
   let applicationDecisionOutcomeToPersist = null;
   let applicationAwaitingReasonToPersist = null;
+  let incomingApplicationAwaitingReason = null;
+  let incomingApplicationAwaitingReasonProvided = false;
   let applicationClosureReasonToPersist = null;
   let shouldEnsureClientLink = false;
   let shouldMarkSubmissionNeedsReview = false;
@@ -79411,6 +79425,30 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         }
       }
     }
+    if (
+      Object.prototype.hasOwnProperty.call(body, 'applicationAwaitingReason') ||
+      Object.prototype.hasOwnProperty.call(body, 'application_awaiting_reason')
+    ) {
+      incomingApplicationAwaitingReasonProvided = true;
+      incomingApplicationAwaitingReason = normaliseApplicationAwaitingReasonValue(
+        body.applicationAwaitingReason ?? body.application_awaiting_reason
+      );
+      if (
+        !incomingApplicationAwaitingReason ||
+        (
+          applicationStatusToPersist === 'on_hold' &&
+          !APPLICATION_HOLD_AWAITING_REASONS.has(incomingApplicationAwaitingReason)
+        )
+      ) {
+        await conn.rollback();
+        return res.status(422).json({
+          success: false,
+          error: 'invalid_application_awaiting_reason',
+          message: 'The selected on-hold reason is not available.',
+          lock: lockCheck.lock || null
+        });
+      }
+    }
 
     if (Object.prototype.hasOwnProperty.call(body, 'docsRequested')) {
       docsRequestedFieldPresent = true;
@@ -79490,6 +79528,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         lifecycleStatus: beforeApplicationLifecycleStatus,
         decisionOutcome: beforeApplicationDecisionOutcome,
         awaitingReason: beforeApplicationAwaitingReason,
+        incomingAwaitingReason: incomingApplicationAwaitingReasonProvided ? incomingApplicationAwaitingReason : null,
         closureReason: beforeApplicationClosureReason,
       });
       applicationStatusToPersist = applicationStatusPersistence.legacyStatus;

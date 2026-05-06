@@ -18,7 +18,7 @@ const getBucketTemplate = role => {
         { id: 'new-submissions', label: 'Unassigned Applications', count: '-', description: 'Applications in submitted status without an assigned owner.' },
         { id: 'awaiting-ei-validation', label: 'Awaiting EI Validation', count: '-', description: 'Applications missing EI eligibility confirmation.' },
         { id: 'in-assessment', label: 'In Assessment', count: '-', description: 'Applications in active review by their owners.' },
-        { id: 'on-hold', label: 'On hold / info requested', count: '-', description: 'Applicants have been asked for more information.' },
+        { id: 'on-hold', label: 'On Hold', count: '-', description: 'Applications intentionally parked for follow-up.' },
         { id: 'awaiting-decision', label: 'Assessed, awaiting approval', count: '-', description: 'Application assessments complete, but need program approval.' },
         { id: 'decisions-made', label: 'Decisions Made', count: '-', description: 'Applications approved or rejected this week.' }
       ];
@@ -99,7 +99,7 @@ const STATUS_FILTERS = {
   'new-submissions': 'Submitted',
   'awaiting-ei-validation': 'Awaiting EI Validation',
   'in-assessment': 'In Review',
-  'on-hold': 'Docs Requested',
+  'on-hold': 'on_hold',
   'awaiting-decision': 'Pending Approval',
   'decisions-made': 'Approved', // best-effort; captures approvals even if rejections won't match
   'awaiting-my-approval': 'Pending Approval',

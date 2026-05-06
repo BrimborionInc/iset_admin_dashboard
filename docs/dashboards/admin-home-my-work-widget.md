@@ -2,7 +2,7 @@
 
 Purpose: document the live homepage Work Queue widget and the queues that drive the shared `Work Queue Items` table.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-05-05
+Last Updated: 2026-05-06
 
 ## Scope
 
@@ -28,18 +28,19 @@ Last Updated: 2026-05-05
 ## Current role behavior
 
 - `NWAC Administrator`
-  - sees the shared application-pipeline queues (`New Applications`, `In Assessment`, `Pending Decision`, `Pending Completion`) first
+  - sees the shared application-pipeline queues (`New Applications`, `In Assessment`, `On Hold`, `Pending Decision`, `Pending Completion`) first
   - then sees `All Cases`
   - then sees the remaining shared admin/manager exception queues (`Unresolved Conflicts`, `Exceptions & Escalations`, `Payments Issues`, `Watchlist Hits`, `Overdue`)
 - `Regional Manager`
   - sees `Applications in My Region` first
   - then sees `My Applications`
-  - then sees the shared application-pipeline queues (`New Applications`, `EI Check Needed`, `In Assessment`, `Pending Decision`, `Pending Completion`)
+  - then sees the shared application-pipeline queues (`New Applications`, `EI Check Needed`, `In Assessment`, `On Hold`, `Pending Decision`, `Pending Completion`)
   - then sees `Clients in My Region`
   - then sees the remaining shared admin/manager exception queues
 - `ISET Coordinator`
   - sees the coordinator-specific queue set from `IsetCoordinatorWorkQueueWidget`
   - `My Applications` remains first and `My Clients` appears second
+  - `On Hold` shows assigned applications intentionally parked for later review
 
 ## Current shared application pipeline
 
@@ -56,7 +57,14 @@ Last Updated: 2026-05-05
 - `In Assessment`
   - contains applications whose normalized lifecycle status is `in_review` or `awaiting_applicant`
   - applicant-wait states such as docs requested / closure-response now remain in this queue as qualifiers instead of their own top-level queue cards
+  - explicitly parked applications with raw workflow status `on_hold` are excluded and shown in `On Hold`
   - inline actions can show `Assign` / `Reassign` and, while EI status is pending, `Set Eligibility`
+- `On Hold`
+  - contains applications whose raw workflow status is `on_hold`
+  - holds are application-level, not case-level `dormant` status
+  - the Application Overview quick action records a hold reason in `iset_application.awaiting_reason` and creates a case reminder for the selected review date
+  - common hold reasons include external funding pending, future program/school start, applicant-requested pause, internal follow-up, and other hold reason
+  - rows leave active assessment and decision queues until staff use `Resume review`
 - `Pending Decision`
   - is the final decision-stage queue in this pipeline
   - combines submitted application assessments plus new and revised intervention proposals waiting for decision

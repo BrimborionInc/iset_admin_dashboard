@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next "What's New" update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-05-05
+Last Updated: 2026-05-06
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -36,6 +36,12 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - 2026-05-05 | Release TBD | Fix/Casework | Case Workspace intervention proposals | Changes-requested intervention proposals now stay in rework while saved and use `Resubmit for approval` to send the same row back for review. | Resubmission clears the active decision fields so the next NWAC review cycle is not mixed with the previous pushback note.
 - 2026-05-05 | Release TBD | Fix/Casework | Intervention proposal approval letters | Fixed a server error when sending an approval letter for an approved new intervention proposal that had no optional source metadata. | The fix is limited to null-safe metadata handling in the message-send guard.
 - 2026-05-05 | Release TBD | Fix/Notifications | Intervention proposal bell alerts | Intervention approval bell alerts now show the budget pot code or name instead of the raw database ID. | New intervention decision events carry budget pot code/name, and the bell formatter no longer falls back to numeric pot IDs.
+- 2026-05-06 | Release TBD | UX/Approvals | Application and intervention decisions | Approval decision steps now show the case manager recommendation and rationale before the decision controls. | Applies to application approval, new intervention proposal decisions, and intervention revision decisions so reviewers can see the proposal context without opening the generated assessment PDF.
+- 2026-05-06 | Release TBD | Fix/Casework | Case Workspace intervention approval letters | The `Prepare approval letters` row action now opens the intervention approval-letter follow-up directly. | The action uses the same approval workspace deep link as homepage/feedback routes, including `step=communication`, instead of opening the generic new-proposal wizard.
+- 2026-05-06 | Release TBD | Fix/Documents | Document checklists | Fixed checklist rules that could incorrectly require income or expense evidence for tuition/books-only applications and miss merged Band/Nation decision-letter documents in intervention proposal checklists. | PROD runtime config now uses active evidence document types and the conditional checklist item IDs used by the backend.
+- 2026-05-06 | Release TBD | UX/Casework | Approval letters | Generated approval-letter packs now let staff edit supporting institution, loan-provider, and other-funder letters before downloading them. | Applies to application approval follow-up and intervention approval/revision follow-up; application approval supporting-letter edits are saved with the draft pack.
+- 2026-05-06 | Release TBD | UX/Homepage | Work Queue > On Hold | Added an On Hold queue for applications that need to stay open but leave active assessment/decision queues while staff wait for external funding, future start timing, an applicant pause, or internal follow-up. | Application Overview now has a Put on hold quick action that captures the reason, creates a review reminder, and can be reversed with Resume review.
+- 2026-05-06 | Release TBD | Fix/Public portal | Intake submission | Final public-portal submission now preserves the durable saved application answers instead of creating upload/signature-only submissions when the short-lived final-step state is missing earlier answers. | The portal completion path merges the saved draft with current submit-step data and rejects incomplete final-step-only payloads with a recoverable message.
 2026-05-02 | Release TBD | Notifications | Template Editor dashboard | Added explicit event timestamp fields for staff notification templates and a new `New secure message from applicant` DEV template that alerts staff without exposing secure-message content in email. | Supports safe staff email alerts for applicant-origin secure messages.
 2026-05-02 | Release TBD | Notifications | Manage Notifications | Split secure-message notification events into applicant-to-staff and staff-to-applicant directions. | Staff templates now belong on `Applicant secure message received`, while the applicant `"You've got secure mail"` template belongs on `Staff secure message sent`.
 2026-05-02 | Release TBD | Notifications | Secure messaging | Limited applicant-origin secure-message staff alerts to the assigned file owner plus case watchers when configured. | The inbound event no longer emails or bell-alerts every System/NWAC/Regional user just because that role row is enabled.
@@ -239,6 +245,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - 2026-04-21 | Release TBD | UX | Batch Payments dashboard | Reworked Batch Payments into a cleaner oversight view: single-packet selection now drives detail, finance-side edit/send actions were removed, communications clearly scope to the selected packet or all packets, and SLA snapshot now starts in the palette instead of the default layout. | Aligns the finance dashboard with its oversight purpose and removes the misleading multi-select/detail coupling.
 - 2026-05-01 | Release TBD | UX/Notifications | Template Editor dashboard | Expanded the notification template editor with a grouped field catalog, subject field insertion, scenario-based preview, and warnings for unknown or scenario-mismatched placeholders. | Makes it easier to author staff and applicant email templates for assignment, NWAC review, secure message, decision, and generic staff notification events.
 - 2026-04-23 | Release TBD | Security/Messaging | Applicant Secure Messages | Fixed portal applicant message routing so assigned case managers resolve through staff user accounts instead of overlapping staff profile IDs. | Prevents applicant-origin messages from landing in unrelated applicant inboxes when `user.id` values overlap `staff_profiles.id`; companion PROD repair script corrects existing wrong-recipient mailbox rows before portal reopening.
+- 2026-05-06 | Release TBD | UX/Messaging | Applicant Secure Messages | Secure-message compose now opens in a workspace-owned floating non-modal panel so staff can keep working in the file while drafting, even when quick layouts remove the Secure Messaging widget from the board. | Draft text is kept only while the panel is open; no persisted draft retrieval was added, and the panel closes with a warning if staff switch to another applicant/case record.
 - 2026-04-25 | Release TBD | Security/Public Portal | Applicant account routing | Hardened applicant portal identity checks and fixed TEST portal packaging so the deployed auth helper matches the new applicant-account gate. | Prevents legacy identity fallbacks from linking applicants, staff recipients, or clients through obsolete shared-user assumptions; TEST deploy now installs the runtime `auth/` helper instead of leaving a stale copy behind.
 - 2026-04-23 | Release TBD | UX/Homepage | Work Queue | Reworked the NWAC Administrator and Regional Manager homepage Work Queue into a clearer application pipeline with `New Applications`, `In Assessment`, `Pending Decision`, and `Pending Completion`. | `Pending Decision` continues to combine submitted application assessments with new and revised intervention proposals, while `Pending Completion` covers decided application files that still need post-decision follow-through before completion.
 - 2026-04-23 | Release TBD | UX/Homepage | Work Queue | Removed the redundant NWAC Administrator `All Applications` queue card. | The homepage now starts directly with the stage-based application pipeline and keeps `All Cases` as the only remaining cross-portfolio rollup card in that section.
@@ -267,26 +274,14 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Planned intervention end dates no longer force ILMP close-out outcomes until the intervention is completed or cancelled.
-- Made a change so Work Queue rows use the item name as the workspace link and show only useful row actions like Assign, Reassign, Set Eligibility, or Resolve.
-- Split Application and Case Workspace shortcuts into Quick layouts and Quick actions.
-- Made historical-entry actions available on application-backed cases for authorized managers and admins.
-- Made a change so Bugs and Change Requests now has a dedicated dashboard under Support.
-- Made a change so staff email notification settings can send configured emails for non-assignment events, with NWAC review split by approval, denial, and changes-requested outcomes.
-- Made the Template Editor more powerful with grouped fields, scenario previews, and warnings for unsupported placeholders.
-- Made applicant-origin secure-message alerts go only to the assigned file owner plus configured case watchers.
-- Made staff Name and Display name editable from Administrative Users.
-- Fixed a bug where an older completed application on a client file could return to application queues after later client-file updates.
-- Fixed missing generated assessment documents on a small number of pending-decision records so the expected case manager assessment and redline PDFs are now available.
-- Fixed a bug where Regional Managers could see a Supporting Documents load error when Application Workspace was set to All documents.
-- Fixed intervention proposal follow-up so approved new/revised intervention proposals stay open until the approval letter has been sent.
-- Fixed approved intervention activation so case managers can move approved interventions into progress without being blocked by proposal-decision permissions.
-- Fixed a generic Forbidden error that could block assigned case managers from updating interventions on their own case.
-- Fixed the ISET Coordinator Awaiting Approval queue so submitted intervention proposals and revisions appear while waiting for NWAC review.
-- Added a My Clients queue for ISET Coordinators so assigned client case files are available directly after My Applications.
-- Fixed pushed-back intervention proposals so saving progress does not move them out of rework, and the final wizard action clearly resubmits them for approval.
-- Fixed a server error when sending an approval letter for an approved intervention proposal.
-- Fixed intervention approval alerts so budget pots show by code or name instead of a raw database ID.
+- Added an On Hold stage for applications that need to stay open but leave active assessment and decision queues until staff resume review.
+- Added Application Overview actions to put an application on hold with a reason and review reminder, then resume it when follow-up is ready.
+- Fixed a public-portal submission issue where final submission could create an upload/signature-only record instead of preserving the full saved application.
+- Made secure-message drafting non-blocking so staff can keep reviewing the file while composing a message, even after changing quick layouts.
+- Made approval decision steps show the case manager recommendation and rationale before reviewers record the decision.
+- Made approval-letter packs editable for supporting institution, loan-provider, and other-funder letters before staff send or download them.
+- Fixed the Case Workspace `Prepare approval letters` action so approved intervention proposals open the approval-letter follow-up directly.
+- Fixed document checklist rules so tuition/books-only applications are not blocked by income or expense evidence, and Band/Nation decision letters count correctly in intervention proposal checklists.
 
 ### Known Bugs (draft bullets - EN)
 
@@ -294,26 +289,14 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Nouveautes (brouillon - FR)
 
-- Les dates de fin prevues des interventions n'exigent plus de resultat de cloture ILMP tant que l'intervention n'est pas terminee ou annulee.
-- Les lignes de la file de travail utilisent maintenant le nom de l'element comme lien vers l'espace de travail et affichent seulement les actions utiles, comme Affecter, Reaffecter, Definir l'admissibilite ou Resoudre.
-- Les raccourcis des espaces de travail Demande et Dossier sont maintenant separes entre Mises en page rapides et Actions rapides.
-- Les actions de saisie historique sont maintenant disponibles dans les dossiers avec demande pour les gestionnaires et administrateurs autorises.
-- Les bogues et demandes de changement ont maintenant un tableau de bord dedie dans Support.
-- Les parametres de courriel du personnel peuvent maintenant envoyer des courriels configures pour les evenements qui ne sont pas des affectations, avec la revue NWAC separee par approbation, refus et demandes de changements.
-- L'editeur de modeles est plus complet, avec des champs groupes, des apercus par scenario et des avertissements pour les variables non prises en charge.
-- Les alertes de message securise provenant d'une personne candidate sont maintenant envoyees seulement au responsable du dossier et aux observateurs configures.
-- Le nom et le nom d'affichage du personnel peuvent maintenant etre modifies dans Utilisateurs administratifs.
-- Correction d'un probleme ou une ancienne demande completee dans un dossier client pouvait revenir dans les files de demandes apres des mises a jour du dossier client.
-- Les documents d'evaluation generes qui manquaient pour un petit nombre de dossiers en attente de decision ont ete ajoutes, y compris les PDF d'evaluation du gestionnaire de cas et de redline attendus.
-- Correction d'un probleme ou les gestionnaires regionaux pouvaient voir une erreur de chargement des documents justificatifs lorsque l'espace de travail de la demande etait regle sur Tous les documents.
-- Correction du suivi des propositions d'intervention afin que les nouvelles propositions ou revisions approuvees restent ouvertes jusqu'a l'envoi de la lettre d'approbation.
-- Correction de l'activation des interventions approuvees afin que les gestionnaires de cas puissent les mettre en cours sans etre bloques par les permissions de decision de proposition.
-- Correction d'une erreur generique Forbidden qui pouvait bloquer les gestionnaires de cas affectes lorsqu'ils mettaient a jour les interventions de leur propre dossier.
-- Correction de la file En attente d'approbation des coordonnateurs ISET afin que les propositions et revisions d'intervention soumises s'affichent pendant l'attente de la revue NWAC.
-- Ajout d'une file Mes clients pour les coordonnateurs ISET afin que les dossiers clients affectes soient disponibles directement apres Mes demandes.
-- Correction des propositions d'intervention retournees pour changements afin que l'enregistrement conserve l'etat de reprise et que l'action finale les resoumette clairement pour approbation.
-- Correction d'une erreur serveur lors de l'envoi d'une lettre d'approbation pour une proposition d'intervention approuvee.
-- Correction des alertes d'approbation d'intervention afin que les enveloppes budgetaires s'affichent par code ou par nom, et non par identifiant de base de donnees.
+- Ajout d'une etape En attente pour les demandes qui doivent rester ouvertes, mais sortir des files d'evaluation et de decision jusqu'a la reprise de la revue.
+- Ajout d'actions dans l'apercu de la demande pour mettre une demande en attente avec une raison et un rappel, puis reprendre la revue.
+- Correction d'un probleme du portail public ou la soumission finale pouvait creer un dossier limite aux televersements/signatures au lieu de conserver toute la demande enregistree.
+- La redaction des messages securises ne bloque plus l'espace de travail, afin que le personnel puisse continuer a consulter le dossier pendant la redaction.
+- Les etapes de decision d'approbation affichent maintenant la recommandation et la justification du gestionnaire de cas avant la saisie de la decision.
+- Les ensembles de lettres d'approbation permettent maintenant de modifier les lettres aux etablissements, preteurs et autres bailleurs de fonds avant l'envoi ou le telechargement.
+- Correction de l'action `Preparer les lettres d'approbation` dans l'espace Dossier afin que les propositions d'intervention approuvees ouvrent directement le suivi de lettre d'approbation.
+- Correction des regles de liste de verification des documents afin que les demandes pour frais de scolarite/livres seulement ne soient pas bloquees par les preuves de revenu ou de depenses, et que les lettres de decision de bande ou de nation soient bien reconnues dans les propositions d'intervention.
 
 ### Problemes connus (brouillon - FR)
 

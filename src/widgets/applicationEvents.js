@@ -11,6 +11,8 @@ const STATUS_LABELS = {
   in_review: 'In Review',
   'in review': 'In Review',
   awaiting_applicant: 'Awaiting Applicant',
+  on_hold: 'On Hold',
+  'on hold': 'On Hold',
   docs_requested: 'Action Required',
   'docs requested': 'Action Required',
   action_required: 'Action Required',

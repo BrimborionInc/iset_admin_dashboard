@@ -41,6 +41,15 @@ const RECOMMEND_OPTIONS = [
   { label: 'Do not recommend funding', value: 'no_recommend' },
   { label: 'Recommend alternative intervention', value: 'alternative' }
 ];
+const resolveRecommendationLabel = (value, fallback = 'No recommendation recorded') => {
+  const normalized = String(value || '').trim().toLowerCase();
+  const directOption = RECOMMEND_OPTIONS.find(option => option.value === normalized);
+  if (directOption) return directOption.label;
+  if (['fund', 'approve'].includes(normalized)) return 'Recommend funding this intervention';
+  if (['do_not_fund', 'reject', 'decline'].includes(normalized)) return 'Do not recommend funding';
+  if (normalized === 'alternative') return 'Recommend alternative intervention';
+  return value ? String(value) : fallback;
+};
 const DENIAL_REASON_OPTIONS = [
   { value: 'eligibility_not_met', label: 'Eligibility criteria not met' },
   { value: 'documentation_missing', label: 'Required identity/supporting documentation not sufficient' },
@@ -3905,13 +3914,12 @@ const CoordinatorAssessmentWidget = forwardRef(
     return letterDrafts?.[activeLetterKey] || buildEmptyDecisionLetterDraft();
   }, [activeLetterKey, letterDrafts]);
   const showApprovalLetterPackTabs = activeLetterKey === 'approval';
-  const isClientLetterTab = !showApprovalLetterPackTabs || approvalLetterPackTabId === 'client';
   const letterWorkflowId = activeLetterKey ? letterWorkflows?.[activeLetterKey] : null;
   const letterAlreadySent = Boolean(activeLetterKey && decisionLetterSent?.[activeLetterKey]);
   const deniedApplicationCloseoutComplete = decisionOutcome === 'denied' && letterAlreadySent;
   const isLetterEditingDisabled = lockedByAnotherUser || isCompletedStatus || letterAlreadySent;
   const canGenerateLetterDraft = Boolean(activeLetterKey) && !isLetterEditingDisabled && !draftingLetter;
-  const canSaveLetterDraft = Boolean(activeLetterKey) && isClientLetterTab && !isLetterEditingDisabled;
+  const canSaveLetterDraft = Boolean(activeLetterKey) && !isLetterEditingDisabled;
   const canSendLetter =
     Boolean(activeLetterKey) &&
     !isLetterEditingDisabled &&
@@ -3965,6 +3973,63 @@ const CoordinatorAssessmentWidget = forwardRef(
     approvalLetterPackGenerated && approvalSavedLoanProviderLetters.length
       ? approvalSavedLoanProviderLetters
       : loanProviderApprovalLetters;
+  const buildApprovalLetterPackDraft = useCallback(
+    (overrides = {}) => ({
+      generated_at: approvalSavedPack?.generated_at || new Date().toISOString(),
+      institutionLetters: overrides.institutionLetters || approvalInstitutionLettersForDisplay,
+      coFunderLetters: overrides.coFunderLetters || approvalCoFunderLettersForDisplay,
+      loanProviderLetters: overrides.loanProviderLetters || approvalLoanProviderLettersForDisplay
+    }),
+    [
+      approvalCoFunderLettersForDisplay,
+      approvalInstitutionLettersForDisplay,
+      approvalLoanProviderLettersForDisplay,
+      approvalSavedPack?.generated_at
+    ]
+  );
+  const updateApprovalLetterPackLetterBody = useCallback(
+    (letterGroup, targetLetter, nextBody, targetIndex = null) => {
+      if (!letterGroup || !targetLetter) return;
+      const targetKey = targetLetter.id || targetLetter.fileName || targetLetter.title || '';
+      const replaceBody = letters => {
+        const source = Array.isArray(letters) ? letters : [];
+        return source.map((letter, index) => {
+          const letterKey = letter?.id || letter?.fileName || letter?.title || '';
+          const isMatch = targetKey ? letterKey === targetKey : index === targetIndex;
+          if (!isMatch) return letter;
+          return { ...letter, body: nextBody };
+        });
+      };
+      setSavedApprovalLetterPackDrafts(prev => {
+        const currentPack = prev?.approval && typeof prev.approval === 'object' ? prev.approval : {};
+        const basePack = buildApprovalLetterPackDraft({
+          institutionLetters: Array.isArray(currentPack.institutionLetters)
+            ? currentPack.institutionLetters
+            : approvalInstitutionLettersForDisplay,
+          coFunderLetters: Array.isArray(currentPack.coFunderLetters)
+            ? currentPack.coFunderLetters
+            : approvalCoFunderLettersForDisplay,
+          loanProviderLetters: Array.isArray(currentPack.loanProviderLetters)
+            ? currentPack.loanProviderLetters
+            : approvalLoanProviderLettersForDisplay
+        });
+        const nextPack = {
+          ...basePack,
+          [letterGroup]: replaceBody(basePack[letterGroup])
+        };
+        return {
+          ...(prev || {}),
+          approval: nextPack
+        };
+      });
+    },
+    [
+      approvalCoFunderLettersForDisplay,
+      approvalInstitutionLettersForDisplay,
+      approvalLoanProviderLettersForDisplay,
+      buildApprovalLetterPackDraft
+    ]
+  );
   useEffect(() => {
     const letterContextKey = `${caseId || 'case'}:${activeLetterKey || 'none'}`;
     if (!activeLetterKey) {
@@ -6755,12 +6820,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         ? {
             decisionLetterPackDrafts: {
               ...(savedApprovalLetterPackDrafts || {}),
-              approval: {
-                generated_at: new Date().toISOString(),
-                institutionLetters: institutionApprovalLetters,
-                coFunderLetters: coFunderApprovalLetters,
-                loanProviderLetters: loanProviderApprovalLetters
-              }
+              approval: buildApprovalLetterPackDraft()
             }
           }
         : activeLetterKey === 'denial'
@@ -6790,13 +6850,11 @@ const CoordinatorAssessmentWidget = forwardRef(
     },
     [
       activeLetterKey,
+      buildApprovalLetterPackDraft,
       caseData?.caseContext,
-      coFunderApprovalLetters,
       denialReasonChoice,
       denialReasonExplanation,
-      institutionApprovalLetters,
       letterDrafts,
-      loanProviderApprovalLetters,
       persistLetterContext,
       savedApprovalLetterPackDrafts
     ]
@@ -7529,6 +7587,15 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       return;
     }
     setApprovalLetterPackGenerated(true);
+    setSavedApprovalLetterPackDrafts(prev => ({
+      ...(prev || {}),
+      approval: {
+        generated_at: new Date().toISOString(),
+        institutionLetters: institutionApprovalLetters,
+        coFunderLetters: coFunderApprovalLetters,
+        loanProviderLetters: loanProviderApprovalLetters
+      }
+    }));
     await generateLetterDraft();
   };
 
@@ -9654,10 +9721,10 @@ ${JSON.stringify(contextPayload, null, 2)}`;
   );
 
   const letterGuidance = decisionOutcome === 'approved'
-    ? 'Edit the client approval letter, then review the institution, loan-provider, and other-funder letters in the tabs before downloading them.'
+    ? 'Edit the client approval letter, then edit or review the institution, loan-provider, and other-funder letters in the tabs before downloading them.'
     : 'Write or generate a short letter explaining what is being denied and the reason for denial. Keep the letter policy and evidence based. If in doubt, please consult your manager.';
 
-  const renderReadOnlyLetters = (letters, emptyMessage, options = {}) => {
+  const renderEditableLetters = (letters, emptyMessage, letterGroup, options = {}) => {
     if (options.requireDraftGeneration && !approvalLetterPackGenerated) {
       return (
         <Alert type="info" statusIconAriaLabel="Info">
@@ -9674,7 +9741,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     }
     return (
       <SpaceBetween size="l">
-        {letters.map(letter => (
+        {letters.map((letter, letterIndex) => (
           <Box key={letter.id || letter.title}>
             <Header
               variant="h4"
@@ -9691,9 +9758,12 @@ ${JSON.stringify(contextPayload, null, 2)}`;
             </Header>
             <Textarea
               value={letter.body || ''}
-              readOnly
+              onChange={({ detail }) => {
+                updateApprovalLetterPackLetterBody(letterGroup, letter, detail.value || '', letterIndex);
+              }}
               rows={14}
-              spellcheck={false}
+              spellcheck={true}
+              disabled={isLetterEditingDisabled}
             />
           </Box>
         ))}
@@ -9784,27 +9854,30 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                   {
                     id: 'institution',
                     label: 'Institution letter',
-                    content: renderReadOnlyLetters(
+                    content: renderEditableLetters(
                       approvalInstitutionLettersForDisplay,
                       'No institution-directed funding was identified from intervention delivery details and cost lines.',
+                      'institutionLetters',
                       { requireDraftGeneration: true }
                     )
                   },
                   {
                     id: 'loan-provider',
                     label: 'Loan provider letters',
-                    content: renderReadOnlyLetters(
+                    content: renderEditableLetters(
                       approvalLoanProviderLettersForDisplay,
                       'No student loan repayment lines were identified in the approved cost items.',
+                      'loanProviderLetters',
                       { requireDraftGeneration: true }
                     )
                   },
                   {
                     id: 'other-funding',
                     label: 'Letters to other funders',
-                    content: renderReadOnlyLetters(
+                    content: renderEditableLetters(
                       approvalCoFunderLettersForDisplay,
                       'No other funding sources were provided in the Other funding sources step.',
+                      'coFunderLetters',
                       { requireDraftGeneration: true }
                     )
                   }
@@ -10817,26 +10890,50 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     </Modal>
   );
 
+  const caseManagerRecommendationSummary = (
+    <SpaceBetween size="xs">
+      <Header variant="h3">Case manager recommendation</Header>
+      <ColumnLayout columns={2} variant="text-grid" minColumnWidth={260}>
+        <Box>
+          <Box fontWeight="bold">Recommended action</Box>
+          <div>{resolveRecommendationLabel(assessment.recommendation)}</div>
+        </Box>
+        <Box>
+          <Box fontWeight="bold">Rationale</Box>
+          <div style={{ whiteSpace: 'pre-wrap' }}>
+            {String(assessment.justification || '').trim() || 'No rationale recorded.'}
+          </div>
+        </Box>
+      </ColumnLayout>
+    </SpaceBetween>
+  );
+  const assessmentAssuranceOptions = [
+    { label: 'Agree with Case Manager Recommendation', value: 'agree' },
+    { label: 'Disagree with Case Manager Recommendation', value: 'disagree' }
+  ];
+
   const decisionStepContent = (
     <>
-      {shouldShowDecisionPendingAlert && (
-        <Alert
-          type="info"
-          dismissible
-          onDismiss={() => setShowDecisionPendingAlert(false)}
-          header="Funding decision pending"
+      <SpaceBetween size="l">
+        {shouldShowDecisionPendingAlert && (
+          <Alert
+            type="info"
+            dismissible
+            onDismiss={() => setShowDecisionPendingAlert(false)}
+            header="Funding decision pending"
+          >
+            A funding decision has not been recorded for this application yet. You will be notified as soon as one is made.
+          </Alert>
+        )}
+        {caseManagerRecommendationSummary}
+        <Box
+          style={
+            isNWACFieldsDisabled || isOutcomeNoticeDisabled
+              ? { opacity: 0.6, pointerEvents: 'none' }
+              : undefined
+          }
+          aria-disabled={isNWACFieldsDisabled || isOutcomeNoticeDisabled}
         >
-          A funding decision has not been recorded for this application yet. You will be notified as soon as one is made.
-        </Alert>
-      )}
-      <Box
-        style={
-          isNWACFieldsDisabled || isOutcomeNoticeDisabled
-            ? { opacity: 0.6, pointerEvents: 'none' }
-            : undefined
-        }
-        aria-disabled={isNWACFieldsDisabled || isOutcomeNoticeDisabled}
-      >
         <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
           <FormField label="Funding Decision" errorText={showDecisionErrors && fieldErrors.nwacReviewStatus ? fieldErrors.nwacReviewStatus : undefined}>
             <SpaceBetween direction="horizontal" size="xs">
@@ -10876,15 +10973,12 @@ ${JSON.stringify(contextPayload, null, 2)}`;
           >
             <Hotspot hotspotId="nwac-assessment-assurance" direction="right">
               <Select
-                selectedOption={assessment.nwacReview ? { label: assessment.nwacReview, value: assessment.nwacReview } : null}
+                selectedOption={assessmentAssuranceOptions.find(option => option.value === assessment.nwacReview) || null}
                 onChange={({ detail }) => {
                   if (isNWACFieldsDisabled) return;
                   handleField('nwacReview', detail.selectedOption.value);
                 }}
-                options={[
-                  { label: 'Agree with Coordinator Recommendation', value: 'agree' },
-                  { label: 'Disagree with Coordinator Recommendation', value: 'disagree' }
-                ]}
+                options={assessmentAssuranceOptions}
                 placeholder="Select review outcome"
                 data-error-focus={showDecisionErrors && fieldErrors.nwacReview ? 'true' : undefined}
                 readOnly={isNWACFieldsDisabled || assessment.nwacReviewStatus === 'push_back'}
@@ -10970,6 +11064,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
           </Grid>
         )}
       </Box>
+      </SpaceBetween>
       <Modal
         visible={showApproveConfirmModal}
         onDismiss={() => setShowApproveConfirmModal(false)}

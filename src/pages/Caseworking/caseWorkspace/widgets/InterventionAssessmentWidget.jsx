@@ -1554,6 +1554,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   const [approvalLetterPackTabId, setApprovalLetterPackTabId] = useState("client");
   const [approvalLetterPackGenerated, setApprovalLetterPackGenerated] = useState(false);
   const [clientLetterBody, setClientLetterBody] = useState("");
+  const [editableInstitutionApprovalLetters, setEditableInstitutionApprovalLetters] = useState([]);
+  const [editableCoFunderApprovalLetters, setEditableCoFunderApprovalLetters] = useState([]);
+  const [editableLoanProviderApprovalLetters, setEditableLoanProviderApprovalLetters] = useState([]);
   const [sendingLetter, setSendingLetter] = useState(false);
   const [sendingLetterError, setSendingLetterError] = useState(null);
   const [showSendApprovalLetterConfirmModal, setShowSendApprovalLetterConfirmModal] = useState(false);
@@ -5053,6 +5056,34 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       trackingReference,
     ]
   );
+  const institutionApprovalLettersForDisplay = approvalLetterPackGenerated
+    ? editableInstitutionApprovalLetters
+    : institutionApprovalLetters;
+  const coFunderApprovalLettersForDisplay = approvalLetterPackGenerated
+    ? editableCoFunderApprovalLetters
+    : coFunderApprovalLetters;
+  const loanProviderApprovalLettersForDisplay = approvalLetterPackGenerated
+    ? editableLoanProviderApprovalLetters
+    : loanProviderApprovalLetters;
+  useEffect(() => {
+    if (approvalLetterPackGenerated) return;
+    setEditableInstitutionApprovalLetters([]);
+    setEditableCoFunderApprovalLetters([]);
+    setEditableLoanProviderApprovalLetters([]);
+  }, [approvalLetterPackGenerated]);
+  const updateEditableLetterBody = useCallback((setter, targetLetter, nextBody, targetIndex = null) => {
+    if (!targetLetter) return;
+    const targetKey = targetLetter.id || targetLetter.fileName || targetLetter.title || "";
+    setter(current => {
+      const source = Array.isArray(current) ? current : [];
+      return source.map((letter, index) => {
+        const letterKey = letter?.id || letter?.fileName || letter?.title || "";
+        const isMatch = targetKey ? letterKey === targetKey : index === targetIndex;
+        if (!isMatch) return letter;
+        return { ...letter, body: nextBody };
+      });
+    });
+  }, []);
   const buildApprovedClientLetterBody = useCallback(() => {
     const recipient = String(applicantSalutationName || "").trim() || "Client";
     const interventions = Array.isArray(proposedInterventions) ? proposedInterventions : [];
@@ -5125,12 +5156,18 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   const generateLetterPackDrafts = useCallback(() => {
     if (isApprovedDecisionOutcome) {
       setClientLetterBody(buildApprovedClientLetterBody());
+      setEditableInstitutionApprovalLetters(institutionApprovalLetters);
+      setEditableCoFunderApprovalLetters(coFunderApprovalLetters);
+      setEditableLoanProviderApprovalLetters(loanProviderApprovalLetters);
       setApprovalLetterPackGenerated(true);
       return;
     }
   }, [
     buildApprovedClientLetterBody,
+    coFunderApprovalLetters,
+    institutionApprovalLetters,
     isApprovedDecisionOutcome,
+    loanProviderApprovalLetters,
   ]);
   const downloadLetterAsText = useCallback((fileName, body) => {
     if (!body || typeof window === "undefined" || typeof document === "undefined") return;
@@ -5953,8 +5990,32 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     </SpaceBetween>
   );
 
+  const inferredCaseManagerRecommendation = isRevisionMode
+    ? "Recommend approving the proposed funding revision"
+    : proposedInterventions.length > 1
+      ? "Recommend funding the proposed interventions"
+      : "Recommend funding the proposed intervention";
+  const caseManagerRecommendationSummary = (
+    <SpaceBetween size="xs">
+      <Header variant="h3">Case manager recommendation</Header>
+      <ColumnLayout columns={2} variant="text-grid" minColumnWidth={260}>
+        <Box>
+          <Box fontWeight="bold">Recommended action</Box>
+          <div>{inferredCaseManagerRecommendation}</div>
+        </Box>
+        <Box>
+          <Box fontWeight="bold">Rationale</Box>
+          <div style={{ whiteSpace: "pre-wrap" }}>
+            {String(form.rationale || "").trim() || "No rationale recorded."}
+          </div>
+        </Box>
+      </ColumnLayout>
+    </SpaceBetween>
+  );
+
   const decisionStepContent = (
     <SpaceBetween size="m">
+      {caseManagerRecommendationSummary}
       <FormField
         label="Decision"
         description="Record the approval decision for this proposal."
@@ -6169,7 +6230,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     </SpaceBetween>
   );
 
-  const renderReadOnlyLetters = (letters, emptyMessage, options = {}) => {
+  const renderEditableLetters = (letters, emptyMessage, onBodyChange, options = {}) => {
     if (options.requireDraftGeneration && !approvalLetterPackGenerated) {
       return (
         <Alert type="info" statusIconAriaLabel="Info">
@@ -6186,7 +6247,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     }
     return (
       <SpaceBetween size="l">
-        {letters.map(letter => (
+        {letters.map((letter, letterIndex) => (
           <Box key={letter.id || letter.title}>
             <Header
               variant="h4"
@@ -6203,8 +6264,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
             </Header>
             <Textarea
               value={letter.body || ""}
-              readOnly
+              onChange={({ detail }) => onBodyChange(letter, detail.value || "", letterIndex)}
               rows={14}
+              spellcheck={true}
             />
           </Box>
         ))}
@@ -6263,8 +6325,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
           <SpaceBetween size="m">
             <Box>
               {isRevisionMode
-                ? "Edit the client funding revision letter, then review the red-line revised Client Funding Agreement and the institution, loan-provider, and other-funder letters before downloading them."
-                : "Edit the client approval letter, then review the institution, loan-provider, and other-funder letters in the tabs before downloading them."}
+                ? "Edit the client funding revision letter, then edit or review the red-line revised Client Funding Agreement and the institution, loan-provider, and other-funder letters before downloading them."
+                : "Edit the client approval letter, then edit or review the institution, loan-provider, and other-funder letters in the tabs before downloading them."}
             </Box>
             <Tabs
               activeTabId={approvalLetterPackTabId}
@@ -6284,27 +6346,30 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                 {
                   id: "institution",
                   label: "Institution letter",
-                  content: renderReadOnlyLetters(
-                    institutionApprovalLetters,
+                  content: renderEditableLetters(
+                    institutionApprovalLettersForDisplay,
                     "No institution-directed funding was identified from intervention delivery details and cost lines.",
+                    (letter, value, index) => updateEditableLetterBody(setEditableInstitutionApprovalLetters, letter, value, index),
                     { requireDraftGeneration: true }
                   ),
                 },
                 {
                   id: "loan-provider",
                   label: "Loan provider letters",
-                  content: renderReadOnlyLetters(
-                    loanProviderApprovalLetters,
+                  content: renderEditableLetters(
+                    loanProviderApprovalLettersForDisplay,
                     "No student loan repayment lines were identified in the approved cost items.",
+                    (letter, value, index) => updateEditableLetterBody(setEditableLoanProviderApprovalLetters, letter, value, index),
                     { requireDraftGeneration: true }
                   ),
                 },
                 {
                   id: "other-funding",
                   label: "Letters to other funders",
-                  content: renderReadOnlyLetters(
-                    coFunderApprovalLetters,
+                  content: renderEditableLetters(
+                    coFunderApprovalLettersForDisplay,
                     "No other funding sources were provided in the Other funding sources step.",
+                    (letter, value, index) => updateEditableLetterBody(setEditableCoFunderApprovalLetters, letter, value, index),
                     { requireDraftGeneration: true }
                   ),
                 },

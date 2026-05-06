@@ -2,7 +2,7 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-05-04
+Last Updated: 2026-05-06
 
 ## How to use
 
@@ -31,6 +31,117 @@ For each indexed thread/topic, keep:
 - `Status`: whether the note is current, partial, incomplete-title, or superseded
 
 ## Indexed Topics
+
+### Fix PROD checklist rules
+
+- Codex task title: `Fix PROD checklist rules`
+- Topic: PROD document-checklist configuration repairs, related feedback triage, editable generated approval-letter packs, and DEV application On Hold workflow bucket.
+- Keywords: `Fix PROD checklist rules`, `PROD checklist rules`, `Denial Letter Missing`, `Application Assessment- Missing Documents`, `feedback 78`, `feedback 82`, `document checklist`, `evidence_income`, `evidence_expense`, `band_funding_decision`, `supporting documents`, `Can't delete`, `feedback 86`, `approval letters editable`, `institution letter`, `loan-provider letter`, `other-funder letter`, `Hey Bill`, `feedback 55`, `emarion@nwac.ca`, `on_hold`, `On Hold`, `Put on hold`, `parking`, `Application hold review`
+- When to open: the user asks what happened in the May 6 checklist-rule thread; asks whether the checklist fixes were config-only or need deployment; asks why income/expense or Band/Nation decision-letter checklist rules changed; asks about generated approval supporting-letter editability; asks why feedback `#55` or `#86` is `planned`; or asks about the new parking/on-hold workflow.
+- Primary docs:
+  - `docs/planning/document-checklist-config-widget.md`
+  - `docs/guides/status-lifecycle-implementation.md`
+  - `docs/dashboards/admin-home-my-work-widget.md`
+  - `docs/widgets/admin/application-overview-widget.md`
+  - `docs/widgets/admin/application-assessment-widget.md`
+  - `docs/widgets/admin/intervention-assessment-widget.md`
+  - `docs/planning/application-workspace-quick-actions.md`
+  - `docs/planning/status-architecture-overhaul.md`
+  - `docs/meta/changelog.md`
+  - `docs/meta/next-release-notes-log.md`
+  - `src/server/config/checklists/iset-compliance.json`
+  - `src/server/config/checklists/iset-intervention.json`
+  - `src/widgets/CoordinatorAssessmentWidget.js`
+  - `src/pages/Caseworking/caseWorkspace/widgets/InterventionAssessmentWidget.jsx`
+  - `src/widgets/ApplicationOverviewWidget.js`
+  - `src/pages/home/HomeDashboardPage.jsx`
+  - `src/utils/applicationStatus.js`
+  - `src/utils/applicationSla.js`
+  - `isetadminserver.js`
+  - `sql/ops/prod-fix-feedback-78-82-document-checklist-config-20260506.sql`
+- Status: current as of 2026-05-06. PROD checklist runtime-config repairs for feedback `#78` / `#82` were applied live; generated supporting approval-letter editability and the application On Hold workflow are DEV code changes that require deployment before PROD users see them. PROD feedback `#55` and `#86` are marked `planned` pending deployment/verification.
+- Notes: The checklist portion repaired PROD configuration, not application code: income/expense evidence uses the active evidence document types and conditional checklist item IDs, while intervention proposal Band/Nation decision-letter requirements accept the merged `band_funding_decision` document type. Repo checklist JSON/docs were kept aligned so future deploys do not overwrite the live config fix.
+- Notes: Kelly Hyde's `Can't delete` report was triaged as an approval-letter editing limitation. The DEV UI now lets staff edit generated supporting approval letters for institutions, loan providers, and other funders before save/send/download. Application approval supporting-letter edits persist with the decision-letter draft pack; intervention approval/revision supporting-letter edits are editable in the generated pack before send/download. This requires an admin app deployment.
+- Notes: Emilie Marion's `Hey Bill` change request became the DEV application On Hold workflow. It persists raw `iset_application.status = 'on_hold'`, stores a hold reason in `awaiting_reason`, creates an `Application hold review` reminder for the selected review date, and exposes parked applications in a dedicated homepage `On Hold` queue for NWAC Administrators, Regional Managers, and ISET Coordinators. It is application-scoped and deliberately does not use case lifecycle `dormant`.
+
+### Test PROD database connectivity
+
+- Codex task title: `Test PROD database connectivity`
+- Topic: PROD DB access validation, Occupational Skills intervention approval-letter repair, Kayla Gladue damaged-submission recovery, and DEV-only public-portal submit hardening
+- Keywords: `Test PROD database connectivity`, `PROD database`, `run-prod-sql-via-ssm`, `Occupational Skills Intervention`, `Occupational skills training – diploma`, `case 40`, `planId=6`, `interventionId=37`, `approvalType=intervention`, `step=communication`, `Prepare approval letters`, `proposal in progress`, `feedback 83`, `ISET-20260505-4ED405`, `Kayla Gladue`, `application 61`, `case 138`, `input_json_state`, `iset_application_draft_dynamic`, `PITR`, `codex-kayla-pitr`, `TemporaryKaylaDraftRecovery`, `intakeCompletionPayload`, `submission_incomplete`
+- When to open: the user asks about the large May 6 thread that began with testing PROD DB connectivity, asks what happened with the Occupational Skills intervention or its approval-letter quick action, asks how Kayla's missing public-portal submission data was recovered, asks whether temporary PROD recovery resources/IAM permissions are still needed, or asks for the public-portal bug fix that should be rolled out later.
+- Primary docs:
+  - `docs/ops/agent-operational-access.md`
+  - `docs/meta/changelog.md`
+  - `docs/meta/next-release-notes-log.md`
+  - `docs/widgets/admin/interventions-widget.md`
+  - `docs/widgets/admin/intervention-assessment-widget.md`
+  - `sql/ops/prod-fix-feedback-83-occupational-skills-letter-pending-20260506.sql`
+  - `sql/ops/prod-fix-feedback-83-occupational-skills-letter-pending-metadata-20260506.sql`
+  - `sql/ops/prod-fix-kayla-application-61-display-assignment-20260506.sql`
+  - `sql/ops/prod-fix-kayla-application-61-repair-metadata-20260506.sql`
+  - `src/pages/Caseworking/caseWorkspace/widgets/InterventionsWidget.jsx`
+  - `src/pages/applicationCaseDashboard.js`
+  - `../ISET-intake/docs/meta/changelog.md`
+  - `../ISET-intake/server.js`
+  - `../ISET-intake/src/services/intakeCompletionPayload.js`
+  - `../ISET-intake/src/__tests__/intakeCompletionPayload.test.js`
+  - `../ISET-intake/src/pages/DynamicTest.js`
+- Status: current as of 2026-05-06. PROD data repairs are complete and the temporary PITR RDS resources were deleted; the public-portal code fix is DEV-only and intentionally not rolled out yet.
+- Notes: this thread confirmed usable PROD database access via the documented SSM SQL helper, then used guarded PROD SQL with restore points for live data repairs. The Occupational Skills intervention investigation started from feedback report title `Occupational Skills Intervention` for case `40`. The PROD data repair made the future Skills Development action plan non-active/draft-planned and put `Occupational skills training – diploma` into the approved letter-pending state so Amanda could prepare the approval letter. A separate DEV admin bug was then fixed because the Case Workspace `Prepare approval letters` row action opened the generic new-proposal wizard instead of the intervention approval-letter route with `entry=approval&approvalType=intervention&step=communication&interventionId=37&planId=6`.
+- Notes: the Kayla Gladue PROD issue was application `ISET-20260505-4ED405`, application row `61`, case `138`. The submitted payload had collapsed to final upload/signature fields only, leaving the Manage ISET Applications row blank and assignment facts missing. A first guarded repair populated display/routing facts from linked client `160` and assigned the Alberta case owner. A second guarded recovery used temporary PITR cluster `codex-kayla-pitr-20260506140904` restored to `2026-05-05T16:20:00Z` to recover the May 1 saved draft payload, merged it with the live May 5 final upload/signature fields, and wrote the recovered full payload back to PROD. Verification found `110` answer keys on both `iset_application_submission.id=61` and `iset_application.id=61`; the temporary `codex-kayla-*` cluster/instance were deleted afterward. Bill can remove the temporary IAM inline policy `TemporaryKaylaDraftRecovery`.
+- Notes: the root cause for Kayla was in the public portal completion path. `../ISET-intake/server.js` submitted from short-lived `input_json_state` only, so if that state expired/recreated around the final upload/signature step, the endpoint could create a damaged final-step-only submission and delete the durable draft. The DEV-only fix adds `src/services/intakeCompletionPayload.js`, makes `/api/intake/complete` merge durable `iset_application_draft_dynamic` draft data with the latest ephemeral state, strips internal root keys, carries merged history/doc refs, and returns `422 submission_incomplete` instead of creating a submission when core applicant facts are absent. `src/pages/DynamicTest.js` now surfaces that backend message. Focused test `npm test -- --runTestsByPath src/__tests__/intakeCompletionPayload.test.js --watchAll=false` passed; no full build was run per Bill's request, and Bill said he would roll it out later.
+
+### Review secure messaging panel
+
+- Codex task title: `Review secure messaging panel`
+- Topic: secure-message compose/read UX investigation and DEV implementation of a workspace-owned floating compose panel
+- Keywords: `Review secure messaging panel`, `secure messaging`, `SecureMessagingWidget`, `SecureMessageComposePanel`, `floating panel`, `floating window`, `non-modal`, `compose`, `reply`, `quick layouts`, `Application Workspace`, `Case Workspace`, `draft`, `secure-messaging:open-compose`, `secure-messaging:refresh`
+- When to open: the user asks why secure-message compose is now floating instead of modal, asks why quick layouts should not close the draft, asks whether the secure messaging widget must stay on the board for an open draft, asks about draft-save support, asks how the panel behaves when staff switch to another applicant/case, or wants to continue secure-message read/compose UX work.
+- Primary docs:
+  - `docs/widgets/admin/secure-messaging-widget.md`
+  - `docs/meta/changelog.md`
+  - `docs/meta/next-release-notes-log.md`
+  - `src/widgets/SecureMessageComposePanel.jsx`
+  - `src/widgets/SecureMessagingWidget.js`
+  - `src/pages/applicationCaseDashboard.js`
+  - `src/pages/Caseworking/CaseWorkspacePage.jsx`
+- Status: current as of 2026-05-06; DEV implementation only, with no full build run per user request.
+- Notes: the investigation found that reusing the floating-panel pattern was sensible for secure-message compose, but persistent draft save/retrieval would require deeper backend work and was explicitly deferred. The first DEV pass made compose non-modal but kept the panel state inside `SecureMessagingWidget`; quick-layout changes that removed the widget still unmounted the open draft.
+- Notes: the follow-up DEV fix hoisted secure-message compose ownership into both workspace shells. `SecureMessagingWidget` now launches compose/reply through `secure-messaging:open-compose`, while the workspace-owned `SecureMessageComposePanel` owns in-memory draft state, sends through the existing `/api/cases/:id/messages` route, preserves form attachment behavior, dispatches `secure-messaging:refresh` after send, and closes with a warning if the workspace changes to another case/applicant. This lets quick layouts remove Secure Messaging from the board without closing the floating draft.
+
+### Fix generic notification emails
+
+- Codex task title: `Fix generic notification emails`
+- Topic: generic staff notification email dispatch, approval decision events, intervention proposal follow-up, homepage queue fixes, and TEST deployment of the admin hotfix set
+- Keywords: `Fix generic notification emails`, `notification_setting.email_alert`, `notification_template`, `generic staff email`, `notificationDispatcher`, `SES`, `template editor`, `nwac_review_approved`, `nwac_review_denied`, `nwac_review_changes_requested`, `intervention_proposal_approved`, `intervention_proposal_denied`, `intervention_proposal_changes_requested`, `intervention_revision_approved`, `intervention_revision_denied`, `intervention_revision_changes_requested`, `assessment_approval_letter`, `approval letter unlock`, `Pending Completion`, `Awaiting Approval`, `My Clients`, `budget pot code`, `20260505-admin-notification-pot-code-test`
+- When to open: the user asks why non-assignment staff notification emails do or do not send, wants to revisit approval/denial/pushback event routing, asks about notification template fields or scenario previews, investigates intervention proposal approval-letter follow-up, sees Pending Completion/Awaiting Approval queue behavior, sees raw budget-pot IDs in bell alerts, or needs the TEST deployment context for the May 5 admin hotfix set.
+- Primary docs:
+  - `docs/change-requests/CR-0014-Configurable-Notification-Email-Pipeline.md`
+  - `docs/dashboards/manage-notifications-dashboard.md`
+  - `docs/dashboards/template-editor-dashboard.md`
+  - `docs/dashboards/admin-home-my-work-widget.md`
+  - `docs/planning/iset-coordinator-homepage.md`
+  - `docs/widgets/admin/intervention-assessment-widget.md`
+  - `docs/widgets/admin/interventions-widget.md`
+  - `docs/ops/deployments/deployment-quick-guide.md`
+  - `docs/meta/changelog.md`
+  - `docs/meta/next-release-notes-log.md`
+  - `isetadminserver.js`
+  - `../shared/events/notificationDispatcher.js`
+  - `src/pages/Caseworking/caseWorkspace/widgets/InterventionAssessmentWidget.jsx`
+  - `src/pages/Caseworking/caseWorkspace/widgets/InterventionsWidget.jsx`
+  - `src/pages/home/HomeDashboardPage.jsx`
+  - `src/pages/home/widgets/IsetCoordinatorWorkQueueWidget.js`
+  - `src/pages/home/widgets/ProgramAdminWorkQueueWidget.js`
+  - `src/pages/home/widgets/WorkQueueItemsTableWidget.js`
+- Status: current as of 2026-05-05; deployed to TEST as admin release `20260505-admin-notification-pot-code-test` with schema/data/portal skipped.
+- Notes: this thread completed the missing generic staff email dispatch path so configured non-assignment events can send SES emails from `notification_setting.email_alert` / `template_id` by event, role, language, and context while preserving the TEST real-email block and existing assignment-family emails. The notification work also split the NWAC review decision outcomes into distinct approval, denial, and changes-requested events, kept owner/watcher scoping expectations explicit for case-specific staff events, and improved the Template Editor with grouped placeholders, scenario previews, unsupported-placeholder warnings, and updated help-panel guidance. Follow-up testing found that broad role notifications can over-send if settings are not owner/watcher scoped; future notification changes should verify recipient scoping in `../shared/events/notificationDispatcher.js` before enabling email rows.
+- Notes: the Sarah Froese/Amanda Curtis investigation found that application assessment approval events had been implemented, but the two intervention proposal workflows did not emit equivalent backend events and did not reliably keep the approval-letter step available after approval. The narrow DEV fix added six event keys without a schema migration: `intervention_proposal_approved`, `intervention_proposal_denied`, `intervention_proposal_changes_requested`, `intervention_revision_approved`, `intervention_revision_denied`, and `intervention_revision_changes_requested`. New proposal decisions emit from the intervention decision path; revision denial/changes-requested emit from the draft revision decision path; revision approvals emit when the approved draft is applied to the persisted source intervention so the event survives draft deletion. These events flow through the existing event/notification/audit infrastructure and are intended to appear in notification settings, bell/email routing, the events panel, and audit history.
+- Notes: the intervention approval-letter follow-up was changed so approved new/revised intervention proposals remain available/openable until the approval letter is sent. The unlock is derived from persisted approved proposal/revision state, not temporary frontend `completionNote`, and deliberately does not treat every ordinary approved/planned/in-progress intervention as needing a new approval-letter step. The case secure-message attachment guard was updated so `assessment_approval_letter` can be sent when the message belongs to the case, the attached intervention belongs to the case, and the relevant proposal/revision status is approved; intervention denial-letter paths remain hidden/blocked because proposal workflows only need the approval letter on approval.
+- Notes: DEV workflow testing in the same thread produced several small queue/workflow fixes: Pending Completion now includes post-decision but pre-completion application and intervention work; opening Pending Completion items should route to the relevant wizard step rather than stale last-viewed step; ISET Coordinator homepages now have a `My Clients` queue for assigned client files; submitted intervention revisions now appear in the coordinator Awaiting Approval queue; pushed-back intervention revisions keep rework state while saving progress and use `Resubmit for approval` on the final action; assigned case managers can PATCH their own interventions, including moving approved interventions to `in_progress`, without being blocked by proposal-decision permissions.
+- Notes: two runtime bugs were also fixed during DEV testing. Sending an approval letter for an approved intervention proposal could throw `Cannot read properties of null (reading 'toLowerCase')` because optional intervention metadata was normalized unsafely; the fix made the metadata normalization null-safe. Intervention proposal approved bell alerts could show a raw `budget_pot.id`; new alerts now prefer `budget_pot.code` or name by resolving pot code/name into event payloads and by avoiding raw ID fallback in the shared dispatcher. Existing already-created alerts may still contain the old stored message.
+- Notes: the TEST deploy on 2026-05-05 followed the deployment runbook sequence after the earlier maintenance-process miss: admin-scoped warning, wait through the warning window, enable admin ALB fixed-response 503 fallback, run `path:deploy` with `--skip-schema --skip-data --skip-portal`, smoke the admin target group, clear fallback, then clear warning. Release `20260505-admin-notification-pot-code-test` updated both TEST admin instances successfully and smoke reported both admin targets healthy.
 
 ### Explain PATH XML validation rules
 
@@ -1065,6 +1176,27 @@ For each indexed thread/topic, keep:
   - `src/widgets/SupportingDocumentsWidget.js`
 - Status: fixed and deployed to TEST on 2026-04-30 as admin release `regional-manager-doc-scope-test-20260430`
 - Notes: TEST data showed `spam@sillery.co.uk` is active Regional Manager staff profile `122593`, directly assigned to case `126`; applicant `186` belongs to application `46` on that case. The bug was not a backend authorization failure for the assigned case. The frontend `All documents` option made an unscoped applicant-document call (`/api/applicants/186/documents`), which NWAC Administrators can use but Regional Managers cannot after the 2026-04-25 document-scope hardening. Selecting the specific application worked because the widget then sent `applicationId=46`. The fix makes Application Workspace `All documents` send scoped context, preferring `caseId=126`, and updates the backend `caseId` document query to include documents linked directly to the case, action plans, the case's primary application, and proven historical intake-upload matches from the primary application's submission payload. Verification before deploy passed `node.exe --check isetadminserver.js`, focused Jest tests `tests/applicationSubmissionDocumentScope.test.js` and `tests/caseAccess.test.js`, `npm run smoke:privacy-routes`, and `git diff --check`. TEST deploy was admin-only with schema/data/portal/shared skipped; both admin instances (`i-09fe8c219a4564040`, `i-0a8be782ed8604211`) reported healthy in target-group smoke, and the TEST maintenance warning was cleared afterward.
+
+### Application On Hold workflow bucket
+
+- Codex task title: `Fix PROD checklist rules`
+- Topic: DEV implementation for feedback report `#55` from Emilie Marion requesting a way to keep an application open while waiting on external funding or future start timing.
+- Keywords: `Fix PROD checklist rules`, `Hey Bill`, `feedback 55`, `emarion@nwac.ca`, `on_hold`, `On Hold`, `parking`, `parked application`, `Put on hold`, `Resume review`, `awaiting_reason`, `external_funding`, `future_start`, `Application Overview`, `Work Queue`
+- When to open: the user asks about parking applications, on-hold queue behavior, why parked files leave In Assessment/Pending Decision, or how hold reasons/review reminders are persisted.
+- Primary docs:
+  - `docs/guides/status-lifecycle-implementation.md`
+  - `docs/dashboards/admin-home-my-work-widget.md`
+  - `docs/widgets/admin/application-overview-widget.md`
+  - `docs/planning/application-workspace-quick-actions.md`
+  - `docs/planning/status-architecture-overhaul.md`
+  - `src/widgets/ApplicationOverviewWidget.js`
+  - `src/pages/home/HomeDashboardPage.jsx`
+  - `src/pages/home/widgets/ProgramAdminWorkQueueWidget.js`
+  - `src/pages/home/widgets/IsetCoordinatorWorkQueueWidget.js`
+  - `src/utils/applicationStatus.js`
+  - `isetadminserver.js`
+- Status: implemented in DEV on 2026-05-06; not a PROD data/config-only fix until deployed.
+- Notes: `Put on hold` persists raw `iset_application.status = 'on_hold'`, lifecycle `awaiting_applicant`, and an `awaiting_reason` of `external_funding`, `future_start`, `applicant_pause`, `internal_follow_up`, `other_hold`, or generic `on_hold`. The quick action captures reason + review date + optional note, creates an `iset_case_reminder` with category `Application hold review`, and `Resume review` moves the application back to `in_review`. Homepage `On Hold` appears for NWAC Administrators, Regional Managers, and ISET Coordinators; raw `on_hold` rows are excluded from active `In Assessment`, missing-docs/follow-up, pending-decision, and active SLA-stage queues. Do not use case lifecycle `dormant` for this pre-decision application parking workflow.
 
 ## Future improvements
 

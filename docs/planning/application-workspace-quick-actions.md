@@ -2,7 +2,7 @@
 
 Purpose: Capture requirements for non-layout quick actions in the Application Workspace.
 Audience: Application management owners, frontend engineers, QA.
-Last Updated: 2026-05-04
+Last Updated: 2026-05-06
 Status: In progress
 
 ## Scope
@@ -11,11 +11,12 @@ Define non-layout quick actions for the Application Workspace header, including 
 ## Current UI split
 
 - `Quick layouts` contains non-mutating board/view presets: Review application, Documents and messages, Notes and case calendar, and View audit trail.
-- `Quick actions` contains mutating or workflow-launching actions: Add applicant to watchlist, Assign / reassign, Resume review, escalation actions, Put on closure notice, Close application, Archive application, Reopen application, and Release lock.
+- `Quick actions` contains mutating or workflow-launching actions: Add applicant to watchlist, Assign / reassign, Put on hold, Resume review, escalation actions, Put on closure notice, Close application, Archive application, Reopen application, and Release lock.
 - Keep layout switches out of the mutating action menu so staff can distinguish navigation from workflow changes.
 
 ## Actions to confirm
 - Assign / reassign
+- Put on hold
 - Put on closure notice
 - Resume review
 - Close application
@@ -45,15 +46,23 @@ Define non-layout quick actions for the Application Workspace header, including 
 - Confirmation/modal requirements: Confirm modal with required note; note text should state that if the applicant does not respond, the application should be escalated to a manager/admin for closure.
 - Intent: applicant has not responded or provided key documents; application remains open but flagged for closure notice.
 
+### Put on hold
+- Roles that can see/use: All roles with Application Overview quick-action access for the file.
+- Status gating: Available from `submitted`, `in_review`, `docs_requested`, `closure_notice`, and `pending_approval`; unavailable from terminal statuses and when already `on_hold`.
+- Backend endpoint + payload: Set `applicationStatus` to `on_hold` through `PUT /api/cases/:id`; send `applicationAwaitingReason` with the selected parking reason.
+- Confirmation/modal requirements: Confirm modal asks for hold reason, review date, and optional note.
+- Side effects: Creates a case reminder with category `Application hold review`; records the reason/review date in the case note text; moves the row to homepage `On Hold` and out of active assessment/decision queues.
+- Intent: application remains open while PATH waits on external funding, a future program/school start, applicant-requested pause, internal follow-up, or another scheduled hold reason.
+
 ### Resume review
 - Roles that can see/use: All roles (including ISET Coordinator).
-- Status gating: Available from `docs_requested` (Action Required) and `closure_notice`.
+- Status gating: Available from `docs_requested` (Action Required), `closure_notice`, and `on_hold`.
 - Backend endpoint + payload: Set status to `in_review`.
 - Confirmation/modal requirements: Confirm modal with required note for consistency.
 
 ### Close application
 - Roles that can see/use: System Administrator, Program Administrator, Regional Manager.
-- Status gating: Available from `submitted`, `in_review`, `docs_requested`, `pending_approval`, `closure_notice`.
+- Status gating: Available from `submitted`, `in_review`, `docs_requested`, `pending_approval`, `closure_notice`, and `on_hold`.
 - Backend endpoint + payload: Set status to `closed`.
 - Confirmation/modal requirements: Confirm modal with required note.
 - Escalation handling: Allow closing with an open escalation, but ensure the escalation queue is resolved/closed to avoid orphaned items.
