@@ -1,7 +1,7 @@
 # PATH Deploy Orchestrator
 
 Status: current deployment control-plane reference.
-Last reviewed: 2026-04-29 during ops documentation cleanup; command names checked against current `package.json`.
+Last reviewed: 2026-05-07 after WSL local-development migration; command names checked against current `package.json`.
 
 Start with the short operator runbook in `docs/ops/deployments/deployment-quick-guide.md` if you just need the normal commands.
 
@@ -12,7 +12,7 @@ Deployed admin environments now force `DISABLE_AUTO_MIGRATIONS=true`, so this ex
 Operator runtime caveat: in the current Codex sandbox, `npm` package scripts execute under Windows Node while the trusted operator AWS profiles live in the bash/WSL-side AWS CLI config. The control-plane scripts intentionally shell AWS-backed checks through `bash` so `nwac-test` / `nwac-prod` resolve consistently. `nwac-prod` is now a reduced assumed-role profile and `default` is only a bootstrap IAM user, so direct prod resource calls through `default` are expected to fail.
 For prod app rollout, the control plane now also exports credentials from the working bash-side profile into the Windows-side PowerShell deploy subprocesses before running the shared/admin/portal upload scripts and the ASG refresh.
 
-Use this from `X:\ISET\admin-dashboard` so one command can sequence:
+Use this from `X:\ISET\admin-dashboard` so one command can sequence the deploy. Daily coding now happens in `/home/bill/ISET/path-dev-wsl.code-workspace`; before running the orchestrator, sync or pull the intended WSL changes into the Windows checkout and inspect the Windows tree. The orchestrator packages the Windows working tree, not the WSL workspace.
 
 1. AWS/profile preflight
 2. prod restore point capture when DB mutation is planned

@@ -18,7 +18,8 @@ const HomeWorkQueueItemsHelp = () => (
     </Box>
     <Box>
       In <strong>Pending Completion</strong>, application rows open the assessment wizard on the
-      active post-decision step instead of restoring the last step you viewed.
+      active post-decision step instead of restoring the last step you viewed. Approved intervention
+      proposal or revision rows open the Case Workspace approval-letter follow-up.
     </Box>
     <Box>
       In the <strong>Pending Decision</strong> queue, select the applicant or item name to complete the
@@ -45,6 +46,7 @@ Keep answers operational:
 - In coordinator-focused answers, emphasize that this table is a launching point into the detailed application or case workspace where notes, messaging, documents, and assessment are actually handled.
 - Clarify that the Pending Decision queue opens through the applicant/item name and that approval decisions happen inside the workspace.
 - Clarify that Pending Completion application rows open the active post-decision wizard step: approval letters first, then funding forms and signatures after the approval letter has been sent.
+- Clarify that Pending Completion can also include approved intervention proposal/revision letter follow-up rows, which open Case Workspace for the intervention-scoped approval/funding revision letter.
 - Clarify that assignable rows can use Assign/Reassign inline actions, while the applicant or item name opens the workspace.
 - Mention queue-specific inline actions only when they are visible for the current queue.
 - Mention Back to work queue when the table is showing metric results.

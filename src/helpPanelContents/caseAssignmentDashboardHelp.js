@@ -38,7 +38,7 @@ const CaseAssignmentDashboardHelp = () => (
 
     <h3>Typical coordinator flow</h3>
     <ol>
-      <li>Use the list selector to focus on active, new, assessment, pending-decision, decision-recorded, approved, denied, closed, flagged, or all applications.</li>
+      <li>Use the list selector to focus on active, new, assessment, pending-decision, decision-recorded, approved, denied, closed, flagged, or all applications. All applications includes historical applications for the same client/case.</li>
       <li>The active list includes post-decision files that still need completion follow-up, such as approval letters, funding forms, signatures, or the final checklist.</li>
       <li>Search or sort the table to find the assigned application you need to work on.</li>
       <li>Check status, docs age, and timeline status to understand what kind of follow-up is required.</li>
@@ -70,7 +70,7 @@ How to guide users:
 - Treat the table as a list for finding the right application and opening the full Application Workspace.
 - Explain the practical meaning of status, Docs Requested age, timeline status, owner, and received date.
 - Explain that the header selector narrows the server-paginated list by application status group, matching the Case Management dashboard's header-selector pattern.
-- Explain that Active includes pending-completion files and excludes only closed or archived application lifecycle rows.
+- Explain that Active includes pending-completion files and excludes only closed or archived application lifecycle rows. All Applications returns every matching application record, including historical applications for the same client/case.
 - Use View to send the user to /application-case/{case_id} when they need to review the form, documents, messages, notes, or assessment.
 - If the user cannot find a case, explain role visibility: coordinators only see assigned applications; regional managers and NWAC admins have broader scope.
 - Mention Assign/Reassign only when relevant to the user’s role. Reassign is not the normal coordinator path here.

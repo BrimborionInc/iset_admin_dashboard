@@ -88,6 +88,8 @@
     "workflow:set-file-upload-max-size-floor": "node scripts/set-file-upload-max-size-floor.js",
     "fixtures:workflows": "node scripts/generate-workflow-fixtures.js",
     "sync:portal-renderers": "node scripts/sync-portal-renderers.js",
+    "ai:inventory": "node scripts/admin-ai-inventory.js",
+    "ai:eval:check": "node scripts/admin-ai-eval-fixtures-check.js",
     "db:migrate:inventory": "node scripts/path-schema-migrate.js inventory",
     "db:migrate:plan": "node scripts/path-schema-migrate.js plan",
     "db:migrate:apply": "node scripts/path-schema-migrate.js apply",

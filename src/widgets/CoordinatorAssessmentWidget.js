@@ -15,6 +15,8 @@ import {
   APPLICATION_FINAL_STATUSES,
   APPLICATION_LOCKED_STATUSES,
   POST_DECISION_APPLICATION_STATUSES,
+  buildAssessmentDecisionAlignmentError,
+  deriveAssessmentDecisionStatusFromAgreement,
   deriveAssessmentReviewStatusSelection,
   deriveApplicationDecisionOutcome,
 } from '../utils/applicationStatus';
@@ -40,6 +42,11 @@ const RECOMMEND_OPTIONS = [
   { label: 'Recommend funding this intervention', value: 'recommend' },
   { label: 'Do not recommend funding', value: 'no_recommend' },
   { label: 'Recommend alternative intervention', value: 'alternative' }
+];
+const FUNDING_DECISION_OPTIONS = [
+  { value: 'approve', label: 'Approve funding' },
+  { value: 'reject', label: 'Deny funding' },
+  { value: 'push_back', label: 'Request changes' }
 ];
 const resolveRecommendationLabel = (value, fallback = 'No recommendation recorded') => {
   const normalized = String(value || '').trim().toLowerCase();
@@ -5124,6 +5131,44 @@ const CoordinatorAssessmentWidget = forwardRef(
       return nextAssessment;
     });
   };
+  const applyAssessmentAssurance = (value) => {
+    if (isNWACFieldsDisabled) return;
+    const inferredDecision = deriveAssessmentDecisionStatusFromAgreement({
+      recommendation: assessment.recommendation,
+      assessmentReview: value,
+    });
+    if (inferredDecision === 'approve' && approvalBlockMessage) {
+      setValidationAlert([approvalBlockMessage]);
+    }
+    if (inferredDecision === 'approve' && !approvalBlockMessage) {
+      setDenialReasonChoice('');
+      setDenialReasonExplanation('');
+    }
+    updateAssessmentWithValidation(prevAssessment => {
+      const nextAssessment = { ...prevAssessment, nwacReview: value };
+      if (inferredDecision && !(inferredDecision === 'approve' && approvalBlockMessage)) {
+        nextAssessment.nwacReviewStatus = inferredDecision;
+        if (inferredDecision === 'approve') {
+          nextAssessment.nwacReason = '';
+        }
+      }
+      return nextAssessment;
+    });
+  };
+  const applyFundingDecision = (value) => {
+    if (value === 'approve' && approvalBlockMessage) {
+      setValidationAlert([approvalBlockMessage]);
+      return;
+    }
+    if (isNWACFieldsDisabled) return;
+    if (value === 'approve' && assessment.nwacReason) {
+      setShowApproveConfirmModal(true);
+      return;
+    }
+    handleField('nwacReviewStatus', value);
+    if (value === 'approve') handleField('nwacReason', '');
+    if (value === 'push_back') handleField('nwacReview', '');
+  };
   const updateProposedInterventions = useCallback(
     (updater) => {
       updateAssessmentWithValidation(prev => {
@@ -7854,11 +7899,19 @@ ${JSON.stringify(contextPayload, null, 2)}`;
   const validateNWACReview = (assessment) => {
     const errors = {};
     const decision = assessment.nwacReviewStatus;
+    const alignmentError = buildAssessmentDecisionAlignmentError({
+      recommendation: assessment.recommendation,
+      assessmentReview: assessment.nwacReview,
+      decisionStatus: decision,
+    });
     if (!decision) {
       errors.nwacReviewStatus = 'Funding decision selection is required.';
     }
     if (decision && decision !== 'push_back' && !assessment.nwacReview) {
       errors.nwacReview = 'Assessment assurance outcome is required.';
+    }
+    if (alignmentError) {
+      errors.nwacReviewStatus = alignmentError;
     }
     if ((decision === 'reject' || decision === 'push_back') && (!assessment.nwacReason || !assessment.nwacReason.trim())) {
       errors.nwacReason = decision === 'push_back'
@@ -10890,16 +10943,21 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     </Modal>
   );
 
+  const decisionAlignmentWarning = buildAssessmentDecisionAlignmentError({
+    recommendation: assessment.recommendation,
+    assessmentReview: assessment.nwacReview,
+    decisionStatus: assessment.nwacReviewStatus,
+  });
   const caseManagerRecommendationSummary = (
     <SpaceBetween size="xs">
-      <Header variant="h3">Case manager recommendation</Header>
+      <Header variant="h3">Case manager assessment recommendation</Header>
       <ColumnLayout columns={2} variant="text-grid" minColumnWidth={260}>
         <Box>
-          <Box fontWeight="bold">Recommended action</Box>
+          <Box fontWeight="bold">Submitted recommendation</Box>
           <div>{resolveRecommendationLabel(assessment.recommendation)}</div>
         </Box>
         <Box>
-          <Box fontWeight="bold">Rationale</Box>
+          <Box fontWeight="bold">Case manager rationale</Box>
           <div style={{ whiteSpace: 'pre-wrap' }}>
             {String(assessment.justification || '').trim() || 'No rationale recorded.'}
           </div>
@@ -10908,8 +10966,8 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     </SpaceBetween>
   );
   const assessmentAssuranceOptions = [
-    { label: 'Agree with Case Manager Recommendation', value: 'agree' },
-    { label: 'Disagree with Case Manager Recommendation', value: 'disagree' }
+    { label: 'Yes - follow this recommendation', value: 'agree' },
+    { label: 'No - record a different outcome', value: 'disagree' }
   ];
 
   const decisionStepContent = (
@@ -10926,6 +10984,11 @@ ${JSON.stringify(contextPayload, null, 2)}`;
           </Alert>
         )}
         {caseManagerRecommendationSummary}
+        {decisionAlignmentWarning && (
+          <Alert type="warning" header="Outcome does not match the agreement answer">
+            {decisionAlignmentWarning}
+          </Alert>
+        )}
         <Box
           style={
             isNWACFieldsDisabled || isOutcomeNoticeDisabled
@@ -10935,55 +10998,41 @@ ${JSON.stringify(contextPayload, null, 2)}`;
           aria-disabled={isNWACFieldsDisabled || isOutcomeNoticeDisabled}
         >
         <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-          <FormField label="Funding Decision" errorText={showDecisionErrors && fieldErrors.nwacReviewStatus ? fieldErrors.nwacReviewStatus : undefined}>
-            <SpaceBetween direction="horizontal" size="xs">
-              <Hotspot hotspotId="nwac-decision-status" direction="right">
-                <RadioGroup
-                  value={assessment.nwacReviewStatus || ''}
-                  onChange={({ detail }) => {
-                    if (detail.value === 'approve' && approvalBlockMessage) {
-                      setValidationAlert([approvalBlockMessage]);
-                      return;
-                    }
-                    if (isNWACFieldsDisabled) return;
-                    if (detail.value === 'approve' && assessment.nwacReason) {
-                      setShowApproveConfirmModal(true);
-                    } else {
-                      handleField('nwacReviewStatus', detail.value);
-                      if (detail.value === 'approve') handleField('nwacReason', '');
-                      if (detail.value === 'push_back') handleField('nwacReview', '');
-                    }
-                  }}
-                  items={[
-                    { value: 'approve', label: 'Approved' },
-                    { value: 'reject', label: 'Denied' },
-                    { value: 'push_back', label: 'Request Changes' }
-                  ]}
-                  ariaLabel="NWAC Review Status"
-                  data-error-focus={showDecisionErrors && fieldErrors.nwacReviewStatus ? 'true' : undefined}
-                  readOnly={isNWACFieldsDisabled}
-                />
-              </Hotspot>
-            </SpaceBetween>
-          </FormField>
           <FormField
-            label="Assessment Assurance"
-            description="Indicate whether you agree or disagree with the case manager's recommendation."
+            label="Do you agree with this assessment recommendation?"
+            description="Your answer sets the default funding outcome below."
             errorText={showDecisionErrors && fieldErrors.nwacReview ? fieldErrors.nwacReview : undefined}
           >
             <Hotspot hotspotId="nwac-assessment-assurance" direction="right">
               <Select
                 selectedOption={assessmentAssuranceOptions.find(option => option.value === assessment.nwacReview) || null}
                 onChange={({ detail }) => {
-                  if (isNWACFieldsDisabled) return;
-                  handleField('nwacReview', detail.selectedOption.value);
+                  applyAssessmentAssurance(detail.selectedOption?.value || '');
                 }}
                 options={assessmentAssuranceOptions}
-                placeholder="Select review outcome"
+                placeholder="Select agreement"
                 data-error-focus={showDecisionErrors && fieldErrors.nwacReview ? 'true' : undefined}
                 readOnly={isNWACFieldsDisabled || assessment.nwacReviewStatus === 'push_back'}
               />
             </Hotspot>
+          </FormField>
+          <FormField
+            label="Funding outcome to record"
+            description="Review the outcome before committing the decision."
+            errorText={showDecisionErrors && fieldErrors.nwacReviewStatus ? fieldErrors.nwacReviewStatus : undefined}
+          >
+            <SpaceBetween direction="horizontal" size="xs">
+              <Hotspot hotspotId="nwac-decision-status" direction="right">
+                <RadioGroup
+                  value={assessment.nwacReviewStatus || ''}
+                  onChange={({ detail }) => applyFundingDecision(detail.value)}
+                  items={FUNDING_DECISION_OPTIONS}
+                  ariaLabel="NWAC funding outcome"
+                  data-error-focus={showDecisionErrors && fieldErrors.nwacReviewStatus ? 'true' : undefined}
+                  readOnly={isNWACFieldsDisabled}
+                />
+              </Hotspot>
+            </SpaceBetween>
           </FormField>
         </Grid>
         {['reject', 'push_back'].includes(assessment.nwacReviewStatus) && (

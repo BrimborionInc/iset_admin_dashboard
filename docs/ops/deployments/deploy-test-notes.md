@@ -1,7 +1,7 @@
 # Test Environment Deployment Notes
 
 Status: current TEST deployment notes. Prefer `deployment-quick-guide.md` for the shortest operator commands.
-Last reviewed: 2026-04-29 during ops documentation cleanup; command names checked against current admin and portal `package.json` files.
+Last reviewed: 2026-05-07 after WSL local-development migration; command names checked against current admin and portal `package.json` files.
 
 For the shortest operator commands, start with `docs/ops/deployments/deployment-quick-guide.md`.
 
@@ -13,9 +13,11 @@ Run the PATH orchestrator from `X:\ISET\admin-dashboard`:
 npm run path:deploy -- --env test --dataset intake-release --workflow-id 21
 ```
 
-Do not start this from a WSL-only checkout path. The app rollout still shells into Windows `npm` / PowerShell deploy scripts, so use the Windows working tree at `X:\ISET\admin-dashboard`.
+Do not start this from a WSL-only checkout path. Daily coding now happens in `/home/bill/ISET/path-dev-wsl.code-workspace`, but the app rollout still shells into Windows `npm` / PowerShell deploy scripts, so use the Windows working tree at `X:\ISET\admin-dashboard`.
 
-Important: the deploy scripts package the current working tree, not just the Git index. If you only want to release a subset of local edits, isolate them first by staging the intended files and temporarily stashing the rest (`git stash push --keep-index --include-untracked` is the safe pattern).
+Important WSL migration rule: before deploying work developed in WSL, update the Windows checkout deliberately. Commit/push from WSL and pull/update the Windows tree, or copy/sync the exact changed files into `X:\ISET\...`; then inspect the Windows checkout's `git status --short` and diff before running the deploy. `path:deploy` packages the Windows working tree, not the WSL workspace.
+
+Important: the deploy scripts package the current Windows working tree, not just the Git index. If you only want to release a subset of local edits, isolate them first by staging the intended files and temporarily stashing the rest (`git stash push --keep-index --include-untracked` is the safe pattern).
 
 Important coupling rule: do not assume `admin-only` just because the user-facing behavior is in the admin console. The admin backend stages sibling `..\shared` during `deploy-admin-to-test`, and some admin runtime paths also import sibling `..\ISET-intake` modules from the deployed portal tree. If the changed code path touches either of those sibling locations, deploy the coupled surface as well instead of using `--skip-portal`.
 

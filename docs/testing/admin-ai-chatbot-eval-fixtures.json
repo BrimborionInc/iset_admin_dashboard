@@ -1,0 +1,375 @@
+[
+  {
+    "id": "case-intervention-approval-letters",
+    "domain": "Case Management",
+    "route": "/cases/:caseId",
+    "helpTitle": "Case Workspace",
+    "role": "NWAC Administrator",
+    "prompt": "How do I prepare approval letters for approved new interventions?",
+    "expectedAnchors": [
+      "Case Workspace",
+      "Interventions",
+      "Prepare approval letters",
+      "Approval letters",
+      "Generate drafts",
+      "Send client approval letter"
+    ],
+    "forbiddenPatterns": [
+      "Approvals area",
+      "equivalent letter/print action",
+      "record toolbar",
+      "select the correct approval letter template"
+    ],
+    "sourceRefs": [
+      "src/pages/Caseworking/caseWorkspace/widgets/InterventionsWidget.jsx",
+      "src/pages/Caseworking/caseWorkspace/widgets/InterventionAssessmentWidget.jsx",
+      "docs/widgets/admin/interventions-widget.md",
+      "docs/widgets/admin/intervention-assessment-widget.md"
+    ],
+    "status": "verified"
+  },
+  {
+    "id": "home-pending-completion-purpose",
+    "domain": "Home / Work Queues",
+    "route": "/",
+    "helpTitle": "Home Dashboard",
+    "role": "ISET Coordinator",
+    "prompt": "What is Pending Completion for?",
+    "expectedAnchors": [
+      "post-decision",
+      "approval letters",
+      "funding forms and signatures",
+      "approved intervention proposal",
+      "until the application is completed or closed"
+    ],
+    "forbiddenPatterns": [
+      "completed applications only",
+      "closed cases",
+      "archive queue"
+    ],
+    "sourceRefs": [
+      "src/pages/home/HomeDashboardPage.jsx",
+      "src/pages/home/widgets/WorkQueueItemsTableWidget.js",
+      "docs/dashboards/admin-home-my-work-widget.md",
+      "src/helpPanelContents/homeWorkQueueHelp.js"
+    ],
+    "status": "verified"
+  },
+  {
+    "id": "case-backload-active-intervention",
+    "domain": "Imports / Backload",
+    "route": "/cases/:caseId",
+    "helpTitle": "Case Workspace",
+    "role": "Regional Manager",
+    "prompt": "Can I backload an active intervention?",
+    "expectedAnchors": [
+      "active plan",
+      "archived plans are blocked",
+      "closed plans only accept completed or cancelled interventions",
+      "in-progress or suspended interventions",
+      "historical"
+    ],
+    "forbiddenPatterns": [
+      "creates a payment packet",
+      "starts approval routing",
+      "create a fake application"
+    ],
+    "sourceRefs": [
+      "src/server/adminAiGuidanceService.js",
+      "src/helpPanelContents/caseWorkspaceInterventionsHelp.js",
+      "docs/guides/client-file-imports.md"
+    ],
+    "status": "drafted"
+  },
+  {
+    "id": "application-missing-documents-next-step",
+    "domain": "Application Assessment",
+    "route": "/application-case/:id",
+    "helpTitle": "Application assessment workflow",
+    "role": "ISET Coordinator",
+    "prompt": "What do I do when required documents are missing?",
+    "expectedAnchors": [
+      "Supporting Documents",
+      "request missing documents",
+      "Secure Messaging",
+      "Case Notes",
+      "document follow-up attempts"
+    ],
+    "forbiddenPatterns": [
+      "email only",
+      "approve while waiting",
+      "ignore the checklist"
+    ],
+    "sourceRefs": [
+      "src/helpPanelContents/applicationAssessmentHelp.js",
+      "src/helpPanelContents/supportingDocumentsHelp.js",
+      "src/helpPanelContents/secureMessagesHelpPanelContent.js",
+      "src/helpPanelContents/caseNotesHelp.js",
+      "docs/planning/document-checklist-config-widget.md",
+      "docs/training/TRAINING_MODULES_September_2025_extracted.md"
+    ],
+    "status": "verified"
+  },
+  {
+    "id": "application-request-changes",
+    "domain": "Application Assessment",
+    "route": "/application-case/:id",
+    "helpTitle": "Application assessment workflow",
+    "role": "NWAC Administrator",
+    "prompt": "How do I request changes instead of approving an application?",
+    "expectedAnchors": [
+      "Approval and decision",
+      "Request changes",
+      "decision notes",
+      "send back",
+      "case manager"
+    ],
+    "forbiddenPatterns": [
+      "deny the application",
+      "edit the applicant submission directly",
+      "delete the assessment"
+    ],
+    "sourceRefs": [
+      "src/widgets/CoordinatorAssessmentWidget.js",
+      "src/helpPanelContents/applicationAssessmentHelp.js",
+      "docs/widgets/admin/application-assessment-widget.md",
+      "isetadminserver.js"
+    ],
+    "status": "verified"
+  },
+  {
+    "id": "living-allowance-documentation",
+    "domain": "Training / Financial Need",
+    "route": "/application-case/:id",
+    "helpTitle": "Application assessment workflow",
+    "role": "ISET Coordinator",
+    "prompt": "What documentation is needed before recommending a living allowance?",
+    "expectedAnchors": [
+      "financial situation",
+      "income",
+      "expenses",
+      "documentation",
+      "rationale"
+    ],
+    "forbiddenPatterns": [
+      "approve first and collect later",
+      "no proof needed",
+      "estimate without evidence"
+    ],
+    "sourceRefs": [
+      "docs/training/TRAINING_MODULES_September_2025_extracted.md",
+      "src/documentation/runtime/trainingModules2025.json",
+      "src/helpPanelContents/applicationAssessmentHelp.js"
+    ],
+    "status": "drafted"
+  },
+  {
+    "id": "supporting-documents-band-decision-letter",
+    "domain": "Supporting Documents",
+    "route": "/application-case/:id",
+    "helpTitle": "Supporting Documents",
+    "role": "ISET Coordinator",
+    "prompt": "Where should I upload a Band or Nation funding decision letter?",
+    "expectedAnchors": [
+      "Supporting Documents",
+      "Band/Nation funding decision",
+      "application or intervention context",
+      "checklist",
+      "do not use Other unless no specific type fits"
+    ],
+    "forbiddenPatterns": [
+      "email it instead",
+      "upload anywhere",
+      "global finance export"
+    ],
+    "sourceRefs": [
+      "src/helpPanelContents/supportingDocumentsHelp.js",
+      "docs/planning/document-checklist-config-widget.md",
+      "src/server/config/checklists/iset-compliance.json",
+      "src/server/config/checklists/iset-intervention.json"
+    ],
+    "status": "drafted"
+  },
+  {
+    "id": "secure-message-vs-contact-communications",
+    "domain": "Secure Messaging / Contact",
+    "route": "/cases/:caseId",
+    "helpTitle": "Case Workspace",
+    "role": "ISET Coordinator",
+    "prompt": "Should I send a secure message or use Contact Communications?",
+    "expectedAnchors": [
+      "Secure Messaging",
+      "case or applicant-specific",
+      "Contact Communications",
+      "public contact",
+      "avoid sensitive details in public contact channels"
+    ],
+    "forbiddenPatterns": [
+      "use either one interchangeably",
+      "send applicant details through public contact",
+      "generic message endpoint"
+    ],
+    "sourceRefs": [
+      "src/helpPanelContents/secureMessagesHelpPanelContent.js",
+      "src/helpPanelContents/contactCommunicationsHelp.js",
+      "docs/widgets/admin/secure-messaging-widget.md"
+    ],
+    "status": "drafted"
+  },
+  {
+    "id": "case-notes-missing-document-followup",
+    "domain": "Case Notes",
+    "route": "/cases/:caseId",
+    "helpTitle": "Case Workspace",
+    "role": "ISET Coordinator",
+    "prompt": "Where do I record missing-document follow-up attempts?",
+    "expectedAnchors": [
+      "Case Notes",
+      "Supporting Documents",
+      "Secure Messaging",
+      "date",
+      "follow-up attempt"
+    ],
+    "forbiddenPatterns": [
+      "only in email",
+      "no need to record",
+      "browser note"
+    ],
+    "sourceRefs": [
+      "src/helpPanelContents/caseNotesHelp.js",
+      "src/helpPanelContents/supportingDocumentsHelp.js",
+      "docs/training/TRAINING_MODULES_September_2025_extracted.md"
+    ],
+    "status": "drafted"
+  },
+  {
+    "id": "ilmp-planned-end-date-no-outcome",
+    "domain": "ESDC / ILMP",
+    "route": "/esdc/participants/:clientId",
+    "helpTitle": "ESDC Participant Submission",
+    "role": "System Administrator",
+    "prompt": "Why does an intervention with a planned end date not require an outcome yet?",
+    "expectedAnchors": [
+      "status-driven",
+      "planned end date",
+      "completed or cancelled",
+      "outcome",
+      "ILMP closeout"
+    ],
+    "forbiddenPatterns": [
+      "any end date requires an outcome",
+      "remove the planned date",
+      "schema change"
+    ],
+    "sourceRefs": [
+      "docs/workflows/admin/ilmp-reporting.md",
+      "src/server/esdcIlmpParticipantRules.js",
+      "isetadminserver.js"
+    ],
+    "status": "drafted"
+  },
+  {
+    "id": "finance-intervention-approval-payment-packet",
+    "domain": "Finance / Payments",
+    "route": "/finance/payments",
+    "helpTitle": "Finance Payments",
+    "role": "Finance Manager",
+    "prompt": "Does approving an intervention create a payment packet?",
+    "expectedAnchors": [
+      "No",
+      "approval authorizes funding",
+      "payment packet",
+      "specific claim period or receipt",
+      "finance workflow"
+    ],
+    "forbiddenPatterns": [
+      "auto-create payment packet",
+      "payment is submitted automatically",
+      "approval equals paid"
+    ],
+    "sourceRefs": [
+      "docs/features/payments-module.md",
+      "docs/dashboards/financial-reports-dashboard.md",
+      "src/helpPanelContents/financePaymentsHelp.js"
+    ],
+    "status": "drafted"
+  },
+  {
+    "id": "notifications-applicant-secure-message-owner",
+    "domain": "Notifications",
+    "route": "/manage-notifications",
+    "helpTitle": "Manage Notifications",
+    "role": "NWAC Administrator",
+    "prompt": "Why did only the owner receive an applicant secure-message alert?",
+    "expectedAnchors": [
+      "applicant_secure_message_received",
+      "owner-scoped",
+      "assigned owner",
+      "case watchers",
+      "not every user in the role"
+    ],
+    "forbiddenPatterns": [
+      "all NWAC Administrators",
+      "generic message_received",
+      "broadcast"
+    ],
+    "sourceRefs": [
+      "docs/dashboards/manage-notifications-dashboard.md",
+      "docs/change-requests/CR-0014-Configurable-Notification-Email-Pipeline.md",
+      "../shared/events/notificationDispatcher.js"
+    ],
+    "status": "drafted"
+  },
+  {
+    "id": "workflow-studio-manual-intake-skips-portal-steps",
+    "domain": "Workflow Studio / Manual Intake",
+    "route": "/iset/applications/intake",
+    "helpTitle": "Manual Application Intake",
+    "role": "System Administrator",
+    "prompt": "Why does Manual Intake skip upload and signature steps?",
+    "expectedAnchors": [
+      "portal-only",
+      "Manual Intake",
+      "renderable manual-intake content",
+      "upload",
+      "signature"
+    ],
+    "forbiddenPatterns": [
+      "bug",
+      "same as public portal for every step",
+      "must upload through Manual Intake"
+    ],
+    "sourceRefs": [
+      "docs/planning/step19-checkbox-conditionality-followup.md",
+      "src/helpPanelContents/manualApplicationIntakeHelp.js",
+      "src/widgets/WorkflowPreviewWidget.js"
+    ],
+    "status": "drafted"
+  },
+  {
+    "id": "admin-preview-public-portal-parity",
+    "domain": "Workflow Studio / Public Portal Relationship",
+    "route": "/manage-workflows",
+    "helpTitle": "Workflow Preview",
+    "role": "System Administrator",
+    "prompt": "Does the admin preview exactly match public portal behavior?",
+    "expectedAnchors": [
+      "verify",
+      "runtime config",
+      "portal renderer",
+      "Admin Workflow Preview",
+      "not assume parity"
+    ],
+    "forbiddenPatterns": [
+      "always exactly matches",
+      "admin preview is the source of truth",
+      "no need to check portal"
+    ],
+    "sourceRefs": [
+      "docs/AGENTS.md",
+      "src/widgets/WorkflowPreviewWidget.js",
+      "../ISET-intake/src/renderer/renderers.js"
+    ],
+    "status": "drafted"
+  }
+]

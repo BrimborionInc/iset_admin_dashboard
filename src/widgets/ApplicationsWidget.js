@@ -379,7 +379,11 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
       return (
         <Button
           variant="inline-link"
-          onClick={() => history.push({ pathname: `/application-case/${row.case_id}`, state: { assessorEmail: row.assigned_user_email } })}
+	          onClick={() => history.push({
+	            pathname: `/application-case/${row.case_id}`,
+	            search: row.application_id ? `?applicationId=${encodeURIComponent(row.application_id)}` : '',
+	            state: { assessorEmail: row.assigned_user_email, applicationId: row.application_id || null }
+	          })}
         >
           {text}
         </Button>
@@ -936,7 +940,11 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
           {item.case_id && (
             <Button
               variant="inline-link"
-              onClick={() => history.push({ pathname: `/application-case/${item.case_id}`, state: { assessorEmail: item.assigned_user_email } })}
+	              onClick={() => history.push({
+	                pathname: `/application-case/${item.case_id}`,
+	                search: item.application_id ? `?applicationId=${encodeURIComponent(item.application_id)}` : '',
+	                state: { assessorEmail: item.assigned_user_email, applicationId: item.application_id || null }
+	              })}
             >
               View
             </Button>

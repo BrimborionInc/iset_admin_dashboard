@@ -1,7 +1,7 @@
 # PATH Deployment Quick Guide
 
 Status: current primary operator guide for normal TEST/PROD PATH deploys.
-Last reviewed: 2026-05-05 after TEST deploy maintenance-fallback miss; command names checked against current `package.json`.
+Last reviewed: 2026-05-07 after WSL local-development migration; command names checked against current `package.json`.
 
 This is the shortest operator guide for normal PATH deployments.
 
@@ -11,7 +11,9 @@ Work from:
 cd X:\ISET\admin-dashboard
 ```
 
-Do not run the app deploy commands from a WSL-only checkout such as `/root/ISET/admin-dashboard` or from a `\\wsl$\\...` working directory. The current rollout still drops into Windows `npm` / PowerShell deploy scripts, and those subprocesses need a normal Windows path like `X:\ISET\admin-dashboard`.
+Daily coding/Codex work now happens in the WSL workspace `/home/bill/ISET/path-dev-wsl.code-workspace`, but app deploy commands still package and run from the Windows checkout. Do not run app deploy commands from a WSL-only checkout such as `/home/bill/ISET/admin-dashboard` or from a `\\wsl$\\...` working directory. The current rollout still drops into Windows `npm` / PowerShell deploy scripts, and those subprocesses need a normal Windows path like `X:\ISET\admin-dashboard`.
+
+Before any TEST/PROD app deploy after WSL-side development, prove the Windows deploy checkout contains the intended WSL changes. Either commit/push from WSL and pull/update the Windows checkout, or deliberately copy/sync the changed files into `X:\ISET\...` and inspect the Windows `git status --short` / diff there. Never assume that files edited under `/home/bill/ISET` are automatically what `path:deploy` will package from `X:\ISET`.
 
 ## Rules
 
@@ -23,7 +25,7 @@ Do not run the app deploy commands from a WSL-only checkout such as `/root/ISET/
 - PROD deploys require `--yes`.
 - TEST deploys require `--yes` only when you include `--refresh-test-db`.
 - Deploys do not auto-bump `package.json` semver; instead, each frontend build now carries a visible release/build stamp.
-- App deploys package the current working tree. If you mean “deploy only the staged subset,” stage the intended files and stash the rest before running `path:deploy`.
+- App deploys package the current Windows working tree. If you mean “deploy only the staged subset,” stage the intended files and stash the rest before running `path:deploy`; if the source changes were made in WSL, align the Windows checkout first.
 - TEST app rollouts should rehearse PROD user-facing maintenance behavior. Any TEST deploy that can restart app processes, make a surface unavailable, or produce transient `502 Bad Gateway` responses needs a scoped warning first and the affected surface behind the ALB maintenance page before deploy starts. TEST remains less strict than PROD because ordinary app deploys do not require `--yes`, but raw 502s are not an acceptable planned TEST experience. TEST maintenance copy must use the user-facing name `Test and Training environment` and explicitly state that Production is not affected.
 - PROD app rollouts are user-impacting unless the plan proves otherwise. Any PROD deploy that refreshes ASG instances, restarts app processes, rotates target groups, or can produce transient `502 Bad Gateway` responses needs a scoped warning first and the affected surface behind the ALB maintenance page before deploy starts, even if it is admin-only, portal-only, or code-only.
 - Operator checklist rule: before running `path:deploy`, state the exact maintenance sequence. For TEST in-place app rollouts that restart admin or portal, use `warning -> wait -> ALB 503 fallback -> deploy -> clear fallback -> smoke normal routing -> clear warning`. For PROD ASG-refresh rollouts, use the ALB fallback for the cutover risk, but clear it if the instance refresh waits on ELB health with `Target.NotInUse` / `insufficient data`; target groups must be in normal forwarding to become healthy. Do not treat the in-app warning as a substitute for the ALB fallback when target health may drop, but keep the in-app warning active until normal-routing smoke passes.

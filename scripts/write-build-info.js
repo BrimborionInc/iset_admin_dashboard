@@ -149,9 +149,11 @@ function buildPublicReleaseNotes({ builtAt, releaseId }) {
   const markdown = fs.readFileSync(RELEASE_NOTES_LOG_PATH, 'utf8');
   const enFeatures = extractBulletSection(markdown, "What's New (draft bullets - EN)");
   const enKnownIssues = extractBulletSection(markdown, 'Known Bugs (draft bullets - EN)', { required: false });
+  const enPreviousChanges = extractBulletSection(markdown, 'Earlier Changes (draft bullets - EN)', { required: false });
   const enComingNext = extractBulletSection(markdown, 'Coming Soon (draft bullets - EN)', { required: false });
   const frFeatures = extractBulletSection(markdown, 'Nouveautes (brouillon - FR)');
   const frKnownIssues = extractBulletSection(markdown, 'Problemes connus (brouillon - FR)', { required: false });
+  const frPreviousChanges = extractBulletSection(markdown, 'Changements precedents (brouillon - FR)', { required: false });
   const frComingNext = extractBulletSection(markdown, 'A venir (brouillon - FR)', { required: false });
   const releaseLabel = releaseId ? `Release ${releaseId}` : 'Current build';
 
@@ -168,6 +170,8 @@ function buildPublicReleaseNotes({ builtAt, releaseId }) {
       features: enFeatures,
       knownIssuesHeading: 'Known issues',
       knownIssues: enKnownIssues,
+      previousChangesHeading: 'Earlier changes',
+      previousChanges: enPreviousChanges,
       comingNextHeading: 'Coming next',
       comingNext: enComingNext,
     },
@@ -178,6 +182,8 @@ function buildPublicReleaseNotes({ builtAt, releaseId }) {
       features: frFeatures,
       knownIssuesHeading: 'Points connus',
       knownIssues: frKnownIssues,
+      previousChangesHeading: 'Changements precedents',
+      previousChanges: frPreviousChanges,
       comingNextHeading: 'A venir',
       comingNext: frComingNext,
     },

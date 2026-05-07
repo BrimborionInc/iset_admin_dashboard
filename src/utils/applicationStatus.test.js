@@ -1,4 +1,6 @@
 import {
+  buildAssessmentDecisionAlignmentError,
+  deriveAssessmentDecisionStatusFromAgreement,
   deriveAssessmentReviewStatusSelection,
   deriveApplicationDecisionOutcome,
 } from './applicationStatus';
@@ -50,5 +52,47 @@ describe('deriveApplicationDecisionOutcome', () => {
         caseStatus: 'closed',
       })
     ).toBe('denied');
+  });
+});
+
+describe('deriveAssessmentDecisionStatusFromAgreement', () => {
+  it('defaults agreement with a no-funding recommendation to deny funding', () => {
+    expect(
+      deriveAssessmentDecisionStatusFromAgreement({
+        recommendation: 'no_recommend',
+        assessmentReview: 'agree',
+      })
+    ).toBe('reject');
+  });
+
+  it('defaults disagreement with a no-funding recommendation to approve funding', () => {
+    expect(
+      deriveAssessmentDecisionStatusFromAgreement({
+        recommendation: 'no_recommend',
+        assessmentReview: 'disagree',
+      })
+    ).toBe('approve');
+  });
+});
+
+describe('buildAssessmentDecisionAlignmentError', () => {
+  it('flags approve plus agreement with a no-funding recommendation as contradictory', () => {
+    expect(
+      buildAssessmentDecisionAlignmentError({
+        recommendation: 'no_recommend',
+        assessmentReview: 'agree',
+        decisionStatus: 'approve',
+      })
+    ).toContain('conflicts');
+  });
+
+  it('allows deny plus agreement with a no-funding recommendation', () => {
+    expect(
+      buildAssessmentDecisionAlignmentError({
+        recommendation: 'no_recommend',
+        assessmentReview: 'agree',
+        decisionStatus: 'reject',
+      })
+    ).toBe('');
   });
 });

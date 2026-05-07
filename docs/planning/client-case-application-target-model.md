@@ -4,7 +4,7 @@ Purpose: define the agreed PATH entity model for `client`, `case`, and `applicat
 
 Audience: product, engineering, reporting/data, and migration planning.
 
-Last Updated: 2026-05-01
+Last Updated: 2026-05-07
 
 ## Status
 
@@ -20,6 +20,7 @@ Last Updated: 2026-05-01
 - `client`: the canonical person record. One real person should map to one `client`. Duplicate client rows are data defects.
 - `case`: the long-lived operational file for that client. One client should have one case.
 - `application`: a discrete intake/request/decision event. A client may have many applications over time.
+- `assessment`: the application-specific assessment, recommendation, review, and generated-document source for a discrete application inside a case.
 - `action_plan`: a support episode inside the case. Action plans are owned by the case and may optionally retain application provenance.
 - `draft`: pre-submission working state. Drafts are not applications.
 
@@ -28,6 +29,7 @@ Last Updated: 2026-05-01
 - one `client` -> one `case`
 - one `client` -> many `applications`
 - one `case` -> many `applications`
+- one `application` -> zero or one application assessment
 - one `case` -> many `action_plans`
 - one `action_plan` -> many `interventions`
 - documents belong to the case context and may also carry application or action-plan provenance
@@ -64,6 +66,7 @@ Verified from current schema and code:
 - Client Batch Import already supports `client` plus application-less `iset_case`.
 - Case-level "primary application" joins now prefer non-terminal application rows before terminal rows (`approved`, `completed`, denied/withdrawn/cancelled/closed/archived states), so late client-file or document updates on historical completed applications do not make those applications the current queue target when a newer active application exists.
 - `PUT /api/cases/:id` rejects attempts to move a terminal application back into review or document-request queues; the approved-to-completed finish transition remains allowed.
+- Discovered gap on 2026-05-07: `iset_case_assessment` still has one row per `case_id` and no `application_id`, so repeat applications on the same case can load and overwrite the prior application's assessment. Treat this as the active exception to the target model until `docs/planning/application-assessment-application-scope-migration-plan.md` is implemented.
 - Remaining non-final pieces:
   - TEST/PROD still need the DEV backfill/retirement/hardening migrations rehearsed against live data.
   - Some workflows still accept `application_id` as an entry parameter, but they now resolve the case through `iset_application.case_id` instead of a case-side pointer.
@@ -86,6 +89,13 @@ Verified from current schema and code:
   - both required for submitted rows; DEV enforces this as `NOT NULL`
   - application ownership must no longer depend on `iset_case.application_id`
 
+- `iset_case_assessment`
+  - target one assessment per application, not one assessment per case
+  - keep `case_id` as case context
+  - add `application_id` for ownership/provenance
+  - allow application-less assessment only for explicitly supported imported/historical case work
+  - migration planning lives in `docs/planning/application-assessment-application-scope-migration-plan.md`
+
 - `iset_case_action_plan`
   - keep `case_id` as the owning foreign key
   - optional `application_id` for provenance
@@ -104,6 +114,7 @@ Verified from current schema and code:
 6. Add and enforce one-case-per-client constraints after data cleanup.
 7. Retire or repurpose `iset_case.application_id` once no core flow depends on it as the primary relationship anchor. Completed in DEV by migration `20260427_0013_retire_legacy_case_application_pointer.sql`.
 8. Harden application ownership after the backfill is clean. Completed in DEV by migration `20260427_0014_harden_application_case_scope.sql`.
+9. Move `iset_case_assessment` from case-scoped storage to application-scoped storage before repeat-application assessment workflows are rolled out to TEST/PROD.
 
 ## Current Verified Gaps To Resolve
 
@@ -127,6 +138,7 @@ Verified from current schema and code:
 - `docs/data/documents-model.md`
 - `docs/planning/client-case-application-migration-plan.md`
 - `docs/planning/status-architecture-overhaul.md`
+- `docs/planning/application-assessment-application-scope-migration-plan.md`
 
 ## Next Planning Step
 

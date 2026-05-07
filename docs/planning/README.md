@@ -19,6 +19,7 @@ As of the 2026-04-29 documentation cleanup, these are the main planning docs int
 
 - `client-case-application-target-model.md`
 - `client-case-application-migration-plan.md`
+- `application-assessment-application-scope-migration-plan.md`
 - `privacy-erm-cleanup-grand-release-plan.md`
 - `privacy-erm-cleanup-progress.md`
 - `privacy-security-systematic-review-2026-04-25.md`
@@ -26,6 +27,8 @@ As of the 2026-04-29 documentation cleanup, these are the main planning docs int
 - `status-architecture-overhaul.md`
 - `step19-checkbox-conditionality-followup.md`
 - `path-document-type-canonical-review.md`
+- `admin-ai-chatbot-knowledge-base-transformation.md`
+- `admin-ai-chatbot-coverage-register.md`
 
 `client-case-application-cutover-dependency-inventory.md` is useful for dependency history, but `docs/AGENTS.md` currently says to use `client-case-application-target-model.md` for the live target model where they differ.
 

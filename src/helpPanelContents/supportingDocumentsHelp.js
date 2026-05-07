@@ -86,6 +86,10 @@ const SupportingDocumentsHelp = () => (
       <li>
         In the case workspace, select an intervention to view its checklist when the case has a linked application.
       </li>
+      <li>
+        If required application documents are missing, request them through <strong>Secure Messaging</strong> and record
+        the request, deadline, and follow-up attempts in <strong>Notes and Tasks</strong> or <strong>Case Notes</strong>.
+      </li>
     </ul>
 
     <h3>Troubleshooting</h3>
@@ -120,7 +124,9 @@ sortable, with Uploaded shown near the front by default, and that column prefere
 For historical client-file documents, keep the guidance practical: use \`Case header > Upload existing documents\`,
 choose the label and document type, and attach the file to the correct client, case, or action-plan record. Avoid
 implementation explanations unless the staff member specifically asks for them. Offer troubleshooting for missing checklist
-counts and unavailable files.
+counts and unavailable files. When required application documents are missing, direct staff to identify the gap in the
+Checklist, request the item through Secure Messaging, and record the request/deadline/follow-up attempts in Notes and Tasks
+or Case Notes instead of relying on outside email alone.
 `;
 
 export default SupportingDocumentsHelp;

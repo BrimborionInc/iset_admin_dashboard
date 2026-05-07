@@ -153,8 +153,13 @@ export const NwacAssessmentHelp = ({ onRestartTutorial, onEndTutorial }) => {
         <li>Select <strong>Approved</strong>, <strong>Denied</strong>, or <strong>Request Changes</strong>.</li>
         <li>Choose the <strong>Assessment Assurance</strong> outcome when approving or denying.</li>
         <li>Provide the <strong>Reason for denial</strong> or <strong>Request Changes note</strong> when required.</li>
-        <li>Click <em>Commit</em> to save the outcome, update status, and unlock the Communication step.</li>
+        <li>Click <em>Commit</em> to save the outcome. Approved or denied outcomes unlock the Communication step; Request Changes sends the assessment back for updates.</li>
       </ol>
+      <p>
+        <strong>Request Changes</strong> sends the assessment back to the coordinator or case manager for updates.
+        PATH records the Request Changes note in Case Notes / Notes and Reminders for audit visibility; it is not the
+        same as denying the application.
+      </p>
 
       <h3>Quick start walkthrough</h3>
       <p>Use the guided walkthrough if you want a focused pass through recording the NWAC decision, checking consistency, and moving the outcome into communication.</p>

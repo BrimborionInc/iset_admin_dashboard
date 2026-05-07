@@ -1,7 +1,7 @@
 # Agent Operational Access Notes
 
 Status: current operational access guidance for Codex/WSL threads. Verify live AWS/DB state before running mutating commands.
-Last reviewed: 2026-05-04 during PROD DB access verification.
+Last reviewed: 2026-05-07 after WSL local-development migration.
 
 Purpose: keep database, TEST/PROD, and AWS profile command notes out of `docs/AGENTS.md` while preserving the operational details future agents need.
 
@@ -11,6 +11,13 @@ Purpose: keep database, TEST/PROD, and AWS profile command notes out of `docs/AG
 - When tables/columns/relationships change, update the index and linked domain docs.
 - Regenerate schema dump after schema changes, but do not commit dump files:
   `npm run dump:dev-schema`
+
+## Local Workspace And Deploy Split
+
+- Daily coding/Codex work now happens in the WSL multi-root workspace `/home/bill/ISET/path-dev-wsl.code-workspace`.
+- That workspace includes `/home/bill/ISET/admin-dashboard`, `/home/bill/ISET/ISET-intake`, `/home/bill/ISET/shared`, and `/home/bill/ISET/intacct-mock-service`.
+- TEST/PROD app deploys still run from the Windows checkout (`X:\ISET\admin-dashboard`) because the rollout path shells into Windows `npm` / PowerShell scripts.
+- Before a deploy, explicitly align the Windows checkout with WSL changes and inspect the Windows tree. Do not assume `/home/bill/ISET` edits are what `path:deploy` will package.
 
 ## DB Interaction From WSL (DEV)
 

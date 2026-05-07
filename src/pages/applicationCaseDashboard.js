@@ -233,6 +233,12 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
   const { id } = useParams(); // id = iset_case.id
   const location = useLocation();
   const history = useHistory();
+  const selectedApplicationId = useMemo(() => {
+    const searchValue = new URLSearchParams(location?.search || '').get('applicationId');
+    const raw = searchValue || location?.state?.applicationId || location?.state?.application_id || '';
+    const numeric = Number.parseInt(raw, 10);
+    return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
+  }, [location?.search, location?.state]);
   const [caseData, setCaseData] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [appRowVersion, setAppRowVersion] = useState(0);
@@ -449,8 +455,9 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
     let attempt = 0;
     while (true) {
       try {
-        console.info('[case:ui] requesting case', { caseId, attempt: attempt + 1, retries: retries + 1 });
-        const res = await apiFetch(`/api/cases/${caseId}`);
+        const query = selectedApplicationId ? `?applicationId=${encodeURIComponent(selectedApplicationId)}` : '';
+        console.info('[case:ui] requesting case', { caseId, selectedApplicationId, attempt: attempt + 1, retries: retries + 1 });
+        const res = await apiFetch(`/api/cases/${caseId}${query}`);
         console.info('[case:ui] response received', { caseId, status: res.status, ok: res.ok, attempt: attempt + 1 });
         if (res.ok) {
           const data = await res.json().catch(() => null);
@@ -483,7 +490,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
         throw err;
       }
     }
-  }, []);
+  }, [selectedApplicationId]);
 
   const refreshCaseData = useCallback(async () => {
     if (!id) return null;
@@ -496,7 +503,8 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
         ...data,
         ...resolveApplicationStateFields(data),
       };
-      const applied = applyCaseDataIfNewer(String(id), normalised);
+      const key = selectedApplicationId ? `${id}:application:${selectedApplicationId}` : String(id);
+      const applied = applyCaseDataIfNewer(key, normalised);
       setCaseData(applied);
       const incomingVersion = Number(normalised.application_row_version || 0);
       if (incomingVersion) {
@@ -515,13 +523,13 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
       setLoadError(message);
       return null;
     }
-  }, [id, location?.state?.assessorEmail, applyCaseDataIfNewer, loadCaseResponse]);
+  }, [id, selectedApplicationId, location?.state?.assessorEmail, applyCaseDataIfNewer, loadCaseResponse]);
 
   useEffect(() => {
     if (!id) return;
     let isMounted = true;
     setLoadError(null);
-    const key = String(id);
+    const key = selectedApplicationId ? `${id}:application:${selectedApplicationId}` : String(id);
 
     // Show cached data immediately if we have it, but still fetch fresh data
     if (cacheRef.current.has(key)) {
@@ -610,7 +618,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
     return () => {
       isMounted = false;
     };
-  }, [id, location?.state?.assessorEmail, applyCaseDataIfNewer, loadCaseResponse, updateBreadcrumbs]);
+  }, [id, selectedApplicationId, location?.state?.assessorEmail, applyCaseDataIfNewer, loadCaseResponse, updateBreadcrumbs]);
 
   useEffect(() => {
     setLayout(current => current); // ensure board rerenders when caseData changes

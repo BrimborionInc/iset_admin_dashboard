@@ -36,7 +36,7 @@ const {
 const nunjucks = require("nunjucks");
 let pool; // Initialized after DB config loads
 const { getRenderer: getComponentRenderer } = require('./src/server/componentRenderRegistry');
-const { buildHelpPanelGuidanceSystemPrompt } = require('./src/server/adminAiGuidanceService');
+const { buildHelpPanelGuidanceResult } = require('./src/server/adminAiGuidanceService');
 const { createEventService, EventValidationError, registerNotificationHook } = require('../shared/events');
 const {
   emitApplicantWatchlistHitEvents,
@@ -29999,6 +29999,35 @@ function adminAiMessagesContainSensitiveContent(messages = []) {
   );
 }
 
+function isTruthyConfigValue(value) {
+  return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
+
+function shouldIncludeAdminAiGuidanceDebug(req) {
+  return isTruthyConfigValue(process.env.ADMIN_AI_GUIDANCE_DEBUG) && sysAdminOnly(req);
+}
+
+function buildAdminAiGuidanceDebugPayload(result) {
+  if (!result) return null;
+  const context = result.context || {};
+  const matches = Array.isArray(result.matches) ? result.matches : [];
+  const examples = Array.isArray(result.examples) ? result.examples : [];
+  return {
+    promptInjected: Boolean(result.prompt),
+    matched: matches.length > 0,
+    noMatchReason: result.noMatchReason || null,
+    context: {
+      surface: context.surface || null,
+      pathname: context.pathname || null,
+      helpTitle: context.helpTitle || null,
+      role: context.role || null,
+      workflowState: context.workflowState || null,
+    },
+    matches,
+    examples,
+  };
+}
+
 // GET /api/ai/models -> dynamic model catalog (role not strictly required but we may restrict later)
 app.get('/api/ai/models', async (req, res) => {
   try {
@@ -30054,13 +30083,16 @@ app.post('/api/ai/chat', async (req, res) => {
       });
     }
     let effectiveMessages = safeMessages;
+    let guidanceDebug = null;
     if (chatContext && pool) {
       try {
-        const guidancePrompt = await buildHelpPanelGuidanceSystemPrompt({
+        const guidanceResult = await buildHelpPanelGuidanceResult({
           pool,
           chatContext,
           messages: safeMessages,
         });
+        guidanceDebug = buildAdminAiGuidanceDebugPayload(guidanceResult);
+        const guidancePrompt = guidanceResult.prompt;
         if (guidancePrompt) {
           const guidanceMessage = { role: 'system', content: guidancePrompt.slice(0, 12000) };
           const firstNonSystemIndex = safeMessages.findIndex(message => message.role !== 'system');
@@ -30116,16 +30148,22 @@ app.post('/api/ai/chat', async (req, res) => {
           if (fb === mdl) continue; // skip if same
             try {
               resp = await tryModel(fb);
-              return res.status(200).json({ ...resp.data, _fallbackChain: attempted });
+              const fallbackPayload = { ...resp.data, _fallbackChain: attempted };
+              if (guidanceDebug && shouldIncludeAdminAiGuidanceDebug(req)) fallbackPayload._guidance = guidanceDebug;
+              return res.status(200).json(fallbackPayload);
             } catch (e2) {
               continue;
             }
         }
       }
       const details = err?.response?.data || { message: err.message };
-      return res.status(status || 500).json({ error: 'proxy_failed', details, attempted, _fallbackChain: attempted });
+      const errorPayload = { error: 'proxy_failed', details, attempted, _fallbackChain: attempted };
+      if (guidanceDebug && shouldIncludeAdminAiGuidanceDebug(req)) errorPayload._guidance = guidanceDebug;
+      return res.status(status || 500).json(errorPayload);
     }
-    res.status(200).json({ ...resp.data, _attempted: attempted });
+    const responsePayload = { ...resp.data, _attempted: attempted };
+    if (guidanceDebug && shouldIncludeAdminAiGuidanceDebug(req)) responsePayload._guidance = guidanceDebug;
+    res.status(200).json(responsePayload);
   } catch (e) {
     const status = e?.response?.status || 500;
     const details = e?.response?.data || { message: e.message };
@@ -52714,6 +52752,7 @@ app.get('/api/cases/:id', async (req, res) => {
   if (!caseId) {
     return res.status(400).json({ error: 'invalid_case_id' });
   }
+  const requestedApplicationId = normalisePositiveInteger(req.query.applicationId || req.query.application_id);
   const traceId = `case-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const startedAt = Date.now();
   const staffProfileIdRaw = req?.staffProfile?.id ?? req?.auth?.staffProfileId ?? null;
@@ -52722,13 +52761,16 @@ app.get('/api/cases/:id', async (req, res) => {
   let usedFallbackQuery = false;
   let fallbackReason = null;
   try {
-    console.info('[case:detail] start', { traceId, caseId, conflictJoinStaffId });
+    console.info('[case:detail] start', { traceId, caseId, requestedApplicationId, conflictJoinStaffId });
     const accessError = await validateCaseAccessByCaseId(req, caseId);
     if (accessError) {
       return res.status(accessError.status).json(accessError.body);
     }
     await ensureAssessmentBudgetPotColumn();
     // Fetch case core details + assessment snapshot
+    const applicationJoinSql = requestedApplicationId
+      ? 'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
+      : buildCasePrimaryApplicationJoinSql('c', 'a');
     const baseSql = `
       SELECT
         c.id,
@@ -52808,7 +52850,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         cd.declaration_choice AS assessment_conflict_declaration_choice,
         cd.conflict_details AS assessment_conflict_declaration_details
       FROM iset_case c
-      ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+      ${applicationJoinSql}
       LEFT JOIN application_lock al ON al.application_id = a.id AND al.expires_at > NOW()
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
@@ -52821,7 +52863,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       WHERE c.id = ?
     `;
 
-    const params = [conflictJoinStaffId, caseId];
+    const params = requestedApplicationId
+      ? [requestedApplicationId, conflictJoinStaffId, caseId]
+      : [conflictJoinStaffId, caseId];
 
     let rows;
     try {
@@ -52891,8 +52935,11 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           ? "JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number')) AS tracking_id, a.created_at AS submitted_at"
           : "NULL AS tracking_id, NULL AS submitted_at";
 
+        const fallbackApplicationJoinSql = requestedApplicationId
+          ? 'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
+          : buildCasePrimaryApplicationJoinSql('c', 'a', true);
         const fromClause = hasApp
-          ? `FROM iset_case c ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}`
+          ? `FROM iset_case c ${fallbackApplicationJoinSql}`
           : 'FROM iset_case c';
 
         const staffJoin = (hasStaffEmail && existingCols.includes('assigned_staff_profile_id'))
@@ -52905,7 +52952,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         const caseSelect = caseSelectParts.join(', ');
 
         const fallbackSql = `SELECT ${caseSelect}, ${trackingSelect}, ${coalesceSelect} ${fromClause} ${submissionJoin} ${applicantJoin} ${staffJoin} WHERE c.id = ? LIMIT 1`;
-        [rows] = await pool.query(fallbackSql, [caseId]);
+        const fallbackParams = requestedApplicationId ? [requestedApplicationId, caseId] : [caseId];
+        [rows] = await pool.query(fallbackSql, fallbackParams);
       } else {
         throw e;
       }
@@ -78009,10 +78057,10 @@ app.get('/api/applications', async (req, res) => {
          WHERE dfa.status = 'active'
            AND dfa.document_category = 'funding_agreement'
            AND (dfa.application_id = a.id OR dfa.case_id = c.id)
-	      ) AS funding_agreement_count,
-	      ${approvalDecisionLetterSentExpr} AS approval_decision_letter_sent,
-	      ${denialDecisionLetterSentExpr} AS denial_decision_letter_sent,
-	      a.created_at AS submitted_at,
+      ) AS funding_agreement_count,
+      ${approvalDecisionLetterSentExpr} AS approval_decision_letter_sent,
+      ${denialDecisionLetterSentExpr} AS denial_decision_letter_sent,
+      a.created_at AS submitted_at,
       ${preferredNameExpr} AS preferred_name,
       ${applicantFirstNameExpr} AS applicant_first_name,
       ${applicantLastNameExpr} AS applicant_last_name,
@@ -78024,7 +78072,7 @@ app.get('/api/applications', async (req, res) => {
       ${submissionLastNameExpr} AS submission_last_name,
       0 AS is_unassigned_submission
       FROM iset_case c
-      ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
+      JOIN iset_application a ON ${buildApplicationCaseJoinPredicate('c', 'a')}
       LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
       LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
@@ -78173,7 +78221,7 @@ app.get('/api/applications', async (req, res) => {
     let count = rows.length;
     try {
       if (role === 'NWAC Administrator' || role === 'System Administrator') {
-        let countCaseSql = `SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c ${buildCasePrimaryApplicationJoinSql('c', 'a', true)} LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id`;
+        let countCaseSql = `SELECT COUNT(DISTINCT a.id) AS cnt FROM iset_case c JOIN iset_application a ON ${buildApplicationCaseJoinPredicate('c', 'a')} LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id`;
         if (where.length) countCaseSql += ' WHERE ' + where.join(' AND ');
         const [[caseCnt]] = await pool.query(countCaseSql, params);
         const unassignedWhereClauses = ['c2.id IS NULL'];
@@ -78198,7 +78246,7 @@ app.get('/api/applications', async (req, res) => {
         const [[unassignedCnt]] = await pool.query(unassignedSql, unassignedParams);
         count = (caseCnt?.cnt || 0) + (unassignedCnt?.cnt || 0);
       } else {
-        let countSql = `SELECT COUNT(DISTINCT c.id) AS cnt FROM iset_case c ${buildCasePrimaryApplicationJoinSql('c', 'a', true)} LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id`;
+        let countSql = `SELECT COUNT(DISTINCT a.id) AS cnt FROM iset_case c JOIN iset_application a ON ${buildApplicationCaseJoinPredicate('c', 'a')} LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id`;
         if (where.length) countSql += ' WHERE ' + where.join(' AND ');
         const [[cRow]] = await pool.query(countSql, params);
         if (cRow && typeof cRow.cnt === 'number') count = cRow.cnt;

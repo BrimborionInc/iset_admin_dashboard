@@ -4,13 +4,14 @@ Purpose: plan the database and data migration from the current hybrid PATH model
 
 Audience: engineering, product, operations, and release planning.
 
-Last Updated: 2026-04-27
+Last Updated: 2026-05-07
 
 ## Status
 
 - Planning draft based on current development schema and current code paths.
 - Assumes production is in early live use and must be migrated carefully.
 - This note is the canonical migration-planning companion to `docs/planning/client-case-application-target-model.md`.
+- 2026-05-07 update: the repeat-application workflow exposed that `iset_case_assessment` is still case-scoped. Older wording in this plan that describes assessments as case-owned is superseded for the application assessment workflow by `docs/planning/application-assessment-application-scope-migration-plan.md`.
 - 2026-04-27 DEV update: `iset_case.application_id` has been physically retired in DEV by `sql/migrations/20260427_0013_retire_legacy_case_application_pointer.sql`, and `iset_application.client_id` / `case_id` are required by `sql/migrations/20260427_0014_harden_application_case_scope.sql`. Older sections below that describe the case-side pointer or nullable application ownership are historical baseline context for TEST/PROD rehearsal and should not be read as current DEV state.
 - Status-overhaul planning is tracked in `docs/planning/status-architecture-overhaul.md`.
 - The route/query/widget dependency ledger for cutover is tracked in `docs/planning/client-case-application-cutover-dependency-inventory.md`.
@@ -71,7 +72,7 @@ The current schema is only partially fit for the agreed target model.
 What is already aligned:
 
 - `client` already exists as the canonical person entity.
-- Most operational child records are already case-owned: assessments, action plans, interventions, notes, tasks, events, reminders, finance snapshots, and several reporting tables.
+- Most operational child records are already case-owned: action plans, interventions, notes, tasks, events, reminders, finance snapshots, and several reporting tables. Application assessment is the exception discovered during repeat-application testing; see `docs/planning/application-assessment-application-scope-migration-plan.md`.
 - `iset_document` already supports `client_id`, `case_id`, `application_id`, and `action_plan_id`.
 
 What is not fit for purpose:

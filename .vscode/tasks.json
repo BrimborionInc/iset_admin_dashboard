@@ -1,14 +1,96 @@
 {
-	"version": "2.0.0",
-	"tasks": [
-		{
-			"label": "install-ajv",
-			"type": "shell",
-			"command": "npm install ajv@^8.12.0 --no-audit --save",
-			"args": [],
-			"isBackground": false,
-			"problemMatcher": [],
-			"group": "build"
-		}
-	]
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Public Frontend",
+      "type": "shell",
+      "command": "BROWSER=none npm start",
+      "options": {
+        "cwd": "${workspaceFolder}/../ISET-intake"
+      },
+      "presentation": {
+        "panel": "new",
+        "reveal": "always"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Public Backend",
+      "type": "shell",
+      "command": "DB_HOST=172.26.176.1 LD_LIBRARY_PATH=/home/bill/.local/chrome-deps/extract/usr/lib/x86_64-linux-gnu nodemon server.js",
+      "options": {
+        "cwd": "${workspaceFolder}/../ISET-intake"
+      },
+      "presentation": {
+        "panel": "new",
+        "reveal": "always"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "MinIO",
+      "type": "shell",
+      "command": "mkdir -p minio/data && MINIO_ROOT_USER=\"$(grep -m1 '^OBJECT_ACCESS_KEY=' .env | cut -d= -f2-)\" MINIO_ROOT_PASSWORD=\"$(grep -m1 '^OBJECT_SECRET_KEY=' .env | cut -d= -f2-)\" ./minio/minio server minio/data --address :9000 --console-address :9001",
+      "options": {
+        "cwd": "${workspaceFolder}/../ISET-intake"
+      },
+      "presentation": {
+        "panel": "new",
+        "reveal": "always"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Admin Frontend",
+      "type": "shell",
+      "command": "PORT=3001 BROWSER=none node scripts/write-build-info.js --build-target local-start && PORT=3001 BROWSER=none ./node_modules/.bin/react-scripts start",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "panel": "new",
+        "reveal": "always"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Admin Backend",
+      "type": "shell",
+      "command": "DB_HOST=172.26.176.1 LD_LIBRARY_PATH=/home/bill/.local/chrome-deps/extract/usr/lib/x86_64-linux-gnu ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES=true nodemon isetadminserver.js",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "panel": "new",
+        "reveal": "always"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Sage Intacct Mock",
+      "type": "shell",
+      "command": "DB_HOST=172.26.176.1 npm start",
+      "options": {
+        "cwd": "${workspaceFolder}/../intacct-mock-service"
+      },
+      "presentation": {
+        "panel": "new",
+        "reveal": "always"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "dev:all",
+      "dependsOrder": "parallel",
+      "dependsOn": [
+        "Public Frontend",
+        "Public Backend",
+        "MinIO",
+        "Admin Frontend",
+        "Admin Backend",
+        "Sage Intacct Mock"
+      ],
+      "problemMatcher": []
+    }
+  ]
 }

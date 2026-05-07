@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next "What's New" update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-05-06
+Last Updated: 2026-05-07
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -12,6 +12,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Include enough context that a future thread can convert entries into polished "What's New", "Known Bugs", and "Coming Soon" sections.
 - Keep entries concise and factual; avoid speculative language.
 - Keep the draft bullet sections at the bottom of this file current in both English and French. The normal build/deploy path now generates `src/generated/publicReleaseNotes.js` from those sections. The "What's New" / "Nouveautes" lists must not be empty; "Known Bugs" and "Coming Soon" can be left empty when there is nothing accurate to publish.
+- Keep the top "What's New" / "Nouveautes" sections focused on the current patch. When useful, move still-relevant earlier notes into "Earlier Changes" / "Changements precedents" so the current patch does not look larger than it is.
 - If Bill asks for a bullet summary of the last week's user-interesting fixes/changes, use this log as the primary source but also review `docs/meta/codex-thread-index.md` for recent user-visible work that may not have originated from a bug report or change request.
 - Do not assume the feedback-report queue is a complete source for weekly user-facing summaries; include relevant non-queue improvements when they materially changed the product experience.
 
@@ -42,6 +43,12 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - 2026-05-06 | Release TBD | UX/Casework | Approval letters | Generated approval-letter packs now let staff edit supporting institution, loan-provider, and other-funder letters before downloading them. | Applies to application approval follow-up and intervention approval/revision follow-up; application approval supporting-letter edits are saved with the draft pack.
 - 2026-05-06 | Release TBD | UX/Homepage | Work Queue > On Hold | Added an On Hold queue for applications that need to stay open but leave active assessment/decision queues while staff wait for external funding, future start timing, an applicant pause, or internal follow-up. | Application Overview now has a Put on hold quick action that captures the reason, creates a review reminder, and can be reversed with Resume review.
 - 2026-05-06 | Release TBD | Fix/Public portal | Intake submission | Final public-portal submission now preserves the durable saved application answers instead of creating upload/signature-only submissions when the short-lived final-step state is missing earlier answers. | The portal completion path merges the saved draft with current submit-step data and rejects incomplete final-step-only payloads with a recoverable message.
+- 2026-05-07 | Release TBD | UX/Admin AI | Ask the AI | The admin help chatbot now uses stricter PATH guidance guardrails when no verified knowledge-card match is available. | For workflow-specific questions, it should say verified PATH guidance is not available yet instead of inventing buttons, queues, templates, or side effects from generic software patterns.
+- 2026-05-07 | Release TBD | UX/Admin AI | Ask the AI | Added verified chatbot guidance for preparing approved intervention proposal approval letters from Case Workspace. | The guidance points staff to Interventions > Prepare approval letters, Generate drafts, the letter tabs, and Send client approval letter, and avoids the previous generic "Approvals area" style answer.
+- 2026-05-07 | Release TBD | UX/Admin AI | Ask the AI | Added verified chatbot guidance for the homepage Pending Completion queue. | The guidance explains that Pending Completion is post-decision follow-through for applications plus approved intervention proposal/revision letter follow-up, not an archive or completed-only queue.
+- 2026-05-07 | Release TBD | UX/Admin AI | Ask the AI | Added verified chatbot guidance for missing required documents during application assessment. | The guidance tells staff to identify checklist gaps in Supporting Documents, request missing items through Secure Messaging, and record follow-up attempts in Notes or Case Notes.
+- 2026-05-07 | Release TBD | UX/Admin AI | Ask the AI | Added verified chatbot guidance for Request Changes during application approval review. | The guidance explains the Funding Decision > Request Changes path, required note, Case Notes audit trail, and that it is not approval or denial communication.
+- 2026-05-07 | Release TBD | Known issue/Application assessment | Repeat applications for an existing client can currently load the previous application's assessment because assessment storage is still case-scoped. | Impact: staff may see pre-filled assessment answers from an earlier application, and editing them can overwrite that earlier assessment. Planned fix: application-scoped assessment migration over the weekend.
 2026-05-02 | Release TBD | Notifications | Template Editor dashboard | Added explicit event timestamp fields for staff notification templates and a new `New secure message from applicant` DEV template that alerts staff without exposing secure-message content in email. | Supports safe staff email alerts for applicant-origin secure messages.
 2026-05-02 | Release TBD | Notifications | Manage Notifications | Split secure-message notification events into applicant-to-staff and staff-to-applicant directions. | Staff templates now belong on `Applicant secure message received`, while the applicant `"You've got secure mail"` template belongs on `Staff secure message sent`.
 2026-05-02 | Release TBD | Notifications | Secure messaging | Limited applicant-origin secure-message staff alerts to the assigned file owner plus case watchers when configured. | The inbound event no longer emails or bell-alerts every System/NWAC/Regional user just because that role row is enabled.
@@ -274,6 +281,17 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
+- Fixed the ISET Applications list so staff can use All Applications or Closed views to open more than one application for the same client/case, including historical applications.
+- Removed the public portal footer Contact link so applicants are directed toward secure Messages for case-manager contact.
+- Made application approval decisions clearer by separating agreement with the case manager recommendation from the final funding outcome.
+- Improved Ask the AI guidance and guardrails for common application, document, approval-letter, and Pending Completion questions.
+
+### Known Bugs (draft bullets - EN)
+
+- Known issue: repeat applications for an existing client can currently open the previous application's assessment. Please avoid editing the assessment on a repeat application for now, because changes can overwrite the earlier assessment; we plan to fix this over the weekend.
+
+### Earlier Changes (draft bullets - EN)
+
 - Added an On Hold stage for applications that need to stay open but leave active assessment and decision queues until staff resume review.
 - Added Application Overview actions to put an application on hold with a reason and review reminder, then resume it when follow-up is ready.
 - Fixed a public-portal submission issue where final submission could create an upload/signature-only record instead of preserving the full saved application.
@@ -283,11 +301,20 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Fixed the Case Workspace `Prepare approval letters` action so approved intervention proposals open the approval-letter follow-up directly.
 - Fixed document checklist rules so tuition/books-only applications are not blocked by income or expense evidence, and Band/Nation decision letters count correctly in intervention proposal checklists.
 
-### Known Bugs (draft bullets - EN)
-
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
+
+- Correction de la liste des demandes ISET afin que le personnel puisse utiliser les vues Toutes les demandes ou Fermees pour ouvrir plusieurs demandes du meme client/dossier, y compris les demandes historiques.
+- Retrait du lien Contact dans le pied de page du portail public afin que les candidates et candidats soient diriges vers les Messages securises pour joindre leur gestionnaire de cas.
+- Clarification des decisions d'approbation des demandes en separant l'accord avec la recommandation du gestionnaire de cas du resultat final de financement.
+- Amelioration des consignes et garde-fous de Ask the AI pour les questions courantes sur les demandes, documents, lettres d'approbation et la file En attente de completion.
+
+### Problemes connus (brouillon - FR)
+
+- Probleme connu : les nouvelles demandes d'un client deja inscrit peuvent ouvrir l'evaluation de la demande precedente. Evitez de modifier l'evaluation d'une demande repetee pour l'instant, car les changements peuvent remplacer l'evaluation precedente; une correction est prevue pendant la fin de semaine.
+
+### Changements precedents (brouillon - FR)
 
 - Ajout d'une etape En attente pour les demandes qui doivent rester ouvertes, mais sortir des files d'evaluation et de decision jusqu'a la reprise de la revue.
 - Ajout d'actions dans l'apercu de la demande pour mettre une demande en attente avec une raison et un rappel, puis reprendre la revue.
@@ -297,7 +324,5 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les ensembles de lettres d'approbation permettent maintenant de modifier les lettres aux etablissements, preteurs et autres bailleurs de fonds avant l'envoi ou le telechargement.
 - Correction de l'action `Preparer les lettres d'approbation` dans l'espace Dossier afin que les propositions d'intervention approuvees ouvrent directement le suivi de lettre d'approbation.
 - Correction des regles de liste de verification des documents afin que les demandes pour frais de scolarite/livres seulement ne soient pas bloquees par les preuves de revenu ou de depenses, et que les lettres de decision de bande ou de nation soient bien reconnues dans les propositions d'intervention.
-
-### Problemes connus (brouillon - FR)
 
 ### A venir (brouillon - FR)

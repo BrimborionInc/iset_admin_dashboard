@@ -22,11 +22,13 @@ The documentation under `docs/` is maintained as persistent project memory for f
 
 ## Common Commands
 
-Verified from `package.json` on 2026-04-29.
+Verified from `package.json` and WSL task config on 2026-05-07.
+
+- WSL local dev checkout: open `/home/bill/ISET/admin-dashboard` in VS Code and run task `dev:all` for admin, public portal, MinIO, and the Sage Intacct mock service. See `docs/guides/wsl-local-development.md`.
 
 - `npm start`: write local build info and start the CRA dev server on port `3001`.
 - `npm run server`: start `isetadminserver.js`.
-- `npm run dev`: delegate to `../ISET-intake/start-dev.ps1`.
+- `npm run dev`: legacy Windows/PowerShell launcher; prefer VS Code task `dev:all` in the WSL checkout.
 - `npm run build`: production React build.
 - `npm test -- --watch=false`: React test runner in non-watch mode.
 - `npm run lint`: ESLint over `src`.

@@ -25,6 +25,15 @@ const CaseWorkspaceInterventionsHelp = () => (
       <li>Review completed interventions before closing the related action plan, and make sure any required post-intervention follow-up, including the 12-week follow-up where applicable, is recorded before closing the case.</li>
     </ul>
 
+    <h3>Approval-letter follow-up</h3>
+    <ul>
+      <li>For an approved new intervention proposal, use <strong>Actions &gt; Prepare approval letters</strong> on the intervention row.</li>
+      <li>For an approved revision, use <strong>Prepare funding revision letter</strong> and send the client funding revision letter from the same follow-up area.</li>
+      <li>PATH opens the intervention follow-up on <strong>Approval letters</strong>. Select <strong>Generate drafts</strong>, review or edit the <strong>Client letter</strong> and any institution, loan-provider, or other-funder letter tabs, then use <strong>Send client approval letter</strong>.</li>
+      <li>Institution, loan-provider, and other-funder letters are reviewed or downloaded for manual handling; PATH does not automatically send those supporting letters.</li>
+      <li>This follow-up is for approved new intervention proposals and approved revisions. Historical/backloaded approved interventions do not unlock the letter follow-up just because their status is approved.</li>
+    </ul>
+
     <h3>Imported client-file backloads</h3>
     <ul>
       <li>Use <strong>Case header &gt; Add existing intervention</strong> when the service already existed before PATH go-live or belongs to an imported/application-less file.</li>
@@ -35,6 +44,6 @@ const CaseWorkspaceInterventionsHelp = () => (
   </div>
 );
 
-CaseWorkspaceInterventionsHelp.aiContext = `You are helping with the Interventions widget on the Case Workspace. Explain interventions as the actual client activities or supports being delivered. Emphasize accurate dates, status, outcome details, and clear linkage to the client's employment goal. Mention that multiple interventions can exist when justified, and remind the user to keep employer or provider requirements and other supporting details documented in the file. When the intervention ends, remind the user to capture the outcome and complete any required post-intervention follow-up, including the 12-week follow-up where applicable, before the case is closed. If the question is about imported or application-less cases, explain that historical interventions should be entered from \`Case header > Add existing intervention\`, that archived plans are blocked, closed plans only accept completed/cancelled interventions, in-progress or suspended interventions require an active plan, and that backloaded actual amounts or payment lines are historical only rather than live payment workflow.`;
+CaseWorkspaceInterventionsHelp.aiContext = `You are helping with the Interventions widget on the Case Workspace. Explain interventions as the actual client activities or supports being delivered. Emphasize accurate dates, status, outcome details, and clear linkage to the client's employment goal. Mention that multiple interventions can exist when justified, and remind the user to keep employer or provider requirements and other supporting details documented in the file. When the intervention ends, remind the user to capture the outcome and complete any required post-intervention follow-up, including the 12-week follow-up where applicable, before the case is closed. For approved new intervention proposal approval-letter follow-up, direct staff to the Interventions row action \`Prepare approval letters\`, then the \`Approval letters\` step where they click \`Generate drafts\`, review/edit the Client letter and supporting letter tabs, and use \`Send client approval letter\`; institution, loan-provider, and other-funder letters are reviewed/downloaded for manual handling rather than auto-sent. If the question is about imported or application-less cases, explain that historical interventions should be entered from \`Case header > Add existing intervention\`, that archived plans are blocked, closed plans only accept completed/cancelled interventions, in-progress or suspended interventions require an active plan, and that backloaded actual amounts or payment lines are historical only rather than live payment workflow.`;
 
 export default CaseWorkspaceInterventionsHelp;

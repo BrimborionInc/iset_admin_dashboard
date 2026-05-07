@@ -1,7 +1,7 @@
 # Prod Deployment Guide
 
 Status: current PROD deployment guide. Verify live AWS state before any mutating command.
-Last reviewed: 2026-04-29 during ops documentation cleanup; command names checked against current admin and portal `package.json` files.
+Last reviewed: 2026-05-07 after WSL local-development migration; command names checked against current admin and portal `package.json` files.
 
 For the shortest operator commands, start with `docs/ops/deployments/deployment-quick-guide.md`.
 
@@ -10,7 +10,8 @@ This is the shortest safe path to deploy the current prod stack.
 ## Before You Start
 
 - Work from the repo roots on the same machine that has AWS prod access.
-- Launch the app deploy from the Windows checkout at `X:\ISET\admin-dashboard`, not from a WSL-only checkout or a `\\wsl$\\...` current directory.
+- Launch the app deploy from the Windows checkout at `X:\ISET\admin-dashboard`, not from the WSL daily-development workspace (`/home/bill/ISET/path-dev-wsl.code-workspace`) or a `\\wsl$\\...` current directory.
+- Before any PROD app deploy after WSL-side development, prove the Windows deploy checkout contains the intended WSL changes. Commit/push from WSL and pull/update the Windows checkout, or deliberately copy/sync the exact changed files into `X:\ISET\...`; then inspect `git status --short`, the relevant diff, and staged files in the Windows checkout before running `path:deploy`.
 - Prefer the PATH orchestrator from `admin-dashboard`; it wraps schema/data/app rollout/smoke into one release command.
 - Uploading artifacts does not update the live instance by itself. The orchestrator and the low-level manual flow both trigger a prod instance refresh after uploads.
 - The dedicated prod operator profile is `nwac-prod`. In the current Codex sandbox it assumes the reduced role `nwac-prod-codex-operator` from `default`; `default` is only the bootstrap IAM user and direct prod resource calls through it are expected to fail.
@@ -19,7 +20,7 @@ This is the shortest safe path to deploy the current prod stack.
 - Current prod DB helper assumption: `nwac-prod-db-credentials` currently contains only `username` and `password`, so `scripts/run-prod-sql-via-ssm.sh` defaults the host/database/port to `nwac-prod-db.cluster-c3g4iamg8j38.ca-central-1.rds.amazonaws.com`, `iset_intake`, and `3306`.
 - `scripts/run-db-dump-via-ssm.sh` now exports temporary credentials from the active AWS profile before uploading the dump back to S3, so the role-backed `nwac-prod` profile works for prod dump capture as well.
 - Do not use `-SkipBuild` unless you have already inspected the current `build/` output and confirmed it was compiled for prod. React bundles bake environment-specific Cognito domains, client IDs, and external links, so a stale test build can be uploaded to prod unchanged.
-- Prod app deploys package the current working tree. If you intend to ship only a subset of local edits, stage the intended files and temporarily stash the rest before running `path:deploy`.
+- Prod app deploys package the current Windows working tree. If you intend to ship only a subset of local edits, stage the intended files and temporarily stash the rest before running `path:deploy`; if the edits were made in WSL, align the Windows checkout first.
 - Before a PROD app deploy, explicitly inspect both `git diff --cached --name-only` and `git status --short`. This catches the common operator mistake where nothing is staged but unrelated dirty files would still be packaged.
 
 ## Full Prod Deploy

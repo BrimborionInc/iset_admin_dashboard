@@ -335,6 +335,75 @@ export function deriveAssessmentReviewStatusSelection({
   return '';
 }
 
+const ASSESSMENT_RECOMMENDATION_DECISIONS = Object.freeze({
+  recommend: 'approve',
+  fund: 'approve',
+  approve: 'approve',
+  approved: 'approve',
+  no_recommend: 'reject',
+  do_not_fund: 'reject',
+  reject: 'reject',
+  rejected: 'reject',
+  decline: 'reject',
+  declined: 'reject',
+  deny: 'reject',
+  denied: 'reject',
+});
+
+const ASSESSMENT_DECISION_LABELS = Object.freeze({
+  approve: 'Approve funding',
+  reject: 'Deny funding',
+});
+
+const ASSESSMENT_RECOMMENDATION_LABELS = Object.freeze({
+  recommend: 'Recommend funding',
+  fund: 'Recommend funding',
+  approve: 'Recommend funding',
+  approved: 'Recommend funding',
+  no_recommend: 'Do not recommend funding',
+  do_not_fund: 'Do not recommend funding',
+  reject: 'Do not recommend funding',
+  rejected: 'Do not recommend funding',
+  decline: 'Do not recommend funding',
+  declined: 'Do not recommend funding',
+  deny: 'Do not recommend funding',
+  denied: 'Do not recommend funding',
+});
+
+export function deriveAssessmentDecisionStatusFromAgreement({ recommendation, assessmentReview } = {}) {
+  const recommendationKey = normalizeStatusKey(recommendation);
+  const reviewKey = normalizeStatusKey(assessmentReview);
+  const recommendedDecision = ASSESSMENT_RECOMMENDATION_DECISIONS[recommendationKey] || null;
+  if (!recommendedDecision) return null;
+  if (reviewKey === 'agree') return recommendedDecision;
+  if (reviewKey === 'disagree') return recommendedDecision === 'approve' ? 'reject' : 'approve';
+  return null;
+}
+
+export function buildAssessmentDecisionAlignmentError({
+  recommendation,
+  assessmentReview,
+  decisionStatus,
+} = {}) {
+  const decisionKey = normalizeStatusKey(decisionStatus);
+  if (!decisionKey || decisionKey === 'push_back') return '';
+
+  const recommendationKey = normalizeStatusKey(recommendation);
+  const reviewKey = normalizeStatusKey(assessmentReview);
+  const recommendedDecision = ASSESSMENT_RECOMMENDATION_DECISIONS[recommendationKey] || null;
+  if (!recommendedDecision || (reviewKey !== 'agree' && reviewKey !== 'disagree')) return '';
+
+  const expectedDecision = deriveAssessmentDecisionStatusFromAgreement({ recommendation, assessmentReview });
+  if (!expectedDecision || expectedDecision === decisionKey) return '';
+
+  const recommendationLabel =
+    ASSESSMENT_RECOMMENDATION_LABELS[recommendationKey] || 'the case manager recommendation';
+  const expectedLabel = ASSESSMENT_DECISION_LABELS[expectedDecision] || expectedDecision;
+  const reviewPhrase = reviewKey === 'agree' ? 'agree with' : 'do not agree with';
+
+  return `This outcome conflicts with your agreement answer. You selected that you ${reviewPhrase} "${recommendationLabel}", so the funding outcome must be "${expectedLabel}" or you should request changes.`;
+}
+
 export function resolveApplicationStateFields(record = {}, { fallbackStatus = null } = {}) {
   const applicationStatus = record?.applicationStatus ?? record?.application_status ?? null;
   const applicationLifecycleStatus =

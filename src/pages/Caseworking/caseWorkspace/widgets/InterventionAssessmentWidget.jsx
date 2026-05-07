@@ -114,12 +114,6 @@ const ELIGIBILITY_ALLOWED_MIME_TYPES = [
 ];
 const ELIGIBILITY_MAX_BYTES = 6 * 1024 * 1024;
 
-const DECISION_OPTIONS = [
-  { value: "approved", label: "Approved" },
-  { value: "changes_requested", label: "Request Changes" },
-  { value: "rejected", label: "Denied" },
-];
-
 const BASE_STEP_IDS = [
   "plan",
   "framing",
@@ -1847,6 +1841,28 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   const revisionSourceActionPlanId = revisionContext?.sourceActionPlanId || "";
   const revisionSourceStatus = revisionContext?.sourceStatus || "approved";
   const revisionSourceTitle = revisionContext?.sourceTitle || "this approved intervention";
+  const decisionSubjectLabel = isRevisionMode ? "intervention change" : "new intervention proposal";
+  const decisionSubjectWithArticle = isRevisionMode ? "the proposed intervention change" : "the new intervention proposal";
+  const decisionSubjectThis = isRevisionMode ? "this intervention change" : "this new intervention proposal";
+  const decisionOptions = useMemo(
+    () => [
+      {
+        value: "approved",
+        label: isRevisionMode ? "Approve intervention change" : "Approve new intervention proposal",
+      },
+      {
+        value: "changes_requested",
+        label: isRevisionMode
+          ? "Request changes to intervention change"
+          : "Request changes to new intervention proposal",
+      },
+      {
+        value: "rejected",
+        label: isRevisionMode ? "Deny intervention change" : "Deny new intervention proposal",
+      },
+    ],
+    [isRevisionMode]
+  );
   const decisionOutcomeKey = String(form.decisionOutcome || "").trim().toLowerCase();
   const isApprovedDecisionOutcome = decisionOutcomeKey === "approved";
   const isRejectedDecisionOutcome = decisionOutcomeKey === "rejected";
@@ -4693,12 +4709,12 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       const reasons = [];
       let targetStep = null;
       if (!outcome) {
-        reasons.push("Select a decision outcome in the decision step.");
+        reasons.push(`Select a decision for ${decisionSubjectThis}.`);
         targetStep = "decision";
       }
       if (outcome === "approved") {
         if (!form.eiVerificationStatus) {
-          reasons.push("Set EI eligibility for approval.");
+          reasons.push(`Set EI eligibility before approving ${decisionSubjectThis}.`);
           targetStep = targetStep || "decision";
         }
         if (hasPlanFundingMismatch) {
@@ -4722,11 +4738,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         }
       }
       if (outcome === "changes_requested" && !form.decisionNotes.trim()) {
-        reasons.push("Request changes requires a note.");
+        reasons.push(`Requesting changes to ${decisionSubjectThis} requires a note.`);
         targetStep = targetStep || "decision";
       }
       if (outcome === "rejected" && !form.decisionNotes.trim()) {
-        reasons.push("Denial requires a note.");
+        reasons.push(`Denying ${decisionSubjectThis} requires a note.`);
         targetStep = targetStep || "decision";
       }
       if (requireActiveIntervention && !activeInterventionIdValue) {
@@ -4741,6 +4757,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     },
     [
       activeInterventionIdValue,
+      decisionSubjectThis,
       form.actionPlanId,
       form.decisionNotes,
       form.decisionOutcome,
@@ -5400,9 +5417,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       : isReviewStageStatus && isEditable && !canDecideSubmittedProposal
         ? "Update the submitted proposal. Record of decision is limited to NWAC Administrators."
     : isReviewStageStatus && isEditable && isRevisionMode
-      ? `Review the proposed change to ${revisionSourceTitle}, verify EI status, and record the decision.`
+      ? `Review the proposed change to ${revisionSourceTitle}, verify EI status, and record whether the change is approved, denied, or returned for changes.`
       : isReviewStageStatus && isEditable
-        ? "Review the submitted proposal, verify EI status, and record the decision."
+        ? "Review the submitted new intervention proposal, verify EI status, and record whether the proposal is approved, denied, or returned for changes."
         : isEditable && isRevisionMode
           ? `Draft a proposed change to ${revisionSourceTitle}. The approved intervention stays unchanged until this change is approved.`
           : isEditable
@@ -5991,20 +6008,29 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   );
 
   const inferredCaseManagerRecommendation = isRevisionMode
-    ? "Recommend approving the proposed funding revision"
-    : proposedInterventions.length > 1
-      ? "Recommend funding the proposed interventions"
-      : "Recommend funding the proposed intervention";
+    ? "Recommend approving this proposed intervention change"
+    : "Recommend approving this new intervention proposal";
+  const decisionNoteLabel = form.decisionOutcome === "changes_requested"
+    ? `Changes requested for this ${decisionSubjectLabel}`
+    : `Reason for denying this ${decisionSubjectLabel}`;
+  const decisionNoteErrorText = form.decisionOutcome === "changes_requested"
+    ? "A request-changes note is required."
+    : "A denial reason is required.";
+  const decisionNotePlaceholder = form.decisionOutcome === "changes_requested"
+    ? `Explain what must change before ${decisionSubjectWithArticle} can be resubmitted.`
+    : `Explain why ${decisionSubjectWithArticle} is being denied.`;
   const caseManagerRecommendationSummary = (
     <SpaceBetween size="xs">
-      <Header variant="h3">Case manager recommendation</Header>
+      <Header variant="h3">Case manager proposal recommendation</Header>
       <ColumnLayout columns={2} variant="text-grid" minColumnWidth={260}>
         <Box>
-          <Box fontWeight="bold">Recommended action</Box>
+          <Box fontWeight="bold">
+            {isRevisionMode ? "Recommendation for this change" : "Recommendation for this proposal"}
+          </Box>
           <div>{inferredCaseManagerRecommendation}</div>
         </Box>
         <Box>
-          <Box fontWeight="bold">Rationale</Box>
+          <Box fontWeight="bold">Case manager rationale</Box>
           <div style={{ whiteSpace: "pre-wrap" }}>
             {String(form.rationale || "").trim() || "No rationale recorded."}
           </div>
@@ -6017,24 +6043,24 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     <SpaceBetween size="m">
       {caseManagerRecommendationSummary}
       <FormField
-        label="Decision"
-        description="Record the approval decision for this proposal."
-        errorText={showDecisionErrors && !form.decisionOutcome ? "Decision is required." : undefined}
+        label={`Decision on ${decisionSubjectWithArticle}`}
+        description={`Choose whether to approve ${decisionSubjectWithArticle}, deny it, or request changes from the case manager.`}
+        errorText={showDecisionErrors && !form.decisionOutcome ? `Decision on ${decisionSubjectWithArticle} is required.` : undefined}
       >
         <Select
-          selectedOption={DECISION_OPTIONS.find(option => option.value === form.decisionOutcome) || null}
+          selectedOption={decisionOptions.find(option => option.value === form.decisionOutcome) || null}
           onChange={({ detail }) => handleChange("decisionOutcome", detail.selectedOption?.value || "")}
-          options={DECISION_OPTIONS}
-          placeholder="Select decision"
+          options={decisionOptions}
+          placeholder="Select decision outcome"
           readOnly={isDecisionReadOnly}
         />
       </FormField>
       {(form.decisionOutcome === "changes_requested" || form.decisionOutcome === "rejected") && (
         <FormField
-          label={form.decisionOutcome === "changes_requested" ? "Request changes note" : "Reason for denial"}
+          label={decisionNoteLabel}
           errorText={
             showDecisionErrors && !form.decisionNotes.trim()
-              ? "A note is required."
+              ? decisionNoteErrorText
               : undefined
           }
         >
@@ -6042,7 +6068,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
             value={form.decisionNotes}
             onChange={({ detail }) => handleChange("decisionNotes", detail.value)}
             rows={3}
-            placeholder="Provide context for this decision."
+            placeholder={decisionNotePlaceholder}
             spellcheck={true}
             disabled={isDecisionReadOnly}
           />

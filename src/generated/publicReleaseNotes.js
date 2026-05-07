@@ -1,7 +1,7 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-05-07T00:36:02.991Z",
-  "releaseId": "20260506-prod-dev-outstanding",
-  "releaseLabel": "Release 20260506-prod-dev-outstanding",
+  "generatedAt": "2026-05-07T19:36:10.228Z",
+  "releaseId": "20260507-prod-evening",
+  "releaseLabel": "Release 20260507-prod-evening",
   "releaseDateEn": "7th May 2026",
   "releaseDateFr": "7 mai 2026",
   "en": {
@@ -9,6 +9,17 @@ const publicReleaseNotes = {
     "description": "",
     "featuresHeading": "What changed",
     "features": [
+      "Fixed the ISET Applications list so staff can use All Applications or Closed views to open more than one application for the same client/case, including historical applications.",
+      "Removed the public portal footer Contact link so applicants are directed toward secure Messages for case-manager contact.",
+      "Made application approval decisions clearer by separating agreement with the case manager recommendation from the final funding outcome.",
+      "Improved Ask the AI guidance and guardrails for common application, document, approval-letter, and Pending Completion questions."
+    ],
+    "knownIssuesHeading": "Known issues",
+    "knownIssues": [
+      "Known issue: repeat applications for an existing client can currently open the previous application's assessment. Please avoid editing the assessment on a repeat application for now, because changes can overwrite the earlier assessment; we plan to fix this over the weekend."
+    ],
+    "previousChangesHeading": "Earlier changes",
+    "previousChanges": [
       "Added an On Hold stage for applications that need to stay open but leave active assessment and decision queues until staff resume review.",
       "Added Application Overview actions to put an application on hold with a reason and review reminder, then resume it when follow-up is ready.",
       "Fixed a public-portal submission issue where final submission could create an upload/signature-only record instead of preserving the full saved application.",
@@ -18,8 +29,6 @@ const publicReleaseNotes = {
       "Fixed the Case Workspace `Prepare approval letters` action so approved intervention proposals open the approval-letter follow-up directly.",
       "Fixed document checklist rules so tuition/books-only applications are not blocked by income or expense evidence, and Band/Nation decision letters count correctly in intervention proposal checklists."
     ],
-    "knownIssuesHeading": "Known issues",
-    "knownIssues": [],
     "comingNextHeading": "Coming next",
     "comingNext": []
   },
@@ -28,6 +37,17 @@ const publicReleaseNotes = {
     "description": "",
     "featuresHeading": "Ce qui a change",
     "features": [
+      "Correction de la liste des demandes ISET afin que le personnel puisse utiliser les vues Toutes les demandes ou Fermees pour ouvrir plusieurs demandes du meme client/dossier, y compris les demandes historiques.",
+      "Retrait du lien Contact dans le pied de page du portail public afin que les candidates et candidats soient diriges vers les Messages securises pour joindre leur gestionnaire de cas.",
+      "Clarification des decisions d'approbation des demandes en separant l'accord avec la recommandation du gestionnaire de cas du resultat final de financement.",
+      "Amelioration des consignes et garde-fous de Ask the AI pour les questions courantes sur les demandes, documents, lettres d'approbation et la file En attente de completion."
+    ],
+    "knownIssuesHeading": "Points connus",
+    "knownIssues": [
+      "Probleme connu : les nouvelles demandes d'un client deja inscrit peuvent ouvrir l'evaluation de la demande precedente. Evitez de modifier l'evaluation d'une demande repetee pour l'instant, car les changements peuvent remplacer l'evaluation precedente; une correction est prevue pendant la fin de semaine."
+    ],
+    "previousChangesHeading": "Changements precedents",
+    "previousChanges": [
       "Ajout d'une etape En attente pour les demandes qui doivent rester ouvertes, mais sortir des files d'evaluation et de decision jusqu'a la reprise de la revue.",
       "Ajout d'actions dans l'apercu de la demande pour mettre une demande en attente avec une raison et un rappel, puis reprendre la revue.",
       "Correction d'un probleme du portail public ou la soumission finale pouvait creer un dossier limite aux televersements/signatures au lieu de conserver toute la demande enregistree.",
@@ -37,8 +57,6 @@ const publicReleaseNotes = {
       "Correction de l'action `Preparer les lettres d'approbation` dans l'espace Dossier afin que les propositions d'intervention approuvees ouvrent directement le suivi de lettre d'approbation.",
       "Correction des regles de liste de verification des documents afin que les demandes pour frais de scolarite/livres seulement ne soient pas bloquees par les preuves de revenu ou de depenses, et que les lettres de decision de bande ou de nation soient bien reconnues dans les propositions d'intervention."
     ],
-    "knownIssuesHeading": "Points connus",
-    "knownIssues": [],
     "comingNextHeading": "A venir",
     "comingNext": []
   }

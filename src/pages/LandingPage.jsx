@@ -369,6 +369,16 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
                     </ul>
                   </article>
                 ) : null}
+                {(releaseNotes?.previousChanges || []).length > 0 ? (
+                  <article className="landing-card">
+                    <h3 className="release-notes-heading">{releaseNotes?.previousChangesHeading || ''}</h3>
+                    <ul className="landing-release-notes__list">
+                      {(releaseNotes?.previousChanges || []).map(item => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </article>
+                ) : null}
                 {(releaseNotes?.comingNext || []).length > 0 ? (
                   <article className="landing-card">
                     <h3 className="release-notes-heading">{releaseNotes?.comingNextHeading || ''}</h3>
