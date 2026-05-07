@@ -114,16 +114,17 @@ Recommended planned-maintenance sequence:
 2. Wait through the warning window.
 3. If a hard outage is required, enable the ALB fixed-response maintenance page.
 4. Run `path:deploy`.
-5. Confirm deploy smoke passes while the maintenance page is still protecting users.
-6. Clear the ALB fixed-response maintenance page if you enabled it.
-7. Run smoke again with normal routing restored.
-8. Clear the warning.
+5. For TEST in-place deploys, keep the maintenance page up until the deploy finishes, then clear it and smoke normal routing.
+6. For PROD ASG refreshes, do not leave the ALB maintenance page up if the refresh stalls on ELB health with `Target.NotInUse` or `insufficient data`; the fixed response makes the target group unused, so clear the fallback once the refreshed instance is in service and let the in-app warning cover final warm-up.
+7. Run smoke with normal routing restored.
+8. Clear the warning after normal-routing smoke passes.
 
 Guidance:
 - Size `--expected-duration` to the likely user-facing interruption window, not the total operator runtime of the release.
 - For normal rolling releases that are proven not to interrupt service, no banner is acceptable. If a TEST or PROD rollout may produce raw 502s or make a surface unavailable, use a short `brief interruptions possible` warning or the ALB `503` fallback before starting.
 - For admin-only or portal-only hotfixes, prefer a scoped announcement instead of a global banner so unaffected users are not warned unnecessarily.
 - Do not assume "hotfix", "code-only", or "admin-only" means "no user impact". The deciding factor is the rollout primitive. ASG refresh, app restart, target-group change, or known transient gateway risk requires warning/fallback handling; in PROD this also requires the explicit prod approval gates.
+- If `path:deploy` reports a smoke `503` immediately after a PROD fallback clear but ASG refresh is `Successful`, confirm fallback status and rerun smoke before declaring the release failed; ALB rule propagation can lag the deploy command by a few seconds.
 
 ## Feature-Flagged Portal Rollouts
 

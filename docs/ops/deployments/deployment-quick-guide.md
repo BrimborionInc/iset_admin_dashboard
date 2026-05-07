@@ -26,7 +26,7 @@ Do not run the app deploy commands from a WSL-only checkout such as `/root/ISET/
 - App deploys package the current working tree. If you mean “deploy only the staged subset,” stage the intended files and stash the rest before running `path:deploy`.
 - TEST app rollouts should rehearse PROD user-facing maintenance behavior. Any TEST deploy that can restart app processes, make a surface unavailable, or produce transient `502 Bad Gateway` responses needs a scoped warning first and the affected surface behind the ALB maintenance page before deploy starts. TEST remains less strict than PROD because ordinary app deploys do not require `--yes`, but raw 502s are not an acceptable planned TEST experience. TEST maintenance copy must use the user-facing name `Test and Training environment` and explicitly state that Production is not affected.
 - PROD app rollouts are user-impacting unless the plan proves otherwise. Any PROD deploy that refreshes ASG instances, restarts app processes, rotates target groups, or can produce transient `502 Bad Gateway` responses needs a scoped warning first and the affected surface behind the ALB maintenance page before deploy starts, even if it is admin-only, portal-only, or code-only.
-- Operator checklist rule: before running `path:deploy`, state the exact maintenance sequence. For normal app rollouts that restart admin or portal, use `warning -> wait -> ALB 503 fallback -> deploy -> smoke -> clear fallback -> clear warning`. Do not treat the in-app warning as a substitute for the ALB fallback when target health may drop.
+- Operator checklist rule: before running `path:deploy`, state the exact maintenance sequence. For TEST in-place app rollouts that restart admin or portal, use `warning -> wait -> ALB 503 fallback -> deploy -> clear fallback -> smoke normal routing -> clear warning`. For PROD ASG-refresh rollouts, use the ALB fallback for the cutover risk, but clear it if the instance refresh waits on ELB health with `Target.NotInUse` / `insufficient data`; target groups must be in normal forwarding to become healthy. Do not treat the in-app warning as a substitute for the ALB fallback when target health may drop, but keep the in-app warning active until normal-routing smoke passes.
 - Current dependency-reinstall safeguard: in-place TEST deploy scripts now clear the deployed `node_modules` tree before running remote `npm ci/install`, and the PROD bootstrap path already does the same during instance boot. Keep that rule in any future deploy helper to avoid stale-filesystem `ENOTEMPTY` failures during runtime dependency replacement.
 
 ## Most Common Commands
@@ -230,7 +230,7 @@ npm run path:maintenance -- set --env test --start-now --expected-duration 5m --
 npm run path:maintenance -- set --env prod --start-now --expected-duration 5m --unscheduled --yes
 ```
 
-Clear the warning after smoke passes. If you enabled the ALB fallback, clear the fallback first, run smoke again with normal routing restored, then clear the warning:
+Clear the warning after smoke passes. If you enabled the ALB fallback, clear the fallback first, run smoke with normal routing restored, then clear the warning:
 
 ```powershell
 npm run path:maintenance -- clear --env test
@@ -242,6 +242,7 @@ Notes:
 - Admin and portal clients poll every 15 seconds and render the countdown locally, so this is an operator warning tool, not a precise sub-minute push channel.
 - Set `expected-duration` to the likely user-visible interruption window, not the full end-to-end deploy runtime. Rolling app deploys often take several minutes in the operator console while causing little or no visible disruption.
 - If the service must be fully unavailable during cutover, the warning can be combined with the separate ALB `503` maintenance fallback.
+- During PROD ASG-refresh deploys, the ALB fallback can make target groups report `Target.NotInUse`; if the refresh stalls on that reason, clear the fallback once the refreshed instance is in service so ELB health can evaluate, then rerun smoke with normal routing.
 - A generic `502 Bad Gateway` during TEST deploy is not an acceptable planned rehearsal behavior. If the release can expose that state, either warn users first or put the affected TEST surface behind the ALB maintenance page.
 - A generic `502 Bad Gateway` during PROD deploy is not acceptable planned behavior. If the release can expose that state, either warn users first or put the affected surface behind the ALB maintenance page.
 
@@ -268,6 +269,7 @@ Notes:
 - The ALB returns a static HTML `503` page during the cutover.
 - `clear` restores the normal admin and portal target-group forwarding.
 - You can scope it to `admin`, `portal`, or `all` with `--surfaces`.
+- For PROD ASG refreshes, normal forwarding may be required before the refresh can finish because the ASG relies on ELB target health.
 
 ## TEST Reset Only
 
