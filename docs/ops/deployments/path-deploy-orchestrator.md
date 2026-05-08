@@ -1,7 +1,7 @@
 # PATH Deploy Orchestrator
 
 Status: current deployment control-plane reference.
-Last reviewed: 2026-05-07 after WSL local-development migration; command names checked against current `package.json`.
+Last reviewed: 2026-05-08 after WSL-native PROD release `20260507-prod-contact-retirement`; command names checked against current `package.json`.
 
 Start with the short operator runbook in `docs/ops/deployments/deployment-quick-guide.md` if you just need the normal commands.
 
@@ -9,10 +9,19 @@ The PATH deployment control plane now lives in `admin-dashboard` and is operated
 
 Deployed admin environments now force `DISABLE_AUTO_MIGRATIONS=true`, so this explicit deploy path is the intended schema-ownership path for TEST/PROD.
 
-Operator runtime caveat: in the current Codex sandbox, `npm` package scripts execute under Windows Node while the trusted operator AWS profiles live in the bash/WSL-side AWS CLI config. The control-plane scripts intentionally shell AWS-backed checks through `bash` so `nwac-test` / `nwac-prod` resolve consistently. `nwac-prod` is now a reduced assumed-role profile and `default` is only a bootstrap IAM user, so direct prod resource calls through `default` are expected to fail.
-For prod app rollout, the control plane now also exports credentials from the working bash-side profile into the Windows-side PowerShell deploy subprocesses before running the shared/admin/portal upload scripts and the ASG refresh.
+Operator runtime caveat: in the current Codex sandbox, the trusted operator AWS profiles live in the bash/WSL-side AWS CLI config. The control-plane scripts intentionally shell AWS-backed checks through `bash` so `nwac-test` / `nwac-prod` resolve consistently. `nwac-prod` is now a reduced assumed-role profile and `default` is only a bootstrap IAM user, so direct prod resource calls through `default` are expected to fail.
+TEST app rollout is WSL-native in `scripts/path-deploy.js`: it builds/packages the WSL admin repo, sibling portal repo, and sibling shared tree, uploads artifacts with WSL AWS CLI, and runs the in-place SSM update commands directly. Do not route TEST deploys through stale Windows checkout instructions.
+PROD app rollout is also WSL-native in `scripts/path-deploy.js`: it uploads `shared/shared-latest.zip`, `admin/admin-dashboard-latest.zip`, and `portal/portal-latest.zip` to `nwac-prod-artifacts`, then starts and waits for the PROD ASG refresh.
 
-Use this from `X:\ISET\admin-dashboard` so one command can sequence the deploy. Daily coding now happens in `/home/bill/ISET/path-dev-wsl.code-workspace`; before running the orchestrator, sync or pull the intended WSL changes into the Windows checkout and inspect the Windows tree. The orchestrator packages the Windows working tree, not the WSL workspace.
+Use this from the WSL admin repo:
+
+```bash
+cd /home/bill/ISET/admin-dashboard
+```
+
+The orchestrator packages the WSL working tree for TEST and PROD app deploys. If `/mnt/x/ISET` still exists, treat it as stale/archive-only unless a task explicitly asks to inspect it.
+
+The admin artifact also stages selected operational support scripts used by deployed-runtime checks/backfills, currently the application-assessment backfill, context-backfill, and Option B smoke scripts referenced by package aliases.
 
 1. AWS/profile preflight
 2. prod restore point capture when DB mutation is planned
@@ -26,37 +35,37 @@ Use this from `X:\ISET\admin-dashboard` so one command can sequence the deploy. 
 
 Plan a TEST deployment:
 
-```powershell
+```bash
 npm run path:deploy:plan -- --env test --dataset intake-release --workflow-id 21
 ```
 
 Run a TEST deployment:
 
-```powershell
+```bash
 npm run path:deploy -- --env test --dataset intake-release --workflow-id 21
 ```
 
 Run a TEST deployment that also rebuilds TEST from the current DEV baseline first:
 
-```powershell
+```bash
 npm run path:deploy -- --env test --refresh-test-db --dataset intake-release --workflow-id 21 --yes
 ```
 
 Plan a PROD deployment:
 
-```powershell
+```bash
 npm run path:deploy:plan -- --env prod --dataset intake-release --workflow-id 21
 ```
 
 Run a PROD deployment:
 
-```powershell
+```bash
 npm run path:deploy -- --env prod --dataset intake-release --workflow-id 21 --yes
 ```
 
 Run smoke checks only:
 
-```powershell
+```bash
 npm run path:deploy:smoke -- --env test
 npm run path:deploy:smoke -- --env prod
 ```
@@ -65,7 +74,7 @@ npm run path:deploy:smoke -- --env prod
 
 The deploy control plane now has a companion operator command for scoped admin and/or portal maintenance warnings:
 
-```powershell
+```bash
 npm run path:maintenance -- set --env test --surfaces admin --start-in 5m --expected-duration 20m --title "Test and Training maintenance" --message "The Test and Training environment is temporarily unavailable for maintenance. Production is not affected."
 npm run path:maintenance -- set --env test --surfaces portal --start-in 5m --expected-duration 20m
 npm run path:maintenance -- set --env test --surfaces all --start-in 5m --expected-duration 20m
@@ -93,7 +102,7 @@ Current behavior:
 
 For the hard maintenance page itself, use the separate ALB helper:
 
-```powershell
+```bash
 npm run path:maintenance:fallback -- status --env test
 npm run path:maintenance:fallback -- set --env test --surfaces all
 npm run path:maintenance:fallback -- clear --env test --surfaces all
@@ -139,7 +148,7 @@ Use this pattern:
 
 Suggested portal-only deploy commands:
 
-```powershell
+```bash
 npm run path:deploy -- --env test --skip-schema --skip-data --skip-admin --release-id intake-draft-autosave-test
 npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --release-id intake-draft-autosave-prod --yes
 ```
@@ -162,7 +171,7 @@ Current autosave rollout note:
   - Optional `--refresh-test-db` now makes TEST reset a first-class deploy step instead of a separate manual prerequisite.
   - Runs canonical schema work remotely through SSM on a TEST app host.
   - Optional config/data promotion uses `scripts/path-data-sync.js`.
-  - App rollout still uses the existing in-place SSM deploy scripts for admin and portal.
+  - App rollout uses WSL-native build/package/upload/SSM steps in `scripts/path-deploy.js` for admin and portal instead of the legacy PowerShell component scripts.
   - Current runtime-install safeguard: the TEST admin/portal deploy scripts now remove the deployed `node_modules` tree before remote `npm ci/install`, matching the existing PROD bootstrap rule, so stale instance filesystems do not break a rerun with `ENOTEMPTY`.
   - The frontend bundles now carry a visible build stamp derived from package version + release ID + git SHA. Check the admin landing-page footer or the public portal Help page after deploy.
   - Smoke uses ALB target-group health (`nwac-test-admin-tg`, `nwac-test-portal-tg`) instead of public `/healthz`, because the public TEST hosts are fronted by ALB/Nginx auth and currently return `403` to unauthenticated requests from Codex.
@@ -176,7 +185,8 @@ Current autosave rollout note:
   - If that restore-point step ever fails again, only rerun with `--skip-schema --skip-data` when you have direct proof that no schema/data delta remains. Example from 2026-04-24: DEV and PROD checksums for workflow `21` plus `publish/workflow.schema.intake` were identical, so an app-only rerun was safe. Follow-up validation from 2026-04-25: after the IAM policy update, release `20260425-100201` captured restore point `path-prod-20260425-100201-20260425100220` successfully under the normal full prod path.
   - Runs canonical schema work remotely through SSM on a PROD app host.
   - Optional config/data promotion uses `scripts/path-data-sync.js`.
-  - App rollout uploads `shared`, `admin`, and `portal` artifacts, then waits for `refresh-prod`.
+  - App rollout uses WSL-native build/package/upload steps in `scripts/path-deploy.js`: `shared/shared-latest.zip`, `admin/admin-dashboard-latest.zip`, and `portal/portal-latest.zip` are uploaded to `nwac-prod-artifacts`, then `nwac-prod-asg` is refreshed with `MinHealthyPercentage=100,InstanceWarmup=180,SkipMatching=false`.
+  - WSL-native PROD validation: release `20260507-prod-contact-retirement` captured restore point `path-prod-20260507-prod-contact-retirement-20260508000234`, uploaded all three artifacts, completed ASG refresh `f323cb21-bc0c-4063-b0e8-017b40f31544` on replacement instance `i-00b00ebdff3f55dc5`, and passed final public smoke.
   - The boot-time app bootstrap already removes deployed `node_modules` before reinstalling runtime dependencies; keep any future prod in-place helper aligned with that rule.
   - The frontend bundles now carry a visible build stamp derived from package version + release ID + git SHA. Check the admin landing-page footer or the public portal Help page after deploy.
   - Smoke currently uses public `/healthz` URLs (`nwac-console.awentech.ca`, `iset.nwac.ca`, `nwac-public.awentech.ca`).
@@ -215,7 +225,7 @@ Current autosave rollout note:
 - TEST DB reset:
   - `npm run test:db:refresh:plan -- --source-env dev`
   - `npm run test:db:refresh -- --source-env dev --yes`
-  - `npm run test:db:refresh -- --snapshot-file X:\path\to\scrubbed.sql --yes`
+  - `npm run test:db:refresh -- --snapshot-file /path/to/scrubbed.sql --yes`
 
 ## Release manifests
 

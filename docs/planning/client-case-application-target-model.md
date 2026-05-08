@@ -4,7 +4,7 @@ Purpose: define the agreed PATH entity model for `client`, `case`, and `applicat
 
 Audience: product, engineering, reporting/data, and migration planning.
 
-Last Updated: 2026-05-07
+Last Updated: 2026-05-08
 
 ## Status
 
@@ -66,7 +66,7 @@ Verified from current schema and code:
 - Client Batch Import already supports `client` plus application-less `iset_case`.
 - Case-level "primary application" joins now prefer non-terminal application rows before terminal rows (`approved`, `completed`, denied/withdrawn/cancelled/closed/archived states), so late client-file or document updates on historical completed applications do not make those applications the current queue target when a newer active application exists.
 - `PUT /api/cases/:id` rejects attempts to move a terminal application back into review or document-request queues; the approved-to-completed finish transition remains allowed.
-- Discovered gap on 2026-05-07: `iset_case_assessment` still has one row per `case_id` and no `application_id`, so repeat applications on the same case can load and overwrite the prior application's assessment. Treat this as the active exception to the target model until `docs/planning/application-assessment-application-scope-migration-plan.md` is implemented.
+- Discovered gap on 2026-05-07, scoped on 2026-05-08: `iset_case_assessment` still has one row per `case_id` and no `application_id`, so repeat applications on the same case can load and overwrite the prior application's assessment. Current first-pass decision is Option B containment: add `iset_application_assessment` and move the application assessment workflow/direct read-write surfaces before any full in-place `iset_case_assessment` ERM correction. DEV now has the additive table and first containment code patch; TEST has completed schema/backfill/DB-fixture rehearsal, but PROD deployment is still pending authenticated browser/PDF/queue smoke and must follow `docs/planning/application-assessment-application-scope-migration-plan.md`.
 - Remaining non-final pieces:
   - TEST/PROD still need the DEV backfill/retirement/hardening migrations rehearsed against live data.
   - Some workflows still accept `application_id` as an entry parameter, but they now resolve the case through `iset_application.case_id` instead of a case-side pointer.
@@ -89,10 +89,10 @@ Verified from current schema and code:
   - both required for submitted rows; DEV enforces this as `NOT NULL`
   - application ownership must no longer depend on `iset_case.application_id`
 
-- `iset_case_assessment`
+- application assessment
   - target one assessment per application, not one assessment per case
-  - keep `case_id` as case context
-  - add `application_id` for ownership/provenance
+  - current containment plan adds `iset_application_assessment` while retaining `iset_case_assessment` as legacy compatibility
+  - keep `case_id` as case context and use `application_id` for selected application ownership
   - allow application-less assessment only for explicitly supported imported/historical case work
   - migration planning lives in `docs/planning/application-assessment-application-scope-migration-plan.md`
 
@@ -114,7 +114,7 @@ Verified from current schema and code:
 6. Add and enforce one-case-per-client constraints after data cleanup.
 7. Retire or repurpose `iset_case.application_id` once no core flow depends on it as the primary relationship anchor. Completed in DEV by migration `20260427_0013_retire_legacy_case_application_pointer.sql`.
 8. Harden application ownership after the backfill is clean. Completed in DEV by migration `20260427_0014_harden_application_case_scope.sql`.
-9. Move `iset_case_assessment` from case-scoped storage to application-scoped storage before repeat-application assessment workflows are rolled out to TEST/PROD.
+9. Move application assessment workflow reads/writes to the additive `iset_application_assessment` store before repeat-application assessment workflows are rolled out to TEST/PROD. DEV has started this containment path; TEST/PROD evidence is still required before release.
 
 ## Current Verified Gaps To Resolve
 

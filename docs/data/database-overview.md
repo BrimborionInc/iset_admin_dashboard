@@ -28,7 +28,10 @@ erDiagram
   ISET_APPLICATION ||--o{ ISET_DOCUMENT : "application_id (optional)"
   ISET_CASE ||--o{ ISET_DOCUMENT : "case_id (optional)"
   ISET_CASE_ACTION_PLAN ||--o{ ISET_DOCUMENT : "action_plan_id (optional)"
-  BUDGET_POT ||--o{ ISET_CASE_ASSESSMENT : "intervention_budget_pot_id"
+  ISET_APPLICATION ||--o| ISET_APPLICATION_ASSESSMENT : "application_id"
+  ISET_CASE ||--o{ ISET_APPLICATION_ASSESSMENT : "case_id"
+  BUDGET_POT ||--o{ ISET_APPLICATION_ASSESSMENT : "intervention_budget_pot_id"
+  BUDGET_POT ||--o{ ISET_CASE_ASSESSMENT : "legacy intervention_budget_pot_id"
   ISET_CASE_ACTION_PLAN ||--o{ ISET_CASE_REMINDER : "action_plan_id"
   CANADA_REGION ||--o{ STAFF_PROFILES : "region_id"
   ISET_DOCUMENT ||--o{ ISET_DOCUMENT_INTERVENTION : "document_id"
@@ -47,12 +50,13 @@ Notes:
 - DEV physically retired `iset_application_version.created_by_id`; derive version author display from `created_by_staff_profile_id` / `created_by_user_id`.
 - DEV constrains application submission/version lineage and CFA case/version/document/participant relationships. CFA agreement documents must resolve to the same case/client as their CFA series.
 - DEV constrains the remaining deterministic relationship gaps for `client_applicant_account_event.client_id`, `input_json_state.client_id`, `iset_case_assessment.intervention_budget_pot_id`, `iset_case_reminder.action_plan_id`, and `staff_profiles.region_id`. Workflow `workflow_id` fields remain string runtime keys such as `iset-v1`, not numeric `workflow.id` FKs.
+- DEV now has additive application-scoped assessment table `iset_application_assessment` for the Option B repeat-application containment fix. Application-backed assessment workflows should resolve by selected `application_id` first and must not blindly fall back to `iset_case_assessment` by `case_id`. `iset_case_assessment` remains legacy case-scoped compatibility for imported/application-less or not-yet-migrated case behavior. See `docs/planning/application-assessment-application-scope-migration-plan.md`.
 - DEV retired the empty `zzz_legacy_documents` experiment table. Do not use it as a fallback document source; all supporting-document work should go through `iset_document` plus the scoped attachment/document relationships above.
 - Finance allocation evidence object keys are not standalone access authority. Allocation evidence presign/delete must prove the key is referenced by `budget_allocation`/`budget_pot` evidence metadata or is an unexpired `pending_uploads` row owned by the current local staff user with `document_type = finance_allocation_evidence`.
 
 ## Domain table map (not exhaustive)
 - Intake submissions and applications: `iset_application_submission`, `iset_application`, `iset_application_version`, `iset_application_draft`, `iset_application_draft_dynamic`.
-- Cases and assessments: `iset_case`, `iset_case_assessment`, `iset_case_action_plan`, `iset_case_intervention`, `iset_case_financial_snapshot`, `iset_case_event`, `iset_case_note`, `iset_case_task`, `iset_case_watch`, `iset_case_action_item`, `iset_case_compliance_check`, `iset_case_reminder`.
+- Cases and assessments: `iset_case`, `iset_application_assessment`, `iset_case_assessment` (legacy case-scoped compatibility), `iset_case_action_plan`, `iset_case_intervention`, `iset_case_financial_snapshot`, `iset_case_event`, `iset_case_note`, `iset_case_task`, `iset_case_watch`, `iset_case_action_item`, `iset_case_compliance_check`, `iset_case_reminder`.
 - Clients and orgs: `client`, `organization`, `ptma`, `staff_profiles`, `staff_region`, `user`.
 - Documents and uploads: `iset_document`, `iset_document_intervention`, `iset_application_file`, `pending_uploads`, `document_type`, `payment_packet_document`, `message_attachment`.
 - Messaging: `messages`, `message_attachment`, `message_signing_request`, `signing_request`, `staff_message`, `staff_message_item`, `staff_message_thread`, `staff_message_thread_participant`.
@@ -69,7 +73,7 @@ Notes:
 1. Identity and routing: `user` (applicant), `client`, optional `organization` or `ptma` if routing or scoping is needed.
 2. Submission: `iset_application_submission` (immutable snapshot).
 3. Case and application: create or resolve `iset_case` (linked to `client_id`), then insert `iset_application` with both `client_id` and `case_id`, plus `iset_case_event` for timeline visibility if needed.
-4. Assessment: `iset_case_assessment` if the workspace expects assessment payloads.
+4. Assessment: `iset_application_assessment` for application-backed assessment workflows; use `iset_case_assessment` only for legacy/imported application-less compatibility where that workflow is explicitly supported.
 5. Plans and interventions: `iset_case_action_plan` then `iset_case_intervention` (link to case + plan). Reference lookup tables (`funding_stream`, `esdc_intervention_code`, `esdc_intervention_outcome`, `noc_code`, `noc_version`) when the UI requires those fields.
 6. Documents: `iset_document` (client_id required) plus `iset_document_intervention` for intervention links; use `payment_packet_document` for payment evidence.
 

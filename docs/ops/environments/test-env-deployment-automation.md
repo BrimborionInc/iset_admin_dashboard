@@ -1,9 +1,9 @@
 # Test Environment Deployment Automation – Outline
 
-Status: historical TEST deployment automation outline. Current operator entry points are `path:deploy`, `deploy-admin-to-test`, and `deploy-portal-to-test`.
+Status: historical TEST deployment automation outline. Current operator entry point is WSL-native `path:deploy` from `/home/bill/ISET/admin-dashboard`; the old component PowerShell scripts are legacy references.
 Last reviewed: 2026-04-29 during ops documentation cleanup.
 
-This note describes how the refreshed `deploy-test.ps1` scripts will render environment files, sync application assets, and restart services in AWS while keeping secrets in SSM/Secrets Manager.
+This note describes the older `deploy-test.ps1` design. The current TEST app rollout lives in `scripts/path-deploy.js`, which builds/packages from WSL and restarts services through SSM while keeping secrets in SSM/Secrets Manager.
 
 ## 1. Prerequisites
 - IAM role `nwac-test-deployer` with permissions to:
@@ -11,7 +11,7 @@ This note describes how the refreshed `deploy-test.ps1` scripts will render envi
   - Retrieve Secrets Manager secrets (`nwac-test/db/*`, `nwac-test/nginx/*`)
   - Start SSM Session Manager port-forwarding (optional break-glass)
   - Trigger CodeDeploy or interact with EC2 Auto Scaling groups as designed
-- Workstation or CI runner configured with AWS CLI (`ca-central-1` profile) and PowerShell 7.
+- Workstation or CI runner configured with WSL AWS CLI (`ca-central-1` profile).
 - Terraform has already populated:
   - `SSM: /nwac/test/admin/env` (JSON map of env vars)
   - `SSM: /nwac/test/portal/env`
@@ -84,8 +84,8 @@ Outstanding items before automation proceeds:
 - Post-deployment health check hits `/healthz` endpoint behind ALB to confirm success.
 
 ## 5. Next Steps
- - Implement PowerShell module + per-app `deploy-test.ps1`.
- - Added portal automation script at `scripts/deploy-portal-test.ps1` (run via `npm run deploy-portal-to-test` inside `ISET-intake`).
+- Historical item: implement PowerShell module + per-app `deploy-test.ps1`; superseded for TEST by WSL-native `path:deploy`.
+- Historical item: portal automation script at `scripts/deploy-portal-test.ps1`; current supported TEST portal deploy is through `scripts/path-deploy.js`.
 - Terraform provisions `nwac-test-artifacts`; ensure IAM access and upload artifacts per release.
 - Wire CodeDeploy or SSM automation documents accordingly.
 

@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next "What's New" update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-05-07
+Last Updated: 2026-05-08
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -38,6 +38,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - 2026-05-05 | Release TBD | Fix/Casework | Intervention proposal approval letters | Fixed a server error when sending an approval letter for an approved new intervention proposal that had no optional source metadata. | The fix is limited to null-safe metadata handling in the message-send guard.
 - 2026-05-05 | Release TBD | Fix/Notifications | Intervention proposal bell alerts | Intervention approval bell alerts now show the budget pot code or name instead of the raw database ID. | New intervention decision events carry budget pot code/name, and the bell formatter no longer falls back to numeric pot IDs.
 - 2026-05-06 | Release TBD | UX/Approvals | Application and intervention decisions | Approval decision steps now show the case manager recommendation and rationale before the decision controls. | Applies to application approval, new intervention proposal decisions, and intervention revision decisions so reviewers can see the proposal context without opening the generated assessment PDF.
+- 2026-05-08 | Release TBD | Fix/Approvals | Repeat application assessments | Repeat-application approval letters now scope drafts, sent markers, and review context to the selected application. | Prevents a second approved application from inheriting the previous application's approval-letter content or read-only sent state; DEV and TEST authenticated browser/API smoke passed for repeat-application fixtures, with SES send intentionally not exercised in TEST.
 - 2026-05-06 | Release TBD | Fix/Casework | Case Workspace intervention approval letters | The `Prepare approval letters` row action now opens the intervention approval-letter follow-up directly. | The action uses the same approval workspace deep link as homepage/feedback routes, including `step=communication`, instead of opening the generic new-proposal wizard.
 - 2026-05-06 | Release TBD | Fix/Documents | Document checklists | Fixed checklist rules that could incorrectly require income or expense evidence for tuition/books-only applications and miss merged Band/Nation decision-letter documents in intervention proposal checklists. | PROD runtime config now uses active evidence document types and the conditional checklist item IDs used by the backend.
 - 2026-05-06 | Release TBD | UX/Casework | Approval letters | Generated approval-letter packs now let staff edit supporting institution, loan-provider, and other-funder letters before downloading them. | Applies to application approval follow-up and intervention approval/revision follow-up; application approval supporting-letter edits are saved with the draft pack.
@@ -251,6 +252,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - 2026-03-10 | Release v0.5.4 | Workflow/Validation | Batch Payments > Payment Packet Detail | Packet validation now blocks submission when payee details are missing and surfaces both top-level block messaging and line-level `Payee missing` indicators. | New validation code path emits line-addressable `payee_missing` policy errors.
 - 2026-04-21 | Release TBD | UX | Batch Payments dashboard | Reworked Batch Payments into a cleaner oversight view: single-packet selection now drives detail, finance-side edit/send actions were removed, communications clearly scope to the selected packet or all packets, and SLA snapshot now starts in the palette instead of the default layout. | Aligns the finance dashboard with its oversight purpose and removes the misleading multi-select/detail coupling.
 - 2026-05-01 | Release TBD | UX/Notifications | Template Editor dashboard | Expanded the notification template editor with a grouped field catalog, subject field insertion, scenario-based preview, and warnings for unknown or scenario-mismatched placeholders. | Makes it easier to author staff and applicant email templates for assignment, NWAC review, secure message, decision, and generic staff notification events.
+- 2026-05-08 | Release TBD | Fix/Application Assessment | Repeat applications | DEV and TEST containment work now stores application assessment data by selected application instead of the shared case assessment row, so a second application can start with its own blank assessment and save without overwriting the first application's assessment. Approval-letter workflow state is also scoped by selected application instead of root case context. | Corrected letter-state/context-backfill build is on TEST; authenticated TEST smoke passed for selected-application reads/writes, Step 14 letter freshness/editability, app-associated generated assessment document rows, queues/decision APIs, and applicationless case workspace. PROD remains pending explicit deployment decision.
 - 2026-04-23 | Release TBD | Security/Messaging | Applicant Secure Messages | Fixed portal applicant message routing so assigned case managers resolve through staff user accounts instead of overlapping staff profile IDs. | Prevents applicant-origin messages from landing in unrelated applicant inboxes when `user.id` values overlap `staff_profiles.id`; companion PROD repair script corrects existing wrong-recipient mailbox rows before portal reopening.
 - 2026-05-06 | Release TBD | UX/Messaging | Applicant Secure Messages | Secure-message compose now opens in a workspace-owned floating non-modal panel so staff can keep working in the file while drafting, even when quick layouts remove the Secure Messaging widget from the board. | Draft text is kept only while the panel is open; no persisted draft retrieval was added, and the panel closes with a warning if staff switch to another applicant/case record.
 - 2026-04-25 | Release TBD | Security/Public Portal | Applicant account routing | Hardened applicant portal identity checks and fixed TEST portal packaging so the deployed auth helper matches the new applicant-account gate. | Prevents legacy identity fallbacks from linking applicants, staff recipients, or clients through obsolete shared-user assumptions; TEST deploy now installs the runtime `auth/` helper instead of leaving a stale copy behind.
@@ -281,8 +283,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Fixed the ISET Applications list so staff can use All Applications or Closed views to open more than one application for the same client/case, including historical applications.
-- Removed the public portal footer Contact link so applicants are directed toward secure Messages for case-manager contact.
+- Retired the public portal Contact function as an applicant support path; applicants should use secure Messages for case-manager contact, and staff can continue to triage any legacy contact-message records in Contact Communications.
 - Made application approval decisions clearer by separating agreement with the case manager recommendation from the final funding outcome.
 - Improved Ask the AI guidance and guardrails for common application, document, approval-letter, and Pending Completion questions.
 
@@ -305,8 +306,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Nouveautes (brouillon - FR)
 
-- Correction de la liste des demandes ISET afin que le personnel puisse utiliser les vues Toutes les demandes ou Fermees pour ouvrir plusieurs demandes du meme client/dossier, y compris les demandes historiques.
-- Retrait du lien Contact dans le pied de page du portail public afin que les candidates et candidats soient diriges vers les Messages securises pour joindre leur gestionnaire de cas.
+- Retrait de la fonction Contact du portail public comme voie de soutien aux candidates et candidats; les personnes inscrites doivent utiliser les Messages securises pour joindre leur gestionnaire de cas, tandis que le personnel peut continuer a trier les anciens messages Contact dans Communications Contact.
 - Clarification des decisions d'approbation des demandes en separant l'accord avec la recommandation du gestionnaire de cas du resultat final de financement.
 - Amelioration des consignes et garde-fous de Ask the AI pour les questions courantes sur les demandes, documents, lettres d'approbation et la file En attente de completion.
 

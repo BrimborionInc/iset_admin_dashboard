@@ -39,7 +39,6 @@ const ContactMessageInsightsHelp = () => (
 );
 
 ContactMessageInsightsHelp.aiContext =
-  "Describe the KPI widget on the Contact Communications dashboard that summarises new portal enquiries, backlog, response time, and escalations.";
+  "Describe the KPI widget on the Contact Communications dashboard that summarises legacy portal contact enquiries, backlog, response time, and escalations.";
 
 export default ContactMessageInsightsHelp;
-

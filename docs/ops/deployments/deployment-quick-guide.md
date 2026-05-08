@@ -1,19 +1,17 @@
 # PATH Deployment Quick Guide
 
 Status: current primary operator guide for normal TEST/PROD PATH deploys.
-Last reviewed: 2026-05-07 after WSL local-development migration; command names checked against current `package.json`.
+Last reviewed: 2026-05-08 after WSL-native PROD release `20260507-prod-contact-retirement`; command names checked against current `package.json`.
 
 This is the shortest operator guide for normal PATH deployments.
 
 Work from:
 
-```powershell
-cd X:\ISET\admin-dashboard
+```bash
+cd /home/bill/ISET/admin-dashboard
 ```
 
-Daily coding/Codex work now happens in the WSL workspace `/home/bill/ISET/path-dev-wsl.code-workspace`, but app deploy commands still package and run from the Windows checkout. Do not run app deploy commands from a WSL-only checkout such as `/home/bill/ISET/admin-dashboard` or from a `\\wsl$\\...` working directory. The current rollout still drops into Windows `npm` / PowerShell deploy scripts, and those subprocesses need a normal Windows path like `X:\ISET\admin-dashboard`.
-
-Before any TEST/PROD app deploy after WSL-side development, prove the Windows deploy checkout contains the intended WSL changes. Either commit/push from WSL and pull/update the Windows checkout, or deliberately copy/sync the changed files into `X:\ISET\...` and inspect the Windows `git status --short` / diff there. Never assume that files edited under `/home/bill/ISET` are automatically what `path:deploy` will package from `X:\ISET`.
+Daily coding/Codex work and deployments now happen from the WSL workspace `/home/bill/ISET/path-dev-wsl.code-workspace`. `path:deploy` packages the WSL admin repo plus sibling `ISET-intake` and `shared` trees. TEST rolls out through WSL AWS CLI + SSM; PROD uploads fixed latest artifacts and waits for the PROD ASG refresh. Do not use stale `X:\ISET` or `/mnt/x/ISET` checkout instructions for deploys.
 
 ## Rules
 
@@ -25,17 +23,17 @@ Before any TEST/PROD app deploy after WSL-side development, prove the Windows de
 - PROD deploys require `--yes`.
 - TEST deploys require `--yes` only when you include `--refresh-test-db`.
 - Deploys do not auto-bump `package.json` semver; instead, each frontend build now carries a visible release/build stamp.
-- App deploys package the current Windows working tree. If you mean “deploy only the staged subset,” stage the intended files and stash the rest before running `path:deploy`; if the source changes were made in WSL, align the Windows checkout first.
+- TEST app deploys package the current WSL working tree and sibling WSL portal/shared trees. If you mean "deploy only the staged subset," isolate unrelated local edits before running `path:deploy`; the deploy artifact is not limited to the Git index.
 - TEST app rollouts should rehearse PROD user-facing maintenance behavior. Any TEST deploy that can restart app processes, make a surface unavailable, or produce transient `502 Bad Gateway` responses needs a scoped warning first and the affected surface behind the ALB maintenance page before deploy starts. TEST remains less strict than PROD because ordinary app deploys do not require `--yes`, but raw 502s are not an acceptable planned TEST experience. TEST maintenance copy must use the user-facing name `Test and Training environment` and explicitly state that Production is not affected.
 - PROD app rollouts are user-impacting unless the plan proves otherwise. Any PROD deploy that refreshes ASG instances, restarts app processes, rotates target groups, or can produce transient `502 Bad Gateway` responses needs a scoped warning first and the affected surface behind the ALB maintenance page before deploy starts, even if it is admin-only, portal-only, or code-only.
 - Operator checklist rule: before running `path:deploy`, state the exact maintenance sequence. For TEST in-place app rollouts that restart admin or portal, use `warning -> wait -> ALB 503 fallback -> deploy -> clear fallback -> smoke normal routing -> clear warning`. For PROD ASG-refresh rollouts, use the ALB fallback for the cutover risk, but clear it if the instance refresh waits on ELB health with `Target.NotInUse` / `insufficient data`; target groups must be in normal forwarding to become healthy. Do not treat the in-app warning as a substitute for the ALB fallback when target health may drop, but keep the in-app warning active until normal-routing smoke passes.
-- Current dependency-reinstall safeguard: in-place TEST deploy scripts now clear the deployed `node_modules` tree before running remote `npm ci/install`, and the PROD bootstrap path already does the same during instance boot. Keep that rule in any future deploy helper to avoid stale-filesystem `ENOTEMPTY` failures during runtime dependency replacement.
+- Current dependency-reinstall safeguard: in-place TEST deploy steps now clear the deployed `node_modules` tree before running remote `npm ci/install`, and the PROD bootstrap path already does the same during instance boot. Keep that rule in any future deploy helper to avoid stale-filesystem `ENOTEMPTY` failures during runtime dependency replacement.
 
 ## Most Common Commands
 
 ### 1. Deploy current code to TEST
 
-```powershell
+```bash
 npm run path:deploy -- --env test --dataset intake-release --workflow-id 21
 ```
 
@@ -45,13 +43,13 @@ Use this when:
 
 For an admin-only TEST rollout with no schema/data/portal work:
 
-```powershell
+```bash
 npm run path:deploy -- --env test --skip-schema --skip-data --skip-portal --release-id <release-id>
 ```
 
 Before running that shortcut, set an admin-scoped TEST warning or use the ALB maintenance page if the rollout may restart the admin app or briefly expose a gateway error:
 
-```powershell
+```bash
 npm run path:maintenance -- set --env test --surfaces admin --start-in 5m --expected-duration 5m --title "Test and Training maintenance" --message "The Test and Training environment is temporarily unavailable for maintenance. Production is not affected."
 ```
 
@@ -61,23 +59,23 @@ Wait through the warning window when practical, then deploy. Clear the warning o
 
 If the shortcut may restart the admin app or briefly expose a gateway error, enable the ALB fallback after the warning window and before deploy:
 
-```powershell
+```bash
 npm run path:maintenance:fallback -- set --env test --surfaces admin
 ```
 
 Clear it only after smoke is green:
 
-```powershell
+```bash
 npm run path:maintenance:fallback -- clear --env test --surfaces admin
 ```
 
 After clearing the fallback, run `path:deploy:smoke` once more before clearing the in-app warning so the final check covers normal target-group routing, not just protected maintenance-page routing.
 
-Use that admin-only shortcut only when the change is truly confined to the admin repo. Do not use `--skip-portal` when the admin backend depends on sibling code under `..\ISET-intake` or `..\shared` for the changed runtime path. Current concrete example: assignment/reassignment notification email delivery uses `../shared/events/notificationDispatcher.js` plus `../ISET-intake/notifications/templateRenderer.js`, so that fix must ship as an `admin + portal` TEST rollout, not as admin-only.
+Use that admin-only shortcut only when the change is truly confined to the admin repo. Do not use `--skip-portal` when the admin backend depends on sibling code under `../ISET-intake` or `../shared` for the changed runtime path. Current concrete example: assignment/reassignment notification email delivery uses `../shared/events/notificationDispatcher.js` plus `../ISET-intake/notifications/templateRenderer.js`, so that fix must ship as an `admin + portal` TEST rollout, not as admin-only.
 
 ### 2. Reset TEST from the current DEV baseline, then deploy
 
-```powershell
+```bash
 npm run path:deploy -- --env test --refresh-test-db --dataset intake-release --workflow-id 21 --yes
 ```
 
@@ -96,13 +94,29 @@ What this does:
 
 ### 3. Deploy to PROD
 
-```powershell
-npm run path:deploy -- --env prod --dataset intake-release --workflow-id 21 --yes
+First plan:
+
+```bash
+npm run path:deploy:plan -- --env prod --dataset intake-release --workflow-id 21
 ```
+
+For a normal app rollout, use the maintenance sequence so smoke runs after normal routing is restored:
+
+```bash
+npm run path:maintenance -- set --env prod --surfaces all --start-in 5m --expected-duration 15m --yes
+# wait through the warning window
+npm run path:maintenance:fallback -- set --env prod --surfaces all --yes
+npm run path:deploy -- --env prod --dataset intake-release --workflow-id 21 --release-id <release-id> --skip-smoke --yes
+npm run path:maintenance:fallback -- clear --env prod --surfaces all --yes
+npm run path:deploy:smoke -- --env prod
+npm run path:maintenance -- clear --env prod --surfaces all --yes
+```
+
+If the ASG refresh reports `Target.NotInUse` or insufficient ELB health data while fallback is active, clear the fallback in another shell and let the refresh continue.
 
 Use this when:
 - the change has already been validated in TEST
-- you want the normal safe prod path
+- the maintenance warning/fallback sequence has been stated before the run
 
 What this does:
 - verifies AWS prod identity
@@ -111,20 +125,21 @@ What this does:
 - applies allowlisted config/data only
 - deploys artifacts
 - waits for prod refresh
-- runs prod smoke checks
+- runs prod smoke checks, or records the release before a manual normal-routing smoke when `--skip-smoke` is used during ALB fallback
 
 Historical note:
+- On 2026-05-08, release `20260507-prod-contact-retirement` validated the WSL-native PROD app path with restore point `path-prod-20260507-prod-contact-retirement-20260508000234`, ASG refresh `f323cb21-bc0c-4063-b0e8-017b40f31544`, replacement instance `i-00b00ebdff3f55dc5`, and green final public smoke.
 - On 2026-04-24 the reduced role briefly lacked `rds:AddTagsToResource`, which blocked automatic restore-point capture. That IAM gap was fixed, and release `20260425-100201` confirmed restore-point capture is working again under the normal prod path.
 
 For an admin-only PROD rollout with no schema/data/portal work and no shared-library changes:
 
-```powershell
-npm run path:deploy -- --env prod --skip-schema --skip-data --skip-portal --skip-shared --release-id <release-id> --yes
+```bash
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-portal --skip-shared --release-id <release-id> --skip-smoke --yes
 ```
 
 Before running that shortcut, set an admin-scoped warning if the rollout will refresh PROD instances or can cause a brief gateway error:
 
-```powershell
+```bash
 npm run path:maintenance -- set --env prod --surfaces admin --start-in 5m --expected-duration 5m --yes
 ```
 
@@ -138,14 +153,14 @@ Use this pattern when a portal behavior change is guarded by a runtime flag such
 
 Deploy the portal code first, without unrelated schema/data/admin work:
 
-```powershell
+```bash
 npm run path:deploy -- --env test --skip-schema --skip-data --skip-admin --release-id intake-draft-autosave-test
 ```
 
 Then enable the runtime flag in TEST:
 
 ```bash
-cd /mnt/x/ISET/admin-dashboard
+cd /home/bill/ISET/admin-dashboard
 scripts/run-test-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('runtime', 'intake.draft_autosave', CAST('{\"enabled\": true}' AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP;"
 ```
 
@@ -153,14 +168,14 @@ scripts/run-test-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (scope, k
 
 Deploy the code first with the flag still absent or `false`, let the rollout finish, and only then enable the flag:
 
-```powershell
+```bash
 npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-shared --release-id intake-draft-autosave-prod --yes
 ```
 
 After prod smoke passes, enable the flag:
 
 ```bash
-cd /mnt/x/ISET/admin-dashboard
+cd /home/bill/ISET/admin-dashboard
 scripts/run-prod-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('runtime', 'intake.draft_autosave', CAST('{\"enabled\": true}' AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP;"
 ```
 
@@ -171,15 +186,15 @@ Why this sequence matters:
 
 If the feature is already enabled in the target environment, set it to `false` before starting the app rollout, then re-enable it after smoke passes.
 
-For a portal-only PROD hotfix with no schema/data/admin/shared work:
+Portal-only PROD hotfix command:
 
-```powershell
+```bash
 npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-shared --release-id <release-id> --yes
 ```
 
 The deploy command records smoke-check details in the release manifest even when the console only prints the final summary. If you need operator-visible smoke lines before clearing the maintenance warning, run:
 
-```powershell
+```bash
 npm run path:deploy:smoke -- --env test --skip-admin
 npm run path:deploy:smoke -- --env prod --skip-admin --skip-shared
 ```
@@ -188,25 +203,25 @@ npm run path:deploy:smoke -- --env prod --skip-admin --skip-shared
 
 Plan TEST:
 
-```powershell
+```bash
 npm run path:deploy:plan -- --env test --dataset intake-release --workflow-id 21
 ```
 
 Plan TEST reset + deploy:
 
-```powershell
+```bash
 npm run path:deploy:plan -- --env test --refresh-test-db --dataset intake-release --workflow-id 21
 ```
 
 Plan PROD:
 
-```powershell
+```bash
 npm run path:deploy:plan -- --env prod --dataset intake-release --workflow-id 21
 ```
 
 Smoke only:
 
-```powershell
+```bash
 npm run path:deploy:smoke -- --env test
 npm run path:deploy:smoke -- --env prod
 ```
@@ -215,7 +230,7 @@ npm run path:deploy:smoke -- --env prod
 
 Set a warning before a planned deploy:
 
-```powershell
+```bash
 npm run path:maintenance -- set --env test --start-in 5m --expected-duration 5m
 npm run path:maintenance -- set --env prod --start-in 5m --expected-duration 5m --yes
 ```
@@ -227,14 +242,14 @@ Use this when:
 
 For unscheduled work that is already starting:
 
-```powershell
+```bash
 npm run path:maintenance -- set --env test --start-now --expected-duration 5m --unscheduled
 npm run path:maintenance -- set --env prod --start-now --expected-duration 5m --unscheduled --yes
 ```
 
 Clear the warning after smoke passes. If you enabled the ALB fallback, clear the fallback first, run smoke with normal routing restored, then clear the warning:
 
-```powershell
+```bash
 npm run path:maintenance -- clear --env test
 npm run path:maintenance -- clear --env prod --yes
 ```
@@ -251,15 +266,15 @@ Notes:
 ## App-Coupling Rule
 
 - The TEST deploy decision is based on runtime dependency, not on which repo you edited from first.
-- `deploy-admin-to-test` stages the sibling `..\shared` tree into the admin artifact, so admin changes that touch `shared` still count as admin deploys.
-- The admin backend on the server also resolves some modules from the deployed portal tree via `../ISET-intake/*`, so changes under `X:\ISET\ISET-intake` that are used by the admin backend require a portal deploy too.
+- The WSL-native TEST admin deploy stages the sibling `../shared` tree into the admin artifact, so admin changes that touch `shared` still count as admin deploys.
+- The admin backend on the server also resolves some modules from the deployed portal tree via `../ISET-intake/*`, so changes under `/home/bill/ISET/ISET-intake` that are used by the admin backend require a portal deploy too.
 - Before using an `admin-only` shortcut, check whether the changed execution path imports from `../shared/*` or `../ISET-intake/*`. If it does, ship the coupled surface(s) together.
 
 ## Hard Maintenance Page
 
 If you want users to see a deliberate maintenance page instead of a generic browser error while the app is unavailable:
 
-```powershell
+```bash
 npm run path:maintenance:fallback -- set --env test --surfaces all
 npm run path:maintenance:fallback -- clear --env test --surfaces all
 npm run path:maintenance:fallback -- set --env prod --surfaces all --yes
@@ -277,13 +292,13 @@ Notes:
 
 If you want to reset TEST without doing an app deploy:
 
-```powershell
+```bash
 npm run test:db:refresh -- --source-env dev --yes
 ```
 
 Preflight only:
 
-```powershell
+```bash
 npm run test:db:refresh:plan -- --source-env dev
 ```
 

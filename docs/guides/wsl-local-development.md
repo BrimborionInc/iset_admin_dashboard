@@ -9,12 +9,12 @@ Last updated: 2026-05-07
 - Active WSL2 Ubuntu coding checkout: `/home/bill/ISET/admin-dashboard`
 - Active WSL2 Ubuntu public portal checkout: `/home/bill/ISET/ISET-intake`
 - Active WSL2 Ubuntu Sage Intacct mock checkout: `/home/bill/ISET/intacct-mock-service`
-- Older Windows-mounted checkout: `/mnt/x/ISET/admin-dashboard`
+- Older Windows-mounted checkout: stale/archive only if present; do not use for deploy decisions
 - DEV MySQL host from WSL: `172.26.176.1`
 
-Use the `/home/bill/ISET/*` copies for normal local coding, Git-heavy work, and VS Code/Codex sessions. Do not reopen the Windows-mounted `/mnt/x/ISET/admin-dashboard` copy for day-to-day development unless the task explicitly needs the old Windows tree.
+Use the `/home/bill/ISET/*` copies for normal local coding, Git-heavy work, VS Code/Codex sessions, and TEST deployments. Do not reopen a Windows-mounted `/mnt/x/ISET/admin-dashboard` copy for day-to-day development or deployment unless the task explicitly asks to inspect a stale archive.
 
-The Windows checkout remains relevant for TEST/PROD app deploy flows that still shell into Windows `npm` / PowerShell. Follow the deployment guides before deploying; do not assume the WSL-only checkout is a supported deploy working directory. Before a TEST/PROD app deploy, sync or pull the intended WSL changes into `X:\ISET\...` and inspect the Windows checkout because the deploy scripts package that Windows working tree.
+TEST `path:deploy` is now WSL-native: run it from `/home/bill/ISET/admin-dashboard`, and it packages the WSL admin, portal, and shared trees. The legacy PowerShell component deploy scripts remain as lower-level historical references, but Windows `npm.cmd` is not reliable from a `\\wsl.localhost\...` working directory. PROD app deploy from WSL still needs a dedicated port/revalidation before the next PROD app rollout; do not resurrect old `X:\ISET` instructions as a shortcut.
 
 ## Opening VS Code
 
@@ -108,7 +108,7 @@ DB_HOST=172.26.176.1 npm start
 
 ## Common Pitfall
 
-The package scripts still include some Windows-oriented commands, including PowerShell launchers and `set PORT=...` syntax. Prefer the WSL VS Code tasks or the manual Linux commands above for local development from `/home/bill/ISET/admin-dashboard`.
+Some package scripts still include Windows-oriented commands, including legacy PowerShell launchers and `set PORT=...` syntax. Prefer the WSL VS Code tasks or the manual Linux commands above for local development from `/home/bill/ISET/admin-dashboard`. For TEST deployment, prefer `npm run path:deploy` from the WSL admin repo; do not call the legacy component PowerShell scripts directly from WSL.
 
 ## Puppeteer/Chrome Dependencies
 

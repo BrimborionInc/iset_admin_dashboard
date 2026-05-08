@@ -6,7 +6,7 @@ const ContactMessageQueueHelp = () => (
     <Box>
       <strong>What this widget shows</strong>
       <p>
-        A triage table of public portal enquiries with submission timestamp, applicant details, message preview, and current status.
+        A triage table of legacy public portal enquiries with submission timestamp, applicant details, message preview, and current status.
       </p>
     </Box>
     <Box>
@@ -21,7 +21,7 @@ const ContactMessageQueueHelp = () => (
       <strong>Implementation notes</strong>
       <ul>
         <li>Backed by the <code>contact_message</code> table and the associated audit trail once wired to production.</li>
-        <li>Respect portal-side rate limiting and spam flags; suppress any messages flagged as blocked.</li>
+        <li>Do not treat this as a new applicant support channel; the public portal Contact function has been retired.</li>
         <li>Persist table preferences (columns, filters, density) so coordinators maintain their preferred triage view.</li>
       </ul>
     </Box>
@@ -29,6 +29,6 @@ const ContactMessageQueueHelp = () => (
 );
 
 ContactMessageQueueHelp.aiContext =
-  "Explain the Contact Communications queue widget that lists contact_message records with status, priority, assignee, and inline actions for NWAC Administrators.";
+  "Explain the Contact Communications queue widget that lists legacy contact_message records with status, priority, assignee, and inline actions for NWAC Administrators.";
 
 export default ContactMessageQueueHelp;

@@ -1,7 +1,7 @@
 # Prod Portal Hostname Cutover
 
 Status: point-in-time elevated cutover runbook. Verify current DNS, ACM, WAF, SSM, and Terraform state before acting.
-Last reviewed: 2026-04-29 during ops documentation cleanup.
+Last reviewed: 2026-05-07 after WSL workspace migration follow-up.
 
 Goal: serve the prod public portal on `https://iset.nwac.ca` while keeping `https://nwac-public.awentech.ca` working.
 
@@ -23,23 +23,23 @@ As of March 27, 2026:
 
 ## 1. Rotate the CAPTCHA API key
 
-Run from any PowerShell window with prod AWS access:
+Run from a shell with elevated prod AWS access:
 
-```powershell
-aws wafv2 create-api-key `
-  --profile <elevated-prod-profile> `
-  --region ca-central-1 `
-  --scope REGIONAL `
+```bash
+aws wafv2 create-api-key \
+  --profile <elevated-prod-profile> \
+  --region ca-central-1 \
+  --scope REGIONAL \
   --token-domains nwac-console.awentech.ca iset.nwac.ca nwac-public.awentech.ca
 ```
 
-Copy the returned `APIKey` and replace `REACT_APP_WAF_CAPTCHA_API_KEY` in [ISET-intake/.env.production](/mnt/x/ISET/ISET-intake/.env.production).
+Copy the returned `APIKey` and replace `REACT_APP_WAF_CAPTCHA_API_KEY` in `/home/bill/ISET/ISET-intake/.env.production`.
 
 ## 2. Update prod runtime env and uploads CORS
 
-From `X:\ISET\admin-dashboard`:
+From `/home/bill/ISET/admin-dashboard`:
 
-```powershell
+```bash
 npm run configure-prod-portal-hosts -- -Profile <elevated-prod-profile>
 ```
 
@@ -50,15 +50,15 @@ This updates:
 
 ## 3. Deploy the new admin and portal builds
 
-From `X:\ISET\admin-dashboard`:
+Current WSL caveat: PROD app deploy/refresh needs WSL-native port/revalidation before use. Once that is done, run the app deploy from `/home/bill/ISET/admin-dashboard`.
 
-```powershell
+```bash
 npm run deploy-admin-to-prod -- -Profile nwac-prod
 ```
 
-From `X:\ISET\ISET-intake`:
+From `/home/bill/ISET/ISET-intake`:
 
-```powershell
+```bash
 npm run deploy-portal-to-prod -- -Profile nwac-prod
 npm run refresh-prod -- -Profile nwac-prod -Wait
 ```
@@ -68,9 +68,9 @@ npm run refresh-prod -- -Profile nwac-prod -Wait
 The prod Terraform now supports one primary portal hostname plus additional portal aliases.
 Run this step through the normal prod Terraform / infra-admin access path from `docs/ops/runbooks/terraform-prod-runbook.md`, not under the reduced `nwac-prod` operator profile.
 
-From `X:\ISET\admin-dashboard\infra\terraform\environments\prod`:
+From `/home/bill/ISET/admin-dashboard/infra/terraform/environments/prod`:
 
-```powershell
+```bash
 terraform init -backend-config=backend.hcl -reconfigure
 terraform apply -target=module.acm -var-file=nwac-prod.tfvars
 ```
@@ -99,12 +99,12 @@ Do not ask them to add the live `iset` record until the AWS side is ready.
 
 ## 6. Switch the ALB to the new cert and dual-host listener rule
 
-Once the new cert is `ISSUED`, put the new certificate ARN into [nwac-prod.tfvars](/mnt/x/ISET/admin-dashboard/infra/terraform/environments/prod/nwac-prod.tfvars) as `alb_certificate_arn`.
+Once the new cert is `ISSUED`, put the new certificate ARN into `/home/bill/ISET/admin-dashboard/infra/terraform/environments/prod/nwac-prod.tfvars` as `alb_certificate_arn`.
 Run this step through the same elevated Terraform / infra-admin access path as step 4, not under the reduced `nwac-prod` operator profile.
 
 Then run:
 
-```powershell
+```bash
 terraform apply -var-file=nwac-prod.tfvars
 ```
 

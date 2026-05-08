@@ -1,43 +1,49 @@
 # Prod Deployment Guide
 
-Status: current PROD deployment guide. Verify live AWS state before any mutating command.
-Last reviewed: 2026-05-07 after WSL local-development migration; command names checked against current admin and portal `package.json` files.
+Status: current WSL-native PROD deployment guide. Verify live AWS state before any mutating command.
+Last reviewed: 2026-05-08 after WSL-native PROD release `20260507-prod-contact-retirement`.
 
 For the shortest operator commands, start with `docs/ops/deployments/deployment-quick-guide.md`.
 
-This is the shortest safe path to deploy the current prod stack.
+This guide records the PROD safety sequence. The active app artifact rollout is WSL-native through `scripts/path-deploy.js`; do not use stale Windows checkout paths as a deployment source.
 
 ## Before You Start
 
-- Work from the repo roots on the same machine that has AWS prod access.
-- Launch the app deploy from the Windows checkout at `X:\ISET\admin-dashboard`, not from the WSL daily-development workspace (`/home/bill/ISET/path-dev-wsl.code-workspace`) or a `\\wsl$\\...` current directory.
-- Before any PROD app deploy after WSL-side development, prove the Windows deploy checkout contains the intended WSL changes. Commit/push from WSL and pull/update the Windows checkout, or deliberately copy/sync the exact changed files into `X:\ISET\...`; then inspect `git status --short`, the relevant diff, and staged files in the Windows checkout before running `path:deploy`.
+- Work from the WSL admin repo: `/home/bill/ISET/admin-dashboard`.
+- Do not use old `X:\ISET` / `/mnt/x/ISET` checkout instructions for PROD. They were superseded by the WSL migration and are not a valid way to recover deploy safety.
+- PROD plan/schema/data/app/smoke helpers are WSL-safe through `path:deploy`. The PROD app branch builds and packages the WSL admin repo, sibling portal repo, and sibling `shared` tree, uploads fixed `*-latest.zip` artifacts to `nwac-prod-artifacts`, then waits for the PROD ASG refresh.
 - Prefer the PATH orchestrator from `admin-dashboard`; it wraps schema/data/app rollout/smoke into one release command.
 - Uploading artifacts does not update the live instance by itself. The orchestrator and the low-level manual flow both trigger a prod instance refresh after uploads.
 - The dedicated prod operator profile is `nwac-prod`. In the current Codex sandbox it assumes the reduced role `nwac-prod-codex-operator` from `default`; `default` is only the bootstrap IAM user and direct prod resource calls through it are expected to fail.
 - The reduced `nwac-prod` role covers normal deploys, prod SQL/dumps via SSM, ASG refresh, automatic prod restore-point capture, and the ALB `path:maintenance:fallback` flow. It does not cover broader infra/admin tasks such as WAF changes, SSM env parameter writes, uploads-bucket CORS changes, or Terraform/ACM changes.
-- In the current Codex sandbox, `npm` runs under Windows Node while the trusted operator AWS profiles live in the bash/WSL-side AWS CLI config. The PATH control-plane scripts already route AWS-backed checks through `bash`; if you write new operator helpers, follow the same pattern instead of assuming `npm` -> `aws.exe` will see the same profiles.
+- In the current Codex sandbox, trusted operator AWS profiles live in the bash/WSL-side AWS CLI config. The PATH control-plane scripts already route AWS-backed checks through `bash`; if you write new operator helpers, follow the same pattern.
 - Current prod DB helper assumption: `nwac-prod-db-credentials` currently contains only `username` and `password`, so `scripts/run-prod-sql-via-ssm.sh` defaults the host/database/port to `nwac-prod-db.cluster-c3g4iamg8j38.ca-central-1.rds.amazonaws.com`, `iset_intake`, and `3306`.
 - `scripts/run-db-dump-via-ssm.sh` now exports temporary credentials from the active AWS profile before uploading the dump back to S3, so the role-backed `nwac-prod` profile works for prod dump capture as well.
 - Do not use `-SkipBuild` unless you have already inspected the current `build/` output and confirmed it was compiled for prod. React bundles bake environment-specific Cognito domains, client IDs, and external links, so a stale test build can be uploaded to prod unchanged.
-- Prod app deploys package the current Windows working tree. If you intend to ship only a subset of local edits, stage the intended files and temporarily stash the rest before running `path:deploy`; if the edits were made in WSL, align the Windows checkout first.
-- Before a PROD app deploy, explicitly inspect both `git diff --cached --name-only` and `git status --short`. This catches the common operator mistake where nothing is staged but unrelated dirty files would still be packaged.
+- Before a future PROD app deploy, explicitly inspect `git status --short` and the relevant WSL diffs. The app artifact packages the current WSL working trees, not just the Git index.
 
 ## Full Prod Deploy
 
-Recommended:
+Preflight from WSL:
 
-```powershell
-cd X:\ISET\admin-dashboard
-npm run path:deploy -- --env prod --dataset intake-release --workflow-id 21 --yes
-```
-
-Preflight only:
-
-```powershell
-cd X:\ISET\admin-dashboard
+```bash
+cd /home/bill/ISET/admin-dashboard
 npm run path:deploy:plan -- --env prod --dataset intake-release --workflow-id 21
 ```
+
+Planned maintenance sequence:
+
+```bash
+npm run path:maintenance -- set --env prod --surfaces all --start-in 5m --expected-duration 15m --yes
+# wait through the warning window
+npm run path:maintenance:fallback -- set --env prod --surfaces all --yes
+npm run path:deploy -- --env prod --dataset intake-release --workflow-id 21 --release-id <release-id> --skip-smoke --yes
+npm run path:maintenance:fallback -- clear --env prod --surfaces all --yes
+npm run path:deploy:smoke -- --env prod
+npm run path:maintenance -- clear --env prod --surfaces all --yes
+```
+
+If `path:deploy` reports `Target.NotInUse` or insufficient ELB health data during the ASG refresh while the ALB fallback is enabled, clear the fallback immediately in another shell and let the refresh continue. Target groups must be in normal forwarding before ELB health can become healthy. Keep the in-app warning active until normal-routing smoke passes.
 
 The orchestrator performs:
 
@@ -46,13 +52,14 @@ The orchestrator performs:
 - if that restore-point step ever fails under the reduced role, do not force through a DB-affecting deploy; either fix IAM first or prove the schema/data payload is already identical and rerun app-only with `--skip-schema --skip-data`
 - canonical shared-schema plan/apply through SSM
 - optional allowlisted data/config promotion
-- `shared` + `admin` + `portal` artifact upload
+- WSL-native `shared` + `admin` + `portal` artifact upload
 - waited prod ASG instance refresh
 - post-refresh smoke checks
 - release manifest capture under `tmp/path-deploy/prod/`
 - the existing boot-time runtime install path already removes deployed `node_modules` before `npm ci/install`, which is the dependency-reinstall rule TEST now mirrors for its in-place deploy scripts
 
 Current validation note:
+- Release `20260507-prod-contact-retirement` confirmed the WSL-native PROD path: restore point `path-prod-20260507-prod-contact-retirement-20260508000234`, artifacts `shared/shared-latest.zip`, `admin/admin-dashboard-latest.zip`, `portal/portal-latest.zip`, ASG refresh `f323cb21-bc0c-4063-b0e8-017b40f31544`, replacement instance `i-00b00ebdff3f55dc5`, and final public smoke all passed.
 - Release `20260425-100201` confirmed the repaired IAM path by capturing restore point `path-prod-20260425-100201-20260425100220` before the normal full prod deploy completed successfully.
 
 ## Feature-Flagged Portal Changes
@@ -64,15 +71,15 @@ Recommended prod sequence:
 1. Keep the target runtime row absent or set to `false`.
 2. Deploy the portal code:
 
-```powershell
-cd X:\ISET\admin-dashboard
+```bash
+cd /home/bill/ISET/admin-dashboard
 npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-shared --release-id intake-draft-autosave-prod --yes
 ```
 
 3. After the prod refresh and smoke checks pass, enable the flag:
 
 ```bash
-cd /mnt/x/ISET/admin-dashboard
+cd /home/bill/ISET/admin-dashboard
 scripts/run-prod-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('runtime', 'intake.draft_autosave', CAST('{\"enabled\": true}' AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP;"
 ```
 
@@ -85,30 +92,30 @@ Current autosave safety note:
 
 ## Low-Level Component Flow
 
-Use this only when you need the underlying primitives directly.
+Legacy reference only. Prefer `path:deploy` from WSL so schema/data/app/refresh/smoke stay in one manifest.
 
-From `X:\ISET\admin-dashboard`:
+From the admin repo, legacy commands were:
 
-```powershell
+```bash
 npm run deploy-shared-to-prod -- -Profile nwac-prod
 npm run deploy-admin-to-prod -- -Profile nwac-prod
 ```
 
-From `X:\ISET\ISET-intake`:
+From the portal repo, legacy commands were:
 
-```powershell
+```bash
 npm run deploy-portal-to-prod -- -Profile nwac-prod
 ```
 
 Then trigger the prod rollout from either repo:
 
-```powershell
+```bash
 npm run refresh-prod -- -Profile nwac-prod
 ```
 
 If you want the refresh script to wait and print progress:
 
-```powershell
+```bash
 npm run refresh-prod -- -Profile nwac-prod -Wait
 ```
 
@@ -122,83 +129,84 @@ The warmup is intentionally short because the real gate is ALB health; prod inst
 
 ## Partial Deploys
 
-Admin only:
+Current status:
 
-```powershell
-cd X:\ISET\admin-dashboard
-npm run deploy-admin-to-prod -- -Profile nwac-prod
-npm run refresh-prod -- -Profile nwac-prod
-```
+- Admin-only, portal-only, and shared-only PROD app deploys are WSL-native through `path:deploy`.
+- The old component commands are retained only in [Low-Level Component Flow](#low-level-component-flow) as legacy reference material.
+- Use `--skip-smoke` while the ALB fallback is active, clear fallback when ELB health needs normal forwarding or once refresh succeeds, then run `path:deploy:smoke` before clearing the in-app warning.
 
-Recommended admin-only hotfix path with a user-facing warning:
+Admin-only hotfix path:
 
-```powershell
-cd X:\ISET\admin-dashboard
+```bash
+cd /home/bill/ISET/admin-dashboard
 npm run path:maintenance -- set --env prod --surfaces admin --start-in 5m --expected-duration 5m --yes
 ```
 
 Wait through the warning window, then run:
 
-```powershell
-cd X:\ISET\admin-dashboard
-npm run path:deploy -- --env prod --skip-schema --skip-data --skip-portal --skip-shared --release-id <release-id> --yes
+```bash
+cd /home/bill/ISET/admin-dashboard
+npm run path:maintenance:fallback -- set --env prod --surfaces admin --yes
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-portal --skip-shared --release-id <release-id> --skip-smoke --yes
+npm run path:maintenance:fallback -- clear --env prod --surfaces admin --yes
+npm run path:deploy:smoke -- --env prod --skip-portal --skip-shared
 npm run path:maintenance -- clear --env prod --surfaces admin --yes
 ```
 
 Use this when:
 - the release is app-only
-- the release does not include changes from `X:\ISET\shared`
+- the release does not include changes from `/home/bill/ISET/shared`
 - the change is already validated in TEST
 - you want a short admin-only `brief interruptions possible` warning instead of a hard maintenance page
 
-Portal only:
+Portal-only hotfix path:
 
-```powershell
-cd X:\ISET\ISET-intake
-npm run deploy-portal-to-prod -- -Profile nwac-prod
-npm run refresh-prod -- -Profile nwac-prod
-```
-
-Recommended portal-only hotfix path with a user-facing warning:
-
-```powershell
-cd X:\ISET\admin-dashboard
+```bash
+cd /home/bill/ISET/admin-dashboard
 npm run path:maintenance -- set --env prod --surfaces portal --start-in 5m --expected-duration 5m --yes
 ```
 
 Wait through the warning window, then run:
 
-```powershell
-cd X:\ISET\admin-dashboard
-npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-shared --release-id <release-id> --yes
+```bash
+cd /home/bill/ISET/admin-dashboard
+npm run path:maintenance:fallback -- set --env prod --surfaces portal --yes
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-shared --release-id <release-id> --skip-smoke --yes
+npm run path:maintenance:fallback -- clear --env prod --surfaces portal --yes
+npm run path:deploy:smoke -- --env prod --skip-admin --skip-shared
 npm run path:maintenance -- clear --env prod --surfaces portal --yes
 ```
 
 Use this when:
 - the release is portal-only
-- the release does not include changes from `X:\ISET\shared`
+- the release does not include changes from `/home/bill/ISET/shared`
 - the change is already validated or intentionally being hotfixed directly
 - you want a short portal-only `brief interruptions possible` warning instead of a hard maintenance page
 
-Shared only:
+Shared-only app rollout:
 
-```powershell
-cd X:\ISET\admin-dashboard
-npm run deploy-shared-to-prod -- -Profile nwac-prod
-npm run refresh-prod -- -Profile nwac-prod
+```bash
+cd /home/bill/ISET/admin-dashboard
+npm run path:maintenance -- set --env prod --surfaces all --start-in 5m --expected-duration 5m --yes
+# wait through the warning window
+npm run path:maintenance:fallback -- set --env prod --surfaces all --yes
+npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-portal --release-id <release-id> --skip-smoke --yes
+npm run path:maintenance:fallback -- clear --env prod --surfaces all --yes
+npm run path:deploy:smoke -- --env prod
+npm run path:maintenance -- clear --env prod --surfaces all --yes
 ```
 
 ## Verify Prod
 
 Check refresh status:
 
-```powershell
+```bash
 aws autoscaling describe-instance-refreshes --region ca-central-1 --auto-scaling-group-name nwac-prod-asg --profile nwac-prod --output table
 ```
 
 Check health:
 
-```powershell
+```bash
 curl https://nwac-console.awentech.ca/healthz
 curl https://iset.nwac.ca/healthz
 curl https://nwac-public.awentech.ca/healthz

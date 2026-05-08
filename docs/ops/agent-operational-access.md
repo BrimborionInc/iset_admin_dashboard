@@ -1,7 +1,7 @@
 # Agent Operational Access Notes
 
 Status: current operational access guidance for Codex/WSL threads. Verify live AWS/DB state before running mutating commands.
-Last reviewed: 2026-05-07 after WSL local-development migration.
+Last reviewed: 2026-05-08 after WSL-native PROD app deployment validation.
 
 Purpose: keep database, TEST/PROD, and AWS profile command notes out of `docs/AGENTS.md` while preserving the operational details future agents need.
 
@@ -16,8 +16,9 @@ Purpose: keep database, TEST/PROD, and AWS profile command notes out of `docs/AG
 
 - Daily coding/Codex work now happens in the WSL multi-root workspace `/home/bill/ISET/path-dev-wsl.code-workspace`.
 - That workspace includes `/home/bill/ISET/admin-dashboard`, `/home/bill/ISET/ISET-intake`, `/home/bill/ISET/shared`, and `/home/bill/ISET/intacct-mock-service`.
-- TEST/PROD app deploys still run from the Windows checkout (`X:\ISET\admin-dashboard`) because the rollout path shells into Windows `npm` / PowerShell scripts.
-- Before a deploy, explicitly align the Windows checkout with WSL changes and inspect the Windows tree. Do not assume `/home/bill/ISET` edits are what `path:deploy` will package.
+- TEST deploys run from `/home/bill/ISET/admin-dashboard`. The WSL-native `path:deploy` TEST app step builds/packages the WSL admin tree, sibling portal tree, and sibling shared tree, then deploys through AWS CLI + SSM.
+- PROD deploys also run from `/home/bill/ISET/admin-dashboard`. The WSL-native `path:deploy` PROD app step builds/packages the WSL admin tree, sibling portal tree, and sibling shared tree, uploads fixed latest artifacts to `nwac-prod-artifacts`, then starts and waits for the PROD ASG refresh.
+- Do not use stale `X:\ISET` or `/mnt/x/ISET` deploy guidance. Windows `npm.cmd` is not reliable from `\\wsl.localhost\...`, which is why the active app paths are handled by the Node orchestrator instead of the legacy PowerShell component scripts.
 
 ## DB Interaction From WSL (DEV)
 
@@ -110,7 +111,7 @@ Notes:
   - `nwac-prod-codex-operator` -> `arn:aws:sts::468278742295:assumed-role/nwac-prod-codex-operator/codex-prod-operator` when assumed from `default`
   - `nwac-test` -> `arn:aws:iam::124355655255:user/CODEX_CLI_Admin` (test account `124355655255`)
 - Reduced PROD operator role added 2026-04-20 and widened 2026-04-20 for the full repo-driven deploy/migration path: `nwac-prod-codex-operator` / `nwac-prod` cover artifact uploads in `nwac-prod-artifacts` (`admin/*`, `portal/*`, `shared/*`, `ssm-sql/*`, `db-dumps/*`), PROD SSM SQL/dump execution, ASG refresh, PROD DB restore-point snapshots, and the ALB `path-maintenance-fallback` flow. They still do not allow direct `secretsmanager:GetSecretValue` on `nwac-prod-db-credentials`.
-- Windows/npm processes do not share the same AWS config home as bash/WSL. For Windows-side deploy scripts, first export credentials from the bash/WSL role-backed profile into the child-process env. `scripts/path-deploy.js` already does this through `seedWindowsAwsCredentials()`.
+- Legacy Windows/npm deploy processes do not share the same AWS config home as bash/WSL. TEST no longer uses that path; if PROD app deploy is ported by adapting the old PowerShell helpers, credentials must still come from the WSL role-backed profile rather than an implicit Windows default.
 - Always pass `--profile` for AWS commands in threads that touch infra or storage:
   - TEST example: `aws s3api get-bucket-encryption --bucket nwac-test-uploads-20251014 --region ca-central-1 --profile nwac-test`
   - PROD example: `aws sts get-caller-identity --profile nwac-prod`

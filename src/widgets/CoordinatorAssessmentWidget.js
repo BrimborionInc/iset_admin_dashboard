@@ -1913,26 +1913,100 @@ const buildEmptyDecisionLetterDrafts = () => ({
   approval: buildEmptyDecisionLetterDraft(),
   denial: buildEmptyDecisionLetterDraft()
 });
-const getDecisionLetterSent = (context) => {
-  if (!context || typeof context !== 'object') return null;
-  const raw = context.decisionLetterSent || context.decision_letter_sent || null;
+const APPLICATION_ASSESSMENT_CONTEXT_KEY = 'applicationDecisionLetters';
+const APPLICATION_ASSESSMENT_CONTEXT_ROOT_KEYS = [
+  'assessmentOtherFunding',
+  'assessment_nwac_review_status',
+  'decisionLetterDrafts',
+  'decision_letter_drafts',
+  'decisionLetter',
+  'decision_letter',
+  'decisionLetterPackDrafts',
+  'decision_letter_pack_drafts',
+  'decisionLetterSent',
+  'decision_letter_sent',
+  'decisionLetterSentType',
+  'decision_letter_sent_type',
+  'decisionLetterSentAt',
+  'decision_letter_sent_at',
+  FUNDING_DECISION_REASON_CODE_KEY,
+  FUNDING_DECISION_REASON_LABEL_KEY,
+  FUNDING_DECISION_REASON_EXPLANATION_KEY
+];
+const normalizeApplicationContextKey = (value) => {
+  const numeric = Number(value);
+  if (Number.isInteger(numeric) && numeric > 0) return String(numeric);
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text || null;
+};
+const isPlainObject = value => value && typeof value === 'object' && !Array.isArray(value);
+const getApplicationAssessmentContext = (context, applicationId, { allowLegacyFallback = false } = {}) => {
+  if (!isPlainObject(context)) return {};
+  const applicationKey = normalizeApplicationContextKey(applicationId);
+  if (!applicationKey) return context;
+  const applicationContexts = context[APPLICATION_ASSESSMENT_CONTEXT_KEY];
+  const scopedContext = isPlainObject(applicationContexts) && isPlainObject(applicationContexts[applicationKey])
+    ? applicationContexts[applicationKey]
+    : null;
+  if (scopedContext) return scopedContext;
+  return allowLegacyFallback ? context : {};
+};
+const getDecisionLetterDrafts = (context, applicationId) => {
+  const assessmentContext = getApplicationAssessmentContext(context, applicationId);
+  return (
+    assessmentContext.decisionLetterDrafts ||
+    assessmentContext.decision_letter_drafts ||
+    assessmentContext.decisionLetter ||
+    assessmentContext.decision_letter ||
+    null
+  );
+};
+const getDecisionLetterSent = (context, applicationId) => {
+  const assessmentContext = getApplicationAssessmentContext(context, applicationId);
+  if (!assessmentContext || typeof assessmentContext !== 'object') return null;
+  const raw = assessmentContext.decisionLetterSent || assessmentContext.decision_letter_sent || null;
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     return raw;
   }
-  const legacyType = context.decisionLetterSentType || context.decision_letter_sent_type || null;
-  const legacyAt = context.decisionLetterSentAt || context.decision_letter_sent_at || null;
+  const legacyType = assessmentContext.decisionLetterSentType || assessmentContext.decision_letter_sent_type || null;
+  const legacyAt = assessmentContext.decisionLetterSentAt || assessmentContext.decision_letter_sent_at || null;
   if (legacyType && legacyAt) {
     return { [legacyType]: legacyAt };
   }
   return null;
 };
-const getDecisionLetterPackDrafts = (context) => {
-  if (!context || typeof context !== 'object') return null;
-  const raw = context.decisionLetterPackDrafts || context.decision_letter_pack_drafts || null;
+const getDecisionLetterPackDrafts = (context, applicationId) => {
+  const assessmentContext = getApplicationAssessmentContext(context, applicationId);
+  if (!assessmentContext || typeof assessmentContext !== 'object') return null;
+  const raw = assessmentContext.decisionLetterPackDrafts || assessmentContext.decision_letter_pack_drafts || null;
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     return raw;
   }
   return null;
+};
+const buildApplicationAssessmentCaseContext = (baseContext, applicationId, updates = {}) => {
+  const context = isPlainObject(baseContext) ? { ...baseContext } : {};
+  const applicationKey = normalizeApplicationContextKey(applicationId);
+  if (!applicationKey) {
+    return { ...context, ...(isPlainObject(updates) ? updates : {}) };
+  }
+  APPLICATION_ASSESSMENT_CONTEXT_ROOT_KEYS.forEach(key => {
+    if (Object.prototype.hasOwnProperty.call(context, key)) {
+      delete context[key];
+    }
+  });
+  const existingApplicationContexts = isPlainObject(context[APPLICATION_ASSESSMENT_CONTEXT_KEY])
+    ? context[APPLICATION_ASSESSMENT_CONTEXT_KEY]
+    : {};
+  const existingScopedContext = getApplicationAssessmentContext(baseContext, applicationId);
+  context[APPLICATION_ASSESSMENT_CONTEXT_KEY] = {
+    ...existingApplicationContexts,
+    [applicationKey]: {
+      ...(isPlainObject(existingScopedContext) ? existingScopedContext : {}),
+      ...(isPlainObject(updates) ? updates : {})
+    }
+  };
+  return context;
 };
 const normalizeDecisionDateValue = (value, fallback = '') => {
   const trimmed = typeof value === 'string' ? value.trim() : '';
@@ -2140,18 +2214,21 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [letterBody, setLetterBody] = useState('');
   const [approvalLetterPackTabId, setApprovalLetterPackTabId] = useState('client');
   const [approvalLetterPackGenerated, setApprovalLetterPackGenerated] = useState(false);
+  const initialApplicationId = caseData?.application_id ?? caseData?.applicationId ?? application_id ?? null;
   const [savedApprovalLetterPackDrafts, setSavedApprovalLetterPackDrafts] = useState(
-    () => getDecisionLetterPackDrafts(caseData?.caseContext) || null
+    () => getDecisionLetterPackDrafts(caseData?.caseContext, initialApplicationId) || null
   );
-  const [decisionLetterSent, setDecisionLetterSent] = useState(() => getDecisionLetterSent(caseData?.caseContext) || {});
+  const [decisionLetterSent, setDecisionLetterSent] = useState(
+    () => getDecisionLetterSent(caseData?.caseContext, initialApplicationId) || {}
+  );
   const letterBodyDirtyRef = useRef(false);
   const lastActiveLetterKeyRef = useRef(null);
   const [denialReasonModalVisible, setDenialReasonModalVisible] = useState(false);
   const [denialReasonChoice, setDenialReasonChoice] = useState(
-    () => caseData?.caseContext?.[FUNDING_DECISION_REASON_CODE_KEY] || ''
+    () => getApplicationAssessmentContext(caseData?.caseContext, initialApplicationId)?.[FUNDING_DECISION_REASON_CODE_KEY] || ''
   );
   const [denialReasonExplanation, setDenialReasonExplanation] = useState(
-    () => caseData?.caseContext?.[FUNDING_DECISION_REASON_EXPLANATION_KEY] || ''
+    () => getApplicationAssessmentContext(caseData?.caseContext, initialApplicationId)?.[FUNDING_DECISION_REASON_EXPLANATION_KEY] || ''
   );
   const [denialReasonErrors, setDenialReasonErrors] = useState({});
   const [denyFundingModalVisible, setDenyFundingModalVisible] = useState(false);
@@ -2452,28 +2529,22 @@ const CoordinatorAssessmentWidget = forwardRef(
       setDecisionLetterSent({});
       return;
     }
-    const sent = getDecisionLetterSent(caseData?.caseContext) || {};
+    const sent = getDecisionLetterSent(caseData?.caseContext, applicationId) || {};
     setDecisionLetterSent(sent);
-  }, [caseId]);
+  }, [applicationId, caseData?.caseContext, caseId]);
   useEffect(() => {
-    const sent = getDecisionLetterSent(caseData?.caseContext);
-    if (!sent) return;
-    setDecisionLetterSent(prev => ({ ...(prev || {}), ...sent }));
-  }, [caseData?.caseContext]);
-  useEffect(() => {
-    const saved = getDecisionLetterPackDrafts(caseData?.caseContext);
+    const saved = getDecisionLetterPackDrafts(caseData?.caseContext, applicationId);
     setSavedApprovalLetterPackDrafts(saved || null);
-  }, [caseData?.caseContext]);
+  }, [applicationId, caseData?.caseContext]);
   useEffect(() => {
-    const persistedReasonCode = caseData?.caseContext?.[FUNDING_DECISION_REASON_CODE_KEY];
-    if (typeof persistedReasonCode === 'string' && persistedReasonCode.trim()) {
-      setDenialReasonChoice(prev => prev || persistedReasonCode.trim());
-    }
-    const persistedReasonExplanation = caseData?.caseContext?.[FUNDING_DECISION_REASON_EXPLANATION_KEY];
-    if (typeof persistedReasonExplanation === 'string' && persistedReasonExplanation.trim()) {
-      setDenialReasonExplanation(prev => prev || persistedReasonExplanation.trim());
-    }
-  }, [caseData?.caseContext]);
+    const assessmentContext = getApplicationAssessmentContext(caseData?.caseContext, applicationId);
+    const persistedReasonCode = assessmentContext?.[FUNDING_DECISION_REASON_CODE_KEY];
+    setDenialReasonChoice(typeof persistedReasonCode === 'string' ? persistedReasonCode.trim() : '');
+    const persistedReasonExplanation = assessmentContext?.[FUNDING_DECISION_REASON_EXPLANATION_KEY];
+    setDenialReasonExplanation(
+      typeof persistedReasonExplanation === 'string' ? persistedReasonExplanation.trim() : ''
+    );
+  }, [applicationId, caseData?.caseContext]);
   const applicantName = useMemo(() => {
     const ctx = resolveCaseContext(caseData);
     const personal = ctx.applicationPersonal || {};
@@ -3559,6 +3630,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     );
     const otherFundingSummary = buildOtherFundingSummary(normalizedOtherFunding);
     const payload = {
+      applicationId: applicationId || null,
       assessment_date_of_assessment: formatDate(assessment.dateOfAssessment) || null,
       assessment_employment_goals: assessment.employmentGoals || null,
       assessment_previous_iset: assessment.previousISET || null,
@@ -3614,14 +3686,14 @@ const CoordinatorAssessmentWidget = forwardRef(
     const baseContext = caseData?.caseContext && typeof caseData.caseContext === 'object' ? caseData.caseContext : null;
     const includeLetterDrafts = letterDrafts && typeof letterDrafts === 'object';
     if (baseContext || includeLetterDrafts || normalizedOtherFunding.involved || normalizedOtherFunding.sources.length || normalizedOtherFunding.nwacCoverage || normalizedOtherFunding.notes) {
-      payload.caseContext = {
-        ...(baseContext || {}),
+      payload.caseContext = buildApplicationAssessmentCaseContext(baseContext, applicationId, {
         assessmentOtherFunding: normalizedOtherFunding,
         ...(includeLetterDrafts ? { decisionLetterDrafts: letterDrafts } : {})
-      };
+      });
     }
     return payload;
   }, [
+    applicationId,
     assessment,
     caseData?.caseContext,
     isEligibilityAdmin,
@@ -4210,8 +4282,9 @@ const CoordinatorAssessmentWidget = forwardRef(
       ? normalizeProposedInterventions(parsedProposed)
       : (legacyHasValues ? [legacyIntervention] : []);
 
+    const assessmentContext = getApplicationAssessmentContext(caseData?.caseContext, applicationId);
     const normalizedOtherFunding = normalizeOtherFundingDetails(
-      caseData?.caseContext?.assessmentOtherFunding
+      assessmentContext?.assessmentOtherFunding
     );
     const placeholders = {
       dateOfAssessment: caseData.assessment_date_of_assessment || '',
@@ -4302,12 +4375,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     setConflictDeclarationDetails(incomingConflictDetails);
     setDeclarationError(null);
 
-    const contextDrafts =
-      caseData?.caseContext?.decisionLetterDrafts ||
-      caseData?.caseContext?.decision_letter_drafts ||
-      caseData?.caseContext?.decisionLetter ||
-      caseData?.caseContext?.decision_letter ||
-      null;
+    const contextDrafts = getDecisionLetterDrafts(caseData?.caseContext, applicationId);
     const normalizeDraft = (draft, defaults) => {
       const src = draft && typeof draft === 'object' ? draft : {};
       return {
@@ -4351,7 +4419,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     };
     setLetterDrafts(mergedDrafts);
     setInitialLetterDrafts(mergedDrafts);
-  }, [caseData]);
+  }, [applicationId, caseData, currentUserName]);
 
   // Show NWAC section after submission, review completion, or outcome-ready status
   useEffect(() => {
@@ -6066,6 +6134,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
       const shouldPromoteToInReview = canonicalApplicationStatus === 'submitted';
       const payload = {
+        applicationId: applicationId || null,
         assessment_conflict_declaration_signed: true,
         assessment_conflict_declaration_choice: choice,
         assessment_conflict_declaration_details: choice === 'conflict' ? detailsValue : ''
@@ -6160,6 +6229,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
   }, [
     actions,
+    applicationId,
     applicationRowVersion,
     caseData?.application_row_version,
     caseData?.id,
@@ -6195,7 +6265,10 @@ const CoordinatorAssessmentWidget = forwardRef(
     if (!lockCheck.ok) return { ok: false };
     const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
     const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
-    const payload = { assessment_esdc_eligibility: nextEligibility || null };
+    const payload = {
+      applicationId: applicationId || null,
+      assessment_esdc_eligibility: nextEligibility || null
+    };
     if (versionToken > 0) {
       payload.expectedRowVersion = versionToken;
     }
@@ -6271,6 +6344,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   }, [
     actions,
     apiFetch,
+    applicationId,
     applicationRowVersionState,
     assessment.esdcEligibility,
     caseData?.assessment_esdc_eligibility,
@@ -6797,13 +6871,15 @@ const CoordinatorAssessmentWidget = forwardRef(
       const nextDecisionLetterSent =
         (contextUpdates && contextUpdates.decisionLetterSent) ||
         (decisionLetterSent && Object.keys(decisionLetterSent).length ? decisionLetterSent : null);
-      const updatedContext = {
-        ...baseContext,
+      const updatedContext = buildApplicationAssessmentCaseContext(baseContext, applicationId, {
         ...(contextUpdates || {}),
         ...(nextDecisionLetterSent ? { decisionLetterSent: nextDecisionLetterSent } : {}),
         decisionLetterDrafts: letterDrafts
+      });
+      const payload = {
+        applicationId: applicationId || null,
+        caseContext: updatedContext
       };
-      const payload = { caseContext: updatedContext };
       if (versionToken > 0) {
         payload.expectedRowVersion = versionToken;
       }
@@ -6843,6 +6919,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     },
     [
       applicationRowVersionState,
+      applicationId,
       caseData?.application_row_version,
       caseData?.caseContext,
       caseId,
@@ -6855,11 +6932,12 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   const persistLetterDraft = useCallback(
     async ({ silent = false } = {}) => {
+      const assessmentContext = getApplicationAssessmentContext(caseData?.caseContext, applicationId);
       const denialReasonCode = activeLetterKey === 'denial'
-        ? String(denialReasonChoice || caseData?.caseContext?.[FUNDING_DECISION_REASON_CODE_KEY] || '').trim()
+        ? String(denialReasonChoice || assessmentContext?.[FUNDING_DECISION_REASON_CODE_KEY] || '').trim()
         : '';
       const denialReasonExplanationValue = activeLetterKey === 'denial'
-        ? String(denialReasonExplanation || caseData?.caseContext?.[FUNDING_DECISION_REASON_EXPLANATION_KEY] || '').trim()
+        ? String(denialReasonExplanation || assessmentContext?.[FUNDING_DECISION_REASON_EXPLANATION_KEY] || '').trim()
         : '';
       const contextUpdates = activeLetterKey === 'approval'
         ? {
@@ -6895,6 +6973,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     },
     [
       activeLetterKey,
+      applicationId,
       buildApprovalLetterPackDraft,
       caseData?.caseContext,
       denialReasonChoice,
@@ -7651,7 +7730,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       const existing = decisionLetterSent && typeof decisionLetterSent === 'object' ? decisionLetterSent : {};
       const nextSent = { ...existing, [letterKey]: timestamp };
       setDecisionLetterSent(nextSent);
-      const baseSent = getDecisionLetterSent(caseData?.caseContext) || {};
+      const baseSent = getDecisionLetterSent(caseData?.caseContext, applicationId) || {};
       const mergedSent = { ...baseSent, ...nextSent };
       const result = await persistLetterContext({
         silent: true,
@@ -7667,7 +7746,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       }
       return { ok: result.ok, sentAt: timestamp };
     },
-    [caseData?.caseContext, decisionLetterSent, persistLetterContext]
+    [applicationId, caseData?.caseContext, decisionLetterSent, persistLetterContext]
   );
 
   const handleSendDecisionLetter = async () => {
@@ -7676,8 +7755,9 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       return { ok: false };
     }
     if (activeLetterKey === 'denial') {
+      const assessmentContext = getApplicationAssessmentContext(caseData?.caseContext, applicationId);
       const effectiveDenialReasonCode = String(
-        denialReasonChoice || caseData?.caseContext?.[FUNDING_DECISION_REASON_CODE_KEY] || ''
+        denialReasonChoice || assessmentContext?.[FUNDING_DECISION_REASON_CODE_KEY] || ''
       ).trim();
       if (!effectiveDenialReasonCode) {
         setSendingLetterError('Select a denial reason before sending the letter.');

@@ -201,8 +201,8 @@
       "Secure Messaging",
       "case or applicant-specific",
       "Contact Communications",
-      "public contact",
-      "avoid sensitive details in public contact channels"
+      "retired",
+      "legacy"
     ],
     "forbiddenPatterns": [
       "use either one interchangeably",

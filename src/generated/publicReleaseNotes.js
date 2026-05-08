@@ -1,16 +1,15 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-05-07T19:36:10.228Z",
-  "releaseId": "20260507-prod-evening",
-  "releaseLabel": "Release 20260507-prod-evening",
-  "releaseDateEn": "7th May 2026",
-  "releaseDateFr": "7 mai 2026",
+  "generatedAt": "2026-05-08T19:19:12.215Z",
+  "releaseId": "",
+  "releaseLabel": "Current build",
+  "releaseDateEn": "8th May 2026",
+  "releaseDateFr": "8 mai 2026",
   "en": {
     "sectionEyebrow": "Optional reading",
     "description": "",
     "featuresHeading": "What changed",
     "features": [
-      "Fixed the ISET Applications list so staff can use All Applications or Closed views to open more than one application for the same client/case, including historical applications.",
-      "Removed the public portal footer Contact link so applicants are directed toward secure Messages for case-manager contact.",
+      "Retired the public portal Contact function as an applicant support path; applicants should use secure Messages for case-manager contact, and staff can continue to triage any legacy contact-message records in Contact Communications.",
       "Made application approval decisions clearer by separating agreement with the case manager recommendation from the final funding outcome.",
       "Improved Ask the AI guidance and guardrails for common application, document, approval-letter, and Pending Completion questions."
     ],
@@ -37,8 +36,7 @@ const publicReleaseNotes = {
     "description": "",
     "featuresHeading": "Ce qui a change",
     "features": [
-      "Correction de la liste des demandes ISET afin que le personnel puisse utiliser les vues Toutes les demandes ou Fermees pour ouvrir plusieurs demandes du meme client/dossier, y compris les demandes historiques.",
-      "Retrait du lien Contact dans le pied de page du portail public afin que les candidates et candidats soient diriges vers les Messages securises pour joindre leur gestionnaire de cas.",
+      "Retrait de la fonction Contact du portail public comme voie de soutien aux candidates et candidats; les personnes inscrites doivent utiliser les Messages securises pour joindre leur gestionnaire de cas, tandis que le personnel peut continuer a trier les anciens messages Contact dans Communications Contact.",
       "Clarification des decisions d'approbation des demandes en separant l'accord avec la recommandation du gestionnaire de cas du resultat final de financement.",
       "Amelioration des consignes et garde-fous de Ask the AI pour les questions courantes sur les demandes, documents, lettres d'approbation et la file En attente de completion."
     ],

@@ -588,7 +588,7 @@ const CaseWorkspaceContext = createContext({
   clearInterventionWizardDraft: () => {},
 });
 
-export const CaseWorkspaceProvider = ({ caseId, children }) => {
+export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }) => {
   const [state, setState] = useState({
     caseData: null,
     isLoading: false,
@@ -707,7 +707,12 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
     try {
       const fetchOnce = async () => {
-        const resp = await apiFetch(`/api/cases/${caseId}/workspace`, { method: "GET" });
+        const params = new URLSearchParams();
+        if (applicationId) {
+          params.set("applicationId", String(applicationId));
+        }
+        const query = params.toString() ? `?${params.toString()}` : "";
+        const resp = await apiFetch(`/api/cases/${caseId}/workspace${query}`, { method: "GET" });
         if (!resp.ok) {
           const error = new Error("Failed to load case.");
           error.status = resp.status;
@@ -743,7 +748,7 @@ export const CaseWorkspaceProvider = ({ caseId, children }) => {
       setState(prev => ({ ...prev, isLoading: false, error: error?.message || "Failed to load case." }));
       throw error;
     }
-  }, [caseId]);
+  }, [caseId, applicationId]);
 
   useEffect(() => {
     loadCase().catch(() => {});

@@ -12,7 +12,7 @@ Current implementation note (2026-04-04):
 - Existing S3 objects are also supported:
   - `npm run test:db:refresh -- --snapshot-key db-refresh/<object>.sql.gz --yes`
 - Existing local scrubbed dump files are still supported:
-  - `npm run test:db:refresh -- --snapshot-file X:\path\to\scrubbed.sql.gz --yes`
+  - `npm run test:db:refresh -- --snapshot-file /path/to/scrubbed.sql.gz --yes`
 - The command auto-discovers an online `nwac-test-asg` app host, restores the dump through SSM with the app-security-group network path, runs canonical schema apply unless `--skip-schema` is supplied, and then runs TEST smoke unless `--skip-smoke` is supplied.
 - Current implementation uses the existing bucket `nwac-test-artifacts` with `db-refresh/` keys instead of a dedicated import bucket.
 - The DEV-derived snapshot mode is not a raw full-data clone. It builds full schema for all tables, includes data only for allowlisted safe/reference tables, and includes only the published intake runtime row from `iset_runtime_config`. Applicant, case, message, payment, and identity-link rows are excluded by design.

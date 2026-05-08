@@ -411,6 +411,10 @@ const CaseWorkspacePage = ({
   const { caseId } = useParams();
   const location = useLocation();
   const workspaceEntry = useMemo(() => parseWorkspaceEntry(location.search), [location.search]);
+  const selectedApplicationId = useMemo(() => {
+    const params = new URLSearchParams(location.search || "");
+    return params.get("applicationId") || params.get("application_id") || null;
+  }, [location.search]);
   const isInterventionApprovalEntry =
     workspaceEntry?.mode === "approval" && workspaceEntry?.approvalType === "intervention";
   const paymentFilters = useMemo(() => (caseId ? { caseId } : {}), [caseId]);
@@ -624,7 +628,7 @@ const CaseWorkspacePage = ({
   }, [applyLayout, caseId, isInterventionApprovalEntry, workspaceEntry]);
 
   return (
-    <CaseWorkspaceProvider caseId={caseId}>
+    <CaseWorkspaceProvider caseId={caseId} applicationId={selectedApplicationId}>
       <PaymentsDataProvider filters={paymentFilters}>
         <SpaceBetween size="l">
           <Board

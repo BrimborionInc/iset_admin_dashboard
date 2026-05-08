@@ -3,13 +3,13 @@ import React from "react";
 const ContactCommunicationsHelp = () => (
   <div>
     <p>
-      Use this dashboard to triage questions and support requests submitted from the public ISET portal.
+      Use this dashboard to triage legacy questions and support requests that were submitted before the public portal Contact function was retired.
     </p>
 
     <h3>Purpose</h3>
     <p>
-      Provide NWAC Administrators with a consolidated view of new and in-progress contact messages, including the
-      applicant context and a quick way to update status as triage progresses.
+      Provide NWAC Administrators with a consolidated view of existing contact messages, including the applicant
+      context and a quick way to update status as triage progresses.
     </p>
 
     <h3>Key workflows</h3>
@@ -22,8 +22,8 @@ const ContactCommunicationsHelp = () => (
     <h3>Data sources</h3>
     <ul>
       <li>
-        Records originate from the public portal&apos;s <code>/api/contact</code> endpoint and reside in the{" "}
-        <code>contact_message</code> table.
+        Records reside in the <code>contact_message</code> table. The public portal&apos;s <code>/api/contact</code>
+        endpoint now rejects new submissions because secure Messages is the applicant support path.
       </li>
       <li>
         Staff updates sync back to the admin API, emitting <code>contact_message.updated</code> events for audit and notifications.
@@ -40,6 +40,6 @@ const ContactCommunicationsHelp = () => (
 );
 
 ContactCommunicationsHelp.aiContext =
-  "Describe the Contact Communications dashboard that surfaces contact_message records from the public portal, shows queue status, and helps NWAC Administrators triage applicant enquiries.";
+  "Describe the Contact Communications dashboard that surfaces legacy contact_message records, shows queue status, and helps NWAC Administrators triage applicant enquiries submitted before the public portal Contact function was retired.";
 
 export default ContactCommunicationsHelp;

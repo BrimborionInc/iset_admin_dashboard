@@ -691,7 +691,7 @@ const SEEDED_GUIDANCE_ENTRIES = [
     topicTags: [
       "secure messaging",
       "contact communications",
-      "public contact",
+      "retired public contact",
       "privacy",
       "applicant communication",
     ],
@@ -700,7 +700,7 @@ const SEEDED_GUIDANCE_ENTRIES = [
       "secure messaging",
       "contact communications",
       "contact message",
-      "public contact",
+      "legacy public contact",
       "contact form",
       "which message",
       "send a secure message",
@@ -735,17 +735,17 @@ const SEEDED_GUIDANCE_ENTRIES = [
       "email-only record",
     ],
     applicabilityText:
-      "Use when staff ask whether to use secure messaging, staff messages, contact communications, or public contact channels.",
+      "Use when staff ask whether to use secure messaging, staff messages, retired public contact, or Contact Communications legacy triage.",
     stepsText:
-      "Use Secure Messaging inside the Application Workspace or Case Workspace for applicant-specific or case-specific communication, especially missing-document requests, application acknowledgements, follow-up, and attachments. Use Contact Communications for public portal contact-message triage: general questions/support requests submitted through the public contact endpoint. If a contact message turns into casework, move the substantive follow-up into the appropriate application/case workflow and keep sensitive details out of public contact channels.",
+      "Use Secure Messaging inside the Application Workspace or Case Workspace for applicant-specific or case-specific communication, especially missing-document requests, application acknowledgements, follow-up, and attachments. The public portal Contact function is retired for new applicant support; Contact Communications is only for triaging legacy contact_message records that were already submitted. If a legacy contact message turns into casework, move the substantive follow-up into the appropriate application/case workflow.",
     sideEffectsText:
       "Secure-message attachments opened/adopted by staff are copied to Supporting Documents and can be relabelled there. Important messaging outcomes should also be summarized in Case Notes/Notes and Tasks when they affect decisions, deadlines, or audit history. Contact Communications status updates are triage/audit records for public contact messages, not a replacement for the case thread.",
     restrictionsText:
-      "Do not treat public contact messages and secure case/application messaging as interchangeable. Do not send case details, applicant identifiers, documents, or sensitive casework through public contact channels when a secure case/application thread is available.",
+      "Do not treat legacy public contact messages and secure case/application messaging as interchangeable. Do not send case details, applicant identifiers, documents, or sensitive casework through public contact channels; the portal Contact form is no longer a support path for new applicant communication.",
     answerStyleText:
-      "Answer as a privacy-safe channel-selection rule: Secure Messaging for file-specific casework, Contact Communications for public inquiries.",
+      "Answer as a privacy-safe channel-selection rule: Secure Messaging for file-specific casework, Contact Communications only for legacy public-contact records.",
     guidanceText:
-      "Use `Secure Messaging` for case-specific or applicant-specific communication inside the file: acknowledgements, missing-document requests, follow-up, and attachment exchange. Secure-message attachments are adopted into `Supporting Documents`, and important outcomes should be captured in `Case Notes` / `Notes and Tasks` when they matter to the audit trail. Use `Contact Communications` for public portal contact-message triage and response status, not as the secure case thread. If a public inquiry becomes casework, continue the substantive discussion in the appropriate Application Workspace or Case Workspace and avoid putting sensitive applicant or case details into public contact channels.",
+      "Use `Secure Messaging` for case-specific or applicant-specific communication inside the file: acknowledgements, missing-document requests, follow-up, and attachment exchange. Secure-message attachments are adopted into `Supporting Documents`, and important outcomes should be captured in `Case Notes` / `Notes and Tasks` when they matter to the audit trail. The public portal Contact function is retired; use `Contact Communications` only for triage and response status on legacy contact-message records, not as the secure case thread. If a legacy inquiry becomes casework, continue the substantive discussion in the appropriate Application Workspace or Case Workspace.",
   },
   {
     slug: "case-notes-followup-recordkeeping",
@@ -1482,7 +1482,7 @@ const SEEDED_GUIDANCE_EXAMPLES = [
     ],
     questionText: "Should I send a secure message or use Contact Communications?",
     answerText:
-      "Use `Secure Messaging` when the communication is case-specific or applicant-specific, such as missing-document requests, acknowledgements, follow-up, or attachments inside an Application Workspace or Case Workspace. Use `Contact Communications` for public portal contact-message triage and general support inquiries. If a public contact message turns into casework, continue the substantive discussion in the appropriate file and avoid putting sensitive applicant or case details in public contact channels.",
+      "Use `Secure Messaging` when the communication is case-specific or applicant-specific, such as missing-document requests, acknowledgements, follow-up, or attachments inside an Application Workspace or Case Workspace. The public portal Contact function is retired for new applicant support; use `Contact Communications` only for legacy public contact-message triage. If a legacy contact message turns into casework, continue the substantive discussion in the appropriate file.",
   },
   {
     guidanceSlug: "case-notes-followup-recordkeeping",

@@ -21,7 +21,7 @@ Last reviewed: 2026-04-29 during ops documentation cleanup.
 - MySQL-compatible relational database powering both admin and applicant data workflows.
 - AWS Cognito used for identity (separate pools per applicant vs. staff) with supporting Lambda triggers, SES (optional), and KMS-backed secrets.
 - Outbound messaging via Amazon SES; current implementation sends system emails for submission/secure-messaging/approval events with future expansion to configurable notifications.
-- Shared assets and modules under `X:\ISET\` (e.g., workflow templates, block steps, Terraform scaffolding) are consumed by both applications; deployment pipeline must package these shared pieces for the test environment.
+- Shared assets and modules under `/home/bill/ISET/` (for example workflow templates, block steps, Terraform scaffolding, and `shared/`) are consumed by both applications; the TEST deployment pipeline must package these shared pieces from the WSL workspace.
 - Terraform provisions all AWS resources from scratch (Cognito pools, SES identities, RDS/Aurora, VPC guardrails) using a consistent prefix (e.g., `nwac-test-`) for traceability.
 - _Topology diagram pending - to capture VPC, subnets, load balancers, database tier, and endpoints._
 - Test environment will live alongside dev in the existing company AWS account; isolation handled via dedicated VPCs, tagging, and IAM boundaries rather than separate accounts.

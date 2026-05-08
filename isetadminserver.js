@@ -133,11 +133,11 @@ const DEFAULT_BACKEND_JOBS_CONFIG = {
   allocationApplyHour: 1,
 };
 const REMINDER_POLL_INTERVAL_MS = DEFAULT_BACKEND_JOBS_CONFIG.reminderPollMinutes * 60 * 1000;
+const ALLOCATION_POLL_INTERVAL_MS = DEFAULT_BACKEND_JOBS_CONFIG.allocationPollMinutes * 60 * 1000;
 let reminderPollIntervalMsDynamic = REMINDER_POLL_INTERVAL_MS;
 let reminderPollTimer = null;
 let allocationPollTimer = null;
-let allocationPollIntervalMsDynamic =
-  DEFAULT_BACKEND_JOBS_CONFIG.allocationPollMinutes * 60 * 1000;
+let allocationPollIntervalMsDynamic = ALLOCATION_POLL_INTERVAL_MS;
 let allocationApplyHourConfig = DEFAULT_BACKEND_JOBS_CONFIG.allocationApplyHour;
 const CHECKLIST_SCOPE = 'checklist';
 const CHECKLIST_KEY = 'checklist.compliance.iset';
@@ -666,6 +666,187 @@ function buildCasePrimaryApplicationJoinSql(caseAlias = 'c', applicationAlias = 
 
 const APPLICATION_CASE_JOIN_PREDICATE = buildApplicationCaseJoinPredicate('c', 'a');
 
+const APPLICATION_ASSESSMENT_TABLE = 'iset_application_assessment';
+const LEGACY_CASE_ASSESSMENT_TABLE = 'iset_case_assessment';
+const ASSESSMENT_STORAGE_COLUMNS = [
+  'date_of_assessment',
+  'overview',
+  'employment_goals',
+  'previous_iset',
+  'previous_iset_details',
+  'employment_barriers',
+  'employment_barriers_other_details',
+  'local_area_priorities',
+  'other_funding_details',
+  'esdc_eligibility',
+  'intervention_start_date',
+  'intervention_end_date',
+  'institution',
+  'program_name',
+  'itp_payload',
+  'wage_payload',
+  'recommendation',
+  'justification',
+  'nwac_review',
+  'nwac_reason',
+  'intervention_code',
+  'intervention_outcome_code',
+  'intervention_duration_days',
+  'intervention_cost_total',
+  'intervention_related_noc',
+  'intervention_related_noc_version',
+  'intervention_budget_pot_id',
+  'posting_context',
+  'proposed_interventions',
+  'childcare_need',
+  'childcare_funding_details',
+  'action_plan_result_code',
+  'action_plan_result_date',
+];
+const ASSESSMENT_RESPONSE_FIELD_BY_COLUMN = {
+  date_of_assessment: 'assessment_date_of_assessment',
+  overview: 'case_summary',
+  employment_goals: 'assessment_employment_goals',
+  previous_iset: 'assessment_previous_iset',
+  previous_iset_details: 'assessment_previous_iset_details',
+  employment_barriers: 'assessment_employment_barriers',
+  employment_barriers_other_details: 'assessment_employment_barriers_other_details',
+  local_area_priorities: 'assessment_local_area_priorities',
+  other_funding_details: 'assessment_other_funding_details',
+  esdc_eligibility: 'assessment_esdc_eligibility',
+  intervention_start_date: 'assessment_intervention_start_date',
+  intervention_end_date: 'assessment_intervention_end_date',
+  institution: 'assessment_institution',
+  program_name: 'assessment_program_name',
+  itp_payload: 'assessment_itp',
+  wage_payload: 'assessment_wage',
+  recommendation: 'assessment_recommendation',
+  justification: 'assessment_justification',
+  nwac_review: 'assessment_nwac_review',
+  nwac_reason: 'assessment_nwac_reason',
+  intervention_code: 'assessment_intervention_code',
+  intervention_outcome_code: 'assessment_intervention_outcome_code',
+  intervention_duration_days: 'assessment_intervention_duration_days',
+  intervention_cost_total: 'assessment_intervention_cost_total',
+  intervention_related_noc: 'assessment_intervention_related_noc',
+  intervention_related_noc_version: 'assessment_intervention_related_noc_version',
+  intervention_budget_pot_id: 'assessment_intervention_pot_id',
+  posting_context: 'assessment_posting_context',
+  proposed_interventions: 'assessment_proposed_interventions',
+  childcare_need: 'assessment_childcare_need',
+  childcare_funding_details: 'assessment_childcare_funding_details',
+  action_plan_result_code: 'assessment_action_plan_result_code',
+  action_plan_result_date: 'assessment_action_plan_result_date',
+};
+
+function applyAssessmentRowToResponse(target, assessmentRow = null) {
+  const destination = target || {};
+  for (const column of ASSESSMENT_STORAGE_COLUMNS) {
+    const responseField = ASSESSMENT_RESPONSE_FIELD_BY_COLUMN[column];
+    if (!responseField) continue;
+    destination[responseField] = assessmentRow ? assessmentRow[column] ?? null : null;
+  }
+  destination.assessment_source = assessmentRow?._assessment_source || null;
+  destination.assessment_application_id = assessmentRow?.application_id || null;
+  destination.assessment_legacy_case_id = assessmentRow?.legacy_case_assessment_case_id || null;
+  return destination;
+}
+
+async function fetchApplicationAssessmentRow(connection, { caseId, applicationId } = {}) {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (!normalizedCaseId) return null;
+
+  if (normalizedApplicationId) {
+    try {
+      const [[row]] = await connection.query(
+        `SELECT aa.*, 'application_assessment' AS _assessment_source
+           FROM ${APPLICATION_ASSESSMENT_TABLE} aa
+          WHERE aa.case_id = ?
+            AND aa.application_id = ?
+          LIMIT 1`,
+        [normalizedCaseId, normalizedApplicationId]
+      );
+      if (row) return row;
+    } catch (err) {
+      if (!isMissingTableErrorLocal(err)) throw err;
+    }
+
+    const [applicationRows] = await connection.query(
+      `SELECT id
+         FROM iset_application
+        WHERE case_id = ?
+        ORDER BY id ASC`,
+      [normalizedCaseId]
+    );
+    const applicationIds = (Array.isArray(applicationRows) ? applicationRows : [])
+      .map(row => normalisePositiveInteger(row?.id))
+      .filter(Boolean);
+    if (applicationIds.length === 1 && applicationIds[0] === normalizedApplicationId) {
+      const [[legacyRow]] = await connection.query(
+        `SELECT ca.*,
+                NULL AS id,
+                ? AS application_id,
+                ca.case_id AS legacy_case_assessment_case_id,
+                'legacy_case_assessment_single_application' AS _assessment_source
+           FROM ${LEGACY_CASE_ASSESSMENT_TABLE} ca
+          WHERE ca.case_id = ?
+          LIMIT 1`,
+        [normalizedApplicationId, normalizedCaseId]
+      );
+      return legacyRow || null;
+    }
+
+    return null;
+  }
+
+  const [[legacyRow]] = await connection.query(
+    `SELECT ca.*,
+            NULL AS id,
+            NULL AS application_id,
+            ca.case_id AS legacy_case_assessment_case_id,
+            'legacy_case_assessment_applicationless' AS _assessment_source
+       FROM ${LEGACY_CASE_ASSESSMENT_TABLE} ca
+      WHERE ca.case_id = ?
+      LIMIT 1`,
+    [normalizedCaseId]
+  );
+  return legacyRow || null;
+}
+
+async function writeAssessmentRow(connection, { caseId, applicationId, insertColumns, insertValues, updateAssignments } = {}) {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (!normalizedCaseId || !Array.isArray(insertColumns) || !Array.isArray(insertValues) || !Array.isArray(updateAssignments) || !updateAssignments.length) {
+    return false;
+  }
+
+  if (normalizedApplicationId) {
+    const columns = ['case_id', 'application_id'];
+    const values = [normalizedCaseId, normalizedApplicationId];
+    insertColumns.forEach((column, index) => {
+      if (column === 'case_id' || column === 'application_id') return;
+      columns.push(column);
+      values.push(insertValues[index]);
+    });
+    const updateClause = updateAssignments.join(', ');
+    await connection.query(
+      `INSERT INTO ${APPLICATION_ASSESSMENT_TABLE} (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})
+       ON DUPLICATE KEY UPDATE ${updateClause}`,
+      values
+    );
+    return true;
+  }
+
+  const updateClause = updateAssignments.join(', ');
+  await connection.query(
+    `INSERT INTO ${LEGACY_CASE_ASSESSMENT_TABLE} (${insertColumns.join(', ')}) VALUES (${insertColumns.map(() => '?').join(', ')})
+     ON DUPLICATE KEY UPDATE ${updateClause}`,
+    insertValues
+  );
+  return true;
+}
+
 async function fetchCaseRowForApplicationId(
   applicationId,
   {
@@ -1186,10 +1367,10 @@ async function loadApplicationAnswers({ applicantId = null, applicationId = null
     const caseId = caseRow?.id || null;
     if (caseId) {
       try {
-        const [[assess]] = await pool.query(
-          'SELECT recommendation, date_of_assessment, itp_payload, intervention_duration_days, intervention_cost_total FROM iset_case_assessment WHERE case_id = ? LIMIT 1',
-          [caseId]
-        );
+        const assess = await fetchApplicationAssessmentRow(pool, {
+          caseId,
+          applicationId: row?.id || null,
+        });
         assessmentSubmitted = !!assess;
         if (assess) {
           const hasRecommendation = assess.recommendation !== null && assess.recommendation !== undefined;
@@ -5399,6 +5580,7 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'staff_tutorial_progress',
   'iset_case_action_item',
   'iset_case_action_plan',
+  'iset_application_assessment',
   'iset_case_assessment',
   'iset_case_compliance_check',
   'iset_case_document',
@@ -10278,12 +10460,111 @@ function normaliseDecisionLetterDraft(rawDraft) {
   };
 }
 
-function resolveDecisionLetterDrafts(caseContext = {}) {
+const APPLICATION_ASSESSMENT_CONTEXT_KEY = 'applicationDecisionLetters';
+const APPLICATION_ASSESSMENT_CONTEXT_ROOT_KEYS = [
+  'assessmentOtherFunding',
+  'assessment_nwac_review_status',
+  'decisionLetterDrafts',
+  'decision_letter_drafts',
+  'decisionLetter',
+  'decision_letter',
+  'decisionLetterPackDrafts',
+  'decision_letter_pack_drafts',
+  'decisionLetterSent',
+  'decision_letter_sent',
+  'decisionLetterSentType',
+  'decision_letter_sent_type',
+  'decisionLetterSentAt',
+  'decision_letter_sent_at',
+  'fundingDecisionReasonCode',
+  'fundingDecisionReasonLabel',
+  'fundingDecisionReasonExplanation'
+];
+
+function isPlainObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeApplicationContextKey(value) {
+  const normalized = normalisePositiveInteger(value);
+  if (normalized) return String(normalized);
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text || null;
+}
+
+function resolveApplicationAssessmentCaseContext(caseContext = {}, applicationId = null, { allowLegacyFallback = false } = {}) {
+  if (!isPlainObject(caseContext)) return {};
+  const applicationKey = normalizeApplicationContextKey(applicationId);
+  if (!applicationKey) return caseContext;
+  const applicationContexts = caseContext[APPLICATION_ASSESSMENT_CONTEXT_KEY];
+  const scopedContext = isPlainObject(applicationContexts) && isPlainObject(applicationContexts[applicationKey])
+    ? applicationContexts[applicationKey]
+    : null;
+  if (scopedContext) return scopedContext;
+  return allowLegacyFallback ? caseContext : {};
+}
+
+function scopeApplicationAssessmentCaseContextPatch(incomingContext = {}, applicationId = null) {
+  if (!isPlainObject(incomingContext)) return incomingContext;
+  const applicationKey = normalizeApplicationContextKey(applicationId);
+  if (!applicationKey) return incomingContext;
+
+  const nextContext = { ...incomingContext };
+  const applicationContexts = isPlainObject(nextContext[APPLICATION_ASSESSMENT_CONTEXT_KEY])
+    ? { ...nextContext[APPLICATION_ASSESSMENT_CONTEXT_KEY] }
+    : {};
+  const existingScopedPatch = isPlainObject(applicationContexts[applicationKey])
+    ? applicationContexts[applicationKey]
+    : {};
+  const hasScopedPatch = Object.keys(existingScopedPatch).length > 0;
+  const rootPatch = {};
+
+  APPLICATION_ASSESSMENT_CONTEXT_ROOT_KEYS.forEach((key) => {
+    if (!Object.prototype.hasOwnProperty.call(nextContext, key)) return;
+    if (!hasScopedPatch) {
+      rootPatch[key] = nextContext[key];
+    }
+    delete nextContext[key];
+  });
+
+  if (!hasScopedPatch && Object.keys(rootPatch).length) {
+    applicationContexts[applicationKey] = {
+      ...existingScopedPatch,
+      ...rootPatch
+    };
+  }
+  if (hasScopedPatch || Object.keys(rootPatch).length || Object.keys(applicationContexts).length) {
+    nextContext[APPLICATION_ASSESSMENT_CONTEXT_KEY] = applicationContexts;
+  }
+  return nextContext;
+}
+
+function hasApplicationAssessmentScopedContext(context = {}, applicationId = null) {
+  if (!isPlainObject(context)) return false;
+  const applicationKey = normalizeApplicationContextKey(applicationId);
+  if (!applicationKey) return false;
+  const applicationContexts = context[APPLICATION_ASSESSMENT_CONTEXT_KEY];
+  return isPlainObject(applicationContexts) && isPlainObject(applicationContexts[applicationKey]);
+}
+
+function stripApplicationAssessmentRootContext(context = {}) {
+  if (!isPlainObject(context)) return context;
+  const nextContext = { ...context };
+  APPLICATION_ASSESSMENT_CONTEXT_ROOT_KEYS.forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(nextContext, key)) {
+      delete nextContext[key];
+    }
+  });
+  return nextContext;
+}
+
+function resolveDecisionLetterDrafts(caseContext = {}, applicationId = null) {
+  const assessmentContext = resolveApplicationAssessmentCaseContext(caseContext, applicationId);
   const raw =
-    caseContext.decisionLetterDrafts ||
-    caseContext.decision_letter_drafts ||
-    caseContext.decisionLetter ||
-    caseContext.decision_letter ||
+    assessmentContext.decisionLetterDrafts ||
+    assessmentContext.decision_letter_drafts ||
+    assessmentContext.decisionLetter ||
+    assessmentContext.decision_letter ||
     {};
   const approval = normaliseDecisionLetterDraft(raw.approval || raw.approved || {});
   const denial = normaliseDecisionLetterDraft(raw.denial || raw.denied || raw.rejected || {});
@@ -10410,25 +10691,30 @@ function resolveDecisionLetterTokens({
   };
 }
 
-async function resolveDecisionLetterTokensForSigningRequest({ pool, caseId, createdByUserId, docType }) {
+async function resolveDecisionLetterTokensForSigningRequest({ pool, caseId, applicationId = null, createdByUserId, docType }) {
   if (!caseId || !docType) return null;
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const applicationJoinSql = normalizedApplicationId
+    ? 'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
+    : buildCasePrimaryApplicationJoinSql('c', 'a');
   const [[caseRow]] = await pool.query(
     `SELECT c.case_number,
             c.case_context_json,
+            a.id AS application_id,
             s.reference_number,
             s.intake_payload,
             applicant.email AS applicant_email
        FROM iset_case c
-       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+       ${applicationJoinSql}
        LEFT JOIN iset_application_submission s ON a.submission_id = s.id
        LEFT JOIN user applicant ON s.user_id = applicant.id
       WHERE c.id = ?
       LIMIT 1`,
-    [caseId]
+    normalizedApplicationId ? [normalizedApplicationId, caseId] : [caseId]
   );
   if (!caseRow) return null;
   const caseContext = safeJsonParse(caseRow?.case_context_json, null) || {};
-  const decisionDrafts = resolveDecisionLetterDrafts(caseContext);
+  const decisionDrafts = resolveDecisionLetterDrafts(caseContext, caseRow?.application_id || normalizedApplicationId || null);
   const draft = docType === 'assessment_approval_letter' ? decisionDrafts.approval : decisionDrafts.denial;
   const submissionPayload = safeJsonParse(caseRow?.intake_payload, null);
   const ctxPersonal = caseContext?.applicationPersonal || {};
@@ -11436,7 +11722,11 @@ async function buildCfaSnapshot({ connection, caseId, actionPlanId }) {
   };
 }
 
-async function buildCfaSnapshotFromAssessment({ connection, caseId }) {
+async function buildCfaSnapshotFromAssessment({ connection, caseId, applicationId = null }) {
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const applicationJoinSql = normalizedApplicationId
+    ? 'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
+    : buildCasePrimaryApplicationJoinSql('c', 'a');
   const [[caseRow]] = await connection.query(
     `SELECT c.id,
             c.case_number,
@@ -11447,22 +11737,19 @@ async function buildCfaSnapshotFromAssessment({ connection, caseId }) {
             s.reference_number,
             s.intake_payload
        FROM iset_case c
-       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+       ${applicationJoinSql}
        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       WHERE c.id = ?
       LIMIT 1`,
-    [caseId]
+    normalizedApplicationId ? [normalizedApplicationId, caseId] : [caseId]
   );
   if (!caseRow) {
     throw new Error('case_not_found');
   }
-  const [[assessmentRow]] = await connection.query(
-    `SELECT *
-       FROM iset_case_assessment
-      WHERE case_id = ?
-      LIMIT 1`,
-    [caseId]
-  );
+  const assessmentRow = await fetchApplicationAssessmentRow(connection, {
+    caseId,
+    applicationId: caseRow.application_id || normalizedApplicationId || null,
+  });
   if (!assessmentRow) {
     throw new Error('assessment_not_found');
   }
@@ -12228,6 +12515,7 @@ async function createCfaVersionForPlan({
 
 async function createCfaVersionFromAssessment({
   caseId,
+  applicationId = null,
   changeReason,
   changeSummary,
   actorUserId,
@@ -12276,7 +12564,8 @@ async function createCfaVersionFromAssessment({
 
     const snapshot = await buildCfaSnapshotFromAssessment({
       connection: runner,
-      caseId
+      caseId,
+      applicationId
     });
 
     if (!snapshot?.interventions?.length) {
@@ -13590,6 +13879,7 @@ async function moveApplicationDocumentsToIntervention(connection, {
 
 async function ensureAutoPlanAndInterventionFromAssessment(connection, {
   caseId,
+  applicationId,
   caseRow,
   approvalUserId,
   budgetPotId
@@ -13609,10 +13899,7 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     }
   }
 
-  const [[assessmentRow]] = await connection.query(
-    'SELECT * FROM iset_case_assessment WHERE case_id = ? LIMIT 1',
-    [caseId]
-  );
+  const assessmentRow = await fetchApplicationAssessmentRow(connection, { caseId, applicationId });
   if (!assessmentRow) {
     return { createdPlan: false, createdIntervention: false, interventionId: null, planId: null };
   }
@@ -15297,16 +15584,18 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
       console.warn('[esdc] failed to load case action plans', err);
     }
 
+    const applicationId = submissionRow.application_id || caseRow.application_id || null;
     let caseAssessmentRow = null;
     try {
-      const [[assessmentRow]] = await conn.query('SELECT * FROM iset_case_assessment WHERE case_id = ? LIMIT 1', [caseRow.id]);
-      caseAssessmentRow = assessmentRow || null;
+      caseAssessmentRow = await fetchApplicationAssessmentRow(conn, {
+        caseId: caseRow.id,
+        applicationId,
+      });
     } catch (err) {
       const code = err && err.code;
       if (code && code !== 'ER_NO_SUCH_TABLE') throw err;
     }
 
-    const applicationId = submissionRow.application_id || caseRow.application_id || null;
     let applicationPayload = null;
     if (applicationId) {
       applicationPayload = await readApplicationPayload(
@@ -19250,12 +19539,13 @@ function isDeniedIneligibleReportingCaseContext(caseContext) {
   );
 }
 
-function resolveFundingDecisionReasonCode(caseContext) {
+function resolveFundingDecisionReasonCode(caseContext, applicationId = null) {
   const context =
     caseContext && typeof caseContext === 'object'
       ? caseContext
       : safeJsonParse(caseContext, null);
-  const normalized = normaliseString(context?.[FUNDING_DECISION_REASON_CODE_KEY]);
+  const assessmentContext = resolveApplicationAssessmentCaseContext(context, applicationId);
+  const normalized = normaliseString(assessmentContext?.[FUNDING_DECISION_REASON_CODE_KEY]);
   return normalized ? normalized.toLowerCase() : null;
 }
 
@@ -19352,8 +19642,8 @@ function buildDeniedIneligibleReportingCaseContext({
       existingCaseContext?.reportingSeededAt ||
       null
     ),
-    [FUNDING_DECISION_REASON_CODE_KEY]:
-      resolveFundingDecisionReasonCode(existingCaseContext) || DENIED_INELIGIBLE_TRIGGER_REASON,
+	    [FUNDING_DECISION_REASON_CODE_KEY]:
+	      resolveFundingDecisionReasonCode(existingCaseContext, applicationId) || DENIED_INELIGIBLE_TRIGGER_REASON,
     applicationId: applicationId || null,
     clientId: clientId || null,
     applicationAnswers: Object.keys(currentAnswers).length ? currentAnswers : null,
@@ -19492,15 +19782,12 @@ async function syncDeniedIneligibleReportingArtifacts(connection, {
   );
   if (!caseRow) return null;
 
-  const [[assessmentRow]] = await connection.query(
-    `SELECT nwac_reason, esdc_eligibility
-       FROM iset_case_assessment
-      WHERE case_id = ?
-      LIMIT 1`,
-    [numericCaseId]
-  );
+  const assessmentRow = await fetchApplicationAssessmentRow(connection, {
+    caseId: numericCaseId,
+    applicationId: numericApplicationId,
+  });
   const existingCaseContext = safeJsonParse(caseRow.case_context_json, null) || {};
-  const denialReasonCode = resolveFundingDecisionReasonCode(existingCaseContext);
+  const denialReasonCode = resolveFundingDecisionReasonCode(existingCaseContext, numericApplicationId);
   if (denialReasonCode !== DENIED_INELIGIBLE_TRIGGER_REASON) {
     return null;
   }
@@ -24314,7 +24601,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
        FROM iset_case c
        ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-       LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
+       LEFT JOIN iset_application_assessment ca ON ca.application_id = a.id
       WHERE c.assigned_staff_profile_id IN (${placeholders})`;
   try {
     const [rows] = await pool.query(sql, ids);
@@ -24338,7 +24625,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
        FROM iset_case c
        ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
        LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-       LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
+       LEFT JOIN iset_application_assessment ca ON ca.application_id = a.id
       WHERE c.assigned_staff_profile_id IS NOT NULL
         AND c.assigned_staff_profile_id <> 0`;
   try {
@@ -25513,7 +25800,7 @@ async function buildGroupedIlmpClientPayload(clientRows, { ignoreWarnings = fals
       if (plan.id !== null && typeof plan.id !== 'undefined') return `id:${plan.id}`;
       const agreement = normaliseString(plan.agreementNumber || plan.agreement_number || '') || '';
       const startDate = normaliseString(plan.startDate || plan.effectiveDate || plan.actionPlanStartDate || '') || '';
-      const status = normalisePlanStatus(plan.status || '');
+      const status = normalisePlanStatusShort(plan.status || '');
       return `fallback:${agreement}|${startDate}|${status}`;
     };
     const seenPlanKeys = new Set();
@@ -27899,7 +28186,7 @@ app.get('/api/reporting/data-and-results/filter-options', async (req, res) => {
       return res.json({
         fiscalYearStart,
         fiscalYear: formatReportingFiscalYearLabel(fiscalYearStart),
-        caseManagers: fallbackCaseManagers,
+        caseManagers: [],
       });
     }
     console.error('[reporting:data-and-results] filter options fetch failed:', err?.message || err);
@@ -34877,11 +35164,12 @@ app.post('/api/ai/create-dummy-case-payments', requireUnsafeAdminDebugAccess, as
 
         const primaryIntervention = interventionRollup[0] || null;
         await conn.query(
-          `INSERT INTO iset_case_assessment
-            (case_id, date_of_assessment, overview, employment_goals, previous_iset, employment_barriers, local_area_priorities, esdc_eligibility, intervention_start_date, intervention_end_date, intervention_budget_pot_id, posting_context, intervention_code, intervention_duration_days, intervention_cost_total, institution, program_name, recommendation, justification, nwac_review, nwac_reason, proposed_interventions)
-           VALUES (?, ?, ?, ?, 0, CAST(? AS JSON), CAST(? AS JSON), 'eligible', ?, ?, ?, 'external', ?, ?, ?, ?, ?, 'approved', ?, 'approved', 'Auto-approved for payment draft testing', CAST(? AS JSON))`,
+          `INSERT INTO iset_application_assessment
+            (case_id, application_id, date_of_assessment, overview, employment_goals, previous_iset, employment_barriers, local_area_priorities, esdc_eligibility, intervention_start_date, intervention_end_date, intervention_budget_pot_id, posting_context, intervention_code, intervention_duration_days, intervention_cost_total, institution, program_name, recommendation, justification, nwac_review, nwac_reason, proposed_interventions)
+           VALUES (?, ?, ?, ?, ?, 0, CAST(? AS JSON), CAST(? AS JSON), 'eligible', ?, ?, ?, 'external', ?, ?, ?, ?, ?, 'approved', ?, 'approved', 'Auto-approved for payment draft testing', CAST(? AS JSON))`,
           [
             caseId,
+            applicationId,
             nowDate,
             'Assessment completed as part of automated finance/payment test data generation.',
             'Client is prepared for intervention delivery and related payment disbursement workflow.',
@@ -36319,7 +36607,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"social-insurance-number\"')) AS sin_number
     FROM iset_case c
     ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
-    LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
+    LEFT JOIN iset_application_assessment ca ON ca.application_id = a.id
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
     ${where}
@@ -36426,7 +36714,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       ic.label AS intervention_label
     FROM iset_case c
     ${buildCasePrimaryApplicationJoinSql('c', 'a', true)}
-    LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
+    LEFT JOIN iset_application_assessment ca ON ca.application_id = a.id
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
     LEFT JOIN esdc_intervention_code ic ON ic.code = ca.intervention_code
@@ -46875,11 +47163,15 @@ app.get('/api/cases/:case_id/application/current', sendRetiredCaseApplicationVer
 app.post('/api/cases/:case_id/application/versions', sendRetiredCaseApplicationVersionResponse);
 
 
-async function resolveCaseApplicantMessagingContext(caseId) {
+async function resolveCaseApplicantMessagingContext(caseId, { applicationId = null } = {}) {
   const numericCaseId = Number.parseInt(caseId, 10);
   if (!Number.isInteger(numericCaseId) || numericCaseId < 1) {
     return null;
   }
+  const requestedApplicationId = normalisePositiveInteger(applicationId);
+  const applicationJoinSql = requestedApplicationId
+    ? 'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
+    : buildCasePrimaryApplicationJoinSql('c', 'a');
 
   const [[row] = []] = await pool.query(
     `SELECT
@@ -46908,15 +47200,15 @@ async function resolveCaseApplicantMessagingContext(caseId) {
          applicant_client_sub.email,
          NULLIF(TRIM(cl.applicant_account_email), '')
        ) AS applicant_email
-     FROM iset_case c
-     LEFT JOIN client cl ON cl.id = c.client_id
-     ${buildCasePrimaryApplicationJoinSql('c', 'a')}
-     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-     LEFT JOIN user applicant_submission ON applicant_submission.id = s.user_id
-     LEFT JOIN user applicant_client_sub ON applicant_client_sub.cognito_sub = cl.applicant_cognito_sub
-     WHERE c.id = ?
-     LIMIT 1`,
-    [numericCaseId]
+	     FROM iset_case c
+	     LEFT JOIN client cl ON cl.id = c.client_id
+	     ${applicationJoinSql}
+	     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+	     LEFT JOIN user applicant_submission ON applicant_submission.id = s.user_id
+	     LEFT JOIN user applicant_client_sub ON applicant_client_sub.cognito_sub = cl.applicant_cognito_sub
+	     WHERE c.id = ?
+	     LIMIT 1`,
+    requestedApplicationId ? [requestedApplicationId, numericCaseId] : [numericCaseId]
   );
 
   if (!row) {
@@ -46954,8 +47246,12 @@ app.get('/api/cases/:id/workspace', async (req, res) => {
   if (!Number.isInteger(caseId) || caseId <= 0) {
     return res.status(400).json({ error: 'invalid_case_id' });
   }
+  const requestedApplicationId = normalisePositiveInteger(req.query.applicationId || req.query.application_id);
 
   try {
+    const applicationJoinSql = requestedApplicationId
+      ? 'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
+      : buildCasePrimaryApplicationJoinSql('c', 'a');
     const sql = `
       SELECT
         c.id,
@@ -47029,7 +47325,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
       LEFT JOIN canada_region cr ON cr.region_id = c.portfolio_region_id
       LEFT JOIN canada_region owner_region ON owner_region.region_id = sp.region_id
-      ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+      ${applicationJoinSql}
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN user applicant_submission ON applicant_submission.id = s.user_id
       LEFT JOIN (
@@ -47078,7 +47374,10 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       LIMIT 1
     `;
 
-    const [[row] = []] = await pool.query(sql, [caseId]);
+    const [[row] = []] = await pool.query(
+      sql,
+      requestedApplicationId ? [requestedApplicationId, caseId] : [caseId]
+    );
     if (!row) {
       return res.status(404).json({ error: 'case_not_found' });
     }
@@ -47606,8 +47905,12 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       return fallback;
     };
 
-    const caseContext = parseJsonField(row.case_context_json, null);
-    const contextPersonal = caseContext?.applicationPersonal || {};
+	    const caseContext = parseJsonField(row.case_context_json, null);
+	    const applicationAssessmentContext = resolveApplicationAssessmentCaseContext(
+	      caseContext,
+	      row.application_id || null
+	    );
+	    const contextPersonal = caseContext?.applicationPersonal || {};
     const contextAnswers = caseContext?.applicationAnswers || {};
 
     const firstNameCandidates = [
@@ -47894,11 +48197,10 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
 
     let assessmentRow = null;
     try {
-      const [[assessmentRecord] = []] = await pool.query(
-        'SELECT * FROM iset_case_assessment WHERE case_id = ? LIMIT 1',
-        [caseId]
-      );
-      assessmentRow = assessmentRecord || null;
+      assessmentRow = await fetchApplicationAssessmentRow(pool, {
+        caseId,
+        applicationId: row.application_id || null,
+      });
     } catch (err) {
       console.warn('[workspace] failed to load assessment for case', caseId, err);
     }
@@ -48006,9 +48308,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       assessmentRow?.justification ?? row.assessment_justification ?? null;
     response.assessment_nwac_review =
       assessmentRow?.nwac_review ?? row.assessment_nwac_review ?? null;
-    const assessmentReviewStatusRaw = typeof caseContext?.assessment_nwac_review_status === 'string'
-      ? caseContext.assessment_nwac_review_status.trim().toLowerCase()
-      : null;
+	    const assessmentReviewStatusRaw = typeof applicationAssessmentContext?.assessment_nwac_review_status === 'string'
+	      ? applicationAssessmentContext.assessment_nwac_review_status.trim().toLowerCase()
+	      : null;
     response.assessment_nwac_review_status =
       assessmentReviewStatusRaw === 'approve' ||
       assessmentReviewStatusRaw === 'reject' ||
@@ -48309,38 +48611,10 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       }
     }
 
-    const [[assessmentRow]] = await connection.query(
-      `SELECT
-         overview,
-         employment_goals,
-         previous_iset,
-         previous_iset_details,
-         employment_barriers,
-         employment_barriers_other_details,
-         local_area_priorities,
-         other_funding_details,
-         esdc_eligibility,
-         intervention_start_date,
-         intervention_end_date,
-         intervention_code,
-         intervention_outcome_code,
-         intervention_duration_days,
-         intervention_cost_total,
-         intervention_related_noc,
-         intervention_related_noc_version,
-         childcare_need,
-         childcare_funding_details,
-         institution,
-         program_name,
-         itp_payload,
-         wage_payload,
-         recommendation,
-         justification
-       FROM iset_case_assessment
-       WHERE case_id = ?
-       LIMIT 1`,
-      [caseId]
-    );
+    const assessmentRow = await fetchApplicationAssessmentRow(connection, {
+      caseId,
+      applicationId: caseRow.application_id || null,
+    });
 
     const caseContext = safeJsonParse(caseRow?.case_context_json, null) || null;
 
@@ -49422,6 +49696,13 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       );
       const existingContext = contextRows && contextRows[0] ? contextRows[0].case_context_json : null;
       if (!existingContext) {
+        const assessmentRow = await fetchApplicationAssessmentRow(connection, {
+          caseId,
+          applicationId: caseRow.application_id || null,
+        });
+        const previousIsetNormalised = normalizeYesNoValue(assessmentRow?.previous_iset);
+        const previousIsetBoolean =
+          previousIsetNormalised === null ? null : previousIsetNormalised === 'yes';
         const parseArrayLocal = (value) => {
           if (!value) return [];
           if (Array.isArray(value)) return value;
@@ -52854,7 +53135,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       LEFT JOIN application_lock al ON al.application_id = a.id AND al.expires_at > NOW()
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
-      LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
+      LEFT JOIN iset_application_assessment ca ON ca.application_id = a.id
       LEFT JOIN iset_case_conflict_declaration cd
         ON cd.case_id = c.id
        AND cd.staff_profile_id = ?
@@ -53010,6 +53291,39 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     row.application_closure_reason = row.application_closure_reason || null;
     row.applicationClosureReason = row.application_closure_reason || null;
     Object.assign(row, buildAssignedStaffProfileResponseFields(row));
+    try {
+      const assessmentRow = await fetchApplicationAssessmentRow(pool, {
+        caseId: row.id,
+        applicationId: row.application_id || null,
+      });
+      applyAssessmentRowToResponse(row, assessmentRow);
+      row.assessment_intervention_pot_code = null;
+      row.assessment_intervention_pot_name = null;
+      row.assessment_intervention_label = null;
+      const assessmentPotId = normalisePositiveInteger(row.assessment_intervention_pot_id);
+      if (assessmentPotId) {
+        const [[potRow] = []] = await pool.query(
+          'SELECT code, name FROM budget_pot WHERE id = ? LIMIT 1',
+          [assessmentPotId]
+        );
+        row.assessment_intervention_pot_code = normaliseString(potRow?.code) || null;
+        row.assessment_intervention_pot_name = normaliseString(potRow?.name) || null;
+      }
+      const interventionCode = normalisePositiveInteger(row.assessment_intervention_code);
+      if (interventionCode) {
+        const [[interventionCodeRow] = []] = await pool.query(
+          'SELECT label FROM esdc_intervention_code WHERE code = ? LIMIT 1',
+          [interventionCode]
+        );
+        row.assessment_intervention_label = normaliseString(interventionCodeRow?.label) || null;
+      }
+    } catch (assessmentErr) {
+      console.warn('[case:detail] selected application assessment lookup failed:', assessmentErr?.message || assessmentErr);
+      applyAssessmentRowToResponse(row, null);
+      row.assessment_intervention_pot_code = null;
+      row.assessment_intervention_pot_name = null;
+      row.assessment_intervention_label = null;
+    }
 
     try {
       const existingClientSummary = await findExistingClientCaseSummary(pool, {
@@ -55800,11 +56114,12 @@ app.delete('/api/cases/:caseId/notes/:noteId', async (req, res) => {
 app.get('/api/cases/:id/messages', async (req, res) => {
   const caseId = parseInt(req.params.id, 10);
   if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
-  try {
-    const ownerUserId = await resolveOrCreateUserIdFromAuth(req);
-    if (!ownerUserId) return res.status(401).json({ error: 'unauthorized' });
-    await ensureCaseMessageItemTable();
-    const requesterRole = canonicaliseAccessRole(inferUserRole(req));
+	  try {
+	    const ownerUserId = await resolveOrCreateUserIdFromAuth(req);
+	    if (!ownerUserId) return res.status(401).json({ error: 'unauthorized' });
+	    await ensureCaseMessageItemTable();
+	    const requestedApplicationId = normalisePositiveInteger(req.query.applicationId || req.query.application_id);
+	    const requesterRole = canonicaliseAccessRole(inferUserRole(req));
     const isStaffRequester = req?.auth?.subjectType === 'staff' || Boolean(requesterRole);
     if (isStaffRequester) {
       const accessError = await validateCaseAccessByCaseId(req, caseId);
@@ -55812,9 +56127,9 @@ app.get('/api/cases/:id/messages', async (req, res) => {
     }
 
     // Resolve applicant user id for this case
-    let applicantContext;
-    try {
-      applicantContext = await resolveCaseApplicantMessagingContext(caseId);
+	    let applicantContext;
+	    try {
+	      applicantContext = await resolveCaseApplicantMessagingContext(caseId, { applicationId: requestedApplicationId });
     } catch (e) {
       const noTable = e && e.code === 'ER_NO_SUCH_TABLE';
       const badField = e && e.code === 'ER_BAD_FIELD_ERROR';
@@ -55963,9 +56278,11 @@ const handlePostCaseSecureMessage = async (req, res) => {
     urgent,
     toDisplayName,
     fromDisplayName,
-    attachments,
-    interventionId
-  } = req.body || {};
+	    attachments,
+	    interventionId,
+	    applicationId,
+	    application_id
+	  } = req.body || {};
   if (!Number.isInteger(caseId) || caseId < 1) return res.status(400).json({ error: 'invalid_case_id' });
   const subjectValue = typeof subject === 'string' ? subject.trim() : '';
   const bodyValue = typeof body === 'string' ? body.trim() : '';
@@ -55992,8 +56309,9 @@ const handlePostCaseSecureMessage = async (req, res) => {
     const accessError = await validateCaseAccessByCaseId(req, caseId);
     if (accessError) return res.status(accessError.status).json(accessError.body);
 
-    // Resolve applicant user id
-    const caseRow = await resolveCaseApplicantMessagingContext(caseId);
+	    const requestedApplicationId = normalisePositiveInteger(applicationId || application_id);
+	    // Resolve applicant user id
+	    const caseRow = await resolveCaseApplicantMessagingContext(caseId, { applicationId: requestedApplicationId });
     if (!caseRow) return res.status(404).json({ error: 'case_not_found' });
     if (caseRow.applicant_resolution_conflict) {
       console.error(
@@ -56005,10 +56323,14 @@ const handlePostCaseSecureMessage = async (req, res) => {
         message: 'The case has conflicting applicant account links. Repair the account mapping before sending secure messages or signing requests.'
       });
     }
-    const recipientId = caseRow?.applicant_user_id || null;
-    if (!recipientId) return res.status(404).json({ error: 'applicant_not_found' });
-    const caseContext = safeJsonParse(caseRow?.case_context_json, null) || {};
-    const ctxPersonal = caseContext.applicationPersonal || {};
+	    const recipientId = caseRow?.applicant_user_id || null;
+	    if (!recipientId) return res.status(404).json({ error: 'applicant_not_found' });
+	    const caseContext = safeJsonParse(caseRow?.case_context_json, null) || {};
+	    const applicationAssessmentContext = resolveApplicationAssessmentCaseContext(
+	      caseContext,
+	      caseRow?.application_id || null
+	    );
+	    const ctxPersonal = caseContext.applicationPersonal || {};
     const ctxAnswers = caseContext.applicationAnswers || {};
     const contextNameCandidates = [
       ctxPersonal.preferred_name,
@@ -56103,13 +56425,10 @@ const handlePostCaseSecureMessage = async (req, res) => {
           interventionFundingRow?.plan_funding_stream || null
         );
       } else {
-        const [[assessmentRow]] = await pool.query(
-          `SELECT proposed_interventions, intervention_cost_total
-             FROM iset_case_assessment
-            WHERE case_id = ?
-            LIMIT 1`,
-          [caseId]
-        );
+        const assessmentRow = await fetchApplicationAssessmentRow(pool, {
+          caseId,
+          applicationId: caseRow?.application_id || null,
+        });
         shouldAttachFundingForms = assessmentHasFundedCostLines(assessmentRow);
       }
       if (shouldAttachFundingForms) {
@@ -56214,13 +56533,12 @@ const handlePostCaseSecureMessage = async (req, res) => {
           allowedDocTypes = new Set(['assessment_approval_letter']);
         } else {
           const decisionOutcome = resolveDecisionOutcome(
-            caseRow?.application_status,
-            caseRow?.case_lifecycle_status || caseRow?.case_status,
-            caseRow?.decision_outcome ||
-              caseContext?.assessment_nwac_review_status ||
-              caseContext?.assessmentNwacReviewStatus ||
-              null
-          );
+	            caseRow?.application_status,
+	            caseRow?.case_lifecycle_status || caseRow?.case_status,
+	            caseRow?.decision_outcome ||
+	              applicationAssessmentContext?.assessment_nwac_review_status ||
+	              null
+	          );
           allowedDocTypes = decisionOutcome === 'approved'
             ? new Set(['assessment_approval_letter'])
             : decisionOutcome === 'denied'
@@ -56234,7 +56552,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
             message: 'Decision letter forms can only be sent for the current application decision.'
           });
         }
-        const decisionDrafts = resolveDecisionLetterDrafts(caseContext);
+	        const decisionDrafts = resolveDecisionLetterDrafts(caseContext, caseRow?.application_id || null);
         const applicantNameToken = normaliseString(toNameValue) || contextApplicantName || normaliseString(caseRow?.applicant_email) || null;
         const coordinatorNameToken = normaliseString(fromNameValue) || null;
         letterAttachments.forEach((letter) => {
@@ -56285,9 +56603,10 @@ const handlePostCaseSecureMessage = async (req, res) => {
             preferredName: requesterDisplayName,
             createdByUserId: senderId,
           });
-          const created = await createCfaVersionFromAssessment({
-            caseId,
-            changeReason: 'NEW_INTERVENTION_APPROVED',
+	          const created = await createCfaVersionFromAssessment({
+	            caseId,
+	            applicationId: caseRow?.application_id || null,
+	            changeReason: 'NEW_INTERVENTION_APPROVED',
             changeSummary: 'Initial funding agreement',
             actorUserId: senderId,
             staffProfileId,
@@ -56327,13 +56646,10 @@ const handlePostCaseSecureMessage = async (req, res) => {
       }
       if (!cfaDraftRow) {
         try {
-          const [[assessmentDebug]] = await pool.query(
-            `SELECT intervention_code, intervention_cost_total, proposed_interventions
-               FROM iset_case_assessment
-              WHERE case_id = ?
-              LIMIT 1`,
-            [caseId]
-          );
+          const assessmentDebug = await fetchApplicationAssessmentRow(pool, {
+            caseId,
+            applicationId: caseRow?.application_id || null,
+          });
           const proposedRaw = assessmentDebug?.proposed_interventions ?? null;
           const proposedType = Array.isArray(proposedRaw) ? 'array' : typeof proposedRaw;
           const proposedLen = typeof proposedRaw === 'string'
@@ -56385,13 +56701,10 @@ const handlePostCaseSecureMessage = async (req, res) => {
       });
       const caseManagerName = caseManager.name || requesterDisplayName || '';
       const caseManagerSignedDate = formatFundingDate(new Date());
-      const [[assessmentRow]] = await pool.query(
-        `SELECT program_name, institution, intervention_start_date, intervention_end_date, itp_payload, intervention_cost_total, proposed_interventions
-           FROM iset_case_assessment
-          WHERE case_id = ?
-          LIMIT 1`,
-        [caseId]
-      );
+      const assessmentRow = await fetchApplicationAssessmentRow(pool, {
+        caseId,
+        applicationId: caseRow?.application_id || null,
+      });
       let interventionRow = null;
       if (requestedInterventionId) {
         const [[selectedIntervention]] = await pool.query(
@@ -56524,9 +56837,8 @@ const handlePostCaseSecureMessage = async (req, res) => {
       // Participant-facing views hide this block at read time.
     }
 
-    const requestedApplicationId = normalisePositiveInteger(req.body?.applicationId);
-    const caseApplicationId = normalisePositiveInteger(caseRow?.application_id);
-    const messageApplicationId = caseApplicationId || null;
+	    const caseApplicationId = normalisePositiveInteger(caseRow?.application_id);
+	    const messageApplicationId = caseApplicationId || null;
     if (requestedApplicationId && requestedApplicationId !== messageApplicationId) {
       console.warn(
         '[messages] ignoring applicationId mismatch for case %s (requested %s, case %s)',
@@ -63504,31 +63816,38 @@ const scaleFundingCapsForRecurring = ({ caps, totalAuthorized, interventionRow, 
   return { caps, totalAuthorized, scaled: false };
 };
 
-const fetchActionPlanMetadata = async (actionPlanId, connection) => {
+const fetchActionPlanAssessmentContext = async (actionPlanId, connection) => {
   if (!actionPlanId) return null;
   const runner = connection || pool;
   const [[row]] = await runner.query(
-    'SELECT metadata_json FROM iset_case_action_plan WHERE id = ? LIMIT 1',
+    'SELECT application_id, metadata_json FROM iset_case_action_plan WHERE id = ? LIMIT 1',
     [Number(actionPlanId)]
   );
-  if (!row?.metadata_json) return null;
-  return safeJsonParse(row.metadata_json, {}) || {};
+  if (!row) return null;
+  return {
+    applicationId: normalisePositiveInteger(row.application_id) || null,
+    metadata: safeJsonParse(row.metadata_json, {}) || {},
+  };
 };
 
-const fetchAssessmentFundingRow = async (caseId, connection) => {
+const fetchAssessmentFundingRow = async ({ caseId, applicationId = null, connection } = {}) => {
   if (!caseId) return null;
   const runner = connection || pool;
-  const [[row]] = await runner.query(
-    `SELECT itp_payload, wage_payload, intervention_cost_total
-       FROM iset_case_assessment
-      WHERE case_id = ?
-      LIMIT 1`,
-    [Number(caseId)]
-  );
-  return row || null;
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  if (normalizedApplicationId) {
+    return fetchApplicationAssessmentRow(runner, {
+      caseId: normalizedCaseId,
+      applicationId: normalizedApplicationId,
+    });
+  }
+  return fetchApplicationAssessmentRow(runner, {
+    caseId: normalizedCaseId,
+    applicationId: null,
+  });
 };
 
-const resolveFundingAuthorizationForIntervention = async ({ interventionRow, caseId, connection }) => {
+const resolveFundingAuthorizationForIntervention = async ({ interventionRow, caseId, applicationId = null, connection }) => {
   if (!interventionRow && !caseId) return null;
   const runner = connection || pool;
   let source = null;
@@ -63547,8 +63866,10 @@ const resolveFundingAuthorizationForIntervention = async ({ interventionRow, cas
     source = 'intervention_metadata';
   }
 
+  let actionPlanContext = null;
   if (!caps && interventionRow?.action_plan_id) {
-    const planMeta = await fetchActionPlanMetadata(interventionRow.action_plan_id, runner);
+    actionPlanContext = await fetchActionPlanAssessmentContext(interventionRow.action_plan_id, runner);
+    const planMeta = actionPlanContext?.metadata || {};
     const planFunding =
       planMeta?.recommendedIntervention?.fundingBreakdown ||
       planMeta?.recommendedIntervention?.funding_breakdown ||
@@ -63562,7 +63883,18 @@ const resolveFundingAuthorizationForIntervention = async ({ interventionRow, cas
   }
 
   if (!caps && caseId) {
-    assessmentRow = await fetchAssessmentFundingRow(caseId, runner);
+    let resolvedApplicationId = normalisePositiveInteger(applicationId);
+    if (!resolvedApplicationId && interventionRow?.action_plan_id) {
+      if (!actionPlanContext) {
+        actionPlanContext = await fetchActionPlanAssessmentContext(interventionRow.action_plan_id, runner);
+      }
+      resolvedApplicationId = normalisePositiveInteger(actionPlanContext?.applicationId);
+    }
+    assessmentRow = await fetchAssessmentFundingRow({
+      caseId,
+      applicationId: resolvedApplicationId || null,
+      connection: runner,
+    });
     caps = buildFundingCapsFromAssessment(assessmentRow);
     if (caps) {
       source = 'assessment_payload';
@@ -65277,22 +65609,20 @@ async function createAutoPaymentPacketFromIntervention({
   const caseId = Number(interventionRow.case_id) || null;
   const caseRow = caseId ? await fetchCaseRow(caseId, runner) : null;
   const clientId = Number(caseRow?.client_id) || null;
-  const applicationId = Number(caseRow?.application_id) || null;
+  const actionPlanContext = interventionRow.action_plan_id
+    ? await fetchActionPlanAssessmentContext(interventionRow.action_plan_id, runner)
+    : null;
+  const applicationId = normalisePositiveInteger(actionPlanContext?.applicationId) || null;
 
   const metadata = safeJsonParse(interventionRow.metadata_json, {}) || {};
-  const [[assessmentRow]] = caseId
-    ? await runner.query(
-        `SELECT itp_payload, wage_payload, intervention_start_date, intervention_end_date,
-                institution, intervention_cost_total
-           FROM iset_case_assessment
-          WHERE case_id = ?
-          LIMIT 1`,
-        [caseId]
-      )
-    : [[]];
-  const planMetadata = interventionRow.action_plan_id
-    ? await fetchActionPlanMetadata(interventionRow.action_plan_id, runner)
+  const assessmentRow = caseId
+    ? await fetchAssessmentFundingRow({
+        caseId,
+        applicationId,
+        connection: runner,
+      })
     : null;
+  const planMetadata = actionPlanContext?.metadata || null;
   const partnerName = resolveAutoPacketPartnerName({
     assessmentRow,
     interventionMetadata: metadata,
@@ -76804,11 +77134,10 @@ app.get('/api/applications/:id', async (req, res) => {
       } catch (_) {}
       const [[resolvedCaseRow]] = await pool.query(caseSql, caseParams);
       caseRow = resolvedCaseRow || null;
-      const [[resolvedAssessmentRow]] = await pool.query(
-        'SELECT esdc_eligibility FROM iset_case_assessment WHERE case_id = ? LIMIT 1',
-        [linkedCaseId]
-      );
-      assessmentRow = resolvedAssessmentRow || null;
+      assessmentRow = await fetchApplicationAssessmentRow(pool, {
+        caseId: linkedCaseId,
+        applicationId,
+      });
     }
 
     let ptma = null;
@@ -77902,12 +78231,30 @@ app.get('/api/applications', async (req, res) => {
     )`;
 	    const caseContextStringExpr = path =>
 	      `NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '${path}')), ''), 'null')`;
+	    const applicationContextStringExpr = path =>
+	      `NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, CONCAT('$.${APPLICATION_ASSESSMENT_CONTEXT_KEY}."', a.id, '".${path}'))), ''), 'null')`;
+	    const singleApplicationCaseExpr = `(SELECT COUNT(*) FROM iset_application app_ctx WHERE app_ctx.case_id = c.id) = 1`;
 	    const approvalDecisionLetterSentExpr = `CASE
 	      WHEN COALESCE(
+	        ${applicationContextStringExpr('decisionLetterSent.approval')},
+	        ${applicationContextStringExpr('decision_letter_sent.approval')}
+	      ) IS NOT NULL THEN 1
+	      WHEN LOWER(COALESCE(
+	        ${applicationContextStringExpr('decisionLetterSentType')},
+	        ${applicationContextStringExpr('decision_letter_sent_type')},
+	        ''
+	      )) = 'approval'
+	      AND COALESCE(
+	        ${applicationContextStringExpr('decisionLetterSentAt')},
+	        ${applicationContextStringExpr('decision_letter_sent_at')}
+	      ) IS NOT NULL THEN 1
+	      WHEN ${singleApplicationCaseExpr}
+	      AND COALESCE(
 	        ${caseContextStringExpr('$.decisionLetterSent.approval')},
 	        ${caseContextStringExpr('$.decision_letter_sent.approval')}
 	      ) IS NOT NULL THEN 1
-	      WHEN LOWER(COALESCE(
+	      WHEN ${singleApplicationCaseExpr}
+	      AND LOWER(COALESCE(
 	        ${caseContextStringExpr('$.decisionLetterSentType')},
 	        ${caseContextStringExpr('$.decision_letter_sent_type')},
 	        ''
@@ -77920,20 +78267,35 @@ app.get('/api/applications', async (req, res) => {
 	    END`;
 	    const denialDecisionLetterSentExpr = `CASE
 	      WHEN COALESCE(
+	        ${applicationContextStringExpr('decisionLetterSent.denial')},
+	        ${applicationContextStringExpr('decision_letter_sent.denial')}
+	      ) IS NOT NULL THEN 1
+	      WHEN LOWER(COALESCE(
+	        ${applicationContextStringExpr('decisionLetterSentType')},
+	        ${applicationContextStringExpr('decision_letter_sent_type')},
+	        ''
+	      )) = 'denial'
+	      AND COALESCE(
+	        ${applicationContextStringExpr('decisionLetterSentAt')},
+	        ${applicationContextStringExpr('decision_letter_sent_at')}
+	      ) IS NOT NULL THEN 1
+	      WHEN ${singleApplicationCaseExpr}
+	      AND COALESCE(
 	        ${caseContextStringExpr('$.decisionLetterSent.denial')},
-        ${caseContextStringExpr('$.decision_letter_sent.denial')}
-      ) IS NOT NULL THEN 1
-      WHEN LOWER(COALESCE(
-        ${caseContextStringExpr('$.decisionLetterSentType')},
-        ${caseContextStringExpr('$.decision_letter_sent_type')},
-        ''
-      )) = 'denial'
-      AND COALESCE(
-        ${caseContextStringExpr('$.decisionLetterSentAt')},
-        ${caseContextStringExpr('$.decision_letter_sent_at')}
-      ) IS NOT NULL THEN 1
-      ELSE 0
-    END`;
+	        ${caseContextStringExpr('$.decision_letter_sent.denial')}
+	      ) IS NOT NULL THEN 1
+	      WHEN ${singleApplicationCaseExpr}
+	      AND LOWER(COALESCE(
+	        ${caseContextStringExpr('$.decisionLetterSentType')},
+	        ${caseContextStringExpr('$.decision_letter_sent_type')},
+	        ''
+	      )) = 'denial'
+	      AND COALESCE(
+	        ${caseContextStringExpr('$.decisionLetterSentAt')},
+	        ${caseContextStringExpr('$.decision_letter_sent_at')}
+	      ) IS NOT NULL THEN 1
+	      ELSE 0
+	    END`;
     const preferredNameExpr = `JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."preferred-name"'))`;
     const applicantFirstNameExpr = `JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."first-name"'))`;
     const applicantLastNameExpr = `JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.answers."last-name"'))`;
@@ -78073,7 +78435,7 @@ app.get('/api/applications', async (req, res) => {
       0 AS is_unassigned_submission
       FROM iset_case c
       JOIN iset_application a ON ${buildApplicationCaseJoinPredicate('c', 'a')}
-      LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
+      LEFT JOIN iset_application_assessment ca ON ca.application_id = a.id
       LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
       LEFT JOIN application_lock al ON al.application_id = a.id AND al.expires_at > NOW()`;
@@ -78877,13 +79239,26 @@ app.get('/api/signing-requests/:id', async (req, res) => {
         } catch (_) {}
         const schema = await buildWorkflowSchema({ pool, workflowId: row.workflow_id });
         let resolvedSchema = { steps: schema.steps, meta: schema.meta };
-        if (docType === 'assessment_approval_letter' || docType === 'assessment_denial_letter') {
-          const tokens = await resolveDecisionLetterTokensForSigningRequest({
-            pool,
-            caseId: row.case_id,
-            createdByUserId: row.created_by_user_id,
-            docType
-          });
+	        if (docType === 'assessment_approval_letter' || docType === 'assessment_denial_letter') {
+	          let messageApplicationId = null;
+	          try {
+	            const [[messageScopeRow]] = await pool.query(
+	              `SELECT m.application_id
+	                 FROM message_signing_request msr
+	                 JOIN messages m ON m.id = msr.message_id
+	                WHERE msr.signing_request_id = ?
+	                LIMIT 1`,
+	              [id]
+	            );
+	            messageApplicationId = normalisePositiveInteger(messageScopeRow?.application_id) || null;
+	          } catch (_) {}
+	          const tokens = await resolveDecisionLetterTokensForSigningRequest({
+	            pool,
+	            caseId: row.case_id,
+	            applicationId: messageApplicationId,
+	            createdByUserId: row.created_by_user_id,
+	            docType
+	          });
           if (tokens) {
             resolvedSchema = applyPrefillTokensToSchema(resolvedSchema, tokens);
             resolvedSchema = pruneDecisionLetterSchema(resolvedSchema);
@@ -79106,6 +79481,12 @@ app.put('/api/cases/:id', async (req, res) => {
   }
 
   const body = req.body || {};
+  const requestedApplicationId = normalisePositiveInteger(
+    body.applicationId ||
+    body.application_id ||
+    req.query.applicationId ||
+    req.query.application_id
+  );
   const eligibilityUpdateRequested = Object.prototype.hasOwnProperty.call(body, 'assessment_esdc_eligibility');
   const identity = getRequesterIdentity(req);
   const expectedRowVersionRaw = body.expectedApplicationRowVersion ?? body.expectedRowVersion;
@@ -79252,6 +79633,9 @@ app.put('/api/cases/:id', async (req, res) => {
   let pushBackCaseNoteId = null;
   let pushBackCaseNoteBody = null;
   let requiredAssessmentDocsGenerated = false;
+  const applicationJoinSql = requestedApplicationId
+    ? 'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
+    : buildCasePrimaryApplicationJoinSql('c', 'a');
 
   try {
     const accessError = await validateCaseAccessByCaseId(req, caseId);
@@ -79286,11 +79670,11 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
               al.owner_email AS lock_owner_email,
               al.expires_at AS lock_expires_at
          FROM iset_case c
-         ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+         ${applicationJoinSql}
          LEFT JOIN application_lock al ON al.application_id = a.id AND al.expires_at > NOW()
         WHERE c.id = ?
         LIMIT 1 FOR UPDATE`,
-      [caseId]
+      requestedApplicationId ? [requestedApplicationId, caseId] : [caseId]
     );
     if (!existingCase) {
       await conn.rollback();
@@ -79310,12 +79694,16 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       normaliseApplicationDecisionOutcomeValue(existingCase.application_decision_outcome) || null;
     beforeApplicationAwaitingReason = normaliseString(existingCase.application_awaiting_reason) || null;
     beforeApplicationClosureReason = normaliseString(existingCase.application_closure_reason) || null;
-    const beforeStatusLower = beforeStatus ? String(beforeStatus).toLowerCase() : null;
-    const beforeStatusNormalised = beforeCaseLifecycleStatus || normaliseCaseStatusValue(beforeStatus);
-    const existingCaseContext = safeJsonParse(existingCase.case_context_json, null);
-    beforeAssessmentReviewStatus = normalizeAssessmentReviewStatus(
-      existingCaseContext?.assessment_nwac_review_status
-    );
+	    const beforeStatusLower = beforeStatus ? String(beforeStatus).toLowerCase() : null;
+	    const beforeStatusNormalised = beforeCaseLifecycleStatus || normaliseCaseStatusValue(beforeStatus);
+	    const existingCaseContext = safeJsonParse(existingCase.case_context_json, null);
+	    const existingApplicationAssessmentContext = resolveApplicationAssessmentCaseContext(
+	      existingCaseContext,
+	      existingCase.application_id || null
+	    );
+	    beforeAssessmentReviewStatus = normalizeAssessmentReviewStatus(
+	      existingApplicationAssessmentContext?.assessment_nwac_review_status
+	    );
     beforeDocsRequestedActive = Number(existingCase.docs_requested_active || 0) === 1;
     beforeDocsRequestedAt = existingCase.docs_requested_at || null;
     beforeDocsRequestedClearedAt = existingCase.docs_requested_cleared_at || null;
@@ -79394,10 +79782,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       const roleKeyRaw = normaliseString(identity.role);
       const roleKey = roleKeyRaw ? roleKeyRaw.toLowerCase().replace(/[\s_-]+/g, '') : '';
       if (!eligibilityRoleAllowlist.has(roleKey)) {
-        const [[assessmentRow]] = await conn.query(
-          'SELECT esdc_eligibility FROM iset_case_assessment WHERE case_id = ? LIMIT 1',
-          [caseId]
-        );
+        const assessmentRow = await fetchApplicationAssessmentRow(conn, { caseId, applicationId });
         const existingEligibility = normaliseString(assessmentRow?.esdc_eligibility) || null;
         const incomingEligibility = normaliseString(body.assessment_esdc_eligibility) || null;
         const existingKey = (existingEligibility || '').toLowerCase();
@@ -79625,18 +80010,27 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
 
   const conflictSignatureRequested = Object.prototype.hasOwnProperty.call(body, 'assessment_conflict_declaration_signed');
   hasAssessmentPayload = assessmentKeys.some(key => Object.prototype.hasOwnProperty.call(body, key));
+  if (hasAssessmentPayload && applicationId && !requestedApplicationId) {
+    const [[applicationCountRow]] = await conn.query(
+      'SELECT COUNT(*) AS application_count FROM iset_application WHERE case_id = ?',
+      [caseId]
+    );
+    if (Number(applicationCountRow?.application_count || 0) > 1) {
+      await conn.rollback();
+      return res.status(422).json({
+        success: false,
+        error: 'application_id_required_for_assessment',
+        message: 'Assessment changes for repeat-application cases must include the selected application id.',
+        lock: lockCheck.lock || null
+      });
+    }
+  }
   const hasCaseContextPayload =
     Object.prototype.hasOwnProperty.call(body, 'caseContext') ||
     Object.prototype.hasOwnProperty.call(body, 'case_context');
 
   if (hasAssessmentPayload) {
-    const [[existingAssessmentRow]] = await conn.query(
-      `SELECT intervention_budget_pot_id, posting_context
-         FROM iset_case_assessment
-        WHERE case_id = ?
-        LIMIT 1`,
-      [caseId]
-    );
+    const existingAssessmentRow = await fetchApplicationAssessmentRow(conn, { caseId, applicationId });
     beforeAssessmentBudgetPotId = normalisePositiveInteger(existingAssessmentRow?.intervention_budget_pot_id);
     beforeAssessmentPostingContext = normalizePostingContext(existingAssessmentRow?.posting_context) || null;
   }
@@ -79718,10 +80112,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         null
       );
       if (approvalCost === null) {
-        const [[costRow]] = await conn.query(
-          'SELECT intervention_cost_total FROM iset_case_assessment WHERE case_id = ? LIMIT 1',
-          [caseId]
-        );
+        const costRow = await fetchApplicationAssessmentRow(conn, { caseId, applicationId });
         approvalCost = parseCostValue(costRow?.intervention_cost_total);
       }
       if (approvalCost !== null) {
@@ -79850,13 +80241,13 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       add('posting_context', postingContext);
     }
     if (updateAssignments.length) {
-      const placeholders = insertColumns.map(() => '?').join(', ');
-      const updateClause = updateAssignments.join(', ');
-      await conn.query(
-        `INSERT INTO iset_case_assessment (${insertColumns.join(', ')}) VALUES (${placeholders})
-         ON DUPLICATE KEY UPDATE ${updateClause}`,
-        insertValues
-      );
+      await writeAssessmentRow(conn, {
+        caseId,
+        applicationId,
+        insertColumns,
+        insertValues,
+        updateAssignments
+      });
       if (applicationId) {
         bumpApplicationRowVersion = true;
       }
@@ -79872,11 +80263,15 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         jsonValue = null;
       } else if (parsedContext === null) {
         jsonValue = null;
-      } else if (parsedContext && typeof parsedContext === 'object' && !Array.isArray(parsedContext)) {
-        const existingContext = safeJsonParse(existingCase.case_context_json, null);
-        const mergedContext = mergeCaseContext(existingContext, parsedContext);
-        const hydratedContext = await ensureCaseContextHasParticipantDetails(
-          conn,
+	      } else if (parsedContext && typeof parsedContext === 'object' && !Array.isArray(parsedContext)) {
+	        const existingContext = safeJsonParse(existingCase.case_context_json, null);
+	        const scopedContext = scopeApplicationAssessmentCaseContextPatch(parsedContext, applicationId);
+	        const baseContext = hasApplicationAssessmentScopedContext(scopedContext, applicationId)
+	          ? stripApplicationAssessmentRootContext(existingContext)
+	          : existingContext;
+	        const mergedContext = mergeCaseContext(baseContext, scopedContext);
+	        const hydratedContext = await ensureCaseContextHasParticipantDetails(
+	          conn,
           applicationId,
           mergedContext
         );
@@ -79892,13 +80287,17 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       const [[contextRow]] = await conn.query(
         'SELECT case_context_json FROM iset_case WHERE id = ? LIMIT 1 FOR UPDATE',
         [caseId]
-      );
-      const currentContext = safeJsonParse(contextRow?.case_context_json, null);
-      const nextContext = mergeCaseContext(currentContext, {
-        assessment_nwac_review_status: assessmentReviewStatus
-      });
-      await conn.query('UPDATE iset_case SET case_context_json = ? WHERE id = ?', [JSON.stringify(nextContext), caseId]);
-    }
+	      );
+	      const currentContext = safeJsonParse(contextRow?.case_context_json, null);
+	      const scopedReviewContext = scopeApplicationAssessmentCaseContextPatch({
+	        assessment_nwac_review_status: assessmentReviewStatus
+	      }, applicationId);
+	      const baseContext = hasApplicationAssessmentScopedContext(scopedReviewContext, applicationId)
+	        ? stripApplicationAssessmentRootContext(currentContext)
+	        : currentContext;
+	      const nextContext = mergeCaseContext(baseContext, scopedReviewContext);
+	      await conn.query('UPDATE iset_case SET case_context_json = ? WHERE id = ?', [JSON.stringify(nextContext), caseId]);
+	    }
 
     if (conflictSignatureRequested) {
       const conflictSigned = toTinyInt(body.assessment_conflict_declaration_signed);
@@ -80031,6 +80430,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       autoPlanApprovalUserId = approvalUserId || null;
       autoPlanSuggestion = await ensureAutoPlanAndInterventionFromAssessment(conn, {
         caseId,
+        applicationId,
         caseRow: existingCase,
         approvalUserId: autoPlanApprovalUserId,
         budgetPotId: assessmentBudgetPotId,
@@ -80103,7 +80503,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           LIMIT 1`,
         [caseId]
       );
-      const deniedReason = resolveFundingDecisionReasonCode(caseContextRow?.case_context_json);
+	      const deniedReason = resolveFundingDecisionReasonCode(caseContextRow?.case_context_json, applicationId);
       if (deniedReason === DENIED_INELIGIBLE_TRIGGER_REASON) {
         deniedReportingSeedResult = await syncDeniedIneligibleReportingArtifacts(conn, {
           caseId,
@@ -80332,9 +80732,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
                 cd2.declaration_choice AS assessment_conflict_declaration_choice,
                 cd2.conflict_details AS assessment_conflict_declaration_details
            FROM iset_case c
-           ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+           ${applicationJoinSql}
            LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-           LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
+           LEFT JOIN iset_application_assessment ca ON ca.application_id = a.id
            LEFT JOIN esdc_intervention_code ic ON ic.code = ca.intervention_code
            LEFT JOIN budget_pot bp ON bp.id = ca.intervention_budget_pot_id
            LEFT JOIN iset_case_conflict_declaration cd2
@@ -80342,7 +80742,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
             AND cd2.staff_profile_id = ?
             AND cd2.revoked_at IS NULL
           WHERE c.id = ?`,
-        [conflictSummaryStaffId, caseId]
+        requestedApplicationId
+          ? [requestedApplicationId, conflictSummaryStaffId, caseId]
+          : [conflictSummaryStaffId, caseId]
       );
       const documentCaseRow = normalizeAssessmentDocumentCaseRow(documentCaseRowRaw);
       if (!documentCaseRow?.application_id) {
@@ -80648,9 +81050,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
               cd2.declaration_choice AS assessment_conflict_declaration_choice,
               cd2.conflict_details AS assessment_conflict_declaration_details
          FROM iset_case c
-         ${buildCasePrimaryApplicationJoinSql('c', 'a')}
+         ${applicationJoinSql}
          LEFT JOIN iset_application_submission s ON s.id = a.submission_id
-         LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
+         LEFT JOIN iset_application_assessment ca ON ca.application_id = a.id
          LEFT JOIN esdc_intervention_code ic ON ic.code = ca.intervention_code
          LEFT JOIN budget_pot bp ON bp.id = ca.intervention_budget_pot_id
          LEFT JOIN iset_case_conflict_declaration cd2
@@ -80658,7 +81060,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           AND cd2.staff_profile_id = ?
           AND cd2.revoked_at IS NULL
         WHERE c.id = ?`,
-      [conflictSummaryStaffId, caseId]
+      requestedApplicationId
+        ? [requestedApplicationId, conflictSummaryStaffId, caseId]
+        : [conflictSummaryStaffId, caseId]
     );
 
     try {
@@ -81022,10 +81426,14 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         submittedApplicationLifecycleStatus === 'pending_decision' ||
         (submittedCaseLifecycleStatus === CASE_STATUS_DERIVED_VALUES.intake && submittedApplicationStatus === null)
       );
-    const afterCaseContext = safeJsonParse(caseRow?.case_context_json, null);
-    const afterAssessmentReviewStatus = normalizeAssessmentReviewStatus(
-      afterCaseContext?.assessment_nwac_review_status
-    );
+	    const afterCaseContext = safeJsonParse(caseRow?.case_context_json, null);
+	    const afterApplicationAssessmentContext = resolveApplicationAssessmentCaseContext(
+	      afterCaseContext,
+	      caseRow?.application_id || applicationId || null
+	    );
+	    const afterAssessmentReviewStatus = normalizeAssessmentReviewStatus(
+	      afterApplicationAssessmentContext?.assessment_nwac_review_status
+	    );
     const afterAssessmentPotId = normalisePositiveInteger(caseRow?.assessment_intervention_pot_id);
     const afterAssessmentPostingContext = normalizePostingContext(caseRow?.assessment_posting_context) || null;
     const budgetPotOrPostingChanged =
