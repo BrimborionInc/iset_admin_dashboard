@@ -22,7 +22,11 @@ const {
   isSubmissionPayloadDocumentMatch,
 } = require('./src/lib/applicationSubmissionDocumentScope');
 const { runStartupSharedSchemaMigrations } = require('./src/lib/sharedSchemaMigrationRunner');
-const { getCaseAccessError, getRegionalManagerCaseAccessError } = require('./src/lib/caseAccess');
+const {
+  buildRegionalManagerCaseAccessSql,
+  getCaseAccessError,
+  getRegionalManagerCaseAccessError,
+} = require('./src/lib/caseAccess');
 const {
   createCaseWatch,
   deleteCaseWatch,
@@ -10663,7 +10667,8 @@ function resolveDecisionLetterTokens({
   applicantName,
   trackingId,
   caseNumber,
-  coordinatorName
+  coordinatorName,
+  decisionDate = null
 }) {
   const isApproval = docType === 'assessment_approval_letter';
   const titleFallback = isApproval ? 'Letter of Approval' : 'Letter of Denial';
@@ -10674,7 +10679,7 @@ function resolveDecisionLetterTokens({
   const nextStep2 = safe(effectiveDraft.next_step_2);
   const showNextSteps = isApproval && (nextStep1 || nextStep2);
   return {
-    decision_date: safe(effectiveDraft.decision_date) || formatFundingDate(new Date()),
+    decision_date: safe(decisionDate) || safe(effectiveDraft.decision_date) || formatFundingDate(new Date()),
     applicant_name: safe(applicantName),
     tracking_id: safe(trackingId),
     case_number: safe(caseNumber),
@@ -25303,14 +25308,54 @@ const CONTACT_MSG_PAGE_SIZE_MAX = 100;
 
 function resolveContactAdminRole(req) {
   const role = inferUserRole(req);
-  if (role === 'System Administrator' || role === 'NWAC Administrator') {
+  if (role === 'System Administrator' || role === 'NWAC Administrator' || role === 'Regional Manager') {
     return role;
   }
   return null;
 }
 
+function buildContactMessageScope(req, { messageAlias = 'cm' } = {}) {
+  const role = resolveContactAdminRole(req);
+  if (!role) return { forbidden: true, role: null, clause: null, params: [] };
+  if (role === 'System Administrator' || role === 'NWAC Administrator') {
+    return { forbidden: false, role, clause: null, params: [] };
+  }
+
+  const requesterId = normalisePositiveInteger(
+    req?.staffProfile?.id ?? req?.auth?.staffProfileId ?? req?.auth?.userId ?? null
+  );
+  const regionalScope = buildRegionalManagerCaseAccessSql({
+    requesterId,
+    regionIds: resolveRequestRegionIds(req),
+    caseAlias: 'contact_case',
+    ownerAlias: 'contact_owner'
+  });
+  if (!regionalScope) {
+    return { forbidden: true, role, clause: null, params: [] };
+  }
+
+  const alias = /^[A-Za-z_][A-Za-z0-9_]*$/.test(String(messageAlias || ''))
+    ? String(messageAlias)
+    : 'cm';
+  return {
+    forbidden: false,
+    role,
+    clause: `EXISTS (
+      SELECT 1
+        FROM iset_application_submission contact_submission
+        JOIN iset_application contact_application ON contact_application.submission_id = contact_submission.id
+        JOIN iset_case contact_case ON contact_case.id = contact_application.case_id
+        LEFT JOIN staff_profiles contact_owner ON contact_owner.id = contact_case.assigned_staff_profile_id
+       WHERE contact_submission.user_id = ${alias}.user_id
+         AND ${regionalScope.clause}
+    )`,
+    params: regionalScope.params,
+  };
+}
+
 app.get('/api/admin/contact-messages', async (req, res) => {
-  if (!resolveContactAdminRole(req)) return res.status(403).json({ error: 'forbidden' });
+  const accessScope = buildContactMessageScope(req);
+  if (accessScope.forbidden) return res.status(403).json({ error: 'forbidden' });
 
   const page = Math.max(1, parseInt(req.query.page ?? '1', 10) || 1);
   const pageSize = Math.min(
@@ -25328,6 +25373,10 @@ app.get('/api/admin/contact-messages', async (req, res) => {
 
   const where = [];
   const params = [];
+  if (accessScope.clause) {
+    where.push(accessScope.clause);
+    params.push(...accessScope.params);
+  }
 
   if (status) {
     where.push('cm.status = ?');
@@ -29278,7 +29327,8 @@ app.get('/api/reporting/data-and-results/quarterly-uploads', async (req, res) =>
 
 
 app.get('/api/admin/contact-messages/:id', async (req, res) => {
-  if (!resolveContactAdminRole(req)) return res.status(403).json({ error: 'forbidden' });
+  const accessScope = buildContactMessageScope(req);
+  if (accessScope.forbidden) return res.status(403).json({ error: 'forbidden' });
 
   const id = Number.parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
@@ -29298,8 +29348,9 @@ app.get('/api/admin/contact-messages/:id', async (req, res) => {
          cm.updated_at     AS updatedAt
        FROM contact_message cm
        WHERE cm.id = ?
+         ${accessScope.clause ? `AND ${accessScope.clause}` : ''}
        LIMIT 1`,
-      [id]
+      [id, ...accessScope.params]
     );
     if (!message) return res.status(404).json({ error: 'not_found' });
 
@@ -29353,7 +29404,8 @@ app.get('/api/admin/contact-messages/:id', async (req, res) => {
 });
 
 app.patch('/api/admin/contact-messages/:id/status', async (req, res) => {
-  if (!resolveContactAdminRole(req)) return res.status(403).json({ error: 'forbidden' });
+  const accessScope = buildContactMessageScope(req);
+  if (accessScope.forbidden) return res.status(403).json({ error: 'forbidden' });
 
   const id = Number.parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
@@ -29370,8 +29422,12 @@ app.patch('/api/admin/contact-messages/:id/status', async (req, res) => {
     await connection.beginTransaction();
 
     const [[current]] = await connection.query(
-      'SELECT status FROM contact_message WHERE id = ? LIMIT 1',
-      [id]
+      `SELECT cm.status
+         FROM contact_message cm
+        WHERE cm.id = ?
+          ${accessScope.clause ? `AND ${accessScope.clause}` : ''}
+        LIMIT 1`,
+      [id, ...accessScope.params]
     );
     if (!current) {
       await connection.rollback();
@@ -29427,7 +29483,8 @@ app.patch('/api/admin/contact-messages/:id/status', async (req, res) => {
 });
 
 app.post('/api/admin/contact-messages/:id/notes', async (req, res) => {
-  if (!resolveContactAdminRole(req)) return res.status(403).json({ error: 'forbidden' });
+  const accessScope = buildContactMessageScope(req);
+  if (accessScope.forbidden) return res.status(403).json({ error: 'forbidden' });
 
   const id = Number.parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
@@ -29464,6 +29521,16 @@ app.post('/api/admin/contact-messages/:id/notes', async (req, res) => {
   }
 
   try {
+    const [[messageRow]] = await pool.query(
+      `SELECT cm.id
+         FROM contact_message cm
+        WHERE cm.id = ?
+          ${accessScope.clause ? `AND ${accessScope.clause}` : ''}
+        LIMIT 1`,
+      [id, ...accessScope.params]
+    );
+    if (!messageRow) return res.status(404).json({ error: 'not_found' });
+
     await pool.query(
       `INSERT INTO contact_message_note
          (contact_message_id, author_user_id, note_text, created_at)
@@ -29478,12 +29545,23 @@ app.post('/api/admin/contact-messages/:id/notes', async (req, res) => {
 });
 
 app.get('/api/admin/contact-messages/:id/notes', async (req, res) => {
-  if (!resolveContactAdminRole(req)) return res.status(403).json({ error: 'forbidden' });
+  const accessScope = buildContactMessageScope(req);
+  if (accessScope.forbidden) return res.status(403).json({ error: 'forbidden' });
 
   const id = Number.parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
 
   try {
+    const [[messageRow]] = await pool.query(
+      `SELECT cm.id
+         FROM contact_message cm
+        WHERE cm.id = ?
+          ${accessScope.clause ? `AND ${accessScope.clause}` : ''}
+        LIMIT 1`,
+      [id, ...accessScope.params]
+    );
+    if (!messageRow) return res.status(404).json({ error: 'not_found' });
+
     const [notes] = await pool.query(
       `SELECT
          n.id,
@@ -46710,17 +46788,17 @@ app.get('/api/cases', async (req, res) => {
 
     if (!allowAll) {
       if (role === 'Regional Manager') {
-        if (!requesterRegionIds.length) {
+        const regionalScope = buildRegionalManagerCaseAccessSql({
+          requesterId: requesterId,
+          regionIds: requesterRegionIds,
+          caseAlias: 'c',
+          ownerAlias: 'sp'
+        });
+        if (!regionalScope) {
           return res.status(403).json({ error: 'forbidden', detail: 'region_scope_missing' });
         }
-        if (requesterRegionIds.length === 1) {
-          whereClauses.push('(sp.region_id = ? OR c.assigned_staff_profile_id IS NULL)');
-          params.push(requesterRegionIds[0]);
-        } else {
-          const placeholders = requesterRegionIds.map(() => '?').join(',');
-          whereClauses.push(`(sp.region_id IN (${placeholders}) OR c.assigned_staff_profile_id IS NULL)`);
-          params.push(...requesterRegionIds);
-        }
+        whereClauses.push(regionalScope.clause);
+        params.push(...regionalScope.params);
       } else if (role === 'ISET Coordinator' || role === 'ISET_Coordinator') {
         if (!Number.isFinite(requesterId)) {
           return res.status(403).json({ error: 'forbidden', detail: 'assessor_scope_missing' });
@@ -56567,7 +56645,8 @@ const handlePostCaseSecureMessage = async (req, res) => {
               applicantName: applicantNameToken,
               trackingId: trackingReference,
               caseNumber: caseRow?.case_number,
-              coordinatorName: coordinatorNameToken
+              coordinatorName: coordinatorNameToken,
+              decisionDate: formatFundingDate(new Date())
             })
           );
         });
@@ -58243,6 +58322,41 @@ const normalizeAssessmentReviewStatus = value => {
   if (normalized !== 'approve' && normalized !== 'reject' && normalized !== 'push_back') return null;
   return normalized;
 };
+
+const normalizeAssessmentAlignmentKey = value => {
+  if (typeof value !== 'string') return '';
+  return value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+};
+
+const ASSESSMENT_RECOMMENDATION_DECISION_MAP = Object.freeze({
+  recommend: 'approve',
+  fund: 'approve',
+  approve: 'approve',
+  approved: 'approve',
+  no_recommend: 'reject',
+  do_not_fund: 'reject',
+  reject: 'reject',
+  rejected: 'reject',
+  decline: 'reject',
+  declined: 'reject',
+  deny: 'reject',
+  denied: 'reject',
+});
+
+const ASSESSMENT_DECISION_LABEL_MAP = Object.freeze({
+  approve: 'Approve funding',
+  reject: 'Deny funding',
+});
+
+function deriveAssessmentDecisionStatusFromAgreementServer({ recommendation, assessmentReview } = {}) {
+  const recommendationKey = normalizeAssessmentAlignmentKey(recommendation);
+  const reviewKey = normalizeAssessmentAlignmentKey(assessmentReview);
+  const recommendedDecision = ASSESSMENT_RECOMMENDATION_DECISION_MAP[recommendationKey] || null;
+  if (!recommendedDecision) return null;
+  if (reviewKey === 'agree') return recommendedDecision;
+  if (reviewKey === 'disagree') return recommendedDecision === 'approve' ? 'reject' : 'approve';
+  return null;
+}
 
 // Validate that a pot is chargeable (funding stream) and return the GL/project code for the given posting context.
 async function ensureChargeablePot({ runner, potId, postingContext = 'external' }) {
@@ -79620,6 +79734,7 @@ app.put('/api/cases/:id', async (req, res) => {
   let assessmentBudgetPotId = undefined;
   let assessmentBudgetPotProvided = false;
   let hasAssessmentPayload = false;
+  let existingAssessmentRow = null;
   let beforeAssessmentBudgetPotId = null;
   let beforeAssessmentPostingContext = null;
   let beforeAssessmentReviewStatus = null;
@@ -80030,7 +80145,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     Object.prototype.hasOwnProperty.call(body, 'case_context');
 
   if (hasAssessmentPayload) {
-    const existingAssessmentRow = await fetchApplicationAssessmentRow(conn, { caseId, applicationId });
+    existingAssessmentRow = await fetchApplicationAssessmentRow(conn, { caseId, applicationId });
     beforeAssessmentBudgetPotId = normalisePositiveInteger(existingAssessmentRow?.intervention_budget_pot_id);
     beforeAssessmentPostingContext = normalizePostingContext(existingAssessmentRow?.posting_context) || null;
   }
@@ -80093,6 +80208,50 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       applicationDecisionOutcomeToPersist = null;
       applicationAwaitingReasonToPersist = null;
       applicationClosureReasonToPersist = null;
+    }
+
+    const assessmentAlignmentRelevant =
+      assessmentReviewStatusProvided ||
+      requestedFinalApplicationDecision ||
+      Object.prototype.hasOwnProperty.call(body, 'assessment_recommendation') ||
+      Object.prototype.hasOwnProperty.call(body, 'assessment_nwac_review');
+    if (assessmentAlignmentRelevant) {
+      if (!existingAssessmentRow) {
+        existingAssessmentRow = await fetchApplicationAssessmentRow(conn, { caseId, applicationId });
+      }
+      const effectiveDecisionStatus =
+        assessmentReviewStatus ||
+        (requestedApplicationDecisionStatus === 'approved'
+          ? 'approve'
+          : requestedApplicationDecisionStatus === 'rejected'
+            ? 'reject'
+            : null) ||
+        beforeAssessmentReviewStatus;
+      const effectiveRecommendation = Object.prototype.hasOwnProperty.call(body, 'assessment_recommendation')
+        ? toNull(body.assessment_recommendation)
+        : existingAssessmentRow?.recommendation;
+      const effectiveAssessmentAgreement = Object.prototype.hasOwnProperty.call(body, 'assessment_nwac_review')
+        ? toNull(body.assessment_nwac_review)
+        : existingAssessmentRow?.nwac_review;
+      const expectedDecisionStatus = deriveAssessmentDecisionStatusFromAgreementServer({
+        recommendation: effectiveRecommendation,
+        assessmentReview: effectiveAssessmentAgreement
+      });
+      if (
+        expectedDecisionStatus &&
+        effectiveDecisionStatus &&
+        effectiveDecisionStatus !== 'push_back' &&
+        expectedDecisionStatus !== effectiveDecisionStatus
+      ) {
+        await conn.rollback();
+        const expectedLabel = ASSESSMENT_DECISION_LABEL_MAP[expectedDecisionStatus] || expectedDecisionStatus;
+        return res.status(422).json({
+          success: false,
+          error: 'assessment_decision_alignment_conflict',
+          message: `The funding decision conflicts with the recorded recommendation agreement. Choose "${expectedLabel}" or request changes.`,
+          lock: lockCheck.lock || null
+        });
+      }
     }
 
     const canonicalRoleForApproval = canonicaliseAccessRole(identity.role);

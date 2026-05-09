@@ -26,6 +26,12 @@ function normalizeRole(role) {
   return String(role).trim();
 }
 
+function normalizeSqlAlias(alias, fallback) {
+  const value = typeof alias === 'string' ? alias.trim() : '';
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) return value;
+  return fallback;
+}
+
 function resolveAssignedStaffProfileId(caseRow) {
   return (
     normalizePositiveInteger(caseRow?.assigned_staff_profile_id) ||
@@ -117,7 +123,42 @@ function getCaseAccessError(args = {}) {
   };
 }
 
+function buildRegionalManagerCaseAccessSql({
+  requesterId = null,
+  regionIds = [],
+  caseAlias = 'c',
+  ownerAlias = 'sp',
+} = {}) {
+  const c = normalizeSqlAlias(caseAlias, 'c');
+  const owner = normalizeSqlAlias(ownerAlias, 'sp');
+  const normalizedRequesterId = normalizePositiveInteger(requesterId);
+  const normalizedRegionIds = normalizeRegionIds(regionIds);
+  const conditions = [];
+  const params = [];
+
+  if (normalizedRequesterId !== null) {
+    conditions.push(`${c}.assigned_staff_profile_id = ?`);
+    params.push(normalizedRequesterId);
+  }
+
+  if (normalizedRegionIds.length) {
+    conditions.push(`${c}.assigned_staff_profile_id IS NULL`);
+    const placeholders = normalizedRegionIds.map(() => '?').join(',');
+    conditions.push(`${c}.portfolio_region_id IN (${placeholders})`);
+    params.push(...normalizedRegionIds);
+    conditions.push(`${owner}.region_id IN (${placeholders})`);
+    params.push(...normalizedRegionIds);
+  }
+
+  if (!conditions.length) return null;
+  return {
+    clause: `(${conditions.join(' OR ')})`,
+    params,
+  };
+}
+
 module.exports = {
+  buildRegionalManagerCaseAccessSql,
   evaluateCaseAccess,
   evaluateRegionalManagerCaseAccess,
   getCaseAccessError,

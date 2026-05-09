@@ -32,7 +32,8 @@
     ],
     "/iset/cases": [
       "System Administrator",
-      "NWAC Administrator"
+      "NWAC Administrator",
+      "Regional Manager"
     ],
     "/iset/imports/client-files": [
       "System Administrator",
@@ -52,7 +53,8 @@
     ],
     "/contact-communications": [
       "System Administrator",
-      "NWAC Administrator"
+      "NWAC Administrator",
+      "Regional Manager"
     ],
     "/messages": [
       "System Administrator",

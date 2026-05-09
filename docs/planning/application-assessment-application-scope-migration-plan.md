@@ -1,12 +1,12 @@
 # Application Assessment Ownership Containment Plan
 
-Status: current decision - Option B containment first
+Status: Option B containment deployed to PROD
 
 Purpose: document the agreed first production-safe fix for the repeat-application assessment defect, and preserve the blast-radius analysis for the later full ERM correction.
 
 Audience: engineering, product, operations, release planning, and future Codex threads.
 
-Last Updated: 2026-05-08
+Last Updated: 2026-05-09
 
 ## Executive Summary
 
@@ -14,7 +14,7 @@ PATH now supports the target model `one client -> one long-lived case -> many ap
 
 Current decision: choose **Option B: narrow containment first**. Add an additive application-scoped assessment store, `iset_application_assessment`, and move only the application assessment workflow plus its direct read/write surfaces onto that store. Do not do the full in-place `iset_case_assessment` ERM correction as the first production bugfix.
 
-Current DEV/TEST state: the additive schema and backend/frontend containment patch have been implemented in DEV, including the later Step 14 approval-letter context fix. TEST has rehearsed schema/backfill, corrected admin deploys, context backfill, repeat-application fixture smoke, authenticated selected-application API save isolation, Step 14 browser smoke, document provenance, queue/decision APIs, and applicationless legacy-case workspace behavior. PROD is paused for an approved maintenance window and must follow the combined release plan below; do not proceed automatically from DEV/TEST success.
+Current deployment state: Option B containment shipped to PROD on 2026-05-09 as release `20260509-prod-option-b-plus-portal`. PROD now has the additive `iset_application_assessment` store, application-assessment read/write containment, selected-application approval-letter context scoping, and backfilled legacy rows where ownership was clear. PROD had no repeat-application cases at deployment time, so repeat-application functional behavior remains covered by the DEV/TEST fixtures until the first real PROD repeat case appears.
 
 Option A, the full in-place migration of `iset_case_assessment` to application ownership, remains the cleaner long-term target, but it has a large blast radius. Once multiple assessment rows per case are allowed, every `case_id`-only assessment read becomes dangerous.
 
@@ -397,6 +397,7 @@ DEV automation added on 2026-05-08:
 
 - Script: `scripts/application-assessment-option-b-smoke.js`.
 - NPM alias: `npm run assessment:option-b:smoke`.
+- Generalized browser/API workflow-smoke lessons from this release are captured in `docs/testing/browser-workflow-smoke-automation.md`.
 - Purpose: fast DB-backed smoke for Option B application-assessment ownership, app-scoped `case_context_json.applicationDecisionLetters`, document application association, and duplicate assessment owners.
 - Default mode is read-only against a repeat-application case. `--fixture` creates a disposable repeat-application fixture inside a transaction and rolls it back.
 - `--fixture --keep-fixture` commits a fresh repeat-application fixture for browser testing. Current DEV fixture: case `6`, Application A `11`, Application B `12`; Application A has prior sent approval-letter state and Application B is approved/fresh for Step 14 with no inherited drafts, pack, or sent marker.
@@ -589,14 +590,14 @@ Authenticated TEST smoke after corrected deploy:
 - Legacy/applicationless smoke passed: preserved case `100` still has `0` applications, no `applicationDecisionLetters`, and `/api/cases/100/workspace` returned `200` without an application.
 - Post-run cleanup verification passed: temporary TEST staff rows `0`, temporary conflict declarations `0`, Application `62` locks `0`, Application `62` cost restored to `222`, and temporary TEST Cognito users matching `codex-test-optionb-*` `0`.
 
-Remaining release gates before PROD mutation:
+Pre-PROD release gates, completed before the 2026-05-09 mutation:
 
-- Review the completed TEST rehearsal evidence above, including the note that SES email delivery was intentionally not exercised in TEST.
-- Follow the PROD deployment decision/release plan below. Do not proceed outside an approved PROD window.
+- Reviewed the completed TEST rehearsal evidence above, including the note that SES email delivery was intentionally not exercised in TEST.
+- Followed the PROD deployment decision/release plan below during the approved 2026-05-09 maintenance window.
 
 ## PROD Deployment Decision And Release Plan
 
-Decision as of 2026-05-08: **GO for a controlled PROD release**, provided the PROD preflight gates below pass. This is not an automatic deploy instruction; it is the release decision and operating plan for the next approved PROD window.
+Decision as of 2026-05-08: **GO for a controlled PROD release**, provided the PROD preflight gates below passed. This was the release decision and operating plan for the 2026-05-09 approved PROD window.
 
 Recommended release id if deployed on 2026-05-09: `20260509-prod-option-b-plus-portal`.
 
@@ -626,12 +627,13 @@ npm run path:deploy:plan -- --env prod --skip-data --skip-shared --release-id 20
 Preflight already completed on 2026-05-08:
 
 - Local checks passed: admin `node --check` for `isetadminserver.js`, `scripts/path-deploy.js`, and all three assessment scripts; public portal `node --check server.js`; `git diff --check` in both admin and portal repos.
-- Admin `npm run build:production` passed with existing warnings; public portal `npm run build:production` passed.
+- Admin `PATH_RELEASE_ID=20260509-prod-option-b-plus-portal npm run build:production` passed with existing warnings; public portal `npm run build:production` passed.
+- Landing-page release notes were regenerated for `20260509-prod-option-b-plus-portal`; the current notes include the repeat-application assessment fix and the public portal dashboard/start-resume change, and the repeat-application known-issue warning has been removed.
 - The PATH deploy orchestrator now stages the three application-assessment support scripts in the admin artifact so the weekend backfill/smoke npm aliases are available under `/opt/nwac/admin-dashboard/scripts` after deploy.
 - Read-only PROD deploy plan passed with release id `20260509-prod-option-b-plus-portal`.
 - Plan result: pending schema `1`, exactly `20260508_0001_create_application_assessment.sql`; data dataset `none` because `--skip-data`; app deploy `admin=true`, `portal=true`, `shared=false`; smoke targets `3` (`admin`, `iset.nwac.ca`, `nwac-public.awentech.ca`).
-- Latest planned restore point name: `path-prod-20260509-prod-option-b-plus-portal-20260508192150`.
-- Latest plan manifest: `tmp/path-deploy/prod/20260509-prod-option-b-plus-portal--2026-05-08T19-21-50-174Z.json`.
+- Latest planned restore point name: `path-prod-20260509-prod-option-b-plus-portal-20260508193256`.
+- Latest plan manifest: `tmp/path-deploy/prod/20260509-prod-option-b-plus-portal--2026-05-08T19-32-56-458Z.json`.
 - Read-only PROD inventory through SSM command `1dd2ae6d-f597-4d66-8cc7-0f3146708030`: `57` legacy `iset_case_assessment` rows, `0` repeat-application cases, `58` cases with root assessment workflow context keys, `106` active assessment/decision/funding document rows, `19` distinct document `application_id` owners, `29` applicationless assessment/decision/funding document rows, and `iset_application_assessment` table currently absent.
 - Before running the weekend deployment, rerun the same plan if any repo changes after this handoff.
 
@@ -714,10 +716,66 @@ Release acceptance criteria:
 - Step 14 approval-letter smoke passes without inherited prior-application draft/sent state, or PROD has no safe repeat case and the TEST evidence is explicitly accepted for that path.
 - No outbound email sent during smoke unless intentionally approved.
 
+## PROD Deployment Record - 2026-05-09
+
+Release: `20260509-prod-option-b-plus-portal`.
+
+Source state and fresh preflight:
+
+- Admin repo HEAD: `f36ecb9fe88d`; public portal repo HEAD: `3c0825a41f20`.
+- Shared tree skipped; `/home/bill/ISET/shared` is not a Git worktree and no shared release dependency was identified.
+- Local checks passed before mutation: admin `node --check` for `isetadminserver.js`, `scripts/path-deploy.js`, `scripts/application-assessment-backfill.js`, `scripts/application-assessment-context-backfill.js`, and `scripts/application-assessment-option-b-smoke.js`; portal `node --check server.js`; `git diff --check` in both admin and portal repos.
+- Production builds passed before mutation: `PATH_RELEASE_ID=20260509-prod-option-b-plus-portal npm run build:production` in admin and portal. Admin retained only the known existing compile warnings.
+- Fresh read-only PROD plan passed with exactly one pending schema migration, `20260508_0001_create_application_assessment.sql`; app deploy `admin=true`, `portal=true`, `shared=false`; data promotion skipped; smoke targets `3`.
+- Fresh plan manifest: `tmp/path-deploy/prod/20260509-prod-option-b-plus-portal--2026-05-09T09-27-51-924Z.json`.
+- Fresh read-only PROD inventory through SSM command `f935ab7b-727b-4a3f-ba3f-2d9135cc94d1`: `57` legacy `iset_case_assessment` rows, `0` repeat-application cases, `58` cases with root assessment workflow context keys, `106` active assessment/decision/funding document rows, `19` distinct document `application_id` owners, `29` applicationless assessment/decision/funding document rows, and no pre-existing `iset_application_assessment` table.
+
+Maintenance and app deploy:
+
+- Set all-surface PROD in-app maintenance warning, waited through the warning window, then enabled all-surface ALB fixed-response fallback.
+- Ran `npm run path:deploy -- --env prod --skip-data --skip-shared --release-id 20260509-prod-option-b-plus-portal --skip-smoke --yes`.
+- Restore point captured: `path-prod-20260509-prod-option-b-plus-portal-20260509093619`.
+- Deploy manifest: `tmp/path-deploy/prod/20260509-prod-option-b-plus-portal--2026-05-09T09-36-19-596Z.json`.
+- ASG refresh: `1e9442ae-7391-4177-8f84-86ec7ea9c467`; refreshed instance used for post-deploy SSM checks: `i-0fa6a12dc69d110c0`.
+- The run encountered the known ALB fallback / ELB health-data interaction during instance refresh. Fallback was cleared while the in-app warning stayed active, normal routing recovered, and the deploy completed successfully.
+
+Schema evidence:
+
+- Migration `20260508_0001_create_application_assessment.sql` recorded in `iset_migration` with `success = 1`, `applied_at = 2026-05-09 09:40:43`, and `duration_ms = 8633`.
+- Post-schema SQL confirmed `iset_application_assessment` existed and initially had `0` rows before backfill.
+
+Application assessment table backfill:
+
+- Dry-run SSM command `8ecf6cb5-050b-4ef7-a5ea-300891c0da55`: total `57`, clear ownership `57`, already migrated `0`, copied `0`, by classification `single_application: 57`.
+- Apply SSM command `0c65d9f4-cf67-4c80-ab9b-383dcbfe458e`: total `57`, clear ownership `57`, already migrated `0`, copied `57`, by classification `single_application: 57`.
+- Idempotency rerun SSM command `c1624fba-43e6-42b7-90f8-ed442e2e8733`: total `57`, clear ownership `57`, already migrated `57`, by classification `single_application: 57`.
+- SQL verification through SSM command `f1760376-606a-46ba-8036-ad4d98532a3c`: application assessment rows `57`, legacy case assessment rows `57`, legacy backfilled rows `57`, duplicate application-assessment owners `0`.
+
+Application decision-letter context backfill:
+
+- Dry-run SSM command `75577a7e-8039-4262-917a-c4fae13e7d50`: cases inspected `134`, cases reported `58`, cases with root workflow keys `58`, clear ownership `57`, by classification `single_application: 57`, `applicationless_case: 1`.
+- Apply SSM command `dad82d1d-12ae-448b-9efc-741f6358a385`: applied `57` clear single-application context moves and preserved the one applicationless legacy case.
+- Post-apply SSM command `65cb7de9-48af-4100-b7f6-30ee12c3f94d`: cases inspected `134`, cases reported `1`, cases with root workflow keys `1`, clear ownership `0`, by classification `applicationless_case: 1`.
+- Post-apply SQL through SSM command `a919841b-a7d4-440b-a0d1-ef8fd55c0106`: application assessment rows `57`, legacy case assessment rows `57`, legacy backfilled rows `57`, duplicate application-assessment owners `0`, root workflow-key cases remaining `1`, cases with scoped `applicationDecisionLetters` `57`.
+
+Post-deploy validation:
+
+- Read-only deploy plan after deploy reported schema pending `0`; manifest `tmp/path-deploy/prod/20260509-prod-option-b-plus-portal--2026-05-09T09-54-24-677Z.json`.
+- PROD health smoke passed: `200` for `https://nwac-console.awentech.ca/healthz`, `https://iset.nwac.ca/healthz`, and `https://nwac-public.awentech.ca/healthz`.
+- Direct `curl` health checks also returned `{"status":"ok"}` for all three surfaces.
+- ALB fallback status after release: all three hostnames normal forward.
+- In-app maintenance warning cleared; SQL command `9630df59-fb3a-4e1d-b5e2-297745ac4be0` confirmed `active_service_announcements = 0`.
+- No outbound PROD email was sent as part of smoke testing.
+
+Acceptance notes:
+
+- PROD had `0` repeat-application cases at deployment time, so no live repeat-application staff workflow was exercised in PROD. The repeat-application behavior gate is covered by DEV and TEST authenticated fixture evidence above until the first real PROD repeat application exists.
+- The one remaining root-level assessment/letter workflow context is intentionally preserved because the case has no application. It must not be treated as a failed context backfill.
+
 ## Open Product Decision
 
 Staff may eventually want a deliberate `Copy previous assessment` action for repeat applicants. That must be a visible, auditable workflow choice, not automatic prefill. It is not required for the containment fix.
 
 ## Current Work State
 
-As of 2026-05-08, Option B has a DEV implementation, a TEST schema/table-backfill rehearsal, corrected TEST admin redeploys, TEST context-backfill apply evidence, authenticated TEST API/browser smoke for the repeat-application assessment and Step 14 approval-letter containment fix, and the explicit combined admin+portal PROD release decision/plan above. DEV found and fixed an additional correctness blocker: Step 14 application approval-letter state was case-scoped through `iset_case.case_context_json` and could bleed from Application 1 into Application 2. DEV fixture case `6` / Application B `12` and TEST fixture case `136` / Application B `62` remain useful repeat-application fixtures. PROD is GO only for the controlled release path above after preflight gates pass; it is not an automatic deployment.
+As of 2026-05-09, Option B has shipped to PROD through the controlled combined admin+portal release `20260509-prod-option-b-plus-portal`. DEV fixture case `6` / Application B `12` and TEST fixture case `136` / Application B `62` remain the useful repeat-application fixtures because PROD had zero repeat-application cases at deployment time. Future work should monitor the first real PROD repeat application and keep Option A as a separate coordinated ERM cleanup, not a continuation of this first containment release.

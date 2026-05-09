@@ -21,6 +21,7 @@ const ContactMessageQueueHelp = () => (
       <strong>Implementation notes</strong>
       <ul>
         <li>Backed by the <code>contact_message</code> table and the associated audit trail once wired to production.</li>
+        <li>Regional Managers see legacy messages linked to applications in their case scope; NWAC Administrators see the full legacy queue.</li>
         <li>Do not treat this as a new applicant support channel; the public portal Contact function has been retired.</li>
         <li>Persist table preferences (columns, filters, density) so coordinators maintain their preferred triage view.</li>
       </ul>
@@ -29,6 +30,6 @@ const ContactMessageQueueHelp = () => (
 );
 
 ContactMessageQueueHelp.aiContext =
-  "Explain the Contact Communications queue widget that lists legacy contact_message records with status, priority, assignee, and inline actions for NWAC Administrators.";
+  "Explain the Contact Communications queue widget that lists legacy contact_message records with status, priority, assignee, and inline actions for NWAC Administrators and scoped Regional Managers.";
 
 export default ContactMessageQueueHelp;

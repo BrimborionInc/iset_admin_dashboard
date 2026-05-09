@@ -4390,7 +4390,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         organization_name: src.organization_name || defaults.organization_name || ''
       };
     };
-    const baseDecisionDate = formatDate(caseData?.assessment_date_of_assessment || new Date());
+    const baseDecisionDate = formatDate(new Date());
     const defaultApproval = {
       decision_date: baseDecisionDate,
       letter_title: 'Letter of Approval',
@@ -6862,7 +6862,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   );
 
   const persistLetterContext = useCallback(
-    async ({ silent = false, contextUpdates = null } = {}) => {
+    async ({ silent = false, contextUpdates = null, letterDraftsOverride = null } = {}) => {
       if (!caseId) return { ok: false };
       const lockCheck = await ensureLockForOperation();
       if (!lockCheck.ok) return { ok: false };
@@ -6871,10 +6871,11 @@ const CoordinatorAssessmentWidget = forwardRef(
       const nextDecisionLetterSent =
         (contextUpdates && contextUpdates.decisionLetterSent) ||
         (decisionLetterSent && Object.keys(decisionLetterSent).length ? decisionLetterSent : null);
+      const effectiveLetterDrafts = letterDraftsOverride || letterDrafts;
       const updatedContext = buildApplicationAssessmentCaseContext(baseContext, applicationId, {
         ...(contextUpdates || {}),
         ...(nextDecisionLetterSent ? { decisionLetterSent: nextDecisionLetterSent } : {}),
-        decisionLetterDrafts: letterDrafts
+        decisionLetterDrafts: effectiveLetterDrafts
       });
       const payload = {
         applicationId: applicationId || null,
@@ -6931,7 +6932,8 @@ const CoordinatorAssessmentWidget = forwardRef(
   );
 
   const persistLetterDraft = useCallback(
-    async ({ silent = false } = {}) => {
+    async ({ silent = false, letterDraftsOverride = null } = {}) => {
+      const effectiveLetterDrafts = letterDraftsOverride || letterDrafts;
       const assessmentContext = getApplicationAssessmentContext(caseData?.caseContext, applicationId);
       const denialReasonCode = activeLetterKey === 'denial'
         ? String(denialReasonChoice || assessmentContext?.[FUNDING_DECISION_REASON_CODE_KEY] || '').trim()
@@ -6955,12 +6957,12 @@ const CoordinatorAssessmentWidget = forwardRef(
               [FUNDING_DECISION_REASON_EXPLANATION_KEY]: denialReasonExplanationValue || null
             }
         : null;
-      const result = await persistLetterContext({ silent, contextUpdates });
+      const result = await persistLetterContext({ silent, contextUpdates, letterDraftsOverride: effectiveLetterDrafts });
       if (!result.ok) return result;
       if (activeLetterKey === 'approval' && contextUpdates?.decisionLetterPackDrafts) {
         setSavedApprovalLetterPackDrafts(contextUpdates.decisionLetterPackDrafts);
       }
-      setInitialLetterDrafts(letterDrafts);
+      setInitialLetterDrafts(effectiveLetterDrafts);
       if (!silent) {
         setAlert({
           type: 'success',
@@ -7371,7 +7373,7 @@ ${JSON.stringify(aiContext, null, 2)}`;
             ...prev,
             [activeLetterKey]: {
               ...current,
-              decision_date: current.decision_date || decisionDate,
+              decision_date: decisionDate,
               letter_title: 'Letter of Approval',
               decision_label: 'Approved',
               decision_intro: approvalIntro,
@@ -7665,7 +7667,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
           ...prev,
           [activeLetterKey]: {
             ...current,
-            decision_date: isDenialDraft ? decisionDate : current.decision_date,
+            decision_date: decisionDate,
             letter_title: isDenialDraft ? 'Letter of Denial' : (parsed.letter_title || current.letter_title),
             decision_intro: resolvedDecisionIntro,
             decision_label: isDenialDraft ? 'Not approved' : (parsed.decision_label || current.decision_label),
@@ -7771,7 +7773,17 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     setSendingLetter(true);
     setSendingLetterError(null);
     try {
-      const saved = await persistLetterDraft({ silent: true });
+      const sendDecisionDate = formatDate(new Date());
+      const refreshedActiveLetterDraft = {
+        ...activeLetterDraft,
+        decision_date: sendDecisionDate
+      };
+      const refreshedLetterDrafts = {
+        ...(letterDrafts || {}),
+        [activeLetterKey]: refreshedActiveLetterDraft
+      };
+      setLetterDrafts(refreshedLetterDrafts);
+      const saved = await persistLetterDraft({ silent: true, letterDraftsOverride: refreshedLetterDrafts });
       if (!saved.ok) {
         throw new Error('Save the letter draft before sending.');
       }
@@ -7780,8 +7792,8 @@ ${JSON.stringify(contextPayload, null, 2)}`;
           ? 'Letter of Approval'
           : 'Letter of Denial';
       const includeNextSteps =
-        activeLetterKey === 'denial' && Boolean(activeLetterDraft.next_step_1 || activeLetterDraft.next_step_2);
-      const messageBody = buildLetterBodyFromDraft(activeLetterDraft, {
+        activeLetterKey === 'denial' && Boolean(refreshedActiveLetterDraft.next_step_1 || refreshedActiveLetterDraft.next_step_2);
+      const messageBody = buildLetterBodyFromDraft(refreshedActiveLetterDraft, {
         includeNextSteps,
         includeDecisionLabel: false,
         includeReasonLabel: false

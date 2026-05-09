@@ -7,7 +7,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-05-08
+Last Updated: 2026-05-09
 
 ## Project memory layer
 
@@ -58,6 +58,7 @@ Last Updated: 2026-05-08
 - For homepage Metrics or Items work, read `docs/dashboards/admin-home-metrics-widget.md`.
 - For coordinator-facing PATH help-panel or AI-context work, use `docs/training/TRAINING_MODULES_September_2025_extracted.md` as the baseline for staff workflow expectations and write guidance as a job aid, not a product tour.
 - For admin `Ask the AI` chatbot quality, retrieval, or knowledge-base work, read `docs/planning/admin-ai-chatbot-knowledge-base-transformation.md`, `docs/planning/admin-ai-chatbot-coverage-register.md`, `docs/testing/admin-ai-chatbot-evals.md`, and `docs/features/admin-ai-guidance.md` before changing prompts, guidance rows, evals, or model/runtime behavior.
+- For browser-level workflow smokes, especially approval/assessment/letter workflows, read `docs/testing/browser-workflow-smoke-automation.md` before inventing one-off manual browser testing. Prefer DB/API fixture automation plus authenticated browser assertions and cleanup evidence.
 - Keep doc updates in the same change when behavior or structure changes.
 - If blocked by tooling, permissions, or environment access, call it out immediately.
 - For TEST/PROD deploys, apply the deployment runbook as an execution checklist, not as background reading. Before `path:deploy`, state the maintenance sequence being used. If the deploy will restart admin/portal processes, refresh ASG instances, reinstall dependencies, change target routing, or otherwise risk a raw `502 Bad Gateway`, set the scoped in-app warning, wait through the warning window when practical, then enable the ALB fixed-response maintenance fallback before starting the deploy. Clear fallback only after smoke is green, then clear the warning.
@@ -187,6 +188,7 @@ Treat this file as the current project context for this repo. If the user refere
 - Admin AI chatbot coverage register: `docs/planning/admin-ai-chatbot-coverage-register.md`
 - Admin AI source inventory helper: `scripts/admin-ai-inventory.js` / `npm run ai:inventory`
 - Admin AI eval scaffold: `docs/testing/admin-ai-chatbot-evals.md`, `docs/testing/admin-ai-chatbot-eval-fixtures.json`, `scripts/admin-ai-eval-fixtures-check.js`, `npm run ai:eval:check`
+- Browser workflow smoke automation guide: `docs/testing/browser-workflow-smoke-automation.md`
 - Admin AI guidance feature reference: `docs/features/admin-ai-guidance.md`
 - Admin intake preview renderer: `apps/web/src/features/intake/ComponentRenderer.tsx`
 - Public portal renderer (legacy deployed repo): `../ISET-intake/src/renderer/renderers.js`

@@ -67,6 +67,7 @@ Widget references:
 
 - Intended for ISET Coordinator, Regional Manager, Program Administrator.
 - Some actions are role-sensitive; route and server checks determine final access.
+- The `ISET Clients` route is available to Regional Managers; the backing `/api/cases` list uses the same case-scope model as workspaces: direct assignment, unassigned files when the manager has region scope, portfolio-region matches, and assigned-owner region matches.
 - Regional Managers can now open directly assigned case-workspace files even when the case's current portfolio/owner region falls outside their normal region scope; otherwise normal region-scoped case access still applies.
 
 ## Current Gaps / Risks

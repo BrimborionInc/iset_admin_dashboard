@@ -6,8 +6,8 @@ const ContactMessageInsightsHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Offer a quick snapshot of volume, response progress, and backlog risk for contact messages flowing in from the
-        public portal.
+        Offer a quick snapshot of volume, response progress, and backlog risk for legacy contact messages visible to
+        the current staff member.
       </p>
     </Box>
     <Box>
@@ -31,6 +31,7 @@ const ContactMessageInsightsHelp = () => (
       <strong>When live</strong>
       <ul>
         <li>Drive the counts from the contact message store and audit events, not from the table page size.</li>
+        <li>Apply the same scoped Regional Manager visibility as the queue so metrics match the messages they can open.</li>
         <li>Ensure escalations are tracked in the notification framework so the metric stays accurate.</li>
         <li>Highlight days breaching the SLA to guide staffing adjustments.</li>
       </ul>

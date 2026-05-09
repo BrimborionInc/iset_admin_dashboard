@@ -18,6 +18,7 @@ Daily coding/Codex work and deployments now happen from the WSL workspace `/home
 - Do not dump the DEV database manually before asking Codex to deploy.
 - Use `path:deploy` for normal releases.
 - Use `test:db:refresh` only when you want to reset TEST.
+- When a release changes the public What's New panel, update `docs/meta/next-release-notes-log.md` by adding bullets to the draft sections instead of replacing the existing current-release bullets. Before deploy, verify the generated `src/generated/publicReleaseNotes.js` keeps the previous current bullets plus the new ones.
 - In the current Codex sandbox, `nwac-prod` is the standard role-backed prod operator profile. `default` is only the bootstrap IAM user and direct prod resource calls through it are expected to fail.
 - The reduced `nwac-prod` role covers normal deploys, prod SQL/dumps via SSM, ASG refresh, automatic prod restore-point snapshots, and the ALB maintenance fallback. It does not cover broader infra/admin work such as WAF changes, SSM env parameter writes, uploads-bucket CORS changes, or Terraform/ACM changes.
 - PROD deploys require `--yes`.

@@ -1,4 +1,5 @@
 const {
+  buildRegionalManagerCaseAccessSql,
   evaluateCaseAccess,
   evaluateRegionalManagerCaseAccess,
   getCaseAccessError,
@@ -130,5 +131,31 @@ describe('caseAccess', () => {
         },
       })
     ).toEqual({ allowed: true, reason: 'portfolio_region' });
+  });
+
+  test('builds SQL scope for direct assignment, unassigned, portfolio, and owner-region access', () => {
+    expect(
+      buildRegionalManagerCaseAccessSql({
+        requesterId: 54,
+        regionIds: [4, 5],
+        caseAlias: 'c',
+        ownerAlias: 'sp',
+      })
+    ).toEqual({
+      clause: '(c.assigned_staff_profile_id = ? OR c.assigned_staff_profile_id IS NULL OR c.portfolio_region_id IN (?,?) OR sp.region_id IN (?,?))',
+      params: [54, 4, 5, 4, 5],
+    });
+  });
+
+  test('SQL scope still allows direct assignment when region scope is missing', () => {
+    expect(
+      buildRegionalManagerCaseAccessSql({
+        requesterId: 54,
+        regionIds: [],
+      })
+    ).toEqual({
+      clause: '(c.assigned_staff_profile_id = ?)',
+      params: [54],
+    });
   });
 });
