@@ -34,6 +34,7 @@ const widgetRegistry = {
     mode: "finance",
     title: "Payment packet detail",
     description: "Payment lines and evidence for the packet currently being sent to finance.",
+    showIntacctTools: true,
     helpComponent: FinancePaymentDetailHelp,
     helpTitle: "Payment detail",
     aiContext: FinancePaymentDetailHelp.aiContext,
@@ -94,6 +95,7 @@ const toBoardItems = layout =>
         columnOffset: item.columnOffset,
         data: {
           mode: definition.mode,
+          showIntacctTools: definition.showIntacctTools === true,
           title: definition.title,
           description: definition.description,
           component: definition.component,

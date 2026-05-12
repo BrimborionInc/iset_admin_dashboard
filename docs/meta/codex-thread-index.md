@@ -2,7 +2,7 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-05-09
+Last Updated: 2026-05-11
 
 ## How to use
 
@@ -896,6 +896,28 @@ For each indexed thread/topic, keep:
   - `sql/migrations/20260406_0003_simplify_payment_packet_statuses.sql`
 - Status: current as of 2026-04-06
 - Notes: durable decisions from this thread: approved interventions are funding authority only and do not auto-create live packets; staff create payment packets for specific months, receipts, invoices, or claim periods; canonical packet statuses are `draft`, `ready_to_send`, `submitted`, `confirmed`, `cancelled`; canonical line statuses are `needs_evidence`, `ready_to_send`, `submitted`, `paid`, `held`, `cancelled`; `committed` begins when a packet is sent to finance; `actual` begins only when PATH records confirmed/posted payment; optional `payment_batch` records may group submitted lines but batching is not itself a packet or line status.
+
+### Payments implementation review and cleanup risks
+
+- Codex task title: `Overall look at PATH payments features`
+- Topic: 2026-05-11 implementation review of payment packets, evidence gates, email/Intacct submission, simple workflow bypasses, and lingering experimental paths
+- Keywords: `payments review`, `SIMPLE_PAYMENT_WORKFLOW`, `send-email`, `line_level_documents_not_supported`, `mark paid`, `Intacct REST`, `Batch Payments`, `payment packet cleanup`, `legacy fallback`
+- When to open: the user asks for a current payment-module audit, asks which legacy payment paths still exist, asks why program users can mark paid, asks whether Intacct submission is real or preview-only, or wants the next cleanup/refactor plan for payment packets
+- Primary docs:
+  - `docs/planning/payments-implementation-review-2026-05-11.md`
+  - `docs/planning/payments-target-operating-model-2026-05-11.md`
+  - `docs/planning/payments-transformation-plan-2026-05-11.md`
+  - `docs/testing/payments-workflow-automation.md`
+  - `docs/features/payments-module.md`
+  - `docs/guides/payments-module-user-manual.md`
+  - `isetadminserver.js`
+  - `src/pages/finance/widgets/PaymentDetailWidget.jsx`
+  - `src/pages/finance/widgets/PaymentsDataContext.jsx`
+  - `src/pages/Caseworking/ProgramPaymentsPage.jsx`
+  - `scripts/payments-workflow-smoke.js`
+- Status: current implementation review as of 2026-05-11
+- Notes: the review found the canonical status enums in local WSL DEV, with no active packet/line rows carrying old status values. A PROD read-only aggregate check on 2026-05-11 found all payment-packet workflow tables empty; only 2 historical `finance_transaction` rows existed, both `metadata.source = manual_backload_history`, and PROD payment email routing was present but disabled. Follow-on design conversation agreed the high-level business boundary: Finance/Sage is the financial system of record; PATH is the ISET operations system for preparing email payment handoffs and tracking operations-side follow-up where Finance feedback is unreliable. Post-email status in PATH should be treated as operational confidence/follow-up state, not authoritative accounting truth, and the distinction belongs mainly in help/design guidance rather than alert-heavy widget copy. Payments should have two surfaces over the same packet/line/follow-up data and core business actions: a case-scoped Case Workspace surface and a cross-client Payments dashboard surface. They differ by scope, filtering, and queueing context, not by having separate workflows. The 2026-05-11 safety tranche disabled `SIMPLE_PAYMENT_WORKFLOW`, retired direct `send-email`, enforced draft-only packet/line creation, moved the frontend send helper to the status transition, hid the old `Mark paid` action, and added `npm run test:payments:safety`. The 2026-05-11 follow-up tranche added current packet/line follow-up fields, immutable `payment_followup_event` history, follow-up API routes, and Payment Detail UI for logging follow-up. The 2026-05-11 two-surface tranche populated `/iset/payments` as the cross-client operational dashboard, added payment communications to the Case Workspace manage-payments layout, changed communications loading to selected-packet scope for scoped users, replaced one-click placeholder manual email logs with a real modal, and hid Intacct XML preview from operational payment surfaces by default. The evidence tranche removed the line-level document attach block, validates packet-line ownership, and sends line ids from the evidence UI so manual link/upload flows persist `payment_packet_document.payment_packet_line_id`. The reporting/budget semantics tranche made Financial Reports prefer explicit `payment_packet.follow_up_status`, changed paid/confirmed report/export language to recorded paid, and changed case/budget/homepage finance labels to recorded actual where PATH is only the operational shadow. Remaining drift: SQL-level cross-client scope scaling, audit bundle/browser coverage for line-level evidence, full DEV browser/API workflow automation, TEST rehearsal, and PROD preflight/config. Use the transformation plan for agreed workstreams and phase ordering.
+- Notes: the first DEV workflow automation tranche added `scripts/payments-workflow-smoke.js` plus `npm run payments:workflow:smoke`, `payments:workflow:smoke:api`, and `payments:workflow:smoke:browser`. The rollback DB smoke passed against DEV with `DB_HOST=172.26.176.1` and verifies the submitted packet/line, line evidence, follow-up event, communication, operational finance transaction, and cleanup invariants without persisting fixture rows. The authenticated API and Puppeteer browser smokes also passed on 2026-05-11 using `program.admin@awentech.ca`; the browser pass proved the same synthetic packet renders on the Case Workspace payment surface and `/iset/payments`, with no browser console/page/API failures and cleanup verified. TEST rehearsal then completed on 2026-05-11: read-only preflight found payment workflow tables empty and Finance email routing disabled; release `20260511-test-payments-workflow` applied the follow-up migration and deployed admin under warning/fallback; rollback DB smoke passed on-instance; a deployed-bundle browser issue led to a small `src/auth/apiClient.js` fix so authenticated `apiFetch` honors `window.__API_BASE__`; release `20260511-test-payments-api-base` deployed that fix; authenticated TEST API + Puppeteer smoke passed against the deployed bundle; and final SQL cleanup showed zero smoke rows. Next step is PROD read-only preflight/config in an approved maintenance window, with no real Finance email send unless explicitly approved.
 
 ### Sage Intacct mock dashboard handoff
 

@@ -6,8 +6,8 @@ const FinanceBudgetBurnRateHelp = () => (
     <Box>
       <strong>What this covers</strong>
       <p>
-        Mini trend indicators showing how each major pot is pacing against plan, including projected year-end balance
-        and variance thresholds that trigger reallocations or evidence reviews.
+        Mini trend indicators showing how each major pot is pacing against plan, including recorded actuals,
+        projected year-end balance, and variance thresholds that trigger reallocations or evidence reviews.
       </p>
     </Box>
     <Box>
@@ -28,7 +28,6 @@ const FinanceBudgetBurnRateHelp = () => (
   </SpaceBetween>
 );
 
-FinanceBudgetBurnRateHelp.aiContext = "Describe the burn-rate widget’s role in highlighting over/under spend pacing for Budgets dashboard planning.";
+FinanceBudgetBurnRateHelp.aiContext = "Describe the burn-rate widget’s role in highlighting over/under spend pacing for Budgets dashboard planning, using PATH-recorded actuals rather than Sage as the source of truth.";
 
 export default FinanceBudgetBurnRateHelp;
-

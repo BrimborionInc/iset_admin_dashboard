@@ -1,9 +1,9 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-05-09T13:00:59.294Z",
-  "releaseId": "20260509-admin-feedback-fixes",
-  "releaseLabel": "Release 20260509-admin-feedback-fixes",
-  "releaseDateEn": "9th May 2026",
-  "releaseDateFr": "9 mai 2026",
+  "generatedAt": "2026-05-12T20:18:16.159Z",
+  "releaseId": "20260512-test-funding-overview-signatures",
+  "releaseLabel": "Release 20260512-test-funding-overview-signatures",
+  "releaseDateEn": "12th May 2026",
+  "releaseDateFr": "12 mai 2026",
   "en": {
     "sectionEyebrow": "Optional reading",
     "description": "",
@@ -16,6 +16,7 @@ const publicReleaseNotes = {
       "Made Contact Communications available to Regional Managers for legacy contact messages linked to applications in their case scope.",
       "Fixed repeat-application assessments so each selected application loads and saves its own assessment and approval-letter state instead of reusing data from an earlier application on the same case.",
       "Updated the public portal dashboard so signed-in applicants see saved drafts, current support, and application history before starting or resuming an intake.",
+      "Updated the intake so Household Income and base Household Expenses are collected for all support requests, not only Living allowance requests.",
       "Improved Ask the AI guidance and guardrails for common application, document, approval-letter, and Pending Completion questions."
     ],
     "knownIssuesHeading": "Known issues",
@@ -33,7 +34,9 @@ const publicReleaseNotes = {
       "Fixed document checklist rules so tuition/books-only applications are not blocked by income or expense evidence, and Band/Nation decision letters count correctly in intervention proposal checklists."
     ],
     "comingNextHeading": "Coming next",
-    "comingNext": []
+    "comingNext": [
+      "Payments will gain an operations-side follow-up workflow for Finance email handoffs, with the same packet, evidence, and communication history available from Case Workspace and the cross-client Payments dashboard."
+    ]
   },
   "fr": {
     "sectionEyebrow": "Lecture optionnelle",
@@ -47,6 +50,7 @@ const publicReleaseNotes = {
       "Communications Contact est maintenant disponible aux gestionnaires regionaux pour les anciens messages lies aux demandes dans leur portee de cas.",
       "Correction des evaluations de demandes repetees afin que chaque demande selectionnee charge et enregistre sa propre evaluation et son propre etat de lettres d'approbation, au lieu de reutiliser les donnees d'une demande precedente dans le meme dossier.",
       "Mise a jour du tableau de bord du portail public afin que les personnes connectees voient les brouillons sauvegardes, le soutien en cours et l'historique des demandes avant de commencer ou reprendre une demande.",
+      "Mise a jour de la demande afin que le revenu du menage et les depenses de base du menage soient recueillis pour toutes les demandes de soutien, pas seulement les demandes d'allocation de subsistance.",
       "Amelioration des consignes et garde-fous de Ask the AI pour les questions courantes sur les demandes, documents, lettres d'approbation et la file En attente de completion."
     ],
     "knownIssuesHeading": "Points connus",
@@ -64,7 +68,9 @@ const publicReleaseNotes = {
       "Correction des regles de liste de verification des documents afin que les demandes pour frais de scolarite/livres seulement ne soient pas bloquees par les preuves de revenu ou de depenses, et que les lettres de decision de bande ou de nation soient bien reconnues dans les propositions d'intervention."
     ],
     "comingNextHeading": "A venir",
-    "comingNext": []
+    "comingNext": [
+      "Le module Paiements ajoutera un suivi operationnel des demandes envoyees aux finances par courriel, avec les memes donnees de paquet, preuves et communications dans l'espace Dossier et le tableau de bord Paiements."
+    ]
   }
 };
 

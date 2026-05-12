@@ -11,6 +11,8 @@ Payments AP Integrations
 ## Primary Route Context
 
 - /finance/payments
+- /iset/payments
+- /cases/:caseId through the case wrapper widget
 
 ## Purpose
 
@@ -39,6 +41,7 @@ Communication history for packet submissions.
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
 - The communication log table shows `Client name` as the first column for each packet communication row.
 - In `/finance/payments`, the widget is read-only and shows either the active packet's log or the all-packets log when no packet is selected.
+- In `/iset/payments` and the Case Workspace manage-payments layout, the widget supports manual email logging through an explicit modal and scopes communication loading to the selected packet when available.
 - Outbound finance payment emails now use a lean AP-style body organized into `Payee`, `Payment Instructions`, and `Coding` sections.
 - `Payment Instructions` renders as an HTML table with required columns `Payment type`, `Amount`, and `Invoice reference`, plus conditional `Requested payment date` and `Payee reference` columns when those values exist on one or more packet lines.
 - The payee section labels the optional line-level `payee_reference` value as `Vendor reference` in the finance email when a single shared value is present across the packet.

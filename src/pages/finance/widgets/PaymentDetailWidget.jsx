@@ -16,6 +16,7 @@ import {
   Modal,
   FormField,
   Input,
+  Textarea,
   DatePicker,
   FileUpload,
   RadioGroup,
@@ -168,6 +169,55 @@ const lineStatusMeta = {
   paid: { label: "Paid", indicator: "success" },
   submitted: { label: "Sent to finance", indicator: "info" },
   cancelled: { label: "Cancelled", indicator: "error" },
+};
+
+const followUpStatusMeta = {
+  not_required: { label: "Not started", indicator: "pending" },
+  sent_to_finance: { label: "Sent to finance", indicator: "info" },
+  follow_up_needed: { label: "Follow-up needed", indicator: "warning" },
+  follow_up_logged: { label: "Follow-up logged", indicator: "info" },
+  reported_paid: { label: "Reported paid", indicator: "success" },
+  confirmed_by_evidence: { label: "Confirmed by evidence", indicator: "success" },
+  stale_no_response: { label: "Stale/no response", indicator: "error" },
+  cancelled_not_proceeding: { label: "Cancelled/not proceeding", indicator: "error" },
+};
+
+const followUpStatusOptions = [
+  {
+    value: "follow_up_needed",
+    label: "Follow-up needed",
+    description: "Finance response or fulfilment confirmation is needed.",
+  },
+  {
+    value: "follow_up_logged",
+    label: "Follow-up logged",
+    description: "A follow-up contact or internal update was recorded.",
+  },
+  {
+    value: "reported_paid",
+    label: "Reported paid",
+    description: "Finance or another source reported that payment was fulfilled.",
+  },
+  {
+    value: "confirmed_by_evidence",
+    label: "Confirmed by evidence",
+    description: "Operations has evidence supporting fulfilment.",
+  },
+  {
+    value: "stale_no_response",
+    label: "Stale/no response",
+    description: "The request is unresolved after follow-up.",
+  },
+  {
+    value: "cancelled_not_proceeding",
+    label: "Cancelled/not proceeding",
+    description: "Operations is no longer pursuing this payment request.",
+  },
+];
+
+const resolveFollowUpStatusMeta = status => {
+  const key = String(status || "not_required").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return followUpStatusMeta[key] || followUpStatusMeta.not_required;
 };
 
 const resolveLineStatusMeta = (line, packetStatusKey) => {
@@ -647,6 +697,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     validatePacket,
     updateLineStatus,
     updateLine,
+    logPaymentFollowUp,
     deleteLine,
     addPacketLines,
     createRecurringLines,
@@ -658,6 +709,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     paymentTypeMappingLoading,
   } = usePaymentsData();
   const isFinanceView = metadata?.mode === "finance";
+  const showIntacctTools = metadata?.showIntacctTools === true;
   const [selectedLineId, setSelectedLineId] = useState(null);
   const [actionStatus, setActionStatus] = useState(null);
   const [activeTabId, setActiveTabId] = useState("packet-details");
@@ -727,6 +779,13 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   const [deleteLineSubmitting, setDeleteLineSubmitting] = useState(false);
   const [deleteLineError, setDeleteLineError] = useState(null);
   const [submitSubmitting, setSubmitSubmitting] = useState(false);
+  const [followUpModalOpen, setFollowUpModalOpen] = useState(false);
+  const [followUpSubmitting, setFollowUpSubmitting] = useState(false);
+  const [followUpError, setFollowUpError] = useState(null);
+  const [followUpScope, setFollowUpScope] = useState("packet");
+  const [followUpStatus, setFollowUpStatus] = useState(followUpStatusOptions[0]);
+  const [followUpNote, setFollowUpNote] = useState("");
+  const [followUpDueAt, setFollowUpDueAt] = useState("");
   const [reopenModalOpen, setReopenModalOpen] = useState(false);
   const [reopenSubmitting, setReopenSubmitting] = useState(false);
   const [linePotOptions, setLinePotOptions] = useState([]);
@@ -819,8 +878,14 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   }, []);
 
   useEffect(() => {
+    if (!showIntacctTools) {
+      setIntacctConfig(null);
+      setIntacctConfigLoading(false);
+      setIntacctConfigError(null);
+      return;
+    }
     loadIntacctConfig();
-  }, [loadIntacctConfig]);
+  }, [loadIntacctConfig, showIntacctTools]);
 
   useEffect(() => {
     if (selectedRequest?.lines?.length) {
@@ -877,6 +942,13 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     });
     setLineSubmitting(false);
     setLineError(null);
+    setFollowUpModalOpen(false);
+    setFollowUpSubmitting(false);
+    setFollowUpError(null);
+    setFollowUpScope("packet");
+    setFollowUpStatus(followUpStatusOptions[0]);
+    setFollowUpNote("");
+    setFollowUpDueAt("");
     setReopenModalOpen(false);
     setReopenSubmitting(false);
   }, [selectedRequest?.id, selectedRequest?.lines]);
@@ -942,14 +1014,12 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     packetStatusKey === "draft";
   const showRecurringLinesButton = false;
   const canEditPacketLines = !isFinanceView && selectedRequest && packetStatusKey === "draft";
-  const canMarkLinePaid =
-    !isFinanceView &&
-    Boolean(selectedRequest) &&
-    packetStatusValue === "submitted" &&
-    Boolean(selectedLine) &&
-    selectedLine.status !== "paid" &&
-    selectedLine.status !== "cancelled";
+  const canMarkLinePaid = false;
   const canUploadEvidence = !isFinanceView && packetStatusKey === "draft";
+  const canLogFollowUp =
+    Boolean(selectedRequest) &&
+    packetStatusKey !== "draft" &&
+    packetStatusKey !== "cancelled";
   const intacctPreview = useMemo(
     () => buildIntacctApBillPreview(selectedRequest, intacctConfig),
     [selectedRequest, intacctConfig]
@@ -1305,6 +1375,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             body: JSON.stringify({
               documentId,
               evidenceType: activeEvidenceRow.evidenceType,
+              lineId: activeEvidenceRow.lineId || null,
               required: activeEvidenceRow.required,
               received: true,
             }),
@@ -1427,6 +1498,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           body: JSON.stringify({
             documentId,
             evidenceType: activeEvidenceRow.evidenceType,
+            lineId: activeEvidenceRow.lineId || null,
             required: activeEvidenceRow.required,
             received: true,
           }),
@@ -1761,6 +1833,51 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     setMarkPaidModalOpen(true);
   };
 
+  const openFollowUpModal = () => {
+    if (!selectedRequest || !canLogFollowUp) return;
+    setFollowUpError(null);
+    setFollowUpScope(selectedLine ? "line" : "packet");
+    setFollowUpStatus(followUpStatusOptions[0]);
+    setFollowUpNote("");
+    setFollowUpDueAt("");
+    setFollowUpModalOpen(true);
+  };
+
+  const handleFollowUpSubmit = async () => {
+    if (!selectedRequest || !followUpStatus?.value) return;
+    const lineScoped = followUpScope === "line" && selectedLine?.id;
+    const needsContext = [
+      "reported_paid",
+      "confirmed_by_evidence",
+      "stale_no_response",
+      "cancelled_not_proceeding",
+    ].includes(followUpStatus.value);
+    if (needsContext && !followUpNote.trim()) {
+      setFollowUpError("Add a short note for this follow-up update.");
+      return;
+    }
+    setFollowUpSubmitting(true);
+    setFollowUpError(null);
+    try {
+      await logPaymentFollowUp(selectedRequest.id, {
+        lineId: lineScoped ? selectedLine.id : null,
+        status: followUpStatus.value,
+        note: followUpNote.trim() || null,
+        dueAt: followUpDueAt || null,
+      });
+      setFollowUpModalOpen(false);
+      setActionStatus({ type: "success", message: "Payment follow-up recorded." });
+    } catch (err) {
+      const message =
+        err?.code === "follow_up_note_or_document_required"
+          ? "Add a short note for this follow-up update."
+          : err?.message || "Failed to record payment follow-up.";
+      setFollowUpError(message);
+    } finally {
+      setFollowUpSubmitting(false);
+    }
+  };
+
   const selectedLineStatus = useMemo(() => {
     const found = findOptionByValue(editableLineStatusOptions, lineForm.status);
     if (found) return found;
@@ -1958,6 +2075,14 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       },
     },
     {
+      id: "followUp",
+      header: "Follow-up",
+      cell: item => {
+        const meta = resolveFollowUpStatusMeta(item.followUpStatus);
+        return <StatusIndicator type={meta.indicator}>{meta.label}</StatusIndicator>;
+      },
+    },
+    {
       id: "evidence",
       header: "Evidence",
       cell: item => {
@@ -2142,6 +2267,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   );
   const intacctOutcome = resolveIntacctOutcome(latestIntacctAttempt);
   const canReopenPacket =
+    showIntacctTools &&
     !isFinanceView &&
     packetStatusKey === "submitted" &&
     (intacctOutcome === "failed" || intacctOutcome === "partial");
@@ -2162,6 +2288,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     ? [activeEvidenceRow.evidence, activeEvidenceRow.scope].filter(Boolean).join(" • ")
     : "";
   const activePacketStatusMeta = resolvePacketStatusMeta(selectedRequest);
+  const activeFollowUpMeta = resolveFollowUpStatusMeta(selectedRequest?.followUpStatus);
   const linkableDocumentsEmptyText = supportingDocuments.length
     ? "No linkable documents available for this evidence requirement."
     : "No supporting documents found for this applicant.";
@@ -2170,6 +2297,11 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
       <StatusIndicator type={activePacketStatusMeta.indicator}>
         {activePacketStatusMeta.label}
       </StatusIndicator>
+      {packetStatusKey !== "draft" ? (
+        <StatusIndicator type={activeFollowUpMeta.indicator}>
+          {activeFollowUpMeta.label}
+        </StatusIndicator>
+      ) : null}
       {canValidatePacket ? (
         <Button
           variant="primary"
@@ -2194,8 +2326,17 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
           {submitSubmitting ? "Sending" : "Send to finance"}
         </Button>
       ) : null}
+      {canLogFollowUp ? (
+        <Button
+          variant="normal"
+          onClick={openFollowUpModal}
+          disabled={!selectedRequest?.id || followUpSubmitting}
+        >
+          Log follow-up
+        </Button>
+      ) : null}
       {canReopenPacket ? (
-      <Button
+        <Button
           variant="normal"
           onClick={() => setReopenModalOpen(true)}
           disabled={!selectedRequest?.id || reopenSubmitting}
@@ -2207,8 +2348,8 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   ) : undefined;
   const detailDescription =
     isFinanceView
-      ? "Inspect the selected packet's lines, evidence, and Intacct preview."
-      : "Add payment lines, attach evidence, validate, then send to finance. Sending emails finance or submits to Intacct and locks edits.";
+      ? "Inspect the selected packet's lines, evidence, and communication history."
+      : "Add payment lines, attach evidence, validate, then send to finance. Sending records the finance email handoff and locks normal edits.";
   return (
     <BoardItem
       header={
@@ -2349,7 +2490,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                 />
               ),
             },
-            {
+            ...(showIntacctTools ? [{
               id: "intacct-xml",
               label: "Intacct XML (Draft)",
               content: (
@@ -2475,7 +2616,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                   </Container>
                 </ColumnLayout>
               ),
-            },
+            }] : []),
             ]}
           />
         </SpaceBetween>
@@ -2527,6 +2668,77 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             Reopen is only available when the latest Intacct send failed or partially
             completed.
           </Box>
+        </SpaceBetween>
+      </Modal>
+      <Modal
+        visible={followUpModalOpen}
+        onDismiss={() => {
+          if (followUpSubmitting) return;
+          setFollowUpModalOpen(false);
+          setFollowUpError(null);
+        }}
+        header="Log payment follow-up"
+        footer={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button
+              variant="link"
+              onClick={() => {
+                setFollowUpModalOpen(false);
+                setFollowUpError(null);
+              }}
+              disabled={followUpSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleFollowUpSubmit}
+              loading={followUpSubmitting}
+            >
+              Save follow-up
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="m">
+          {followUpError ? (
+            <Alert type="error" dismissible onDismiss={() => setFollowUpError(null)}>
+              {followUpError}
+            </Alert>
+          ) : null}
+          {selectedLine ? (
+            <FormField label="Scope">
+              <RadioGroup
+                value={followUpScope}
+                onChange={({ detail }) => setFollowUpScope(detail.value)}
+                items={[
+                  { value: "line", label: `Selected line ${selectedLine.id}` },
+                  { value: "packet", label: "Whole packet" },
+                ]}
+              />
+            </FormField>
+          ) : null}
+          <FormField label="Follow-up status">
+            <Select
+              selectedOption={followUpStatus}
+              onChange={({ detail }) => setFollowUpStatus(detail.selectedOption)}
+              options={followUpStatusOptions}
+            />
+          </FormField>
+          <FormField label="Follow-up due date">
+            <DatePicker
+              value={followUpDueAt}
+              onChange={({ detail }) => setFollowUpDueAt(detail.value)}
+              placeholder="YYYY-MM-DD"
+            />
+          </FormField>
+          <FormField label="Note">
+            <Textarea
+              value={followUpNote}
+              onChange={({ detail }) => setFollowUpNote(detail.value)}
+              rows={4}
+            />
+          </FormField>
         </SpaceBetween>
       </Modal>
       <Modal
@@ -2802,7 +3014,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
             </Alert>
           ) : null}
           <ColumnLayout columns={2} variant="text-grid">
-            <FormField label="Paid date">
+            <FormField label="Recorded paid date">
               <DatePicker
                 value={markPaidForm.paidAt}
                 onChange={({ detail }) =>

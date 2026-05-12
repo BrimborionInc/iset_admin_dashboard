@@ -14,7 +14,7 @@ const FinancePaymentsHelp = () => (
       <strong>What this dashboard covers</strong>
       <ul>
         <li>Payment packet queue: focus current packets, blockers, and ageing.</li>
-        <li>Detail: inspect the currently selected packet's lines, evidence, and draft Intacct payload.</li>
+        <li>Detail: inspect and progress the currently selected packet's lines, evidence, send status, and follow-up.</li>
         <li>Communications: review outbound finance emails and follow-ups for the selected packet or across all packets.</li>
         <li>SLA snapshot: optional summary card available from the widget palette when needed.</li>
       </ul>
@@ -32,7 +32,7 @@ const FinancePaymentsHelp = () => (
     <Box>
       <strong>Quick start</strong>
       <ol>
-        <li>Use the queue filter to narrow the current oversight slice.</li>
+        <li>Use the queue filter to narrow the current payment work.</li>
         <li>Select one packet in the queue to inspect its detail and evidence.</li>
         <li>Review communications for that packet or clear selection to return to the broader picture.</li>
       </ol>
@@ -48,6 +48,6 @@ const FinancePaymentsHelp = () => (
 );
 
 FinancePaymentsHelp.aiContext =
-  "Explain the Batch Payments dashboard as an oversight view: single-packet queue selection drives the detail panel, communications can show the active packet or all packets, SLA snapshot is optional in the palette, approved intervention funding is an authorization ceiling rather than a packet amount, and sending a packet emails finance and locks edits in the program workflow.";
+  "Explain the Payments dashboard as the operational payment-packet surface: single-packet queue selection drives the detail panel, communications can show the active packet or all packets, SLA snapshot is optional in the palette, approved intervention funding is an authorization ceiling rather than a packet amount, and sending a packet emails finance and locks normal edits.";
 
 export default FinancePaymentsHelp;

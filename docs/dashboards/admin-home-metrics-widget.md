@@ -14,7 +14,7 @@ Last Updated: 2026-04-14
 ## Current UX
 
 - The widget shows configurable metrics for `This week`, `This month`, `This quarter`, and `This year`.
-- Currency metrics (`Funds approved`, `Funds committed`, `Funds actual`) are display-only.
+- Currency metrics (`Funds approved`, `Funds committed`, `Funds recorded actual`) are display-only.
 - Count metrics are links. Selecting one opens the matching records in the existing `Work Queue Items` widget.
 - The `Work Queue Items` widget switches into a dedicated metric-results mode with neutral columns and a `Back to work queue` action.
 - If the user previously removed `Work Queue Items` from the board, selecting a metric restores that widget automatically.
@@ -64,4 +64,4 @@ Important:
 - Funding semantics for the currency tiles are now:
   - `Funds approved`: intervention funding approved in PATH during the selected period.
   - `Funds committed`: finance transactions submitted to finance during the selected period.
-  - `Funds actual`: finance transactions marked paid in PATH during the selected period.
+  - `Funds recorded actual`: finance transactions recorded paid/confirmed in PATH during the selected period.

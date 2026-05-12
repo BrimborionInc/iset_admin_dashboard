@@ -38,8 +38,6 @@ SET metadata = JSON_REMOVE(metadata, '$.scheduledApplyAt')
 WHERE status = 'approved'
   AND JSON_EXTRACT(metadata, '$.scheduledApplyAt') IS NOT NULL;
 
-DELETE FROM iset_event_outbox;
-
 DELETE FROM pending_uploads;
 
 DELETE FROM input_json_state;

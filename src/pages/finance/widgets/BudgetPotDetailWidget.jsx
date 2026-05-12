@@ -6,11 +6,9 @@ import {
   SpaceBetween,
   ButtonDropdown,
   Box,
-  StatusIndicator,
   Link,
   ColumnLayout,
   Badge,
-  Button,
   Tabs,
   Table,
   Popover,
@@ -60,16 +58,6 @@ const BudgetPotDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
 
   const isDraftView = selectedPotSource === "draft";
   const activePotId = pot?.id ?? null;
-  const adminPercentage =
-    pot && pot.adjusted ? Math.round(((pot.adminShare ?? 0) / pot.adjusted) * 1000) / 10 : 0;
-  const lifecycleType =
-    pot?.status === "draft"
-      ? "warning"
-      : pot?.status === "pending"
-        ? "info"
-        : pot?.status === "archived"
-          ? "stopped"
-          : "success";
   const lifecycleLabel =
     pot?.status === "draft"
       ? "Draft"
@@ -177,7 +165,7 @@ const BudgetPotDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
       {
         id: "committed",
         label: "Committed",
-        description: "Total commitments recorded for this pot (CAD).",
+        description: "Payment requests sent to finance for this pot (CAD).",
         value:
           pot?.committed !== undefined && pot?.committed !== null
             ? `$${Number(pot.committed).toLocaleString("en-CA", {
@@ -188,8 +176,8 @@ const BudgetPotDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
       },
       {
         id: "actual",
-        label: "Actual",
-        description: "Actual spend to date for this pot (CAD).",
+        label: "Recorded actual",
+        description: "PATH-recorded fulfilled or historical spend for this pot (CAD).",
         value:
           pot?.actual !== undefined && pot?.actual !== null
             ? `$${Number(pot.actual).toLocaleString("en-CA", {
@@ -201,7 +189,7 @@ const BudgetPotDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
       {
         id: "remaining",
         label: "Remaining",
-        description: "Available funds remaining (adjusted minus commitments/actuals).",
+        description: "Available funds remaining (adjusted minus committed and recorded actual amounts).",
         value:
           pot?.remaining !== undefined && pot?.remaining !== null
             ? `$${Number(pot.remaining).toLocaleString("en-CA", {

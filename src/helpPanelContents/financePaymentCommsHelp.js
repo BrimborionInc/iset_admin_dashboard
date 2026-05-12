@@ -6,8 +6,8 @@ const FinancePaymentCommsHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Capture the audit trail of packet-related emails, templates, and attachments so Finance can prove when requests
-        were sent.
+        Capture the audit trail of packet-related emails, templates, and attachments so operations can prove when
+        requests were sent and what follow-up was recorded.
       </p>
     </Box>
     <Box>
@@ -36,6 +36,6 @@ const FinancePaymentCommsHelp = () => (
 );
 
 FinancePaymentCommsHelp.aiContext =
-  "Explain the Batch Payments communications log: automatic email entries from packets sent to finance, packet-scoped versus all-packets viewing, filtering by packet or recipient, and how attachments support audit trails.";
+  "Explain the Payments communications log: automatic email entries from packets sent to finance, manual inbound/outbound email logs, packet-scoped versus all-packets viewing, filtering by packet or recipient, and how attachments support audit trails.";
 
 export default FinancePaymentCommsHelp;

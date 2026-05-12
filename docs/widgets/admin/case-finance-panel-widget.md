@@ -37,8 +37,8 @@ Case-scoped financial context and summary indicators.
 ## Current Notes
 
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
-- The panel now shows case funding using PATH operational statuses: `Approved`, `Committed`, and `Actual`.
+- The panel now shows case funding using PATH operational statuses: `Approved`, `Committed`, and `Recorded actual`.
 - `Approved` comes from approved intervention funding in PATH.
 - `Committed` comes from PATH finance transactions that have been submitted to finance.
-- `Actual` comes from PATH finance transactions marked paid, including historical backloads.
+- `Recorded actual` comes from PATH finance transactions recorded paid/confirmed, including historical backloads. It is operational case-planning data, not Sage authority.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.

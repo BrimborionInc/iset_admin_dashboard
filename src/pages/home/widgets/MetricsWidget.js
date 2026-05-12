@@ -107,8 +107,8 @@ const METRIC_DEFINITIONS = [
   },
   {
     id: 'fundsActual',
-    label: 'Funds actual',
-    description: 'Finance transactions marked paid in the selected period.',
+    label: 'Funds recorded actual',
+    description: 'PATH finance transactions recorded paid in the selected period.',
     format: 'currency'
   }
 ];

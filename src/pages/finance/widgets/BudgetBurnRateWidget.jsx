@@ -421,7 +421,7 @@ const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
     }
     if (actualSeries?.length) {
       series.push({
-        title: "Actual",
+        title: "Recorded actual",
         type: "line",
         data: actualSeries,
         valueFormatter: ({ y }) => formatCurrency(y),
@@ -456,7 +456,7 @@ const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
           xTitle="Month"
           yTitle="Cumulative spend (CAD)"
           legendTitle="Data sets"
-          ariaLabel="Burn-rate plan vs. actual"
+          ariaLabel="Burn-rate plan vs. recorded actual"
           i18nStrings={lineChartI18nStrings}
           detailPopoverSeriesContent={({ series, y }) => ({
             key: series.title,
@@ -493,9 +493,9 @@ const BudgetBurnRateWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) 
           <StatusIndicator type={overview.varianceType}>
             {overview.varianceLabel}: {formatCurrency(overview.varianceValue)}
           </StatusIndicator>
-          <Box variant="awsui-key-label">Plan vs. actual (period)</Box>
+          <Box variant="awsui-key-label">Plan vs. recorded actual (period)</Box>
           <Box variant="p">
-            Actual {formatCurrency(planActualDelta.actual)} vs plan {formatCurrency(planActualDelta.plan)} (
+            Recorded actual {formatCurrency(planActualDelta.actual)} vs plan {formatCurrency(planActualDelta.plan)} (
             {planActualDelta.delta >= 0 ? "+" : "-"}
             {formatCurrency(Math.abs(planActualDelta.delta))})
           </Box>

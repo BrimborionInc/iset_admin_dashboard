@@ -6,7 +6,7 @@ const FinancePaymentDetailHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Provide a read-only inspection view of the selected packet's lines, evidence, and draft Intacct payload.
+        Show the selected packet's lines, evidence, validation state, finance handoff, and follow-up.
       </p>
     </Box>
     <Box>
@@ -30,16 +30,9 @@ const FinancePaymentDetailHelp = () => (
     <Box>
       <strong>Actions</strong>
       <ul>
-        <li>This finance view is inspection-only; create, edit, validate, and send actions happen in the program workflow.</li>
+        <li>In the Payments dashboard or Case Workspace, use this widget to edit drafts, validate packets, send to finance, and log follow-up.</li>
+        <li>In the finance oversight route, actions may be limited to inspection and follow-up depending on role and packet status.</li>
         <li>Use the queue selection to change which packet is shown here.</li>
-      </ul>
-    </Box>
-    <Box>
-      <strong>Intacct XML preview</strong>
-      <ul>
-        <li>Use the "Intacct XML (Draft)" tab to review a demo-only AP Bill payload.</li>
-        <li>Preview is read-only, uses Draft status, and is not transmitted.</li>
-        <li>Missing required fields are flagged in the preview.</li>
       </ul>
     </Box>
     <Box>
@@ -52,6 +45,6 @@ const FinancePaymentDetailHelp = () => (
 );
 
 FinancePaymentDetailHelp.aiContext =
-  "Explain the Batch Payments detail widget as a read-only inspection panel: line items, recurrence and service-period policy by payment type, evidence checklist, and the Intacct XML draft preview. Mention evidence and payee completeness gates, that packets should reflect the specific claim being sent now, and that edit/validate/send actions live in the program workflow rather than this finance overview.";
+  "Explain the Payments detail widget as the selected packet work surface: line items, recurrence and service-period policy by payment type, evidence checklist, validation/send controls, and follow-up state. Mention evidence and payee completeness gates and that packets should reflect the specific claim being sent now.";
 
 export default FinancePaymentDetailHelp;

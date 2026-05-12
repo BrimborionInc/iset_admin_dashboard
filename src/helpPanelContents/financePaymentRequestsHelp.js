@@ -33,13 +33,13 @@ const FinancePaymentRequestsHelp = () => (
     <Box>
       <strong>Next steps</strong>
       <p>
-        Use the selected packet's detail view to inspect evidence completeness and the draft Intacct payload.
+        Use the selected packet's detail view to inspect evidence completeness, validate the packet, send it to finance, or record follow-up.
       </p>
     </Box>
   </SpaceBetween>
 );
 
 FinancePaymentRequestsHelp.aiContext =
-  "Explain the Batch Payments queue as an oversight list: single-packet selection drives the detail panel, queue filters slice the packet list, blocking reason and schedule indicate attention, and packets should be created for the specific month, receipt, or claim period being sent rather than defaulting to the whole approved intervention.";
+  "Explain the Payments queue as an operational list: single-packet selection drives the detail panel, queue filters slice the packet list, blocking reason and schedule indicate attention, and packets should be created for the specific month, receipt, or claim period being sent rather than defaulting to the whole approved intervention.";
 
 export default FinancePaymentRequestsHelp;

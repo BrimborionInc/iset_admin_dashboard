@@ -13,12 +13,13 @@
 - **Performance**: Efficient querying for timeline widgets and notification feeds.
 - **Security**: Enforce scoping so staff only see events tied to cases they manage.
 
-## Current State Summary (2025-09-30)
+## Current State Summary (updated 2026-05-10)
 - Admin server now instantiates `createEventService` from `../shared/events` in `isetadminserver.js`, replacing the legacy `addCaseEvent` helper and deprecated `/api/case-events` endpoint; the public portal backend still needs to migrate.
-- Event emission flows through `shared/events/emitter.js` (`emitEvent`), which validates types and subjects, enforces object payloads, honours capture toggles stored in `iset_runtime_config` (scope `events_capture`), persists to `iset_event_entry`, queues `iset_event_outbox`, and falls back to an in-memory buffer if tables are missing.
+- Event emission flows through `shared/events/emitter.js` (`emitEvent`), which validates types and subjects, enforces object payloads, honours capture toggles stored in `iset_runtime_config` (scope `events_capture`), persists to `iset_event_entry`, invokes the in-process notification hook, and falls back to an in-memory buffer if event tables are missing.
 - `/api/cases/:case_id/events`, `/api/events/feed`, `/api/events` (POST), and `/api/events/:eventId/read` now proxy to the shared service with filter/receipt support and consistent error handling.
 - Event taxonomy and metadata are sourced from `shared/events/catalog.js`, providing category, severity, source, draft, and lock flags consumed by the capture-rule tooling.
 - Frontend widgets (`src/widgets/ApplicationEvents.js`, `src/widgets/caseUpdates.js`) consume the new endpoints, rendering severity badges, read-state indicators, and filter/sort controls against the normalized event payloads.
+- The unfinished `iset_event_outbox` async-delivery scaffold was retired on 2026-05-10. `emitEvent` no longer writes it, and migration `20260510_0001_retire_event_outbox.sql` drops the table.
 
 ## Progress Log
 
@@ -28,11 +29,15 @@
 
 ### 2025-09-29 - Legacy event pipeline retirement (admin)
 - Replaced all `iset_case_event` dependencies with the shared `createEventService` wiring in `isetadminserver.js`; legacy helpers remain only in `prev_isetadminserver.js` for reference.
-- Updated purge/reset routines to include `iset_event_entry`, `iset_event_receipt`, and `iset_event_outbox`, while memory fallbacks keep the UI functional until the migration runs.
+- Updated purge/reset routines to include `iset_event_entry` and `iset_event_receipt`, while memory fallbacks keep the UI functional until the migration runs.
 
 ### 2025-09-29 - Event store schema deployed (admin)
 - Ran migration 20250926 to drop the legacy case-event tables and create `iset_event_entry`, `iset_event_receipt`, and `iset_event_outbox` in the dev database.
 - Verified new tables exist and old ones are gone; shared emitter can now write to the canonical store for continued work.
+
+### 2026-05-10 - Event outbox retired
+- Retired the unfinished `iset_event_outbox` scaffold after DEV/PROD evidence showed every row remained `pending` and no worker consumed it.
+- `shared/events/emitter.js` now persists only the canonical event row and invokes the in-process notification hook. Migration `20260510_0001_retire_event_outbox.sql` drops the unused table.
 
 ### 2025-09-30 - Admin endpoints & widgets upgraded
 - Hardened `/api/cases/:case_id/events`, `/api/events/feed`, and `/api/events` with filter parsing, validation (types, categories, date bounds), and consistent error codes.
@@ -43,7 +48,7 @@
 
 ### Shared event service
 - `shared/events/index.js` returns pooled helpers (`emit`, `emitCaseEvent`, `getCaseTimeline`, `getEventFeed`, `markRead`, capture rule loaders) bound to the MySQL pool supplied by `isetadminserver.js`.
-- `shared/events/emitter.js` enforces known event types (via `getEventType`), requires case subjects for case events, ensures payloads are objects, honours capture toggles, writes to `iset_event_entry`, and enqueues serialized payloads into `iset_event_outbox` (worker pending). Missing tables trigger logging and population of an in-memory cache so early environments can continue to function.
+- `shared/events/emitter.js` enforces known event types (via `getEventType`), requires case subjects for case events, ensures payloads are objects, honours capture toggles, writes to `iset_event_entry`, and invokes the registered notification hook. Missing event-entry tables trigger logging and population of an in-memory cache so early environments can continue to function.
 - `shared/events/service.js` builds the capture state by overlaying `iset_runtime_config` updates onto the catalog, tracks `updated_at`/`updated_by`, and invalidates the cache whenever capture rules change.
 - `shared/events/catalog.js` defines the current taxonomy across `application_submission`, `case_lifecycle`, `assessment`, `documents`, `messaging`, `notes`, and `system` categories with severity/source metadata and draft/locked flags.
 
@@ -56,23 +61,23 @@
 - `src/widgets/ApplicationEvents.js` loads `/api/cases/:case_id/events`, provides free-text filtering across columns, client-side sorting, and exposes read-state via `is_read`.
 - `src/widgets/caseUpdates.js` fetches `/api/events/feed?limit=20`, highlights unread items, persists user preferences (localStorage), and renders severity through `StatusIndicator`.
 
-### Persistence, receipts, and outbox
-- Successful emissions create rows in `iset_event_entry` with UUID identifiers plus optional `tracking_id`/`correlation_id`; acknowledgements live in `iset_event_receipt` keyed by `recipient_id`.
-- Each event is also serialized into `iset_event_outbox` with `status='pending'`, `attempts=0`, and `next_attempt_at=captured_at`, preparing the ground for a future fan-out worker.
+### Persistence and receipts
+- Successful emissions create rows in `iset_event_entry` with UUID identifiers plus optional `tracking_id`/`correlation_id`; acknowledgements live in `iset_event_receipt` keyed by the typed viewer fields.
+- Event-driven bell/email side effects currently run through the registered in-process notification hook, not through an async outbox queue.
 
 ### Fallback behaviour & known gaps
 - When tables are missing (e.g., local dev without migrations), the emitter stores events in an in-memory ring buffer so dashboards keep working until the schema is provisioned.
 - The public portal backend still posts directly to `iset_case_event`; migrating it onto the shared service remains outstanding.
-- No worker currently drains `iset_event_outbox`, so downstream notifications/analytics are not yet triggered.
+- There is no durable async event-delivery queue. Reintroduce one only as a deliberate notification-delivery design with a worker, idempotency, retry, monitoring, and retention.
 
-*The sections below outline future phases that have not yet been implemented as of 2025-09-30.*
+*The sections below are historical 2025 planning context. They are not current implementation instructions; the outbox parts are superseded by the 2026-05-10 retirement decision above.*
 
 ## Proposed Documentation Outline
 
 ## Event Store Schema (Phase 1 rollout)
 - **iset_event_entry**: canonical event rows (char(36) UUID id, category, event_type, severity, source, subject_type, subject_id, actor_type, actor_id, actor_display_name, payload_json, tracking_id, correlation_id, captured_by, captured_at, ingested_at). Indexed on (subject_type, subject_id, captured_at DESC) and (event_type, captured_at DESC).
 - **iset_event_receipt**: per-recipient read/ack state (composite PK on event_id + recipient_id) storing `read_at`, enabling dashboards to track unread counts without mutating event rows.
-- **iset_event_outbox**: async fan-out queue (pending/delivering/delivered/failed) with attempt counters and next_attempt_at so future workers can push into notification buses or analytics sinks without blocking emitters.
+- **Retired**: `iset_event_outbox` was originally planned as an async fan-out queue but was dropped by `20260510_0001_retire_event_outbox.sql` before any worker used it.
 - Existing iset_case_event / iset_event_type remain read-only for reference during the transition and will be retired once emitters migrate.
 
 Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these tables idempotently; the server's migration bootstraper already executes migrations on startup.
@@ -215,7 +220,7 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
    - Wrap existing direct inserts into a thin adapter that calls a no-op event service stub; feature-flagged to allow gradual switch.
    - Document all touchpoints scheduled for removal (helpers, routes, widgets expecting legacy payloads).
 3. **Event Service + Outbox Scaffolding**
-   - Create new modules (`src/lib/events/service.ts`, `db/migrations/...`) implementing emit contract, rule cache, and DB tables (`event_entry`, `event_outbox`, etc.).
+   - Historical plan: create new modules (`src/lib/events/service.ts`, `db/migrations/...`) implementing emit contract, rule cache, and DB tables (`event_entry`, `event_outbox`, etc.). Current implementation uses `../shared/events`; the unfinished outbox table is retired.
    - Provide CLI/dev tooling to seed rules and types for local environments.
 4. **Configuration APIs**
    - Implement `/api/admin/event-capture-rules` (GET/PATCH) and `/api/admin/event-types` for the dashboard.
@@ -238,7 +243,7 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
   - Hydrate capture rules (cached from iset_runtime_config scope events_capture).
   - Prepare for future mandatory/locked events while short-circuiting disabled categories/types.
   - Enrich payload with identifiers (event UUID, timestamps, environment, correlation ID).
-  - Persist to the canonical event store (DB table or queuing outbox) and optionally fan out to secondary sinks (logs, notifications).
+  - Persist to the canonical event store and optionally fan out to secondary sinks (logs, notifications).
   - Expose async guarantees (e.g., options.deliveryMode = 'async' | 'sync').
 
 ### Storage Model
@@ -250,9 +255,9 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
 - Retention: plan archival routine (e.g., move events older than X years to cold storage) while keeping audit guarantees.
 
 ### Resilience & Delivery
-- Support an outbox pattern: transactional insert into event_outbox when emitting inside business transactions; background worker flushes to event_entry or external bus. Avoids blocking user flows if the event store lags.
-- Retries with exponential backoff and dead-letter queue for problematic payloads.
-- Health metrics: queue depth, failed writes, config cache staleness.
+- Historical note: an outbox pattern was considered in 2025 but the unfinished `iset_event_outbox` implementation was retired in 2026 before a worker existed.
+- If durable async delivery is reintroduced, design it as a new notification-delivery mechanism with retries, dead-letter handling, ownership, monitoring, and retention.
+- Current event emission remains synchronous for the event-row insert and in-process for notification hooks.
 
 ### API Surface Refresh
 - Expose `/api/cases/:id/events` and `/api/events/feed` endpoints backed by the new store, honouring filters (category, type, subject, time range).
@@ -275,7 +280,7 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
    - Capture feedback on schema, API contracts, and configuration keys; record final decisions.
 
 2. **Schema & Migration Delivery**
-   - Author Phase 1 migrations for `iset_event_entry`, `iset_event_receipt`, and `iset_event_outbox`; run them in dev and document rollback steps.
+   - Historical plan: author Phase 1 migrations for `iset_event_entry`, `iset_event_receipt`, and `iset_event_outbox`; run them in dev and document rollback steps. Current schema keeps `iset_event_entry` and `iset_event_receipt`; `iset_event_outbox` is retired.
    - Provide seed scripts/sample data so emitters can be smoke-tested immediately after deployment.
 
 3. **Service & SDK Enablement**
@@ -295,7 +300,7 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
    - Verify event ingestion parity (existing portal timelines vs new pipeline) during rollout.
 
 7. **Observability & Ops**
-   - Instrument metrics/logging around emit success/failure, cache refresh, and outbox queue depth.
+   - Instrument metrics/logging around emit success/failure, cache refresh, event volume, and notification delivery health.
    - Produce dashboards and alerts for event delivery, capture-rule staleness, and backlog growth.
 
 8. **Rollout & Cleanup**
@@ -303,7 +308,6 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
    - Remove feature toggles, document operator runbooks, and schedule follow-up audits for retention/archival policies.
 
 ## TODO (Implementation Follow-up)
-- Hook the new event service into the future event outbox/migration scripts once the storage schema is ready.
 - Expand the API contract to return detailed validation errors (future locked/mandatory events) instead of silently skipping updates.
 - Tighten the Event Capture dashboard with search, filtering, and audit trails when the catalogue grows.
 
@@ -311,8 +315,6 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
 - Finalise scope for Step 2 (legacy code removal) and create tracking tasks.
 - Draft schema migration scripts and event service interface skeletons.
 - Define API contracts (OpenAPI/TypeScript types) for frontend and portal teams.
-
-
 
 
 

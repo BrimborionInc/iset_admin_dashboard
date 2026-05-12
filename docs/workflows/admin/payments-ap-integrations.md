@@ -7,6 +7,7 @@ Move payment packets from operational preparation to AP-facing submission contex
 ## Primary Routes
 
 - `/finance/payments`
+- `/iset/payments`
 - `/cases/:caseId` (case payment packet widgets)
 
 ## Core Widgets (current)
@@ -17,9 +18,16 @@ Finance Payments dashboard (`/finance/payments`):
 - Payment communications
 - SLA snapshot
 
+Operational Payments dashboard (`/iset/payments`):
+- Payment packet queue
+- Payment packet detail
+- Payment communications
+- SLA snapshot
+
 Case workspace payment surfaces (`/cases/:caseId`):
 - Payment packet queue (case scope)
 - Payment packet detail (case scope)
+- Payment communications (case scope)
 
 Widget references:
 - `docs/widgets/admin/finance-payment-packet-queue-widget.md`
@@ -28,6 +36,7 @@ Widget references:
 - `docs/widgets/admin/finance-payment-sla-widget.md`
 - `docs/widgets/admin/case-payment-packet-queue-widget.md`
 - `docs/widgets/admin/case-payment-packet-detail-widget.md`
+- `docs/widgets/admin/case-payment-communications-widget.md`
 
 ## Typical Flow
 

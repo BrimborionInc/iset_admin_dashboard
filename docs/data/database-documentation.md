@@ -11,6 +11,7 @@ Purpose: Single entrypoint for database documentation across the admin dashboard
 - `docs/data/finance-regional-salaries.md` - Annual province/territory salary entry records used by the Budgets and Finance salaries dashboard.
 - `docs/data/regional-snapshot-reporting.md` - Saved Board-style regional snapshot report records and manual-input schema.
 - `docs/data/tutorial-progress.md` - Hands-on tutorial completion/dismissal tracking (`staff_tutorial_progress`).
+- `docs/planning/database-retention-unchecked-growth-review-2026-05-10.md` - Current review of system tracking, security, notification, event, session, transient upload/state, and lock tables that may need retention or cleanup.
 - `docs/planning/document-model-erm-adjustment.md` - ERM changes and rationale for document relationships.
 - `docs/data/record-locking.md` - `application_lock` and optimistic/pessimistic concurrency tables.
 - `docs/architecture/integrations/public-admin-integration-notes.md` - Cross-app data flow and shared-DB context.

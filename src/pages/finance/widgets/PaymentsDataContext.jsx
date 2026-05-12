@@ -213,6 +213,41 @@ const normalizeLineStatusValue = value => {
     : null;
 };
 
+const normalizeFollowUpStatusValue = value => {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (!normalized) return null;
+  return [
+    "not_required",
+    "sent_to_finance",
+    "follow_up_needed",
+    "follow_up_logged",
+    "reported_paid",
+    "confirmed_by_evidence",
+    "stale_no_response",
+    "cancelled_not_proceeding",
+  ].includes(normalized)
+    ? normalized
+    : null;
+};
+
+const normalizeFollowUpEvent = raw => {
+  if (!raw || typeof raw !== "object") return null;
+  return {
+    id: raw.id ? String(raw.id) : "",
+    packetId: raw.packetId || raw.payment_packet_id || null,
+    lineId: raw.lineId || raw.payment_packet_line_id || null,
+    fromStatus: normalizeFollowUpStatusValue(raw.fromStatus || raw.from_status),
+    toStatus: normalizeFollowUpStatusValue(raw.toStatus || raw.to_status || raw.status),
+    label: raw.label || null,
+    actor: raw.actor || raw.actor_name || raw.actor_email || null,
+    note: raw.note || raw.notes || null,
+    dueAt: raw.dueAt || raw.due_at || null,
+    documentId: raw.documentId || raw.document_id || null,
+    createdAt: raw.createdAt || raw.created_at || null,
+  };
+};
+
 const normalizeRecurrencePolicies = raw => {
   const map = new Map();
   const add = (codeRaw, modeRaw) => {
@@ -275,6 +310,13 @@ const normalizeLine = raw => {
     requestedPaymentDate: raw.requestedPaymentDate || raw.requested_payment_date || null,
     invoiceReferenceNumber: raw.invoiceReferenceNumber || raw.invoice_reference_number || null,
     status: normalizeLineStatusValue(raw.status) || "needs_evidence",
+    followUpStatus: normalizeFollowUpStatusValue(raw.followUpStatus || raw.follow_up_status) || "not_required",
+    followUpLabel: raw.followUpLabel || raw.follow_up_label || null,
+    followUpDueAt: raw.followUpDueAt || raw.follow_up_due_at || null,
+    followUpUpdatedAt: raw.followUpUpdatedAt || raw.follow_up_updated_at || null,
+    followUpEvents: Array.isArray(raw.followUpEvents || raw.follow_up_events)
+      ? (raw.followUpEvents || raw.follow_up_events).map(normalizeFollowUpEvent).filter(Boolean)
+      : [],
     paidAt: raw.paidAt || raw.paid_at || null,
     paymentReference: raw.paymentReference || raw.payment_reference || null,
     paymentProofDocumentId: raw.paymentProofDocumentId || raw.payment_proof_document_id || null,
@@ -342,6 +384,10 @@ const normalizePacket = packet => {
     requester: packet?.requester || packet?.requester_name || null,
     requesterRole: packet?.requesterRole || packet?.requester_role || null,
     status: normalizePacketStatusValue(packet?.status) || "draft",
+    followUpStatus: normalizeFollowUpStatusValue(packet?.followUpStatus || packet?.follow_up_status) || "not_required",
+    followUpLabel: packet?.followUpLabel || packet?.follow_up_label || null,
+    followUpDueAt: packet?.followUpDueAt || packet?.follow_up_due_at || null,
+    followUpUpdatedAt: packet?.followUpUpdatedAt || packet?.follow_up_updated_at || null,
     submittedOn: packet?.submittedOn || packet?.submitted_on || null,
     dueBy: packet?.dueBy || packet?.due_by || null,
     notes: packet?.notes || packet?.notes_internal || null,
@@ -350,6 +396,9 @@ const normalizePacket = packet => {
     lines: Array.isArray(packet?.lines) ? packet.lines.filter(Boolean).map(normalizeLine) : [],
     approvals: Array.isArray(packet?.approvals) ? packet.approvals : [],
     timeline: Array.isArray(packet?.timeline) ? packet.timeline : [],
+    followUpEvents: Array.isArray(packet?.followUpEvents || packet?.follow_up_events)
+      ? (packet.followUpEvents || packet.follow_up_events).map(normalizeFollowUpEvent).filter(Boolean)
+      : [],
     documents: Array.isArray(packet?.documents) ? packet.documents : [],
     duplicateWarnings: Array.isArray(packet?.duplicateWarnings) ? packet.duplicateWarnings : [],
     overrideHistory: Array.isArray(packet?.overrideHistory) ? packet.overrideHistory : [],
@@ -595,10 +644,21 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
   const [paymentTypeMapping, setPaymentTypeMapping] = useState(null);
   const [paymentTypeMappingLoading, setPaymentTypeMappingLoading] = useState(false);
 
-  const loadCommunications = useCallback(async () => {
+  const loadCommunications = useCallback(async (packetIdOverride = null) => {
     try {
-      const resp = await apiFetch("/api/finance/payment-communications");
+      const scopedPacketId =
+        packetIdOverride !== null && packetIdOverride !== undefined && packetIdOverride !== ""
+          ? String(packetIdOverride)
+          : "";
+      const endpoint = scopedPacketId
+        ? `/api/finance/payment-communications?packetId=${encodeURIComponent(scopedPacketId)}`
+        : "/api/finance/payment-communications";
+      const resp = await apiFetch(endpoint);
       if (!resp.ok) {
+        if (!scopedPacketId && (resp.status === 400 || resp.status === 403)) {
+          setCommunications([]);
+          return;
+        }
         throw new Error(`Communications load failed (${resp.status})`);
       }
       const data = await resp.json();
@@ -658,8 +718,8 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
   }, [loadRequests]);
 
   useEffect(() => {
-    loadCommunications();
-  }, [loadCommunications]);
+    loadCommunications(selectedRequestId || null);
+  }, [loadCommunications, selectedRequestId]);
 
   useEffect(() => {
     loadPaymentTypeMapping();
@@ -867,6 +927,46 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
     } catch (err) {
       console.error("[Payments] failed to update payment line", err);
       const message = err.message || "Failed to update payment line";
+      setError(message);
+      throw err;
+    }
+  }, []);
+
+  const logPaymentFollowUp = useCallback(async (packetId, payload = {}) => {
+    if (!packetId) return null;
+    try {
+      const resp = await apiFetch(
+        `/api/finance/payment-packets/${encodeURIComponent(packetId)}/follow-up`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw buildApiError(resp, data, `Follow-up update failed (${resp.status})`);
+      }
+      const updated = normalizePacket(data?.packet || data);
+      if (updated?.id) {
+        setRequests(prev => {
+          const next = Array.isArray(prev) ? prev.slice() : [];
+          const index = next.findIndex(entry => entry.id === updated.id);
+          if (index >= 0) {
+            next[index] = updated;
+            return next;
+          }
+          return [updated, ...next];
+        });
+        setSelectedRequestId(updated.id);
+      }
+      return {
+        packet: updated,
+        event: normalizeFollowUpEvent(data?.event),
+      };
+    } catch (err) {
+      console.error("[Payments] failed to log follow-up", err);
+      const message = err.message || "Failed to log payment follow-up";
       setError(message);
       throw err;
     }
@@ -1151,31 +1251,8 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
 
   const sendPacketEmail = useCallback(async (packetId, note = null) => {
     if (!packetId) return null;
-    try {
-      const resp = await apiFetch(
-        `/api/finance/payment-packets/${encodeURIComponent(packetId)}/send-email`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ note }),
-        }
-      );
-      const payload = await resp.json().catch(() => ({}));
-      if (!resp.ok) {
-        throw new Error(payload?.message || payload?.error || `Send failed (${resp.status})`);
-      }
-      const created = normalizeCommunication(payload?.communication);
-      if (created) {
-        setCommunications(prev => [created, ...prev]);
-      } else {
-        loadCommunications();
-      }
-      return payload;
-    } catch (err) {
-      console.error("[Payments] failed to send finance email", err);
-      throw err;
-    }
-  }, [loadCommunications]);
+    return updatePacketStatus(packetId, "submitted", { notes: note });
+  }, [updatePacketStatus]);
 
   const selectedRequest = useMemo(
     () => requests.find(entry => entry.id === selectedRequestId) ?? null,
@@ -1238,6 +1315,7 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
       validatePacket,
       updateLineStatus,
       updateLine,
+      logPaymentFollowUp,
       deleteLine,
       createPacket,
       deletePacket,
@@ -1272,6 +1350,7 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
       validatePacket,
       updateLineStatus,
       updateLine,
+      logPaymentFollowUp,
       deleteLine,
       createPacket,
       deletePacket,

@@ -205,7 +205,7 @@ const FinancePanelWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =>
       },
       {
         id: "actual",
-        header: "Actual",
+        header: "Recorded actual",
         cell: item => (item.isTotals ? <strong>{formatCurrency(item.actual)}</strong> : formatCurrency(item.actual)),
       },
       {

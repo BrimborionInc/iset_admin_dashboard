@@ -60,6 +60,12 @@
       letter-spacing: 0.3px;
     }
 
+    .version-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--muted);
+    }
+
     .confidential {
       font-size: 10px;
       font-weight: 700;
@@ -173,6 +179,68 @@
       height: 11px;
       margin: 0;
     }
+
+    .redline-inline-old {
+      color: #8b1a1a;
+      text-decoration: line-through;
+      font-weight: 700;
+      display: block;
+    }
+
+    .redline-inline-new {
+      color: #146c2e;
+      font-weight: 700;
+      display: block;
+    }
+
+    .redline-change-block {
+      display: block;
+      border-left: 3px solid #aab7b8;
+      padding-left: 6px;
+      min-height: 16px;
+    }
+
+    .redline-check {
+      display: inline-flex;
+      gap: 4px;
+      align-items: center;
+    }
+
+    .signature-section {
+      margin-top: 10px;
+      border: 1px solid var(--line);
+      padding: 6px;
+    }
+
+    .signature-attestation {
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .signature-panel {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 3px;
+    }
+
+    .signature-box {
+      min-height: 26px;
+      border-bottom: 1px solid var(--line);
+      font-family: cursive;
+      font-size: 16px;
+      padding: 3px 4px;
+    }
+
+    .signature-box.empty {
+      font-family: var(--sans);
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    .signature-meta {
+      font-size: 9.5px;
+      color: var(--muted);
+    }
   </style>
 </head>
 <body>
@@ -182,6 +250,7 @@
         <img class="logo" data-field="nwac_logo" alt="NWAC logo" />
         <div class="title-block">
           <div class="title">ISET Financial Overview</div>
+          <div class="version-label" data-field="version_label"></div>
           <div class="confidential">CONFIDENTIAL</div>
         </div>
       </div>
@@ -299,6 +368,8 @@
         <td colspan="3"><textarea data-field="loan_grant_details"></textarea></td>
       </tr>
     </table>
+
+    <div data-field="signature_section_html"></div>
   </div>
 </body>
 </html>

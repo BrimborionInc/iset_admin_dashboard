@@ -11,6 +11,7 @@ This directory is not a single source of truth. It contains current domain docs,
 
 - For database orientation, start with `database-documentation.md` and `database-overview.md`.
 - For document storage/scoping, use `documents-model.md`.
+- For the current PROD document checklist gate and document-type configuration snapshot, use `document-checklist-current-configuration.md`.
 - For applicant accounts, use `applicant-account-activation.md`.
 - For secure messaging data integration, use `integrations/secure-messaging.md`.
 - For privacy ERM evidence, use `privacy-erm-audits/` plus the controlling planning docs linked from `docs/AGENTS.md`.

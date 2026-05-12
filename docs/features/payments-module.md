@@ -2,7 +2,9 @@
 
 **Purpose:** Canonical design and planning for the Payments module/dashboard, aligned to `docs/requirements/payments-module.v2.md`.  
 **Audience:** Finance staff, program staff, product owners, engineers, ops, audit/compliance.  
-**Last Updated:** 2026-04-06
+**Last Updated:** 2026-05-11
+
+Current implementation review: `docs/planning/payments-implementation-review-2026-05-11.md`. Current target operating model: `docs/planning/payments-target-operating-model-2026-05-11.md`. Current transformation plan for the NWAC email workflow: `docs/planning/payments-transformation-plan-2026-05-11.md`.
 
 ## Sources and authority levels
 - **MUST (source-derived):** From NWAC training modules, compliant checklist, and ISET agreement context.
@@ -10,17 +12,23 @@
 - **MAY (configurable/later):** Optional capabilities not required for initial compliance.
 
 ## Context (current codebase)
-- Payments dashboard is live in `src/pages/finance/FinancePaymentsPage.jsx` with queue, detail, communications, and SLA widgets.
+- The cross-client operational Payments dashboard is live at `/iset/payments` in `src/pages/Caseworking/ProgramPaymentsPage.jsx` with queue, detail, communications, and SLA widgets. `/finance/payments` remains a finance/admin oversight surface using the same shared widget family.
 - Core finance objects already exist: `budget_pot`, `budget_pot_region`, `finance_transaction`, `iset_document`, `pending_uploads`.
 - The Payments module is internal to NWAC (ISET team to Finance team), not GoC disbursement.
+- Finance/Sage is the financial system of record. PATH is the ISET operations system that prepares, sends, and tracks payment requests across the email handoff gap.
+- Finance reporting back to operations after AP fulfillment is erratic, so PATH must support operational follow-up and confidence tracking without pretending to be authoritative accounting truth.
+- Payments are exposed through two operational surfaces over the same data and business capabilities: a case-scoped surface in the Case Workspace and the multi-client `/iset/payments` dashboard. The difference is scope and queueing context, not a separate workflow model.
 
 ## Design stance (updated)
 - Requirements explicitly stated in training/checklists are not treated as hypotheses.
 - The **Payment Packet** is the canonical workflow record.
-- The ledger-of-record for annual reporting remains `finance_transaction`.
+- The PATH-side ledger/reporting model is an operational shadow of ISET payment request activity. It supports budget awareness, case finance views, follow-up, and reporting caveats, but Sage/Finance remains the financial record.
 - Approved interventions authorize future funding but do not auto-create live payment packets.
 - Multiple packets may exist for one intervention over time; recurring supports should be packeted by the payable period or receipt cycle.
 - Release 1 favors compliance gates and auditability over automation.
+- After email submission, PATH should track operational confidence states such as sent, follow-up needed, reported paid, confirmed by evidence, or stale/no response. Do not over-label normal widgets with accounting disclaimers; keep nuance in help panels and workflow guidance unless a user action creates genuine risk.
+- Current implementation now stores follow-up state on packets and lines, with immutable `payment_followup_event` history. Financial Reports prefer that explicit follow-up state before falling back to submitted/posted PATH finance transactions. Treat this as operations-side follow-up/confidence tracking, not Sage/AP confirmation.
+- Payment evidence now uses line-level links where the checklist row is line-scoped; `payment_packet_document.payment_packet_line_id` is populated by manual link/upload flows and validation uses baseline plus line evidence for payment-type gates.
 
 ## Goals
 - Evidence-gated payment workflow that can pass audit.
@@ -121,6 +129,8 @@ Program dashboard:
 
 Finance dashboard:
 - Drafts needing evidence, Sent to finance, Payment confirmed, overdue evidence tasks.
+
+The case-scoped payment widgets and the cross-client Payments dashboard should show the same packet/line/payment-follow-up data and support the same core business actions where role/scope allows. The dashboard adds aggregate filtering, queueing, and cross-client monitoring; the case workspace adds local case context.
 
 Row fields:
 - client (if applicable), intervention, payment type, amount, stream (CRF/EI), reporting unit, pot, requester, ageing, evidence completeness, risk flags, status.

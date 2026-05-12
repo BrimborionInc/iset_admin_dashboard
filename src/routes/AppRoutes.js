@@ -945,9 +945,9 @@ const AppRoutes = ({
             [
               { text: 'Home', href: '/' },
               { text: 'ISET Clients', href: '/iset/cases' },
-              { text: 'Program Payments', href: '/iset/payments' }
+              { text: 'Payments', href: '/iset/payments' }
             ],
-            'Program Payments',
+            'Payments',
             <Box variant="p">Manage payment packets, upload evidence, and submit requests to finance.</Box>,
             (
               <SpaceBetween size="xs" direction="horizontal">
@@ -1222,9 +1222,9 @@ const AppRoutes = ({
             [
               { text: 'Home', href: '/' },
               { text: 'Budgets and Finance', href: '/finance/overview' },
-              { text: 'Batch Payments', href: '/finance/payments' }
+              { text: 'Payments', href: '/finance/payments' }
             ],
-            'Batch Payments',
+            'Payments',
             <FinancePaymentsHelp />,
             (
               <SpaceBetween size="xs" direction="horizontal">

@@ -12,6 +12,12 @@ import {
   Badge,
   Link,
   Button,
+  Modal,
+  FormField,
+  Input,
+  Textarea,
+  Select,
+  Alert,
 } from "@cloudscape-design/components";
 import { boardItemI18nStrings } from "./common";
 import { usePaymentsData } from "./PaymentsDataContext.jsx";
@@ -26,6 +32,24 @@ const directionBadge = {
   outbound: { label: "Sent", color: "blue" },
   inbound: { label: "Received", color: "green" },
 };
+
+const directionOptions = [
+  { value: "outbound", label: "Sent to finance" },
+  { value: "inbound", label: "Received from finance" },
+];
+
+const EMPTY_LOG_FORM = {
+  direction: "outbound",
+  recipients: "",
+  subject: "",
+  body: "",
+};
+
+const splitRecipientText = value =>
+  String(value || "")
+    .split(/[;,]+/)
+    .map(entry => entry.trim())
+    .filter(Boolean);
 
 const baseColumns = [
   {
@@ -142,6 +166,10 @@ const PaymentCommunicationWidget = ({ actions = {}, metadata = {}, toggleHelpPan
   const [columnWidths, setColumnWidths] = useState(() => loadColumnWidths());
   const [preferences, setPreferences] = useState(() => loadPreferences());
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
+  const [logModalOpen, setLogModalOpen] = useState(false);
+  const [logSubmitting, setLogSubmitting] = useState(false);
+  const [logError, setLogError] = useState(null);
+  const [logForm, setLogForm] = useState(() => ({ ...EMPTY_LOG_FORM }));
   const preferencesRef = useRef(preferences);
 
   const visibleColumns = useMemo(() => {
@@ -314,7 +342,58 @@ const PaymentCommunicationWidget = ({ actions = {}, metadata = {}, toggleHelpPan
   );
 
   const selectedPacketLabel = selectedRequestId ? `Packet ${selectedRequestId}` : null;
-  const logTargetId = isFinanceView ? null : selectedRequestId ?? communicationItems[0]?.packetId ?? null;
+  const logTargetId = isFinanceView ? null : selectedRequestId ?? null;
+  const selectedDirectionOption =
+    directionOptions.find(option => option.value === logForm.direction) || directionOptions[0];
+  const updateLogForm = (key, value) => {
+    setLogForm(current => ({ ...current, [key]: value }));
+  };
+  const openLogModal = () => {
+    if (!logTargetId) return;
+    setLogForm({
+      ...EMPTY_LOG_FORM,
+      subject: selectedPacketLabel ? `${selectedPacketLabel} follow-up` : "",
+    });
+    setLogError(null);
+    setLogModalOpen(true);
+  };
+  const closeLogModal = () => {
+    if (logSubmitting) return;
+    setLogModalOpen(false);
+    setLogError(null);
+  };
+  const handleLogSubmit = async () => {
+    if (!logTargetId) {
+      setLogError("Select a packet before logging an email.");
+      return;
+    }
+    const subject = logForm.subject.trim();
+    if (!subject) {
+      setLogError("Subject is required.");
+      return;
+    }
+    const recipients = splitRecipientText(logForm.recipients);
+    setLogSubmitting(true);
+    setLogError(null);
+    try {
+      const created = await addCommunication({
+        packetId: logTargetId,
+        subject,
+        recipients,
+        direction: logForm.direction === "inbound" ? "inbound" : "outbound",
+        body: logForm.body.trim() || null,
+        template: "manual",
+      });
+      if (!created) {
+        throw new Error("Unable to log the email.");
+      }
+      setLogModalOpen(false);
+    } catch (error) {
+      setLogError(error?.message || "Unable to log the email.");
+    } finally {
+      setLogSubmitting(false);
+    }
+  };
 
   return (
     <BoardItem
@@ -363,16 +442,9 @@ const PaymentCommunicationWidget = ({ actions = {}, metadata = {}, toggleHelpPan
             <Button
               iconName="add-plus"
               disabled={!logTargetId}
-              onClick={() =>
-                addCommunication({
-                  packetId: logTargetId,
-                  subject: "Follow-up note",
-                  recipients: ["finance@nwac.org"],
-                  direction: "outbound",
-                })
-              }
+              onClick={openLogModal}
             >
-              Log manual email
+              Log email
             </Button>
           ) : null}
         </SpaceBetween>
@@ -395,6 +467,60 @@ const PaymentCommunicationWidget = ({ actions = {}, metadata = {}, toggleHelpPan
           preferences={preferencesComponent}
           pagination={pagination}
         />
+        <Modal
+          visible={logModalOpen}
+          onDismiss={closeLogModal}
+          header="Log payment email"
+          footer={
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={closeLogModal} disabled={logSubmitting}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={handleLogSubmit} loading={logSubmitting}>
+                Save log
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="m">
+            {logError ? <Alert type="error">{logError}</Alert> : null}
+            <Box variant="small" color="text-body-secondary">
+              {selectedPacketLabel ? `Logging against ${selectedPacketLabel}.` : "Select a packet first."}
+            </Box>
+            <FormField label="Direction">
+              <Select
+                selectedOption={selectedDirectionOption}
+                options={directionOptions}
+                onChange={({ detail }) =>
+                  updateLogForm("direction", detail.selectedOption?.value || "outbound")
+                }
+              />
+            </FormField>
+            <FormField label="People or email addresses">
+              <Input
+                value={logForm.recipients}
+                onChange={({ detail }) => updateLogForm("recipients", detail.value)}
+                placeholder="Separate multiple entries with commas"
+                spellcheck={false}
+              />
+            </FormField>
+            <FormField label="Subject">
+              <Input
+                value={logForm.subject}
+                onChange={({ detail }) => updateLogForm("subject", detail.value)}
+                spellcheck={true}
+              />
+            </FormField>
+            <FormField label="Notes (optional)">
+              <Textarea
+                value={logForm.body}
+                onChange={({ detail }) => updateLogForm("body", detail.value)}
+                rows={4}
+                spellcheck={true}
+              />
+            </FormField>
+          </SpaceBetween>
+        </Modal>
       </SpaceBetween>
     </BoardItem>
   );

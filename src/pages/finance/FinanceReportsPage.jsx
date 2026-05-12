@@ -47,6 +47,11 @@ const DEFAULT_SUMMARY = {
     awaitingRelease: 0,
     readyToSend: 0,
     sentToFinance: 0,
+    followUpNeeded: 0,
+    followUpLogged: 0,
+    reportedPaid: 0,
+    confirmedByEvidence: 0,
+    staleNoResponse: 0,
     partiallyPaid: 0,
     paidInFull: 0,
     cancelled: 0,
@@ -144,6 +149,11 @@ const getFinanceFollowUpIndicatorType = statusKey => {
   const normalized = String(statusKey || "").trim();
   if (normalized === "paidInFull") return "success";
   if (normalized === "partiallyPaid") return "in-progress";
+  if (normalized === "reportedPaid") return "success";
+  if (normalized === "confirmedByEvidence") return "success";
+  if (normalized === "followUpLogged") return "in-progress";
+  if (normalized === "followUpNeeded") return "warning";
+  if (normalized === "staleNoResponse") return "error";
   if (normalized === "sentToFinance") return "info";
   if (normalized === "readyToSend") return "success";
   if (normalized === "awaitingRelease") return "warning";
@@ -242,6 +252,11 @@ const summarizeRows = rows => {
     awaitingRelease: 0,
     readyToSend: 0,
     sentToFinance: 0,
+    followUpNeeded: 0,
+    followUpLogged: 0,
+    reportedPaid: 0,
+    confirmedByEvidence: 0,
+    staleNoResponse: 0,
     partiallyPaid: 0,
     paidInFull: 0,
     cancelled: 0,
@@ -779,7 +794,7 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
             <Box color="text-body-secondary" fontSize="body-s">
               {[
                 `Sent: ${formatDate(item.financeSentDate)}`,
-                `Paid: ${formatDate(item.financePaidDate)}`,
+                `Recorded paid: ${formatDate(item.financePaidDate)}`,
               ].join(" · ")}
             </Box>
             <Box color="text-body-secondary" fontSize="body-s">
@@ -788,7 +803,7 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
                   ? `Sent ${formatCurrency(item.financeSentAmount)}`
                   : null,
                 Number(item?.financePaidAmount || 0) > 0
-                  ? `Paid ${formatCurrency(item.financePaidAmount)}`
+                  ? `Recorded paid ${formatCurrency(item.financePaidAmount)}`
                   : null,
               ]
                 .filter(Boolean)
@@ -945,7 +960,7 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
         header={
           <Header
             variant="h1"
-            description="Filter by fiscal year for one or more provinces/territories. Carry-over or adjustment amounts appear as negatives, and payment status shows whether related packets are still draft, sent to finance, or confirmed."
+            description="Filter by fiscal year for one or more provinces/territories. Carry-over or adjustment amounts appear as negatives, and payment status shows the current PATH follow-up state for related packets."
             actions={
               <SpaceBetween direction="horizontal" size="xs">
                 <Button onClick={handleClearFilters} disabled={optionsLoading && dataLoading}>

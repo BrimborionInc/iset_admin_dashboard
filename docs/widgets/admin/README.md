@@ -26,6 +26,7 @@ Purpose: Index of widget-level docs for the initial workflow tranche.
 - `docs/widgets/admin/case-export-preview-widget.md`
 - `docs/widgets/admin/case-payment-packet-queue-widget.md`
 - `docs/widgets/admin/case-payment-packet-detail-widget.md`
+- `docs/widgets/admin/case-payment-communications-widget.md`
 
 ## ILMP Reporting
 

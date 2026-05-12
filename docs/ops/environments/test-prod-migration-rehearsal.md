@@ -63,7 +63,7 @@ Current effects:
 - slows backend reminder/allocation pollers to a daily interval
 - disables notification-setting email alerts
 - removes `budget_allocation.metadata.scheduledApplyAt` from approved rows so the allocation poller cannot auto-apply historical scheduled entries
-- clears `iset_event_outbox`, `pending_uploads`, `input_json_state`, and `application_lock`
+- clears `pending_uploads`, `input_json_state`, and `application_lock`; historical `iset_event_outbox` cleanup was removed because the table is retired by migration `20260510_0001_retire_event_outbox.sql`
 
 Identity overlay:
 

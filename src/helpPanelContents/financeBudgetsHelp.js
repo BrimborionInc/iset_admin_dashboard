@@ -1,5 +1,5 @@
 import React from "react";
-import { SpaceBetween, Box, Link } from "@cloudscape-design/components";
+import { SpaceBetween, Box } from "@cloudscape-design/components";
 
 const FinanceBudgetsHelp = () => (
   <SpaceBetween size="m">
@@ -27,13 +27,13 @@ const FinanceBudgetsHelp = () => (
       <strong>Notes</strong>
       <ul>
         <li>Publishing takes a snapshot for rollback, then replaces the live hierarchy.</li>
-        <li>Active amounts reflect finance transactions; draft edits don’t affect spend until published.</li>
+        <li>Active committed and recorded-actual amounts reflect PATH finance transactions; draft edits don’t affect spend until published.</li>
       </ul>
     </Box>
   </SpaceBetween>
 );
 
 FinanceBudgetsHelp.aiContext =
-  "Explain the Budgets dashboard: Active is read-only live hierarchy; Draft Budgets stages hierarchies and publishes; Structure manager edits drafts, copies Active to draft, captures/restores snapshots; publishing replaces Active after a safety snapshot.";
+  "Explain the Budgets dashboard: Active is read-only live hierarchy; Draft Budgets stages hierarchies and publishes; Structure manager edits drafts, copies Active to draft, captures/restores snapshots; publishing replaces Active after a safety snapshot. Committed and recorded-actual amounts are PATH operational finance totals.";
 
 export default FinanceBudgetsHelp;

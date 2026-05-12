@@ -95,7 +95,7 @@ const writeSummarySheet = (worksheet, summary, meta) => {
     ["CRF advances", formatCurrency(summary?.fundingTotals?.CRF)],
     ["EI advances", formatCurrency(summary?.fundingTotals?.EI)],
     ["Sent to finance", formatCurrency(summary?.financeTotals?.sentAmount)],
-    ["Paid / confirmed", formatCurrency(summary?.financeTotals?.paidAmount)],
+    ["Recorded paid / confirmed", formatCurrency(summary?.financeTotals?.paidAmount)],
     ["Not yet sent", formatCurrency(summary?.financeTotals?.notYetSentAmount)],
     ["Interventions", Number(summary?.interventionCount || 0)],
     ["Participants", Number(summary?.participantCount || 0)],
@@ -180,9 +180,9 @@ const writeDetailSheet = (worksheet, rows, fundingSource, meta) => {
     "Payment status",
     "Latest packet status",
     "Sent amount",
-    "Paid amount",
+    "Recorded paid amount",
     "Sent date",
-    "Paid date",
+    "Recorded paid date",
     "Budget pot"
   );
 

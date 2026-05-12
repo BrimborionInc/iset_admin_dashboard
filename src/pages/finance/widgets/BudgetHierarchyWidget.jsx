@@ -341,7 +341,7 @@ const BudgetHierarchyWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     if (activeTab === "drafts" && draftOptions.length && !selectedDraftId) {
       setSelectedDraftId(draftOptions[0].value);
     }
-  }, [activeTab, draftOptions, selectedDraftId]);
+  }, [activeTab, draftOptions, selectedDraftId, setSelectedDraftId]);
 
   useEffect(() => {
     if (!draftModalFiscalYear && activeVersion?.label) {
@@ -579,7 +579,7 @@ useEffect(() => {
     },
     {
       id: "actual",
-      header: "Actual",
+      header: "Recorded actual",
       cell: item => formatCurrency(item.actual),
     },
     {

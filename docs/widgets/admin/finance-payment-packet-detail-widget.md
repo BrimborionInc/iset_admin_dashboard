@@ -11,10 +11,12 @@ Payments AP Integrations
 ## Primary Route Context
 
 - /finance/payments
+- /iset/payments
+- /cases/:caseId through the case wrapper widget
 
 ## Purpose
 
-Read-only inspection of packet line items, evidence, and draft Intacct payload.
+Shared packet detail surface. In `/finance/payments` it is an inspection widget; in `/iset/payments` and the Case Workspace it supports line edits, evidence, validation, send-to-finance, and follow-up where status and scope allow.
 
 ## User Actions (observed)
 
@@ -38,4 +40,6 @@ Read-only inspection of packet line items, evidence, and draft Intacct payload.
 
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
 - In `/finance/payments`, this widget is inspection-only; create/edit/validate/send actions remain in the program workflow.
+- The experimental Intacct XML preview is hidden from operational surfaces by default and is only shown when the parent dashboard opts in through widget metadata.
+- Evidence link/upload actions now pass the selected evidence row's line id when the row is line-scoped, so `payment_packet_document.payment_packet_line_id` is preserved for payment-type gates.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.

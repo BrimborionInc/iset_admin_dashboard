@@ -31,7 +31,7 @@ const widgetRegistry = {
     defaultColumnSpan: 2,
     component: SimpleTrendWidget,
     title: "Spend trend",
-    description: "Plan vs. actual spend placeholder.",
+    description: "Plan vs. recorded actual spend.",
     helpComponent: FinanceTrendHelp,
     helpTitle: "Spend trend",
     aiContext: FinanceTrendHelp.aiContext,

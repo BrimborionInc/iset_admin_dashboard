@@ -11,10 +11,12 @@ Payments AP Integrations
 ## Primary Route Context
 
 - /finance/payments
+- /iset/payments
+- /cases/:caseId through the case wrapper widget
 
 ## Purpose
 
-Oversight queue for drilling into one packet at a time.
+Shared payment packet queue. In `/finance/payments` it is an oversight queue; in `/iset/payments` and the Case Workspace it is an operational queue for creating and progressing payment packets.
 
 ## User Actions (observed)
 
@@ -39,4 +41,5 @@ Oversight queue for drilling into one packet at a time.
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
 - In `/finance/payments`, queue selection is single-select and drives the detail/communications drill-down state.
 - The default finance queue filter opens on `Unsubmitted` to reduce clutter and surface current work first.
+- In `/iset/payments`, the widget runs in operational mode and supports case search plus packet creation for approved interventions the user can access.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.

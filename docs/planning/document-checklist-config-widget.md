@@ -7,6 +7,7 @@ Last Updated: 2026-05-06
 - Admin UIs consume `/api/applicants/:id/document-checklist`, which loads the runtime config and computes per-item status.
 - System Administrators can edit the checklist from Configuration Settings > Document checklists. Direct DB edits are still used for guarded PROD repairs when the live config itself is broken.
 - Runtime config source of truth remains `iset_runtime_config`; fallback JSON under `src/server/config/checklists/` should be kept aligned so new environments do not reintroduce repaired drift.
+- Current PROD gate/item/document-type snapshot lives in `docs/data/document-checklist-current-configuration.md`; use it for staff-facing configuration review, then re-query the target environment before mutating runtime rows.
 
 ## Current Runtime Guardrails
 

@@ -2,7 +2,7 @@
 
 Purpose: capture the current live behavior of `Budgets and Finance > Financial Reports` so future threads can extend the finance-reporting surface without reverse-engineering the page and endpoints from code.
 Audience: admin dashboard engineers, finance/reporting reviewers, and product owners.
-Last Updated: 2026-04-06
+Last Updated: 2026-05-11
 
 ## Scope
 
@@ -18,7 +18,7 @@ Last Updated: 2026-04-06
 - This page is the Budgets and Finance reporting surface for the annual `ISET Advances and Active Clients` report.
 - The live view is an approved-funding report, not a live payments ledger.
 - Approved funding is based on intervention approval timing and approved expense.
-- Payment status is shown beside each intervention so staff can see whether the related packet work is still draft, ready to send, already sent to finance, or already confirmed.
+- Payment follow-up status is shown beside each intervention so staff can see whether the related packet work is still draft, ready to send, sent to finance, needs follow-up, reported paid, confirmed by evidence, stale/no response, or cancelled.
 - An optional `Include carry-over` toggle adds a best-effort cross-fiscal estimate using payment-line dates when available and the intervention schedule as fallback.
 
 ## Current controls
@@ -68,7 +68,7 @@ Last Updated: 2026-04-06
   - institution / partner
   - program / position
   - status
-  - payment status
+  - PATH payment follow-up status
   - tuition/books/living/childcare/wage-other category amounts
   - total advances
   - optional carry-over estimate / adjustment
@@ -85,7 +85,8 @@ Last Updated: 2026-04-06
 
 ## Current limitations
 
-- Approved funding is the main report basis; the finance-follow-up fields are a clean operational summary, not a full payment-history ledger.
+- Approved funding is the main report basis; the finance-follow-up fields are a clean PATH operational summary, not a full payment-history ledger or Sage ledger.
+- `Recorded paid` amounts/dates are PATH-side paid/confirmed records from payment follow-up or posted finance transactions; Finance/Sage remains the financial system of record.
 - Approved category columns are derived from intervention cost-line data and scaled to the approved total when needed so row totals reconcile, which means category amounts are presentation/reporting allocations rather than a separate authoritative ledger.
 - Carry-over is best-effort only. It uses stored payment-line dates first, then derived intervention schedules when no live payment lines exist, so it should be treated as a planning/reconciliation aid rather than a definitive accounting ledger.
 - This page replaced the earlier finance-reporting demo/widget scaffold; `Add widget` / `Reset layout` no longer apply here.

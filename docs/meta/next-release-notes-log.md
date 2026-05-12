@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next "What's New" update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-05-09
+Last Updated: 2026-05-12
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -27,6 +27,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - 2026-05-09 | Release 20260509-admin-feedback-fixes | Fix/Approvals | Decision letters | Decision-letter drafts now refresh to the current generation/send date before the applicant message and signing request are created. | Prevents approval or denial letters from carrying an older assessment or stale draft date. Deployed to TEST and PROD on 2026-05-09.
 - 2026-05-09 | Release 20260509-admin-feedback-fixes | Fix/Casework | ISET Clients | Regional Managers can open the ISET Clients dashboard and see cases in their case scope, including files assigned directly to them. | The list now uses the same direct-assignment, unassigned, portfolio-region, and owner-region model as case-workspace access. Deployed to TEST and PROD on 2026-05-09.
 - 2026-05-09 | Release 20260509-admin-feedback-fixes | Fix/Support | Contact Communications | Regional Managers can use Contact Communications for legacy contact messages linked to applications in their case scope. | NWAC Administrators keep the full legacy queue; Regional Manager counts, list rows, details, statuses, and notes are scoped to accessible applicant files. Deployed to TEST and PROD on 2026-05-09.
+- 2026-05-12 | Release TBD | Intake/Workflow | ISET Intake financial information | Household Income and base Household Expenses are now collected regardless of whether the applicant selects Living allowance. | Updated DEV workflow 21 authoring and the published intake runtime config; amount-driven financial evidence uploads now follow the entered income/expense amounts rather than the Living allowance support selection. TEST promotion rehearsal passed on 2026-05-12 with in-place runtime assertions on both app instances.
+- 2026-05-12 | Release 20260512-test-funding-overview-signatures / 20260512-test-funding-overview-portal-signing | Workflow/Documents | Funding Overview signatures | Case managers can send a Funding Overview to the client for signature as a secure-message digital attachment. | The signed PDF uses the current Case Workspace / Application Details financial figures, the client attests that the income/expense figures are accurate as of signing, and later versions can redline against the previous signed Funding Overview. Deployed to TEST on 2026-05-12 and corrected with an automated TEST send/view/sign smoke; PROD not deployed yet.
 - 2026-05-05 | Release TBD | Fix/Approvals | Case Workspace intervention proposals | New and revised intervention proposal decisions now emit backend events for approved, denied, and changes-requested outcomes. | These decisions now appear in notification settings, bell/email notification routing, case events, and audit history through the shared event infrastructure.
 - 2026-05-05 | Release TBD | Fix/Notifications | Approval decision emails | Approval, denial, changes-requested, and intervention proposal decision emails now go only to the assigned owner and case watchers. | Role rows in Manage Notifications still control templates/settings, but these decision events no longer email every enabled staff member in those roles.
 - 2026-05-05 | Release TBD | Fix/Casework | Intervention proposal approval letters | Approved new intervention proposals and approved applied revisions now reopen the approval-letter follow-up from persisted state and remain in-progress until the letter is sent. | The follow-up no longer depends on the approver's temporary browser state, ordinary approved/backloaded interventions do not unlock it, intervention denial-letter sending stays blocked, and sending the approval letter stores the completion marker that clears proposal/revision blocking.
@@ -257,6 +259,9 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - 2026-03-10 | Release v0.5.4 | UX | Application Workspace + Case Workspace > Proposed Intervention Cost Items | Cost-item add/edit modal now includes early payee capture fields (`payee type`, `payee name`, optional `reference`) without adding a new table column. | Payee remains optional at costing-step progression time.
 - 2026-03-10 | Release v0.5.4 | Workflow/Validation | Batch Payments > Payment Packet Detail | Packet validation now blocks submission when payee details are missing and surfaces both top-level block messaging and line-level `Payee missing` indicators. | New validation code path emits line-addressable `payee_missing` policy errors.
 - 2026-04-21 | Release TBD | UX | Batch Payments dashboard | Reworked Batch Payments into a cleaner oversight view: single-packet selection now drives detail, finance-side edit/send actions were removed, communications clearly scope to the selected packet or all packets, and SLA snapshot now starts in the palette instead of the default layout. | Aligns the finance dashboard with its oversight purpose and removes the misleading multi-select/detail coupling.
+- 2026-05-11 | Release TBD | UX/Payments | Payments dashboard | Restored `/iset/payments` as the cross-client operational payments dashboard with the shared packet queue, detail, and communications widgets. | Case Workspace now also includes payment communications in the Manage Payments layout, and manual email logging records a real subject/direction/notes entry instead of creating a placeholder log.
+- 2026-05-11 | Release TBD | Workflow/Payments | Payment follow-up | Added operations-side follow-up tracking for payment packets and lines after the Finance email handoff. | Staff can log follow-up state and notes without treating PATH as the Sage/AP system of record.
+- 2026-05-11 | Release TBD | Workflow/Payments | Payment evidence | Payment evidence can now be attached to the specific packet line that requires it. | The payment detail workflow now preserves line-level evidence links for validation and audit instead of flattening every document to the whole packet.
 - 2026-05-01 | Release TBD | UX/Notifications | Template Editor dashboard | Expanded the notification template editor with a grouped field catalog, subject field insertion, scenario-based preview, and warnings for unknown or scenario-mismatched placeholders. | Makes it easier to author staff and applicant email templates for assignment, NWAC review, secure message, decision, and generic staff notification events.
 - 2026-05-08 | Release 20260509-prod-option-b-plus-portal | Fix/Application Assessment | Repeat applications | Application assessment data now stores by selected application instead of the shared case assessment row, so a second application can start with its own blank assessment and save without overwriting the first application's assessment. Approval-letter workflow state is also scoped by selected application instead of root case context. | Corrected letter-state/context-backfill build passed TEST; PROD deployed on 2026-05-09, copied 57 clear legacy assessments, moved 57 clear letter contexts under application scope, and left duplicate application-assessment owners at 0.
 - 2026-04-23 | Release TBD | Security/Messaging | Applicant Secure Messages | Fixed portal applicant message routing so assigned case managers resolve through staff user accounts instead of overlapping staff profile IDs. | Prevents applicant-origin messages from landing in unrelated applicant inboxes when `user.id` values overlap `staff_profiles.id`; companion PROD repair script corrects existing wrong-recipient mailbox rows before portal reopening.
@@ -296,6 +301,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Made Contact Communications available to Regional Managers for legacy contact messages linked to applications in their case scope.
 - Fixed repeat-application assessments so each selected application loads and saves its own assessment and approval-letter state instead of reusing data from an earlier application on the same case.
 - Updated the public portal dashboard so signed-in applicants see saved drafts, current support, and application history before starting or resuming an intake.
+- Updated the intake so Household Income and base Household Expenses are collected for all support requests, not only Living allowance requests.
 - Improved Ask the AI guidance and guardrails for common application, document, approval-letter, and Pending Completion questions.
 
 ### Known Bugs (draft bullets - EN)
@@ -314,6 +320,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Coming Soon (draft bullets - EN)
 
+- Payments will gain an operations-side follow-up workflow for Finance email handoffs, with the same packet, evidence, and communication history available from Case Workspace and the cross-client Payments dashboard.
+
 ### Nouveautes (brouillon - FR)
 
 - Retrait de la fonction Contact du portail public comme voie de soutien aux candidates et candidats; les personnes inscrites doivent utiliser les Messages securises pour joindre leur gestionnaire de cas, tandis que le personnel peut continuer a trier les anciens messages Contact dans Communications Contact.
@@ -323,6 +331,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Communications Contact est maintenant disponible aux gestionnaires regionaux pour les anciens messages lies aux demandes dans leur portee de cas.
 - Correction des evaluations de demandes repetees afin que chaque demande selectionnee charge et enregistre sa propre evaluation et son propre etat de lettres d'approbation, au lieu de reutiliser les donnees d'une demande precedente dans le meme dossier.
 - Mise a jour du tableau de bord du portail public afin que les personnes connectees voient les brouillons sauvegardes, le soutien en cours et l'historique des demandes avant de commencer ou reprendre une demande.
+- Mise a jour de la demande afin que le revenu du menage et les depenses de base du menage soient recueillis pour toutes les demandes de soutien, pas seulement les demandes d'allocation de subsistance.
 - Amelioration des consignes et garde-fous de Ask the AI pour les questions courantes sur les demandes, documents, lettres d'approbation et la file En attente de completion.
 
 ### Problemes connus (brouillon - FR)
@@ -340,3 +349,5 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Correction des regles de liste de verification des documents afin que les demandes pour frais de scolarite/livres seulement ne soient pas bloquees par les preuves de revenu ou de depenses, et que les lettres de decision de bande ou de nation soient bien reconnues dans les propositions d'intervention.
 
 ### A venir (brouillon - FR)
+
+- Le module Paiements ajoutera un suivi operationnel des demandes envoyees aux finances par courriel, avec les memes donnees de paquet, preuves et communications dans l'espace Dossier et le tableau de bord Paiements.

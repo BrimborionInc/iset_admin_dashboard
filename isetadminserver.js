@@ -73,6 +73,10 @@ const FUNDING_AGREEMENT_PDF_TEMPLATE_PATH = path.join(__dirname, 'src', 'server'
 const CFA_TEMPLATE_KEY = 'ISET_CFA_STANDARD';
 const CFA_SNAPSHOT_SCHEMA_VERSION = '1';
 const CFA_TEMPLATE_VERSION = '1';
+const FUNDING_OVERVIEW_TEMPLATE_KEY = 'ISET_FUNDING_OVERVIEW_STANDARD';
+const FUNDING_OVERVIEW_SNAPSHOT_SCHEMA_VERSION = '1';
+const FUNDING_OVERVIEW_TEMPLATE_VERSION = '1';
+const FUNDING_OVERVIEW_ATTESTATION_TEXT = 'I confirm these income/expense figures are accurate as of today.';
 const CFA_CHANGE_REASONS = new Set([
   'NEW_INTERVENTION_APPROVED',
   'INTERVENTION_CHANGED',
@@ -2076,11 +2080,15 @@ const setTemplateField = ($, field, value) => {
   const hasHtml = value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'html');
   selection.each((_idx, node) => {
     const el = $(node);
+    const tag = (node.tagName || '').toLowerCase();
     if (hasHtml) {
+      if (tag === 'input' || tag === 'textarea') {
+        el.replaceWith(`<span class="pdf-html-field">${value.html || ''}</span>`);
+        return;
+      }
       el.html(value.html || '');
       return;
     }
-    const tag = (node.tagName || '').toLowerCase();
     if (tag === 'input') {
       const inputType = (el.attr('type') || '').toLowerCase();
       if (inputType === 'checkbox') {
@@ -2490,6 +2498,104 @@ async function storeFinancialOverviewPdfDocument({
        (case_id, application_id, client_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
      VALUES (?,?,?,?,?, 'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
     insertPayload
+  );
+  return result?.insertId || null;
+}
+
+async function storeFundingOverviewPdfDocument({
+  caseId,
+  applicationId = null,
+  actionPlanId = null,
+  clientId,
+  applicantUserId,
+  actorUserId,
+  versionNumber,
+  trackingId,
+  fundingOverviewVersionId,
+  pdfBuffer,
+  isRedline = false,
+  signedByClient = false,
+  connection = pool
+}) {
+  if (!caseId || !pdfBuffer) return null;
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const normalizedActionPlanId = normalisePositiveInteger(actionPlanId);
+  const normalizedClientId = normalisePositiveInteger(clientId);
+  if (!normalizedCaseId) {
+    throw new Error('case_id_required');
+  }
+  if (!normalizedClientId) {
+    throw new Error('client_id_required');
+  }
+  const documentType = 'financial_overview';
+  const labelBase = `Funding Overview v${versionNumber || 1}`;
+  const label = isRedline
+    ? signedByClient
+      ? `${labelBase} (redline signed)`
+      : `${labelBase} (redline for signature)`
+    : signedByClient
+      ? `${labelBase} (signed)`
+      : `${labelBase} (for signature)`;
+  const baseRef = normaliseString(trackingId) || String(normalizedCaseId);
+  const suffix = [
+    isRedline ? 'redline' : null,
+    signedByClient ? 'signed' : null
+  ].filter(Boolean).join('-');
+  const displayName = `funding-overview-v${versionNumber || 1}-${baseRef}${suffix ? `-${suffix}` : ''}.pdf`;
+  const sizeBytes = Number.isFinite(Number(pdfBuffer?.length)) ? Number(pdfBuffer.length) : null;
+  const checksum = pdfBuffer ? crypto.createHash('sha256').update(pdfBuffer).digest('hex') : null;
+  const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
+  const normalizedActorUserId = normalisePositiveInteger(actorUserId);
+  let relativePath = null;
+  const { generateKey, presignPut, DRIVER } = require('../ISET-intake/s3Provider');
+  if (DRIVER !== 's3') {
+    throw new Error('s3_upload_unavailable');
+  }
+  const key = generateKey(applicantUserId || actorUserId || 'admin', displayName);
+  const presigned = await presignPut({ key, contentType: 'application/pdf' });
+  await axios.put(presigned.url, pdfBuffer, {
+    headers: {
+      ...(presigned.headers || {}),
+      'Content-Type': 'application/pdf',
+      ...(sizeBytes ? { 'Content-Length': sizeBytes } : {})
+    }
+  });
+  relativePath = key;
+  if (!relativePath) {
+    throw new Error('path_resolution_failed');
+  }
+
+  const metadata = JSON.stringify({
+    label,
+    document_type: documentType,
+    funding_overview_version_id: fundingOverviewVersionId || null,
+    funding_overview_version_number: versionNumber || null,
+    variant: isRedline ? 'redline' : 'clean',
+    template_key: FUNDING_OVERVIEW_TEMPLATE_KEY,
+    signed_by_client: Boolean(signedByClient),
+    attestation: FUNDING_OVERVIEW_ATTESTATION_TEXT
+  });
+  const [result] = await connection.query(
+    `INSERT INTO iset_document
+       (case_id, application_id, action_plan_id, client_id, applicant_user_id, user_id, source, file_name, file_path, mime_type, label, metadata, size_bytes, checksum_sha256, status, document_category)
+     VALUES (?,?,?,?,?,?,'system_generated', ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+    [
+      normalizedCaseId,
+      normalizedApplicationId || null,
+      normalizedActionPlanId || null,
+      normalizedClientId,
+      normalizedApplicantUserId || null,
+      normalizedActorUserId || null,
+      displayName,
+      relativePath,
+      'application/pdf',
+      label,
+      metadata,
+      sizeBytes,
+      checksum,
+      documentType
+    ]
   );
   return result?.insertId || null;
 }
@@ -5221,6 +5327,14 @@ function buildFinancialOverviewPdfFields({
   };
 }
 
+function buildFinancialOverviewPdfHtmlFromFields(fields = {}) {
+  const templateHtml = getFinancialOverviewTemplateHtml();
+  if (!templateHtml) {
+    throw new Error('financial_overview_template_missing');
+  }
+  return buildAssessmentPdfHtml({ templateHtml, fields });
+}
+
 async function generateAssessmentPdfBuffer({
   caseRow,
   applicantName,
@@ -5327,10 +5441,6 @@ async function generateFinancialOverviewPdfBuffer({
   referenceNumber,
   receivedAt
 }) {
-  const templateHtml = getFinancialOverviewTemplateHtml();
-  if (!templateHtml) {
-    throw new Error('financial_overview_template_missing');
-  }
   const fields = buildFinancialOverviewPdfFields({
     applicationRow,
     payload,
@@ -5339,7 +5449,25 @@ async function generateFinancialOverviewPdfBuffer({
     referenceNumber,
     receivedAt
   });
-  const html = buildAssessmentPdfHtml({ templateHtml, fields });
+  const html = buildFinancialOverviewPdfHtmlFromFields(fields);
+  return generatePdfBufferFromHtml(html, {
+    format: 'Letter',
+    margin: { top: '12mm', bottom: '12mm', left: '10mm', right: '10mm' }
+  });
+}
+
+async function generateFinancialOverviewPdfBufferFromFields(fields = {}) {
+  const html = buildFinancialOverviewPdfHtmlFromFields(fields);
+  return generatePdfBufferFromHtml(html, {
+    format: 'Letter',
+    margin: { top: '12mm', bottom: '12mm', left: '10mm', right: '10mm' }
+  });
+}
+
+async function generatePdfBufferFromHtml(html, {
+  format = 'Letter',
+  margin = { top: '12mm', bottom: '12mm', left: '10mm', right: '10mm' }
+} = {}) {
   let browser;
   try {
     browser = await puppeteer.launch({
@@ -5349,9 +5477,9 @@ async function generateFinancialOverviewPdfBuffer({
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });
     const pdfBuffer = await page.pdf({
-      format: 'Letter',
+      format,
       printBackground: true,
-      margin: { top: '12mm', bottom: '12mm', left: '10mm', right: '10mm' }
+      margin
     });
     await page.close();
     return pdfBuffer;
@@ -5597,6 +5725,7 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'payment_batch_line',
   'payment_packet_document',
   'payment_packet_communication',
+  'payment_followup_event',
   'payment_status_event',
   'payment_override',
   'payment_packet_line',
@@ -5622,7 +5751,6 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'budget_snapshot',
   'budget_pot_draft',
   'iset_event_receipt',
-  'iset_event_outbox',
   'iset_event_entry',
   'message_signing_request',
   'signing_request',
@@ -12177,6 +12305,642 @@ async function buildCfaRenderSet({
     participantTokens: participantVariant === 'redline' ? redlineTokens : cleanTokens,
     participantVariant,
   };
+}
+
+const FUNDING_OVERVIEW_FIELD_LABELS = {
+  reference_number: 'Reference #',
+  applicant_name: 'Applicant Name',
+  received_at: 'Received At',
+  income_employment: 'Employment income',
+  income_spousal: 'Spousal income',
+  income_social_assist: 'Social assistance income',
+  income_child_support: 'Child support income',
+  income_child_benefit: 'Canada Child Benefit',
+  income_jordans: "Jordan's Principle",
+  income_band_funding: 'Band funding',
+  income_alimony: 'Alimony / spousal support',
+  income_other_amount: 'Other income amount',
+  income_total: 'Total monthly income',
+  income_other_sources: 'Other income source(s)',
+  expenses_rent: 'Rent / Mortgage',
+  expenses_groceries: 'Groceries',
+  expenses_electricity: 'Electricity/Hydro',
+  expenses_heating: 'Home Heating',
+  expenses_water: 'Water',
+  expenses_sewerage: 'Sewer / Wastewater',
+  expenses_garbage: 'Waste Management',
+  expenses_bus_pass: 'Bus pass',
+  expenses_parking: 'Parking charges',
+  expenses_other_total: 'Other expenses total',
+  expenses_total: 'Total monthly expenses',
+  expenses_other_list: 'Other expenses list',
+  social_assistance_yes: 'Social Assistance: Yes',
+  social_assistance_no: 'Social Assistance: No',
+  top_up_amount: 'Top-up amount',
+  childcare_ei_crf: 'Childcare funding: EI/CRF',
+  childcare_provincial: 'Childcare funding: Provincial funding/subsidy',
+  childcare_fnicci: 'Childcare funding: FNICCI',
+  childcare_no_funding: 'Childcare funding: No funding received',
+  childcare_daycare_unavailable: 'Childcare funding: Daycare not available',
+  childcare_family: 'Childcare funding: Assisted by family',
+  childcare_self_funded: 'Childcare funding: Self-funded',
+  childcare_not_applicable: 'Childcare funding: Not applicable',
+  transport_bus_pass: 'Transport: Bus pass',
+  transport_parking: 'Transport: Parking',
+  transport_mileage: 'Transport: Mileage',
+  transport_mileage_km: 'Mileage (km/month)',
+  loan_grant_yes: 'Student loans or grants: Yes',
+  loan_grant_no: 'Student loans or grants: No',
+  loan_grant_details: 'Student loan/grant details',
+};
+
+const FUNDING_OVERVIEW_NON_DIFF_FIELDS = new Set([
+  'nwac_logo',
+  'version_label',
+  'signature_section_html',
+]);
+
+const FUNDING_OVERVIEW_SOURCE_ANSWER_KEYS = [
+  ...FINANCIAL_OVERVIEW_INCOME_FIELDS.map(({ key }) => key),
+  ...FINANCIAL_OVERVIEW_EXPENSE_FIELDS.map(({ key }) => key),
+  'income-other',
+  'expenses-other-list',
+  'social-assistance',
+  'top-up-amount',
+  'requested-supports',
+  'childcare-fuding-status',
+  'expenses-transport',
+  'expenses_transport_mileage',
+  'loan-grant',
+  'loan-grant-details',
+];
+
+function stripFundingOverviewRuntimeFields(fields = {}) {
+  const out = {};
+  Object.entries(fields || {}).forEach(([key, value]) => {
+    if (FUNDING_OVERVIEW_NON_DIFF_FIELDS.has(key)) return;
+    out[key] = value;
+  });
+  return out;
+}
+
+function extractFundingOverviewSourceAnswers(answers = {}) {
+  const out = {};
+  if (!answers || typeof answers !== 'object') return out;
+  FUNDING_OVERVIEW_SOURCE_ANSWER_KEYS.forEach(key => {
+    const altKey = key.replace(/-/g, '_');
+    if (Object.prototype.hasOwnProperty.call(answers, key)) {
+      out[key] = answers[key];
+    } else if (Object.prototype.hasOwnProperty.call(answers, altKey)) {
+      out[altKey] = answers[altKey];
+    }
+  });
+  return out;
+}
+
+function normalizeFundingOverviewFieldValue(value) {
+  if (value === null || typeof value === 'undefined') return '';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return String(value).replace(/\s+/g, ' ').trim();
+}
+
+function buildFundingOverviewCheckboxDiffHtml(currentValue, previousValue) {
+  const currentChecked = Boolean(currentValue);
+  const previousChecked = Boolean(previousValue);
+  if (currentChecked === previousChecked) return currentChecked ? '&#9745;' : '&#9744;';
+  const oldMark = previousChecked ? '&#9745;' : '&#9744;';
+  const newMark = currentChecked ? '&#9745;' : '&#9744;';
+  return [
+    '<span class="redline-check">',
+    `<span class="redline-inline-old">${oldMark}</span>`,
+    `<span class="redline-inline-new">${newMark}</span>`,
+    '</span>'
+  ].join('');
+}
+
+function buildFundingOverviewRedlineFields(currentFields = {}, previousFields = {}) {
+  const rendered = { ...currentFields };
+  Object.keys(currentFields || {}).forEach(key => {
+    if (FUNDING_OVERVIEW_NON_DIFF_FIELDS.has(key)) return;
+    const currentValue = currentFields[key];
+    const previousValue = previousFields ? previousFields[key] : undefined;
+    if (typeof currentValue === 'boolean' || typeof previousValue === 'boolean') {
+      if (Boolean(currentValue) !== Boolean(previousValue)) {
+        rendered[key] = { html: buildFundingOverviewCheckboxDiffHtml(currentValue, previousValue) };
+      }
+      return;
+    }
+    const normalizedCurrent = normalizeFundingOverviewFieldValue(currentValue);
+    const normalizedPrevious = normalizeFundingOverviewFieldValue(previousValue);
+    if (normalizedCurrent !== normalizedPrevious) {
+      rendered[key] = {
+        html: buildAssessmentInlineDiffHtml({
+          currentValue: currentValue || '',
+          previousValue: previousValue || '',
+          emptyValue: ''
+        })
+      };
+    }
+  });
+  return rendered;
+}
+
+function buildFundingOverviewChangeSummary(currentFields = {}, previousFields = {}) {
+  const changed = [];
+  Object.keys(FUNDING_OVERVIEW_FIELD_LABELS).forEach(key => {
+    const currentValue = currentFields ? currentFields[key] : undefined;
+    const previousValue = previousFields ? previousFields[key] : undefined;
+    if (normalizeFundingOverviewFieldValue(currentValue) !== normalizeFundingOverviewFieldValue(previousValue)) {
+      changed.push(FUNDING_OVERVIEW_FIELD_LABELS[key] || key);
+    }
+  });
+  return changed;
+}
+
+function buildFundingOverviewSignatureSectionHtml({
+  signerName = '',
+  signedAt = null,
+  includeBlank = true
+} = {}) {
+  const panel = buildPdfSignaturePanelHtml({
+    signerName,
+    signedAt,
+    emptyMessage: includeBlank ? 'Client signature pending' : ''
+  });
+  return `
+    <div class="signature-section">
+      <div class="signature-attestation">${escapeHtml(FUNDING_OVERVIEW_ATTESTATION_TEXT)}</div>
+      ${panel}
+    </div>
+  `;
+}
+
+function buildFundingOverviewVersionLabel({ versionNumber, variant = 'clean' } = {}) {
+  const version = normalisePositiveInteger(versionNumber) || 1;
+  return variant === 'redline' ? `Funding Overview v${version} redline` : `Funding Overview v${version}`;
+}
+
+function resolveFundingOverviewApplicantName({ caseRow, payload, answers, caseContext } = {}) {
+  const personal = caseContext?.applicationPersonal || {};
+  const contextNameCandidates = [
+    caseContext?.preferredName,
+    caseContext?.preferred_name,
+    personal.preferred_name,
+    personal.preferredName,
+    answers?.['preferred-name'],
+    answers?.preferred_name,
+    personal.first_name && personal.last_name ? `${personal.first_name} ${personal.last_name}` : null,
+    personal.firstName && personal.lastName ? `${personal.firstName} ${personal.lastName}` : null,
+    caseContext?.firstName && caseContext?.lastName ? `${caseContext.firstName} ${caseContext.lastName}` : null,
+    caseContext?.first_name && caseContext?.last_name ? `${caseContext.first_name} ${caseContext.last_name}` : null,
+    caseRow?.client_first_name && caseRow?.client_last_name ? `${caseRow.client_first_name} ${caseRow.client_last_name}` : null,
+    caseRow?.applicant_name,
+    caseRow?.applicant_email,
+  ];
+  const fallbackName = contextNameCandidates.map(v => normaliseString(v)).find(Boolean) || null;
+  return resolveApplicantNameFromPayload(payload, fallbackName) || fallbackName || '';
+}
+
+async function buildFundingOverviewSnapshot({
+  connection = pool,
+  caseId,
+  applicationId = null,
+  actorUserId = null,
+  staffProfileId = null,
+  preparedByName = ''
+}) {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  if (!normalizedCaseId) throw new Error('invalid_case_id');
+  const requestedApplicationId = normalisePositiveInteger(applicationId);
+  const applicationJoinSql = requestedApplicationId
+    ? 'LEFT JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
+    : buildCasePrimaryApplicationJoinSql('c', 'a');
+  const params = requestedApplicationId ? [requestedApplicationId, normalizedCaseId] : [normalizedCaseId];
+  const [[caseRow]] = await connection.query(
+    `SELECT c.id AS case_id,
+            c.case_number,
+            c.client_id,
+            c.assigned_staff_profile_id,
+            c.case_context_json,
+            cl.first_name AS client_first_name,
+            cl.last_name AS client_last_name,
+            a.id AS application_id,
+            a.created_at AS application_created_at,
+            a.submission_id,
+            s.reference_number,
+            s.user_id AS submission_user_id,
+            applicant.email AS applicant_email,
+            applicant.name AS applicant_name
+       FROM iset_case c
+       LEFT JOIN client cl ON cl.id = c.client_id
+       ${applicationJoinSql}
+       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+       LEFT JOIN user applicant ON applicant.id = s.user_id
+      WHERE c.id = ?
+      LIMIT 1`,
+    params
+  );
+  if (!caseRow) throw new Error('case_not_found');
+  const resolvedApplicationId = normalisePositiveInteger(caseRow.application_id) || requestedApplicationId || null;
+  let applicationPayload = null;
+  if (resolvedApplicationId) {
+    applicationPayload = await readApplicationPayload(connection, resolvedApplicationId, { forUpdate: false });
+  }
+  const payload = applicationPayload?.payload || {};
+  const baseAnswers = sanitiseAnswersPayload(payload.answers || {});
+  const caseContext = safeJsonParse(caseRow.case_context_json, null) || {};
+  const contextAnswers =
+    caseContext.applicationAnswers && typeof caseContext.applicationAnswers === 'object'
+      ? sanitiseAnswersPayload(caseContext.applicationAnswers)
+      : {};
+  const answers = {
+    ...baseAnswers,
+    ...contextAnswers,
+  };
+  const applicantName = resolveFundingOverviewApplicantName({
+    caseRow,
+    payload,
+    answers,
+    caseContext
+  });
+  const referenceNumber =
+    normaliseString(caseRow.reference_number) ||
+    normaliseString(caseRow.case_number) ||
+    `CASE-${normalizedCaseId}`;
+  const receivedAt =
+    applicationPayload?.row?.created_at ||
+    caseRow.application_created_at ||
+    null;
+  const fields = buildFinancialOverviewPdfFields({
+    applicationRow: applicationPayload?.row || { id: resolvedApplicationId },
+    payload,
+    answers,
+    applicantName,
+    referenceNumber,
+    receivedAt
+  });
+  const snapshotFields = stripFundingOverviewRuntimeFields(fields);
+  return {
+    schemaVersion: FUNDING_OVERVIEW_SNAPSHOT_SCHEMA_VERSION,
+    capturedAt: new Date().toISOString(),
+    attestation: FUNDING_OVERVIEW_ATTESTATION_TEXT,
+    case: {
+      caseId: normalizedCaseId,
+      caseNumber: normaliseString(caseRow.case_number) || null,
+      clientId: normalisePositiveInteger(caseRow.client_id) || null,
+      applicationId: resolvedApplicationId,
+      applicantUserId: normalisePositiveInteger(caseRow.submission_user_id) || null,
+      trackingId: referenceNumber,
+      receivedAt: receivedAt ? toIsoDateTime(receivedAt) : null,
+      assignedStaffProfileId: normalisePositiveInteger(caseRow.assigned_staff_profile_id) || null,
+    },
+    client: {
+      name: applicantName,
+      email: normaliseString(caseRow.applicant_email) || null,
+    },
+    preparedBy: {
+      userId: normalisePositiveInteger(actorUserId) || null,
+      staffProfileId: normalisePositiveInteger(staffProfileId) || null,
+      name: normaliseString(preparedByName) || null,
+    },
+    sourceAnswers: extractFundingOverviewSourceAnswers(answers),
+    fields: snapshotFields,
+  };
+}
+
+function computeFundingOverviewSnapshotSignature(snapshot) {
+  const canonicalJson = JSON.stringify(snapshot || {});
+  const hash = crypto.createHash('sha256').update(canonicalJson).digest('hex');
+  return { canonicalJson, hash };
+}
+
+function buildFundingOverviewRenderSet({
+  snapshot,
+  previousSnapshot = null,
+  versionNumber = 1,
+  preferParticipantRedline = false,
+  signerName = '',
+  signedAt = null,
+  includeSignatureSection = true
+} = {}) {
+  const cleanFields = {
+    ...(snapshot?.fields || {}),
+    nwac_logo: getNwacLogoDataUri(),
+    version_label: buildFundingOverviewVersionLabel({ versionNumber, variant: 'clean' }),
+    signature_section_html: includeSignatureSection
+      ? { html: buildFundingOverviewSignatureSectionHtml({ signerName, signedAt }) }
+      : ''
+  };
+  let redlineFields = null;
+  if (previousSnapshot?.fields && Object.keys(previousSnapshot.fields).length) {
+    redlineFields = {
+      ...buildFundingOverviewRedlineFields(snapshot?.fields || {}, previousSnapshot.fields),
+      nwac_logo: getNwacLogoDataUri(),
+      version_label: buildFundingOverviewVersionLabel({ versionNumber, variant: 'redline' }),
+      signature_section_html: includeSignatureSection
+        ? { html: buildFundingOverviewSignatureSectionHtml({ signerName, signedAt }) }
+        : ''
+    };
+  }
+  const participantVariant = preferParticipantRedline && redlineFields ? 'redline' : 'clean';
+  return {
+    cleanFields,
+    redlineFields,
+    participantFields: participantVariant === 'redline' ? redlineFields : cleanFields,
+    participantVariant,
+    changedFields: redlineFields ? buildFundingOverviewChangeSummary(snapshot?.fields || {}, previousSnapshot?.fields || {}) : []
+  };
+}
+
+async function ensureFundingOverviewSeries(connection, { caseId, templateKey, createdByStaffProfileId }) {
+  const [[row]] = await connection.query(
+    `SELECT id
+       FROM funding_overview_series
+      WHERE case_id = ? AND template_key = ?
+      LIMIT 1`,
+    [caseId, templateKey]
+  );
+  if (row?.id) return Number(row.id);
+  const [result] = await connection.query(
+    `INSERT INTO funding_overview_series (case_id, template_key, created_by_staff_profile_id)
+     VALUES (?, ?, ?)`,
+    [caseId, templateKey, createdByStaffProfileId || null]
+  );
+  return result.insertId;
+}
+
+async function cancelUnsignedFundingOverviewSigningRequests(connection, versionIds = []) {
+  const ids = (Array.isArray(versionIds) ? versionIds : [])
+    .map(normalisePositiveInteger)
+    .filter(Boolean);
+  if (!ids.length) return;
+  const placeholders = ids.map(() => '?').join(',');
+  await connection.query(
+    `UPDATE signing_request
+        SET status = 'cancelled',
+            updated_at = NOW()
+      WHERE status IN ('pending', 'viewed')
+        AND JSON_UNQUOTE(JSON_EXTRACT(resolved_schema_json, '$.meta.fundingOverviewVersionId')) IN (${placeholders})`,
+    ids.map(String)
+  );
+}
+
+async function createFundingOverviewVersion({
+  caseId,
+  applicationId = null,
+  changeReason = 'FINANCIAL_OVERVIEW_UPDATED',
+  changeSummary = 'Funding overview for signature',
+  actorUserId,
+  staffProfileId,
+  preparedByName,
+  connection = null
+}) {
+  let runner = connection;
+  let release = false;
+  if (!runner) {
+    runner = await pool.getConnection();
+    release = true;
+    await runner.beginTransaction();
+  }
+  try {
+    const normalizedCaseId = normalisePositiveInteger(caseId);
+    if (!normalizedCaseId) throw new Error('invalid_case_id');
+    const seriesId = await ensureFundingOverviewSeries(runner, {
+      caseId: normalizedCaseId,
+      templateKey: FUNDING_OVERVIEW_TEMPLATE_KEY,
+      createdByStaffProfileId: staffProfileId || null
+    });
+
+    const [unsignedRows] = await runner.query(
+      `SELECT id
+         FROM funding_overview_version
+        WHERE series_id = ?
+          AND status IN ('draft', 'sent')`,
+      [seriesId]
+    );
+    const unsignedIds = (Array.isArray(unsignedRows) ? unsignedRows : [])
+      .map(row => normalisePositiveInteger(row.id))
+      .filter(Boolean);
+    if (unsignedIds.length) {
+      const placeholders = unsignedIds.map(() => '?').join(',');
+      await runner.query(
+        `UPDATE funding_overview_version
+            SET status = 'withdrawn'
+          WHERE id IN (${placeholders})`,
+        unsignedIds
+      );
+      await cancelUnsignedFundingOverviewSigningRequests(runner, unsignedIds);
+    }
+
+    const [[maxRow]] = await runner.query(
+      `SELECT MAX(version_number) AS max_version
+         FROM funding_overview_version
+        WHERE series_id = ?`,
+      [seriesId]
+    );
+    const nextVersionNumber = (Number(maxRow?.max_version) || 0) + 1;
+
+    const [[priorSignedRow]] = await runner.query(
+      `SELECT id, metadata_json
+         FROM funding_overview_version
+        WHERE series_id = ?
+          AND status = 'signed'
+        ORDER BY version_number DESC
+        LIMIT 1`,
+      [seriesId]
+    );
+    const previousSnapshot = safeJsonParse(priorSignedRow?.metadata_json, null);
+    const snapshot = await buildFundingOverviewSnapshot({
+      connection: runner,
+      caseId: normalizedCaseId,
+      applicationId,
+      actorUserId,
+      staffProfileId,
+      preparedByName
+    });
+    const { canonicalJson, hash } = computeFundingOverviewSnapshotSignature(snapshot);
+    const [insert] = await runner.query(
+      `INSERT INTO funding_overview_version
+        (series_id, version_number, status, supersedes_version_id, change_reason, change_summary,
+         created_by_staff_profile_id, effective_date, snapshot_schema_version, snapshot_hash,
+         rendered_template_version, metadata_json)
+       VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        seriesId,
+        nextVersionNumber,
+        priorSignedRow?.id || null,
+        changeReason || null,
+        changeSummary || null,
+        staffProfileId || null,
+        toDateOnlyString(new Date()),
+        FUNDING_OVERVIEW_SNAPSHOT_SCHEMA_VERSION,
+        hash,
+        FUNDING_OVERVIEW_TEMPLATE_VERSION,
+        canonicalJson
+      ]
+    );
+    const fundingOverviewVersionId = insert.insertId;
+    const renderSet = buildFundingOverviewRenderSet({
+      snapshot,
+      previousSnapshot,
+      versionNumber: nextVersionNumber,
+      preferParticipantRedline: false
+    });
+    const cleanBuffer = await generateFinancialOverviewPdfBufferFromFields(renderSet.cleanFields);
+    const cleanDocId = await storeFundingOverviewPdfDocument({
+      caseId: normalizedCaseId,
+      applicationId: snapshot?.case?.applicationId || null,
+      clientId: snapshot?.case?.clientId || null,
+      applicantUserId: snapshot?.case?.applicantUserId || null,
+      actorUserId,
+      versionNumber: nextVersionNumber,
+      trackingId: snapshot?.case?.trackingId || null,
+      fundingOverviewVersionId,
+      pdfBuffer: cleanBuffer,
+      isRedline: false,
+      connection: runner
+    });
+    if (cleanDocId) {
+      await runner.query(
+        `INSERT INTO funding_overview_version_documents (funding_overview_version_id, document_type, document_id)
+         VALUES (?, 'clean', ?)`,
+        [fundingOverviewVersionId, cleanDocId]
+      );
+    }
+
+    let redlineDocId = null;
+    if (renderSet.redlineFields) {
+      const redlineBuffer = await generateFinancialOverviewPdfBufferFromFields(renderSet.redlineFields);
+      redlineDocId = await storeFundingOverviewPdfDocument({
+        caseId: normalizedCaseId,
+        applicationId: snapshot?.case?.applicationId || null,
+        clientId: snapshot?.case?.clientId || null,
+        applicantUserId: snapshot?.case?.applicantUserId || null,
+        actorUserId,
+        versionNumber: nextVersionNumber,
+        trackingId: snapshot?.case?.trackingId || null,
+        fundingOverviewVersionId,
+        pdfBuffer: redlineBuffer,
+        isRedline: true,
+        connection: runner
+      });
+      if (redlineDocId) {
+        await runner.query(
+          `INSERT INTO funding_overview_version_documents (funding_overview_version_id, document_type, document_id)
+           VALUES (?, 'redline', ?)`,
+          [fundingOverviewVersionId, redlineDocId]
+        );
+      }
+    }
+
+    if (release) await runner.commit();
+    return {
+      fundingOverviewVersionId,
+      versionNumber: nextVersionNumber,
+      seriesId,
+      cleanDocId: cleanDocId || null,
+      redlineDocId: redlineDocId || null,
+      supersedesVersionId: priorSignedRow?.id || null,
+      snapshot,
+      previousSnapshot: previousSnapshot || null,
+    };
+  } catch (error) {
+    if (release) {
+      try { await runner.rollback(); } catch (_) {}
+    }
+    throw error;
+  } finally {
+    if (release && runner) runner.release();
+  }
+}
+
+async function regenerateSignedFundingOverviewDocument({
+  connection,
+  fundingOverviewVersionId,
+  participantUserId,
+  signedPayload,
+  actorUserId,
+}) {
+  const runner = connection || pool;
+  const [[versionRow]] = await runner.query(
+    `SELECT v.id, v.version_number, v.metadata_json, v.supersedes_version_id, s.case_id
+       FROM funding_overview_version v
+       JOIN funding_overview_series s ON s.id = v.series_id
+      WHERE v.id = ?
+      LIMIT 1`,
+    [fundingOverviewVersionId]
+  );
+  if (!versionRow) return null;
+  const snapshot = safeJsonParse(versionRow.metadata_json, null) || {};
+  const caseId = normalisePositiveInteger(versionRow.case_id);
+  if (!caseId) return null;
+  let previousSnapshot = null;
+  const priorVersionId = normalisePositiveInteger(versionRow.supersedes_version_id);
+  if (priorVersionId) {
+    const [[priorRow]] = await runner.query(
+      `SELECT metadata_json
+         FROM funding_overview_version
+        WHERE id = ?
+        LIMIT 1`,
+      [priorVersionId]
+    );
+    previousSnapshot = safeJsonParse(priorRow?.metadata_json, null);
+  }
+  const clientSignature =
+    extractParticipantSignatureNameFromPayload(signedPayload) ||
+    normaliseString(snapshot?.client?.name || '') ||
+    '';
+  const renderSet = buildFundingOverviewRenderSet({
+    snapshot,
+    previousSnapshot,
+    versionNumber: Number(versionRow.version_number) || 1,
+    preferParticipantRedline: true,
+    signerName: clientSignature,
+    signedAt: new Date()
+  });
+  const signedVariantIsRedline = renderSet.participantVariant === 'redline';
+  const signedBuffer = await generateFinancialOverviewPdfBufferFromFields(renderSet.participantFields);
+  const signedDocId = await storeFundingOverviewPdfDocument({
+    caseId,
+    applicationId: snapshot?.case?.applicationId || null,
+    clientId: snapshot?.case?.clientId || null,
+    applicantUserId: snapshot?.case?.applicantUserId || participantUserId || null,
+    actorUserId: actorUserId || participantUserId || null,
+    versionNumber: Number(versionRow.version_number) || 1,
+    trackingId: snapshot?.case?.trackingId || null,
+    fundingOverviewVersionId,
+    pdfBuffer: signedBuffer,
+    isRedline: signedVariantIsRedline,
+    signedByClient: true,
+    connection: runner
+  });
+  if (!signedDocId) return null;
+
+  const targetDocumentType = signedVariantIsRedline ? 'redline' : 'clean';
+  const [[currentDocRow]] = await runner.query(
+    `SELECT document_id
+       FROM funding_overview_version_documents
+      WHERE funding_overview_version_id = ?
+        AND document_type = ?
+      LIMIT 1`,
+    [fundingOverviewVersionId, targetDocumentType]
+  );
+  const previousDocId = normalisePositiveInteger(currentDocRow?.document_id);
+  if (previousDocId && previousDocId !== signedDocId) {
+    await runner.query(
+      `UPDATE iset_document
+          SET status = 'archived', updated_at = NOW()
+        WHERE id = ?`,
+      [previousDocId]
+    );
+  }
+  await runner.query(
+    `INSERT INTO funding_overview_version_documents (funding_overview_version_id, document_type, document_id)
+     VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE document_id = VALUES(document_id), created_at = CURRENT_TIMESTAMP`,
+    [fundingOverviewVersionId, targetDocumentType, signedDocId]
+  );
+  return signedDocId;
 }
 
 function extractParticipantSignatureNameFromPayload(payload) {
@@ -56656,6 +57420,12 @@ const handlePostCaseSecureMessage = async (req, res) => {
     const needsFundingAgreementPrefill = attachmentRows.some(
       row => row.workflow_type === 'consent-cm-prefill' && row.document_type === 'funding_agreement'
     );
+    const needsFundingOverviewPrefill = attachmentRows.some(
+      row => row.workflow_type === 'consent-cm-prefill' && row.document_type === 'financial_overview'
+    );
+    const resolvedSenderStaffProfileIdForForms =
+      resolveActiveStaffProfileId(req) ||
+      await findStaffProfileIdByUserId(pool, Number(senderId));
     let cfaDraft = null;
     let cfaSnapshot = null;
     let fundingAgreementTokens = null;
@@ -56916,6 +57686,59 @@ const handlePostCaseSecureMessage = async (req, res) => {
       // Participant-facing views hide this block at read time.
     }
 
+    let fundingOverviewDraft = null;
+    let fundingOverviewTokens = null;
+    let fundingOverviewVariant = 'clean';
+    if (needsFundingOverviewPrefill) {
+      try {
+        const requesterDisplayName = await resolveStaffDisplayName(pool, req);
+        const created = await createFundingOverviewVersion({
+          caseId,
+          applicationId: caseRow?.application_id || null,
+          changeReason: 'FINANCIAL_OVERVIEW_SIGNATURE_REQUESTED',
+          changeSummary: 'Funding overview sent for client signature',
+          actorUserId: senderId,
+          staffProfileId: resolvedSenderStaffProfileIdForForms || null,
+          preparedByName: requesterDisplayName || fromNameValue || ''
+        });
+        if (!created?.fundingOverviewVersionId) {
+          return res.status(409).json({
+            error: 'funding_overview_draft_missing',
+            message: 'No funding overview draft could be created for this case.'
+          });
+        }
+        const renderSet = buildFundingOverviewRenderSet({
+          snapshot: created.snapshot,
+          previousSnapshot: created.previousSnapshot,
+          versionNumber: created.versionNumber,
+          preferParticipantRedline: true,
+          includeSignatureSection: false
+        });
+        fundingOverviewVariant = renderSet.participantVariant || 'clean';
+        fundingOverviewDraft = {
+          id: Number(created.fundingOverviewVersionId),
+          versionNumber: Number(created.versionNumber),
+          seriesId: Number(created.seriesId),
+          supersedesVersionId: normalisePositiveInteger(created.supersedesVersionId) || null,
+          changedFields: Array.isArray(renderSet.changedFields) ? renderSet.changedFields : [],
+        };
+        fundingOverviewTokens = {
+          funding_overview_html: buildFinancialOverviewPdfHtmlFromFields(renderSet.participantFields)
+        };
+      } catch (err) {
+        console.warn(
+          '[funding-overview] draft creation failed for case %s (code=%s, message=%s)',
+          caseId,
+          err?.code || 'n/a',
+          err?.message || err
+        );
+        return res.status(409).json({
+          error: 'funding_overview_draft_failed',
+          message: 'No funding overview draft could be created for this case.'
+        });
+      }
+    }
+
 	    const caseApplicationId = normalisePositiveInteger(caseRow?.application_id);
 	    const messageApplicationId = caseApplicationId || null;
     if (requestedApplicationId && requestedApplicationId !== messageApplicationId) {
@@ -56927,9 +57750,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
       );
     }
 
-    const senderStaffProfileId =
-      resolveActiveStaffProfileId(req) ||
-      await findStaffProfileIdByUserId(pool, Number(senderId));
+    const senderStaffProfileId = resolvedSenderStaffProfileIdForForms;
     const senderActorType = senderStaffProfileId ? 'staff_profile' : 'local_user';
     const [result] = await pool.query(
       `INSERT INTO messages
@@ -57015,6 +57836,14 @@ const handlePostCaseSecureMessage = async (req, res) => {
         ) {
           resolvedSchema = applyPrefillTokensToSchema(resolvedSchema, fundingAgreementTokens, { preserveMissingTokens: true });
         }
+        if (
+          resolvedSchema &&
+          fundingOverviewTokens &&
+          wf.workflow_type === 'consent-cm-prefill' &&
+          wf.document_type === 'financial_overview'
+        ) {
+          resolvedSchema = applyPrefillTokensToSchema(resolvedSchema, fundingOverviewTokens, { preserveMissingTokens: true });
+        }
         if (resolvedSchema && cfaDraft && wf.document_type === 'funding_agreement') {
           resolvedSchema = {
             ...resolvedSchema,
@@ -57024,6 +57853,21 @@ const handlePostCaseSecureMessage = async (req, res) => {
               cfaVersionNumber: cfaDraft.versionNumber,
               cfaSeriesId: cfaDraft.seriesId,
               cfaRenderVariant: fundingAgreementVariant,
+            }
+          };
+        }
+        if (resolvedSchema && fundingOverviewDraft && wf.document_type === 'financial_overview') {
+          resolvedSchema = {
+            ...resolvedSchema,
+            meta: {
+              ...(resolvedSchema?.meta || {}),
+              fundingOverviewVersionId: fundingOverviewDraft.id,
+              fundingOverviewVersionNumber: fundingOverviewDraft.versionNumber,
+              fundingOverviewSeriesId: fundingOverviewDraft.seriesId,
+              fundingOverviewRenderVariant: fundingOverviewVariant,
+              fundingOverviewSupersedesVersionId: fundingOverviewDraft.supersedesVersionId,
+              fundingOverviewChangedFields: fundingOverviewDraft.changedFields,
+              fundingOverviewAttestation: FUNDING_OVERVIEW_ATTESTATION_TEXT,
             }
           };
         }
@@ -57125,6 +57969,17 @@ const handlePostCaseSecureMessage = async (req, res) => {
           WHERE id = ?
             AND status = 'draft'`,
         [staffProfileId, cfaDraft.id]
+      );
+    }
+    if (fundingOverviewDraft) {
+      await pool.query(
+        `UPDATE funding_overview_version
+            SET status = 'sent',
+                sent_at = NOW(),
+                sent_by_staff_profile_id = ?
+          WHERE id = ?
+            AND status = 'draft'`,
+        [senderStaffProfileId || null, fundingOverviewDraft.id]
       );
     }
     if (
@@ -58526,14 +59381,7 @@ const isFinancePaymentsRole = role => {
   return FINANCE_PAYMENTS_ROLE_ALLOWLIST.has(canonical);
 };
 
-const SIMPLE_PAYMENT_WORKFLOW = true;
-const SIMPLE_PAYMENT_PACKET_STATUSES = new Set([
-  'draft',
-  'ready_to_send',
-  'submitted',
-  'confirmed',
-  'cancelled',
-]);
+const SIMPLE_PAYMENT_WORKFLOW = false;
 
 const PAYMENT_PACKET_STATUSES = new Set([
   'draft',
@@ -58553,6 +59401,28 @@ const PAYMENT_LINE_STATUSES = new Set([
 ]);
 
 const PAYMENT_BATCH_STATUSES = new Set(['draft', 'approved', 'exported', 'closed']);
+
+const PAYMENT_FOLLOW_UP_STATUSES = new Set([
+  'not_required',
+  'sent_to_finance',
+  'follow_up_needed',
+  'follow_up_logged',
+  'reported_paid',
+  'confirmed_by_evidence',
+  'stale_no_response',
+  'cancelled_not_proceeding',
+]);
+
+const PAYMENT_FOLLOW_UP_LABELS = {
+  not_required: 'Not started',
+  sent_to_finance: 'Sent to finance',
+  follow_up_needed: 'Follow-up needed',
+  follow_up_logged: 'Follow-up logged',
+  reported_paid: 'Reported paid',
+  confirmed_by_evidence: 'Confirmed by evidence',
+  stale_no_response: 'Stale/no response',
+  cancelled_not_proceeding: 'Cancelled/not proceeding',
+};
 
 const PACKET_STATUS_TO_LINE_STATUS = {
   draft: 'needs_evidence',
@@ -64347,6 +65217,30 @@ const normalizePaymentLineStatus = value => {
   return PAYMENT_LINE_STATUSES.has(status) ? status : null;
 };
 
+const normalizePaymentFollowUpStatus = value => {
+  if (typeof value !== 'string') return null;
+  const status = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (!status) return null;
+  return PAYMENT_FOLLOW_UP_STATUSES.has(status) ? status : null;
+};
+
+const normalizePaymentFollowUpDueDate = value => {
+  if (value === null || value === undefined || value === '') return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const date = new Date(`${trimmed}T00:00:00Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== trimmed) {
+    return null;
+  }
+  return trimmed;
+};
+
 const normalizePaymentBatchStatus = value => {
   if (typeof value !== 'string') return null;
   const status = value.trim().toLowerCase();
@@ -64421,6 +65315,7 @@ const deletePaymentPacket = async ({ packetId, connection }) => {
 
   await connection.query('DELETE FROM payment_packet_document WHERE payment_packet_id = ?', [packetId]);
   await connection.query('DELETE FROM payment_packet_communication WHERE payment_packet_id = ?', [packetId]);
+  await connection.query('DELETE FROM payment_followup_event WHERE payment_packet_id = ?', [packetId]);
   await connection.query('DELETE FROM payment_status_event WHERE payment_packet_id = ?', [packetId]);
   await connection.query('DELETE FROM payment_override WHERE payment_packet_id = ?', [packetId]);
   await connection.query('DELETE FROM payment_packet_line WHERE payment_packet_id = ?', [packetId]);
@@ -64452,6 +65347,7 @@ const deletePaymentLine = async ({ lineId, connection }) => {
   await connection.query('DELETE FROM payment_line_transaction WHERE payment_packet_line_id = ?', [lineId]);
   await connection.query('DELETE FROM payment_batch_line WHERE payment_packet_line_id = ?', [lineId]);
   await connection.query('DELETE FROM payment_packet_document WHERE payment_packet_line_id = ?', [lineId]);
+  await connection.query('DELETE FROM payment_followup_event WHERE payment_packet_line_id = ?', [lineId]);
   await connection.query('DELETE FROM payment_status_event WHERE payment_packet_line_id = ?', [lineId]);
   await connection.query('DELETE FROM payment_override WHERE payment_packet_line_id = ?', [lineId]);
   await connection.query('DELETE FROM payment_packet_line WHERE id = ? LIMIT 1', [lineId]);
@@ -64555,6 +65451,12 @@ const mapPaymentPacketRow = row => {
     potId: null,
     potName: null,
     status: normalizePaymentStatus(row.status) || 'draft',
+    followUpStatus: normalizePaymentFollowUpStatus(row.follow_up_status) || 'not_required',
+    followUpLabel:
+      PAYMENT_FOLLOW_UP_LABELS[normalizePaymentFollowUpStatus(row.follow_up_status)] ||
+      PAYMENT_FOLLOW_UP_LABELS.not_required,
+    followUpDueAt: toDateOnlyString(row.follow_up_due_at),
+    followUpUpdatedAt: row.follow_up_updated_at || null,
     requester,
     requesterRole: metadata.requesterRole || metadata.requester_role || null,
     submittedOn: toDateOnlyString(row.submitted_at),
@@ -64590,6 +65492,12 @@ const mapPaymentLineRow = row => {
     potName: row.pot_name || null,
     fundingStream: row.funding_stream || row.pot_funding_source || null,
     status: normalizePaymentLineStatus(row.status),
+    followUpStatus: normalizePaymentFollowUpStatus(row.follow_up_status) || 'not_required',
+    followUpLabel:
+      PAYMENT_FOLLOW_UP_LABELS[normalizePaymentFollowUpStatus(row.follow_up_status)] ||
+      PAYMENT_FOLLOW_UP_LABELS.not_required,
+    followUpDueAt: toDateOnlyString(row.follow_up_due_at),
+    followUpUpdatedAt: row.follow_up_updated_at || null,
     holdReason: row.hold_reason || null,
     paidAt: row.paid_at || null,
     paymentReference: row.payment_reference || null,
@@ -64600,6 +65508,8 @@ const mapPaymentLineRow = row => {
 
 const mapPaymentDocumentRow = row => ({
   id: String(row.id),
+  packetId: row.payment_packet_id ? String(row.payment_packet_id) : null,
+  lineId: row.payment_packet_line_id ? String(row.payment_packet_line_id) : null,
   documentId: row.document_id ? String(row.document_id) : null,
   type: row.evidence_type,
   required: !!row.required,
@@ -64636,6 +65546,30 @@ const mapPaymentCommunicationRow = row => {
     attachments: Array.isArray(attachments) ? attachments : [],
     status: row.status || null,
     sentOn: row.sent_at || row.created_at || null,
+  };
+};
+
+const mapPaymentFollowUpEventRow = row => {
+  const status = normalizePaymentFollowUpStatus(row?.to_status) || row?.to_status || null;
+  const fromStatus = normalizePaymentFollowUpStatus(row?.from_status) || row?.from_status || null;
+  const actor =
+    row?.actor_name ||
+    row?.actor_email ||
+    row?.actor_user_id ||
+    null;
+  return {
+    id: String(row.id),
+    packetId: row.payment_packet_id ? String(row.payment_packet_id) : null,
+    lineId: row.payment_packet_line_id ? String(row.payment_packet_line_id) : null,
+    fromStatus,
+    toStatus: status,
+    label: PAYMENT_FOLLOW_UP_LABELS[status] || status,
+    actor,
+    note: row.note || null,
+    dueAt: toDateOnlyString(row.due_at),
+    documentId: row.document_id ? String(row.document_id) : null,
+    metadata: safeJsonParse(row.metadata, {}) || {},
+    createdAt: row.created_at || null,
   };
 };
 
@@ -64751,6 +65685,15 @@ async function hydratePaymentPackets(packetRows, connection = null, options = {}
     packetIds
   );
 
+  const [followUpRows] = await runner.query(
+    `SELECT pfe.*, u.name AS actor_name, u.email AS actor_email
+       FROM payment_followup_event pfe
+       LEFT JOIN user u ON u.id = pfe.actor_user_id
+      WHERE pfe.payment_packet_id IN (${placeholders})
+      ORDER BY pfe.payment_packet_id ASC, pfe.created_at ASC, pfe.id ASC`,
+    packetIds
+  );
+
   const evidenceRules = await readPaymentEvidenceRules(runner);
   const packets = [];
   const packetMap = new Map();
@@ -64767,6 +65710,7 @@ async function hydratePaymentPackets(packetRows, connection = null, options = {}
     packet.baselineEvidence = [];
     packet.documents = [];
     packet.timeline = [];
+    packet.followUpEvents = [];
     packet.approvals = buildApprovalsFromPacketRow(row);
     packetMap.set(String(row.id), packet);
     packets.push(packet);
@@ -64778,6 +65722,7 @@ async function hydratePaymentPackets(packetRows, connection = null, options = {}
     if (!packet) return;
     const line = mapPaymentLineRow(row);
     line.evidenceChecklist = [];
+    line.followUpEvents = [];
     line.reportingUnit = packet.reportingUnit || packet.reporting_unit || null;
     line.batch = batchInfoMap.get(String(row.id)) || null;
     packet.lines.push(line);
@@ -64821,6 +65766,25 @@ async function hydratePaymentPackets(packetRows, connection = null, options = {}
       at: row.created_at,
       actor: row.actor_name || row.actor_email || row.actor_user_id || null,
       notes: row.notes || null,
+    });
+  });
+
+  followUpRows.forEach(row => {
+    const packet = packetMap.get(String(row.payment_packet_id));
+    if (!packet) return;
+    const event = mapPaymentFollowUpEventRow(row);
+    packet.followUpEvents.push(event);
+    if (row.payment_packet_line_id) {
+      const line = lineMap.get(String(row.payment_packet_line_id));
+      if (line) {
+        line.followUpEvents.push(event);
+      }
+    }
+    packet.timeline.push({
+      label: event.label ? `Follow-up: ${event.label}` : 'Follow-up updated',
+      at: event.createdAt,
+      actor: event.actor,
+      notes: event.note || null,
     });
   });
 
@@ -67968,6 +68932,125 @@ async function createPaymentCommunication({
   return fetchPaymentCommunicationById(commId, runner);
 }
 
+async function fetchPaymentFollowUpEventById(eventId, connection = null) {
+  const runner = connection || pool;
+  const [[row]] = await runner.query(
+    `SELECT pfe.*, u.name AS actor_name, u.email AS actor_email
+       FROM payment_followup_event pfe
+       LEFT JOIN user u ON u.id = pfe.actor_user_id
+      WHERE pfe.id = ?
+      LIMIT 1`,
+    [eventId]
+  );
+  return row ? mapPaymentFollowUpEventRow(row) : null;
+}
+
+async function fetchPaymentFollowUpEvents({ packetId, lineId = null, connection = null, limit = 200 } = {}) {
+  const runner = connection || pool;
+  const packetValue = parsePaymentPacketId(packetId);
+  if (!runner || !packetValue) return [];
+  const params = [packetValue];
+  const where = ['pfe.payment_packet_id = ?'];
+  const lineValue = parsePaymentLineId(lineId);
+  if (lineValue) {
+    where.push('pfe.payment_packet_line_id = ?');
+    params.push(lineValue);
+  }
+  const cappedLimit = Math.min(Number(limit) || 200, 500);
+  const [rows] = await runner.query(
+    `SELECT pfe.*, u.name AS actor_name, u.email AS actor_email
+       FROM payment_followup_event pfe
+       LEFT JOIN user u ON u.id = pfe.actor_user_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY pfe.created_at DESC, pfe.id DESC
+      LIMIT ?`,
+    [...params, cappedLimit]
+  );
+  return (rows || []).map(mapPaymentFollowUpEventRow);
+}
+
+async function createPaymentFollowUpEvent({
+  packetId,
+  lineId = null,
+  fromStatus = null,
+  toStatus,
+  actorUserId = null,
+  note = null,
+  dueAt = null,
+  documentId = null,
+  metadata = null,
+  connection = null,
+}) {
+  const runner = connection || pool;
+  const packetValue = parsePaymentPacketId(packetId);
+  const status = normalizePaymentFollowUpStatus(toStatus);
+  if (!runner || !packetValue || !status) return null;
+  const lineValue = parsePaymentLineId(lineId) || null;
+  const fromValue = normalizePaymentFollowUpStatus(fromStatus) || null;
+  const dueValue = normalizePaymentFollowUpDueDate(dueAt);
+  const documentValue = normalisePositiveInteger(documentId) || null;
+  const [result] = await runner.query(
+    `INSERT INTO payment_followup_event
+      (payment_packet_id, payment_packet_line_id, from_status, to_status, actor_user_id, note, due_at, document_id, metadata, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+    [
+      packetValue,
+      lineValue,
+      fromValue,
+      status,
+      actorUserId || null,
+      note || null,
+      dueValue,
+      documentValue,
+      metadata ? JSON.stringify(metadata) : null,
+    ]
+  );
+  return fetchPaymentFollowUpEventById(result.insertId, runner);
+}
+
+async function recomputePacketFollowUpStatusFromLines({ packetId, connection = null } = {}) {
+  const runner = connection || pool;
+  const packetValue = parsePaymentPacketId(packetId);
+  if (!runner || !packetValue) return null;
+  const [rows] = await runner.query(
+    `SELECT follow_up_status
+       FROM payment_packet_line
+      WHERE payment_packet_id = ?
+        AND status <> 'cancelled'`,
+    [packetValue]
+  );
+  const statuses = (rows || [])
+    .map(row => normalizePaymentFollowUpStatus(row.follow_up_status))
+    .filter(Boolean);
+  if (!statuses.length) return null;
+  let nextStatus = null;
+  if (statuses.includes('stale_no_response')) {
+    nextStatus = 'stale_no_response';
+  } else if (statuses.includes('follow_up_needed')) {
+    nextStatus = 'follow_up_needed';
+  } else if (statuses.includes('sent_to_finance')) {
+    nextStatus = 'sent_to_finance';
+  } else if (statuses.includes('follow_up_logged')) {
+    nextStatus = 'follow_up_logged';
+  } else if (statuses.includes('reported_paid')) {
+    nextStatus = 'reported_paid';
+  } else if (statuses.every(status => status === 'confirmed_by_evidence')) {
+    nextStatus = 'confirmed_by_evidence';
+  } else if (statuses.every(status => status === 'cancelled_not_proceeding')) {
+    nextStatus = 'cancelled_not_proceeding';
+  }
+  if (!nextStatus) return null;
+  await runner.query(
+    `UPDATE payment_packet
+        SET follow_up_status = ?,
+            follow_up_updated_at = NOW(),
+            updated_at = NOW()
+      WHERE id = ?`,
+    [nextStatus, packetValue]
+  );
+  return nextStatus;
+}
+
 function evaluateTransferPolicies(sourcePot, destPot) {
   const violations = [];
   const sourceFs = (sourcePot?.funding_source || "").toUpperCase();
@@ -68876,8 +69959,13 @@ const FINANCE_INTERVENTION_REPORT_FOLLOW_UP_META = Object.freeze({
   draftPaymentRequest: { key: 'draftPaymentRequest', label: 'Draft' },
   readyToSend: { key: 'readyToSend', label: 'Ready to send' },
   sentToFinance: { key: 'sentToFinance', label: 'Sent to finance' },
-  partiallyPaid: { key: 'partiallyPaid', label: 'Partially paid' },
-  paidInFull: { key: 'paidInFull', label: 'Paid in full' },
+  followUpNeeded: { key: 'followUpNeeded', label: 'Follow-up needed' },
+  followUpLogged: { key: 'followUpLogged', label: 'Follow-up logged' },
+  reportedPaid: { key: 'reportedPaid', label: 'Reported paid' },
+  confirmedByEvidence: { key: 'confirmedByEvidence', label: 'Confirmed by evidence' },
+  staleNoResponse: { key: 'staleNoResponse', label: 'Stale/no response' },
+  partiallyPaid: { key: 'partiallyPaid', label: 'Recorded paid in part' },
+  paidInFull: { key: 'paidInFull', label: 'Recorded paid in full' },
   cancelled: { key: 'cancelled', label: 'Cancelled' },
 });
 
@@ -68898,6 +69986,8 @@ function createEmptyFinanceInterventionReportFollowUp() {
     hasDraftPacket: false,
     latestPacketStatus: null,
     latestPacketStatusLabel: null,
+    operationalFollowUpStatus: null,
+    operationalFollowUpStatusLabel: null,
     financeSentAmount: 0,
     financePaidAmount: 0,
     financeSentDate: null,
@@ -68912,14 +70002,37 @@ function resolveFinanceInterventionReportFollowUpStatus({
   financeSentAmount = 0,
   financePaidAmount = 0,
   latestPacketStatus = null,
+  operationalFollowUpStatus = null,
   hasDraftPacket = false,
 } = {}) {
   const approvedNumeric = Number(approvedTotal);
   const sentNumeric = Number(financeSentAmount);
   const paidNumeric = Number(financePaidAmount);
   const packetStatus = normalizePaymentStatus(latestPacketStatus) || '';
+  const followUpStatus = normalizePaymentFollowUpStatus(operationalFollowUpStatus) || '';
   const epsilon = 0.009;
 
+  if (followUpStatus === 'stale_no_response') {
+    return FINANCE_INTERVENTION_REPORT_FOLLOW_UP_META.staleNoResponse;
+  }
+  if (followUpStatus === 'follow_up_needed') {
+    return FINANCE_INTERVENTION_REPORT_FOLLOW_UP_META.followUpNeeded;
+  }
+  if (followUpStatus === 'follow_up_logged') {
+    return FINANCE_INTERVENTION_REPORT_FOLLOW_UP_META.followUpLogged;
+  }
+  if (followUpStatus === 'confirmed_by_evidence') {
+    return FINANCE_INTERVENTION_REPORT_FOLLOW_UP_META.confirmedByEvidence;
+  }
+  if (followUpStatus === 'reported_paid') {
+    return FINANCE_INTERVENTION_REPORT_FOLLOW_UP_META.reportedPaid;
+  }
+  if (followUpStatus === 'cancelled_not_proceeding') {
+    return FINANCE_INTERVENTION_REPORT_FOLLOW_UP_META.cancelled;
+  }
+  if (followUpStatus === 'sent_to_finance') {
+    return FINANCE_INTERVENTION_REPORT_FOLLOW_UP_META.sentToFinance;
+  }
   if (Number.isFinite(paidNumeric) && paidNumeric > 0) {
     if (
       Number.isFinite(approvedNumeric) &&
@@ -69258,6 +70371,8 @@ async function readFinanceInterventionReportFollowUpMap(interventionIds, executo
         id,
         intervention_id,
         status,
+        follow_up_status,
+        follow_up_updated_at,
         submitted_at,
         sent_at,
         confirmed_at,
@@ -69281,6 +70396,25 @@ async function readFinanceInterventionReportFollowUpMap(interventionIds, executo
       if (!current.latestPacketStatus) {
         current.latestPacketStatus = packetStatus;
         current.latestPacketStatusLabel = formatFinanceInterventionReportPacketStatusLabel(packetStatus);
+      }
+      const followUpStatus = normalizePaymentFollowUpStatus(row.follow_up_status) || null;
+      if (followUpStatus && followUpStatus !== 'not_required') {
+        const statusRank = {
+          stale_no_response: 80,
+          follow_up_needed: 70,
+          follow_up_logged: 60,
+          confirmed_by_evidence: 50,
+          reported_paid: 40,
+          sent_to_finance: 30,
+          cancelled_not_proceeding: 20,
+        };
+        const currentRank = statusRank[current.operationalFollowUpStatus] || 0;
+        const nextRank = statusRank[followUpStatus] || 0;
+        if (!current.operationalFollowUpStatus || nextRank > currentRank) {
+          current.operationalFollowUpStatus = followUpStatus;
+          current.operationalFollowUpStatusLabel =
+            PAYMENT_FOLLOW_UP_LABELS[followUpStatus] || followUpStatus;
+        }
       }
       const handoffDate = toDateOnlyString(row.sent_at || row.submitted_at || null);
       if (handoffDate && (!current.financeSentDate || handoffDate > current.financeSentDate)) {
@@ -69366,6 +70500,7 @@ function buildFinanceInterventionReportRow(
     financeSentAmount: followUpSeed.financeSentAmount,
     financePaidAmount: followUpSeed.financePaidAmount,
     latestPacketStatus: followUpSeed.latestPacketStatus,
+    operationalFollowUpStatus: followUpSeed.operationalFollowUpStatus,
     hasDraftPacket: followUpSeed.hasDraftPacket,
   });
   return {
@@ -69418,6 +70553,8 @@ function buildFinanceInterventionReportRow(
     financePaidAmount: roundFinanceCurrencyAmount(followUpSeed.financePaidAmount || 0),
     financeSentDate: followUpSeed.financeSentDate || null,
     financePaidDate: followUpSeed.financePaidDate || null,
+    operationalFollowUpStatus: followUpSeed.operationalFollowUpStatus || null,
+    operationalFollowUpStatusLabel: followUpSeed.operationalFollowUpStatusLabel || null,
     latestPacketStatus: followUpSeed.latestPacketStatus || null,
     latestPacketStatusLabel: followUpSeed.latestPacketStatusLabel || null,
     paymentPacketCount: Number(followUpSeed.packetCount || 0),
@@ -69482,6 +70619,11 @@ function buildFinanceInterventionReportSummary(
     awaitingRelease: 0,
     readyToSend: 0,
     sentToFinance: 0,
+    followUpNeeded: 0,
+    followUpLogged: 0,
+    reportedPaid: 0,
+    confirmedByEvidence: 0,
+    staleNoResponse: 0,
     partiallyPaid: 0,
     paidInFull: 0,
     cancelled: 0,
@@ -72674,70 +73816,10 @@ app.post('/api/finance/payment-packets/:id/send-email', async (req, res) => {
   if (!Number.isFinite(packetId)) {
     return res.status(400).json({ error: 'invalid_payment_packet_id' });
   }
-  const note = typeof req.body?.note === 'string' ? req.body.note.trim() : null;
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    const [[packetRow]] = await conn.query(
-      'SELECT id, status FROM payment_packet WHERE id = ? LIMIT 1 FOR UPDATE',
-      [packetId]
-    );
-    if (!packetRow) {
-      await conn.rollback();
-      return res.status(404).json({ error: 'payment_packet_not_found' });
-    }
-    const accessError = await validatePaymentPacketAccess(req, packetId, { connection: conn });
-    if (accessError) {
-      await conn.rollback();
-      return res.status(accessError.status).json(accessError.body);
-    }
-    const packetStage = normalizePacketWorkflowStage(packetRow.status);
-    if (packetStage !== 'draft') {
-      await conn.rollback();
-      return res.status(409).json({
-        error: 'payment_packet_already_submitted',
-        status: packetRow.status || null,
-        message: 'This packet has already been submitted.',
-      });
-    }
-
-    const result = await submitPaymentPacketExternally({ packetId, note, req, connection: conn });
-    await conn.commit();
-    if (result?.error === 'payment_packet_not_found') {
-      return res.status(404).json({ error: result.error });
-    }
-    if (result?.error === 'finance_email_missing') {
-      return res.status(409).json({
-        error: result.error,
-        message: result.message,
-        regionCode: result.regionCode,
-      });
-    }
-    if (result?.error) {
-      return res.status(500).json({
-        error: result.error,
-        message: result.message,
-        communication: result.communication,
-        mode: result.mode,
-      });
-    }
-    res.status(200).json({
-      ok: true,
-      mode: result.mode,
-      regionCode: result.regionCode,
-      to: result.recipients?.to || [],
-      cc: result.recipients?.cc || [],
-      billId: result.billId,
-      baseUrl: result.baseUrl,
-      communication: result.communication,
-    });
-  } catch (err) {
-    try { await conn.rollback(); } catch {}
-    console.error('[payments] failed to send finance email', err);
-    res.status(500).json({ error: 'finance_email_send_failed', message: err.message });
-  } finally {
-    conn.release();
-  }
+  return res.status(410).json({
+    error: 'payment_email_endpoint_retired',
+    message: 'Send payment packets through the status transition endpoint with status=submitted.',
+  });
 });
 
 app.get('/api/finance/payment-communications', async (req, res) => {
@@ -72809,6 +73891,216 @@ app.post('/api/finance/payment-communications', async (req, res) => {
   }
 });
 
+app.get('/api/finance/payment-followups', async (req, res) => {
+  if (requirePaymentsRole(req, res)) return;
+  const packetId = parsePaymentPacketId(req.query?.packetId || req.query?.paymentPacketId);
+  if (!Number.isFinite(packetId)) {
+    return res.status(400).json({ error: 'invalid_payment_packet_id' });
+  }
+  const accessError = await validatePaymentPacketAccess(req, packetId);
+  if (accessError) {
+    return res.status(accessError.status).json(accessError.body);
+  }
+  const lineId = parsePaymentLineId(req.query?.lineId || req.query?.paymentPacketLineId);
+  try {
+    const events = await fetchPaymentFollowUpEvents({ packetId, lineId, limit: req.query?.limit });
+    return res.status(200).json(events);
+  } catch (err) {
+    console.error('[payments] failed to fetch follow-up events', err);
+    return res.status(500).json({ error: 'failed_to_fetch_payment_followups' });
+  }
+});
+
+async function handleRecordPaymentFollowUp(req, res, { packetId, lineId = null } = {}) {
+  const packetValue = parsePaymentPacketId(packetId);
+  const lineValue = parsePaymentLineId(lineId);
+  if (!Number.isFinite(packetValue)) {
+    return res.status(400).json({ error: 'invalid_payment_packet_id' });
+  }
+  const body = req.body || {};
+  const nextStatus = normalizePaymentFollowUpStatus(body.status || body.followUpStatus || body.follow_up_status);
+  if (!nextStatus) {
+    return res.status(400).json({ error: 'invalid_follow_up_status' });
+  }
+  const note = typeof body.note === 'string'
+    ? body.note.trim()
+    : typeof body.notes === 'string'
+      ? body.notes.trim()
+      : null;
+  const rawDueAt = body.dueAt || body.due_at || null;
+  const dueAt = normalizePaymentFollowUpDueDate(rawDueAt);
+  if (rawDueAt && !dueAt) {
+    return res.status(400).json({ error: 'invalid_follow_up_due_at' });
+  }
+  const documentId = normalisePositiveInteger(
+    body.documentId || body.document_id || body.evidenceDocumentId || body.evidence_document_id
+  ) || null;
+  if (
+    ['reported_paid', 'confirmed_by_evidence', 'stale_no_response', 'cancelled_not_proceeding'].includes(nextStatus) &&
+    !note &&
+    !documentId
+  ) {
+    return res.status(400).json({ error: 'follow_up_note_or_document_required' });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const actorUserId = await resolveFinanceRouteActorUserId(req, conn);
+    if (!actorUserId) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'actor_user_required' });
+    }
+    const [[packetRow]] = await conn.query(
+      'SELECT * FROM payment_packet WHERE id = ? LIMIT 1 FOR UPDATE',
+      [packetValue]
+    );
+    if (!packetRow) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'payment_packet_not_found' });
+    }
+    const accessError = await validatePaymentPacketAccess(req, packetValue, { connection: conn });
+    if (accessError) {
+      await conn.rollback();
+      return res.status(accessError.status).json(accessError.body);
+    }
+    if (normalizePacketWorkflowStage(packetRow.status) === 'draft') {
+      await conn.rollback();
+      return res.status(409).json({ error: 'payment_packet_not_sent' });
+    }
+
+    if (documentId) {
+      const [[docRow]] = await conn.query(
+        `SELECT id, client_id, case_id, application_id, action_plan_id, applicant_user_id
+           FROM iset_document
+          WHERE id = ? AND status = "active"
+          LIMIT 1`,
+        [documentId]
+      );
+      if (!docRow) {
+        await conn.rollback();
+        return res.status(400).json({ error: 'follow_up_document_not_found' });
+      }
+      let documentAccessError = await validateDocumentAccess(req, docRow, { connection: conn });
+      if (documentAccessError) {
+        const packetDocumentAccessError = await validatePaymentPacketDocumentAccess(req, {
+          packetId: packetValue,
+          documentRow: docRow,
+          connection: conn,
+        });
+        documentAccessError = packetDocumentAccessError || null;
+      }
+      if (documentAccessError) {
+        await conn.rollback();
+        return res.status(documentAccessError.status).json(documentAccessError.body);
+      }
+    }
+
+    let event = null;
+    if (lineValue) {
+      const [[lineRow]] = await conn.query(
+        `SELECT id, payment_packet_id, follow_up_status
+           FROM payment_packet_line
+          WHERE id = ? AND payment_packet_id = ?
+          LIMIT 1 FOR UPDATE`,
+        [lineValue, packetValue]
+      );
+      if (!lineRow) {
+        await conn.rollback();
+        return res.status(404).json({ error: 'payment_line_not_found' });
+      }
+      const fromStatus = normalizePaymentFollowUpStatus(lineRow.follow_up_status) || 'not_required';
+      await conn.query(
+        `UPDATE payment_packet_line
+            SET follow_up_status = ?,
+                follow_up_due_at = ?,
+                follow_up_updated_at = NOW(),
+                updated_at = NOW()
+          WHERE id = ?`,
+        [nextStatus, dueAt, lineValue]
+      );
+      event = await createPaymentFollowUpEvent({
+        packetId: packetValue,
+        lineId: lineValue,
+        fromStatus,
+        toStatus: nextStatus,
+        actorUserId,
+        note,
+        dueAt,
+        documentId,
+        metadata: { source: 'manual_follow_up' },
+        connection: conn,
+      });
+      await recomputePacketFollowUpStatusFromLines({ packetId: packetValue, connection: conn });
+    } else {
+      const fromStatus = normalizePaymentFollowUpStatus(packetRow.follow_up_status) || 'not_required';
+      await conn.query(
+        `UPDATE payment_packet
+            SET follow_up_status = ?,
+                follow_up_due_at = ?,
+                follow_up_updated_at = NOW(),
+                updated_at = NOW()
+          WHERE id = ?`,
+        [nextStatus, dueAt, packetValue]
+      );
+      event = await createPaymentFollowUpEvent({
+        packetId: packetValue,
+        fromStatus,
+        toStatus: nextStatus,
+        actorUserId,
+        note,
+        dueAt,
+        documentId,
+        metadata: { source: 'manual_follow_up' },
+        connection: conn,
+      });
+    }
+
+    await conn.commit();
+    const packet = await fetchPaymentPacketById(packetValue);
+    return res.status(200).json({ packet, event });
+  } catch (err) {
+    try { await conn.rollback(); } catch {}
+    console.error('[payments] failed to record follow-up', err);
+    return res.status(500).json({ error: 'failed_to_record_payment_follow_up' });
+  } finally {
+    conn.release();
+  }
+}
+
+app.post('/api/finance/payment-packets/:id/follow-up', async (req, res) => {
+  if (requirePaymentsRole(req, res)) return;
+  const bodyLineId = req.body?.lineId || req.body?.line_id || req.body?.paymentPacketLineId || null;
+  return handleRecordPaymentFollowUp(req, res, {
+    packetId: req.params.id,
+    lineId: bodyLineId,
+  });
+});
+
+app.post('/api/finance/payment-lines/:id/follow-up', async (req, res) => {
+  if (requirePaymentsRole(req, res)) return;
+  const lineId = parsePaymentLineId(req.params.id);
+  if (!Number.isFinite(lineId)) {
+    return res.status(400).json({ error: 'invalid_payment_line_id' });
+  }
+  try {
+    const [[lineRow]] = await pool.query(
+      'SELECT payment_packet_id FROM payment_packet_line WHERE id = ? LIMIT 1',
+      [lineId]
+    );
+    if (!lineRow) {
+      return res.status(404).json({ error: 'payment_line_not_found' });
+    }
+    return handleRecordPaymentFollowUp(req, res, {
+      packetId: lineRow.payment_packet_id,
+      lineId,
+    });
+  } catch (err) {
+    console.error('[payments] failed to resolve follow-up line', err);
+    return res.status(500).json({ error: 'failed_to_record_payment_follow_up' });
+  }
+});
+
 app.post('/api/finance/payment-packets', async (req, res) => {
   if (requirePaymentsRole(req, res)) return;
   const body = req.body || {};
@@ -72817,15 +74109,14 @@ app.post('/api/finance/payment-packets', async (req, res) => {
   if (rawPacketStatus && !status) {
     return res.status(400).json({ error: 'invalid_status' });
   }
+  if (status !== 'draft') {
+    return res.status(400).json({ error: 'payment_packet_create_requires_draft' });
+  }
   const linesPayload = Array.isArray(body.lines)
     ? body.lines
     : Array.isArray(body.lineItems)
       ? body.lineItems
       : [];
-
-  if (status !== 'draft' && linesPayload.length === 0) {
-    return res.status(400).json({ error: 'lines_required_for_status' });
-  }
 
   const caseId = normalisePositiveInteger(body.caseId || body.case_id) || null;
   const clientId = normalisePositiveInteger(body.clientId || body.client_id) || null;
@@ -72995,6 +74286,13 @@ app.post('/api/finance/payment-packets', async (req, res) => {
         const lineStatus = rawLineStatus ? normalizePaymentLineStatus(rawLineStatus) : 'needs_evidence';
         if (rawLineStatus && !lineStatus) {
           lineErrors.push({ index, field: 'status', error: 'invalid', message: 'Payment line status is invalid.' });
+        } else if (rawLineStatus && lineStatus !== 'needs_evidence') {
+          lineErrors.push({
+            index,
+            field: 'status',
+            error: 'create_requires_draft_line',
+            message: 'Payment lines must be created in draft evidence-gathering status.',
+          });
         }
         return {
           paymentType,
@@ -73504,9 +74802,6 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
   if (!nextStatus) {
     return res.status(400).json({ error: 'invalid_status' });
   }
-  if (SIMPLE_PAYMENT_WORKFLOW && !SIMPLE_PAYMENT_PACKET_STATUSES.has(nextStatus)) {
-    return res.status(400).json({ error: 'status_not_supported' });
-  }
   let actorUserId = null;
   const actorRoleRaw = inferUserRole(req);
   const actorRole = canonicaliseAccessRole(actorRoleRaw) || actorRoleRaw;
@@ -73544,35 +74839,33 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
     const latestIntacctAttempt = resolveLatestIntacctAttempt(packetMeta);
     const latestIntacctOutcome = resolveIntacctAttemptStatus(latestIntacctAttempt);
     const canReopenForIntacct = latestIntacctOutcome === 'failed' || latestIntacctOutcome === 'partial';
-    if (SIMPLE_PAYMENT_WORKFLOW) {
-      const fromStage = normalizePacketWorkflowStage(fromStatus);
-      const nextStage = normalizePacketWorkflowStage(nextStatus);
-      const allowReopen = nextStatus === 'draft' && fromStage !== 'draft' && canReopenForIntacct;
-      const duplicateSubmitRequest = nextStatus === 'submitted' && fromStage === 'submitted';
-      if (duplicateSubmitRequest && !allowReopen) {
-        await conn.rollback();
-        return res.status(409).json({
-          error: 'payment_packet_already_submitted',
-          status: fromStatus,
-          message: 'This packet has already been submitted.',
-        });
-      }
-      if (fromStage !== 'draft' && nextStage !== fromStage && !allowReopen) {
-        await conn.rollback();
-        return res.status(409).json({ error: 'payment_packet_locked', status: fromStatus });
-      }
-      if (fromStage === 'draft' && nextStage === 'draft' && fromStatus === nextStatus) {
-        await conn.rollback();
-        const packet = await fetchPaymentPacketById(packetId);
-        return packet
-          ? res.status(200).json(packet)
-          : res.status(404).json({ error: 'payment_packet_not_found' });
-      }
+    const fromStage = normalizePacketWorkflowStage(fromStatus);
+    const nextStage = normalizePacketWorkflowStage(nextStatus);
+    const allowReopen = nextStatus === 'draft' && fromStage !== 'draft' && canReopenForIntacct;
+    const duplicateSubmitRequest = nextStatus === 'submitted' && fromStage === 'submitted';
+    if (duplicateSubmitRequest && !allowReopen) {
+      await conn.rollback();
+      return res.status(409).json({
+        error: 'payment_packet_already_submitted',
+        status: fromStatus,
+        message: 'This packet has already been submitted.',
+      });
+    }
+    if (fromStage !== 'draft' && nextStage !== fromStage && !allowReopen) {
+      await conn.rollback();
+      return res.status(409).json({ error: 'payment_packet_locked', status: fromStatus });
+    }
+    if (fromStage === 'draft' && nextStage === 'draft' && fromStatus === nextStatus) {
+      await conn.rollback();
+      const packet = await fetchPaymentPacketById(packetId);
+      return packet
+        ? res.status(200).json(packet)
+        : res.status(404).json({ error: 'payment_packet_not_found' });
     }
     const [lineRows] = await conn.query(
       `SELECT id, payment_packet_id, amount, status, payment_type, payee_name, payee_reference,
               service_period_start, service_period_end, invoice_reference_number, requested_payment_date,
-              metadata, intervention_id, payee_type, paid_at, payment_reference
+              metadata, intervention_id, payee_type, paid_at, payment_reference, follow_up_status
          FROM payment_packet_line
         WHERE payment_packet_id = ?`,
       [packetId]
@@ -73890,19 +75183,54 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
     if (!packetRow.confirmed_at && nextStatus === 'confirmed') {
       fields.push('confirmed_at = NOW()');
     }
+    if (nextStatus === 'submitted') {
+      fields.push('follow_up_status = ?');
+      params.push('sent_to_finance');
+      fields.push('follow_up_updated_at = NOW()');
+    } else if (nextStatus === 'cancelled') {
+      fields.push('follow_up_status = ?');
+      params.push('cancelled_not_proceeding');
+      fields.push('follow_up_updated_at = NOW()');
+    } else if (nextStatus === 'draft') {
+      fields.push('follow_up_status = ?');
+      params.push('not_required');
+      fields.push('follow_up_due_at = NULL');
+      fields.push('follow_up_updated_at = NULL');
+    }
     params.push(packetId);
     await conn.query(`UPDATE payment_packet SET ${fields.join(', ')} WHERE id = ?`, params);
 
     const lineStatus = PACKET_STATUS_TO_LINE_STATUS[nextStatus];
     if (lineStatus && nextStatus !== 'confirmed') {
+      const followUpLineStatus =
+        nextStatus === 'submitted'
+          ? 'sent_to_finance'
+          : nextStatus === 'cancelled'
+            ? 'cancelled_not_proceeding'
+            : nextStatus === 'draft'
+              ? 'not_required'
+              : null;
       const [lineRows] = await conn.query(
-        'SELECT id, status FROM payment_packet_line WHERE payment_packet_id = ?',
+        'SELECT id, status, follow_up_status FROM payment_packet_line WHERE payment_packet_id = ?',
         [packetId]
       );
-      await conn.query(
-        'UPDATE payment_packet_line SET status = ? WHERE payment_packet_id = ? AND status NOT IN ("paid","cancelled")',
-        [lineStatus, packetId]
-      );
+      if (followUpLineStatus) {
+        await conn.query(
+          `UPDATE payment_packet_line
+              SET status = ?,
+                  follow_up_status = ?,
+                  follow_up_due_at = CASE WHEN ? = 'not_required' THEN NULL ELSE follow_up_due_at END,
+                  follow_up_updated_at = CASE WHEN ? = 'not_required' THEN NULL ELSE NOW() END
+            WHERE payment_packet_id = ?
+              AND status NOT IN ("paid","cancelled")`,
+          [lineStatus, followUpLineStatus, followUpLineStatus, followUpLineStatus, packetId]
+        );
+      } else {
+        await conn.query(
+          'UPDATE payment_packet_line SET status = ? WHERE payment_packet_id = ? AND status NOT IN ("paid","cancelled")',
+          [lineStatus, packetId]
+        );
+      }
       const eventTimestamp = new Date();
       const lineEventValues = (lineRows || [])
         .filter(row => row.status !== lineStatus && !['paid', 'cancelled'].includes(row.status))
@@ -73923,6 +75251,52 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
            VALUES ?`,
           [lineEventValues]
         );
+      }
+      if (followUpLineStatus) {
+        const followUpEventValues = (lineRows || [])
+          .filter(row => !['paid', 'cancelled'].includes(row.status))
+          .filter(row => (normalizePaymentFollowUpStatus(row.follow_up_status) || 'not_required') !== followUpLineStatus)
+          .map(row => [
+            packetId,
+            row.id,
+            normalizePaymentFollowUpStatus(row.follow_up_status) || 'not_required',
+            followUpLineStatus,
+            actorUserId,
+            nextStatus === 'submitted' ? 'Finance email handoff recorded.' : null,
+            null,
+            null,
+            JSON.stringify({ source: 'packet_status_transition', packetStatus: nextStatus }),
+            eventTimestamp,
+          ]);
+        if (followUpEventValues.length) {
+          await conn.query(
+            `INSERT INTO payment_followup_event
+              (payment_packet_id, payment_packet_line_id, from_status, to_status, actor_user_id, note, due_at, document_id, metadata, created_at)
+             VALUES ?`,
+            [followUpEventValues]
+          );
+        }
+      }
+    }
+
+    if (nextStatus === 'submitted' || nextStatus === 'cancelled' || nextStatus === 'draft') {
+      const fromFollowUpStatus = normalizePaymentFollowUpStatus(packetRow.follow_up_status) || 'not_required';
+      const toFollowUpStatus =
+        nextStatus === 'submitted'
+          ? 'sent_to_finance'
+          : nextStatus === 'cancelled'
+            ? 'cancelled_not_proceeding'
+            : 'not_required';
+      if (fromFollowUpStatus !== toFollowUpStatus) {
+        await createPaymentFollowUpEvent({
+          packetId,
+          fromStatus: fromFollowUpStatus,
+          toStatus: toFollowUpStatus,
+          actorUserId,
+          note: nextStatus === 'submitted' ? 'Finance email handoff recorded.' : null,
+          metadata: { source: 'packet_status_transition', packetStatus: nextStatus },
+          connection: conn,
+        });
       }
     }
 
@@ -75365,6 +76739,28 @@ app.post('/api/finance/payment-lines/:id/status', async (req, res) => {
       fields.push('payment_proof_document_id = ?');
       params.push(resolvedProofDocumentId);
     }
+    const nextFollowUpStatus =
+      nextStatus === 'paid'
+        ? 'confirmed_by_evidence'
+        : nextStatus === 'held'
+          ? 'follow_up_needed'
+          : nextStatus === 'submitted'
+            ? 'sent_to_finance'
+            : nextStatus === 'cancelled'
+              ? 'cancelled_not_proceeding'
+              : nextStatus === 'needs_evidence' || nextStatus === 'ready_to_send'
+                ? 'not_required'
+                : null;
+    if (nextFollowUpStatus) {
+      fields.push('follow_up_status = ?');
+      params.push(nextFollowUpStatus);
+      if (nextFollowUpStatus === 'not_required') {
+        fields.push('follow_up_due_at = NULL');
+        fields.push('follow_up_updated_at = NULL');
+      } else {
+        fields.push('follow_up_updated_at = NOW()');
+      }
+    }
     params.push(lineId);
     await conn.query(`UPDATE payment_packet_line SET ${fields.join(', ')} WHERE id = ?`, params);
 
@@ -75374,6 +76770,26 @@ app.post('/api/finance/payment-lines/:id/status', async (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, NULL, NOW())`,
       [lineRow.payment_packet_id, lineId, fromStatus, nextStatus, actorUserId, notes]
     );
+
+    if (nextFollowUpStatus) {
+      const fromFollowUpStatus = normalizePaymentFollowUpStatus(lineRow.follow_up_status) || 'not_required';
+      if (fromFollowUpStatus !== nextFollowUpStatus) {
+        await createPaymentFollowUpEvent({
+          packetId: Number(lineRow.payment_packet_id),
+          lineId,
+          fromStatus: fromFollowUpStatus,
+          toStatus: nextFollowUpStatus,
+          actorUserId,
+          note: notes,
+          metadata: { source: 'line_status_transition', lineStatus: nextStatus },
+          connection: conn,
+        });
+        await recomputePacketFollowUpStatusFromLines({
+          packetId: Number(lineRow.payment_packet_id),
+          connection: conn,
+        });
+      }
+    }
 
     if (nextStatus === 'paid') {
       const evidenceRules = await readPaymentEvidenceRules(conn);
@@ -75485,9 +76901,6 @@ app.post('/api/finance/payment-packets/:id/documents', async (req, res) => {
     return res.status(400).json({ error: 'evidenceType_required' });
   }
   const lineId = parsePaymentLineId(body.lineId || body.paymentPacketLineId || body.payment_packet_line_id);
-  if (lineId) {
-    return res.status(400).json({ error: 'line_level_documents_not_supported' });
-  }
   const requiredRaw = body.required;
   const required = requiredRaw !== undefined ? normalizeBooleanLike(requiredRaw) : false;
   if (requiredRaw !== undefined && required === null) {
@@ -75521,6 +76934,20 @@ app.post('/api/finance/payment-packets/:id/documents', async (req, res) => {
     );
     if (!packetRow) {
       return res.status(404).json({ error: 'payment_packet_not_found' });
+    }
+    let lineRow = null;
+    if (lineId) {
+      const [[resolvedLineRow]] = await pool.query(
+        'SELECT id, payment_packet_id FROM payment_packet_line WHERE id = ? LIMIT 1',
+        [lineId]
+      );
+      if (!resolvedLineRow) {
+        return res.status(404).json({ error: 'payment_line_not_found' });
+      }
+      if (Number(resolvedLineRow.payment_packet_id) !== Number(packetId)) {
+        return res.status(409).json({ error: 'payment_line_packet_mismatch' });
+      }
+      lineRow = resolvedLineRow;
     }
     const packetAccessError = await validatePaymentPacketAccess(req, packetId);
     if (packetAccessError) {
@@ -75565,7 +76992,7 @@ app.post('/api/finance/payment-packets/:id/documents', async (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         packetId,
-        null,
+        lineRow?.id || null,
         documentId,
         evidenceType,
         required ? 1 : 0,
@@ -78830,7 +80257,6 @@ app.post('/api/purge-cases', requireUnsafeAdminDebugAccess, async (req, res) => 
     await deleteTableIfExists('iset_case_note');
     await deleteTableIfExists('iset_case_task');
     await deleteTableIfExists('iset_event_receipt');
-    await deleteTableIfExists('iset_event_outbox');
     await deleteTableIfExists('iset_event_entry');
     await deleteTableIfExists('iset_case');
     res.status(200).json({ message: 'All cases and related data purged.' });
@@ -79464,6 +80890,31 @@ app.post('/api/signing-requests/:id/sign', async (req, res) => {
         });
       } catch (signedDocErr) {
         console.warn('[cfa] failed to regenerate signed CFA document', signedDocErr?.message || signedDocErr);
+      }
+    }
+    const fundingOverviewVersionId = normalisePositiveInteger(
+      resolvedSchema?.meta?.fundingOverviewVersionId ?? resolvedSchema?.meta?.funding_overview_version_id ?? null
+    );
+    if (fundingOverviewVersionId) {
+      await pool.query(
+        `UPDATE funding_overview_version
+            SET status = 'signed',
+                signed_at = NOW(),
+                signed_by_participant_id = ?
+          WHERE id = ?
+            AND status <> 'signed'`,
+        [userId, fundingOverviewVersionId]
+      );
+      try {
+        await regenerateSignedFundingOverviewDocument({
+          connection: pool,
+          fundingOverviewVersionId,
+          participantUserId: userId,
+          signedPayload: payload,
+          actorUserId: userId
+        });
+      } catch (signedDocErr) {
+        console.warn('[funding-overview] failed to regenerate signed Funding Overview document', signedDocErr?.message || signedDocErr);
       }
     }
     const caseId = Number(row.case_id);

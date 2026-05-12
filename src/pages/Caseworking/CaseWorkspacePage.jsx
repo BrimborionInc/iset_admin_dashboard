@@ -17,6 +17,7 @@ import ExportPreviewWidget from "./caseWorkspace/widgets/ExportPreviewWidget.jsx
 import InterventionAssessmentWidget from "./caseWorkspace/widgets/InterventionAssessmentWidget.jsx";
 import CasePaymentRequestsWidget from "./caseWorkspace/widgets/CasePaymentRequestsWidget.jsx";
 import CasePaymentDetailWidget from "./caseWorkspace/widgets/CasePaymentDetailWidget.jsx";
+import CasePaymentCommunicationWidget from "./caseWorkspace/widgets/CasePaymentCommunicationWidget.jsx";
 import CaseWorkspaceCaseHeaderHelp from "../../helpPanelContents/caseWorkspaceCaseHeaderHelp.js";
 import SupportingDocumentsHelp from "../../helpPanelContents/supportingDocumentsHelp.js";
 import SecureMessagesHelpPanelContent from "../../helpPanelContents/secureMessagesHelpPanelContent.js";
@@ -31,6 +32,9 @@ import CaseWorkspaceParticipantDetailsHelp from "../../helpPanelContents/caseWor
 import CaseWorkspaceExportPreviewHelp from "../../helpPanelContents/caseWorkspaceExportPreviewHelp.js";
 import CaseWorkspaceTimelineHelp from "../../helpPanelContents/caseWorkspaceTimelineHelp.js";
 import CaseWorkspaceHelp from "../../helpPanelContents/caseWorkspaceHelp.js";
+import FinancePaymentRequestsHelp from "../../helpPanelContents/financePaymentRequestsHelp.js";
+import FinancePaymentDetailHelp from "../../helpPanelContents/financePaymentDetailHelp.js";
+import FinancePaymentCommsHelp from "../../helpPanelContents/financePaymentCommsHelp.js";
 import { CaseWorkspaceProvider, useCaseWorkspace } from "./caseWorkspace/CaseWorkspaceContext.jsx";
 import { PaymentsDataProvider } from "../finance/widgets/PaymentsDataContext.jsx";
 import CaseApplicationEventsWidget from "./caseWorkspace/widgets/CaseApplicationEventsWidget.jsx";
@@ -191,6 +195,9 @@ const widgetRegistry = {
     component: CasePaymentRequestsWidget,
     title: "Payment packet queue",
     description: "Program payment packets tied to this case.",
+    helpComponent: FinancePaymentRequestsHelp,
+    helpTitle: "Payment packet queue",
+    aiContext: FinancePaymentRequestsHelp.aiContext,
   },
   "payments-detail": {
     id: "payments-detail",
@@ -199,6 +206,20 @@ const widgetRegistry = {
     component: CasePaymentDetailWidget,
     title: "Payment packet detail",
     description: "Evidence, approvals, and line items for the selected packet.",
+    helpComponent: FinancePaymentDetailHelp,
+    helpTitle: "Payment detail",
+    aiContext: FinancePaymentDetailHelp.aiContext,
+  },
+  "payments-comms": {
+    id: "payments-comms",
+    defaultRowSpan: 4,
+    defaultColumnSpan: 4,
+    component: CasePaymentCommunicationWidget,
+    title: "Payment communications",
+    description: "Email log and follow-up notes for the selected packet.",
+    helpComponent: FinancePaymentCommsHelp,
+    helpTitle: "Payment communications",
+    aiContext: FinancePaymentCommsHelp.aiContext,
   },
 };
 
@@ -256,6 +277,7 @@ const managePaymentsLayout = [
   { id: "caseHeader", rowSpan: 3, columnSpan: 4 },
   { id: "payments-queue", rowSpan: 5, columnSpan: 4 },
   { id: "payments-detail", rowSpan: 5, columnSpan: 4 },
+  { id: "payments-comms", rowSpan: 4, columnSpan: 4 },
   { id: "interventions", rowSpan: 4, columnSpan: 4 },
   { id: "actionPlans", rowSpan: 4, columnSpan: 4 },
 ];

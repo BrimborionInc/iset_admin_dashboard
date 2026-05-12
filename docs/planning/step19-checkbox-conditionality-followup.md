@@ -1,7 +1,7 @@
 # Step 19 Checkbox Conditionality Follow-up
 
 Status: implemented
-Last Updated: 2026-04-14
+Last Updated: 2026-05-12
 
 ## What is implemented now
 
@@ -12,10 +12,10 @@ Last Updated: 2026-04-14
   - `notContainsAny`
   - `containsAll`
 - The public intake portal now also auto-skips steps whose authored components are all hidden by conditions, and the visible step/progress count is renumbered to match the applicant-visible path.
-- DEV authoring for workflow `21` now uses those operators to drive later intake questions and uploads from Step 19 `requested-supports` without replacing that step with separate yes/no fields.
-- DEV workflow `21` Step 21 and Step 22 no longer rely on placeholder fallback notices; they now disappear entirely in the public portal when their support-driven conditions are not met.
+- DEV authoring for workflow `21` now uses those operators to drive later support-specific intake questions and uploads from Step 19 `requested-supports` without replacing that step with separate yes/no fields.
+- As of 2026-05-12, DEV workflow `21` no longer gates Household Income, base Household Expenses, or amount-driven financial evidence uploads on `requested-supports` containing `living`; those financial questions now appear regardless of selected support type. Transportation, childcare, and other-support follow-up questions remain support-specific.
 - DEV workflow `21` now also branches after Step `93` (`Employment Goals and Barriers`) based on `dependent-children`, sending `0` / `No` applicants to a cloned Step 19 variant that omits the `Childcare` support option while leaving the default path on the full Step 19.
-- Verified on 2026-04-14: rebuilding DEV workflow `21` from the authoring tables through `buildWorkflowSchema` reproduces the current published runtime payload in `iset_runtime_config(scope='publish', k='workflow.schema.intake')` apart from the normal timestamp/checksum refresh, so no separate step/workflow-library backfill is currently required to match the published intake.
+- Verified on 2026-05-12: DEV workflow `21` authoring rows were republished through `scripts/publish-workflow.js` after the financial-information conditionality update, keeping the step library, workflow library, and `iset_runtime_config(scope='publish', k='workflow.schema.intake')` row aligned.
 
 ## Current scope boundary
 
@@ -32,7 +32,7 @@ This means the live applicant portal and the admin-side authoring, preview, and 
 
 ## Why this note exists
 
-This was added to keep Step 19 as a single checkbox array while still allowing later intake steps to react to support selections such as `living`, `transportation`, `childcare`, and `other`.
+This was added to keep Step 19 as a single checkbox array while still allowing later intake steps to react to support selections such as `transportation`, `childcare`, and `other`.
 
 Without runtime checkbox-array operators, the earlier fallback would have been refactoring Step 19 into separate scalar yes/no fields.
 

@@ -7,7 +7,7 @@ Run active client cases after approval, including plan management, intervention 
 ## Primary Routes
 
 - `/cases/:caseId`
-- `/iset/payments` (program payments surface; currently scaffolded)
+- `/iset/payments` (cross-client operational payments dashboard)
 
 ## Core Widgets (current)
 
@@ -26,6 +26,7 @@ Run active client cases after approval, including plan management, intervention 
 - Finance panel
 - Payment packet queue (case scope)
 - Payment packet detail (case scope)
+- Payment communications (case scope)
 
 Widget references:
 - `docs/widgets/admin/case-header-widget.md`
@@ -43,6 +44,7 @@ Widget references:
 - `docs/widgets/admin/case-finance-panel-widget.md`
 - `docs/widgets/admin/case-payment-packet-queue-widget.md`
 - `docs/widgets/admin/case-payment-packet-detail-widget.md`
+- `docs/widgets/admin/case-payment-communications-widget.md`
 
 ## Typical Flow
 
@@ -72,5 +74,4 @@ Widget references:
 
 ## Current Gaps / Risks
 
-- `/iset/payments` page currently has empty widget registry; treat as scaffold.
 - Plan/intervention/payment behavior is distributed across several widgets and contexts; regression risk is high without synchronized docs/tests.
