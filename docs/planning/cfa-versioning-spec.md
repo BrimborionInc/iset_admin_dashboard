@@ -109,8 +109,8 @@ No new panel is added in Secure Messaging. CFA files are generated into Supporti
 ## Open Questions
 None. Label in outbound docs: "CFA vN".
 
-## Related Funding Overview Signature Pattern
-- DEV now mirrors the CFA signing pattern for Funding Overview signature requests. The secure-message attachment workflow is `Funding Overview` (`workflow_id=52`, `workflow_type='consent-cm-prefill'`, `document_type='financial_overview'`).
-- Funding Overview versions are case scoped in `funding_overview_series` / `funding_overview_version`, with clean/redline documents linked through `funding_overview_version_documents`.
+## Related Financial Overview Signature Pattern
+- DEV now mirrors the CFA signing pattern for Financial Overview signature requests. The secure-message attachment workflow is `Financial Overview` (`workflow_id=52`, `workflow_type='consent-cm-prefill'`, `document_type='financial_overview'`).
+- Financial Overview versions are case scoped in `funding_overview_series` / `funding_overview_version`, with clean/redline documents linked through `funding_overview_version_documents`.
 - The snapshot is a complete financial overview built from Case Workspace / Application Details financial answers. The applicant cannot edit figures in the signing request; the `signature-ack` records only the attestation that the displayed income/expense figures are accurate as of the signing date.
-- When a new Funding Overview is sent, unsigned prior draft/sent versions for the same case are withdrawn and pending/viewed signing requests are cancelled. Signed versions remain immutable history and later versions redline against the previous signed Funding Overview.
+- When a new Financial Overview is sent, unsigned prior draft/sent versions for the same case are withdrawn and pending/viewed signing requests are cancelled. Signed versions remain immutable history and later versions redline against the previous signed Financial Overview.

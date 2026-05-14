@@ -80,7 +80,7 @@ const CONTEXT_FACTS = {
   'iset-application-assessment': `
 - This workspace combines widgets: Application Overview (case summary), ISET Application Form (editable intake submission), Application Assessment (funding decision workflow), Supporting Documents, Secure Messaging, Case Notes, and Application Events (timeline).
 - To correct applicant data, open the ISET Application Form widget and choose **Edit**. Confirm the modal, adjust fields inline, then choose **Save**. Saving creates a new version entry that is accessible via **View versions**; the original submission stays intact.
-- Editing is blocked if the case status is already Approved or Not Approved, except for reporting-only eligibility denials that remain editable for ILMP corrections. Otherwise, coordinators may update answers on the applicant's behalf when they have source evidence.
+- Editing is blocked if the case status is already Approved or Denied, except for reporting-only eligibility denials that remain editable for ILMP corrections. Otherwise, coordinators may update answers on the applicant's behalf when they have source evidence.
 - Log the change in Case Notes and, if the applicant must be informed, send a Secure Message from the same board before leaving the page.
 - After changes, refresh the Application Overview or Application Events widgets to confirm downstream automations recorded the update.
 `

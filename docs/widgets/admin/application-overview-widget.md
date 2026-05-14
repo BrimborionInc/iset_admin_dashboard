@@ -22,7 +22,7 @@ Case summary, status context, quick layouts, and quick actions.
 - Use widget controls to progress work for the owning workflow.
 - Navigate to linked records or execute relevant operational actions.
 - Use `Quick layouts` for review, documents/messages, notes/calendar, and audit trail views.
-- Use `Quick actions` for mutating or workflow-launching actions such as assignment, watchlist, escalation, put application on hold, resume review, closure notice, close/archive/reopen, and lock release.
+- Use `Quick actions` for mutating or workflow-launching actions such as assignment, watchlist, escalation, put application on hold, resume review, closure notice, withdraw/archive/reopen, and lock release.
 
 ## Inputs / Dependencies
 

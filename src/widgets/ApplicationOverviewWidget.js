@@ -53,6 +53,7 @@ import {
   getApplicationStatusLabel,
   mapWorkflowStatusToPersistenceStatus,
   normalizeApplicationStatus,
+  normalizeStatusKey,
 } from '../utils/applicationStatus';
 import { resolveAssignedStaffProfileId } from '../utils/assignmentIdentity';
 
@@ -89,7 +90,7 @@ const ASSIGN_BLOCKED_STATUSES = new Set(['approved', 'archived', 'closed']);
 const CLOSURE_NOTICE_ELIGIBLE_STATUSES = new Set(['submitted', 'in_review', 'docs_requested', 'pending_approval', 'on_hold']);
 const PARK_ALLOWED_STATUSES = new Set(['submitted', 'in_review', 'docs_requested', 'pending_approval', 'closure_notice']);
 const RESUME_REVIEW_STATUSES = new Set(['docs_requested', 'closure_notice', 'on_hold']);
-const CLOSE_ALLOWED_STATUSES = new Set(['submitted', 'in_review', 'docs_requested', 'pending_approval', 'closure_notice', 'on_hold']);
+const WITHDRAW_ALLOWED_STATUSES = new Set(['submitted', 'in_review', 'docs_requested', 'pending_approval', 'closure_notice', 'on_hold']);
 const ARCHIVE_ALLOWED_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed']);
 const HOLD_REVIEW_DEFAULT_DAYS = 30;
 
@@ -840,6 +841,18 @@ const ApplicationOverviewWidget = ({
 
   const fallbackStatusRaw = statusValue || applicationStatusFromCase || application?.status || '';
   const fallbackStatus = normalizeApplicationStatus(normalizeClosedStatus(fallbackStatusRaw));
+  const fallbackStatusRawKey = normalizeStatusKey(fallbackStatusRaw);
+  const applicationClosureReason =
+    caseData?.application_closure_reason ??
+    caseData?.applicationClosureReason ??
+    application?.application_closure_reason ??
+    application?.applicationClosureReason ??
+    application?.closure_reason ??
+    null;
+  const applicationClosureReasonKey = normalizeStatusKey(applicationClosureReason);
+  const isWithdrawnApplication =
+    fallbackStatusRawKey === 'withdrawn' ||
+    (fallbackStatus === 'closed' && applicationClosureReasonKey === 'withdrawn');
   const normalizedStatusKey = fallbackStatus;
   const statusContext = getApplicationStatusContext(fallbackStatus);
   const roleAccess = getRoleGroups(canonicalRole || userRole);
@@ -857,7 +870,9 @@ const ApplicationOverviewWidget = ({
     hasCase: Boolean(caseData?.id),
   });
 
-  const statusOption = APPLICATION_STATUS_OPTIONS.find(option => option.value === fallbackStatus);
+  const statusOption = isWithdrawnApplication
+    ? { label: 'Withdrawn', value: fallbackStatusRawKey === 'withdrawn' ? 'withdrawn' : fallbackStatus }
+    : APPLICATION_STATUS_OPTIONS.find(option => option.value === fallbackStatus);
   const statusLabel = statusOption?.label || formatStatusLabel(fallbackStatus);
   const selectedStatusOption = statusOption || (fallbackStatus ? { label: statusLabel, value: fallbackStatus } : null);
   const isDocsRequestedStatus = ['docs_requested', 'action_required', 'action_required_(docs_requested)'].includes(normalizedStatusKey);
@@ -899,7 +914,7 @@ const ApplicationOverviewWidget = ({
   const canPutOnClosureNotice = hasCaseId && CLOSURE_NOTICE_ELIGIBLE_STATUSES.has(normalizedStatusKey);
   const canPutOnHold = hasCaseId && PARK_ALLOWED_STATUSES.has(normalizedStatusKey);
   const canResumeReview = hasCaseId && RESUME_REVIEW_STATUSES.has(normalizedStatusKey);
-  const canCloseApplication = hasCaseId && CLOSE_ALLOWED_STATUSES.has(normalizedStatusKey) && (isAdminRole || isRegionalCoordinatorRole);
+  const canWithdrawApplication = hasCaseId && WITHDRAW_ALLOWED_STATUSES.has(normalizedStatusKey) && (isAdminRole || isRegionalCoordinatorRole);
   const canArchiveApplication = hasCaseId && ARCHIVE_ALLOWED_STATUSES.has(normalizedStatusKey) && isAdminRole;
   const canReopenClosed = hasCaseId && normalizedStatusKey === 'closed' && isAdminRole;
   const canReopenArchived = hasCaseId && normalizedStatusKey === 'archived' && isSystemAdministratorRole;
@@ -922,7 +937,7 @@ const ApplicationOverviewWidget = ({
       'resolve-escalation': canResolveEscalation ? { id: 'resolve-escalation', text: 'Resolve escalation' } : null,
       'escalate-up': canEscalateUp ? { id: 'escalate-up', text: 'Escalate to NWAC Administrator' } : null,
       'closure-notice': canPutOnClosureNotice ? { id: 'closure-notice', text: 'Put on closure notice' } : null,
-      close: canCloseApplication ? { id: 'close', text: 'Close application' } : null,
+      withdraw: canWithdrawApplication ? { id: 'withdraw', text: 'Withdraw application' } : null,
       archive: canArchiveApplication ? { id: 'archive', text: 'Archive application' } : null,
       reopen: canReopenApplication ? { id: 'reopen', text: 'Reopen application' } : null,
       'release-lock': canReleaseLock ? { id: 'release-lock', text: 'Release lock' } : null,
@@ -937,7 +952,7 @@ const ApplicationOverviewWidget = ({
       'resolve-escalation',
       'escalate-up',
       'closure-notice',
-      'close',
+      'withdraw',
       'archive',
       'reopen',
       'release-lock',
@@ -953,7 +968,7 @@ const ApplicationOverviewWidget = ({
     canPutOnClosureNotice,
     canPutOnHold,
     canResumeReview,
-    canCloseApplication,
+    canWithdrawApplication,
     canArchiveApplication,
     canReopenApplication,
     canReleaseLock,
@@ -1294,14 +1309,14 @@ const ApplicationOverviewWidget = ({
       return;
     }
 
-    if (actionId === 'close') {
+    if (actionId === 'withdraw') {
       setQuickActionConfirmInput('');
       setQuickActionNote('');
       setQuickActionConfirm(buildConfirm({
-        title: 'Close application',
-        body: 'Closing will move this application to Closed. Use this when the applicant requests closure or is no longer pursuing the application.',
-        targetStatus: 'closed',
-        actionLabel: 'Close application',
+        title: 'Withdraw application',
+        body: 'Withdrawing will move this application to Withdrawn. Use this when the applicant has withdrawn or is no longer pursuing the application.',
+        targetStatus: 'withdrawn',
+        actionLabel: 'Withdraw application',
         resolveEscalation: true
       }));
       return;

@@ -1556,18 +1556,19 @@ const formatDateOnly = value => {
   return date.toISOString().slice(0, 10);
 };
 
-const formatStatusLabel = value =>
-  value
-    ? String(value)
-        .trim()
-        .replace(/[_-]+/g, " ")
-        .replace(/\b\w/g, character => character.toUpperCase())
-    : "—";
+const formatStatusLabel = value => {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (!normalized) return "—";
+  if (["rejected", "declined", "denied", "not_approved"].includes(normalized)) return "Denied";
+  return normalized
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, character => character.toUpperCase());
+};
 
 const getDrilldownStatusType = value => {
   const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
   if (["approved", "completed"].includes(normalized)) return "success";
-  if (["rejected", "declined", "cancelled", "closed", "archived"].includes(normalized)) {
+  if (["rejected", "declined", "denied", "not_approved", "cancelled", "closed", "archived"].includes(normalized)) {
     return "error";
   }
   if (["in_review", "submitted", "pending", "approved"].includes(normalized)) {

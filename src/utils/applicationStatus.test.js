@@ -1,8 +1,11 @@
 import {
+  buildApplicationStatusInfo,
   buildAssessmentDecisionAlignmentError,
   deriveAssessmentDecisionStatusFromAgreement,
   deriveAssessmentReviewStatusSelection,
   deriveApplicationDecisionOutcome,
+  getApplicationStatusLabel,
+  mapWorkflowStatusToPersistenceStatus,
 } from './applicationStatus';
 
 describe('deriveAssessmentReviewStatusSelection', () => {
@@ -52,6 +55,28 @@ describe('deriveApplicationDecisionOutcome', () => {
         caseStatus: 'closed',
       })
     ).toBe('denied');
+  });
+});
+
+describe('withdrawn application status presentation', () => {
+  it('preserves withdrawn as the persisted quick-action status', () => {
+    expect(mapWorkflowStatusToPersistenceStatus('withdrawn')).toBe('withdrawn');
+  });
+
+  it('labels raw withdrawn applications as Withdrawn', () => {
+    expect(getApplicationStatusLabel('withdrawn')).toBe('Withdrawn');
+  });
+
+  it('renders withdrawn closure records as Withdrawn while keeping closed lifecycle semantics', () => {
+    const info = buildApplicationStatusInfo({
+      applicationStatus: 'withdrawn',
+      applicationLifecycleStatus: 'closed',
+      closureReason: 'withdrawn',
+      caseId: 123,
+    });
+
+    expect(info.rawStatus).toBe('closed');
+    expect(info.statusLabel).toBe('Withdrawn');
   });
 });
 

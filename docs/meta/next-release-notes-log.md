@@ -1,8 +1,8 @@
-# Next Release Notes Working Log
+Also t# Next Release Notes Working Log
 
 Purpose: running capture of user-facing fixes/changes for the next "What's New" update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-05-12
+Last Updated: 2026-05-14
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -28,7 +28,14 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - 2026-05-09 | Release 20260509-admin-feedback-fixes | Fix/Casework | ISET Clients | Regional Managers can open the ISET Clients dashboard and see cases in their case scope, including files assigned directly to them. | The list now uses the same direct-assignment, unassigned, portfolio-region, and owner-region model as case-workspace access. Deployed to TEST and PROD on 2026-05-09.
 - 2026-05-09 | Release 20260509-admin-feedback-fixes | Fix/Support | Contact Communications | Regional Managers can use Contact Communications for legacy contact messages linked to applications in their case scope. | NWAC Administrators keep the full legacy queue; Regional Manager counts, list rows, details, statuses, and notes are scoped to accessible applicant files. Deployed to TEST and PROD on 2026-05-09.
 - 2026-05-12 | Release TBD | Intake/Workflow | ISET Intake financial information | Household Income and base Household Expenses are now collected regardless of whether the applicant selects Living allowance. | Updated DEV workflow 21 authoring and the published intake runtime config; amount-driven financial evidence uploads now follow the entered income/expense amounts rather than the Living allowance support selection. TEST promotion rehearsal passed on 2026-05-12 with in-place runtime assertions on both app instances.
-- 2026-05-12 | Release 20260512-test-funding-overview-signatures / 20260512-test-funding-overview-portal-signing | Workflow/Documents | Funding Overview signatures | Case managers can send a Funding Overview to the client for signature as a secure-message digital attachment. | The signed PDF uses the current Case Workspace / Application Details financial figures, the client attests that the income/expense figures are accurate as of signing, and later versions can redline against the previous signed Funding Overview. Deployed to TEST on 2026-05-12 and corrected with an automated TEST send/view/sign smoke; PROD not deployed yet.
+- 2026-05-12 | Release 20260512-test-funding-overview-signatures / 20260512-test-funding-overview-portal-signing | Workflow/Documents | Financial Overview signatures | Case managers can send a Financial Overview to the client for signature as a secure-message digital attachment. | The signed PDF uses the current Case Workspace / Application Details financial figures, the client attests that the income/expense figures are accurate as of signing, and later versions can redline against the previous signed Financial Overview. Deployed to TEST on 2026-05-12 and corrected with an automated TEST send/view/sign smoke; PROD not deployed yet.
+- 2026-05-13 | Release TBD | UX/Help | ISET Clients dashboard | Updated the dashboard and Clients widget help text to explain the current Open, Funded, Dormant, Ineligible, and All client filters. | The help now clarifies that the dashboard is a case-management client list, not the intake assessment queue, and documents grouped client rows, search fields, current columns, role scope, and the funded-intervention logic.
+- 2026-05-13 | Release TBD | UX/Wording | PATH decision statuses | PATH denial decisions now display as `Denied` instead of `Rejected` or `Not Approved` in admin reporting drilldowns, supporting-document selectors, homepage widgets, denial-letter labels/defaults, tutorial/help copy, and applicant decision-email labels. | This is presentation-only; internal raw status values such as `rejected` are unchanged. ESDC submission/package rejection and finance allocation rejection wording remain separate concepts.
+- 2026-05-13 | Release TBD | Workflow/Application Workspace | Application withdrawals | Application Overview now uses a `Withdraw application` quick action for applicant withdrawals instead of labelling that workflow as close. | The action stores raw status `withdrawn`, keeps closed lifecycle behavior for queues, requires a staff note, resolves open escalations, and shows the status as `Withdrawn` in staff-facing application status displays.
+- 2026-05-14 | Release 20260514-prod-dev-alignment | Release/PROD alignment | Current DEV/TEST alignment | Production was brought forward to the current validated DEV/TEST release set. | Deployed on 2026-05-14 with intake financial-information conditionality, payments follow-up, Financial Overview signatures, PATH denial wording, application withdrawal labelling, and supporting admin/portal fixes.
+- 2026-05-14 | Release TBD | UX/Documents | Financial Overview naming | Standardized the secure-message signing form on Financial Overview everywhere users see it. | Updates the attached form label, generated document labels and PDF filenames, signed portal artifact label, and What's New wording; internal database identifiers remain unchanged.
+- 2026-05-14 | Release TBD | Fix/Documents | Financial Overview applicant name | Fixed Financial Overview documents so the Applicant Name field uses the participant's full application name instead of a nickname/preferred-name field when full-name data is available. | Also added durable project guidance that preferred-name fields are nicknames/display preferences and should not be treated as full names in formal documents.
+- 2026-05-14 | Release TBD | Fix/ILMP | Participant validation | ILMP participant validation now reads stored intake answers when a participant submission row is missing its application link. | The ESDC requirements are unchanged; the fix restores the action-plan/application/case-context mapping so stored answers such as Disability and address street are not reported as missing.
 - 2026-05-05 | Release TBD | Fix/Approvals | Case Workspace intervention proposals | New and revised intervention proposal decisions now emit backend events for approved, denied, and changes-requested outcomes. | These decisions now appear in notification settings, bell/email notification routing, case events, and audit history through the shared event infrastructure.
 - 2026-05-05 | Release TBD | Fix/Notifications | Approval decision emails | Approval, denial, changes-requested, and intervention proposal decision emails now go only to the assigned owner and case watchers. | Role rows in Manage Notifications still control templates/settings, but these decision events no longer email every enabled staff member in those roles.
 - 2026-05-05 | Release TBD | Fix/Casework | Intervention proposal approval letters | Approved new intervention proposals and approved applied revisions now reopen the approval-letter follow-up from persisted state and remain in-progress until the letter is sent. | The follow-up no longer depends on the approver's temporary browser state, ordinary approved/backloaded interventions do not unlock it, intervention denial-letter sending stays blocked, and sending the approval letter stores the completion marker that clears proposal/revision blocking.
@@ -294,6 +301,19 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
+- Brought Production up to the current DEV/TEST release set, including the latest admin, public portal, shared runtime, schema, and approved workflow-configuration updates.
+- Updated the intake so Household Income and base Household Expenses are collected for all support requests, not only Living allowance requests.
+- Added the Financial Overview signing workflow so case managers can send the current financial overview to the client for signature, with signed PDFs and version history retained on the file.
+- Added payment follow-up tracking for Finance email handoffs, including packet and line-level follow-up status, notes, evidence links, and communication history.
+- Restored the cross-client Payments dashboard and added Payment Communications to Case Workspace Manage Payments so packet detail, evidence, and follow-up history are available in both places.
+- Standardized PATH denial wording so application and intervention denial decisions display as Denied instead of Rejected or Not Approved in admin screens, letters, reports, supporting-document selectors, and applicant decision-email labels.
+- Renamed the application withdrawal workflow to Withdraw application and show withdrawn applications as Withdrawn while keeping them out of active queues.
+- Updated the ISET Clients dashboard help so Open, Funded, Dormant, Ineligible, and All client filters match the current case-management list behavior.
+
+### Known Bugs (draft bullets - EN)
+
+### Earlier Changes (draft bullets - EN)
+
 - Retired the public portal Contact function as an applicant support path; applicants should use secure Messages for case-manager contact, and staff can continue to triage any legacy contact-message records in Contact Communications.
 - Fixed application decision validation so approval and denial outcomes must match the reviewer agreement with the case manager recommendation.
 - Fixed decision-letter dates so generated and sent approval/denial letters use the current send date instead of an older draft or assessment date.
@@ -301,13 +321,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Made Contact Communications available to Regional Managers for legacy contact messages linked to applications in their case scope.
 - Fixed repeat-application assessments so each selected application loads and saves its own assessment and approval-letter state instead of reusing data from an earlier application on the same case.
 - Updated the public portal dashboard so signed-in applicants see saved drafts, current support, and application history before starting or resuming an intake.
-- Updated the intake so Household Income and base Household Expenses are collected for all support requests, not only Living allowance requests.
 - Improved Ask the AI guidance and guardrails for common application, document, approval-letter, and Pending Completion questions.
-
-### Known Bugs (draft bullets - EN)
-
-### Earlier Changes (draft bullets - EN)
-
 - Made application approval decisions clearer by separating agreement with the case manager recommendation from the final funding outcome.
 - Added an On Hold stage for applications that need to stay open but leave active assessment and decision queues until staff resume review.
 - Added Application Overview actions to put an application on hold with a reason and review reminder, then resume it when follow-up is ready.
@@ -320,9 +334,20 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Coming Soon (draft bullets - EN)
 
-- Payments will gain an operations-side follow-up workflow for Finance email handoffs, with the same packet, evidence, and communication history available from Case Workspace and the cross-client Payments dashboard.
-
 ### Nouveautes (brouillon - FR)
+
+- Mise a niveau de la Production avec l'ensemble courant valide en DEV/TEST, y compris les mises a jour admin, portail public, runtime partage, schema et configuration de flux approuvee.
+- Mise a jour de la demande afin que le revenu du menage et les depenses de base du menage soient recueillis pour toutes les demandes de soutien, pas seulement les demandes d'allocation de subsistance.
+- Ajout du flux de signature Apercu financier afin que les gestionnaires de cas puissent envoyer l'apercu financier courant a la cliente ou au client pour signature, avec PDF signe et historique de versions conserves au dossier.
+- Ajout du suivi des paiements apres envoi aux Finances par courriel, avec statut de suivi par paquet et par ligne, notes, preuves liees et historique des communications.
+- Retablissement du tableau de bord Paiements multi-clients et ajout de Communications de paiement a la vue Gerer les paiements dans l'espace Dossier.
+- Uniformisation du libelle des refus afin que les decisions de refus PATH s'affichent comme Refusee/Refuse au lieu de Rejected ou Not Approved dans les ecrans admin, les lettres, les rapports, les selecteurs de documents et les courriels de decision.
+- Le flux de retrait d'une demande s'appelle maintenant Retirer la demande et les demandes retirees s'affichent comme Retiree, tout en restant exclues des files actives.
+- Mise a jour de l'aide du tableau Clients ISET afin que les filtres Ouverts, Finances, Dormants, Inadmissibles et Tous correspondent au comportement actuel de la liste de gestion des cas.
+
+### Problemes connus (brouillon - FR)
+
+### Changements precedents (brouillon - FR)
 
 - Retrait de la fonction Contact du portail public comme voie de soutien aux candidates et candidats; les personnes inscrites doivent utiliser les Messages securises pour joindre leur gestionnaire de cas, tandis que le personnel peut continuer a trier les anciens messages Contact dans Communications Contact.
 - Correction de la validation des decisions de demande afin que l'approbation ou le refus corresponde a l'accord indique avec la recommandation du gestionnaire de cas.
@@ -331,13 +356,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Communications Contact est maintenant disponible aux gestionnaires regionaux pour les anciens messages lies aux demandes dans leur portee de cas.
 - Correction des evaluations de demandes repetees afin que chaque demande selectionnee charge et enregistre sa propre evaluation et son propre etat de lettres d'approbation, au lieu de reutiliser les donnees d'une demande precedente dans le meme dossier.
 - Mise a jour du tableau de bord du portail public afin que les personnes connectees voient les brouillons sauvegardes, le soutien en cours et l'historique des demandes avant de commencer ou reprendre une demande.
-- Mise a jour de la demande afin que le revenu du menage et les depenses de base du menage soient recueillis pour toutes les demandes de soutien, pas seulement les demandes d'allocation de subsistance.
 - Amelioration des consignes et garde-fous de Ask the AI pour les questions courantes sur les demandes, documents, lettres d'approbation et la file En attente de completion.
-
-### Problemes connus (brouillon - FR)
-
-### Changements precedents (brouillon - FR)
-
 - Clarification des decisions d'approbation des demandes en separant l'accord avec la recommandation du gestionnaire de cas du resultat final de financement.
 - Ajout d'une etape En attente pour les demandes qui doivent rester ouvertes, mais sortir des files d'evaluation et de decision jusqu'a la reprise de la revue.
 - Ajout d'actions dans l'apercu de la demande pour mettre une demande en attente avec une raison et un rappel, puis reprendre la revue.
@@ -349,5 +368,3 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Correction des regles de liste de verification des documents afin que les demandes pour frais de scolarite/livres seulement ne soient pas bloquees par les preuves de revenu ou de depenses, et que les lettres de decision de bande ou de nation soient bien reconnues dans les propositions d'intervention.
 
 ### A venir (brouillon - FR)
-
-- Le module Paiements ajoutera un suivi operationnel des demandes envoyees aux finances par courriel, avec les memes donnees de paquet, preuves et communications dans l'espace Dossier et le tableau de bord Paiements.

@@ -97,7 +97,7 @@ const ApplicationCaseDashboardHelp = ({ onRestartTutorial, onEndTutorial }) => {
         <li>Drag, resize, remove, or re-add widgets from the palette; reset restores the default layout.</li>
         <li>Read-only fields remain visible. Use <em>Edit</em> only when the status and lock allow changes.</li>
         <li>Checklist counts depend on document type and attachment; fix mismatches in Supporting Documents.</li>
-        <li>Quick actions in Application Overview include assign/reassign, closure notice, escalation, and layout presets.</li>
+        <li>Quick actions in Application Overview include assign/reassign, closure notice, withdrawal, escalation, and layout presets.</li>
         <li>Refresh the page after major updates to pull the latest case data and event log entries.</li>
       </ul>
     </div>

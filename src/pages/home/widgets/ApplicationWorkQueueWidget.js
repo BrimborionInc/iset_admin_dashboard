@@ -20,7 +20,7 @@ const getBucketTemplate = role => {
         { id: 'in-assessment', label: 'In Assessment', count: '-', description: 'Applications in active review by their owners.' },
         { id: 'on-hold', label: 'On Hold', count: '-', description: 'Applications intentionally parked for follow-up.' },
         { id: 'awaiting-decision', label: 'Assessed, awaiting approval', count: '-', description: 'Application assessments complete, but need program approval.' },
-        { id: 'decisions-made', label: 'Decisions Made', count: '-', description: 'Applications approved or rejected this week.' }
+        { id: 'decisions-made', label: 'Decisions Made', count: '-', description: 'Applications approved or denied this week.' }
       ];
     case 'Regional Manager':
       return [

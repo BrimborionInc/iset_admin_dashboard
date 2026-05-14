@@ -2,7 +2,7 @@
 
 Purpose: capture the current live behavior of `Reporting > Data and Results` so future threads can extend the reporting surface without reverse-engineering the page from code.
 Audience: admin dashboard engineers, product owners, and reporting reviewers.
-Last Updated: 2026-03-24
+Last Updated: 2026-05-13
 
 ## Scope
 
@@ -95,6 +95,7 @@ Important limitation:
   - application approvals/denials use the application row `updated_at` proxy
   - intervention count drilldowns use the currently selected start/end-date basis
   - intervention cost drilldowns use payment-month allocation
+- Display terminology normalizes PATH denial outcomes to `Denied` in drilldown lists even when internal raw status values remain `rejected`, `declined`, or `not_approved`. This terminology rule does not rename ESDC/reporting package submission statuses such as `Rejected`.
 
 ## Demo data rules
 

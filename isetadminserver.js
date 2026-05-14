@@ -21,6 +21,10 @@ const {
   createSubmissionPayloadFilePathSet,
   isSubmissionPayloadDocumentMatch,
 } = require('./src/lib/applicationSubmissionDocumentScope');
+const {
+  chooseIlmpApplicationId,
+  mergeIlmpAnswers,
+} = require('./src/lib/ilmpContextMapping');
 const { runStartupSharedSchemaMigrations } = require('./src/lib/sharedSchemaMigrationRunner');
 const {
   buildRegionalManagerCaseAccessSql,
@@ -2529,7 +2533,7 @@ async function storeFundingOverviewPdfDocument({
     throw new Error('client_id_required');
   }
   const documentType = 'financial_overview';
-  const labelBase = `Funding Overview v${versionNumber || 1}`;
+  const labelBase = `Financial Overview v${versionNumber || 1}`;
   const label = isRedline
     ? signedByClient
       ? `${labelBase} (redline signed)`
@@ -2542,7 +2546,7 @@ async function storeFundingOverviewPdfDocument({
     isRedline ? 'redline' : null,
     signedByClient ? 'signed' : null
   ].filter(Boolean).join('-');
-  const displayName = `funding-overview-v${versionNumber || 1}-${baseRef}${suffix ? `-${suffix}` : ''}.pdf`;
+  const displayName = `financial-overview-v${versionNumber || 1}-${baseRef}${suffix ? `-${suffix}` : ''}.pdf`;
   const sizeBytes = Number.isFinite(Number(pdfBuffer?.length)) ? Number(pdfBuffer.length) : null;
   const checksum = pdfBuffer ? crypto.createHash('sha256').update(pdfBuffer).digest('hex') : null;
   const normalizedApplicantUserId = normalisePositiveInteger(applicantUserId);
@@ -5975,6 +5979,48 @@ async function findEsdcSubmissionIdForCase(executor, caseId) {
   }
 }
 
+async function resolvePrimaryApplicationIdForCase(executor, caseId) {
+  const db = executor && typeof executor.query === 'function' ? executor : pool;
+  const numericCaseId = normalisePositiveInteger(caseId);
+  if (!db || !numericCaseId) return null;
+  try {
+    const [[row]] = await db.query(
+      `
+      SELECT ${buildCasePrimaryApplicationIdSql('c')} AS application_id
+        FROM iset_case c
+       WHERE c.id = ?
+       LIMIT 1
+      `,
+      [numericCaseId]
+    );
+    return normalisePositiveInteger(row?.application_id);
+  } catch (err) {
+    console.warn('[esdc] failed to resolve primary application for case', numericCaseId, err?.message || err);
+    return null;
+  }
+}
+
+async function resolveActionPlanApplicationId(executor, actionPlanId) {
+  const db = executor && typeof executor.query === 'function' ? executor : pool;
+  const numericPlanId = normalisePositiveInteger(actionPlanId);
+  if (!db || !numericPlanId) return null;
+  try {
+    const [[row]] = await db.query(
+      `SELECT application_id
+         FROM iset_case_action_plan
+        WHERE id = ?
+        LIMIT 1`,
+      [numericPlanId]
+    );
+    return normalisePositiveInteger(row?.application_id);
+  } catch (err) {
+    if (err?.code && err.code !== 'ER_BAD_FIELD_ERROR' && err.code !== 'ER_NO_SUCH_TABLE') {
+      console.warn('[esdc] failed to resolve action-plan application', numericPlanId, err?.message || err);
+    }
+    return null;
+  }
+}
+
 async function ensureEsdcParticipantSubmissionRecord(db, caseId, applicationId, actionPlanId) {
   if (!caseId) return;
   const executor = db && typeof db.query === 'function' ? db : pool;
@@ -5982,6 +6028,17 @@ async function ensureEsdcParticipantSubmissionRecord(db, caseId, applicationId, 
   const resolvedPlanId = Number.isInteger(Number(actionPlanId)) && Number(actionPlanId) > 0
     ? Number(actionPlanId)
     : await findPreferredActionPlanIdForCase(executor, Number(caseId));
+  let resolvedApplicationId = chooseIlmpApplicationId({ submissionApplicationId: applicationId });
+  if (!resolvedApplicationId) {
+    resolvedApplicationId = chooseIlmpApplicationId({
+      actionPlanApplicationId: await resolveActionPlanApplicationId(executor, resolvedPlanId),
+    });
+  }
+  if (!resolvedApplicationId) {
+    resolvedApplicationId = chooseIlmpApplicationId({
+      primaryApplicationId: await resolvePrimaryApplicationIdForCase(executor, Number(caseId)),
+    });
+  }
   try {
     await executor.query(
       `INSERT INTO esdc_participant_submission (
@@ -6017,7 +6074,7 @@ async function ensureEsdcParticipantSubmissionRecord(db, caseId, applicationId, 
          payload_checksum = NULL,
          rejection_reason = NULL,
          updated_at = NOW()`,
-      [caseId, resolvedPlanId || null, applicationId || null]
+      [caseId, resolvedPlanId || null, resolvedApplicationId || null]
     );
   } catch (err) {
     console.error('[esdc] ensure participant submission failed', err);
@@ -7243,18 +7300,28 @@ function extractVisibleMinority(context) {
 
 function extractDisabilityInfo(context) {
   const { answers = {}, caseContext = {} } = context;
+  const caseAnswers =
+    caseContext?.applicationAnswers && typeof caseContext.applicationAnswers === 'object'
+      ? caseContext.applicationAnswers
+      : {};
   const raw = (() => {
     if (typeof caseContext.hasDisability !== 'undefined') return caseContext.hasDisability;
     if (Object.prototype.hasOwnProperty.call(answers, 'has-disability')) return answers['has-disability'];
     if (Object.prototype.hasOwnProperty.call(answers, 'has_disability')) return answers['has_disability'];
-    return answers['disability'];
+    if (Object.prototype.hasOwnProperty.call(answers, 'disability')) return answers.disability;
+    if (Object.prototype.hasOwnProperty.call(caseAnswers, 'has-disability')) return caseAnswers['has-disability'];
+    if (Object.prototype.hasOwnProperty.call(caseAnswers, 'has_disability')) return caseAnswers.has_disability;
+    return caseAnswers.disability;
   })();
   const declared = coerceBoolean(raw);
   const description = normaliseString(
     caseContext.disabilityDescription ||
     answers['disability-description'] ||
     answers['disability_description'] ||
-    answers['disabilityDetails']
+    answers['disabilityDetails'] ||
+    caseAnswers['disability-description'] ||
+    caseAnswers['disability_description'] ||
+    caseAnswers.disabilityDetails
   );
   return {
     declared,
@@ -10800,7 +10867,7 @@ function resolveDecisionLetterTokens({
 }) {
   const isApproval = docType === 'assessment_approval_letter';
   const titleFallback = isApproval ? 'Letter of Approval' : 'Letter of Denial';
-  const labelFallback = isApproval ? 'Approved' : 'Not approved';
+  const labelFallback = isApproval ? 'Approved' : 'Denied';
   const safe = value => normaliseString(value) || '';
   const effectiveDraft = draft && typeof draft === 'object' ? draft : {};
   const nextStep1 = safe(effectiveDraft.next_step_1);
@@ -12477,28 +12544,49 @@ function buildFundingOverviewSignatureSectionHtml({
 
 function buildFundingOverviewVersionLabel({ versionNumber, variant = 'clean' } = {}) {
   const version = normalisePositiveInteger(versionNumber) || 1;
-  return variant === 'redline' ? `Funding Overview v${version} redline` : `Funding Overview v${version}`;
+  return variant === 'redline' ? `Financial Overview v${version} redline` : `Financial Overview v${version}`;
 }
 
 function resolveFundingOverviewApplicantName({ caseRow, payload, answers, caseContext } = {}) {
   const personal = caseContext?.applicationPersonal || {};
+  const answerFirstName = normaliseString(answers?.['first-name'] || answers?.first_name || answers?.firstName);
+  const answerMiddleNames = normaliseString(answers?.['middle-names'] || answers?.middle_names || answers?.middleNames);
+  const answerLastName = normaliseString(answers?.['last-name'] || answers?.last_name || answers?.lastName);
+  const answerFullName = [answerFirstName, answerMiddleNames, answerLastName].filter(Boolean).join(' ');
+  const personalFirstName = normaliseString(personal.first_name || personal.firstName);
+  const personalMiddleNames = normaliseString(personal.middle_names || personal.middleNames);
+  const personalLastName = normaliseString(personal.last_name || personal.lastName);
+  const personalFullName = [personalFirstName, personalMiddleNames, personalLastName].filter(Boolean).join(' ');
+  const contextFirstName = normaliseString(caseContext?.firstName || caseContext?.first_name);
+  const contextMiddleNames = normaliseString(caseContext?.middleNames || caseContext?.middle_names);
+  const contextLastName = normaliseString(caseContext?.lastName || caseContext?.last_name);
+  const contextFullName = [contextFirstName, contextMiddleNames, contextLastName].filter(Boolean).join(' ');
+  const clientFullName = [caseRow?.client_first_name, caseRow?.client_last_name]
+    .map(value => normaliseString(value))
+    .filter(Boolean)
+    .join(' ');
+  const payloadResolvedName = resolveApplicantNameFromPayload(payload, null);
   const contextNameCandidates = [
+    payload?.personal?.full_name,
+    payload?.personal?.fullName,
+    payload?.submission_snapshot?.full_name,
+    payload?.submission_snapshot?.fullName,
+    answerFullName,
+    personalFullName,
+    contextFullName,
+    clientFullName,
+    payloadResolvedName,
+    caseRow?.applicant_name,
     caseContext?.preferredName,
     caseContext?.preferred_name,
     personal.preferred_name,
     personal.preferredName,
     answers?.['preferred-name'],
     answers?.preferred_name,
-    personal.first_name && personal.last_name ? `${personal.first_name} ${personal.last_name}` : null,
-    personal.firstName && personal.lastName ? `${personal.firstName} ${personal.lastName}` : null,
-    caseContext?.firstName && caseContext?.lastName ? `${caseContext.firstName} ${caseContext.lastName}` : null,
-    caseContext?.first_name && caseContext?.last_name ? `${caseContext.first_name} ${caseContext.last_name}` : null,
-    caseRow?.client_first_name && caseRow?.client_last_name ? `${caseRow.client_first_name} ${caseRow.client_last_name}` : null,
-    caseRow?.applicant_name,
     caseRow?.applicant_email,
   ];
   const fallbackName = contextNameCandidates.map(v => normaliseString(v)).find(Boolean) || null;
-  return resolveApplicantNameFromPayload(payload, fallbackName) || fallbackName || '';
+  return fallbackName || '';
 }
 
 async function buildFundingOverviewSnapshot({
@@ -12689,7 +12777,7 @@ async function createFundingOverviewVersion({
   caseId,
   applicationId = null,
   changeReason = 'FINANCIAL_OVERVIEW_UPDATED',
-  changeSummary = 'Funding overview for signature',
+  changeSummary = 'Financial overview for signature',
   actorUserId,
   staffProfileId,
   preparedByName,
@@ -16353,7 +16441,20 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
       console.warn('[esdc] failed to load case action plans', err);
     }
 
-    const applicationId = submissionRow.application_id || caseRow.application_id || null;
+    let applicationId = chooseIlmpApplicationId({
+      submissionApplicationId: submissionRow.application_id,
+    });
+    if (!applicationId) {
+      applicationId = chooseIlmpApplicationId({
+        actionPlanApplicationId: await resolveActionPlanApplicationId(conn, submissionRow.action_plan_id),
+      });
+    }
+    if (!applicationId) {
+      applicationId = chooseIlmpApplicationId({
+        legacyCaseApplicationId: caseRow.application_id,
+        primaryApplicationId: await resolvePrimaryApplicationIdForCase(conn, caseRow.id),
+      });
+    }
     let caseAssessmentRow = null;
     try {
       caseAssessmentRow = await fetchApplicationAssessmentRow(conn, {
@@ -16373,6 +16474,10 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
         { forUpdate: useForUpdate }
       );
     }
+    const mergedAnswers = mergeIlmpAnswers({
+      caseContext,
+      applicationPayload: applicationPayload?.payload || {},
+    });
 
     let validNocPairs = null;
     try {
@@ -16437,7 +16542,7 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
       applicationId,
       applicationRow: applicationPayload?.row || null,
       payload: applicationPayload?.payload || {},
-      answers: applicationPayload?.payload?.answers || {},
+      answers: mergedAnswers,
       validNocPairs
     };
   } catch (error) {
@@ -22715,7 +22820,7 @@ const WORK_QUEUE_BUCKET_META = {
   },
   'decisions-made': {
     label: 'Decisions Made',
-    description: 'Applications approved or rejected this week.'
+    description: 'Applications approved or denied this week.'
   },
   'awaiting-decision': {
     label: 'Awaiting approval',
@@ -53017,7 +53122,7 @@ app.post('/api/interventions/:id/delete', async (req, res) => {
       return res.status(409).json({
         error: 'invalid_status',
         detail: 'only_deletable_interventions_allowed',
-        message: 'Only draft, submitted, in-review, changes requested, approved, or rejected interventions can be deleted. Close or cancel instead.'
+        message: 'Only draft, submitted, in-review, changes requested, approved, or denied interventions can be deleted. Close or cancel instead.'
       });
     }
 
@@ -57696,7 +57801,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
           caseId,
           applicationId: caseRow?.application_id || null,
           changeReason: 'FINANCIAL_OVERVIEW_SIGNATURE_REQUESTED',
-          changeSummary: 'Funding overview sent for client signature',
+          changeSummary: 'Financial overview sent for client signature',
           actorUserId: senderId,
           staffProfileId: resolvedSenderStaffProfileIdForForms || null,
           preparedByName: requesterDisplayName || fromNameValue || ''
@@ -57704,7 +57809,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
         if (!created?.fundingOverviewVersionId) {
           return res.status(409).json({
             error: 'funding_overview_draft_missing',
-            message: 'No funding overview draft could be created for this case.'
+            message: 'No financial overview draft could be created for this case.'
           });
         }
         const renderSet = buildFundingOverviewRenderSet({
@@ -57727,14 +57832,14 @@ const handlePostCaseSecureMessage = async (req, res) => {
         };
       } catch (err) {
         console.warn(
-          '[funding-overview] draft creation failed for case %s (code=%s, message=%s)',
+          '[financial-overview] draft creation failed for case %s (code=%s, message=%s)',
           caseId,
           err?.code || 'n/a',
           err?.message || err
         );
         return res.status(409).json({
           error: 'funding_overview_draft_failed',
-          message: 'No funding overview draft could be created for this case.'
+          message: 'No financial overview draft could be created for this case.'
         });
       }
     }
@@ -80914,7 +81019,7 @@ app.post('/api/signing-requests/:id/sign', async (req, res) => {
           actorUserId: userId
         });
       } catch (signedDocErr) {
-        console.warn('[funding-overview] failed to regenerate signed Funding Overview document', signedDocErr?.message || signedDocErr);
+        console.warn('[financial-overview] failed to regenerate signed Financial Overview document', signedDocErr?.message || signedDocErr);
       }
     }
     const caseId = Number(row.case_id);

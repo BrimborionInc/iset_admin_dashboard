@@ -114,7 +114,7 @@ const buildDenialTemplateDraftForReason = ({
       return {
         decision_intro: intro,
         decision_reason: buildReason(
-          'After reviewing your application, we are unable to approve your funding request at this time because the required documentation confirming eligibility is not yet sufficient under NWAC ISET criteria.',
+          'After reviewing your application, your funding request is denied at this time because the required documentation confirming eligibility is not yet sufficient under NWAC ISET criteria.',
           detail ||
             'A self-declaration or partial third-party confirmation may be helpful, but on its own it is not sufficient to establish eligibility for NWAC ISET funding.',
           'We would be happy to reassess your eligibility when the required supporting documentation is received.',
@@ -141,7 +141,7 @@ const buildDenialTemplateDraftForReason = ({
             (otherFundingSummary
               ? `Our file review indicates existing support already covers requested costs (${otherFundingSummary}).`
               : 'Our review indicates that requested supports overlap with confirmed funding from another source.'),
-          'Because overlapping supports cannot be duplicated under ISET policy, we are not able to approve this request at this time.',
+          'Because overlapping supports cannot be duplicated under ISET policy, this request is denied at this time.',
           nextStepsText
         )
       };
@@ -160,7 +160,7 @@ const buildDenialTemplateDraftForReason = ({
       return {
         decision_intro: intro,
         decision_reason: buildReason(
-          `At this time, your application is not approved because the proposed training does not align closely enough with your stated employment objective${goalText ? ` (${goalText})` : ''}.`,
+          `At this time, your application is denied because the proposed training does not align closely enough with your stated employment objective${goalText ? ` (${goalText})` : ''}.`,
           detail ||
             'ISET funding decisions must be linked to a clear skills-development and labour-market pathway.',
           nextStepsText ||
@@ -171,7 +171,7 @@ const buildDenialTemplateDraftForReason = ({
       return {
         decision_intro: intro,
         decision_reason: buildReason(
-          'At this time, your application is not approved because funding is not currently available under the requested stream.',
+          'At this time, your application is denied because funding is not currently available under the requested stream.',
           detail || '',
           nextStepsText || 'Please contact your case manager to review alternate supports or future intake opportunities.'
         )
@@ -181,7 +181,7 @@ const buildDenialTemplateDraftForReason = ({
       return {
         decision_intro: intro,
         decision_reason: buildReason(
-          'After reviewing your application against NWAC ISET eligibility criteria, your request is not approved at this time.',
+          'After reviewing your application against NWAC ISET eligibility criteria, your request is denied at this time.',
           detail || 'The information currently on file does not meet one or more eligibility requirements for this funding request.',
           nextStepsText || 'You may reapply if your circumstances change and program criteria are met.'
         )
@@ -4406,7 +4406,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       decision_date: baseDecisionDate,
       letter_title: 'Letter of Denial',
       decision_intro: '',
-      decision_label: 'Not approved',
+      decision_label: 'Denied',
       decision_reason: '',
       next_step_1: '',
       next_step_2: '',
@@ -7462,7 +7462,7 @@ ${JSON.stringify(aiContext, null, 2)}`;
               ...current,
               decision_date: decisionDate,
               letter_title: 'Letter of Denial',
-              decision_label: 'Not approved',
+              decision_label: 'Denied',
               decision_intro: denialTemplateDraft.decision_intro || current.decision_intro,
               decision_reason: denialTemplateDraft.decision_reason || current.decision_reason,
               next_step_1: '',
@@ -7546,14 +7546,14 @@ Strict template rules:
 
 Required output:
 - letter_title: "Letter of Denial"
-- decision_label: "Not approved"
+- decision_label: "Denied"
 - decision_intro: close to denial_template_intro
 - decision_reason: close to denial_template_reason
 - next_step_1: ""
 - next_step_2: ""
 
 Content rules:
-- Explicitly state the request is not approved at this time.
+- Explicitly state the request is denied at this time.
 - Ground rationale in denial_reason_code, denial_reason_label, denial_reason_explanation, and context facts.
 - Rewrite internal-case-note phrasing into applicant-facing prose. Do not copy wording like "Person is..." or "Client has..." verbatim.
 - Use options_going_forward and partial_services_available when present.
@@ -7648,7 +7648,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
         const parsedReason = scrubLetterText(parsed.decision_reason || '');
         const denialIntroLooksOnTemplate = /^thank you for your recent application/i.test(parsedIntro);
         const denialReasonLooksOnTemplate =
-          parsedReason.length >= 120 && /(not approved|unable to approve)/i.test(parsedReason);
+          parsedReason.length >= 120 && /(denied|not approved|unable to approve)/i.test(parsedReason);
         const resolvedDecisionIntro = isDenialDraft
           ? (denialIntroLooksOnTemplate ? parsedIntro : fallbackDenialIntro)
           : scrubLetterText(parsed.decision_intro || current.decision_intro);
@@ -7670,7 +7670,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
             decision_date: decisionDate,
             letter_title: isDenialDraft ? 'Letter of Denial' : (parsed.letter_title || current.letter_title),
             decision_intro: resolvedDecisionIntro,
-            decision_label: isDenialDraft ? 'Not approved' : (parsed.decision_label || current.decision_label),
+            decision_label: isDenialDraft ? 'Denied' : (parsed.decision_label || current.decision_label),
             decision_reason: resolvedDecisionReason,
             next_step_1: nextStep1,
             next_step_2: nextStep2
@@ -7687,7 +7687,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
               ...current,
               decision_date: decisionDate,
               letter_title: 'Letter of Denial',
-              decision_label: 'Not approved',
+              decision_label: 'Denied',
               decision_intro: denialTemplateDraft?.decision_intro || current.decision_intro,
               decision_reason: denialTemplateDraft?.decision_reason || current.decision_reason,
               next_step_1: '',

@@ -34,11 +34,11 @@ Stored in `iset_application.status` (varchar). Canonical values:
 | `rejected` | NWAC outcome denied. | `CoordinatorAssessmentWidget.handleComplete` with `reject`, or legacy denial records finalized in `handleCommunicationComplete`. |
 | `declined` | Legacy decision status treated as rejected/terminal. | Legacy/imported records. |
 | `cancelled` | Legacy terminal status for cancelled applications. | Legacy/imported records. |
-| `closed` | Application closed (e.g., applicant withdrew or file closed administratively). | Manual status change or automation. |
+| `closed` | Application closed administratively. | Manual status change or automation. |
 | `archived` | Historical record retained, no further action. | Manual administrative action. |
-| `withdrawn` | Applicant withdrew; normalized to `closed` in UI. | Legacy/imported records or portal withdrawal. |
+| `withdrawn` | Applicant withdrew; lifecycle normalizes to `closed` while staff-facing status displays as `Withdrawn`. | Application Overview `Withdraw application` quick action, legacy/imported records, or portal withdrawal. |
 
-> **Normalization:** `getApplicationStatusContext()` (in `src/utils/rbac.js`) lowercases/underscores incoming values and maps `withdrawn` to `closed`. `on_hold` persists as the raw workflow status but normalizes to application lifecycle `awaiting_applicant`; homepage queue logic gives it a dedicated `On Hold` bucket instead of mixing it into active assessment. SLA timing returns no active stage while an application is parked.
+> **Normalization:** `getApplicationStatusContext()` (in `src/utils/rbac.js`) lowercases/underscores incoming values and maps `withdrawn` to `closed` for lifecycle, permission, and queue semantics. Display helpers preserve the staff-facing `Withdrawn` label when the raw application status or closure reason is `withdrawn`. `on_hold` persists as the raw workflow status but normalizes to application lifecycle `awaiting_applicant`; homepage queue logic gives it a dedicated `On Hold` bucket instead of mixing it into active assessment. SLA timing returns no active stage while an application is parked.
 > **Note:** `docs_requested` remains an application status option, but document-request timing is now tracked separately (see below) so requests can overlap any status.
 > **DEV migration note:** the development branch now also writes `application_lifecycle_status`, `decision_outcome`, `application_awaiting_reason`, and `application_closure_reason`. `iset_application.status` remains in place as the legacy compatibility field until rollout and backfill are complete.
 
@@ -192,7 +192,7 @@ Implemented in `recomputeCaseStatus(caseId)` (see `isetadminserver.js`):
   - Uses `getApplicationStatusContext` and `getCaseStatusContext` to decide which panels to show.
   - Calls `actions.refreshCaseData()` after successful submit or outcome decision, ensuring the Application Overview widget reflects the new status without page reloads.
 - **Badges & Tables**: Portfolio and workspace headers display derived case status badges; they no longer present stage/sub-stage chips.
-- **Portfolio filtering**: The ISET Case Portfolio widget defaults to `initiated`, `active`, `dormant`, `ready_to_close`, `closed`, and `archived` statuses so newly submitted/intake cases remain on the assessor dashboard rather than the portfolio view.
+- **Portfolio filtering**: The ISET Clients table sends the default case lifecycle set (`initiated`, `active`, `dormant`, `ready_to_close`, `closed`, and `archived`) to `/api/cases`, so newly submitted/intake-only cases remain on the assessment surfaces rather than the case-management client list. The widget's `Show` selector then narrows that list with `clientCategory`: `active` means `initiated`/`active`/`ready_to_close` and excludes reporting-only files; `funded` means at least one positive funded intervention amount in effective status `approved`, `in_progress`, `suspended`, `completed`, or `cancelled`; `dormant` means `dormant`/`closed`/`archived`; `ineligible_reporting` means files flagged `reportingOnlyDeniedIneligible`; `all` includes ordinary and reporting-only files within the default lifecycle set.
 
 ### 4.3 Data Synchronisation Lessons
 During the November 2025 testing cycle the NWAC widget kept showing the outcome notice prematurely because `/api/cases/:id` omitted `application_status`. We spent hours debugging front-end caching (`__ISET_CASE_CACHE`) before identifying the missing SQL column. Always validate API projections first when a widget reports stale data—especially when new fields were recently introduced.

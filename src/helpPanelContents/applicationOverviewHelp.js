@@ -37,14 +37,14 @@ const ApplicationOverviewHelp = () => (
       </li>
       <li>
         <strong>Act quickly:</strong> Use Quick layouts for common review views. Use Quick actions for
-        assignment, closure notice, escalation, and other workflow actions when they are available.
+        assignment, closure notice, withdrawal, escalation, and other workflow actions when they are available.
       </li>
     </ul>
 
     <h3>Tips</h3>
     <ul>
       <li>Status changes are recorded in the Events Timeline, so confirm the update there after saving.</li>
-      <li>Escalations block some actions until resolved; respond or resolve before closing or archiving.</li>
+      <li>Escalations block some actions until resolved; respond or resolve before withdrawing or archiving.</li>
       <li>If a field or detail is missing, open the ISET Application Form widget to review the full submission.</li>
       <li>Denied-ineligible ILMP issues do not belong to normal casework queues; use the ESDC reporting status panel to see whether the record is blocked, pending, or ready.</li>
       <li>Use this widget to orient yourself quickly, but do the real review in the form, documents, notes, messaging, and assessment widgets.</li>
@@ -54,7 +54,7 @@ const ApplicationOverviewHelp = () => (
 
 ApplicationOverviewHelp.aiContext = `
 You are assisting an ISET program coordinator using the Application Overview widget. Explain the status badge and
-selector, including that the manual status selector in this widget is available to System Administrators and NWAC Administrators, plus timeline status, Quick layouts, assignment and escalation quick actions, document checklist summary, the ESDC/ILMP reporting status shown for denied-ineligible records, and where to confirm identifiers and contact details.
+	selector, including that the manual status selector in this widget is available to System Administrators and NWAC Administrators, plus timeline status, Quick layouts, assignment, withdrawal, and escalation quick actions, document checklist summary, the ESDC/ILMP reporting status shown for denied-ineligible records, and where to confirm identifiers and contact details.
 Keep guidance operational and aligned with the visible controls. Treat this widget as the first orientation point in the file, not as a substitute for reviewing the underlying application, documents, notes, and assessment.
 `;
 

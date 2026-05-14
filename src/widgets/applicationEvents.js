@@ -29,7 +29,7 @@ const STATUS_LABELS = {
   denied: 'Denied',
   rejected: 'Denied',
   closed: 'Closed',
-  withdrawn: 'Closed',
+  withdrawn: 'Withdrawn',
   archived: 'Archived'
 };
 

@@ -519,7 +519,7 @@ const checks = [
     anchor: 'if (isDenialDraft && denialTemplateDraft)',
     patterns: [
       "letter_title: 'Letter of Denial'",
-      "decision_label: 'Not approved'",
+      "decision_label: 'Denied'",
       'return;',
     ],
     after: 2500,

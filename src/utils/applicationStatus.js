@@ -91,7 +91,7 @@ export const APPLICATION_STATUS_LABEL_MAP = APPLICATION_STATUS_OPTIONS.reduce((a
   return acc;
 }, {});
 
-APPLICATION_STATUS_LABEL_MAP.withdrawn = 'Closed';
+APPLICATION_STATUS_LABEL_MAP.withdrawn = 'Withdrawn';
 APPLICATION_STATUS_LABEL_MAP.cancelled = 'Closed';
 APPLICATION_STATUS_LABEL_MAP.completed = 'Closed';
 APPLICATION_STATUS_LABEL_MAP.docs_requested = 'Awaiting Applicant';
@@ -125,6 +125,7 @@ export function normalizeDecisionOutcome(value, fallback = null) {
 }
 
 export function getApplicationStatusLabel(status) {
+  if (normalizeStatusKey(status) === 'withdrawn') return 'Withdrawn';
   const normalized = normalizeApplicationStatus(status);
   if (!normalized) return 'Unknown';
   if (APPLICATION_STATUS_LABEL_MAP[normalized]) {
@@ -456,6 +457,8 @@ export function mapWorkflowStatusToPersistenceStatus(
   status,
   { currentStatus = null, awaitingReason = null, decisionOutcome = null } = {}
 ) {
+  const rawStatus = normalizeStatusKey(status);
+  if (rawStatus === 'withdrawn') return 'withdrawn';
   const normalizedStatus = normalizeApplicationStatus(status);
   const currentKey = normalizeApplicationStatus(currentStatus);
   const awaitingKey = normalizeStatusKey(awaitingReason);
@@ -553,6 +556,7 @@ export function buildApplicationStatusInfo({
   includeUnassignedQualifier = true,
 } = {}) {
   const fallbackStatus = caseId ? 'submitted' : 'new';
+  const applicationStatusKey = normalizeStatusKey(applicationStatus);
   const rawStatus = deriveApplicationStatusFromState({
     applicationStatus,
     applicationLifecycleStatus,
@@ -581,6 +585,7 @@ export function buildApplicationStatusInfo({
   const qualifiers = [];
   const awaitingKey = normalizeStatusKey(awaitingReason);
   const closureKey = normalizeStatusKey(closureReason);
+  const isWithdrawnApplication = applicationStatusKey === 'withdrawn' || (rawStatus === 'closed' && closureKey === 'withdrawn');
   if (includeUnassignedQualifier && isUnassignedCase) {
     qualifiers.push('Unassigned');
   }
@@ -606,13 +611,10 @@ export function buildApplicationStatusInfo({
       qualifiers.push('Denied');
     }
   }
-  if (rawStatus === 'closed' && closureKey === 'withdrawn') {
-    qualifiers.push('Withdrawn');
-  }
   if (eligibilityMissing) {
     qualifiers.push('Awaiting EI Validation');
   }
-  const baseLabel = getApplicationStatusLabel(rawStatus);
+  const baseLabel = isWithdrawnApplication ? 'Withdrawn' : getApplicationStatusLabel(rawStatus);
   const statusLabel = qualifiers.length ? `${baseLabel} • ${qualifiers.join(' • ')}` : baseLabel;
   return {
     rawStatus,

@@ -11,7 +11,7 @@ Define non-layout quick actions for the Application Workspace header, including 
 ## Current UI split
 
 - `Quick layouts` contains non-mutating board/view presets: Review application, Documents and messages, Notes and case calendar, and View audit trail.
-- `Quick actions` contains mutating or workflow-launching actions: Add applicant to watchlist, Assign / reassign, Put on hold, Resume review, escalation actions, Put on closure notice, Close application, Archive application, Reopen application, and Release lock.
+- `Quick actions` contains mutating or workflow-launching actions: Add applicant to watchlist, Assign / reassign, Put on hold, Resume review, escalation actions, Put on closure notice, Withdraw application, Archive application, Reopen application, and Release lock.
 - Keep layout switches out of the mutating action menu so staff can distinguish navigation from workflow changes.
 
 ## Actions to confirm
@@ -19,7 +19,7 @@ Define non-layout quick actions for the Application Workspace header, including 
 - Put on hold
 - Put on closure notice
 - Resume review
-- Close application
+- Withdraw application
 - Archive application (if supported)
 - Reopen application (if supported)
 - Escalate application
@@ -60,17 +60,18 @@ Define non-layout quick actions for the Application Workspace header, including 
 - Backend endpoint + payload: Set status to `in_review`.
 - Confirmation/modal requirements: Confirm modal with required note for consistency.
 
-### Close application
+### Withdraw application
 - Roles that can see/use: System Administrator, Program Administrator, Regional Manager.
 - Status gating: Available from `submitted`, `in_review`, `docs_requested`, `pending_approval`, `closure_notice`, and `on_hold`.
-- Backend endpoint + payload: Set status to `closed`.
+- Backend endpoint + payload: Set application status to `withdrawn`; lifecycle remains closed through the status persistence helper.
 - Confirmation/modal requirements: Confirm modal with required note.
-- Escalation handling: Allow closing with an open escalation, but ensure the escalation queue is resolved/closed to avoid orphaned items.
-- Escalation handling detail: If an escalation is open, auto-resolve it and attach the close note as the resolution note.
+- Escalation handling: Allow withdrawing with an open escalation, but ensure the escalation queue is resolved/closed to avoid orphaned items.
+- Escalation handling detail: If an escalation is open, auto-resolve it and attach the withdrawal note as the resolution note.
+- Intent: applicant has withdrawn or is no longer pursuing the application; display as `Withdrawn` in application status surfaces.
 
 ### Archive application
 - Roles that can see/use: System Administrator, Program Administrator.
-- Status gating: Available from `approved`, `completed`, `rejected`, `closed`.
+- Status gating: Available from `approved`, `completed`, `rejected`, `closed`/`withdrawn`.
 - Backend endpoint + payload: Set status to `archived`.
 - Confirmation/modal requirements: Confirm modal with required note.
 - Escalation handling: Block if an escalation is open; show a note explaining why.

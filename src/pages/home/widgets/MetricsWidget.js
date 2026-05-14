@@ -54,7 +54,7 @@ const METRIC_DEFINITIONS = [
   {
     id: 'denied',
     label: 'Applications denied',
-    description: 'Applications currently not approved and updated in the selected period.',
+    description: 'Applications currently denied and updated in the selected period.',
     format: 'count'
   },
   {

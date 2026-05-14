@@ -26,7 +26,7 @@ import { closePendingDocumentWindow, navigateDocumentWindow, openPendingDocument
 import useCurrentUser from '../hooks/useCurrentUser';
 import { getRoleGroups } from '../utils/rbac';
 import { resolveApplicationStateFields } from '../utils/applicationStatus';
-import { resolveInterventionStateFields } from '../utils/interventionStatus';
+import { formatInterventionStatusLabel, resolveInterventionStateFields } from '../utils/interventionStatus';
 
 const REFRESH_EVENT = 'iset:supporting-documents:refresh';
 const OPEN_UPLOAD_EVENT = 'iset:supporting-documents:open-upload';
@@ -105,10 +105,19 @@ const formatSourceLabel = item => {
 
 const formatApplicationStatus = value => {
   if (!value) return '';
-  const normalized = String(value).trim().toLowerCase();
-  if (normalized === 'rejected') return 'Not Approved';
-  return String(value).trim().replace(/_/g, ' ');
+  const normalized = String(value).trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (['rejected', 'declined', 'denied', 'not_approved'].includes(normalized)) return 'Denied';
+  return normalized
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, character => character.toUpperCase());
 };
+
+const formatApplicationStatusTag = value => formatApplicationStatus(value) || undefined;
+const formatInterventionStatusTag = value => {
+  const label = formatInterventionStatusLabel(value);
+  return label && label !== '-' ? label : undefined;
+};
+const buildStatusTag = label => (label ? [label] : undefined);
 
 const buildInterventionDocumentOption = (intervention, planLabel, planId) => {
   if (!intervention?.id) return null;
@@ -1895,7 +1904,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         value: opt.value,
         label: opt.label,
         description: opt.description,
-        tags: showStatusTag ? [opt.status] : undefined
+        tags: showStatusTag ? buildStatusTag(formatApplicationStatusTag(opt.status)) : undefined
       });
     });
     return opts;
@@ -1915,7 +1924,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         value: opt.value,
         label: opt.label,
         description: opt.description,
-        tags: opt.status ? [opt.status] : undefined
+        tags: opt.status ? buildStatusTag(formatInterventionStatusTag(opt.status)) : undefined
       });
     });
     return opts;
@@ -1940,7 +1949,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
             (descriptionLower !== statusLabel && descriptionLower !== String(opt.status).toLowerCase()));
         return {
           ...opt,
-          tags: showStatusTag ? [opt.status] : undefined
+          tags: showStatusTag ? buildStatusTag(formatApplicationStatusTag(opt.status)) : undefined
         };
       }),
     [applicationOptions]
@@ -1950,21 +1959,21 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     const options = actionPlanInterventionMap.get(String(pendingActionPlan || '')) || [];
     return options.map(opt => ({
       ...opt,
-      tags: opt.status ? [opt.status] : undefined
+      tags: opt.status ? buildStatusTag(formatInterventionStatusTag(opt.status)) : undefined
     }));
   }, [actionPlanInterventionMap, pendingActionPlan]);
   const editActionPlanInterventionOptions = useMemo(() => {
     const options = actionPlanInterventionMap.get(String(editActionPlanId || '')) || [];
     return options.map(opt => ({
       ...opt,
-      tags: opt.status ? [opt.status] : undefined
+      tags: opt.status ? buildStatusTag(formatInterventionStatusTag(opt.status)) : undefined
     }));
   }, [actionPlanInterventionMap, editActionPlanId]);
   const duplicateActionPlanInterventionOptions = useMemo(() => {
     const options = actionPlanInterventionMap.get(String(duplicateActionPlanId || '')) || [];
     return options.map(opt => ({
       ...opt,
-      tags: opt.status ? [opt.status] : undefined
+      tags: opt.status ? buildStatusTag(formatInterventionStatusTag(opt.status)) : undefined
     }));
   }, [actionPlanInterventionMap, duplicateActionPlanId]);
   const pendingSelectedInterventionOptions = useMemo(() => {

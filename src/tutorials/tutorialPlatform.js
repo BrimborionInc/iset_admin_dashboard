@@ -345,7 +345,7 @@ const TUTORIAL_DEFINITIONS = [
         steps: [
           {
             title: 'Funding decision',
-            content: 'Choose Approved, Not Approved, or Push back. Use Push back when the coordinator needs to correct the file before a final decision. Use Commit to record the decision and unlock the communication step.',
+            content: 'Choose Approved, Denied, or Push back. Use Push back when the coordinator needs to correct the file before a final decision. Use Commit to record the decision and unlock the communication step.',
             hotspotId: 'nwac-decision-status'
           },
           {
