@@ -1,7 +1,7 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-05-14T14:02:36.327Z",
-  "releaseId": "",
-  "releaseLabel": "Current build",
+  "generatedAt": "2026-05-14T20:20:11.657Z",
+  "releaseId": "20260514-ilmp-draft-plan-readiness-test",
+  "releaseLabel": "Release 20260514-ilmp-draft-plan-readiness-test",
   "releaseDateEn": "14th May 2026",
   "releaseDateFr": "14 mai 2026",
   "en": {

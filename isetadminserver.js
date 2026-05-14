@@ -25,6 +25,10 @@ const {
   chooseIlmpApplicationId,
   mergeIlmpAnswers,
 } = require('./src/lib/ilmpContextMapping');
+const {
+  getIlmpActionPlanReadinessWarning,
+  summariseIlmpActionPlanStatuses,
+} = require('./src/lib/ilmpActionPlanReadiness');
 const { runStartupSharedSchemaMigrations } = require('./src/lib/sharedSchemaMigrationRunner');
 const {
   buildRegionalManagerCaseAccessSql,
@@ -8409,44 +8413,12 @@ function runIlmpValidation(context) {
   const derivedPlans = extractActionPlanDetails(context, clientStatus, requestedSupports) || [];
   const barriersRaw = extractEmploymentBarriers(context) || [];
 
-  const planStatusCounts = (() => {
-    const plans = Array.isArray(context.caseActionPlans) ? context.caseActionPlans : [];
-    const normalise = status => (status ? String(status).trim().toLowerCase() : '');
-    let hasNonDraft = false;
-    let draftCount = 0;
-    let activePlans = 0;
-    plans.forEach(plan => {
-      const status = normalise(plan?.status);
-      if (status === 'draft') draftCount += 1;
-      if (status && status !== 'draft') hasNonDraft = true;
-        if (status === 'active') activePlans += 1;
-    });
-    return { hasNonDraft, draftCount, total: plans.length, activePlans };
-  })();
-  if (!planStatusCounts.hasNonDraft) {
-    const msg = 'At least one action plan must be active/closed for ESDC; only draft plans found.';
+  const planStatusCounts = summariseIlmpActionPlanStatuses(context.caseActionPlans);
+  const actionPlanReadinessWarning = getIlmpActionPlanReadinessWarning(context.caseActionPlans);
+  if (actionPlanReadinessWarning) {
+    const msg = actionPlanReadinessWarning.ruleResult.message;
     warnings.push(`[actionPlan] ${msg}`);
-    ruleResults.push({
-      id: 'actionplan-required',
-      label: 'Action plan',
-      category: 'mandatory',
-      severity: 'warning',
-      passed: false,
-      message: msg,
-      detail: planStatusCounts.total
-    });
-  } else if (planStatusCounts.draftCount > 0) {
-    const msg = 'One or more action plans are still in draft status; promote to active before submission.';
-    warnings.push(`[actionPlan] ${msg}`);
-    ruleResults.push({
-      id: 'actionplan-planned',
-      label: 'Action plan status',
-      category: 'mandatory',
-      severity: 'warning',
-      passed: false,
-      message: msg,
-      detail: planStatusCounts.draftCount
-    });
+    ruleResults.push(actionPlanReadinessWarning.ruleResult);
   }
 
   const genderCode = toCode(extracted.gender, { male:'1', female:'2', unspecified:'3' });
