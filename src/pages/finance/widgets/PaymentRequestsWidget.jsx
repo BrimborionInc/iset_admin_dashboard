@@ -18,7 +18,6 @@ import {
   Modal,
   FormField,
   Input,
-  Textarea,
   DatePicker,
   Autosuggest,
   Alert,
@@ -27,8 +26,6 @@ import { apiFetch } from "../../../auth/apiClient";
 import { boardItemI18nStrings } from "./common";
 import { usePaymentsData } from "./PaymentsDataContext.jsx";
 import { findOptionByValue } from "./paymentOptions";
-import useCurrentUser from "../../../hooks/useCurrentUser";
-import { toCanonicalRole } from "../../../context/RoleMatrixContext";
 import { normalizeInterventionStatus } from "../../../utils/interventionStatus.js";
 import { getCurrencyInputDisplayValue } from "../../../utils/currencyFormat.js";
 
@@ -179,7 +176,6 @@ const EMPTY_CREATE_FORM = {
   caseId: "",
   interventionId: "",
   reportingUnit: "",
-  dueBy: "",
   notes: "",
   paymentType: "",
   payeeType: "",
@@ -192,6 +188,20 @@ const EMPTY_CREATE_FORM = {
   requestedPaymentDate: "",
   invoiceReferenceNumber: "",
 };
+
+const EMPTY_CREATE_LINE_FIELDS = {
+  paymentType: "",
+  payeeType: "",
+  payeeName: "",
+  payeeReference: "",
+  amount: "",
+  servicePeriodStart: "",
+  servicePeriodEnd: "",
+  requestedPaymentDate: "",
+  invoiceReferenceNumber: "",
+};
+
+const CREATE_LINE_FIELD_KEYS = Object.keys(EMPTY_CREATE_LINE_FIELDS);
 
 const isBlockedInterventionStatus = status =>
   BLOCKED_INTERVENTION_STATUSES.has(normalizeInterventionStatus(status));
@@ -618,8 +628,11 @@ const normalizeApprovedCostLine = (raw, index = 0) => {
   const occurrences = toNumberOrNull(recurrenceRaw.occurrences);
   const type = normalizeSupportTypeValue(raw.type || raw.paymentType || raw.payment_type);
   if (!(amount > 0) && !(amountPerPeriod > 0)) return null;
+  const sourceId = raw.id ? String(raw.id) : null;
   return {
-    id: raw.id ? String(raw.id) : `approved-line-${index + 1}`,
+    id: sourceId || `approved-line-${index + 1}`,
+    sourceId,
+    costLineIndex: index + 1,
     type: normalizePaymentTypeValue(type),
     amount,
     amountPerPeriod,
@@ -669,17 +682,179 @@ const formatApprovedCostLineSchedule = line => {
   return parts.join(" · ") || "—";
 };
 
-const formatApprovedCostLineAmount = line => {
-  if (line?.amount !== null) {
-    return formatCurrency(line.amount);
+const getApprovedCostLineAmount = line => {
+  const amount = roundCurrencyValue(line?.amount);
+  if (amount !== null) {
+    return amount;
   }
-  if (line?.amountPerPeriod > 0 && line?.occurrences) {
-    return formatCurrency(line.amountPerPeriod * line.occurrences);
+  const amountPerPeriod = roundCurrencyValue(line?.amountPerPeriod);
+  const occurrences = toNumberOrNull(line?.occurrences);
+  if (amountPerPeriod > 0 && occurrences > 0) {
+    return Math.round(amountPerPeriod * occurrences * 100) / 100;
+  }
+  if (amountPerPeriod > 0) {
+    return amountPerPeriod;
+  }
+  return null;
+};
+
+const formatApprovedCostLineAmount = line => {
+  const amount = getApprovedCostLineAmount(line);
+  if (amount !== null) {
+    return formatCurrency(amount);
   }
   if (line?.amountPerPeriod > 0) {
     return `${formatCurrency(line.amountPerPeriod)} / period`;
   }
   return "—";
+};
+
+const normalizeFundingLineIdentifier = value => {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+};
+
+const normalizeComparableName = value =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+
+const getPacketLineFundingLineId = line => {
+  const metadata = line?.metadata && typeof line.metadata === "object" ? line.metadata : {};
+  return normalizeFundingLineIdentifier(
+    metadata.costLineId ??
+      metadata.cost_line_id ??
+      metadata.approvedFundingLineId ??
+      metadata.approved_funding_line_id ??
+      metadata.fundingLineId ??
+      metadata.funding_line_id,
+  );
+};
+
+const getPacketLineFundingLineIndex = line => {
+  const metadata = line?.metadata && typeof line.metadata === "object" ? line.metadata : {};
+  const rawIndex =
+    metadata.costLineIndex ??
+    metadata.cost_line_index ??
+    metadata.approvedFundingLineIndex ??
+    metadata.approved_funding_line_index ??
+    metadata.fundingLineIndex ??
+    metadata.funding_line_index;
+  const numeric = toNumberOrNull(rawIndex);
+  return numeric > 0 ? Math.trunc(numeric) : null;
+};
+
+const buildApprovedCostLinePeriodKeys = line => {
+  const keys = new Set();
+  if (line?.amountPerPeriod > 0 && (line?.startDate || line?.endDate || line?.occurrences)) {
+    buildMonthlyPeriods({
+      startDate: line.startDate,
+      endDate: line.endDate,
+      occurrences: line.occurrences,
+    }).forEach(period => {
+      const key = buildServicePeriodKey(period.start, period.end);
+      if (key !== "|") keys.add(key);
+    });
+  }
+  if (!keys.size && (line?.startDate || line?.endDate)) {
+    const key = buildServicePeriodKey(
+      line?.startDate ? toDateInputValue(line.startDate) : "",
+      line?.endDate ? toDateInputValue(line.endDate) : "",
+    );
+    if (key !== "|") keys.add(key);
+  }
+  return keys;
+};
+
+const resolveApprovedCostLineUsage = (approvedLines, packetLines) => {
+  const records = (Array.isArray(approvedLines) ? approvedLines : []).map((line, index) => {
+    const sourceId = normalizeFundingLineIdentifier(line?.sourceId || line?.id);
+    const key = `${sourceId || "approved-line"}:${index + 1}`;
+    return {
+      key,
+      line,
+      sourceId,
+      index: index + 1,
+      type: normalizePaymentTypeValue(line?.type),
+      amount: getApprovedCostLineAmount(line),
+      periodKeys: buildApprovedCostLinePeriodKeys(line),
+      payeeNameKey: normalizeComparableName(line?.payeeName),
+    };
+  });
+  const usageByKey = new Map(records.map(record => [record.key, 0]));
+  const bySourceId = new Map(
+    records.filter(record => record.sourceId).map(record => [record.sourceId, record]),
+  );
+  const byIndex = new Map(records.map(record => [record.index, record]));
+  const recordsByType = new Map();
+  records.forEach(record => {
+    if (!record.type) return;
+    if (!recordsByType.has(record.type)) recordsByType.set(record.type, []);
+    recordsByType.get(record.type).push(record);
+  });
+
+  const addUsage = (record, amount) => {
+    if (!record || !(amount > 0)) return;
+    usageByKey.set(record.key, Math.round(((usageByKey.get(record.key) || 0) + amount) * 100) / 100);
+  };
+
+  const findTargetRecord = packetLine => {
+    const costLineId = getPacketLineFundingLineId(packetLine);
+    if (costLineId && bySourceId.has(costLineId)) {
+      return bySourceId.get(costLineId);
+    }
+    const costLineIndex = getPacketLineFundingLineIndex(packetLine);
+    if (costLineIndex && byIndex.has(costLineIndex)) {
+      return byIndex.get(costLineIndex);
+    }
+    const paymentType = normalizePaymentTypeValue(packetLine?.paymentType || packetLine?.payment_type);
+    const candidates = paymentType ? recordsByType.get(paymentType) || [] : [];
+    if (candidates.length === 1) return candidates[0];
+    if (!candidates.length) return null;
+
+    const packetPeriodKey = buildServicePeriodKey(
+      packetLine?.servicePeriodStart || packetLine?.service_period_start || "",
+      packetLine?.servicePeriodEnd || packetLine?.service_period_end || "",
+    );
+    if (packetPeriodKey !== "|") {
+      const periodMatches = candidates.filter(record => record.periodKeys.has(packetPeriodKey));
+      if (periodMatches.length === 1) return periodMatches[0];
+    }
+
+    const packetPayeeKey = normalizeComparableName(packetLine?.payeeName || packetLine?.payee_name);
+    if (packetPayeeKey) {
+      const payeeMatches = candidates.filter(record => record.payeeNameKey === packetPayeeKey);
+      if (payeeMatches.length === 1) return payeeMatches[0];
+    }
+
+    return (
+      candidates.find(record => {
+        if (record.amount === null) return false;
+        return (usageByKey.get(record.key) || 0) < record.amount;
+      }) || candidates[0]
+    );
+  };
+
+  (Array.isArray(packetLines) ? packetLines : []).forEach(packetLine => {
+    const amount = roundCurrencyValue(packetLine?.amount);
+    if (!(amount > 0)) return;
+    addUsage(findTargetRecord(packetLine), amount);
+  });
+
+  return records.map(record => {
+    const packetedAmount = Math.round((usageByKey.get(record.key) || 0) * 100) / 100;
+    const remainingAmount =
+      record.amount !== null
+        ? Math.max(0, Math.round((record.amount - packetedAmount) * 100) / 100)
+        : null;
+    return {
+      ...record.line,
+      approvedAmount: record.amount,
+      packetedAmount,
+      remainingAmount,
+    };
+  });
 };
 
 const resolveScheduleMeta = packet => {
@@ -835,11 +1010,6 @@ const buildCaseOption = row => {
     caseId: row?.id ? String(row.id) : null,
   };
 };
-
-const mapRegionOption = region => ({
-  value: String(region.code || "").trim().toUpperCase(),
-  label: region.name ? `${region.name} (${String(region.code || "").trim().toUpperCase()})` : String(region.code || "").trim().toUpperCase(),
-});
 
 const mapPotOption = pot => {
   const code = pot?.code ? String(pot.code).trim() : "";
@@ -1081,10 +1251,6 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     loading,
     error,
   } = usePaymentsData();
-  const currentUser = useCurrentUser();
-  const canonicalRole = toCanonicalRole(currentUser?.role || "");
-  const isAdminRole =
-    canonicalRole === "System Administrator" || canonicalRole === "NWAC Administrator";
   const lockedCaseId = metadata?.caseId ? String(metadata.caseId) : "";
   const lockedCaseLabel =
     metadata?.caseLabel || (lockedCaseId ? `Case ${lockedCaseId}` : "");
@@ -1115,12 +1281,16 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
   const defaultCreateForm = useMemo(
     () => ({
       ...EMPTY_CREATE_FORM,
+      ...EMPTY_CREATE_LINE_FIELDS,
       caseSearch: isCaseLocked ? lockedCaseLabel : "",
       caseId: isCaseLocked ? lockedCaseId : "",
     }),
     [isCaseLocked, lockedCaseId, lockedCaseLabel]
   );
   const [createForm, setCreateForm] = useState(() => ({ ...defaultCreateForm }));
+  const [createLines, setCreateLines] = useState([]);
+  const [editingCreateLineId, setEditingCreateLineId] = useState(null);
+  const [createLineEditorOpen, setCreateLineEditorOpen] = useState(false);
   const [createError, setCreateError] = useState(null);
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [isCreateAmountFocused, setIsCreateAmountFocused] = useState(false);
@@ -1132,13 +1302,12 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
   const [interventionOptions, setInterventionOptions] = useState([]);
   const [interventionsLoading, setInterventionsLoading] = useState(false);
   const [interventionsBlockedCount, setInterventionsBlockedCount] = useState(0);
-  const [regionOptions, setRegionOptions] = useState([]);
-  const [regionsLoading, setRegionsLoading] = useState(false);
   const [potOptions, setPotOptions] = useState([]);
   const [potsLoading, setPotsLoading] = useState(false);
   const managePaymentsSelectionRef = useRef(false);
   const lastInterventionIdRef = useRef(null);
   const lastAutofillKeyRef = useRef("");
+  const createLineIdCounterRef = useRef(0);
   const createModalAlertRef = useRef(null);
   const resolveReportingUnitForPot = useCallback(
     potId => {
@@ -1166,21 +1335,6 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
 
   useEffect(() => {
     if (!createModalOpen || !isProgramView) return;
-    if (!regionOptions.length && !regionsLoading) {
-      setRegionsLoading(true);
-      apiFetch("/api/regions/canada")
-        .then(resp => resp.ok ? resp.json() : Promise.reject(new Error("Failed to load regions")))
-        .then(payload => {
-          const list = Array.isArray(payload) ? payload.map(mapRegionOption).filter(option => option.value) : [];
-          setRegionOptions(list);
-        })
-        .catch(() => {
-          setRegionOptions([]);
-        })
-        .finally(() => {
-          setRegionsLoading(false);
-        });
-    }
     if (!potOptions.length && !potsLoading) {
       setPotsLoading(true);
       apiFetch("/api/reference/budget-pots-lite?chargeableOnly=1")
@@ -1194,12 +1348,15 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
         })
         .finally(() => {
           setPotsLoading(false);
-        });
+      });
     }
-  }, [createModalOpen, isProgramView, regionOptions.length, regionsLoading, potOptions.length, potsLoading]);
+  }, [createModalOpen, isProgramView, potOptions.length, potsLoading]);
 
   const resetCreateForm = () => {
     setCreateForm({ ...defaultCreateForm });
+    setCreateLines([]);
+    setEditingCreateLineId(null);
+    setCreateLineEditorOpen(false);
     setCreateError(null);
     setCaseOptions([]);
     setCaseDetails(null);
@@ -1210,6 +1367,24 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     setIsCreateAmountFocused(false);
     lastAutofillKeyRef.current = "";
   };
+
+  const clearCreateLineEditor = (overrides = {}, options = {}) => {
+    setCreateForm(current => ({
+      ...current,
+      ...EMPTY_CREATE_LINE_FIELDS,
+      ...overrides,
+    }));
+    setEditingCreateLineId(null);
+    setCreateLineEditorOpen(Boolean(options.keepOpen));
+    setIsCreateAmountFocused(false);
+    lastAutofillKeyRef.current = "";
+  };
+
+  const isCreateLineEditorEmpty = form =>
+    CREATE_LINE_FIELD_KEYS.every(key => {
+      const value = form?.[key];
+      return value === null || value === undefined || String(value).trim() === "";
+    });
 
   const updateCreateForm = (key, value) => {
     setCreateForm(current => ({ ...current, [key]: value }));
@@ -1269,7 +1444,10 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     const interventionId = String(selectedInterventionOption.value || "");
     if (!interventionId) return null;
     const approvedLines = extractApprovedCostLines(selectedInterventionOption);
+    const packetLinesForIntervention = [];
+    const draftLinesForIntervention = [];
     let packetedTotal = 0;
+    let draftTotal = 0;
     let packetCount = 0;
     const seenPacketIds = new Set();
 
@@ -1283,6 +1461,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
         const amount = roundCurrencyValue(line?.amount);
         if (!(amount > 0)) return;
         packetedTotal += amount;
+        packetLinesForIntervention.push(line);
         packetMatched = true;
       });
       if (packetMatched && packet?.id && !seenPacketIds.has(String(packet.id))) {
@@ -1291,24 +1470,47 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
       }
     });
 
+    createLines.forEach(line => {
+      const lineInterventionId = line?.interventionId || interventionId;
+      if (!lineInterventionId || String(lineInterventionId) !== interventionId) return;
+      const amount = roundCurrencyValue(line?.amount);
+      if (!(amount > 0)) return;
+      draftTotal += amount;
+      draftLinesForIntervention.push(line);
+    });
+
     const roundedPacketedTotal = Math.round(packetedTotal * 100) / 100;
+    const roundedDraftTotal = Math.round(draftTotal * 100) / 100;
     const remainingAmount =
       derivedInterventionAmount !== null
-        ? Math.max(0, Math.round((derivedInterventionAmount - roundedPacketedTotal) * 100) / 100)
+        ? Math.max(0, Math.round((derivedInterventionAmount - roundedPacketedTotal - roundedDraftTotal) * 100) / 100)
         : null;
     const scheduleLabel = formatDateRangeLabel(
       selectedInterventionOption.startDate,
       selectedInterventionOption.endDate,
     );
     return {
-      approvedLines,
+      approvedLines: resolveApprovedCostLineUsage(approvedLines, [
+        ...packetLinesForIntervention,
+        ...draftLinesForIntervention,
+      ]),
       packetCount,
       packetedTotal: roundedPacketedTotal,
+      draftTotal: roundedDraftTotal,
       remainingAmount,
       scheduleLabel,
     };
-  }, [derivedInterventionAmount, requests, selectedInterventionOption]);
+  }, [createLines, derivedInterventionAmount, requests, selectedInterventionOption]);
   const remainingAuthorizedAmount = selectedInterventionFundingSummary?.remainingAmount ?? null;
+  const editingCreateLine = useMemo(
+    () => createLines.find(line => line.id === editingCreateLineId) || null,
+    [createLines, editingCreateLineId]
+  );
+  const remainingForCreateLineEditor = useMemo(() => {
+    if (remainingAuthorizedAmount === null) return null;
+    const editingAmount = roundCurrencyValue(editingCreateLine?.amount) || 0;
+    return Math.max(0, Math.round((remainingAuthorizedAmount + editingAmount) * 100) / 100);
+  }, [editingCreateLine, remainingAuthorizedAmount]);
   const approvedFundingLineColumns = useMemo(
     () => [
       {
@@ -1333,6 +1535,13 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
         id: "amount",
         header: "Approved amount",
         cell: line => formatApprovedCostLineAmount(line),
+      },
+      {
+        id: "remainingAmount",
+        header: "Amount remaining",
+        cell: line => line?.remainingAmount !== null && line?.remainingAmount !== undefined
+          ? formatCurrency(line.remainingAmount)
+          : "—",
       },
     ],
     []
@@ -1364,8 +1573,15 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
         lines.push(line);
       });
     });
+    createLines.forEach(line => {
+      if (editingCreateLineId && line.id === editingCreateLineId) return;
+      const lineInterventionId = line?.interventionId || interventionId;
+      if (!lineInterventionId || String(lineInterventionId) !== interventionId) return;
+      if (normalizePaymentTypeValue(line?.paymentType) !== paymentType) return;
+      lines.push(line);
+    });
     return lines;
-  }, [createForm.paymentType, requests, selectedInterventionOption]);
+  }, [createForm.paymentType, createLines, editingCreateLineId, requests, selectedInterventionOption]);
   const createPacketAutofill = useMemo(() => {
     const paymentType = normalizePaymentTypeValue(createForm.paymentType);
     if (!paymentType) return null;
@@ -1411,8 +1627,15 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
         if (nextPeriod) {
           return { line, nextPeriod };
         }
+        const lineRemainingAmount = roundCurrencyValue(line?.remainingAmount);
         const lineAmount = roundCurrencyValue(line?.amount);
-        if (lineAmount !== null && Math.max(0, lineAmount - typeUsageTotal) > 0) {
+        const fallbackRemaining =
+          lineRemainingAmount !== null
+            ? lineRemainingAmount
+            : lineAmount !== null
+              ? Math.max(0, lineAmount - typeUsageTotal)
+              : null;
+        if (fallbackRemaining !== null && fallbackRemaining > 0) {
           fallback = line;
         }
       }
@@ -1423,9 +1646,14 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     const line = chosen?.line || null;
     const nextPeriod = chosen?.nextPeriod || null;
     const lineAmount = roundCurrencyValue(line?.amount);
+    const lineRemainingAmount = roundCurrencyValue(line?.remainingAmount);
     const recurringAmount = roundCurrencyValue(line?.amountPerPeriod);
     const remainingLineAmount =
-      lineAmount !== null ? Math.max(0, Math.round((lineAmount - typeUsageTotal) * 100) / 100) : null;
+      lineRemainingAmount !== null
+        ? lineRemainingAmount
+        : lineAmount !== null
+          ? Math.max(0, Math.round((lineAmount - typeUsageTotal) * 100) / 100)
+          : null;
 
     let amount =
       nextPeriod && recurringAmount !== null
@@ -1445,6 +1673,9 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
       servicePeriodStart: nextPeriod?.start || "",
       servicePeriodEnd: nextPeriod?.end || "",
       requestedPaymentDate: nextPeriod?.end || "",
+      approvedFundingLineId: line?.sourceId || null,
+      approvedFundingLineIndex: line?.costLineIndex || null,
+      approvedFundingLineType: line?.type || null,
     };
   }, [
     configuredPayeeTypeOptions,
@@ -1460,14 +1691,20 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     if (!createModalOpen) return;
     if (!selectedInterventionOption) {
       lastInterventionIdRef.current = null;
+      setCreateLines([]);
+      setEditingCreateLineId(null);
+      setCreateLineEditorOpen(false);
+      lastAutofillKeyRef.current = "";
       setCreateForm(current => {
-        if (!current.potId && !current.reportingUnit) {
+        const hasLineValues = !isCreateLineEditorEmpty(current);
+        if (!current.potId && !current.reportingUnit && !hasLineValues) {
           return current;
         }
         return {
           ...current,
           potId: "",
           reportingUnit: "",
+          ...EMPTY_CREATE_LINE_FIELDS,
         };
       });
       return;
@@ -1479,6 +1716,12 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
       selectedInterventionOption.planBudgetPotId ||
       "";
     const derivedReportingUnit = resolveReportingUnitForPot(derivedPotId);
+    if (interventionChanged) {
+      setCreateLines([]);
+      setEditingCreateLineId(null);
+      setCreateLineEditorOpen(false);
+      lastAutofillKeyRef.current = "";
+    }
     setCreateForm(current => {
       const next = { ...current };
       if (derivedPotId) {
@@ -1490,18 +1733,20 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
       }
       const shouldUpdateReportingUnit =
         derivedReportingUnit &&
-        (!current.reportingUnit || !isAdminRole || interventionChanged);
+        (!current.reportingUnit || interventionChanged);
       if (shouldUpdateReportingUnit && current.reportingUnit !== derivedReportingUnit) {
         next.reportingUnit = derivedReportingUnit;
       } else if (interventionChanged && !derivedReportingUnit && current.reportingUnit) {
         next.reportingUnit = "";
+      }
+      if (interventionChanged) {
+        Object.assign(next, EMPTY_CREATE_LINE_FIELDS);
       }
       return next;
     });
     lastInterventionIdRef.current = nextInterventionId;
   }, [
     createModalOpen,
-    isAdminRole,
     resolveReportingUnitForPot,
     selectedInterventionOption,
   ]);
@@ -1727,6 +1972,10 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     setCaseDetails(null);
     setInterventionOptions([]);
     setInterventionsBlockedCount(0);
+    setCreateLines([]);
+    setEditingCreateLineId(null);
+    setCreateLineEditorOpen(false);
+    lastAutofillKeyRef.current = "";
     updateCreateForm("interventionId", "");
     if (!value) {
       setCaseOptions([]);
@@ -1747,78 +1996,198 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     const caseId = selected?.caseId ? String(selected.caseId) : "";
     updateCreateForm("caseId", caseId);
     updateCreateForm("interventionId", "");
+    setCreateLines([]);
+    setEditingCreateLineId(null);
+    setCreateLineEditorOpen(false);
+    lastAutofillKeyRef.current = "";
     if (caseId) {
       loadCaseContext(caseId);
     }
   };
 
-  const handleCreateSubmit = async () => {
-    setCreateError(null);
+  const buildLineMetadata = () => ({
+    source: "manual_payment_packet",
+    ...(createPacketAutofill?.approvedFundingLineId
+      ? { costLineId: createPacketAutofill.approvedFundingLineId }
+      : {}),
+    ...(createPacketAutofill?.approvedFundingLineIndex
+      ? { costLineIndex: createPacketAutofill.approvedFundingLineIndex }
+      : {}),
+    ...(createPacketAutofill?.approvedFundingLineType
+      ? { costLineType: createPacketAutofill.approvedFundingLineType }
+      : {}),
+  });
+
+  const validateCreatePacketContext = () => {
+    if (isProgramView && !createForm.interventionId) {
+      return "Select an intervention to create a payment packet.";
+    }
+    if (isProgramView && selectedInterventionOption && isBlockedInterventionStatus(selectedInterventionOption.status)) {
+      return "Selected intervention is not eligible for payment initiation.";
+    }
+    if (isProgramView && selectedInterventionOption && derivedInterventionAmount === null) {
+      return "Selected intervention is missing an approved amount.";
+    }
+    if (!createForm.caseId) {
+      return "Select a case to create a payment packet.";
+    }
+    if (allowedPaymentTypes && allowedPaymentTypes.size === 0) {
+      return "No payment types are available for the selected intervention.";
+    }
+    const effectiveReportingUnit = createForm.reportingUnit || caseRegionCode || null;
+    if (isProgramView && !effectiveReportingUnit) {
+      return "Unable to derive the reporting unit for this packet.";
+    }
+    return null;
+  };
+
+  const buildCreateLineFromEditor = () => {
     const paymentType = createForm.paymentType;
     const payeeType = createForm.payeeType;
     const payeeName = createForm.payeeName.trim();
-    const amountInputValue = toNumberOrNull(createForm.amount);
-    const derivedAmount = derivedInterventionAmount;
-    const amountValue = amountInputValue;
+    const amountValue = toNumberOrNull(createForm.amount);
     const potId = createForm.potId;
-    if (isProgramView && !createForm.interventionId) {
-      setCreateError("Select an intervention to create a payment packet.");
-      return;
-    }
-    if (isProgramView && selectedInterventionOption && isBlockedInterventionStatus(selectedInterventionOption.status)) {
-      setCreateError("Selected intervention is not eligible for payment initiation.");
-      return;
-    }
-    if (isProgramView && selectedInterventionOption && derivedAmount === null) {
-      setCreateError("Selected intervention is missing an approved amount.");
-      return;
-    }
-    if (!createForm.caseId) {
-      setCreateError("Select a case to create a payment packet.");
-      return;
-    }
-    if (allowedPaymentTypes && allowedPaymentTypes.size === 0) {
-      setCreateError("No payment types are available for the selected intervention.");
-      return;
-    }
+
     if (!paymentType || !payeeType || !payeeName) {
-      setCreateError("Payment type, payee type, and payee name are required.");
-      return;
+      return { error: "Payment type, payee type, and payee name are required." };
     }
     if (allowedPaymentTypes && !allowedPaymentTypes.has(paymentType)) {
-      setCreateError(
-        selectedInterventionCode
+      return {
+        error: selectedInterventionCode
           ? `Payment type is not allowed for intervention code ${selectedInterventionCode}.`
           : "Payment type is not allowed for the selected intervention.",
-      );
-      return;
+      };
     }
     if (!Number.isFinite(amountValue) || amountValue <= 0) {
-      setCreateError("Amount must be a positive number.");
-      return;
+      return { error: "Amount must be a positive number." };
     }
-    if (remainingAuthorizedAmount !== null && amountValue > remainingAuthorizedAmount) {
-      setCreateError("Amount exceeds remaining authorized funding for this intervention.");
-      return;
+    if (remainingForCreateLineEditor !== null && amountValue > remainingForCreateLineEditor) {
+      return { error: "Amount exceeds remaining approved funding for this intervention." };
     }
-    if (derivedAmount !== null && amountValue > derivedAmount) {
-      setCreateError("Amount cannot exceed the approved intervention ceiling.");
-      return;
+    if (derivedInterventionAmount !== null && amountValue > derivedInterventionAmount) {
+      return { error: "Amount cannot exceed the approved funding for this intervention." };
     }
     if (!potId) {
-      setCreateError("Select a budget pot for the payment line.");
-      return;
-    }
-    if (isProgramView && !createForm.reportingUnit) {
-      setCreateError("Reporting unit is required.");
-      return;
+      return { error: "Select a budget pot for the payment line." };
     }
     const requiresPeriod = requiresServicePeriod(
       paymentType,
       paymentTypeRecurrencePolicyLookup,
     );
     if (requiresPeriod && (!createForm.servicePeriodStart || !createForm.servicePeriodEnd)) {
-      setCreateError("Service period start and end are required for this payment type.");
+      return { error: "Service period start and end are required for this payment type." };
+    }
+
+    return {
+      line: {
+        id: editingCreateLineId || `new-line-${Date.now()}-${createLineIdCounterRef.current + 1}`,
+        interventionId: createForm.interventionId ? String(createForm.interventionId) : null,
+        paymentType,
+        payeeType,
+        payeeName,
+        payeeReference: createForm.payeeReference ? createForm.payeeReference.trim() : null,
+        amount: amountValue,
+        potId: String(potId),
+        servicePeriodStart: createForm.servicePeriodStart || null,
+        servicePeriodEnd: createForm.servicePeriodEnd || null,
+        requestedPaymentDate: createForm.requestedPaymentDate || null,
+        invoiceReferenceNumber: createForm.invoiceReferenceNumber || null,
+        metadata: buildLineMetadata(),
+      },
+    };
+  };
+
+  const handleSaveCreateLine = () => {
+    setCreateError(null);
+    const contextError = validateCreatePacketContext();
+    if (contextError) {
+      setCreateError(contextError);
+      return;
+    }
+    const { line, error: lineError } = buildCreateLineFromEditor();
+    if (lineError) {
+      setCreateError(lineError);
+      return;
+    }
+    const nextLine = {
+      ...line,
+      id: editingCreateLineId || `draft-line-${createLineIdCounterRef.current + 1}`,
+    };
+    if (!editingCreateLineId) {
+      createLineIdCounterRef.current += 1;
+    }
+    setCreateLines(current => {
+      if (editingCreateLineId) {
+        return current.map(item => (item.id === editingCreateLineId ? nextLine : item));
+      }
+      return [...current, nextLine];
+    });
+    clearCreateLineEditor();
+  };
+
+  const handleEditCreateLine = line => {
+    if (!line) return;
+    const paymentType = line.paymentType || "";
+    const interventionId = selectedInterventionOption?.value ? String(selectedInterventionOption.value) : "";
+    lastAutofillKeyRef.current = interventionId && paymentType ? `${interventionId}:${paymentType}` : "";
+    setEditingCreateLineId(line.id);
+    setCreateLineEditorOpen(true);
+    setCreateForm(current => ({
+      ...current,
+      paymentType,
+      payeeType: line.payeeType || "",
+      payeeName: line.payeeName || "",
+      payeeReference: line.payeeReference || "",
+      amount: formatEditableAmount(line.amount),
+      potId: line.potId ? String(line.potId) : current.potId,
+      servicePeriodStart: line.servicePeriodStart || "",
+      servicePeriodEnd: line.servicePeriodEnd || "",
+      requestedPaymentDate: line.requestedPaymentDate || "",
+      invoiceReferenceNumber: line.invoiceReferenceNumber || "",
+    }));
+  };
+
+  const handleRemoveCreateLine = line => {
+    if (!line) return;
+    setCreateLines(current => current.filter(item => item.id !== line.id));
+    if (editingCreateLineId === line.id) {
+      clearCreateLineEditor();
+    }
+  };
+
+  const handleOpenCreateLineEditor = () => {
+    setCreateError(null);
+    clearCreateLineEditor({}, { keepOpen: true });
+  };
+
+  const handleCreateSubmit = async () => {
+    setCreateError(null);
+    const effectiveReportingUnit = createForm.reportingUnit || caseRegionCode || null;
+    const contextError = validateCreatePacketContext();
+    if (contextError) {
+      setCreateError(contextError);
+      return;
+    }
+    let linesToCreate = createLines;
+    if (createLines.length) {
+      if (editingCreateLineId) {
+        setCreateError("Save or cancel the payment line edit before creating the packet.");
+        return;
+      }
+      if (!isCreateLineEditorEmpty(createForm)) {
+        setCreateError("Add or clear the current payment line before creating the packet.");
+        return;
+      }
+    } else {
+      const { line, error: lineError } = buildCreateLineFromEditor();
+      if (lineError) {
+        setCreateError(lineError);
+        return;
+      }
+      linesToCreate = [line];
+    }
+    if (!linesToCreate.length) {
+      setCreateError("Add at least one payment line before creating the packet.");
       return;
     }
     setCreateSubmitting(true);
@@ -1828,27 +2197,30 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
         caseDetails?.client_id ||
         caseDetails?.client?.id ||
         null;
+      const requestedDates = linesToCreate
+        .map(line => line.requestedPaymentDate)
+        .filter(Boolean)
+        .sort();
       const payload = {
         caseId: Number(createForm.caseId),
         clientId: clientId ? Number(clientId) : null,
         interventionId: createForm.interventionId ? Number(createForm.interventionId) : null,
-        reportingUnit: createForm.reportingUnit || null,
-        dueBy: createForm.dueBy || null,
+        reportingUnit: effectiveReportingUnit,
+        dueBy: requestedDates[0] || null,
         notes: createForm.notes ? createForm.notes.trim() : null,
-        lines: [
-          {
-            paymentType,
-            payeeType,
-            payeeName,
-            payeeReference: createForm.payeeReference ? createForm.payeeReference.trim() : null,
-            amount: amountValue,
-            potId: Number(potId),
-            servicePeriodStart: createForm.servicePeriodStart || null,
-            servicePeriodEnd: createForm.servicePeriodEnd || null,
-            requestedPaymentDate: createForm.requestedPaymentDate || null,
-            invoiceReferenceNumber: createForm.invoiceReferenceNumber || null,
-          },
-        ],
+        lines: linesToCreate.map(line => ({
+          paymentType: line.paymentType,
+          payeeType: line.payeeType,
+          payeeName: line.payeeName,
+          payeeReference: line.payeeReference || null,
+          amount: line.amount,
+          potId: Number(line.potId),
+          servicePeriodStart: line.servicePeriodStart || null,
+          servicePeriodEnd: line.servicePeriodEnd || null,
+          requestedPaymentDate: line.requestedPaymentDate || null,
+          invoiceReferenceNumber: line.invoiceReferenceNumber || null,
+          metadata: line.metadata || {},
+        })),
       };
       await createPacket(payload);
       setCreateModalOpen(false);
@@ -1990,14 +2362,75 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
     () => findOptionByValue(configuredPayeeTypeOptions, createForm.payeeType),
     [configuredPayeeTypeOptions, createForm.payeeType]
   );
-  const selectedReportingUnit = useMemo(
-    () => regionOptions.find(option => option.value === createForm.reportingUnit) || null,
-    [regionOptions, createForm.reportingUnit]
-  );
   const selectedPot = useMemo(
     () => potOptions.find(option => option.value === createForm.potId) || null,
     [potOptions, createForm.potId]
   );
+  const createLinesTotal = selectedInterventionFundingSummary?.draftTotal ?? 0;
+  const createLineEditorVisible =
+    createLines.length === 0 || createLineEditorOpen || Boolean(editingCreateLineId);
+  const resolveCreateLinePotLabel = line => {
+    const potId = line?.potId ? String(line.potId) : "";
+    if (!potId) return "—";
+    return potOptions.find(option => option.value === potId)?.label || potId;
+  };
+  const createLineColumns = [
+    {
+      id: "paymentType",
+      header: "Payment type",
+      cell: line => formatSupportTypeLabel(line.paymentType),
+    },
+    {
+      id: "payee",
+      header: "Payee",
+      cell: line => [line.payeeName, line.payeeReference].filter(Boolean).join(" · ") || "—",
+    },
+    {
+      id: "amount",
+      header: "Amount",
+      cell: line => formatCurrency(line.amount),
+    },
+    {
+      id: "schedule",
+      header: "Schedule / due by",
+      cell: line => {
+        const servicePeriod = formatDateRangeLabel(line.servicePeriodStart, line.servicePeriodEnd);
+        return [servicePeriod, line.requestedPaymentDate ? `Due ${formatDateLabel(line.requestedPaymentDate)}` : ""]
+          .filter(Boolean)
+          .join(" · ") || "—";
+      },
+    },
+    {
+      id: "budgetPot",
+      header: "Budget pot",
+      cell: line => resolveCreateLinePotLabel(line),
+    },
+    {
+      id: "invoice",
+      header: "Invoice / receipt",
+      cell: line => line.invoiceReferenceNumber || "—",
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      cell: line => (
+        <SpaceBetween direction="horizontal" size="xxs">
+          <Button
+            variant="icon"
+            iconName="edit"
+            ariaLabel={`Edit ${formatSupportTypeLabel(line.paymentType)} payment line`}
+            onClick={() => handleEditCreateLine(line)}
+          />
+          <Button
+            variant="icon"
+            iconName="remove"
+            ariaLabel={`Remove ${formatSupportTypeLabel(line.paymentType)} payment line`}
+            onClick={() => handleRemoveCreateLine(line)}
+          />
+        </SpaceBetween>
+      ),
+    },
+  ];
 
   const infoLink = metadata.helpComponent && toggleHelpPanel ? (
     <Link
@@ -2291,6 +2724,7 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
         <Modal
           visible={createModalOpen}
           onDismiss={handleCloseCreateModal}
+          size="max"
           header="Create payment packet"
           footer={
             <SpaceBetween direction="horizontal" size="xs">
@@ -2311,17 +2745,11 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
             <div ref={createModalAlertRef} />
             {createError ? <Alert type="error">{createError}</Alert> : null}
             <ColumnLayout columns={2} variant="text-grid">
-              <FormField
-                label="Case"
-                description={
-                  isCaseLocked
-                    ? "Locked to the current case workspace."
-                    : "Search by client name, case number, or tracking ID."
-                }
-              >
-                {isCaseLocked ? (
-                  <Input value={lockedCaseLabel} disabled />
-                ) : (
+              {!isCaseLocked ? (
+                <FormField
+                  label="Case"
+                  description="Search by client name, case number, or tracking ID."
+                >
                   <Autosuggest
                     value={createForm.caseSearch}
                     onChange={handleCaseChange}
@@ -2337,8 +2765,8 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
                     }
                     enteredTextLabel={value => `Use "${value}"`}
                   />
-                )}
-              </FormField>
+                </FormField>
+              ) : null}
               <FormField label={isProgramView ? "Intervention" : "Intervention (optional)"}>
                 <Select
                   selectedOption={selectedInterventionOption}
@@ -2360,30 +2788,6 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
                   }
                 />
               </FormField>
-              <FormField label="Reporting unit">
-                {isAdminRole ? (
-                  <Select
-                    selectedOption={selectedReportingUnit}
-                    options={regionOptions}
-                    onChange={({ detail }) => updateCreateForm("reportingUnit", detail.selectedOption?.value || "")}
-                    statusType={regionsLoading ? "loading" : "finished"}
-                    placeholder={regionsLoading ? "Loading regions" : "Select reporting unit"}
-                    filteringType="auto"
-                    empty="No regions available."
-                    disabled={createPacketFieldsDisabled}
-                  />
-                ) : (
-                  <Input value={selectedReportingUnit?.label || createForm.reportingUnit || ""} disabled readOnly />
-                )}
-              </FormField>
-              <FormField label="Due by (optional)">
-                <DatePicker
-                  value={createForm.dueBy}
-                  onChange={({ detail }) => updateCreateForm("dueBy", detail.value)}
-                  placeholder="YYYY-MM-DD"
-                  disabled={createPacketFieldsDisabled}
-                />
-              </FormField>
             </ColumnLayout>
             {isProgramView && interventionsBlockedCount > 0 ? (
               <Box variant="p">
@@ -2391,201 +2795,241 @@ const PaymentRequestsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel })
               </Box>
             ) : null}
             {isProgramView && selectedInterventionOption ? (
-              <Box
-                padding="m"
-                style={{
-                  border: "1px solid var(--color-border-divider-default)",
-                  borderRadius: "12px",
-                }}
-              >
-                <SpaceBetween size="s">
+              <SpaceBetween size="s">
+                <ColumnLayout columns={4} variant="text-grid">
                   <Box>
-                    <Box variant="awsui-key-label">Approved for this intervention</Box>
-                    {selectedInterventionFundingSummary?.scheduleLabel ? (
-                      <Box
-                        style={{
-                          color: "var(--color-text-body-secondary)",
-                          fontSize: "12px",
-                        }}
-                      >
-                        {selectedInterventionFundingSummary.scheduleLabel}
-                      </Box>
-                    ) : null}
+                    <Box variant="awsui-key-label">Approved funding</Box>
+                    <Box>
+                      {derivedInterventionAmount !== null
+                        ? formatCurrency(derivedInterventionAmount)
+                        : "—"}
+                    </Box>
                   </Box>
-                  <ColumnLayout columns={3} variant="text-grid">
+                  <Box>
+                    <Box variant="awsui-key-label">Already packeted</Box>
+                    <Box>{formatCurrency(selectedInterventionFundingSummary?.packetedTotal ?? 0)}</Box>
+                  </Box>
+                  <Box>
+                    <Box variant="awsui-key-label">In this packet</Box>
+                    <Box>{formatCurrency(createLinesTotal)}</Box>
+                  </Box>
+                  <Box>
+                    <Box variant="awsui-key-label">Remaining to packet</Box>
                     <Box>
-                      <Box variant="awsui-key-label">Approved ceiling</Box>
-                      <Box>
-                        {derivedInterventionAmount !== null
-                          ? formatCurrency(derivedInterventionAmount)
-                          : "—"}
-                      </Box>
+                      {selectedInterventionFundingSummary?.remainingAmount !== null
+                        ? formatCurrency(selectedInterventionFundingSummary.remainingAmount)
+                        : "—"}
                     </Box>
-                    <Box>
-                      <Box variant="awsui-key-label">Already packeted</Box>
-                      <Box>{formatCurrency(selectedInterventionFundingSummary?.packetedTotal ?? 0)}</Box>
-                    </Box>
-                    <Box>
-                      <Box variant="awsui-key-label">Remaining to packet</Box>
-                      <Box>
-                        {selectedInterventionFundingSummary?.remainingAmount !== null
-                          ? formatCurrency(selectedInterventionFundingSummary.remainingAmount)
-                          : "—"}
-                      </Box>
-                    </Box>
-                  </ColumnLayout>
-                  {selectedInterventionFundingSummary?.approvedLines?.length ? (
-                    <Table
-                      variant="embedded"
-                      trackBy="id"
-                      items={selectedInterventionFundingSummary.approvedLines}
-                      columnDefinitions={approvedFundingLineColumns}
-                      wrapLines
-                      header={
-                        <Header
-                          variant="h3"
-                          counter={`(${selectedInterventionFundingSummary.approvedLines.length})`}
-                        >
-                          Approved funding lines
-                        </Header>
-                      }
-                    />
-                  ) : (
-                    <Box style={{ color: "var(--color-text-body-secondary)", fontSize: "12px" }}>
-                      No approved support breakdown is stored on this intervention. Use the approved ceiling above and the intervention detail view when creating the packet.
-                    </Box>
-                  )}
-                  {selectedInterventionFundingSummary?.packetCount > 0 ? (
-                    <Box style={{ color: "var(--color-text-body-secondary)", fontSize: "12px" }}>
-                      {selectedInterventionFundingSummary.packetCount} existing packet
-                      {selectedInterventionFundingSummary.packetCount === 1 ? "" : "s"} already use part of this intervention's approved funding.
-                    </Box>
-                  ) : null}
-                </SpaceBetween>
-              </Box>
+                  </Box>
+                </ColumnLayout>
+                {selectedInterventionFundingSummary?.approvedLines?.length ? (
+                  <Table
+                    variant="embedded"
+                    trackBy="id"
+                    items={selectedInterventionFundingSummary.approvedLines}
+                    columnDefinitions={approvedFundingLineColumns}
+                    wrapLines
+                    header={
+                      <Header
+                        variant="h3"
+                        counter={`(${selectedInterventionFundingSummary.approvedLines.length})`}
+                      >
+                        Approved funding lines
+                      </Header>
+                    }
+                  />
+                ) : (
+                  <Box style={{ color: "var(--color-text-body-secondary)", fontSize: "12px" }}>
+                    No approved support breakdown is stored on this intervention. Use the approved funding above and the intervention detail view when creating the packet.
+                  </Box>
+                )}
+                {selectedInterventionFundingSummary?.packetCount > 0 ? (
+                  <Box style={{ color: "var(--color-text-body-secondary)", fontSize: "12px" }}>
+                    {selectedInterventionFundingSummary.packetCount} existing packet
+                    {selectedInterventionFundingSummary.packetCount === 1 ? "" : "s"} already use part of this intervention's approved funding.
+                  </Box>
+                ) : null}
+              </SpaceBetween>
             ) : null}
-            <FormField label="Notes (optional)">
-              <Textarea
-                value={createForm.notes}
-                onChange={({ detail }) => updateCreateForm("notes", detail.value)}
-                rows={3}
-                spellcheck={true}
-                disabled={createPacketFieldsDisabled}
-              />
-            </FormField>
 
-            <Header variant="h3">Payment line</Header>
-            <ColumnLayout columns={2} variant="text-grid">
-              <FormField
-                label="Payment type"
-                errorText={paymentTypeRestrictionError || undefined}
-              >
-                <Select
-                  selectedOption={selectedPaymentType}
-                  options={paymentTypeOptions}
-                  onChange={({ detail }) => updateCreateForm("paymentType", detail.selectedOption?.value || "")}
-                  placeholder="Select payment type"
-                  filteringType="auto"
-                  statusType={paymentTypeMappingLoading ? "loading" : "finished"}
-                  empty={paymentTypeEmptyMessage}
-                  disabled={createPacketFieldsDisabled}
-                />
-              </FormField>
-              <FormField label="Payee type">
-                <Select
-                  selectedOption={selectedPayeeType}
-                  options={configuredPayeeTypeOptions}
-                  onChange={({ detail }) => updateCreateForm("payeeType", detail.selectedOption?.value || "")}
-                  placeholder="Select payee type"
-                  disabled={createPacketFieldsDisabled}
-                />
-              </FormField>
-              <FormField label="Payee name">
-                <Input
-                  value={createForm.payeeName}
-                  onChange={({ detail }) => updateCreateForm("payeeName", detail.value)}
-                  placeholder="Payee name"
-                  spellcheck={false}
-                  disabled={createPacketFieldsDisabled}
-                />
-              </FormField>
-              <FormField label="Payee reference (optional)">
-                <Input
-                  value={createForm.payeeReference}
-                  onChange={({ detail }) => updateCreateForm("payeeReference", detail.value)}
-                  placeholder="Account or vendor reference"
-                  spellcheck={false}
-                  disabled={createPacketFieldsDisabled}
-                />
-              </FormField>
-              <FormField
-                label="Amount"
-                description={
-                  remainingAuthorizedAmount !== null
-                    ? `Remaining authorized funding: ${formatCurrency(remainingAuthorizedAmount)}. Enter the amount for this packet.`
-                    : derivedInterventionAmount !== null
-                      ? `Approved ceiling: ${formatCurrency(derivedInterventionAmount)}. Enter the amount for this packet.`
-                    : "Enter the amount for this packet."
-                }
-              >
-                <Input
-                  value={getCurrencyInputDisplayValue(createForm.amount, isCreateAmountFocused)}
-                  onChange={({ detail }) => updateCreateForm("amount", detail.value)}
-                  inputMode="decimal"
-                  placeholder="0.00"
-                  spellcheck={false}
-                  onFocus={() => setIsCreateAmountFocused(true)}
-                  onBlur={() => setIsCreateAmountFocused(false)}
-                  disabled={createPacketFieldsDisabled}
-                />
-              </FormField>
-              <FormField label="Budget pot">
-                <Input value={selectedPot?.label || createForm.potId || ""} disabled readOnly />
-              </FormField>
-              {requiresPeriodFields ? (
-                <>
+            <Table
+              variant="embedded"
+              trackBy="id"
+              items={createLines}
+              columnDefinitions={createLineColumns}
+              wrapLines
+              header={
+                <Header
+                  variant="h3"
+                  counter={`(${createLines.length})`}
+                  actions={
+                    createLines.length ? (
+                      <SpaceBetween direction="horizontal" size="xs">
+                        <Box variant="small" color="text-body-secondary">
+                          In this packet: {formatCurrency(createLinesTotal)}
+                        </Box>
+                        {!createLineEditorVisible ? (
+                          <Button
+                            iconName="add-plus"
+                            onClick={handleOpenCreateLineEditor}
+                            disabled={createPacketFieldsDisabled || createSubmitting}
+                          >
+                            Add line
+                          </Button>
+                        ) : null}
+                      </SpaceBetween>
+                    ) : null
+                  }
+                >
+                  Payment lines
+                </Header>
+              }
+              empty={
+                <Box padding="s" color="text-body-secondary">
+                  No payment lines added yet.
+                </Box>
+              }
+            />
+
+            {createLineEditorVisible ? (
+              <>
+                <Header
+                  variant="h3"
+                  actions={
+                    <SpaceBetween direction="horizontal" size="xs">
+                      {editingCreateLineId || !isCreateLineEditorEmpty(createForm) ? (
+                        <Button
+                          variant="link"
+                          onClick={() => clearCreateLineEditor()}
+                          disabled={createSubmitting}
+                        >
+                          {editingCreateLineId ? "Cancel edit" : "Clear line"}
+                        </Button>
+                      ) : null}
+                      <Button
+                        onClick={handleSaveCreateLine}
+                        disabled={createPacketFieldsDisabled || createSubmitting}
+                      >
+                        {editingCreateLineId ? "Save line" : "Add line"}
+                      </Button>
+                    </SpaceBetween>
+                  }
+                >
+                  {editingCreateLineId ? "Edit payment line" : "Add payment line"}
+                </Header>
+                <ColumnLayout columns={3} variant="text-grid">
                   <FormField
-                    label="Service period start"
-                    description="Required for living allowance and wage subsidy."
+                    label="Payment type"
+                    errorText={paymentTypeRestrictionError || undefined}
                   >
-                    <DatePicker
-                      value={createForm.servicePeriodStart}
-                      onChange={({ detail }) => updateCreateForm("servicePeriodStart", detail.value)}
-                      placeholder="YYYY-MM-DD"
+                    <Select
+                      selectedOption={selectedPaymentType}
+                      options={paymentTypeOptions}
+                      onChange={({ detail }) => updateCreateForm("paymentType", detail.selectedOption?.value || "")}
+                      placeholder="Select payment type"
+                      filteringType="auto"
+                      statusType={paymentTypeMappingLoading ? "loading" : "finished"}
+                      empty={paymentTypeEmptyMessage}
+                      disabled={createPacketFieldsDisabled}
+                    />
+                  </FormField>
+                  <FormField label="Payee type">
+                    <Select
+                      selectedOption={selectedPayeeType}
+                      options={configuredPayeeTypeOptions}
+                      onChange={({ detail }) => updateCreateForm("payeeType", detail.selectedOption?.value || "")}
+                      placeholder="Select payee type"
                       disabled={createPacketFieldsDisabled}
                     />
                   </FormField>
                   <FormField
-                    label="Service period end"
-                    description="Required for living allowance and wage subsidy."
+                    label="Amount"
+                    description={
+                      remainingForCreateLineEditor !== null
+                        ? `Remaining approved funding: ${formatCurrency(remainingForCreateLineEditor)}. Enter the amount for this line.`
+                        : derivedInterventionAmount !== null
+                          ? `Approved funding: ${formatCurrency(derivedInterventionAmount)}. Enter the amount for this line.`
+                        : "Enter the amount for this line."
+                    }
                   >
+                    <Input
+                      value={getCurrencyInputDisplayValue(createForm.amount, isCreateAmountFocused)}
+                      onChange={({ detail }) => updateCreateForm("amount", detail.value)}
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      spellcheck={false}
+                      onFocus={() => setIsCreateAmountFocused(true)}
+                      onBlur={() => setIsCreateAmountFocused(false)}
+                      disabled={createPacketFieldsDisabled}
+                    />
+                  </FormField>
+                  <FormField label="Payee name">
+                    <Input
+                      value={createForm.payeeName}
+                      onChange={({ detail }) => updateCreateForm("payeeName", detail.value)}
+                      placeholder="Payee name"
+                      spellcheck={false}
+                      disabled={createPacketFieldsDisabled}
+                    />
+                  </FormField>
+                  <FormField label="Payee reference (optional)">
+                    <Input
+                      value={createForm.payeeReference}
+                      onChange={({ detail }) => updateCreateForm("payeeReference", detail.value)}
+                      placeholder="Account or vendor reference"
+                      spellcheck={false}
+                      disabled={createPacketFieldsDisabled}
+                    />
+                  </FormField>
+                  <FormField label="Budget pot">
+                    <Input value={selectedPot?.label || createForm.potId || ""} disabled readOnly />
+                  </FormField>
+                  {requiresPeriodFields ? (
+                    <>
+                      <FormField
+                        label="Service period start"
+                        description="Required for living allowance and wage subsidy."
+                      >
+                        <DatePicker
+                          value={createForm.servicePeriodStart}
+                          onChange={({ detail }) => updateCreateForm("servicePeriodStart", detail.value)}
+                          placeholder="YYYY-MM-DD"
+                          disabled={createPacketFieldsDisabled}
+                        />
+                      </FormField>
+                      <FormField
+                        label="Service period end"
+                        description="Required for living allowance and wage subsidy."
+                      >
+                        <DatePicker
+                          value={createForm.servicePeriodEnd}
+                          onChange={({ detail }) => updateCreateForm("servicePeriodEnd", detail.value)}
+                          placeholder="YYYY-MM-DD"
+                          disabled={createPacketFieldsDisabled}
+                        />
+                      </FormField>
+                    </>
+                  ) : null}
+                  <FormField label="Due by (optional)">
                     <DatePicker
-                      value={createForm.servicePeriodEnd}
-                      onChange={({ detail }) => updateCreateForm("servicePeriodEnd", detail.value)}
+                      value={createForm.requestedPaymentDate}
+                      onChange={({ detail }) => updateCreateForm("requestedPaymentDate", detail.value)}
                       placeholder="YYYY-MM-DD"
                       disabled={createPacketFieldsDisabled}
                     />
                   </FormField>
-                </>
-              ) : null}
-              <FormField label="Requested payment date (optional)">
-                <DatePicker
-                  value={createForm.requestedPaymentDate}
-                  onChange={({ detail }) => updateCreateForm("requestedPaymentDate", detail.value)}
-                  placeholder="YYYY-MM-DD"
-                  disabled={createPacketFieldsDisabled}
-                />
-              </FormField>
-              <FormField label="Invoice reference (optional)">
-                <Input
-                  value={createForm.invoiceReferenceNumber}
-                  onChange={({ detail }) => updateCreateForm("invoiceReferenceNumber", detail.value)}
-                  placeholder="Invoice or receipt number"
-                  spellcheck={false}
-                  disabled={createPacketFieldsDisabled}
-                />
-              </FormField>
-            </ColumnLayout>
+                  <FormField label="Invoice reference (optional)">
+                    <Input
+                      value={createForm.invoiceReferenceNumber}
+                      onChange={({ detail }) => updateCreateForm("invoiceReferenceNumber", detail.value)}
+                      placeholder="Invoice or receipt number"
+                      spellcheck={false}
+                      disabled={createPacketFieldsDisabled}
+                    />
+                  </FormField>
+                </ColumnLayout>
+              </>
+            ) : null}
           </SpaceBetween>
         </Modal>
       </SpaceBetween>

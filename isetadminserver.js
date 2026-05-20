@@ -11306,14 +11306,21 @@ async function resolveStaffDisplayName(pool, req) {
 
 const AUTO_PLAN_METADATA_SOURCE = 'auto_assessment';
 const DENIED_INELIGIBLE_REPORTING_SOURCE = 'denied_ineligible_reporting';
+const DENIED_REPORTING_SOURCE = 'denied_reporting';
 const DENIED_INELIGIBLE_TRIGGER_REASON = 'eligibility_not_met';
 const FUNDING_DECISION_REASON_CODE_KEY = 'fundingDecisionReasonCode';
-const DENIED_INELIGIBLE_PLAN_NAME = 'Eligibility denial reporting plan';
-const DENIED_INELIGIBLE_INTERVENTION_TITLE = 'Career Research and Exploration';
-const DENIED_INELIGIBLE_INTERVENTION_CODE = 1;
-const DENIED_INELIGIBLE_ACTION_PLAN_RESULT_CODE = '1';
-const DENIED_INELIGIBLE_INTERVENTION_OUTCOME_CODE = 1;
-const DENIED_INELIGIBLE_REPORTING_NOTE = 'Auto-created after eligibility denial for ILMP reporting.';
+const DENIED_REPORTING_PLAN_NAME = 'Actions leading to denial';
+const DENIED_REPORTING_ACTION_PLAN_RESULT_CODE = '1';
+const DENIED_REPORTING_INTERVENTION_OUTCOME_CODE = 1;
+const DENIED_REPORTING_NOTE = 'Auto-created after denial decision for ILMP reporting.';
+const DENIED_REPORTING_METADATA_SOURCES = Object.freeze([
+  DENIED_REPORTING_SOURCE,
+  DENIED_INELIGIBLE_REPORTING_SOURCE,
+]);
+const DENIED_REPORTING_INTERVENTIONS = Object.freeze([
+  { code: 1, title: 'Career Research and Exploration' },
+  { code: 3, title: 'Employment Counselling' },
+]);
 const ILMP_PLACEHOLDER_AGREEMENT_NUMBER = '999999999';
 const ILMP_EDUCATION_LEVEL_CODE_MAP = Object.freeze({
   '1': '1',
@@ -13922,12 +13929,24 @@ async function fetchInterventionAssessmentContext({ caseId, interventionRow, con
        FROM iset_case c
        ${buildCasePrimaryApplicationJoinSql('c', 'a')}
        LEFT JOIN iset_case_action_plan ap ON ap.id = ?
-       LEFT JOIN budget_pot bp ON bp.id = COALESCE(?, ap.budget_pot)
+       LEFT JOIN budget_pot bp
+         ON (
+           (? IS NOT NULL AND bp.id = ?)
+           OR (
+             ? IS NULL
+             AND (
+               (ap.budget_pot REGEXP '^[0-9]+$' AND bp.id = CAST(ap.budget_pot AS UNSIGNED))
+               OR bp.code = ap.budget_pot
+             )
+           )
+         )
        LEFT JOIN client cl ON cl.id = c.client_id
       WHERE c.id = ?
       LIMIT 1`,
     [
       normalisePositiveInteger(interventionRow?.action_plan_id) || null,
+      normalisePositiveInteger(interventionRow?.pot_id) || normalisePositiveInteger(interventionRow?.budget_pot) || null,
+      normalisePositiveInteger(interventionRow?.pot_id) || normalisePositiveInteger(interventionRow?.budget_pot) || null,
       normalisePositiveInteger(interventionRow?.pot_id) || normalisePositiveInteger(interventionRow?.budget_pot) || null,
       normalizedCaseId
     ]
@@ -17401,7 +17420,9 @@ async function fetchActionPlanWithCase(planId) {
     `SELECT
        ap.*,
        ap.esdc_action_plan_json AS esdcActionPlanJson,
+       bp.id AS budget_pot_id,
        bp.code AS budget_pot_code,
+       bp.name AS budget_pot_name,
        c.assigned_staff_profile_id AS assigned_staff_profile_id,
        c.assigned_staff_profile_id AS assigned_to_user_id,
        c.portfolio_region_id,
@@ -17413,7 +17434,11 @@ async function fetchActionPlanWithCase(planId) {
      ) AS intervention_count
    FROM iset_case_action_plan ap
    JOIN iset_case c ON c.id = ap.case_id
-   LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
+   LEFT JOIN budget_pot bp
+     ON (
+       (ap.budget_pot REGEXP '^[0-9]+$' AND bp.id = CAST(ap.budget_pot AS UNSIGNED))
+       OR bp.code = ap.budget_pot
+     )
    LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
    WHERE ap.id = ?
    LIMIT 1`,
@@ -18840,14 +18865,40 @@ function mapActionPlanRow(plan) {
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric : 0;
   };
+  const budgetPotId =
+    plan.budget_pot_id ||
+    (normalisePositiveInteger(plan.budget_pot) ? normalisePositiveInteger(plan.budget_pot) : null);
+  const budgetPotCode =
+    normaliseString(plan.budget_pot_code) ||
+    normaliseString(esdc.budgetPotCode) ||
+    normaliseString(esdc.budgetPot) ||
+    null;
+  const metadataBudgetPotLabel = normaliseString(metadata?.budgetPotLabel) || null;
+  const budgetPotName =
+    normaliseString(plan.budget_pot_name) ||
+    normaliseString(metadata?.budgetPotName) ||
+    null;
+  const budgetPotDisplayLabel =
+    [budgetPotCode, budgetPotName].filter(Boolean).join(' - ') ||
+    metadataBudgetPotLabel ||
+    budgetPotCode ||
+    budgetPotName ||
+    null;
   return {
     id: plan.id,
     caseId: plan.case_id || plan.caseId || null,
     name: plan.name || null,
     status: plan.status || null,
-    budgetPotId: plan.budget_pot || null,
-    budgetPotCode: plan.budget_pot_code || esdc.budgetPot || null,
-    budgetPot: plan.budget_pot || null,
+    budgetPotId,
+    budgetPotCode,
+    budgetPotName,
+    budgetPotDisplayLabel,
+    budgetPotLabel: budgetPotDisplayLabel,
+    budgetPot: budgetPotId || plan.budget_pot || null,
+    budget_pot_id: budgetPotId,
+    budget_pot_code: budgetPotCode,
+    budget_pot_name: budgetPotName,
+    budget_pot_label: budgetPotDisplayLabel,
     fundingStream: plan.funding_stream || esdc.fundingStream || null,
     postingContext:
       (metadata && metadata.postingContext) ||
@@ -20374,14 +20425,15 @@ async function buildClientProfileFromApplication(connection, applicationId, { fo
   };
 }
 
-function isDeniedIneligibleReportingCaseContext(caseContext) {
+function isDeniedReportingCaseContext(caseContext) {
   const context =
     caseContext && typeof caseContext === 'object'
       ? caseContext
       : safeJsonParse(caseContext, null);
   return Boolean(
-    context?.reportingOnlyDeniedIneligible === true &&
-    context?.reportingSeedSource === DENIED_INELIGIBLE_TRIGGER_REASON
+    context?.reportingOnlyDenied === true ||
+    context?.reportingOnlyDeniedIneligible === true ||
+    DENIED_REPORTING_METADATA_SOURCES.includes(context?.reportingSeedSource)
   );
 }
 
@@ -20455,13 +20507,14 @@ function toMysqlDateTimeString(value) {
   return `${dateOnly} 00:00:00`;
 }
 
-function buildDeniedIneligibleReportingCaseContext({
+function buildDeniedReportingCaseContext({
   existingCaseContext = null,
   payload = {},
   answers = {},
   applicationId = null,
   clientId = null,
   denialDate = null,
+  denialReasonCode = null,
 } = {}) {
   const currentPayload = payload && typeof payload === 'object' ? payload : {};
   const currentAnswers = answers && typeof answers === 'object' ? answers : {};
@@ -20475,11 +20528,15 @@ function buildDeniedIneligibleReportingCaseContext({
   const disability = extractDisabilityInfo(extractionContext) || {};
   const clientStatus = extractClientStatusDetails(extractionContext) || {};
   const dependentChildren = extractDependentChildrenInfo(extractionContext) || {};
+  const normalizedDenialReason = (normaliseString(denialReasonCode) || '').toLowerCase() || null;
   const nextContextPatch = {
-    reportingOnlyDeniedIneligible: true,
+    reportingOnlyDenied: true,
+    reportingOnlyDeniedIneligible:
+      existingCaseContext?.reportingOnlyDeniedIneligible === true ||
+      normalizedDenialReason === DENIED_INELIGIBLE_TRIGGER_REASON,
     excludeFromCaseworkQueues: true,
     reportingCorrectionAllowed: true,
-    reportingSeedSource: DENIED_INELIGIBLE_TRIGGER_REASON,
+    reportingSeedSource: DENIED_REPORTING_SOURCE,
     reportingSeededAt: existingCaseContext?.reportingSeededAt || new Date().toISOString(),
     reportingLastSyncedAt: new Date().toISOString(),
     reportingDeniedAt: toDateOnlyString(
@@ -20488,8 +20545,8 @@ function buildDeniedIneligibleReportingCaseContext({
       existingCaseContext?.reportingSeededAt ||
       null
     ),
-	    [FUNDING_DECISION_REASON_CODE_KEY]:
-	      resolveFundingDecisionReasonCode(existingCaseContext, applicationId) || DENIED_INELIGIBLE_TRIGGER_REASON,
+    [FUNDING_DECISION_REASON_CODE_KEY]:
+      normalizedDenialReason || resolveFundingDecisionReasonCode(existingCaseContext, applicationId) || null,
     applicationId: applicationId || null,
     clientId: clientId || null,
     applicationAnswers: Object.keys(currentAnswers).length ? currentAnswers : null,
@@ -20609,7 +20666,7 @@ async function syncCaseClientFromApplication(connection, {
   return newClientId;
 }
 
-async function syncDeniedIneligibleReportingArtifacts(connection, {
+async function syncDeniedReportingArtifacts(connection, {
   caseId,
   applicationId,
   denialDate = null,
@@ -20633,10 +20690,9 @@ async function syncDeniedIneligibleReportingArtifacts(connection, {
     applicationId: numericApplicationId,
   });
   const existingCaseContext = safeJsonParse(caseRow.case_context_json, null) || {};
-  const denialReasonCode = resolveFundingDecisionReasonCode(existingCaseContext, numericApplicationId);
-  if (denialReasonCode !== DENIED_INELIGIBLE_TRIGGER_REASON) {
-    return null;
-  }
+  const denialReasonCode =
+    resolveFundingDecisionReasonCode(existingCaseContext, numericApplicationId) ||
+    ((normaliseString(assessmentRow?.nwac_reason) || '').toLowerCase() || null);
 
   const applicationPayload = await readApplicationPayload(connection, numericApplicationId, { forUpdate: true });
   const payload = applicationPayload?.payload || {};
@@ -20654,13 +20710,14 @@ async function syncDeniedIneligibleReportingArtifacts(connection, {
     existingClientId: caseRow.client_id || null,
   });
 
-  const nextCaseContext = buildDeniedIneligibleReportingCaseContext({
+  const nextCaseContext = buildDeniedReportingCaseContext({
     existingCaseContext,
     payload,
     answers,
     applicationId: numericApplicationId,
     clientId: syncedClientId,
     denialDate: resolvedDenialDate,
+    denialReasonCode,
   });
 
   await connection.query(
@@ -20753,17 +20810,17 @@ async function syncDeniedIneligibleReportingArtifacts(connection, {
     actionPlanChildcareNeed: childcareNeedCode,
     actionPlanChildcareFundedCode: childcareFundingCode,
     BarrierToEmployment: barrierCodes,
-    actionPlanResultCode: DENIED_INELIGIBLE_ACTION_PLAN_RESULT_CODE,
+    actionPlanResultCode: DENIED_REPORTING_ACTION_PLAN_RESULT_CODE,
     actionPlanResultDate: resolvedDenialDate,
     actionPlanResultEducationLevel: educationLevelCode,
   }) || null;
   const planMetadata = pruneNullish({
-    source: DENIED_INELIGIBLE_REPORTING_SOURCE,
+    source: DENIED_REPORTING_SOURCE,
     reportingOnly: true,
     generatedAt: existingCaseContext?.reportingSeededAt || new Date().toISOString(),
-    denialReason: DENIED_INELIGIBLE_TRIGGER_REASON,
+    denialReason: denialReasonCode || null,
     denialDate: resolvedDenialDate,
-    note: DENIED_INELIGIBLE_REPORTING_NOTE,
+    note: DENIED_REPORTING_NOTE,
     applicantSnapshot: pruneNullish({
       firstName: extractFirstName(extractionContext),
       lastName: extractLastName(extractionContext),
@@ -20778,10 +20835,10 @@ async function syncDeniedIneligibleReportingArtifacts(connection, {
     `SELECT id
        FROM iset_case_action_plan
       WHERE case_id = ?
-        AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) = ?
+        AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) IN (?, ?)
       LIMIT 1
       FOR UPDATE`,
-    [numericCaseId, DENIED_INELIGIBLE_REPORTING_SOURCE]
+    [numericCaseId, ...DENIED_REPORTING_METADATA_SOURCES]
   );
 
   let planId = existingPlan?.id || null;
@@ -20811,20 +20868,20 @@ async function syncDeniedIneligibleReportingArtifacts(connection, {
               updated_at = NOW()
         WHERE id = ?`,
       [
-        DENIED_INELIGIBLE_PLAN_NAME,
+        DENIED_REPORTING_PLAN_NAME,
         agreementNumber,
         fundingStream,
         resolveCaseAssignedStaffProfileId(caseRow) || null,
         resolvedDenialDate,
         resolvedDateTime,
         resolvedDateTime,
-        DENIED_INELIGIBLE_ACTION_PLAN_RESULT_CODE,
+        DENIED_REPORTING_ACTION_PLAN_RESULT_CODE,
         explicitEiClaimantCode ? Number(explicitEiClaimantCode) : null,
         prevEmploymentCode,
         resolvedDenialDate,
-        DENIED_INELIGIBLE_REPORTING_NOTE,
-        DENIED_INELIGIBLE_REPORTING_NOTE,
-        DENIED_INELIGIBLE_REPORTING_NOTE,
+        DENIED_REPORTING_NOTE,
+        DENIED_REPORTING_NOTE,
+        DENIED_REPORTING_NOTE,
         planMetadata ? JSON.stringify(planMetadata) : null,
         actionPlanEsdcPayload ? JSON.stringify(actionPlanEsdcPayload) : null,
         planId
@@ -20837,20 +20894,20 @@ async function syncDeniedIneligibleReportingArtifacts(connection, {
        VALUES (?, ?, 'closed', ?, NULL, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         numericCaseId,
-        DENIED_INELIGIBLE_PLAN_NAME,
+        DENIED_REPORTING_PLAN_NAME,
         agreementNumber,
         fundingStream,
         resolveCaseAssignedStaffProfileId(caseRow) || null,
         resolvedDenialDate,
         resolvedDateTime,
         resolvedDateTime,
-        DENIED_INELIGIBLE_ACTION_PLAN_RESULT_CODE,
+        DENIED_REPORTING_ACTION_PLAN_RESULT_CODE,
         explicitEiClaimantCode ? Number(explicitEiClaimantCode) : null,
         prevEmploymentCode,
         resolvedDenialDate,
-        DENIED_INELIGIBLE_REPORTING_NOTE,
-        DENIED_INELIGIBLE_REPORTING_NOTE,
-        DENIED_INELIGIBLE_REPORTING_NOTE,
+        DENIED_REPORTING_NOTE,
+        DENIED_REPORTING_NOTE,
+        DENIED_REPORTING_NOTE,
         planMetadata ? JSON.stringify(planMetadata) : null,
         actionPlanEsdcPayload ? JSON.stringify(actionPlanEsdcPayload) : null
       ]
@@ -20858,102 +20915,123 @@ async function syncDeniedIneligibleReportingArtifacts(connection, {
     planId = planInsert.insertId || null;
   }
 
-  const interventionMetadata = pruneNullish({
-    source: DENIED_INELIGIBLE_REPORTING_SOURCE,
-    reportingOnly: true,
-    generatedAt: existingCaseContext?.reportingSeededAt || new Date().toISOString(),
-    title: DENIED_INELIGIBLE_INTERVENTION_TITLE,
-    denialReason: DENIED_INELIGIBLE_TRIGGER_REASON,
-    denialDate: resolvedDenialDate,
-  }) || null;
-  const interventionEsdcPayload = pruneNullish({
-    interventionOutcome: String(DENIED_INELIGIBLE_INTERVENTION_OUTCOME_CODE),
-    interventionDuration: 0,
-  }) || null;
+  const interventionIds = [];
+  const ownerStaffProfileId = resolveCaseAssignedStaffProfileId(caseRow) || null;
+  for (const interventionDefinition of DENIED_REPORTING_INTERVENTIONS) {
+    const interventionMetadata = pruneNullish({
+      source: DENIED_REPORTING_SOURCE,
+      reportingOnly: true,
+      generatedAt: existingCaseContext?.reportingSeededAt || new Date().toISOString(),
+      title: interventionDefinition.title,
+      denialReason: denialReasonCode || null,
+      denialDate: resolvedDenialDate,
+    }) || null;
+    const interventionEsdcPayload = pruneNullish({
+      interventionOutcome: String(DENIED_REPORTING_INTERVENTION_OUTCOME_CODE),
+      interventionDuration: 0,
+    }) || null;
 
-  const [[existingIntervention]] = await connection.query(
-    `SELECT id
-       FROM iset_case_intervention
-      WHERE case_id = ?
-        AND action_plan_id = ?
-        AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) = ?
-      LIMIT 1
-      FOR UPDATE`,
-    [numericCaseId, planId, DENIED_INELIGIBLE_REPORTING_SOURCE]
-  );
-
-  let interventionId = existingIntervention?.id || null;
-  if (interventionId) {
-    await connection.query(
-      `UPDATE iset_case_intervention
-          SET action_plan_id = ?,
-              intervention_code = ?,
-              related_noc_version = NULL,
-              related_noc = NULL,
-              status = 'completed',
-              start_date = ?,
-              end_date = ?,
-              duration_days = 0,
-              intervention_cost = NULL,
-              budget_amount = NULL,
-              approved_amount = NULL,
-              actual_amount = NULL,
-              outcome_code = ?,
-              notes = ?,
-              metadata_json = ?,
-              esdc_intervention_json = ?,
-              created_by_staff_profile_id = ?,
-              reviewed_by_staff_profile_id = NULL,
-              reviewed_at = NULL,
-              review_notes = NULL,
-              eligibility_result = NULL,
-              funding_stream_decision = ?,
-              required_docs_flags = NULL,
-              closed_at = COALESCE(closed_at, ?),
-              updated_at = NOW()
-        WHERE id = ?`,
-      [
-        planId,
-        DENIED_INELIGIBLE_INTERVENTION_CODE,
-        resolvedDenialDate,
-        resolvedDenialDate,
-        DENIED_INELIGIBLE_INTERVENTION_OUTCOME_CODE,
-        DENIED_INELIGIBLE_REPORTING_NOTE,
-        interventionMetadata ? JSON.stringify(interventionMetadata) : null,
-        interventionEsdcPayload ? JSON.stringify(interventionEsdcPayload) : null,
-        resolveCaseAssignedStaffProfileId(caseRow) || null,
-        fundingStream,
-        resolvedDateTime,
-        interventionId
-      ]
-    );
-  } else {
-    const [interventionInsert] = await connection.query(
-      `INSERT INTO iset_case_intervention
-         (case_id, action_plan_id, intervention_code, related_noc_version, related_noc, status, delivery_status, start_date, end_date, duration_days, intervention_cost, budget_amount, approved_amount, actual_amount, outcome_code, notes, metadata_json, esdc_intervention_json, created_by_staff_profile_id, reviewed_by_staff_profile_id, reviewed_at, review_notes, eligibility_result, funding_stream_decision, required_docs_flags, closed_at)
-       VALUES (?, ?, ?, NULL, NULL, 'completed', 'completed', ?, ?, 0, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, NULL, ?)`,
+    const [[existingIntervention]] = await connection.query(
+      `SELECT id
+         FROM iset_case_intervention
+        WHERE case_id = ?
+          AND action_plan_id = ?
+          AND intervention_code = ?
+          AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) IN (?, ?)
+        LIMIT 1
+        FOR UPDATE`,
       [
         numericCaseId,
         planId,
-        DENIED_INELIGIBLE_INTERVENTION_CODE,
-        resolvedDenialDate,
-        resolvedDenialDate,
-        DENIED_INELIGIBLE_INTERVENTION_OUTCOME_CODE,
-        DENIED_INELIGIBLE_REPORTING_NOTE,
-        interventionMetadata ? JSON.stringify(interventionMetadata) : null,
-        interventionEsdcPayload ? JSON.stringify(interventionEsdcPayload) : null,
-        resolveCaseAssignedStaffProfileId(caseRow) || null,
-        fundingStream,
-        resolvedDateTime
+        interventionDefinition.code,
+        ...DENIED_REPORTING_METADATA_SOURCES
       ]
     );
-    interventionId = interventionInsert.insertId || null;
+
+    let interventionId = existingIntervention?.id || null;
+    if (interventionId) {
+      await connection.query(
+        `UPDATE iset_case_intervention
+            SET action_plan_id = ?,
+                intervention_code = ?,
+                related_noc_version = NULL,
+                related_noc = NULL,
+                status = 'completed',
+                delivery_status = 'completed',
+                start_date = ?,
+                end_date = ?,
+                duration_days = 0,
+                intervention_cost = NULL,
+                budget_amount = NULL,
+                approved_amount = NULL,
+                actual_amount = NULL,
+                outcome_code = ?,
+                notes = ?,
+                metadata_json = ?,
+                esdc_intervention_json = ?,
+                created_by_staff_profile_id = ?,
+                reviewed_by_staff_profile_id = NULL,
+                reviewed_at = NULL,
+                review_notes = NULL,
+                eligibility_result = NULL,
+                funding_stream_decision = ?,
+                required_docs_flags = NULL,
+                closed_at = COALESCE(closed_at, ?),
+                updated_at = NOW()
+          WHERE id = ?`,
+        [
+          planId,
+          interventionDefinition.code,
+          resolvedDenialDate,
+          resolvedDenialDate,
+          DENIED_REPORTING_INTERVENTION_OUTCOME_CODE,
+          DENIED_REPORTING_NOTE,
+          interventionMetadata ? JSON.stringify(interventionMetadata) : null,
+          interventionEsdcPayload ? JSON.stringify(interventionEsdcPayload) : null,
+          ownerStaffProfileId,
+          fundingStream,
+          resolvedDateTime,
+          interventionId
+        ]
+      );
+    } else {
+      const [interventionInsert] = await connection.query(
+        `INSERT INTO iset_case_intervention
+           (case_id, action_plan_id, intervention_code, related_noc_version, related_noc, status, delivery_status, start_date, end_date, duration_days, intervention_cost, budget_amount, approved_amount, actual_amount, outcome_code, notes, metadata_json, esdc_intervention_json, created_by_staff_profile_id, reviewed_by_staff_profile_id, reviewed_at, review_notes, eligibility_result, funding_stream_decision, required_docs_flags, closed_at)
+         VALUES (?, ?, ?, NULL, NULL, 'completed', 'completed', ?, ?, 0, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, NULL, ?)`,
+        [
+          numericCaseId,
+          planId,
+          interventionDefinition.code,
+          resolvedDenialDate,
+          resolvedDenialDate,
+          DENIED_REPORTING_INTERVENTION_OUTCOME_CODE,
+          DENIED_REPORTING_NOTE,
+          interventionMetadata ? JSON.stringify(interventionMetadata) : null,
+          interventionEsdcPayload ? JSON.stringify(interventionEsdcPayload) : null,
+          ownerStaffProfileId,
+          fundingStream,
+          resolvedDateTime
+        ]
+      );
+      interventionId = interventionInsert.insertId || null;
+    }
+    if (interventionId) {
+      interventionIds.push(interventionId);
+    }
   }
 
   await ensureEsdcParticipantSubmissionRecord(connection, numericCaseId, numericApplicationId, planId);
   const submissionId = await findEsdcSubmissionIdForCase(connection, numericCaseId);
   if (!submissionId) {
-    return { clientId: syncedClientId, planId, interventionId, submissionId: null, compliance: null };
+    return {
+      clientId: syncedClientId,
+      planId,
+      interventionId: interventionIds[0] || null,
+      interventionIds,
+      submissionId: null,
+      compliance: null
+    };
   }
 
   await validateEsdcParticipantSubmission(
@@ -20968,24 +21046,27 @@ async function syncDeniedIneligibleReportingArtifacts(connection, {
     [submissionId]
   );
   const compliance = mapIlmpComplianceFromSubmission(updatedSubmission);
-  await connection.query(
-    `UPDATE iset_case_intervention
-        SET metadata_json = JSON_SET(COALESCE(metadata_json, JSON_OBJECT()), '$.compliance.ilmp', ?),
-            updated_at = NOW()
-      WHERE id = ?`,
-    [compliance.status, interventionId]
-  );
+  for (const interventionId of interventionIds) {
+    await connection.query(
+      `UPDATE iset_case_intervention
+          SET metadata_json = JSON_SET(COALESCE(metadata_json, JSON_OBJECT()), '$.compliance.ilmp', ?),
+              updated_at = NOW()
+        WHERE id = ?`,
+      [compliance.status, interventionId]
+    );
+  }
 
   return {
     clientId: syncedClientId,
     planId,
-    interventionId,
+    interventionId: interventionIds[0] || null,
+    interventionIds,
     submissionId,
     compliance
   };
 }
 
-async function syncDeniedIneligibleReportingForApplicationIfNeeded(connection, {
+async function syncDeniedReportingForApplicationIfNeeded(connection, {
   applicationId,
   denialDate = null,
 } = {}) {
@@ -20997,10 +21078,10 @@ async function syncDeniedIneligibleReportingForApplicationIfNeeded(connection, {
     forUpdate: true,
   });
   if (!caseRow) return null;
-  if (!isDeniedIneligibleReportingCaseContext(caseRow.case_context_json)) {
+  if (!isDeniedReportingCaseContext(caseRow.case_context_json)) {
     return null;
   }
-  return syncDeniedIneligibleReportingArtifacts(connection, {
+  return syncDeniedReportingArtifacts(connection, {
     caseId: caseRow.id,
     applicationId: numericApplicationId,
     denialDate,
@@ -38075,7 +38156,11 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
     LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
-    LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
+    LEFT JOIN budget_pot bp
+      ON (
+        (ap.budget_pot REGEXP '^[0-9]+$' AND bp.id = CAST(ap.budget_pot AS UNSIGNED))
+        OR bp.code = ap.budget_pot
+      )
     ${legacyWhere}
     ORDER BY ci.updated_at DESC, ci.created_at DESC
     LIMIT 200
@@ -38133,7 +38218,11 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
         LEFT JOIN esdc_intervention_code ic ON ic.code = COALESCE(p.intervention_code, ci.intervention_code)
-        LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
+        LEFT JOIN budget_pot bp
+          ON (
+            (ap.budget_pot REGEXP '^[0-9]+$' AND bp.id = CAST(ap.budget_pot AS UNSIGNED))
+            OR bp.code = ap.budget_pot
+          )
         WHERE ${proposalReviewStatusExpr} IN (?, ?)
 
         UNION ALL
@@ -38184,7 +38273,11 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
         LEFT JOIN esdc_intervention_code ic ON ic.code = ci.intervention_code
-        LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
+        LEFT JOIN budget_pot bp
+          ON (
+            (ap.budget_pot REGEXP '^[0-9]+$' AND bp.id = CAST(ap.budget_pot AS UNSIGNED))
+            OR bp.code = ap.budget_pot
+          )
         WHERE p_existing.id IS NULL
           AND ${interventionReviewStatusExpr} IN (?, ?)
       ) q
@@ -38479,7 +38572,11 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
     LEFT JOIN esdc_intervention_code ic ON ic.code = COALESCE(p.intervention_code, ci.intervention_code)
-    LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
+    LEFT JOIN budget_pot bp
+      ON (
+        (ap.budget_pot REGEXP '^[0-9]+$' AND bp.id = CAST(ap.budget_pot AS UNSIGNED))
+        OR bp.code = ap.budget_pot
+      )
     WHERE ${completionFilters.join(' AND ')}
     ORDER BY COALESCE(p.reviewed_at, ci.reviewed_at, p.updated_at, ci.updated_at, ci.created_at) DESC,
              ci.id DESC
@@ -47555,7 +47652,8 @@ app.get('/api/cases', async (req, res) => {
       );
     } else if (clientCategory === 'ineligible_reporting') {
       whereClauses.push(
-        `COALESCE(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.reportingOnlyDeniedIneligible')), 'false') = 'true'`
+        `(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.reportingOnlyDenied')), 'false') = 'true'
+          OR COALESCE(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.reportingOnlyDeniedIneligible')), 'false') = 'true')`
       );
     }
 
@@ -48397,7 +48495,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         ap.budget_pot,
         ap.funding_stream,
         ap.esdc_action_plan_json AS esdcActionPlanJson,
+        bp.id AS budget_pot_id,
         bp.code AS budget_pot_code,
+        bp.name AS budget_pot_name,
         ap.archived_at,
         ap.created_at,
         ap.updated_at,
@@ -48407,7 +48507,11 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
            WHERE ci.action_plan_id = ap.id
          ) AS intervention_count
        FROM iset_case_action_plan ap
-       LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
+       LEFT JOIN budget_pot bp
+         ON (
+           (ap.budget_pot REGEXP '^[0-9]+$' AND bp.id = CAST(ap.budget_pot AS UNSIGNED))
+           OR bp.code = ap.budget_pot
+         )
        WHERE ap.case_id = ?
        ORDER BY ap.created_at ASC, ap.id ASC`,
       [caseId]
@@ -59458,7 +59562,7 @@ const isFinancePaymentsRole = role => {
   return FINANCE_PAYMENTS_ROLE_ALLOWLIST.has(canonical);
 };
 
-const SIMPLE_PAYMENT_WORKFLOW = false;
+const SIMPLE_PAYMENT_WORKFLOW = true;
 
 const PAYMENT_PACKET_STATUSES = new Set([
   'draft',
@@ -61911,7 +62015,12 @@ const resolveEvidenceTypesForDocument = row => {
   const docType = resolveDocumentTypeFromRow(row);
   if (!docType) return [];
   const types = PAYMENT_EVIDENCE_DOCUMENT_TYPE_MAP[docType];
-  return Array.isArray(types) ? types : [];
+  if (Array.isArray(types)) return types;
+  const docEvidenceKey = docType.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const directEvidenceType = Object.keys(PAYMENT_EVIDENCE_LABEL_OVERRIDES).find(type =>
+    type.toLowerCase().replace(/[^a-z0-9]+/g, '') === docEvidenceKey
+  );
+  return directEvidenceType ? [directEvidenceType] : [];
 };
 
 const PAYMENT_TYPE_ALIASES = {
@@ -67740,50 +67849,40 @@ const buildPaymentPacketBundleDocument = async ({ packetId, packet, actorUserId,
   if (!packetId || !runner) return null;
   const resolvedPacket = packet || await fetchPaymentPacketById(packetId, runner);
   if (!resolvedPacket) return null;
-  const payeeIdentity = await resolvePaymentPacketPayeeIdentity({
-    packetId,
-    packet: resolvedPacket,
-    connection: runner,
-  });
-  const packetForBundle = payeeIdentity
-    ? { ...resolvedPacket, payeeIdentity }
-    : resolvedPacket;
   const evidenceRows = await fetchPaymentEvidenceDocumentRows({ packetId, connection: runner });
-  const pdfBuffer = await generatePaymentPacketPdfBuffer({ packet: packetForBundle });
-  const entries = [
-    { name: 'packet-summary.pdf', buffer: pdfBuffer },
-  ];
+  const entries = [];
+  const entryNames = new Set();
   const generatedAt = new Date().toISOString();
-  const manifest = {
-    packetId: String(packetId),
-    generatedAt,
-    approvals: packetForBundle?.approvals || [],
-    payeeIdentity: payeeIdentity || null,
-    evidence: evidenceRows.map(row => ({
-      documentId: row.document_id ? String(row.document_id) : null,
-      fileName: row.file_name || null,
-      evidenceType: row.evidence_type || null,
-      checksum: row.checksum_sha256 || null,
-      lineId: row.payment_packet_line_id ? String(row.payment_packet_line_id) : null,
-    })),
-  };
-  entries.push({
-    name: 'manifest.json',
-    buffer: Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'),
-  });
-  entries.push({
-    name: 'payee-identity.json',
-    buffer: Buffer.from(JSON.stringify(payeeIdentity || {}, null, 2), 'utf8'),
-  });
 
   for (const doc of evidenceRows) {
     if (!doc?.file_path) continue;
-    const buffer = await loadDocumentBuffer(doc);
+    let buffer = null;
+    try {
+      buffer = await loadDocumentBuffer(doc);
+    } catch (err) {
+      console.warn(
+        '[payments] skipped payment bundle document %s for packet %s: %s',
+        doc.document_id || doc.link_id || doc.file_name || 'unknown',
+        packetId,
+        err?.message || err
+      );
+      continue;
+    }
     if (!buffer) continue;
     const safeName = sanitizeArchiveName(doc.file_name || `document-${doc.document_id || doc.link_id}`);
-    const archiveName = `evidence/${doc.document_id ? `${doc.document_id}-` : ''}${safeName}`;
+    const parsedName = path.parse(safeName);
+    const baseName = `${doc.document_id ? `${doc.document_id}-` : ''}${parsedName.name || 'document'}`;
+    const extension = parsedName.ext || '';
+    let archiveName = `${baseName}${extension}`;
+    let duplicateIndex = 2;
+    while (entryNames.has(archiveName)) {
+      archiveName = `${baseName}-${duplicateIndex}${extension}`;
+      duplicateIndex += 1;
+    }
+    entryNames.add(archiveName);
     entries.push({ name: archiveName, buffer });
   }
+  if (!entries.length) return null;
 
   const zipBuffer = await buildZipBuffer({ entries });
   const filename = `payment-packet-${packetId}-bundle-${Date.now()}.zip`;
@@ -67791,7 +67890,7 @@ const buildPaymentPacketBundleDocument = async ({ packetId, packet, actorUserId,
     buffer: zipBuffer,
     fileName: filename,
     contentType: 'application/zip',
-    label: 'Payment packet bundle',
+    label: 'Payment packet document bundle',
     category: 'payment_audit_bundle',
     metadata: { packetId: String(packetId), generatedAt },
     actorUserId,
@@ -67838,8 +67937,15 @@ const buildPaymentPacketEmail = ({
 }) => {
   const lines = Array.isArray(packet?.lines) ? packet.lines : [];
   const packetIdLabel = formatPacketIdLabel(packet?.id || '');
-  const subject = packetIdLabel
-    ? `${packetIdLabel} payment packet submitted to finance`
+  const clientName = normaliseString(
+    packet?.clientName ||
+      packet?.client_name ||
+      packet?.metadata?.clientName ||
+      packet?.metadata?.client_name
+  );
+  const subjectPrefix = [packetIdLabel, clientName].filter(Boolean).join(' - ');
+  const subject = subjectPrefix
+    ? `${subjectPrefix} payment packet submitted to finance`
     : 'Payment packet submitted to finance';
 
   const attachments = buildPacketAttachmentSummary(packet);
@@ -67886,6 +67992,14 @@ const buildPaymentPacketEmail = ({
     requestedPaymentDate: line?.requestedPaymentDate || '',
     payeeReference: line?.payeeReference || line?.payee_reference || '',
   }));
+  const bundleExpiresInDaysNumber = Number(bundleExpiresInDays);
+  const bundleExpiryDate = bundleExpiresAt ? toDateOnlyString(bundleExpiresAt) : null;
+  const bundleExpiryText =
+    bundleExpiryDate && Number.isFinite(bundleExpiresInDaysNumber) && bundleExpiresInDaysNumber > 0
+      ? `Link expires in ${bundleExpiresInDaysNumber} days (${bundleExpiryDate}).`
+      : bundleExpiryDate
+        ? `Link expires on ${bundleExpiryDate}.`
+        : null;
 
   const bodyTextLines = [
     'A payment packet request has been submitted to finance for processing.',
@@ -67908,6 +68022,14 @@ const buildPaymentPacketEmail = ({
     `- Budget pot: ${uniquePotLabels[0] || '-'}`,
     `- Funding stream: ${uniqueFundingStreams[0] || '-'}`,
     `- Reporting unit: ${uniqueReportingUnits[0] || '-'}`,
+    ...(bundleLink
+      ? [
+          '',
+          'Packet bundle',
+          `- Download packet bundle: ${bundleLink}`,
+          ...(bundleExpiryText ? [`- ${bundleExpiryText}`] : []),
+        ]
+      : []),
     ...(note ? ['', `Requester note: ${note}`] : []),
   ];
   const bodyText = bodyTextLines.join('\n');
@@ -67943,6 +68065,13 @@ const buildPaymentPacketEmail = ({
       <li>Funding stream: ${escapeHtml(uniqueFundingStreams[0] || '-')}</li>
       <li>Reporting unit: ${escapeHtml(uniqueReportingUnits[0] || '-')}</li>
     </ul>
+    ${bundleLink ? `
+      <p><strong>Packet bundle</strong></p>
+      <ul>
+        <li><a href="${escapeHtml(bundleLink)}">Download packet bundle</a></li>
+        ${bundleExpiryText ? `<li>${escapeHtml(bundleExpiryText)}</li>` : ''}
+      </ul>
+    ` : ''}
     ${note ? `<p>Requester note: ${escapeHtml(note)}</p>` : ''}
   `;
 
@@ -70926,7 +71055,11 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       JOIN iset_case c ON c.id = ci.case_id
       LEFT JOIN client cl ON cl.id = c.client_id
       LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
-      LEFT JOIN budget_pot bp ON bp.id = ap.budget_pot
+      LEFT JOIN budget_pot bp
+        ON (
+          (ap.budget_pot REGEXP '^[0-9]+$' AND bp.id = CAST(ap.budget_pot AS UNSIGNED))
+          OR bp.code = ap.budget_pot
+        )
       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
       ${buildCasePrimaryApplicationJoinSql('c', 'a')}
       LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
@@ -75156,10 +75289,6 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
         await conn.rollback();
         return res.status(400).json({ error: 'actor_user_required' });
       }
-      if (packetRow.requester_user_id && Number(packetRow.requester_user_id) === Number(actorUserId)) {
-        await conn.rollback();
-        return res.status(403).json({ error: 'maker_checker_violation' });
-      }
     }
 
     if (EVIDENCE_GATE_PACKET_STATUSES.has(nextStatus)) {
@@ -76690,10 +76819,6 @@ app.post('/api/finance/payment-lines/:id/status', async (req, res) => {
           await conn.rollback();
           return res.status(400).json({ error: 'actor_user_required' });
         }
-        if (lineRow.requester_user_id && Number(lineRow.requester_user_id) === Number(actorUserId)) {
-          await conn.rollback();
-          return res.status(403).json({ error: 'maker_checker_violation' });
-        }
         const approvalRules = await readPaymentApprovalRules(conn);
         const requirement = resolveApprovalRequirement(approvalRules.paid, {
           totalAmount: Number(lineRow.amount || 0),
@@ -77387,9 +77512,6 @@ app.post('/api/finance/payment-batches/:id/status', async (req, res) => {
     if (nextStatus === 'approved') {
       if (!actorUserId) {
         return res.status(400).json({ error: 'actor_user_required' });
-      }
-      if (batchRow.created_by_user_id && Number(batchRow.created_by_user_id) === Number(actorUserId)) {
-        return res.status(403).json({ error: 'maker_checker_violation' });
       }
       const approvalRules = await readPaymentApprovalRules(pool);
       const requirement = resolveApprovalRequirement(approvalRules.batch, {
@@ -79628,7 +79750,7 @@ app.post('/api/applications/:id/versions', async (req, res) => {
       throw insertErr;
     }
 
-    await syncDeniedIneligibleReportingForApplicationIfNeeded(connection, {
+    await syncDeniedReportingForApplicationIfNeeded(connection, {
       applicationId,
     });
 
@@ -79731,7 +79853,7 @@ app.post('/api/applications/:id/versions/:versionId/restore', async (req, res) =
       await connection.rollback();
       return res.status(409).json({ error: 'row_version_conflict', currentRowVersion, lock: lockCheck.lock || null });
     }
-    await syncDeniedIneligibleReportingForApplicationIfNeeded(connection, {
+    await syncDeniedReportingForApplicationIfNeeded(connection, {
       applicationId,
     });
     await connection.commit();
@@ -82177,27 +82299,17 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       bumpApplicationRowVersion = true;
     }
 
-    const shouldSeedDeniedIneligibleReporting =
+    const shouldSeedDeniedReporting =
       applicationStatusToPersist === 'rejected' &&
       beforeApplicationStatus !== 'rejected' &&
       applicationId;
 
-    if (shouldSeedDeniedIneligibleReporting) {
-      const [[caseContextRow]] = await conn.query(
-        `SELECT case_context_json
-           FROM iset_case
-          WHERE id = ?
-          LIMIT 1`,
-        [caseId]
-      );
-	      const deniedReason = resolveFundingDecisionReasonCode(caseContextRow?.case_context_json, applicationId);
-      if (deniedReason === DENIED_INELIGIBLE_TRIGGER_REASON) {
-        deniedReportingSeedResult = await syncDeniedIneligibleReportingArtifacts(conn, {
-          caseId,
-          applicationId,
-          denialDate: new Date(),
-        });
-      }
+    if (shouldSeedDeniedReporting) {
+      deniedReportingSeedResult = await syncDeniedReportingArtifacts(conn, {
+        caseId,
+        applicationId,
+        denialDate: new Date(),
+      });
     }
 
     if (bumpApplicationRowVersion) {

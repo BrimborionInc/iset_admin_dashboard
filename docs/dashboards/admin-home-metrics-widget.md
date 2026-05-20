@@ -2,7 +2,7 @@
 
 Purpose: document the live behavior of the homepage Metrics widget and its drilldown into the shared Items table.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-04-14
+Last Updated: 2026-05-20
 
 ## Scope
 
@@ -17,6 +17,7 @@ Last Updated: 2026-04-14
 - Currency metrics (`Funds approved`, `Funds committed`, `Funds recorded actual`) are display-only.
 - Count metrics are links. Selecting one opens the matching records in the existing `Work Queue Items` widget.
 - The `Work Queue Items` widget switches into a dedicated metric-results mode with neutral columns and a `Back to work queue` action.
+- The shared Items table sorts the currently filtered queue or metric result set client-side; adaptive columns such as Item, Province, Owner, Status, Timeline target, Next action, Details, and Tag use the same display fallbacks as the visible cells.
 - If the user previously removed `Work Queue Items` from the board, selecting a metric restores that widget automatically.
 - Selecting a queue in the Work Queue widget exits metric-results mode and returns the Items table to queue-driven behavior.
 

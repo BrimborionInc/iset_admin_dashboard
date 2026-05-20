@@ -776,6 +776,7 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
         return [updated, ...next];
       });
       setSelectedRequestId(updated.id);
+      loadCommunications(updated.id);
       return updated;
     } catch (err) {
       console.error("[Payments] failed to update packet status", err);
@@ -783,7 +784,7 @@ export const PaymentsDataProvider = ({ children, filters = {}, autoSelectFirst =
       setError(message);
       throw err;
     }
-  }, []);
+  }, [loadCommunications]);
 
   const validatePacket = useCallback(async packetId => {
     if (!packetId) return null;

@@ -14,7 +14,7 @@ const PortfolioDashboardHelp = () => (
     <h3>Key actions</h3>
     <ul>
       <li>Use <strong>Add widget</strong> and <strong>Reset layout</strong> to manage the dashboard board.</li>
-      <li>Use the Clients widget <strong>Show</strong> selector to move between Open, Funded, Dormant, Ineligible, and All client views.</li>
+      <li>Use the Clients widget <strong>Show</strong> selector to move between Open, Funded, Dormant, Denied / Ineligible, and All client views.</li>
       <li>Search the Clients table by client name, preferred name, reference number, case number, or owner.</li>
       <li>Select a client or case row to open the case workspace for action plans, interventions, notes, documents, messages, and case finance work.</li>
     </ul>
@@ -24,7 +24,7 @@ const PortfolioDashboardHelp = () => (
       <li><strong>Open</strong>: Initiated, Active, and Ready to close case lifecycle files.</li>
       <li><strong>Funded</strong>: files with at least one positive funded intervention amount, including approved, active, suspended, completed, or cancelled funded interventions.</li>
       <li><strong>Dormant</strong>: Dormant, Closed, and Archived lifecycle files.</li>
-      <li><strong>Ineligible</strong>: reporting-only denied or ineligible files.</li>
+      <li><strong>Denied / Ineligible</strong>: reporting-only denied or ineligible files.</li>
       <li><strong>All</strong>: accessible case-management files across the listed lifecycle states, including reporting-only files.</li>
     </ul>
 
@@ -37,6 +37,6 @@ const PortfolioDashboardHelp = () => (
   </div>
 );
 
-PortfolioDashboardHelp.aiContext = `You are guiding a user through the ISET Clients dashboard at /iset/cases. This is the case-management client-file dashboard, not the application assessment intake queue. The board can contain widgets such as Clients, Client summary, and Finance overview; the default layout shows the Clients table. The Clients table opens the case workspace and has a Show selector: Open = initiated/active/ready_to_close case lifecycle files; Funded = files with at least one positive funded intervention amount in approved, in_progress, suspended, completed, or cancelled effective status; Dormant = dormant/closed/archived; Ineligible = reporting-only denied/ineligible files; All = accessible initiated/active/dormant/ready_to_close/closed/archived files including reporting-only files. Role and assignment scope still limit results.`;
+PortfolioDashboardHelp.aiContext = `You are guiding a user through the ISET Clients dashboard at /iset/cases. This is the case-management client-file dashboard, not the application assessment intake queue. The board can contain widgets such as Clients, Client summary, and Finance overview; the default layout shows the Clients table. The Clients table opens the case workspace and has a Show selector: Open = initiated/active/ready_to_close case lifecycle files; Funded = files with at least one positive funded intervention amount in approved, in_progress, suspended, completed, or cancelled effective status; Dormant = dormant/closed/archived; Denied / Ineligible = reporting-only denied/ineligible files; All = accessible initiated/active/dormant/ready_to_close/closed/archived files including reporting-only files. Role and assignment scope still limit results.`;
 
 export default PortfolioDashboardHelp;

@@ -332,7 +332,14 @@ const InterventionModal = ({
   const [showCloseGuidance, setShowCloseGuidance] = useState(true);
   const [closeForm, setCloseForm] = useState(buildCloseForm(intervention));
   const [potOptions, setPotOptions] = useState([]);
-  const inheritedBudgetPot = plan?.budgetPot || plan?.budget_pot || "";
+  const inheritedBudgetPot = plan?.budgetPotId || plan?.budget_pot_id || plan?.budgetPot || plan?.budget_pot || "";
+  const inheritedBudgetPotDisplay =
+    plan?.budgetPotDisplayLabel ||
+    plan?.budgetPotLabel ||
+    plan?.budget_pot_label ||
+    [plan?.budgetPotCode || plan?.budget_pot_code, plan?.budgetPotName || plan?.budget_pot_name]
+      .filter(Boolean)
+      .join(" - ");
   const inheritedFundingStream = plan?.fundingStream || plan?.funding_stream || "";
 
   useEffect(() => {
@@ -611,8 +618,8 @@ const InterventionModal = ({
 
   const inheritedBudgetPotLabel = useMemo(() => {
     const match = potOptions.find(opt => String(opt.value) === String(inheritedBudgetPot));
-    return match?.label || (inheritedBudgetPot ? String(inheritedBudgetPot) : "Not set");
-  }, [potOptions, inheritedBudgetPot]);
+    return match?.label || inheritedBudgetPotDisplay || (inheritedBudgetPot ? String(inheritedBudgetPot) : "Not set");
+  }, [potOptions, inheritedBudgetPot, inheritedBudgetPotDisplay]);
   const selectedPostingContext = useMemo(
     () => POSTING_CONTEXT_OPTIONS.find(option => option.value === form.postingContext) || POSTING_CONTEXT_OPTIONS[0],
     [form.postingContext]

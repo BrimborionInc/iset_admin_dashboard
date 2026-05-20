@@ -2,7 +2,7 @@
 
 Purpose: document the live homepage Work Queue widget and the queues that drive the shared `Work Queue Items` table.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-05-06
+Last Updated: 2026-05-20
 
 ## Scope
 
@@ -74,8 +74,10 @@ Last Updated: 2026-05-06
   - the selected row still passes explicit decision-entry context so the target workspace opens in a review-focused board layout and the relevant decision step instead of restoring a stale personal board or wizard position
 - `Pending Completion`
   - contains decision-recorded application files that still need post-decision follow-through before the application workflow is complete
-  - includes approved and denied application assessment outcomes until the application is actually completed/closed
-  - application rows open Application Workspace with a post-decision step intent: `Approval letters` before the approval letter is sent, then `Funding forms and signatures` after an approval letter is recorded as sent
+  - includes approved application assessment outcomes until the application is actually completed/closed
+  - includes denied application assessment outcomes only until the denial letter is sent; sending the denial letter immediately completes the application because there are no further denial follow-up steps
+  - approved application rows open Application Workspace with a post-decision step intent: `Approval letters` before the approval letter is sent, then `Funding forms and signatures` after an approval letter is recorded as sent
+  - denied application rows open Application Workspace at the denial-letter step until the denial letter is sent
   - includes approved new intervention proposals and approved intervention revisions from `/api/dashboard/intervention-completion-items` until the intervention-scoped approval letter is sent
   - does not include ordinary approved/planned interventions, historical/backloaded interventions, or `auto_assessment` interventions created by an application approval, even when those rows have compatibility proposal records
   - is visible across the admin/manager shared pipeline and as the renamed coordinator `funding-agreements` queue so the post-decision stage is represented consistently across role homepages
@@ -100,7 +102,7 @@ Last Updated: 2026-05-06
 - `All Cases` includes open client cases visible through `/api/dashboard/all-client-cases`.
 - `All Cases` is case-based, not deduped by client, so multiple open files for one client count separately.
 - The case queue excludes only `closed` and `archived` statuses. `Dormant` and `ready_to_close` remain in scope.
-- `Pending Completion` is the exception to the non-terminal-only rule for the pipeline cards: it intentionally surfaces decision-recorded application files that still need post-decision work even when the underlying application outcome is `approved`, `rejected`, or `declined`. These rows remain until the application is completed/closed, not merely until a decision letter is sent.
+- `Pending Completion` is the exception to the non-terminal-only rule for the pipeline cards: it intentionally surfaces decision-recorded application files that still need post-decision work. Approved rows remain until the application is completed/closed after approval-letter and funding-doc follow-through. Denied rows remain only until the denial letter is sent, because the denial-letter send completes the application.
 
 ## Regional Manager scope rule
 

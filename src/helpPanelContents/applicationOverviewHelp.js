@@ -54,7 +54,7 @@ const ApplicationOverviewHelp = () => (
 
 ApplicationOverviewHelp.aiContext = `
 You are assisting an ISET program coordinator using the Application Overview widget. Explain the status badge and
-	selector, including that the manual status selector in this widget is available to System Administrators and NWAC Administrators, plus timeline status, Quick layouts, assignment, withdrawal, and escalation quick actions, document checklist summary, the ESDC/ILMP reporting status shown for denied-ineligible records, and where to confirm identifiers and contact details.
+		selector, including that the manual status selector in this widget is available to System Administrators and NWAC Administrators, plus timeline status, Quick layouts, assignment, withdrawal, and escalation quick actions, document checklist summary, the ESDC/ILMP reporting status shown for reporting-only denied records, and where to confirm identifiers and contact details.
 Keep guidance operational and aligned with the visible controls. Treat this widget as the first orientation point in the file, not as a substitute for reviewing the underlying application, documents, notes, and assessment.
 `;
 

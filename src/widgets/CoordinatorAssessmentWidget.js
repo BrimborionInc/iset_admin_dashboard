@@ -7746,7 +7746,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
           statusIconAriaLabel: 'Warning'
         });
       }
-      return { ok: result.ok, sentAt: timestamp };
+      return { ok: result.ok, sentAt: timestamp, updatedRowVersion: result.updatedRowVersion || null };
     },
     [applicationId, caseData?.caseContext, decisionLetterSent, persistLetterContext]
   );
@@ -7843,8 +7843,8 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       });
       dispatchSupportingDocsRefresh();
       await loadDocumentChecklist();
-      await markDecisionLetterSent(activeLetterKey);
-      return { ok: true };
+      const sentResult = await markDecisionLetterSent(activeLetterKey);
+      return { ok: true, updatedRowVersion: sentResult.updatedRowVersion || null };
     } catch (err) {
       setSendingLetterError(err?.message || 'Failed to send the decision letter.');
       return { ok: false, error: err };
@@ -8304,13 +8304,14 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       successMessage,
       errorMessage = 'Failed to update the application status.',
       refreshDocs = false,
-      resetSubmitted = false
+      resetSubmitted = false,
+      expectedRowVersion = null
     } = {}) => {
       if (!caseId || !nextStatus) return { ok: false };
       const lockCheck = await ensureLockForOperation();
       if (!lockCheck.ok) return { ok: false };
       const releaseAfterSuccess = lockCheck.localOwner || lockHeldByCurrentUser;
-      const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || 0);
+      const versionToken = Number(expectedRowVersion || applicationRowVersionState || caseData?.application_row_version || 0);
       const payload = { applicationStatus: nextStatus };
       if (versionToken > 0) {
         payload.expectedRowVersion = versionToken;
@@ -8437,13 +8438,17 @@ ${JSON.stringify(contextPayload, null, 2)}`;
   };
 
   const markApplicationCompleted = useCallback(
-    async ({ successMessage = 'Communication complete. Application marked as completed.' } = {}) =>
+    async ({
+      successMessage = 'Communication complete. Application marked as completed.',
+      expectedRowVersion = null
+    } = {}) =>
       updateApplicationStatus({
         nextStatus: 'completed',
         successMessage,
         errorMessage: 'Failed to complete the application.',
         refreshDocs: true,
-        resetSubmitted: true
+        resetSubmitted: true,
+        expectedRowVersion
       }),
     [updateApplicationStatus]
   );
@@ -8460,50 +8465,9 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     const letterResult = await handleSendDecisionLetter();
     if (!letterResult.ok) return;
     if (decisionOutcome === 'denied') {
-      let latestApplicationStatus = normalizedApplicationStatus;
-      let latestDecisionOutcome = persistedDecisionOutcome || decisionOutcome;
-      if (typeof actions?.refreshCaseData === 'function') {
-        try {
-          const refreshedCaseData = await actions.refreshCaseData();
-          if (refreshedCaseData && typeof refreshedCaseData === 'object') {
-            const refreshedRawApplicationStatus =
-              refreshedCaseData.applicationStatus ?? refreshedCaseData.application_status ?? null;
-            const refreshedRawCaseStatus = refreshedCaseData.status ?? refreshedCaseData.case_status ?? '';
-            const refreshedApplicationStatusContext = getApplicationStatusContext(refreshedRawApplicationStatus);
-            const refreshedCaseStatusContext = getApplicationStatusContext(refreshedRawCaseStatus);
-            const refreshedCaseDerivedApplicationStatus = LEGACY_APPLICATION_FALLBACK_STATUSES.has(
-              refreshedCaseStatusContext.canonicalStatus
-            )
-              ? refreshedCaseStatusContext.canonicalStatus
-              : '';
-            latestApplicationStatus =
-              refreshedApplicationStatusContext.canonicalStatus ||
-              refreshedCaseDerivedApplicationStatus ||
-              latestApplicationStatus;
-            latestDecisionOutcome =
-              deriveApplicationDecisionOutcome({
-                applicationStatus: latestApplicationStatus || refreshedRawApplicationStatus,
-                caseStatus: refreshedRawCaseStatus || rawCaseStatusSnapshot,
-                decisionOutcome: refreshedCaseData.decision_outcome ?? refreshedCaseData.decisionOutcome ?? null,
-                reviewStatus:
-                  refreshedCaseData.assessment_nwac_review_status ??
-                  refreshedCaseData.assessment_nwac_review ??
-                  null,
-              }) ||
-              latestDecisionOutcome;
-          }
-        } catch (_) {}
-      }
-      if (latestDecisionOutcome === 'denied' && APPLICATION_FINAL_STATUSES.has(latestApplicationStatus)) {
-        setHasSubmitted(false);
-        scrollAfterAction();
-        return;
-      }
-      await updateApplicationStatus({
-        nextStatus: 'rejected',
-        successMessage: 'Denial letter sent. Application marked as denied.',
-        errorMessage: 'Failed to mark application as denied.',
-        resetSubmitted: true
+      await markApplicationCompleted({
+        successMessage: 'Denial letter sent. Application marked as completed.',
+        expectedRowVersion: letterResult.updatedRowVersion || null
       });
       return;
     }

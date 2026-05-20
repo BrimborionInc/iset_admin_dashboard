@@ -722,8 +722,10 @@ const ApplicationOverviewWidget = ({
     }
   }, [application_id]);
   const watchlistHitSummary = watchlistHitDetails?.summary || null;
-  const isReportingOnlyDeniedIneligible = Boolean(
-    caseData?.caseContext?.reportingOnlyDeniedIneligible || caseData?.caseContext?.reportingCorrectionAllowed
+  const isReportingOnlyDenied = Boolean(
+    caseData?.caseContext?.reportingOnlyDenied ||
+    caseData?.caseContext?.reportingOnlyDeniedIneligible ||
+    caseData?.caseContext?.reportingCorrectionAllowed
   );
   const ilmpCompliance = caseData?.compliance?.ilmp || null;
   const ilmpStatus = ilmpCompliance?.status || 'pending';
@@ -2098,7 +2100,7 @@ const ApplicationOverviewWidget = ({
   if (assignedStaffValue) overviewItems.push({ label: 'Case Manager', value: assignedStaffValue });
   if (checklistValue !== null) overviewItems.push({ label: 'Document Checklist', value: checklistValue });
   overviewItems.push({ label: 'Docs Requested', value: docsRequestedContent });
-  if (isReportingOnlyDeniedIneligible) {
+  if (isReportingOnlyDenied) {
     overviewItems.push({
       label: 'ESDC Reporting',
       value: <StatusIndicator type={ilmpStatusType}>{ilmpStatusLabel}</StatusIndicator>
@@ -2235,11 +2237,11 @@ const ApplicationOverviewWidget = ({
             </Box>
           </Alert>
         ) : null}
-        {isReportingOnlyDeniedIneligible && (
+        {isReportingOnlyDenied && (
           <Alert type={ilmpStatus === 'blocked' ? 'error' : ilmpStatus === 'warning' ? 'warning' : ilmpStatus === 'clean' ? 'success' : 'info'}>
             <SpaceBetween size="xs">
               <Box>
-                This eligibility-denied record is retained for ILMP reporting. Fix missing reporting data in the Application Form widget; corrections revalidate automatically and blocked records stay out of normal casework queues.
+                This denied application is retained for ILMP reporting. Fix missing reporting data in the Application Form widget; corrections revalidate automatically and blocked records stay out of normal casework queues.
               </Box>
               {ilmpMessages.length > 0 && (
                 <Box as="ul" padding={{ left: 'm' }}>

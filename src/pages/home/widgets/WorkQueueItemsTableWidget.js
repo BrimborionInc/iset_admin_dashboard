@@ -48,6 +48,11 @@ import {
   formatInterventionStatusLabel,
   resolveInterventionStateFields,
 } from '../../../utils/interventionStatus';
+import {
+  isSortableWorkQueueColumn,
+  sortWorkQueueItems,
+  toSortTimestamp,
+} from './workQueueItemsSorting';
 
 const COLUMN_WIDTHS_STORAGE_KEY = 'work-queue-items-column-widths-v1';
 const WATCHLIST_REFRESH_EVENT = 'watchlist:refresh';
@@ -624,7 +629,8 @@ const columnDefinitionsByKey = {
   details: {
     id: 'details',
     header: 'Details',
-    cell: item => item.details || item.summary || '—'
+    cell: item => item.details || item.summary || '—',
+    sortingField: 'details'
   },
   signedAt: {
     id: 'signedAt',
@@ -765,6 +771,7 @@ const WorkQueueItemsTableWidget = ({
   const metricLoading = isMetricMode && Boolean(metricView?.loading);
   const metricError = isMetricMode ? metricView?.error || '' : '';
   const [filteringText, setFilteringText] = useState('');
+  const [sortingState, setSortingState] = useState({ columnId: null, isDescending: false });
   const [assignModalVisible, setAssignModalVisible] = useState(false);
   const [assignTarget, setAssignTarget] = useState(null);
   const [assignableStaff, setAssignableStaff] = useState([]);
@@ -1334,6 +1341,7 @@ const WorkQueueItemsTableWidget = ({
     const watchColumn = {
       id: 'watch',
       header: 'Tag',
+      sortingField: '__isWatched',
       minWidth: 45,
       width: widthsMap.get('watch'),
       cell: item => {
@@ -1522,6 +1530,67 @@ const WorkQueueItemsTableWidget = ({
     renderInlineAction,
     watchPending,
     handleToggleWatch
+  ]);
+
+  const activeSortingColumn = useMemo(
+    () => columnDefinitions.find(column => column.id === sortingState.columnId && isSortableWorkQueueColumn(column)) || null,
+    [columnDefinitions, sortingState.columnId]
+  );
+  const activeSortingColumnId = activeSortingColumn?.id || null;
+
+  const sortedTableItems = useMemo(() => {
+    if (!activeSortingColumnId) return tableItems;
+    return sortWorkQueueItems(tableItems, activeSortingColumnId, {
+      isDescending: sortingState.isDescending,
+      resolveProvinceCode,
+      formatRoleDisplay,
+      resolveStatusLabel: item => getStatusInfo(item).statusLabel,
+      resolveDueDateSortValue: item => {
+        const isClientCasesQueue =
+          selectedBucketId === 'regional-client-cases' ||
+          selectedBucketId === 'all-client-cases';
+        if (!isMetricMode && !isClientCasesQueue) {
+          const meta = computeSlaMeta(
+            item,
+            slaTargets,
+            normalizeApplicationStatus(item.status || 'submitted'),
+            Boolean(resolveAssignedStaffProfileId(item))
+          );
+          const computedDue = toSortTimestamp(meta?.due);
+          if (computedDue !== null) {
+            return computedDue;
+          }
+        }
+        const rawDue = toSortTimestamp(
+          item.dueDate ||
+          item.sla_due_at ||
+          item.nextActionDueAt ||
+          item.next_action_due_at
+        );
+        return rawDue !== null ? rawDue : item.milestoneLabel || null;
+      },
+      resolveApprovalTimelineSortValue: item => {
+        const meta = computeApprovalSlaMeta(item, slaTargets);
+        const computedDue = toSortTimestamp(meta?.due);
+        if (computedDue !== null) {
+          return computedDue;
+        }
+        return toSortTimestamp(
+          item.approvalQueuedAt ||
+          item.approval_queued_at ||
+          item.submittedAt ||
+          item.receivedAt ||
+          item.submitted_at
+        );
+      }
+    });
+  }, [
+    activeSortingColumnId,
+    isMetricMode,
+    selectedBucketId,
+    slaTargets,
+    sortingState.isDescending,
+    tableItems
   ]);
 
   const emptyState = isMetricMode
@@ -1813,8 +1882,16 @@ const WorkQueueItemsTableWidget = ({
       <Table
         variant="embedded"
         trackBy="id"
-        items={tableItems}
+        items={sortedTableItems}
         columnDefinitions={columnDefinitions}
+        sortingColumn={activeSortingColumn || undefined}
+        sortingDescending={sortingState.isDescending}
+        onSortingChange={({ detail }) => {
+          const columnId = detail?.sortingColumn?.id;
+          if (columnId) {
+            setSortingState({ columnId, isDescending: Boolean(detail.isDescending) });
+          }
+        }}
         resizableColumns
         stickyHeader
         enableKeyboardNavigation

@@ -21,7 +21,7 @@ const HomeCoordinatorWorkQueueHelp = () => (
         <li><strong>Ready to assess:</strong> files that appear ready for the assessment and recommendation work.</li>
         <li><strong>Missing Docs / Follow-ups Needed:</strong> applications waiting on the applicant.</li>
         <li><strong>Awaiting Approval:</strong> application assessments and new/revised intervention proposals you submitted to NWAC.</li>
-        <li><strong>Pending Completion:</strong> approved or denied application assessments, plus approved intervention proposals/revisions, that still need letters, documents, signatures, or final completion.</li>
+        <li><strong>Pending Completion:</strong> approved application assessments that still need approval-letter, document, signature, or final completion work; denied applications stay here only until the denial letter is sent.</li>
         <li><strong>Active Clients</strong>, <strong>Payments &amp; Proof Due</strong>, and <strong>Follow-ups &amp; File Closure Due:</strong> active case-management work after approval.</li>
       </ul>
     </Box>

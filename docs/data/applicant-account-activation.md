@@ -1,6 +1,6 @@
 # Applicant Account Activation Data
 
-_Last updated: 26 March 2026_
+_Last updated: 19 May 2026_
 
 ## Purpose
 
@@ -41,6 +41,11 @@ Current event types:
 - `account_created`
 - `invitation_sent`
 - `activated`
+
+Invitation events may include Cognito repair metadata such as `cognitoUserStatusBefore`,
+`cognitoUserStatusAfter`, and `cognitoTemporaryPasswordRepaired`. This records when PATH
+had to convert an older imported Cognito user out of `FORCE_CHANGE_PASSWORD` before the
+forgot-password-based activation flow could work.
 
 Columns:
 
@@ -115,3 +120,11 @@ Activation flow:
 2. PATH emails an `Activate your account` link.
 3. The portal activation page starts the Cognito forgot-password flow behind the scenes.
 4. On the first successful authenticated portal session, PATH marks the linked client as `activated`.
+
+Before sending or resending an activation email, the admin backend now checks whether the
+linked Cognito applicant user is still in `FORCE_CHANGE_PASSWORD`. Older imported accounts
+can get stuck there if they were created with a temporary password before the activation
+workflow normalized imported users to permanent random passwords. When found, PATH replaces
+that temporary state with an unknown permanent random password. No password is exposed to
+staff or the applicant; the applicant still sets their own password through the activation
+code flow.

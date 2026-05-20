@@ -588,10 +588,17 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
         id: "budgetPot",
         header: "Budget pot",
         cell: item => {
-          const code = item.budgetPotCode || item.budgetPot || null;
-          if (!code) return "-";
+          const label =
+            item.budgetPotDisplayLabel ||
+            item.budgetPotLabel ||
+            [item.budgetPotCode, item.budgetPotName].filter(Boolean).join(" - ") ||
+            item.budgetPotCode ||
+            item.budgetPotName ||
+            item.budgetPot ||
+            null;
+          if (!label) return "-";
           return (
-            <Badge color="blue">{code}</Badge>
+            <Badge color="blue">{label}</Badge>
           );
         },
       },

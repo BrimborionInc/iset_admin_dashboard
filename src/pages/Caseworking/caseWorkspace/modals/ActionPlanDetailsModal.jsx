@@ -386,11 +386,14 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
         ? {
             value: String(form.budgetPot),
             label:
+              plan?.budgetPotDisplayLabel ||
+              plan?.budgetPotLabel ||
+              [plan?.budgetPotCode, plan?.budgetPotName].filter(Boolean).join(" - ") ||
               potOptions.find(opt => String(opt.value) === String(form.budgetPot))?.label ||
               String(form.budgetPot),
           }
         : null),
-    [potOptions, form.budgetPot]
+    [potOptions, form.budgetPot, plan]
   );
 
   // Derive agreement number from the selected budget pot's agreement_id when available.
@@ -435,7 +438,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
       startDate: plan?.startDate || "",
       reviewDate: plan?.endDate || "",
       fundingStream: planFundingStream,
-      budgetPot: plan?.budgetPot || plan?.budget_pot || "",
+      budgetPot: plan?.budgetPotId || plan?.budget_pot_id || plan?.budgetPot || plan?.budget_pot || "",
       postingContext: plan?.postingContext || plan?.posting_context || "external",
       agreementNumber,
       educationLevel: plan?.educationLevel ? String(plan.educationLevel) : "",
@@ -467,7 +470,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
       startDate: plan?.startDate || "",
       reviewDate: plan?.endDate || "",
       fundingStream: planFundingStream,
-      budgetPot: plan?.budgetPot || plan?.budget_pot || "",
+      budgetPot: plan?.budgetPotId || plan?.budget_pot_id || plan?.budgetPot || plan?.budget_pot || "",
       postingContext: plan?.postingContext || plan?.posting_context || "external",
       agreementNumber,
       educationLevel: plan?.educationLevel ? String(plan.educationLevel) : "",

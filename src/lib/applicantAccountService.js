@@ -15,6 +15,7 @@ const SES_REGION = process.env.AWS_SES_REGION || AWS_REGION;
 const APPLICANT_STATUS_CREATED = 'created';
 const APPLICANT_STATUS_INVITATION_SENT = 'invitation_sent';
 const APPLICANT_STATUS_ACTIVATED = 'activated';
+const COGNITO_STATUS_FORCE_CHANGE_PASSWORD = 'FORCE_CHANGE_PASSWORD';
 const NOTIFICATION_RUNTIME_SCOPE = 'notifications';
 const PATH_EMAIL_SETTINGS_KEY = 'path.email';
 const DEFAULT_SENDER_EMAIL = 'ISET@awentech.ca';
@@ -264,6 +265,51 @@ async function updateApplicantCognitoAttributes(username, attributes = []) {
   }));
 }
 
+async function setPermanentRandomApplicantPassword(username) {
+  const normalizedUsername = normalizeEmail(username);
+  if (!normalizedUsername) return false;
+  const { client, poolId } = getApplicantCognitoClient();
+  await client.send(new AdminSetUserPasswordCommand({
+    UserPoolId: poolId,
+    Username: normalizedUsername,
+    Password: buildStrongRandomPassword(),
+    Permanent: true,
+  }));
+  return true;
+}
+
+async function ensureApplicantCognitoPasswordResetReady(username, knownUser = null) {
+  const normalizedUsername = normalizeEmail(username);
+  if (!normalizedUsername) {
+    return {
+      user: knownUser || null,
+      repairedTemporaryPassword: false,
+      userStatusBefore: normaliseString(knownUser?.UserStatus),
+      userStatusAfter: normaliseString(knownUser?.UserStatus),
+    };
+  }
+
+  const currentUser = knownUser || await fetchApplicantCognitoUser(normalizedUsername);
+  const userStatusBefore = normaliseString(currentUser?.UserStatus);
+  if (userStatusBefore !== COGNITO_STATUS_FORCE_CHANGE_PASSWORD) {
+    return {
+      user: currentUser,
+      repairedTemporaryPassword: false,
+      userStatusBefore,
+      userStatusAfter: userStatusBefore,
+    };
+  }
+
+  await setPermanentRandomApplicantPassword(normalizedUsername);
+  const refreshedUser = await fetchApplicantCognitoUser(normalizedUsername);
+  return {
+    user: refreshedUser,
+    repairedTemporaryPassword: true,
+    userStatusBefore,
+    userStatusAfter: normaliseString(refreshedUser?.UserStatus),
+  };
+}
+
 async function ensureApplicantCognitoUser({
   email,
   firstName = null,
@@ -340,9 +386,13 @@ async function ensureApplicantCognitoUser({
     }
   }
 
+  const resetReadiness = await ensureApplicantCognitoPasswordResetReady(normalizedEmail, user);
+  user = resetReadiness.user || user;
+
   const attrMap = toAttrMap(user);
   return {
     created,
+    repairedTemporaryPassword: resetReadiness.repairedTemporaryPassword,
     username: normalizedEmail,
     email: normalizeEmail(attrMap.email) || normalizedEmail,
     cognitoSub: normaliseString(attrMap.sub),
@@ -1016,6 +1066,7 @@ async function sendApplicantActivationInvitation(dbPool, {
     ]
   );
   const preferredLanguage = preferredLanguageQuery?.[0]?.[0]?.preferred_language || 'en';
+  const resetReadiness = await ensureApplicantCognitoPasswordResetReady(accountRow.cognitoUsername || accountRow.email);
   const sendResult = await sendApplicantActivationEmail({
     dbPool,
     to: accountRow.email,
@@ -1046,6 +1097,9 @@ async function sendApplicantActivationInvitation(dbPool, {
       recipient: sendResult.recipient,
       finalRecipient: sendResult.finalRecipient,
       mode: accountRow.accountStatus === APPLICANT_STATUS_INVITATION_SENT ? 'resend' : 'send',
+      cognitoUserStatusBefore: resetReadiness.userStatusBefore || null,
+      cognitoUserStatusAfter: resetReadiness.userStatusAfter || null,
+      cognitoTemporaryPasswordRepaired: Boolean(resetReadiness.repairedTemporaryPassword),
     },
   });
 
@@ -1062,6 +1116,7 @@ module.exports = {
   deriveStatusCode,
   deriveStatusLabel,
   ensureApplicantAccountForClient,
+  ensureApplicantCognitoPasswordResetReady,
   extractClientEmail,
   fetchActorStaffProfileId,
   fetchApplicantAccountRows,

@@ -1014,7 +1014,12 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     packetStatusKey === "draft";
   const showRecurringLinesButton = false;
   const canEditPacketLines = !isFinanceView && selectedRequest && packetStatusKey === "draft";
-  const canMarkLinePaid = false;
+  const canMarkLinePaid =
+    !isFinanceView &&
+    selectedRequest &&
+    packetStatusKey === "submitted" &&
+    selectedLine &&
+    !["paid", "cancelled"].includes(String(selectedLine.status || "").trim().toLowerCase());
   const canUploadEvidence = !isFinanceView && packetStatusKey === "draft";
   const canLogFollowUp =
     Boolean(selectedRequest) &&
@@ -2260,7 +2265,11 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
   );
 
   const canValidatePacket = !isFinanceView && packetStatusKey === "draft";
-  const canSubmitPacket = !isFinanceView && packetStatusValue === "ready_to_send" && isValidated;
+  const canSubmitPacket =
+    metadata?.hideSubmitAction !== true &&
+    !isFinanceView &&
+    packetStatusValue === "ready_to_send" &&
+    isValidated;
   const latestIntacctAttempt = useMemo(
     () => resolveLatestIntacctAttempt(selectedRequest),
     [selectedRequest]
@@ -3029,7 +3038,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
                 onChange={({ detail }) =>
                   setMarkPaidForm(current => ({ ...current, paymentReference: detail.value }))
                 }
-                placeholder="Reference from finance email"
+                placeholder="Reference, cheque, EFT, or note"
               />
             </FormField>
           </ColumnLayout>

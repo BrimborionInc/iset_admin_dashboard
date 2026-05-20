@@ -1,8 +1,23 @@
 # CR-0017: Denied-Ineligible ILMP Seeding
 
-Status: Implementation Complete / Verification Pending
+Status: Superseded by all-denial reporting seed / Forward change implemented
 Owner: Codex + Bill
-Last updated: 2026-03-17
+Last updated: 2026-05-20
+
+## 2026-05-20 update: all-denial forward seed
+
+NWAC direction now requires the reporting seed for every newly denied application, not only denials with `assessment_nwac_reason = eligibility_not_met`.
+
+Forward-looking implementation:
+- Trigger: when a denial decision first moves the application to `rejected`.
+- No bulk backfill is included in this change.
+- The reporting-only action plan is named `Actions leading to denial`.
+- The plan is closed immediately using the denial decision date.
+- Exactly two completed interventions are created/updated under that plan:
+  - `1` / `Career Research and Exploration`
+  - `3` / `Employment Counselling`
+- Both interventions use the denial decision date as start and end date, duration `0`, and outcome code `1` / Complete.
+- New records are flagged with generic `reportingOnlyDenied: true` and stay excluded from normal casework queues. Legacy `reportingOnlyDeniedIneligible` records remain recognized for compatibility.
 
 ## Goal
 Ensure applications denied specifically for `eligibility_not_met` still produce the downstream client/action-plan/intervention/reporting records required for ESDC ILMP reporting, without pushing those records into normal casework workflows.

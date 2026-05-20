@@ -2,6 +2,29 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-05-20
+- Workflow/Reporting/DEV: New denial decisions now seed a reporting-only closed action plan named `Actions leading to denial` with completed `Career Research and Exploration` and `Employment Counselling` interventions dated to the denial decision day. The seed applies to all denial reasons going forward and keeps the files out of normal casework queues.
+- Fix/Homepage/DEV: Sending an application denial letter now immediately completes the denied application, and Pending Completion no longer keeps denied application rows once their denial letter has been sent.
+- Fix/Homepage/DEV: Restored client-side sorting in the shared Work Queue Items table so NWAC Administrator, Regional Manager, and ISET Coordinator item lists sort their visible queue and metric-result rows from the column headers, including the NWAC All Cases table.
+
+## 2026-05-19
+- Fix/Applicant Accounts/DEV: Admin applicant-account activation now repairs older imported Cognito users stuck in `FORCE_CHANGE_PASSWORD` before sending or resending PATH activation emails, so the public portal's activation-code/password setup flow can complete.
+- Ops/PROD/Data repair: Repaired Molly Hink's imported Gmail applicant account and Jeannie Loring's applicant account in PROD Cognito by converting their stale temporary-password state from `FORCE_CHANGE_PASSWORD` to `CONFIRMED` with unknown permanent random passwords. PATH activation status remains invitation-sent until each applicant completes a normal portal sign-in.
+
+## 2026-05-16
+- Ops/TEST/Release: Deployed admin-only release `20260516-payments-packet-workflow-test` to TEST after an admin-scoped Test and Training maintenance warning plus ALB fallback. Schema, data, portal, and shared deployment were skipped; the admin artifact `s3://nwac-test-artifacts/admin-dashboard/admin-dashboard-20260516-072032.zip` installed successfully on instances `i-09fe8c219a4564040` and `i-0a8be782ed8604211`, and normal-routing admin target-group smoke reported both targets healthy.
+- Ops/PROD/Release: Deployed admin-only release `20260516-payments-packet-workflow-prod` to PROD after an admin-scoped maintenance warning plus ALB fallback. Schema, data, portal, and shared deployment were skipped, no DB restore point was captured because no DB mutation was planned, PROD ASG refresh `569d93b0-5587-41fc-98ac-fcac2454449d` completed successfully, fallback was cleared for ELB health evaluation, and normal-routing admin smoke returned `200` for `https://nwac-console.awentech.ca/healthz`.
+
+## 2026-05-15
+- UX/Payments/DEV: Reworked the create payment packet modal so staff can add, edit, and remove multiple payment lines before creating a packet. The modal now uses the max width layout, aligns the approved-funding section with the rest of the form, shows draft payment lines in a table with a header add-line action after the first line, and submits all staged lines in one packet.
+- UX/Payments/DEV: Added an `Amount remaining` column to the create payment packet modal's approved funding lines table, subtracting non-cancelled packeted amounts from each approved funding line.
+- UX/Payments/DEV: Renamed the create payment packet modal's approved total copy to `Approved funding`, including related helper and validation text.
+- Fix/Payments/DEV: Restored the finance email payment-packet bundle link and changed the generated email bundle to contain only linked evidence documents, excluding the packet summary PDF and JSON metadata. Finance email subjects now include the packet client name after the packet id.
+- Fix/Payments/DEV: Removed the unapproved maker-checker blocker from payment packet submission, payment-line paid marking, and payment batch approval so DEV demos can use the payment workflow without same-user handoff failures.
+- Fix/Payments/DEV: Updated payment packet evidence auto-attachment so supporting documents categorized with direct evidence-type names, such as `ClientApplicationSigned` or `FundingAgreement`, are recognized alongside lower-level document category codes. Backfilled the current DEV payment packet fixture links so baseline evidence no longer appears missing when matching placeholder evidence exists.
+- Fix/PATH/DEV: Fixed Case Workspace action-plan budget pot mapping so intervention and action-plan displays use the resolved budget pot code/name instead of leaking the raw `iset_case_action_plan.budget_pot` storage value. Backend action-plan queries now join `budget_pot` by stored numeric id or code, and workspace UI fields prefer the mapped display label.
+- Ops/PROD/Release: Deployed admin-only release `20260515-ilmp-draft-plan-readiness-prod` to PROD for the ILMP draft action-plan readiness fix. The run used scoped admin warning plus ALB fallback, skipped schema, data, portal, and shared deployment steps, skipped DB restore-point capture because no DB mutation was planned, cleared fallback for ELB health evaluation, completed ASG refresh `c3036341-ec7b-4bf4-888c-0f9e2e37d77d`, and normal-routing admin smoke returned `200` for `https://nwac-console.awentech.ca/healthz`.
+
 ## 2026-05-14
 - Ops/TEST/Release: Deployed admin release `20260514-ilmp-draft-plan-readiness-test` to TEST after a scoped admin maintenance warning and ALB fallback. Both TEST admin targets reported healthy after the release, and Sarah Froese's participant submission row for `CASE-2026-0000040` revalidated to `ready` with no warnings.
 - Fix/ILMP/DEV: Updated ILMP participant readiness so draft action plans are ignored when a participant also has an active/closed action plan. Draft plans are still excluded from ILMP XML, and a warning remains when no reportable action plan exists.
