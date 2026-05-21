@@ -2317,6 +2317,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const wizardStepRestoreStepsRef = useRef(null);
   const approvalEntryStepAppliedRef = useRef(null);
   const wizardNavPrimeRef = useRef({ signature: null, restoreStep: null });
+  const suppressPostDecisionStepAutoPrimeRef = useRef(false);
   const defaultInterventionSeedCaseKeyRef = useRef(null);
   const defaultInterventionSeedAppliedRef = useRef(false);
   const widgetRootRef = useRef(null);
@@ -3275,6 +3276,30 @@ const CoordinatorAssessmentWidget = forwardRef(
     setCurrentStep('decision');
     setPendingDecisionJump(false);
   }, [pendingDecisionJump, activeStepIds]);
+  const navigateToAssessmentWizardStep = useCallback(
+    (stepId) => {
+      if (!stepId || !activeStepIds.includes(stepId)) return;
+      if (approvalWorkspaceEntry?.mode === 'approval' && typeof history?.replace === 'function') {
+        const currentLocation =
+          history.location ||
+          (typeof window !== 'undefined' ? window.location : null);
+        const params = new URLSearchParams(currentLocation?.search || '');
+        params.set('entry', 'approval');
+        params.set('approvalType', 'application');
+        params.set('step', stepId);
+        history.replace({
+          pathname: currentLocation?.pathname || '',
+          search: `?${params.toString()}`,
+          hash: currentLocation?.hash || ''
+        });
+      }
+      setCurrentStep(stepId);
+      if (wizardStepKey) {
+        assessmentWizardStepStore.set(String(wizardStepKey), stepId);
+      }
+    },
+    [activeStepIds, approvalWorkspaceEntry?.mode, history, wizardStepKey]
+  );
   const docsChecklistReady = Boolean(applicantUserId && applicationId);
   const docsChecklistComplete = Boolean(
     docsChecklistReady &&
@@ -4531,6 +4556,14 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
     if (!shouldUnlockWizardNavigation || activeStepIds.length < 2) return;
     const signature = activeStepIds.join('|');
+    if (suppressPostDecisionStepAutoPrimeRef.current) {
+      suppressPostDecisionStepAutoPrimeRef.current = false;
+      wizardNavPrimeRef.current = { signature, restoreStep: null };
+      if (wizardNavPriming) {
+        setWizardNavPriming(false);
+      }
+      return;
+    }
     if (wizardNavPrimeRef.current.signature === signature) return;
     const lastStepId = activeStepIds[activeStepIds.length - 1];
     if (!lastStepId) {
@@ -8212,6 +8245,9 @@ ${JSON.stringify(contextPayload, null, 2)}`;
         return;
       }
       if (!res.ok || !result?.success) throw new Error(result?.error || 'Failed to save NWAC review.');
+      if (!isOutcomePushBack) {
+        suppressPostDecisionStepAutoPrimeRef.current = true;
+      }
       const updatedRowVersion = Number(result?.application_row_version ?? (versionToken > 0 ? versionToken + 1 : null));
       if (updatedRowVersion) {
         updateRowVersion(updatedRowVersion);
@@ -8249,6 +8285,13 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       setLocalAssessmentSubmitted(true);
       setFieldErrors({});
       setHasSubmitted(false);
+      if (!isOutcomePushBack) {
+        suppressPostDecisionStepAutoPrimeRef.current = true;
+        setCurrentStep('decision');
+        if (wizardStepKey) {
+          assessmentWizardStepStore.set(String(wizardStepKey), 'decision');
+        }
+      }
       scrollAfterAction();
       const decisionMessage = (() => {
         if (isOutcomePushBack) return 'Decision pushed back. Application returned to In review.';
@@ -11025,10 +11068,71 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     { label: 'Yes - follow this recommendation', value: 'agree' },
     { label: 'No - record a different outcome', value: 'disagree' }
   ];
+  const isApprovalDecisionRecorded = decisionOutcome === 'approved';
+  const isDenialDecisionRecorded = decisionOutcome === 'denied';
+  const shouldShowRecordedDecisionAlert =
+    isPostDecisionStatus &&
+    !isPendingApprovalStatus &&
+    (isApprovalDecisionRecorded || isDenialDecisionRecorded);
+  const recordedDecisionFollowUpStep = (() => {
+    if (!shouldShowRecordedDecisionAlert || isCompletedStatus) return null;
+    if (
+      isApprovalDecisionRecorded &&
+      letterAlreadySent &&
+      showFundingDocsStep &&
+      activeStepIds.includes(FUNDING_DOCS_STEP_ID)
+    ) {
+      return FUNDING_DOCS_STEP_ID;
+    }
+    if (!letterAlreadySent && activeStepIds.includes('communication')) {
+      return 'communication';
+    }
+    return null;
+  })();
+  const recordedDecisionAlertHeader = isApprovalDecisionRecorded
+    ? 'Approval decision recorded'
+    : 'Denial decision recorded';
+  const recordedDecisionAlertContent = (() => {
+    if (isApprovalDecisionRecorded) {
+      if (letterAlreadySent) {
+        return 'The approval letter has been sent. Continue with funding forms and signatures when they are required.';
+      }
+      return approvalHasFundingPackage
+        ? 'The approval is saved. Prepare the client approval letter when ready; funding forms and signatures remain a separate follow-up after the letter is sent.'
+        : 'The approval is saved. Prepare the client approval letter when ready.';
+    }
+    if (letterAlreadySent) {
+      return 'The denial letter has been sent and the denied application is complete.';
+    }
+    return 'The denial is saved. Prepare the denial letter when ready.';
+  })();
+  const recordedDecisionActionLabel = (() => {
+    if (recordedDecisionFollowUpStep === FUNDING_DOCS_STEP_ID) return 'Continue funding forms';
+    if (recordedDecisionFollowUpStep === 'communication') {
+      return isApprovalDecisionRecorded ? 'Prepare approval letter' : 'Prepare denial letter';
+    }
+    return null;
+  })();
 
   const decisionStepContent = (
     <>
       <SpaceBetween size="l">
+        {shouldShowRecordedDecisionAlert && (
+          <Alert
+            type="success"
+            statusIconAriaLabel="Success"
+            header={recordedDecisionAlertHeader}
+            action={
+              recordedDecisionFollowUpStep && recordedDecisionActionLabel ? (
+                <Button onClick={() => navigateToAssessmentWizardStep(recordedDecisionFollowUpStep)}>
+                  {recordedDecisionActionLabel}
+                </Button>
+              ) : undefined
+            }
+          >
+            {recordedDecisionAlertContent}
+          </Alert>
+        )}
         {shouldShowDecisionPendingAlert && (
           <Alert
             type="info"

@@ -38,14 +38,19 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - 2026-05-14 | Release TBD | Fix/ILMP | Participant validation | ILMP participant validation now reads stored intake answers when a participant submission row is missing its application link. | The ESDC requirements are unchanged; the fix restores the action-plan/application/case-context mapping so stored answers such as Disability and address street are not reported as missing.
 - 2026-05-14 | Release TBD | Intake/Workflow | Disability and Social Assistance | The public intake Disability question is now mandatory in DEV, TEST, and PROD. | Updated workflow 21 authoring and the published intake runtime config directly in each database so applicants must choose Yes or No before continuing, aligning intake capture with ILMP submission requirements.
 - 2026-05-14 | Release TBD | Fix/ILMP | Participant readiness | Draft action plans no longer block ILMP submission when the participant has an active or closed action plan. | Draft action plans continue to be ignored in ILMP XML; PATH still warns when no reportable action plan exists.
+- 2026-05-20 | Release TBD | Fix/Public portal | Intake date of birth | The public intake Date of Birth step now blocks impossible calendar dates before the step is saved, and final submission rejects missing or invalid DOB values. | DEV workflow 21 was republished after the code fix; backend parsing now treats exact date strings strictly so invalid leap days cannot roll forward silently.
 - 2026-05-15 | Release TBD | Fix/Payments | Finance emails | Finance payment-packet emails once again include a download link for a packet document bundle, and the email subject now includes the client name. | The emailed bundle contains linked evidence documents only, without the packet summary PDF or JSON metadata files.
 - 2026-05-15 | Release TBD | UX/Payments | Payment packet creation | The create payment packet form now labels the approved intervention total as `Approved funding`. | Related amount helper and validation copy use the same wording.
 - 2026-05-15 | Release TBD | UX/Payments | Payment packet creation | The approved funding lines table now shows `Amount remaining` for each funding line. | The value subtracts existing non-cancelled payment packet lines from the approved amount, using stored cost-line metadata when available and payment-type matching for existing manual packets.
 - 2026-05-15 | Release TBD | UX/Payments | Payment packet creation | Staff can now stage multiple payment lines while creating a payment packet. | The create modal supports add, edit, and remove actions for draft lines, shows the in-packet total, uses the wider modal space for the line editor, and submits all staged lines in one packet.
 - 2026-05-19 | Release TBD | Fix/Applicant Accounts | PATH activation emails | Resending an imported applicant's PATH activation email now repairs older Cognito accounts that are stuck in temporary-password status before the applicant requests a code. | Staff do not see or set a password; applicants still use the normal activation-code flow to choose their own PATH password.
-- 2026-05-20 | Release TBD | Fix/Homepage | Work Queue Items | The homepage Work Queue Items table now sorts correctly from the column headers for NWAC Administrators, Regional Managers, and ISET Coordinators. | Covers queue views such as NWAC All Cases, regional client lists, coordinator lists, and metric drilldown results.
-- 2026-05-20 | Release TBD | Fix/Homepage | Pending Completion | Denied applications now leave Pending Completion as soon as the denial letter is sent. | Sending the denial letter marks the application completed because there are no further denial follow-up steps.
-- 2026-05-20 | Release TBD | Workflow/Reporting | Denied application ILMP reporting | New denied applications now automatically create the reporting-only action plan and interventions NWAC needs for ILMP reporting. | The generated action plan is named `Actions leading to denial`; it is closed on the denial decision date with completed `Career Research and Exploration` and `Employment Counselling` interventions dated the same day. Existing denied applications are not backfilled by this forward-looking change.
+- 2026-05-20 | Release 20260520-prod-denial-reporting | Fix/Homepage | Work Queue Items | The homepage Work Queue Items table now sorts correctly from the column headers for NWAC Administrators, Regional Managers, and ISET Coordinators. | Covers queue views such as NWAC All Cases, regional client lists, coordinator lists, and metric drilldown results.
+- 2026-05-20 | Release 20260520-prod-denial-reporting | Fix/Homepage | Pending Completion | Denied applications now leave Pending Completion as soon as the denial letter is sent. | Sending the denial letter marks the application completed because there are no further denial follow-up steps.
+- 2026-05-20 | Release 20260520-prod-denial-reporting | Workflow/Reporting | Denied application ILMP reporting | New denied applications now automatically create the reporting-only action plan and interventions NWAC needs for ILMP reporting. | The generated action plan is named `Actions leading to denial`; it is closed on the denial decision date with completed `Career Research and Exploration` and `Employment Counselling` interventions dated the same day. Existing sent-denial-letter PROD cases were backfilled after the TEST rehearsal as part of the release.
+- 2026-05-21 | Release TBD | Fix/ILMP | Participant validation | ILMP readiness now recognizes current intake barrier selections and valid stored intervention NOC codes more reliably. | The validator maps intake/case barrier keys such as `funding`, `location`, `lack-of-job-opportunities`, and `other` to ESDC codes, checks NOC candidates across stored snake_case and camelCase intervention fields, and gives clearer guidance when a future-dated plan has linked interventions that are not reportable yet.
+- 2026-05-21 | Release TBD | Fix/ILMP | Archived action-plan validation | ILMP readiness now ignores stale participant-submission rows tied to archived action plans when selecting the current case validation record. | This keeps older blocked validation rows from confusing staff after the correct current denial-reporting action plan exists.
+- 2026-05-21 | Release TBD | Fix/Application lifecycle | Withdrawn applications | When an application is withdrawn before any casework activity exists, the case now closes as Withdrawn so staff can find it under Dormant or All clients. | Withdrawals are not denials, so PATH does not create denial-reporting Employment Counselling or Career Research interventions for withdrawn applications.
+- 2026-05-21 | Release TBD | UX/Approvals | Application approval decisions | Recording an application approval or denial now leaves the approver on the decision screen and offers letter preparation as a separate next action. | The approval/denial letter step is still available immediately, but PATH no longer feels like it automatically moves the approver into writing the client letter after Commit.
 - 2026-05-05 | Release TBD | Fix/Approvals | Case Workspace intervention proposals | New and revised intervention proposal decisions now emit backend events for approved, denied, and changes-requested outcomes. | These decisions now appear in notification settings, bell/email notification routing, case events, and audit history through the shared event infrastructure.
 - 2026-05-05 | Release TBD | Fix/Notifications | Approval decision emails | Approval, denial, changes-requested, and intervention proposal decision emails now go only to the assigned owner and case watchers. | Role rows in Manage Notifications still control templates/settings, but these decision events no longer email every enabled staff member in those roles.
 - 2026-05-05 | Release TBD | Fix/Casework | Intervention proposal approval letters | Approved new intervention proposals and approved applied revisions now reopen the approval-letter follow-up from persisted state and remain in-progress until the letter is sent. | The follow-up no longer depends on the approver's temporary browser state, ordinary approved/backloaded interventions do not unlock it, intervention denial-letter sending stays blocked, and sending the approval letter stores the completion marker that clears proposal/revision blocking.
@@ -311,7 +316,17 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Brought Production up to the current DEV/TEST release set, including the latest admin, public portal, shared runtime, schema, and approved workflow-configuration updates.
+- Fixed homepage item-list sorting so Work Queue Items tables sort correctly from the column headers for NWAC Administrators, Regional Managers, and ISET Coordinators.
+- Denied applications now complete when the denial letter is sent, so they leave Pending Completion once there are no remaining denial follow-up steps.
+- New denied applications now create the reporting-only action plan and two completed interventions NWAC needs for ILMP reporting.
+- The denial-reporting action plan is named `Actions leading to denial` and includes completed `Career Research and Exploration` and `Employment Counselling` interventions dated to the denial decision day.
+- Existing denied applications that already had denial letters were back-loaded into the same reporting structure as part of this release after a TEST rehearsal.
+
+### Known Bugs (draft bullets - EN)
+
+### Earlier Changes (draft bullets - EN)
+
+- Brought Production up to the 14 May DEV/TEST release set, including the latest admin, public portal, shared runtime, schema, and approved workflow-configuration updates.
 - Updated the intake so Household Income and base Household Expenses are collected for all support requests, not only Living allowance requests.
 - Added the Financial Overview signing workflow so case managers can send the current financial overview to the client for signature, with signed PDFs and version history retained on the file.
 - Added payment follow-up tracking for Finance email handoffs, including packet and line-level follow-up status, notes, evidence links, and communication history.
@@ -319,11 +334,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Standardized PATH denial wording so application and intervention denial decisions display as Denied instead of Rejected or Not Approved in admin screens, letters, reports, supporting-document selectors, and applicant decision-email labels.
 - Renamed the application withdrawal workflow to Withdraw application and show withdrawn applications as Withdrawn while keeping them out of active queues.
 - Updated the ISET Clients dashboard help so Open, Funded, Dormant, Ineligible, and All client filters match the current case-management list behavior.
-
-### Known Bugs (draft bullets - EN)
-
-### Earlier Changes (draft bullets - EN)
-
 - Retired the public portal Contact function as an applicant support path; applicants should use secure Messages for case-manager contact, and staff can continue to triage any legacy contact-message records in Contact Communications.
 - Fixed application decision validation so approval and denial outcomes must match the reviewer agreement with the case manager recommendation.
 - Fixed decision-letter dates so generated and sent approval/denial letters use the current send date instead of an older draft or assessment date.
@@ -346,7 +356,17 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Nouveautes (brouillon - FR)
 
-- Mise a niveau de la Production avec l'ensemble courant valide en DEV/TEST, y compris les mises a jour admin, portail public, runtime partage, schema et configuration de flux approuvee.
+- Correction du tri dans les listes d'elements de la page d'accueil afin que les tableaux Work Queue Items se trient correctement depuis les en-tetes de colonnes pour les administratrices et administrateurs NWAC, les gestionnaires regionaux et les coordinatrices et coordinateurs ISET.
+- Les demandes refusees se terminent maintenant lorsque la lettre de refus est envoyee; elles quittent donc En attente de completion lorsqu'il ne reste aucune etape de suivi du refus.
+- Les nouvelles demandes refusees creent maintenant le plan d'action reserve au reporting et les deux interventions completees requis par NWAC pour le reporting ILMP.
+- Le plan d'action de reporting des refus s'appelle `Actions leading to denial` et comprend les interventions completees `Career Research and Exploration` et `Employment Counselling`, datees du jour de la decision de refus.
+- Les demandes refusees existantes dont la lettre de refus avait deja ete envoyee ont ete rechargees dans la meme structure de reporting dans cette release, apres une repetition en TEST.
+
+### Problemes connus (brouillon - FR)
+
+### Changements precedents (brouillon - FR)
+
+- Mise a niveau de la Production avec l'ensemble DEV/TEST valide du 14 mai, y compris les mises a jour admin, portail public, runtime partage, schema et configuration de flux approuvee.
 - Mise a jour de la demande afin que le revenu du menage et les depenses de base du menage soient recueillis pour toutes les demandes de soutien, pas seulement les demandes d'allocation de subsistance.
 - Ajout du flux de signature Apercu financier afin que les gestionnaires de cas puissent envoyer l'apercu financier courant a la cliente ou au client pour signature, avec PDF signe et historique de versions conserves au dossier.
 - Ajout du suivi des paiements apres envoi aux Finances par courriel, avec statut de suivi par paquet et par ligne, notes, preuves liees et historique des communications.
@@ -354,11 +374,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Uniformisation du libelle des refus afin que les decisions de refus PATH s'affichent comme Refusee/Refuse au lieu de Rejected ou Not Approved dans les ecrans admin, les lettres, les rapports, les selecteurs de documents et les courriels de decision.
 - Le flux de retrait d'une demande s'appelle maintenant Retirer la demande et les demandes retirees s'affichent comme Retiree, tout en restant exclues des files actives.
 - Mise a jour de l'aide du tableau Clients ISET afin que les filtres Ouverts, Finances, Dormants, Inadmissibles et Tous correspondent au comportement actuel de la liste de gestion des cas.
-
-### Problemes connus (brouillon - FR)
-
-### Changements precedents (brouillon - FR)
-
 - Retrait de la fonction Contact du portail public comme voie de soutien aux candidates et candidats; les personnes inscrites doivent utiliser les Messages securises pour joindre leur gestionnaire de cas, tandis que le personnel peut continuer a trier les anciens messages Contact dans Communications Contact.
 - Correction de la validation des decisions de demande afin que l'approbation ou le refus corresponde a l'accord indique avec la recommandation du gestionnaire de cas.
 - Correction des dates des lettres de decision afin que les lettres d'approbation ou de refus envoyees utilisent la date d'envoi courante, et non une ancienne date de brouillon ou d'evaluation.

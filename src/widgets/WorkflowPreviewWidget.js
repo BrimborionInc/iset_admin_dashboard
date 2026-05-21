@@ -574,8 +574,44 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
     }
     return false;
   }
+  function extractDateInputParts(value) {
+    if (value === undefined || value === null) return { empty: true };
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return { empty: true };
+      const match = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+      if (!match) return { empty: false, complete: false };
+      return { empty: false, complete: true, year: match[1], month: match[2], day: match[3] };
+    }
+    if (typeof value === 'object' && !Array.isArray(value)) {
+      const day = String(value.day || value.d || '').trim();
+      const month = String(value.month || value.m || '').trim();
+      const year = String(value.year || value.y || '').trim();
+      if ([day, month, year].every(part => part === '')) return { empty: true };
+      return { empty: false, complete: Boolean(day && month && year && year.length === 4), day, month, year };
+    }
+    return { empty: false, complete: false };
+  }
+  function validateDateInputValue(value) {
+    const parts = extractDateInputParts(value);
+    if (parts.empty) return { ok: false, reason: 'empty' };
+    if (!parts.complete) return { ok: false, reason: 'incomplete' };
+    if (!/^\d{1,2}$/.test(parts.day) || !/^\d{1,2}$/.test(parts.month) || !/^\d{4}$/.test(parts.year)) {
+      return { ok: false, reason: 'invalid' };
+    }
+    const year = Number(parts.year);
+    const month = Number(parts.month);
+    const day = Number(parts.day);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return { ok: false, reason: 'invalid' };
+    if (month < 1 || month > 12) return { ok: false, reason: 'invalid' };
+    const maxDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    if (day < 1 || day > maxDay) return { ok: false, reason: 'invalid' };
+    return { ok: true };
+  }
   function valueIsEmpty(val, compType){
     if (String(compType || '').toLowerCase() === 'file-upload') return !hasFileUploadValue(val);
+    const type = String(compType || '').toLowerCase();
+    if (type === 'date' || type === 'date-input') return extractDateInputParts(val).empty;
     if(val==null) return true; if(typeof val==='string') return val.trim()===''; if(Array.isArray(val)) return val.length===0; return false;
   }
   function mergedLogicData(stepObj){
@@ -677,6 +713,14 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
       if(isReq && valueIsEmpty(val, c?.type)){
         const reqMsg = migrated.requiredMessage ? msgFor(migrated.requiredMessage) : (migrated.errorMessage ? msgFor(migrated.errorMessage) : 'This field is required');
         errs[k]=reqMsg; return; // skip further rules
+      }
+      if ((type === 'date' || type === 'date-input') && !valueIsEmpty(val, c?.type)) {
+        const dateCheck = validateDateInputValue(val);
+        if (!dateCheck.ok) {
+          const dateMsg = migrated.requiredMessage ? msgFor(migrated.requiredMessage) : (migrated.errorMessage ? msgFor(migrated.errorMessage) : 'Enter a valid date.');
+          errs[k] = dateMsg || 'Enter a valid date.';
+          return;
+        }
       }
       for(const r of migrated.rules){
         const triggers = Array.isArray(r.trigger)?r.trigger:['submit'];

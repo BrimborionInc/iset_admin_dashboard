@@ -1,6 +1,9 @@
 const {
   ACTION_PLAN_REQUIRED_MESSAGE,
+  NO_REPORTABLE_INTERVENTIONS_FUTURE_MESSAGE,
+  NO_REPORTABLE_INTERVENTIONS_MESSAGE,
   getIlmpActionPlanReadinessWarning,
+  getNoReportableInterventionsMessage,
   summariseIlmpActionPlanStatuses,
 } = require('../ilmpActionPlanReadiness');
 
@@ -29,5 +32,10 @@ describe('ilmpActionPlanReadiness', () => {
       message: ACTION_PLAN_REQUIRED_MESSAGE,
       detail: 1,
     });
+  });
+
+  test('distinguishes missing interventions from linked interventions that are not reportable yet', () => {
+    expect(getNoReportableInterventionsMessage()).toBe(NO_REPORTABLE_INTERVENTIONS_MESSAGE);
+    expect(getNoReportableInterventionsMessage({ planStartIsFuture: true })).toBe(NO_REPORTABLE_INTERVENTIONS_FUTURE_MESSAGE);
   });
 });

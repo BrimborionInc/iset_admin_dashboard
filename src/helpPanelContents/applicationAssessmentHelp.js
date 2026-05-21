@@ -153,7 +153,7 @@ export const NwacAssessmentHelp = ({ onRestartTutorial, onEndTutorial }) => {
         <li>Select <strong>Approved</strong>, <strong>Denied</strong>, or <strong>Request Changes</strong>.</li>
         <li>Choose the <strong>Assessment Assurance</strong> outcome when approving or denying.</li>
         <li>Provide the <strong>Reason for denial</strong> or <strong>Request Changes note</strong> when required.</li>
-        <li>Click <em>Commit</em> to save the outcome. Approved or denied outcomes unlock the Communication step; Request Changes sends the assessment back for updates.</li>
+        <li>Click <em>Commit</em> to save the outcome. Approved or denied outcomes stay on the decision screen and unlock the Communication step as a separate follow-up; Request Changes sends the assessment back for updates.</li>
       </ol>
       <p>
         <strong>Request Changes</strong> sends the assessment back to the coordinator or case manager for updates.
@@ -184,7 +184,7 @@ NwacAssessmentHelp.aiContext = `
 You are assisting an NWAC reviewer who is completing the outcome notice at the end of the Application Assessment widget.
 Explain that the outcome notice shows the case manager's recommendation and rationale inline, then explain how to
 record the funding decision, assurance outcome, and required reasons, and what happens when Commit is selected.
-Approved or Denied moves the application to decision ready and unlocks the Communication step; approvals with funded
+Approved or Denied records the decision, keeps the reviewer on the decision screen, and unlocks the Communication step as a separate follow-up; approvals with funded
 cost lines then require completing Funding forms and signatures after the letter is sent, while zero-funding approvals
 send an intervention-focused approval letter without a funding package. Complete the application only when all required
 items are Complete, while denials complete after the letter is sent. Request Changes returns the assessment to the

@@ -1,7 +1,7 @@
 # PROD Duplicate Applicant Identity Merge
 
 Status: current operational guidance for rare live data repairs. Verify schema, code, and live DB state before use.
-Last reviewed: 2026-05-04 after the Jodie Stephens PROD repair.
+Last reviewed: 2026-05-21 after the Molly Hink PROD repair.
 
 Purpose: record how to detect and repair the pattern where one real applicant has both an imported case/client identity and a later public-portal application identity. This is not a general-purpose merge script. Treat every PROD repair as bespoke, guarded, snapshotted, and recoverable.
 
@@ -18,6 +18,7 @@ Detection signals:
 - Imported client account events show `account_created` from `client_file_import` and possibly `invitation_sent`.
 - Public portal user account is activated and owns the submitted application.
 - The public portal application has its own client/case, often with a different applicant email.
+- In later variants, both identities may have submitted public-portal applications. In that case, identify the business-canonical login/application first, then preserve the duplicate submission as an archived historical application rather than leaving a second active work item.
 - Staff may have already started draft action plan, intervention, or proposal work on the imported case.
 
 ## Source Of Truth
@@ -25,6 +26,8 @@ Detection signals:
 When the public portal application is the applicant-submitted current record, treat it as canonical for personal details and applicant email. Prefer moving staff work from the imported record into the public application context over moving the public application onto the imported record.
 
 For the 2026-05-04 Jodie Stephens repair, the survivor was public portal client `156` / user `199` / case `134` / application `56`, and the imported identity client `72` / user `75` / case `72` was retired. The reviewed SQL script was `sql/ops/prod-merge-jodie-stephens-client-case-20260504.sql`.
+
+For the 2026-05-21 Molly Hink repair, staff confirmed the Hotmail login was canonical. The survivor was Hotmail client `149` / user `189` / case `129` / active application `50`; imported/Gmail client `42` / user `45` / case `42` and duplicate application `76` were retired. The reviewed SQL script was `sql/ops/prod-merge-molly-hink-gmail-into-hotmail-20260521.sql`.
 
 ## Repair Shape
 
@@ -45,7 +48,9 @@ Typical merge actions:
 - Rehome the original draft action plan/intervention/proposal rows to the survivor case/application only if useful for traceability, then mark them archived/withdrawn rather than active.
 - Move imported-case manual-upload documents to the survivor client/case/application while preserving `source = 'manual_upload'`, original uploader `user_id`, and previous scope in metadata. If a manual-upload document is linked to an application, it must satisfy `chk_iset_document_manual_upload_scope`, including `applicant_user_id`.
 - Preserve portal-submitted documents with `source = 'application_submission'` so staff can distinguish applicant-submitted files from manually uploaded files.
+- If the duplicate identity also has a submitted portal application, move that application onto the survivor client/case but set it to `status = 'archived'`, `lifecycle_status = 'archived'`, and `closure_reason = 'duplicate'`. Keep the submitted payload/submission row for audit. When staff need the duplicate submission's newer uploads in the working file, rehome those `application_submission` document rows onto the canonical active application and preserve the previous client/case/application/user/submission IDs in document metadata.
 - Repoint case timeline/event rows and client account events only after confirming their object scope and preserving previous IDs in metadata.
+- Expire stale internal notifications that point staff at the duplicate case/application, with metadata recording the canonical case/application.
 - Suspend or otherwise disable the old imported local applicant user if it should not remain usable, especially when it has a different email.
 - Retire the imported case shell by archiving/detaching it rather than hard deleting it.
 
@@ -54,9 +59,11 @@ Typical merge actions:
 After the transaction, independently verify:
 
 - The survivor application remains in the intended lifecycle/status.
+- The survivor case still resolves to the intended non-terminal primary application when an archived duplicate application is also retained on the case.
 - Exactly one draft assessment exists for the survivor application/case when one was created.
 - Moved document counts match preflight counts, and source groups still distinguish `application_submission` from `manual_upload`.
 - No key child tables still reference the retired case/client unless deliberately preserved as audit metadata.
+- Stale duplicate notifications are expired when the repair intentionally retires a duplicate submitted application.
 - The old user is disabled if required.
 - The old case is archived/detached and marked as a merged duplicate.
 - Client and case merge audit rows exist and include the run ID and snapshot ID.

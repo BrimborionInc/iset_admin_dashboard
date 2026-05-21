@@ -2,6 +2,7 @@
 
 Prepared: 2026-02-19  
 Scope: case workspace ILMP handling (validation, warnings/errors), ILMP Submissions & Exports dashboard queue/prepare/submit flow, and backend participant payload pipeline.
+Last targeted update: 2026-05-21 for barrier key normalization, NOC lookup candidate collection, future-dated action-plan readiness copy, and archived action-plan submission selection.
 
 ## Sources reviewed
 - `docs/data/ESDC/ilmp-standard-data-file-iset-spf-2023-extracted.md`
@@ -30,10 +31,16 @@ This means final conformance still depends on official ESDC Data Exchange Guide 
 
 ## Executive summary
 - Core action plan/intervention chronology rules are mostly implemented backend-side.
-- Significant gaps remain for strict 2023 alignment: first/last-name validation, strict NOC validity checks, and immutable identity key handling after first submission.
+- Significant gaps remain for strict 2023 alignment: first/last-name validation and immutable identity key handling after first submission. Strict NOC validity is now DB-backed for current action-plan/intervention candidate pairs, but final conformance still depends on the official ESDC guide/gateway and the freshness of the local `noc_code` table.
 - Backend and UI have rule mismatches that can cause inconsistent user outcomes.
 - The participant queue trigger model is mainly product logic in code; there is no direct ESDC text that prescribes this exact queue lifecycle.
 - Existing dashboard documentation is out of date versus implemented queue logic.
+
+## 2026-05-21 implementation notes
+- Barrier readiness now uses `src/lib/ilmpValidationMappings.js` so current intake/case keys such as `funding`, `location`, `lack-of-job-opportunities`, `other`, and health variants normalize to ILMP barrier codes before validation and payload generation.
+- NOC validation candidate loading now accepts stored intervention/action-plan field shapes including `related_noc`, `related_noc_version`, `noc`, `nocVersion`, `relatedNoc`, and `relatedNocVersion` before querying active rows in `noc_code`.
+- Future-dated active action plans remain blocked from ILMP submission. When linked interventions exist but are planned/draft/not yet in a reportable delivery status, readiness should say there are no ILMP-reportable interventions yet instead of saying the action plan has no intervention.
+- Archived action-plan participant-submission rows are treated as historical/audit rows and are not selected as the current case validation/compliance row. Case-level revalidation updates current non-archived plan submissions instead of reviving stale archived-plan blockers.
 
 ## Requirement source excerpts (ESDC)
 Relevant quotes from the extracted 2023 material:
@@ -101,7 +108,7 @@ No direct ESDC text was found that defines this exact queue trigger model. ESDC 
 | IV-02 | Intervention end date <= action plan result date | Implemented backend | Match | `isetadminserver.js:6021` to `isetadminserver.js:6033`; source `docs/data/ESDC/ilmp-standard-data-file-iset-spf-2023-extracted.md:476` |
 | IV-03 | When action plan result date provided, intervention outcome required | Partially implemented (current backend requires outcome only when end date exists) | Partial gap | backend `isetadminserver.js:6125` to `isetadminserver.js:6137`; source `docs/data/ESDC/ilmp-standard-data-file-iset-spf-2023-extracted.md:491` |
 | IV-04 | Intervention code 6-13 requires intervention related NOC and valid NOC | Implemented requirement for NOC + version + digit length, but not strict validity against official NOC list | Partial gap | backend `isetadminserver.js:6139` to `isetadminserver.js:6189`; UI `InterventionModal.jsx:805` to `InterventionModal.jsx:816`; source `docs/data/ESDC/ilmp-standard-data-file-iset-spf-2023-extracted.md:509` |
-| IV-05 | NOC validity (real code list, not only length) | Not fully enforced server-side | Gap | backend checks length/pattern only `isetadminserver.js:6155` to `isetadminserver.js:6165`; source `docs/data/ESDC/ilmp-standard-data-file-iset-spf-2023-extracted.md:509` |
+| IV-05 | NOC validity (real code list, not only length) | Implemented for DB-backed candidate pairs loaded from action plans and interventions | Partial: depends on active `noc_code` table contents and official gateway behavior | `src/lib/ilmpValidationMappings.js` collects NOC/version candidates across stored field shapes before `isetadminserver.js` validates against active `noc_code` rows; source `docs/data/ESDC/ilmp-standard-data-file-iset-spf-2023-extracted.md:509` |
 | SUB-01 | Upload strategy may be full set or changed records | Current dashboard queue is "action-needed" subset, not explicit full/history set builder | Decision gap (product policy vs ESDC optionality) | source `docs/data/ESDC/ilmp-standard-data-file-iset-spf-2023-extracted.md:23`; queue SQL `isetadminserver.js:16380` to `isetadminserver.js:16448` |
 
 ## Non-ESDC (or not-explicitly-sourced) rules currently enforced

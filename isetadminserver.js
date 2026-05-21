@@ -27,8 +27,15 @@ const {
 } = require('./src/lib/ilmpContextMapping');
 const {
   getIlmpActionPlanReadinessWarning,
+  getNoReportableInterventionsMessage,
   summariseIlmpActionPlanStatuses,
 } = require('./src/lib/ilmpActionPlanReadiness');
+const {
+  ILMP_BARRIER_CODE_LOOKUP,
+  collectNocLookupPairs,
+  mapIlmpBarrierCodes,
+  normaliseIlmpBarrierCode,
+} = require('./src/lib/ilmpValidationMappings');
 const { runStartupSharedSchemaMigrations } = require('./src/lib/sharedSchemaMigrationRunner');
 const {
   buildRegionalManagerCaseAccessSql,
@@ -5941,9 +5948,10 @@ async function findPreferredActionPlanIdForCase(executor, caseId) {
       SELECT ap.id
         FROM iset_case_action_plan ap
        WHERE ap.case_id = ?
+         AND ap.archived_at IS NULL
+         AND LOWER(COALESCE(ap.status, '')) <> 'archived'
        ORDER BY
          (LOWER(COALESCE(ap.status, '')) = 'active') DESC,
-         (ap.archived_at IS NULL) DESC,
          ap.updated_at DESC,
          ap.id DESC
        LIMIT 1
@@ -5967,8 +5975,17 @@ async function findEsdcSubmissionIdForCase(executor, caseId) {
         FROM esdc_participant_submission eps
         LEFT JOIN iset_case_action_plan ap ON ap.id = eps.action_plan_id
        WHERE eps.case_id = ?
+         AND (
+           eps.action_plan_id IS NULL
+           OR ap.id IS NULL
+           OR (
+             ap.archived_at IS NULL
+             AND LOWER(COALESCE(ap.status, '')) <> 'archived'
+           )
+         )
        ORDER BY
          (LOWER(COALESCE(ap.status, '')) = 'active') DESC,
+         (LOWER(COALESCE(ap.status, '')) IN ('closed', 'ready_to_close', 'ready-to-close', 'ready to close')) DESC,
          ap.updated_at DESC,
          eps.updated_at DESC,
          eps.id DESC
@@ -6114,7 +6131,19 @@ async function markEsdcParticipantSubmissionNeedsReview(db, caseId, options = {}
     );
   }
   try {
-    const sql = `UPDATE esdc_participant_submission SET ${assignments.join(', ')} WHERE case_id = ?`;
+    const sql = `
+      UPDATE esdc_participant_submission eps
+      LEFT JOIN iset_case_action_plan ap ON ap.id = eps.action_plan_id
+         SET ${assignments.map(assignment => `eps.${assignment}`).join(', ')}
+       WHERE eps.case_id = ?
+         AND (
+           eps.action_plan_id IS NULL
+           OR ap.id IS NULL
+           OR (
+             ap.archived_at IS NULL
+             AND LOWER(COALESCE(ap.status, '')) <> 'archived'
+           )
+         )`;
     await executor.query(sql, [caseId]);
   } catch (err) {
     console.error('[esdc] mark participant submission needs review failed', err);
@@ -6276,16 +6305,25 @@ function parseDate(value) {
   if (!str) return null;
   // Accept YYYY-MM-DD, YYYY/MM/DD, DD/MM/YYYY, ISO 8601
   const normalized = str.replace(/\//g, '-');
-  const date = new Date(normalized);
-  if (!Number.isNaN(date.getTime())) return date;
-  // Attempt to flip DD-MM-YYYY
+  const fromParts = (yyyy, mm, dd) => {
+    const year = Number(yyyy);
+    const month = Number(mm);
+    const day = Number(dd);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+    if (month < 1 || month > 12) return null;
+    const maxDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    if (day < 1 || day > maxDay) return null;
+    return new Date(Date.UTC(year, month - 1, day));
+  };
+  const isoMatch = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (isoMatch) return fromParts(isoMatch[1], isoMatch[2], isoMatch[3]);
   const parts = normalized.split('-');
   if (parts.length === 3 && parts[0].length === 2 && parts[2].length === 4) {
     const [dd, mm, yyyy] = parts;
-    const iso = `${yyyy}-${mm}-${dd}`;
-    const fallback = new Date(iso);
-    if (!Number.isNaN(fallback.getTime())) return fallback;
+    return fromParts(yyyy, mm, dd);
   }
+  const date = new Date(normalized);
+  if (!Number.isNaN(date.getTime())) return date;
   return null;
 }
 
@@ -8282,20 +8320,7 @@ function runIlmpValidation(context) {
     nocVersion: new Set(['2016','2021'])
   };
   const CODE_LOOKUP = {
-    barrier: {
-      none: '1',
-      'lack of labour force attachment': '2',
-      'lack of work experience': '3',
-      'lack of transportation': '4',
-      remoteness: '5',
-      language: '6',
-      education: '7',
-      economic: '8',
-      'dependent care': '9',
-      'lack of marketable skills': '10',
-      'physical/emotional/mental health': '11',
-      'other barrier': '12'
-    },
+    barrier: ILMP_BARRIER_CODE_LOOKUP,
     prevEmployment: {
       unemployed: '1',
       underemployed: '1',
@@ -8527,7 +8552,7 @@ function runIlmpValidation(context) {
   const barrierCodes = [];
   const invalidBarriers = [];
   barriersRaw.forEach(barrier => {
-    const code = toCode(barrier, CODE_LOOKUP.barrier);
+    const code = normaliseIlmpBarrierCode(barrier);
     if (code) {
       barrierCodes.push(code);
     } else {
@@ -8591,6 +8616,34 @@ function runIlmpValidation(context) {
   const eligiblePlans = Array.isArray(derivedPlans)
     ? derivedPlans.filter(plan => (plan?.status || '').toLowerCase() !== 'draft')
     : [];
+  const sourceActionPlans = Array.isArray(context.caseActionPlans) ? context.caseActionPlans : [];
+  const findSourceActionPlan = plan => {
+    const planId = plan?.id || plan?.action_plan_id || null;
+    if (!planId) return null;
+    return sourceActionPlans.find(sourcePlan => {
+      const sourceId = sourcePlan?.id || sourcePlan?.action_plan_id || null;
+      return sourceId && String(sourceId) === String(planId);
+    }) || null;
+  };
+  const summariseSourceInterventions = sourcePlan => {
+    const sourceInterventions = Array.isArray(sourcePlan?.interventions) ? sourcePlan.interventions : [];
+    const nonReportableInterventions = sourceInterventions.filter(intv => !isEsdcReportableIntervention(intv));
+    const statuses = Array.from(new Set(
+      nonReportableInterventions
+        .map(intv => resolvePlanBlockingInterventionStatus(intv) || normalizeIlmpStatusKey(intv?.status || intv?.deliveryStatus || intv?.delivery_status || ''))
+        .filter(Boolean)
+    ));
+    const startDates = nonReportableInterventions
+      .map(intv => toDateOnly(intv?.startDate || intv?.start_date || null))
+      .filter(Boolean)
+      .sort();
+    return {
+      sourceInterventionCount: sourceInterventions.length,
+      nonReportableCount: nonReportableInterventions.length,
+      statuses,
+      earliestStartDate: startDates[0] || null
+    };
+  };
   const activeDerived = eligiblePlans.filter(plan => (plan?.status || '').toLowerCase() === 'active');
   if (activeDerived.length > 1) {
     const msg = 'More than one active action plan detected for this case.';
@@ -8643,6 +8696,7 @@ function runIlmpValidation(context) {
     const interventions = Array.isArray(plan.interventions)
       ? plan.interventions.filter(intv => isEsdcReportableIntervention(intv))
       : [];
+    const sourceInterventionSummary = summariseSourceInterventions(findSourceActionPlan(plan));
 
     const agreementNumber = plan.agreementNumber || extractAgreementNumber(context);
     const cleanedAgreement = agreementNumber ? String(agreementNumber).replace(/\D/g, '') : '';
@@ -8687,7 +8741,7 @@ function runIlmpValidation(context) {
         });
       }
       if (planStart > now) {
-        const msg = 'Action plan start date must not be in the future.';
+        const msg = `Action plan starts in the future (${planStartStr}); it cannot be included in an ILMP submission yet.`;
         blockingIssues.push(`${planPrefix} ${msg}`);
         ruleResults.push({
           id: `${planPrefix}-start-future`,
@@ -8702,17 +8756,31 @@ function runIlmpValidation(context) {
     }
 
     if (!interventions.length) {
-      const msg = 'At least one intervention is required for an action plan.';
-      blockingIssues.push(`${planPrefix} ${msg}`);
-      ruleResults.push({
-        id: `${planPrefix}-no-interventions`,
-        label: 'Action plan interventions',
-        category: 'mandatory',
-        severity: 'blocking',
-        passed: false,
-        message: msg,
-        detail: null
-      });
+      if (sourceInterventionSummary.sourceInterventionCount > 0) {
+        const msg = getNoReportableInterventionsMessage({ planStartIsFuture: Boolean(planStart && planStart > now) });
+        blockingIssues.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-no-reportable-interventions`,
+          label: 'Action plan interventions',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: sourceInterventionSummary
+        });
+      } else {
+        const msg = 'At least one intervention is required for an action plan.';
+        blockingIssues.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-no-interventions`,
+          label: 'Action plan interventions',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: null
+        });
+      }
     }
 
     let earliestStart = null;
@@ -11394,21 +11462,6 @@ const ILMP_CHILDCARE_FUNDING_CODE_MAP = Object.freeze({
   'self-funded': '7',
   self_funded: '7',
 });
-const ILMP_BARRIER_CODE_MAP = Object.freeze({
-  none: '1',
-  'lack of labour force attachment': '2',
-  'lack of work experience': '3',
-  'lack of transportation': '4',
-  remoteness: '5',
-  language: '6',
-  education: '7',
-  economic: '8',
-  'dependent care': '9',
-  'lack of marketable skills': '10',
-  'physical, emotional, or mental health': '11',
-  other: '12',
-});
-
 function pruneNullish(value) {
   if (Array.isArray(value)) {
     const next = value
@@ -11437,7 +11490,17 @@ const toDateOnlyString = (value) => {
   }
   const str = String(value).trim();
   if (!str) return null;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  const isoMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (isoMatch) {
+    const year = Number(isoMatch[1]);
+    const month = Number(isoMatch[2]);
+    const day = Number(isoMatch[3]);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+    if (month < 1 || month > 12) return null;
+    const maxDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    if (day < 1 || day > maxDay) return null;
+    return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
   const parsed = new Date(str);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed.toISOString().slice(0, 10);
@@ -14963,28 +15026,10 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     if (!str) return null;
     return set.has(str) ? str : null;
   };
-  const BARRIER_LABEL_TO_CODE = {
-    'none': '1',
-    'lack of labour force attachment': '2',
-    'lack of work experience': '3',
-    'lack of transportation': '4',
-    'remoteness': '5',
-    'language': '6',
-    'education': '7',
-    'economic': '8',
-    'dependent care': '9',
-    'lack of marketable skills': '10',
-    'physical, emotional, or mental health': '11',
-    'other': '12',
-  };
   const mapBarrierLabelsToCodes = labels => {
     if (!Array.isArray(labels) || !labels.length) return [];
     return labels
-      .map(label => {
-        if (label === null || typeof label === 'undefined') return null;
-        const key = String(label).trim().toLowerCase();
-        return BARRIER_LABEL_TO_CODE[key] || null;
-      })
+      .map(normaliseIlmpBarrierCode)
       .filter(code => code && CODE_SETS.barrier.has(code));
   };
   let applicationAnswers = {};
@@ -15655,20 +15700,7 @@ function buildIlmpParticipantPayload(context) {
     },
     socialAssistance: { no: '0', yes: '1' },
     eiClaimant: { 'ei claimant': '1', 'reach-back / former claimant': '2', 'non-insured client': '3' },
-    barrier: {
-      none: '1',
-      'lack of labour force attachment': '2',
-      'lack of work experience': '3',
-      'lack of transportation': '4',
-      remoteness: '5',
-      language: '6',
-      education: '7',
-      economic: '8',
-      'dependent care': '9',
-      'lack of marketable skills': '10',
-      'physical/emotional/mental health': '11',
-      'other barrier': '12'
-    },
+    barrier: ILMP_BARRIER_CODE_LOOKUP,
     prevEmployment: {
       unemployed: '1',
       'underemployed': '1',
@@ -15769,11 +15801,7 @@ function buildIlmpParticipantPayload(context) {
     return coerced ? '1' : '0';
   })();
   const eiClaimantCode = eiClaimant ? toCode(eiClaimant, CODE_MAPS.eiClaimant) : null;
-  const barrierCodes = Array.isArray(barriers)
-    ? barriers
-        .map(entry => toCode(entry, CODE_MAPS.barrier))
-        .filter(Boolean)
-    : null;
+  const barrierCodes = mapIlmpBarrierCodes(barriers);
 
   const genderCode = toCode(gender, CODE_MAPS.gender);
   const indigenousCode = toCode(indigenousIdentity, CODE_MAPS.aboriginal);
@@ -16472,27 +16500,7 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
 
     let validNocPairs = null;
     try {
-      const candidatePairs = new Set();
-      const addNocPair = (codeRaw, versionRaw) => {
-        const version = versionRaw === null || typeof versionRaw === 'undefined'
-          ? ''
-          : String(versionRaw).trim();
-        const code = normalizeNocDigits(codeRaw);
-        if (!version || !code) return;
-        if (version !== '2016' && version !== '2021') return;
-        candidatePairs.add(`${version}:${code}`);
-      };
-
-      (Array.isArray(caseActionPlans) ? caseActionPlans : []).forEach(plan => {
-        if (!plan || typeof plan !== 'object') return;
-        addNocPair(plan.prevEmploymentNoc, plan.prevEmploymentNocVersion);
-        addNocPair(plan.resultNoc, plan.resultNocVersion);
-        (Array.isArray(plan.interventions) ? plan.interventions : []).forEach(intv => {
-          if (!intv || typeof intv !== 'object') return;
-          addNocPair(intv.relatedNoc, intv.relatedNocVersion);
-        });
-      });
-
+      const candidatePairs = collectNocLookupPairs(caseActionPlans);
       const parsedPairs = Array.from(candidatePairs).map(value => {
         const [version, code] = String(value).split(':');
         return { version, code };
@@ -18750,6 +18758,19 @@ async function ensureCaseContextHasParticipantDetails(connection, applicationId,
 function toDateOnly(value) {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(value);
+  if (typeof value === 'string') {
+    const match = value.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (match) {
+      const year = Number(match[1]);
+      const month = Number(match[2]);
+      const day = Number(match[3]);
+      if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+      if (month < 1 || month > 12) return null;
+      const maxDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      if (day < 1 || day > maxDay) return null;
+      return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
   if (Number.isNaN(date.getTime())) return null;
   return date.toISOString().slice(0, 10);
 }
@@ -19809,6 +19830,12 @@ function mapInterventionRow(row) {
         ? 'ok'
         : 'pending',
   };
+  const relatedNoc = row.related_noc || metadata.noc || esdc.interventionRelatedNOC || null;
+  const relatedNocVersion =
+    row.related_noc_version ||
+    metadata.nocVersion ||
+    esdc.interventionRelatedNOCVersion ||
+    null;
 
   return {
     id: row.id,
@@ -19862,15 +19889,12 @@ function mapInterventionRow(row) {
     actualAmount,
     actualCost: actualAmount,
     potId: metadata.potId || metadata.budgetPotId || null,
-    noc: row.related_noc || metadata.noc || esdc.interventionRelatedNOC || null,
-    nocVersion:
-      row.related_noc_version ||
-      metadata.nocVersion ||
-      esdc.interventionRelatedNOCVersion ||
-      null,
-    related_noc: row.related_noc || esdc.interventionRelatedNOC || null,
-    related_noc_version:
-      row.related_noc_version || esdc.interventionRelatedNOCVersion || null,
+    noc: relatedNoc,
+    nocVersion: relatedNocVersion,
+    relatedNoc,
+    relatedNocVersion,
+    related_noc: relatedNoc,
+    related_noc_version: relatedNocVersion,
     intervention_cost: Number.isFinite(row.intervention_cost) ? Number(row.intervention_cost) : null,
     notes,
     costLines,
@@ -20253,6 +20277,7 @@ async function recomputeCaseStatus(caseId, connection = null, options = {}) {
       `SELECT c.id,
               c.status,
               c.lifecycle_status,
+              c.closure_reason,
         a.id AS application_id
          FROM iset_case c
          ${buildCasePrimaryApplicationJoinSql('c', 'a')}
@@ -20267,6 +20292,7 @@ async function recomputeCaseStatus(caseId, connection = null, options = {}) {
     const currentStatus =
       normaliseCaseLifecycleStatusValue(caseRow.lifecycle_status || caseRow.status, { preserveUnknown: true }) ||
       normaliseCaseStatusValue(caseRow.status);
+    const currentClosureReason = normaliseString(caseRow.closure_reason) || null;
     if (!allowReopenFinal && currentStatus && CASE_STATUS_FINAL_SET.has(currentStatus)) {
       return { status: currentStatus, previousStatus: currentStatus, changed: false };
     }
@@ -20288,34 +20314,92 @@ async function recomputeCaseStatus(caseId, connection = null, options = {}) {
     const draftPlans = Number(planSummary?.draft_count || 0);
     const totalPlans = Number(planSummary?.total_count || 0);
 
+    const appStatusExpr = buildNormalisedStatusSql('a.status');
+    const appLifecycleExpr = buildNormalisedStatusSql('a.lifecycle_status');
+    const appClosureReasonExpr = buildNormalisedStatusSql('a.closure_reason');
+    const appDecisionOutcomeExpr = buildNormalisedStatusSql('a.decision_outcome');
+    const [[applicationSummary]] = await conn.query(
+      `SELECT
+          COUNT(*) AS total_count,
+          SUM(CASE WHEN ${buildApplicationTerminalRankSql('a')} = 0 THEN 1 ELSE 0 END) AS open_count,
+          SUM(CASE WHEN ${appStatusExpr} = 'withdrawn' OR ${appClosureReasonExpr} = 'withdrawn' THEN 1 ELSE 0 END) AS withdrawn_count,
+          SUM(CASE WHEN ${appStatusExpr} = 'archived' OR ${appLifecycleExpr} = 'archived' THEN 1 ELSE 0 END) AS archived_count,
+          SUM(CASE WHEN ${appStatusExpr} IN ('rejected', 'declined', 'denied') OR ${appDecisionOutcomeExpr} = 'denied' THEN 1 ELSE 0 END) AS denied_count
+        FROM iset_application a
+        WHERE a.case_id = ?`,
+      [numericCaseId]
+    );
+    const totalApplications = Number(applicationSummary?.total_count || 0);
+    const openApplications = Number(applicationSummary?.open_count || 0);
+    const withdrawnApplications = Number(applicationSummary?.withdrawn_count || 0);
+    const archivedApplications = Number(applicationSummary?.archived_count || 0);
+    const deniedApplications = Number(applicationSummary?.denied_count || 0);
+
     let nextStatus = currentStatus;
+    let nextClosureReason = currentClosureReason;
 
     if (activePlans > 0) {
       nextStatus = CASE_STATUS_DERIVED_VALUES.active;
+      nextClosureReason = null;
     } else if (closedPlans > 0) {
       nextStatus = CASE_STATUS_DERIVED_VALUES.dormant;
+      nextClosureReason = null;
     } else if (draftPlans > 0) {
       nextStatus = CASE_STATUS_DERIVED_VALUES.initiated;
+      nextClosureReason = null;
     } else if (totalPlans > 0) {
       nextStatus = CASE_STATUS_DERIVED_VALUES.initiated;
+      nextClosureReason = null;
+    } else if (totalApplications > 0 && openApplications === 0) {
+      nextStatus = archivedApplications === totalApplications
+        ? CASE_STATUS_DERIVED_VALUES.archived
+        : CASE_STATUS_DERIVED_VALUES.closed;
+      if (withdrawnApplications === totalApplications) {
+        nextClosureReason = 'withdrawn';
+      } else if (deniedApplications > 0) {
+        nextClosureReason = 'application_denied';
+      } else {
+        nextClosureReason = 'administrative';
+      }
     } else if (CASE_STATUS_INITIATED_SEEDS.has(currentStatus)) {
       nextStatus = CASE_STATUS_DERIVED_VALUES.initiated;
+      nextClosureReason = null;
     } else if (CASE_STATUS_PENDING_SEEDS.has(currentStatus)) {
       nextStatus = CASE_STATUS_DERIVED_VALUES.intake;
+      nextClosureReason = null;
     } else if (!currentStatus) {
       nextStatus = CASE_STATUS_DERIVED_VALUES.intake;
+      nextClosureReason = null;
     } else {
       // Preserve unrecognised states to avoid accidental downgrade.
       nextStatus = currentStatus;
+      nextClosureReason = currentClosureReason;
     }
 
-    if (nextStatus === currentStatus || !nextStatus) {
+    const shouldPersistClosureReason =
+      nextStatus === CASE_STATUS_DERIVED_VALUES.closed ||
+      nextStatus === CASE_STATUS_DERIVED_VALUES.archived;
+    const closureReasonToPersist = shouldPersistClosureReason ? nextClosureReason : null;
+
+    if (
+      (nextStatus === currentStatus || !nextStatus) &&
+      closureReasonToPersist === currentClosureReason
+    ) {
       return { status: currentStatus, previousStatus: currentStatus, changed: false };
     }
 
     await conn.query(
-      'UPDATE iset_case SET status = ?, lifecycle_status = ?, updated_at = NOW() WHERE id = ?',
-      [nextStatus, nextStatus, numericCaseId]
+      `UPDATE iset_case
+          SET status = ?,
+              lifecycle_status = ?,
+              closure_reason = ?,
+              closed_at = CASE
+                WHEN ? IN ('closed', 'archived') THEN COALESCE(closed_at, NOW())
+                ELSE closed_at
+              END,
+              updated_at = NOW()
+        WHERE id = ?`,
+      [nextStatus, nextStatus, closureReasonToPersist, nextStatus, numericCaseId]
     );
 
     return { status: nextStatus, previousStatus: currentStatus, changed: true };
@@ -20477,19 +20561,7 @@ function mapChildcareFundingToIlmpCode(value) {
 }
 
 function mapBarrierLabelsToIlmpCodes(labels = []) {
-  if (!Array.isArray(labels) || !labels.length) return null;
-  const codes = Array.from(
-    new Set(
-      labels
-        .map(label => {
-          const normalized = normaliseString(label);
-          if (!normalized) return null;
-          return ILMP_BARRIER_CODE_MAP[normalized.toLowerCase()] || null;
-        })
-        .filter(Boolean)
-    )
-  );
-  return codes.length ? codes : null;
+  return mapIlmpBarrierCodes(labels);
 }
 
 function firstDefinedValue(...values) {
@@ -81734,6 +81806,12 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       applicationDecisionOutcomeToPersist = applicationStatusPersistence.decisionOutcome;
       applicationAwaitingReasonToPersist = applicationStatusPersistence.awaitingReason;
       applicationClosureReasonToPersist = applicationStatusPersistence.closureReason;
+      if (
+        applicationLifecycleStatusToPersist === 'closed' ||
+        applicationLifecycleStatusToPersist === 'archived'
+      ) {
+        shouldRecomputeCaseStatus = true;
+      }
     }
 
     const assessmentKeys = [
