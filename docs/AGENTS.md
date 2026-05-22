@@ -22,6 +22,7 @@ Last Updated: 2026-05-14
 ## Working relationship (design dialog)
 
 - Treat implementation as a design dialog with the user, not literal instruction execution.
+- When the user is talking through bugs, change requests, design choices, priorities, or process questions, answer in natural conversational English by default. Prefer coherent paragraphs over many one-line bullets, avoid unnecessary headings and nested lists, and give the user one clear next point to respond to when the conversation is still exploratory.
 - The user may be wrong or operating from incomplete context; surface contradictions and risks early.
 - If requested changes could break behavior, conflict with data reality, or create regressions, pause and discuss tradeoffs before coding.
 - Challenge weak assumptions with concrete evidence (code paths, payloads, schema, runtime config), then agree on the target behavior.
@@ -302,8 +303,9 @@ When a subsystem doc disagrees with current code, migrations, package scripts, o
 - Use `docs/meta/standing-directive.md` for the project-memory maintenance contract and `docs/meta/documentation-audit-2026-04-29.md` for the current cleanup strategy.
 - Update `docs/meta/changelog.md` for user-visible or operational changes.
 - Record major structural doc reorganizations in `docs/meta/project-map.md`.
-- Maintain `docs/meta/next-release-notes-log.md` as a standing running log for the next Landing Page "What's New" update.
-- Keep the bilingual draft bullet sections in `docs/meta/next-release-notes-log.md` current before deploy. The build now fails if those required landing-page draft sections are missing or empty.
+- Maintain `docs/meta/next-release-notes-log.md` as a standing running log for the next Landing Page release-notes update.
+- Keep the bilingual draft bullet sections in `docs/meta/next-release-notes-log.md` current before deploy. The build now fails if the required fallback `What's New` / `Nouveautes` draft sections are missing or empty.
+- Landing-page release notes must use the standard public shape: `What changed`, `Known Bugs`, and `What's Coming`. Do not publish an `Earlier changes` section. Under `What changed`, keep three expandable release-package groups for the three most recent release packages, newest first, using `What Changed Packages (draft - EN)` and `Lots de changements (brouillon - FR)` in the release-notes log. When a release ships, add it as the first package and retire the oldest fourth package.
 - Landing-page release-note identity is now tied to the deployed build release ID/date rather than a separate hardcoded semver string in `src/pages/LandingPage.jsx`.
 - When drafting user-facing hotfix notes or Landing Page "What's New" bullets, keep them short and outcome-first. Prefer plain openers like `Fixed a bug...` or `Made a change...`, and do not mention internal bug/CR IDs, reporter names, or that the item came from a complaint.
 - Current user-requested weekly-summary workflow (2026-04-17): when Bill asks for a bullet summary of fixes/changes from the last week that will interest users, do not limit the review to bug reports, CRs, or the feedback queue. Review `docs/meta/next-release-notes-log.md` and also inspect `docs/meta/codex-thread-index.md` for user-visible work from recent threads that was not driven by a bug report or change request, then return a short user-facing bullet list of the most relevant changes.

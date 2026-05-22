@@ -121,6 +121,57 @@ function extractBulletSection(markdown, heading, options = {}) {
   return items;
 }
 
+function extractPackageSections(markdown, heading, options = {}) {
+  const required = options.required === true;
+  const lines = String(markdown || '').split(/\r?\n/);
+  const targetHeading = `### ${heading}`;
+  const startIndex = lines.findIndex(line => line.trim() === targetHeading);
+  if (startIndex === -1) {
+    if (required) {
+      throw new Error(`Missing release-notes draft section: ${heading}`);
+    }
+    return [];
+  }
+  const packages = [];
+  let currentPackage = null;
+  for (let index = startIndex + 1; index < lines.length; index += 1) {
+    const trimmed = lines[index].trim();
+    if (trimmed.startsWith('### ') || trimmed.startsWith('## ')) {
+      break;
+    }
+    if (trimmed.startsWith('#### ')) {
+      currentPackage = {
+        title: trimmed.slice(5).trim(),
+        items: [],
+      };
+      if (currentPackage.title) {
+        packages.push(currentPackage);
+      }
+      continue;
+    }
+    if (trimmed.startsWith('- ')) {
+      if (!currentPackage) {
+        currentPackage = {
+          title: '',
+          items: [],
+        };
+        packages.push(currentPackage);
+      }
+      currentPackage.items.push(trimmed.slice(2).trim());
+    }
+  }
+  const populatedPackages = packages
+    .map(pkg => ({
+      title: pkg.title,
+      items: pkg.items.filter(Boolean),
+    }))
+    .filter(pkg => pkg.title && pkg.items.length);
+  if (!populatedPackages.length && required) {
+    throw new Error(`Release-notes package section is empty: ${heading}`);
+  }
+  return populatedPackages.slice(0, 3);
+}
+
 function getOrdinalSuffix(day) {
   const mod100 = day % 100;
   if (mod100 >= 11 && mod100 <= 13) return 'th';
@@ -148,12 +199,12 @@ function formatReleaseDate(dateValue, locale) {
 function buildPublicReleaseNotes({ builtAt, releaseId }) {
   const markdown = fs.readFileSync(RELEASE_NOTES_LOG_PATH, 'utf8');
   const enFeatures = extractBulletSection(markdown, "What's New (draft bullets - EN)");
+  const enFeaturePackages = extractPackageSections(markdown, 'What Changed Packages (draft - EN)');
   const enKnownIssues = extractBulletSection(markdown, 'Known Bugs (draft bullets - EN)', { required: false });
-  const enPreviousChanges = extractBulletSection(markdown, 'Earlier Changes (draft bullets - EN)', { required: false });
   const enComingNext = extractBulletSection(markdown, 'Coming Soon (draft bullets - EN)', { required: false });
   const frFeatures = extractBulletSection(markdown, 'Nouveautes (brouillon - FR)');
+  const frFeaturePackages = extractPackageSections(markdown, 'Lots de changements (brouillon - FR)');
   const frKnownIssues = extractBulletSection(markdown, 'Problemes connus (brouillon - FR)', { required: false });
-  const frPreviousChanges = extractBulletSection(markdown, 'Changements precedents (brouillon - FR)', { required: false });
   const frComingNext = extractBulletSection(markdown, 'A venir (brouillon - FR)', { required: false });
   const releaseLabel = releaseId ? `Release ${releaseId}` : 'Current build';
 
@@ -168,11 +219,12 @@ function buildPublicReleaseNotes({ builtAt, releaseId }) {
       description: '',
       featuresHeading: 'What changed',
       features: enFeatures,
-      knownIssuesHeading: 'Known issues',
+      featurePackages: enFeaturePackages.length
+        ? enFeaturePackages
+        : [{ title: releaseLabel, items: enFeatures }],
+      knownIssuesHeading: 'Known Bugs',
       knownIssues: enKnownIssues,
-      previousChangesHeading: 'Earlier changes',
-      previousChanges: enPreviousChanges,
-      comingNextHeading: 'Coming next',
+      comingNextHeading: "What's Coming",
       comingNext: enComingNext,
     },
     fr: {
@@ -180,10 +232,11 @@ function buildPublicReleaseNotes({ builtAt, releaseId }) {
       description: '',
       featuresHeading: 'Ce qui a change',
       features: frFeatures,
-      knownIssuesHeading: 'Points connus',
+      featurePackages: frFeaturePackages.length
+        ? frFeaturePackages
+        : [{ title: releaseLabel, items: frFeatures }],
+      knownIssuesHeading: 'Problemes connus',
       knownIssues: frKnownIssues,
-      previousChangesHeading: 'Changements precedents',
-      previousChanges: frPreviousChanges,
       comingNextHeading: 'A venir',
       comingNext: frComingNext,
     },

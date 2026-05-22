@@ -1288,6 +1288,23 @@ For each indexed thread/topic, keep:
 - Status: implemented forward-only in DEV on 2026-05-20; existing denied applications still need a separate backfill plan.
 - Notes: The denial seed now runs when an application first moves to raw status `rejected`, not when the denial letter is sent. It creates or updates one closed reporting-only action plan named `Actions leading to denial`, creates/updates completed interventions for codes `1` (`Career Research and Exploration`) and `3` (`Employment Counselling`), sets start/end/closed dates to the denial decision date, and flags the case with generic `reportingOnlyDenied: true` plus `excludeFromCaseworkQueues: true`. Legacy `reportingOnlyDeniedIneligible` and `denied_ineligible_reporting` records remain recognized so existing records do not duplicate if staff edit them later.
 
+### Withdrawn application ILMP reporting seed
+
+- Codex task title: `Add withdrawal reporting action plan seed`
+- Topic: Forward-looking DEV change so `Withdraw application` also creates the reporting-only ILMP action-plan/intervention structure NWAC expects.
+- Keywords: `withdraw application`, `withdrawn_reporting`, `Actions leading to withdrawal`, `Career Research and Exploration`, `Employment Counselling`, `reportingOnlyWithdrawal`, `ILMP`, `ESDC`
+- When to open: the user asks whether withdrawals create the closed reporting action plan/interventions, asks about existing withdrawn applications that need backfill, or asks why withdrawn records appear in ESDC reporting correction surfaces.
+- Primary docs:
+  - `docs/guides/case-workspace-guidance.md`
+  - `docs/guides/status-lifecycle-implementation.md`
+  - `docs/planning/application-workspace-quick-actions.md`
+  - `docs/meta/changelog.md`
+  - `isetadminserver.js`
+  - `src/widgets/ApplicationOverviewWidget.js`
+  - `src/widgets/IsetApplicationFormWidget.js`
+- Status: implemented forward-only in DEV on 2026-05-22; PROD read-only preview found one existing withdrawn application missing withdrawal reporting artifacts, so that record needs a separate guarded backfill if the policy is applied retroactively.
+- Notes: The withdrawal seed runs when an application first moves to raw status `withdrawn`. It creates or updates one closed reporting-only action plan named `Actions leading to withdrawal`, creates/updates completed interventions for codes `1` (`Career Research and Exploration`) and `3` (`Employment Counselling`), sets start/end/closed dates to the withdrawal date, records `reportingSeedSource: withdrawn_reporting`, and flags the case with `reportingOnlyWithdrawal: true`, `reportingCorrectionAllowed: true`, and `excludeFromCaseworkQueues: true`.
+
 ## Future improvements
 
 - Add stable entry IDs if this grows beyond a small manual list.

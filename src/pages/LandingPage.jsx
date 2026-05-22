@@ -352,11 +352,26 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
                 {(releaseNotes?.features || []).length > 0 ? (
                   <article className="landing-card">
                     <h3 className="release-notes-heading">{releaseNotes?.featuresHeading || ''}</h3>
-                    <ul className="landing-release-notes__list">
-                      {(releaseNotes?.features || []).map(item => (
-                        <li key={item}>{item}</li>
+                    <div className="landing-release-notes__packages">
+                      {(
+                        (releaseNotes?.featurePackages || []).length
+                          ? releaseNotes.featurePackages
+                          : [{ title: publicReleaseNotes?.releaseLabel || releaseNotes?.featuresHeading || '', items: releaseNotes?.features || [] }]
+                      ).slice(0, 3).map((releasePackage, index) => (
+                        <ExpandableSection
+                          key={releasePackage.title || `release-package-${index}`}
+                          headerText={releasePackage.title}
+                          defaultExpanded={index === 0}
+                          variant="footer"
+                        >
+                          <ul className="landing-release-notes__list">
+                            {(releasePackage.items || []).map(item => (
+                              <li key={item}>{item}</li>
+                            ))}
+                          </ul>
+                        </ExpandableSection>
                       ))}
-                    </ul>
+                    </div>
                   </article>
                 ) : null}
                 {(releaseNotes?.knownIssues || []).length > 0 ? (
@@ -364,16 +379,6 @@ const LandingPage = ({ currentLanguage = 'en', onLanguageChange }) => {
                     <h3 className="release-notes-heading">{releaseNotes?.knownIssuesHeading || ''}</h3>
                     <ul className="landing-release-notes__list">
                       {(releaseNotes?.knownIssues || []).map(item => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </article>
-                ) : null}
-                {(releaseNotes?.previousChanges || []).length > 0 ? (
-                  <article className="landing-card">
-                    <h3 className="release-notes-heading">{releaseNotes?.previousChangesHeading || ''}</h3>
-                    <ul className="landing-release-notes__list">
-                      {(releaseNotes?.previousChanges || []).map(item => (
                         <li key={item}>{item}</li>
                       ))}
                     </ul>

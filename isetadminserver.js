@@ -2058,6 +2058,54 @@ const parseCurrencyValue = (value) => {
   return Number.isFinite(num) ? num : null;
 };
 
+const normalizeCurrencyAmountInput = value => {
+  if (value === null || typeof value === 'undefined' || value === '') {
+    return { empty: true, valid: true, normalized: '', fractionDigits: 0 };
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      return { empty: false, valid: false, normalized: '', fractionDigits: 0 };
+    }
+    const normalized = String(value);
+    const fractionDigits = normalized.includes('.') ? normalized.split('.')[1].length : 0;
+    return { empty: false, valid: true, normalized, fractionDigits };
+  }
+  const compact = String(value)
+    .trim()
+    .replace(/[$]/g, '')
+    .replace(/\s+/g, '');
+  if (!compact) {
+    return { empty: true, valid: true, normalized: '', fractionDigits: 0 };
+  }
+  const currencyPattern = /^[+-]?(?:(?:(?:\d{1,3}(?:,\d{3})+)|\d+)(?:\.\d*)?|\.\d+)$/;
+  if (!currencyPattern.test(compact)) {
+    return { empty: false, valid: false, normalized: '', fractionDigits: 0 };
+  }
+  const normalized = compact.replace(/,/g, '');
+  const fractionDigits = normalized.includes('.') ? normalized.split('.')[1].length : 0;
+  return { empty: false, valid: true, normalized, fractionDigits };
+};
+
+const parseCurrencyAmountInput = value => {
+  const normalized = normalizeCurrencyAmountInput(value);
+  if (normalized.empty) return { value: null, error: null };
+  if (!normalized.valid) return { value: NaN, error: 'invalid' };
+  const numeric = Number(normalized.normalized);
+  if (!Number.isFinite(numeric)) return { value: NaN, error: 'invalid' };
+  if (normalized.fractionDigits > 2) return { value: numeric, error: 'precision' };
+  return { value: Number(numeric.toFixed(2)), error: null };
+};
+
+const validateCurrencyAmountInput = (value, { min = 0, max = 999999 } = {}) => {
+  const parsed = parseCurrencyAmountInput(value);
+  if (parsed.error) return parsed;
+  if (parsed.value === null) return parsed;
+  if ((min !== null && parsed.value < min) || (max !== null && parsed.value > max)) {
+    return { value: parsed.value, error: 'range' };
+  }
+  return parsed;
+};
+
 const formatCurrencyValue = (value) => {
   const num = parseCurrencyValue(value);
   if (num === null) return '';
@@ -11375,15 +11423,19 @@ async function resolveStaffDisplayName(pool, req) {
 const AUTO_PLAN_METADATA_SOURCE = 'auto_assessment';
 const DENIED_INELIGIBLE_REPORTING_SOURCE = 'denied_ineligible_reporting';
 const DENIED_REPORTING_SOURCE = 'denied_reporting';
+const WITHDRAWN_REPORTING_SOURCE = 'withdrawn_reporting';
 const DENIED_INELIGIBLE_TRIGGER_REASON = 'eligibility_not_met';
 const FUNDING_DECISION_REASON_CODE_KEY = 'fundingDecisionReasonCode';
 const DENIED_REPORTING_PLAN_NAME = 'Actions leading to denial';
+const WITHDRAWN_REPORTING_PLAN_NAME = 'Actions leading to withdrawal';
 const DENIED_REPORTING_ACTION_PLAN_RESULT_CODE = '1';
 const DENIED_REPORTING_INTERVENTION_OUTCOME_CODE = 1;
 const DENIED_REPORTING_NOTE = 'Auto-created after denial decision for ILMP reporting.';
-const DENIED_REPORTING_METADATA_SOURCES = Object.freeze([
+const WITHDRAWN_REPORTING_NOTE = 'Auto-created after application withdrawal for ILMP reporting.';
+const REPORTING_ARTIFACT_METADATA_SOURCES = Object.freeze([
   DENIED_REPORTING_SOURCE,
   DENIED_INELIGIBLE_REPORTING_SOURCE,
+  WITHDRAWN_REPORTING_SOURCE,
 ]);
 const DENIED_REPORTING_INTERVENTIONS = Object.freeze([
   { code: 1, title: 'Career Research and Exploration' },
@@ -11414,7 +11466,17 @@ const ILMP_EDUCATION_LEVEL_CODE_MAP = Object.freeze({
   'university certificate or diploma': '9',
   "university - bachelor's degree": '10',
   "university - master's degree": '11',
-  "university - doctorate": '12'
+  "university - doctorate": '12',
+  grade_9_10: '3',
+  grade_11_12: '4',
+  secondary_school_diploma_or_ged: '5',
+  post_secondary_training: '6',
+  apprenticeship_trades: '7',
+  college: '8',
+  university_certificate: '9',
+  bachelors_degree: '10',
+  masters_degree: '11',
+  doctorate_degree: '12'
 });
 const ILMP_PROVINCE_NUMERIC_CODE_MAP = Object.freeze({
   NL: '1',
@@ -18496,7 +18558,13 @@ function buildApplicationStatusPersistence(status, current = {}) {
     normaliseApplicationLifecycleStatusValue(normalizedStatus, { preserveUnknown: true }) ||
     current.lifecycleStatus ||
     null;
-  const decisionOutcome = normaliseApplicationDecisionOutcomeValue(normalizedStatus);
+  const statusDecisionOutcome = normaliseApplicationDecisionOutcomeValue(normalizedStatus);
+  const currentDecisionOutcome = normaliseApplicationDecisionOutcomeValue(current.decisionOutcome);
+  const decisionOutcome =
+    statusDecisionOutcome ||
+    (normalizedStatus === 'completed' || normalizedStatus === 'closed' || normalizedStatus === 'archived'
+      ? currentDecisionOutcome
+      : null);
   let awaitingReason = deriveApplicationAwaitingReason(normalizedStatus);
   if (normalizedStatus === 'on_hold') {
     const currentAwaitingReason = normaliseApplicationAwaitingReasonValue(current.awaitingReason);
@@ -18520,6 +18588,172 @@ function buildApplicationStatusPersistence(status, current = {}) {
         ? (closureReason ?? current.closureReason ?? null)
         : null,
   };
+}
+
+function isDeniedApplicationState(row = {}) {
+  const decisionOutcome = normaliseApplicationDecisionOutcomeValue(
+    row.decision_outcome ?? row.decisionOutcome
+  );
+  if (decisionOutcome === 'denied') return true;
+  const status = normaliseApplicationStatusValue(
+    row.status ?? row.application_status ?? row.applicationStatus
+  );
+  return ['rejected', 'declined', 'denied'].includes(status);
+}
+
+function mergeDecisionLetterSentIntoCaseContext(caseContext = {}, applicationId = null, letterKey = null, sentAt = null) {
+  if (!letterKey || !sentAt) return caseContext;
+  const baseContext = isPlainObject(caseContext) ? caseContext : {};
+  const applicationKey = normalizeApplicationContextKey(applicationId);
+  if (!applicationKey) {
+    const existingSent = isPlainObject(baseContext.decisionLetterSent)
+      ? baseContext.decisionLetterSent
+      : {};
+    if (existingSent[letterKey]) return baseContext;
+    return {
+      ...baseContext,
+      decisionLetterSent: {
+        ...existingSent,
+        [letterKey]: sentAt,
+      },
+    };
+  }
+  const applicationContexts = isPlainObject(baseContext[APPLICATION_ASSESSMENT_CONTEXT_KEY])
+    ? baseContext[APPLICATION_ASSESSMENT_CONTEXT_KEY]
+    : {};
+  const existingScopedContext = isPlainObject(applicationContexts[applicationKey])
+    ? applicationContexts[applicationKey]
+    : {};
+  const existingSent = isPlainObject(existingScopedContext.decisionLetterSent)
+    ? existingScopedContext.decisionLetterSent
+    : {};
+  if (existingSent[letterKey]) return baseContext;
+  return {
+    ...baseContext,
+    [APPLICATION_ASSESSMENT_CONTEXT_KEY]: {
+      ...applicationContexts,
+      [applicationKey]: {
+        ...existingScopedContext,
+        decisionLetterSent: {
+          ...existingSent,
+          [letterKey]: sentAt,
+        },
+      },
+    },
+  };
+}
+
+async function completeDeniedApplicationAfterDenialLetterSent({
+  caseId,
+  applicationId,
+  sentAt = null,
+  connection = null,
+} = {}) {
+  const numericCaseId = normalisePositiveInteger(caseId);
+  const numericApplicationId = normalisePositiveInteger(applicationId);
+  if (!numericCaseId || !numericApplicationId) {
+    return { updated: false, reason: 'missing_scope' };
+  }
+
+  let conn = connection;
+  let shouldRelease = false;
+  let startedTransaction = false;
+  if (!conn) {
+    conn = await pool.getConnection();
+    shouldRelease = true;
+  }
+
+  try {
+    if (shouldRelease) {
+      await conn.beginTransaction();
+      startedTransaction = true;
+    }
+    const [[row]] = await conn.query(
+      `SELECT a.id,
+              a.status,
+              a.lifecycle_status,
+              a.decision_outcome,
+              a.awaiting_reason,
+              a.closure_reason,
+              a.row_version,
+              c.case_context_json
+         FROM iset_application a
+         JOIN iset_case c ON c.id = a.case_id
+        WHERE a.id = ?
+          AND a.case_id = ?
+        LIMIT 1
+        FOR UPDATE`,
+      [numericApplicationId, numericCaseId]
+    );
+    if (!row) {
+      if (startedTransaction) await conn.rollback();
+      return { updated: false, reason: 'application_not_found' };
+    }
+    if (!isDeniedApplicationState(row)) {
+      if (startedTransaction) await conn.rollback();
+      return { updated: false, reason: 'not_denied' };
+    }
+
+    const completedSentAt = sentAt || new Date().toISOString();
+    const existingContext = safeJsonParse(row.case_context_json, null) || {};
+    const nextContext = mergeDecisionLetterSentIntoCaseContext(
+      existingContext,
+      numericApplicationId,
+      'denial',
+      completedSentAt
+    );
+    const contextChanged = JSON.stringify(nextContext) !== JSON.stringify(existingContext);
+    if (contextChanged) {
+      await conn.query(
+        'UPDATE iset_case SET case_context_json = ?, updated_at = NOW() WHERE id = ?',
+        [JSON.stringify(nextContext), numericCaseId]
+      );
+    }
+
+    const currentStatus = normaliseApplicationStatusValue(row.status);
+    const currentLifecycle = normaliseApplicationLifecycleStatusValue(row.lifecycle_status, { preserveUnknown: true });
+    const currentDecisionOutcome = normaliseApplicationDecisionOutcomeValue(row.decision_outcome);
+    const needsApplicationUpdate =
+      currentStatus !== 'completed' ||
+      currentLifecycle !== 'closed' ||
+      currentDecisionOutcome !== 'denied';
+
+    if (needsApplicationUpdate) {
+      await conn.query(
+        `UPDATE iset_application
+            SET status = 'completed',
+                lifecycle_status = 'closed',
+                decision_outcome = 'denied',
+                awaiting_reason = 'none',
+                row_version = row_version + 1,
+                updated_at = NOW()
+          WHERE id = ?
+            AND case_id = ?`,
+        [numericApplicationId, numericCaseId]
+      );
+    }
+
+    if (startedTransaction) await conn.commit();
+    return {
+      updated: needsApplicationUpdate || contextChanged,
+      applicationUpdated: needsApplicationUpdate,
+      contextUpdated: contextChanged,
+      status: 'completed',
+      lifecycleStatus: 'closed',
+      decisionOutcome: 'denied',
+    };
+  } catch (err) {
+    if (startedTransaction && conn) {
+      try {
+        await conn.rollback();
+      } catch (_) {}
+    }
+    throw err;
+  } finally {
+    if (shouldRelease && conn) {
+      conn.release();
+    }
+  }
 }
 function isTerminalApplicationStatus(status) {
   const key = normaliseApplicationStatusValue(status);
@@ -20514,11 +20748,48 @@ function isDeniedReportingCaseContext(caseContext) {
     caseContext && typeof caseContext === 'object'
       ? caseContext
       : safeJsonParse(caseContext, null);
+  const reportingSeedSource = normaliseString(context?.reportingSeedSource);
+  const reportingSeedSourceKey = reportingSeedSource ? reportingSeedSource.toLowerCase() : null;
   return Boolean(
     context?.reportingOnlyDenied === true ||
     context?.reportingOnlyDeniedIneligible === true ||
-    DENIED_REPORTING_METADATA_SOURCES.includes(context?.reportingSeedSource)
+    context?.reportingOnlyWithdrawal === true ||
+    REPORTING_ARTIFACT_METADATA_SOURCES.includes(reportingSeedSourceKey)
   );
+}
+
+function resolveReportingArtifactTrigger(value, context = null) {
+  const normalized = normaliseString(value || context?.reportingTrigger || null);
+  const key = normalized ? normalized.toLowerCase().replace(/[\s-]+/g, '_') : null;
+  const contextSource = normaliseString(context?.reportingSeedSource);
+  const contextSourceKey = contextSource ? contextSource.toLowerCase() : null;
+  if (
+    key === 'withdrawal' ||
+    key === 'withdrawn' ||
+    context?.reportingOnlyWithdrawal === true ||
+    contextSourceKey === WITHDRAWN_REPORTING_SOURCE
+  ) {
+    return 'withdrawal';
+  }
+  return 'denial';
+}
+
+function resolveReportingArtifactConfig(trigger) {
+  return trigger === 'withdrawal'
+    ? {
+        source: WITHDRAWN_REPORTING_SOURCE,
+        planName: WITHDRAWN_REPORTING_PLAN_NAME,
+        note: WITHDRAWN_REPORTING_NOTE,
+        dateContextKey: 'reportingWithdrawnAt',
+        dateMetadataKey: 'withdrawalDate',
+      }
+    : {
+        source: DENIED_REPORTING_SOURCE,
+        planName: DENIED_REPORTING_PLAN_NAME,
+        note: DENIED_REPORTING_NOTE,
+        dateContextKey: 'reportingDeniedAt',
+        dateMetadataKey: 'denialDate',
+      };
 }
 
 function resolveFundingDecisionReasonCode(caseContext, applicationId = null) {
@@ -20535,7 +20806,11 @@ function mapEducationLevelToIlmpCode(value) {
   const normalized = normaliseString(value);
   if (!normalized) return null;
   const key = normalized.toLowerCase();
-  return ILMP_EDUCATION_LEVEL_CODE_MAP[key] || null;
+  if (ILMP_EDUCATION_LEVEL_CODE_MAP[key]) {
+    return ILMP_EDUCATION_LEVEL_CODE_MAP[key];
+  }
+  const looseKey = key.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return ILMP_EDUCATION_LEVEL_CODE_MAP[looseKey] || null;
 }
 
 function mapProvinceToIlmpCode(value) {
@@ -20585,9 +20860,13 @@ function buildDeniedReportingCaseContext({
   answers = {},
   applicationId = null,
   clientId = null,
+  reportingDate = null,
   denialDate = null,
   denialReasonCode = null,
+  reportingTrigger = 'denial',
 } = {}) {
+  const normalizedReportingTrigger = resolveReportingArtifactTrigger(reportingTrigger, existingCaseContext);
+  const reportingConfig = resolveReportingArtifactConfig(normalizedReportingTrigger);
   const currentPayload = payload && typeof payload === 'object' ? payload : {};
   const currentAnswers = answers && typeof answers === 'object' ? answers : {};
   const currentPersonal =
@@ -20601,24 +20880,23 @@ function buildDeniedReportingCaseContext({
   const clientStatus = extractClientStatusDetails(extractionContext) || {};
   const dependentChildren = extractDependentChildrenInfo(extractionContext) || {};
   const normalizedDenialReason = (normaliseString(denialReasonCode) || '').toLowerCase() || null;
+  const resolvedReportingDate = toDateOnlyString(
+    reportingDate ||
+    denialDate ||
+    existingCaseContext?.[reportingConfig.dateContextKey] ||
+    existingCaseContext?.reportingDeniedAt ||
+    existingCaseContext?.reportingWithdrawnAt ||
+    existingCaseContext?.reportingSeededAt ||
+    null
+  );
   const nextContextPatch = {
-    reportingOnlyDenied: true,
-    reportingOnlyDeniedIneligible:
-      existingCaseContext?.reportingOnlyDeniedIneligible === true ||
-      normalizedDenialReason === DENIED_INELIGIBLE_TRIGGER_REASON,
     excludeFromCaseworkQueues: true,
     reportingCorrectionAllowed: true,
-    reportingSeedSource: DENIED_REPORTING_SOURCE,
+    reportingTrigger: normalizedReportingTrigger,
+    reportingSeedSource: reportingConfig.source,
     reportingSeededAt: existingCaseContext?.reportingSeededAt || new Date().toISOString(),
     reportingLastSyncedAt: new Date().toISOString(),
-    reportingDeniedAt: toDateOnlyString(
-      denialDate ||
-      existingCaseContext?.reportingDeniedAt ||
-      existingCaseContext?.reportingSeededAt ||
-      null
-    ),
-    [FUNDING_DECISION_REASON_CODE_KEY]:
-      normalizedDenialReason || resolveFundingDecisionReasonCode(existingCaseContext, applicationId) || null,
+    [reportingConfig.dateContextKey]: resolvedReportingDate,
     applicationId: applicationId || null,
     clientId: clientId || null,
     applicationAnswers: Object.keys(currentAnswers).length ? currentAnswers : null,
@@ -20666,6 +20944,16 @@ function buildDeniedReportingCaseContext({
     employmentNocVersion: clientStatus.nocVersion || null,
     prevEmployment: clientStatus.prevEmployment || null,
   };
+  if (normalizedReportingTrigger === 'withdrawal') {
+    nextContextPatch.reportingOnlyWithdrawal = true;
+  } else {
+    nextContextPatch.reportingOnlyDenied = true;
+    nextContextPatch.reportingOnlyDeniedIneligible =
+      existingCaseContext?.reportingOnlyDeniedIneligible === true ||
+      normalizedDenialReason === DENIED_INELIGIBLE_TRIGGER_REASON;
+    nextContextPatch[FUNDING_DECISION_REASON_CODE_KEY] =
+      normalizedDenialReason || resolveFundingDecisionReasonCode(existingCaseContext, applicationId) || null;
+  }
   return mergeCaseContext(existingCaseContext || {}, nextContextPatch);
 }
 
@@ -20742,6 +21030,8 @@ async function syncDeniedReportingArtifacts(connection, {
   caseId,
   applicationId,
   denialDate = null,
+  reportingDate = null,
+  reportingTrigger = 'denial',
 } = {}) {
   const numericCaseId = Number(caseId);
   const numericApplicationId = Number(applicationId);
@@ -20762,20 +21052,29 @@ async function syncDeniedReportingArtifacts(connection, {
     applicationId: numericApplicationId,
   });
   const existingCaseContext = safeJsonParse(caseRow.case_context_json, null) || {};
+  const normalizedReportingTrigger = resolveReportingArtifactTrigger(reportingTrigger, existingCaseContext);
+  const reportingConfig = resolveReportingArtifactConfig(normalizedReportingTrigger);
   const denialReasonCode =
-    resolveFundingDecisionReasonCode(existingCaseContext, numericApplicationId) ||
-    ((normaliseString(assessmentRow?.nwac_reason) || '').toLowerCase() || null);
+    normalizedReportingTrigger === 'withdrawal'
+      ? null
+      : (
+          resolveFundingDecisionReasonCode(existingCaseContext, numericApplicationId) ||
+          ((normaliseString(assessmentRow?.nwac_reason) || '').toLowerCase() || null)
+        );
 
   const applicationPayload = await readApplicationPayload(connection, numericApplicationId, { forUpdate: true });
   const payload = applicationPayload?.payload || {};
   const answers = sanitiseAnswersPayload(payload.answers || {});
-  const resolvedDenialDate = toDateOnlyString(
+  const resolvedReportingDate = toDateOnlyString(
+    reportingDate ||
     denialDate ||
+    existingCaseContext?.[reportingConfig.dateContextKey] ||
     existingCaseContext?.reportingDeniedAt ||
+    existingCaseContext?.reportingWithdrawnAt ||
     caseRow.closed_at ||
     new Date()
   );
-  const resolvedDateTime = toMysqlDateTimeString(resolvedDenialDate);
+  const resolvedDateTime = toMysqlDateTimeString(resolvedReportingDate);
   const syncedClientId = await syncCaseClientFromApplication(connection, {
     caseId: numericCaseId,
     applicationId: numericApplicationId,
@@ -20788,8 +21087,9 @@ async function syncDeniedReportingArtifacts(connection, {
     answers,
     applicationId: numericApplicationId,
     clientId: syncedClientId,
-    denialDate: resolvedDenialDate,
+    reportingDate: resolvedReportingDate,
     denialReasonCode,
+    reportingTrigger: normalizedReportingTrigger,
   });
 
   await connection.query(
@@ -20855,10 +21155,11 @@ async function syncDeniedReportingArtifacts(connection, {
     }
     return null;
   })();
+  const deniedReportingEiClaimantCode = explicitEiClaimantCode || '3';
   const fundingStream =
-    explicitEiClaimantCode === '1' || explicitEiClaimantCode === '2'
+    deniedReportingEiClaimantCode === '1' || deniedReportingEiClaimantCode === '2'
       ? 'EI'
-      : explicitEiClaimantCode === '3'
+      : deniedReportingEiClaimantCode === '3'
         ? 'CRF'
         : null;
   const agreementCandidate = fundingStream ? deriveAgreementNumberFromFundingStream(fundingStream) : null;
@@ -20869,7 +21170,7 @@ async function syncDeniedReportingArtifacts(connection, {
   const actionPlanEsdcPayload = pruneNullish({
     agreementNumber,
     fundingStream,
-    EIClaimant: explicitEiClaimantCode || null,
+    EIClaimant: deniedReportingEiClaimantCode || null,
     educationLevel: educationLevelCode,
     educationProvince: educationProvinceCode,
     socialAssistanceRecipient: socialAssistanceCode,
@@ -20883,16 +21184,17 @@ async function syncDeniedReportingArtifacts(connection, {
     actionPlanChildcareFundedCode: childcareFundingCode,
     BarrierToEmployment: barrierCodes,
     actionPlanResultCode: DENIED_REPORTING_ACTION_PLAN_RESULT_CODE,
-    actionPlanResultDate: resolvedDenialDate,
+    actionPlanResultDate: resolvedReportingDate,
     actionPlanResultEducationLevel: educationLevelCode,
   }) || null;
   const planMetadata = pruneNullish({
-    source: DENIED_REPORTING_SOURCE,
+    source: reportingConfig.source,
     reportingOnly: true,
+    reportingTrigger: normalizedReportingTrigger,
     generatedAt: existingCaseContext?.reportingSeededAt || new Date().toISOString(),
     denialReason: denialReasonCode || null,
-    denialDate: resolvedDenialDate,
-    note: DENIED_REPORTING_NOTE,
+    [reportingConfig.dateMetadataKey]: resolvedReportingDate,
+    note: reportingConfig.note,
     applicantSnapshot: pruneNullish({
       firstName: extractFirstName(extractionContext),
       lastName: extractLastName(extractionContext),
@@ -20907,10 +21209,10 @@ async function syncDeniedReportingArtifacts(connection, {
     `SELECT id
        FROM iset_case_action_plan
       WHERE case_id = ?
-        AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) IN (?, ?)
+        AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) IN (${REPORTING_ARTIFACT_METADATA_SOURCES.map(() => '?').join(', ')})
       LIMIT 1
       FOR UPDATE`,
-    [numericCaseId, ...DENIED_REPORTING_METADATA_SOURCES]
+    [numericCaseId, ...REPORTING_ARTIFACT_METADATA_SOURCES]
   );
 
   let planId = existingPlan?.id || null;
@@ -20940,20 +21242,20 @@ async function syncDeniedReportingArtifacts(connection, {
               updated_at = NOW()
         WHERE id = ?`,
       [
-        DENIED_REPORTING_PLAN_NAME,
+        reportingConfig.planName,
         agreementNumber,
         fundingStream,
         resolveCaseAssignedStaffProfileId(caseRow) || null,
-        resolvedDenialDate,
+        resolvedReportingDate,
         resolvedDateTime,
         resolvedDateTime,
         DENIED_REPORTING_ACTION_PLAN_RESULT_CODE,
-        explicitEiClaimantCode ? Number(explicitEiClaimantCode) : null,
+        deniedReportingEiClaimantCode ? Number(deniedReportingEiClaimantCode) : null,
         prevEmploymentCode,
-        resolvedDenialDate,
-        DENIED_REPORTING_NOTE,
-        DENIED_REPORTING_NOTE,
-        DENIED_REPORTING_NOTE,
+        resolvedReportingDate,
+        reportingConfig.note,
+        reportingConfig.note,
+        reportingConfig.note,
         planMetadata ? JSON.stringify(planMetadata) : null,
         actionPlanEsdcPayload ? JSON.stringify(actionPlanEsdcPayload) : null,
         planId
@@ -20966,20 +21268,20 @@ async function syncDeniedReportingArtifacts(connection, {
        VALUES (?, ?, 'closed', ?, NULL, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         numericCaseId,
-        DENIED_REPORTING_PLAN_NAME,
+        reportingConfig.planName,
         agreementNumber,
         fundingStream,
         resolveCaseAssignedStaffProfileId(caseRow) || null,
-        resolvedDenialDate,
+        resolvedReportingDate,
         resolvedDateTime,
         resolvedDateTime,
         DENIED_REPORTING_ACTION_PLAN_RESULT_CODE,
-        explicitEiClaimantCode ? Number(explicitEiClaimantCode) : null,
+        deniedReportingEiClaimantCode ? Number(deniedReportingEiClaimantCode) : null,
         prevEmploymentCode,
-        resolvedDenialDate,
-        DENIED_REPORTING_NOTE,
-        DENIED_REPORTING_NOTE,
-        DENIED_REPORTING_NOTE,
+        resolvedReportingDate,
+        reportingConfig.note,
+        reportingConfig.note,
+        reportingConfig.note,
         planMetadata ? JSON.stringify(planMetadata) : null,
         actionPlanEsdcPayload ? JSON.stringify(actionPlanEsdcPayload) : null
       ]
@@ -20991,12 +21293,13 @@ async function syncDeniedReportingArtifacts(connection, {
   const ownerStaffProfileId = resolveCaseAssignedStaffProfileId(caseRow) || null;
   for (const interventionDefinition of DENIED_REPORTING_INTERVENTIONS) {
     const interventionMetadata = pruneNullish({
-      source: DENIED_REPORTING_SOURCE,
+      source: reportingConfig.source,
       reportingOnly: true,
+      reportingTrigger: normalizedReportingTrigger,
       generatedAt: existingCaseContext?.reportingSeededAt || new Date().toISOString(),
       title: interventionDefinition.title,
       denialReason: denialReasonCode || null,
-      denialDate: resolvedDenialDate,
+      [reportingConfig.dateMetadataKey]: resolvedReportingDate,
     }) || null;
     const interventionEsdcPayload = pruneNullish({
       interventionOutcome: String(DENIED_REPORTING_INTERVENTION_OUTCOME_CODE),
@@ -21009,14 +21312,14 @@ async function syncDeniedReportingArtifacts(connection, {
         WHERE case_id = ?
           AND action_plan_id = ?
           AND intervention_code = ?
-          AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) IN (?, ?)
+          AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) IN (${REPORTING_ARTIFACT_METADATA_SOURCES.map(() => '?').join(', ')})
         LIMIT 1
         FOR UPDATE`,
       [
         numericCaseId,
         planId,
         interventionDefinition.code,
-        ...DENIED_REPORTING_METADATA_SOURCES
+        ...REPORTING_ARTIFACT_METADATA_SOURCES
       ]
     );
 
@@ -21054,10 +21357,10 @@ async function syncDeniedReportingArtifacts(connection, {
         [
           planId,
           interventionDefinition.code,
-          resolvedDenialDate,
-          resolvedDenialDate,
+          resolvedReportingDate,
+          resolvedReportingDate,
           DENIED_REPORTING_INTERVENTION_OUTCOME_CODE,
-          DENIED_REPORTING_NOTE,
+          reportingConfig.note,
           interventionMetadata ? JSON.stringify(interventionMetadata) : null,
           interventionEsdcPayload ? JSON.stringify(interventionEsdcPayload) : null,
           ownerStaffProfileId,
@@ -21075,10 +21378,10 @@ async function syncDeniedReportingArtifacts(connection, {
           numericCaseId,
           planId,
           interventionDefinition.code,
-          resolvedDenialDate,
-          resolvedDenialDate,
+          resolvedReportingDate,
+          resolvedReportingDate,
           DENIED_REPORTING_INTERVENTION_OUTCOME_CODE,
-          DENIED_REPORTING_NOTE,
+          reportingConfig.note,
           interventionMetadata ? JSON.stringify(interventionMetadata) : null,
           interventionEsdcPayload ? JSON.stringify(interventionEsdcPayload) : null,
           ownerStaffProfileId,
@@ -21150,13 +21453,15 @@ async function syncDeniedReportingForApplicationIfNeeded(connection, {
     forUpdate: true,
   });
   if (!caseRow) return null;
-  if (!isDeniedReportingCaseContext(caseRow.case_context_json)) {
+  const caseContext = safeJsonParse(caseRow.case_context_json, null) || {};
+  if (!isDeniedReportingCaseContext(caseContext)) {
     return null;
   }
   return syncDeniedReportingArtifacts(connection, {
     caseId: caseRow.id,
     applicationId: numericApplicationId,
     denialDate,
+    reportingTrigger: resolveReportingArtifactTrigger(null, caseContext),
   });
 }
 
@@ -47725,7 +48030,8 @@ app.get('/api/cases', async (req, res) => {
     } else if (clientCategory === 'ineligible_reporting') {
       whereClauses.push(
         `(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.reportingOnlyDenied')), 'false') = 'true'
-          OR COALESCE(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.reportingOnlyDeniedIneligible')), 'false') = 'true')`
+          OR COALESCE(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.reportingOnlyDeniedIneligible')), 'false') = 'true'
+          OR COALESCE(JSON_UNQUOTE(JSON_EXTRACT(c.case_context_json, '$.reportingOnlyWithdrawal')), 'false') = 'true')`
       );
     }
 
@@ -51200,20 +51506,41 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     return res.status(422).json({ error: 'invalid_duration_days', message: 'Duration (days) cannot be negative.' });
   }
 
-  const plannedCostValue = parseNumeric(cost);
-  if (Number.isNaN(plannedCostValue)) {
-    return res.status(422).json({ error: 'invalid_cost', message: 'Cost must be a number.' });
+  const plannedCostInput = validateCurrencyAmountInput(cost);
+  if (plannedCostInput.error === 'invalid') {
+    return res.status(422).json({ error: 'invalid_cost', message: 'Cost must be a valid dollar amount.' });
   }
+  if (plannedCostInput.error) {
+    return res.status(422).json({
+      error: 'invalid_cost_range',
+      message: 'Cost must be between 0 and 999999 with no more than two decimal places.'
+    });
+  }
+  const plannedCostValue = plannedCostInput.value;
 
-  const approvedAmountValue = parseNumeric(approvedAmount);
-  if (Number.isNaN(approvedAmountValue)) {
-    return res.status(422).json({ error: 'invalid_approved_amount', message: 'Approved amount must be a number.' });
+  const approvedAmountInput = validateCurrencyAmountInput(approvedAmount);
+  if (approvedAmountInput.error === 'invalid') {
+    return res.status(422).json({ error: 'invalid_approved_amount', message: 'Approved amount must be a valid dollar amount.' });
   }
+  if (approvedAmountInput.error) {
+    return res.status(422).json({
+      error: 'invalid_approved_amount',
+      message: 'Approved amount must be between 0 and 999999 with no more than two decimal places.'
+    });
+  }
+  const approvedAmountValue = approvedAmountInput.value;
 
-  const actualAmountValue = parseNumeric(actualAmount);
-  if (Number.isNaN(actualAmountValue)) {
-    return res.status(422).json({ error: 'invalid_actual_amount', message: 'Actual amount must be a number.' });
+  const actualAmountInput = validateCurrencyAmountInput(actualAmount);
+  if (actualAmountInput.error === 'invalid') {
+    return res.status(422).json({ error: 'invalid_actual_amount', message: 'Actual amount must be a valid dollar amount.' });
   }
+  if (actualAmountInput.error) {
+    return res.status(422).json({
+      error: 'invalid_actual_amount',
+      message: 'Actual amount must be between 0 and 999999 with no more than two decimal places.'
+    });
+  }
+  const actualAmountValue = actualAmountInput.value;
 
   const statusValue = normaliseInterventionStatus(status, 'draft');
   if (!statusValue) {
@@ -51437,11 +51764,11 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       }
     }
 
-    // Cost validation (integer 0-999999) when provided.
-    let plannedCostInt = null;
+    // Cost validation (currency 0-999999, up to two decimals) when provided.
+    let plannedCostAmount = null;
     if (plannedCostValue !== null) {
-      plannedCostInt = Math.round(plannedCostValue);
-      if (!Number.isFinite(plannedCostInt) || plannedCostInt < 0 || plannedCostInt > 999999) {
+      plannedCostAmount = plannedCostValue;
+      if (!Number.isFinite(plannedCostAmount) || plannedCostAmount < 0 || plannedCostAmount > 999999) {
         return res.status(422).json({ error: 'invalid_cost_range', message: 'Cost must be between 0 and 999999.' });
       }
     }
@@ -51454,10 +51781,16 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     const normalizedCostLines = Array.isArray(metadata.costLines)
       ? metadata.costLines.map(normalizeProposedCostLine).filter(Boolean)
       : [];
-    if (normalizedCostLines.length && plannedCostInt === null) {
+    if (normalizedCostLines.length && plannedCostAmount === null) {
       const totalFromLines = computeCostLinesTotal(normalizedCostLines);
       if (Number.isFinite(totalFromLines)) {
-        plannedCostInt = Math.round(totalFromLines);
+        plannedCostAmount = Number(totalFromLines.toFixed(2));
+        if (plannedCostAmount < 0 || plannedCostAmount > 999999) {
+          return res.status(422).json({
+            error: 'invalid_cost_range',
+            message: 'Cost must be between 0 and 999999 with no more than two decimal places.'
+          });
+        }
       }
     }
     const ensure = (key, value) => {
@@ -51474,7 +51807,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     ensure('code', trimmedCode);
     ensure('title', trimmedTitle);
     if (durationWeeksValue !== null) ensure('durationWeeks', durationWeeksValue);
-    if (Number.isFinite(plannedCostInt)) ensure('cost', plannedCostInt);
+    if (Number.isFinite(plannedCostAmount)) ensure('cost', plannedCostAmount);
     if (trimmedPotId) ensure('potId', trimmedPotId);
     if (trimmedPotId) ensure('budgetPotId', trimmedPotId);
     ensure('postingContext', metadata.postingContext || postingContext);
@@ -51510,7 +51843,7 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       interventionEndDate: endDateValue || null,
       interventionOutcome: trimmedOutcomeCreate || null,
       interventionDuration: durationDaysValue,
-      interventionCost: plannedCostInt,
+      interventionCost: plannedCostAmount,
       interventionRelatedNOC: trimmedNoc || null,
       interventionRelatedNOCVersion: trimmedNocVersion || null,
       postingContext,
@@ -51558,10 +51891,10 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         startDateValue || null,
         endDateValue || null,
         durationDaysValue !== null ? durationDaysValue : null,
-        Number.isFinite(plannedCostInt) ? plannedCostInt : null,
+        Number.isFinite(plannedCostAmount) ? plannedCostAmount : null,
         Number.isFinite(approvedAmountValue) ? approvedAmountValue : null,
         Number.isFinite(actualAmountValue) ? actualAmountValue : null,
-        Number.isFinite(plannedCostInt) ? plannedCostInt : null,
+        Number.isFinite(plannedCostAmount) ? plannedCostAmount : null,
         trimmedNoc || null,
         trimmedNocVersion || null,
         trimmedOutcomeCreate || null,
@@ -51751,10 +52084,10 @@ app.post('/api/interventions/:id/revise', async (req, res) => {
       interventionRelatedNOCVersion: sourcePayload.nocVersion || esdcExisting.interventionRelatedNOCVersion || null,
     });
 
-    const plannedCostValue = Number.isFinite(Number(sourcePayload.plannedCost))
-      ? Math.round(Number(sourcePayload.plannedCost))
-      : Number.isFinite(Number(sourcePayload.cost))
-        ? Math.round(Number(sourcePayload.cost))
+    const plannedCostValue = Number.isFinite(parseCurrencyAmountInput(sourcePayload.plannedCost).value)
+      ? parseCurrencyAmountInput(sourcePayload.plannedCost).value
+      : Number.isFinite(parseCurrencyAmountInput(sourcePayload.cost).value)
+        ? parseCurrencyAmountInput(sourcePayload.cost).value
         : null;
     const createdBy = getRequesterIdentity(req)?.staffProfileId || null;
 
@@ -52005,28 +52338,47 @@ app.patch('/api/interventions/:id', async (req, res) => {
   }
 
   const costProvided = Object.prototype.hasOwnProperty.call(body, 'cost');
-  const plannedCostValue = costProvided ? parseNumeric(body.cost) : undefined;
-  if (Number.isNaN(plannedCostValue)) {
-    return res.status(422).json({ error: 'invalid_cost', message: 'Cost must be a number.' });
+  const plannedCostInput = costProvided ? validateCurrencyAmountInput(body.cost) : { value: undefined, error: null };
+  if (plannedCostInput.error === 'invalid') {
+    return res.status(422).json({ error: 'invalid_cost', message: 'Cost must be a valid dollar amount.' });
   }
-  if (plannedCostValue !== undefined && plannedCostValue !== null) {
-    const costInt = Math.round(plannedCostValue);
-    if (!Number.isFinite(costInt) || costInt < 0 || costInt > 999999) {
-      return res.status(422).json({ error: 'invalid_cost_range', message: 'Cost must be between 0 and 999999.' });
-    }
+  if (plannedCostInput.error) {
+    return res.status(422).json({
+      error: 'invalid_cost_range',
+      message: 'Cost must be between 0 and 999999 with no more than two decimal places.'
+    });
   }
+  const plannedCostValue = plannedCostInput.value;
 
   const approvedProvided = Object.prototype.hasOwnProperty.call(body, 'approvedAmount');
-  const approvedAmountValue = approvedProvided ? parseNumeric(body.approvedAmount) : undefined;
-  if (Number.isNaN(approvedAmountValue)) {
-    return res.status(422).json({ error: 'invalid_approved_amount', message: 'Approved amount must be a number.' });
+  const approvedAmountInput = approvedProvided
+    ? validateCurrencyAmountInput(body.approvedAmount)
+    : { value: undefined, error: null };
+  if (approvedAmountInput.error === 'invalid') {
+    return res.status(422).json({ error: 'invalid_approved_amount', message: 'Approved amount must be a valid dollar amount.' });
   }
+  if (approvedAmountInput.error) {
+    return res.status(422).json({
+      error: 'invalid_approved_amount',
+      message: 'Approved amount must be between 0 and 999999 with no more than two decimal places.'
+    });
+  }
+  const approvedAmountValue = approvedAmountInput.value;
 
   const actualProvided = Object.prototype.hasOwnProperty.call(body, 'actualAmount');
-  const actualAmountValue = actualProvided ? parseNumeric(body.actualAmount) : undefined;
-  if (Number.isNaN(actualAmountValue)) {
-    return res.status(422).json({ error: 'invalid_actual_amount', message: 'Actual amount must be a number.' });
+  const actualAmountInput = actualProvided
+    ? validateCurrencyAmountInput(body.actualAmount)
+    : { value: undefined, error: null };
+  if (actualAmountInput.error === 'invalid') {
+    return res.status(422).json({ error: 'invalid_actual_amount', message: 'Actual amount must be a valid dollar amount.' });
   }
+  if (actualAmountInput.error) {
+    return res.status(422).json({
+      error: 'invalid_actual_amount',
+      message: 'Actual amount must be between 0 and 999999 with no more than two decimal places.'
+    });
+  }
+  const actualAmountValue = actualAmountInput.value;
 
   const statusProvided = Object.prototype.hasOwnProperty.call(body, 'status');
   const statusValue = statusProvided ? normaliseInterventionStatus(body.status, null) : undefined;
@@ -52532,22 +52884,22 @@ app.patch('/api/interventions/:id', async (req, res) => {
       metadataChanged = true;
     }
 
-    let plannedCostInt = null;
+    let plannedCostAmount = null;
     if (costProvided) {
       if (plannedCostValue !== null) {
-        plannedCostInt = Math.round(plannedCostValue);
-        if (!Number.isFinite(plannedCostInt) || plannedCostInt < 0 || plannedCostInt > 999999) {
+        plannedCostAmount = plannedCostValue;
+        if (!Number.isFinite(plannedCostAmount) || plannedCostAmount < 0 || plannedCostAmount > 999999) {
           return res.status(422).json({ error: 'invalid_cost_range', message: 'Cost must be between 0 and 999999.' });
         }
       }
       updates.push('budget_amount = ?');
-      params.push(plannedCostInt === null ? null : plannedCostInt);
+      params.push(plannedCostAmount === null ? null : plannedCostAmount);
       updates.push('intervention_cost = ?');
-      params.push(plannedCostInt === null ? null : plannedCostInt);
-      if (plannedCostInt === null) {
+      params.push(plannedCostAmount === null ? null : plannedCostAmount);
+      if (plannedCostAmount === null) {
         delete metadata.cost;
       } else {
-        metadata.cost = plannedCostInt;
+        metadata.cost = plannedCostAmount;
       }
       metadataChanged = true;
     }
@@ -52679,7 +53031,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
     }
     if (costProvided) {
       esdcPayload.interventionCost =
-        plannedCostInt === null || typeof plannedCostInt === 'undefined' ? null : plannedCostInt;
+        plannedCostAmount === null || typeof plannedCostAmount === 'undefined' ? null : plannedCostAmount;
     }
     if (Object.prototype.hasOwnProperty.call(body, 'outcome')) {
       const trimmedOutcomeUpdate = typeof body.outcome === 'string' ? body.outcome.trim() : '';
@@ -53061,21 +53413,17 @@ app.post('/api/interventions/:id/close', async (req, res) => {
     return res.status(422).json({ error: 'invalid_outcome', message: 'Outcome must be one of 1–6.' });
   }
 
-  const parseNumeric = value => {
-    if (value === null || typeof value === 'undefined' || value === '') return null;
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric : NaN;
-  };
-  const actualAmountValue = parseNumeric(actualAmount);
-  if (Number.isNaN(actualAmountValue)) {
-    return res.status(422).json({ error: 'invalid_actual_amount', message: 'Actual amount must be a number.' });
+  const actualAmountInput = validateCurrencyAmountInput(actualAmount);
+  if (actualAmountInput.error === 'invalid') {
+    return res.status(422).json({ error: 'invalid_actual_amount', message: 'Actual amount must be a valid dollar amount.' });
   }
-  if (actualAmountValue !== null) {
-    const actualInt = Math.round(actualAmountValue);
-    if (!Number.isFinite(actualInt) || actualInt < 0 || actualInt > 999999) {
-      return res.status(422).json({ error: 'invalid_actual_amount', message: 'Actual amount must be a whole number between 0 and 999999.' });
-    }
+  if (actualAmountInput.error) {
+    return res.status(422).json({
+      error: 'invalid_actual_amount',
+      message: 'Actual amount must be between 0 and 999999 with no more than two decimal places.'
+    });
   }
+  const actualAmountValue = actualAmountInput.value;
 
   const normaliseDate = raw => {
     if (!raw && raw !== 0) return null;
@@ -53133,8 +53481,7 @@ app.post('/api/interventions/:id/close', async (req, res) => {
     }
     metadata.outcome = trimmedOutcomeClose;
     if (Number.isFinite(actualAmountValue)) {
-      const actualInt = Math.round(actualAmountValue);
-      metadata.actualAmount = actualInt;
+      metadata.actualAmount = actualAmountValue;
       metadata.compliance.finance = 'ok';
     } else {
       delete metadata.actualAmount;
@@ -53150,7 +53497,7 @@ app.post('/api/interventions/:id/close', async (req, res) => {
       interventionEndDate: completionDateValue || esdcExisting.interventionEndDate || null,
       interventionCost:
         Number.isFinite(actualAmountValue) && actualAmountValue !== null
-          ? Math.round(actualAmountValue)
+          ? actualAmountValue
           : esdcExisting.interventionCost ?? null,
     });
 
@@ -53167,7 +53514,7 @@ app.post('/api/interventions/:id/close', async (req, res) => {
       statusPersistence.legacyStatus,
       statusPersistence.deliveryStatus,
       trimmedOutcomeClose,
-      Number.isFinite(actualAmountValue) ? Math.round(actualAmountValue) : null,
+      Number.isFinite(actualAmountValue) ? actualAmountValue : null,
     ];
 
     Object.keys(metadata).forEach(key => {
@@ -53215,7 +53562,7 @@ app.post('/api/interventions/:id/close', async (req, res) => {
           interventionRow: updatedRow,
           actorUserId,
           potId: historicalBackloadPotId,
-          actualAmount: Number.isFinite(actualAmountValue) ? Math.round(actualAmountValue) : null,
+          actualAmount: Number.isFinite(actualAmountValue) ? actualAmountValue : null,
           postingContext: payload.postingContext || metadata.postingContext || null,
           transactionDate: completionDateValue || payload.endDate || payload.startDate || null,
           interventionTitle: payload.title || metadata.title || null,
@@ -57465,6 +57812,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
     let attachmentRows = [];
     let decisionLetterTokensByWorkflowId = new Map();
     const decisionLetterDocs = [];
+    let denialLetterCompletionResult = null;
     const letterDocTypes = new Set(['assessment_approval_letter', 'assessment_denial_letter']);
     const requestedInterventionId = normalisePositiveInteger(interventionId);
     if (attachmentSpecs.length) {
@@ -58212,6 +58560,16 @@ const handlePostCaseSecureMessage = async (req, res) => {
         console.warn('[decision-letter] missing application id; skipping document insert');
       }
     }
+    if (
+      !requestedInterventionId &&
+      caseApplicationId &&
+      decisionLetterDocs.some(letter => letter?.docType === 'assessment_denial_letter')
+    ) {
+      denialLetterCompletionResult = await completeDeniedApplicationAfterDenialLetterSent({
+        caseId,
+        applicationId: caseApplicationId,
+      });
+    }
     if (cfaDraft) {
       const staffProfileId = resolveActiveStaffProfileId(req);
       await pool.query(
@@ -58317,7 +58675,13 @@ const handlePostCaseSecureMessage = async (req, res) => {
     } catch (notifyErr) {
       console.error('[events] staff_secure_message_sent emit failed', notifyErr?.message || notifyErr);
     }
-    res.status(201).json({ message: 'Message sent', messageId: result.insertId });
+    res.status(201).json({
+      message: 'Message sent',
+      messageId: result.insertId,
+      ...(denialLetterCompletionResult
+        ? { denialLetterCompletion: denialLetterCompletionResult }
+        : {})
+    });
   } catch (e) {
     console.error('POST /api/cases/:id/messages failed:', e.message);
     res.status(500).json({ error: 'failed_to_send_message' });
@@ -82377,16 +82741,17 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       bumpApplicationRowVersion = true;
     }
 
-    const shouldSeedDeniedReporting =
-      applicationStatusToPersist === 'rejected' &&
-      beforeApplicationStatus !== 'rejected' &&
+    const shouldSeedApplicationReportingArtifacts =
+      ['rejected', 'withdrawn'].includes(applicationStatusToPersist) &&
+      applicationStatusToPersist !== beforeApplicationStatus &&
       applicationId;
 
-    if (shouldSeedDeniedReporting) {
+    if (shouldSeedApplicationReportingArtifacts) {
       deniedReportingSeedResult = await syncDeniedReportingArtifacts(conn, {
         caseId,
         applicationId,
-        denialDate: new Date(),
+        reportingDate: new Date(),
+        reportingTrigger: applicationStatusToPersist === 'withdrawn' ? 'withdrawal' : 'denial',
       });
     }
 

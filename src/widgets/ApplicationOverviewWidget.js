@@ -722,11 +722,15 @@ const ApplicationOverviewWidget = ({
     }
   }, [application_id]);
   const watchlistHitSummary = watchlistHitDetails?.summary || null;
-  const isReportingOnlyDenied = Boolean(
+  const isReportingOnlyApplication = Boolean(
     caseData?.caseContext?.reportingOnlyDenied ||
     caseData?.caseContext?.reportingOnlyDeniedIneligible ||
+    caseData?.caseContext?.reportingOnlyWithdrawal ||
     caseData?.caseContext?.reportingCorrectionAllowed
   );
+  const reportingApplicationLabel = caseData?.caseContext?.reportingOnlyWithdrawal
+    ? 'withdrawn application'
+    : 'denied application';
   const ilmpCompliance = caseData?.compliance?.ilmp || null;
   const ilmpStatus = ilmpCompliance?.status || 'pending';
   const ilmpStatusType = ilmpStatus === 'clean'
@@ -2100,7 +2104,7 @@ const ApplicationOverviewWidget = ({
   if (assignedStaffValue) overviewItems.push({ label: 'Case Manager', value: assignedStaffValue });
   if (checklistValue !== null) overviewItems.push({ label: 'Document Checklist', value: checklistValue });
   overviewItems.push({ label: 'Docs Requested', value: docsRequestedContent });
-  if (isReportingOnlyDenied) {
+  if (isReportingOnlyApplication) {
     overviewItems.push({
       label: 'ESDC Reporting',
       value: <StatusIndicator type={ilmpStatusType}>{ilmpStatusLabel}</StatusIndicator>
@@ -2237,11 +2241,11 @@ const ApplicationOverviewWidget = ({
             </Box>
           </Alert>
         ) : null}
-        {isReportingOnlyDenied && (
+        {isReportingOnlyApplication && (
           <Alert type={ilmpStatus === 'blocked' ? 'error' : ilmpStatus === 'warning' ? 'warning' : ilmpStatus === 'clean' ? 'success' : 'info'}>
             <SpaceBetween size="xs">
               <Box>
-                This denied application is retained for ILMP reporting. Fix missing reporting data in the Application Form widget; corrections revalidate automatically and blocked records stay out of normal casework queues.
+                This {reportingApplicationLabel} is retained for ILMP reporting. Fix missing reporting data in the Application Form widget; corrections revalidate automatically and blocked records stay out of normal casework queues.
               </Box>
               {ilmpMessages.length > 0 && (
                 <Box as="ul" padding={{ left: 'm' }}>

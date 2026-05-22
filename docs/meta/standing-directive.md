@@ -11,6 +11,7 @@ This repo uses `docs/` as persistent project memory. Future agents do not have h
 - Verify important claims against source code, migrations, config, package scripts, tests, or live database evidence before acting on them.
 - Maintain docs as part of normal task completion when behavior, schema, workflows, architecture, operations, or active project state changes.
 - Keep documentation concise, operational, and useful for a future agent starting without prior chat history.
+- In exploratory conversation with Bill, use dialog mode: write natural English in readable paragraphs, avoid formatting-heavy status-report style unless the task genuinely calls for it, and keep the thread focused on one main point at a time.
 - Revise, merge, archive, or delete stale/conflicting docs. Do not preserve obsolete wording just because it already exists.
 - Sensitive files may be inspected or edited only when genuinely needed for the task and allowed by the current session's tool policy.
 - Keep credentials, secrets, tokens, and unnecessary sensitive personal data out of docs.

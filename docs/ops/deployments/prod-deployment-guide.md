@@ -10,6 +10,7 @@ This guide records the PROD safety sequence. The active app artifact rollout is 
 ## Before You Start
 
 - Work from the WSL admin repo: `/home/bill/ISET/admin-dashboard`.
+- Before any PROD app deploy with user-visible changes, update `docs/meta/next-release-notes-log.md` so the landing-page release notes match the release being shipped. The public page must show the standard `What changed`, `Known Bugs`, and `What's Coming` sections; `What changed` must contain expandable groups for the three most recent release packages, newest first, and must not use `Earlier changes`.
 - Do not use old `X:\ISET` / `/mnt/x/ISET` checkout instructions for PROD. They were superseded by the WSL migration and are not a valid way to recover deploy safety.
 - PROD plan/schema/data/app/smoke helpers are WSL-safe through `path:deploy`. The PROD app branch builds and packages the WSL admin repo, sibling portal repo, and sibling `shared` tree, uploads fixed `*-latest.zip` artifacts to `nwac-prod-artifacts`, then waits for the PROD ASG refresh.
 - Prefer the PATH orchestrator from `admin-dashboard`; it wraps schema/data/app rollout/smoke into one release command.

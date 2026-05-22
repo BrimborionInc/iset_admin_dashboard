@@ -18,7 +18,13 @@ import {
 } from "@cloudscape-design/components";
 import { apiFetch } from "../../../../auth/apiClient.js";
 import useCurrentUser from "../../../../hooks/useCurrentUser.js";
-import { formatCurrencyDisplay, getCurrencyInputDisplayValue } from "../../../../utils/currencyFormat.js";
+import {
+  formatCurrencyDisplay,
+  getCurrencyInputDisplayValue,
+  hasCurrencyPrecision,
+  normalizeCurrencyAmount,
+  parseCurrencyAmount,
+} from "../../../../utils/currencyFormat.js";
 import {
   formatInterventionStatusLabel,
   INTERVENTION_OPEN_STATUSES,
@@ -47,6 +53,7 @@ const CLOSE_STATUS_OPTIONS = [
 
 const IN_PROGRESS_OUTCOME = "2";
 const DEFAULT_CLOSED_OUTCOME = "1";
+const CURRENCY_AMOUNT_RANGE_MESSAGE = "must be between 0 and 999999 with no more than two decimal places.";
 const POSTING_CONTEXT_OPTIONS = [
   { value: "external", label: "External (region/PTMA)" },
   { value: "internal", label: "Internal (NWAC)" },
@@ -187,6 +194,21 @@ const normaliseFormNumbers = value =>
 
 const normaliseInterventionText = value => (typeof value === "string" ? value : "");
 
+const parseOptionalCurrencyAmount = value => {
+  if (value === null || typeof value === "undefined" || value === "") return null;
+  const numeric = parseCurrencyAmount(value);
+  if (!Number.isFinite(numeric)) return NaN;
+  return normalizeCurrencyAmount(numeric);
+};
+
+const isValidOptionalCurrencyAmount = value => {
+  const numeric = parseOptionalCurrencyAmount(value);
+  return (
+    numeric === null ||
+    (Number.isFinite(numeric) && numeric >= 0 && numeric <= 999999 && hasCurrencyPrecision(value))
+  );
+};
+
 const resolveModalInterventionState = (record, fallbackStatus = "approved") =>
   resolveInterventionStateFields(record, { fallbackStatus });
 
@@ -276,7 +298,7 @@ const buildCloseForm = intervention => {
   for (const candidate of actualCandidates) {
     if (candidate === null || typeof candidate === "undefined") continue;
     if (typeof candidate === "string" && !candidate.trim()) continue;
-    const numeric = Number(candidate);
+    const numeric = parseCurrencyAmount(candidate);
     if (Number.isFinite(numeric)) {
       actualAmount = String(numeric);
       break;
@@ -796,16 +818,12 @@ const InterventionModal = ({
         : "completed";
     const actualAmountRaw = (closeForm.actualAmount || "").trim();
     if (actualAmountRaw) {
-      const numeric = Number(actualAmountRaw);
-      if (!Number.isFinite(numeric)) {
-        setError("Actual amount must be a whole number between 0 and 999999.");
-        return;
-      }
-      if (!Number.isInteger(numeric) || numeric < 0 || numeric > 999999) {
-        setError("Actual amount must be a whole number between 0 and 999999.");
+      if (!isValidOptionalCurrencyAmount(actualAmountRaw)) {
+        setError(`Actual cost ${CURRENCY_AMOUNT_RANGE_MESSAGE}.`);
         return;
       }
     }
+    const actualAmountValue = parseOptionalCurrencyAmount(actualAmountRaw);
     if (!closeForm.completionDate) {
       setError("Completion date is required to close this intervention.");
       return;
@@ -817,7 +835,7 @@ const InterventionModal = ({
         status: statusValue,
         deliveryStatus: statusValue,
         outcome: outcomeValue,
-        actualAmount: actualAmountRaw ? Number(actualAmountRaw) : null,
+        actualAmount: actualAmountValue,
         completionDate: closeForm.completionDate || null,
         notes: form.notes?.trim() ? form.notes.trim() : null,
       });
@@ -913,12 +931,12 @@ const InterventionModal = ({
       }
     }
 
-    const costValue = form.cost === "" ? null : Number(form.cost.replace(/\s+/g, ""));
+    const costValue = parseOptionalCurrencyAmount(form.cost);
     if (form.cost !== "" && !Number.isFinite(costValue)) {
-      errors.cost = "Cost must be a number.";
+      errors.cost = "Cost must be a valid dollar amount.";
     }
-    if (costValue !== null && (costValue < 0 || costValue > 999999 || !Number.isInteger(costValue))) {
-      errors.cost = "Cost must be a whole number between 0 and 999999.";
+    if (!errors.cost && !isValidOptionalCurrencyAmount(form.cost)) {
+      errors.cost = `Cost ${CURRENCY_AMOUNT_RANGE_MESSAGE}.`;
     }
     if (Object.keys(errors).length) {
       setFieldErrors(errors);
@@ -1170,7 +1188,7 @@ const InterventionModal = ({
               </FormField>
               <FormField
                 label="Actual cost"
-                description="Whole dollars 0–999999. Leave blank if not applicable."
+                description="Dollars 0-999999, up to two decimals. Leave blank if not applicable."
               >
                 <Input
                   value={getCurrencyInputDisplayValue(closeForm.actualAmount, isActualCostFocused)}
@@ -1445,7 +1463,7 @@ const InterventionModal = ({
                   onChange={({ detail }) => handleChange("cost", detail.value)}
                   onFocus={() => setIsCostFocused(true)}
                   onBlur={() => setIsCostFocused(false)}
-                  placeholder="e.g. 42000"
+                  placeholder="e.g. 42000.00"
                   spellcheck={false}
                   readOnly={isFormReadOnly}
                 />

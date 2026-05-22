@@ -31,7 +31,12 @@ import {
   getDefaultBackloadInterventionStatus,
   normalizeActionPlanLifecycleStatus,
 } from "../../../../utils/backloadInterventionRules.js";
-import { getCurrencyInputDisplayValue } from "../../../../utils/currencyFormat.js";
+import {
+  getCurrencyInputDisplayValue,
+  hasCurrencyPrecision,
+  normalizeCurrencyAmount,
+  parseCurrencyAmount,
+} from "../../../../utils/currencyFormat.js";
 import { resolveInterventionStateFields } from "../../../../utils/interventionStatus.js";
 import { useCaseWorkspace } from "../CaseWorkspaceContext.jsx";
 
@@ -68,6 +73,8 @@ const NOC_VERSION_OPTIONS = [
   { value: "2016", label: "2016" },
   { value: "2021", label: "2021" },
 ];
+
+const CURRENCY_AMOUNT_RANGE_MESSAGE = "must be between 0 and 999999 with no more than two decimal places.";
 
 const pickDefaultNocVersion = options => {
   if (!Array.isArray(options) || options.length === 0) return "";
@@ -185,12 +192,27 @@ const stripCodePrefix = value =>
     .trim();
 
 const formatCurrencyAmount = amount => {
-  const numeric = Number(amount);
+  const numeric = parseCurrencyAmount(amount);
   if (!Number.isFinite(numeric)) return "—";
   return `$${numeric.toLocaleString("en-CA", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+};
+
+const parseOptionalCurrencyAmount = value => {
+  if (value === null || typeof value === "undefined" || value === "") return null;
+  const numeric = parseCurrencyAmount(value);
+  if (!Number.isFinite(numeric)) return NaN;
+  return normalizeCurrencyAmount(numeric);
+};
+
+const isValidOptionalCurrencyAmount = value => {
+  const numeric = parseOptionalCurrencyAmount(value);
+  return (
+    numeric === null ||
+    (Number.isFinite(numeric) && numeric >= 0 && numeric <= 999999 && hasCurrencyPrecision(value))
+  );
 };
 
 const resolveExistingInterventionState = status =>
@@ -388,7 +410,7 @@ const ExistingInterventionModal = ({
 
   const costLinesTotal = useMemo(() => {
     return form.costLines.reduce((sum, line) => {
-      const amount = Number(line.amount);
+      const amount = parseCurrencyAmount(line.amount);
       return sum + (Number.isFinite(amount) ? amount : 0);
     }, 0);
   }, [form.costLines]);
@@ -570,9 +592,13 @@ const ExistingInterventionModal = ({
     if (!costLineDraft.type) {
       nextErrors.type = "Payment type is required.";
     }
-    const amountValue = Number(costLineDraft.amount);
-    if (costLineDraft.amount === "" || !Number.isFinite(amountValue)) {
-      nextErrors.amount = "Amount must be numeric.";
+    const amountValue = parseOptionalCurrencyAmount(costLineDraft.amount);
+    if (
+      costLineDraft.amount === "" ||
+      !Number.isFinite(amountValue) ||
+      !isValidOptionalCurrencyAmount(costLineDraft.amount)
+    ) {
+      nextErrors.amount = `Amount ${CURRENCY_AMOUNT_RANGE_MESSAGE}.`;
     }
     const recurrenceOccurrencesValue =
       costLineDraft.recurrenceOccurrences === ""
@@ -587,12 +613,13 @@ const ExistingInterventionModal = ({
     const recurrenceAmountValue =
       costLineDraft.recurrenceAmountPerPeriod === ""
         ? null
-        : Number(costLineDraft.recurrenceAmountPerPeriod);
+        : parseOptionalCurrencyAmount(costLineDraft.recurrenceAmountPerPeriod);
     if (
       costLineDraft.recurrenceAmountPerPeriod !== "" &&
-      !Number.isFinite(recurrenceAmountValue)
+      (!Number.isFinite(recurrenceAmountValue) ||
+        !isValidOptionalCurrencyAmount(costLineDraft.recurrenceAmountPerPeriod))
     ) {
-      nextErrors.recurrenceAmountPerPeriod = "Recurring amount must be numeric.";
+      nextErrors.recurrenceAmountPerPeriod = `Recurring amount ${CURRENCY_AMOUNT_RANGE_MESSAGE}.`;
     }
     if (
       costLineDraft.recurrenceStartDate &&
@@ -613,14 +640,14 @@ const ExistingInterventionModal = ({
         payeeType: costLineDraft.payeeType || "",
         payeeName: costLineDraft.payeeName || "",
         payeeReference: costLineDraft.payeeReference || "",
-        amount: costLineDraft.amount,
+        amount: String(amountValue),
         notes: costLineDraft.notes || "",
         recurrenceEnabled: Boolean(costLineDraft.recurrenceEnabled),
         recurrenceStartDate: costLineDraft.recurrenceEnabled ? costLineDraft.recurrenceStartDate || "" : "",
         recurrenceEndDate: costLineDraft.recurrenceEnabled ? costLineDraft.recurrenceEndDate || "" : "",
         recurrenceOccurrences: costLineDraft.recurrenceEnabled ? costLineDraft.recurrenceOccurrences || "" : "",
         recurrenceAmountPerPeriod:
-          costLineDraft.recurrenceEnabled ? costLineDraft.recurrenceAmountPerPeriod || "" : "",
+          costLineDraft.recurrenceEnabled && recurrenceAmountValue !== null ? String(recurrenceAmountValue) : "",
       };
       const nextLines = editingCostLineId
         ? current.costLines.map(line => (line.id === editingCostLineId ? nextLine : line))
@@ -768,13 +795,22 @@ const ExistingInterventionModal = ({
     } else if (form.deliveryMode !== "in_house" && !form.institution.trim()) {
       nextErrors.institution = "Delivery partner / provider is required when using external delivery.";
     }
+    if (!isValidOptionalCurrencyAmount(form.plannedCost)) {
+      nextErrors.plannedCost = `Planned cost ${CURRENCY_AMOUNT_RANGE_MESSAGE}.`;
+    }
+    if (!isValidOptionalCurrencyAmount(form.approvedAmount)) {
+      nextErrors.approvedAmount = `Approved amount ${CURRENCY_AMOUNT_RANGE_MESSAGE}.`;
+    }
+    if (!isValidOptionalCurrencyAmount(form.actualAmount)) {
+      nextErrors.actualAmount = `Actual amount ${CURRENCY_AMOUNT_RANGE_MESSAGE}.`;
+    }
     const invalidCostLine = form.costLines.find(line => {
       if (!line.type && !line.amount && !line.payeeName && !line.notes) return false;
-      const amount = Number(line.amount);
-      return !line.type || !Number.isFinite(amount);
+      const amount = parseOptionalCurrencyAmount(line.amount);
+      return !line.type || !Number.isFinite(amount) || !isValidOptionalCurrencyAmount(line.amount);
     });
     if (invalidCostLine) {
-      nextErrors.costLines = "Each payment line needs a payment type and a numeric amount.";
+      nextErrors.costLines = "Each payment line needs a payment type and a valid amount with no more than two decimal places.";
     }
     if (Object.keys(nextErrors).length) {
       setFieldErrors(nextErrors);
@@ -799,7 +835,7 @@ const ExistingInterventionModal = ({
       .map(line => ({
         id: line.id,
         type: line.type || null,
-        amount: line.amount === "" ? null : Number(line.amount),
+        amount: parseOptionalCurrencyAmount(line.amount),
         notes: line.notes.trim() || null,
         payee: {
           type: line.payeeType || null,
@@ -823,12 +859,12 @@ const ExistingInterventionModal = ({
                 amountPerPeriod:
                   line.recurrenceAmountPerPeriod === ""
                     ? null
-                    : Number(line.recurrenceAmountPerPeriod),
+                    : parseOptionalCurrencyAmount(line.recurrenceAmountPerPeriod),
               }
             : null,
       }));
     const fallbackPlannedCost =
-      form.plannedCost === "" ? null : Number(form.plannedCost);
+      form.plannedCost === "" ? null : parseOptionalCurrencyAmount(form.plannedCost);
     const plannedCostValue =
       normalizedCostLines.length && Number.isFinite(costLinesTotal) && costLinesTotal > 0
         ? costLinesTotal
@@ -847,8 +883,8 @@ const ExistingInterventionModal = ({
         durationDays: form.durationDays === "" ? null : Number(form.durationDays),
         outcome: isClosed ? form.outcome || null : null,
         cost: Number.isFinite(plannedCostValue) ? plannedCostValue : null,
-        approvedAmount: form.approvedAmount === "" ? null : Number(form.approvedAmount),
-        actualAmount: form.actualAmount === "" ? null : Number(form.actualAmount),
+        approvedAmount: form.approvedAmount === "" ? null : parseOptionalCurrencyAmount(form.approvedAmount),
+        actualAmount: form.actualAmount === "" ? null : parseOptionalCurrencyAmount(form.actualAmount),
         postingContext: form.postingContext || "external",
         deliveryMode: form.deliveryMode === "in_house" ? "in_house" : "partner",
         institution: form.institution.trim() || null,
@@ -1154,36 +1190,36 @@ const ExistingInterventionModal = ({
             <SpaceBetween size="s">
               <Box fontWeight="bold">Funding and cost</Box>
               <ColumnLayout columns={3} variant="text-grid">
-              <FormField label="Planned cost (optional)">
+              <FormField label="Planned cost (optional)" errorText={fieldErrors.plannedCost}>
                 <Input
                   value={getCurrencyInputDisplayValue(form.plannedCost, focusedCurrencyFields.plannedCost)}
                   onChange={({ detail }) => handleFieldChange("plannedCost", detail.value)}
                   onFocus={() => setCurrencyFieldFocused("plannedCost", true)}
                   onBlur={() => setCurrencyFieldFocused("plannedCost", false)}
                   inputMode="decimal"
-                  placeholder="Whole dollars"
+                  placeholder="e.g. 4200.00"
                   spellcheck={false}
                 />
               </FormField>
-              <FormField label="Approved amount (optional)">
+              <FormField label="Approved amount (optional)" errorText={fieldErrors.approvedAmount}>
                 <Input
                   value={getCurrencyInputDisplayValue(form.approvedAmount, focusedCurrencyFields.approvedAmount)}
                   onChange={({ detail }) => handleFieldChange("approvedAmount", detail.value)}
                   onFocus={() => setCurrencyFieldFocused("approvedAmount", true)}
                   onBlur={() => setCurrencyFieldFocused("approvedAmount", false)}
                   inputMode="decimal"
-                  placeholder="Whole dollars"
+                  placeholder="e.g. 4200.00"
                   spellcheck={false}
                 />
               </FormField>
-              <FormField label="Actual amount (optional)">
+              <FormField label="Actual amount (optional)" errorText={fieldErrors.actualAmount}>
                 <Input
                   value={getCurrencyInputDisplayValue(form.actualAmount, focusedCurrencyFields.actualAmount)}
                   onChange={({ detail }) => handleFieldChange("actualAmount", detail.value)}
                   onFocus={() => setCurrencyFieldFocused("actualAmount", true)}
                   onBlur={() => setCurrencyFieldFocused("actualAmount", false)}
                   inputMode="decimal"
-                  placeholder="Whole dollars"
+                  placeholder="e.g. 4200.00"
                   spellcheck={false}
                 />
               </FormField>
@@ -1267,7 +1303,7 @@ const ExistingInterventionModal = ({
                 onFocus={() => setCurrencyFieldFocused("costLineAmount", true)}
                 onBlur={() => setCurrencyFieldFocused("costLineAmount", false)}
                 inputMode="decimal"
-                placeholder="Whole dollars"
+                placeholder="e.g. 4200.00"
                 spellcheck={false}
               />
             </FormField>

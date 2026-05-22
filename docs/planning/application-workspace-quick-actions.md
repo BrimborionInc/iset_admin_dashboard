@@ -65,6 +65,7 @@ Define non-layout quick actions for the Application Workspace header, including 
 - Status gating: Available from `submitted`, `in_review`, `docs_requested`, `pending_approval`, `closure_notice`, and `on_hold`.
 - Backend endpoint + payload: Set application status to `withdrawn`; lifecycle remains closed through the status persistence helper.
 - Confirmation/modal requirements: Confirm modal with required note.
+- Side effects: Creates or updates the reporting-only ILMP structure: one closed action plan named `Actions leading to withdrawal` and completed `Career Research and Exploration` plus `Employment Counselling` interventions dated to the withdrawal.
 - Escalation handling: Allow withdrawing with an open escalation, but ensure the escalation queue is resolved/closed to avoid orphaned items.
 - Escalation handling detail: If an escalation is open, auto-resolve it and attach the withdrawal note as the resolution note.
 - Intent: applicant has withdrawn or is no longer pursuing the application; display as `Withdrawn` in application status surfaces.

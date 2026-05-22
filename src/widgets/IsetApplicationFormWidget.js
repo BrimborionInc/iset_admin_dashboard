@@ -1538,8 +1538,12 @@ const IsetApplicationFormWidget = ({
   const reportingCorrectionAllowed = Boolean(
     reportingCaseContext?.reportingOnlyDenied ||
     reportingCaseContext?.reportingOnlyDeniedIneligible ||
+    reportingCaseContext?.reportingOnlyWithdrawal ||
     reportingCaseContext?.reportingCorrectionAllowed
   );
+  const reportingApplicationLabel = reportingCaseContext?.reportingOnlyWithdrawal
+    ? 'withdrawn application record'
+    : 'denied application record';
   const isDecisionFinal =
     Boolean(resolvedApplicationState.decisionOutcome) ||
     ['decision_ready', 'completed', 'closed', 'archived'].includes(decisionStatusSource.toLowerCase());
@@ -1548,12 +1552,12 @@ const IsetApplicationFormWidget = ({
   const reportingStatusMessage = reportingCorrectionAllowed
     ? (
       reportingComplianceStatus === 'clean'
-        ? 'This denied application record is valid for ILMP reporting and will flow into the ESDC queue automatically.'
+        ? `This ${reportingApplicationLabel} is valid for ILMP reporting and will flow into the ESDC queue automatically.`
         : reportingComplianceStatus === 'blocked'
-          ? 'This denied application record is blocked from ILMP reporting until the missing or invalid data below is corrected.'
+          ? `This ${reportingApplicationLabel} is blocked from ILMP reporting until the missing or invalid data below is corrected.`
           : reportingComplianceStatus === 'warning'
-            ? 'This denied application record still needs ILMP review before it can be included in ESDC reporting.'
-            : 'This denied application record stays editable here so ILMP reporting data can be corrected without opening Case Workspace.'
+            ? `This ${reportingApplicationLabel} still needs ILMP review before it can be included in ESDC reporting.`
+            : `This ${reportingApplicationLabel} stays editable here so ILMP reporting data can be corrected without opening Case Workspace.`
     )
     : '';
   const activeLock = useMemo(() => {
