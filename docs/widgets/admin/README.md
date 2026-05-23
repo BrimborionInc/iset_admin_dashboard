@@ -47,6 +47,7 @@ Purpose: Index of widget-level docs for the initial workflow tranche.
 - `docs/widgets/admin/finance-payment-packet-queue-widget.md`
 - `docs/widgets/admin/finance-payment-packet-detail-widget.md`
 - `docs/widgets/admin/finance-payment-communications-widget.md`
+- `docs/widgets/admin/finance-packet-email-preview-widget.md`
 - `docs/widgets/admin/finance-payment-sla-widget.md`
 
 ## Next Step

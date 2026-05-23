@@ -1,9 +1,9 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-05-22T17:49:16.541Z",
-  "releaseId": "20260522-admin-followup",
-  "releaseLabel": "Release 20260522-admin-followup",
-  "releaseDateEn": "22nd May 2026",
-  "releaseDateFr": "22 mai 2026",
+  "generatedAt": "2026-05-23T12:59:33.975Z",
+  "releaseId": "",
+  "releaseLabel": "Current build",
+  "releaseDateEn": "23rd May 2026",
+  "releaseDateFr": "23 mai 2026",
   "en": {
     "sectionEyebrow": "Optional reading",
     "description": "",
@@ -12,16 +12,18 @@ const publicReleaseNotes = {
       "Fixed a bug where some denied applications could still appear in active application lists after the denial letter was sent.",
       "Improved denied and withdrawn application reporting records so ILMP validation has the required agreement and education fields.",
       "Withdrawn applications now create the reporting-only action plan and two completed interventions needed for ILMP reporting.",
-      "Intervention planned-cost fields now accept normal dollars-and-cents amounts."
+      "Intervention planned-cost fields now accept normal dollars-and-cents amounts.",
+      "Supporting Documents uploads now work on case files where an older application has an unsafe applicant-account link."
     ],
     "featurePackages": [
       {
-        "title": "Release 20260522-admin-followup",
+        "title": "Release 20260522-prod-document-upload-scope",
         "items": [
           "Fixed a bug where some denied applications could still appear in active application lists after the denial letter was sent.",
           "Improved denied application reporting records so ILMP validation has the required agreement and education fields.",
           "Withdrawn applications now create the reporting-only action plan and two completed interventions needed for ILMP reporting.",
-          "Intervention planned-cost fields now accept normal dollars-and-cents amounts."
+          "Intervention planned-cost fields now accept normal dollars-and-cents amounts.",
+          "Supporting Documents uploads now work on case files where an older application has an unsafe applicant-account link."
         ]
       },
       {
@@ -57,16 +59,18 @@ const publicReleaseNotes = {
       "Correction d'un probleme ou certaines demandes refusees pouvaient encore apparaitre dans les listes actives apres l'envoi de la lettre de refus.",
       "Amelioration des dossiers de reporting pour les demandes refusees et retirees afin que la validation ILMP ait les champs requis.",
       "Les demandes retirees creent maintenant le plan d'action reserve au reporting et les deux interventions completees requis pour le reporting ILMP.",
-      "Les champs de cout prevu des interventions acceptent maintenant les montants courants en dollars et cents."
+      "Les champs de cout prevu des interventions acceptent maintenant les montants courants en dollars et cents.",
+      "Les televersements dans Supporting Documents fonctionnent maintenant pour les dossiers ou une ancienne demande a un lien de compte client non securitaire."
     ],
     "featurePackages": [
       {
-        "title": "Release 20260522-admin-followup",
+        "title": "Release 20260522-prod-document-upload-scope",
         "items": [
           "Correction d'un probleme ou certaines demandes refusees pouvaient encore apparaitre dans les listes actives apres l'envoi de la lettre de refus.",
           "Amelioration des dossiers de reporting des demandes refusees afin que la validation ILMP ait les champs d'entente et d'education requis.",
           "Les demandes retirees creent maintenant le plan d'action reserve au reporting et les deux interventions completees requis pour le reporting ILMP.",
-          "Les champs de cout prevu des interventions acceptent maintenant les montants courants en dollars et cents."
+          "Les champs de cout prevu des interventions acceptent maintenant les montants courants en dollars et cents.",
+          "Les televersements dans Supporting Documents fonctionnent maintenant pour les dossiers ou une ancienne demande a un lien de compte client non securitaire."
         ]
       },
       {

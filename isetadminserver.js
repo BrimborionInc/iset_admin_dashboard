@@ -3009,7 +3009,14 @@ const loadDocumentBuffer = async docRow => {
   if (!docRow?.file_path) return null;
   const { presignGet, DRIVER } = require('../ISET-intake/s3Provider');
   if (DRIVER !== 's3' || typeof presignGet !== 'function') {
-    throw new Error('s3_download_unavailable');
+    const normalizedPath = String(docRow.file_path || '').replace(/\\/g, '/').replace(/^\/+/, '');
+    const candidatePath = normalizedPath.startsWith('uploads/')
+      ? path.resolve(INTAKE_ROOT, normalizedPath)
+      : path.resolve(INTAKE_UPLOADS_ROOT, normalizedPath);
+    if (candidatePath !== INTAKE_UPLOADS_ROOT && !candidatePath.startsWith(`${INTAKE_UPLOADS_ROOT}${path.sep}`)) {
+      throw new Error('local_document_path_out_of_scope');
+    }
+    return fs.promises.readFile(candidatePath);
   }
   const presigned = await presignGet({ key: docRow.file_path });
   const url = presigned?.url || presigned?.signedUrl;
@@ -22519,6 +22526,44 @@ const authenticatedStaffRouteMiddleware = authnMiddlewareFactory
   ? [authnMiddlewareFactory(), requireAuthenticatedStaff, staffProfileMiddleware]
   : [(_req, res) => res.status(503).json({ error: 'auth_unavailable' })];
 
+// Signed finance email bundle links must remain usable by Finance recipients
+// without a PATH staff session, so this route is intentionally mounted before
+// the global /api staff-auth middleware below.
+app.get('/api/finance/payment-packets/:id/document-bundle', async (req, res) => {
+  const packetId = parsePaymentPacketId(req.params.id);
+  if (!Number.isFinite(packetId)) {
+    return res.status(400).json({ error: 'invalid_payment_packet_id' });
+  }
+  const verification = verifyPaymentPacketBundleToken({
+    token: req.query?.token,
+    packetId,
+  });
+  if (!verification.ok) {
+    const status = verification.error === 'payment_packet_bundle_token_expired' ? 410 : 403;
+    return res.status(status).json({ error: verification.error });
+  }
+  try {
+    const [[packetRow]] = await pool.query(
+      'SELECT id FROM payment_packet WHERE id = ? LIMIT 1',
+      [packetId]
+    );
+    if (!packetRow) {
+      return res.status(404).json({ error: 'payment_packet_not_found' });
+    }
+    const bundle = await buildPaymentPacketEvidenceBundle({ packetId, connection: pool });
+    if (!bundle?.buffer?.length) {
+      return res.status(404).json({ error: 'payment_packet_bundle_empty' });
+    }
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', buildAttachmentContentDisposition(bundle.fileName));
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    return res.end(bundle.buffer);
+  } catch (err) {
+    console.error('[payments] failed to download payment packet document bundle', err);
+    return res.status(500).json({ error: 'failed_to_download_payment_packet_bundle' });
+  }
+});
+
 // Publish endpoint for workflows (dev/internal) - writes normalized schema to legacy & new portals
 app.post('/api/workflows/:id/publish', authenticatedStaffRouteMiddleware, requireSystemOrNwacAdmin, async (req, res) => {
   const idRaw = req.params.id;
@@ -32448,6 +32493,17 @@ app.get('/api/config/runtime/finance-email-routing', async (req, res) => {
   } catch (err) {
     console.error('[finance-email-routing] fetch failed', err);
     res.status(500).json({ error: 'finance_email_routing_fetch_failed', message: err.message });
+  }
+});
+
+app.get('/api/config/runtime/finance-packet-email-preview', async (req, res) => {
+  try {
+    if (requireFinanceRole(req, res)) return;
+    res.set('Cache-Control', 'no-store');
+    res.json(buildPaymentPacketEmailPreviewPayload());
+  } catch (err) {
+    console.error('[finance-packet-email-preview] fetch failed', err);
+    res.status(500).json({ error: 'finance_packet_email_preview_failed', message: err.message });
   }
 });
 
@@ -48571,6 +48627,7 @@ async function resolveCaseApplicantMessagingContext(caseId, { applicationId = nu
   const [[row] = []] = await pool.query(
     `SELECT
        c.id AS case_id,
+       c.client_id,
        a.id AS application_id,
        c.case_number,
        c.case_context_json,
@@ -48583,7 +48640,10 @@ async function resolveCaseApplicantMessagingContext(caseId, { applicationId = nu
        a.closure_reason AS application_closure_reason,
        s.reference_number AS submission_reference,
        applicant_submission.id AS applicant_submission_user_id,
+       applicant_submission_client.id AS applicant_submission_client_id,
        applicant_client_sub.id AS applicant_client_sub_user_id,
+       NULLIF(CONCAT_WS(' ', NULLIF(TRIM(cl.first_name), ''), NULLIF(TRIM(cl.last_name), '')), '') AS client_name,
+       NULLIF(TRIM(cl.applicant_account_email), '') AS client_email,
        COALESCE(
          applicant_submission.name,
          applicant_client_sub.name,
@@ -48600,6 +48660,7 @@ async function resolveCaseApplicantMessagingContext(caseId, { applicationId = nu
 	     ${applicationJoinSql}
 	     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
 	     LEFT JOIN user applicant_submission ON applicant_submission.id = s.user_id
+	     LEFT JOIN client applicant_submission_client ON applicant_submission_client.applicant_cognito_sub = applicant_submission.cognito_sub
 	     LEFT JOIN user applicant_client_sub ON applicant_client_sub.cognito_sub = cl.applicant_cognito_sub
 	     WHERE c.id = ?
 	     LIMIT 1`,
@@ -48611,14 +48672,25 @@ async function resolveCaseApplicantMessagingContext(caseId, { applicationId = nu
   }
 
   const submissionApplicantUserId = normalisePositiveInteger(row.applicant_submission_user_id);
+  const submissionApplicantClientId = normalisePositiveInteger(row.applicant_submission_client_id);
   const clientSubApplicantUserId = normalisePositiveInteger(row.applicant_client_sub_user_id);
-  const hasStrongIdentityConflict =
+  const caseClientId = normalisePositiveInteger(row.client_id);
+  // Manual-intake submissions can be authored under an account that is not the case participant.
+  const hasApplicantUserConflict =
     submissionApplicantUserId &&
     clientSubApplicantUserId &&
     submissionApplicantUserId !== clientSubApplicantUserId;
+  const hasApplicantClientConflict =
+    submissionApplicantUserId &&
+    submissionApplicantClientId &&
+    caseClientId &&
+    submissionApplicantClientId !== caseClientId;
+  const hasStrongIdentityConflict = Boolean(hasApplicantUserConflict || hasApplicantClientConflict);
   const applicantUserId = hasStrongIdentityConflict
     ? null
     : (submissionApplicantUserId || clientSubApplicantUserId || null);
+  const clientName = normaliseString(row.client_name) || null;
+  const clientEmail = normaliseString(row.client_email) || null;
 
   return {
     ...row,
@@ -48627,8 +48699,12 @@ async function resolveCaseApplicantMessagingContext(caseId, { applicationId = nu
       ? (submissionApplicantUserId ? 'submission_user_id' : 'client_cognito_sub')
       : null,
     applicant_resolution_conflict: Boolean(hasStrongIdentityConflict),
-    applicant_name: normaliseString(row.applicant_name) || null,
-    applicant_email: normaliseString(row.applicant_email) || null,
+    applicant_name: hasStrongIdentityConflict
+      ? clientName
+      : (normaliseString(row.applicant_name) || clientName),
+    applicant_email: hasStrongIdentityConflict
+      ? clientEmail
+      : (normaliseString(row.applicant_email) || clientEmail),
     submission_reference: normaliseString(row.submission_reference) || null,
     case_number: normaliseString(row.case_number) || null,
   };
@@ -49432,20 +49508,22 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       return Number.isFinite(numeric) ? numeric : null;
     };
 
-    const applicantUserIdValue = resolveApplicantUserId(
-      applicantMessagingContext?.applicant_user_id ?? row.applicant_user_id
+    const hasApplicantMessagingContext = Boolean(
+      applicantMessagingContext &&
+      Object.prototype.hasOwnProperty.call(applicantMessagingContext, 'applicant_user_id')
     );
-    const applicantNameValue =
-      normaliseString(applicantMessagingContext?.applicant_name) ||
-      normaliseString(row.applicant_name) ||
-      null;
+    const applicantUserIdValue = resolveApplicantUserId(
+      hasApplicantMessagingContext ? applicantMessagingContext.applicant_user_id : row.applicant_user_id
+    );
+    const applicantNameValue = hasApplicantMessagingContext
+      ? (normaliseString(applicantMessagingContext?.applicant_name) || null)
+      : (normaliseString(row.applicant_name) || null);
     const applicantLegalNameValue =
       [firstName, lastName].filter(Boolean).join(' ') ||
       (applicantNameValue && applicantNameValue.includes(' ') ? applicantNameValue : null);
-    const applicantEmailValue =
-      normaliseString(applicantMessagingContext?.applicant_email) ||
-      normaliseString(row.applicant_email) ||
-      null;
+    const applicantEmailValue = hasApplicantMessagingContext
+      ? (normaliseString(applicantMessagingContext?.applicant_email) || null)
+      : (normaliseString(row.applicant_email) || null);
     const pathAccountEmailValue =
       normaliseString(row.client_applicant_account_email) ||
       normaliseString(
@@ -60261,6 +60339,7 @@ const FINANCE_EMAIL_TEMPLATE_KEY = 'payment_packet';
 const FINANCE_EMAIL_MAX_RECIPIENTS = 10;
 const PAYMENT_PACKET_BUNDLE_EXPIRY_DAYS = 7;
 const PAYMENT_PACKET_BUNDLE_EXPIRY_SECONDS = PAYMENT_PACKET_BUNDLE_EXPIRY_DAYS * 24 * 60 * 60;
+const PAYMENT_PACKET_BUNDLE_FALLBACK_SECRET = crypto.randomBytes(32).toString('hex');
 const INTACCT_INTEGRATION_SCOPE = 'finance';
 const INTACCT_INTEGRATION_KEY = 'intacct.integration';
 const NOTIFICATION_RUNTIME_SCOPE = 'notifications';
@@ -62364,7 +62443,11 @@ const EMPTY_EVIDENCE_RULE_SET = {
 };
 
 const DEFAULT_PAYMENT_EVIDENCE_RULES = {
-  baseline: { ...EMPTY_EVIDENCE_RULE_SET },
+  baseline: {
+    required: ['FundingAgreement', 'SignedEftBankingForm'],
+    optional: [],
+    postPayRequired: [],
+  },
   paymentTypes: {},
 };
 
@@ -62381,6 +62464,7 @@ const PAYMENT_EVIDENCE_DOCUMENT_TYPE_MAP = {
   acceptance_letter: ['AcceptanceLetter'],
   statement_of_account: ['StatementOfAccount', 'TuitionStatementOrInvoice'],
   funding_agreement: ['FundingAgreement'],
+  eft_form: ['SignedEftBankingForm'],
   case_assessment: ['CaseManagerAssessment'],
   case_assessment_approved: ['CaseManagerAssessment'],
   attendance_form: ['AttendanceReport'],
@@ -62405,7 +62489,8 @@ const PAYMENT_EVIDENCE_LABEL_OVERRIDES = {
   AcceptanceLetter: 'Acceptance letter',
   StatementOfAccount: 'Statement of account',
   TuitionStatementOrInvoice: 'Tuition statement or invoice',
-  FundingAgreement: 'Funding agreement',
+  FundingAgreement: 'Client Funding Agreement',
+  SignedEftBankingForm: 'Signed EFT banking form',
   CaseManagerAssessment: 'Case manager assessment',
   AttendanceReport: 'Attendance report',
   FinancialOverview: 'Financial overview',
@@ -68280,15 +68365,94 @@ async function resolvePaymentPacketPayeeIdentity({ packetId, packet = null, conn
   }
 }
 
-const buildPaymentPacketBundleDocument = async ({ packetId, packet, actorUserId, connection }) => {
+const getPaymentPacketBundleSigningSecret = () => (
+  process.env.PAYMENT_PACKET_BUNDLE_SECRET ||
+  process.env.ADMIN_DOWNLOAD_TOKEN_SECRET ||
+  process.env.DEV_AUTH_TOKEN ||
+  process.env.OBJECT_SECRET_KEY ||
+  process.env.DB_PASS ||
+  PAYMENT_PACKET_BUNDLE_FALLBACK_SECRET
+);
+
+const encodePaymentPacketBundleTokenPart = value =>
+  Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
+
+const signPaymentPacketBundlePayload = payloadPart =>
+  crypto
+    .createHmac('sha256', getPaymentPacketBundleSigningSecret())
+    .update(payloadPart)
+    .digest('base64url');
+
+const createPaymentPacketBundleToken = ({ packetId, expiresInSeconds = PAYMENT_PACKET_BUNDLE_EXPIRY_SECONDS }) => {
+  const packetValue = parsePaymentPacketId(packetId);
+  if (!Number.isFinite(packetValue)) return null;
+  const expiresAtSeconds = Math.floor(Date.now() / 1000) + Math.max(60, Number(expiresInSeconds) || PAYMENT_PACKET_BUNDLE_EXPIRY_SECONDS);
+  const payloadPart = encodePaymentPacketBundleTokenPart({
+    v: 1,
+    scope: 'payment_packet_bundle',
+    packetId: String(packetValue),
+    exp: expiresAtSeconds,
+  });
+  return `${payloadPart}.${signPaymentPacketBundlePayload(payloadPart)}`;
+};
+
+const verifyPaymentPacketBundleToken = ({ token, packetId }) => {
+  const packetValue = parsePaymentPacketId(packetId);
+  if (!token || !Number.isFinite(packetValue)) {
+    return { ok: false, error: 'invalid_payment_packet_bundle_token' };
+  }
+  const [payloadPart, signaturePart] = String(token).split('.');
+  if (!payloadPart || !signaturePart) {
+    return { ok: false, error: 'invalid_payment_packet_bundle_token' };
+  }
+  const expectedSignature = signPaymentPacketBundlePayload(payloadPart);
+  const actualBuffer = Buffer.from(signaturePart);
+  const expectedBuffer = Buffer.from(expectedSignature);
+  if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) {
+    return { ok: false, error: 'invalid_payment_packet_bundle_token' };
+  }
+  let payload = null;
+  try {
+    payload = JSON.parse(Buffer.from(payloadPart, 'base64url').toString('utf8'));
+  } catch (_) {
+    return { ok: false, error: 'invalid_payment_packet_bundle_token' };
+  }
+  if (
+    payload?.scope !== 'payment_packet_bundle' ||
+    String(payload?.packetId || '') !== String(packetValue)
+  ) {
+    return { ok: false, error: 'invalid_payment_packet_bundle_token' };
+  }
+  const expiresAtSeconds = Number(payload?.exp);
+  if (!Number.isFinite(expiresAtSeconds) || expiresAtSeconds <= Math.floor(Date.now() / 1000)) {
+    return { ok: false, error: 'payment_packet_bundle_token_expired' };
+  }
+  return { ok: true, payload, expiresAt: new Date(expiresAtSeconds * 1000) };
+};
+
+const resolveRequestPublicBaseUrl = req => {
+  const configured = (
+    process.env.PAYMENT_PACKET_BUNDLE_PUBLIC_BASE_URL ||
+    process.env.ADMIN_PUBLIC_BASE_URL ||
+    process.env.PUBLIC_ADMIN_BASE_URL ||
+    process.env.API_BASE ||
+    process.env.REACT_APP_API_BASE_URL ||
+    ''
+  ).trim();
+  if (configured) return configured.replace(/\/+$/, '');
+  const forwardedProto = String(req?.get?.('x-forwarded-proto') || '').split(',')[0].trim();
+  const forwardedHost = String(req?.get?.('x-forwarded-host') || '').split(',')[0].trim();
+  const proto = forwardedProto || req?.protocol || 'http';
+  const host = forwardedHost || req?.get?.('host') || `localhost:${port}`;
+  return `${proto}://${host}`.replace(/\/+$/, '');
+};
+
+const buildPaymentPacketEvidenceBundle = async ({ packetId, connection }) => {
   const runner = connection || pool;
   if (!packetId || !runner) return null;
-  const resolvedPacket = packet || await fetchPaymentPacketById(packetId, runner);
-  if (!resolvedPacket) return null;
   const evidenceRows = await fetchPaymentEvidenceDocumentRows({ packetId, connection: runner });
   const entries = [];
   const entryNames = new Set();
-  const generatedAt = new Date().toISOString();
 
   for (const doc of evidenceRows) {
     if (!doc?.file_path) continue;
@@ -68322,43 +68486,23 @@ const buildPaymentPacketBundleDocument = async ({ packetId, packet, actorUserId,
 
   const zipBuffer = await buildZipBuffer({ entries });
   const filename = `payment-packet-${packetId}-bundle-${Date.now()}.zip`;
-  const stored = await storeGeneratedDocument({
-    buffer: zipBuffer,
-    fileName: filename,
-    contentType: 'application/zip',
-    label: 'Payment packet document bundle',
-    category: 'payment_audit_bundle',
-    metadata: { packetId: String(packetId), generatedAt },
-    actorUserId,
-    caseId: resolvedPacket.caseId ? Number(resolvedPacket.caseId) : null,
-    applicationId: resolvedPacket.applicationId ? Number(resolvedPacket.applicationId) : null,
-    clientId: resolvedPacket.clientId ? Number(resolvedPacket.clientId) : null,
-    applicantUserId: resolvedPacket.applicantUserId ? Number(resolvedPacket.applicantUserId) : null,
-  });
-  if (!stored?.filePath) return null;
-  return { ...stored, fileName: filename };
+  return { buffer: zipBuffer, fileName: filename, evidenceCount: entries.length };
 };
 
 const buildPaymentPacketBundleLink = async ({
   packetId,
-  packet,
-  actorUserId,
+  req,
   connection,
   expiresInSeconds,
 }) => {
-  const bundle = await buildPaymentPacketBundleDocument({ packetId, packet, actorUserId, connection });
-  if (!bundle?.filePath) return { url: null, expiresAt: null };
-  const { presignGet, DRIVER } = require('../ISET-intake/s3Provider');
-  if (DRIVER !== 's3' || typeof presignGet !== 'function') {
-    return { url: null, expiresAt: null };
-  }
-  const presigned = await presignGet({ key: bundle.filePath, expiresIn: expiresInSeconds });
-  const url = presigned?.url || presigned?.signedUrl || null;
-  if (!url) return { url: null, expiresAt: null };
-  const expiresAt = Number(expiresInSeconds)
-    ? new Date(Date.now() + Number(expiresInSeconds) * 1000)
-    : null;
-  return { url, expiresAt, documentId: bundle.documentId, fileName: bundle.fileName };
+  const evidenceRows = await fetchPaymentEvidenceDocumentRows({ packetId, connection: connection || pool });
+  if (!evidenceRows.some(row => row?.file_path)) return { url: null, expiresAt: null };
+  const token = createPaymentPacketBundleToken({ packetId, expiresInSeconds });
+  if (!token) return { url: null, expiresAt: null };
+  const expiresAt = new Date(Date.now() + (Number(expiresInSeconds) || PAYMENT_PACKET_BUNDLE_EXPIRY_SECONDS) * 1000);
+  const baseUrl = resolveRequestPublicBaseUrl(req);
+  const url = `${baseUrl}/api/finance/payment-packets/${encodeURIComponent(String(packetId))}/document-bundle?token=${encodeURIComponent(token)}`;
+  return { url, expiresAt };
 };
 
 const buildPaymentPacketEmail = ({
@@ -68512,6 +68656,64 @@ const buildPaymentPacketEmail = ({
   `;
 
   return { subject, bodyText, bodyHtml, attachments };
+};
+
+const buildPaymentPacketEmailPreviewPayload = () => {
+  const packet = {
+    id: 'PREVIEW',
+    clientName: 'Avery Cardinal',
+    reportingUnit: 'ON',
+    lines: [
+      {
+        id: '1',
+        paymentType: 'Tuition fees - direct payment',
+        amount: 2450,
+        invoiceReferenceNumber: 'INV-2026-0142',
+        requestedPaymentDate: '2026-06-03',
+        payeeName: 'Northern Skills College',
+        payeeReference: 'VEND-4217',
+        potName: 'Skills Development - Tuition',
+        fundingStream: 'ISET 2025-2026',
+        reportingUnit: 'ON',
+      },
+      {
+        id: '2',
+        paymentType: 'Books and materials reimbursement',
+        amount: 315.75,
+        invoiceReferenceNumber: 'RCPT-88721',
+        requestedPaymentDate: '2026-06-03',
+        payeeName: 'Northern Skills College',
+        payeeReference: 'VEND-4217',
+        potName: 'Skills Development - Tuition',
+        fundingStream: 'ISET 2025-2026',
+        reportingUnit: 'ON',
+      },
+    ],
+    documents: [
+      { documentId: 'DOC-101', documentName: 'Client Funding Agreement.pdf', type: 'FundingAgreement' },
+      { documentId: 'DOC-102', documentName: 'Signed EFT banking form.pdf', type: 'SignedEftBankingForm' },
+    ],
+  };
+  const bundleExpiresAt = new Date(Date.now() + PAYMENT_PACKET_BUNDLE_EXPIRY_SECONDS * 1000);
+  const email = buildPaymentPacketEmail({
+    packet,
+    regionCode: 'ON',
+    note: 'Preview note from the requester. Replace with packet-specific notes when a real packet is submitted.',
+    statusOverride: 'submitted',
+    bundleLink: 'https://nwac-console.example/finance/payment-packets/PREVIEW/document-bundle?token=preview',
+    bundleExpiresAt,
+    bundleExpiresInDays: PAYMENT_PACKET_BUNDLE_EXPIRY_DAYS,
+  });
+  return {
+    ...email,
+    templateKey: FINANCE_EMAIL_TEMPLATE_KEY,
+    generatedAt: new Date().toISOString(),
+    preview: {
+      sampleData: true,
+      bundleLinkIsPlaceholder: true,
+      bundleExpiresInDays: PAYMENT_PACKET_BUNDLE_EXPIRY_DAYS,
+    },
+  };
 };
 
 const recordPaymentPacketSubmissionMeta = async ({
@@ -69343,8 +69545,7 @@ async function sendFinanceEmailForPacket({ packetId, packetRow = null, note = nu
   try {
     const bundle = await buildPaymentPacketBundleLink({
       packetId,
-      packet: packetWithPayeeIdentity,
-      actorUserId: senderUserId,
+      req,
       connection: runner,
       expiresInSeconds: PAYMENT_PACKET_BUNDLE_EXPIRY_SECONDS,
     });

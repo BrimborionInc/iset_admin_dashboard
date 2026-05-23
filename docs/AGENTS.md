@@ -15,6 +15,7 @@ Last Updated: 2026-05-14
 - The root `AGENTS.md` exists only to point agents here; `docs/AGENTS.md` is the canonical entry point.
 - Code, schema, migrations, config, tests, and live database evidence are the source of truth. Docs are operational guidance and must be verified before being treated as proof.
 - Maintain the memory layer as part of normal work: update affected docs when code, schema, architecture, workflows, operations, or active project state changes.
+- When the user corrects or refines Codex's operating behavior and the correction should persist, update the relevant project-memory doc immediately before continuing the original task. Acknowledging the correction in chat is not enough.
 - Prefer concise, current, task-useful docs. Revise, merge, archive, or delete stale/conflicting documentation instead of preserving old wording because it might be useful.
 - Keep improving the quality of the persistent knowledge base as you work. When you encounter guidance that survived from the Windows-mounted checkout era, update it to the current WSL/Linux `/home/bill/ISET` reality or mark it as historical instead of carrying stale Windows paths, commands, or assumptions forward.
 - Follow `docs/meta/standing-directive.md` for the durable maintenance contract and `docs/meta/documentation-audit-2026-04-29.md` for the current documentation cleanup inventory.
@@ -23,6 +24,7 @@ Last Updated: 2026-05-14
 
 - Treat implementation as a design dialog with the user, not literal instruction execution.
 - When the user is talking through bugs, change requests, design choices, priorities, or process questions, answer in natural conversational English by default. Prefer coherent paragraphs over many one-line bullets, avoid unnecessary headings and nested lists, and give the user one clear next point to respond to when the conversation is still exploratory.
+- Do not turn exploratory design into a branching checklist in the linear chat. If several concerns or unknowns exist, group them, make a recommendation, and advance one live decision at a time. If one point needs deeper discussion, pause the rest, carry the unresolved context yourself, and reintroduce the next relevant point when it is actually needed.
 - The user may be wrong or operating from incomplete context; surface contradictions and risks early.
 - If requested changes could break behavior, conflict with data reality, or create regressions, pause and discuss tradeoffs before coding.
 - Challenge weak assumptions with concrete evidence (code paths, payloads, schema, runtime config), then agree on the target behavior.

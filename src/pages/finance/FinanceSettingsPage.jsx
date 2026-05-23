@@ -3,11 +3,12 @@ import Board from "@cloudscape-design/board-components/board";
 import { Box, SpaceBetween } from "@cloudscape-design/components";
 import FinanceEmailRoutingWidget from "./widgets/FinanceEmailRoutingWidget.jsx";
 import FinanceIntacctIntegrationWidget from "./widgets/FinanceIntacctIntegrationWidget.jsx";
+import FinancePacketEmailPreviewWidget from "./widgets/FinancePacketEmailPreviewWidget.jsx";
 import FinancePaymentTypeMappingWidget from "./widgets/FinancePaymentTypeMappingWidget.jsx";
 import FinanceSettingsOverviewWidget from "./widgets/FinanceSettingsOverviewWidget.jsx";
 import FinancePaymentTypeMappingHelp from "../../helpPanelContents/financePaymentTypeMappingHelp.js";
 
-const STORAGE_KEY = "finance-settings-layout-v2";
+const STORAGE_KEY = "finance-settings-layout-v3";
 
 const widgetRegistry = {
   overview: {
@@ -43,6 +44,17 @@ const widgetRegistry = {
     helpTitle: "Finance email routing",
     aiContext: null,
   },
+  packetEmailPreview: {
+    id: "packetEmailPreview",
+    defaultRowSpan: 6,
+    defaultColumnSpan: 4,
+    component: FinancePacketEmailPreviewWidget,
+    title: "Finance packet email preview",
+    description: "Preview the current outbound payment-packet email template.",
+    helpComponent: null,
+    helpTitle: "Finance packet email preview",
+    aiContext: null,
+  },
   intacctIntegration: {
     id: "intacctIntegration",
     defaultRowSpan: 9,
@@ -60,6 +72,7 @@ const defaultLayout = [
   { id: "overview", rowSpan: 4, columnSpan: 4 },
   { id: "paymentTypeMap", rowSpan: 8, columnSpan: 4 },
   { id: "emailRouting", rowSpan: 5, columnSpan: 4 },
+  { id: "packetEmailPreview", rowSpan: 6, columnSpan: 4 },
   { id: "intacctIntegration", rowSpan: 9, columnSpan: 4 },
 ];
 

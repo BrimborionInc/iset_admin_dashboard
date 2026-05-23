@@ -319,11 +319,11 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const caseWorkspaceApplicationId = applicationId ? String(applicationId) : '';
   const isApplicationLessCaseWorkspace = Boolean(isCaseWorkspace && caseId && !caseWorkspaceApplicationId);
   const canUseApplicantDocumentMode = Boolean(applicantUserId) && !isApplicationLessCaseWorkspace;
-  const isCaseDocumentMode = Boolean(isCaseWorkspace && caseId && isApplicationLessCaseWorkspace);
+  const isCaseDocumentMode = Boolean(isCaseWorkspace && caseId && !canUseApplicantDocumentMode);
   const canUploadDocuments = canUseApplicantDocumentMode || isCaseDocumentMode;
   const usesApplicationScopeFallback = useCallback(
-    scope => scope === 'application' && isCaseDocumentMode && !caseWorkspaceApplicationId,
-    [isCaseDocumentMode, caseWorkspaceApplicationId]
+    scope => scope === 'application' && isCaseDocumentMode,
+    [isCaseDocumentMode]
   );
   const buildApplicationFallbackTarget = useCallback(
     (actionPlanValue, interventionValues) => {
@@ -944,8 +944,6 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           setPendingApplicationError('Select which application this document should be attached to.');
           return;
         }
-      } else if (caseWorkspaceApplicationId) {
-        targetApplicationId = caseWorkspaceApplicationId;
       } else {
         const fallbackTarget = buildApplicationFallbackTarget(pendingActionPlan, pendingInterventions);
         targetActionPlanId = fallbackTarget.actionPlanId;
@@ -990,7 +988,6 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     pendingActionPlan,
     pendingInterventions,
     canUseApplicantDocumentMode,
-    caseWorkspaceApplicationId,
     buildApplicationFallbackTarget,
     getDocumentTypeScope,
     caseId
@@ -1282,8 +1279,6 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           return;
         }
         payload.applicationId = nextApplicationId;
-      } else if (caseWorkspaceApplicationId) {
-        payload.applicationId = caseWorkspaceApplicationId;
       } else {
         const fallbackTarget = buildApplicationFallbackTarget(editActionPlanId, editInterventionIds);
         if (fallbackTarget.actionPlanId) {
@@ -1343,7 +1338,6 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     editActionPlanId,
     editInterventionIds,
     buildApplicationFallbackTarget,
-    caseWorkspaceApplicationId,
     getDocumentTypeScope,
     loadDocuments,
     loadChecklist,
@@ -1448,8 +1442,6 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           return;
         }
         payload.applicationId = nextApplicationId;
-      } else if (caseWorkspaceApplicationId) {
-        payload.applicationId = caseWorkspaceApplicationId;
       } else {
         const fallbackTarget = buildApplicationFallbackTarget(duplicateActionPlanId, duplicateInterventionIds);
         if (fallbackTarget.actionPlanId) {
@@ -1513,7 +1505,6 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     duplicateActionPlanId,
     duplicateInterventionIds,
     buildApplicationFallbackTarget,
-    caseWorkspaceApplicationId,
     getDocumentTypeScope,
     loadDocuments,
     loadChecklist,
@@ -2010,12 +2001,9 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const pendingUsesApplicationFallback = usesApplicationScopeFallback(pendingDocScope);
   const editUsesApplicationFallback = usesApplicationScopeFallback(editDocScope);
   const duplicateUsesApplicationFallback = usesApplicationScopeFallback(duplicateDocScope);
-  const pendingUsesDirectCaseApplication =
-    pendingDocScope === 'application' && isCaseDocumentMode && !canUseApplicantDocumentMode && Boolean(caseWorkspaceApplicationId);
-  const editUsesDirectCaseApplication =
-    editDocScope === 'application' && isCaseDocumentMode && !canUseApplicantDocumentMode && Boolean(caseWorkspaceApplicationId);
-  const duplicateUsesDirectCaseApplication =
-    duplicateDocScope === 'application' && isCaseDocumentMode && !canUseApplicantDocumentMode && Boolean(caseWorkspaceApplicationId);
+  const pendingUsesDirectCaseApplication = false;
+  const editUsesDirectCaseApplication = false;
+  const duplicateUsesDirectCaseApplication = false;
   const showChecklistTab = canUseApplicantDocumentMode;
   const uploadApplicationOptions = useMemo(() => {
     if (!applicationSelectOptions.length) {
@@ -2158,8 +2146,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           {pendingDocScope === 'application' && pendingUsesApplicationFallback ? (
             <>
               <ModalScopeHint>
-                No linked application exists for this case. PATH will store this document under the selected action
-                plan, or the case file if no action plan is chosen.
+                PATH will store this document under the selected action plan, or the case file if no action plan is
+                chosen.
               </ModalScopeHint>
               <FormField
                 label="Store under action plan"
@@ -2387,8 +2375,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           {editDocScope === 'application' && editUsesApplicationFallback && (
             <>
               <ModalScopeHint>
-                No linked application exists for this case. PATH will store this document under the selected action
-                plan, or the case file if no action plan is chosen.
+                PATH will store this document under the selected action plan, or the case file if no action plan is
+                chosen.
               </ModalScopeHint>
               <FormField
                 label="Store under action plan"
@@ -2551,8 +2539,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
           {duplicateDocScope === 'application' && duplicateUsesApplicationFallback && (
             <>
               <ModalScopeHint>
-                No linked application exists for this case. PATH will store the duplicate under the selected action
-                plan, or the case file if no action plan is chosen.
+                PATH will store the duplicate under the selected action plan, or the case file if no action plan is
+                chosen.
               </ModalScopeHint>
               <FormField label="Store under action plan">
                 <Select

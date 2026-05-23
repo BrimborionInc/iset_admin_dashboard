@@ -1,6 +1,6 @@
 # Supporting Documents widget
 
-Date: 2026-04-27
+Date: 2026-05-22
 
 ## Workflow
 
@@ -48,7 +48,7 @@ manual uploads, and generated forms, then compares them against the relevant che
   - the backend resolver must preserve or resolve the real `case_id` for manual uploads, including application-scoped uploads that also write `application_id`
   - then uploads through either:
     - `/api/applicants/:applicant_user_id/documents/upload` for applicant/application mode
-    - `/api/cases/:case_id/documents/upload` for application-less case mode
+    - `/api/cases/:case_id/documents/upload` for case-backed document mode when the file has no safe applicant account context
 - Refresh behavior: listens for `iset:supporting-documents:refresh`, mainly from Secure Messaging attachment adoption.
 - View behavior:
   - most files open from the presigned object URL returned by `GET /api/documents/:id/presign-download`
@@ -59,20 +59,21 @@ manual uploads, and generated forms, then compares them against the relevant che
   - the inline `Download` action is shown only to `System Administrator` and `NWAC Administrator`
   - it requires an explicit privacy warning confirmation
   - it calls `GET /api/documents/:id/presign-download?mode=original`, which forces an attachment download of the original stored object instead of the preview path
-- Imported/application-less case mode:
+- Case-backed document mode:
   - enables upload and refresh without `applicant_user_id`
   - also remains the correct mode when the imported client has a linked PATH account but no `iset_application` row points at the case
+  - also applies when a case has an application row but the submission user resolves to a different client than the case client; do not expose that user as the case applicant account
   - allows `client`, `case`, `action_plan`, and `application` document categories
-  - stores application-type uploads against a real application when one exists, or falls them back to an action plan / case when the file has no linked application
+  - stores application-type uploads under an action plan or case when there is no safe applicant account context, even if an unsafe linked application exists
   - hides the checklist tab
   - treats uploads as silent casework backload actions
 
 ## Critical derived state
 
-- `applicant_user_id` is resolved from the workspace/case payload.
+- `applicant_user_id` is resolved from the workspace/case payload only when the applicant-account identity is safe for that case.
 - `caseId` and `applicationId` are also derived from the workspace/case payload and are used to prefill upload associations. When an upload has an `applicationId`, the backend still resolves and stores that application's real `case_id`.
-- In Case Workspace, a linked `applicationId` is what decides whether the widget uses applicant/application mode with checklist support.
-- When the case has no linked `applicationId`, the widget uses case-based document mode even if `applicant_user_id` exists because the client already has a PATH account.
+- In Case Workspace, applicant/application mode requires a safe `applicant_user_id`; otherwise the widget uses case-backed document mode even when a linked `applicationId` exists.
+- When the case has no linked `applicationId`, the widget uses case-backed document mode even if `applicant_user_id` exists because the client already has a PATH account.
 - The checklist tab is intentionally unavailable in case-based mode because there is no applicant/application checklist context.
 
 ## Client-file import support
@@ -91,5 +92,6 @@ manual uploads, and generated forms, then compares them against the relevant che
 - If a privileged user reports that `Download` is missing, verify their canonical role/group resolves to `System Administrator` / `NWAC Administrator` (`System_Administrator` / `NWAC_Administrator`) before debugging the widget.
 - If a case-backed upload fails, inspect `caseData.id`, the selected document type scope, and the `/api/cases/:id/documents/upload` response code first.
 - If a normal applicant-backed case cannot upload or refresh, inspect `caseData.applicant_user_id` / `caseData.applicantUserId` and the `/api/applicants/:id/*` endpoints.
+- If `/api/applicants/:id/documents/upload` returns `client_id_mismatch`, compare the URL applicant user, the case client, and the application/submission user. A submission user that maps to another client is an unsafe applicant context; the Case Workspace should fall back to `/api/cases/:case_id/documents/upload`.
 - If `chk_iset_document_manual_upload_scope` fails for a staff upload, treat it as a backend context-resolution bug first. Manual uploads must carry `client_id` and `case_id`; application-linked uploads must also carry `application_id` and `applicant_user_id`.
 - Do not add placeholder application, assessment, or action-plan rows just to make document management work.

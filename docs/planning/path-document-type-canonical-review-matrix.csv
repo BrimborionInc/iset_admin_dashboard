@@ -13,7 +13,7 @@ Application,ei_consent,EI Consent Form,yes,application,compliance|intervention,E
 Application,ei_verification,EI Eligibility Verification,yes,application,compliance|intervention,EIVerification,no,Upload and intervention-link actions are role-restricted; special approval gating in intervention assessment.,no,,no
 Application,conflict_of_interest,Conflict of Interest Form,yes,application,compliance|intervention,,no,,no,,no
 Application,band_funding_decision,Band or Nation funding decision letter,yes,application,compliance|intervention,,no,,no,,no
-Application,EFT_form,EFT or wire transfer direct deposit form,yes,application,compliance|intervention,,no,Auto-attached funding-package workflow uses this checklist doc type explicitly.,no,,no
+Application,EFT_form,EFT or wire transfer direct deposit form,yes,application,compliance|intervention,SignedEftBankingForm,no,Auto-attached funding-package workflow uses this checklist doc type explicitly and payment-packet baseline evidence maps the signed EFT banking form to this document type.,no,,no
 Application,mou_co_funding_agreement_letter,MOU/Co-funding agreement letter,yes,application,compliance|intervention,,no,Required only if the client is co-funded for this funding agreement.,no,,no
 Application,supporting_evidence,Supporting evidence,yes,application,,,no,,no,,no
 Application,client_acknowledgement,Client Acknowledgement of Funding Source,yes,application,compliance|intervention,,no,,no,,no

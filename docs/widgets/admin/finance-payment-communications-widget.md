@@ -45,4 +45,7 @@ Communication history for packet submissions.
 - Outbound finance payment emails now use a lean AP-style body organized into `Payee`, `Payment Instructions`, and `Coding` sections.
 - `Payment Instructions` renders as an HTML table with required columns `Payment type`, `Amount`, and `Invoice reference`, plus conditional `Requested payment date` and `Payee reference` columns when those values exist on one or more packet lines.
 - The payee section labels the optional line-level `payee_reference` value as `Vendor reference` in the finance email when a single shared value is present across the packet.
+- When linked evidence files exist, the finance email includes a time-limited `Download packet bundle` link. The link downloads a simple zip of the packet's supporting evidence files only; it does not attach the zip to the email and does not include the audit-bundle PDF/manifest JSON files.
+- The packet baseline evidence list is intentionally small: `FundingAgreement` plus `SignedEftBankingForm`. `SignedEftBankingForm` maps to the canonical supporting-document type `EFT_form`.
+- Finance Settings now includes a read-only `Finance packet email preview` widget that renders sample data through the same backend email builder, including placeholder packet-bundle wording.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.
