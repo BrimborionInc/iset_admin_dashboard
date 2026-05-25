@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-05-23
+Last Updated: 2026-05-25
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -21,9 +21,13 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-05-25 | Release 20260525-test-bugcr-batch | Fix/Casework | Other Funding | Other funders can now be marked confirmed, pending, denied, or unknown, with optional amount and notes. | Coverage is required only for confirmed funding, pending/denied/unknown funders stay on the file as context, and only confirmed other funders generate other-funder letters.
+- 2026-05-25 | Release 20260525-test-bugcr-batch | Fix/Casework | Funding revision letters | Client funding revision letters now use the reviewed secure-message letter body when creating the signable letter artifact. | This keeps the approval/reassessment letter in the outbound packet aligned with the revised CFA and intervention amounts instead of reusing the original application approval-letter draft.
 - 2026-05-23 | Release TBD | Fix/Payments | Finance emails | Finance payment-packet emails include a seven-day download link for the packet evidence bundle. | The link downloads through PATH instead of a direct S3/MinIO presign, so it works with DEV/local storage and object-store deployments; the zip contains supporting evidence files only, without packet-summary PDF or JSON manifest files.
 - 2026-05-23 | Release TBD | Config/Payments | Payment packet evidence | Payment packets now require only the Client Funding Agreement and the signed EFT banking form as baseline evidence. | The new signed EFT evidence type maps to the existing `EFT_form` document type, and the runtime-config update preserves existing per-payment-type evidence rules.
 - 2026-05-23 | Release TBD | UX/Finance Settings | Finance email preview | Finance Settings now includes a read-only preview of the finance payment-packet email. | The preview uses sample packet data rendered through the same backend email builder used for real submissions, including placeholder packet-bundle wording.
+- 2026-05-24 | Release TBD | UX/Finance Reports | ISET Advances and Active Clients | Financial Reports now opens with a cleaner funded-interventions view and better intervention-detail controls. | The detail table defaults to funded interventions only, can be switched to all approved interventions, hides reference-number clutter under participant names, shows CRF/EI and approved funding near the front, and supports column selection, column resizing, and sorting.
+- 2026-05-24 | Release TBD | UX/Help | Financial Reports | Financial Reports help now reads as staff-facing guidance instead of implementation notes. | The page has section-level info for setup, summary, carry-over, region summary, and intervention detail, plus seeded AI help coverage for the annual report purpose, export scope, and PATH-versus-Sage payment-status caveat.
 - 2026-05-01 | Release TBD | Notifications | Manage Notifications | Staff email notification settings now apply to non-assignment events, with NWAC review split by approval, denial, and changes-requested outcomes. | Enabled staff rows with `email_alert=1` and a template send through SES once per deduped recipient; assignment emails keep their existing behavior, and TEST remains blocked from real sends.
 
 - 2026-05-09 | Release 20260509-prod-option-b-plus-portal | Ops/Release | Admin + public portal | Deployed the repeat-application assessment containment fix and the applicant dashboard/start-resume portal update to PROD. | PROD backfilled 57 clear legacy assessments into the new application-scoped store, scoped 57 approval-letter workflow contexts by application, preserved one applicationless legacy context, and passed health smoke for admin plus both public portal hostnames.
@@ -325,6 +329,9 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
+- Financial Reports now opens with a cleaner funded-interventions view and better intervention-detail controls.
+- Other funders can now be marked confirmed, pending, denied, or unknown, with optional amount and notes.
+- Financial Reports help now gives staff-facing guidance for the annual ISET Advances and Active Clients report.
 - Fixed a bug where some denied applications could still appear in active application lists after the denial letter was sent.
 - Finance Settings now shows a read-only preview of the payment-packet email sent to Finance.
 - Improved denied and withdrawn application reporting records so ILMP validation has the required agreement and education fields.
@@ -334,8 +341,12 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What Changed Packages (draft - EN)
 
-#### Release TBD
+#### Release 20260525-test-bugcr-batch
 
+- Financial Reports now defaults Intervention detail to funded interventions only, with an option to include all approved interventions when zero-dollar counselling or career-research rows need review.
+- The Financial Reports detail table now hides reference-number clutter under participant names, shows CRF/EI and approved funding near the front, and supports column selection, resizing, and sorting.
+- Financial Reports help now includes section-level guidance and AI-help coverage for the annual report purpose, export scope, and PATH-versus-Sage payment-status caveat.
+- Other funders can now be marked confirmed, pending, denied, or unknown; only confirmed other funders require coverage details and generate other-funder letters.
 - Finance payment-packet emails now include a seven-day download link for the packet evidence bundle.
 - Payment packets now require only the Client Funding Agreement and the signed EFT banking form as baseline evidence.
 - Finance Settings now shows a read-only preview of the payment-packet email sent to Finance.
@@ -361,6 +372,9 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Nouveautes (brouillon - FR)
 
+- Financial Reports s'ouvre maintenant avec une vue plus claire des interventions financees et de meilleurs controles de detail.
+- Les autres bailleurs de fonds peuvent maintenant etre marques comme confirmes, en attente, refuses ou inconnus, avec montant et notes facultatifs.
+- L'aide de Financial Reports donne maintenant des consignes pratiques pour le rapport annuel ISET Advances and Active Clients.
 - Correction d'un probleme ou certaines demandes refusees pouvaient encore apparaitre dans les listes actives apres l'envoi de la lettre de refus.
 - Finance Settings affiche maintenant un apercu en lecture seule du courriel de packet de paiement envoye aux Finances.
 - Amelioration des dossiers de reporting pour les demandes refusees et retirees afin que la validation ILMP ait les champs requis.
@@ -370,8 +384,12 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Lots de changements (brouillon - FR)
 
-#### Release TBD
+#### Release 20260525-test-bugcr-batch
 
+- Financial Reports affiche maintenant par defaut seulement les interventions financees dans le detail, avec une option pour inclure toutes les interventions approuvees lorsque les lignes a zero dollar doivent etre examinees.
+- Le tableau de detail de Financial Reports masque les numeros de reference sous les noms des participantes et participants, affiche CRF/EI et le financement approuve plus tot, et permet de choisir, redimensionner et trier les colonnes.
+- L'aide de Financial Reports comprend maintenant des consignes par section et une couverture d'aide IA pour le but du rapport annuel, la portee de l'export et la distinction entre le suivi PATH et Sage.
+- Les autres bailleurs de fonds peuvent maintenant etre marques comme confirmes, en attente, refuses ou inconnus; seuls les bailleurs confirmes exigent les details de couverture et generent des lettres.
 - Les courriels de packet de paiement incluent maintenant un lien de telechargement valide sept jours pour le paquet de pieces justificatives.
 - Les packets de paiement exigent maintenant seulement le Client Funding Agreement et le formulaire bancaire EFT signe comme pieces justificatives de base.
 - Finance Settings affiche maintenant un apercu en lecture seule du courriel de packet de paiement envoye aux Finances.

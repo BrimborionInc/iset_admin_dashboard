@@ -7,7 +7,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-05-14
+Last Updated: 2026-05-25
 
 ## Project memory layer
 
@@ -64,7 +64,7 @@ Last Updated: 2026-05-14
 - For browser-level workflow smokes, especially approval/assessment/letter workflows, read `docs/testing/browser-workflow-smoke-automation.md` before inventing one-off manual browser testing. Prefer DB/API fixture automation plus authenticated browser assertions and cleanup evidence.
 - Keep doc updates in the same change when behavior or structure changes.
 - If blocked by tooling, permissions, or environment access, call it out immediately.
-- For TEST/PROD deploys, apply the deployment runbook as an execution checklist, not as background reading. Before `path:deploy`, state the maintenance sequence being used. If the deploy will restart admin/portal processes, refresh ASG instances, reinstall dependencies, change target routing, or otherwise risk a raw `502 Bad Gateway`, set the scoped in-app warning, wait through the warning window when practical, then enable the ALB fixed-response maintenance fallback before starting the deploy. Clear fallback only after smoke is green, then clear the warning.
+- For TEST/PROD deploys, apply the deployment runbook as an execution checklist, not as background reading. Before `path:deploy`, state the maintenance sequence being used. If the deploy will restart admin/portal processes, refresh ASG instances, reinstall dependencies, change target routing, or otherwise risk a raw `502 Bad Gateway`, set the scoped in-app warning, wait through the warning window when practical, then enable the ALB fixed-response maintenance fallback before starting the deploy. Clear fallback only after smoke is green, then clear the warning. For PROD bug/CR releases, the deploy is not complete until the affected live feedback reports have current status, status history, and internal notes after targeted recheck.
 
 ## For future Codex threads
 
@@ -72,6 +72,8 @@ Treat this file as the current project context for this repo. If the user refere
 
 - Standing operational rule for PROD bug/change triage: if a thread investigates, fixes, deploys, or otherwise materially resolves a PROD item that came through the in-app feedback system, update the live PROD feedback log before closing the thread. That means keeping `admin_feedback_report.status`, `admin_feedback_status_history`, and `admin_feedback_note` in sync with the real outcome instead of leaving the resolution only in chat, code comments, or repo docs.
 - Current user-requested bug/CR triage workflow (2026-04-17): when Bill asks Codex to triage bugs or change requests, the expected outcome is not just queue cleanup. Codex should review the live queue, inspect each item's available context, add internal notes, change statuses where warranted, and then present Bill with a prioritized analysis so implementation planning can happen against the real queue state.
+- Current user-requested bug/CR validation standard (2026-05-25): take a holistic workflow view before telling staff a report is fixed or marking it `resolved`. For workflow or client-facing-output issues, verify the complete affected flow and every generated/sent artifact in the packet, not only the specific symptom named in the report. If adjacent artifacts or downstream states are not verified, keep the item open and record the remaining verification work in the feedback notes.
+- Current user-requested bug/CR release-planning standard (2026-05-25): do not assume each fixed report should be deployed to PROD immediately. Unless Bill explicitly approves an emergency hotfix, keep prepared fixes open as planned/in progress, continue triage and implementation, and batch suitable fixes into the next planned PROD maintenance release. Only after that release and targeted live recheck should affected reports move to `resolved`.
 
 ## Core conventions
 
@@ -90,6 +92,7 @@ Treat this file as the current project context for this repo. If the user refere
 - Current Regional Manager case-workspace access rule (2026-04-14): the `/api/cases/:id/workspace` family plus action-plan/intervention access validators now allow a Regional Manager to open or mutate a case when it is assigned directly to that manager, even if the file's region falls outside the manager's resolved `regionIds`. When the file is not directly assigned, the existing unassigned / `portfolio_region_id` / owner-region scope checks still apply.
 - When adding/changing UI fields, confirm the backend actually returns the data.
 - Fix root causes instead of layering workarounds.
+- Current route-access source-of-truth rule (2026-05-25): when a dashboard is governed by the runtime Access Control matrix, the backend APIs that power that dashboard must either enforce the same route-matrix permission or a stricter documented object-scope rule. Do not add hardcoded role checks that can drift from the Access Control dashboard.
 - Current application SLA rule (2026-04-11): due/overdue displays now derive the active SLA stage from application status + assignment state + `assessment_esdc_eligibility`, using `Assignment -> EI Status Verification -> Assessment -> Program decision`. The frontend source of truth is `src/utils/applicationSla.js`; backend counting/helpers live in `isetadminserver.js` (`getApplicationSlaStageKey`, `computeApplicationSlaTiming`). The due-date baseline is still submission/creation time, not a dedicated per-stage timestamp model. Staff-facing UI labels now prefer `Workflow timing targets`, `Timeline status`, and `Timeline target`; internal config/storage names remain `sla_*`.
 
 ## Auth model

@@ -5,6 +5,7 @@ import {
   Button,
   Checkbox,
   ColumnLayout,
+  CollectionPreferences,
   Container,
   FormField,
   Header,
@@ -19,6 +20,13 @@ import {
 } from "@cloudscape-design/components";
 
 import { apiFetch } from "../../auth/apiClient";
+import {
+  FinanceReportsCarryOverHelp,
+  FinanceReportsDetailHelp,
+  FinanceReportsRegionSummaryHelp,
+  FinanceReportsSetupHelp,
+  FinanceReportsSummaryHelp,
+} from "../../helpPanelContents/financeReportsHelp.js";
 import { triggerFinanceInterventionReportExcelDownload } from "./financeInterventionReportExport.js";
 
 const FINANCE_REPORT_PERIOD_TYPE = "year";
@@ -81,6 +89,38 @@ const DEFAULT_SUMMARY = {
 
 const PAGE_SIZE = 20;
 
+const DETAIL_TABLE_PREFERENCES_STORAGE_KEY =
+  "finance-reports-intervention-detail-preferences-v2";
+
+const DETAIL_TABLE_DEFAULT_VISIBLE_COLUMNS = [
+  "participant",
+  "province",
+  "fundingSource",
+  "total",
+  "intervention",
+  "tuition",
+  "booksMaterials",
+  "living",
+  "childcare",
+  "wage",
+  "other",
+  "carryOver",
+  "budgetPot",
+];
+
+const INTERVENTION_AMOUNT_FILTER_OPTIONS = [
+  {
+    value: "funded",
+    label: "Funded interventions only",
+    description: "Hide approved interventions whose funding amount is zero.",
+  },
+  {
+    value: "all",
+    label: "All approved interventions",
+    description: "Include zero-dollar approved interventions such as counselling or career research.",
+  },
+];
+
 const getCurrentFiscalYearStart = (referenceDate = new Date()) => {
   const date = referenceDate instanceof Date ? referenceDate : new Date(referenceDate);
   if (Number.isNaN(date.getTime())) {
@@ -135,6 +175,218 @@ const formatStatusLabel = value =>
     .trim()
     .replace(/[_-]+/g, " ")
     .replace(/\b\w/g, character => character.toUpperCase()) || "—";
+
+const normalizeComparableText = value =>
+  String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+
+const getDetailColumnText = (item, columnId) => {
+  if (!item) return "";
+  switch (columnId) {
+    case "participant":
+      return [item.participantName, item.caseNumber, item.trackingId].filter(Boolean).join(" ");
+    case "province":
+      return item.participantProvinceName || item.participantProvince || "";
+    case "fundingSource":
+      return item.fundingSource || "";
+    case "intervention":
+      return [item.interventionLabel, item.interventionTitle, item.actionPlanName]
+        .filter(Boolean)
+        .join(" ");
+    case "institution":
+      return item.institution || "";
+    case "program":
+      return item.programName || "";
+    case "status":
+      return formatStatusLabel(item.status);
+    case "financeFollowUp":
+      return [
+        item.financeFollowUpStatusLabel,
+        item.latestPacketStatusLabel,
+        item.financeSentDate,
+        item.financePaidDate,
+      ]
+        .filter(Boolean)
+        .join(" ");
+    case "budgetPot":
+      return [item.budgetPotCode, item.budgetPotName].filter(Boolean).join(" ");
+    default:
+      return "";
+  }
+};
+
+const getDetailColumnNumber = (item, columnId) => {
+  switch (columnId) {
+    case "tuition":
+      return Number(item?.tuitionAmount || 0);
+    case "booksMaterials":
+      return Number(item?.booksMaterialsAmount || 0);
+    case "living":
+      return Number(item?.livingAmount || 0);
+    case "childcare":
+      return Number(item?.childcareAmount || 0);
+    case "wage":
+      return Number(item?.wageAmount || 0);
+    case "other":
+      return Number(item?.otherAmount || 0);
+    case "total":
+      return Number(item?.totalAmount || 0);
+    case "carryOver":
+      return Number(item?.carryOverCurrentFiscalAmount || 0);
+    default:
+      return 0;
+  }
+};
+
+const getDetailColumnDate = (item, columnId) => {
+  if (columnId === "approvedDate") {
+    return item?.approvedDate || item?.commitmentDate || "";
+  }
+  if (columnId === "dates") {
+    return [item?.interventionStartDate, item?.interventionEndDate].filter(Boolean).join(" ");
+  }
+  return "";
+};
+
+const compareDetailValues = (left, right, columnId) => {
+  const numericColumns = new Set([
+    "tuition",
+    "booksMaterials",
+    "living",
+    "childcare",
+    "wage",
+    "other",
+    "total",
+    "carryOver",
+  ]);
+  if (numericColumns.has(columnId)) {
+    const leftNumber = getDetailColumnNumber(left, columnId);
+    const rightNumber = getDetailColumnNumber(right, columnId);
+    if (leftNumber !== rightNumber) {
+      return leftNumber - rightNumber;
+    }
+  } else if (columnId === "approvedDate" || columnId === "dates") {
+    const leftDate = getDetailColumnDate(left, columnId);
+    const rightDate = getDetailColumnDate(right, columnId);
+    const dateCompare = String(leftDate || "").localeCompare(String(rightDate || ""));
+    if (dateCompare !== 0) {
+      return dateCompare;
+    }
+  } else {
+    const textCompare = getDetailColumnText(left, columnId).localeCompare(
+      getDetailColumnText(right, columnId),
+      "en-CA",
+      { numeric: true, sensitivity: "base" }
+    );
+    if (textCompare !== 0) {
+      return textCompare;
+    }
+  }
+  return String(left?.id || "").localeCompare(String(right?.id || ""), "en-CA", {
+    numeric: true,
+    sensitivity: "base",
+  });
+};
+
+const sortRowsByDetailColumn = (rows, sortingColumnId, sortingDescending) => {
+  const items = Array.isArray(rows) ? rows.slice() : [];
+  if (!sortingColumnId) {
+    return items;
+  }
+  return items.sort((left, right) => {
+    const result = compareDetailValues(left, right, sortingColumnId);
+    return sortingDescending ? -result : result;
+  });
+};
+
+const buildInterventionSecondaryText = item => {
+  const primaryText = item?.interventionLabel || item?.interventionCode || "Intervention";
+  const primaryKey = normalizeComparableText(primaryText);
+  const seen = new Set([primaryKey]);
+  return [item?.interventionTitle, item?.actionPlanName]
+    .map(value => String(value || "").trim())
+    .filter(Boolean)
+    .filter(value => {
+      const key = normalizeComparableText(value);
+      if (!key || seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    })
+    .join(" · ");
+};
+
+const sanitizeDetailVisibleColumns = (candidate, availableColumnIds) => {
+  const available = new Set(
+    (Array.isArray(availableColumnIds) ? availableColumnIds : []).filter(Boolean)
+  );
+  const source = Array.isArray(candidate) && candidate.length
+    ? candidate
+    : DETAIL_TABLE_DEFAULT_VISIBLE_COLUMNS;
+  const next = source.filter(id => available.has(id));
+  if (next.length) {
+    return Array.from(new Set(next));
+  }
+  return DETAIL_TABLE_DEFAULT_VISIBLE_COLUMNS.filter(id => available.has(id));
+};
+
+const sanitizeDetailColumnWidths = candidate =>
+  (Array.isArray(candidate) ? candidate : [])
+    .map(entry => {
+      const width = Number(entry?.width);
+      return typeof entry?.id === "string" && Number.isFinite(width)
+        ? { id: entry.id, width }
+        : null;
+    })
+    .filter(Boolean);
+
+const loadDetailTablePreferences = () => {
+  const fallback = {
+    visibleContent: DETAIL_TABLE_DEFAULT_VISIBLE_COLUMNS,
+    columnWidths: [],
+  };
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+  try {
+    const raw = window.localStorage.getItem(DETAIL_TABLE_PREFERENCES_STORAGE_KEY);
+    if (!raw) {
+      return fallback;
+    }
+    const parsed = JSON.parse(raw);
+    return {
+      visibleContent: Array.isArray(parsed?.visibleContent)
+        ? parsed.visibleContent
+        : fallback.visibleContent,
+      columnWidths: sanitizeDetailColumnWidths(parsed?.columnWidths),
+    };
+  } catch (error) {
+    console.error("[FinanceReports] failed to load intervention detail preferences", error);
+    return fallback;
+  }
+};
+
+const storeDetailTablePreferences = preferences => {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      DETAIL_TABLE_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        visibleContent: Array.isArray(preferences?.visibleContent)
+          ? preferences.visibleContent
+          : DETAIL_TABLE_DEFAULT_VISIBLE_COLUMNS,
+        columnWidths: sanitizeDetailColumnWidths(preferences?.columnWidths),
+      })
+    );
+  } catch (error) {
+    console.error("[FinanceReports] failed to persist intervention detail preferences", error);
+  }
+};
 
 const getStatusIndicatorType = status => {
   const normalized = String(status || "").trim().toLowerCase();
@@ -236,6 +488,14 @@ const filterRowsByText = (rows, filteringText) => {
       .filter(Boolean)
       .some(value => String(value).toLowerCase().includes(text))
   );
+};
+
+const filterRowsByApprovedFunding = (rows, filterValue) => {
+  const items = Array.isArray(rows) ? rows : [];
+  if (filterValue === "all") {
+    return items;
+  }
+  return items.filter(row => Number(row?.totalAmount || 0) > 0);
 };
 
 const summarizeRows = rows => {
@@ -377,7 +637,12 @@ const SummaryCard = ({ label, value, secondary = null }) => (
   </Container>
 );
 
-const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPanelOpen }) => {
+const FinanceReportsPage = ({
+  toggleHelpPanel,
+  updateBreadcrumbs,
+  setAvailableItems,
+  setSplitPanelOpen,
+}) => {
   const initializedShellStateRef = useRef(false);
   const currentFiscalYearStart = useMemo(() => getCurrentFiscalYearStart(new Date()), []);
   const fiscalYearOptions = useMemo(
@@ -393,6 +658,9 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
   const [provinceOptions, setProvinceOptions] = useState([]);
   const [selectedProvinceValues, setSelectedProvinceValues] = useState([]);
   const [includeCarryOver, setIncludeCarryOver] = useState(false);
+  const [interventionAmountFilter, setInterventionAmountFilter] = useState(
+    INTERVENTION_AMOUNT_FILTER_OPTIONS[0].value
+  );
   const [filteringText, setFilteringText] = useState("");
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [optionsError, setOptionsError] = useState("");
@@ -408,6 +676,11 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
     summary: DEFAULT_SUMMARY,
   });
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
+  const [detailTablePreferences, setDetailTablePreferences] = useState(() =>
+    loadDetailTablePreferences()
+  );
+  const [detailSortingColumnId, setDetailSortingColumnId] = useState("");
+  const [detailSortingDescending, setDetailSortingDescending] = useState(false);
 
   const selectedFiscalYearOption = useMemo(
     () =>
@@ -435,6 +708,35 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
   );
 
   const fiscalYearStart = Number(selectedFiscalYearStart || currentFiscalYearStart);
+  const selectedInterventionAmountFilterOption = useMemo(
+    () =>
+      findOptionByValue(INTERVENTION_AMOUNT_FILTER_OPTIONS, interventionAmountFilter) ||
+      INTERVENTION_AMOUNT_FILTER_OPTIONS[0],
+    [interventionAmountFilter]
+  );
+
+  const renderInfoLink = useCallback(
+    (HelpComponent, title) => {
+      if (typeof toggleHelpPanel !== "function" || !HelpComponent) {
+        return null;
+      }
+      return (
+        <Link
+          variant="info"
+          onClick={() =>
+            toggleHelpPanel(
+              React.createElement(HelpComponent),
+              title,
+              HelpComponent.aiContext || ""
+            )
+          }
+        >
+          Info
+        </Link>
+      );
+    },
+    [toggleHelpPanel]
+  );
 
   useEffect(() => {
     if (initializedShellStateRef.current) {
@@ -636,17 +938,31 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
     includeCarryOver,
   ]);
 
+  const amountFilteredRows = useMemo(
+    () => filterRowsByApprovedFunding(reportData.rows, interventionAmountFilter),
+    [reportData.rows, interventionAmountFilter]
+  );
   const displayRows = useMemo(
-    () => filterRowsByText(reportData.rows, filteringText),
-    [reportData.rows, filteringText]
+    () => filterRowsByText(amountFilteredRows, filteringText),
+    [amountFilteredRows, filteringText]
+  );
+  const sortedDisplayRows = useMemo(
+    () => sortRowsByDetailColumn(displayRows, detailSortingColumnId, detailSortingDescending),
+    [detailSortingColumnId, detailSortingDescending, displayRows]
   );
   const displaySummary = useMemo(() => summarizeRows(displayRows), [displayRows]);
+  const zeroFundingRowCount = useMemo(
+    () => (Array.isArray(reportData.rows) ? reportData.rows : []).filter(row => Number(row?.totalAmount || 0) <= 0).length,
+    [reportData.rows]
+  );
+  const hiddenZeroFundingRowCount =
+    interventionAmountFilter === "funded" ? zeroFundingRowCount : 0;
 
   const pagesCount = Math.max(1, Math.ceil(displayRows.length / PAGE_SIZE));
   const pagedRows = useMemo(() => {
     const start = (currentPageIndex - 1) * PAGE_SIZE;
-    return displayRows.slice(start, start + PAGE_SIZE);
-  }, [displayRows, currentPageIndex]);
+    return sortedDisplayRows.slice(start, start + PAGE_SIZE);
+  }, [sortedDisplayRows, currentPageIndex]);
 
   useEffect(() => {
     if (currentPageIndex > pagesCount) {
@@ -656,7 +972,7 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
 
   useEffect(() => {
     setCurrentPageIndex(1);
-  }, [filteringText, reportData.rows.length]);
+  }, [filteringText, interventionAmountFilter, reportData.rows.length]);
 
   const handleClearFilters = useCallback(() => {
     setSelectedMode(
@@ -665,8 +981,21 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
     setSelectedFiscalYearStart(String(fiscalYearOptions[0]?.value || currentFiscalYearStart));
     setSelectedProvinceValues([]);
     setIncludeCarryOver(false);
+    setInterventionAmountFilter(INTERVENTION_AMOUNT_FILTER_OPTIONS[0].value);
     setFilteringText("");
   }, [currentFiscalYearStart, fiscalYearOptions, modeOptions]);
+
+  const handleDetailColumnWidthsChange = useCallback(({ detail }) => {
+    const widths = sanitizeDetailColumnWidths(detail?.columnWidths || detail?.widths);
+    setDetailTablePreferences(previous => {
+      const next = {
+        ...previous,
+        columnWidths: widths,
+      };
+      storeDetailTablePreferences(next);
+      return next;
+    });
+  }, []);
 
   const provinceSummaryColumns = useMemo(
     () => [
@@ -709,19 +1038,13 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
       {
         id: "participant",
         header: "Participant",
-        cell: item => (
-          <SpaceBetween size="xxs">
-            {item.workspacePath ? (
-              <Link href={item.workspacePath}>{item.participantName || "Participant"}</Link>
-            ) : (
-              <span>{item.participantName || "Participant"}</span>
-            )}
-            <Box color="text-body-secondary" fontSize="body-s">
-              {[item.caseNumber, item.trackingId].filter(Boolean).join(" · ") || "No case reference"}
-            </Box>
-          </SpaceBetween>
-        ),
-        minWidth: 220,
+        cell: item =>
+          item.workspacePath ? (
+            <Link href={item.workspacePath}>{item.participantName || "Participant"}</Link>
+          ) : (
+            <span>{item.participantName || "Participant"}</span>
+          ),
+        minWidth: 190,
       },
       {
         id: "province",
@@ -736,16 +1059,33 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
         minWidth: 150,
       },
       {
+        id: "fundingSource",
+        header: "Funding",
+        cell: item => item.fundingSource || "—",
+        minWidth: 110,
+      },
+      {
+        id: "total",
+        header: "Approved funding",
+        cell: item => formatCurrency(item.totalAmount),
+        minWidth: 160,
+      },
+      {
         id: "intervention",
         header: "Intervention",
-        cell: item => (
-          <SpaceBetween size="xxs">
-            <span>{item.interventionLabel || item.interventionCode || "Intervention"}</span>
-            <Box color="text-body-secondary" fontSize="body-s">
-              {item.interventionTitle || "No intervention title"}
-            </Box>
-          </SpaceBetween>
-        ),
+        cell: item => {
+          const secondaryText = buildInterventionSecondaryText(item);
+          return (
+            <SpaceBetween size="xxs">
+              <span>{item.interventionLabel || item.interventionCode || "Intervention"}</span>
+              {secondaryText ? (
+                <Box color="text-body-secondary" fontSize="body-s">
+                  {secondaryText}
+                </Box>
+              ) : null}
+            </SpaceBetween>
+          );
+        },
         minWidth: 240,
       },
       {
@@ -849,12 +1189,6 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
         cell: item => formatCurrency(item.otherAmount),
         minWidth: 130,
       },
-      {
-        id: "total",
-        header: "Total advances",
-        cell: item => formatCurrency(item.totalAmount),
-        minWidth: 150,
-      },
       ...(includeCarryOver
         ? [
             {
@@ -891,8 +1225,79 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
           [item.budgetPotCode, item.budgetPotName].filter(Boolean).join(" · ") || "—",
         minWidth: 220,
       },
-    ],
+    ].map(column => ({
+      ...column,
+      sortingComparator: (left, right) => compareDetailValues(left, right, column.id),
+    })),
     [includeCarryOver]
+  );
+
+  const detailColumnIds = useMemo(
+    () => detailColumns.map(column => column.id).filter(Boolean),
+    [detailColumns]
+  );
+  const visibleDetailColumnIds = useMemo(
+    () => sanitizeDetailVisibleColumns(detailTablePreferences.visibleContent, detailColumnIds),
+    [detailColumnIds, detailTablePreferences.visibleContent]
+  );
+  const visibleDetailColumns = useMemo(
+    () =>
+      visibleDetailColumnIds
+        .map(columnId => detailColumns.find(column => column.id === columnId))
+        .filter(Boolean)
+        .map(column => {
+          const width = detailTablePreferences.columnWidths.find(entry => entry.id === column.id)?.width;
+          return width ? { ...column, width } : column;
+        }),
+    [detailColumns, detailTablePreferences.columnWidths, visibleDetailColumnIds]
+  );
+  const detailSortingColumn = useMemo(
+    () => detailColumns.find(column => column.id === detailSortingColumnId) || null,
+    [detailColumns, detailSortingColumnId]
+  );
+  const detailTablePreferencesComponent = useMemo(
+    () => (
+      <CollectionPreferences
+        title="Table preferences"
+        confirmLabel="Confirm"
+        cancelLabel="Cancel"
+        preferences={{
+          contentDisplay: detailColumns.map(column => ({
+            id: column.id,
+            visible: visibleDetailColumnIds.includes(column.id),
+          })),
+          columnWidths: detailTablePreferences.columnWidths,
+        }}
+        contentDisplayPreference={{
+          title: "Select visible columns",
+          options: detailColumns.map(column => ({
+            id: column.id,
+            label: column.header,
+            alwaysVisible: column.id === "participant",
+          })),
+        }}
+        onConfirm={({ detail }) => {
+          const nextVisibleContent = Array.isArray(detail?.contentDisplay)
+            ? detail.contentDisplay.filter(entry => entry.visible).map(entry => entry.id)
+            : visibleDetailColumnIds;
+          const next = {
+            visibleContent: sanitizeDetailVisibleColumns(nextVisibleContent, detailColumnIds),
+            columnWidths: sanitizeDetailColumnWidths(
+              detail?.columnWidths || detailTablePreferences.columnWidths
+            ),
+          };
+          setDetailTablePreferences(next);
+          storeDetailTablePreferences(next);
+          setCurrentPageIndex(1);
+        }}
+      />
+    ),
+    [
+      detailColumnIds,
+      detailColumns,
+      detailTablePreferences.columnWidths,
+      visibleDetailColumnIds,
+    ]
   );
 
   const exportTitle = useMemo(() => {
@@ -914,7 +1319,7 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
           }
         : displaySummary;
       await triggerFinanceInterventionReportExcelDownload({
-        rows: displayRows,
+        rows: sortedDisplayRows,
         summary: exportSummary,
         meta: {
           title: "ISET Advances and Active Clients",
@@ -927,6 +1332,8 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
           provinceLabel: selectedProvinceOptions.length
             ? selectedProvinceOptions.map(option => option.label).join(", ")
             : "All regions",
+          interventionFilterLabel:
+            selectedInterventionAmountFilterOption?.label || "Funded interventions only",
           includeCarryOver,
           filename: `${exportTitle || "iset-advances-and-active-clients"}.xlsx`,
         },
@@ -937,7 +1344,6 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
       setExporting(false);
     }
   }, [
-    displayRows,
     displaySummary,
     exportTitle,
     fiscalYearStart,
@@ -945,7 +1351,9 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
     reportData.period,
     reportData.summary,
     selectedModeOption,
+    selectedInterventionAmountFilterOption,
     selectedProvinceOptions,
+    sortedDisplayRows,
     includeCarryOver,
   ]);
 
@@ -953,6 +1361,13 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
   const displayFiscalYearStart = Number(reportData.fiscalYearStart || fiscalYearStart || currentFiscalYearStart);
   const previousFiscalYearLabel = formatFiscalYearLabel(displayFiscalYearStart - 1);
   const nextFiscalYearLabel = formatFiscalYearLabel(displayFiscalYearStart + 1);
+  const detailDescription = includeCarryOver
+    ? "One row per visible intervention, with payment status and a best-effort carry-over estimate beside the funding amounts."
+    : "One row per visible intervention, with payment status shown beside the funding amounts.";
+  const interventionFilterDetail =
+    interventionAmountFilter === "funded" && hiddenZeroFundingRowCount > 0
+      ? ` ${formatInteger(hiddenZeroFundingRowCount)} zero-dollar intervention${hiddenZeroFundingRowCount === 1 ? " is" : "s are"} hidden.`
+      : "";
 
   return (
     <SpaceBetween size="l">
@@ -960,6 +1375,7 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
         header={
           <Header
             variant="h1"
+            info={renderInfoLink(FinanceReportsSetupHelp, "Report setup")}
             description="Filter by fiscal year for one or more provinces/territories. Carry-over or adjustment amounts appear as negatives, and payment status shows the current PATH follow-up state for related packets."
             actions={
               <SpaceBetween direction="horizontal" size="xs">
@@ -1051,22 +1467,31 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
         </Alert>
       ) : null}
 
+      <Header
+        variant="h2"
+        info={renderInfoLink(FinanceReportsSummaryHelp, "Report summary")}
+        description="Approved advances, active clients, and interventions for the visible report rows."
+      >
+        Report summary
+      </Header>
+
       <ColumnLayout columns={4}>
         <SummaryCard
-          label="CRF Advances"
+          label="Total advances"
+          value={formatCurrency(displaySummary.totalAmount)}
+        />
+        <SummaryCard
+          label="CRF advances"
           value={formatCurrency(displaySummary.fundingTotals.CRF)}
         />
         <SummaryCard
-          label="EI Advances"
+          label="EI advances"
           value={formatCurrency(displaySummary.fundingTotals.EI)}
         />
         <SummaryCard
-          label="Participants"
+          label="Active clients"
           value={formatInteger(displaySummary.participantCount)}
-        />
-        <SummaryCard
-          label="Interventions"
-          value={formatInteger(displaySummary.interventionCount)}
+          secondary={`${formatInteger(displaySummary.interventionCount)} interventions`}
         />
       </ColumnLayout>
 
@@ -1075,6 +1500,7 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
           header={
             <Header
               variant="h2"
+              info={renderInfoLink(FinanceReportsCarryOverHelp, "Carry-over estimate")}
               description={carryOverSummary?.sourceNote || "Best-effort estimate for cross-fiscal activity."}
             >
               Carry-over estimate
@@ -1105,6 +1531,7 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
         header={
           <Header
             variant="h2"
+            info={renderInfoLink(FinanceReportsRegionSummaryHelp, "Region summary")}
             description="Current filtered totals by participant home province or territory."
           >
             Region summary
@@ -1129,10 +1556,23 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
         header={
           <Header
             variant="h2"
-            description={
-              includeCarryOver
-                ? "One row per intervention, with payment status and a best-effort carry-over estimate beside the funding amounts."
-                : "One row per intervention, with payment status shown beside the funding amounts."
+            info={renderInfoLink(FinanceReportsDetailHelp, "Intervention detail")}
+            description={`${detailDescription}${interventionFilterDetail}`}
+            actions={
+              <div style={{ minWidth: "15rem" }}>
+                <Select
+                  selectedOption={selectedInterventionAmountFilterOption}
+                  options={INTERVENTION_AMOUNT_FILTER_OPTIONS}
+                  onChange={({ detail }) =>
+                    setInterventionAmountFilter(
+                      detail.selectedOption?.value || INTERVENTION_AMOUNT_FILTER_OPTIONS[0].value
+                    )
+                  }
+                  selectedAriaLabel="Selected intervention row scope"
+                  ariaLabel="Intervention row scope"
+                  disabled={dataLoading}
+                />
+              </div>
             }
           >
             Intervention detail
@@ -1143,10 +1583,18 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
           variant="embedded"
           trackBy="id"
           items={pagedRows}
-          columnDefinitions={detailColumns}
+          columnDefinitions={visibleDetailColumns}
           loading={dataLoading}
           loadingText="Loading intervention detail"
           resizableColumns
+          onColumnWidthsChange={handleDetailColumnWidthsChange}
+          sortingColumn={detailSortingColumn || undefined}
+          sortingDescending={detailSortingDescending}
+          onSortingChange={({ detail }) => {
+            setDetailSortingColumnId(detail?.sortingColumn?.id || "");
+            setDetailSortingDescending(Boolean(detail?.isDescending));
+            setCurrentPageIndex(1);
+          }}
           stickyHeader
           filter={
             <TextFilter
@@ -1169,6 +1617,7 @@ const FinanceReportsPage = ({ updateBreadcrumbs, setAvailableItems, setSplitPane
               No interventions match the current filters.
             </Box>
           }
+          preferences={detailTablePreferencesComponent}
         />
       </Container>
     </SpaceBetween>

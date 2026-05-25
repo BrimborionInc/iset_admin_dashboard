@@ -26,6 +26,9 @@ const {
   mergeIlmpAnswers,
 } = require('./src/lib/ilmpContextMapping');
 const {
+  buildDecisionLetterSchemaFromMessageBody,
+} = require('./src/lib/decisionLetterMessageBody');
+const {
   getIlmpActionPlanReadinessWarning,
   getNoReportableInterventionsMessage,
   summariseIlmpActionPlanStatuses,
@@ -4363,7 +4366,24 @@ async function fetchAssessmentApplicantContext({ applicationId, applicantUserId 
 }
 
 function formatAssessmentOtherFundingDetailsForPdf(structuredDetails, fallbackText = '') {
-  const source = structuredDetails && typeof structuredDetails === 'object' ? structuredDetails : null;
+  const parseLegacyOtherFundingSummary = value => {
+    const text = normaliseString(value);
+    if (!text) return {};
+    const involvedMatch = text.match(/Other funding involved:\s*(Yes|No|Unknown)\.?/i);
+    const involved = involvedMatch ? involvedMatch[1].toLowerCase() : '';
+    const notesMatch = text.match(/(?:^|\s)Notes:\s*([\s\S]*)$/i);
+    const notes = notesMatch
+      ? notesMatch[1].trim()
+      : text.replace(/Other funding involved:\s*(Yes|No|Unknown)\.?\s*/i, '').trim();
+    return {
+      involved,
+      sources: [],
+      notes: notes || text,
+    };
+  };
+  const source = structuredDetails && typeof structuredDetails === 'object'
+    ? structuredDetails
+    : (typeof structuredDetails === 'string' ? parseLegacyOtherFundingSummary(structuredDetails) : null);
   if (!source) return normaliseString(fallbackText) || '';
 
   const normalizeInvolved = value => {
@@ -4375,6 +4395,12 @@ function formatAssessmentOtherFundingDetailsForPdf(structuredDetails, fallbackTe
     const normalized = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
     if (!normalized) return 'other';
     return normalized;
+  };
+  const normalizeStatus = (value, entry = {}) => {
+    const normalized = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (normalized === 'not_confirmed' || normalized === 'notconfirmed') return 'unknown';
+    if (['confirmed', 'pending', 'denied', 'unknown'].includes(normalized)) return normalized;
+    return String(entry?.coverage || '').trim() ? 'confirmed' : 'unknown';
   };
   const typeLabelLookup = {
     iset_holder: 'ISET Holder',
@@ -4389,6 +4415,16 @@ function formatAssessmentOtherFundingDetailsForPdf(structuredDetails, fallbackTe
     other_public: 'Other Public',
     other: 'Other',
   };
+  const statusLabelLookup = {
+    confirmed: 'Confirmed',
+    pending: 'Pending',
+    denied: 'Denied',
+    unknown: 'Unknown / not confirmed',
+  };
+  const formatAmount = value => {
+    const parsed = parseCurrencyValue(value);
+    return parsed === null ? '' : `$${formatCurrencyValue(parsed)}`;
+  };
 
   const involved = normalizeInvolved(source.involved);
   const sources = Array.isArray(source.sources) ? source.sources : [];
@@ -4397,13 +4433,26 @@ function formatAssessmentOtherFundingDetailsForPdf(structuredDetails, fallbackTe
       if (!entry || typeof entry !== 'object') return null;
       const name = String(entry.name || '').trim();
       const coverage = String(entry.coverage || '').trim();
-      if (!name && !coverage) return null;
+      const rawAmount = entry.amount ?? entry.fundingAmount ?? entry.funding_amount ?? '';
+      const amount = formatAmount(rawAmount);
+      const notes = String(entry.notes || '').trim();
+      const rawStatus = entry.status || entry.fundingStatus || entry.funding_status;
+      if (!name && !coverage && !amount && !notes && !rawStatus) return null;
       const type = normalizeType(entry.type);
       const typeLabel = typeLabelLookup[type] || 'Other';
-      return { typeLabel, name, coverage };
+      const status = normalizeStatus(rawStatus, entry);
+      return {
+        typeLabel,
+        name,
+        coverage,
+        amount,
+        notes,
+        status,
+        statusLabel: statusLabelLookup[status] || statusLabelLookup.unknown,
+      };
     })
     .filter(Boolean);
-  const nwacCoverage = String(source.nwacCoverage || '').trim();
+  const nwacCoverage = String(source.nwacCoverage || source.nwac_coverage || '').trim();
   const notes = String(source.notes || '').trim();
 
   const lines = [];
@@ -4414,8 +4463,23 @@ function formatAssessmentOtherFundingDetailsForPdf(structuredDetails, fallbackTe
   if (normalizedSources.length) {
     normalizedSources.forEach((entry, index) => {
       const nameLabel = entry.name || 'Unnamed funder';
-      const coverageLabel = entry.coverage || 'Coverage not specified';
-      lines.push(`${index + 1}. ${entry.typeLabel}: ${nameLabel} - ${coverageLabel}`);
+      const details = [entry.statusLabel];
+      if (entry.amount) {
+        details.push(`Amount: ${entry.amount}`);
+      } else if (entry.status !== 'confirmed') {
+        details.push('Amount not confirmed');
+      }
+      if (entry.coverage) {
+        details.push(entry.coverage);
+      } else if (entry.status !== 'confirmed') {
+        details.push('No confirmed coverage');
+      } else {
+        details.push('Coverage not specified');
+      }
+      if (entry.notes) {
+        details.push(`Notes: ${entry.notes}`);
+      }
+      lines.push(`${index + 1}. ${entry.typeLabel}: ${nameLabel} - ${details.join('; ')}`);
     });
   }
   if (nwacCoverage) {
@@ -16865,6 +16929,8 @@ async function writeAccessControlMatrix(nextMatrix) {
 }
 
 const APPLICANT_WATCHLIST_MANAGER_ROUTE = '/configuration/applicant-watchlist';
+const TEMPLATE_EDITOR_ROUTE = '/template-editor';
+const MANAGE_NOTIFICATIONS_ROUTE = '/manage-notifications';
 const APPLICANT_WATCHLIST_STATUS_ACTIVE = 'active';
 const APPLICANT_WATCHLIST_STATUS_INACTIVE = 'inactive';
 const APPLICANT_WATCHLIST_EVENT_TYPES = new Set([
@@ -16884,11 +16950,24 @@ async function requestHasRouteMatrixAccess(req, routePath) {
   const role = canonicaliseAccessRole(inferUserRole(req));
   if (!role || !routePath) return false;
   const matrix = await readAccessControlMatrix();
+  return roleHasAccessControlMatrixRoute(matrix, role, routePath);
+}
+
+function roleHasAccessControlMatrixRoute(matrix, role, routePath) {
+  if (!role || !routePath) return false;
   const allowed = Array.isArray(matrix?.routes?.[routePath]) ? matrix.routes[routePath] : null;
   if (allowed) {
     return allowed.includes(role);
   }
   return matrix?.default !== 'deny';
+}
+
+async function requestHasAnyRouteMatrixAccess(req, routePaths = []) {
+  const role = canonicaliseAccessRole(inferUserRole(req));
+  const paths = Array.isArray(routePaths) ? routePaths.filter(Boolean) : [routePaths].filter(Boolean);
+  if (!role || paths.length === 0) return false;
+  const matrix = await readAccessControlMatrix();
+  return paths.some(routePath => roleHasAccessControlMatrixRoute(matrix, role, routePath));
 }
 
 function requireRouteMatrixAccess(routePath) {
@@ -55361,17 +55440,32 @@ const fetchTemplateById = async (templateId) => {
   return rows;
 };
 
-function requireNotificationConfigAccess(req, res) {
-  if (!hasSystemOrNwacAdminAccess(req)) {
-    res.status(403).json({ error: 'forbidden' });
+async function requireNotificationConfigAccess(req, res, routePaths) {
+  try {
+    if (!req.auth) {
+      res.status(401).json({ error: 'Unauthenticated' });
+      return false;
+    }
+    if (req.auth.subjectType !== 'staff') {
+      res.status(403).json({ error: 'forbidden' });
+      return false;
+    }
+    const allowed = await requestHasAnyRouteMatrixAccess(req, routePaths);
+    if (!allowed) {
+      res.status(403).json({ error: 'forbidden' });
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('[notification-config] access matrix check failed:', err?.message || err);
+    res.status(500).json({ error: 'notification_config_access_check_failed' });
     return false;
   }
-  return true;
 }
 
 // Get all templates
 app.get('/api/templates', async (req, res) => {
-  if (!requireNotificationConfigAccess(req, res)) return;
+  if (!(await requireNotificationConfigAccess(req, res, [TEMPLATE_EDITOR_ROUTE, MANAGE_NOTIFICATIONS_ROUTE]))) return;
   try {
     const [rows] = await pool.query(`
       SELECT id, name, type, status, language, subject, content, localized, created_at, updated_at
@@ -55387,7 +55481,7 @@ app.get('/api/templates', async (req, res) => {
 
 // Get a template by ID
 app.get('/api/templates/:templateId', async (req, res) => {
-  if (!requireNotificationConfigAccess(req, res)) return;
+  if (!(await requireNotificationConfigAccess(req, res, TEMPLATE_EDITOR_ROUTE))) return;
   const templateId = req.params.templateId;
   try {
     const rows = await fetchTemplateById(templateId);
@@ -55403,7 +55497,7 @@ app.get('/api/templates/:templateId', async (req, res) => {
 
 // Save (create or update) a template by ID
 app.post('/api/templates/:templateId', async (req, res) => {
-  if (!requireNotificationConfigAccess(req, res)) return;
+  if (!(await requireNotificationConfigAccess(req, res, TEMPLATE_EDITOR_ROUTE))) return;
   const templateId = req.params.templateId;
   const { name } = req.body || {};
 
@@ -55488,7 +55582,7 @@ app.post('/api/templates/:templateId', async (req, res) => {
 
 // Delete a template by ID
 app.delete('/api/templates/:templateId', async (req, res) => {
-  if (!requireNotificationConfigAccess(req, res)) return;
+  if (!(await requireNotificationConfigAccess(req, res, TEMPLATE_EDITOR_ROUTE))) return;
   const templateId = req.params.templateId;
   try {
     const [result] = await pool.query(
@@ -57888,7 +57982,8 @@ const handlePostCaseSecureMessage = async (req, res) => {
 
     // Resolve eligible workflow attachments (consent forms only)
     let attachmentRows = [];
-    let decisionLetterTokensByWorkflowId = new Map();
+    const decisionLetterTokensByWorkflowId = new Map();
+    const decisionLetterSchemaOverridesByWorkflowId = new Map();
     const decisionLetterDocs = [];
     let denialLetterCompletionResult = null;
     const letterDocTypes = new Set(['assessment_approval_letter', 'assessment_denial_letter']);
@@ -58073,10 +58168,21 @@ const handlePostCaseSecureMessage = async (req, res) => {
             message: 'Decision letter forms can only be sent for the current application decision.'
           });
         }
-	        const decisionDrafts = resolveDecisionLetterDrafts(caseContext, caseRow?.application_id || null);
+        const decisionDrafts = resolveDecisionLetterDrafts(caseContext, caseRow?.application_id || null);
         const applicantNameToken = normaliseString(toNameValue) || contextApplicantName || normaliseString(caseRow?.applicant_email) || null;
         const coordinatorNameToken = normaliseString(fromNameValue) || null;
         letterAttachments.forEach((letter) => {
+          if (requestedInterventionId && letter.document_type === 'assessment_approval_letter') {
+            decisionLetterSchemaOverridesByWorkflowId.set(letter.id, {
+              body: bodyValue,
+              meta: {
+                interventionId: requestedInterventionId,
+                messageSubject: subjectValue,
+                generatedFor: 'intervention_approval_follow_up',
+              },
+            });
+            return;
+          }
           const draft = letter.document_type === 'assessment_approval_letter'
             ? decisionDrafts.approval
             : decisionDrafts.denial;
@@ -58503,7 +58609,10 @@ const handlePostCaseSecureMessage = async (req, res) => {
             console.warn('[signing_request] failed to build schema for workflow', wf.id, schemaErr?.message || schemaErr);
           }
         }
-        if (resolvedSchema && decisionLetterTokensByWorkflowId.has(wf.id)) {
+        if (resolvedSchema && decisionLetterSchemaOverridesByWorkflowId.has(wf.id)) {
+          const override = decisionLetterSchemaOverridesByWorkflowId.get(wf.id);
+          resolvedSchema = buildDecisionLetterSchemaFromMessageBody(resolvedSchema, override?.body || '', override?.meta || {});
+        } else if (resolvedSchema && decisionLetterTokensByWorkflowId.has(wf.id)) {
           resolvedSchema = applyPrefillTokensToSchema(resolvedSchema, decisionLetterTokensByWorkflowId.get(wf.id));
           resolvedSchema = pruneDecisionLetterSchema(resolvedSchema);
         }
@@ -85267,7 +85376,7 @@ app.patch('/api/events/:eventId/read', async (req, res) => {
 
 // Notification Settings Endpoints
 app.get('/api/config/notifications/email-settings', async (req, res) => {
-    if (!requireNotificationConfigAccess(req, res)) return;
+    if (!(await requireNotificationConfigAccess(req, res, MANAGE_NOTIFICATIONS_ROUTE))) return;
     try {
         const settings = await readNotificationEmailSettings();
         res.json(settings);
@@ -85278,7 +85387,7 @@ app.get('/api/config/notifications/email-settings', async (req, res) => {
 });
 
 app.patch('/api/config/notifications/email-settings', async (req, res) => {
-    if (!requireNotificationConfigAccess(req, res)) return;
+    if (!(await requireNotificationConfigAccess(req, res, MANAGE_NOTIFICATIONS_ROUTE))) return;
     try {
         const { senderEmail = null, senderName = null, replyTo = null } = req.body || {};
         const trimmedSenderEmail = senderEmail === null || senderEmail === undefined
@@ -85310,7 +85419,7 @@ app.patch('/api/config/notifications/email-settings', async (req, res) => {
 
 // GET all notification settings with template info
 app.get('/api/notifications', async (req, res) => {
-    if (!requireNotificationConfigAccess(req, res)) return;
+    if (!(await requireNotificationConfigAccess(req, res, MANAGE_NOTIFICATIONS_ROUTE))) return;
     try {
         const [rows] = await pool.query(`
             SELECT ns.*, nt.name as template_name, nt.language as template_language
@@ -85327,7 +85436,7 @@ app.get('/api/notifications', async (req, res) => {
 
 // POST create or update a notification setting
 app.post('/api/notifications', async (req, res) => {
-    if (!requireNotificationConfigAccess(req, res)) return;
+    if (!(await requireNotificationConfigAccess(req, res, MANAGE_NOTIFICATIONS_ROUTE))) return;
     const { id, event, role, template_id, language, enabled, email_alert, bell_alert } = req.body;
     try {
         if (id) {
@@ -85353,7 +85462,7 @@ app.post('/api/notifications', async (req, res) => {
 
 // DELETE a notification setting
 app.delete('/api/notifications/:id', async (req, res) => {
-    if (!requireNotificationConfigAccess(req, res)) return;
+    if (!(await requireNotificationConfigAccess(req, res, MANAGE_NOTIFICATIONS_ROUTE))) return;
     const { id } = req.params;
     try {
         await pool.query(`DELETE FROM notification_setting WHERE id=?`, [id]);

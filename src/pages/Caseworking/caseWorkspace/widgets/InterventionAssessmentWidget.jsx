@@ -146,6 +146,30 @@ const OTHER_FUNDING_INVOLVED_OPTIONS = [
   { label: "Yes", value: "yes" },
   { label: "Unknown", value: "unknown" },
 ];
+const OTHER_FUNDER_STATUS_CONFIRMED = "confirmed";
+const OTHER_FUNDER_STATUS_OPTIONS = [
+  {
+    label: "Confirmed",
+    value: OTHER_FUNDER_STATUS_CONFIRMED,
+    description: "This funder has confirmed coverage.",
+  },
+  {
+    label: "Pending",
+    value: "pending",
+    description: "A request or application is still waiting for a decision.",
+  },
+  {
+    label: "Denied",
+    value: "denied",
+    description: "Funding was requested and denied.",
+  },
+  {
+    label: "Unknown / not confirmed",
+    value: "unknown",
+    description: "The source is known, but coverage or amount is not confirmed.",
+  },
+];
+const OTHER_FUNDER_STATUS_VALUE_SET = new Set(OTHER_FUNDER_STATUS_OPTIONS.map(option => option.value));
 const OTHER_FUNDER_TYPE_OPTIONS = [
   {
     label: "ISET Holder",
@@ -206,6 +230,20 @@ const OTHER_FUNDER_TYPE_OPTIONS = [
 const OTHER_FUNDER_TYPE_VALUE_SET = new Set(OTHER_FUNDER_TYPE_OPTIONS.map(option => option.value));
 const resolveOtherFunderTypeLabel = value =>
   OTHER_FUNDER_TYPE_OPTIONS.find(option => option.value === normalizeOtherFunderType(value))?.label || "Other";
+const normalizeOtherFunderStatus = (value, source = {}) => {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  if (normalized === "not_confirmed" || normalized === "notconfirmed") return "unknown";
+  if (OTHER_FUNDER_STATUS_VALUE_SET.has(normalized)) return normalized;
+  return String(source?.coverage || "").trim() ? OTHER_FUNDER_STATUS_CONFIRMED : "unknown";
+};
+const resolveOtherFunderStatusLabel = value =>
+  OTHER_FUNDER_STATUS_OPTIONS.find(option => option.value === normalizeOtherFunderStatus(value))?.label ||
+  "Unknown / not confirmed";
+const isConfirmedOtherFundingSource = source =>
+  normalizeOtherFunderStatus(source?.status, source) === OTHER_FUNDER_STATUS_CONFIRMED;
 
 const defaultFormState = {
   actionPlanId: "",
@@ -524,12 +562,13 @@ const buildCoFunderApprovalLetters = ({
     caseManagerPhone,
   });
 
-  return (Array.isArray(fundingSources) ? fundingSources : [])
+  return (Array.isArray(fundingSources) ? fundingSources.filter(isConfirmedOtherFundingSource) : [])
     .map((source, index) => {
       const funderName = String(source?.name || "").trim();
       if (!funderName) return null;
       const funderTypeLabel = resolveOtherFunderTypeLabel(source?.type);
       const sourceCoverage = String(source?.coverage || "").trim();
+      const sourceAmount = formatOtherFundingAmountDisplay(source?.amount);
       const body = [
         isRevision ? "Funding Revision Letter (Other Funding Source)" : "Letter of Approval (Other Funding Source)",
         `Date: ${decisionDate || ""}`,
@@ -555,6 +594,7 @@ const buildCoFunderApprovalLetters = ({
         "",
         `As documented in the assessment records, ${funderName} (${funderTypeLabel}) is identified as funding the following:`,
         sourceCoverage ? `- ${normalizeInlineText(sourceCoverage)}` : "- Funding details to be confirmed through your office.",
+        sourceAmount ? `- Confirmed other funding amount: ${sourceAmount}` : "",
         nwacCoverage ? `- NWAC coverage summary: ${normalizeInlineText(nwacCoverage)}` : "",
         notes ? `- Coordination notes: ${normalizeInlineText(notes)}` : "",
         trackingReference ? `- File reference: ${normalizeInlineText(trackingReference)}` : "",
@@ -849,12 +889,16 @@ const buildEmptyOtherFundingSource = (overrides = {}) => {
     id: overrides.id || buildUuid(),
     name: "",
     type: "other",
+    status: OTHER_FUNDER_STATUS_CONFIRMED,
+    amount: "",
     coverage: "",
+    notes: "",
     ...overrides,
   };
   return {
     ...base,
     type: normalizeOtherFunderType(base.type || "other"),
+    status: normalizeOtherFunderStatus(base.status, base),
   };
 };
 
@@ -873,10 +917,31 @@ const validateOtherFundingSourceDraft = draft => {
   if (!String(next.name || "").trim()) {
     errors.name = "Funder name is required.";
   }
-  if (!String(next.coverage || "").trim()) {
-    errors.coverage = "Coverage details are required.";
+  if (isConfirmedOtherFundingSource(next) && !String(next.coverage || "").trim()) {
+    errors.coverage = "Coverage details are required for confirmed funding.";
+  }
+  const rawAmount = String(next.amount || "").trim();
+  const parsedAmount = parseCurrencyInput(rawAmount);
+  if (rawAmount && (parsedAmount === null || !Number.isFinite(parsedAmount) || parsedAmount < 0)) {
+    errors.amount = "Enter a valid amount in dollars, or leave it blank.";
   }
   return errors;
+};
+
+const parseLegacyOtherFundingSummary = value => {
+  const text = String(value || "").trim();
+  if (!text) return {};
+  const involvedMatch = text.match(/Other funding involved:\s*(Yes|No|Unknown)\.?/i);
+  const involved = involvedMatch ? involvedMatch[1].toLowerCase() : "";
+  const notesMatch = text.match(/(?:^|\s)Notes:\s*([\s\S]*)$/i);
+  const notes = notesMatch
+    ? notesMatch[1].trim()
+    : text.replace(/Other funding involved:\s*(Yes|No|Unknown)\.?\s*/i, "").trim();
+  return {
+    involved,
+    sources: [],
+    notes: notes || text,
+  };
 };
 
 const normalizeOtherFundingSources = (value, { keepEmpty = false, preserveWhitespace = false } = {}) => {
@@ -886,20 +951,39 @@ const normalizeOtherFundingSources = (value, { keepEmpty = false, preserveWhites
       if (!entry || typeof entry !== "object") return null;
       const rawName = String(entry.name || "");
       const rawCoverage = String(entry.coverage || "");
+      const rawAmount = String(entry.amount ?? entry.fundingAmount ?? entry.funding_amount ?? "");
+      const rawNotes = String(entry.notes || "");
+      const status = normalizeOtherFunderStatus(
+        entry.status || entry.fundingStatus || entry.funding_status,
+        entry
+      );
       const normalized = buildEmptyOtherFundingSource({
         id: entry.id || buildUuid(),
         name: preserveWhitespace ? rawName : rawName.trim(),
         type: entry.type || "other",
+        status,
+        amount: preserveWhitespace ? rawAmount : rawAmount.trim(),
         coverage: preserveWhitespace ? rawCoverage : rawCoverage.trim(),
+        notes: preserveWhitespace ? rawNotes : rawNotes.trim(),
       });
-      const hasValues = rawName.trim() || rawCoverage.trim();
+      const hasValues =
+        rawName.trim() ||
+        rawCoverage.trim() ||
+        rawAmount.trim() ||
+        rawNotes.trim() ||
+        entry.status ||
+        entry.fundingStatus ||
+        entry.funding_status;
       return hasValues || keepEmpty ? normalized : null;
     })
     .filter(Boolean);
 };
 
 const normalizeOtherFundingDetails = (rawDetails, options = {}) => {
-  const source = rawDetails && typeof rawDetails === "object" ? rawDetails : {};
+  const source =
+    rawDetails && typeof rawDetails === "object"
+      ? rawDetails
+      : (typeof rawDetails === "string" ? parseLegacyOtherFundingSummary(rawDetails) : {});
   const keepEmptySources = Boolean(options.keepEmptySources);
   const preserveWhitespace = Boolean(options.preserveWhitespace);
   const involved = normalizeOtherFundingInvolved(source.involved);
@@ -973,6 +1057,11 @@ const formatCurrencyDisplay = value => {
   const num = parseCurrencyInput(value);
   if (num === null) return "";
   return `$ ${num.toFixed(2)}`;
+};
+
+const formatOtherFundingAmountDisplay = value => {
+  const amount = parseCurrencyInput(value);
+  return amount !== null && Number.isFinite(amount) ? formatCurrencyDisplay(amount) : "";
 };
 
 const sanitizeCurrencyInput = (value, options = {}) => {
@@ -3875,8 +3964,15 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
             .map(val => BARRIER_OPTIONS.find(opt => opt.value === (val.value || val)))
             .filter(Boolean)
         : [];
+      const caseContext = resolveCaseContext(caseData);
+      const fallbackOtherFundingDetails =
+        caseData?.assessment_other_funding_details ||
+        caseData?.assessmentOtherFunding ||
+        caseContext?.assessmentOtherFunding ||
+        caseContext?.otherFunding ||
+        null;
       const normalizedOtherFunding = normalizeOtherFundingDetails(
-        metadata.otherFundingDetails
+        metadata.otherFundingDetails || fallbackOtherFundingDetails
       );
       const hydratedForm = {
         ...defaultFormState,
@@ -5639,10 +5735,27 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         cell: item => resolveOtherFunderTypeLabel(item.type),
       },
       {
+        id: "status",
+        header: "Status",
+        minWidth: 150,
+        cell: item => resolveOtherFunderStatusLabel(item.status),
+      },
+      {
+        id: "amount",
+        header: "Amount",
+        minWidth: 120,
+        cell: item => formatOtherFundingAmountDisplay(item.amount) || "—",
+      },
+      {
         id: "coverage",
         header: "What this funder covers",
         minWidth: 260,
-        cell: item => item.coverage || "—",
+        cell: item => (
+          <SpaceBetween size="xxs">
+            <Box>{item.coverage || "—"}</Box>
+            {item.notes ? <Box fontStyle="italic">{item.notes}</Box> : null}
+          </SpaceBetween>
+        ),
       },
       {
         id: "actions",
@@ -5684,16 +5797,17 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
           }
           onChange={({ detail }) => {
             const nextValue = detail.selectedOption?.value || "";
-            if (nextValue !== "yes") {
+            if (!nextValue || nextValue === "no") {
               resetOtherFundingSourceModal();
             }
             updateOtherFundingFields(prev => {
-              const resetValues = nextValue === "yes"
-                ? {}
-                : {
+              const resetValues =
+                !nextValue || nextValue === "no"
+                  ? {
                     otherFundingSources: [],
                     otherFundingNwacCoverage: "",
-                  };
+                  }
+                  : {};
               return {
                 ...prev,
                 otherFundingInvolved: nextValue,
@@ -5706,7 +5820,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
           disabled={isFormLocked}
         />
       </FormField>
-      {form.otherFundingInvolved === "yes" && (
+      {form.otherFundingInvolved && form.otherFundingInvolved !== "no" && (
         <SpaceBetween size="m">
           <Table
             stripedRows
@@ -5965,8 +6079,10 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
             <SpaceBetween size="xxs">
               {reviewOtherFundingSources.map((source, index) => (
                 <div key={source.id || `${source.name}-${index}`}>
-                  {resolveOtherFunderTypeLabel(source.type)}: {source.name || "Unnamed funder"}
+                  {resolveOtherFunderTypeLabel(source.type)}: {source.name || "Unnamed funder"} ({resolveOtherFunderStatusLabel(source.status)})
+                  {formatOtherFundingAmountDisplay(source.amount) ? ` — ${formatOtherFundingAmountDisplay(source.amount)}` : ""}
                   {source.coverage ? ` — ${source.coverage}` : ""}
+                  {source.notes ? ` — ${source.notes}` : ""}
                 </div>
               ))}
             </SpaceBetween>
@@ -6544,8 +6660,49 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
               readOnly={isFormLocked}
             />
           </FormField>
+          <FormField label="Funding status">
+            <Select
+              selectedOption={
+                OTHER_FUNDER_STATUS_OPTIONS.find(option => option.value === otherFundingSourceModalDraft.status) ||
+                OTHER_FUNDER_STATUS_OPTIONS.find(option => option.value === OTHER_FUNDER_STATUS_CONFIRMED)
+              }
+              onChange={({ detail }) => {
+                updateOtherFundingSourceModalDraft({ status: detail.selectedOption?.value || OTHER_FUNDER_STATUS_CONFIRMED });
+                setOtherFundingSourceModalErrors(prev => {
+                  const next = { ...prev };
+                  delete next.coverage;
+                  return next;
+                });
+              }}
+              options={OTHER_FUNDER_STATUS_OPTIONS}
+              placeholder="Select funding status"
+              readOnly={isFormLocked}
+            />
+          </FormField>
+          <FormField
+            label="Amount (optional)"
+            description="Leave blank if the amount is not known or not applicable."
+            errorText={otherFundingSourceModalErrors.amount}
+          >
+            <Input
+              inputMode="decimal"
+              value={otherFundingSourceModalDraft.amount || ""}
+              onChange={({ detail }) => {
+                updateOtherFundingSourceModalDraft({ amount: detail.value });
+                setOtherFundingSourceModalErrors(prev => {
+                  const next = { ...prev };
+                  delete next.amount;
+                  return next;
+                });
+              }}
+              placeholder="0.00"
+              spellcheck={false}
+              readOnly={isFormLocked}
+            />
+          </FormField>
           <FormField
             label="What this funder covers"
+            description="Required only when funding is confirmed."
             errorText={otherFundingSourceModalErrors.coverage}
           >
             <Textarea
@@ -6558,6 +6715,17 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                   delete next.coverage;
                   return next;
                 });
+              }}
+              spellcheck={true}
+              readOnly={isFormLocked}
+            />
+          </FormField>
+          <FormField label="Funder notes (optional)">
+            <Textarea
+              value={otherFundingSourceModalDraft.notes || ""}
+              rows={3}
+              onChange={({ detail }) => {
+                updateOtherFundingSourceModalDraft({ notes: detail.value });
               }}
               spellcheck={true}
               readOnly={isFormLocked}

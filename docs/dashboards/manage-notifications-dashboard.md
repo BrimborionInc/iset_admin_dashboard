@@ -1,6 +1,6 @@
 # Manage Notifications Dashboard
 
-Last updated: 2026-05-05
+Last updated: 2026-05-25
 
 > **Quick patch (2025-10-02):** Applicant email alerts for submissions, secure messages, and decisions are temporarily hardwired while the dashboard toggles remain read-only.
 
@@ -8,7 +8,8 @@ Last updated: 2026-05-05
 
 ### Notification Settings
 - Combines `/api/events`, `/api/roles`, `/api/templates`, and `/api/notifications`, normalising responses before rendering.
-- Backend template, notification matrix, and sender-settings APIs are restricted to System Administrator and NWAC Administrator roles; frontend route gating is not the only access control.
+- Backend notification matrix and sender-settings APIs follow the runtime access-control matrix for `/manage-notifications`. The Access Control dashboard is the source of truth for which staff roles can use this dashboard.
+- The shared template list endpoint can be read by staff with either `/manage-notifications` or `/template-editor` access, because both dashboards need the same template catalogue.
 - Stores the PATH SES sender settings in `iset_runtime_config` (`scope='notifications'`, `k='path.email'`) so PATH-generated emails share one configurable `From` address, display name, and `Reply-To` across the admin dashboard and portal.
 - Sender and `Reply-To` email identities are trimmed and validated but their casing is preserved, because SES email identity verification can be case-sensitive in sandboxed DEV testing.
 - Roles are hydrated with `value`/`label` pairs; legacy `PTMA Staff` entries map to `Application Assessor`, and the synthetic `Applicant` row is injected when the API omits it so applicant toggles stay visible.

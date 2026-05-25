@@ -67,6 +67,7 @@ The first seeded guidance slice is intentionally narrow:
 - imported/application-less backload overview
 - existing-intervention lifecycle guardrails
 - historical finance handling for `manual_backload` interventions
+- annual Financial Reports / `ISET Advances and Active Clients` report purpose, funded-interventions default, export scope, and PATH payment-follow-up caveat
 
 This limited seed exists to tune answer quality before expanding coverage across the full admin dashboard.
 

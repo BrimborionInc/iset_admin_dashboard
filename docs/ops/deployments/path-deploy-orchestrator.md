@@ -1,7 +1,7 @@
 # PATH Deploy Orchestrator
 
 Status: current deployment control-plane reference.
-Last reviewed: 2026-05-08 after WSL-native PROD release `20260507-prod-contact-retirement`; command names checked against current `package.json`.
+Last reviewed: 2026-05-25 after adding the PROD bug/CR feedback reconciliation closeout gate; command names checked against current `package.json`.
 
 Start with the short operator runbook in `docs/ops/deployments/deployment-quick-guide.md` if you just need the normal commands.
 
@@ -127,11 +127,13 @@ Recommended planned-maintenance sequence:
 6. For PROD ASG refreshes, do not leave the ALB maintenance page up if the refresh stalls on ELB health with `Target.NotInUse` or `insufficient data`; the fixed response makes the target group unused, so clear the fallback once the refreshed instance is in service and let the in-app warning cover final warm-up.
 7. Run smoke with normal routing restored.
 8. Clear the warning after normal-routing smoke passes.
+9. For PROD bug/CR releases, reconcile the affected live feedback reports after smoke and targeted recheck: update report status, status history, and internal notes before calling the release complete.
 
 Guidance:
 - Size `--expected-duration` to the likely user-facing interruption window, not the total operator runtime of the release.
 - For normal rolling releases that are proven not to interrupt service, no banner is acceptable. If a TEST or PROD rollout may produce raw 502s or make a surface unavailable, use a short `brief interruptions possible` warning or the ALB `503` fallback before starting.
 - For admin-only or portal-only hotfixes, prefer a scoped announcement instead of a global banner so unaffected users are not warned unnecessarily.
+- For bug/CR work, a prepared fix is not automatically a PROD hotfix. Batch suitable fixes into the next planned PROD maintenance release unless Bill explicitly approves emergency hotfix handling.
 - Do not assume "hotfix", "code-only", or "admin-only" means "no user impact". The deciding factor is the rollout primitive. ASG refresh, app restart, target-group change, or known transient gateway risk requires warning/fallback handling; in PROD this also requires the explicit prod approval gates.
 - If `path:deploy` reports a smoke `503` immediately after a PROD fallback clear but ASG refresh is `Successful`, confirm fallback status and rerun smoke before declaring the release failed; ALB rule propagation can lag the deploy command by a few seconds.
 
@@ -249,3 +251,5 @@ The manifest records:
 - rollback guidance
 
 `tmp/` is ignored by Git, so these manifests are local operator artifacts.
+
+Release manifests do not update the in-app feedback queue. When a PROD release includes bug/CR report fixes, the operator must still update the live `admin_feedback_report`, `admin_feedback_status_history`, and `admin_feedback_note` rows after the deployed behavior is verified.

@@ -1,7 +1,7 @@
 # PATH Deployment Quick Guide
 
 Status: current primary operator guide for normal TEST/PROD PATH deploys.
-Last reviewed: 2026-05-08 after WSL-native PROD release `20260507-prod-contact-retirement`; command names checked against current `package.json`.
+Last reviewed: 2026-05-25 after adding the PROD bug/CR feedback reconciliation closeout gate; command names checked against current `package.json`.
 
 This is the shortest operator guide for normal PATH deployments.
 
@@ -19,6 +19,8 @@ Daily coding/Codex work and deployments now happen from the WSL workspace `/home
 - Use `path:deploy` for normal releases.
 - Use `test:db:refresh` only when you want to reset TEST.
 - Before every TEST or PROD app deploy, update `docs/meta/next-release-notes-log.md` for user-visible changes. The public landing-page panel must keep the standard sections `What changed`, `Known Bugs`, and `What's Coming`; do not publish `Earlier changes`.
+- For any PROD deploy that includes in-app feedback bug/CR fixes, report reconciliation is part of the deploy. Before the deploy, identify the affected `admin_feedback_report` IDs and make sure each report has a current note/status reflecting the planned release. After normal-routing smoke and the targeted workflow recheck pass, update `admin_feedback_report.status`, `admin_feedback_status_history`, and `admin_feedback_note` in PROD before calling the deployment complete. Only mark a report `resolved` after the deployed behavior and relevant client-facing/generated artifacts have been verified; otherwise leave it open with the remaining verification work noted.
+- Do not turn every prepared bug/CR fix into its own PROD deploy. Batch suitable fixes into the next planned PROD maintenance release unless Bill explicitly approves an emergency hotfix.
 - Under `What changed`, maintain three expandable release-package groups for the three most recent release packages. Add the new release as the first `#### Release ...` group in `What Changed Packages (draft - EN)` and `Lots de changements (brouillon - FR)`, keep only the two next-most-recent groups below it, and remove the oldest fourth group.
 - Keep the flat `What's New (draft bullets - EN)` and `Nouveautes (brouillon - FR)` fallback sections focused on the newest release package. `Known Bugs` and `What's Coming` can be empty only when there is nothing accurate to publish.
 - Before deploy, run or inspect the generated `src/generated/publicReleaseNotes.js` and confirm it contains `featurePackages` for the three current release packages and does not expose `Earlier changes`.
@@ -130,6 +132,7 @@ What this does:
 - deploys artifacts
 - waits for prod refresh
 - runs prod smoke checks, or records the release before a manual normal-routing smoke when `--skip-smoke` is used during ALB fallback
+- for bug/CR releases, requires live feedback report notes/status/history to be reconciled after smoke and targeted recheck
 
 Historical note:
 - On 2026-05-08, release `20260507-prod-contact-retirement` validated the WSL-native PROD app path with restore point `path-prod-20260507-prod-contact-retirement-20260508000234`, ASG refresh `f323cb21-bc0c-4063-b0e8-017b40f31544`, replacement instance `i-00b00ebdff3f55dc5`, and green final public smoke.
@@ -340,6 +343,7 @@ tmp/path-deploy/<env>/
 - Admin console: check the subtle version line at the bottom of the landing page.
 - Public portal: open the Help page and check the version line near the bottom.
 - The admin landing page now also generates its public release-notes panel from `docs/meta/next-release-notes-log.md` during build, so the visible landing-page notes heading should carry the same deployed release ID/date as the footer build line.
+- If the release contains bug/CR fixes, verify the affected live workflow or artifact, then update the corresponding PROD feedback reports before ending the deploy thread. Use `scripts/run-prod-sql-via-ssm.sh` for live updates and keep multi-row/guarded updates as SQL artifacts under `sql/ops/`.
 
 ## How To Ask Codex
 

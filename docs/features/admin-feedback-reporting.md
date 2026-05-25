@@ -59,7 +59,9 @@ Provide an in-app way for signed-in PATH staff to report admin-console bugs and 
   - `resolved`: requested outcome is actually delivered in the target environment
 - If evidence is insufficient, keep the item open and note what additional information is needed from the reporter instead of guessing.
 - If an item is a duplicate, note the canonical item before closing the duplicate.
+- For workflow or client-facing-output bugs, use holistic validation before saying an issue is fixed or moving it to `resolved`: inspect the full affected workflow and every generated/sent artifact in the packet, not only the specific artifact named in the report. If one part is fixed but adjacent output remains unverified, keep the report open and describe the remaining verification explicitly.
 - Current autonomy boundary: this workflow is for queue review, notes/status updates, and planning analysis. Do not assume a triage request also authorizes autonomous implementation or deployment unless the user asks for that separately.
+- Current release-planning boundary: a prepared bug/CR fix does not imply an immediate PROD deploy. Unless Bill explicitly approves an emergency hotfix, keep the report open with notes, continue building the prioritized queue, and batch suitable fixes into the next planned PROD maintenance release. Move reports to `resolved` only after that release and targeted live recheck.
 - User-facing hotfix or release-note copy should stay neutral and outcome-focused. Use short bullets such as `Fixed a bug...` or `Made a change...`, and do not reference report IDs, reporter names, or that a change came from a complaint.
 
 ## Current form model

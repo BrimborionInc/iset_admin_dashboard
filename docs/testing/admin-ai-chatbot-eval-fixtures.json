@@ -295,6 +295,35 @@
     "status": "drafted"
   },
   {
+    "id": "finance-reports-annual-advances-purpose",
+    "domain": "Finance / Reporting",
+    "route": "/finance/reports",
+    "helpTitle": "Financial Reports",
+    "role": "NWAC Administrator",
+    "prompt": "What is this Financial Reports page for, and why are some interventions hidden?",
+    "expectedAnchors": [
+      "ISET Advances and Active Clients",
+      "annual approved-funding report",
+      "CRF/EI",
+      "Funded interventions only",
+      "All approved interventions",
+      "PATH payment follow-up",
+      "Excel"
+    ],
+    "forbiddenPatterns": [
+      "Sage ledger",
+      "actual paid ledger",
+      "all approved interventions are shown by default"
+    ],
+    "sourceRefs": [
+      "src/pages/finance/FinanceReportsPage.jsx",
+      "src/helpPanelContents/financeReportsHelp.js",
+      "src/pages/finance/financeInterventionReportExport.js",
+      "docs/dashboards/financial-reports-dashboard.md"
+    ],
+    "status": "verified"
+  },
+  {
     "id": "notifications-applicant-secure-message-owner",
     "domain": "Notifications",
     "route": "/manage-notifications",

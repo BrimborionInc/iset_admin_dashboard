@@ -1,7 +1,7 @@
 # Prod Deployment Guide
 
 Status: current WSL-native PROD deployment guide. Verify live AWS state before any mutating command.
-Last reviewed: 2026-05-08 after WSL-native PROD release `20260507-prod-contact-retirement`.
+Last reviewed: 2026-05-25 after adding the mandatory bug/CR feedback reconciliation closeout gate.
 
 For the shortest operator commands, start with `docs/ops/deployments/deployment-quick-guide.md`.
 
@@ -11,6 +11,8 @@ This guide records the PROD safety sequence. The active app artifact rollout is 
 
 - Work from the WSL admin repo: `/home/bill/ISET/admin-dashboard`.
 - Before any PROD app deploy with user-visible changes, update `docs/meta/next-release-notes-log.md` so the landing-page release notes match the release being shipped. The public page must show the standard `What changed`, `Known Bugs`, and `What's Coming` sections; `What changed` must contain expandable groups for the three most recent release packages, newest first, and must not use `Earlier changes`.
+- If the PROD deploy includes fixes for in-app feedback bug/CR reports, list the affected report IDs before deploy and make sure each live report has a current note/status for the pending release. Report reconciliation is part of the deploy, not a separate follow-up.
+- Do not deploy each prepared bug/CR fix to PROD on its own by default. Batch suitable fixes into a planned PROD maintenance release unless Bill explicitly approves an emergency hotfix.
 - Do not use old `X:\ISET` / `/mnt/x/ISET` checkout instructions for PROD. They were superseded by the WSL migration and are not a valid way to recover deploy safety.
 - PROD plan/schema/data/app/smoke helpers are WSL-safe through `path:deploy`. The PROD app branch builds and packages the WSL admin repo, sibling portal repo, and sibling `shared` tree, uploads fixed `*-latest.zip` artifacts to `nwac-prod-artifacts`, then waits for the PROD ASG refresh.
 - Prefer the PATH orchestrator from `admin-dashboard`; it wraps schema/data/app rollout/smoke into one release command.
@@ -220,3 +222,12 @@ Expected result for each health URL:
 ```
 
 If the run included prod schema or allowlisted data mutation, the manifest under `tmp/path-deploy/prod/` will also record the captured restore-point snapshot identifier for `nwac-prod-db`.
+
+## Bug/CR Feedback Closeout
+
+For any PROD deploy that ships fixes from the in-app bug/change-request queue, the release is not complete until the live feedback reports are reconciled.
+
+- Before deploy, identify every included `admin_feedback_report.id` and add or confirm a note/status showing the item is planned or in progress for the release.
+- After normal-routing smoke passes, perform the targeted workflow/artifact recheck for each included report.
+- Update `admin_feedback_report.status`, `admin_feedback_status_history`, and `admin_feedback_note` in PROD after the recheck. Use `scripts/run-prod-sql-via-ssm.sh`; for multi-row or guarded updates, keep a reviewed SQL artifact in `sql/ops/`.
+- Mark a report `resolved` only when the deployed behavior and all relevant generated/sent/client-facing artifacts have been verified. If anything remains unverified or only partially fixed, leave the report open and record exactly what remains.

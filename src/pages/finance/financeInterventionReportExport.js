@@ -87,9 +87,10 @@ const writeSummarySheet = (worksheet, summary, meta) => {
   writeSectionHeader(worksheet, 4, "Report Context");
   writeLabelValueRow(worksheet, 5, "Fiscal year", meta?.fiscalYearLabel || "—");
   writeLabelValueRow(worksheet, 6, "Region", meta?.provinceLabel || "All regions");
-  writeLabelValueRow(worksheet, 7, "Include carry-over", meta?.includeCarryOver ? "Yes" : "No");
+  writeLabelValueRow(worksheet, 7, "Intervention rows", meta?.interventionFilterLabel || "Funded interventions only");
+  writeLabelValueRow(worksheet, 8, "Include carry-over", meta?.includeCarryOver ? "Yes" : "No");
 
-  writeSectionHeader(worksheet, 9, "Summary");
+  writeSectionHeader(worksheet, 10, "Summary");
   const summaryRows = [
     ["Total advances", formatCurrency(summary?.totalAmount)],
     ["CRF advances", formatCurrency(summary?.fundingTotals?.CRF)],
@@ -109,10 +110,10 @@ const writeSummarySheet = (worksheet, summary, meta) => {
     );
   }
   summaryRows.forEach((row, index) => {
-    writeLabelValueRow(worksheet, 10 + index, row[0], row[1]);
+    writeLabelValueRow(worksheet, 11 + index, row[0], row[1]);
   });
 
-  const provinceStartRow = 10 + summaryRows.length + 2;
+  const provinceStartRow = 11 + summaryRows.length + 2;
   writeSectionHeader(worksheet, provinceStartRow, "Region Totals");
   const headerRow = worksheet.getRow(provinceStartRow + 1);
   ["Region", "Participants", "Interventions", "CRF advances", "EI advances", "Total advances"].forEach(

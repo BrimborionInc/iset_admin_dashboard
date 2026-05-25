@@ -42,7 +42,7 @@ const ApplicationAssessmentHelp = () => {
         <li>Select <em>Edit</em> and confirm to acquire the lock.</li>
         <li>Record EI eligibility and upload verification if required.</li>
         <li>Complete the overview so it explains the client, their background, prior education or work, and why the proposed direction fits.</li>
-        <li>Record other funding carefully so the file shows what NWAC is covering and what another funder is covering.</li>
+        <li>Record other funding carefully so the file shows which funders are confirmed, pending, denied, or unknown, and what NWAC is covering.</li>
         <li>Capture the intervention details, provider, timing, and cost information clearly enough for review and later follow-through.</li>
         <li>Use the checklist step to confirm the evidence is complete or to identify what still needs follow-up.</li>
         <li>Write the recommendation and justification in plain language. The recommendation should explain why you are recommending support, a different intervention, a referral, or no funding.</li>
@@ -102,6 +102,7 @@ Key behaviors and constraints:
 Training-aligned guidance to surface:
 - The assessment should explain the client background, prior education/work, employment goal, and why the recommendation makes sense.
 - Keep numbers, dates, and facts consistent across the application and documents.
+- Other funding should distinguish confirmed funding from pending, denied, or unknown sources; confirmed funders need coverage details, while amount can be left blank when it is not known.
 - EI consent and verification matter before EI-related decisions can proceed.
 - Living allowance recommendations should be supported by financial overview and verification. If those are missing and living allowance is still being considered, tell the user not to submit yet: save a draft, document what is outstanding, and follow up for the missing evidence.
 - A coordinator does not have to recommend funding; alternate interventions, referrals, job-search support, or no funding may be the correct outcome.

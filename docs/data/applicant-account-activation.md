@@ -1,6 +1,6 @@
 # Applicant Account Activation Data
 
-_Last updated: 19 May 2026_
+_Last updated: 25 May 2026_
 
 ## Purpose
 
@@ -128,3 +128,18 @@ workflow normalized imported users to permanent random passwords. When found, PA
 that temporary state with an unknown permanent random password. No password is exposed to
 staff or the applicant; the applicant still sets their own password through the activation
 code flow.
+
+## Manual temporary-password exception
+
+The normal applicant-account recovery path is still activation-code delivery. If Bill or an
+authorized PATH owner explicitly approves a one-off exception because Cognito activation-code
+email delivery is not reaching the participant, an operator may use Cognito
+`admin-set-user-password --no-permanent` to set a temporary password. The public portal
+supports Cognito `NEW_PASSWORD_REQUIRED`: the participant signs in with the temporary
+password and must choose a new private password before continuing.
+
+Do not store the temporary password in PATH notes, report notes, docs, or SQL artifacts.
+Record only that the exception was used, who approved it, the account/email, and that Cognito
+was verified in `FORCE_CHANGE_PASSWORD`. Staff should not resend the PATH activation link
+after the temporary password is set, because the normal resend path intentionally repairs
+`FORCE_CHANGE_PASSWORD` accounts back to the activation-code flow.
