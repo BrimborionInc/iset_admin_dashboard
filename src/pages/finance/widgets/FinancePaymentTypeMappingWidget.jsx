@@ -1545,7 +1545,7 @@ const FinancePaymentTypeMappingWidget = ({ actions = {}, metadata = {}, toggleHe
               current ? { ...current, notes: normalizeNotes(detail.value) } : current,
             )
           }
-          placeholder="Include context for finance reviewers."
+          placeholder="Include context for reviewers."
         />
       </FormField>
       {updatedAt && (

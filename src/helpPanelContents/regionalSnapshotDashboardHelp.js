@@ -4,16 +4,18 @@ const RegionalSnapshotDashboardHelp = () => (
   <div>
     <p>
       Use this dashboard to review a saved regional snapshot for a selected month, quarter, or fiscal year.
-      It combines live PATH counts with saved regional reporting inputs such as funding details, salary values, operating costs,
+      It combines live PATH activity with saved regional reporting inputs such as operating costs,
       compliance notes, and recommendations.
     </p>
 
     <h3>What You Can Review</h3>
     <ul>
       <li>Region information and reporting period for the selected snapshot.</li>
-      <li>Applications received, funded, and denied or withdrawn during the selected period.</li>
-      <li>Live client funding and salary figures for the region, plus saved operating values.</li>
-      <li>Calculated totals and ratios based on the saved amounts and live funded count.</li>
+      <li>Applications received, funded clients, and denied or withdrawn applications during the selected period.</li>
+      <li>Approved CRF/EI funding and funded-client totals use the same approved-funding basis as Financial Reports.</li>
+      <li>Funded clients may not add up with application activity rows because they follow the Financial Reports basis.</li>
+      <li>Coordinator salary is pulled from the Salaries dashboard, with saved operating values shown beside it.</li>
+      <li>Calculated totals and ratios based on the saved amounts and live funded-client count.</li>
       <li>Compliance flag and comments or recommendations for the selected reporting window.</li>
     </ul>
 
@@ -25,10 +27,10 @@ const RegionalSnapshotDashboardHelp = () => (
 
     <h3>Editing</h3>
     <ul>
-      <li>Admins can update the saved regional manager, regional manager, operating, compliance, and comments fields.</li>
+      <li>Admins can update the saved regional manager, coordinator, operating, compliance, and comments fields.</li>
       <li>Coordinator salary is pulled from the Salaries dashboard for the selected region and period.</li>
       <li>Totals and ratios are calculated automatically from the live and saved values on the snapshot.</li>
-      <li>Live client activity counts remain read-only system values.</li>
+      <li>Live application activity, funded-client totals, and approved funding remain read-only system values.</li>
     </ul>
   </div>
 );
@@ -37,9 +39,13 @@ RegionalSnapshotDashboardHelp.aiContext = `
 Regional Snapshot dashboard for management and Board-style regional reporting. Keep explanations concise and
 plain-language. Explain that the page combines live PATH counts with saved regional reporting inputs for the
 selected region and reporting period. Cover the region, period type, fiscal year, and period selectors. Explain
-that applications received, funded, denied or withdrawn, client funding, and coordinator salary are live system
-values, while operating, compliance, and comments fields are saved report inputs that admins can edit. Note that
-totals and ratios are calculated automatically from the live and saved inputs and funded count.
+that applications received and denied or withdrawn are live application activity values. Funded clients and
+CRF/EI funding use the same approved-funding and participant-home-province basis as Financial Reports. Coordinator
+salary is a live value from the Salaries dashboard, while operating, compliance, and comments fields are saved
+report inputs that admins can edit. Note that totals and ratios are calculated automatically from the live and
+saved inputs and funded-client count. Do not describe the Client Activity section as an arithmetic status
+breakdown because funded clients follow the Financial Reports basis while the other rows follow application
+workflow timing.
 `;
 
 export default RegionalSnapshotDashboardHelp;

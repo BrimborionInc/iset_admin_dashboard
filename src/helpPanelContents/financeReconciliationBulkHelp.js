@@ -30,6 +30,6 @@ const FinanceReconciliationBulkHelp = () => (
 );
 
 FinanceReconciliationBulkHelp.aiContext =
-  "Explain the Reconciliation bulk actions widget and how finance teams should use it.";
+  "Explain the Reconciliation bulk actions widget and how staff should use it.";
 
 export default FinanceReconciliationBulkHelp;

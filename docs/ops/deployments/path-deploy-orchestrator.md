@@ -31,6 +31,8 @@ The admin artifact also stages selected operational support scripts used by depl
 6. environment-appropriate smoke checks
 7. release-manifest capture under `tmp/path-deploy/`
 
+For schema-backed operational evidence, `path:deploy` smoke is not enough. If a release changes or relies on audit/security/support telemetry such as `user_session_audit`, password-reset audit, event rows, notifications, secure-message scope, document scope, or payment evidence, add a focused preflight/smoke that compares the writer SQL to the live schema and proves the expected row is written or updated in TEST. Do not let "best effort" audit writes catch and hide schema errors without at least a non-PII warning and a test that exercises the deployed table shape.
+
 ## Commands
 
 Plan a TEST deployment:
@@ -62,6 +64,8 @@ Run a PROD deployment:
 ```bash
 npm run path:deploy -- --env prod --dataset intake-release --workflow-id 21 --yes
 ```
+
+Do not run the PROD command until Bill has explicitly approved the PROD deployment in the current thread. `--yes` is the command-line safety gate; it is not a substitute for that approval.
 
 Run smoke checks only:
 

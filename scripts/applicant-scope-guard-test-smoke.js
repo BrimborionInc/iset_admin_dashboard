@@ -1,0 +1,1284 @@
+#!/usr/bin/env node
+'use strict';
+
+const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { execFileSync } = require('child_process');
+
+const DEFAULT_PROFILE = 'nwac-test';
+const DEFAULT_REGION = 'ca-central-1';
+const DEFAULT_BUCKET = 'nwac-test-artifacts';
+const DEFAULT_PORTAL_ENV = path.resolve(__dirname, '..', '..', 'ISET-intake', '.env.test');
+const DEFAULT_PUBLIC_API_ORIGIN = 'https://nwac-public-test.awentech.ca';
+const DEFAULT_LOCAL_BASE_URL = 'http://127.0.0.1:5000';
+
+function parseArgs(argv) {
+  const args = {
+    profile: process.env.AWS_PROFILE || DEFAULT_PROFILE,
+    region: process.env.AWS_REGION || DEFAULT_REGION,
+    bucket: process.env.APPLICANT_SCOPE_SMOKE_BUCKET || DEFAULT_BUCKET,
+    instanceId: process.env.APPLICANT_SCOPE_SMOKE_INSTANCE_ID || '',
+    portalEnv: process.env.APPLICANT_SCOPE_SMOKE_PORTAL_ENV || DEFAULT_PORTAL_ENV,
+    keepFixture: false,
+    skipBrowser: false,
+    json: false,
+  };
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (token === '--profile') args.profile = argv[++index];
+    else if (token === '--region') args.region = argv[++index];
+    else if (token === '--bucket') args.bucket = argv[++index];
+    else if (token === '--instance-id') args.instanceId = argv[++index];
+    else if (token === '--portal-env') args.portalEnv = argv[++index];
+    else if (token === '--keep-fixture') args.keepFixture = true;
+    else if (token === '--skip-browser') args.skipBrowser = true;
+    else if (token === '--json') args.json = true;
+    else if (token === '--help' || token === '-h') {
+      usage();
+      process.exit(0);
+    } else {
+      throw new Error(`Unknown argument: ${token}`);
+    }
+  }
+  return args;
+}
+
+function usage() {
+  console.log([
+    'Usage: node scripts/applicant-scope-guard-test-smoke.js [options]',
+    '',
+    'Creates temporary TEST Cognito applicant users, seeds a wrong-applicant',
+    'case/application fixture on a TEST app host, exercises the deployed public',
+    'portal through authenticated API checks and Puppeteer, then cleans up.',
+    '',
+    'Options:',
+    '  --instance-id ID   Run on a specific online nwac-test-app instance.',
+    '  --profile NAME     AWS profile. Default: nwac-test.',
+    '  --region REGION    AWS region. Default: ca-central-1.',
+    '  --bucket NAME      Temporary S3 bucket. Default: nwac-test-artifacts.',
+    '  --portal-env PATH  Portal .env.test used for applicant pool values.',
+    '  --skip-browser     Run API/data checks only.',
+    '  --keep-fixture     Keep DB fixture and Cognito users for inspection.',
+    '  --json             Emit JSON summary.',
+  ].join('\n'));
+}
+
+function readEnvFile(filePath) {
+  const env = {};
+  const raw = fs.readFileSync(filePath, 'utf8');
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const equals = trimmed.indexOf('=');
+    if (equals < 0) continue;
+    const key = trimmed.slice(0, equals).trim();
+    let value = trimmed.slice(equals + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    env[key] = value;
+  }
+  return env;
+}
+
+function aws(args, options) {
+  const allArgs = [
+    ...args,
+    '--region',
+    options.region,
+    '--profile',
+    options.profile,
+  ];
+  return execFileSync('aws', allArgs, {
+    cwd: path.resolve(__dirname, '..'),
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: 20 * 1024 * 1024,
+  });
+}
+
+function awsJson(args, options) {
+  const out = aws([...args, '--output', 'json'], options).trim();
+  return out ? JSON.parse(out) : null;
+}
+
+function awsText(args, options) {
+  return aws([...args, '--output', 'text'], options).trim();
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function randomSuffix() {
+  return crypto.randomBytes(5).toString('hex');
+}
+
+function randomPassword() {
+  return `Scope#${crypto.randomBytes(9).toString('base64').replace(/[^A-Za-z0-9]/g, '').slice(0, 12)}aA1!`;
+}
+
+function discoverInstanceId(options) {
+  if (options.instanceId) return options.instanceId;
+  const online = new Set(
+    awsText([
+      'ssm',
+      'describe-instance-information',
+      '--query',
+      'InstanceInformationList[?PingStatus==`Online`].InstanceId',
+    ], options)
+      .split(/\s+/)
+      .filter(Boolean)
+  );
+  const running = awsText([
+    'ec2',
+    'describe-instances',
+    '--filters',
+    'Name=tag:Name,Values=nwac-test-app',
+    'Name=instance-state-name,Values=running',
+    '--query',
+    'Reservations[].Instances[].InstanceId',
+  ], options)
+    .split(/\s+/)
+    .filter(Boolean);
+  const match = running.find(instanceId => online.has(instanceId));
+  if (!match) throw new Error('No online SSM-managed nwac-test-app instance found.');
+  return match;
+}
+
+function createCognitoUser({ email, password, givenName, familyName, poolId }, options) {
+  aws([
+    'cognito-idp',
+    'admin-create-user',
+    '--user-pool-id',
+    poolId,
+    '--username',
+    email,
+    '--message-action',
+    'SUPPRESS',
+    '--user-attributes',
+    `Name=email,Value=${email}`,
+    'Name=email_verified,Value=true',
+    `Name=preferred_username,Value=${email}`,
+    `Name=given_name,Value=${givenName}`,
+    `Name=family_name,Value=${familyName}`,
+  ], options);
+  aws([
+    'cognito-idp',
+    'admin-set-user-password',
+    '--user-pool-id',
+    poolId,
+    '--username',
+    email,
+    '--password',
+    password,
+    '--permanent',
+  ], options);
+  const user = awsJson([
+    'cognito-idp',
+    'admin-get-user',
+    '--user-pool-id',
+    poolId,
+    '--username',
+    email,
+  ], options);
+  const sub = (user.UserAttributes || []).find(attribute => attribute.Name === 'sub')?.Value;
+  if (!sub) throw new Error(`Unable to resolve Cognito sub for ${email}`);
+  return sub;
+}
+
+function deleteCognitoUser({ email, poolId }, options) {
+  try {
+    aws([
+      'cognito-idp',
+      'admin-delete-user',
+      '--user-pool-id',
+      poolId,
+      '--username',
+      email,
+    ], options);
+  } catch (error) {
+    const message = String(error.stderr || error.message || error);
+    if (!/UserNotFoundException/.test(message)) {
+      console.warn(`[applicant-scope-smoke] Cognito cleanup warning for ${email}: ${message.split('\n')[0]}`);
+    }
+  }
+}
+
+function uploadRemoteScript(remoteScript, { key }, options) {
+  const tempFile = path.join(os.tmpdir(), `applicant-scope-smoke-${process.pid}-${Date.now()}.js`);
+  fs.writeFileSync(tempFile, remoteScript, 'utf8');
+  try {
+    aws([
+      's3',
+      'cp',
+      tempFile,
+      `s3://${options.bucket}/${key}`,
+      '--only-show-errors',
+    ], options);
+  } finally {
+    fs.rmSync(tempFile, { force: true });
+  }
+}
+
+function deleteRemoteScript({ key }, options) {
+  try {
+    aws([
+      's3',
+      'rm',
+      `s3://${options.bucket}/${key}`,
+      '--only-show-errors',
+    ], options);
+  } catch (_) {
+    // Best effort only.
+  }
+}
+
+function sendRemoteCommand(instanceId, commandLines, comment, options) {
+  const paramsFile = path.join(os.tmpdir(), `applicant-scope-params-${process.pid}-${Date.now()}.json`);
+  fs.writeFileSync(paramsFile, JSON.stringify({ commands: commandLines }), 'utf8');
+  try {
+    return awsText([
+      'ssm',
+      'send-command',
+      '--instance-ids',
+      instanceId,
+      '--document-name',
+      'AWS-RunShellScript',
+      '--parameters',
+      `file://${paramsFile}`,
+      '--comment',
+      comment,
+      '--query',
+      'Command.CommandId',
+    ], options);
+  } finally {
+    fs.rmSync(paramsFile, { force: true });
+  }
+}
+
+function waitForCommand(instanceId, commandId, options) {
+  for (;;) {
+    let invocation = null;
+    try {
+      invocation = awsJson([
+        'ssm',
+        'get-command-invocation',
+        '--command-id',
+        commandId,
+        '--instance-id',
+        instanceId,
+        '--query',
+        '{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}',
+      ], options);
+    } catch (_) {
+      invocation = null;
+    }
+    const status = invocation?.Status || '';
+    if (['Pending', 'InProgress', 'Delayed', ''].includes(status)) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2500);
+      continue;
+    }
+    return invocation;
+  }
+}
+
+function parseRemoteResult(stdout) {
+  const marker = '@@APPLICANT_SCOPE_SMOKE_RESULT@@';
+  const index = String(stdout || '').lastIndexOf(marker);
+  if (index < 0) return null;
+  const jsonText = String(stdout).slice(index + marker.length).trim();
+  try {
+    return JSON.parse(jsonText);
+  } catch (_) {
+    return null;
+  }
+}
+
+function summarizeResult(result) {
+  const rows = [];
+  for (const item of result?.checks || []) {
+    rows.push(`${item.status.padEnd(4)} ${item.name}`);
+  }
+  return rows.join('\n');
+}
+
+async function main() {
+  const options = parseArgs(process.argv.slice(2));
+  options.bucket = options.bucket || DEFAULT_BUCKET;
+  if (!fs.existsSync(options.portalEnv)) {
+    throw new Error(`Portal env file not found: ${options.portalEnv}`);
+  }
+  const portalEnv = readEnvFile(options.portalEnv);
+  const poolId =
+    portalEnv.COGNITO_APPLICANT_USER_POOL_ID ||
+    portalEnv.COGNITO_PORTAL_USER_POOL_ID ||
+    portalEnv.COGNITO_USER_POOL_ID;
+  if (!poolId) throw new Error('COGNITO_USER_POOL_ID not found in portal env.');
+
+  const suffix = randomSuffix();
+  const stamp = `scope-${Date.now()}-${suffix}`;
+  const applicantA = {
+    label: 'rightful',
+    email: `codex.portal.scope.${suffix}.rightful@example.com`,
+    password: randomPassword(),
+    givenName: 'Scope',
+    familyName: `Rightful ${suffix}`,
+  };
+  const applicantB = {
+    label: 'wrong',
+    email: `codex.portal.scope.${suffix}.wrong@example.com`,
+    password: randomPassword(),
+    givenName: 'Scope',
+    familyName: `Wrong ${suffix}`,
+  };
+  const createdUsers = [];
+  let remoteKey = null;
+  let result = null;
+
+  try {
+    console.log('[applicant-scope-smoke] Discovering TEST app instance...');
+    const instanceId = discoverInstanceId(options);
+    console.log(`[applicant-scope-smoke] Using ${instanceId}`);
+
+    console.log('[applicant-scope-smoke] Creating temporary TEST applicant Cognito users...');
+    applicantA.sub = createCognitoUser({ ...applicantA, poolId }, options);
+    createdUsers.push(applicantA);
+    applicantB.sub = createCognitoUser({ ...applicantB, poolId }, options);
+    createdUsers.push(applicantB);
+
+    remoteKey = `ssm-scripts/applicant-scope-smoke-${stamp}.js`;
+    const remoteScript = `(${remoteRunner.toString()})();\n`;
+    uploadRemoteScript(remoteScript, { key: remoteKey }, options);
+
+    const remotePath = `/tmp/applicant-scope-smoke-${stamp}.js`;
+    const commandLines = [
+      'set -euo pipefail',
+      `aws s3 cp ${shellQuote(`s3://${options.bucket}/${remoteKey}`)} ${shellQuote(remotePath)} --region ${shellQuote(options.region)} --only-show-errors`,
+      `trap 'rm -f ${shellQuote(remotePath)}' EXIT`,
+      'cd /opt/nwac/portal',
+      [
+        `FIXTURE_STAMP=${shellQuote(stamp)}`,
+        `APPLICANT_A_EMAIL=${shellQuote(applicantA.email)}`,
+        `APPLICANT_A_PASSWORD=${shellQuote(applicantA.password)}`,
+        `APPLICANT_A_SUB=${shellQuote(applicantA.sub)}`,
+        `APPLICANT_B_EMAIL=${shellQuote(applicantB.email)}`,
+        `APPLICANT_B_PASSWORD=${shellQuote(applicantB.password)}`,
+        `APPLICANT_B_SUB=${shellQuote(applicantB.sub)}`,
+        `KEEP_FIXTURE=${options.keepFixture ? '1' : '0'}`,
+        `RUN_BROWSER=${options.skipBrowser ? '0' : '1'}`,
+        `PORTAL_LOCAL_BASE_URL=${shellQuote(DEFAULT_LOCAL_BASE_URL)}`,
+        `PUBLIC_API_ORIGIN=${shellQuote(DEFAULT_PUBLIC_API_ORIGIN)}`,
+        `node ${shellQuote(remotePath)}`,
+      ].join(' '),
+      `rm -f ${shellQuote(remotePath)}`,
+    ];
+
+    console.log('[applicant-scope-smoke] Running deployed TEST portal smoke through SSM...');
+    const commandId = sendRemoteCommand(instanceId, commandLines, 'Codex applicant scope guard TEST smoke', options);
+    console.log(`[applicant-scope-smoke] SSM command ${commandId}`);
+    const invocation = waitForCommand(instanceId, commandId, options);
+    result = parseRemoteResult(invocation?.Stdout);
+    if (invocation?.Status !== 'Success') {
+      const stderr = invocation?.Stderr ? `\n${invocation.Stderr}` : '';
+      throw new Error(`Remote smoke failed with status ${invocation?.Status || 'unknown'}${stderr}`);
+    }
+    if (!result) {
+      throw new Error(`Remote smoke finished but did not emit a parseable result.\n${invocation?.Stdout || ''}`);
+    }
+    if (!options.json) {
+      console.log(summarizeResult(result));
+      console.log(`[applicant-scope-smoke] Fixture IDs: ${JSON.stringify(result.fixtureIds)}`);
+    }
+    const failures = (result.checks || []).filter(check => check.status === 'FAIL');
+    if (failures.length) {
+      throw new Error(`${failures.length} applicant scope smoke check(s) failed.`);
+    }
+  } finally {
+    if (remoteKey) deleteRemoteScript({ key: remoteKey }, options);
+    if (!options.keepFixture) {
+      for (const user of createdUsers.reverse()) {
+        deleteCognitoUser({ email: user.email, poolId }, options);
+      }
+    }
+  }
+
+  if (options.json) {
+    console.log(JSON.stringify(result, null, 2));
+  }
+}
+
+function remoteRunner() {
+  'use strict';
+
+  const fs = require('fs');
+  const path = require('path');
+  const { createRequire } = require('module');
+  const portalRequire = createRequire('/opt/nwac/portal/package.json');
+  const mysql = portalRequire('mysql2/promise');
+
+  try {
+    portalRequire('dotenv').config({ path: '/opt/nwac/portal/.env.test' });
+    portalRequire('dotenv').config({ path: '/opt/nwac/portal/.env' });
+  } catch (_) {
+    // The deployed process has these envs; dotenv is only for ad hoc SSM runs.
+  }
+
+  const result = {
+    status: 'running',
+    startedAt: new Date().toISOString(),
+    finishedAt: null,
+    checks: [],
+    fixtureIds: {},
+    cleanup: null,
+  };
+
+  const config = {
+    stamp: requiredEnv('FIXTURE_STAMP'),
+    keepFixture: process.env.KEEP_FIXTURE === '1',
+    runBrowser: process.env.RUN_BROWSER !== '0',
+    localBaseUrl: stripTrailingSlash(process.env.PORTAL_LOCAL_BASE_URL || 'http://127.0.0.1:5000'),
+    publicApiOrigin: stripTrailingSlash(process.env.PUBLIC_API_ORIGIN || 'https://nwac-public-test.awentech.ca'),
+    applicantA: {
+      email: requiredEnv('APPLICANT_A_EMAIL'),
+      password: requiredEnv('APPLICANT_A_PASSWORD'),
+      sub: requiredEnv('APPLICANT_A_SUB'),
+    },
+    applicantB: {
+      email: requiredEnv('APPLICANT_B_EMAIL'),
+      password: requiredEnv('APPLICANT_B_PASSWORD'),
+      sub: requiredEnv('APPLICANT_B_SUB'),
+    },
+  };
+
+  const fixture = {
+    suffix: config.stamp.replace(/[^a-zA-Z0-9]+/g, '').slice(-12),
+    marker: { fixture: 'applicant-scope-guard-smoke', stamp: config.stamp },
+    refs: {},
+  };
+
+  let connection = null;
+  let seeded = false;
+
+  main()
+    .then(() => {
+      result.status = result.checks.some(check => check.status === 'FAIL') ? 'failed' : 'passed';
+      result.finishedAt = new Date().toISOString();
+      console.log('@@APPLICANT_SCOPE_SMOKE_RESULT@@' + JSON.stringify(result));
+      if (result.status !== 'passed') process.exitCode = 1;
+    })
+    .catch(error => {
+      fail('remote runner completed without crashing', {
+        error: error && error.stack ? error.stack : String(error),
+      });
+      result.status = 'failed';
+      result.finishedAt = new Date().toISOString();
+      console.log('@@APPLICANT_SCOPE_SMOKE_RESULT@@' + JSON.stringify(result));
+      process.exitCode = 1;
+    });
+
+  async function main() {
+    progress('remote runner starting');
+    connection = await mysql.createConnection(dbConfig());
+    progress('db connected');
+    await seedFixture();
+    seeded = true;
+    progress('fixture seeded');
+    await runApiChecks();
+    progress('api checks complete');
+    if (config.runBrowser) {
+      await runBrowserChecks();
+      progress('browser checks complete');
+    } else {
+      skip('browser dashboard/messages smoke skipped by operator option');
+      progress('browser checks skipped');
+    }
+    if (!config.keepFixture) {
+      await cleanupFixture();
+      progress('fixture cleaned up');
+    } else {
+      result.cleanup = 'kept';
+      progress('fixture kept');
+    }
+    await connection.end();
+    progress('db connection closed');
+  }
+
+  function progress(message) {
+    const line = `${new Date().toISOString()} ${message}\n`;
+    try {
+      fs.appendFileSync(`/tmp/applicant-scope-smoke-${config.stamp}.progress.log`, line, 'utf8');
+    } catch (_) {
+      // Progress breadcrumbs are diagnostic only.
+    }
+  }
+
+  function requiredEnv(key) {
+    const value = String(process.env[key] || '').trim();
+    if (!value) throw new Error(`Missing env ${key}`);
+    return value;
+  }
+
+  function stripTrailingSlash(value) {
+    return String(value || '').replace(/\/+$/, '');
+  }
+
+  function dbConfig() {
+    return {
+      host: process.env.DB_HOST,
+      port: Number(process.env.DB_PORT || 3306),
+      user: process.env.DB_USER,
+      password: process.env.DB_PASS || '',
+      database: process.env.DB_NAME || 'iset_intake',
+      multipleStatements: false,
+      connectTimeout: 10000,
+    };
+  }
+
+  function addCheck(status, name, details = {}) {
+    result.checks.push({ status, name, details });
+  }
+
+  function pass(name, details = {}) {
+    addCheck('PASS', name, details);
+  }
+
+  function fail(name, details = {}) {
+    addCheck('FAIL', name, details);
+  }
+
+  function skip(name, details = {}) {
+    addCheck('SKIP', name, details);
+  }
+
+  function expect(name, condition, details = {}) {
+    if (condition) pass(name, details);
+    else fail(name, details);
+  }
+
+  async function query(sql, params = []) {
+    return connection.query(sql, params);
+  }
+
+  async function insert(sql, params = []) {
+    const [res] = await query(sql, params);
+    return Number(res.insertId);
+  }
+
+  function json(value) {
+    return JSON.stringify(value);
+  }
+
+  async function seedFixture() {
+    progress('seed cleanup starting');
+    await cleanupFixture({ quiet: true });
+    progress('seed cleanup complete');
+    await connection.beginTransaction();
+    try {
+      const suffix = fixture.suffix;
+      fixture.staffEmail = `codex.portal.scope.${suffix}.staff@example.com`;
+      fixture.staffSub = `scope-staff-${suffix}`;
+      fixture.refs.applicantA = `SCOPEA-${suffix}`.slice(0, 32);
+      fixture.refs.applicantB = `SCOPEB-${suffix}`.slice(0, 32);
+      fixture.caseNumber = `SCOPE-${suffix}`.slice(0, 32);
+      fixture.interventionTitle = `Scope guard plan ${suffix}`;
+      fixture.subjectA = `Scope guard rightful message ${suffix}`;
+      fixture.subjectB = `Scope guard stale message ${suffix}`;
+
+      fixture.userA = await insert(
+        `INSERT INTO user (name, email, cognito_sub, email_verified, suspended, preferred_language)
+         VALUES (?, ?, ?, 1, 0, 'en')`,
+        [`Scope Rightful ${suffix}`, config.applicantA.email, config.applicantA.sub]
+      );
+      fixture.userB = await insert(
+        `INSERT INTO user (name, email, cognito_sub, email_verified, suspended, preferred_language)
+         VALUES (?, ?, ?, 1, 0, 'en')`,
+        [`Scope Wrong ${suffix}`, config.applicantB.email, config.applicantB.sub]
+      );
+      fixture.staffUser = await insert(
+        `INSERT INTO user (name, email, cognito_sub, email_verified, suspended, preferred_language)
+         VALUES (?, ?, ?, 1, 0, 'en')`,
+        [`Scope Staff ${suffix}`, fixture.staffEmail, fixture.staffSub]
+      );
+      fixture.staffProfile = await insert(
+        `INSERT INTO staff_profiles (cognito_sub, email, name, display_name, primary_role, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'ISET Coordinator', 'active', NOW(), NOW())`,
+        [fixture.staffSub, fixture.staffEmail, `Scope Staff ${suffix}`, `Scope Staff ${suffix}`]
+      );
+      progress('seed users and staff complete');
+      fixture.clientA = await insert(
+        `INSERT INTO client
+           (first_name, last_name, applicant_cognito_sub, applicant_cognito_username, applicant_account_status, applicant_account_email, applicant_activated_at, address_json)
+         VALUES (?, ?, ?, ?, 'activated', ?, NOW(), CAST(? AS JSON))`,
+        ['Scope', `Rightful ${suffix}`, config.applicantA.sub, config.applicantA.email, config.applicantA.email, json({ fixture: fixture.marker })]
+      );
+      fixture.clientB = await insert(
+        `INSERT INTO client
+           (first_name, last_name, applicant_cognito_sub, applicant_cognito_username, applicant_account_status, applicant_account_email, applicant_activated_at, address_json)
+         VALUES (?, ?, ?, ?, 'activated', ?, NOW(), CAST(? AS JSON))`,
+        ['Scope', `Wrong ${suffix}`, config.applicantB.sub, config.applicantB.email, config.applicantB.email, json({ fixture: fixture.marker })]
+      );
+      fixture.caseA = await insert(
+        `INSERT INTO iset_case
+           (case_number, client_id, assigned_staff_profile_id, status, lifecycle_status, stage, opened_at, case_context_json)
+         VALUES (?, ?, ?, 'active', 'active', 'scope_guard_smoke', NOW(), CAST(? AS JSON))`,
+        [fixture.caseNumber, fixture.clientA, fixture.staffProfile, json({ ...fixture.marker, applicant: 'A' })]
+      );
+      progress('seed clients and case complete');
+
+      const payloadA = {
+        ...fixture.marker,
+        applicant: 'A',
+        answers: {
+          firstName: 'Scope',
+          lastName: `Rightful ${suffix}`,
+          email: config.applicantA.email,
+        },
+      };
+      const payloadB = {
+        ...fixture.marker,
+        applicant: 'B',
+        answers: {
+          firstName: 'Scope',
+          lastName: `Wrong ${suffix}`,
+          email: config.applicantB.email,
+        },
+      };
+
+      fixture.submissionB = await insert(
+        `INSERT INTO iset_application_submission
+           (user_id, workflow_id, reference_number, status, submitted_at, intake_payload, schema_snapshot, history, doc_refs, locale)
+         VALUES (?, 'iset-v1', ?, 'submitted', DATE_SUB(NOW(), INTERVAL 2 MINUTE), CAST(? AS JSON), CAST(? AS JSON), CAST(? AS JSON), CAST(? AS JSON), 'en')`,
+        [fixture.userB, fixture.refs.applicantB, json(payloadB), json({ fixture: fixture.marker }), json([]), json([])]
+      );
+      fixture.wrongApplication = await insert(
+        `INSERT INTO iset_application
+           (submission_id, client_id, case_id, payload_json, status, lifecycle_status, decision_outcome, awaiting_reason, created_at, updated_at)
+         VALUES (?, ?, ?, CAST(? AS JSON), 'approved', 'decision_recorded', 'approved', 'none', DATE_SUB(NOW(), INTERVAL 2 MINUTE), DATE_SUB(NOW(), INTERVAL 2 MINUTE))`,
+        [fixture.submissionB, fixture.clientA, fixture.caseA, json(payloadB)]
+      );
+      fixture.submissionA = await insert(
+        `INSERT INTO iset_application_submission
+           (user_id, workflow_id, reference_number, status, submitted_at, intake_payload, schema_snapshot, history, doc_refs, locale)
+         VALUES (?, 'iset-v1', ?, 'submitted', NOW(), CAST(? AS JSON), CAST(? AS JSON), CAST(? AS JSON), CAST(? AS JSON), 'en')`,
+        [fixture.userA, fixture.refs.applicantA, json(payloadA), json({ fixture: fixture.marker }), json([]), json([])]
+      );
+      fixture.applicationA = await insert(
+        `INSERT INTO iset_application
+           (submission_id, client_id, case_id, payload_json, status, lifecycle_status, decision_outcome, awaiting_reason, created_at, updated_at)
+         VALUES (?, ?, ?, CAST(? AS JSON), 'approved', 'decision_recorded', 'approved', 'none', NOW(), NOW())`,
+        [fixture.submissionA, fixture.clientA, fixture.caseA, json(payloadA)]
+      );
+      progress('seed submissions and applications complete');
+      fixture.intervention = await insert(
+        `INSERT INTO iset_case_intervention
+           (case_id, intervention_code, status, delivery_status, start_date, end_date, intervention_cost, budget_amount, approved_amount, notes, metadata_json, eligibility_result, funding_stream_decision, created_by_staff_profile_id)
+         VALUES (?, 1, 'approved', 'planned', CURRENT_DATE(), DATE_ADD(CURRENT_DATE(), INTERVAL 30 DAY), 100.00, 100.00, 100.00, 'Synthetic applicant scope smoke intervention.', CAST(? AS JSON), 'eligible', 'CRF', ?)`,
+        [fixture.caseA, json({ ...fixture.marker, title: fixture.interventionTitle }), fixture.staffProfile]
+      );
+      progress('seed intervention complete');
+      fixture.messageA = await insert(
+        `INSERT INTO messages
+           (sender_actor_type, sender_user_id, sender_staff_profile_id, recipient_actor_type, recipient_user_id, recipient_staff_profile_id, case_id, application_id, subject, body, status, urgent, deleted, created_at)
+         VALUES ('staff_profile', ?, ?, 'applicant_user', ?, NULL, ?, ?, ?, 'Rightful applicant message body.', 'unread', 1, 0, NOW())`,
+        [fixture.staffUser, fixture.staffProfile, fixture.userA, fixture.caseA, fixture.applicationA, fixture.subjectA]
+      );
+      fixture.messageB = await insert(
+        `INSERT INTO messages
+           (sender_actor_type, sender_user_id, sender_staff_profile_id, recipient_actor_type, recipient_user_id, recipient_staff_profile_id, case_id, application_id, subject, body, status, urgent, deleted, created_at)
+         VALUES ('staff_profile', ?, ?, 'applicant_user', ?, NULL, ?, ?, ?, 'Stale wrong-applicant message body.', 'unread', 1, 0, NOW())`,
+        [fixture.staffUser, fixture.staffProfile, fixture.userB, fixture.caseA, fixture.applicationA, fixture.subjectB]
+      );
+      progress('seed messages complete');
+      await query(
+        `INSERT INTO message_item (message_id, owner_user_id, folder, folder_before_deleted, read_at, deleted_at, purged_at)
+         VALUES (?, ?, 'inbox', NULL, NULL, NULL, NULL), (?, ?, 'inbox', NULL, NULL, NULL, NULL)`,
+        [fixture.messageA, fixture.userA, fixture.messageB, fixture.userB]
+      );
+      progress('seed message items complete');
+
+      const signingSchema = {
+        meta: { fixture: fixture.marker, title: 'Scope guard acknowledgement' },
+        steps: [
+          {
+            id: 'acknowledgement',
+            title: 'Scope guard acknowledgement',
+            components: [
+              {
+                id: 'ack',
+                type: 'content',
+                text: 'Synthetic signing request for applicant scope smoke.',
+              },
+            ],
+          },
+        ],
+      };
+      fixture.signingA = await insert(
+        `INSERT INTO signing_request
+           (workflow_id, workflow_name, workflow_type, case_id, participant_user_id, created_by_user_id, status, due_at, resolved_schema_json, checklist_doc_type)
+         VALUES (44, 'Client Acknowledgement of Funding Source', 'client_acknowledgement', ?, ?, ?, 'pending', DATE_ADD(NOW(), INTERVAL 7 DAY), CAST(? AS JSON), 'client_acknowledgement')`,
+        [fixture.caseA, fixture.userA, fixture.staffUser, json(signingSchema)]
+      );
+      fixture.signingB = await insert(
+        `INSERT INTO signing_request
+           (workflow_id, workflow_name, workflow_type, case_id, participant_user_id, created_by_user_id, status, due_at, resolved_schema_json, checklist_doc_type)
+         VALUES (44, 'Client Acknowledgement of Funding Source', 'client_acknowledgement', ?, ?, ?, 'pending', DATE_ADD(NOW(), INTERVAL 7 DAY), CAST(? AS JSON), 'client_acknowledgement')`,
+        [fixture.caseA, fixture.userB, fixture.staffUser, json(signingSchema)]
+      );
+      progress('seed signing requests complete');
+      await query(
+        `INSERT INTO message_signing_request (message_id, signing_request_id)
+         VALUES (?, ?), (?, ?)`,
+        [fixture.messageA, fixture.signingA, fixture.messageB, fixture.signingB]
+      );
+      progress('seed signing links complete');
+
+      await connection.commit();
+      progress('seed transaction committed');
+      result.fixtureIds = {
+        userA: fixture.userA,
+        userB: fixture.userB,
+        clientA: fixture.clientA,
+        clientB: fixture.clientB,
+        caseA: fixture.caseA,
+        applicationA: fixture.applicationA,
+        wrongApplication: fixture.wrongApplication,
+        messageA: fixture.messageA,
+        messageB: fixture.messageB,
+        signingA: fixture.signingA,
+        signingB: fixture.signingB,
+        intervention: fixture.intervention,
+      };
+      pass('TEST synthetic wrong-applicant fixture seeded', result.fixtureIds);
+    } catch (error) {
+      progress(`seed failed: ${error.message || String(error)}`);
+      await connection.rollback();
+      throw error;
+    }
+  }
+
+  async function cleanupFixture(options = {}) {
+    const emails = [
+      config.applicantA.email,
+      config.applicantB.email,
+      fixture.staffEmail || `codex.portal.scope.${fixture.suffix}.staff@example.com`,
+    ];
+    const markerLike = `%"stamp":"${config.stamp}"%`;
+    try {
+      progress('cleanup starting');
+      if (fixture.userA && fixture.userB && fixture.staffUser) {
+        await cleanupByFixtureIds();
+      } else {
+        await cleanupByMarkerAndEmail({ emails, markerLike });
+      }
+      if (!options.quiet) {
+        result.cleanup = 'deleted';
+        pass('TEST synthetic fixture cleaned up');
+      }
+      progress('cleanup complete');
+    } catch (error) {
+      if (!options.quiet) {
+        fail('TEST synthetic fixture cleaned up', { error: error.message || String(error) });
+      }
+      progress(`cleanup failed: ${error.message || String(error)}`);
+      throw error;
+    }
+  }
+
+  async function cleanupByFixtureIds() {
+    const userIds = [fixture.userA, fixture.userB, fixture.staffUser].filter(Boolean);
+    const messageIds = [fixture.messageA, fixture.messageB].filter(Boolean);
+    const signingIds = [fixture.signingA, fixture.signingB].filter(Boolean);
+    progress('cleanup exact signing links');
+    if (messageIds.length || signingIds.length) {
+      await query(
+        `DELETE FROM message_signing_request
+          WHERE ${messageIds.length ? `message_id IN (${messageIds.map(() => '?').join(',')})` : 'FALSE'}
+             OR ${signingIds.length ? `signing_request_id IN (${signingIds.map(() => '?').join(',')})` : 'FALSE'}`,
+        [...messageIds, ...signingIds]
+      );
+    }
+    progress('cleanup exact signing requests');
+    if (signingIds.length) {
+      await query(`DELETE FROM signing_request WHERE id IN (${signingIds.map(() => '?').join(',')})`, signingIds);
+    }
+    progress('cleanup exact message items');
+    if (messageIds.length || userIds.length) {
+      await query(
+        `DELETE FROM message_item
+          WHERE ${messageIds.length ? `message_id IN (${messageIds.map(() => '?').join(',')})` : 'FALSE'}
+             OR ${userIds.length ? `owner_user_id IN (${userIds.map(() => '?').join(',')})` : 'FALSE'}`,
+        [...messageIds, ...userIds]
+      );
+    }
+    progress('cleanup exact messages');
+    if (messageIds.length) {
+      await query(`DELETE FROM messages WHERE id IN (${messageIds.map(() => '?').join(',')})`, messageIds);
+    }
+    progress('cleanup exact intervention');
+    if (fixture.intervention) await query('DELETE FROM iset_case_intervention WHERE id = ?', [fixture.intervention]);
+    progress('cleanup exact applications');
+    const applicationIds = [fixture.wrongApplication, fixture.applicationA].filter(Boolean);
+    if (applicationIds.length) {
+      await query(`DELETE FROM iset_application WHERE id IN (${applicationIds.map(() => '?').join(',')})`, applicationIds);
+    }
+    progress('cleanup exact submissions');
+    const submissionIds = [fixture.submissionB, fixture.submissionA].filter(Boolean);
+    if (submissionIds.length) {
+      await query(`DELETE FROM iset_application_submission WHERE id IN (${submissionIds.map(() => '?').join(',')})`, submissionIds);
+    }
+    progress('cleanup exact case');
+    if (fixture.caseA) await query('DELETE FROM iset_case WHERE id = ?', [fixture.caseA]);
+    progress('cleanup exact clients');
+    const clientIds = [fixture.clientA, fixture.clientB].filter(Boolean);
+    if (clientIds.length) {
+      await query(`DELETE FROM client WHERE id IN (${clientIds.map(() => '?').join(',')})`, clientIds);
+    }
+    progress('cleanup exact staff profile');
+    if (fixture.staffProfile) await query('DELETE FROM staff_profiles WHERE id = ?', [fixture.staffProfile]);
+    progress('cleanup exact user dependents');
+    if (userIds.length) {
+      await query(`DELETE FROM input_json_state WHERE user_id IN (${userIds.map(() => '?').join(',')})`, userIds);
+      await query(`DELETE FROM iset_application_draft_dynamic WHERE user_id IN (${userIds.map(() => '?').join(',')})`, userIds);
+      await query(`DELETE FROM pending_uploads WHERE user_id IN (${userIds.map(() => '?').join(',')})`, userIds);
+    }
+    progress('cleanup exact users');
+    if (userIds.length) {
+      await query(`DELETE FROM user WHERE id IN (${userIds.map(() => '?').join(',')})`, userIds);
+    }
+  }
+
+  async function cleanupByMarkerAndEmail({ emails, markerLike }) {
+    progress('cleanup fallback signing links');
+    await query('DELETE FROM message_signing_request WHERE signing_request_id IN (SELECT id FROM signing_request WHERE created_by_user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?)))', emails);
+    await query('DELETE FROM message_signing_request WHERE message_id IN (SELECT id FROM messages WHERE subject IN (?, ?))', [fixture.subjectA || '', fixture.subjectB || '']);
+    progress('cleanup fallback signing requests');
+    await query('DELETE FROM signing_request WHERE created_by_user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?)) OR participant_user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?))', [...emails, ...emails]);
+    progress('cleanup fallback messages');
+    await query('DELETE FROM message_item WHERE owner_user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?))', emails);
+    await query('DELETE FROM messages WHERE subject IN (?, ?) OR sender_user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?)) OR recipient_user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?))', [
+      fixture.subjectA || '',
+      fixture.subjectB || '',
+      ...emails,
+      ...emails,
+    ]);
+    progress('cleanup fallback app/case rows');
+    await query('DELETE FROM iset_case_intervention WHERE CAST(metadata_json AS CHAR) LIKE ?', [markerLike]);
+    await query('DELETE FROM iset_application WHERE CAST(payload_json AS CHAR) LIKE ?', [markerLike]);
+    await query('DELETE FROM iset_application_submission WHERE CAST(intake_payload AS CHAR) LIKE ?', [markerLike]);
+    await query('DELETE FROM iset_case WHERE case_context_json IS NOT NULL AND CAST(case_context_json AS CHAR) LIKE ?', [markerLike]);
+    progress('cleanup fallback identity rows');
+    await query('DELETE FROM client WHERE applicant_account_email IN (?, ?) OR applicant_cognito_sub IN (?, ?)', [
+      config.applicantA.email,
+      config.applicantB.email,
+      config.applicantA.sub,
+      config.applicantB.sub,
+    ]);
+    await query('DELETE FROM staff_profiles WHERE email = ? OR cognito_sub = ?', [
+      fixture.staffEmail || `codex.portal.scope.${fixture.suffix}.staff@example.com`,
+      fixture.staffSub || `scope-staff-${fixture.suffix}`,
+    ]);
+    await query('DELETE FROM input_json_state WHERE user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?))', emails);
+    await query('DELETE FROM iset_application_draft_dynamic WHERE user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?))', emails);
+    await query('DELETE FROM pending_uploads WHERE user_id IN (SELECT id FROM user WHERE email IN (?, ?, ?))', emails);
+    await query('DELETE FROM user WHERE email IN (?, ?, ?)', emails);
+  }
+
+  async function fetchImpl(url, options = {}) {
+    const timeoutMs = options.timeoutMs || 30000;
+    const requestOptions = { ...options };
+    delete requestOptions.timeoutMs;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    requestOptions.signal = requestOptions.signal || controller.signal;
+    try {
+      if (typeof fetch === 'function') return await fetch(url, requestOptions);
+      const nodeFetch = portalRequire('node-fetch');
+      return await nodeFetch(url, requestOptions);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function responseBody(response) {
+    const text = await response.text();
+    try {
+      return { text, json: text ? JSON.parse(text) : null };
+    } catch (_) {
+      return { text, json: null };
+    }
+  }
+
+  function setCookies(response) {
+    if (response.headers && typeof response.headers.raw === 'function') {
+      return response.headers.raw()['set-cookie'] || [];
+    }
+    if (response.headers && typeof response.headers.getSetCookie === 'function') {
+      return response.headers.getSetCookie();
+    }
+    const single = response.headers && response.headers.get ? response.headers.get('set-cookie') : null;
+    return single ? [single] : [];
+  }
+
+  function cookieHeaderFromSetCookies(cookies) {
+    return cookies
+      .map(cookie => String(cookie).split(';')[0])
+      .filter(Boolean)
+      .join('; ');
+  }
+
+  async function apiRequest(session, route, options = {}) {
+    const url = `${config.localBaseUrl}${route}`;
+    const headers = {
+      Accept: 'application/json',
+      ...(options.headers || {}),
+    };
+    let body = options.body;
+    if (body && typeof body !== 'string' && !Buffer.isBuffer(body)) {
+      headers['Content-Type'] = 'application/json';
+      body = JSON.stringify(body);
+    }
+    if (session?.cookieHeader) headers.Cookie = session.cookieHeader;
+    const response = await fetchImpl(url, {
+      method: options.method || 'GET',
+      headers,
+      body,
+      redirect: 'manual',
+    });
+    const parsed = await responseBody(response);
+    return {
+      status: response.status,
+      headers: response.headers,
+      text: parsed.text,
+      json: parsed.json,
+    };
+  }
+
+  async function login(applicant, expectedUserId) {
+    const response = await fetchImpl(`${config.localBaseUrl}/api/auth/password-login`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email: applicant.email, password: applicant.password }),
+      redirect: 'manual',
+    });
+    const body = await responseBody(response);
+    const cookieHeader = cookieHeaderFromSetCookies(setCookies(response));
+    const session = { cookieHeader };
+    const me = await apiRequest(session, '/api/me');
+    expect(`authenticated login for ${expectedUserId === fixture.userA ? 'rightful' : 'wrong'} applicant`, response.status === 200 && body.json?.success === true && me.json?.authenticated === true && Number(me.json?.id) === Number(expectedUserId), {
+      loginStatus: response.status,
+      meStatus: me.status,
+      meId: me.json?.id || null,
+    });
+    return session;
+  }
+
+  async function runApiChecks() {
+    const sessionA = await login(config.applicantA, fixture.userA);
+    const sessionB = await login(config.applicantB, fixture.userB);
+    fixture.sessionA = sessionA;
+    fixture.sessionB = sessionB;
+
+    const contextA = await apiRequest(sessionA, '/api/messages/context');
+    expect('rightful applicant messaging context remains usable', contextA.status === 200 && contextA.json?.canCompose === true && Number(contextA.json?.caseId) === fixture.caseA && Number(contextA.json?.applicationId) === fixture.applicationA && !contextA.json?.applicantIdentityConflict, {
+      status: contextA.status,
+      context: redactContext(contextA.json),
+    });
+
+    const contextB = await apiRequest(sessionB, '/api/messages/context');
+    expect('wrong applicant messaging context is conflict-blocked', contextB.status === 200 && contextB.json?.canCompose === false && contextB.json?.applicantIdentityConflict === true && !contextB.json?.caseId && !contextB.json?.applicationId, {
+      status: contextB.status,
+      context: redactContext(contextB.json),
+    });
+
+    const composeB = await apiRequest(sessionB, '/api/messages/reply-with-attachments', {
+      method: 'POST',
+      body: {
+        compose_mode: 'new',
+        recipient_id: fixture.staffUser,
+        case_id: fixture.caseA,
+        application_id: fixture.applicationA,
+        subject: 'Should be blocked',
+        body: 'This should not send.',
+      },
+    });
+    expect('wrong applicant cannot compose into mismatched case', composeB.status === 409 && composeB.json?.error === 'applicant_identity_conflict', {
+      status: composeB.status,
+      error: composeB.json?.error || null,
+    });
+
+    const submissionsA = await apiRequest(sessionA, '/api/submissions');
+    const subA = Array.isArray(submissionsA.json) ? submissionsA.json.find(item => item.tracking_id === fixture.refs.applicantA) : null;
+    expect('rightful applicant dashboard submission status uses owned application', submissionsA.status === 200 && subA && !['submitted', 'unknown'].includes(String(subA.external_status || '').toLowerCase()), {
+      status: submissionsA.status,
+      externalStatus: subA?.external_status || null,
+    });
+
+    const byRefA = await apiRequest(sessionA, `/api/submissions/by-reference?ref=${encodeURIComponent(fixture.refs.applicantA)}`);
+    expect('rightful applicant submission detail includes application status', byRefA.status === 200 && byRefA.json?.application_status === 'approved', {
+      status: byRefA.status,
+      applicationStatus: byRefA.json?.application_status || null,
+      caseStatus: byRefA.json?.case_status || null,
+    });
+
+    const submissionsB = await apiRequest(sessionB, '/api/submissions');
+    const subB = Array.isArray(submissionsB.json) ? submissionsB.json.find(item => item.tracking_id === fixture.refs.applicantB) : null;
+    expect('wrong applicant submission list does not inherit other client status', submissionsB.status === 200 && subB && String(subB.external_status || '').toLowerCase() !== 'approved', {
+      status: submissionsB.status,
+      externalStatus: subB?.external_status || null,
+    });
+
+    const byRefB = await apiRequest(sessionB, `/api/submissions/by-reference?ref=${encodeURIComponent(fixture.refs.applicantB)}`);
+    expect('wrong applicant submission detail strips mismatched application/case', byRefB.status === 200 && !byRefB.json?.application_status && byRefB.json?.case_status === 'submitted' && byRefB.json?.status === 'submitted', {
+      status: byRefB.status,
+      applicationStatus: byRefB.json?.application_status || null,
+      caseStatus: byRefB.json?.case_status || null,
+      statusValue: byRefB.json?.status || null,
+    });
+
+    const interventionsA = await apiRequest(sessionA, '/api/my/interventions');
+    expect('rightful applicant can see own active plan activity', interventionsA.status === 200 && Array.isArray(interventionsA.json?.items) && interventionsA.json.items.some(item => item.intervention_id === fixture.intervention), {
+      status: interventionsA.status,
+      count: interventionsA.json?.items?.length || 0,
+    });
+
+    const interventionsB = await apiRequest(sessionB, '/api/my/interventions');
+    expect('wrong applicant cannot see other client plan activity', interventionsB.status === 200 && Array.isArray(interventionsB.json?.items) && interventionsB.json.items.length === 0, {
+      status: interventionsB.status,
+      count: interventionsB.json?.items?.length || 0,
+    });
+
+    const inboxA = await apiRequest(sessionA, '/api/messages?folder=inbox');
+    expect('rightful applicant inbox shows own case message only', inboxA.status === 200 && Array.isArray(inboxA.json?.items) && inboxA.json.items.some(item => item.id === fixture.messageA) && !inboxA.json.items.some(item => item.id === fixture.messageB), {
+      status: inboxA.status,
+      ids: (inboxA.json?.items || []).map(item => item.id),
+    });
+
+    const inboxB = await apiRequest(sessionB, '/api/messages?folder=inbox');
+    expect('wrong applicant inbox hides stale case message rows', inboxB.status === 200 && Array.isArray(inboxB.json?.items) && inboxB.json.items.length === 0, {
+      status: inboxB.status,
+      ids: (inboxB.json?.items || []).map(item => item.id),
+    });
+
+    const messageA = await apiRequest(sessionA, `/api/messages/${fixture.messageA}`);
+    expect('rightful applicant can open own message detail', messageA.status === 200 && messageA.json?.id === fixture.messageA && messageA.json?.subject === fixture.subjectA, {
+      status: messageA.status,
+      id: messageA.json?.id || null,
+    });
+
+    const wrongReadsMessageA = await apiRequest(sessionB, `/api/messages/${fixture.messageA}`);
+    const wrongReadsMessageB = await apiRequest(sessionB, `/api/messages/${fixture.messageB}`);
+    expect('wrong applicant cannot open rightful applicant message detail', wrongReadsMessageA.status === 404, {
+      status: wrongReadsMessageA.status,
+    });
+    expect('wrong applicant cannot open stale message even when addressed to them', wrongReadsMessageB.status === 404, {
+      status: wrongReadsMessageB.status,
+    });
+
+    const signingA = await apiRequest(sessionA, '/api/signing-requests');
+    expect('rightful applicant can see own signing request', signingA.status === 200 && Array.isArray(signingA.json) && signingA.json.some(item => Number(item.id) === fixture.signingA) && !signingA.json.some(item => Number(item.id) === fixture.signingB), {
+      status: signingA.status,
+      ids: Array.isArray(signingA.json) ? signingA.json.map(item => item.id) : [],
+    });
+
+    const signingADetail = await apiRequest(sessionA, `/api/signing-requests/${fixture.signingA}`);
+    expect('rightful applicant can open own signing request detail', signingADetail.status === 200 && signingADetail.json?.id === fixture.signingA && Array.isArray(signingADetail.json?.steps), {
+      status: signingADetail.status,
+      id: signingADetail.json?.id || null,
+    });
+
+    const signingB = await apiRequest(sessionB, '/api/signing-requests');
+    expect('wrong applicant signing request list hides mismatched case request', signingB.status === 200 && Array.isArray(signingB.json) && !signingB.json.some(item => Number(item.id) === fixture.signingB || Number(item.id) === fixture.signingA), {
+      status: signingB.status,
+      ids: Array.isArray(signingB.json) ? signingB.json.map(item => item.id) : [],
+    });
+
+    const signingBDetail = await apiRequest(sessionB, `/api/signing-requests/${fixture.signingB}`);
+    expect('wrong applicant cannot open stale signing request detail', signingBDetail.status === 404, {
+      status: signingBDetail.status,
+    });
+  }
+
+  function redactContext(context) {
+    if (!context || typeof context !== 'object') return context || null;
+    return {
+      hasSubmittedApplication: Boolean(context.hasSubmittedApplication),
+      submissionId: context.submissionId || null,
+      applicationId: context.applicationId || null,
+      caseId: context.caseId || null,
+      canCompose: Boolean(context.canCompose),
+      applicantIdentityConflict: Boolean(context.applicantIdentityConflict),
+    };
+  }
+
+  async function runBrowserChecks() {
+    let puppeteer;
+    try {
+      puppeteer = portalRequire('puppeteer');
+    } catch (error) {
+      fail('Puppeteer available on deployed TEST portal host', { error: error.message || String(error) });
+      return;
+    }
+
+    const browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+    try {
+      await browserDashboardCheck(browser, 'rightful', fixture.sessionA, {
+        dashboardMustContain: [fixture.interventionTitle],
+        messagesMustContain: [fixture.subjectA],
+        mustNotContain: [fixture.subjectB],
+      });
+      await browserDashboardCheck(browser, 'wrong', fixture.sessionB, {
+        dashboardMustContain: ['My PATH dashboard'],
+        messagesMustContain: ['Secure messages'],
+        mustNotContain: [fixture.interventionTitle, fixture.subjectA, fixture.subjectB],
+      });
+    } finally {
+      await browser.close().catch(() => {});
+    }
+  }
+
+  async function browserDashboardCheck(browser, label, session, assertions) {
+    const page = await browser.newPage();
+    const diagnostics = {
+      consoleErrors: [],
+      failedRequests: [],
+      failedResponses: [],
+    };
+    page.on('console', message => {
+      if (message.type() === 'error') diagnostics.consoleErrors.push(message.text());
+    });
+    page.on('requestfailed', request => {
+      if (/\/api\//.test(request.url())) {
+        diagnostics.failedRequests.push({ url: request.url(), failure: request.failure()?.errorText || 'failed' });
+      }
+    });
+    page.on('response', response => {
+      if (response.status() >= 400 && /\/api\//.test(response.url())) {
+        diagnostics.failedResponses.push({ url: response.url(), status: response.status() });
+      }
+    });
+    await interceptApi(page, session);
+    await page.goto(`${config.localBaseUrl}/dashboard`, { waitUntil: 'networkidle2', timeout: 45000 });
+    await waitForBodyText(page, /My PATH dashboard|Mon tableau de bord PATH/);
+    const dashboardText = await page.evaluate(() => document.body ? document.body.innerText : '');
+    await page.goto(`${config.localBaseUrl}/messages`, { waitUntil: 'networkidle2', timeout: 45000 });
+    await waitForBodyText(page, /Secure messages|Messages sécurisés/);
+    const messagesText = await page.evaluate(() => document.body ? document.body.innerText : '');
+    const combinedText = `${dashboardText}\n${messagesText}`;
+    const dashboardHasRequired = (assertions.dashboardMustContain || []).every(text => dashboardText.includes(text));
+    const messagesHasRequired = (assertions.messagesMustContain || []).every(text => messagesText.includes(text));
+    const hasRequired = dashboardHasRequired && messagesHasRequired;
+    const hasForbidden = (assertions.mustNotContain || []).some(text => combinedText.includes(text));
+    expect(`Puppeteer ${label} applicant page content is scoped`, hasRequired && !hasForbidden && diagnostics.failedRequests.length === 0 && diagnostics.failedResponses.length === 0, {
+      dashboardHasRequired,
+      messagesHasRequired,
+      hasForbidden,
+      failedRequests: diagnostics.failedRequests,
+      failedResponses: diagnostics.failedResponses,
+      consoleErrors: diagnostics.consoleErrors.slice(0, 5),
+    });
+    await page.close().catch(() => {});
+  }
+
+  async function interceptApi(page, session) {
+    await page.setRequestInterception(true);
+    page.on('request', async request => {
+      const requestUrl = request.url();
+      const isApi =
+        requestUrl.startsWith(`${config.publicApiOrigin}/api/`) ||
+        requestUrl.startsWith(`${config.localBaseUrl}/api/`);
+      if (!isApi) {
+        request.continue();
+        return;
+      }
+      const parsed = new URL(requestUrl);
+      const targetUrl = `${config.localBaseUrl}${parsed.pathname}${parsed.search}`;
+      if (request.method() === 'OPTIONS') {
+        request.respond({
+          status: 204,
+          headers: corsHeaders(),
+          body: '',
+        });
+        return;
+      }
+      try {
+        const headers = {
+          Accept: request.headers().accept || 'application/json',
+          Cookie: session.cookieHeader,
+        };
+        const contentType = request.headers()['content-type'];
+        if (contentType) headers['Content-Type'] = contentType;
+        const response = await fetchImpl(targetUrl, {
+          method: request.method(),
+          headers,
+          body: ['GET', 'HEAD'].includes(request.method()) ? undefined : request.postData(),
+          redirect: 'manual',
+        });
+        const buffer = await readResponseBuffer(response);
+        const responseHeaders = {
+          ...corsHeaders(),
+          'content-type': response.headers.get('content-type') || 'application/json; charset=utf-8',
+        };
+        request.respond({
+          status: response.status,
+          headers: responseHeaders,
+          body: buffer,
+        });
+      } catch (error) {
+        request.respond({
+          status: 599,
+          headers: corsHeaders(),
+          body: JSON.stringify({ error: 'intercept_failed', message: error.message || String(error) }),
+        });
+      }
+    });
+  }
+
+  function corsHeaders() {
+    return {
+      'access-control-allow-origin': config.localBaseUrl,
+      'access-control-allow-credentials': 'true',
+      'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
+      'access-control-allow-headers': 'content-type,authorization,x-access-token',
+    };
+  }
+
+  async function readResponseBuffer(response) {
+    if (typeof response.arrayBuffer === 'function') {
+      return Buffer.from(await response.arrayBuffer());
+    }
+    if (typeof response.buffer === 'function') {
+      return response.buffer();
+    }
+    return Buffer.from(await response.text(), 'utf8');
+  }
+
+  async function waitForBodyText(page, pattern) {
+    const source = pattern.source;
+    const flags = pattern.flags;
+    await page.waitForFunction(
+      ({ source, flags }) => {
+        const regex = new RegExp(source, flags);
+        return regex.test(document.body ? document.body.innerText : '');
+      },
+      { timeout: 30000 },
+      { source, flags }
+    );
+  }
+}
+
+main().catch(error => {
+  console.error('[applicant-scope-smoke] Failed:', error.message || error);
+  process.exitCode = 1;
+});

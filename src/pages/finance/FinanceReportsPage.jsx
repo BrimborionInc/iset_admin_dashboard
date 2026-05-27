@@ -92,6 +92,12 @@ const PAGE_SIZE = 20;
 const DETAIL_TABLE_PREFERENCES_STORAGE_KEY =
   "finance-reports-intervention-detail-preferences-v2";
 
+const REPORT_SUMMARY_GRID_STYLE = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+  gap: "20px",
+};
+
 const DETAIL_TABLE_DEFAULT_VISIBLE_COLUMNS = [
   "participant",
   "province",
@@ -1376,7 +1382,7 @@ const FinanceReportsPage = ({
           <Header
             variant="h1"
             info={renderInfoLink(FinanceReportsSetupHelp, "Report setup")}
-            description="Filter by fiscal year for one or more provinces/territories. Carry-over or adjustment amounts appear as negatives, and payment status shows the current PATH follow-up state for related packets."
+            description="Review approved CRF/EI intervention advances by approval fiscal year and participant home region. Export uses the current filters and visible detail rows."
             actions={
               <SpaceBetween direction="horizontal" size="xs">
                 <Button onClick={handleClearFilters} disabled={optionsLoading && dataLoading}>
@@ -1401,7 +1407,7 @@ const FinanceReportsPage = ({
           <ColumnLayout columns={3}>
             <FormField
               label="Fiscal year"
-              description="Choose the fiscal year for the annual report."
+              description="Uses the intervention approval date."
             >
               <Select
                 selectedOption={selectedFiscalYearOption}
@@ -1414,7 +1420,7 @@ const FinanceReportsPage = ({
 
             <FormField
               label="Region"
-              description="Select one or more provinces or territories."
+              description="Participant home province or territory."
             >
               <Multiselect
                 selectedOptions={selectedProvinceOptions}
@@ -1434,7 +1440,7 @@ const FinanceReportsPage = ({
 
             <FormField
               label="Carry-over"
-              description="Add a best-effort estimate across fiscal years."
+              description="Estimate cross-fiscal activity when needed."
             >
               <Checkbox
                 checked={includeCarryOver}
@@ -1470,12 +1476,12 @@ const FinanceReportsPage = ({
       <Header
         variant="h2"
         info={renderInfoLink(FinanceReportsSummaryHelp, "Report summary")}
-        description="Approved advances, active clients, and interventions for the visible report rows."
+        description="Approved advances, funded clients, and intervention rows from the current visible report."
       >
         Report summary
       </Header>
 
-      <ColumnLayout columns={4}>
+      <div style={REPORT_SUMMARY_GRID_STYLE}>
         <SummaryCard
           label="Total advances"
           value={formatCurrency(displaySummary.totalAmount)}
@@ -1489,11 +1495,14 @@ const FinanceReportsPage = ({
           value={formatCurrency(displaySummary.fundingTotals.EI)}
         />
         <SummaryCard
-          label="Active clients"
+          label="Funded clients"
           value={formatInteger(displaySummary.participantCount)}
-          secondary={`${formatInteger(displaySummary.interventionCount)} interventions`}
         />
-      </ColumnLayout>
+        <SummaryCard
+          label={interventionAmountFilter === "funded" ? "Funded interventions" : "Approved interventions"}
+          value={formatInteger(displaySummary.interventionCount)}
+        />
+      </div>
 
       {includeCarryOver ? (
         <Container
@@ -1501,7 +1510,7 @@ const FinanceReportsPage = ({
             <Header
               variant="h2"
               info={renderInfoLink(FinanceReportsCarryOverHelp, "Carry-over estimate")}
-              description={carryOverSummary?.sourceNote || "Best-effort estimate for cross-fiscal activity."}
+              description={carryOverSummary?.sourceNote || "Best-effort estimate using payment-line dates when available, otherwise intervention schedule."}
             >
               Carry-over estimate
             </Header>
@@ -1519,9 +1528,9 @@ const FinanceReportsPage = ({
               secondary={`${formatInteger(carryOverSummary?.carryOutInterventionCount)} interventions`}
             />
             <SummaryCard
-              label="Current FY estimate"
+              label={`FY ${reportData.fiscalYear || formatFiscalYearLabel(fiscalYearStart)} estimate`}
               value={formatCurrency(carryOverSummary?.currentFiscalEstimatedAmount)}
-              secondary="Estimated from dated payment activity or intervention schedule"
+              secondary="Estimated in the selected fiscal year"
             />
           </ColumnLayout>
         </Container>

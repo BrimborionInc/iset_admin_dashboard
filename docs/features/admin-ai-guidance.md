@@ -2,7 +2,7 @@
 
 Purpose: move PATH workflow grounding for the embedded admin help chat out of brittle page-local `aiContext` strings and into dedicated database-backed guidance records.
 
-Last updated: 2026-05-07
+Last updated: 2026-05-26
 
 ## Transformation plan
 
@@ -67,7 +67,7 @@ The first seeded guidance slice is intentionally narrow:
 - imported/application-less backload overview
 - existing-intervention lifecycle guardrails
 - historical finance handling for `manual_backload` interventions
-- annual Financial Reports / `ISET Advances and Active Clients` report purpose, funded-interventions default, export scope, and PATH payment-follow-up caveat
+- annual Financial Reports / `ISET Advances and Active Clients` report purpose, funded-interventions default, export scope, PATH payment-follow-up caveat, and explicit Financial Reports vs Data and Results comparison prompts
 
 This limited seed exists to tune answer quality before expanding coverage across the full admin dashboard.
 

@@ -1,6 +1,6 @@
 # Browser Workflow Smoke Automation
 
-Status: current guidance from the 2026-05-08/09 application-assessment containment release.
+Status: current guidance from the 2026-05-08/09 application-assessment containment release, updated with the 2026-05-26 applicant-scope TEST smoke.
 
 Audience: Codex threads and developers building or rehearsing browser-level workflow smokes for PATH.
 
@@ -70,6 +70,16 @@ The authenticated DEV/TEST browser smoke for Option B proved:
 - Applicationless legacy cases stayed usable.
 
 The canonical evidence and exact fixture IDs live in `docs/planning/application-assessment-application-scope-migration-plan.md`.
+
+## Applicant Scope Guard Reference
+
+The 2026-05-26 public-portal privacy release added a TEST wrong-applicant smoke:
+
+- Script: `scripts/applicant-scope-guard-test-smoke.js`
+- Typical command: `node scripts/applicant-scope-guard-test-smoke.js`
+- API-only diagnosis: `node scripts/applicant-scope-guard-test-smoke.js --skip-browser`
+
+The smoke creates temporary TEST Cognito applicant users, seeds a synthetic stale applicant/application/case cross-link through SSM on a TEST app host, proves the rightful applicant still has dashboard/message/intervention/signing access, proves the wrong applicant is denied or shown only safe submission metadata, runs a Puppeteer dashboard/messages check from the TEST host, then deletes the Cognito users and fixture rows.
 
 ## Automation Backlog
 

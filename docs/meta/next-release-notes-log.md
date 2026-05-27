@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-05-25
+Last Updated: 2026-05-26
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -21,8 +21,13 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
-- 2026-05-25 | Release 20260525-test-bugcr-batch | Fix/Casework | Other Funding | Other funders can now be marked confirmed, pending, denied, or unknown, with optional amount and notes. | Coverage is required only for confirmed funding, pending/denied/unknown funders stay on the file as context, and only confirmed other funders generate other-funder letters.
-- 2026-05-25 | Release 20260525-test-bugcr-batch | Fix/Casework | Funding revision letters | Client funding revision letters now use the reviewed secure-message letter body when creating the signable letter artifact. | This keeps the approval/reassessment letter in the outbound packet aligned with the revised CFA and intervention amounts instead of reusing the original application approval-letter draft.
+- 2026-05-25 | Release 20260525-prod-bugcr-batch | Fix/Casework | Other Funding | Other funders can now be marked confirmed, pending, denied, or unknown, with optional amount and notes. | Coverage is required only for confirmed funding, pending/denied/unknown funders stay on the file as context, and only confirmed other funders generate other-funder letters.
+- 2026-05-25 | Release 20260525-prod-bugcr-batch | Fix/Casework | Funding revision letters | Client funding revision letters now use the reviewed secure-message letter body when creating the signable letter artifact. | This keeps the approval/reassessment letter in the outbound packet aligned with the revised CFA and intervention amounts instead of reusing the original application approval-letter draft.
+- 2026-05-26 | Release 20260526-prod-snapshot-scope-guard | UX/Casework | List page size | Manage ISET Applications and ISET Clients table preferences now include a `Show All` page-size option. | The option uses the established `9999` page-size value; the ISET Clients API cap was raised to honor it.
+- 2026-05-26 | Release 20260526-prod-snapshot-scope-guard | UX/Casework | Table sorting | Manage ISET Applications and ISET Clients now sort the full filtered result set before pagination. | Column header sorting sends allowlisted sort/direction fields to the backend instead of sorting only the rows already loaded on the current page.
+- 2026-05-26 | Release 20260526-prod-snapshot-scope-guard | Fix/Reporting | Regional Snapshot | Regional Snapshot funding and funded-client totals now use the same approved-funding and participant-home-province basis as Financial Reports. | Fixes the BC FY 2026/27 snapshot showing zero CRF/EI funding because it was reading payment-packet lines by case portfolio region instead of approved intervention funding by participant home province.
+- 2026-05-26 | Release 20260526-prod-snapshot-scope-guard | UX/Help | Financial Reports | Financial Reports guidance is now organized around the report user's workflow. | The page explains approval-year scope, participant-home-region filtering, funded-client and funded-intervention totals, carry-over estimates, export scope, and the first checks to make when a number looks wrong, while keeping PATH-side review separate from external Finance/Sage work.
+- 2026-05-26 | Release 20260526-prod-snapshot-scope-guard | Security/Public Portal | Applicant ownership checks | Applicant portal messaging, signing, status, and intervention routes now reject application/case context when the signed-in applicant account is linked to a different client than the application or case. | Normal same-client records continue to work; mismatched legacy duplicate-account rows fail closed instead of surfacing another client file.
 - 2026-05-23 | Release TBD | Fix/Payments | Finance emails | Finance payment-packet emails include a seven-day download link for the packet evidence bundle. | The link downloads through PATH instead of a direct S3/MinIO presign, so it works with DEV/local storage and object-store deployments; the zip contains supporting evidence files only, without packet-summary PDF or JSON manifest files.
 - 2026-05-23 | Release TBD | Config/Payments | Payment packet evidence | Payment packets now require only the Client Funding Agreement and the signed EFT banking form as baseline evidence. | The new signed EFT evidence type maps to the existing `EFT_form` document type, and the runtime-config update preserves existing per-payment-type evidence rules.
 - 2026-05-23 | Release TBD | UX/Finance Settings | Finance email preview | Finance Settings now includes a read-only preview of the finance payment-packet email. | The preview uses sample packet data rendered through the same backend email builder used for real submissions, including placeholder packet-bundle wording.
@@ -330,6 +335,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 ### What's New (draft bullets - EN)
 
 - Financial Reports now opens with a cleaner funded-interventions view and better intervention-detail controls.
+- Manage ISET Applications and ISET Clients now include `Show All` page-size options and sort full filtered results before pagination.
+- Regional Snapshot funding and funded-client totals now align with Financial Reports for approved CRF/EI funding by participant home province.
 - Other funders can now be marked confirmed, pending, denied, or unknown, with optional amount and notes.
 - Financial Reports help now gives staff-facing guidance for the annual ISET Advances and Active Clients report.
 - Fixed a bug where some denied applications could still appear in active application lists after the denial letter was sent.
@@ -338,13 +345,23 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Withdrawn applications now create the reporting-only action plan and two completed interventions needed for ILMP reporting.
 - Intervention planned-cost fields now accept normal dollars-and-cents amounts.
 - Supporting Documents uploads now work on case files where an older application has an unsafe applicant-account link.
+- Applicant portal case/status/message routes now double-check that the signed-in account belongs to the same client as the application and case being shown.
 
 ### What Changed Packages (draft - EN)
 
-#### Release 20260525-test-bugcr-batch
+#### Release 20260526-prod-snapshot-scope-guard
+
+- Manage ISET Applications and ISET Clients now include `Show All` page-size options and sort the full filtered result set before pagination.
+- Regional Snapshot now uses the same approved CRF/EI funding and participant-home-province rules as Financial Reports for funding and funded-client totals.
+- Financial Reports help is organized around annual-report workflow, including approval-year scope, visible-row totals, carry-over confidence, export scope, and first checks when a number looks wrong.
+- Applicant portal message, signing, status, and intervention routes now double-check that the signed-in account belongs to the same client as the application and case being shown.
+- Applicant session-audit writes now match the deployed `user_session_audit` table shape and prune old rows with bounded retention.
+
+#### Release 20260525-prod-bugcr-batch
 
 - Financial Reports now defaults Intervention detail to funded interventions only, with an option to include all approved interventions when zero-dollar counselling or career-research rows need review.
 - The Financial Reports detail table now hides reference-number clutter under participant names, shows CRF/EI and approved funding near the front, and supports column selection, resizing, and sorting.
+- Regional Snapshot now uses the same approved CRF/EI funding and participant-home-province rules as Financial Reports for funding and funded-client totals.
 - Financial Reports help now includes section-level guidance and AI-help coverage for the annual report purpose, export scope, and PATH-versus-Sage payment-status caveat.
 - Other funders can now be marked confirmed, pending, denied, or unknown; only confirmed other funders require coverage details and generate other-funder letters.
 - Finance payment-packet emails now include a seven-day download link for the packet evidence bundle.
@@ -359,13 +376,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Intervention planned-cost fields now accept normal dollars-and-cents amounts.
 - Supporting Documents uploads now work on case files where an older application has an unsafe applicant-account link.
 
-#### Release 20260521-prod-admin-bugcr-packets
-
-- Improved ILMP validation so current barrier selections and stored NOC codes are recognized more reliably.
-- ILMP readiness now ignores archived action-plan validation rows when choosing the current case validation record.
-- Withdrawn-only applications now close the case as Withdrawn so staff can find them under Dormant or All clients.
-- Application approval and denial decisions now stay on the decision screen after Commit and offer letter preparation as a separate next action.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
@@ -373,6 +383,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 ### Nouveautes (brouillon - FR)
 
 - Financial Reports s'ouvre maintenant avec une vue plus claire des interventions financees et de meilleurs controles de detail.
+- Manage ISET Applications et ISET Clients incluent maintenant l'option `Show All` et trient tous les resultats filtres avant la pagination.
+- Regional Snapshot aligne maintenant le financement et le nombre de clients finances avec les regles de Financial Reports, selon le financement CRF/EI approuve et la province de residence.
 - Les autres bailleurs de fonds peuvent maintenant etre marques comme confirmes, en attente, refuses ou inconnus, avec montant et notes facultatifs.
 - L'aide de Financial Reports donne maintenant des consignes pratiques pour le rapport annuel ISET Advances and Active Clients.
 - Correction d'un probleme ou certaines demandes refusees pouvaient encore apparaitre dans les listes actives apres l'envoi de la lettre de refus.
@@ -381,13 +393,23 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les demandes retirees creent maintenant le plan d'action reserve au reporting et les deux interventions completees requis pour le reporting ILMP.
 - Les champs de cout prevu des interventions acceptent maintenant les montants courants en dollars et cents.
 - Les televersements dans Supporting Documents fonctionnent maintenant pour les dossiers ou une ancienne demande a un lien de compte client non securitaire.
+- Le portail applicant verifie maintenant que le compte connecte appartient au meme client que la demande et le dossier affiches.
 
 ### Lots de changements (brouillon - FR)
 
-#### Release 20260525-test-bugcr-batch
+#### Release 20260526-prod-snapshot-scope-guard
+
+- Manage ISET Applications et ISET Clients incluent maintenant l'option `Show All` et trient tous les resultats filtres avant la pagination.
+- Regional Snapshot utilise maintenant les memes regles que Financial Reports pour le financement CRF/EI approuve et les clients finances par province de residence.
+- L'aide de Financial Reports est organisee autour du travail de rapport annuel, notamment la portee par annee d'approbation, les totaux des lignes visibles, la fiabilite du report, la portee de l'export et les premieres verifications quand un montant semble incorrect.
+- Les routes de messages, signatures, statuts et interventions du portail applicant verifient maintenant que le compte connecte appartient au meme client que la demande et le dossier affiches.
+- L'audit de session applicant ecrit maintenant selon la structure de table `user_session_audit` deployee et supprime les anciennes lignes avec une retention bornee.
+
+#### Release 20260525-prod-bugcr-batch
 
 - Financial Reports affiche maintenant par defaut seulement les interventions financees dans le detail, avec une option pour inclure toutes les interventions approuvees lorsque les lignes a zero dollar doivent etre examinees.
 - Le tableau de detail de Financial Reports masque les numeros de reference sous les noms des participantes et participants, affiche CRF/EI et le financement approuve plus tot, et permet de choisir, redimensionner et trier les colonnes.
+- Regional Snapshot utilise maintenant les memes regles que Financial Reports pour le financement CRF/EI approuve et les clients finances par province de residence.
 - L'aide de Financial Reports comprend maintenant des consignes par section et une couverture d'aide IA pour le but du rapport annuel, la portee de l'export et la distinction entre le suivi PATH et Sage.
 - Les autres bailleurs de fonds peuvent maintenant etre marques comme confirmes, en attente, refuses ou inconnus; seuls les bailleurs confirmes exigent les details de couverture et generent des lettres.
 - Les courriels de packet de paiement incluent maintenant un lien de telechargement valide sept jours pour le paquet de pieces justificatives.
@@ -401,13 +423,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les demandes retirees creent maintenant le plan d'action reserve au reporting et les deux interventions completees requis pour le reporting ILMP.
 - Les champs de cout prevu des interventions acceptent maintenant les montants courants en dollars et cents.
 - Les televersements dans Supporting Documents fonctionnent maintenant pour les dossiers ou une ancienne demande a un lien de compte client non securitaire.
-
-#### Release 20260521-prod-admin-bugcr-packets
-
-- Amelioration de la validation ILMP afin que les barrieres courantes et les codes CNP enregistres soient mieux reconnus.
-- La disponibilite ILMP ignore maintenant les anciennes validations liees a des plans d'action archives lorsqu'elle choisit la validation courante du dossier.
-- Les demandes retirees sans activite de dossier ferment maintenant le dossier comme Retire, afin que le personnel puisse les retrouver dans Dormants ou Tous.
-- Les decisions d'approbation et de refus restent maintenant sur l'ecran de decision apres Commit et proposent la preparation de lettre comme prochaine action separee.
 
 ### Problemes connus (brouillon - FR)
 

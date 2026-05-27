@@ -273,7 +273,7 @@
     "domain": "Finance / Payments",
     "route": "/finance/payments",
     "helpTitle": "Finance Payments",
-    "role": "Finance Manager",
+    "role": "NWAC Administrator",
     "prompt": "Does approving an intervention create a payment packet?",
     "expectedAnchors": [
       "No",
@@ -305,6 +305,8 @@
       "ISET Advances and Active Clients",
       "annual approved-funding report",
       "CRF/EI",
+      "approval date",
+      "funded clients",
       "Funded interventions only",
       "All approved interventions",
       "PATH payment follow-up",
@@ -313,13 +315,49 @@
     "forbiddenPatterns": [
       "Sage ledger",
       "actual paid ledger",
-      "all approved interventions are shown by default"
+      "all approved interventions are shown by default",
+      "finance staff use PATH",
+      "finance team uses PATH"
     ],
     "sourceRefs": [
       "src/pages/finance/FinanceReportsPage.jsx",
       "src/helpPanelContents/financeReportsHelp.js",
       "src/pages/finance/financeInterventionReportExport.js",
       "docs/dashboards/financial-reports-dashboard.md"
+    ],
+    "status": "verified"
+  },
+  {
+    "id": "finance-reports-data-results-comparison",
+    "domain": "Finance / Reporting",
+    "route": "/finance/reports",
+    "helpTitle": "Financial Reports",
+    "role": "NWAC Administrator",
+    "prompt": "Why does Financial Reports not match Data and Results?",
+    "expectedAnchors": [
+      "Financial Reports",
+      "Data and Results",
+      "approval date",
+      "funded CRF/EI",
+      "status",
+      "start date",
+      "end date",
+      "payment month"
+    ],
+    "forbiddenPatterns": [
+      "should match",
+      "same report",
+      "Sage ledger",
+      "finance staff use PATH",
+      "finance team uses PATH"
+    ],
+    "sourceRefs": [
+      "src/pages/finance/FinanceReportsPage.jsx",
+      "src/helpPanelContents/financeReportsHelp.js",
+      "src/pages/reporting/DataAndResultsDashboard.jsx",
+      "src/helpPanelContents/dataAndResultsDashboardHelp.js",
+      "docs/dashboards/financial-reports-dashboard.md",
+      "docs/dashboards/data-and-results-dashboard.md"
     ],
     "status": "verified"
   },

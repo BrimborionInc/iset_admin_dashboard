@@ -2,7 +2,7 @@
 
 Purpose: capture the current live behavior of `Budgets and Finance > Financial Reports` so future threads can extend the finance-reporting surface without reverse-engineering the page and endpoints from code.
 Audience: admin dashboard engineers, finance/reporting reviewers, and product owners.
-Last Updated: 2026-05-24
+Last Updated: 2026-05-26
 
 ## Scope
 
@@ -21,6 +21,7 @@ Last Updated: 2026-05-24
 - Intervention detail defaults to funded interventions only so zero-dollar approved interventions, such as Employment counselling or Career research & exploration, do not clutter the advances view. Staff can switch the row-scope selector to all approved interventions when they need to review those rows.
 - Payment follow-up status is shown beside each intervention so staff can see whether the related packet work is still draft, ready to send, sent to finance, needs follow-up, reported paid, confirmed by evidence, stale/no response, or cancelled.
 - An optional `Include carry-over` toggle adds a best-effort cross-fiscal estimate using payment-line dates when available and the intervention schedule as fallback.
+- User-facing guidance is structured as an approved-funding review job aid: set report scope, read the summary and regional totals, inspect intervention detail, use carry-over only when needed, export the current visible rows, and check filters/approval basis before investigating a number that looks wrong.
 
 ## Current controls
 
@@ -33,7 +34,7 @@ Last Updated: 2026-05-24
 - Local detail-table text filter
 - Intervention detail table preferences for visible columns and stored column widths
 - Intervention detail sorting on all visible columns
-- Default intervention detail columns focus on finance review fields: participant, region, funding source, approved funding, intervention, and funding-category amounts.
+- Default intervention detail columns focus on funding review fields: participant, region, funding source, approved funding, intervention, and funding-category amounts.
 
 ## Current data rules
 
@@ -56,12 +57,12 @@ Last Updated: 2026-05-24
   - total advances
   - CRF advances
   - EI advances
-  - active client count
-  - intervention count as secondary context
+  - funded client count
+  - funded intervention count as a separate card in the default row scope; the card changes to approved interventions when staff switch to all approved rows
 - Optional carry-over summary section with:
   - carry-over from prior FY
   - carry-over to next FY
-  - current FY estimated amount
+  - selected-FY estimated amount
 - Region summary table with:
   - participants
   - interventions
@@ -82,7 +83,7 @@ Last Updated: 2026-05-24
   - `Summary`
   - `CRF Detail`
   - `EI Detail`
-- Export is intentionally closer to workbook-style finance review than to the old demo dashboard.
+- Export is intentionally closer to workbook-style approved-funding review than to the old demo dashboard.
 
 ## Current limitations
 
@@ -91,4 +92,4 @@ Last Updated: 2026-05-24
 - Approved category columns are derived from intervention cost-line data and scaled to the approved total when needed so row totals reconcile, which means category amounts are presentation/reporting allocations rather than a separate authoritative ledger.
 - Carry-over is best-effort only. It uses stored payment-line dates first, then derived intervention schedules when no live payment lines exist, so it should be treated as a planning/reconciliation aid rather than a definitive accounting ledger.
 - This page replaced the earlier finance-reporting demo/widget scaffold; `Add widget` / `Reset layout` no longer apply here.
-- The route-level help and section-level info links are written as staff-facing job aids. The page also has a seeded admin-AI guidance card for the annual report purpose, default funded-intervention scope, Excel export scope, and PATH-vs-Sage payment-status caveat.
+- The route-level help and section-level info links are written as staff-facing job aids rather than implementation notes. The page also has seeded admin-AI guidance for the annual report purpose, default funded-intervention scope, Excel export scope, PATH-vs-Sage payment-status caveat, and explicit comparison questions when staff ask why finance advances do not match an operational reporting view.

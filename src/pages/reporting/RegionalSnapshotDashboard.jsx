@@ -880,7 +880,7 @@ const RegionalSnapshotDashboard = () => {
   const clientRows = report
     ? [
         { label: "Applications Received", value: formatInteger(report.liveMetrics?.applicationsReceived) },
-        { label: "Funded", value: formatInteger(report.liveMetrics?.funded) },
+        { label: "Funded Clients", value: formatInteger(report.liveMetrics?.funded) },
         { label: "Denied / Ineligible / Withdrawn / NC", value: formatInteger(report.liveMetrics?.deniedIneligibleWithdrawn) },
         { label: "Pending Decision", value: formatInteger(report.liveMetrics?.pendingDecision) },
       ]
@@ -1091,7 +1091,7 @@ const RegionalSnapshotDashboard = () => {
       >
         <SpaceBetween size="l">
           <Box color="text-body-secondary" fontSize="body-s">
-            Live client activity, client funding, and salary values are calculated by PATH. Operating costs, compliance, and comments are saved with this snapshot.
+            Live application activity, funded client totals, approved funding, and salary values are calculated by PATH. Operating costs, compliance, and comments are saved with this snapshot.
           </Box>
           <ColumnLayout columns={2} variant="text-grid">
             <FormField label="Snapshot status">

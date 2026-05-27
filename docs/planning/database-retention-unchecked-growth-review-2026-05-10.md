@@ -73,7 +73,7 @@ Recommendation:
 
 `client_applicant_account_event` is account lifecycle audit data, not a transient queue. PROD count was `242`, mostly `activated`, `account_created`, and `invitation_sent`. Keep it longer than password-reset request rows, but document a retention target.
 
-### Medium Risk: Session Audit Is Not Currently Writing
+### Medium Risk: Session Audit Was Not Writing
 
 `user_session_audit` is intended to track token sessions and has a manual System Administrator prune endpoint, but no automatic retention job.
 
@@ -81,11 +81,13 @@ DEV and PROD counts on 2026-05-10 were both `0`.
 
 Important implementation finding: the public portal session-audit insert currently expects columns `cognito_sub`, `exp`, and `ua_hash`, while both DEV and PROD tables have `user_agent_hash` and no `cognito_sub` / `exp`. A rollback-safe DEV probe of the current insert shape failed with `ER_BAD_FIELD_ERROR: Unknown column 'cognito_sub' in 'field list'`. The portal catches this error, so session audit writes are silently skipped.
 
+Status update 2026-05-26: local portal code has been corrected to use the deployed table shape (`session_key`, `user_id`, `issued_at`, `last_seen_at`, `ip_hash`, `user_agent_hash`) and to log a non-PII warning if a session-audit write fails. The local code also starts an automatic prune job with default 90-day retention, a daily interval, and 500-row bounded deletes. This is not deployed to PROD until Bill explicitly approves a PROD release. The follow-up verification requirement remains: after TEST deploy, prove a login writes or updates a `user_session_audit` row and verify the prune job is enabled before treating the table as operational evidence again.
+
 Recommendation:
 
 - Treat this as two separate tasks:
-  - first align the session audit writer and table schema, then verify rows appear;
-  - then replace the manual-only prune button with an automatic retention job, probably 60-90 days for ordinary session telemetry.
+  - first align the session audit writer and table schema, deploy through TEST, then verify rows appear;
+  - then verify the automatic retention job behavior in TEST and tune the default 90-day retention only if operations needs a different window.
 - Keep IP/user-agent hashed as currently intended for session rows.
 
 ### Low Risk / Bounded But Needs Sweeping

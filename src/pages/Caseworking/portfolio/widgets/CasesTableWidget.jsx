@@ -27,6 +27,12 @@ import useCasesData from "../hooks/useCasesData.js";
 const COLUMN_WIDTHS_KEY = "iset-portfolio-cases-table-widths-v2";
 const PREFERENCES_KEY = "iset-portfolio-cases-table-preferences-v2";
 const DEFAULT_PAGE_SIZE = 10;
+const PAGE_SIZE_OPTIONS = [
+  { value: 5, label: "5 rows" },
+  { value: 10, label: "10 rows" },
+  { value: 20, label: "20 rows" },
+  { value: 9999, label: "Show All" },
+];
 const DEFAULT_STATUS_FILTERS = [
   "initiated",
   "active",
@@ -242,7 +248,9 @@ const loadPreferences = () => {
     const visibleColumns = Array.isArray(parsed.visibleColumns)
       ? parsed.visibleColumns.filter(id => groupedColumnIds.includes(id))
       : [...groupedColumnIds];
-    const pageSize = Number.isFinite(parsed.pageSize) ? parsed.pageSize : DEFAULT_PAGE_SIZE;
+    const pageSize = PAGE_SIZE_OPTIONS.some(option => option.value === parsed.pageSize)
+      ? parsed.pageSize
+      : DEFAULT_PAGE_SIZE;
     return {
       pageSize,
       visibleColumns: visibleColumns.length ? visibleColumns : [...groupedColumnIds],
@@ -293,6 +301,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const [preferences, setPreferences] = useState(() => loadPreferences());
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
   const [clientCategory, setClientCategory] = useState(CLIENT_CATEGORY_OPTIONS[0]);
+  const [sortingState, setSortingState] = useState({ columnId: "lastTouch", isDescending: true });
   const preferencesRef = useRef(preferences);
   const pageSize = preferences.pageSize ?? DEFAULT_PAGE_SIZE;
 
@@ -329,7 +338,10 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     clientCategory: clientCategory?.value || "active",
     page: currentPageIndex,
     pageSize,
-    sort: null,
+    sort: {
+      column: sortingState.columnId,
+      direction: sortingState.isDescending ? "desc" : "asc",
+    },
   });
 
   const assignableOptions = useMemo(
@@ -566,7 +578,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       }}
       pageSizePreference={{
         title: "Page size",
-        options: [5, 10, 20].map(value => ({ value, label: `${value} rows` })),
+        options: PAGE_SIZE_OPTIONS,
       }}
       contentDisplayPreference={{
         title: "Select columns",
@@ -650,10 +662,16 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       .filter(column => visibleSet.has(column.id))
       .map(column => {
         const storedWidth = columnWidths.find(entry => entry.id === column.id);
-        return storedWidth ? { ...column, width: storedWidth.width } : column;
+        const sortableColumn = { ...column, sortingField: column.id };
+        return storedWidth ? { ...sortableColumn, width: storedWidth.width } : sortableColumn;
       });
     return columns;
   }, [preferences.visibleColumns, columnWidths]);
+
+  const activeSortingColumn = useMemo(
+    () => columnsToRender.find(column => column.id === sortingState.columnId),
+    [columnsToRender, sortingState.columnId]
+  );
 
   const selectedAgreement = selectedAgreements?.[0] || null;
   const handleClientCategoryChange = ({ detail }) => {
@@ -728,6 +746,15 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
           resizableColumns
           variant="embedded"
           loading={liveLoading}
+          sortingColumn={activeSortingColumn || { id: sortingState.columnId }}
+          sortingDescending={sortingState.isDescending}
+          onSortingChange={({ detail }) => {
+            const columnId = detail?.sortingColumn?.id;
+            if (!columnId) return;
+            setSortingState({ columnId, isDescending: detail.isDescending });
+            setCurrentPageIndex(1);
+            setExpandedItems([]);
+          }}
           header={<Header variant="h3" counter={`(${totalCount})`}>ISET Clients</Header>}
           empty={emptyState}
           filter={

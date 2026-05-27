@@ -93,7 +93,7 @@ const buildRegionInfoRows = report => [
 
 const buildClientActivityRows = report => [
   { label: "Applications Received", value: formatInteger(report?.liveMetrics?.applicationsReceived) },
-  { label: "Funded", value: formatInteger(report?.liveMetrics?.funded) },
+  { label: "Funded Clients", value: formatInteger(report?.liveMetrics?.funded) },
   {
     label: "Denied/Ineligible/Withdrawn/NC",
     value: formatInteger(report?.liveMetrics?.deniedIneligibleWithdrawn),
@@ -222,9 +222,9 @@ const writeSummaryWorksheet = (worksheet, reports, meta = {}) => {
     "Region",
     "Province/Territory",
     "Regional Manager",
-    "Regional Manager",
+    "ISET Coordinator",
     "Applications Received",
-    "Funded",
+    "Funded Clients",
     "Denied/Ineligible/Withdrawn/NC",
     "Pending Decision",
     "CRF Funding ($)",

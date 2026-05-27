@@ -472,7 +472,7 @@ const BudgetSavedViewsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }
             checked={formState.isShared}
             onChange={({ detail }) => setFormState(prev => ({ ...prev, isShared: detail.checked }))}
           >
-            Shared view (visible to finance users)
+            Shared view (visible to users with budget access)
           </Toggle>
           <Button variant="primary" iconName="add-plus" loading={creating} onClick={handleCreateView}>
             Save view

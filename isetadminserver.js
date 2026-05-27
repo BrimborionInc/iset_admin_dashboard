@@ -28814,11 +28814,41 @@ async function readRegionalSnapshotRow({ regionId, periodType, periodStart, peri
   return Array.isArray(rows) && rows.length ? rows[0] : null;
 }
 
-async function readRegionalSnapshotLiveMetrics({ regionId, periodStart, periodEnd }, executor = pool) {
+function buildRegionalSnapshotProvinceFilter(regionCode) {
+  const provinceCode = normaliseReportingProvinceCode(regionCode);
+  return provinceCode && provinceCode !== 'XX' ? [provinceCode] : [];
+}
+
+function isRegionalSnapshotFundedApplication(row) {
+  const decisionOutcome = normaliseApplicationDecisionOutcomeValue(row?.decision_outcome);
+  if (decisionOutcome === 'approved') return true;
+  if (decisionOutcome === 'denied') return false;
+  const status = normaliseApplicationStatusValue(row?.status);
+  return status === 'approved' || status === 'completed';
+}
+
+function isRegionalSnapshotDeniedApplication(row) {
+  const decisionOutcome = normaliseApplicationDecisionOutcomeValue(row?.decision_outcome);
+  if (decisionOutcome === 'denied') return true;
+  if (decisionOutcome === 'approved') return false;
+  const status = normaliseApplicationStatusValue(row?.status);
+  return ['rejected', 'declined', 'denied', 'withdrawn', 'cancelled'].includes(status);
+}
+
+function isRegionalSnapshotPendingApplication(row) {
+  if (isRegionalSnapshotFundedApplication(row) || isRegionalSnapshotDeniedApplication(row)) {
+    return false;
+  }
+  const status = normaliseApplicationStatusValue(row?.status);
+  return !['closed', 'archived'].includes(status);
+}
+
+async function readRegionalSnapshotLiveMetrics({ regionCode, periodStart, periodEnd }, executor = pool) {
   const runner = executor || pool;
   const fallback = {
     applicationsReceived: 0,
     funded: 0,
+    fundedApplications: 0,
     deniedIneligibleWithdrawn: 0,
     pendingDecision: 0,
   };
@@ -28826,52 +28856,84 @@ async function readRegionalSnapshotLiveMetrics({ regionId, periodStart, periodEn
   const startDateTime = `${toDateOnly(periodStart)} 00:00:00`;
   const endExclusive = buildRegionalSnapshotEndExclusive(periodEnd);
   if (!endExclusive) return fallback;
+  const provinceCodes = buildRegionalSnapshotProvinceFilter(regionCode);
+  const clientProvinceExpr = `COALESCE(
+    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.address.province')), ''),
+    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.address.provinceCode')), ''),
+    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.province')), ''),
+    NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.provinceCode')), '')
+  )`;
   try {
-    const [applicationsReceivedRows] = await runner.query(
+    const [rows] = await runner.query(
       `
-      SELECT COUNT(DISTINCT s.id) AS total
-      FROM iset_application_submission s
-      JOIN iset_application a ON a.submission_id = s.id
-      JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
-      WHERE c.portfolio_region_id = ?
-        AND s.submitted_at >= ?
-        AND s.submitted_at < ?
-      `,
-      [regionId, startDateTime, endExclusive]
-    );
-    const statusExpr = `REPLACE(LOWER(TRIM(a.status)), ' ', '_')`;
-    const [fundedRows] = await runner.query(
-      `
-      SELECT COUNT(DISTINCT a.id) AS total
+      SELECT
+        a.id AS application_id,
+        a.status,
+        a.decision_outcome,
+        s.id AS submission_id,
+        s.submitted_at,
+        COALESCE(a.updated_at, a.created_at) AS decision_at,
+        (s.submitted_at >= ? AND s.submitted_at < ?) AS submitted_in_period,
+        (COALESCE(a.updated_at, a.created_at) >= ? AND COALESCE(a.updated_at, a.created_at) < ?) AS decision_in_period,
+        ${REPORTING_ADDRESS_PROVINCE_EXPR} AS submission_address_province,
+        ${clientProvinceExpr} AS client_address_province
       FROM iset_application a
       JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
-      WHERE c.portfolio_region_id = ?
-        AND ${statusExpr} IN ('approved', 'completed')
-        AND COALESCE(a.updated_at, a.created_at) >= ?
-        AND COALESCE(a.updated_at, a.created_at) < ?
+      LEFT JOIN client cl ON cl.id = c.client_id
+      LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+      LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
+      WHERE (
+        (s.submitted_at >= ? AND s.submitted_at < ?)
+        OR (COALESCE(a.updated_at, a.created_at) >= ? AND COALESCE(a.updated_at, a.created_at) < ?)
+      )
       `,
-      [regionId, startDateTime, endExclusive]
+      [
+        startDateTime,
+        endExclusive,
+        startDateTime,
+        endExclusive,
+        startDateTime,
+        endExclusive,
+        startDateTime,
+        endExclusive,
+      ]
     );
-    const [deniedRows] = await runner.query(
-      `
-      SELECT COUNT(DISTINCT a.id) AS total
-      FROM iset_application a
-      JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
-      WHERE c.portfolio_region_id = ?
-        AND ${statusExpr} IN ('rejected', 'declined', 'withdrawn', 'cancelled')
-        AND COALESCE(a.updated_at, a.created_at) >= ?
-        AND COALESCE(a.updated_at, a.created_at) < ?
-      `,
-      [regionId, startDateTime, endExclusive]
-    );
-    const applicationsReceived = Number(applicationsReceivedRows?.[0]?.total ?? 0);
-    const funded = Number(fundedRows?.[0]?.total ?? 0);
-    const deniedIneligibleWithdrawn = Number(deniedRows?.[0]?.total ?? 0);
+
+    const applicationsReceivedSet = new Set();
+    const fundedApplicationsSet = new Set();
+    const deniedSet = new Set();
+    const pendingSet = new Set();
+
+    (rows || [])
+      .filter(row => matchesReportingProvinceFilter(buildMetricProvince(row), provinceCodes))
+      .forEach(row => {
+        const applicationId = normalisePositiveInteger(row?.application_id);
+        const submissionId = normalisePositiveInteger(row?.submission_id);
+        const applicationKey = applicationId ? `application-${applicationId}` : null;
+        if (Number(row?.submitted_in_period || 0)) {
+          applicationsReceivedSet.add(submissionId ? `submission-${submissionId}` : applicationKey);
+          if (applicationKey && isRegionalSnapshotPendingApplication(row)) {
+            pendingSet.add(applicationKey);
+          }
+        }
+        if (applicationKey && Number(row?.decision_in_period || 0)) {
+          if (isRegionalSnapshotFundedApplication(row)) {
+            fundedApplicationsSet.add(applicationKey);
+          } else if (isRegionalSnapshotDeniedApplication(row)) {
+            deniedSet.add(applicationKey);
+          }
+        }
+      });
+
+    const applicationsReceived = Array.from(applicationsReceivedSet).filter(Boolean).length;
+    const fundedApplications = fundedApplicationsSet.size;
+    const deniedIneligibleWithdrawn = deniedSet.size;
     return {
       applicationsReceived,
-      funded,
+      funded: fundedApplications,
+      fundedApplications,
       deniedIneligibleWithdrawn,
-      pendingDecision: Math.max(0, applicationsReceived - funded - deniedIneligibleWithdrawn),
+      pendingDecision: pendingSet.size,
     };
   } catch (err) {
     if (isMissingTableErrorLocal(err) || isMissingColumnErrorLocal(err)) {
@@ -28881,72 +28943,43 @@ async function readRegionalSnapshotLiveMetrics({ regionId, periodStart, periodEn
   }
 }
 
-async function readRegionalSnapshotFundingMetrics({ regionId, periodStart, periodEnd }, executor = pool) {
+async function readRegionalSnapshotFundingMetrics({
+  regionCode,
+  fiscalYearStart,
+  periodType,
+  periodKey,
+}, executor = pool) {
   const runner = executor || pool;
   const fallback = {
     crfFundingAmount: 0,
     eiFundingAmount: 0,
+    fundedClientCount: 0,
+    fundedInterventionCount: 0,
   };
   if (!runner || typeof runner.query !== 'function') return fallback;
   try {
-    const paymentTypeMapping = await readPaymentInterventionMapping(runner).catch(() => null);
-    const submissionTimingByType = buildSubmissionTimingByTypeLookup(paymentTypeMapping);
-    const [rows] = await runner.query(
-      `
-      SELECT
-        ppl.amount,
-        ppl.payment_type,
-        ppl.requested_payment_date,
-        ppl.service_period_start,
-        ppl.service_period_end,
-        ppl.funding_stream,
-        bp.funding_source AS pot_funding_source,
-        ci.start_date,
-        ci.end_date
-      FROM payment_packet_line ppl
-      JOIN iset_case_intervention ci ON ci.id = ppl.intervention_id
-      JOIN iset_case c ON c.id = ci.case_id
-      LEFT JOIN budget_pot bp ON bp.id = ppl.budget_pot_id
-      WHERE c.portfolio_region_id = ?
-        AND ppl.status <> 'cancelled'
-      `,
-      [regionId]
+    const provinceCodes = buildRegionalSnapshotProvinceFilter(regionCode);
+    const financePayload = await readFinanceInterventionReportPayload(
+      {
+        fiscalYearStart,
+        periodType,
+        periodKey,
+        provinces: provinceCodes,
+        includeCarryOver: false,
+      },
+      runner
     );
-    const periodStartDate = toDateOnly(periodStart);
-    const periodEndDate = toDateOnly(periodEnd);
-    let crfFundingAmount = 0;
-    let eiFundingAmount = 0;
-
-    (rows || []).forEach(row => {
-      const scheduledDate = resolveReportingInterventionScheduledDate(
-        {
-          paymentType: row?.payment_type,
-          requestedPaymentDate: row?.requested_payment_date,
-          servicePeriodStart: row?.service_period_start,
-          servicePeriodEnd: row?.service_period_end,
-        },
-        row,
-        submissionTimingByType
-      );
-      if (!scheduledDate || scheduledDate < periodStartDate || scheduledDate > periodEndDate) {
-        return;
-      }
-      const amount = Number(row?.amount || 0);
-      if (!Number.isFinite(amount) || amount <= 0) return;
-      const fundingSource =
-        normalizeFundingSource(row?.pot_funding_source) ||
-        normalizeFundingSource(row?.funding_stream) ||
-        'OTHER';
-      if (fundingSource === 'CRF') {
-        crfFundingAmount += amount;
-      } else if (fundingSource === 'EI') {
-        eiFundingAmount += amount;
-      }
+    const fundedRows = (Array.isArray(financePayload?.rows) ? financePayload.rows : [])
+      .filter(row => Number(row?.totalAmount || 0) > 0);
+    const summary = buildFinanceInterventionReportSummary(fundedRows, {
+      includeCarryOver: false,
     });
 
     return {
-      crfFundingAmount: Math.round(crfFundingAmount * 100) / 100,
-      eiFundingAmount: Math.round(eiFundingAmount * 100) / 100,
+      crfFundingAmount: summary.fundingTotals.CRF,
+      eiFundingAmount: summary.fundingTotals.EI,
+      fundedClientCount: summary.participantCount,
+      fundedInterventionCount: summary.interventionCount,
     };
   } catch (err) {
     if (isMissingTableErrorLocal(err) || isMissingColumnErrorLocal(err)) {
@@ -28983,14 +29016,15 @@ async function buildRegionalSnapshotPayload({
     }, executor),
     readRegionalSnapshotDefaults(regionId, executor),
     readRegionalSnapshotLiveMetrics({
-      regionId,
+      regionCode: regionRow.code,
       periodStart: period.start,
       periodEnd: period.end,
     }, executor),
     readRegionalSnapshotFundingMetrics({
-      regionId,
-      periodStart: period.start,
-      periodEnd: period.end,
+      regionCode: regionRow.code,
+      fiscalYearStart,
+      periodType: period.periodType,
+      periodKey: period.periodKey,
     }, executor),
   ]);
   const salaryMetrics = await readRegionalSnapshotSalaryMetrics(
@@ -29016,6 +29050,13 @@ async function buildRegionalSnapshotPayload({
     createdAt: snapshotRow?.created_at ? toIsoDateTime(snapshotRow.created_at) : null,
     createdByName: snapshotRow?.created_by_name || null,
   };
+  const mergedLiveMetrics = {
+    ...liveMetrics,
+    funded:
+      Number.isFinite(Number(fundingMetrics?.fundedClientCount))
+        ? Number(fundingMetrics.fundedClientCount)
+        : Number(liveMetrics?.funded || 0),
+  };
   return {
     region: {
       regionId: Number(regionRow.region_id),
@@ -29023,11 +29064,11 @@ async function buildRegionalSnapshotPayload({
       name: regionRow.name_en,
     },
     period,
-    liveMetrics,
+    liveMetrics: mergedLiveMetrics,
     fundingMetrics,
     salaryMetrics,
     snapshot,
-    derivedMetrics: buildRegionalSnapshotDerivedValues(snapshot, liveMetrics, fundingMetrics),
+    derivedMetrics: buildRegionalSnapshotDerivedValues(snapshot, mergedLiveMetrics, fundingMetrics),
   };
 }
 
@@ -48092,7 +48133,7 @@ app.get('/api/cases', async (req, res) => {
       clientCategory === 'all';
     const page = Math.max(1, parseInt(firstValue(req.query.page) ?? '1', 10) || 1);
     const rawPageSize = parseInt(firstValue(req.query.pageSize) ?? '25', 10);
-    const pageSize = Math.min(Math.max(Number.isFinite(rawPageSize) ? rawPageSize : 25, 1), 100);
+    const pageSize = Math.min(Math.max(Number.isFinite(rawPageSize) ? rawPageSize : 25, 1), 9999);
     const offset = (page - 1) * pageSize;
 
     const whereClauses = [];
@@ -48263,7 +48304,13 @@ app.get('/api/cases', async (req, res) => {
     }
 
     const sortMap = {
+      client: 'client_sort_last_name',
       status: caseLifecycleStatusExpr,
+      owner: 'owner_name',
+      openTasks: 'open_task_count',
+      openInterventions: 'open_intervention_count',
+      nextActionDue: 'next_action_due_at',
+      lastTouch: 'c.updated_at',
       createdAt: 'c.created_at',
       updatedAt: 'c.updated_at',
       clientName: 'client_sort_last_name',
@@ -80700,6 +80747,9 @@ app.get('/api/applications', async (req, res) => {
     const searchTerm = searchText ? `%${searchText.toLowerCase()}%` : null;
     const statusGroup = String(firstQueryValue(req.query.statusGroup) || '').trim().toLowerCase();
     const watchedOnly = ['1', 'true', 'yes'].includes(String(firstQueryValue(req.query.watchedOnly) || '').trim().toLowerCase());
+    const requestedSortKey = String(firstQueryValue(req.query.sort) || 'submitted_at').trim();
+    const sortDirection =
+      String(firstQueryValue(req.query.direction) || '').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
     const excludeTerminalRaw = firstQueryValue(req.query.excludeTerminal);
     const excludeTerminal = ['1', 'true', 'yes'].includes(String(excludeTerminalRaw || '').trim().toLowerCase());
     const role = req.auth.role;
@@ -80871,7 +80921,7 @@ app.get('/api/applications', async (req, res) => {
           break;
       }
     };
-    const watchColumnName = watchedOnly ? await resolveWatchColumn(pool) : null;
+    const watchColumnName = (watchedOnly || requestedSortKey === 'watch') ? await resolveWatchColumn(pool) : null;
 
     // Base case + application join using new lean model.
     // Assignment user now from staff_profiles (nullable); tracking_id fallback derived from payload_json->submission_snapshot.reference_number if tracking_id column absent.
@@ -80918,6 +80968,22 @@ app.get('/api/applications', async (req, res) => {
       ${submissionPreferredNameExpr} AS submission_preferred_name,
       ${submissionFirstNameExpr} AS submission_first_name,
       ${submissionLastNameExpr} AS submission_last_name,
+      LOWER(COALESCE(
+        NULLIF(TRIM(CONCAT_WS(' ', ${applicantFirstNameExpr}, ${applicantLastNameExpr})), ''),
+        NULLIF(TRIM(CONCAT_WS(' ', ${applicantPersonalFirstNameExpr}, ${applicantPersonalLastNameExpr})), ''),
+        NULLIF(TRIM(CONCAT_WS(' ', ${submissionFirstNameExpr}, ${submissionLastNameExpr})), ''),
+        ${preferredNameExpr},
+        ${submissionPreferredNameExpr},
+        ${applicantFullNameExpr},
+        ''
+      )) AS sort_applicant_name,
+      LOWER(COALESCE(${addressProvinceExpr}, '')) AS sort_address_province,
+      LOWER(COALESCE(${trackingIdExpr}, '')) AS sort_tracking_id,
+      LOWER(COALESCE(${applicationLifecycleStatusExpr}, a.status, '')) AS sort_status,
+      TIMESTAMPDIFF(SECOND, COALESCE(a.created_at, c.created_at, NOW()), NOW()) AS sort_sla_risk,
+      LOWER(COALESCE(sp.email, '')) AS sort_assigned_user_email,
+      LOWER(COALESCE(al.owner_display_name, al.owner_email, '')) AS sort_lock_state,
+      ${watchColumnName && req.staffProfile?.id ? `CASE WHEN EXISTS (SELECT 1 FROM iset_case_watch cw_sort WHERE cw_sort.case_id = c.id AND cw_sort.${watchColumnName} = ${pool.escape(req.staffProfile.id)}) THEN 1 ELSE 0 END` : '0'} AS sort_watch,
       0 AS is_unassigned_submission
       FROM iset_case c
       JOIN iset_application a ON ${buildApplicationCaseJoinPredicate('c', 'a')}
@@ -81046,6 +81112,22 @@ app.get('/api/applications', async (req, res) => {
         ${submissionPreferredNameExpr} AS submission_preferred_name,
         ${submissionFirstNameExpr} AS submission_first_name,
         ${submissionLastNameExpr} AS submission_last_name,
+        LOWER(COALESCE(
+          NULLIF(TRIM(CONCAT_WS(' ', ${applicantFirstNameExpr}, ${applicantLastNameExpr})), ''),
+          NULLIF(TRIM(CONCAT_WS(' ', ${applicantPersonalFirstNameExpr}, ${applicantPersonalLastNameExpr})), ''),
+          NULLIF(TRIM(CONCAT_WS(' ', ${submissionFirstNameExpr}, ${submissionLastNameExpr})), ''),
+          ${preferredNameExpr},
+          ${submissionPreferredNameExpr},
+          ${applicantFullNameExpr},
+          ''
+        )) AS sort_applicant_name,
+        LOWER(COALESCE(${addressProvinceExpr}, '')) AS sort_address_province,
+        LOWER(COALESCE(${trackingIdExpr}, '')) AS sort_tracking_id,
+        LOWER(COALESCE(${applicationLifecycleStatusExpr}, a.status, '')) AS sort_status,
+        TIMESTAMPDIFF(SECOND, COALESCE(a.created_at, NOW()), NOW()) AS sort_sla_risk,
+        '' AS sort_assigned_user_email,
+        '' AS sort_lock_state,
+        0 AS sort_watch,
         1 AS is_unassigned_submission
         FROM iset_application a
         LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
@@ -81060,7 +81142,19 @@ app.get('/api/applications', async (req, res) => {
       }
     }
 
-    finalSql += `\nORDER BY submitted_at DESC\nLIMIT ? OFFSET ?`;
+    const sortMap = {
+      watch: 'sort_watch',
+      applicant_name: 'sort_applicant_name',
+      address_province: 'sort_address_province',
+      tracking_id: 'sort_tracking_id',
+      status: 'sort_status',
+      sla_risk: 'sort_sla_risk',
+      assigned_user_email: 'sort_assigned_user_email',
+      submitted_at: 'submitted_at',
+      lock_state: 'sort_lock_state',
+    };
+    const sortColumn = sortMap[requestedSortKey] || sortMap.submitted_at;
+    finalSql += `\nORDER BY ${sortColumn} ${sortDirection}, submitted_at DESC, application_id DESC\nLIMIT ? OFFSET ?`;
     finalParams.push(Number(limit), Number(offset));
 
     const [rows] = await pool.query(finalSql, finalParams);

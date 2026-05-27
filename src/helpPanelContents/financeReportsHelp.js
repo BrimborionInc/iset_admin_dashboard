@@ -4,32 +4,32 @@ import { Box, SpaceBetween } from "@cloudscape-design/components";
 const FinanceReportsHelp = () => (
   <SpaceBetween size="m">
     <Box>
-      <strong>What this report is for</strong>
+      <strong>What this page helps you answer</strong>
       <p>
-        Use this page to review the annual ISET Advances and Active Clients report before sharing or
-        reconciling the workbook. It brings the active client count, approved CRF/EI advances, regional
-        totals, and intervention-level detail into one finance review view.
+        Use this page to review approved ISET advances for a fiscal year: how much CRF/EI funding has
+        been approved, which funded clients and interventions make up the totals, how the funding is
+        distributed by region, and what payment follow-up is recorded in PATH.
       </p>
     </Box>
     <Box>
-      <strong>What is counted</strong>
-      <p>
-        The report counts approved CRF and EI intervention funding for the selected fiscal year. Each
-        detail row is one intervention, and the active client count deduplicates participants across
-        those rows. Region is based on the participant&apos;s home province or territory.
-      </p>
-    </Box>
-    <Box>
-      <strong>How to use it</strong>
+      <strong>Set the scope first</strong>
       <ul>
-        <li>Select the fiscal year and any provinces or territories you need to review.</li>
-        <li>Check the summary cards first, then use Region summary to compare totals by geography.</li>
-        <li>Use Intervention detail to inspect the people, interventions, category amounts, and payment follow-up status behind the totals.</li>
-        <li>Export to Excel when you need the workbook-style package for finance review or reconciliation.</li>
+        <li>Fiscal year is based on the intervention approval date.</li>
+        <li>Region is the participant&apos;s home province or territory.</li>
+        <li>The default row scope is funded interventions only, so zero-dollar approved interventions stay out of the advances totals.</li>
       </ul>
     </Box>
     <Box>
-      <strong>Payment status</strong>
+      <strong>Read the report in order</strong>
+      <ul>
+        <li>Use Report summary for the current total advances, CRF/EI split, funded clients, and funded interventions.</li>
+        <li>Use Region summary to compare the same visible rows by participant home region.</li>
+        <li>Use Intervention detail to inspect the participant, intervention, approved funding, category allocations, and PATH payment follow-up behind a number.</li>
+        <li>Export to Excel after the fiscal year, region, row scope, and table search match the workbook you need.</li>
+      </ul>
+    </Box>
+    <Box>
+      <strong>Payment follow-up</strong>
       <p>
         Payment status is PATH follow-up information beside the approved funding. It helps staff see
         whether payment packets are draft, ready, sent, need follow-up, or have a recorded paid or
@@ -39,30 +39,32 @@ const FinanceReportsHelp = () => (
     <Box>
       <strong>Carry-over</strong>
       <p>
-        Turn on carry-over when you need an estimate for interventions or payment activity that crosses
-        fiscal years. Treat it as a planning and reconciliation aid, not as an accounting ledger.
+        Leave carry-over off for the standard approved-funding report. Turn it on when you need a
+        planning estimate for activity that crosses a fiscal-year boundary; PATH uses dated payment
+        lines when available and falls back to the intervention schedule when dated lines are missing.
       </p>
     </Box>
     <Box>
       <strong>If something looks off</strong>
       <p>
-        Start by checking the fiscal year, region filter, intervention approved date, intervention
-        status, funding source or budget pot, and whether payment follow-up was recorded in PATH.
+        Check the fiscal year, region, row scope, table search, intervention approval date, funding
+        source, approved amount, and whether the row is zero-dollar before investigating the case file
+        or payment packet history.
       </p>
     </Box>
   </SpaceBetween>
 );
 
 FinanceReportsHelp.aiContext =
-  "Explain the ISET Advances and Active Clients report for finance users. Say it is the annual approved-funding report for CRF/EI interventions, with active client counts, regional totals, intervention detail, optional carry-over estimates, PATH payment follow-up status, and Excel export. Clarify that payment status and recorded paid/confirmed values are PATH-side operational follow-up records, not Sage authority.";
+  "Explain the ISET Advances and Active Clients report as an approved-funding review job aid. Say it is the annual approved-funding report for funded CRF/EI interventions by approval date, with funded client counts, regional totals, intervention detail, optional carry-over estimates, PATH payment follow-up status, and Excel export. Emphasize that fiscal year means approval date, region means participant home province/territory, the default detail scope hides zero-dollar approved interventions, summary totals follow the visible rows, and payment status or recorded paid/confirmed values are PATH-side operational follow-up records, not Sage authority. Use staff and program-side wording for PATH activity.";
 
 export const FinanceReportsSetupHelp = () => (
   <SpaceBetween size="m">
     <Box>
-      <strong>Report setup</strong>
+      <strong>Fiscal year</strong>
       <p>
-        Choose the fiscal year and provinces or territories you want to review. PATH then loads
-        approved CRF/EI intervention funding for that scope.
+        Fiscal year selects interventions approved in that year. It does not use payment date,
+        intervention start date, or intervention end date for the standard report totals.
       </p>
     </Box>
     <Box>
@@ -75,8 +77,9 @@ export const FinanceReportsSetupHelp = () => (
     <Box>
       <strong>Carry-over</strong>
       <p>
-        Include carry-over only when you need a cross-fiscal estimate. The estimate uses payment-line
-        dates when PATH has them, otherwise it falls back to the intervention schedule or dates.
+        Leave carry-over off for the standard approved-funding view. Include it only when you need to
+        estimate activity across fiscal years using payment-line dates or, when those are missing, the
+        intervention schedule.
       </p>
     </Box>
     <Box>
@@ -90,22 +93,24 @@ export const FinanceReportsSetupHelp = () => (
 );
 
 FinanceReportsSetupHelp.aiContext =
-  "Explain the Financial Reports setup controls: fiscal year selects interventions approved in that year, region uses participant home province/territory, carry-over adds a best-effort cross-fiscal estimate, Reset Filters restores the default view, and Export to Excel creates the current workbook view.";
+  "Explain the Financial Reports setup controls: fiscal year selects interventions approved in that year, region uses participant home province/territory, carry-over is optional and adds a best-effort cross-fiscal estimate, Reset Filters restores the default view, and Export to Excel creates the current workbook view.";
 
 export const FinanceReportsSummaryHelp = () => (
   <SpaceBetween size="m">
     <Box>
       <strong>What the cards show</strong>
       <p>
-        The summary cards show approved advances for the current fiscal year and region selection.
-        Total advances is the CRF and EI approved funding combined.
+        The summary cards are calculated from the current visible rows after fiscal year, region, row
+        scope, and table search are applied. Total advances is the CRF and EI approved funding
+        combined.
       </p>
     </Box>
     <Box>
-      <strong>Active clients and interventions</strong>
+      <strong>Funded clients and interventions</strong>
       <p>
-        Active clients counts unique participants in the current result set. Interventions counts the
-        approved intervention rows that make up the report.
+        Funded clients counts unique participants in the current visible rows. Funded interventions
+        counts the funded rows in the default view; if you switch to all approved rows, the card shows
+        approved interventions instead.
       </p>
     </Box>
     <Box>
@@ -119,15 +124,16 @@ export const FinanceReportsSummaryHelp = () => (
 );
 
 FinanceReportsSummaryHelp.aiContext =
-  "Explain the Financial Reports summary cards: total approved advances, CRF advances, EI advances, active clients as unique participants, and intervention count. Mention that the Intervention detail row-scope selector and table search narrow these visible totals.";
+  "Explain the Financial Reports summary cards: total approved advances, CRF advances, EI advances, funded clients as unique participants in the visible rows, and intervention count. Mention that fiscal year, region, the Intervention detail row-scope selector, and table search narrow these visible totals, and that the intervention card changes to approved interventions when all approved rows are selected.";
 
 export const FinanceReportsCarryOverHelp = () => (
   <SpaceBetween size="m">
     <Box>
       <strong>What carry-over estimates</strong>
       <p>
-        Carry-over estimates how much approved intervention activity belongs inside, before, or after
-        the selected fiscal year when the intervention or payment schedule crosses a year boundary.
+        Carry-over estimates how approved intervention activity falls around the selected fiscal year
+        when a payment schedule or intervention period crosses a year boundary. It does not change the
+        approval-year totals in the standard report.
       </p>
     </Box>
     <Box>
@@ -135,21 +141,22 @@ export const FinanceReportsCarryOverHelp = () => (
       <ul>
         <li><strong>From prior FY:</strong> activity approved before the selected fiscal year but estimated in this year.</li>
         <li><strong>To next FY:</strong> approved activity in the selected fiscal year that appears scheduled beyond year-end.</li>
-        <li><strong>Current FY estimate:</strong> the estimated amount that belongs in the selected fiscal year.</li>
+        <li><strong>Selected FY estimate:</strong> the estimated amount that belongs in the selected fiscal year.</li>
       </ul>
     </Box>
     <Box>
       <strong>Confidence level</strong>
       <p>
-        Payment-line dates are the best source. When they are not available, PATH uses the intervention
-        schedule or intervention dates, so the result should be treated as an estimate.
+        Dated payment lines are used first and are assigned to the fiscal year of the line date. When
+        dated lines are not available, PATH uses the intervention schedule or intervention dates, so
+        the result should be treated as an estimate.
       </p>
     </Box>
   </SpaceBetween>
 );
 
 FinanceReportsCarryOverHelp.aiContext =
-  "Explain carry-over in the annual finance report: it is a best-effort estimate for cross-fiscal intervention activity, using payment-line dates first and intervention schedule/dates as fallback. Define carry-in from prior FY, carry-out to next FY, and current FY estimate. Warn that it is not a Sage ledger.";
+  "Explain carry-over in the annual advances report: it is a best-effort estimate for cross-fiscal intervention activity, using payment-line dates first and intervention schedule/dates as fallback. Dated payment lines are assigned to the fiscal year of the line date, not prorated across the intervention. Define carry-in from prior FY, carry-out to next FY, and selected-FY estimate. Warn that it is not a Sage ledger.";
 
 export const FinanceReportsRegionSummaryHelp = () => (
   <SpaceBetween size="m">
@@ -157,14 +164,14 @@ export const FinanceReportsRegionSummaryHelp = () => (
       <strong>Purpose</strong>
       <p>
         Region summary groups the current report totals by participant home province or territory so
-        finance reviewers can compare regional CRF, EI, and total advances.
+        staff can compare regional CRF, EI, and total advances.
       </p>
     </Box>
     <Box>
       <strong>Counts</strong>
       <p>
-        Participants are unique people in that region. Interventions are the approved intervention
-        rows contributing to the regional total.
+        Participants are unique people in that region. Interventions are the visible intervention rows
+        contributing to the regional total.
       </p>
     </Box>
     <Box>
@@ -210,8 +217,8 @@ export const FinanceReportsDetailHelp = () => (
         The row-scope selector defaults to funded interventions, hiding zero-dollar approved work such
         as counselling unless you choose all approved interventions. The table search narrows the
         visible rows by participant, case, intervention, institution, program, region, budget pot, or
-        payment status. Use the table preferences gear to choose columns. Excel export uses the same
-        visible detail rows.
+        payment status. Use the table preferences gear to choose columns. Summary cards and Excel
+        export use the same visible detail rows.
       </p>
     </Box>
   </SpaceBetween>

@@ -29,6 +29,6 @@ const FinanceAllocationSnapshotsHelp = () => (
 );
 
 FinanceAllocationSnapshotsHelp.aiContext =
-  "Describe the allocations snapshot widget: why snapshots are captured, what data they store, and how finance teams use them for governance, audit, and variance analysis.";
+  "Describe the allocations snapshot widget: why snapshots are captured, what data they store, and how staff use them for governance, audit, and variance analysis.";
 
 export default FinanceAllocationSnapshotsHelp;

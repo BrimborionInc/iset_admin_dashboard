@@ -38,7 +38,12 @@ import {
 import { resolveAssignedStaffProfileId } from '../utils/assignmentIdentity';
 import ApplicationsWidgetHelp from '../helpPanelContents/applicationsWidgetHelp';
 
-const PAGE_SIZE_OPTIONS = [10, 20, 50];
+const PAGE_SIZE_OPTIONS = [
+  { value: 10, label: '10 rows' },
+  { value: 20, label: '20 rows' },
+  { value: 50, label: '50 rows' },
+  { value: 9999, label: 'Show All' },
+];
 const DEFAULT_VISIBLE_COLUMNS = ['watch','applicant_name','address_province','tracking_id','status','sla_risk','assigned_user_email','submitted_at','lock_state','actions'];
 const COLUMN_WIDTHS_STORAGE_KEY = 'applications-widget-column-widths';
 const APPLICATION_LIST_VIEW_OPTIONS = [
@@ -217,7 +222,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
   const [filteringText, setFilteringText] = useState('');
   const [useServerSearch, setUseServerSearch] = useState(true);
   const [serverSearchText, setServerSearchText] = useState('');
-  const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0].value);
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
   const [sortingState, setSortingState] = useState({ columnId: 'submitted_at', isDescending: true });
   const [visibleColumns, setVisibleColumns] = useState(DEFAULT_VISIBLE_COLUMNS);
@@ -499,6 +504,8 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
     const params = new URLSearchParams({
       limit: String(pageSize),
       offset: String((currentPageIndex - 1) * pageSize),
+      sort: sortingState.columnId || 'submitted_at',
+      direction: sortingState.isDescending ? 'desc' : 'asc',
     });
     if (serverSearchText) {
       params.set('search', serverSearchText);
@@ -541,7 +548,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
       .catch(() => { if (!cancelled) setError('Failed to load applications'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [pageSize, currentPageIndex, serverSearchText, applicationListView]);
+  }, [pageSize, currentPageIndex, serverSearchText, applicationListView, sortingState]);
 
   useEffect(() => {
     const c = load();
@@ -839,17 +846,6 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
       return fields.some(v => v && String(v).toLowerCase().includes(s));
     })
     .filter(Boolean);
-
-  const sortedItems = useMemo(() => {
-    const { columnId, isDescending } = sortingState;
-    if (!columnId) return filteredItems;
-    const copy = [...filteredItems];
-    copy.sort((a, b) => {
-      const result = compareRows(columnId, a, b);
-      return isDescending ? -result : result;
-    });
-    return copy;
-  }, [filteredItems, sortingState, compareRows]);
 
   const watchColumn = useMemo(() => ({
     id: 'watch',
@@ -1230,7 +1226,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
             {error ? <Box color="error" textAlign="center">{error}</Box> : null}
             <Table
               columnDefinitions={columnDefinitionsForTable}
-              items={sortedItems}
+              items={filteredItems}
               loading={loading}
               loadingText="Loading applications"
               variant="embedded"
@@ -1242,6 +1238,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
                 const columnId = detail?.sortingColumn?.id;
                 if (columnId) {
                   setSortingState({ columnId, isDescending: detail.isDescending });
+                  setCurrentPageIndex(1);
                 }
               }}
               onColumnWidthsChange={handleColumnWidthsChange}
@@ -1272,7 +1269,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
                   confirmLabel="Confirm"
                   cancelLabel="Cancel"
                   preferences={preferences}
-                  pageSizePreference={{ title: 'Page size', options: PAGE_SIZE_OPTIONS.map(v => ({ value: v, label: `${v} rows` })) }}
+                  pageSizePreference={{ title: 'Page size', options: PAGE_SIZE_OPTIONS }}
                   contentDisplayPreference={{ title: 'Select visible columns', options: columnPreferenceOptions }}
                   onConfirm={({ detail }) => {
                     if (detail.pageSize !== undefined) {

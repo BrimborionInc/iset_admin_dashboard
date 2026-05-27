@@ -25,6 +25,13 @@ Current saved fields:
 - comments / recommendations
 - optional `manual_inputs_json` for future low-risk extensions
 
+## Current live metric basis
+
+- Region filtering uses participant home province / territory, matching Financial Reports rather than case portfolio assignment.
+- CRF/EI funding and funded-client count reuse the Financial Reports approved-funding basis: approved CRF/EI intervention rows in the selected period, excluding zero-dollar rows for funded-client totals.
+- Application activity remains application-based: applications received use submission date; denied / ineligible / withdrawn / NC uses the recorded application decision/update date; pending decision counts currently pending applications from the received-in-period set.
+- Because funded clients follow Financial Reports and the other activity rows follow application workflow dates, the Client Activity section is not an arithmetic status breakdown.
+
 ## What is not stored here
 
 This table should not become a duplicate store for operational PATH data that can be calculated live, such as:

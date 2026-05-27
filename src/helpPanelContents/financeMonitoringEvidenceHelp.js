@@ -6,7 +6,7 @@ const FinanceMonitoringEvidenceHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Provide a real-time view of evidence coverage so finance teams can close gaps before monitoring deadlines.
+        Provide a real-time view of evidence coverage so staff can close gaps before monitoring deadlines.
       </p>
     </Box>
     <Box>
@@ -30,4 +30,3 @@ FinanceMonitoringEvidenceHelp.aiContext =
   "Describe the Monitoring & Evidence coverage widget: filtering by risk/program, interpreting coverage vs. targets, and prioritising follow-up.";
 
 export default FinanceMonitoringEvidenceHelp;
-

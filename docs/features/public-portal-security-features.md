@@ -1,14 +1,14 @@
 # Public Portal Security Features Catalog
 
 Purpose: Summarize the technical safeguards built into the public intake portal and API.  
-Scope: Runtime code under `X:\ISET\ISET-intake` (frontend, backend, shared services).  
-Last Updated: 2026-04-27
+Scope: Runtime code under `/home/bill/ISET/ISET-intake` (frontend, backend, shared services).  
+Last Updated: 2026-05-26
 Status: repo-based security feature catalog; verify line numbers against `../ISET-intake` before acting because portal code moves independently.
 
 ## Authentication & Session Control
 - **RS256 JWT validation** – `server.js:2014-2640` and `src/auth/verifyJwt.js` enforce issuer, audience, and JWKS signature checks, with fallback to trusted pool overrides when multiple Cognito clients are allowed.
 - **Suspension-aware user upsert** – `server.js:2324-2484` links Cognito users to local records, blocks suspended accounts, and records last login timestamps; `src/auth/suspensionCache.js` caches suspension state securely.
-- **Session auditing** – `server.js:2520-2604` hashes IP and user-agent details into `user_session_audit`, enabling traceability without storing raw personal data.
+- **Session auditing** – `../ISET-intake/auth/cognitoAuth.js` hashes IP and user-agent details into `user_session_audit`, enabling traceability without storing raw personal data. This broke when the writer diverged from the deployed table shape; local code was corrected on 2026-05-26 and must be verified in TEST before the table is treated as operational evidence again. The same helper now starts automatic pruning with 90-day default retention and bounded daily deletes.
 - **Secure token storage** – Auth callbacks set HttpOnly cookies (`server.js:40-120`; see `../ISET-intake/auth/cognitoAuth.js` for current Cognito helper behavior), eliminating token exposure to frontend scripts.
 - **Dev bypass guardrails** – `server.js:2050-2134` only permits the X-Dev bypass headers on loopback requests when `DEV_BYPASS_ENABLED` is true, reducing accidental production use.
 

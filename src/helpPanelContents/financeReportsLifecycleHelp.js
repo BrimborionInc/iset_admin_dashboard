@@ -6,7 +6,7 @@ const FinanceReportsLifecycleHelp = () => (
     <Box>
       <strong>Purpose</strong>
       <p>
-        Track each report through Draft → Validation → Certification → Submission so finance teams see blockers before due dates.
+        Track each report through Draft → Validation → Certification → Submission so staff see blockers before due dates.
       </p>
     </Box>
     <Box>
@@ -30,4 +30,3 @@ FinanceReportsLifecycleHelp.aiContext =
   "Describe the Financial Reports lifecycle widget: stage tracking, advancing statuses, due dates, and telemetry expectations.";
 
 export default FinanceReportsLifecycleHelp;
-
