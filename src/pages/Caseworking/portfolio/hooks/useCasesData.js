@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../../../../auth/apiClient";
 import { getCaseStatusBadgeColor, getCaseStatusLabel, normalizeCaseStatus } from "../../../../utils/caseStatus";
 
@@ -171,6 +171,34 @@ export default function useCasesData({
 }) {
   const [result, setResult] = useState(defaultResult);
   const abortRef = useRef(null);
+  const statusFiltersKey = Array.isArray(statusFilters) ? statusFilters.join("\u001f") : "";
+  const ownerFiltersKey = Array.isArray(ownerFilters) ? ownerFilters.join("\u001f") : "";
+  const sortColumn = sort?.column || "";
+  const sortDirection = sort?.direction || "";
+  const basePayload = useMemo(
+    () => ({
+      searchText,
+      statusFilters: statusFiltersKey ? statusFiltersKey.split("\u001f") : [],
+      ownerFilters: ownerFiltersKey ? ownerFiltersKey.split("\u001f") : [],
+      clientCategory,
+      page,
+      pageSize,
+      sort: sortColumn ? { column: sortColumn, direction: sortDirection } : null,
+      groupByClient,
+    }),
+    [
+      searchText,
+      statusFiltersKey,
+      ownerFiltersKey,
+      clientCategory,
+      page,
+      pageSize,
+      sortColumn,
+      sortDirection,
+      groupByClient,
+    ]
+  );
+  const baseQuery = useMemo(() => buildQuery(basePayload), [basePayload]);
 
   const fetchCases = useCallback(
     async (override = {}) => {
@@ -178,18 +206,9 @@ export default function useCasesData({
         setResult(defaultResult);
         return;
       }
-      const payload = {
-        searchText,
-        statusFilters,
-        ownerFilters,
-        clientCategory,
-        page,
-        pageSize,
-        sort,
-        ...override,
-        groupByClient,
-      };
-      const query = buildQuery(payload);
+      const query = Object.keys(override || {}).length
+        ? buildQuery({ ...basePayload, ...override })
+        : baseQuery;
       if (abortRef.current) {
         abortRef.current.abort();
       }
@@ -239,7 +258,7 @@ export default function useCasesData({
         });
       }
     },
-    [enabled, searchText, statusFilters, ownerFilters, clientCategory, page, pageSize, sort, groupByClient]
+    [enabled, basePayload, baseQuery]
   );
 
   useEffect(() => {

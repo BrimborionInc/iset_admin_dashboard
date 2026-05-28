@@ -970,7 +970,7 @@ const SEEDED_GUIDANCE_ENTRIES = [
       "funded clients",
       "approval date",
       "funded interventions only",
-      "All approved interventions",
+      "All reportable interventions",
       "PATH payment follow-up",
       "Sage",
       "Excel",
@@ -980,7 +980,7 @@ const SEEDED_GUIDANCE_ENTRIES = [
       "actual paid ledger",
       "full payment-history ledger",
       "approving means paid",
-      "all approved interventions are shown by default",
+      "all reportable interventions are shown by default",
       "zero-dollar rows are part of advances by default",
       "finance staff use PATH",
       "Finance staff use PATH",
@@ -990,7 +990,7 @@ const SEEDED_GUIDANCE_ENTRIES = [
     applicabilityText:
       "Use when staff ask what the Financial Reports page is for, how to read the annual ISET Advances and Active Clients report, why zero-dollar interventions are hidden, or how the Excel export relates to the visible report.",
     stepsText:
-      "Open Budgets and Finance > Financial Reports. Choose the fiscal year and any participant home regions. The report defaults to `Funded interventions only`; switch the Intervention detail selector to `All approved interventions` only when zero-dollar approved interventions such as counselling or career research need to be reviewed. Use Report summary for total approved advances and funded clients, Region summary for province/territory totals, Intervention detail for row-level funding and PATH payment follow-up, and Export to Excel for the workbook-style package.",
+      "Open Budgets and Finance > Financial Reports. Choose the fiscal year and any participant home regions. The report defaults to `Funded interventions only`; switch the Intervention detail selector to `All reportable interventions` only when zero-dollar rows, including denied-application reporting records, need to be reviewed. Use Report summary for total approved advances and funded clients, Region summary for province/territory totals, Intervention detail for row-level funding and PATH payment follow-up, and Export to Excel for the workbook-style package.",
     sideEffectsText:
       "Changing filters, text search, row scope, sorting, column visibility, and column widths only changes the current report view. Export to Excel downloads a workbook from the visible filtered rows; it does not submit, certify, lock, or mutate finance data.",
     restrictionsText:
@@ -998,7 +998,7 @@ const SEEDED_GUIDANCE_ENTRIES = [
     answerStyleText:
       "Explain the page as an approved-funding review job aid. Lead with what the user can do on the page, then clarify report basis and payment-status caveats when relevant.",
     guidanceText:
-      "`Financial Reports` is the annual `ISET Advances and Active Clients` report. It reviews approved funded CRF/EI intervention funding by approval date, funded client counts, regional totals, and intervention-level detail for the selected fiscal year and participant home region. The Intervention detail view defaults to `Funded interventions only`, so zero-dollar approved interventions such as Employment counselling or Career research & exploration stay out of the advances view unless staff choose `All approved interventions`. The detail table includes the funding source, approved funding amount, category allocations, and PATH payment follow-up state. Use `Export to Excel` when staff need the workbook-style package from the visible filtered rows. Do not treat the page as Sage/AP authority or a full actual-paid ledger.",
+      "`Financial Reports` is the annual `ISET Advances and Active Clients` report. It reviews approved funded CRF/EI intervention funding by approval date, funded client counts, regional totals, and intervention-level detail for the selected fiscal year and participant home region. The Intervention detail view defaults to `Funded interventions only`, so zero-dollar reportable rows, including denied-application reporting records, stay out of the advances view unless staff choose `All reportable interventions`. The detail table includes the funding source, approved funding amount, category allocations, and PATH payment follow-up state. Use `Export to Excel` when staff need the workbook-style package from the visible filtered rows. Do not treat the page as Sage/AP authority or a full actual-paid ledger.",
   },
   {
     slug: "finance-reporting-reconcile-data-results",
@@ -1729,7 +1729,7 @@ const SEEDED_GUIDANCE_EXAMPLES = [
       "approval date",
       "funded client",
       "Funded interventions only",
-      "All approved interventions",
+      "All reportable interventions",
       "PATH payment follow-up",
       "Sage",
       "Excel",
@@ -1737,7 +1737,7 @@ const SEEDED_GUIDANCE_EXAMPLES = [
     mustNotMention: [
       "Sage ledger",
       "actual paid ledger",
-      "all approved interventions are shown by default",
+      "all reportable interventions are shown by default",
       "finance staff use PATH",
       "finance team uses PATH",
     ],
@@ -1749,7 +1749,7 @@ const SEEDED_GUIDANCE_EXAMPLES = [
     ],
     questionText: "What is this Financial Reports page for, and why are some interventions hidden?",
     answerText:
-      "`Financial Reports` opens the annual `ISET Advances and Active Clients` approved-funding report for CRF/EI interventions by approval date. It shows funded client counts, regional totals, intervention detail, PATH payment follow-up, and an Excel export from the visible report rows. Intervention detail defaults to `Funded interventions only`, so zero-dollar approved interventions such as counselling or career research are hidden from the advances view unless you choose `All approved interventions`. Treat payment status as PATH operational follow-up beside approved funding, not Sage/AP authority.",
+      "`Financial Reports` opens the annual `ISET Advances and Active Clients` approved-funding report for CRF/EI interventions by approval date. It shows funded client counts, regional totals, intervention detail, PATH payment follow-up, and an Excel export from the visible report rows. Intervention detail defaults to `Funded interventions only`, so zero-dollar reportable rows such as counselling, career research, and denied-application reporting records are hidden from the advances view unless you choose `All reportable interventions`. Treat payment status as PATH operational follow-up beside approved funding, not Sage/AP authority.",
   },
   {
     guidanceSlug: "finance-reporting-reconcile-data-results",

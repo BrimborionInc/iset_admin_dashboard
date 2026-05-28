@@ -270,6 +270,7 @@ const SUPPORT_LABEL_OVERRIDES = {
   BooksMaterialsDirect: "books or program materials",
   BooksMaterialsReimbursement: "books or program materials",
   LivingAllowance: "living allowance",
+  ResidenceCost: "residence costs",
   Childcare: "childcare",
   Transportation: "transportation",
   WageSubsidyEmployer: "targeted wage subsidy",
@@ -791,6 +792,13 @@ const calculateDurationDays = (start, end) => {
   return diff;
 };
 
+const MAX_INTERVENTION_DURATION_DAYS = 999;
+const clampInterventionDurationDaysForIlmp = value => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return null;
+  return Math.min(Math.round(numeric), MAX_INTERVENTION_DURATION_DAYS);
+};
+
 const addMonthsUtc = (startDate, monthsToAdd) => {
   const startUtc = parseIsoDateToUtc(startDate);
   if (startUtc === null) return "";
@@ -1127,6 +1135,7 @@ const SUBMISSION_TIMING_RECURRENCE_SCHEDULE = "recurrence_schedule";
 const SUBMISSION_TIMING_MANUAL_TRIGGER = "manual_trigger";
 const DEFAULT_SUBMISSION_TIMING_BY_TYPE = {
   LivingAllowance: SUBMISSION_TIMING_RECURRENCE_SCHEDULE,
+  ResidenceCost: SUBMISSION_TIMING_INTERVENTION_START,
   TuitionFeesDirect: SUBMISSION_TIMING_INTERVENTION_START,
   TuitionFeesReimbursement: SUBMISSION_TIMING_INTERVENTION_END,
   SpecializedEquipmentAdvance: SUBMISSION_TIMING_INTERVENTION_START,
@@ -1145,6 +1154,12 @@ const PAYMENT_TYPE_ALIASES = {
   wagesubsidy: "WageSubsidyEmployer",
   targetedwagesubsidyemployer: "WageSubsidyEmployer",
   targetedwagesubsidy: "WageSubsidyEmployer",
+  residencecost: "ResidenceCost",
+  residencecosts: "ResidenceCost",
+  residencefee: "ResidenceCost",
+  residencefees: "ResidenceCost",
+  residence: "ResidenceCost",
+  housing: "ResidenceCost",
 };
 const PAYEE_TYPE_PARTICIPANT_CLIENT = "ParticipantClient";
 const PAYEE_TYPES_DEFAULT_FROM_INTERVENTION = new Set([
@@ -1154,6 +1169,7 @@ const PAYEE_TYPES_DEFAULT_FROM_INTERVENTION = new Set([
 ]);
 const PAYMENT_TYPE_DEFAULT_PAYEE_TYPE = {
   LivingAllowance: PAYEE_TYPE_PARTICIPANT_CLIENT,
+  ResidenceCost: "AccreditedEducationalTrainingInstitution",
   TuitionFeesReimbursement: PAYEE_TYPE_PARTICIPANT_CLIENT,
   SpecializedEquipmentReimbursement: PAYEE_TYPE_PARTICIPANT_CLIENT,
   Transportation: PAYEE_TYPE_PARTICIPANT_CLIENT,
@@ -3454,21 +3470,43 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         const intervention = proposedInterventions.find(item => idsMatch(item.id, prev.interventionId));
         if (!intervention) return prev;
         const recurrenceMode = getRecurrenceModeForType(nextType);
+        const submissionTiming = getSubmissionTimingForType(nextType);
         const recurrenceEnabled =
           recurrenceMode === RECURRENCE_MODE_REQUIRED
             ? true
             : recurrenceMode === RECURRENCE_MODE_NOT_ALLOWED
               ? false
-              : Boolean(prev.draft.recurrence?.enabled);
+              : submissionTiming === SUBMISSION_TIMING_RECURRENCE_SCHEDULE && Boolean(prev.draft.recurrence?.enabled);
         const baseRecurrence = buildRecurrenceFromIntervention(intervention, recurrenceEnabled);
         const mergedRecurrence = mergeRecurrenceDefaults(baseRecurrence, prev.draft.recurrence || {});
         const recurrence = recurrenceEnabled
           ? { ...mergedRecurrence, enabled: true }
           : baseRecurrence;
+        const previousPayee = prev.draft.payee && typeof prev.draft.payee === "object" ? prev.draft.payee : {};
+        const previousDefaultPayeeType = deriveDefaultPayeeTypeForCostLine(prev.draft.type);
+        const nextDefaultPayeeType = deriveDefaultPayeeTypeForCostLine(nextType);
+        const previousPayeeType = String(previousPayee.type || "").trim();
+        const previousPayeeName = String(previousPayee.name || "").trim();
+        const participantName = String(participantLegalName || "").trim();
+        const shouldResetPayee =
+          Boolean(nextDefaultPayeeType) &&
+          (
+            !previousPayeeType ||
+            previousPayeeType === previousDefaultPayeeType ||
+            (
+              previousPayeeType === nextDefaultPayeeType &&
+              participantName &&
+              previousPayeeName === participantName
+            )
+          );
+        const payee = shouldResetPayee
+          ? { type: nextDefaultPayeeType, name: "", reference: "" }
+          : previousPayee;
         const nextDraft = applyCostLinePayeeDefaults(
           {
             ...prev.draft,
             type: normalizePaymentTypeCode(nextType) || nextType,
+            payee,
             recurrence,
           },
           intervention,
@@ -3482,7 +3520,13 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       });
       setCostLineModalErrors({});
     },
-    [buildRecurrenceFromIntervention, getRecurrenceModeForType, participantLegalName, proposedInterventions]
+    [
+      buildRecurrenceFromIntervention,
+      getRecurrenceModeForType,
+      getSubmissionTimingForType,
+      participantLegalName,
+      proposedInterventions,
+    ]
   );
 
   const toggleCostLineRecurrence = useCallback(
@@ -4269,7 +4313,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         : [];
       const primaryStartDate = primary?.startDate || "";
       const primaryEndDate = primary?.endDate || "";
-      const interventionDuration = calculateDurationDays(primaryStartDate, primaryEndDate);
+      const interventionDuration = clampInterventionDurationDaysForIlmp(
+        calculateDurationDays(primaryStartDate, primaryEndDate)
+      );
       const primaryCost = Number.isFinite(interventionTotals.get(primary?.id)) ? interventionTotals.get(primary?.id) : 0;
       const normalizedOtherFunding = normalizeOtherFundingDetails(
         {
@@ -4641,7 +4687,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   const buildApprovedInterventionPayload = useCallback(
     (intervention, { approvedStatus = "approved", potId = null, postingContext = null, eiDocumentId = null } = {}) => {
       const totalCost = interventionTotals.get(intervention.id) || 0;
-      const durationDays = calculateDurationDays(intervention.startDate, intervention.endDate);
+      const durationDays = clampInterventionDurationDaysForIlmp(
+        calculateDurationDays(intervention.startDate, intervention.endDate)
+      );
       const approvedCostLines = Array.isArray(intervention.costLines)
         ? intervention.costLines.filter(hasApprovedFundingAmount).map(serializeCostLine)
         : [];
@@ -7229,12 +7277,13 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       {costLineDraft && (
         <SpaceBetween size="m">
           <FormField label="Cost item" errorText={costLineModalErrors.type}>
-            {costLineMode === "add" ? (
+            {isCostLineEditable ? (
               <Select
                 selectedOption={
-                  costLineDraft.type
+                  costLineTypeOptions.find(option => option.value === costLineDraft.type) ||
+                  (costLineDraft.type
                     ? { value: costLineDraft.type, label: paymentTypeLabelLookup.get(costLineDraft.type) || costLineDraft.type }
-                    : null
+                    : null)
                 }
                 onChange={({ detail }) => updateCostLineType(detail.selectedOption?.value || "")}
                 options={costLineTypeOptions}

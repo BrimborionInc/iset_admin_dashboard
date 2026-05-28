@@ -47,6 +47,7 @@ const POSTING_CONTEXT_OPTIONS = [
 
 const PAYMENT_TYPE_OPTIONS = [
   { value: "LivingAllowance", label: "Living allowance" },
+  { value: "ResidenceCost", label: "Residence costs" },
   { value: "TuitionFeesDirect", label: "Tuition fees (direct)" },
   { value: "TuitionFeesReimbursement", label: "Tuition fees (reimbursement)" },
   { value: "SpecializedEquipmentAdvance", label: "Specialized equipment (advance)" },

@@ -53,6 +53,7 @@ Open the DEV Environment
 ```
 
 That request means: use the WSL workspace, then start the same full local stack as task `dev:all`.
+When launching the stack from Codex rather than VS Code tasks, use the manual commands below under a real detached session such as `setsid -f bash -lc '...'`, write logs to `/tmp/iset-dev`, and verify the HTTP endpoints after startup. A plain backgrounded `nohup ... &` from the Codex shell runner can be reaped before services bind their ports.
 
 The WSL-native task group starts:
 

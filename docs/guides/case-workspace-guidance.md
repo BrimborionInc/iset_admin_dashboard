@@ -32,6 +32,7 @@ Use this note when spinning up a fresh chat so the LLM has the context it needs 
 - `GET /api/cases/:caseId/workspace` – provides the entire Case Workspace payload, including action plans and interventions.
 - `PATCH /api/action-plans/:id` – updates plan details (expects `YYYY-MM-DD` dates).
 - `POST /api/action-plans/:id/interventions`, `PATCH /api/interventions/:id` – create/update interventions.
+- Intervention outcomes are closeout-only: open intervention create/edit calls must not persist an outcome code. Use `POST /api/interventions/:id/close` to record the final outcome, completion date, and actual cost.
 - Reference data loaded on demand or prefetch:
   - `GET /api/reference/intervention-codes`
   - `GET /api/reference/intervention-outcomes`
@@ -46,6 +47,7 @@ Use this note when spinning up a fresh chat so the LLM has the context it needs 
 
 ## 5. Recent Fixes & Behavioural Updates
 - Action plan editing bug: sending ISO timestamps caused DB errors; now we convert to `YYYY-MM-DD`.
+- Closed action plan detail edits persist closeout corrections through `PATCH /api/action-plans/:id`, including result code/date, Action Plan Result Education Level, future education, result NOC, outcome summary, and closure notes. The backend keeps these fields in both the action-plan columns and `esdc_action_plan_json`; action-plan activation clears stale closeout JSON keys.
 - Action plan table default selection: sorts by recency and picks the newest plan.
 - Client context now lives in `iset_case.case_context_json`. The Action Plan details modal exposes those client-centric fields (employment status, education, NOC version/code lookup, childcare, barriers/priorities, previous ISET) for editing; saves PATCH `/api/cases/:id` and the values are shared across all plans in the workspace payload.
 - Action plan review dates now drive reminders: creating or updating a plan with a review date upserts an open reminder via `/api/reminders` (case + action_plan scoped, assigned to the plan owner when available). Clearing the review date cancels the reminder. Reminders are set to 8:00 AM local so they surface at the start of the day and trigger `case-reminders-refresh` for the calendar.
@@ -57,6 +59,8 @@ Use this note when spinning up a fresh chat so the LLM has the context it needs 
 - Workspace alerts: all Cloudscape `Alert` instances in the action plan/intervention widgets and modals are now dismissible so users can clear success/error banners after reviewing them.
 - Payment packet creation in the Case Workspace now derives reporting unit, pot, and amount from the selected intervention (partial payments unlock amount entry), hides service period fields unless the payment type requires them, and the Manage Payments quick action focuses the first intervention with a draft/returned packet.
 - Payment type options now filter by intervention code using runtime config `payment.intervention.payment_type_map`, and the backend blocks disallowed types.
+- Intervention create/edit no longer saves a synthetic in-progress outcome. Open intervention saves clear stale outcome values from the row/ESDC JSON, and the API rejects non-empty outcome values unless the intervention is in a completed/cancelled closeout flow. The close modal starts with no outcome selected, so staff must choose the final ESDC outcome explicitly.
+- Intervention duration is an ILMP reporting field capped at 999 days, not the authoritative program schedule. Long date ranges up to the existing 60-month rule remain valid for program dates, but create/edit/revision payloads now clamp the stored/reportable duration to 999 so multi-year education interventions do not block saves with a hidden "0-999" validation error.
 - Existing-intervention backload now enforces lifecycle compatibility with the selected action plan: archived plans are blocked, closed plans accept only completed/cancelled interventions, in-progress/suspended interventions require an active plan, and historical start/result/end dates seed the stored lifecycle timestamps for backloaded plans/interventions.
 - Backloaded intervention finance is now history-only: `actual_amount` on a `manual_backload` intervention writes a posted historical finance ledger entry for reporting/budget burn, but those interventions cannot generate payment packets or be submitted through the live payments workflow.
 - ILMP validation now normalizes current intake/case barrier keys such as `funding`, `location`, `lack-of-job-opportunities`, `other`, and health variants through `src/lib/ilmpValidationMappings.js`. If barrier-readiness bugs recur, fix the shared mapper rather than adding one-off aliases to payload or validation code.

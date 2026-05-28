@@ -14,13 +14,15 @@ ILMP Reporting
 
 ## Purpose
 
-Queue of participants pending validation/export actions.
+Combined queue of participants pending validation/export actions, with bucket-style readiness counts, the bulk `Validate all` action, and the `Generate batch XML` action.
 
 ## User Actions (observed)
 
-- Open and inspect widget state for current case/submission/packet context.
-- Use widget controls to progress work for the owning workflow.
-- Navigate to linked records or execute relevant operational actions.
+- Review ready / needs-review / blocked counts.
+- Run `Validate all` to refresh readiness for the queue.
+- Run `Generate batch XML` to prepare the XML for all ready participants, then save/download it and mark included participants as submitted. Browsers with native save-dialog support use that dialog; other browsers fall back to the normal download flow.
+- Open linked case workspaces from participant names.
+- Expand only grouped participants with multiple submission/action-plan rows.
 
 ## Inputs / Dependencies
 
@@ -36,5 +38,6 @@ Queue of participants pending validation/export actions.
 
 ## Current Notes
 
+- `/api/esdc/participants?groupByClient=true` returns the paged grouped rows plus a `summary` object for the full filtered queue.
+- `/api/esdc/participants/batch-prepare` and `/api/esdc/participants/batch-submit` are now launched from this widget rather than a separate Batch submission widget.
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
-- Add endpoint-level detail and UAT script rows in the next documentation pass.

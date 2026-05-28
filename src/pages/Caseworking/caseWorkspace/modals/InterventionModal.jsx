@@ -27,7 +27,6 @@ import {
 } from "../../../../utils/currencyFormat.js";
 import {
   formatInterventionStatusLabel,
-  INTERVENTION_OPEN_STATUSES,
   isInterventionClosedStatus,
   normalizeInterventionStatus,
   resolveInterventionStateFields,
@@ -51,9 +50,8 @@ const CLOSE_STATUS_OPTIONS = [
   { value: "cancelled", label: "Cancelled" },
 ];
 
-const IN_PROGRESS_OUTCOME = "2";
-const DEFAULT_CLOSED_OUTCOME = "1";
 const CURRENCY_AMOUNT_RANGE_MESSAGE = "must be between 0 and 999999 with no more than two decimal places.";
+const MAX_INTERVENTION_DURATION_DAYS = 999;
 const POSTING_CONTEXT_OPTIONS = [
   { value: "external", label: "External (region/PTMA)" },
   { value: "internal", label: "Internal (NWAC)" },
@@ -192,6 +190,22 @@ const pickDefaultNocVersion = options => {
 const normaliseFormNumbers = value =>
   typeof value === "number" && Number.isFinite(value) ? String(value) : "";
 
+const clampInterventionDurationDaysForIlmp = value => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return "";
+  return String(Math.min(Math.round(numeric), MAX_INTERVENTION_DURATION_DAYS));
+};
+
+const normaliseDurationFormNumber = value => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return clampInterventionDurationDaysForIlmp(value);
+  }
+  if (typeof value === "string" && value.trim()) {
+    return clampInterventionDurationDaysForIlmp(value);
+  }
+  return "";
+};
+
 const normaliseInterventionText = value => (typeof value === "string" ? value : "");
 
 const parseOptionalCurrencyAmount = value => {
@@ -227,7 +241,7 @@ const buildInitialForm = (mode, intervention) => {
       status: normalizeEditableInterventionStatus(intervention, "approved"),
       startDate: intervention.startDate || "",
       endDate: intervention.endDate || "",
-      durationDays: intervention.endDate ? normaliseFormNumbers(intervention.durationDays) : "",
+      durationDays: intervention.endDate ? normaliseDurationFormNumber(intervention.durationDays) : "",
       outcome: intervention.outcome || "",
       cost: normaliseFormNumbers(intervention.cost),
       fundingStream: intervention.fundingStream || "",
@@ -263,25 +277,22 @@ const buildInitialForm = (mode, intervention) => {
 
 const isClosedStatusValue = status => isInterventionClosedStatus(status);
 
-const ensureOutcomeForStatus = (status, currentOutcome) => {
+const normaliseOutcomeForStatus = (status, currentOutcome) => {
   const interventionState = resolveModalInterventionState(status);
   const normalized = interventionState.effectiveStatus || normalizeInterventionStatus(status);
-  if (INTERVENTION_OPEN_STATUSES.has(normalized)) {
-    return IN_PROGRESS_OUTCOME;
+  if (!isInterventionClosedStatus(normalized)) {
+    return "";
   }
-  if (currentOutcome && currentOutcome !== IN_PROGRESS_OUTCOME) {
+  if (currentOutcome) {
     return String(currentOutcome).trim();
   }
-  return DEFAULT_CLOSED_OUTCOME;
+  return "";
 };
 
 const buildCloseForm = intervention => {
   const interventionState = resolveModalInterventionState(intervention, "completed");
   const resolvedStatus = interventionState.deliveryStatus === "cancelled" ? "cancelled" : "completed";
-  const resolvedOutcome =
-    intervention?.outcome && intervention?.outcome !== IN_PROGRESS_OUTCOME
-      ? String(intervention.outcome).trim()
-      : DEFAULT_CLOSED_OUTCOME;
+  const resolvedOutcome = intervention?.outcome ? String(intervention.outcome).trim() : "";
   const actualCandidates = [
     intervention?.actualAmount,
     intervention?.metadata?.actualAmount,
@@ -397,7 +408,7 @@ const InterventionModal = ({
     })();
 
     prepared.status = normalizeEditableInterventionStatus(prepared.status, "approved");
-    prepared.outcome = ensureOutcomeForStatus(prepared.status, prepared.outcome);
+    prepared.outcome = normaliseOutcomeForStatus(prepared.status, prepared.outcome);
 
     initialFormRef.current = { ...prepared };
     setForm(prepared);
@@ -726,11 +737,11 @@ const InterventionModal = ({
       const start = field === "startDate" ? value : next.startDate;
       const end = field === "endDate" ? value : next.endDate;
       const duration = calculateDurationDays(start, end);
-      next.durationDays = duration !== null ? String(duration) : "";
+      next.durationDays = duration !== null ? clampInterventionDurationDaysForIlmp(duration) : "";
     }
 
     next.status = normalizeEditableInterventionStatus(next.status, "approved");
-    next.outcome = ensureOutcomeForStatus(next.status, next.outcome);
+    next.outcome = normaliseOutcomeForStatus(next.status, next.outcome);
 
     return next;
   };
@@ -859,7 +870,7 @@ const InterventionModal = ({
     setFieldErrors({});
     const statusState = resolveModalInterventionState({ status: form.status }, "approved");
     const statusNormalized = statusState.effectiveStatus || normalizeInterventionStatus(form.status, "approved");
-    const outcomeValue = ensureOutcomeForStatus(statusNormalized, form.outcome);
+    const outcomeValue = normaliseOutcomeForStatus(statusNormalized, form.outcome);
     const trimmedCode = (form.code ?? "").toString().trim();
     const errors = {};
     if (!trimmedCode) {
@@ -951,7 +962,7 @@ const InterventionModal = ({
       startDate: form.startDate || null,
       endDate: form.endDate || null,
       durationDays: durationValue,
-      outcome: outcomeValue,
+      outcome: outcomeValue || null,
       cost: costValue,
       potId: inheritedBudgetPot || null,
       postingContext: form.postingContext || "external",
@@ -1165,6 +1176,7 @@ const InterventionModal = ({
                   }
                   options={outcomeSelectOptions}
                   filteringType="auto"
+                  placeholder="Select outcome"
                   readOnly={isCloseReadOnly}
                 />
               </FormField>

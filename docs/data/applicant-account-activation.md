@@ -1,6 +1,6 @@
 # Applicant Account Activation Data
 
-_Last updated: 25 May 2026_
+_Last updated: 27 May 2026_
 
 ## Purpose
 
@@ -39,6 +39,7 @@ Visible UI labels derive from those stored values:
 Current event types:
 
 - `account_created`
+- `account_email_changed`
 - `invitation_sent`
 - `activated`
 
@@ -143,3 +144,22 @@ Record only that the exception was used, who approved it, the account/email, and
 was verified in `FORCE_CHANGE_PASSWORD`. Staff should not resend the PATH activation link
 after the temporary password is set, because the normal resend path intentionally repairs
 `FORCE_CHANGE_PASSWORD` accounts back to the activation-code flow.
+
+## Correcting an unactivated account email
+
+Case Header quick actions include `Change PATH account email` while the linked applicant
+account is not activated. This is the operational repair path when an imported or manually
+edited participant email was wrong and an activation invitation would otherwise keep using
+the old account address.
+
+The correction path:
+
+- validates that no other client or local applicant user already owns the corrected email
+- creates or reuses the corrected applicant-pool Cognito user without sending Cognito mail
+- repoints the local portal `user` row and `client` applicant-account fields to the corrected Cognito identity
+- updates `address_json.contact.email` and `emailNormalized`
+- resets the PATH invitation state to `created`, clearing the previous invited timestamp/staff marker
+- attempts to delete the old typo Cognito user when it is a different unactivated identity
+- records `client_applicant_account_event.event_type = account_email_changed` with old/new email and Cognito metadata
+
+Staff should send the activation email again after saving the corrected address.

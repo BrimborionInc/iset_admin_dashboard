@@ -507,6 +507,106 @@ async function ensureApplicantLocalUser(dbPool, {
   return Number(insertResult.insertId);
 }
 
+async function repointApplicantLocalUser(dbPool, {
+  previousCognitoSub = null,
+  cognitoSub,
+  email,
+  name = null,
+  preferredLanguage = 'en',
+}) {
+  const normalizedSub = normaliseString(cognitoSub);
+  const normalizedPreviousSub = normaliseString(previousCognitoSub);
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedSub || !normalizedEmail) {
+    const error = new Error('Applicant local user sync requires Cognito sub and email.');
+    error.code = 'invalid_local_user_identity';
+    throw error;
+  }
+
+  const columns = await getUserColumnSet(dbPool);
+  const hasName = columns.has('name');
+  const hasPreferredLanguage = columns.has('preferred_language');
+  const hasEmailVerified = columns.has('email_verified');
+  const hasSuspended = columns.has('suspended');
+
+  const [rows] = await dbPool.query(
+    `SELECT id, email, cognito_sub
+       FROM user
+      WHERE ${normalizedPreviousSub ? 'cognito_sub = ? OR ' : ''}cognito_sub = ? OR email = ?
+      ORDER BY
+        CASE
+          ${normalizedPreviousSub ? 'WHEN cognito_sub = ? THEN 0' : ''}
+          WHEN cognito_sub = ? THEN 1
+          WHEN email = ? THEN 2
+          ELSE 3
+        END,
+        id ASC`,
+    [
+      ...(normalizedPreviousSub ? [normalizedPreviousSub] : []),
+      normalizedSub,
+      normalizedEmail,
+      ...(normalizedPreviousSub ? [normalizedPreviousSub] : []),
+      normalizedSub,
+      normalizedEmail,
+    ]
+  );
+
+  const oldUser = normalizedPreviousSub
+    ? rows.find(row => normaliseString(row?.cognito_sub) === normalizedPreviousSub)
+    : null;
+  const newSubUser = rows.find(row => normaliseString(row?.cognito_sub) === normalizedSub);
+  const newEmailUser = rows.find(row => normalizeEmail(row?.email) === normalizedEmail);
+  const targetUser = oldUser || newSubUser || newEmailUser || null;
+
+  if (newEmailUser && targetUser && Number(newEmailUser.id) !== Number(targetUser.id)) {
+    const error = new Error('Another applicant account already uses that email address.');
+    error.code = 'account_email_conflict';
+    throw error;
+  }
+  if (newSubUser && targetUser && Number(newSubUser.id) !== Number(targetUser.id)) {
+    const error = new Error('Another applicant account already uses that Cognito identity.');
+    error.code = 'account_email_conflict';
+    throw error;
+  }
+  if (newEmailUser?.cognito_sub) {
+    const existingSub = normaliseString(newEmailUser.cognito_sub);
+    if (existingSub && existingSub !== normalizedSub && existingSub !== normalizedPreviousSub) {
+      const error = new Error('Another applicant account already uses that email address.');
+      error.code = 'account_email_conflict';
+      throw error;
+    }
+  }
+
+  if (targetUser?.id) {
+    const assignments = ['email = ?', 'cognito_sub = ?'];
+    const values = [normalizedEmail, normalizedSub];
+    if (hasName) {
+      assignments.push('name = COALESCE(NULLIF(?, \'\'), name, ?)');
+      values.push(normaliseString(name) || '', normalizedEmail);
+    }
+    if (hasPreferredLanguage) {
+      assignments.push('preferred_language = COALESCE(preferred_language, ?)');
+      values.push(normaliseString(preferredLanguage) || 'en');
+    }
+    if (hasEmailVerified) {
+      assignments.push('email_verified = 1');
+    }
+    if (hasSuspended) {
+      assignments.push('suspended = 0');
+    }
+    values.push(Number(targetUser.id));
+    await dbPool.query(`UPDATE user SET ${assignments.join(', ')} WHERE id = ?`, values);
+    return Number(targetUser.id);
+  }
+
+  return ensureApplicantLocalUser(dbPool, {
+    cognitoSub: normalizedSub,
+    email: normalizedEmail,
+    name,
+    preferredLanguage,
+  });
+}
+
 function extractClientEmail(addressJson) {
   const address = safeJsonParse(addressJson, {});
   const contact = address && typeof address === 'object' ? (address.contact || {}) : {};
@@ -874,6 +974,181 @@ async function persistApplicantAccountLink(dbPool, {
   );
 }
 
+async function assertApplicantAccountEmailAvailable(dbPool, {
+  clientId,
+  email,
+  allowedCognitoSubs = [],
+}) {
+  const normalizedEmail = normalizeEmail(email);
+  const allowedSubs = new Set(allowedCognitoSubs.map(normaliseString).filter(Boolean));
+  const [[clientConflict]] = await dbPool.query(
+    `SELECT id
+       FROM client
+      WHERE id <> ?
+        AND LOWER(COALESCE(applicant_account_email, '')) = ?
+      LIMIT 1`,
+    [Number(clientId), normalizedEmail]
+  );
+  if (clientConflict?.id) {
+    const error = new Error('Another client already has that PATH account email.');
+    error.code = 'account_email_conflict';
+    throw error;
+  }
+
+  const [[userConflict]] = await dbPool.query(
+    `SELECT id, cognito_sub
+       FROM user
+      WHERE LOWER(email) = ?
+      LIMIT 1`,
+    [normalizedEmail]
+  );
+  const conflictSub = normaliseString(userConflict?.cognito_sub);
+  if (userConflict?.id && conflictSub && !allowedSubs.has(conflictSub)) {
+    const error = new Error('Another applicant account already uses that email address.');
+    error.code = 'account_email_conflict';
+    throw error;
+  }
+}
+
+async function changeApplicantAccountEmail(dbPool, {
+  clientId,
+  email,
+  actorStaffProfileId = null,
+  source = 'manual_dashboard',
+}) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    const error = new Error('Enter a valid email address for the PATH account.');
+    error.code = 'invalid_account_email';
+    throw error;
+  }
+
+  const clientRow = await fetchClientCoreRow(dbPool, clientId);
+  if (!clientRow?.id) {
+    const error = new Error('Client not found.');
+    error.code = 'client_not_found';
+    throw error;
+  }
+  if (clientRow.applicant_account_status === APPLICANT_STATUS_ACTIVATED || clientRow.applicant_activated_at) {
+    const error = new Error('Activated PATH account emails cannot be changed from this action.');
+    error.code = 'account_already_activated';
+    throw error;
+  }
+
+  const previousEmail =
+    normalizeEmail(clientRow.applicant_account_email) ||
+    extractClientEmail(clientRow.address_json) ||
+    null;
+  const previousCognitoSub = normaliseString(clientRow.applicant_cognito_sub);
+  const previousUsername =
+    normalizeEmail(clientRow.applicant_cognito_username) ||
+    previousEmail ||
+    null;
+
+  await assertApplicantAccountEmailAvailable(dbPool, {
+    clientId: clientRow.id,
+    email: normalizedEmail,
+    allowedCognitoSubs: [previousCognitoSub],
+  });
+
+  const cognitoIdentity = await ensureApplicantCognitoUser({
+    email: normalizedEmail,
+    firstName: clientRow.first_name,
+    lastName: clientRow.last_name,
+  });
+  const nextCognitoSub = normaliseString(cognitoIdentity.cognitoSub);
+  if (!nextCognitoSub) {
+    const error = new Error('Unable to resolve the corrected applicant account identity.');
+    error.code = 'invalid_cognito_identity';
+    throw error;
+  }
+
+  const [[subConflict]] = await dbPool.query(
+    `SELECT id
+       FROM client
+      WHERE id <> ?
+        AND applicant_cognito_sub = ?
+      LIMIT 1`,
+    [Number(clientRow.id), nextCognitoSub]
+  );
+  if (subConflict?.id) {
+    const error = new Error('Another client is already linked to that applicant account.');
+    error.code = 'account_email_conflict';
+    throw error;
+  }
+
+  await repointApplicantLocalUser(dbPool, {
+    previousCognitoSub,
+    cognitoSub: nextCognitoSub,
+    email: cognitoIdentity.email,
+    name: cognitoIdentity.displayName,
+  });
+
+  await dbPool.query(
+    `UPDATE client
+        SET applicant_cognito_sub = ?,
+            applicant_cognito_username = ?,
+            applicant_account_email = ?,
+            applicant_account_status = ?,
+            applicant_invited_at = NULL,
+            applicant_invited_by_staff_profile_id = NULL,
+            address_json = JSON_SET(
+              CASE
+                WHEN JSON_TYPE(JSON_EXTRACT(COALESCE(address_json, JSON_OBJECT()), '$.contact')) = 'OBJECT'
+                  THEN COALESCE(address_json, JSON_OBJECT())
+                ELSE JSON_SET(COALESCE(address_json, JSON_OBJECT()), '$.contact', JSON_OBJECT())
+              END,
+              '$.contact.email', ?,
+              '$.contact.emailNormalized', ?
+            ),
+            updated_at = NOW()
+      WHERE id = ?`,
+    [
+      nextCognitoSub,
+      cognitoIdentity.username,
+      cognitoIdentity.email,
+      APPLICANT_STATUS_CREATED,
+      cognitoIdentity.email,
+      cognitoIdentity.email,
+      Number(clientRow.id),
+    ]
+  );
+
+  let previousCognitoDeleted = false;
+  let previousCognitoDeleteError = null;
+  if (
+    previousUsername &&
+    previousUsername !== cognitoIdentity.username &&
+    previousCognitoSub &&
+    previousCognitoSub !== nextCognitoSub
+  ) {
+    try {
+      previousCognitoDeleted = await deleteApplicantCognitoUser(previousUsername);
+    } catch (error) {
+      previousCognitoDeleteError = normaliseString(error?.name || error?.code || error?.message) || 'delete_failed';
+    }
+  }
+
+  await logApplicantAccountEvent(dbPool, {
+    clientId: clientRow.id,
+    eventType: 'account_email_changed',
+    actorStaffProfileId,
+    metadata: {
+      source,
+      previousEmail,
+      newEmail: cognitoIdentity.email,
+      previousCognitoSub,
+      newCognitoSub: nextCognitoSub,
+      previousCognitoUsername: previousUsername,
+      newCognitoUsername: cognitoIdentity.username,
+      previousCognitoDeleted,
+      previousCognitoDeleteError,
+    },
+  });
+
+  return loadApplicantAccountRow(dbPool, clientRow.id);
+}
+
 async function ensureApplicantAccountForClient(dbPool, {
   clientId,
   actorStaffProfileId = null,
@@ -1112,6 +1387,7 @@ module.exports = {
   APPLICANT_STATUS_CREATED,
   APPLICANT_STATUS_INVITATION_SENT,
   buildActivationLink,
+  changeApplicantAccountEmail,
   deleteApplicantCognitoUser,
   deriveStatusCode,
   deriveStatusLabel,

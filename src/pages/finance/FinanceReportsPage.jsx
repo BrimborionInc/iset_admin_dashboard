@@ -118,12 +118,12 @@ const INTERVENTION_AMOUNT_FILTER_OPTIONS = [
   {
     value: "funded",
     label: "Funded interventions only",
-    description: "Hide approved interventions whose funding amount is zero.",
+    description: "Show rows with approved funding above $0.",
   },
   {
     value: "all",
-    label: "All approved interventions",
-    description: "Include zero-dollar approved interventions such as counselling or career research.",
+    label: "All reportable interventions",
+    description: "Include zero-dollar rows, including denied-application reporting records.",
   },
 ];
 
@@ -1499,7 +1499,7 @@ const FinanceReportsPage = ({
           value={formatInteger(displaySummary.participantCount)}
         />
         <SummaryCard
-          label={interventionAmountFilter === "funded" ? "Funded interventions" : "Approved interventions"}
+          label={interventionAmountFilter === "funded" ? "Funded interventions" : "Reportable interventions"}
           value={formatInteger(displaySummary.interventionCount)}
         />
       </div>

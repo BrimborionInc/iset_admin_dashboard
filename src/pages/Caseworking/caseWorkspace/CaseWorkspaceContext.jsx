@@ -223,7 +223,13 @@ const buildInterventionFromApi = (planId, payload = {}) => {
     outcome: payload.outcome || payload.outcomeCode || null,
     plannedCost,
     cost: plannedCost,
-    potId: payload.potId || payload.fundingStream || null,
+    potId:
+      payload.potId ||
+      payload.budgetPotId ||
+      payload.budget_pot_id ||
+      payload.budgetPot ||
+      payload.budget_pot ||
+      null,
     fundingStream: payload.fundingStream || null,
     postingContext: payload.postingContext || payload.posting_context || payload.metadata?.postingContext || null,
     deliveryMode: resolvedDeliveryMode === "in_house" ? "in_house" : "partner",

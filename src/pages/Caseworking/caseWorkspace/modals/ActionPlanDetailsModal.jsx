@@ -347,7 +347,6 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
             value: String(value),
             label,
             description: code || undefined,
-            agreementId: item.agreement_id || item.agreementId || item.agreementCode || null,
           };
         })
         .filter(Boolean);
@@ -396,18 +395,6 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
     [potOptions, form.budgetPot, plan]
   );
 
-  // Derive agreement number from the selected budget pot's agreement_id when available.
-  useEffect(() => {
-    if (!selectedBudgetPot) return;
-    const pot = potOptions.find(opt => String(opt.value) === String(selectedBudgetPot.value));
-    if (pot && pot.agreementId) {
-      setForm(current => ({
-        ...current,
-        agreementNumber: pot.agreementId,
-      }));
-      clearFieldError("agreementNumber");
-    }
-  }, [selectedBudgetPot, potOptions, clearFieldError]);
   useEffect(() => {
     if (!isAssessor) return;
     if (form.postingContext !== "external") {
@@ -509,7 +496,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
     loadPots().catch(() => {});
   }, [visible, form.fundingStream, normalizedProvince, loadPots]);
 
-  // Agreement number now derives from selected pot; keep fundingStream independent.
+  // Funding stream follows EI status unless staff have already chosen a stream.
   useEffect(() => {
     if (form.fundingStream) return;
     if (form.eiClaimant === "1" || form.eiClaimant === "2") {
@@ -628,13 +615,11 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
 
   const validate = () => {
     const errors = {};
-    const digits = String(form.agreementNumber || "").replace(/\D/g, "");
     if (!form.name.trim()) errors.name = "Plan name is required.";
     if (!form.startDate) errors.startDate = "Start date is required.";
     if (form.startDate && form.reviewDate && form.reviewDate < form.startDate) errors.reviewDate = "Review date cannot be before start date.";
     if (!form.fundingStream) errors.fundingStream = "Funding stream is required.";
     if (!form.budgetPot) errors.budgetPot = "Budget pot is required.";
-    if (!digits || digits.length < 7 || digits.length > 9) errors.agreementNumber = "Agreement number must be 7–9 digits.";
     if (!form.socialAssistanceRecipient) errors.socialAssistanceRecipient = "Social assistance recipient is required.";
     if (!form.educationLevel) errors.educationLevel = "Education level is required.";
     if (form.educationLevel && form.educationLevel !== "1" && !form.educationProvince) errors.educationProvince = "Education province is required when education level is set.";
@@ -761,7 +746,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
     []
   );
   const sectionHasFundingErrors = useCallback(
-    errors => Boolean(errors.fundingStream || errors.budgetPot || errors.agreementNumber || errors.postingContext),
+    errors => Boolean(errors.fundingStream || errors.budgetPot || errors.postingContext),
     []
   );
   const sectionHasApplicantErrors = useCallback(errors =>
@@ -1029,7 +1014,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
 
         <ExpandableSection
           headerText="About the plan"
-          defaultExpanded={planExpanded}
+          expanded={planExpanded}
           onChange={({ detail }) => setPlanExpanded(detail.expanded)}
         >
           <ColumnLayout columns={3} variant="text-grid">
@@ -1114,7 +1099,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
 
         <ExpandableSection
           headerText="About the funding"
-          defaultExpanded={fundingExpanded}
+          expanded={fundingExpanded}
           onChange={({ detail }) => setFundingExpanded(detail.expanded)}
         >
           <ColumnLayout columns={3} variant="text-grid">
@@ -1129,11 +1114,9 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
                     ...current,
                     fundingStream: detail.selectedOption?.value || "",
                     budgetPot: "",
-                    agreementNumber: "",
                   }));
                   // Changing funding stream should clear dependent fields and reload filtered pots.
                   clearFieldError("budgetPot");
-                  clearFieldError("agreementNumber");
                   loadPots().catch(() => {});
                 }}
                 placeholder={fundingStreamsLoading ? "Loading funding streams" : "Select funding stream"}
@@ -1189,7 +1172,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
 
         <ExpandableSection
           headerText="About the applicant"
-          defaultExpanded={applicantExpanded}
+          expanded={applicantExpanded}
           onChange={({ detail }) => setApplicantExpanded(detail.expanded)}
         >
           <SpaceBetween size="m">
@@ -1391,7 +1374,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
           <ExpandableSection
             headerText="Closeout details"
             headerDescription="Result, education, and NOC details for closing this action plan."
-            defaultExpanded={closeoutExpanded}
+            expanded={closeoutExpanded}
             onChange={({ detail }) => setCloseoutExpanded(detail.expanded)}
           >
             <SpaceBetween size="m">

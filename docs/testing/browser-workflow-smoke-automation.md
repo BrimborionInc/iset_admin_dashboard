@@ -1,10 +1,10 @@
 # Browser Workflow Smoke Automation
 
-Status: current guidance from the 2026-05-08/09 application-assessment containment release, updated with the 2026-05-26 applicant-scope TEST smoke.
+Status: current guidance from the 2026-05-08/09 application-assessment containment release, updated with the 2026-05-28 dashboard request-loop regression rule.
 
 Audience: Codex threads and developers building or rehearsing browser-level workflow smokes for PATH.
 
-Last Updated: 2026-05-09
+Last Updated: 2026-05-28
 
 ## Purpose
 
@@ -32,6 +32,7 @@ The core lesson from the repeat-application assessment release is that browser t
 4. Capture network and server failures.
    - Treat browser-console errors, failed API responses, and backend `500`s as first-class smoke failures.
    - Include a small route/API smoke for adjacent surfaces touched by the change, such as application lists, work queues, decision queues, and document rows.
+   - For dashboard/widget changes, keep network capture open after initial render and after sort/filter/page-size interactions. Fail the smoke if a non-polling endpoint keeps firing or canceling after the UI should be idle; this catches the recurring unstable-dependency loop class before it reaches TEST/PROD.
 
 5. Reconcile with the database after browser actions.
    - Check that only the selected workflow object mutated.
@@ -80,6 +81,17 @@ The 2026-05-26 public-portal privacy release added a TEST wrong-applicant smoke:
 - API-only diagnosis: `node scripts/applicant-scope-guard-test-smoke.js --skip-browser`
 
 The smoke creates temporary TEST Cognito applicant users, seeds a synthetic stale applicant/application/case cross-link through SSM on a TEST app host, proves the rightful applicant still has dashboard/message/intervention/signing access, proves the wrong applicant is denied or shown only safe submission metadata, runs a Puppeteer dashboard/messages check from the TEST host, then deletes the Cognito users and fixture rows.
+
+## ILMP Participant Queue Reference
+
+The ILMP Submissions & Exports dashboard has a local browser smoke:
+
+- Script: `scripts/esdc-participant-queue-browser-smoke.js`
+- NPM alias: `npm run smoke:esdc-participants:browser`
+
+This smoke loads the real local React bundle at `http://localhost:3001/esdc/participants`, injects a synthetic System Administrator browser session, stubs the required API responses, and verifies the combined participant queue renders with bucket-style validation counters, sortable table headers, participant rows, the queue-header `Generate batch XML` action, and no standalone duplicate Validation Summary or Batch submission widget. It clicks `Generate batch XML`, confirms the UI calls `/api/esdc/participants/batch-prepare`, and checks that the batch modal has a filename field without the retired XML preview or fake download-path field. It is useful for visual/layout regressions when no reusable Cognito staff token is available in the shell. Pair it with a live local endpoint smoke for `/api/esdc/participants` when backend route shape or returned data semantics changed.
+
+The script automatically prepends the current WSL local Chrome dependency path (`/home/bill/.local/chrome-deps/extract/usr/lib/x86_64-linux-gnu`) to `LD_LIBRARY_PATH` when present, so the npm alias works from a normal shell without manually exporting the Puppeteer NSS/NSPR workaround.
 
 ## Automation Backlog
 

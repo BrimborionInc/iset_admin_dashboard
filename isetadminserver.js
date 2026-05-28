@@ -39,6 +39,7 @@ const {
   mapIlmpBarrierCodes,
   normaliseIlmpBarrierCode,
 } = require('./src/lib/ilmpValidationMappings');
+const { normaliseIlmpEducationLevelCode } = require('./src/lib/ilmpEducationMapping');
 const { runStartupSharedSchemaMigrations } = require('./src/lib/sharedSchemaMigrationRunner');
 const {
   buildRegionalManagerCaseAccessSql,
@@ -177,6 +178,7 @@ const RECURRENCE_MODE_OPTIONAL = 'optional';
 const RECURRENCE_MODE_NOT_ALLOWED = 'not_allowed';
 const PAYMENT_TYPE_LABELS = {
   LivingAllowance: 'Living allowance',
+  ResidenceCost: 'Residence costs',
   TuitionFeesDirect: 'Tuition fees (direct)',
   TuitionFeesReimbursement: 'Tuition fees (reimbursement)',
   SpecializedEquipmentAdvance: 'Specialized equipment (advance)',
@@ -192,6 +194,7 @@ const PAYMENT_TYPE_LABELS = {
 };
 const PAYMENT_TYPE_RECURRENCE_DEFAULTS = {
   LivingAllowance: RECURRENCE_MODE_REQUIRED,
+  ResidenceCost: RECURRENCE_MODE_OPTIONAL,
   WageSubsidyEmployer: RECURRENCE_MODE_OPTIONAL,
   OtherEligibleCost: RECURRENCE_MODE_OPTIONAL,
 };
@@ -11513,42 +11516,6 @@ const DENIED_REPORTING_INTERVENTIONS = Object.freeze([
   { code: 3, title: 'Employment Counselling' },
 ]);
 const ILMP_PLACEHOLDER_AGREEMENT_NUMBER = '999999999';
-const ILMP_EDUCATION_LEVEL_CODE_MAP = Object.freeze({
-  '1': '1',
-  '2': '2',
-  '3': '3',
-  '4': '4',
-  '5': '5',
-  '6': '6',
-  '7': '7',
-  '8': '8',
-  '9': '9',
-  '10': '10',
-  '11': '11',
-  '12': '12',
-  'no formal education': '1',
-  'up to grade 7-8': '2',
-  'grade 9-10': '3',
-  'grade 11-12': '4',
-  'secondary school diploma or ged': '5',
-  'some post-secondary training': '6',
-  'apprenticeship or trades certificate or diploma': '7',
-  'college, cegep, or other non-university certificate or diploma': '8',
-  'university certificate or diploma': '9',
-  "university - bachelor's degree": '10',
-  "university - master's degree": '11',
-  "university - doctorate": '12',
-  grade_9_10: '3',
-  grade_11_12: '4',
-  secondary_school_diploma_or_ged: '5',
-  post_secondary_training: '6',
-  apprenticeship_trades: '7',
-  college: '8',
-  university_certificate: '9',
-  bachelors_degree: '10',
-  masters_degree: '11',
-  doctorate_degree: '12'
-});
 const ILMP_PROVINCE_NUMERIC_CODE_MAP = Object.freeze({
   NL: '1',
   NS: '2',
@@ -11645,6 +11612,64 @@ const calculateDurationDaysFromDates = (startDate, endDate) => {
   if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
   const diff = Math.round((end - start) / (1000 * 60 * 60 * 24));
   return Number.isFinite(diff) && diff >= 0 ? diff : null;
+};
+
+const MAX_INTERVENTION_DURATION_DAYS = 999;
+
+const calculateInclusiveDurationDaysFromDates = (startDate, endDate) => {
+  const start = startDate ? new Date(startDate) : null;
+  const end = endDate ? new Date(endDate) : null;
+  if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  const diff = Math.round((end - start) / (1000 * 60 * 60 * 24)) + 1;
+  return Number.isFinite(diff) && diff >= 0 ? diff : null;
+};
+
+const clampInterventionDurationDaysForIlmp = value => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  const rounded = Math.round(numeric);
+  if (rounded < 0) return null;
+  return Math.min(rounded, MAX_INTERVENTION_DURATION_DAYS);
+};
+
+const resolveInterventionDurationDaysForStorage = ({
+  durationDays,
+  durationWeeks = null,
+  startDate = null,
+  endDate = null,
+  deriveFromDates = true,
+} = {}) => {
+  let value = null;
+  if (durationDays !== null && typeof durationDays !== 'undefined') {
+    value = Math.round(Number(durationDays));
+  } else if (durationWeeks !== null && typeof durationWeeks !== 'undefined') {
+    value = Math.round(Number(durationWeeks) * 7);
+  } else if (deriveFromDates) {
+    value = calculateInclusiveDurationDaysFromDates(startDate, endDate);
+  }
+  if (value === null || typeof value === 'undefined') {
+    return { value: null, capped: false };
+  }
+  if (!Number.isFinite(value)) {
+    return { error: 'invalid_duration_days', message: 'Duration (days) must be a number.' };
+  }
+  if (value < 0) {
+    return { error: 'invalid_duration_days', message: 'Duration (days) cannot be negative.' };
+  }
+  const rangeDays = calculateInclusiveDurationDaysFromDates(startDate, endDate);
+  if (Number.isFinite(rangeDays) && rangeDays > 0 && value > rangeDays) {
+    return { error: 'duration_exceeds_range', message: 'Duration (days) must not exceed the date range.' };
+  }
+  if (value > MAX_INTERVENTION_DURATION_DAYS) {
+    if (Number.isFinite(rangeDays) && rangeDays > MAX_INTERVENTION_DURATION_DAYS) {
+      return { value: MAX_INTERVENTION_DURATION_DAYS, capped: true };
+    }
+    return {
+      error: 'invalid_duration_days',
+      message: `Duration (days) must be between 0 and ${MAX_INTERVENTION_DURATION_DAYS}.`
+    };
+  }
+  return { value, capped: false };
 };
 
 const normalizeProposedCostLine = (raw) => {
@@ -15016,7 +15041,9 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
 
   const startDate = primaryIntervention?.startDate || null;
   const endDate = primaryIntervention?.endDate || null;
-  const computedDuration = calculateDurationDaysFromDates(startDate, endDate);
+  const computedDuration = clampInterventionDurationDaysForIlmp(
+    calculateDurationDaysFromDates(startDate, endDate)
+  );
   const programName = normaliseString(primaryIntervention?.programName) || null;
   const institution = normaliseString(primaryIntervention?.institution) || null;
   const primaryNoc = normaliseString(primaryIntervention?.noc) || noc || null;
@@ -15598,7 +15625,9 @@ async function ensureAutoPlanAndInterventionFromAssessment(connection, {
     if (!interventionCode) continue;
     const interventionStartDate = proposed.startDate || null;
     const interventionEndDate = proposed.endDate || null;
-    const durationDays = calculateDurationDaysFromDates(interventionStartDate, interventionEndDate);
+    const durationDays = clampInterventionDurationDaysForIlmp(
+      calculateDurationDaysFromDates(interventionStartDate, interventionEndDate)
+    );
     const lineCostTotal = Number.isFinite(proposed.costTotal)
       ? Number(proposed.costTotal)
       : computeCostLinesTotal(proposed.costLines);
@@ -20889,14 +20918,7 @@ function resolveFundingDecisionReasonCode(caseContext, applicationId = null) {
 }
 
 function mapEducationLevelToIlmpCode(value) {
-  const normalized = normaliseString(value);
-  if (!normalized) return null;
-  const key = normalized.toLowerCase();
-  if (ILMP_EDUCATION_LEVEL_CODE_MAP[key]) {
-    return ILMP_EDUCATION_LEVEL_CODE_MAP[key];
-  }
-  const looseKey = key.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
-  return ILMP_EDUCATION_LEVEL_CODE_MAP[looseKey] || null;
+  return normaliseIlmpEducationLevelCode(value);
 }
 
 function mapProvinceToIlmpCode(value) {
@@ -26873,10 +26895,24 @@ esdcRouter.get('/participants', async (req, res, next) => {
     search,
     limit = 25,
     offset = 0,
+    sortField = '',
+    sortDirection = '',
     groupByClient: groupByClientRaw = 'true'
   } = req.query;
 
   const groupByClient = String(groupByClientRaw || 'true').toLowerCase() !== 'false';
+  const requestedSortField = (normaliseString(sortField) || '').trim();
+  const sortDescending = String(sortDirection || '').trim().toLowerCase() === 'desc';
+  const sortableFields = new Set(['participant_name', 'readiness_status', 'submission_reason', 'detail']);
+  const normalizedSortField = sortableFields.has(requestedSortField) ? requestedSortField : '';
+  const parsedLimit = Number.parseInt(limit, 10);
+  const parsedOffset = Number.parseInt(offset, 10);
+  const pageLimit = Number.isFinite(parsedLimit) && parsedLimit > 0
+    ? Math.min(parsedLimit, 500)
+    : 25;
+  const pageOffset = Number.isFinite(parsedOffset) && parsedOffset > 0
+    ? parsedOffset
+    : 0;
 
   const params = [];
   const where = [];
@@ -26949,6 +26985,8 @@ esdcRouter.get('/participants', async (req, res, next) => {
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
   try {
+    const rowLimitClause = groupByClient ? '' : 'LIMIT ? OFFSET ?';
+    const rowParams = groupByClient ? params : [...params, pageLimit, pageOffset];
     const [rows] = await pool.query(
       `
       SELECT
@@ -27016,12 +27054,12 @@ esdcRouter.get('/participants', async (req, res, next) => {
       LEFT JOIN iset_case_action_plan ap ON ap.id = eps.action_plan_id
       ${whereClause}
       ORDER BY eps.last_validated_at DESC, eps.id DESC
-      LIMIT ? OFFSET ?
+      ${rowLimitClause}
       `,
-      [...params, Number(limit), Number(offset)]
+      rowParams
     );
 
-    const [[{ total }]] = await pool.query(
+    const [[{ total: rawTotal }]] = await pool.query(
       `
       SELECT COUNT(*) AS total
       FROM esdc_participant_submission eps
@@ -27050,6 +27088,84 @@ esdcRouter.get('/participants', async (req, res, next) => {
       return 'pending';
     };
     const submissionPriority = { rejected: 4, pending: 3, submitted: 2, accepted: 1 };
+    const normalizeIssueList = value => {
+      if (!value) return [];
+      if (Array.isArray(value)) return value.filter(Boolean).map(item => String(item));
+      if (typeof value === 'string') {
+        try {
+          const parsed = JSON.parse(value);
+          if (Array.isArray(parsed)) return parsed.filter(Boolean).map(item => String(item));
+        } catch (_) {}
+        return value.trim() ? [value.trim()] : [];
+      }
+      return [];
+    };
+    const getSubmissionReasonLabel = item => {
+      const currentSubmissionStatus = (item?.submission_status || 'pending').toLowerCase();
+      if (currentSubmissionStatus === 'rejected') return 'Resubmission required';
+      const planStatus = (item?.action_plan_status || '').toLowerCase();
+      const hasFinalResult = Boolean(item?.action_plan_result_code && item?.action_plan_result_date);
+      const isFinalPlan = ['closed', 'ready_to_close', 'ready-to-close', 'ready to close'].includes(planStatus);
+      if (isFinalPlan && hasFinalResult) return 'Action plan closed';
+      if (planStatus === 'active') return 'Action plan activated';
+      if (planStatus === 'draft') return 'Action plan created';
+      if (!item?.action_plan_id && !planStatus) return 'New client';
+      return 'Pending submission';
+    };
+    const getIssueDetailLabel = item => {
+      const sourceItems = Array.isArray(item?.children) && item.children.length ? item.children : [item];
+      for (const sourceItem of sourceItems) {
+        const warnings = normalizeIssueList(sourceItem?.warnings);
+        const blocking = normalizeIssueList(sourceItem?.blocking_issues);
+        const sourceReadiness = (sourceItem?.readiness_status || '').toLowerCase();
+        const list = sourceReadiness === 'blocked' ? blocking : [...blocking, ...warnings];
+        if (list.length) return list[0];
+      }
+      return '';
+    };
+    const getSortableValue = item => {
+      switch (normalizedSortField) {
+        case 'participant_name':
+          return item?.participant_name || item?.tracking_id || '';
+        case 'readiness_status': {
+          const readiness = normalizeReadiness(item?.readiness_status);
+          const rank = { blocked: 1, needs_review: 2, ready: 3 };
+          return rank[readiness] || 99;
+        }
+        case 'submission_reason':
+          return getSubmissionReasonLabel(item);
+        case 'detail':
+          return getIssueDetailLabel(item);
+        default:
+          return null;
+      }
+    };
+    const compareSortableValues = (left, right) => {
+      const leftNumber = typeof left === 'number' ? left : null;
+      const rightNumber = typeof right === 'number' ? right : null;
+      if (leftNumber !== null || rightNumber !== null) {
+        return (leftNumber ?? Number.MAX_SAFE_INTEGER) - (rightNumber ?? Number.MAX_SAFE_INTEGER);
+      }
+      return String(left || '').localeCompare(String(right || ''), undefined, {
+        sensitivity: 'base',
+        numeric: true,
+      });
+    };
+    const compareGroupedItems = (left, right) => {
+      if (normalizedSortField) {
+        const primary = compareSortableValues(getSortableValue(left), getSortableValue(right));
+        if (primary !== 0) return sortDescending ? -primary : primary;
+      }
+      const leftDate = left?.last_validated_at ? new Date(left.last_validated_at).getTime() : 0;
+      const rightDate = right?.last_validated_at ? new Date(right.last_validated_at).getTime() : 0;
+      if (leftDate !== rightDate) return rightDate - leftDate;
+      const leftName = left?.participant_name || left?.tracking_id || '';
+      const rightName = right?.participant_name || right?.tracking_id || '';
+      return String(leftName).localeCompare(String(rightName), undefined, {
+        sensitivity: 'base',
+        numeric: true,
+      });
+    };
 
     if (!groupByClient) {
       const items = rows.map(row => ({
@@ -27070,7 +27186,7 @@ esdcRouter.get('/participants', async (req, res, next) => {
         case_number: row.case_number,
         participant_name: row.participant_name || row.tracking_id
       }));
-      res.json({ total, items, grouped: false });
+      res.json({ total: rawTotal, items, grouped: false });
       return;
     }
 
@@ -27081,6 +27197,7 @@ esdcRouter.get('/participants', async (req, res, next) => {
         groups.set(clientKey, {
           id: `client-${clientKey}`,
           client_id: row.client_id || null,
+          case_id: row.case_id || null,
           participant_name:
             row.participant_name ||
             (row.client_first_name && row.client_last_name ? `${row.client_first_name} ${row.client_last_name}` : row.tracking_id),
@@ -27129,7 +27246,7 @@ esdcRouter.get('/participants', async (req, res, next) => {
       });
     });
 
-    const items = Array.from(groups.values()).map(group => {
+    const groupedItems = Array.from(groups.values()).map(group => {
       const pickPrimary = () => {
         const priorities = { active: 0, closed: 1, ready_to_close: 2, 'ready-to-close': 2, dormant: 3 };
         return [...group.children].sort((a, b) => {
@@ -27144,6 +27261,7 @@ esdcRouter.get('/participants', async (req, res, next) => {
       const primary = pickPrimary() || group.children[0] || {};
       return {
         ...group,
+        case_id: primary.case_id || group.case_id || null,
         tracking_id: primary.tracking_id || group.tracking_id,
         case_number: primary.case_number || group.case_number,
         action_plan_status: primary.action_plan_status || null,
@@ -27152,8 +27270,21 @@ esdcRouter.get('/participants', async (req, res, next) => {
         action_plan_result_date: primary.action_plan_result_date || null
       };
     });
+    const sortedGroupedItems = [...groupedItems].sort(compareGroupedItems);
+    const pagedItems = sortedGroupedItems.slice(pageOffset, pageOffset + pageLimit);
+    const summary = sortedGroupedItems.reduce(
+      (acc, item) => {
+        const readiness = normalizeReadiness(item?.readiness_status || 'needs_review');
+        acc.total += 1;
+        if (readiness === 'ready') acc.ready += 1;
+        else if (readiness === 'blocked') acc.blocked += 1;
+        else acc.needsReview += 1;
+        return acc;
+      },
+      { total: 0, ready: 0, needsReview: 0, blocked: 0 }
+    );
 
-    res.json({ total: items.length, items, grouped: true });
+    res.json({ total: sortedGroupedItems.length, items: pagedItems, grouped: true, summary });
   } catch (err) {
     next(err);
   }
@@ -51772,6 +51903,31 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     status: interventionStatusPersistence.legacyStatus,
     delivery_status: interventionStatusPersistence.deliveryStatus,
   });
+  const isClosedStatusCreate =
+    createInterventionState.deliveryStatus === 'completed' ||
+    createInterventionState.deliveryStatus === 'cancelled';
+  const normaliseOutcomeInput = value => {
+    if (value === null || typeof value === 'undefined') return '';
+    return String(value).trim();
+  };
+  const requestedOutcomeCreate =
+    normaliseOutcomeInput(outcome) || normaliseOutcomeInput(outcomeCode);
+  if (requestedOutcomeCreate) {
+    const validInterventionOutcomes = new Set(['1', '2', '3', '4', '5', '6']);
+    if (!validInterventionOutcomes.has(requestedOutcomeCreate)) {
+      return res.status(422).json({
+        error: 'invalid_outcome',
+        message: 'Outcome must be one of 1-6.'
+      });
+    }
+    if (!isClosedStatusCreate) {
+      return res.status(422).json({
+        error: 'outcome_requires_closed_status',
+        message: 'Intervention outcome can only be recorded when closing an intervention.'
+      });
+    }
+  }
+  const trimmedOutcomeCreate = isClosedStatusCreate ? requestedOutcomeCreate : '';
 
   try {
     const planRow = await fetchActionPlanWithCase(planId);
@@ -51823,21 +51979,6 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     const identity = getRequesterIdentity(req);
     const createdBy = identity.staffProfileId || null;
 
-    const trimmedOutcomeCreate =
-      typeof outcome === 'string' && outcome.trim()
-        ? outcome.trim()
-        : typeof outcomeCode === 'string'
-        ? outcomeCode.trim()
-        : '';
-    if (trimmedOutcomeCreate) {
-      const validInterventionOutcomes = new Set(['1', '2', '3', '4', '5', '6']);
-      if (!validInterventionOutcomes.has(trimmedOutcomeCreate)) {
-        return res.status(422).json({
-          error: 'invalid_outcome',
-          message: 'Outcome must be one of 1-6.'
-        });
-      }
-    }
     let trimmedPotId = (() => {
       if (typeof potId === 'string') return potId.trim();
       if (Number.isFinite(potId)) return String(potId);
@@ -51926,9 +52067,6 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         });
       }
     }
-    const isClosedStatusCreate =
-      createInterventionState.deliveryStatus === 'completed' ||
-      createInterventionState.deliveryStatus === 'cancelled';
     if (isClosedStatusCreate && !endDateValue) {
       return res.status(422).json({
         error: 'end_date_required',
@@ -51942,31 +52080,17 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       });
     }
 
-    // Derive durationDays
-    let durationDaysValue = null;
-    if (durationDaysValueRaw !== null) {
-      durationDaysValue = Math.round(durationDaysValueRaw);
-    } else if (durationWeeksValue !== null) {
-      durationDaysValue = Math.round(durationWeeksValue * 7);
-    } else if (startDateValue && endDateValue) {
-      const start = new Date(startDateValue);
-      const end = new Date(endDateValue);
-      const diffDays = Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
-      durationDaysValue = diffDays;
+    const durationResult = resolveInterventionDurationDaysForStorage({
+      durationDays: durationDaysValueRaw,
+      durationWeeks: durationWeeksValue,
+      startDate: startDateValue,
+      endDate: endDateValue,
+      deriveFromDates: true,
+    });
+    if (durationResult.error) {
+      return res.status(422).json({ error: durationResult.error, message: durationResult.message });
     }
-    if (durationDaysValue !== null) {
-      if (durationDaysValue < 0 || durationDaysValue > 999) {
-        return res.status(422).json({ error: 'invalid_duration_days', message: 'Duration (days) must be between 0 and 999.' });
-      }
-      if (startDateValue && endDateValue) {
-        const start = new Date(startDateValue);
-        const end = new Date(endDateValue);
-        const diffDays = Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
-        if (durationDaysValue > diffDays) {
-          return res.status(422).json({ error: 'duration_exceeds_range', message: 'Duration (days) must not exceed the date range.' });
-        }
-      }
-    }
+    const durationDaysValue = durationResult.value;
 
     // Cost validation (currency 0-999999, up to two decimals) when provided.
     let plannedCostAmount = null;
@@ -52522,9 +52646,6 @@ app.patch('/api/interventions/:id', async (req, res) => {
   if (durationDaysValueRaw !== undefined && durationDaysValueRaw !== null && durationDaysValueRaw < 0) {
     return res.status(422).json({ error: 'invalid_duration', message: 'Duration (days) cannot be negative.' });
   }
-  if (durationDaysValueRaw !== undefined && durationDaysValueRaw !== null && durationDaysValueRaw > 999) {
-    return res.status(422).json({ error: 'invalid_duration', message: 'Duration (days) must be 0–999.' });
-  }
   if (
     durationDaysValueRaw !== undefined &&
     durationDaysValueRaw !== null &&
@@ -52822,9 +52943,18 @@ app.patch('/api/interventions/:id', async (req, res) => {
     const nextEndDate = typeof endDateValue !== 'undefined'
       ? (endDateValue || null)
       : toDateOnly(interventionRow.end_date);
-    const nextOutcome = Object.prototype.hasOwnProperty.call(body, 'outcome')
-      ? (typeof body.outcome === 'string' ? body.outcome.trim() : '')
-      : (interventionRow.outcome_code ? String(interventionRow.outcome_code).trim() : '');
+    const outcomeProvided = Object.prototype.hasOwnProperty.call(body, 'outcome');
+    const normaliseOutcomeInput = value => {
+      if (value === null || typeof value === 'undefined') return '';
+      return String(value).trim();
+    };
+    const requestedOutcomeUpdate = outcomeProvided ? normaliseOutcomeInput(body.outcome) : '';
+    const existingOutcome =
+      interventionRow.outcome_code
+        ? String(interventionRow.outcome_code).trim()
+        : parsedInterventionMetadata?.outcome
+        ? String(parsedInterventionMetadata.outcome).trim()
+        : '';
     const nextStatusForValidation =
       nextStatusPersistence?.effectiveStatus ||
       previousInterventionState.effectiveStatus ||
@@ -52840,16 +52970,27 @@ app.patch('/api/interventions/:id', async (req, res) => {
       });
     }
 
-    if (nextOutcome) {
+    const isClosedStatusUpdate = ['completed', 'cancelled'].includes(nextStatusForValidation);
+    const nextOutcome = outcomeProvided
+      ? requestedOutcomeUpdate
+      : isClosedStatusUpdate
+      ? existingOutcome
+      : '';
+    if (requestedOutcomeUpdate) {
       const validInterventionOutcomes = new Set(['1', '2', '3', '4', '5', '6']);
-      if (!validInterventionOutcomes.has(nextOutcome)) {
+      if (!validInterventionOutcomes.has(requestedOutcomeUpdate)) {
         return res.status(422).json({
           error: 'invalid_outcome',
           message: 'Outcome must be one of 1-6.'
         });
       }
+      if (!isClosedStatusUpdate) {
+        return res.status(422).json({
+          error: 'outcome_requires_closed_status',
+          message: 'Intervention outcome can only be recorded when closing an intervention.'
+        });
+      }
     }
-    const isClosedStatusUpdate = ['completed', 'cancelled'].includes(nextStatusForValidation);
     if (isClosedStatusUpdate && !nextEndDate) {
       return res.status(422).json({
         error: 'end_date_required',
@@ -53069,18 +53210,16 @@ app.patch('/api/interventions/:id', async (req, res) => {
         updates.push('duration_days = ?');
         params.push(null);
       } else {
-        durationDaysValue = Math.round(durationDaysValueRaw);
-        if (durationDaysValue < 0 || durationDaysValue > 999) {
-          return res.status(422).json({ error: 'invalid_duration_days', message: 'Duration (days) must be between 0 and 999.' });
+        const durationResult = resolveInterventionDurationDaysForStorage({
+          durationDays: durationDaysValueRaw,
+          startDate: nextStartDate,
+          endDate: nextEndDate,
+          deriveFromDates: false,
+        });
+        if (durationResult.error) {
+          return res.status(422).json({ error: durationResult.error, message: durationResult.message });
         }
-        if (startDateValue && endDateValue) {
-          const start = new Date(startDateValue);
-          const end = new Date(endDateValue);
-          const diffDays = Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
-          if (durationDaysValue > diffDays) {
-            return res.status(422).json({ error: 'duration_exceeds_range', message: 'Duration (days) must not exceed the date range.' });
-          }
-        }
+        durationDaysValue = durationResult.value;
         metadata.durationWeeks = durationDaysValue / 7;
         updates.push('duration_days = ?');
         params.push(durationDaysValue);
@@ -53118,8 +53257,9 @@ app.patch('/api/interventions/:id', async (req, res) => {
       params.push(actualAmountValue === null ? null : actualAmountValue);
     }
 
-    if (Object.prototype.hasOwnProperty.call(body, 'outcome')) {
-      const trimmedOutcomeUpdate = typeof body.outcome === 'string' ? body.outcome.trim() : '';
+    const shouldPersistOutcomeUpdate = outcomeProvided || (!isClosedStatusUpdate && existingOutcome);
+    if (shouldPersistOutcomeUpdate) {
+      const trimmedOutcomeUpdate = isClosedStatusUpdate ? requestedOutcomeUpdate : '';
       updates.push('outcome_code = ?');
       params.push(trimmedOutcomeUpdate || null);
       if (trimmedOutcomeUpdate) {
@@ -53237,8 +53377,8 @@ app.patch('/api/interventions/:id', async (req, res) => {
       esdcPayload.interventionCost =
         plannedCostAmount === null || typeof plannedCostAmount === 'undefined' ? null : plannedCostAmount;
     }
-    if (Object.prototype.hasOwnProperty.call(body, 'outcome')) {
-      const trimmedOutcomeUpdate = typeof body.outcome === 'string' ? body.outcome.trim() : '';
+    if (outcomeProvided || !isClosedStatusUpdate) {
+      const trimmedOutcomeUpdate = isClosedStatusUpdate ? requestedOutcomeUpdate : '';
       esdcPayload.interventionOutcome = trimmedOutcomeUpdate || null;
     }
     if (Object.prototype.hasOwnProperty.call(body, 'noc')) {
@@ -53674,6 +53814,12 @@ app.post('/api/interventions/:id/close', async (req, res) => {
     if (isInterventionClosedStatus(currentInterventionState)) {
       return res.status(200).json(mapInterventionRow(interventionRow));
     }
+    if (['closed', 'archived'].includes((planRow.status || '').toLowerCase())) {
+      return res.status(409).json({
+        error: 'plan_not_editable',
+        message: 'Cannot close interventions on a closed or archived plan.'
+      });
+    }
 
     const metadata = safeJsonParse(interventionRow.metadata_json, null) || {};
     const statusPersistence = buildInterventionStatusPersistence(statusValue, {
@@ -53694,6 +53840,11 @@ app.post('/api/interventions/:id/close', async (req, res) => {
     metadata.compliance.ilmp = 'pending';
 
     const trimmedNotes = typeof notes === 'string' ? notes.trim() : '';
+    if (trimmedNotes) {
+      metadata.notes = trimmedNotes;
+    } else if (notes !== undefined) {
+      delete metadata.notes;
+    }
     const esdcExisting = safeJsonParse(interventionRow.esdc_intervention_json, {}) || {};
     const esdcPayload = pruneNullish({
       ...esdcExisting,
@@ -53737,10 +53888,8 @@ app.post('/api/interventions/:id/close', async (req, res) => {
     if (trimmedNotes) {
       updates.push('notes = ?');
       params.push(trimmedNotes);
-      metadata.notes = trimmedNotes;
     } else if (notes !== undefined) {
       updates.push('notes = NULL');
-      delete metadata.notes;
     }
 
     updates.push('updated_at = NOW()');
@@ -53937,6 +54086,16 @@ app.post('/api/action-plans/:id/activate', async (req, res) => {
     }
 
     try {
+      const existingEsdc = safeJsonParse(planRow.esdc_action_plan_json, {}) || {};
+      const esdcPayload = {
+        ...existingEsdc,
+        actionPlanResultCode: null,
+        actionPlanResultDate: null,
+        actionPlanResultEducationLevel: null,
+        actionPlanFutureEducationLevel: null,
+        actionPlanResultRelatedNOC: null,
+        actionPlanResultRelatedNOCVersion: null,
+      };
       await pool.query(
         `UPDATE iset_case_action_plan
            SET status = 'active',
@@ -53947,9 +54106,10 @@ app.post('/api/action-plans/:id/activate', async (req, res) => {
                result_date = NULL,
                outcome_summary = NULL,
                closure_notes = NULL,
+               esdc_action_plan_json = ?,
                updated_at = NOW()
          WHERE id = ?`,
-        [planId]
+        [JSON.stringify(esdcPayload), planId]
       );
     } catch (error) {
       if (error && error.code === 'ER_DUP_ENTRY') {
@@ -54563,6 +54723,137 @@ app.patch('/api/action-plans/:id', async (req, res) => {
         .filter(code => CODE_SETS.barrier.has(code));
     })();
 
+    const hasBodyField = field => Object.prototype.hasOwnProperty.call(req.body || {}, field);
+    const closedPlanEdit = status === 'closed';
+    let resultCodeValue = null;
+    let resultDateValue = null;
+    let resultEducationValue = null;
+    let futureEducationValue = null;
+    let resultNocVersionValue = null;
+    let resultNocValue = null;
+    let outcomeSummaryValue = planRow.outcome_summary || null;
+    let closureNotesValue = planRow.closure_notes || null;
+    if (closedPlanEdit) {
+      resultCodeValue = normaliseCode(
+        hasBodyField('resultCode') ? req.body.resultCode : planRow.result_code || esdcExisting.actionPlanResultCode,
+        CODE_SETS.resultCode
+      );
+      if (!resultCodeValue) {
+        return res.status(422).json({
+          error: 'result_code_required',
+          message: 'Result code is required for a closed action plan.'
+        });
+      }
+
+      resultDateValue = normaliseDateOnly(
+        hasBodyField('resultDate') ? req.body.resultDate : planRow.result_date || esdcExisting.actionPlanResultDate
+      );
+      if (!resultDateValue) {
+        return res.status(422).json({
+          error: 'invalid_result_date',
+          message: 'Result date must be in YYYY-MM-DD format for a closed action plan.'
+        });
+      }
+      const effectiveStartDate = startDateOnly || (planRow.effective_date ? toDateOnly(planRow.effective_date) : null);
+      if (effectiveStartDate && resultDateValue < effectiveStartDate) {
+        return res.status(422).json({
+          error: 'result_date_before_start',
+          message: 'Result date cannot be before the action plan start date.'
+        });
+      }
+      if (resultDateValue > toDateOnly(new Date())) {
+        return res.status(422).json({
+          error: 'result_date_in_future',
+          message: 'Result date cannot be in the future.'
+        });
+      }
+      const [[maxIntervention]] = await pool.query(
+        "SELECT MAX(end_date) AS latest_end FROM iset_case_intervention WHERE action_plan_id = ? AND status NOT IN ('draft','submitted')",
+        [planId]
+      );
+      const latestInterventionEnd = maxIntervention?.latest_end ? toDateOnly(maxIntervention.latest_end) : null;
+      if (latestInterventionEnd && resultDateValue < latestInterventionEnd) {
+        return res.status(422).json({
+          error: 'result_date_before_intervention',
+          message: 'Result date cannot be before the latest intervention end date.'
+        });
+      }
+
+      resultEducationValue = normaliseCode(
+        hasBodyField('resultEducationLevel')
+          ? req.body.resultEducationLevel
+          : esdcExisting.actionPlanResultEducationLevel,
+        CODE_SETS.resultEducation
+      );
+      if (!resultEducationValue) {
+        return res.status(422).json({
+          error: 'result_education_required',
+          message: 'Action Plan Result Education Level is required for a closed action plan.'
+        });
+      }
+
+      if (resultCodeValue === '4') {
+        futureEducationValue = normaliseCode(
+          hasBodyField('futureEducationLevel')
+            ? req.body.futureEducationLevel
+            : esdcExisting.actionPlanFutureEducationLevel,
+          CODE_SETS.futureEducation
+        );
+        if (!futureEducationValue) {
+          return res.status(422).json({
+            error: 'future_education_required',
+            message: 'Future education level is required for Returned to school.'
+          });
+        }
+      }
+
+      if (resultCodeValue === '2') {
+        resultNocVersionValue = normaliseCode(
+          hasBodyField('resultNocVersion')
+            ? req.body.resultNocVersion
+            : esdcExisting.actionPlanResultRelatedNOCVersion,
+          CODE_SETS.nocVersion
+        );
+        if (!resultNocVersionValue) {
+          return res.status(422).json({
+            error: 'result_noc_version_required',
+            message: 'NOC version is required for Employed result.'
+          });
+        }
+        const resultNocRaw = hasBodyField('resultNoc')
+          ? req.body.resultNoc
+          : esdcExisting.actionPlanResultRelatedNOC;
+        const resultNocDigits =
+          typeof resultNocRaw === 'string'
+            ? resultNocRaw.replace(/\D/g, '')
+            : String(resultNocRaw || '').replace(/\D/g, '');
+        const resultNocLength = resultNocVersionValue === '2021' ? 5 : 4;
+        if (!resultNocDigits || resultNocDigits.length !== resultNocLength) {
+          return res.status(422).json({
+            error: 'result_noc_invalid',
+            message: `NOC code must be ${resultNocLength} digits for version ${resultNocVersionValue}.`
+          });
+        }
+        const knownResultNoc = await isValidNocCodeForVersion(pool, resultNocDigits, resultNocVersionValue);
+        if (!knownResultNoc) {
+          return res.status(422).json({
+            error: 'result_noc_invalid',
+            message: `NOC code ${resultNocDigits} is not valid for version ${resultNocVersionValue}.`
+          });
+        }
+        resultNocValue = resultNocDigits;
+      }
+
+      if (hasBodyField('outcomeSummary')) {
+        outcomeSummaryValue =
+          typeof req.body.outcomeSummary === 'string' ? req.body.outcomeSummary.trim() || null : null;
+      }
+      if (hasBodyField('closureNotes')) {
+        closureNotesValue =
+          typeof req.body.closureNotes === 'string' ? req.body.closureNotes.trim() || null : null;
+      }
+    }
+
     const setParts = [
       'name = ?',
       'effective_date = ?',
@@ -54595,6 +54886,16 @@ app.patch('/api/action-plans/:id', async (req, res) => {
       setParts.splice(5, 0, 'prev_employment = ?');
       values.splice(5, 0, prevEmploymentValue);
     }
+    if (closedPlanEdit) {
+      setParts.push('result_code = ?');
+      values.push(resultCodeValue);
+      setParts.push('result_date = ?');
+      values.push(resultDateValue);
+      setParts.push('outcome_summary = ?');
+      values.push(outcomeSummaryValue);
+      setParts.push('closure_notes = ?');
+      values.push(closureNotesValue);
+    }
     const esdcPayload = {
       ...esdcExisting,
       agreementNumber,
@@ -54612,6 +54913,16 @@ app.patch('/api/action-plans/:id', async (req, res) => {
       actionPlanChildcareNeed: childcareNeed,
       actionPlanChildcareFundedCode: childcareFunding,
       BarrierToEmployment: barrierCodes && barrierCodes.length ? barrierCodes : null,
+      ...(closedPlanEdit
+        ? {
+            actionPlanResultCode: resultCodeValue,
+            actionPlanResultDate: resultDateValue,
+            actionPlanResultEducationLevel: resultEducationValue,
+            actionPlanFutureEducationLevel: futureEducationValue,
+            actionPlanResultRelatedNOC: resultNocValue,
+            actionPlanResultRelatedNOCVersion: resultNocVersionValue,
+          }
+        : {}),
     };
     setParts.push('agreement_number = ?');
     values.push(agreementNumber || null);
@@ -60232,7 +60543,7 @@ const isFinancePaymentsRole = role => {
   return FINANCE_PAYMENTS_ROLE_ALLOWLIST.has(canonical);
 };
 
-const SIMPLE_PAYMENT_WORKFLOW = true;
+const SIMPLE_PAYMENT_WORKFLOW = false;
 
 const PAYMENT_PACKET_STATUSES = new Set([
   'draft',
@@ -62704,6 +63015,12 @@ const PAYMENT_TYPE_ALIASES = {
   livingallowance: 'LivingAllowance',
   livingallowances: 'LivingAllowance',
   monthlylivingallowance: 'LivingAllowance',
+  residencecost: 'ResidenceCost',
+  residencecosts: 'ResidenceCost',
+  residencefee: 'ResidenceCost',
+  residencefees: 'ResidenceCost',
+  residence: 'ResidenceCost',
+  housing: 'ResidenceCost',
   tuitionfeesdirect: 'TuitionFeesDirect',
   tuitiondirect: 'TuitionFeesDirect',
   tuitionfees: 'TuitionFeesDirect',
@@ -62845,6 +63162,7 @@ const normalizeEvidenceTypeKey = value => {
 
 const PAYMENT_TYPE_FUNDING_CATEGORY_MAP = {
   LivingAllowance: 'living',
+  ResidenceCost: 'living',
   TuitionFeesDirect: 'tuition',
   TuitionFeesReimbursement: 'tuition',
   BooksMaterialsDirect: 'books',
@@ -62867,6 +63185,12 @@ const FUNDING_CATEGORY_ALIASES = {
   material: 'materials',
   living: 'living',
   livingallowance: 'living',
+  residence: 'living',
+  residencecost: 'living',
+  residencecosts: 'living',
+  residencefee: 'living',
+  residencefees: 'living',
+  housing: 'living',
   childcare: 'childcare',
   other: 'other',
   otheramount: 'other',
@@ -62895,6 +63219,12 @@ const FUNDING_LABEL_CATEGORY_MAP = {
   materials: 'materials',
   livingallowance: 'living',
   living: 'living',
+  residence: 'living',
+  residencecost: 'living',
+  residencecosts: 'living',
+  residencefee: 'living',
+  residencefees: 'living',
+  housing: 'living',
   childcare: 'childcare',
   wages: 'wage_wages',
   mercs: 'wage_mercs',
@@ -63405,6 +63735,7 @@ async function readPaymentPolicyRules(connection = null) {
 
 const PAYMENT_SUBMISSION_TIMING_DEFAULTS = {
   LivingAllowance: 'recurrence_schedule',
+  ResidenceCost: 'intervention_start',
   TuitionFeesDirect: 'intervention_start',
   TuitionFeesReimbursement: 'intervention_end',
   SpecializedEquipmentAdvance: 'intervention_start',

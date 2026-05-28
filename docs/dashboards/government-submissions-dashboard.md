@@ -1,16 +1,17 @@
 # Government Submissions Dashboard (formerly ARMS submissions)
 Purpose: Capture context, defaults, and work-in-progress notes for the Government/ARMS submissions dashboard so changes stay coordinated.  
 Audience: Admin dashboard engineers and reviewers.  
-Last Updated: 2025-12-12
+Last Updated: 2026-05-27
 
 Overview
 - Dashboard lives at `src/pages/esdc/EsdcParticipantSubmissionsPage.jsx`; uses Cloudscape Board with palette/reset events.
 - Renamed from “ARMS Submissions”; no prior dedicated doc existed (see `docs/dashboards/dashboard-pruning-notes.md` for the old ARMS placeholder removal).
-- Storage key: `esdc-participants-layout-v3` (localStorage). Bump if default widgets change.
-- Default layout/widgets: `queue` (Participant submission queue, 4x3), `validation` (Validation summary, 2x4), `batch` (Batch submission, 2x4), `history` (Recent submissions, 4x3). Palette shows any missing widgets from this set.
+- Storage key: `esdc-participants-layout-v6` (localStorage). Bump if default widgets change.
+- Default layout/widgets: `queue` (Participant submission queue, 4x7, bucket-style readiness summary + Validate all + Generate batch XML + queue table). The separate Batch submission widget is no longer registered on this dashboard; batch generation/download now happens from the queue header. `history` (Recent ILMP exports, 4x5) remains available from the palette for audit/re-export work, but is not part of the default layout.
 - Palette/listeners: responds to `esdcParticipants:openPalette` and `esdcParticipants:resetLayout`; also listens for `palette:add` to place widgets. Palette updates are signature-guarded to avoid render loops per `docs/guides/configurable-dashboard-notes.md`.
-- Help: widgets link to `esdcParticipantQueueHelp`, `esdcParticipantValidationHelp`, `esdcParticipantHistoryHelp`; page uses `EsdcParticipantsHelp` for broader context.
-- Participant queue data: `/api/esdc/participants` now returns only reportable cases that have an active action plan with at least one non-closed intervention whose `start_date` is today/past; submission_status is limited to `pending`/`rejected` (awaiting action). Response includes `action_plan_id`, `action_plan_status`, `action_plan_start_date`, `action_plan_result_code`, `action_plan_result_date`.
+- Help: the queue links to `esdcParticipantQueueHelp`, the optional history widget links to `esdcParticipantHistoryHelp`, and the page uses `EsdcParticipantsHelp` for broader context. `esdcBatchSubmissionHelp` is historical/legacy copy for the retired standalone widget.
+- Participant queue data: `/api/esdc/participants` returns reportable active or close-out action-plan submissions with `submission_status` limited to `pending`/`rejected` (awaiting action). With `groupByClient=true`, the backend groups all filtered rows by participant/client, applies allowlisted column sorting (`participant_name`, `readiness_status`, `submission_reason`, `detail`), and only then applies `limit`/`offset`; it returns the grouped total and readiness summary so Cloudscape pagination and the combined summary reflect the full queue. Response includes `case_id`, `action_plan_id`, `action_plan_status`, `action_plan_start_date`, `action_plan_result_code`, `action_plan_result_date`.
+- Batch modal behavior: `Generate batch XML` prepares the XML and shows ready/excluded counts plus excluded-record links and a filename field. The modal intentionally does not show raw XML or ask for a local path. On browsers that support the File System Access API, the primary save action opens the native Save dialog before submitting/marking records; otherwise it falls back to the standard browser download after `/api/esdc/participants/batch-submit`.
 
 Open Items / TODO
 - TODO: Confirm backend payloads/endpoints for queue, validation summary, and history widgets (assumption freeze: do not add fields unless exposed by the API).
@@ -20,8 +21,8 @@ Open Items / TODO
 
 Related References
 - Dashboard implementation: `src/pages/esdc/EsdcParticipantSubmissionsPage.jsx`
-- Widget components: `src/pages/esdc/widgets/EsdcParticipantQueueWidget.jsx`, `EsdcParticipantValidationWidget.jsx`, `EsdcParticipantHistoryWidget.jsx`
-- Help content: `src/helpPanelContents/esdcParticipantsHelp.js`, `esdcParticipantQueueHelp.js`, `esdcParticipantValidationHelp.js`, `esdcParticipantHistoryHelp.js`
+- Widget components: `src/pages/esdc/widgets/EsdcParticipantQueueWidget.jsx`, optional `EsdcParticipantHistoryWidget.jsx`; legacy standalone batch source remains at `EsdcBatchSubmissionWidget.jsx` but is not registered on the dashboard.
+- Help content: `src/helpPanelContents/esdcParticipantsHelp.js`, `esdcParticipantQueueHelp.js`, `esdcBatchSubmissionHelp.js`, `esdcParticipantHistoryHelp.js`
 - Board guardrails: `docs/guides/configurable-dashboard-notes.md`
 
 Submission Trigger Model (proposed; needs validation vs ILMP guide/backend events)

@@ -40,6 +40,15 @@ Following these guidelines keeps the board responsive, allows widgets to be adde
 - [ ] Has the new route been registered in access control with System Administrator and Program Administrator enabled by default?
 
 Following the pattern above keeps new dashboards from entering the runaway render loop and ensures widget removal, drag, and resize announcements behave consistently.
+
+## Dashboard API request loops (recurring regression check)
+
+- Treat runaway API calls as a standard dashboard regression risk, not a one-off incident. Every dashboard/widget spot check should include watching network traffic after the page settles.
+- The expected steady state is: initial data calls complete, user-triggered refreshes happen only once per action, and intentional polling is documented and bounded. Repeated canceled `fetch/XHR` calls to the same endpoint are a failure even if the UI appears usable.
+- Common causes are unstable render-time values in hook dependencies: inline sort descriptors, filter arrays, payload objects, callback props, and palette/layout arrays. If a data hook depends on an object that is rebuilt every render, a state update from the fetch can recreate the callback/effect, abort the current request, and start a new request indefinitely.
+- Prevention pattern: reduce dependency inputs to stable primitives or memoized values, build query/payload objects with `useMemo`, and make `useEffect` depend on stable callbacks only. Do not mask the symptom with request caps or debouncing until the unstable dependency is fixed.
+- Spot-test pattern: load the dashboard, apply common sort/filter/page-size interactions, wait 10-20 seconds, and confirm the network log is quiet except for expected polling. For automated checks, capture request counts by endpoint and fail when the same non-polling endpoint keeps firing or canceling after idle.
+
 6. **Match widget ids everywhere.** Use the exact same string for the widget id when registering in `widgetRegistry`, seeding `defaultLayout`, and persisting layouts. A mismatch (e.g., `supportingDocuments` vs `supporting-documents`) makes Cloudscape treat the widget as unknown, so it ends up in Available Widgets even if you meant it for the board.
 
 7. **Reset defaults with a storage-key bump.** Whenever you change the default layout (adding/removing widgets), increment the localStorage key. Without that, browsers keep hydrating the old layout and new widgets never appear by default.

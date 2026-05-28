@@ -3,8 +3,9 @@ import React from 'react';
 const EsdcParticipantHistoryHelp = () => (
   <div>
     <p>
-      Recent ILMP exports lists the batch XML files you generated, with metadata, participant roster, and the exact XML
-      payload. Use it to confirm what was downloaded and to re-queue a batch if it needs to be regenerated.
+      Recent ILMP exports is an optional dashboard widget for the batch XML files you generated, with metadata,
+      participant roster, and the exact XML payload. Add it from the dashboard palette when you need to confirm what was
+      downloaded or re-queue a batch.
     </p>
     <ul>
       <li><strong>Batch details</strong>: filename/path, checksum, size, export time.</li>

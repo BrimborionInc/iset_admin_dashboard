@@ -3,7 +3,7 @@
 Status: production environment snapshot with newer deployment/hostname notes folded in. Verify live AWS state before operations.
 Last reviewed: 2026-04-29 during ops documentation cleanup; prefer `docs/ops/deployments/deployment-quick-guide.md` for current deploy commands.
 
-Last updated: January 26, 2026
+Last updated: May 27, 2026
 
 This guide summarizes what is currently deployed in the production environment, how it fits together, and where to look when you need to operate or change it. Each section starts with a non-technical overview, followed by technical details.
 
@@ -46,6 +46,8 @@ The apps run on a production server managed by AWS. A load balancer routes web t
 Technical details  
 - Auto Scaling Group: `nwac-prod-asg` (desired capacity 1).  
 - Load balancer: Application Load Balancer (ALB) fronting both apps.  
+- ALB access logs are enabled to `s3://nwac-prod-alb-logs-468278742295-ca-central-1/prod/alb/AWSLogs/468278742295/` with 90-day lifecycle expiry. AWS created `ELBAccessLogTestFile` at `2026-05-27T17:30:44Z`, confirming log-delivery permissions.
+- AWS WAF Web ACL `nwac-prod-alb-rate-guard` is associated with the PROD ALB. Rule `AdminHostRateLimitPerIp` blocks an IP after more than 2,000 requests in 5 minutes to host `nwac-console.awentech.ca`; rule `AdminCasesApiRateLimitPerIp` blocks an IP after more than 300 requests in 5 minutes to host `nwac-console.awentech.ca` when the URI path starts with `/api/cases`; default action is allow.
 - The admin app and portal are deployed to the same EC2 instance and are started with `pm2`.  
 - Paths on instance:  
   - Admin: `/opt/nwac/admin-dashboard`  

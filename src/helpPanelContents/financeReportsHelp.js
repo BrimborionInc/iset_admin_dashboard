@@ -16,7 +16,7 @@ const FinanceReportsHelp = () => (
       <ul>
         <li>Fiscal year is based on the intervention approval date.</li>
         <li>Region is the participant&apos;s home province or territory.</li>
-        <li>The default row scope is funded interventions only, so zero-dollar approved interventions stay out of the advances totals.</li>
+        <li>The default row scope is funded interventions only, so zero-dollar reportable rows stay out of the advances totals.</li>
       </ul>
     </Box>
     <Box>
@@ -56,7 +56,7 @@ const FinanceReportsHelp = () => (
 );
 
 FinanceReportsHelp.aiContext =
-  "Explain the ISET Advances and Active Clients report as an approved-funding review job aid. Say it is the annual approved-funding report for funded CRF/EI interventions by approval date, with funded client counts, regional totals, intervention detail, optional carry-over estimates, PATH payment follow-up status, and Excel export. Emphasize that fiscal year means approval date, region means participant home province/territory, the default detail scope hides zero-dollar approved interventions, summary totals follow the visible rows, and payment status or recorded paid/confirmed values are PATH-side operational follow-up records, not Sage authority. Use staff and program-side wording for PATH activity.";
+  "Explain the ISET Advances and Active Clients report as an approved-funding review job aid. Say it is the annual approved-funding report for funded CRF/EI interventions by approval date, with funded client counts, regional totals, intervention detail, optional carry-over estimates, PATH payment follow-up status, and Excel export. Emphasize that fiscal year means approval date, region means participant home province/territory, the default detail scope hides zero-dollar reportable rows including denied-application reporting records, summary totals follow the visible rows, and payment status or recorded paid/confirmed values are PATH-side operational follow-up records, not Sage authority. Use staff and program-side wording for PATH activity.";
 
 export const FinanceReportsSetupHelp = () => (
   <SpaceBetween size="m">
@@ -109,8 +109,8 @@ export const FinanceReportsSummaryHelp = () => (
       <strong>Funded clients and interventions</strong>
       <p>
         Funded clients counts unique participants in the current visible rows. Funded interventions
-        counts the funded rows in the default view; if you switch to all approved rows, the card shows
-        approved interventions instead.
+        counts the funded rows in the default view; if you switch to all reportable rows, the card shows
+        reportable interventions instead.
       </p>
     </Box>
     <Box>
@@ -124,7 +124,7 @@ export const FinanceReportsSummaryHelp = () => (
 );
 
 FinanceReportsSummaryHelp.aiContext =
-  "Explain the Financial Reports summary cards: total approved advances, CRF advances, EI advances, funded clients as unique participants in the visible rows, and intervention count. Mention that fiscal year, region, the Intervention detail row-scope selector, and table search narrow these visible totals, and that the intervention card changes to approved interventions when all approved rows are selected.";
+  "Explain the Financial Reports summary cards: total approved advances, CRF advances, EI advances, funded clients as unique participants in the visible rows, and intervention count. Mention that fiscal year, region, the Intervention detail row-scope selector, and table search narrow these visible totals, and that the intervention card changes to reportable interventions when all reportable rows are selected.";
 
 export const FinanceReportsCarryOverHelp = () => (
   <SpaceBetween size="m">
@@ -214,8 +214,8 @@ export const FinanceReportsDetailHelp = () => (
     <Box>
       <strong>Search and export</strong>
       <p>
-        The row-scope selector defaults to funded interventions, hiding zero-dollar approved work such
-        as counselling unless you choose all approved interventions. The table search narrows the
+        The row-scope selector defaults to funded interventions, hiding zero-dollar rows such as
+        counselling, career research, and denied-application reporting records unless you choose all reportable interventions. The table search narrows the
         visible rows by participant, case, intervention, institution, program, region, budget pot, or
         payment status. Use the table preferences gear to choose columns. Summary cards and Excel
         export use the same visible detail rows.
@@ -225,6 +225,6 @@ export const FinanceReportsDetailHelp = () => (
 );
 
 FinanceReportsDetailHelp.aiContext =
-  "Explain the Financial Reports intervention detail table: one row per approved CRF/EI intervention, participant link opens Case Workspace, the row-scope selector defaults to funded interventions only but can include all approved interventions, the table preferences gear chooses visible columns, all columns are sortable/resizable, category columns are reporting allocations of the approved amount, payment status is PATH operational follow-up rather than Sage authority, and text search controls the visible rows and export detail.";
+  "Explain the Financial Reports intervention detail table: one row per reportable CRF/EI intervention, participant link opens Case Workspace, the row-scope selector defaults to funded interventions only but can include zero-dollar reporting rows including denied-application reporting records, the table preferences gear chooses visible columns, all columns are sortable/resizable, category columns are reporting allocations of the approved amount, payment status is PATH operational follow-up rather than Sage authority, and text search controls the visible rows and export detail.";
 
 export default FinanceReportsHelp;

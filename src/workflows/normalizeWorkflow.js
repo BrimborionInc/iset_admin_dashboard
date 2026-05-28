@@ -370,6 +370,8 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
       const labelFr = (labelI18n && labelI18n.fr) || labelEn;
       const hintEn = (hintI18n && hintI18n.en) || asLang(hintFallbackRaw, 'en');
       const hintFr = (hintI18n && hintI18n.fr) || hintEn;
+      const labelText = labelEn || labelFr || '';
+      const hintText = hintEn || hintFr || '';
 
       let options = null;
       if (['radio','radios','checkbox','checkboxes','select'].includes(tplType)) {
@@ -380,11 +382,11 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
         }));
       }
 
-  // Derive a stable slug from the resolved (English) label text; avoid using raw object -> '[object Object]'
-  let labelSlugBase = labelEn && typeof labelEn === 'string' && labelEn.trim() ? labelEn : '';
-  if (!labelSlugBase) labelSlugBase = (typeof labelText === 'string' ? labelText : '') || `${tplType || 'field'}-${i+1}`;
-  let labelSlug = slugify(labelSlugBase) || `${tplType || 'field'}-${i+1}`;
-  if (labelSlug === 'object-object') labelSlug = `${tplType || 'field'}-${i+1}`;
+      // Derive a stable slug from the resolved (English) label text; avoid using raw object -> '[object Object]'
+      let labelSlugBase = typeof labelText === 'string' && labelText.trim() ? labelText : '';
+      if (!labelSlugBase) labelSlugBase = (typeof labelText === 'string' ? labelText : '') || `${tplType || 'field'}-${i+1}`;
+      let labelSlug = slugify(labelSlugBase) || `${tplType || 'field'}-${i+1}`;
+      if (labelSlug === 'object-object') labelSlug = `${tplType || 'field'}-${i+1}`;
       const fieldNameProp = (props?.fieldName || props?.field_name || props?.fieldname || '').toString().trim();
       const nameProp = (props?.name || '').toString().trim();
       const idProp = (props?.id || '').toString().trim();
@@ -398,7 +400,7 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
 
       // Content only components
       if (tplType === 'paragraph' || c.template_key === 'text-block') {
-        const paraText = props?.text ?? labelText ?? '';
+        const paraText = props?.text ?? labelI18n ?? labelText ?? '';
         // Preserve author-supplied rich HTML content when provided (e.g., lists).
         const paraHtml = props?.html ?? (typeof paraText === 'object' ? paraText.html : undefined);
         const textObj = toI18nObject(paraText, '');
@@ -416,7 +418,7 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
         continue;
       }
       if (tplType === 'inset-text') {
-        const txt = props?.text ?? hintText ?? labelText ?? '';
+        const txt = props?.text ?? hintI18n ?? labelI18n ?? hintText ?? labelText ?? '';
         const component = {
           id: toIdSlug('inset-text', 'inset-text', i, usedIds),
           type: 'inset-text',
@@ -428,7 +430,7 @@ async function buildWorkflowSchema({ pool, workflowId, auditTemplates = false, s
         continue;
       }
       if (tplType === 'warning-text') {
-        const txt = props?.text ?? hintText ?? labelText ?? '';
+        const txt = props?.text ?? hintI18n ?? labelI18n ?? hintText ?? labelText ?? '';
         const component = {
           id: toIdSlug('warning-text', 'warning-text', i, usedIds),
           type: 'warning-text',

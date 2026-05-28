@@ -1,9 +1,9 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-05-27T00:50:57.773Z",
-  "releaseId": "20260526-prod-snapshot-scope-guard",
-  "releaseLabel": "Release 20260526-prod-snapshot-scope-guard",
-  "releaseDateEn": "27th May 2026",
-  "releaseDateFr": "27 mai 2026",
+  "generatedAt": "2026-05-28T12:46:32.083Z",
+  "releaseId": "20260528-prod-case-dashboard-loop-hotfix",
+  "releaseLabel": "Release 20260528-prod-case-dashboard-loop-hotfix",
+  "releaseDateEn": "28th May 2026",
+  "releaseDateFr": "28 mai 2026",
   "en": {
     "sectionEyebrow": "Optional reading",
     "description": "",
@@ -20,9 +20,24 @@ const publicReleaseNotes = {
       "Withdrawn applications now create the reporting-only action plan and two completed interventions needed for ILMP reporting.",
       "Intervention planned-cost fields now accept normal dollars-and-cents amounts.",
       "Supporting Documents uploads now work on case files where an older application has an unsafe applicant-account link.",
-      "Applicant portal case/status/message routes now double-check that the signed-in account belongs to the same client as the application and case being shown."
+      "Applicant portal case/status/message routes now double-check that the signed-in account belongs to the same client as the application and case being shown.",
+      "Closed action plan details now save closeout corrections such as Action Plan Result Education Level.",
+      "Long intervention schedules no longer fail save because the ILMP duration field is capped while real start/end dates are preserved.",
+      "Case Header can now change an unactivated PATH account email before resending activation."
     ],
     "featurePackages": [
+      {
+        "title": "Release 20260527-prod-casework-ilmp-hotfix",
+        "items": [
+          "Case Header can now change an unactivated PATH account email before staff resend activation.",
+          "Closed action plan details now save closeout corrections such as Action Plan Result Education Level.",
+          "Long intervention schedules no longer fail save because PATH caps only the ILMP duration field while preserving the real start/end dates.",
+          "Intervention outcomes are recorded only when an intervention is closed, and closeout now requires staff to choose the final ESDC outcome explicitly.",
+          "Intervention cost lines can be corrected from Living Allowance to Residence Costs without deleting and rebuilding the line.",
+          "The ILMP Participant submission queue now paginates, sorts, validates, and batches participant rows in one consolidated widget.",
+          "Denied application reporting records now map applicant education consistently into ILMP start and result education fields."
+        ]
+      },
       {
         "title": "Release 20260526-prod-snapshot-scope-guard",
         "items": [
@@ -36,7 +51,7 @@ const publicReleaseNotes = {
       {
         "title": "Release 20260525-prod-bugcr-batch",
         "items": [
-          "Financial Reports now defaults Intervention detail to funded interventions only, with an option to include all approved interventions when zero-dollar counselling or career-research rows need review.",
+          "Financial Reports now defaults Intervention detail to funded interventions only, with an option to include all reportable interventions when zero-dollar counselling, career-research, or denied-application reporting rows need review.",
           "The Financial Reports detail table now hides reference-number clutter under participant names, shows CRF/EI and approved funding near the front, and supports column selection, resizing, and sorting.",
           "Regional Snapshot now uses the same approved CRF/EI funding and participant-home-province rules as Financial Reports for funding and funded-client totals.",
           "Financial Reports help now includes section-level guidance and AI-help coverage for the annual report purpose, export scope, and PATH-versus-Sage payment-status caveat.",
@@ -44,16 +59,6 @@ const publicReleaseNotes = {
           "Finance payment-packet emails now include a seven-day download link for the packet evidence bundle.",
           "Payment packets now require only the Client Funding Agreement and the signed EFT banking form as baseline evidence.",
           "Finance Settings now shows a read-only preview of the payment-packet email sent to Finance."
-        ]
-      },
-      {
-        "title": "Release 20260522-prod-document-upload-scope",
-        "items": [
-          "Fixed a bug where some denied applications could still appear in active application lists after the denial letter was sent.",
-          "Improved denied application reporting records so ILMP validation has the required agreement and education fields.",
-          "Withdrawn applications now create the reporting-only action plan and two completed interventions needed for ILMP reporting.",
-          "Intervention planned-cost fields now accept normal dollars-and-cents amounts.",
-          "Supporting Documents uploads now work on case files where an older application has an unsafe applicant-account link."
         ]
       }
     ],
@@ -78,9 +83,24 @@ const publicReleaseNotes = {
       "Les demandes retirees creent maintenant le plan d'action reserve au reporting et les deux interventions completees requis pour le reporting ILMP.",
       "Les champs de cout prevu des interventions acceptent maintenant les montants courants en dollars et cents.",
       "Les televersements dans Supporting Documents fonctionnent maintenant pour les dossiers ou une ancienne demande a un lien de compte client non securitaire.",
-      "Le portail applicant verifie maintenant que le compte connecte appartient au meme client que la demande et le dossier affiches."
+      "Le portail applicant verifie maintenant que le compte connecte appartient au meme client que la demande et le dossier affiches.",
+      "Les details d'un plan d'action ferme enregistrent maintenant les corrections de cloture comme le niveau d'education du resultat.",
+      "Les longues periodes d'intervention ne bloquent plus l'enregistrement; PATH limite seulement le champ de duree ILMP et conserve les vraies dates de debut et de fin.",
+      "Case Header permet maintenant de corriger le courriel d'un compte PATH non active avant de renvoyer l'activation."
     ],
     "featurePackages": [
+      {
+        "title": "Release 20260527-prod-casework-ilmp-hotfix",
+        "items": [
+          "Case Header permet maintenant de corriger le courriel d'un compte PATH non active avant que le personnel renvoie l'activation.",
+          "Les details d'un plan d'action ferme enregistrent maintenant les corrections de cloture comme le niveau d'education du resultat.",
+          "Les longues periodes d'intervention ne bloquent plus l'enregistrement; PATH limite seulement le champ de duree ILMP et conserve les vraies dates de debut et de fin.",
+          "Les resultats d'intervention sont enregistres seulement quand une intervention est fermee, et la cloture exige maintenant le choix explicite du resultat ESDC final.",
+          "Les lignes de cout d'intervention peuvent etre corrigees de Living Allowance vers Residence Costs sans supprimer et reconstruire la ligne.",
+          "La file ILMP Participant regroupe maintenant pagination, tri, validation et generation de lots dans un seul widget.",
+          "Les dossiers de reporting des demandes refusees mappent maintenant l'education de la participante ou du participant de facon coherente vers les champs ILMP de debut et de resultat."
+        ]
+      },
       {
         "title": "Release 20260526-prod-snapshot-scope-guard",
         "items": [
@@ -102,16 +122,6 @@ const publicReleaseNotes = {
           "Les courriels de packet de paiement incluent maintenant un lien de telechargement valide sept jours pour le paquet de pieces justificatives.",
           "Les packets de paiement exigent maintenant seulement le Client Funding Agreement et le formulaire bancaire EFT signe comme pieces justificatives de base.",
           "Finance Settings affiche maintenant un apercu en lecture seule du courriel de packet de paiement envoye aux Finances."
-        ]
-      },
-      {
-        "title": "Release 20260522-prod-document-upload-scope",
-        "items": [
-          "Correction d'un probleme ou certaines demandes refusees pouvaient encore apparaitre dans les listes actives apres l'envoi de la lettre de refus.",
-          "Amelioration des dossiers de reporting des demandes refusees afin que la validation ILMP ait les champs d'entente et d'education requis.",
-          "Les demandes retirees creent maintenant le plan d'action reserve au reporting et les deux interventions completees requis pour le reporting ILMP.",
-          "Les champs de cout prevu des interventions acceptent maintenant les montants courants en dollars et cents.",
-          "Les televersements dans Supporting Documents fonctionnent maintenant pour les dossiers ou une ancienne demande a un lien de compte client non securitaire."
         ]
       }
     ],

@@ -3,58 +3,31 @@ import Board from '@cloudscape-design/board-components/board';
 import { SpaceBetween, Box } from '@cloudscape-design/components';
 
 import EsdcParticipantQueueWidget from './widgets/EsdcParticipantQueueWidget.jsx';
-import EsdcParticipantValidationWidget from './widgets/EsdcParticipantValidationWidget.jsx';
-import EsdcBatchSubmissionWidget from './widgets/EsdcBatchSubmissionWidget.jsx';
 import EsdcParticipantHistoryWidget from './widgets/EsdcParticipantHistoryWidget.jsx';
-import EsdcParticipantsHelp from '../../helpPanelContents/esdcParticipantsHelp.js';
 import EsdcParticipantQueueHelp from '../../helpPanelContents/esdcParticipantQueueHelp.js';
-import EsdcParticipantValidationHelp from '../../helpPanelContents/esdcParticipantValidationHelp.js';
 import EsdcParticipantHistoryHelp from '../../helpPanelContents/esdcParticipantHistoryHelp.js';
-import EsdcBatchSubmissionHelp from '../../helpPanelContents/esdcBatchSubmissionHelp.js';
 
-const STORAGE_KEY = 'esdc-participants-layout-v4';
+const STORAGE_KEY = 'esdc-participants-layout-v6';
 
 const widgetRegistry = {
   queue: {
     id: 'queue',
-    defaultRowSpan: 3,
-    defaultColumnSpan: 2,
+    defaultRowSpan: 7,
+    defaultColumnSpan: 4,
     component: EsdcParticipantQueueWidget,
     title: 'Participant submission queue',
-    description: 'Participants awaiting validation or export.',
+    description: 'Readiness summary, validation, batch XML generation, and participant queue.',
     helpComponent: EsdcParticipantQueueHelp,
     helpTitle: 'Participant queue',
     aiContext: EsdcParticipantQueueHelp.aiContext
   },
-  batch: {
-    id: 'batch',
-    defaultRowSpan: 5,
-    defaultColumnSpan: 2,
-    component: EsdcBatchSubmissionWidget,
-    title: 'Batch submission',
-    description: 'Generate ILMP submission XML for all ready participants.',
-    helpComponent: EsdcBatchSubmissionHelp,
-    helpTitle: 'Batch submission',
-    aiContext: EsdcBatchSubmissionHelp.aiContext
-  },
-  validation: {
-    id: 'validation',
-    defaultRowSpan: 3,
-    defaultColumnSpan: 2,
-    component: EsdcParticipantValidationWidget,
-    title: 'Validation summary',
-    description: 'Coverage and top validation issues.',
-    helpComponent: EsdcParticipantValidationHelp,
-    helpTitle: 'Validation summary',
-    aiContext: EsdcParticipantValidationHelp.aiContext
-  },
   history: {
     id: 'history',
     defaultRowSpan: 5,
-    defaultColumnSpan: 2,
+    defaultColumnSpan: 4,
     component: EsdcParticipantHistoryWidget,
-    title: 'Recent participant submissions',
-    description: 'Latest submissions and outcomes.',
+    title: 'Recent ILMP exports',
+    description: 'Latest batch XML downloads and re-export tools.',
     helpComponent: EsdcParticipantHistoryHelp,
     helpTitle: 'Participant submissions history',
     aiContext: EsdcParticipantHistoryHelp.aiContext
@@ -62,10 +35,7 @@ const widgetRegistry = {
 };
 
 const defaultLayout = [
-  { id: 'queue', rowSpan: 3, columnSpan: 2 },
-  { id: 'validation', rowSpan: 3, columnSpan: 2 },
-  { id: 'batch', rowSpan: 5, columnSpan: 2 },
-  { id: 'history', rowSpan: 5, columnSpan: 2 }
+  { id: 'queue', rowSpan: 7, columnSpan: 4 }
 ];
 
 const exportLayout = items =>

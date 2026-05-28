@@ -7,7 +7,7 @@ Purpose: persistent context for future threads.
 This file is a fast onboarding and handoff document for assistants and developers working in the admin dashboard repo. It should help a new thread start quickly, avoid repeated mistakes, and find the right code/docs/data locations with minimal back-and-forth.
 
 Audience: assistants and developers.
-Last Updated: 2026-05-26
+Last Updated: 2026-05-28
 
 ## Project memory layer
 
@@ -64,7 +64,9 @@ Last Updated: 2026-05-26
 - For PATH finance/reporting wording, distinguish PATH-side program/staff review, export, handoff, and operational follow-up from external Finance/Sage work. Do not frame PATH as the day-to-day system used by NWAC Finance staff unless Bill explicitly confirms that operating model has changed.
 - For admin `Ask the AI` chatbot quality, retrieval, or knowledge-base work, read `docs/planning/admin-ai-chatbot-knowledge-base-transformation.md`, `docs/planning/admin-ai-chatbot-coverage-register.md`, `docs/testing/admin-ai-chatbot-evals.md`, and `docs/features/admin-ai-guidance.md` before changing prompts, guidance rows, evals, or model/runtime behavior.
 - For browser-level workflow smokes, especially approval/assessment/letter workflows, read `docs/testing/browser-workflow-smoke-automation.md` before inventing one-off manual browser testing. Prefer DB/API fixture automation plus authenticated browser assertions and cleanup evidence.
+- For dashboard/widget spot checks, always include a runaway request/render-loop check. Open the changed dashboard with DevTools or browser automation network capture and verify that steady-state API calls settle after initial load and intentional polling only. This is a recurring PATH failure mode, especially when inline objects/arrays/functions such as sort descriptors, filters, payloads, or palette items are passed into hook dependencies and cause `useEffect`/`useCallback` refetch loops with aborted requests.
 - Keep doc updates in the same change when behavior or structure changes.
+- For local DEV dashboard/API work, source-level tests are not enough. After changing a widget's API call shape or the backend route that serves it, smoke the actual local endpoint shape the UI will call before saying the work is done. For protected APIs, an unauthenticated `401 Missing bearer token` is acceptable evidence that the route is up and not crashing; use an authenticated browser/API check when validating returned data or UI behavior.
 - If blocked by tooling, permissions, or environment access, call it out immediately.
 - For TEST/PROD deploys, apply the deployment runbook as an execution checklist, not as background reading. PROD deploys require explicit Bill approval in the current thread before running the deploy, even when a fix is prepared and tested. Before `path:deploy`, state the maintenance sequence being used. If the deploy will restart admin/portal processes, refresh ASG instances, reinstall dependencies, change target routing, or otherwise risk a raw `502 Bad Gateway`, set the scoped in-app warning, wait through the warning window when practical, then enable the ALB fixed-response maintenance fallback before starting the deploy. Clear fallback only after smoke is green, then clear the warning. For PROD bug/CR releases, the deploy is not complete until the affected live feedback reports have current status, status history, and internal notes after targeted recheck.
 

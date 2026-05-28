@@ -1015,12 +1015,7 @@ const PaymentDetailWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     packetStatusKey === "draft";
   const showRecurringLinesButton = false;
   const canEditPacketLines = !isFinanceView && selectedRequest && packetStatusKey === "draft";
-  const canMarkLinePaid =
-    !isFinanceView &&
-    selectedRequest &&
-    packetStatusKey === "submitted" &&
-    selectedLine &&
-    !["paid", "cancelled"].includes(String(selectedLine.status || "").trim().toLowerCase());
+  const canMarkLinePaid = false;
   const canUploadEvidence = !isFinanceView && packetStatusKey === "draft";
   const canLogFollowUp =
     Boolean(selectedRequest) &&

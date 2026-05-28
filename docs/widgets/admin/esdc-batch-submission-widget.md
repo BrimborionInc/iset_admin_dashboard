@@ -14,13 +14,12 @@ ILMP Reporting
 
 ## Purpose
 
-Generate ILMP submission batches for ready records.
+Historical standalone widget for generating ILMP submission batches for ready records.
 
 ## User Actions (observed)
 
-- Open and inspect widget state for current case/submission/packet context.
-- Use widget controls to progress work for the owning workflow.
-- Navigate to linked records or execute relevant operational actions.
+- Retired from the default `/esdc/participants` dashboard in DEV on 2026-05-27.
+- Use `Generate batch XML` in the Participant submission queue header instead.
 
 ## Inputs / Dependencies
 
@@ -36,5 +35,5 @@ Generate ILMP submission batches for ready records.
 
 ## Current Notes
 
-- Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
-- Add endpoint-level detail and UAT script rows in the next documentation pass.
+- The source file remains in the repo as legacy/reference code, but `EsdcParticipantSubmissionsPage.jsx` no longer registers it in the widget registry.
+- Batch prepare/download endpoints are now invoked by `src/pages/esdc/widgets/EsdcParticipantQueueWidget.jsx`.

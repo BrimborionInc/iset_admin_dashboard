@@ -170,6 +170,10 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const [existingActionPlanModalOpen, setExistingActionPlanModalOpen] = useState(false);
   const [existingInterventionModalOpen, setExistingInterventionModalOpen] = useState(false);
   const [historicalActionWarning, setHistoricalActionWarning] = useState(null);
+  const [accountEmailModalOpen, setAccountEmailModalOpen] = useState(false);
+  const [accountEmailValue, setAccountEmailValue] = useState("");
+  const [accountEmailSaving, setAccountEmailSaving] = useState(false);
+  const [accountEmailError, setAccountEmailError] = useState(null);
   const canonicalRole = toCanonicalRole(currentUser?.role || null);
   const isSystemAdmin = canonicalRole === "System Administrator";
   const isProgramAdmin = canonicalRole === "NWAC Administrator";
@@ -670,6 +674,9 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       items.push({ id: "backload-action-plan", text: "Add existing action plan" });
       items.push({ id: "backload-intervention", text: "Add existing intervention" });
       items.push({ id: "backload-documents", text: "Upload existing documents" });
+    }
+    if (canManagePathAccount && pathAccountStatusKey !== "activated") {
+      items.push({ id: "change-path-account-email", text: "Change PATH account email" });
     }
     if (canManagePathAccount && hasPathAccountEmail && pathAccountStatusKey !== "activated") {
       items.push({
@@ -1184,6 +1191,43 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     watchlistNotes,
   ]);
 
+  const handleAccountEmailSubmit = useCallback(async () => {
+    const clientId = caseData?.client?.id;
+    const nextEmail = accountEmailValue.trim();
+    if (!clientId) {
+      setAccountEmailError("No client is linked to this case.");
+      return;
+    }
+    if (!nextEmail) {
+      setAccountEmailError("Enter the PATH account email address.");
+      return;
+    }
+    setAccountEmailSaving(true);
+    setAccountEmailError(null);
+    try {
+      const response = await apiFetch(`/api/admin/applicants/${clientId}/account-email`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: nextEmail }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.message || payload?.error || "Unable to update the PATH account email.");
+      }
+      setAccountEmailModalOpen(false);
+      setActionError(null);
+      setActionNotice({
+        type: "success",
+        text: "PATH account email updated. Send a new activation email when ready.",
+      });
+      await refresh();
+    } catch (err) {
+      setAccountEmailError(err?.message || "Unable to update the PATH account email.");
+    } finally {
+      setAccountEmailSaving(false);
+    }
+  }, [accountEmailValue, caseData?.client?.id, refresh]);
+
   const handleQuickAction = useCallback(
     async ({ detail }) => {
       if (!detail?.id) return;
@@ -1291,6 +1335,11 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         setWatchlistError(null);
         setWatchlistNotes("");
         setWatchlistModalOpen(true);
+        setActionNotice(null);
+      } else if (detail.id === "change-path-account-email") {
+        setAccountEmailValue(pathAccount?.email || "");
+        setAccountEmailError(null);
+        setAccountEmailModalOpen(true);
         setActionNotice(null);
       } else if (detail.id === "activate-path-account") {
         const clientId = caseData?.client?.id;
@@ -1623,6 +1672,56 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
                 onChange={({ detail }) => setWatchlistNotes(detail.value)}
                 placeholder="Explain why this applicant is watchlisted and what staff should do when a future watchlist hit is reviewed"
                 rows={4}
+              />
+            </FormField>
+          </SpaceBetween>
+        </Modal>
+        <Modal
+          visible={accountEmailModalOpen}
+          onDismiss={() => {
+            if (accountEmailSaving) return;
+            setAccountEmailModalOpen(false);
+            setAccountEmailError(null);
+          }}
+          header="Change PATH account email"
+          closeAriaLabel="Close PATH account email modal"
+          footer={
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button
+                onClick={() => {
+                  if (accountEmailSaving) return;
+                  setAccountEmailModalOpen(false);
+                  setAccountEmailError(null);
+                }}
+                disabled={accountEmailSaving}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                loading={accountEmailSaving}
+                onClick={handleAccountEmailSubmit}
+              >
+                Save
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="s">
+            <Alert type="info">
+              This updates the PATH sign-in account and clears any previous invitation. Send activation again after saving.
+            </Alert>
+            {accountEmailError ? <Alert type="error">{accountEmailError}</Alert> : null}
+            <FormField
+              label="PATH account email"
+              description="Use the email address the participant should use to activate and sign in to PATH."
+            >
+              <Input
+                type="email"
+                value={accountEmailValue}
+                spellcheck={false}
+                disabled={accountEmailSaving}
+                onChange={({ detail }) => setAccountEmailValue(detail.value)}
               />
             </FormField>
           </SpaceBetween>

@@ -14,13 +14,13 @@ ILMP Reporting
 
 ## Purpose
 
-Recent participant submissions and outcomes.
+Optional Recent ILMP exports widget for participant batch audit/re-export work.
 
 ## User Actions (observed)
 
-- Open and inspect widget state for current case/submission/packet context.
-- Use widget controls to progress work for the owning workflow.
-- Navigate to linked records or execute relevant operational actions.
+- Add the widget from the `/esdc/participants` dashboard palette when export audit details are needed.
+- Review generated batch metadata, participants, checksum/size, and XML payload.
+- Mark a batch back to pending when it needs to be regenerated.
 
 ## Inputs / Dependencies
 
@@ -36,5 +36,5 @@ Recent participant submissions and outcomes.
 
 ## Current Notes
 
+- No longer shown in the default `/esdc/participants` layout as of storage key `esdc-participants-layout-v6`; it remains registered as an optional palette widget.
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
-- Add endpoint-level detail and UAT script rows in the next documentation pass.

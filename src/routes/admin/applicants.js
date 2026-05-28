@@ -3,6 +3,7 @@ const router = express.Router();
 
 const { requireRole } = require('../../middleware/authz');
 const {
+  changeApplicantAccountEmail,
   ensureApplicantAccountForClient,
   fetchActorStaffProfileId,
   fetchApplicantAccountRows,
@@ -26,6 +27,8 @@ function sendRouteError(res, err, fallbackError) {
     case 'missing_applicant_pool':
     case 'missing_recipient_email':
     case 'applicant_email_missing':
+    case 'invalid_account_email':
+    case 'account_email_conflict':
     case 'account_not_created':
     case 'account_already_activated':
       return res.status(400).json({ error: code, message });
@@ -119,6 +122,36 @@ router.post(
     } catch (err) {
       console.warn('[admin-applicants] create-account failed:', err?.message || err);
       return sendRouteError(res, err, 'admin_applicant_create_failed');
+    }
+  }
+);
+
+router.patch(
+  '/applicants/:clientId/account-email',
+  requireRole('System Administrator', 'NWAC Administrator', 'Regional Manager', 'ISET Coordinator'),
+  async (req, res) => {
+    try {
+      const pool = getDbPoolFromRequest(req);
+      if (!pool) {
+        return res.status(500).json({ error: 'db_unavailable', message: 'Database pool unavailable.' });
+      }
+
+      const clientId = Number(req.params.clientId);
+      if (!Number.isInteger(clientId) || clientId <= 0) {
+        return res.status(400).json({ error: 'invalid_client_id', message: 'A valid client id is required.' });
+      }
+
+      const actorStaffProfileId = await fetchActorStaffProfileId(pool, req);
+      const row = await changeApplicantAccountEmail(pool, {
+        clientId,
+        email: req.body?.email,
+        actorStaffProfileId,
+        source: 'case_header',
+      });
+      return res.json({ ok: true, user: row });
+    } catch (err) {
+      console.warn('[admin-applicants] account-email failed:', err?.message || err);
+      return sendRouteError(res, err, 'admin_applicant_email_failed');
     }
   }
 );

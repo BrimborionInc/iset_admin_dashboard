@@ -154,6 +154,64 @@ function makePool() {
   };
 }
 
+function makeContentOnlyPool() {
+  const workflowRows = [[{ id: 22, name: 'Content Workflow', status: 'active', workflow_type: 'main-intake' }]];
+  const stepRows = [[
+    { step_id: 501, step_name: 'Instructions', is_start: 1 },
+  ]];
+  const routeRows = [[]];
+  const routeOptionRows = [[]];
+  const componentRowsByStep = new Map([
+    [501, [[
+      {
+        position: 1,
+        template_id: 5001,
+        template_version: 1,
+        tpl_type: 'paragraph',
+        template_key: 'text-block',
+        default_props: JSON.stringify({
+          text: { en: 'Read this before you continue.', fr: 'Lisez ceci avant de continuer.' },
+        }),
+        props_overrides: JSON.stringify({}),
+      },
+      {
+        position: 2,
+        template_id: 5002,
+        template_version: 1,
+        tpl_type: 'inset-text',
+        template_key: 'inset-text',
+        default_props: JSON.stringify({
+          hint: { text: { en: 'Inset text from hint fallback.', fr: 'Texte encadre depuis le conseil.' } },
+        }),
+        props_overrides: JSON.stringify({}),
+      },
+      {
+        position: 3,
+        template_id: 5003,
+        template_version: 1,
+        tpl_type: 'warning-text',
+        template_key: 'warning-text',
+        default_props: JSON.stringify({
+          label: { text: { en: 'Warning text from label fallback.', fr: 'Avertissement depuis le libelle.' } },
+        }),
+        props_overrides: JSON.stringify({}),
+      },
+    ]]],
+  ]);
+
+  return {
+    query: jest.fn(async (sql, params = []) => {
+      const normalized = String(sql).replace(/\s+/g, ' ').trim();
+      if (normalized.includes('FROM iset_intake.workflow WHERE id = ?')) return workflowRows;
+      if (normalized.includes('FROM iset_intake.workflow_step ws')) return stepRows;
+      if (normalized.includes('FROM iset_intake.workflow_route WHERE workflow_id = ?')) return routeRows;
+      if (normalized.includes('FROM iset_intake.workflow_route_option WHERE workflow_id = ?')) return routeOptionRows;
+      if (normalized.includes('FROM iset_intake.step_component sc')) return componentRowsByStep.get(params[0]) || [[]];
+      throw new Error(`Unexpected SQL in test: ${normalized}`);
+    }),
+  };
+}
+
 describe('buildWorkflowSchema branching source keys', () => {
   test('does not reuse the route field key as storageKey for every component on a branched step', async () => {
     const pool = makePool();
@@ -180,5 +238,33 @@ describe('buildWorkflowSchema branching source keys', () => {
     expect(longTermGoal.type).toBe('character-count');
     expect(barriers.type).toBe('checkboxes');
     expect(targetProgram.type).toBe('radio');
+  });
+});
+
+describe('buildWorkflowSchema content-only fallbacks', () => {
+  test('normalizes text-only components without requiring labels', async () => {
+    const pool = makeContentOnlyPool();
+    const result = await buildWorkflowSchema({ pool, workflowId: 22 });
+    const instructionStep = result.steps.find((step) => step.title?.en === 'Instructions');
+
+    expect(instructionStep).toBeTruthy();
+    expect(instructionStep.components).toHaveLength(3);
+
+    const paragraph = instructionStep.components.find((component) => component.type === 'paragraph');
+    const insetText = instructionStep.components.find((component) => component.type === 'inset-text');
+    const warningText = instructionStep.components.find((component) => component.type === 'warning-text');
+
+    expect(paragraph.text).toEqual({
+      en: 'Read this before you continue.',
+      fr: 'Lisez ceci avant de continuer.',
+    });
+    expect(insetText.text).toEqual({
+      en: 'Inset text from hint fallback.',
+      fr: 'Texte encadre depuis le conseil.',
+    });
+    expect(warningText.text).toEqual({
+      en: 'Warning text from label fallback.',
+      fr: 'Avertissement depuis le libelle.',
+    });
   });
 });

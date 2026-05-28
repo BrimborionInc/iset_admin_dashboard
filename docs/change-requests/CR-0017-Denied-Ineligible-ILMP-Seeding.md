@@ -2,7 +2,13 @@
 
 Status: Superseded by all-denial reporting seed / Forward change implemented
 Owner: Codex + Bill
-Last updated: 2026-05-20
+Last updated: 2026-05-27
+
+## 2026-05-27 update: education mapping hardening
+
+The denied-reporting generator now maps applicant education through a shared ILMP normalizer that accepts both raw intake option keys and display labels. This prevents values such as `highest-education = bachelors_degree` from being transformed into a label variant that fails ILMP code mapping. Reporting-only denial action plans continue to set action-plan result education to the same code as action-plan start education.
+
+PROD follow-up on 2026-05-27 repaired case `MI-MOD8SONV-D56651` / action plan `55` with guarded script `sql/ops/prod-fix-denied-reporting-plan55-result-education-20260527.sql`, setting result education to ILMP code `10` to match the existing bachelor's-degree start education. Post-repair verification found all 13 PROD denied-reporting plans have valid agreement, EI claimant, start education, and result education fields.
 
 ## 2026-05-20 update: all-denial forward seed
 

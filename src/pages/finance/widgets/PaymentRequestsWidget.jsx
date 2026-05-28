@@ -71,6 +71,7 @@ const SUPPORT_TYPE_LABELS = {
   BooksMaterialsDirect: "Books and materials (direct)",
   BooksMaterialsReimbursement: "Books and materials (reimbursement)",
   LivingAllowance: "Living allowance",
+  ResidenceCost: "Residence costs",
   Childcare: "Childcare",
   Transportation: "Transportation",
   SpecializedEquipmentAdvance: "Specialized equipment (advance)",
@@ -85,6 +86,12 @@ const PAYMENT_TYPE_ALIASES = {
   livingallowance: "LivingAllowance",
   livingallowances: "LivingAllowance",
   monthlylivingallowance: "LivingAllowance",
+  residencecost: "ResidenceCost",
+  residencecosts: "ResidenceCost",
+  residencefee: "ResidenceCost",
+  residencefees: "ResidenceCost",
+  residence: "ResidenceCost",
+  housing: "ResidenceCost",
   tuitionfeesdirect: "TuitionFeesDirect",
   tuitiondirect: "TuitionFeesDirect",
   tuitionfees: "TuitionFeesDirect",
@@ -140,6 +147,7 @@ const PAYEE_TYPE_ALIASES = {
 
 const DEFAULT_PAYEE_TYPE_BY_PAYMENT_TYPE = {
   LivingAllowance: "ParticipantClient",
+  ResidenceCost: "AccreditedEducationalTrainingInstitution",
   TuitionFeesReimbursement: "ParticipantClient",
   SpecializedEquipmentReimbursement: "ParticipantClient",
   Transportation: "ParticipantClient",

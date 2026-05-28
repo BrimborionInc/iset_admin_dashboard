@@ -14,13 +14,11 @@ ILMP Reporting
 
 ## Purpose
 
-High-level validation coverage and error concentrations.
+Retired from the default `/esdc/participants` dashboard in DEV on 2026-05-27. Its readiness counts and bulk `Validate all` action moved into `EsdcParticipantQueueWidget.jsx` so the participant submissions page has one combined validation/queue/export surface.
 
 ## User Actions (observed)
 
-- Open and inspect widget state for current case/submission/packet context.
-- Use widget controls to progress work for the owning workflow.
-- Navigate to linked records or execute relevant operational actions.
+- Historical reference only unless this standalone widget is deliberately reintroduced.
 
 ## Inputs / Dependencies
 
@@ -36,5 +34,4 @@ High-level validation coverage and error concentrations.
 
 ## Current Notes
 
-- Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
-- Add endpoint-level detail and UAT script rows in the next documentation pass.
+- Current participant dashboard documentation lives in `docs/widgets/admin/esdc-participant-submission-queue-widget.md`.

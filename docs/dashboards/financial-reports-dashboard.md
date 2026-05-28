@@ -2,7 +2,7 @@
 
 Purpose: capture the current live behavior of `Budgets and Finance > Financial Reports` so future threads can extend the finance-reporting surface without reverse-engineering the page and endpoints from code.
 Audience: admin dashboard engineers, finance/reporting reviewers, and product owners.
-Last Updated: 2026-05-26
+Last Updated: 2026-05-28
 
 ## Scope
 
@@ -18,7 +18,7 @@ Last Updated: 2026-05-26
 - This page is the Budgets and Finance reporting surface for the annual `ISET Advances and Active Clients` report.
 - The live view is an approved-funding report, not a live payments ledger.
 - Approved funding is based on intervention approval timing and approved expense.
-- Intervention detail defaults to funded interventions only so zero-dollar approved interventions, such as Employment counselling or Career research & exploration, do not clutter the advances view. Staff can switch the row-scope selector to all approved interventions when they need to review those rows.
+- Intervention detail defaults to funded interventions only so zero-dollar reportable rows do not clutter the advances view. Staff can switch the row-scope selector to all reportable interventions when they need to review zero-dollar rows, including denied-application reporting records.
 - Payment follow-up status is shown beside each intervention so staff can see whether the related packet work is still draft, ready to send, sent to finance, needs follow-up, reported paid, confirmed by evidence, stale/no response, or cancelled.
 - An optional `Include carry-over` toggle adds a best-effort cross-fiscal estimate using payment-line dates when available and the intervention schedule as fallback.
 - User-facing guidance is structured as an approved-funding review job aid: set report scope, read the summary and regional totals, inspect intervention detail, use carry-over only when needed, export the current visible rows, and check filters/approval basis before investigating a number that looks wrong.
@@ -30,7 +30,7 @@ Last Updated: 2026-05-26
 - Include carry-over
 - Intervention detail row scope:
   - `Funded interventions only` (default)
-  - `All approved interventions`
+  - `All reportable interventions`
 - Local detail-table text filter
 - Intervention detail table preferences for visible columns and stored column widths
 - Intervention detail sorting on all visible columns
@@ -58,7 +58,7 @@ Last Updated: 2026-05-26
   - CRF advances
   - EI advances
   - funded client count
-  - funded intervention count as a separate card in the default row scope; the card changes to approved interventions when staff switch to all approved rows
+  - funded intervention count as a separate card in the default row scope; the card changes to reportable interventions when staff switch to all reportable rows
 - Optional carry-over summary section with:
   - carry-over from prior FY
   - carry-over to next FY
@@ -78,7 +78,7 @@ Last Updated: 2026-05-26
 ## Excel export
 
 - The page exports the currently filtered dataset, including the local text filter.
-- The export uses the current intervention row scope, so the default workbook excludes zero-dollar approved interventions unless staff switch to all approved interventions first.
+- The export uses the current intervention row scope, so the default workbook excludes zero-dollar rows unless staff switch to all reportable interventions first.
 - Workbook layout:
   - `Summary`
   - `CRF Detail`

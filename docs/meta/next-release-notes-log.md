@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-05-26
+Last Updated: 2026-05-28
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -28,10 +28,22 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - 2026-05-26 | Release 20260526-prod-snapshot-scope-guard | Fix/Reporting | Regional Snapshot | Regional Snapshot funding and funded-client totals now use the same approved-funding and participant-home-province basis as Financial Reports. | Fixes the BC FY 2026/27 snapshot showing zero CRF/EI funding because it was reading payment-packet lines by case portfolio region instead of approved intervention funding by participant home province.
 - 2026-05-26 | Release 20260526-prod-snapshot-scope-guard | UX/Help | Financial Reports | Financial Reports guidance is now organized around the report user's workflow. | The page explains approval-year scope, participant-home-region filtering, funded-client and funded-intervention totals, carry-over estimates, export scope, and the first checks to make when a number looks wrong, while keeping PATH-side review separate from external Finance/Sage work.
 - 2026-05-26 | Release 20260526-prod-snapshot-scope-guard | Security/Public Portal | Applicant ownership checks | Applicant portal messaging, signing, status, and intervention routes now reject application/case context when the signed-in applicant account is linked to a different client than the application or case. | Normal same-client records continue to work; mismatched legacy duplicate-account rows fail closed instead of surfacing another client file.
+- 2026-05-27 | Release 20260527-prod-casework-ilmp-hotfix | Fix/Applicant Accounts | PATH account email correction | Case Header can now change an unactivated participant's PATH account email before staff resend activation. | The correction repoints the client account, local portal user, and Cognito identity, clears previous invitation state, updates client contact email, and records an applicant-account audit event.
+- 2026-05-27 | Release TBD | Fix/Casework | Action plan closeout edits | Closed action plan details now save closeout corrections, including Action Plan Result Education Level. | The fix also keeps action-plan activation from leaving stale ESDC closeout data and prevents stale intervention close notes from reappearing after save.
+- 2026-05-27 | Release TBD | Fix/ILMP | Denied application reporting | Denied-application reporting records now map applicant education consistently from intake answers into ILMP start and result education fields. | Covers raw intake values and displayed labels such as bachelor's degree, preventing reporting-only denial plans from losing result education during automatic creation or resync.
+- 2026-05-27 | Release TBD | Fix/Casework | Intervention revisions | Long intervention schedules no longer fail save because the derived ILMP duration exceeds 999 days. | PATH preserves the real start/end dates and caps only the stored/reportable duration field required by ILMP.
+- 2026-05-27 | Release TBD | Fix/ILMP | Participant submission queue | The ILMP Participant submission queue now paginates and sorts correctly when results are grouped by participant/client. | Page 1 can still show 10 rows, but the pagination total now reflects the full ready/needs-review/blocked queue; column sorting applies to the full filtered queue before pagination.
+- 2026-05-27 | Release TBD | Fix/Casework | Intervention outcomes | Intervention outcomes are now recorded only when an intervention is closed. | Editing an open intervention clears stale synthetic outcome data instead of saving an in-progress placeholder, the backend blocks outcome saves on open interventions, and closeout now requires staff to choose the final ESDC outcome explicitly.
+- 2026-05-27 | Release TBD | Fix/Casework | Action plan/intervention modals | Action plan details and intervention data mapping now avoid hidden-field and identifier mix-ups. | The action plan details modal no longer validates an invisible agreement-number field, validation opens the relevant details section, and intervention budget pot IDs are no longer confused with funding stream codes.
+- 2026-05-27 | Release TBD | Fix/Casework | Residence cost corrections | Intervention cost lines can now be corrected from Living Allowance to Residence Costs without deleting and rebuilding the line. | Residence Costs are wired into fallback payment maps and payment requests; changing from a recurring cost item to an intervention-start cost item no longer carries installments forward accidentally.
+- 2026-05-27 | Release TBD | UX/ILMP | Participant submission queue | The ILMP participant queue now combines validation counts, Validate all, batch XML generation, and the queue table in one widget. | Readiness counts use bucket-style cards; the batch modal removes the XML preview and fake download-path field, using the browser's native save dialog where available; participant names are links on the main row, validation details appear without expanding single-row participants, expanded rows are reserved for participants with multiple submission/action-plan rows, and Recent ILMP exports remains available from the dashboard palette when audit/re-export details are needed.
+- 2026-05-28 | Release TBD | Fix/Workflow | Workflow publishing | Workflow Preview and Publish no longer fail on instruction-only components that do not have explicit labels. | Paragraph, inset-text, and warning-text fallback text now uses the normalized label/hint values and preserves bilingual fallback copy.
+- 2026-05-28 | Release TBD | Fix/Payments | Payment follow-up | Submitted payment packets no longer show the old line-level `Mark paid` action. | Staff should use the payment follow-up workflow for operations-side status updates after a packet is sent to Finance.
+- 2026-05-28 | Release TBD | UX/Finance Reports | Intervention detail row scope | Financial Reports now labels the zero-dollar row option as `All reportable interventions`. | The hint text clarifies that this includes zero-dollar rows, including denied-application reporting records, rather than only approved applications.
 - 2026-05-23 | Release TBD | Fix/Payments | Finance emails | Finance payment-packet emails include a seven-day download link for the packet evidence bundle. | The link downloads through PATH instead of a direct S3/MinIO presign, so it works with DEV/local storage and object-store deployments; the zip contains supporting evidence files only, without packet-summary PDF or JSON manifest files.
 - 2026-05-23 | Release TBD | Config/Payments | Payment packet evidence | Payment packets now require only the Client Funding Agreement and the signed EFT banking form as baseline evidence. | The new signed EFT evidence type maps to the existing `EFT_form` document type, and the runtime-config update preserves existing per-payment-type evidence rules.
 - 2026-05-23 | Release TBD | UX/Finance Settings | Finance email preview | Finance Settings now includes a read-only preview of the finance payment-packet email. | The preview uses sample packet data rendered through the same backend email builder used for real submissions, including placeholder packet-bundle wording.
-- 2026-05-24 | Release TBD | UX/Finance Reports | ISET Advances and Active Clients | Financial Reports now opens with a cleaner funded-interventions view and better intervention-detail controls. | The detail table defaults to funded interventions only, can be switched to all approved interventions, hides reference-number clutter under participant names, shows CRF/EI and approved funding near the front, and supports column selection, column resizing, and sorting.
+- 2026-05-24 | Release TBD | UX/Finance Reports | ISET Advances and Active Clients | Financial Reports now opens with a cleaner funded-interventions view and better intervention-detail controls. | The detail table defaults to funded interventions only, can be switched to all reportable interventions, hides reference-number clutter under participant names, shows CRF/EI and approved funding near the front, and supports column selection, column resizing, and sorting.
 - 2026-05-24 | Release TBD | UX/Help | Financial Reports | Financial Reports help now reads as staff-facing guidance instead of implementation notes. | The page has section-level info for setup, summary, carry-over, region summary, and intervention detail, plus seeded AI help coverage for the annual report purpose, export scope, and PATH-versus-Sage payment-status caveat.
 - 2026-05-01 | Release TBD | Notifications | Manage Notifications | Staff email notification settings now apply to non-assignment events, with NWAC review split by approval, denial, and changes-requested outcomes. | Enabled staff rows with `email_alert=1` and a template send through SES once per deduped recipient; assignment emails keep their existing behavior, and TEST remains blocked from real sends.
 
@@ -346,8 +358,23 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Intervention planned-cost fields now accept normal dollars-and-cents amounts.
 - Supporting Documents uploads now work on case files where an older application has an unsafe applicant-account link.
 - Applicant portal case/status/message routes now double-check that the signed-in account belongs to the same client as the application and case being shown.
+- Closed action plan details now save closeout corrections such as Action Plan Result Education Level.
+- Long intervention schedules no longer fail save because the ILMP duration field is capped while real start/end dates are preserved.
+- Case Header can now change an unactivated PATH account email before resending activation.
+- Workflow Preview and Publish no longer fail on instruction-only components without explicit labels.
+- Submitted payment packets no longer show the old line-level `Mark paid` action.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260527-prod-casework-ilmp-hotfix
+
+- Case Header can now change an unactivated PATH account email before staff resend activation.
+- Closed action plan details now save closeout corrections such as Action Plan Result Education Level.
+- Long intervention schedules no longer fail save because PATH caps only the ILMP duration field while preserving the real start/end dates.
+- Intervention outcomes are recorded only when an intervention is closed, and closeout now requires staff to choose the final ESDC outcome explicitly.
+- Intervention cost lines can be corrected from Living Allowance to Residence Costs without deleting and rebuilding the line.
+- The ILMP Participant submission queue now paginates, sorts, validates, and batches participant rows in one consolidated widget.
+- Denied application reporting records now map applicant education consistently into ILMP start and result education fields.
 
 #### Release 20260526-prod-snapshot-scope-guard
 
@@ -359,7 +386,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 #### Release 20260525-prod-bugcr-batch
 
-- Financial Reports now defaults Intervention detail to funded interventions only, with an option to include all approved interventions when zero-dollar counselling or career-research rows need review.
+- Financial Reports now defaults Intervention detail to funded interventions only, with an option to include all reportable interventions when zero-dollar counselling, career-research, or denied-application reporting rows need review.
 - The Financial Reports detail table now hides reference-number clutter under participant names, shows CRF/EI and approved funding near the front, and supports column selection, resizing, and sorting.
 - Regional Snapshot now uses the same approved CRF/EI funding and participant-home-province rules as Financial Reports for funding and funded-client totals.
 - Financial Reports help now includes section-level guidance and AI-help coverage for the annual report purpose, export scope, and PATH-versus-Sage payment-status caveat.
@@ -367,14 +394,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Finance payment-packet emails now include a seven-day download link for the packet evidence bundle.
 - Payment packets now require only the Client Funding Agreement and the signed EFT banking form as baseline evidence.
 - Finance Settings now shows a read-only preview of the payment-packet email sent to Finance.
-
-#### Release 20260522-prod-document-upload-scope
-
-- Fixed a bug where some denied applications could still appear in active application lists after the denial letter was sent.
-- Improved denied application reporting records so ILMP validation has the required agreement and education fields.
-- Withdrawn applications now create the reporting-only action plan and two completed interventions needed for ILMP reporting.
-- Intervention planned-cost fields now accept normal dollars-and-cents amounts.
-- Supporting Documents uploads now work on case files where an older application has an unsafe applicant-account link.
 
 ### Known Bugs (draft bullets - EN)
 
@@ -394,8 +413,23 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les champs de cout prevu des interventions acceptent maintenant les montants courants en dollars et cents.
 - Les televersements dans Supporting Documents fonctionnent maintenant pour les dossiers ou une ancienne demande a un lien de compte client non securitaire.
 - Le portail applicant verifie maintenant que le compte connecte appartient au meme client que la demande et le dossier affiches.
+- Les details d'un plan d'action ferme enregistrent maintenant les corrections de cloture comme le niveau d'education du resultat.
+- Les longues periodes d'intervention ne bloquent plus l'enregistrement; PATH limite seulement le champ de duree ILMP et conserve les vraies dates de debut et de fin.
+- Case Header permet maintenant de corriger le courriel d'un compte PATH non active avant de renvoyer l'activation.
+- Workflow Preview et Publish ne bloquent plus sur les composants d'instructions sans libelle explicite.
+- Les packets de paiement envoyes n'affichent plus l'ancienne action `Mark paid` au niveau de la ligne.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260527-prod-casework-ilmp-hotfix
+
+- Case Header permet maintenant de corriger le courriel d'un compte PATH non active avant que le personnel renvoie l'activation.
+- Les details d'un plan d'action ferme enregistrent maintenant les corrections de cloture comme le niveau d'education du resultat.
+- Les longues periodes d'intervention ne bloquent plus l'enregistrement; PATH limite seulement le champ de duree ILMP et conserve les vraies dates de debut et de fin.
+- Les resultats d'intervention sont enregistres seulement quand une intervention est fermee, et la cloture exige maintenant le choix explicite du resultat ESDC final.
+- Les lignes de cout d'intervention peuvent etre corrigees de Living Allowance vers Residence Costs sans supprimer et reconstruire la ligne.
+- La file ILMP Participant regroupe maintenant pagination, tri, validation et generation de lots dans un seul widget.
+- Les dossiers de reporting des demandes refusees mappent maintenant l'education de la participante ou du participant de facon coherente vers les champs ILMP de debut et de resultat.
 
 #### Release 20260526-prod-snapshot-scope-guard
 
@@ -415,14 +449,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les courriels de packet de paiement incluent maintenant un lien de telechargement valide sept jours pour le paquet de pieces justificatives.
 - Les packets de paiement exigent maintenant seulement le Client Funding Agreement et le formulaire bancaire EFT signe comme pieces justificatives de base.
 - Finance Settings affiche maintenant un apercu en lecture seule du courriel de packet de paiement envoye aux Finances.
-
-#### Release 20260522-prod-document-upload-scope
-
-- Correction d'un probleme ou certaines demandes refusees pouvaient encore apparaitre dans les listes actives apres l'envoi de la lettre de refus.
-- Amelioration des dossiers de reporting des demandes refusees afin que la validation ILMP ait les champs d'entente et d'education requis.
-- Les demandes retirees creent maintenant le plan d'action reserve au reporting et les deux interventions completees requis pour le reporting ILMP.
-- Les champs de cout prevu des interventions acceptent maintenant les montants courants en dollars et cents.
-- Les televersements dans Supporting Documents fonctionnent maintenant pour les dossiers ou une ancienne demande a un lien de compte client non securitaire.
 
 ### Problemes connus (brouillon - FR)
 

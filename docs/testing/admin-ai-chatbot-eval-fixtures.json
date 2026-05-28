@@ -308,14 +308,14 @@
       "approval date",
       "funded clients",
       "Funded interventions only",
-      "All approved interventions",
+      "All reportable interventions",
       "PATH payment follow-up",
       "Excel"
     ],
     "forbiddenPatterns": [
       "Sage ledger",
       "actual paid ledger",
-      "all approved interventions are shown by default",
+      "all reportable interventions are shown by default",
       "finance staff use PATH",
       "finance team uses PATH"
     ],
