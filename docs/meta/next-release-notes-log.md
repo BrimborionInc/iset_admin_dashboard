@@ -28,6 +28,10 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - 2026-05-26 | Release 20260526-prod-snapshot-scope-guard | Fix/Reporting | Regional Snapshot | Regional Snapshot funding and funded-client totals now use the same approved-funding and participant-home-province basis as Financial Reports. | Fixes the BC FY 2026/27 snapshot showing zero CRF/EI funding because it was reading payment-packet lines by case portfolio region instead of approved intervention funding by participant home province.
 - 2026-05-26 | Release 20260526-prod-snapshot-scope-guard | UX/Help | Financial Reports | Financial Reports guidance is now organized around the report user's workflow. | The page explains approval-year scope, participant-home-region filtering, funded-client and funded-intervention totals, carry-over estimates, export scope, and the first checks to make when a number looks wrong, while keeping PATH-side review separate from external Finance/Sage work.
 - 2026-05-26 | Release 20260526-prod-snapshot-scope-guard | Security/Public Portal | Applicant ownership checks | Applicant portal messaging, signing, status, and intervention routes now reject application/case context when the signed-in applicant account is linked to a different client than the application or case. | Normal same-client records continue to work; mismatched legacy duplicate-account rows fail closed instead of surfacing another client file.
+- 2026-05-28 | Release 20260528-evening-batch | UX/ILMP | Recent export history | Recent ILMP exports now uses a compact history table and flat selected-export tabs instead of nested detail containers. | Staff see downloaded/export wording for the manual ESDC upload workflow, with recorded file path/name, downloader display name, Summary/Clients exported/XML tabs, mark-exported batch wording, and a clearer Requeue action.
+- 2026-05-28 | Release 20260528-evening-batch | Fix/Documents | Supporting Documents labels | Inline edits to document labels now save as simple renames without changing document attachment scope. | This fixes identity/status document labels snapping back when older uploaded documents are visible in the file but do not have all modern scope columns populated. The edit-details and duplicate-document modal paths also send current workspace context for client-scoped documents without making staff attach those documents to an application.
+- 2026-05-28 | Release 20260528-evening-batch | UX/Help | ILMP Submissions & Exports | ILMP export help and Ask the AI guidance now explain the participant XML workflow as export/download plus manual ESDC upload. | The help covers Validate all, Generate batch XML, exported-client history, downloader display names, stored XML snapshots, and Requeue behavior without implying PATH submits participant XML directly to ESDC.
+- 2026-05-28 | Release 20260528-evening-batch | Fix/ILMP | Participant validation | ILMP readiness now accepts the mixed-separator intake barrier key `lack_of_job-opportunities`. | This maps to the existing marketable-skills barrier code and clears the false invalid-barrier blocker seen on case `ISET-20260508-0418E2`.
 - 2026-05-27 | Release 20260527-prod-casework-ilmp-hotfix | Fix/Applicant Accounts | PATH account email correction | Case Header can now change an unactivated participant's PATH account email before staff resend activation. | The correction repoints the client account, local portal user, and Cognito identity, clears previous invitation state, updates client contact email, and records an applicant-account audit event.
 - 2026-05-27 | Release TBD | Fix/Casework | Action plan closeout edits | Closed action plan details now save closeout corrections, including Action Plan Result Education Level. | The fix also keeps action-plan activation from leaving stale ESDC closeout data and prevents stale intervention close notes from reappearing after save.
 - 2026-05-27 | Release TBD | Fix/ILMP | Denied application reporting | Denied-application reporting records now map applicant education consistently from intake answers into ILMP start and result education fields. | Covers raw intake values and displayed labels such as bachelor's degree, preventing reporting-only denial plans from losing result education during automatic creation or resync.
@@ -37,9 +41,9 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - 2026-05-27 | Release TBD | Fix/Casework | Action plan/intervention modals | Action plan details and intervention data mapping now avoid hidden-field and identifier mix-ups. | The action plan details modal no longer validates an invisible agreement-number field, validation opens the relevant details section, and intervention budget pot IDs are no longer confused with funding stream codes.
 - 2026-05-27 | Release TBD | Fix/Casework | Residence cost corrections | Intervention cost lines can now be corrected from Living Allowance to Residence Costs without deleting and rebuilding the line. | Residence Costs are wired into fallback payment maps and payment requests; changing from a recurring cost item to an intervention-start cost item no longer carries installments forward accidentally.
 - 2026-05-27 | Release TBD | UX/ILMP | Participant submission queue | The ILMP participant queue now combines validation counts, Validate all, batch XML generation, and the queue table in one widget. | Readiness counts use bucket-style cards; the batch modal removes the XML preview and fake download-path field, using the browser's native save dialog where available; participant names are links on the main row, validation details appear without expanding single-row participants, expanded rows are reserved for participants with multiple submission/action-plan rows, and Recent ILMP exports remains available from the dashboard palette when audit/re-export details are needed.
-- 2026-05-28 | Release TBD | Fix/Workflow | Workflow publishing | Workflow Preview and Publish no longer fail on instruction-only components that do not have explicit labels. | Paragraph, inset-text, and warning-text fallback text now uses the normalized label/hint values and preserves bilingual fallback copy.
-- 2026-05-28 | Release TBD | Fix/Payments | Payment follow-up | Submitted payment packets no longer show the old line-level `Mark paid` action. | Staff should use the payment follow-up workflow for operations-side status updates after a packet is sent to Finance.
-- 2026-05-28 | Release TBD | UX/Finance Reports | Intervention detail row scope | Financial Reports now labels the zero-dollar row option as `All reportable interventions`. | The hint text clarifies that this includes zero-dollar rows, including denied-application reporting records, rather than only approved applications.
+- 2026-05-28 | Release 20260528-evening-batch | Fix/Workflow | Workflow publishing | Workflow Preview and Publish no longer fail on instruction-only components that do not have explicit labels. | Paragraph, inset-text, and warning-text fallback text now uses the normalized label/hint values and preserves bilingual fallback copy.
+- 2026-05-28 | Release 20260528-evening-batch | Fix/Payments | Payment follow-up | Submitted payment packets no longer show the old line-level `Mark paid` action. | Staff should use the payment follow-up workflow for operations-side status updates after a packet is sent to Finance.
+- 2026-05-28 | Release 20260528-evening-batch | UX/Finance Reports | Intervention detail row scope | Financial Reports now labels the zero-dollar row option as `All reportable interventions` and shows `PATH follow-up state` by default in Intervention detail. | The hint text clarifies that this includes zero-dollar rows, including denied-application reporting records, rather than only approved applications, and the payment/follow-up column is explicit PATH operational follow-up rather than Sage authority.
 - 2026-05-23 | Release TBD | Fix/Payments | Finance emails | Finance payment-packet emails include a seven-day download link for the packet evidence bundle. | The link downloads through PATH instead of a direct S3/MinIO presign, so it works with DEV/local storage and object-store deployments; the zip contains supporting evidence files only, without packet-summary PDF or JSON manifest files.
 - 2026-05-23 | Release TBD | Config/Payments | Payment packet evidence | Payment packets now require only the Client Funding Agreement and the signed EFT banking form as baseline evidence. | The new signed EFT evidence type maps to the existing `EFT_form` document type, and the runtime-config update preserves existing per-payment-type evidence rules.
 - 2026-05-23 | Release TBD | UX/Finance Settings | Finance email preview | Finance Settings now includes a read-only preview of the finance payment-packet email. | The preview uses sample packet data rendered through the same backend email builder used for real submissions, including placeholder packet-bundle wording.
@@ -346,25 +350,27 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Financial Reports now opens with a cleaner funded-interventions view and better intervention-detail controls.
-- Manage ISET Applications and ISET Clients now include `Show All` page-size options and sort full filtered results before pagination.
-- Regional Snapshot funding and funded-client totals now align with Financial Reports for approved CRF/EI funding by participant home province.
-- Other funders can now be marked confirmed, pending, denied, or unknown, with optional amount and notes.
-- Financial Reports help now gives staff-facing guidance for the annual ISET Advances and Active Clients report.
-- Fixed a bug where some denied applications could still appear in active application lists after the denial letter was sent.
-- Finance Settings now shows a read-only preview of the payment-packet email sent to Finance.
-- Improved denied and withdrawn application reporting records so ILMP validation has the required agreement and education fields.
-- Withdrawn applications now create the reporting-only action plan and two completed interventions needed for ILMP reporting.
-- Intervention planned-cost fields now accept normal dollars-and-cents amounts.
-- Supporting Documents uploads now work on case files where an older application has an unsafe applicant-account link.
-- Applicant portal case/status/message routes now double-check that the signed-in account belongs to the same client as the application and case being shown.
-- Closed action plan details now save closeout corrections such as Action Plan Result Education Level.
-- Long intervention schedules no longer fail save because the ILMP duration field is capped while real start/end dates are preserved.
-- Case Header can now change an unactivated PATH account email before resending activation.
+- Supporting Documents label edits now save reliably for identity/status documents and older uploaded rows.
+- Edit document details and duplicate-document saves now preserve client document scope without asking staff to attach identity/status documents to an application.
+- Recent ILMP exports now shows a compact export history with Summary, Clients exported, and XML tabs.
+- ILMP export wording now reflects the real workflow: PATH downloads XML for manual upload to ESDC and records the export in history.
+- ILMP validation now accepts the mixed-separator `lack_of_job-opportunities` barrier value.
 - Workflow Preview and Publish no longer fail on instruction-only components without explicit labels.
 - Submitted payment packets no longer show the old line-level `Mark paid` action.
+- Financial Reports now labels the zero-dollar intervention option as `All reportable interventions` and shows `PATH follow-up state` by default.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260528-evening-batch
+
+- Supporting Documents label edits now save as simple renames without changing document scope, including identity/status documents and older uploaded rows.
+- Edit document details and duplicate-document saves now send the current file context for client-scoped documents without asking staff to attach those documents to an application.
+- Recent ILMP exports now uses a compact history table with Summary, Clients exported, and XML tabs, including recorded file path/name and downloader display name.
+- ILMP batch actions and help now use export/download/manual-upload wording so staff know PATH records the XML export but does not upload it to ESDC.
+- ILMP readiness now recognizes the mixed-separator `lack_of_job-opportunities` barrier value.
+- Workflow Preview and Publish no longer fail on instruction-only components that do not have explicit labels.
+- Submitted payment packets no longer show the retired line-level `Mark paid` action.
+- Financial Reports now labels the zero-dollar intervention option as `All reportable interventions` and shows `PATH follow-up state` by default.
 
 #### Release 20260527-prod-casework-ilmp-hotfix
 
@@ -384,42 +390,33 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Applicant portal message, signing, status, and intervention routes now double-check that the signed-in account belongs to the same client as the application and case being shown.
 - Applicant session-audit writes now match the deployed `user_session_audit` table shape and prune old rows with bounded retention.
 
-#### Release 20260525-prod-bugcr-batch
-
-- Financial Reports now defaults Intervention detail to funded interventions only, with an option to include all reportable interventions when zero-dollar counselling, career-research, or denied-application reporting rows need review.
-- The Financial Reports detail table now hides reference-number clutter under participant names, shows CRF/EI and approved funding near the front, and supports column selection, resizing, and sorting.
-- Regional Snapshot now uses the same approved CRF/EI funding and participant-home-province rules as Financial Reports for funding and funded-client totals.
-- Financial Reports help now includes section-level guidance and AI-help coverage for the annual report purpose, export scope, and PATH-versus-Sage payment-status caveat.
-- Other funders can now be marked confirmed, pending, denied, or unknown; only confirmed other funders require coverage details and generate other-funder letters.
-- Finance payment-packet emails now include a seven-day download link for the packet evidence bundle.
-- Payment packets now require only the Client Funding Agreement and the signed EFT banking form as baseline evidence.
-- Finance Settings now shows a read-only preview of the payment-packet email sent to Finance.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
-- Financial Reports s'ouvre maintenant avec une vue plus claire des interventions financees et de meilleurs controles de detail.
-- Manage ISET Applications et ISET Clients incluent maintenant l'option `Show All` et trient tous les resultats filtres avant la pagination.
-- Regional Snapshot aligne maintenant le financement et le nombre de clients finances avec les regles de Financial Reports, selon le financement CRF/EI approuve et la province de residence.
-- Les autres bailleurs de fonds peuvent maintenant etre marques comme confirmes, en attente, refuses ou inconnus, avec montant et notes facultatifs.
-- L'aide de Financial Reports donne maintenant des consignes pratiques pour le rapport annuel ISET Advances and Active Clients.
-- Correction d'un probleme ou certaines demandes refusees pouvaient encore apparaitre dans les listes actives apres l'envoi de la lettre de refus.
-- Finance Settings affiche maintenant un apercu en lecture seule du courriel de packet de paiement envoye aux Finances.
-- Amelioration des dossiers de reporting pour les demandes refusees et retirees afin que la validation ILMP ait les champs requis.
-- Les demandes retirees creent maintenant le plan d'action reserve au reporting et les deux interventions completees requis pour le reporting ILMP.
-- Les champs de cout prevu des interventions acceptent maintenant les montants courants en dollars et cents.
-- Les televersements dans Supporting Documents fonctionnent maintenant pour les dossiers ou une ancienne demande a un lien de compte client non securitaire.
-- Le portail applicant verifie maintenant que le compte connecte appartient au meme client que la demande et le dossier affiches.
-- Les details d'un plan d'action ferme enregistrent maintenant les corrections de cloture comme le niveau d'education du resultat.
-- Les longues periodes d'intervention ne bloquent plus l'enregistrement; PATH limite seulement le champ de duree ILMP et conserve les vraies dates de debut et de fin.
-- Case Header permet maintenant de corriger le courriel d'un compte PATH non active avant de renvoyer l'activation.
+- Les modifications des libelles dans Supporting Documents s'enregistrent maintenant correctement pour les documents d'identite/statut et les anciens televersements.
+- Les fenetres Edit document details et Duplicate document conservent maintenant la portee client des documents sans demander de les rattacher a une demande.
+- Recent ILMP exports affiche maintenant un historique compact avec les onglets Summary, Clients exported et XML.
+- Le libelle ILMP reflete maintenant le vrai flux: PATH telecharge le XML pour un televersement manuel dans ESDC et enregistre l'export dans l'historique.
+- La validation ILMP accepte maintenant la valeur de barriere mixte `lack_of_job-opportunities`.
 - Workflow Preview et Publish ne bloquent plus sur les composants d'instructions sans libelle explicite.
 - Les packets de paiement envoyes n'affichent plus l'ancienne action `Mark paid` au niveau de la ligne.
+- Financial Reports appelle maintenant l'option des lignes a zero dollar `All reportable interventions` et affiche `PATH follow-up state` par defaut.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260528-evening-batch
+
+- Les modifications des libelles dans Supporting Documents s'enregistrent comme de simples renommages sans changer la portee du document, y compris pour les documents d'identite/statut et les anciens televersements.
+- Edit document details et Duplicate document envoient maintenant le contexte du dossier pour les documents a portee client sans demander de les rattacher a une demande.
+- Recent ILMP exports utilise maintenant un tableau d'historique compact avec les onglets Summary, Clients exported et XML, ainsi que le chemin/nom de fichier et le nom de la personne qui a telecharge.
+- Les actions et l'aide ILMP utilisent maintenant les mots export, download et manual upload afin que le personnel sache que PATH enregistre l'export XML mais ne le televerse pas dans ESDC.
+- La validation ILMP reconnait maintenant la valeur de barriere mixte `lack_of_job-opportunities`.
+- Workflow Preview et Publish ne bloquent plus sur les composants d'instructions sans libelle explicite.
+- Les packets de paiement envoyes n'affichent plus l'ancienne action `Mark paid` au niveau de la ligne.
+- Financial Reports appelle maintenant l'option des lignes a zero dollar `All reportable interventions` et affiche `PATH follow-up state` par defaut.
 
 #### Release 20260527-prod-casework-ilmp-hotfix
 
@@ -438,17 +435,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - L'aide de Financial Reports est organisee autour du travail de rapport annuel, notamment la portee par annee d'approbation, les totaux des lignes visibles, la fiabilite du report, la portee de l'export et les premieres verifications quand un montant semble incorrect.
 - Les routes de messages, signatures, statuts et interventions du portail applicant verifient maintenant que le compte connecte appartient au meme client que la demande et le dossier affiches.
 - L'audit de session applicant ecrit maintenant selon la structure de table `user_session_audit` deployee et supprime les anciennes lignes avec une retention bornee.
-
-#### Release 20260525-prod-bugcr-batch
-
-- Financial Reports affiche maintenant par defaut seulement les interventions financees dans le detail, avec une option pour inclure toutes les interventions approuvees lorsque les lignes a zero dollar doivent etre examinees.
-- Le tableau de detail de Financial Reports masque les numeros de reference sous les noms des participantes et participants, affiche CRF/EI et le financement approuve plus tot, et permet de choisir, redimensionner et trier les colonnes.
-- Regional Snapshot utilise maintenant les memes regles que Financial Reports pour le financement CRF/EI approuve et les clients finances par province de residence.
-- L'aide de Financial Reports comprend maintenant des consignes par section et une couverture d'aide IA pour le but du rapport annuel, la portee de l'export et la distinction entre le suivi PATH et Sage.
-- Les autres bailleurs de fonds peuvent maintenant etre marques comme confirmes, en attente, refuses ou inconnus; seuls les bailleurs confirmes exigent les details de couverture et generent des lettres.
-- Les courriels de packet de paiement incluent maintenant un lien de telechargement valide sept jours pour le paquet de pieces justificatives.
-- Les packets de paiement exigent maintenant seulement le Client Funding Agreement et le formulaire bancaire EFT signe comme pieces justificatives de base.
-- Finance Settings affiche maintenant un apercu en lecture seule du courriel de packet de paiement envoye aux Finances.
 
 ### Problemes connus (brouillon - FR)
 

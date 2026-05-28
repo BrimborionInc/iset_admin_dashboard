@@ -430,7 +430,7 @@ async function main() {
     if (!clickedGenerate) {
       failures.push({ type: 'assertion', message: 'Could not click Generate batch XML action', assertions });
     } else {
-      await page.waitForFunction(() => /(?:Download|Save) XML and mark submitted/.test(document.body?.innerText || ''));
+      await page.waitForFunction(() => /(?:Download|Save) XML and mark exported/.test(document.body?.innerText || ''));
       const modalAssertions = await page.evaluate(() => {
         const text = document.body?.innerText || '';
         return {

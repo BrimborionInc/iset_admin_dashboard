@@ -55,6 +55,12 @@ manual uploads, and generated forms, then compares them against the relevant che
   - Word files (`.doc`, `.docx`) now take a different path: the backend generates or reuses a cached internal preview and returns that preview URL instead of the original Office object
   - the preferred preview artifact is PDF, but the backend now falls back to a self-contained HTML preview if the server cannot render PDF on that host
   - this avoids browser-dependent handoff to Microsoft 365 / Office Online for sensitive supporting documents
+- Inline label edits:
+  - the table sends `PUT /api/documents/:id` with only `{ label }`
+  - the backend treats label-only requests as a rename only and preserves existing case/application/action-plan/client scope without re-running attachment resolution
+  - full edit-modal saves still send document type and attachment fields and continue to validate scope
+  - client-scoped modal saves and duplicate-document saves include hidden case/application context only so the backend can validate access and resolve client scope; staff are not asked to attach client-scoped documents to an application
+  - when an older unscoped row is edited, the modal defaults application/action-plan attachment controls from the current workspace filter/context when possible
 - Download behavior:
   - the inline `Download` action is shown only to `System Administrator` and `NWAC Administrator`
   - it requires an explicit privacy warning confirmation
@@ -93,5 +99,7 @@ manual uploads, and generated forms, then compares them against the relevant che
 - If a case-backed upload fails, inspect `caseData.id`, the selected document type scope, and the `/api/cases/:id/documents/upload` response code first.
 - If a normal applicant-backed case cannot upload or refresh, inspect `caseData.applicant_user_id` / `caseData.applicantUserId` and the `/api/applicants/:id/*` endpoints.
 - If `/api/applicants/:id/documents/upload` returns `client_id_mismatch`, compare the URL applicant user, the case client, and the application/submission user. A submission user that maps to another client is an unsafe applicant context; the Case Workspace should fall back to `/api/cases/:case_id/documents/upload`.
+- If a document label inline edit does not stick, inspect `PUT /api/documents/:id` first. A label-only request should not fail because an older submission upload lacks modern attachment scope; only document-type or attachment changes should run scope resolution.
+- If an edit-details or duplicate save fails for a client-scoped type such as `identity_document` or `status_card`, verify the widget request includes `caseId` or `applicationId` even though the document remains client-scoped in storage.
 - If `chk_iset_document_manual_upload_scope` fails for a staff upload, treat it as a backend context-resolution bug first. Manual uploads must carry `client_id` and `case_id`; application-linked uploads must also carry `application_id` and `applicant_user_id`.
 - Do not add placeholder application, assessment, or action-plan rows just to make document management work.

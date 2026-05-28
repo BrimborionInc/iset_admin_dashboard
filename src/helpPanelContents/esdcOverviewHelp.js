@@ -11,7 +11,7 @@ const EsdcOverviewHelp = () => (
     <ul>
       <li>How many participants are ready, blocked, or awaiting validation?</li>
       <li>What ESDC submission deadlines are coming up?</li>
-      <li>What submission or validation activity occurred recently?</li>
+      <li>What validation, export, or ESDC response activity occurred recently?</li>
     </ul>
     <h3>Typical workflow</h3>
     <ol>

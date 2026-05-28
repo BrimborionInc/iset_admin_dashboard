@@ -27617,6 +27617,16 @@ esdcRouter.post('/participants/batch-submit', async (req, res, next) => {
   const downloadPath = downloadPathRaw && String(downloadPathRaw).trim() ? String(downloadPathRaw).trim() : null;
   const batchId = `ilmp-batch-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
   try {
+    const actorUserId = await resolveAdminActorUserId(req, pool);
+    const downloadedByDisplayName = (
+      req?.staffProfile?.display_name ||
+      req?.staffProfile?.name ||
+      req?.auth?.name ||
+      req?.auth?.preferred_username ||
+      req?.auth?.email ||
+      req?.staffProfile?.email ||
+      null
+    );
     const { participants, skipped, clientFragments } = await collectReadyEsdcBatchParticipants();
     if (!participants.length) {
       return res.status(400).json({
@@ -27644,10 +27654,10 @@ esdcRouter.post('/participants/batch-submit', async (req, res, next) => {
       await pool.query(
         `
         UPDATE esdc_participant_submission
-        SET submission_status = 'submitted', submitted_at = NOW(), updated_at = NOW()
+        SET submission_status = 'submitted', submitted_at = NOW(), submitted_by_user_id = ?, updated_at = NOW()
         WHERE id IN (${ids.map(() => '?').join(',')})
         `,
-        ids
+        [actorUserId, ...ids]
       );
       const historyDetails = JSON.stringify({
         batchId,
@@ -27656,6 +27666,7 @@ esdcRouter.post('/participants/batch-submit', async (req, res, next) => {
         xmlChecksum,
         xmlSize,
         participantCount: participants.length,
+        downloadedByDisplayName,
         xml: batchXml
       });
       await pool.query(
@@ -27663,7 +27674,7 @@ esdcRouter.post('/participants/batch-submit', async (req, res, next) => {
         INSERT INTO esdc_participant_submission_history (participant_submission_id, event_type, actor_user_id, event_details)
         VALUES ${ids.map(() => '(?, "submitted", ?, ?)').join(',')}
         `,
-        ids.flatMap(id => [id, req.user?.id || null, historyDetails])
+        ids.flatMap(id => [id, actorUserId, historyDetails])
       );
     }
 
@@ -27675,6 +27686,7 @@ esdcRouter.post('/participants/batch-submit', async (req, res, next) => {
       batchId,
       filename: downloadFilename,
       downloadPath,
+      downloadedByDisplayName,
       xmlChecksum,
       xmlSize
     });
@@ -27698,6 +27710,16 @@ esdcRouter.get('/participants/batches', async (req, res, next) => {
         h.event_details,
         h.occurred_at,
         h.actor_user_id,
+        COALESCE(
+          NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(h.event_details, '$.downloadedByDisplayName'))), ''),
+          NULLIF(TRIM(actor_staff_by_sub.display_name), ''),
+          NULLIF(TRIM(actor_staff_by_sub.name), ''),
+          NULLIF(TRIM(actor_user.name), ''),
+          NULLIF(TRIM(actor_user.email), ''),
+          NULLIF(TRIM(actor_staff_by_id.display_name), ''),
+          NULLIF(TRIM(actor_staff_by_id.name), ''),
+          NULLIF(TRIM(actor_staff_by_id.email), '')
+        ) AS downloaded_by_display_name,
         eps.case_id,
         eps.action_plan_id,
         eps.submission_status,
@@ -27707,6 +27729,9 @@ esdcRouter.get('/participants/batches', async (req, res, next) => {
         COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id
       FROM esdc_participant_submission_history h
       JOIN esdc_participant_submission eps ON eps.id = h.participant_submission_id
+      LEFT JOIN user actor_user ON actor_user.id = h.actor_user_id
+      LEFT JOIN staff_profiles actor_staff_by_sub ON BINARY actor_staff_by_sub.cognito_sub = BINARY actor_user.cognito_sub
+      LEFT JOIN staff_profiles actor_staff_by_id ON actor_staff_by_id.id = h.actor_user_id
       LEFT JOIN iset_case c ON c.id = eps.case_id
       LEFT JOIN client cl ON cl.id = c.client_id
       LEFT JOIN iset_application ia ON ia.id = eps.application_id
@@ -27729,9 +27754,11 @@ esdcRouter.get('/participants/batches', async (req, res, next) => {
       if (!batch) {
         batch = {
           batchId,
+          downloadedAt: row.occurred_at,
           submittedAt: row.occurred_at,
           filename: details.filename || null,
           downloadPath: details.downloadPath || null,
+          downloadedByDisplayName: details.downloadedByDisplayName || row.downloaded_by_display_name || null,
           xmlChecksum: details.xmlChecksum || null,
           xmlSize: details.xmlSize || null,
           participants: []
@@ -27739,10 +27766,14 @@ esdcRouter.get('/participants/batches', async (req, res, next) => {
         batchesMap.set(batchId, batch);
       }
       if (row.occurred_at && (!batch.submittedAt || new Date(row.occurred_at) > new Date(batch.submittedAt))) {
+        batch.downloadedAt = row.occurred_at;
         batch.submittedAt = row.occurred_at;
       }
       if (!batch.filename && details.filename) batch.filename = details.filename;
       if (!batch.downloadPath && details.downloadPath) batch.downloadPath = details.downloadPath;
+      if (!batch.downloadedByDisplayName && (details.downloadedByDisplayName || row.downloaded_by_display_name)) {
+        batch.downloadedByDisplayName = details.downloadedByDisplayName || row.downloaded_by_display_name;
+      }
       if (!batch.xmlChecksum && details.xmlChecksum) batch.xmlChecksum = details.xmlChecksum;
       if (!batch.xmlSize && typeof details.xmlSize !== 'undefined') batch.xmlSize = details.xmlSize;
       const participantName = [row.first_name, row.last_name].filter(Boolean).join(' ') ||
@@ -46443,6 +46474,12 @@ app.put('/api/documents/:id', async (req, res) => {
         normalisePositiveInteger(req.body?.interventionId || req.body?.linkedInterventionId),
       ].filter(Boolean)))
     : undefined;
+  const isLabelOnlyUpdate =
+    !docType &&
+    !caseIdProvided &&
+    !applicationIdProvided &&
+    !actionPlanIdProvided &&
+    !interventionIdsProvided;
   let metadataObj = {};
   let existingRow = null;
   try {
@@ -46478,6 +46515,36 @@ app.put('/api/documents/:id', async (req, res) => {
   if (!metadataObj || typeof metadataObj !== 'object') metadataObj = {};
   metadataObj.label = label;
   if (docType) metadataObj.document_type = docType;
+
+  if (isLabelOnlyUpdate) {
+    const metadata = JSON.stringify(metadataObj);
+    try {
+      const [result] = await pool.query(
+        `UPDATE iset_document
+            SET label = ?, metadata = ?, updated_at = NOW()
+          WHERE id = ?`,
+        [label, metadata, documentId]
+      );
+      if (!result || result.affectedRows === 0) {
+        return res.status(404).json({ error: 'document_not_found' });
+      }
+      const [[row]] = await pool.query(
+        `SELECT id, case_id, application_id, action_plan_id, applicant_user_id, file_name, file_path, label, metadata, document_category, source, mime_type, size_bytes, status, created_at AS uploaded_at
+           FROM iset_document
+          WHERE id = ?
+          LIMIT 1`,
+        [documentId]
+      );
+      if (row) {
+        const map = await fetchDocumentInterventionMap({ documentIds: [documentId] });
+        row.intervention_ids = map.get(documentId) || [];
+      }
+      return res.json({ ok: true, document: row });
+    } catch (err) {
+      console.error('[admin:documents:update-label] error', err);
+      return res.status(500).json({ error: 'failed_to_update_document_label' });
+    }
+  }
 
   const effectiveDocType = docType || metadataObj.document_type || null;
   let docTypeScope = 'application';

@@ -3,12 +3,14 @@ import React from 'react';
 const EsdcParticipantQueueHelp = () => (
   <div>
     <p>
-      The queue combines ILMP readiness counts, bulk validation, and the participant list for export preparation. Use it
-      to refresh validation, open the case workspace, and generate the next batch XML file.
+      The participant submission queue is the working list for the next ILMP export. It combines readiness counts,
+      bulk validation, linked case-workspace follow-up, and the <strong>Generate batch XML</strong> action.
     </p>
     <p>
-      Use <strong>Validate all</strong> to refresh readiness for everyone in the queue before generating a batch. Use
-      <strong> Generate batch XML</strong> when the ready records should be downloaded and marked as submitted.
+      Use <strong>Validate all</strong> before generating a file so readiness reflects current case data. Use
+      <strong> Generate batch XML</strong> when ready clients should be included in a downloaded XML file and marked
+      as exported in PATH. Non-ready records are listed as excluded so they can be fixed without holding back ready
+      clients.
     </p>
     <p>
       Readiness badges:
@@ -23,11 +25,15 @@ const EsdcParticipantQueueHelp = () => (
       name to open the case workspace. Rows expand only when the participant has more than one submission/action plan row
       behind the grouped queue entry.
     </p>
+    <p>
+      Saving or downloading the XML does not upload it to ESDC. Staff still complete the external manual upload step
+      after PATH creates the file.
+    </p>
   </div>
 );
 
 EsdcParticipantQueueHelp.aiContext = `
-Widget help: combined ILMP participant validation/submission queue. Describe bucket readiness counts, Validate all, Generate batch XML/download marks ready records submitted, readiness states, columns, opening the case workspace, and expanded rows only for grouped multi-submission participants.
+Widget help: ILMP participant validation/export queue for the next manual ESDC upload file. Explain bucket readiness counts, Validate all, Generate batch XML, ready/non-ready exclusion behavior, and that saving/downloading marks included clients exported in PATH but does not upload to ESDC. Readiness states: Ready passes mandatory ILMP rules; Needs review has warnings but no hard blocker; Blocked has hard validation failures. Participant names open the case workspace. Expanded rows appear only for grouped clients with multiple submission/action-plan rows.
 `;
 
 export default EsdcParticipantQueueHelp;

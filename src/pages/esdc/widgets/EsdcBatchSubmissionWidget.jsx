@@ -26,7 +26,7 @@ const EsdcBatchSubmissionWidget = ({
   const [alert, setAlert] = useState(null);
   const [xml, setXml] = useState('');
   const [skipped, setSkipped] = useState([]);
-  const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
   const [filename, setFilename] = useState(() => `esdc-participants-${new Date().toISOString().slice(0,10)}.xml`);
   const [downloadPath, setDownloadPath] = useState('');
   const [queueCount, setQueueCount] = useState(0);
@@ -46,7 +46,7 @@ const EsdcBatchSubmissionWidget = ({
       onFollow={event => {
         event.preventDefault();
         const helpContent = React.createElement(metadata.helpComponent);
-        toggleHelpPanel(helpContent, metadata.helpTitle ?? 'Batch submission', metadata.aiContext ?? '');
+        toggleHelpPanel(helpContent, metadata.helpTitle ?? 'Batch export', metadata.aiContext ?? '');
       }}
     >
       Info
@@ -138,7 +138,7 @@ const EsdcBatchSubmissionWidget = ({
       const body = await resp.json().catch(() => ({}));
       if (!resp.ok) {
         setSkipped(Array.isArray(body.skipped) ? body.skipped : []);
-        setAlert({ type: 'error', message: body.error || body.message || 'Batch submit failed.' });
+        setAlert({ type: 'error', message: body.error || body.message || 'Batch export failed.' });
         setXml('');
         return;
       }
@@ -146,7 +146,7 @@ const EsdcBatchSubmissionWidget = ({
       setSkipped(Array.isArray(body.skipped) ? body.skipped : []);
       setAlert({
         type: 'success',
-        message: `Submitted batch ${body.batchId || ''} for ${body.participants?.length || 0} ready participants.${(body.skipped?.length || 0) ? ` Excluded ${body.skipped.length} non-ready records.` : ''}`
+        message: `Exported batch ${body.batchId || ''} for ${body.participants?.length || 0} ready participants.${(body.skipped?.length || 0) ? ` Excluded ${body.skipped.length} non-ready records.` : ''}`
       });
       triggerRefresh();
       loadQueueInfo();
@@ -163,11 +163,11 @@ const EsdcBatchSubmissionWidget = ({
         URL.revokeObjectURL(url);
       }
     } catch (err) {
-      setAlert({ type: 'error', message: err?.message || 'Batch submit failed.' });
+      setAlert({ type: 'error', message: err?.message || 'Batch export failed.' });
       setXml('');
     } finally {
       setLoading(false);
-      setShowSubmitModal(false);
+      setShowExportModal(false);
     }
   };
 
@@ -213,21 +213,21 @@ const EsdcBatchSubmissionWidget = ({
                 variant="normal"
                 iconName="download"
                 disabled={!xml}
-                onClick={() => setShowSubmitModal(true)}
+                onClick={() => setShowExportModal(true)}
               >
                 Download
               </Button>
             </SpaceBetween>
           )}
           >
-            Batch submission
+            Batch export
           </Header>
         )}
         settings={
           typeof actions.removeItem === 'function'
             ? (
               <ButtonDropdown
-                ariaLabel="Batch submission settings"
+                ariaLabel="Batch export settings"
                 variant="icon"
                 items={[{ id: 'remove', text: 'Remove widget' }]}
                 onItemClick={handleSettingsClick}
@@ -273,27 +273,28 @@ const EsdcBatchSubmissionWidget = ({
         </SpaceBetween>
       </BoardItem>
       <Modal
-        visible={showSubmitModal}
-        header="Confirm batch submission"
-        closeAriaLabel="Close submit modal"
-        onDismiss={() => setShowSubmitModal(false)}
+        visible={showExportModal}
+        header="Confirm batch export"
+        closeAriaLabel="Close export modal"
+        onDismiss={() => setShowExportModal(false)}
         footer={(
           <SpaceBetween size="xs" direction="horizontal">
-            <Button variant="normal" onClick={() => setShowSubmitModal(false)}>Cancel</Button>
+            <Button variant="normal" onClick={() => setShowExportModal(false)}>Cancel</Button>
             <Button
               variant="primary"
               iconName="download"
               onClick={submitBatch}
               loading={loading}
             >
-              Submit and download
+              Download and mark exported
             </Button>
           </SpaceBetween>
         )}
       >
         <SpaceBetween size="s">
           <Box>
-            Downloading will mark included participants as submitted and record a history entry. Continue?
+            Downloading will mark included clients as exported in PATH and record a history entry. PATH does not upload
+            the XML to ESDC.
           </Box>
           <SpaceBetween size="xs">
             <Box variant="strong">Filename</Box>

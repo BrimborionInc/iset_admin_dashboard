@@ -178,7 +178,7 @@ const writeDetailSheet = (worksheet, rows, fundingSource, meta) => {
     headers.push("Current FY estimate", "Carry-over adjustment", "Carry-over note");
   }
   headers.push(
-    "Payment status",
+    "PATH follow-up state",
     "Latest packet status",
     "Sent amount",
     "Recorded paid amount",

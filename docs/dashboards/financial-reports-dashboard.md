@@ -34,7 +34,7 @@ Last Updated: 2026-05-28
 - Local detail-table text filter
 - Intervention detail table preferences for visible columns and stored column widths
 - Intervention detail sorting on all visible columns
-- Default intervention detail columns focus on funding review fields: participant, region, funding source, approved funding, intervention, and funding-category amounts.
+- Default intervention detail columns focus on funding review fields: participant, region, funding source, approved funding, PATH follow-up state, intervention, and funding-category amounts.
 
 ## Current data rules
 

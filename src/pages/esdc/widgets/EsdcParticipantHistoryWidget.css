@@ -1,0 +1,33 @@
+.esdc-export-summary {
+  border-top: 1px solid var(--color-border-divider-default, #e9ebed);
+  padding-top: 16px;
+}
+
+.esdc-export-summary__title {
+  color: var(--color-text-heading-default, #16191f);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 22px;
+}
+
+.esdc-export-summary__grid {
+  display: grid;
+  gap: 12px 24px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin-top: 14px;
+}
+
+.esdc-export-summary__label {
+  color: var(--color-text-label, #5f6b7a);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+}
+
+.esdc-export-summary__value {
+  color: var(--color-text-body-default, #16191f);
+  font-size: 14px;
+  line-height: 20px;
+  margin-top: 2px;
+  overflow-wrap: break-word;
+}

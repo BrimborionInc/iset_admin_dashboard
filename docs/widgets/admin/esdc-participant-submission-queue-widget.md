@@ -20,7 +20,7 @@ Combined queue of participants pending validation/export actions, with bucket-st
 
 - Review ready / needs-review / blocked counts.
 - Run `Validate all` to refresh readiness for the queue.
-- Run `Generate batch XML` to prepare the XML for all ready participants, then save/download it and mark included participants as submitted. Browsers with native save-dialog support use that dialog; other browsers fall back to the normal download flow.
+- Run `Generate batch XML` to prepare the XML for all ready participants, then save/download it and mark included clients as exported in PATH. Browsers with native save-dialog support use that dialog; other browsers fall back to the normal download flow. Staff still upload the downloaded XML manually through the external ESDC process.
 - Open linked case workspaces from participant names.
 - Expand only grouped participants with multiple submission/action-plan rows.
 
@@ -39,5 +39,6 @@ Combined queue of participants pending validation/export actions, with bucket-st
 ## Current Notes
 
 - `/api/esdc/participants?groupByClient=true` returns the paged grouped rows plus a `summary` object for the full filtered queue.
-- `/api/esdc/participants/batch-prepare` and `/api/esdc/participants/batch-submit` are now launched from this widget rather than a separate Batch submission widget.
+- `/api/esdc/participants/batch-prepare` and `/api/esdc/participants/batch-submit` are now launched from this widget rather than a separate Batch export widget.
+- Staff-facing wording should describe this as export/download/manual upload. The backend still has legacy `batch-submit` naming and status fields, but PATH does not directly submit or upload participant XML to ESDC from this widget.
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.

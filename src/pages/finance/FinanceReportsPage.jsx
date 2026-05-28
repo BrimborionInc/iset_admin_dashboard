@@ -90,7 +90,7 @@ const DEFAULT_SUMMARY = {
 const PAGE_SIZE = 20;
 
 const DETAIL_TABLE_PREFERENCES_STORAGE_KEY =
-  "finance-reports-intervention-detail-preferences-v2";
+  "finance-reports-intervention-detail-preferences-v3";
 
 const REPORT_SUMMARY_GRID_STYLE = {
   display: "grid",
@@ -103,6 +103,7 @@ const DETAIL_TABLE_DEFAULT_VISIBLE_COLUMNS = [
   "province",
   "fundingSource",
   "total",
+  "financeFollowUp",
   "intervention",
   "tuition",
   "booksMaterials",
@@ -1131,7 +1132,7 @@ const FinanceReportsPage = ({
       },
       {
         id: "financeFollowUp",
-        header: "Payment status",
+        header: "PATH follow-up state",
         cell: item => (
           <SpaceBetween size="xxs">
             <StatusIndicator type={getFinanceFollowUpIndicatorType(item.financeFollowUpStatusKey)}>
@@ -1368,8 +1369,8 @@ const FinanceReportsPage = ({
   const previousFiscalYearLabel = formatFiscalYearLabel(displayFiscalYearStart - 1);
   const nextFiscalYearLabel = formatFiscalYearLabel(displayFiscalYearStart + 1);
   const detailDescription = includeCarryOver
-    ? "One row per visible intervention, with payment status and a best-effort carry-over estimate beside the funding amounts."
-    : "One row per visible intervention, with payment status shown beside the funding amounts.";
+    ? "One row per visible intervention, with PATH follow-up state and a best-effort carry-over estimate beside the funding amounts."
+    : "One row per visible intervention, with PATH follow-up state shown beside the funding amounts.";
   const interventionFilterDetail =
     interventionAmountFilter === "funded" && hiddenZeroFundingRowCount > 0
       ? ` ${formatInteger(hiddenZeroFundingRowCount)} zero-dollar intervention${hiddenZeroFundingRowCount === 1 ? " is" : "s are"} hidden.`
@@ -1607,11 +1608,11 @@ const FinanceReportsPage = ({
           stickyHeader
           filter={
             <TextFilter
-              filteringText={filteringText}
-              onChange={({ detail }) => setFilteringText(detail.filteringText)}
-              filteringPlaceholder="Find participant, case, intervention, institution, program, region, pot, or payment status"
-              countText={`${displayRows.length} matches`}
-            />
+                  filteringText={filteringText}
+                  onChange={({ detail }) => setFilteringText(detail.filteringText)}
+                  filteringPlaceholder="Find participant, case, intervention, institution, program, region, pot, or PATH follow-up state"
+                  countText={`${displayRows.length} matches`}
+                />
           }
           pagination={
             <Pagination

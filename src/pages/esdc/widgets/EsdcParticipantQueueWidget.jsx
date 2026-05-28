@@ -614,7 +614,7 @@ const EsdcParticipantQueueWidget = ({
               loading={batchLoading}
               disabled={!batchXml || batchParticipants.length === 0}
             >
-              {canUseNativeSaveDialog ? 'Save XML and mark submitted' : 'Download XML and mark submitted'}
+              {canUseNativeSaveDialog ? 'Save XML and mark exported' : 'Download XML and mark exported'}
             </Button>
           </SpaceBetween>
         )}

@@ -345,6 +345,31 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     },
     [caseId]
   );
+  const applyClientScopeContext = useCallback(
+    (payload, item = null) => {
+      const nextCaseId = caseId ? String(caseId) : item?.case_id ? String(item.case_id) : '';
+      if (nextCaseId) {
+        payload.caseId = nextCaseId;
+        return true;
+      }
+      const nextApplicationId = applicationId
+        ? String(applicationId)
+        : item?.application_id
+          ? String(item.application_id)
+          : '';
+      if (nextApplicationId) {
+        payload.applicationId = nextApplicationId;
+        return true;
+      }
+      const nextActionPlanId = item?.action_plan_id ? String(item.action_plan_id) : '';
+      if (nextActionPlanId) {
+        payload.actionPlanId = nextActionPlanId;
+        return true;
+      }
+      return false;
+    },
+    [applicationId, caseId]
+  );
   const uploadBlockedMessage = isCaseDocumentMode
     ? 'Unable to upload until a case is selected.'
     : 'Unable to upload until an applicant is selected.';
@@ -960,6 +985,10 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         return;
       }
     }
+    if (scope === 'client' && !caseId && !applicationId) {
+      setLabelError('Unable to determine which case or application should validate this client document.');
+      return;
+    }
     if (scope === 'action_plan') {
       targetActionPlanId = (pendingActionPlan || '').trim();
       if (!targetActionPlanId) {
@@ -970,7 +999,8 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     }
     nextUploadLabelRef.current = trimmed;
     nextUploadCategoryRef.current = categoryTrimmed;
-    nextUploadApplicationIdRef.current = targetApplicationId || '';
+    nextUploadApplicationIdRef.current =
+      targetApplicationId || (scope === 'client' && !caseId && applicationId ? String(applicationId) : '');
     nextUploadActionPlanIdRef.current = targetActionPlanId || '';
     nextUploadInterventionIdsRef.current = targetInterventionIds;
     setLabelError('');
@@ -990,6 +1020,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     canUseApplicantDocumentMode,
     buildApplicationFallbackTarget,
     getDocumentTypeScope,
+    applicationId,
     caseId
   ]);
   const handleFileSelected = useCallback(
@@ -1153,6 +1184,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       } catch (err) {
         setError(err?.message || 'Failed to update document label.');
         setDocuments(original);
+        throw err;
       }
     },
     [documents, loadDocuments]
@@ -1219,12 +1251,29 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         nextInterventionIds = normalizeIdList(item.intervention_ids);
       } else if (caseWorkspaceApplicationId) {
         nextApplicationId = String(caseWorkspaceApplicationId);
+      } else if (selectedApplicationFilter) {
+        nextApplicationId = String(selectedApplicationFilter);
+      } else if (applicationId) {
+        nextApplicationId = String(applicationId);
       }
     } else if (scope === 'action_plan') {
       if (item.action_plan_id) {
         nextActionPlanId = String(item.action_plan_id);
+      } else if (selectedInterventionFilter) {
+        nextActionPlanId = interventionPlanMap.get(String(selectedInterventionFilter)) || '';
+      } else if (actionPlanOptions.length === 1) {
+        nextActionPlanId = actionPlanOptions[0].value;
       }
       nextInterventionIds = normalizeIdList(item.intervention_ids);
+      if (!nextInterventionIds.length && selectedInterventionFilter) {
+        nextInterventionIds = [String(selectedInterventionFilter)];
+      }
+      if (nextActionPlanId) {
+        const allowed = new Set(
+          (actionPlanInterventionMap.get(String(nextActionPlanId)) || []).map(opt => opt.value)
+        );
+        nextInterventionIds = nextInterventionIds.filter(id => allowed.has(String(id)));
+      }
     }
     setEditDocument(item);
     setEditLabel(item.label || item.file_name || '');
@@ -1236,7 +1285,17 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     setEditInterventionIds(nextInterventionIds);
     setEditAttachError('');
     setEditModalVisible(true);
-  }, [caseWorkspaceApplicationId, getDocumentTypeScope, resolveDocumentType]);
+  }, [
+    actionPlanInterventionMap,
+    actionPlanOptions,
+    applicationId,
+    caseWorkspaceApplicationId,
+    getDocumentTypeScope,
+    interventionPlanMap,
+    resolveDocumentType,
+    selectedApplicationFilter,
+    selectedInterventionFilter
+  ]);
 
   const handleEditDismiss = useCallback(() => {
     setEditModalVisible(false);
@@ -1298,6 +1357,11 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         return;
       }
       payload.caseId = nextCaseId;
+    } else if (scope === 'client') {
+      if (!applyClientScopeContext(payload, editDocument)) {
+        setEditAttachError('Unable to determine which case or application should validate this client document.');
+        return;
+      }
     } else if (scope === 'action_plan') {
       const nextActionPlanId = (editActionPlanId || '').trim();
       if (!nextActionPlanId) {
@@ -1337,6 +1401,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     editApplicationId,
     editActionPlanId,
     editInterventionIds,
+    applyClientScopeContext,
     buildApplicationFallbackTarget,
     getDocumentTypeScope,
     loadDocuments,
@@ -1461,6 +1526,11 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
         return;
       }
       payload.caseId = nextCaseId;
+    } else if (scope === 'client') {
+      if (!applyClientScopeContext(payload, duplicateDocument)) {
+        setDuplicateError('Unable to determine which case or application should validate this client document.');
+        return;
+      }
     } else if (scope === 'action_plan') {
       const nextActionPlanId = (duplicateActionPlanId || '').trim();
       if (!nextActionPlanId) {
@@ -1504,6 +1574,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     duplicateApplicationId,
     duplicateActionPlanId,
     duplicateInterventionIds,
+    applyClientScopeContext,
     buildApplicationFallbackTarget,
     getDocumentTypeScope,
     loadDocuments,

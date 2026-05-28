@@ -1,7 +1,7 @@
 # Admin AI Chatbot Coverage Register
 
 Status: current working register
-Last updated: 2026-05-07
+Last updated: 2026-05-28
 
 ## Purpose
 
@@ -100,7 +100,7 @@ Initial route inventory from `src/routes/AppRoutes.js`.
 | `/reporting/regional-snapshot` | Regional Snapshot | Reporting | P1 | `regionalSnapshotDashboardHelp.js`; regional reporting docs | inventory-only | Cover regional metrics, workbook interpretation, and export behavior. |
 | `/reporting-and-monitoring-dashboard` | Reporting and Monitoring | Reporting / legacy | P2 | `reportingAndMonitoring` help key | inventory-only | Decide whether this route is current, legacy, or should be deferred. |
 | `/esdc/overview` | ESDC Overview | ESDC / ILMP | P1 | `esdcOverviewHelp.js`; ESDC widget help files | inventory-only | Cover KPIs, readiness, submission activity, deadlines, validation summary. |
-| `/esdc/participants` | ESDC Participants | ESDC / ILMP | P1 | `esdcParticipantsHelp.js`; participant widget help files | inventory-only | Cover participant queue, validation, readiness, and history. |
+| `/esdc/participants` | ESDC Participants | ESDC / ILMP | P1 | `esdcParticipantsHelp.js`; participant widget help files; `esdc-ilmp-participant-batch-export-flow`; `esdc-ilmp-export-history-xml-snapshot` seeded guidance | partial | Verified cards/evals now cover participant XML export/download/manual-upload workflow and Recent ILMP exports XML-snapshot/requeue behavior. Remaining coverage: detailed validation blocker remediation and broader readiness-policy questions. |
 | `/esdc/participants/:clientId` | ESDC Participant Workspace | ESDC / ILMP | P1 | `esdcSubmissionDashboardHelp.js`; participant workspace help files | inventory-only | Cover payload preview, submission history, readiness checklist, validation, notes. |
 | `/esdc/reporting` | ESDC Reporting Packages | ESDC / ILMP | P1 | `esdcReportingHelp.js`; `docs/workflows/admin/ilmp-reporting.md` | inventory-only | Cover reporting checklist, status, notes, batch submission, packages. |
 | `/manage-components` | Intake Step Library | Workflow Studio | P1 | `manageIntakeStepsHelpPanel.js`; step-library widget help | inventory-only | Cover step library, modify step, preview, conditional visibility, supported component types. |
@@ -132,7 +132,7 @@ This section groups known help-panel files into coverage domains. It is not exha
 | Intake authoring and workflow studio | `manageWorkflowsHelpPanel.js`, `workflowLibraryWidgetHelp.js`, `workflowPropertiesWidgetHelp.js`, `workflowPreviewWidgetHelp.js`, `workflowRuntimeSchemaWidgetHelp.js`, `manageIntakeStepsHelpPanel.js`, `modifyIntakeStep.js`, `intakeStepLibraryWidgetHelp.js`, `previewIntakeStepWidgetHelp.js`, `previewNunjucksWidgetHelp.js` | inventory-only | Needs authoring vs runtime distinction and portal parity warnings. |
 | Documents and checklist | `supportingDocumentsHelp.js`, `documentChecklistConfigHelp.js`, upload config help, file-upload docs | partial | Missing application-document follow-up has a verified seeded card. Remaining high-risk work: checklist runtime config, manual upload scope, portal upload behavior. |
 | Secure messaging and communications | `secureMessagesHelpPanelContent.js`, `contactCommunicationsHelp.js`, `contactMessageQueueHelp.js`, `contactMessageInsightsHelp.js` | inventory-only | Must preserve privacy/message participant guardrails. |
-| ESDC / ILMP reporting | `esdcOverviewHelp.js`, `esdcParticipantsHelp.js`, `esdcSubmissionDashboardHelp.js`, `esdcReportingHelp.js`, all ESDC widget help files | inventory-only | Needs validation/readiness/export cards and policy wording. |
+| ESDC / ILMP reporting | `esdcOverviewHelp.js`, `esdcParticipantsHelp.js`, `esdcSubmissionDashboardHelp.js`, `esdcReportingHelp.js`, all ESDC widget help files | partial | Verified seeded cards now cover participant export/download/manual-upload flow, Recent ILMP export XML snapshots/requeue, and intervention outcome closeout status rules. Remaining work: validation-blocker remediation, participant workspace details, reporting packages, and broader readiness/policy wording. |
 | Finance | finance overview/budgets/payments/allocations/reconciliation/reports/monitoring/forecasting/salaries help files | inventory-only | Large domain; needs payment-packet and reporting semantic precision. |
 | Notifications and templates | `manageNotificationsHelp.js`, `templateEditorDashboardHelp.js`, `manageTemplatesWidgetHelp.js`, notification feature docs | inventory-only | Needs event-key, recipient scoping, template-placeholder, and email privacy cards. |
 | Configuration and security | `aiConfigWidgetHelp.js`, `environmentWidgetHelp.js`, `secretsWidgetHelp.js`, `lockingSettingsHelp.js`, `slaWidgetHelp.js`, `corsOriginsWidgetHelp.js`, `sessionAuditWidgetHelp.js`, `backendJobsWidgetHelp.js`, `encryptionSettingsHelp.js`, access-control pages | inventory-only | Needs admin-only scope, debug-route, and operational-safety guidance. |
@@ -192,6 +192,8 @@ The fixture source is `docs/testing/admin-ai-chatbot-eval-fixtures.json`; run `n
 | Supporting Documents | Where should I upload a Band/Nation funding decision letter? | backlog |
 | Secure Messaging | Should I send a secure message or use Contact Communications? | backlog |
 | Case Notes | Where do I record missing-document follow-up attempts? | backlog |
+| ESDC / ILMP | How do I export the ILMP participant XML file for upload? | verified guidance card seeded |
+| ESDC / ILMP | Does the XML tab show live XML or the XML from the export? | verified guidance card seeded |
 | ESDC / ILMP | Why does an intervention with a planned end date not require an outcome yet? | backlog |
 | Finance / Payments | Does approving an intervention create a payment packet? | backlog |
 | Notifications | Why did only the owner receive an applicant secure-message alert? | backlog |
@@ -210,3 +212,4 @@ The fixture source is `docs/testing/admin-ai-chatbot-eval-fixtures.json`; run `n
 - 2026-05-07: Added a verified workflow card for homepage Pending Completion purpose/routing, covering application post-decision follow-through and approved intervention proposal/revision letter follow-up.
 - 2026-05-07: Added a verified workflow card for missing required documents during application assessment, tying Supporting Documents checklist review to Secure Messaging requests and Notes/Case Notes follow-up documentation.
 - 2026-05-07: Added a verified workflow card for Application Approval `Request Changes`, including the required Request Changes note, Case Notes side effect, and non-denial/non-letter guardrails.
+- 2026-05-28: Added verified ESDC/ILMP guidance and eval fixtures for participant batch XML export/download/manual-upload workflow and Recent ILMP exports XML-snapshot/requeue behavior.

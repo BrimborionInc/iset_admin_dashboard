@@ -31,7 +31,7 @@ const FinanceReportsHelp = () => (
     <Box>
       <strong>Payment follow-up</strong>
       <p>
-        Payment status is PATH follow-up information beside the approved funding. It helps staff see
+        PATH follow-up state is PATH follow-up information beside the approved funding. It helps staff see
         whether payment packets are draft, ready, sent, need follow-up, or have a recorded paid or
         confirmed state. Sage remains the financial system of record.
       </p>
@@ -205,9 +205,9 @@ export const FinanceReportsDetailHelp = () => (
       </p>
     </Box>
     <Box>
-      <strong>Payment status</strong>
+      <strong>PATH follow-up state</strong>
       <p>
-        Payment status shows PATH payment packet and follow-up state beside the approved funding. It
+        PATH follow-up state shows PATH payment packet and follow-up state beside the approved funding. It
         supports operational follow-up and does not replace Sage/AP confirmation.
       </p>
     </Box>

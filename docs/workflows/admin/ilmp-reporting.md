@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Prepare participant and reporting-package submissions for ILMP/ESDC requirements, including readiness checks, validation, payload preview, and submission history.
+Prepare participant and reporting-package files for ILMP/ESDC requirements, including readiness checks, validation, payload preview, and export history. PATH currently generates/downloads XML for manual upload; it does not directly submit participant data to ESDC.
 
 ## Primary Routes
 
@@ -14,7 +14,7 @@ Prepare participant and reporting-package submissions for ILMP/ESDC requirements
 
 Participant submissions page (`/esdc/participants`):
 - Participant submission queue (bucket-style readiness summary, Validate all action, Generate batch XML action, and queue table)
-- Recent ILMP exports (optional palette widget for audit/re-export work; no longer shown by default)
+- Recent ILMP exports (optional palette widget for downloaded file audit/requeue work; no longer shown by default)
 
 Participant workspace (`/esdc/participant/:clientId`):
 - Submission readiness checklist
@@ -44,13 +44,14 @@ Widget references:
 1. Review participant readiness counts and the participant submission queue.
 2. Open participant workspace for blocking issues.
 3. Resolve readiness items and re-validate payload.
-4. Generate the batch XML from the participant submission queue header for ready participants.
+4. Generate and download the batch XML from the participant submission queue header for ready participants, then upload it manually outside PATH.
 5. Manage reporting package status/checklist/notes for reporting periods.
 
 ## Data & Integration Touchpoints
 
 - ESDC participant submission endpoints.
 - ILMP validation and payload generation.
+- Participant export history stores the XML snapshot generated at download/export time. The history `XML` view should not be described as live XML based on current client data.
 - Reporting package and notes persistence.
 - Intervention/action-plan close-out rules are status-driven: planned end dates on non-terminal interventions stay out of ILMP close-out XML, while completed/cancelled interventions require end date + outcome.
 - Intervention duration is exported/stored as the ILMP three-digit duration field and is capped at 999 days. Do not use that cap to limit real program schedules; long intervention start/end dates remain valid and the reportable duration should be clamped.

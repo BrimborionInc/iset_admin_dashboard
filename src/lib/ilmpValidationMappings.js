@@ -32,6 +32,7 @@ const ILMP_BARRIER_CODE_LOOKUP = Object.freeze({
   dependent_care: '9',
   'lack of marketable skills': '10',
   'lack-of-job-opportunities': '10',
+  'lack_of_job-opportunities': '10',
   lack_of_job_opportunities: '10',
   'physical/emotional/mental health': '11',
   'physical, emotional, or mental health': '11',

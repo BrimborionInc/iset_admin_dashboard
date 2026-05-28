@@ -1,4 +1,4 @@
-# ESDC Batch Submission widget
+# ESDC Batch Export widget
 
 ## Workflow
 
@@ -14,7 +14,7 @@ ILMP Reporting
 
 ## Purpose
 
-Historical standalone widget for generating ILMP submission batches for ready records.
+Historical standalone widget for generating ILMP participant XML batches for ready records.
 
 ## User Actions (observed)
 
@@ -37,3 +37,4 @@ Historical standalone widget for generating ILMP submission batches for ready re
 
 - The source file remains in the repo as legacy/reference code, but `EsdcParticipantSubmissionsPage.jsx` no longer registers it in the widget registry.
 - Batch prepare/download endpoints are now invoked by `src/pages/esdc/widgets/EsdcParticipantQueueWidget.jsx`.
+- Any remaining help or source copy should use export/download/manual-upload wording. PATH does not upload participant XML to ESDC; the external ESDC upload remains a manual step.

@@ -3,24 +3,27 @@ import React from 'react';
 const EsdcParticipantsHelp = () => (
   <div>
     <p>
-      The ILMP Submissions &amp; Exports dashboard is the hub for preparing and downloading participant ILMP files for ESDC.
-      It shows who is ready, what still needs fixing, and prepares the batch XML for download.
+      The ILMP Submissions &amp; Exports dashboard is where staff prepare participant ILMP XML files for manual
+      upload outside PATH. Use it to see which clients are ready, fix validation blockers, and download the next
+      export file.
     </p>
     <h3>Typical workflow</h3>
     <ol>
-      <li>Run <strong>Validate all</strong> to refresh readiness for everyone in the queue.</li>
-      <li>Use the queue detail column to fix blockers/warnings in the case workspace.</li>
-      <li>Generate the batch XML from the queue header when required participants are validated, then download the file for upload to the portal.</li>
-      <li>Add Recent ILMP exports from the dashboard palette if you need to confirm a prior download or mark a batch back to pending for re-export.</li>
+      <li>Run <strong>Validate all</strong> to refresh readiness for everyone currently in the queue.</li>
+      <li>Open the linked case workspace for blocked records or warnings that need staff review.</li>
+      <li>Use <strong>Generate batch XML</strong> when ready clients should be exported, then save or download the file.</li>
+      <li>Upload the downloaded XML manually through the external ESDC process.</li>
+      <li>Add <strong>Recent ILMP exports</strong> from the dashboard palette when you need to confirm a prior export, review the exported clients, inspect the XML snapshot, or requeue clients for a replacement file.</li>
     </ol>
     <p>
-      The dashboard is aimed at program admins responsible for assembling and tracking ILMP submissions; it does not upload to ESDC, only prepares the compliant XML.
+      PATH records that the clients were exported and keeps the generated XML for audit/requeue work. It does not
+      upload participant data to ESDC from this dashboard.
     </p>
   </div>
 );
 
 EsdcParticipantsHelp.aiContext = `
-ILMP Submissions & Exports dashboard: combined participant queue with validation, bucket readiness counts, batch XML generation/download, and optional recent exports history. Audience: program admins preparing/downloading ILMP XML files for upload to ESDC.
+ILMP Submissions & Exports dashboard: staff prepare participant ILMP XML files for manual upload outside PATH. Main flow: Validate all, fix blockers in the linked case workspace, Generate batch XML for ready clients, then save/download the XML and manually upload it through the external ESDC process. PATH records exported/downloaded clients and stores the generated XML snapshot; it does not directly submit or upload participant data to ESDC. Optional Recent ILMP exports shows prior downloaded files, clients exported, downloader display name, stored XML snapshot, and Requeue for replacement exports.
 `;
 
 export default EsdcParticipantsHelp;

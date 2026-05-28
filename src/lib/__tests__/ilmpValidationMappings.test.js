@@ -9,6 +9,7 @@ describe('ilmpValidationMappings', () => {
     expect(normaliseIlmpBarrierCode('funding')).toBe('8');
     expect(normaliseIlmpBarrierCode('Economic')).toBe('8');
     expect(normaliseIlmpBarrierCode('lack-of-job-opportunities')).toBe('10');
+    expect(normaliseIlmpBarrierCode('lack_of_job-opportunities')).toBe('10');
     expect(normaliseIlmpBarrierCode('location')).toBe('5');
     expect(normaliseIlmpBarrierCode('Other barrier not listed above')).toBe('12');
     expect(normaliseIlmpBarrierCode('Other: no local program seat')).toBe('12');

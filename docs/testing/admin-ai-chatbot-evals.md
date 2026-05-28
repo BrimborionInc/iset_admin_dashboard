@@ -1,7 +1,7 @@
 # Admin AI Chatbot Evals
 
 Status: current eval scaffold
-Last updated: 2026-05-26
+Last updated: 2026-05-28
 
 ## Purpose
 
@@ -75,3 +75,4 @@ The seed fixture set intentionally spans the system:
 - 2026-05-24: Added and verified `finance-reports-annual-advances-purpose` after checking the Financial Reports page, help content, Excel export helper, and dashboard reference for the annual approved-funding report, funded-interventions default, all-approved override, and PATH payment-follow-up caveat.
 - 2026-05-26: Updated `finance-reports-annual-advances-purpose` for the funded-client label and approval-date basis, and added `finance-reports-data-results-comparison` so the chatbot can answer explicit comparison questions without putting cross-dashboard reconciliation copy in the primary Financial Reports help.
 - 2026-05-26: Tightened finance/reporting wording in the Financial Reports fixtures and seeded guidance so chatbot answers describe PATH-side staff review, export, and handoff context without framing NWAC Finance staff as direct PATH users.
+- 2026-05-28: Added and verified `ilmp-participant-batch-export-flow` and `ilmp-export-history-xml-snapshot` after checking the ILMP participant queue/history widgets, help text, widget docs, and workflow reference. The fixtures enforce export/download/manual-upload wording and stored XML snapshot semantics.

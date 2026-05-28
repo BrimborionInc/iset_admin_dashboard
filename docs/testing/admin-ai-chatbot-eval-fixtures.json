@@ -243,6 +243,65 @@
     "status": "drafted"
   },
   {
+    "id": "ilmp-participant-batch-export-flow",
+    "domain": "ESDC / ILMP",
+    "route": "/esdc/participants",
+    "helpTitle": "ILMP Submissions & Exports",
+    "role": "NWAC Administrator",
+    "prompt": "How do I export the ILMP participant XML file for upload?",
+    "expectedAnchors": [
+      "ILMP Submissions & Exports",
+      "Participant submission queue",
+      "Validate all",
+      "Generate batch XML",
+      "mark exported",
+      "manual upload outside PATH"
+    ],
+    "forbiddenPatterns": [
+      "PATH submits to ESDC",
+      "uploaded to ESDC automatically",
+      "marks submitted",
+      "submission complete at ESDC"
+    ],
+    "sourceRefs": [
+      "src/pages/esdc/widgets/EsdcParticipantQueueWidget.jsx",
+      "src/helpPanelContents/esdcParticipantsHelp.js",
+      "src/helpPanelContents/esdcParticipantQueueHelp.js",
+      "docs/widgets/admin/esdc-participant-submission-queue-widget.md",
+      "docs/workflows/admin/ilmp-reporting.md"
+    ],
+    "status": "verified"
+  },
+  {
+    "id": "ilmp-export-history-xml-snapshot",
+    "domain": "ESDC / ILMP",
+    "route": "/esdc/participants",
+    "helpTitle": "Participant submissions history",
+    "role": "NWAC Administrator",
+    "prompt": "Does the XML tab show live XML or the XML from the export?",
+    "expectedAnchors": [
+      "Recent ILMP exports",
+      "XML",
+      "stored XML snapshot",
+      "at the time of export",
+      "not regenerated from current client data",
+      "Requeue"
+    ],
+    "forbiddenPatterns": [
+      "live XML",
+      "updates automatically when the client changes",
+      "regenerated from current client data",
+      "submits to ESDC"
+    ],
+    "sourceRefs": [
+      "src/pages/esdc/widgets/EsdcParticipantHistoryWidget.jsx",
+      "src/helpPanelContents/esdcParticipantHistoryHelp.js",
+      "docs/widgets/admin/esdc-participant-submission-history-widget.md",
+      "docs/workflows/admin/ilmp-reporting.md"
+    ],
+    "status": "verified"
+  },
+  {
     "id": "ilmp-planned-end-date-no-outcome",
     "domain": "ESDC / ILMP",
     "route": "/esdc/participants/:clientId",
