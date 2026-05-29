@@ -22,7 +22,7 @@ const CASE_STATUS_LABELS = Object.freeze({
   intake: 'Intake',
   initiated: 'Initiated',
   active: 'Active',
-  dormant: 'Dormant',
+  dormant: 'No Active Plan',
   ready_to_close: 'Ready To Close',
   closed: 'Closed',
   archived: 'Archived',

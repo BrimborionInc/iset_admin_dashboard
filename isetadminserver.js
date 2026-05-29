@@ -6122,6 +6122,25 @@ async function findEsdcSubmissionIdForCase(executor, caseId) {
   }
 }
 
+async function findEsdcSubmissionIdForActionPlan(executor, actionPlanId) {
+  const db = executor && typeof executor.query === 'function' ? executor : pool;
+  if (!db || !Number.isInteger(Number(actionPlanId)) || Number(actionPlanId) <= 0) return null;
+  try {
+    const [[row]] = await db.query(
+      `SELECT id
+         FROM esdc_participant_submission
+        WHERE action_plan_id = ?
+        ORDER BY updated_at DESC, id DESC
+        LIMIT 1`,
+      [actionPlanId]
+    );
+    return row?.id || null;
+  } catch (err) {
+    console.warn('[esdc] failed to find submission for action plan', actionPlanId, err?.message || err);
+    return null;
+  }
+}
+
 async function resolvePrimaryApplicationIdForCase(executor, caseId) {
   const db = executor && typeof executor.query === 'function' ? executor : pool;
   const numericCaseId = normalisePositiveInteger(caseId);
@@ -16544,11 +16563,17 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
       const [planRows] = await conn.query(
         `SELECT *
            FROM iset_case_action_plan
-           WHERE case_id = ? AND archived_at IS NULL
+           WHERE case_id = ?
+             AND archived_at IS NULL
+             AND (? IS NULL OR id = ?)
            ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'draft' THEN 1 WHEN 'closed' THEN 2 ELSE 3 END,
                     COALESCE(activated_at, effective_date, created_at) DESC,
                     id DESC`,
-        [caseRow.id]
+        [
+          caseRow.id,
+          normalisePositiveInteger(submissionRow.action_plan_id) || null,
+          normalisePositiveInteger(submissionRow.action_plan_id) || null,
+        ]
       );
       if (planRows && planRows.length) {
     const planMap = new Map();
@@ -20972,6 +20997,7 @@ function buildDeniedReportingCaseContext({
   denialDate = null,
   denialReasonCode = null,
   reportingTrigger = 'denial',
+  caseLevelReportingOnly = true,
 } = {}) {
   const normalizedReportingTrigger = resolveReportingArtifactTrigger(reportingTrigger, existingCaseContext);
   const reportingConfig = resolveReportingArtifactConfig(normalizedReportingTrigger);
@@ -20997,14 +21023,46 @@ function buildDeniedReportingCaseContext({
     existingCaseContext?.reportingSeededAt ||
     null
   );
+  const existingApplicationArtifacts =
+    existingCaseContext?.applicationReportingArtifacts &&
+    typeof existingCaseContext.applicationReportingArtifacts === 'object' &&
+    !Array.isArray(existingCaseContext.applicationReportingArtifacts)
+      ? existingCaseContext.applicationReportingArtifacts
+      : {};
+  const applicationArtifactKey = applicationId ? String(applicationId) : null;
+  const applicationReportingArtifacts = applicationArtifactKey
+    ? {
+        ...existingApplicationArtifacts,
+        [applicationArtifactKey]: pruneNullish({
+          reportingTrigger: normalizedReportingTrigger,
+          reportingSeedSource: reportingConfig.source,
+          reportingOnly: true,
+          caseLevelReportingOnly: Boolean(caseLevelReportingOnly),
+          reportingCorrectionAllowed: true,
+          reportingSeededAt:
+            existingApplicationArtifacts?.[applicationArtifactKey]?.reportingSeededAt ||
+            existingCaseContext?.reportingSeededAt ||
+            new Date().toISOString(),
+          reportingLastSyncedAt: new Date().toISOString(),
+          reportingDate: resolvedReportingDate,
+          [reportingConfig.dateContextKey]: resolvedReportingDate,
+        }) || {},
+      }
+    : existingApplicationArtifacts;
+
+  if (!caseLevelReportingOnly) {
+    return mergeCaseContext(existingCaseContext || {}, {
+      applicationReportingArtifacts,
+    });
+  }
+
   const nextContextPatch = {
-    excludeFromCaseworkQueues: true,
-    reportingCorrectionAllowed: true,
     reportingTrigger: normalizedReportingTrigger,
     reportingSeedSource: reportingConfig.source,
     reportingSeededAt: existingCaseContext?.reportingSeededAt || new Date().toISOString(),
     reportingLastSyncedAt: new Date().toISOString(),
     [reportingConfig.dateContextKey]: resolvedReportingDate,
+    applicationReportingArtifacts,
     applicationId: applicationId || null,
     clientId: clientId || null,
     applicationAnswers: Object.keys(currentAnswers).length ? currentAnswers : null,
@@ -21052,8 +21110,14 @@ function buildDeniedReportingCaseContext({
     employmentNocVersion: clientStatus.nocVersion || null,
     prevEmployment: clientStatus.prevEmployment || null,
   };
+  if (caseLevelReportingOnly) {
+    nextContextPatch.excludeFromCaseworkQueues = true;
+    nextContextPatch.reportingCorrectionAllowed = true;
+  }
   if (normalizedReportingTrigger === 'withdrawal') {
-    nextContextPatch.reportingOnlyWithdrawal = true;
+    if (caseLevelReportingOnly) {
+      nextContextPatch.reportingOnlyWithdrawal = true;
+    }
   } else {
     nextContextPatch.reportingOnlyDenied = true;
     nextContextPatch.reportingOnlyDeniedIneligible =
@@ -21134,6 +21198,74 @@ async function syncCaseClientFromApplication(connection, {
   return newClientId;
 }
 
+async function resolveApplicationReportingCaseMode(connection, {
+  caseId,
+  applicationId,
+  reportingTrigger = 'denial',
+} = {}) {
+  const normalizedReportingTrigger = resolveReportingArtifactTrigger(reportingTrigger);
+  if (normalizedReportingTrigger !== 'withdrawal') {
+    return {
+      caseLevelReportingOnly: true,
+      nonReportingPlanCount: 0,
+      meaningfulOtherApplicationCount: 0,
+    };
+  }
+
+  const numericCaseId = Number(caseId);
+  const numericApplicationId = Number(applicationId);
+  if (!Number.isInteger(numericCaseId) || numericCaseId <= 0) {
+    return {
+      caseLevelReportingOnly: true,
+      nonReportingPlanCount: 0,
+      meaningfulOtherApplicationCount: 0,
+    };
+  }
+
+  const sourceExpr = `LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')), ''))`;
+  const [[planSummary]] = await connection.query(
+    `SELECT COUNT(*) AS count
+       FROM iset_case_action_plan
+      WHERE case_id = ?
+        AND archived_at IS NULL
+        AND (
+          ${sourceExpr} = ''
+          OR ${sourceExpr} NOT IN (${REPORTING_ARTIFACT_METADATA_SOURCES.map(() => '?').join(', ')})
+        )`,
+    [numericCaseId, ...REPORTING_ARTIFACT_METADATA_SOURCES]
+  );
+
+  const statusExpr = buildNormalisedStatusSql('a.status');
+  const lifecycleExpr = buildNormalisedStatusSql('a.lifecycle_status');
+  const closureReasonExpr = buildNormalisedStatusSql('a.closure_reason');
+  const decisionOutcomeExpr = buildNormalisedStatusSql('a.decision_outcome');
+  const [[applicationSummary]] = await connection.query(
+    `SELECT COUNT(*) AS count
+       FROM iset_application a
+      WHERE a.case_id = ?
+        AND (? IS NULL OR a.id <> ?)
+        AND NOT (
+          ${statusExpr} IN ('withdrawn', 'rejected', 'declined', 'denied', 'cancelled', 'archived')
+          OR ${lifecycleExpr} = 'archived'
+          OR ${closureReasonExpr} IN ('withdrawn', 'application_denied')
+          OR ${decisionOutcomeExpr} = 'denied'
+        )`,
+    [
+      numericCaseId,
+      Number.isInteger(numericApplicationId) && numericApplicationId > 0 ? numericApplicationId : null,
+      Number.isInteger(numericApplicationId) && numericApplicationId > 0 ? numericApplicationId : null,
+    ]
+  );
+
+  const nonReportingPlanCount = Number(planSummary?.count || 0);
+  const meaningfulOtherApplicationCount = Number(applicationSummary?.count || 0);
+  return {
+    caseLevelReportingOnly: nonReportingPlanCount === 0 && meaningfulOtherApplicationCount === 0,
+    nonReportingPlanCount,
+    meaningfulOtherApplicationCount,
+  };
+}
+
 async function syncDeniedReportingArtifacts(connection, {
   caseId,
   applicationId,
@@ -21162,6 +21294,11 @@ async function syncDeniedReportingArtifacts(connection, {
   const existingCaseContext = safeJsonParse(caseRow.case_context_json, null) || {};
   const normalizedReportingTrigger = resolveReportingArtifactTrigger(reportingTrigger, existingCaseContext);
   const reportingConfig = resolveReportingArtifactConfig(normalizedReportingTrigger);
+  const reportingCaseMode = await resolveApplicationReportingCaseMode(connection, {
+    caseId: numericCaseId,
+    applicationId: numericApplicationId,
+    reportingTrigger: normalizedReportingTrigger,
+  });
   const denialReasonCode =
     normalizedReportingTrigger === 'withdrawal'
       ? null
@@ -21198,22 +21335,36 @@ async function syncDeniedReportingArtifacts(connection, {
     reportingDate: resolvedReportingDate,
     denialReasonCode,
     reportingTrigger: normalizedReportingTrigger,
+    caseLevelReportingOnly: reportingCaseMode.caseLevelReportingOnly,
   });
 
-  await connection.query(
-    `UPDATE iset_case
-        SET status = ?,
-            closed_at = COALESCE(closed_at, ?),
-            case_context_json = ?,
-            updated_at = NOW()
-      WHERE id = ?`,
-    [
-      CASE_STATUS_DERIVED_VALUES.closed,
-      resolvedDateTime,
-      JSON.stringify(nextCaseContext),
-      numericCaseId
-    ]
-  );
+  if (reportingCaseMode.caseLevelReportingOnly) {
+    await connection.query(
+      `UPDATE iset_case
+          SET status = ?,
+              closed_at = COALESCE(closed_at, ?),
+              case_context_json = ?,
+              updated_at = NOW()
+        WHERE id = ?`,
+      [
+        CASE_STATUS_DERIVED_VALUES.closed,
+        resolvedDateTime,
+        JSON.stringify(nextCaseContext),
+        numericCaseId
+      ]
+    );
+  } else {
+    await connection.query(
+      `UPDATE iset_case
+          SET case_context_json = ?,
+              updated_at = NOW()
+        WHERE id = ?`,
+      [
+        JSON.stringify(nextCaseContext),
+        numericCaseId
+      ]
+    );
+  }
 
   const extractionContext = { payload, answers, caseContext: nextCaseContext };
   const clientStatus = extractClientStatusDetails(extractionContext) || {};
@@ -21299,6 +21450,9 @@ async function syncDeniedReportingArtifacts(connection, {
     source: reportingConfig.source,
     reportingOnly: true,
     reportingTrigger: normalizedReportingTrigger,
+    caseLevelReportingOnly: Boolean(reportingCaseMode.caseLevelReportingOnly),
+    applicationId: numericApplicationId,
+    caseId: numericCaseId,
     generatedAt: existingCaseContext?.reportingSeededAt || new Date().toISOString(),
     denialReason: denialReasonCode || null,
     [reportingConfig.dateMetadataKey]: resolvedReportingDate,
@@ -21313,14 +21467,27 @@ async function syncDeniedReportingArtifacts(connection, {
     }),
   }) || null;
 
+  const planSourceKeys = normalizedReportingTrigger === 'withdrawal'
+    ? [WITHDRAWN_REPORTING_SOURCE]
+    : [DENIED_REPORTING_SOURCE, DENIED_INELIGIBLE_REPORTING_SOURCE];
   const [[existingPlan]] = await connection.query(
-    `SELECT id
-       FROM iset_case_action_plan
-      WHERE case_id = ?
-        AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) IN (${REPORTING_ARTIFACT_METADATA_SOURCES.map(() => '?').join(', ')})
-      LIMIT 1
-      FOR UPDATE`,
-    [numericCaseId, ...REPORTING_ARTIFACT_METADATA_SOURCES]
+    normalizedReportingTrigger === 'withdrawal'
+      ? `SELECT id
+           FROM iset_case_action_plan
+          WHERE case_id = ?
+            AND application_id = ?
+            AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) IN (${planSourceKeys.map(() => '?').join(', ')})
+          LIMIT 1
+          FOR UPDATE`
+      : `SELECT id
+           FROM iset_case_action_plan
+          WHERE case_id = ?
+            AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) IN (${planSourceKeys.map(() => '?').join(', ')})
+          LIMIT 1
+          FOR UPDATE`,
+    normalizedReportingTrigger === 'withdrawal'
+      ? [numericCaseId, numericApplicationId, ...planSourceKeys]
+      : [numericCaseId, ...planSourceKeys]
   );
 
   let planId = existingPlan?.id || null;
@@ -21328,6 +21495,7 @@ async function syncDeniedReportingArtifacts(connection, {
     await connection.query(
       `UPDATE iset_case_action_plan
           SET name = ?,
+              application_id = ?,
               status = 'closed',
               agreement_number = ?,
               budget_pot = NULL,
@@ -21351,6 +21519,7 @@ async function syncDeniedReportingArtifacts(connection, {
         WHERE id = ?`,
       [
         reportingConfig.planName,
+        numericApplicationId,
         agreementNumber,
         fundingStream,
         resolveCaseAssignedStaffProfileId(caseRow) || null,
@@ -21372,10 +21541,11 @@ async function syncDeniedReportingArtifacts(connection, {
   } else {
     const [planInsert] = await connection.query(
       `INSERT INTO iset_case_action_plan
-         (case_id, name, status, agreement_number, budget_pot, funding_stream, owner_staff_profile_id, effective_date, review_date, activated_at, closed_at, result_code, EIClaimant, prev_employment, result_date, outcome_summary, closure_notes, notes, metadata_json, esdc_action_plan_json)
-       VALUES (?, ?, 'closed', ?, NULL, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (case_id, application_id, name, status, agreement_number, budget_pot, funding_stream, owner_staff_profile_id, effective_date, review_date, activated_at, closed_at, result_code, EIClaimant, prev_employment, result_date, outcome_summary, closure_notes, notes, metadata_json, esdc_action_plan_json)
+       VALUES (?, ?, ?, 'closed', ?, NULL, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         numericCaseId,
+        numericApplicationId,
         reportingConfig.planName,
         agreementNumber,
         fundingStream,
@@ -21420,14 +21590,14 @@ async function syncDeniedReportingArtifacts(connection, {
         WHERE case_id = ?
           AND action_plan_id = ?
           AND intervention_code = ?
-          AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) IN (${REPORTING_ARTIFACT_METADATA_SOURCES.map(() => '?').join(', ')})
+          AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.source')) IN (${planSourceKeys.map(() => '?').join(', ')})
         LIMIT 1
         FOR UPDATE`,
       [
         numericCaseId,
         planId,
         interventionDefinition.code,
-        ...REPORTING_ARTIFACT_METADATA_SOURCES
+        ...planSourceKeys
       ]
     );
 
@@ -21505,7 +21675,9 @@ async function syncDeniedReportingArtifacts(connection, {
   }
 
   await ensureEsdcParticipantSubmissionRecord(connection, numericCaseId, numericApplicationId, planId);
-  const submissionId = await findEsdcSubmissionIdForCase(connection, numericCaseId);
+  const submissionId =
+    await findEsdcSubmissionIdForActionPlan(connection, planId) ||
+    await findEsdcSubmissionIdForCase(connection, numericCaseId);
   if (!submissionId) {
     return {
       clientId: syncedClientId,
@@ -21545,7 +21717,10 @@ async function syncDeniedReportingArtifacts(connection, {
     interventionId: interventionIds[0] || null,
     interventionIds,
     submissionId,
-    compliance
+    compliance,
+    caseLevelReportingOnly: reportingCaseMode.caseLevelReportingOnly,
+    meaningfulOtherApplicationCount: reportingCaseMode.meaningfulOtherApplicationCount,
+    nonReportingPlanCount: reportingCaseMode.nonReportingPlanCount
   };
 }
 

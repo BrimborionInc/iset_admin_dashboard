@@ -102,6 +102,13 @@ const HOLD_REASON_OPTIONS = [
   { label: APPLICATION_HOLD_AWAITING_REASONS.other_hold, value: 'other_hold' },
 ];
 
+function getApplicationReportingArtifact(caseContext, applicationId) {
+  const artifacts = caseContext?.applicationReportingArtifacts;
+  if (!artifacts || typeof artifacts !== 'object' || !applicationId) return null;
+  const direct = artifacts[String(applicationId)] || artifacts[Number(applicationId)];
+  return direct && typeof direct === 'object' ? direct : null;
+}
+
 const getDatePickerValueDaysFromNow = days => {
   const date = new Date(Date.now() + days * 86400000);
   return date.toISOString().slice(0, 10);
@@ -722,13 +729,19 @@ const ApplicationOverviewWidget = ({
     }
   }, [application_id]);
   const watchlistHitSummary = watchlistHitDetails?.summary || null;
+  const selectedReportingArtifact = getApplicationReportingArtifact(caseData?.caseContext, application_id);
+  const selectedReportingTrigger = selectedReportingArtifact?.reportingTrigger || selectedReportingArtifact?.trigger || null;
+  const isSelectedReportingWithdrawal =
+    selectedReportingTrigger === 'withdrawal' ||
+    selectedReportingArtifact?.reportingSeedSource === 'withdrawn_reporting';
   const isReportingOnlyApplication = Boolean(
     caseData?.caseContext?.reportingOnlyDenied ||
     caseData?.caseContext?.reportingOnlyDeniedIneligible ||
     caseData?.caseContext?.reportingOnlyWithdrawal ||
-    caseData?.caseContext?.reportingCorrectionAllowed
+    caseData?.caseContext?.reportingCorrectionAllowed ||
+    selectedReportingArtifact?.reportingCorrectionAllowed
   );
-  const reportingApplicationLabel = caseData?.caseContext?.reportingOnlyWithdrawal
+  const reportingApplicationLabel = caseData?.caseContext?.reportingOnlyWithdrawal || isSelectedReportingWithdrawal
     ? 'withdrawn application'
     : 'denied application';
   const ilmpCompliance = caseData?.compliance?.ilmp || null;

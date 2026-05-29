@@ -40,7 +40,7 @@ describe("ESDC participant queue pagination", () => {
     expect(widgetSource).toContain("Generate batch XML");
     expect(widgetSource).toContain("/api/esdc/participants/batch-prepare");
     expect(widgetSource).toContain("/api/esdc/participants/batch-submit");
-    expect(widgetSource).toContain("Download XML and mark submitted");
+    expect(widgetSource).toContain("Download XML and mark exported");
     expect(widgetSource).toContain("summary.ready");
     expect(widgetSource).toContain("summary.needsReview");
     expect(widgetSource).toContain("summary.blocked");

@@ -101,7 +101,7 @@ Last Updated: 2026-05-20
 
 - `All Cases` includes open client cases visible through `/api/dashboard/all-client-cases`.
 - `All Cases` is case-based, not deduped by client, so multiple open files for one client count separately.
-- The case queue excludes only `closed` and `archived` statuses. `Dormant` and `ready_to_close` remain in scope.
+- The case queue excludes only `closed` and `archived` statuses. `dormant` (shown to staff as **No Active Plan**) and `ready_to_close` remain in scope.
 - `Pending Completion` is the exception to the non-terminal-only rule for the pipeline cards: it intentionally surfaces decision-recorded application files that still need post-decision work. Approved rows remain until the application is completed/closed after approval-letter and funding-doc follow-through. Denied rows remain only until the denial letter is sent, because the denial-letter send completes the application.
 
 ## Regional Manager scope rule
@@ -118,7 +118,7 @@ Last Updated: 2026-05-20
   - cases assigned to staff whose `staff_profiles.region_id` is in the manager's resolved region set
   - cases whose `iset_case.portfolio_region_id` is in the manager's resolved region set
 - `Clients in My Region` is case-based, not deduped by client, so multiple open files for one client count separately.
-- The client-case queue excludes only `closed` and `archived` statuses. `Dormant` and `ready_to_close` remain in scope.
+- The client-case queue excludes only `closed` and `archived` statuses. `dormant` (shown to staff as **No Active Plan**) and `ready_to_close` remain in scope.
 - The applications queue excludes terminal application statuses, including normalized terminal variants such as `approved`, `completed`, `withdrawn`, `cancelled`, `closed`, and `archived`.
 
 ## ISET Coordinator scope rule

@@ -35,6 +35,13 @@ import { resolveApplicationStateFields } from '../utils/applicationStatus';
 
 const NOT_PROVIDED = <Box color="text-body-secondary">Not provided</Box>;
 
+function getApplicationReportingArtifact(caseContext, applicationId) {
+  const artifacts = caseContext?.applicationReportingArtifacts;
+  if (!artifacts || typeof artifacts !== 'object' || !applicationId) return null;
+  const direct = artifacts[String(applicationId)] || artifacts[Number(applicationId)];
+  return direct && typeof direct === 'object' ? direct : null;
+}
+
 const EDUCATION_LEVEL_OPTIONS = {
   no_formal_education: 'No formal education',
   grade_7_8: 'Up to Grade 7-8',
@@ -1535,13 +1542,19 @@ const IsetApplicationFormWidget = ({
   });
   const decisionStatusSource = resolvedApplicationState.applicationStatus || '';
   const reportingCaseContext = caseData?.caseContext || {};
+  const selectedReportingArtifact = getApplicationReportingArtifact(reportingCaseContext, application_id);
+  const selectedReportingTrigger = selectedReportingArtifact?.reportingTrigger || selectedReportingArtifact?.trigger || null;
+  const isSelectedReportingWithdrawal =
+    selectedReportingTrigger === 'withdrawal' ||
+    selectedReportingArtifact?.reportingSeedSource === 'withdrawn_reporting';
   const reportingCorrectionAllowed = Boolean(
     reportingCaseContext?.reportingOnlyDenied ||
     reportingCaseContext?.reportingOnlyDeniedIneligible ||
     reportingCaseContext?.reportingOnlyWithdrawal ||
-    reportingCaseContext?.reportingCorrectionAllowed
+    reportingCaseContext?.reportingCorrectionAllowed ||
+    selectedReportingArtifact?.reportingCorrectionAllowed
   );
-  const reportingApplicationLabel = reportingCaseContext?.reportingOnlyWithdrawal
+  const reportingApplicationLabel = reportingCaseContext?.reportingOnlyWithdrawal || isSelectedReportingWithdrawal
     ? 'withdrawn application record'
     : 'denied application record';
   const isDecisionFinal =

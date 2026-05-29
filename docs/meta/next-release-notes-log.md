@@ -47,6 +47,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - 2026-05-23 | Release TBD | Fix/Payments | Finance emails | Finance payment-packet emails include a seven-day download link for the packet evidence bundle. | The link downloads through PATH instead of a direct S3/MinIO presign, so it works with DEV/local storage and object-store deployments; the zip contains supporting evidence files only, without packet-summary PDF or JSON manifest files.
 - 2026-05-23 | Release TBD | Config/Payments | Payment packet evidence | Payment packets now require only the Client Funding Agreement and the signed EFT banking form as baseline evidence. | The new signed EFT evidence type maps to the existing `EFT_form` document type, and the runtime-config update preserves existing per-payment-type evidence rules.
 - 2026-05-23 | Release TBD | UX/Finance Settings | Finance email preview | Finance Settings now includes a read-only preview of the finance payment-packet email. | The preview uses sample packet data rendered through the same backend email builder used for real submissions, including placeholder packet-bundle wording.
+- 2026-05-29 | Release 20260529-prod-case-lifecycle-reporting | UX/Wording | Case lifecycle labels | Case files previously labelled `Dormant` now display as `No Active Plan`. | This is presentation-only: persisted status values and API filters still use `dormant`.
+- 2026-05-29 | Release 20260529-prod-case-lifecycle-reporting | Fix/ILMP | Withdrawn application reporting | Withdrawing one application on a multi-application case now creates application-scoped ILMP reporting artifacts without closing the whole case. | Existing non-reporting action plans and other active applications remain in casework scope; selected-application reporting panels use the application-specific artifact, and ILMP validation loads the matching action plan context.
 - 2026-05-24 | Release TBD | UX/Finance Reports | ISET Advances and Active Clients | Financial Reports now opens with a cleaner funded-interventions view and better intervention-detail controls. | The detail table defaults to funded interventions only, can be switched to all reportable interventions, hides reference-number clutter under participant names, shows CRF/EI and approved funding near the front, and supports column selection, column resizing, and sorting.
 - 2026-05-24 | Release TBD | UX/Help | Financial Reports | Financial Reports help now reads as staff-facing guidance instead of implementation notes. | The page has section-level info for setup, summary, carry-over, region summary, and intervention detail, plus seeded AI help coverage for the annual report purpose, export scope, and PATH-versus-Sage payment-status caveat.
 - 2026-05-01 | Release TBD | Notifications | Manage Notifications | Staff email notification settings now apply to non-assignment events, with NWAC review split by approval, denial, and changes-requested outcomes. | Enabled staff rows with `email_alert=1` and a template send through SES once per deduped recipient; assignment emails keep their existing behavior, and TEST remains blocked from real sends.
@@ -350,16 +352,18 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Supporting Documents label edits now save reliably for identity/status documents and older uploaded rows.
-- Edit document details and duplicate-document saves now preserve client document scope without asking staff to attach identity/status documents to an application.
-- Recent ILMP exports now shows a compact export history with Summary, Clients exported, and XML tabs.
-- ILMP export wording now reflects the real workflow: PATH downloads XML for manual upload to ESDC and records the export in history.
-- ILMP validation now accepts the mixed-separator `lack_of_job-opportunities` barrier value.
-- Workflow Preview and Publish no longer fail on instruction-only components without explicit labels.
-- Submitted payment packets no longer show the old line-level `Mark paid` action.
-- Financial Reports now labels the zero-dollar intervention option as `All reportable interventions` and shows `PATH follow-up state` by default.
+- Case files previously labelled `Dormant` now display as `No Active Plan`, while the stored status and API filter value remain `dormant`.
+- Withdrawing one application on a multi-application case now creates application-scoped ILMP reporting artifacts without closing the whole case.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260529-prod-case-lifecycle-reporting
+
+- Case files previously labelled `Dormant` now display as `No Active Plan` across case status badges, ISET Clients filters, homepage queue descriptions, case re-open copy, and related help guidance.
+- The persisted case lifecycle value and API query value remain `dormant`, so existing saved filters and backend behavior continue to work.
+- Withdrawing one application on a multi-application case now creates application-scoped ILMP reporting artifacts without closing the whole case.
+- Existing non-reporting action plans and other active applications remain in casework scope after an application-specific withdrawal reporting record is created.
+- Selected-application reporting panels now use the application-specific reporting artifact, and ILMP validation loads the matching action plan context.
 
 #### Release 20260528-evening-batch
 
@@ -382,30 +386,24 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - The ILMP Participant submission queue now paginates, sorts, validates, and batches participant rows in one consolidated widget.
 - Denied application reporting records now map applicant education consistently into ILMP start and result education fields.
 
-#### Release 20260526-prod-snapshot-scope-guard
-
-- Manage ISET Applications and ISET Clients now include `Show All` page-size options and sort the full filtered result set before pagination.
-- Regional Snapshot now uses the same approved CRF/EI funding and participant-home-province rules as Financial Reports for funding and funded-client totals.
-- Financial Reports help is organized around annual-report workflow, including approval-year scope, visible-row totals, carry-over confidence, export scope, and first checks when a number looks wrong.
-- Applicant portal message, signing, status, and intervention routes now double-check that the signed-in account belongs to the same client as the application and case being shown.
-- Applicant session-audit writes now match the deployed `user_session_audit` table shape and prune old rows with bounded retention.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
-- Les modifications des libelles dans Supporting Documents s'enregistrent maintenant correctement pour les documents d'identite/statut et les anciens televersements.
-- Les fenetres Edit document details et Duplicate document conservent maintenant la portee client des documents sans demander de les rattacher a une demande.
-- Recent ILMP exports affiche maintenant un historique compact avec les onglets Summary, Clients exported et XML.
-- Le libelle ILMP reflete maintenant le vrai flux: PATH telecharge le XML pour un televersement manuel dans ESDC et enregistre l'export dans l'historique.
-- La validation ILMP accepte maintenant la valeur de barriere mixte `lack_of_job-opportunities`.
-- Workflow Preview et Publish ne bloquent plus sur les composants d'instructions sans libelle explicite.
-- Les packets de paiement envoyes n'affichent plus l'ancienne action `Mark paid` au niveau de la ligne.
-- Financial Reports appelle maintenant l'option des lignes a zero dollar `All reportable interventions` et affiche `PATH follow-up state` par defaut.
+- Les dossiers auparavant libelles `Dormant` s'affichent maintenant comme `No Active Plan`, tandis que le statut stocke et la valeur de filtre API restent `dormant`.
+- Le retrait d'une seule demande dans un dossier a plusieurs demandes cree maintenant des artefacts ILMP propres a cette demande sans fermer tout le dossier.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260529-prod-case-lifecycle-reporting
+
+- Les dossiers auparavant libelles `Dormant` s'affichent maintenant comme `No Active Plan` dans les badges de statut, les filtres ISET Clients, les descriptions de files d'accueil, le texte de reouverture de dossier et l'aide associee.
+- La valeur de cycle de vie stockee et la valeur de requete API restent `dormant`, afin que les filtres existants et le comportement backend continuent de fonctionner.
+- Le retrait d'une seule demande dans un dossier a plusieurs demandes cree maintenant des artefacts ILMP propres a cette demande sans fermer tout le dossier.
+- Les plans d'action non-reporting existants et les autres demandes actives restent dans le suivi de dossier apres la creation d'un enregistrement reporting lie a la demande retiree.
+- Les panneaux de correction reporting utilisent maintenant l'artefact propre a la demande selectionnee, et la validation ILMP charge le contexte du plan d'action correspondant.
 
 #### Release 20260528-evening-batch
 
@@ -427,14 +425,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les lignes de cout d'intervention peuvent etre corrigees de Living Allowance vers Residence Costs sans supprimer et reconstruire la ligne.
 - La file ILMP Participant regroupe maintenant pagination, tri, validation et generation de lots dans un seul widget.
 - Les dossiers de reporting des demandes refusees mappent maintenant l'education de la participante ou du participant de facon coherente vers les champs ILMP de debut et de resultat.
-
-#### Release 20260526-prod-snapshot-scope-guard
-
-- Manage ISET Applications et ISET Clients incluent maintenant l'option `Show All` et trient tous les resultats filtres avant la pagination.
-- Regional Snapshot utilise maintenant les memes regles que Financial Reports pour le financement CRF/EI approuve et les clients finances par province de residence.
-- L'aide de Financial Reports est organisee autour du travail de rapport annuel, notamment la portee par annee d'approbation, les totaux des lignes visibles, la fiabilite du report, la portee de l'export et les premieres verifications quand un montant semble incorrect.
-- Les routes de messages, signatures, statuts et interventions du portail applicant verifient maintenant que le compte connecte appartient au meme client que la demande et le dossier affiches.
-- L'audit de session applicant ecrit maintenant selon la structure de table `user_session_audit` deployee et supprime les anciennes lignes avec une retention bornee.
 
 ### Problemes connus (brouillon - FR)
 

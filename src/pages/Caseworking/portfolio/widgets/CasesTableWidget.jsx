@@ -44,7 +44,7 @@ const DEFAULT_STATUS_FILTERS = [
 const CLIENT_CATEGORY_OPTIONS = [
   { label: "Show Open Clients", value: "active" },
   { label: "Show Funded Clients", value: "funded" },
-  { label: "Show Dormant Clients", value: "dormant" },
+  { label: "Show No Active Plan Clients", value: "dormant" },
   { label: "Show Denied / Ineligible Clients", value: "ineligible_reporting" },
   { label: "Show All Clients", value: "all" },
 ];

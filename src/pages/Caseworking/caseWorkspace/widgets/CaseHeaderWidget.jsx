@@ -1845,7 +1845,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         >
           <SpaceBetween size="m">
             <Box>
-              Re-open this case? The status will move to Dormant and will stay Dormant until a new action plan is initiated.
+              Re-open this case? The status will move to No Active Plan and will stay there until a new action plan is initiated.
             </Box>
           </SpaceBetween>
         </Modal>

@@ -228,7 +228,7 @@ const ISET_COORDINATOR_ON_HOLD_FILTER = [
 const NWAC_ADMIN_CLIENT_CASES_BUCKET = {
     id: 'all-client-cases',
     label: 'All Cases',
-    description: 'All open client cases across the portfolio, including dormant files.'
+    description: 'All open client cases across the portfolio, including files with no active plan.'
 };
 const REGIONAL_MANAGER_OPEN_APPLICATIONS_BUCKET = {
     id: 'regional-open-applications',
@@ -238,7 +238,7 @@ const REGIONAL_MANAGER_OPEN_APPLICATIONS_BUCKET = {
 const REGIONAL_MANAGER_CLIENT_CASES_BUCKET = {
     id: 'regional-client-cases',
     label: 'Clients in My Region',
-    description: 'Open client cases in your regional portfolio, including dormant files.'
+    description: 'Open client cases in your regional portfolio, including files with no active plan.'
 };
 const SHARED_PROGRAM_ADMIN_PIPELINE_BUCKET_IDS = Object.freeze([
     'new-applications',
