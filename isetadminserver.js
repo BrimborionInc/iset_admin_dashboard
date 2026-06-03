@@ -1213,6 +1213,54 @@ async function resolveDocumentAttachmentContext({
   };
 }
 
+function documentSourceRequiresApplicationLineage(source) {
+  return normaliseString(source).toLowerCase() === 'application_submission';
+}
+
+async function preserveDocumentSourceLineage({
+  documentRow = null,
+  caseId = null,
+  applicationId = null,
+  connection = pool,
+} = {}) {
+  let nextCaseId = normalisePositiveInteger(caseId);
+  let nextApplicationId = normalisePositiveInteger(applicationId);
+
+  if (!documentSourceRequiresApplicationLineage(documentRow?.source)) {
+    return {
+      caseId: nextCaseId || null,
+      applicationId: nextApplicationId || null,
+    };
+  }
+
+  nextCaseId = nextCaseId || normalisePositiveInteger(documentRow?.case_id);
+  nextApplicationId = nextApplicationId || normalisePositiveInteger(documentRow?.application_id);
+
+  if (nextApplicationId) {
+    const applicationCaseId = await resolveCaseIdFromApplicationId(nextApplicationId, connection);
+    if (applicationCaseId && nextCaseId && Number(applicationCaseId) !== Number(nextCaseId)) {
+      const err = new Error('application_case_mismatch');
+      err.code = 'application_case_mismatch';
+      err.details = { caseId: nextCaseId, applicationId: nextApplicationId, applicationCaseId };
+      throw err;
+    }
+    if (applicationCaseId) {
+      nextCaseId = applicationCaseId;
+    }
+  }
+
+  if (!nextCaseId || !nextApplicationId) {
+    const err = new Error('application_scope_required_for_submission_document');
+    err.code = 'application_scope_required_for_submission_document';
+    throw err;
+  }
+
+  return {
+    caseId: nextCaseId,
+    applicationId: nextApplicationId,
+  };
+}
+
 async function resolveActionPlanIdForInterventions({ interventionIds, connection = pool } = {}) {
   const ids = Array.from(new Set((interventionIds || []).map(id => Number(id)).filter(Number.isFinite)));
   if (!ids.length) return null;
@@ -1336,7 +1384,7 @@ async function loadApplicationAnswers({ applicantId = null, applicationId = null
     let caseMeta = { status: null, application_status: null };
     if (applicationId) {
       const [[app]] = await pool.query(
-        `SELECT a.id, a.payload_json, a.submission_id, a.status AS application_status, s.user_id, s.intake_payload, s.status AS submission_status, s.submitted_at
+        `SELECT a.id, a.payload_json, a.submission_id, a.status AS application_status, a.decision_outcome, s.user_id, s.intake_payload, s.status AS submission_status, s.submitted_at
            FROM iset_application a
            LEFT JOIN iset_application_submission s ON s.id = a.submission_id
           WHERE a.id = ?
@@ -1347,7 +1395,7 @@ async function loadApplicationAnswers({ applicantId = null, applicationId = null
     }
     if (!row && applicantId) {
       const [[app]] = await pool.query(
-        `SELECT a.id, a.payload_json, a.submission_id, a.status AS application_status, s.user_id, s.intake_payload, s.status AS submission_status, s.submitted_at
+        `SELECT a.id, a.payload_json, a.submission_id, a.status AS application_status, a.decision_outcome, s.user_id, s.intake_payload, s.status AS submission_status, s.submitted_at
            FROM iset_application a
            LEFT JOIN iset_application_submission s ON s.id = a.submission_id
           WHERE s.user_id = ?
@@ -1369,7 +1417,7 @@ async function loadApplicationAnswers({ applicantId = null, applicationId = null
     const applicationStatusFromApplication = row?.application_status || null;
     const applicationStatusFromCase = caseRow?.status || null;
     caseMeta.application_status = applicationStatusFromApplication || applicationStatusFromCase || null;
-    if (!row) return { answers: null, applicationId: null, submissionStatus: null, submittedAt: null, caseId: null, assessmentSubmitted: false, assessmentComplete: false, caseStatus: null, applicationStatus: null };
+    if (!row) return { answers: null, applicationId: null, submissionStatus: null, submittedAt: null, caseId: null, assessmentSubmitted: false, assessmentComplete: false, caseStatus: null, applicationStatus: null, decisionOutcome: null };
     let payload = row.payload_json;
     if (typeof payload === 'string') {
       try { payload = JSON.parse(payload); } catch { payload = {}; }
@@ -1521,6 +1569,7 @@ async function loadApplicationAnswers({ applicantId = null, applicationId = null
       assessmentComplete,
       caseStatus: caseMeta.status || null,
       applicationStatus: caseMeta.application_status || null,
+      decisionOutcome: row.decision_outcome || null,
       assessmentLivingAllowance,
       assessmentDurationDays,
       assessmentCostTotal,
@@ -1544,6 +1593,7 @@ async function loadApplicationAnswers({ applicantId = null, applicationId = null
       assessmentComplete: false,
       caseStatus: null,
       applicationStatus: null,
+      decisionOutcome: null,
       assessmentLivingAllowance: 0,
       assessmentDurationDays: null,
       assessmentCostTotal: null,
@@ -46659,7 +46709,7 @@ app.put('/api/documents/:id', async (req, res) => {
   let existingRow = null;
   try {
     const [rows] = await pool.query(
-      'SELECT id, metadata, document_category, client_id, application_id, case_id, action_plan_id, applicant_user_id FROM iset_document WHERE id = ? LIMIT 1',
+      'SELECT id, metadata, document_category, client_id, application_id, case_id, action_plan_id, applicant_user_id, source FROM iset_document WHERE id = ? LIMIT 1',
       [documentId]
     );
     if (rows && rows[0]) {
@@ -46768,6 +46818,18 @@ app.put('/api/documents/:id', async (req, res) => {
     }
   } catch (err) {
     const errorCode = err?.code || 'document_link_validation_failed';
+    return res.status(400).json({ error: errorCode });
+  }
+  try {
+    const lineageScope = await preserveDocumentSourceLineage({
+      documentRow: existingRow,
+      caseId: nextCaseId,
+      applicationId: nextApplicationId,
+    });
+    nextCaseId = lineageScope.caseId;
+    nextApplicationId = lineageScope.applicationId;
+  } catch (err) {
+    const errorCode = err?.code || 'document_source_lineage_validation_failed';
     return res.status(400).json({ error: errorCode });
   }
   try {
@@ -47074,6 +47136,18 @@ app.post('/api/documents/:id/duplicate', async (req, res) => {
       }
     } catch (err) {
       const errorCode = err?.code || 'document_link_validation_failed';
+      return res.status(400).json({ error: errorCode });
+    }
+    try {
+      const lineageScope = await preserveDocumentSourceLineage({
+        documentRow: doc,
+        caseId: nextCaseId,
+        applicationId: nextApplicationId,
+      });
+      nextCaseId = lineageScope.caseId;
+      nextApplicationId = lineageScope.applicationId;
+    } catch (err) {
+      const errorCode = err?.code || 'document_source_lineage_validation_failed';
       return res.status(400).json({ error: errorCode });
     }
     const targetAccessError = await validateDocumentAttachmentContextAccess(req, {
@@ -47487,16 +47561,31 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
     const trainingProgramSet = new Set(['skills_development', 'tws', 'jcp', 'group']);
     const isTrainingProgram = trainingProgramSet.has(targetProgramValue);
     const assessmentHasLivingAllowance = assessmentLivingAllowance > 0;
+    const applicationDecisionOutcome = normaliseApplicationDecisionOutcomeValue(applicationAnswerMeta.decisionOutcome);
+    const decisionOutcomeApproved = applicationDecisionOutcome === 'approved';
+    const decisionOutcomeDenied = applicationDecisionOutcome === 'denied';
     const decisionReady = applicationStatusLower === 'decision_ready';
     const approvedStatus = applicationStatusLower === 'approved';
     const rejectedStatus =
       applicationStatusLower === 'rejected' ||
-      applicationStatusLower === 'declined';
+      applicationStatusLower === 'declined' ||
+      applicationStatusLower === 'denied';
     const completedStatus = applicationStatusLower === 'completed';
-    const hasDecisionOutcome = decisionReady || approvedStatus || rejectedStatus || completedStatus;
+    const hasDecisionOutcome =
+      decisionOutcomeApproved ||
+      decisionOutcomeDenied ||
+      decisionReady ||
+      approvedStatus ||
+      rejectedStatus ||
+      completedStatus;
     const caseStatusApproved = CASE_STATUS_INITIATED_SEEDS.has(caseStatusLower);
-    const decisionApproved = approvedStatus || ((decisionReady || completedStatus) && caseStatusApproved);
-    const decisionDenied = rejectedStatus || ((decisionReady || completedStatus) && hasDecisionOutcome && !decisionApproved);
+    const decisionApproved =
+      !decisionOutcomeDenied &&
+      (decisionOutcomeApproved || approvedStatus || ((decisionReady || completedStatus) && caseStatusApproved));
+    const decisionDenied =
+      decisionOutcomeDenied ||
+      rejectedStatus ||
+      ((decisionReady || completedStatus) && hasDecisionOutcome && !decisionApproved);
     const approvalOrLater = (() => {
       if (applicationStatusLower) {
         return (
@@ -48040,6 +48129,9 @@ app.get('/api/applicants/:id/document-checklist', async (req, res) => {
     };
 
     if (stageRaw) {
+      if (decisionDenied && normaliseChecklistId(stageRaw) !== 'deny') {
+        return res.json(buildGatePayload('deny'));
+      }
       return res.json(buildGatePayload(stageRaw));
     }
 

@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-05-28
+Last Updated: 2026-06-03
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -21,6 +21,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-06-03 | Release TBD | Fix/Documents | Document checklist | Denied and closed applications no longer show funding-stage checklist items as missing. | The checklist now uses the stored application decision outcome, so completed denied files stay on the denial/no-funding checklist path even when the assessment communication step requests the approval-stage checklist.
+- 2026-06-01 | Release 20260601-prod-document-lineage-fix | Fix/Documents | Supporting Documents labels | Edit document details now saves Status or Treaty Card labels from application submissions without breaking source lineage. | The backend keeps the submission document's existing application link while still treating the document type as client-scoped and validating staff access through the case/application context. Deployed to PROD at 2026-06-02 00:47 UTC.
 - 2026-05-25 | Release 20260525-prod-bugcr-batch | Fix/Casework | Other Funding | Other funders can now be marked confirmed, pending, denied, or unknown, with optional amount and notes. | Coverage is required only for confirmed funding, pending/denied/unknown funders stay on the file as context, and only confirmed other funders generate other-funder letters.
 - 2026-05-25 | Release 20260525-prod-bugcr-batch | Fix/Casework | Funding revision letters | Client funding revision letters now use the reviewed secure-message letter body when creating the signable letter artifact. | This keeps the approval/reassessment letter in the outbound packet aligned with the revised CFA and intervention amounts instead of reusing the original application approval-letter draft.
 - 2026-05-26 | Release 20260526-prod-snapshot-scope-guard | UX/Casework | List page size | Manage ISET Applications and ISET Clients table preferences now include a `Show All` page-size option. | The option uses the established `9999` page-size value; the ISET Clients API cap was raised to honor it.
@@ -352,10 +354,17 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
+- Denied and closed applications no longer show funding-stage checklist items, such as Client Funding Agreement or EFT form, as missing.
+- Edit document details now saves Status or Treaty Card labels from application submissions without losing the document's source link.
 - Case files previously labelled `Dormant` now display as `No Active Plan`, while the stored status and API filter value remain `dormant`.
 - Withdrawing one application on a multi-application case now creates application-scoped ILMP reporting artifacts without closing the whole case.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260601-prod-document-lineage-fix
+
+- Edit document details now saves Status or Treaty Card labels from application submissions without losing the document's source link.
+- The backend keeps the existing submission application link while still treating the document type as client-scoped and validating staff access through the case/application context.
 
 #### Release 20260529-prod-case-lifecycle-reporting
 
@@ -376,26 +385,23 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Submitted payment packets no longer show the retired line-level `Mark paid` action.
 - Financial Reports now labels the zero-dollar intervention option as `All reportable interventions` and shows `PATH follow-up state` by default.
 
-#### Release 20260527-prod-casework-ilmp-hotfix
-
-- Case Header can now change an unactivated PATH account email before staff resend activation.
-- Closed action plan details now save closeout corrections such as Action Plan Result Education Level.
-- Long intervention schedules no longer fail save because PATH caps only the ILMP duration field while preserving the real start/end dates.
-- Intervention outcomes are recorded only when an intervention is closed, and closeout now requires staff to choose the final ESDC outcome explicitly.
-- Intervention cost lines can be corrected from Living Allowance to Residence Costs without deleting and rebuilding the line.
-- The ILMP Participant submission queue now paginates, sorts, validates, and batches participant rows in one consolidated widget.
-- Denied application reporting records now map applicant education consistently into ILMP start and result education fields.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
+- Les demandes refusees et fermees n'affichent plus les elements de checklist lies au financement, comme le Client Funding Agreement ou le formulaire EFT, comme manquants.
+- Edit document details enregistre maintenant les libelles Status or Treaty Card provenant des demandes sans perdre le lien source du document.
 - Les dossiers auparavant libelles `Dormant` s'affichent maintenant comme `No Active Plan`, tandis que le statut stocke et la valeur de filtre API restent `dormant`.
 - Le retrait d'une seule demande dans un dossier a plusieurs demandes cree maintenant des artefacts ILMP propres a cette demande sans fermer tout le dossier.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260601-prod-document-lineage-fix
+
+- Edit document details enregistre maintenant les libelles Status or Treaty Card provenant des demandes sans perdre le lien source du document.
+- Le backend conserve le lien existant vers la demande soumise tout en traitant le type de document comme un document a portee client et en validant l'acces du personnel dans le contexte du dossier/de la demande.
 
 #### Release 20260529-prod-case-lifecycle-reporting
 
@@ -415,16 +421,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Workflow Preview et Publish ne bloquent plus sur les composants d'instructions sans libelle explicite.
 - Les packets de paiement envoyes n'affichent plus l'ancienne action `Mark paid` au niveau de la ligne.
 - Financial Reports appelle maintenant l'option des lignes a zero dollar `All reportable interventions` et affiche `PATH follow-up state` par defaut.
-
-#### Release 20260527-prod-casework-ilmp-hotfix
-
-- Case Header permet maintenant de corriger le courriel d'un compte PATH non active avant que le personnel renvoie l'activation.
-- Les details d'un plan d'action ferme enregistrent maintenant les corrections de cloture comme le niveau d'education du resultat.
-- Les longues periodes d'intervention ne bloquent plus l'enregistrement; PATH limite seulement le champ de duree ILMP et conserve les vraies dates de debut et de fin.
-- Les resultats d'intervention sont enregistres seulement quand une intervention est fermee, et la cloture exige maintenant le choix explicite du resultat ESDC final.
-- Les lignes de cout d'intervention peuvent etre corrigees de Living Allowance vers Residence Costs sans supprimer et reconstruire la ligne.
-- La file ILMP Participant regroupe maintenant pagination, tri, validation et generation de lots dans un seul widget.
-- Les dossiers de reporting des demandes refusees mappent maintenant l'education de la participante ou du participant de facon coherente vers les champs ILMP de debut et de resultat.
 
 ### Problemes connus (brouillon - FR)
 

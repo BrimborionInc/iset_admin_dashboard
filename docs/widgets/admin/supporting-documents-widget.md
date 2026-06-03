@@ -1,6 +1,6 @@
 # Supporting Documents widget
 
-Date: 2026-05-22
+Date: 2026-06-01
 
 ## Workflow
 
@@ -60,6 +60,7 @@ manual uploads, and generated forms, then compares them against the relevant che
   - the backend treats label-only requests as a rename only and preserves existing case/application/action-plan/client scope without re-running attachment resolution
   - full edit-modal saves still send document type and attachment fields and continue to validate scope
   - client-scoped modal saves and duplicate-document saves include hidden case/application context only so the backend can validate access and resolve client scope; staff are not asked to attach client-scoped documents to an application
+  - application-submission documents keep their source-required `application_id` lineage when edited through the modal, even when the selected document type is client-scoped
   - when an older unscoped row is edited, the modal defaults application/action-plan attachment controls from the current workspace filter/context when possible
 - Download behavior:
   - the inline `Download` action is shown only to `System Administrator` and `NWAC Administrator`
@@ -100,6 +101,6 @@ manual uploads, and generated forms, then compares them against the relevant che
 - If a normal applicant-backed case cannot upload or refresh, inspect `caseData.applicant_user_id` / `caseData.applicantUserId` and the `/api/applicants/:id/*` endpoints.
 - If `/api/applicants/:id/documents/upload` returns `client_id_mismatch`, compare the URL applicant user, the case client, and the application/submission user. A submission user that maps to another client is an unsafe applicant context; the Case Workspace should fall back to `/api/cases/:case_id/documents/upload`.
 - If a document label inline edit does not stick, inspect `PUT /api/documents/:id` first. A label-only request should not fail because an older submission upload lacks modern attachment scope; only document-type or attachment changes should run scope resolution.
-- If an edit-details or duplicate save fails for a client-scoped type such as `identity_document` or `status_card`, verify the widget request includes `caseId` or `applicationId` even though the document remains client-scoped in storage.
+- If an edit-details or duplicate save fails for a client-scoped type such as `identity_document` or `status_card`, verify the widget request includes `caseId` or `applicationId` even though the document remains client-scoped in storage. If the row has `source='application_submission'`, also verify the backend preserves the existing `application_id`; PROD's source-lineage CHECK constraint requires submission documents to keep `client_id`, `case_id`, `application_id`, and `applicant_user_id`.
 - If `chk_iset_document_manual_upload_scope` fails for a staff upload, treat it as a backend context-resolution bug first. Manual uploads must carry `client_id` and `case_id`; application-linked uploads must also carry `application_id` and `applicant_user_id`.
 - Do not add placeholder application, assessment, or action-plan rows just to make document management work.

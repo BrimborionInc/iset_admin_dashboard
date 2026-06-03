@@ -1,6 +1,6 @@
 Purpose: Capture the UX, data model, and implementation decisions for a configuration widget that lets SysAdmins edit the runtime document checklist by status gate.
 Audience: Admin dashboard engineers, product owners, and operators configuring checklist requirements.
-Last Updated: 2026-05-06
+Last Updated: 2026-06-03
 
 ## Background
 - The runtime checklist is stored in `iset_runtime_config` under `scope='checklist'` and key `checklist.compliance.iset`.
@@ -12,6 +12,7 @@ Last Updated: 2026-05-06
 ## Current Runtime Guardrails
 
 - Checklist item `id` values are behavioral, not just display keys. `/api/applicants/:id/document-checklist` uses specific IDs to apply conditional required logic.
+- Application checklist gate selection must respect `iset_application.decision_outcome`. A denied application must use the denial/no-funding checklist path even when its status is `completed`, its case is `closed`, or the UI explicitly requests the approval/funding stage (for example the shared assessment `communication` step requesting `approve_and_commence`).
 - For income/expense evidence, use these conditional item IDs:
   - `financial-records` with document type `evidence_income`
   - `financial-evidence` with document type `evidence_expense`

@@ -1,15 +1,15 @@
 const buildInfo = {
   "packageVersion": "0.1.0",
-  "releaseId": "20260529-prod-case-lifecycle-reporting",
+  "releaseId": "20260601-prod-document-lineage-fix",
   "buildTarget": "production",
-  "builtAt": "2026-05-29T22:22:28.843Z",
-  "gitCommit": "5aac70c987ef2838a3943684a7365e29fc568f7a",
-  "gitShort": "5aac70c9",
+  "builtAt": "2026-06-02T00:47:01.494Z",
+  "gitCommit": "916951609f557509f163f53ce8e7410e7cda35f4",
+  "gitShort": "91695160",
   "gitDirty": true,
-  "publicReleaseLabel": "Release 20260529-prod-case-lifecycle-reporting",
-  "publicReleaseDateEn": "29th May 2026",
-  "publicReleaseDateFr": "29 mai 2026",
-  "displayLabel": "release 20260529-prod-case-lifecycle-reporting | 5aac70c9-dirty"
+  "publicReleaseLabel": "Release 20260601-prod-document-lineage-fix",
+  "publicReleaseDateEn": "2nd June 2026",
+  "publicReleaseDateFr": "2 juin 2026",
+  "displayLabel": "release 20260601-prod-document-lineage-fix | 91695160-dirty"
 };
 
 export default buildInfo;

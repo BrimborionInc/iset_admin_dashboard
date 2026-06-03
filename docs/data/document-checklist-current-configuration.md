@@ -18,6 +18,8 @@ Purpose: outline the currently configured PATH document checklist gates and acce
 
 Important caveat: configured `required` is the base rule. `isetadminserver.js` still applies conditional logic for known item IDs, including income evidence, expense evidence, medical documentation, acceptance letters, funding package forms, attendance forms, and intervention financial evidence. Preserve behavioral item IDs such as `financial-records` and `financial-evidence`.
 
+Behavior note added 2026-06-03: application checklist routing also uses the stored application decision outcome. A denied application is routed to the denial checklist path even after it is `completed`/`closed`, and explicit approval-stage requests such as `stage=approve_and_commence` must not surface funding documents for denied files.
+
 ## Environment Drift Notes
 
 - PROD has the May 6, 2026 checklist repair: application income/expense evidence uses active `evidence_income` / `evidence_expense` codes with backend-recognized item IDs, and intervention Band/Nation letter requirements accept `band_funding_decision`.

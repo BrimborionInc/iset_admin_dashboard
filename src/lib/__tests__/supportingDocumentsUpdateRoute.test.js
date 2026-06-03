@@ -30,6 +30,21 @@ describe('Supporting Documents update route', () => {
     expect(routeSource).toContain("console.error('[admin:documents:update-label] error', err)");
   });
 
+  test('full edits preserve application-submission lineage when resolving client scope', () => {
+    const routeSource = extractRouteBlock('put', '/api/documents/:id');
+    const duplicateRouteSource = extractRouteBlock('post', '/api/documents/:id/duplicate');
+    const sourceLookup = routeSource.indexOf('applicant_user_id, source FROM iset_document');
+    const lineagePreservation = routeSource.indexOf('preserveDocumentSourceLineage');
+    const targetAccessCheck = routeSource.indexOf('validateDocumentAttachmentContextAccess');
+
+    expect(serverSource).toContain('function documentSourceRequiresApplicationLineage(source)');
+    expect(serverSource).toContain("normaliseString(source).toLowerCase() === 'application_submission'");
+    expect(sourceLookup).toBeGreaterThanOrEqual(0);
+    expect(lineagePreservation).toBeGreaterThan(sourceLookup);
+    expect(targetAccessCheck).toBeGreaterThan(lineagePreservation);
+    expect(duplicateRouteSource).toContain('preserveDocumentSourceLineage');
+  });
+
   test('modal and duplicate saves send context for client-scoped documents', () => {
     expect(widgetSource).toContain('const applyClientScopeContext = useCallback');
     expect(widgetSource).toContain("} else if (scope === 'client') {");
