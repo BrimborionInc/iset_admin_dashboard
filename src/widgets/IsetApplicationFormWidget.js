@@ -1520,6 +1520,8 @@ const IsetApplicationFormWidget = ({
   const hasDirtyFields = isEditing && Object.keys(diff).length > 0;
   const resolvedApplicationState = resolveApplicationStateFields({
     applicationStatus:
+      caseData?.applicationStatusRaw ||
+      caseData?.application_status_raw ||
       caseData?.applicationStatus ||
       caseData?.application_status ||
       application?.status ||
@@ -1557,6 +1559,8 @@ const IsetApplicationFormWidget = ({
   const reportingApplicationLabel = reportingCaseContext?.reportingOnlyWithdrawal || isSelectedReportingWithdrawal
     ? 'withdrawn application record'
     : 'denied application record';
+  const suppressReportingStatusBanner =
+    reportingCaseContext?.reportingOnlyWithdrawal || isSelectedReportingWithdrawal;
   const isDecisionFinal =
     Boolean(resolvedApplicationState.decisionOutcome) ||
     ['decision_ready', 'completed', 'closed', 'archived'].includes(decisionStatusSource.toLowerCase());
@@ -1570,7 +1574,7 @@ const IsetApplicationFormWidget = ({
           ? `This ${reportingApplicationLabel} is blocked from ILMP reporting until the missing or invalid data below is corrected.`
           : reportingComplianceStatus === 'warning'
             ? `This ${reportingApplicationLabel} still needs ILMP review before it can be included in ESDC reporting.`
-            : `This ${reportingApplicationLabel} stays editable here so ILMP reporting data can be corrected without opening Case Workspace.`
+            : `This ${reportingApplicationLabel} stays editable for ILMP reporting corrections.`
     )
     : '';
   const activeLock = useMemo(() => {
@@ -2602,7 +2606,7 @@ const IsetApplicationFormWidget = ({
               <Flashbar items={flashbarItems} />
             </Box>
           )}
-          {reportingCorrectionAllowed && (
+          {reportingCorrectionAllowed && !suppressReportingStatusBanner && (
             <Box margin={{ bottom: 's' }}>
               <Alert
                 type={

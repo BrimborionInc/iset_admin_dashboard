@@ -64,6 +64,30 @@ function mapIlmpBarrierCodes(values = []) {
   return codes.length ? codes : null;
 }
 
+function hasIlmpOtherBarrierSupportingNotes({ barriers = [], answers = {}, caseContext = {} } = {}) {
+  const hasText = value => value !== null && typeof value !== 'undefined' && String(value).trim() !== '';
+  const answerSource = answers && typeof answers === 'object' && !Array.isArray(answers) ? answers : {};
+  const contextSource = caseContext && typeof caseContext === 'object' && !Array.isArray(caseContext) ? caseContext : {};
+
+  if (
+    hasText(answerSource['other-barrier']) ||
+    hasText(answerSource.other_barrier) ||
+    hasText(contextSource.otherBarrier) ||
+    hasText(contextSource.other_barrier) ||
+    hasText(contextSource.employmentBarriersOtherDetails) ||
+    hasText(contextSource.employment_barriers_other_details)
+  ) {
+    return true;
+  }
+
+  return (Array.isArray(barriers) ? barriers : []).some(value => {
+    if (value === null || typeof value === 'undefined') return false;
+    const text = String(value).trim();
+    const match = text.match(/^other\s*:\s*(.+)$/i);
+    return Boolean(match && match[1].trim());
+  });
+}
+
 function firstDefinedValue(...values) {
   for (const value of values) {
     if (value !== null && typeof value !== 'undefined' && String(value).trim() !== '') {
@@ -167,6 +191,7 @@ module.exports = {
   ILMP_BARRIER_CODE_LOOKUP,
   collectNocLookupPairs,
   firstDefinedValue,
+  hasIlmpOtherBarrierSupportingNotes,
   mapIlmpBarrierCodes,
   normaliseIlmpBarrierCode,
   normalizeNocDigits,

@@ -61,12 +61,12 @@ Define non-layout quick actions for the Application Workspace header, including 
 - Confirmation/modal requirements: Confirm modal with required note for consistency.
 
 ### Withdraw application
-- Roles that can see/use: System Administrator, Program Administrator, Regional Manager.
+- Roles that can see/use: All roles with Application Workspace access to the file, including ISET Coordinator.
 - Status gating: Available from `submitted`, `in_review`, `docs_requested`, `pending_approval`, `closure_notice`, and `on_hold`.
 - Backend endpoint + payload: Set application status to `withdrawn`; lifecycle remains closed through the status persistence helper.
 - Confirmation/modal requirements: Confirm modal with required note.
 - Side effects: Creates or updates the reporting-only ILMP structure: one closed action plan named `Actions leading to withdrawal` and completed `Career Research and Exploration` plus `Employment Counselling` interventions dated to the withdrawal.
-- Escalation handling: Allow withdrawing with an open escalation, but ensure the escalation queue is resolved/closed to avoid orphaned items.
+- Escalation handling: Allow withdrawing with an open escalation; the status-update route resolves open escalation rows in the same transaction so staff do not need to own the escalation before completing the withdrawal.
 - Escalation handling detail: If an escalation is open, auto-resolve it and attach the withdrawal note as the resolution note.
 - Intent: applicant has withdrawn or is no longer pursuing the application; display as `Withdrawn` in application status surfaces.
 
@@ -94,8 +94,8 @@ Unless explicitly stated otherwise, quick actions should use a confirmation moda
 - Treat `closure_notice` like Action Required/hold for SLA and work-queue logic.
 
 ### Reopen application
-- Roles that can see/use: System Administrator, Program Administrator (closed only); System Administrator only (archived).
-- Status gating: Available from `closed` (System + Program Admin), from `archived` (System Admin only).
+- Roles that can see/use: All roles with Application Workspace access to the file, including ISET Coordinator.
+- Status gating: Available from `closed`/withdrawn and `archived`.
 - Backend endpoint + payload: Set status to `in_review`.
 - Confirmation/modal requirements: Confirm modal with required note (default).
 

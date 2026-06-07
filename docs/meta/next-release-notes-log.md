@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-06-03
+Last Updated: 2026-06-07
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -21,7 +21,28 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
-- 2026-06-03 | Release TBD | Fix/Documents | Document checklist | Denied and closed applications no longer show funding-stage checklist items as missing. | The checklist now uses the stored application decision outcome, so completed denied files stay on the denial/no-funding checklist path even when the assessment communication step requests the approval-stage checklist.
+- 2026-06-07 | Release 20260607-prod-tutorials-training-shorts | UX/Support | Tutorials | Support > Tutorials now has a lean Training shorts section for Synthesia-hosted videos and keeps the existing guided-tour completion/reset controls under Guided tours. | PATH stores video metadata and embeds Synthesia videos instead of adding MP4 files to the React app. Training-short table columns are sortable/resizable, visible video columns are limited to Short, Length, and Action, the existing public `PATH Training Shorts - ...` videos are listed, and the withdrawing/reopening, ILMP submissions, and ILMP validation-and-repairs shorts are seeded as shareable watchable drafts until approved published versions are available.
+- 2026-06-07 | Release TBD | UX/Application Workspace | Withdraw application guidance | Application Overview withdrawal guidance now says the action can be used when the applicant is no longer pursuing the file or when staff must withdraw after a missed response deadline. | Help text also points staff to Reopen application when review should continue later.
+- 2026-06-05 | Release 20260605-prod-ilmp-casework-batch | Fix/Application Workspace | Raw status workflow actions | Application workflow actions now preserve and prefer the raw persisted status when deciding which correction actions are available. | Restores Withdraw application on closure-notice files, keeps resume-review checks tied to raw `docs_requested`, and leaves display labels unchanged.
+- 2026-06-05 | Release 20260605-prod-ilmp-casework-batch | Fix/Casework/ILMP | New action-plan prefills | New Action Plan ILMP prefills now map education, barriers, and labour-force answers through explicit codes before label fallbacks. | Prevents canonical Participant Details values and unemployment text from being misread during Appendix A entry.
+- 2026-06-05 | Release 20260605-prod-ilmp-casework-batch | Fix/ILMP | EI claimant validation | EI claimant validation now treats blank/null-like stored values as missing and tells staff to select Claimant, Reach-back, or Non-insured. | Replaces the vague invalid-code message for action-plan ILMP readiness.
+- 2026-06-05 | Release 20260605-prod-ilmp-casework-batch | Fix/Assessment | Decision letters | Generated approval/denial letter artifacts now use the participant's resolved name instead of falling back to `Dear Applicant` when case/application/client identity is available. | The backend now uses a shared name resolver for decision-letter tokens and ignores generic UI placeholders such as `Applicant` or `Client` when real participant identity is available.
+- 2026-06-05 | Release 20260605-prod-ilmp-casework-batch | Fix/Casework/ILMP | Historical action-plan entry | Add Existing Action Plan now prefills and requires the ILMP Appendix A action-plan fields before staff can save historical plans. | Covers social assistance recipient, EI claimant status, employment status at plan start, education level/province, barriers, and conditional previous-employment NOC/version/schedule plus childcare funding. The backend enforces the same core fields so preventable ILMP blockers are caught during entry.
+- 2026-06-05 | Release 20260605-prod-ilmp-casework-batch | Fix/Casework/ILMP | Historical action plans | Saving existing/backloaded action plans now fills blank Participant Details fields from the structured ILMP data on the plan without replacing staff-entered Participant Details. | Covers barriers, education/province, social assistance, EI claimant/insurance, mappable previous-employment status, childcare need/funding, and goals/summary. Existing/backloaded interventions also seed blank program NOC/version from intervention NOC, and Participant Details now exposes the full Appendix A barrier list.
+- 2026-06-04 | Release 20260604-prod-ilmp-appendix-a | Fix/ILMP | Participant validation | Selecting Other barrier no longer creates a Needs review warning when supporting notes are saved. | The validator now recognizes notes from Participant Details, application answers, and mapped `Other: ...` barrier values; blank notes still produce the existing review warning.
+- 2026-06-04 | Release 20260604-prod-ilmp-appendix-a | Fix/ILMP | ILMP batch XML | ILMP Submissions & Exports batch XML now includes warning-only participants and excludes only blocked records. | Dashboard wording now refers to exportable participants and blocked records so warnings remain review signals without preventing XML generation.
+- 2026-06-04 | Release 20260604-prod-ilmp-appendix-a | Fix/ILMP | Appendix A gateway validation | PATH now validates ISET exports against Appendix A gateway-mandatory fields before generating XML. | Covers the mandatory client, address, action-plan, intervention, and conditional result/NOC/closeout elements listed in Appendix A. Dependant-child counts derive from explicit No/count/ages data, counting only ages 18 or less, and missing unknown values stay blocked. The exporter no longer fills missing social-assistance, disability, agreement-number, EI, or result-education fields with fallback values that could hide missing data.
+- 2026-06-04 | Release 20260604-prod-ilmp-appendix-a | Fix/ILMP | Barrier export | Backloaded action plans now validate and export saved ESDC barrier-to-employment codes even when Participant Details barrier fields are blank. | PATH reads `BarrierToEmployment` from the action-plan reporting payload before treating the field as missing, preventing false blockers on imported/backloaded historical records that already had barrier codes saved.
+- 2026-06-04 | Release 20260604-prod-ilmp-barrier-context-hotfix | Fix/ILMP | Action-plan barrier validation context | Saved action-plan `BarrierToEmployment` codes now flow through the participant validation context. | The previous release mapped/exported these codes but the validation context loader rebuilt action-plan objects without the barrier array, so validation could still show a false missing-barrier blocker until this fix was deployed and validation is rerun.
+- 2026-06-04 | Release 20260605-prod-ilmp-social-assistance-hotfix | Fix/ILMP | Action-plan social assistance context | Saved action-plan `socialAssistanceRecipient` values now flow through validation and XML generation when participant/application context is blank. | Fixes a false blocker on `CASE-2026-0000044`, where the action plan saved `No` as ILMP code `0` but validation still treated the Appendix A field as missing. Action-plan/API mappers now preserve valid zero-valued yes/no codes so `0` does not disappear during validation, XML generation, or plan editing.
+- 2026-06-04 | Release 20260604-prod-ilmp-appendix-a | Fix/Casework | Action plan required fields | New and existing/backloaded action plans now require education level and education province at the start of the action plan. | This prevents staff from saving action plans that would later fail ILMP Appendix A gateway validation for action-plan education.
+- 2026-06-04 | Release 20260604-prod-ilmp-appendix-a | Fix/Casework | Participant Details barriers | Participant Details now pulls checkbox-array barrier answers through from the application form and keeps saved Other barrier notes visible. | Fixes cases where application barriers could appear blank in Participant Details because array answers were treated as non-displayable objects or an empty case-context array masked the application answer.
+- 2026-06-04 | PROD data repair | Ops/Casework | Participant Details backfill | Backfilled missing Participant Details checkbox/list answers from the case primary application for 90 PROD cases. | Restore point `path-prod-participant-details-arrays-20260604144745`; repair preserved existing staff-entered Participant Details values, appended missing application values, filled blank Other notes only, and wrote data-repair case events. Katrina Woodgate's Participant Details barriers now include both funding and other.
+- 2026-06-03 | Release 20260605-prod-ilmp-casework-batch | Fix/Assessment | Application Overview status control | Changing status or document-request state from a repeat-application assessment workspace now saves against the selected application, and administrators can reopen a withdrawn application back to In Review as a correction. | Reopening clears the selected application's withdrawal-reporting context. Withdrawn reporting alerts now link to Case Workspace instead of the retired ESDC participant workspace, and clean withdrawn records no longer show the extra reporting alert.
+- 2026-06-03 | Release 20260605-prod-ilmp-casework-batch | Workflow/Application Workspace | Withdraw and reopen quick actions | Withdraw application and Reopen application are now available to every role with normal file access when the application status is eligible. | Reopen returns closed/withdrawn/archived applications to In Review. Withdrawal now resolves open application escalations through the status update itself, so staff do not need separate escalation-owner permission to complete the action.
+- 2026-06-03 | Release 20260605-prod-ilmp-casework-batch | UX/Casework | ISET Clients status badges | ISET Clients now displays dormant case lifecycle rows as No Active Plan in the Status column. | The stored/API value remains `dormant`; this only fixes the staff-facing badge label.
+- 2026-06-03 | Release 20260605-prod-ilmp-casework-batch | Fix/Reporting | Regional Snapshot export | Regional Snapshot Client Activity now uses one application basis, so the regional tabs and all-regions Excel export no longer mix funded-client counts into the application-status block. | Funded Clients remains available with the funding metrics, where it follows the Financial Reports approved-funding participant basis.
+- 2026-06-03 | Release 20260605-prod-ilmp-casework-batch | Fix/Documents | Document checklist | Denied and closed applications no longer show funding-stage checklist items as missing. | The checklist now uses the stored application decision outcome, so completed denied files stay on the denial/no-funding checklist path even when the assessment communication step requests the approval-stage checklist.
 - 2026-06-01 | Release 20260601-prod-document-lineage-fix | Fix/Documents | Supporting Documents labels | Edit document details now saves Status or Treaty Card labels from application submissions without breaking source lineage. | The backend keeps the submission document's existing application link while still treating the document type as client-scoped and validating staff access through the case/application context. Deployed to PROD at 2026-06-02 00:47 UTC.
 - 2026-05-25 | Release 20260525-prod-bugcr-batch | Fix/Casework | Other Funding | Other funders can now be marked confirmed, pending, denied, or unknown, with optional amount and notes. | Coverage is required only for confirmed funding, pending/denied/unknown funders stay on the file as context, and only confirmed other funders generate other-funder letters.
 - 2026-05-25 | Release 20260525-prod-bugcr-batch | Fix/Casework | Funding revision letters | Client funding revision letters now use the reviewed secure-message letter body when creating the signable letter artifact. | This keeps the approval/reassessment letter in the outbound packet aligned with the revised CFA and intervention amounts instead of reusing the original application approval-letter draft.
@@ -354,36 +375,41 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Denied and closed applications no longer show funding-stage checklist items, such as Client Funding Agreement or EFT form, as missing.
-- Edit document details now saves Status or Treaty Card labels from application submissions without losing the document's source link.
-- Case files previously labelled `Dormant` now display as `No Active Plan`, while the stored status and API filter value remain `dormant`.
-- Withdrawing one application on a multi-application case now creates application-scoped ILMP reporting artifacts without closing the whole case.
+- Support > Tutorials now includes Training shorts: short Synthesia-hosted PATH videos that open inside the dashboard, including new ILMP validation and submissions drafts.
+- Historical action-plan entry now prefills and requires the Appendix A facts PATH needs for ILMP reporting.
+- Existing/backloaded action-plan and intervention saves now fill blank Participant Details from structured ILMP fields without replacing staff-entered details.
+- Decision letters now use the participant's resolved name instead of falling back to `Dear Applicant`.
+- Application correction actions now preserve raw workflow status, save against the selected application, and support eligible withdraw/reopen flows.
+- Denied and closed applications no longer show funding-stage checklist items as missing.
+- Regional Snapshot Client Activity now uses one application basis in tabs and the all-regions Excel export.
+- ISET Clients now displays dormant case lifecycle rows as `No Active Plan`.
 
 ### What Changed Packages (draft - EN)
 
-#### Release 20260601-prod-document-lineage-fix
+#### Release 20260607-prod-tutorials-training-shorts
 
-- Edit document details now saves Status or Treaty Card labels from application submissions without losing the document's source link.
-- The backend keeps the existing submission application link while still treating the document type as client-scoped and validating staff access through the case/application context.
+- Support > Tutorials now includes Training shorts: short Synthesia-hosted PATH videos that open inside the dashboard.
+- The Training shorts table is sortable and resizable, with visible columns limited to Short, Length, and Action.
+- The first watchable draft shorts include withdrawing/reopening an application, ILMP submissions, and ILMP validation and repairs.
+- PATH stores Synthesia metadata only; MP4 files are not added to the React app.
 
-#### Release 20260529-prod-case-lifecycle-reporting
+#### Release 20260605-prod-ilmp-casework-batch
 
-- Case files previously labelled `Dormant` now display as `No Active Plan` across case status badges, ISET Clients filters, homepage queue descriptions, case re-open copy, and related help guidance.
-- The persisted case lifecycle value and API query value remain `dormant`, so existing saved filters and backend behavior continue to work.
-- Withdrawing one application on a multi-application case now creates application-scoped ILMP reporting artifacts without closing the whole case.
-- Existing non-reporting action plans and other active applications remain in casework scope after an application-specific withdrawal reporting record is created.
-- Selected-application reporting panels now use the application-specific reporting artifact, and ILMP validation loads the matching action plan context.
+- Historical action-plan entry now prefills and requires the Appendix A facts PATH needs for ILMP reporting.
+- Existing/backloaded action-plan and intervention saves now fill blank Participant Details from structured ILMP fields without replacing staff-entered details.
+- Decision letters now use the participant's resolved name instead of falling back to `Dear Applicant`.
+- Application correction actions now preserve raw workflow status, save against the selected application, and support eligible withdraw/reopen flows.
+- Denied and closed applications no longer show funding-stage checklist items as missing.
+- Regional Snapshot Client Activity now uses one application basis in tabs and the all-regions Excel export.
+- ISET Clients now displays dormant case lifecycle rows as `No Active Plan`.
 
-#### Release 20260528-evening-batch
+#### Release 20260604-prod-ilmp-appendix-a
 
-- Supporting Documents label edits now save as simple renames without changing document scope, including identity/status documents and older uploaded rows.
-- Edit document details and duplicate-document saves now send the current file context for client-scoped documents without asking staff to attach those documents to an application.
-- Recent ILMP exports now uses a compact history table with Summary, Clients exported, and XML tabs, including recorded file path/name and downloader display name.
-- ILMP batch actions and help now use export/download/manual-upload wording so staff know PATH records the XML export but does not upload it to ESDC.
-- ILMP readiness now recognizes the mixed-separator `lack_of_job-opportunities` barrier value.
-- Workflow Preview and Publish no longer fail on instruction-only components that do not have explicit labels.
-- Submitted payment packets no longer show the retired line-level `Mark paid` action.
-- Financial Reports now labels the zero-dollar intervention option as `All reportable interventions` and shows `PATH follow-up state` by default.
+- ILMP validation now follows the ESDC gateway's Appendix A mandatory-field rules before XML is generated.
+- ILMP batch XML now exports participants with warnings and blocks only records with true blocking issues.
+- Backloaded action plans now use their saved barrier-to-employment codes when Participant Details barriers are blank.
+- Participant Details now pulls application checkbox/list answers through correctly, including barriers and Other barrier notes.
+- New and existing/backloaded action plans now require education level and education province at the start of the plan.
 
 ### Known Bugs (draft bullets - EN)
 
@@ -391,36 +417,41 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Nouveautes (brouillon - FR)
 
-- Les demandes refusees et fermees n'affichent plus les elements de checklist lies au financement, comme le Client Funding Agreement ou le formulaire EFT, comme manquants.
-- Edit document details enregistre maintenant les libelles Status or Treaty Card provenant des demandes sans perdre le lien source du document.
-- Les dossiers auparavant libelles `Dormant` s'affichent maintenant comme `No Active Plan`, tandis que le statut stocke et la valeur de filtre API restent `dormant`.
-- Le retrait d'une seule demande dans un dossier a plusieurs demandes cree maintenant des artefacts ILMP propres a cette demande sans fermer tout le dossier.
+- Support > Tutorials inclut maintenant Training shorts : de courtes videos PATH hebergees dans Synthesia qui s'ouvrent dans le tableau de bord, y compris de nouveaux brouillons ILMP pour la validation et les soumissions.
+- La saisie des plans d'action historiques pre-remplit et exige maintenant les faits de l'annexe A necessaires au reporting ILMP.
+- Les enregistrements de plans d'action et d'interventions historiques remplissent maintenant les champs vides de Participant Details a partir des champs ILMP structures, sans remplacer les corrections du personnel.
+- Les lettres de decision utilisent maintenant le nom resolu de la participante au lieu de revenir a `Dear Applicant`.
+- Les actions de correction de demande conservent maintenant le vrai statut de workflow, enregistrent sur la demande selectionnee et prennent en charge les retraits/reouvertures admissibles.
+- Les demandes refusees et fermees n'affichent plus les elements de checklist lies au financement comme manquants.
+- Regional Snapshot Client Activity utilise maintenant une seule base de demandes dans les onglets et l'export Excel toutes regions.
+- ISET Clients affiche maintenant les dossiers dormants comme `No Active Plan`.
 
 ### Lots de changements (brouillon - FR)
 
-#### Release 20260601-prod-document-lineage-fix
+#### Release 20260607-prod-tutorials-training-shorts
 
-- Edit document details enregistre maintenant les libelles Status or Treaty Card provenant des demandes sans perdre le lien source du document.
-- Le backend conserve le lien existant vers la demande soumise tout en traitant le type de document comme un document a portee client et en validant l'acces du personnel dans le contexte du dossier/de la demande.
+- Support > Tutorials inclut maintenant Training shorts : de courtes videos PATH hebergees dans Synthesia qui s'ouvrent dans le tableau de bord.
+- Le tableau Training shorts est triable et redimensionnable, avec seulement les colonnes Short, Length et Action visibles.
+- Les premiers brouillons regardables couvrent le retrait/reouverture d'une demande, les soumissions ILMP et les validations/reparations ILMP.
+- PATH stocke seulement les metadonnees Synthesia; les fichiers MP4 ne sont pas ajoutes a l'application React.
 
-#### Release 20260529-prod-case-lifecycle-reporting
+#### Release 20260605-prod-ilmp-casework-batch
 
-- Les dossiers auparavant libelles `Dormant` s'affichent maintenant comme `No Active Plan` dans les badges de statut, les filtres ISET Clients, les descriptions de files d'accueil, le texte de reouverture de dossier et l'aide associee.
-- La valeur de cycle de vie stockee et la valeur de requete API restent `dormant`, afin que les filtres existants et le comportement backend continuent de fonctionner.
-- Le retrait d'une seule demande dans un dossier a plusieurs demandes cree maintenant des artefacts ILMP propres a cette demande sans fermer tout le dossier.
-- Les plans d'action non-reporting existants et les autres demandes actives restent dans le suivi de dossier apres la creation d'un enregistrement reporting lie a la demande retiree.
-- Les panneaux de correction reporting utilisent maintenant l'artefact propre a la demande selectionnee, et la validation ILMP charge le contexte du plan d'action correspondant.
+- La saisie des plans d'action historiques pre-remplit et exige maintenant les faits de l'annexe A necessaires au reporting ILMP.
+- Les enregistrements de plans d'action et d'interventions historiques remplissent maintenant les champs vides de Participant Details a partir des champs ILMP structures, sans remplacer les corrections du personnel.
+- Les lettres de decision utilisent maintenant le nom resolu de la participante au lieu de revenir a `Dear Applicant`.
+- Les actions de correction de demande conservent maintenant le vrai statut de workflow, enregistrent sur la demande selectionnee et prennent en charge les retraits/reouvertures admissibles.
+- Les demandes refusees et fermees n'affichent plus les elements de checklist lies au financement comme manquants.
+- Regional Snapshot Client Activity utilise maintenant une seule base de demandes dans les onglets et l'export Excel toutes regions.
+- ISET Clients affiche maintenant les dossiers dormants comme `No Active Plan`.
 
-#### Release 20260528-evening-batch
+#### Release 20260604-prod-ilmp-appendix-a
 
-- Les modifications des libelles dans Supporting Documents s'enregistrent comme de simples renommages sans changer la portee du document, y compris pour les documents d'identite/statut et les anciens televersements.
-- Edit document details et Duplicate document envoient maintenant le contexte du dossier pour les documents a portee client sans demander de les rattacher a une demande.
-- Recent ILMP exports utilise maintenant un tableau d'historique compact avec les onglets Summary, Clients exported et XML, ainsi que le chemin/nom de fichier et le nom de la personne qui a telecharge.
-- Les actions et l'aide ILMP utilisent maintenant les mots export, download et manual upload afin que le personnel sache que PATH enregistre l'export XML mais ne le televerse pas dans ESDC.
-- La validation ILMP reconnait maintenant la valeur de barriere mixte `lack_of_job-opportunities`.
-- Workflow Preview et Publish ne bloquent plus sur les composants d'instructions sans libelle explicite.
-- Les packets de paiement envoyes n'affichent plus l'ancienne action `Mark paid` au niveau de la ligne.
-- Financial Reports appelle maintenant l'option des lignes a zero dollar `All reportable interventions` et affiche `PATH follow-up state` par defaut.
+- La validation ILMP suit maintenant les champs obligatoires de l'annexe A de la passerelle EDSC avant la generation du XML.
+- Le XML ILMP inclut maintenant les participantes avec avertissements et bloque seulement les dossiers avec de vrais problemes bloquants.
+- Les plans d'action historiques utilisent maintenant leurs codes sauvegardes de barrieres a l'emploi lorsque Participant Details est vide.
+- Participant Details reprend correctement les reponses de type liste/checkbox de la demande, y compris les barrieres et les notes Other barrier.
+- Les nouveaux plans d'action et les plans historiques exigent maintenant le niveau d'etudes et la province d'etudes au debut du plan.
 
 ### Problemes connus (brouillon - FR)
 

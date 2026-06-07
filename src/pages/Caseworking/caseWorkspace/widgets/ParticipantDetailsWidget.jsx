@@ -85,10 +85,17 @@ const maritalStatusOptions = [
 ];
 
 const barrierOptions = [
+  { value: "none", label: "None" },
+  { value: "lack-of-labour-force-attachment", label: "Lack of labour force attachment" },
+  { value: "lack-of-work-experience", label: "Lack of work experience" },
+  { value: "lack-of-transportation", label: "Lack of transportation" },
+  { value: "location", label: "Location / remoteness" },
+  { value: "language", label: "Language" },
   { value: "education", label: "Education" },
   { value: "funding", label: "Funding" },
+  { value: "dependent-care", label: "Dependent care" },
   { value: "lack-of-job-opportunities", label: "Lack of job opportunities" },
-  { value: "location", label: "Location" },
+  { value: "physical-or-mental-health", label: "Physical or mental health" },
   { value: "other", label: "Other" },
 ];
 
@@ -212,6 +219,7 @@ const makeAnswerReader = answers => key => {
   if (!answers || typeof answers !== "object") return "";
   const value = answers[key];
   if (value === null || typeof value === "undefined") return "";
+  if (Array.isArray(value)) return value;
   if (typeof value === "object") {
     if (value?.value) return String(value.value);
     if (value?.text) return String(value.text);
@@ -608,7 +616,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
           : Array.isArray(readAnswer("barriers"))
           ? readAnswer("barriers")
           : [],
-      otherBarrier: readAnswer("other-barrier") || "",
+      otherBarrier: caseContext.otherBarrier || caseContext.other_barrier || readAnswer("other-barrier") || "",
       requestedSupports:
         Array.isArray(caseContext.requestedSupports)
           ? caseContext.requestedSupports
@@ -756,7 +764,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
           : Array.isArray(readAnswer("barriers"))
           ? readAnswer("barriers")
           : [],
-      otherBarrier: readAnswer("other-barrier") || "",
+      otherBarrier: caseContext.otherBarrier || caseContext.other_barrier || readAnswer("other-barrier") || "",
       requestedSupports:
         Array.isArray(caseContext.requestedSupports)
           ? caseContext.requestedSupports

@@ -169,7 +169,7 @@ Then enable the runtime flag in TEST:
 
 ```bash
 cd /home/bill/ISET/admin-dashboard
-scripts/run-test-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('runtime', 'intake.draft_autosave', CAST('{\"enabled\": true}' AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP;"
+bash scripts/run-test-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('runtime', 'intake.draft_autosave', CAST('{\"enabled\": true}' AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP;"
 ```
 
 ### PROD
@@ -184,7 +184,7 @@ After prod smoke passes, enable the flag:
 
 ```bash
 cd /home/bill/ISET/admin-dashboard
-scripts/run-prod-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('runtime', 'intake.draft_autosave', CAST('{\"enabled\": true}' AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP;"
+bash scripts/run-prod-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('runtime', 'intake.draft_autosave', CAST('{\"enabled\": true}' AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP;"
 ```
 
 Why this sequence matters:
@@ -344,7 +344,7 @@ tmp/path-deploy/<env>/
 - Admin console: check the subtle version line at the bottom of the landing page.
 - Public portal: open the Help page and check the version line near the bottom.
 - The admin landing page now also generates its public release-notes panel from `docs/meta/next-release-notes-log.md` during build, so the visible landing-page notes heading should carry the same deployed release ID/date as the footer build line.
-- If the release contains bug/CR fixes, verify the affected live workflow or artifact, then update the corresponding PROD feedback reports before ending the deploy thread. Use `scripts/run-prod-sql-via-ssm.sh` for live updates and keep multi-row/guarded updates as SQL artifacts under `sql/ops/`.
+- If the release contains bug/CR fixes, verify the affected live workflow or artifact, then update the corresponding PROD feedback reports before ending the deploy thread. Use `bash scripts/run-prod-sql-via-ssm.sh` for live updates and keep multi-row/guarded updates as SQL artifacts under `sql/ops/`.
 
 ## How To Ask Codex
 

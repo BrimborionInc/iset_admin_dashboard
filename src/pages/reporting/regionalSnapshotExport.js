@@ -93,18 +93,19 @@ const buildRegionInfoRows = report => [
 
 const buildClientActivityRows = report => [
   { label: "Applications Received", value: formatInteger(report?.liveMetrics?.applicationsReceived) },
-  { label: "Funded Clients", value: formatInteger(report?.liveMetrics?.funded) },
+  { label: "Approved/Funded Applications", value: formatInteger(report?.liveMetrics?.fundedApplications ?? report?.liveMetrics?.funded) },
   {
     label: "Denied/Ineligible/Withdrawn/NC",
     value: formatInteger(report?.liveMetrics?.deniedIneligibleWithdrawn),
   },
   {
-    label: "Pending Decision",
+    label: "Pending / No Decision",
     value: formatInteger(report?.liveMetrics?.pendingDecision),
   },
 ];
 
 const buildFundingRows = report => [
+  { label: "Funded Clients", value: formatInteger(report?.fundingMetrics?.fundedClientCount ?? report?.liveMetrics?.fundedClients) },
   { label: "CRF Funding ($)", value: formatCurrency(report?.fundingMetrics?.crfFundingAmount) },
   { label: "EI Funding ($)", value: formatCurrency(report?.fundingMetrics?.eiFundingAmount) },
   { label: "Total Funding ($)", value: formatCurrency(report?.derivedMetrics?.totalFunding), emphasis: true },
@@ -224,9 +225,10 @@ const writeSummaryWorksheet = (worksheet, reports, meta = {}) => {
     "Regional Manager",
     "ISET Coordinator",
     "Applications Received",
-    "Funded Clients",
+    "Approved/Funded Applications",
     "Denied/Ineligible/Withdrawn/NC",
-    "Pending Decision",
+    "Pending / No Decision",
+    "Funded Clients",
     "CRF Funding ($)",
     "EI Funding ($)",
     "Total Funding ($)",
@@ -256,9 +258,10 @@ const writeSummaryWorksheet = (worksheet, reports, meta = {}) => {
       report?.snapshot?.regionalManagerName || "",
       report?.snapshot?.regionalCoordinatorName || "",
       safeNumber(report?.liveMetrics?.applicationsReceived),
-      safeNumber(report?.liveMetrics?.funded),
+      safeNumber(report?.liveMetrics?.fundedApplications ?? report?.liveMetrics?.funded),
       safeNumber(report?.liveMetrics?.deniedIneligibleWithdrawn),
       safeNumber(report?.liveMetrics?.pendingDecision),
+      safeNumber(report?.fundingMetrics?.fundedClientCount ?? report?.liveMetrics?.fundedClients),
       safeNumber(report?.fundingMetrics?.crfFundingAmount),
       safeNumber(report?.fundingMetrics?.eiFundingAmount),
       toNullableNumber(report?.derivedMetrics?.totalFunding),
@@ -288,7 +291,7 @@ const writeSummaryWorksheet = (worksheet, reports, meta = {}) => {
   totalRow.getCell(1).fill = SECTION_FILL;
   totalRow.getCell(1).border = BORDER_STYLE;
 
-  const sumColumns = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+  const sumColumns = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
   sumColumns.forEach(columnIndex => {
     const cell = totalRow.getCell(columnIndex);
     const columnLetter = worksheet.getColumn(columnIndex).letter;
@@ -301,26 +304,29 @@ const writeSummaryWorksheet = (worksheet, reports, meta = {}) => {
   });
 
   totalRow.getCell(15).value = {
-    formula: `IF(F${totalRowIndex}=0,"",K${totalRowIndex}/F${totalRowIndex})`,
+    formula: `SUM(O5:O${totalRowIndex - 1})`,
   };
   totalRow.getCell(16).value = {
-    formula: `IF(F${totalRowIndex}=0,"",N${totalRowIndex}/F${totalRowIndex})`,
+    formula: `IF(I${totalRowIndex}=0,"",L${totalRowIndex}/I${totalRowIndex})`,
   };
   totalRow.getCell(17).value = {
-    formula: `IF(K${totalRowIndex}=0,"",N${totalRowIndex}/K${totalRowIndex})`,
+    formula: `IF(I${totalRowIndex}=0,"",O${totalRowIndex}/I${totalRowIndex})`,
+  };
+  totalRow.getCell(18).value = {
+    formula: `IF(L${totalRowIndex}=0,"",O${totalRowIndex}/L${totalRowIndex})`,
   };
 
-  for (let index = 15; index <= 17; index += 1) {
+  for (let index = 16; index <= 18; index += 1) {
     const cell = totalRow.getCell(index);
     cell.font = { name: "Aptos", size: 11, bold: true };
     cell.fill = SECTION_FILL;
     cell.border = BORDER_STYLE;
   }
 
-  [9, 10, 11, 12, 13, 14, 15, 16].forEach(index => {
+  [10, 11, 12, 13, 14, 15, 16, 17].forEach(index => {
     worksheet.getColumn(index).numFmt = '"$"#,##0.00';
   });
-  worksheet.getColumn(17).numFmt = "0.00%";
+  worksheet.getColumn(18).numFmt = "0.00%";
 
   autoFitSummaryColumns(worksheet);
   worksheet.views = [{ state: "frozen", ySplit: 4 }];

@@ -106,14 +106,14 @@ const EsdcBatchSubmissionWidget = ({
       if ((body.participants?.length || 0) > 0) {
         setAlert({
           type: 'success',
-          message: `Generated batch for ${body.participants?.length || 0} ready participants.${(body.skipped?.length || 0) ? ` Excluded ${body.skipped.length} non-ready records.` : ''}`
+          message: `Generated batch for ${body.participants?.length || 0} exportable participants.${(body.skipped?.length || 0) ? ` Excluded ${body.skipped.length} blocked records.` : ''}`
         });
       } else {
         setAlert({
           type: 'info',
           message: (body.skipped?.length || 0)
-            ? `No ready participants were available. ${body.skipped.length} records remain excluded until their ILMP issues are resolved.`
-            : 'No ready participants were available for batch generation.'
+            ? `No exportable participants were available. ${body.skipped.length} blocked records remain excluded until their ILMP blockers are resolved.`
+            : 'No exportable participants were available for batch generation.'
         });
       }
       triggerRefresh();
@@ -146,7 +146,7 @@ const EsdcBatchSubmissionWidget = ({
       setSkipped(Array.isArray(body.skipped) ? body.skipped : []);
       setAlert({
         type: 'success',
-        message: `Exported batch ${body.batchId || ''} for ${body.participants?.length || 0} ready participants.${(body.skipped?.length || 0) ? ` Excluded ${body.skipped.length} non-ready records.` : ''}`
+        message: `Exported batch ${body.batchId || ''} for ${body.participants?.length || 0} exportable participants.${(body.skipped?.length || 0) ? ` Excluded ${body.skipped.length} blocked records.` : ''}`
       });
       triggerRefresh();
       loadQueueInfo();
@@ -197,7 +197,7 @@ const EsdcBatchSubmissionWidget = ({
           <Header
             variant="h2"
             info={infoLink}
-            description="Generate a single ILMP XML file for all ready participants."
+            description="Generate a single ILMP XML file for all participants without blocking ILMP issues."
             actions={(
               <SpaceBetween size="xs" direction="horizontal">
               <Button
@@ -245,7 +245,7 @@ const EsdcBatchSubmissionWidget = ({
             </Alert>
           )}
           <Box variant="p">
-            Ready now: <strong>{readyCount}</strong> of <strong>{queueCount}</strong>. Needs review: <strong>{needsReviewCount}</strong>. Blocked: <strong>{blockedCount}</strong>. Batch generation includes only ready participants and excludes the rest automatically.
+            Ready now: <strong>{readyCount}</strong> of <strong>{queueCount}</strong>. Needs review: <strong>{needsReviewCount}</strong>. Blocked: <strong>{blockedCount}</strong>. Batch generation includes ready and warning-only participants, and excludes blocked records automatically.
           </Box>
           {xml ? (
             <ExpandableSection headerText="Batch ILMP payload" defaultExpanded>

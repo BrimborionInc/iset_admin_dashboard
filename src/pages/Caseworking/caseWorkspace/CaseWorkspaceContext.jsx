@@ -386,6 +386,14 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
   };
 
   const rawActionPlans = Array.isArray(payload.actionPlans) ? payload.actionPlans : [];
+  const firstNonBlankValue = (...values) => {
+    for (const value of values) {
+      if (value === null || value === undefined) continue;
+      if (typeof value === "string" && value.trim() === "") continue;
+      return value;
+    }
+    return null;
+  };
   const actionPlans = sortActionPlansByRecency(rawActionPlans.map(plan => {
     const interventions = Array.isArray(plan.interventions)
       ? plan.interventions
@@ -400,8 +408,8 @@ const buildCaseFromWorkspaceApi = (caseId, payload) => {
       agreementNumber: plan.agreementNumber || plan.agreement_number || null,
       educationLevel: plan.educationLevel || plan.education_level || null,
       educationProvince: plan.educationProvince || plan.education_province || null,
-      socialAssistanceRecipient: plan.socialAssistanceRecipient || plan.social_assistance_recipient || null,
-      childcareNeed: plan.childcareNeed || plan.childcare_need || null,
+      socialAssistanceRecipient: firstNonBlankValue(plan.socialAssistanceRecipient, plan.social_assistance_recipient),
+      childcareNeed: firstNonBlankValue(plan.childcareNeed, plan.childcare_need),
       childcareFunding: plan.childcareFunding || plan.childcare_funding || null,
       prevEmploymentNoc: plan.prevEmploymentNoc || plan.prev_employment_noc || null,
       prevEmploymentNocVersion: plan.prevEmploymentNocVersion || plan.prev_employment_noc_version || null,

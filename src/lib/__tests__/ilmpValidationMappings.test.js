@@ -1,5 +1,6 @@
 const {
   collectNocLookupPairs,
+  hasIlmpOtherBarrierSupportingNotes,
   mapIlmpBarrierCodes,
   normaliseIlmpBarrierCode,
 } = require('../ilmpValidationMappings');
@@ -18,6 +19,13 @@ describe('ilmpValidationMappings', () => {
 
   test('returns unique barrier codes in source order', () => {
     expect(mapIlmpBarrierCodes(['funding', 'Economic', 'other', 'Other: detail'])).toEqual(['8', '12']);
+  });
+
+  test('detects supporting notes for other barrier selections', () => {
+    expect(hasIlmpOtherBarrierSupportingNotes({ barriers: ['Other barrier not listed above'] })).toBe(false);
+    expect(hasIlmpOtherBarrierSupportingNotes({ barriers: ['Other: no local program seat'] })).toBe(true);
+    expect(hasIlmpOtherBarrierSupportingNotes({ answers: { 'other-barrier': 'Funding supports for summer' } })).toBe(true);
+    expect(hasIlmpOtherBarrierSupportingNotes({ caseContext: { otherBarrier: 'Test by Bill. Ignore.' } })).toBe(true);
   });
 
   test('collects valid NOC lookup pairs across action plan and intervention field shapes', () => {

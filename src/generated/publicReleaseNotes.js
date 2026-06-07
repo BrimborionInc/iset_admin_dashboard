@@ -1,47 +1,53 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-06-02T00:47:01.494Z",
-  "releaseId": "20260601-prod-document-lineage-fix",
-  "releaseLabel": "Release 20260601-prod-document-lineage-fix",
-  "releaseDateEn": "2nd June 2026",
-  "releaseDateFr": "2 juin 2026",
+  "generatedAt": "2026-06-07T20:42:37.416Z",
+  "releaseId": "20260607-prod-tutorials-training-shorts",
+  "releaseLabel": "Release 20260607-prod-tutorials-training-shorts",
+  "releaseDateEn": "7th June 2026",
+  "releaseDateFr": "7 juin 2026",
   "en": {
     "sectionEyebrow": "Optional reading",
     "description": "",
     "featuresHeading": "What changed",
     "features": [
-      "Edit document details now saves Status or Treaty Card labels from application submissions without losing the document's source link.",
-      "Case files previously labelled `Dormant` now display as `No Active Plan`, while the stored status and API filter value remain `dormant`.",
-      "Withdrawing one application on a multi-application case now creates application-scoped ILMP reporting artifacts without closing the whole case."
+      "Support > Tutorials now includes Training shorts: short Synthesia-hosted PATH videos that open inside the dashboard, including new ILMP validation and submissions drafts.",
+      "Historical action-plan entry now prefills and requires the Appendix A facts PATH needs for ILMP reporting.",
+      "Existing/backloaded action-plan and intervention saves now fill blank Participant Details from structured ILMP fields without replacing staff-entered details.",
+      "Decision letters now use the participant's resolved name instead of falling back to `Dear Applicant`.",
+      "Application correction actions now preserve raw workflow status, save against the selected application, and support eligible withdraw/reopen flows.",
+      "Denied and closed applications no longer show funding-stage checklist items as missing.",
+      "Regional Snapshot Client Activity now uses one application basis in tabs and the all-regions Excel export.",
+      "ISET Clients now displays dormant case lifecycle rows as `No Active Plan`."
     ],
     "featurePackages": [
       {
-        "title": "Release 20260601-prod-document-lineage-fix",
+        "title": "Release 20260607-prod-tutorials-training-shorts",
         "items": [
-          "Edit document details now saves Status or Treaty Card labels from application submissions without losing the document's source link.",
-          "The backend keeps the existing submission application link while still treating the document type as client-scoped and validating staff access through the case/application context."
+          "Support > Tutorials now includes Training shorts: short Synthesia-hosted PATH videos that open inside the dashboard.",
+          "The Training shorts table is sortable and resizable, with visible columns limited to Short, Length, and Action.",
+          "The first watchable draft shorts include withdrawing/reopening an application, ILMP submissions, and ILMP validation and repairs.",
+          "PATH stores Synthesia metadata only; MP4 files are not added to the React app."
         ]
       },
       {
-        "title": "Release 20260529-prod-case-lifecycle-reporting",
+        "title": "Release 20260605-prod-ilmp-casework-batch",
         "items": [
-          "Case files previously labelled `Dormant` now display as `No Active Plan` across case status badges, ISET Clients filters, homepage queue descriptions, case re-open copy, and related help guidance.",
-          "The persisted case lifecycle value and API query value remain `dormant`, so existing saved filters and backend behavior continue to work.",
-          "Withdrawing one application on a multi-application case now creates application-scoped ILMP reporting artifacts without closing the whole case.",
-          "Existing non-reporting action plans and other active applications remain in casework scope after an application-specific withdrawal reporting record is created.",
-          "Selected-application reporting panels now use the application-specific reporting artifact, and ILMP validation loads the matching action plan context."
+          "Historical action-plan entry now prefills and requires the Appendix A facts PATH needs for ILMP reporting.",
+          "Existing/backloaded action-plan and intervention saves now fill blank Participant Details from structured ILMP fields without replacing staff-entered details.",
+          "Decision letters now use the participant's resolved name instead of falling back to `Dear Applicant`.",
+          "Application correction actions now preserve raw workflow status, save against the selected application, and support eligible withdraw/reopen flows.",
+          "Denied and closed applications no longer show funding-stage checklist items as missing.",
+          "Regional Snapshot Client Activity now uses one application basis in tabs and the all-regions Excel export.",
+          "ISET Clients now displays dormant case lifecycle rows as `No Active Plan`."
         ]
       },
       {
-        "title": "Release 20260528-evening-batch",
+        "title": "Release 20260604-prod-ilmp-appendix-a",
         "items": [
-          "Supporting Documents label edits now save as simple renames without changing document scope, including identity/status documents and older uploaded rows.",
-          "Edit document details and duplicate-document saves now send the current file context for client-scoped documents without asking staff to attach those documents to an application.",
-          "Recent ILMP exports now uses a compact history table with Summary, Clients exported, and XML tabs, including recorded file path/name and downloader display name.",
-          "ILMP batch actions and help now use export/download/manual-upload wording so staff know PATH records the XML export but does not upload it to ESDC.",
-          "ILMP readiness now recognizes the mixed-separator `lack_of_job-opportunities` barrier value.",
-          "Workflow Preview and Publish no longer fail on instruction-only components that do not have explicit labels.",
-          "Submitted payment packets no longer show the retired line-level `Mark paid` action.",
-          "Financial Reports now labels the zero-dollar intervention option as `All reportable interventions` and shows `PATH follow-up state` by default."
+          "ILMP validation now follows the ESDC gateway's Appendix A mandatory-field rules before XML is generated.",
+          "ILMP batch XML now exports participants with warnings and blocks only records with true blocking issues.",
+          "Backloaded action plans now use their saved barrier-to-employment codes when Participant Details barriers are blank.",
+          "Participant Details now pulls application checkbox/list answers through correctly, including barriers and Other barrier notes.",
+          "New and existing/backloaded action plans now require education level and education province at the start of the plan."
         ]
       }
     ],
@@ -55,39 +61,45 @@ const publicReleaseNotes = {
     "description": "",
     "featuresHeading": "Ce qui a change",
     "features": [
-      "Edit document details enregistre maintenant les libelles Status or Treaty Card provenant des demandes sans perdre le lien source du document.",
-      "Les dossiers auparavant libelles `Dormant` s'affichent maintenant comme `No Active Plan`, tandis que le statut stocke et la valeur de filtre API restent `dormant`.",
-      "Le retrait d'une seule demande dans un dossier a plusieurs demandes cree maintenant des artefacts ILMP propres a cette demande sans fermer tout le dossier."
+      "Support > Tutorials inclut maintenant Training shorts : de courtes videos PATH hebergees dans Synthesia qui s'ouvrent dans le tableau de bord, y compris de nouveaux brouillons ILMP pour la validation et les soumissions.",
+      "La saisie des plans d'action historiques pre-remplit et exige maintenant les faits de l'annexe A necessaires au reporting ILMP.",
+      "Les enregistrements de plans d'action et d'interventions historiques remplissent maintenant les champs vides de Participant Details a partir des champs ILMP structures, sans remplacer les corrections du personnel.",
+      "Les lettres de decision utilisent maintenant le nom resolu de la participante au lieu de revenir a `Dear Applicant`.",
+      "Les actions de correction de demande conservent maintenant le vrai statut de workflow, enregistrent sur la demande selectionnee et prennent en charge les retraits/reouvertures admissibles.",
+      "Les demandes refusees et fermees n'affichent plus les elements de checklist lies au financement comme manquants.",
+      "Regional Snapshot Client Activity utilise maintenant une seule base de demandes dans les onglets et l'export Excel toutes regions.",
+      "ISET Clients affiche maintenant les dossiers dormants comme `No Active Plan`."
     ],
     "featurePackages": [
       {
-        "title": "Release 20260601-prod-document-lineage-fix",
+        "title": "Release 20260607-prod-tutorials-training-shorts",
         "items": [
-          "Edit document details enregistre maintenant les libelles Status or Treaty Card provenant des demandes sans perdre le lien source du document.",
-          "Le backend conserve le lien existant vers la demande soumise tout en traitant le type de document comme un document a portee client et en validant l'acces du personnel dans le contexte du dossier/de la demande."
+          "Support > Tutorials inclut maintenant Training shorts : de courtes videos PATH hebergees dans Synthesia qui s'ouvrent dans le tableau de bord.",
+          "Le tableau Training shorts est triable et redimensionnable, avec seulement les colonnes Short, Length et Action visibles.",
+          "Les premiers brouillons regardables couvrent le retrait/reouverture d'une demande, les soumissions ILMP et les validations/reparations ILMP.",
+          "PATH stocke seulement les metadonnees Synthesia; les fichiers MP4 ne sont pas ajoutes a l'application React."
         ]
       },
       {
-        "title": "Release 20260529-prod-case-lifecycle-reporting",
+        "title": "Release 20260605-prod-ilmp-casework-batch",
         "items": [
-          "Les dossiers auparavant libelles `Dormant` s'affichent maintenant comme `No Active Plan` dans les badges de statut, les filtres ISET Clients, les descriptions de files d'accueil, le texte de reouverture de dossier et l'aide associee.",
-          "La valeur de cycle de vie stockee et la valeur de requete API restent `dormant`, afin que les filtres existants et le comportement backend continuent de fonctionner.",
-          "Le retrait d'une seule demande dans un dossier a plusieurs demandes cree maintenant des artefacts ILMP propres a cette demande sans fermer tout le dossier.",
-          "Les plans d'action non-reporting existants et les autres demandes actives restent dans le suivi de dossier apres la creation d'un enregistrement reporting lie a la demande retiree.",
-          "Les panneaux de correction reporting utilisent maintenant l'artefact propre a la demande selectionnee, et la validation ILMP charge le contexte du plan d'action correspondant."
+          "La saisie des plans d'action historiques pre-remplit et exige maintenant les faits de l'annexe A necessaires au reporting ILMP.",
+          "Les enregistrements de plans d'action et d'interventions historiques remplissent maintenant les champs vides de Participant Details a partir des champs ILMP structures, sans remplacer les corrections du personnel.",
+          "Les lettres de decision utilisent maintenant le nom resolu de la participante au lieu de revenir a `Dear Applicant`.",
+          "Les actions de correction de demande conservent maintenant le vrai statut de workflow, enregistrent sur la demande selectionnee et prennent en charge les retraits/reouvertures admissibles.",
+          "Les demandes refusees et fermees n'affichent plus les elements de checklist lies au financement comme manquants.",
+          "Regional Snapshot Client Activity utilise maintenant une seule base de demandes dans les onglets et l'export Excel toutes regions.",
+          "ISET Clients affiche maintenant les dossiers dormants comme `No Active Plan`."
         ]
       },
       {
-        "title": "Release 20260528-evening-batch",
+        "title": "Release 20260604-prod-ilmp-appendix-a",
         "items": [
-          "Les modifications des libelles dans Supporting Documents s'enregistrent comme de simples renommages sans changer la portee du document, y compris pour les documents d'identite/statut et les anciens televersements.",
-          "Edit document details et Duplicate document envoient maintenant le contexte du dossier pour les documents a portee client sans demander de les rattacher a une demande.",
-          "Recent ILMP exports utilise maintenant un tableau d'historique compact avec les onglets Summary, Clients exported et XML, ainsi que le chemin/nom de fichier et le nom de la personne qui a telecharge.",
-          "Les actions et l'aide ILMP utilisent maintenant les mots export, download et manual upload afin que le personnel sache que PATH enregistre l'export XML mais ne le televerse pas dans ESDC.",
-          "La validation ILMP reconnait maintenant la valeur de barriere mixte `lack_of_job-opportunities`.",
-          "Workflow Preview et Publish ne bloquent plus sur les composants d'instructions sans libelle explicite.",
-          "Les packets de paiement envoyes n'affichent plus l'ancienne action `Mark paid` au niveau de la ligne.",
-          "Financial Reports appelle maintenant l'option des lignes a zero dollar `All reportable interventions` et affiche `PATH follow-up state` par defaut."
+          "La validation ILMP suit maintenant les champs obligatoires de l'annexe A de la passerelle EDSC avant la generation du XML.",
+          "Le XML ILMP inclut maintenant les participantes avec avertissements et bloque seulement les dossiers avec de vrais problemes bloquants.",
+          "Les plans d'action historiques utilisent maintenant leurs codes sauvegardes de barrieres a l'emploi lorsque Participant Details est vide.",
+          "Participant Details reprend correctement les reponses de type liste/checkbox de la demande, y compris les barrieres et les notes Other barrier.",
+          "Les nouveaux plans d'action et les plans historiques exigent maintenant le niveau d'etudes et la province d'etudes au debut du plan."
         ]
       }
     ],

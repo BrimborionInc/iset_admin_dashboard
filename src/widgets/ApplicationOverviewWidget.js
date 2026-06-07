@@ -92,6 +92,7 @@ const PARK_ALLOWED_STATUSES = new Set(['submitted', 'in_review', 'docs_requested
 const RESUME_REVIEW_STATUSES = new Set(['docs_requested', 'closure_notice', 'on_hold']);
 const WITHDRAW_ALLOWED_STATUSES = new Set(['submitted', 'in_review', 'docs_requested', 'pending_approval', 'closure_notice', 'on_hold']);
 const ARCHIVE_ALLOWED_STATUSES = new Set(['approved', 'completed', 'rejected', 'closed']);
+const REOPEN_ALLOWED_STATUSES = new Set(['closed', 'archived']);
 const HOLD_REVIEW_DEFAULT_DAYS = 30;
 
 const HOLD_REASON_OPTIONS = [
@@ -258,6 +259,11 @@ const formatStatusLabel = value => {
   return getApplicationStatusLabel(value);
 };
 
+const toPositiveInteger = value => {
+  const numeric = Number(value);
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
+};
+
 const ApplicationOverviewWidget = ({
   actions,
   application_id,
@@ -268,6 +274,10 @@ const ApplicationOverviewWidget = ({
   applicationRowVersion,
   onRowVersionUpdate,
 }) => {
+  const selectedApplicationId = toPositiveInteger(application_id);
+  const caseApplicationId = toPositiveInteger(caseData?.application_id ?? caseData?.applicationId);
+  const caseRowVersionIsForSelectedApplication =
+    !selectedApplicationId || (caseApplicationId && caseApplicationId === selectedApplicationId);
   const DetailItem = ({ label, value }) => (
     <SpaceBetween size="xxs">
       <Box color="text-body-secondary" fontSize="body-s">{label}</Box>
@@ -319,8 +329,12 @@ const ApplicationOverviewWidget = ({
   const [checklistRefreshKey, setChecklistRefreshKey] = useState(0);
   const [checklistGateLabel, setChecklistGateLabel] = useState('');
   const [rowVersion, setRowVersion] = useState(() => {
-    const fromProp = Number(applicationRowVersion || 0);
-    const fromCase = Number(caseData?.application_row_version || 0);
+    const fromProp = caseRowVersionIsForSelectedApplication
+      ? Number(applicationRowVersion || 0)
+      : 0;
+    const fromCase = caseRowVersionIsForSelectedApplication
+      ? Number(caseData?.application_row_version || 0)
+      : 0;
     const fromApp = Number(application?.row_version || 0);
     return Math.max(fromProp || 0, fromCase || 0, fromApp || 0, 0);
   });
@@ -421,10 +435,10 @@ const ApplicationOverviewWidget = ({
 
   useEffect(() => {
     const incoming = Number(applicationRowVersion || 0);
-    if (incoming && incoming > rowVersion) {
+    if (incoming && !application?.row_version && incoming !== rowVersion) {
       setRowVersion(incoming);
     }
-  }, [applicationRowVersion, rowVersion]);
+  }, [application?.row_version, applicationRowVersion, rowVersion]);
 
   useEffect(() => {
     if (regionLookup || typeof window === 'undefined') return;
@@ -484,7 +498,7 @@ const ApplicationOverviewWidget = ({
       setApplication(data);
       const incomingVersion = Number(data?.row_version || 0);
       if (incomingVersion) {
-        setRowVersion(prev => (incomingVersion > prev ? incomingVersion : prev));
+        setRowVersion(incomingVersion);
         if (typeof onRowVersionUpdate === 'function') {
           onRowVersionUpdate(incomingVersion);
         }
@@ -549,7 +563,7 @@ const ApplicationOverviewWidget = ({
         setApplication(data);
         const incomingVersion = Number(data?.row_version || 0);
         if (incomingVersion) {
-          setRowVersion(prev => (incomingVersion > prev ? incomingVersion : prev));
+          setRowVersion(incomingVersion);
           if (typeof onRowVersionUpdate === 'function') {
             onRowVersionUpdate(incomingVersion);
           }
@@ -597,6 +611,7 @@ const ApplicationOverviewWidget = ({
 
   // Keep the cached application row_version in sync with fresher caseData values to avoid stale optimistic tokens.
   useEffect(() => {
+    if (!caseRowVersionIsForSelectedApplication) return;
     const incomingVersion = Number(caseData?.application_row_version || 0);
     if (!incomingVersion) return;
     setRowVersion(prev => (incomingVersion > prev ? incomingVersion : prev));
@@ -608,7 +623,7 @@ const ApplicationOverviewWidget = ({
       }
       return prev;
     });
-  }, [caseData?.application_row_version]);
+  }, [caseData?.application_row_version, caseRowVersionIsForSelectedApplication]);
 
   useEffect(() => {
     let cancelled = false;
@@ -760,10 +775,11 @@ const ApplicationOverviewWidget = ({
       : ilmpStatus === 'warning'
         ? 'Needs ILMP review'
         : 'Pending validation';
-  const ilmpMessages = Array.isArray(ilmpCompliance?.messages) ? ilmpCompliance.messages : [];
-  const ilmpParticipantWorkspacePath = caseData?.esdc_submission_id
-    ? `/esdc/participants/${caseData.esdc_submission_id}`
+  const caseWorkspaceCorrectionPath = caseData?.id
+    ? `/cases/${caseData.id}${application_id ? `?applicationId=${encodeURIComponent(application_id)}` : ''}`
     : null;
+  const showReportingCorrectionAlert =
+    isReportingOnlyApplication && (ilmpStatus === 'blocked' || ilmpStatus === 'warning');
   const provinceSource = useMemo(
     () =>
       caseData?.application_address_province ||
@@ -858,6 +874,16 @@ const ApplicationOverviewWidget = ({
     return () => window.removeEventListener('iset:supporting-documents:refresh', handleRefresh);
   }, [applicantUserId]);
 
+  const quickActionStatusRaw =
+    application?.status ||
+    caseData?.applicationStatusRaw ||
+    caseData?.application_status_raw ||
+    applicationStatusFromCase ||
+    statusValue ||
+    '';
+  const quickActionStatusKey =
+    normalizeApplicationStatus(normalizeClosedStatus(quickActionStatusRaw)) ||
+    normalizeApplicationStatus(normalizeClosedStatus(statusValue || applicationStatusFromCase || ''));
   const fallbackStatusRaw = statusValue || applicationStatusFromCase || application?.status || '';
   const fallbackStatus = normalizeApplicationStatus(normalizeClosedStatus(fallbackStatusRaw));
   const fallbackStatusRawKey = normalizeStatusKey(fallbackStatusRaw);
@@ -877,7 +903,6 @@ const ApplicationOverviewWidget = ({
   const roleAccess = getRoleGroups(canonicalRole || userRole);
   const { canonicalStatus } = statusContext;
   const {
-    isSystemAdministratorRole,
     isAdminRole,
     isRegionalCoordinatorRole,
     isApplicationAssessorRole
@@ -929,17 +954,15 @@ const ApplicationOverviewWidget = ({
     : null;
   const escalationTargetRoleLabel = roleKey === 'regional_manager' ? 'NWAC Administrator' : 'Regional Manager';
   const hasCaseId = Boolean(caseData?.id);
-  const canAssign = hasCaseId && !ASSIGN_BLOCKED_STATUSES.has(normalizedStatusKey) && (isAdminRole || isRegionalCoordinatorRole);
-  const canPutOnClosureNotice = hasCaseId && CLOSURE_NOTICE_ELIGIBLE_STATUSES.has(normalizedStatusKey);
-  const canPutOnHold = hasCaseId && PARK_ALLOWED_STATUSES.has(normalizedStatusKey);
-  const canResumeReview = hasCaseId && RESUME_REVIEW_STATUSES.has(normalizedStatusKey);
-  const canWithdrawApplication = hasCaseId && WITHDRAW_ALLOWED_STATUSES.has(normalizedStatusKey) && (isAdminRole || isRegionalCoordinatorRole);
-  const canArchiveApplication = hasCaseId && ARCHIVE_ALLOWED_STATUSES.has(normalizedStatusKey) && isAdminRole;
-  const canReopenClosed = hasCaseId && normalizedStatusKey === 'closed' && isAdminRole;
-  const canReopenArchived = hasCaseId && normalizedStatusKey === 'archived' && isSystemAdministratorRole;
-  const canReopenApplication = canReopenClosed || canReopenArchived;
+  const canAssign = hasCaseId && !ASSIGN_BLOCKED_STATUSES.has(quickActionStatusKey) && (isAdminRole || isRegionalCoordinatorRole);
+  const canPutOnClosureNotice = hasCaseId && CLOSURE_NOTICE_ELIGIBLE_STATUSES.has(quickActionStatusKey);
+  const canPutOnHold = hasCaseId && PARK_ALLOWED_STATUSES.has(quickActionStatusKey);
+  const canResumeReview = hasCaseId && RESUME_REVIEW_STATUSES.has(quickActionStatusKey);
+  const canWithdrawApplication = hasCaseId && WITHDRAW_ALLOWED_STATUSES.has(quickActionStatusKey);
+  const canArchiveApplication = hasCaseId && ARCHIVE_ALLOWED_STATUSES.has(quickActionStatusKey) && isAdminRole;
+  const canReopenApplication = hasCaseId && REOPEN_ALLOWED_STATUSES.has(quickActionStatusKey);
   const canReleaseLock = Boolean(application_id);
-  const canEscalate = hasCaseId && !APPLICATION_TERMINAL_STATUSES.has(normalizedStatusKey) && !hasOpenEscalation && (isApplicationAssessorRole || isRegionalCoordinatorRole);
+  const canEscalate = hasCaseId && !APPLICATION_TERMINAL_STATUSES.has(quickActionStatusKey) && !hasOpenEscalation && (isApplicationAssessorRole || isRegionalCoordinatorRole);
   const canEscalateUp = hasOpenEscalation && isEscalationOwner && roleKey === 'regional_manager';
   const canRespondEscalation = hasOpenEscalation && isEscalationOwner;
   const canResolveEscalation = hasOpenEscalation && isEscalationOwner;
@@ -1333,7 +1356,7 @@ const ApplicationOverviewWidget = ({
       setQuickActionNote('');
       setQuickActionConfirm(buildConfirm({
         title: 'Withdraw application',
-        body: 'Withdrawing will move this application to Withdrawn. Use this when the applicant has withdrawn or is no longer pursuing the application.',
+        body: 'Withdrawing will move this application to Withdrawn. Use this when the applicant is no longer pursuing the application, or when PATH needs to withdraw it after the applicant misses a response deadline.',
         targetStatus: 'withdrawn',
         actionLabel: 'Withdraw application',
         resolveEscalation: true
@@ -1509,20 +1532,6 @@ const ApplicationOverviewWidget = ({
     return true;
   };
 
-  const resolveEscalationIfNeeded = async (note) => {
-    if (!hasOpenEscalation || !escalation?.id) return;
-    const response = await apiFetch(`/api/escalations/${escalation.id}/respond`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'resolve', note: (note || '').trim(), disposition: 'resolve' })
-    });
-    if (!response.ok) {
-      const body = await response.json().catch(() => null);
-      const message = body?.message || body?.error || 'Failed to resolve escalation.';
-      throw new Error(message);
-    }
-  };
-
   const runStatusUpdate = async (nextStatus, nextOption, options = {}) => {
     const {
       note = '',
@@ -1568,12 +1577,12 @@ const ApplicationOverviewWidget = ({
         refreshLockHeartbeat().catch(() => {});
       }
 
-      if (resolveEscalation) {
-        await resolveEscalationIfNeeded(note);
-      }
-
-      const expectedRowVersion = Number(rowVersion || caseData?.application_row_version || application?.row_version || 0);
+      const scopedCaseRowVersion = caseRowVersionIsForSelectedApplication
+        ? Number(caseData?.application_row_version || 0)
+        : 0;
+      const expectedRowVersion = Number(application?.row_version || rowVersion || scopedCaseRowVersion || 0);
       const payload = {
+        applicationId: application?.id || application_id || caseData?.application_id || null,
         applicationStatus: mapWorkflowStatusToPersistenceStatus(nextStatus, {
           currentStatus: applicationStatusFromCase || application?.status || null,
           awaitingReason:
@@ -1595,6 +1604,10 @@ const ApplicationOverviewWidget = ({
       }
       if (expectedRowVersion > 0) {
         payload.expectedRowVersion = expectedRowVersion;
+      }
+      if (resolveEscalation) {
+        payload.resolveOpenEscalation = true;
+        payload.statusActionNote = note || null;
       }
       const response = await apiFetch(`/api/cases/${caseData.id}`, {
         method: 'PUT',
@@ -1622,9 +1635,19 @@ const ApplicationOverviewWidget = ({
       if (response.status === 409) {
         manualStatusRef.current = null;
         setStatusValue(previousStatus);
+        if (body?.error && body.error !== 'row_version_conflict') {
+          setStatusFeedback({
+            type: 'warning',
+            content: body?.message || body?.error || 'The status change is not allowed for this application.',
+          });
+          if (releaseAfter) {
+            releaseLock({ silent: true }).catch(() => {});
+          }
+          return;
+        }
         const currentRowVersion = Number(body?.currentRowVersion ?? body?.application_row_version);
         if (currentRowVersion) {
-          setRowVersion(prev => (currentRowVersion > prev ? currentRowVersion : prev));
+          setRowVersion(currentRowVersion);
           if (typeof onRowVersionUpdate === 'function') {
             onRowVersionUpdate(currentRowVersion);
           }
@@ -1726,8 +1749,14 @@ const ApplicationOverviewWidget = ({
         refreshLockHeartbeat().catch(() => {});
       }
 
-      const expectedRowVersion = Number(rowVersion || caseData?.application_row_version || application?.row_version || 0);
-      const payload = { docsRequested: nextActive };
+      const scopedCaseRowVersion = caseRowVersionIsForSelectedApplication
+        ? Number(caseData?.application_row_version || 0)
+        : 0;
+      const expectedRowVersion = Number(application?.row_version || rowVersion || scopedCaseRowVersion || 0);
+      const payload = {
+        applicationId: application?.id || application_id || caseData?.application_id || null,
+        docsRequested: nextActive
+      };
       if (nextActive) {
         payload.docsRequestedSource = 'manual';
       }
@@ -1758,7 +1787,7 @@ const ApplicationOverviewWidget = ({
       if (response.status === 409) {
         const currentRowVersion = Number(body?.currentRowVersion ?? body?.application_row_version);
         if (currentRowVersion) {
-          setRowVersion(prev => (currentRowVersion > prev ? currentRowVersion : prev));
+          setRowVersion(currentRowVersion);
           if (typeof onRowVersionUpdate === 'function') {
             onRowVersionUpdate(currentRowVersion);
           }
@@ -2254,22 +2283,15 @@ const ApplicationOverviewWidget = ({
             </Box>
           </Alert>
         ) : null}
-        {isReportingOnlyApplication && (
+        {showReportingCorrectionAlert && (
           <Alert type={ilmpStatus === 'blocked' ? 'error' : ilmpStatus === 'warning' ? 'warning' : ilmpStatus === 'clean' ? 'success' : 'info'}>
             <SpaceBetween size="xs">
               <Box>
-                This {reportingApplicationLabel} is retained for ILMP reporting. Fix missing reporting data in the Application Form widget; corrections revalidate automatically and blocked records stay out of normal casework queues.
+                ILMP reporting needs corrections for this {reportingApplicationLabel}. Open the Case Workspace record, correct the reporting fields, and validation will rerun automatically.
               </Box>
-              {ilmpMessages.length > 0 && (
-                <Box as="ul" padding={{ left: 'm' }}>
-                  {ilmpMessages.map(message => (
-                    <li key={message}>{message}</li>
-                  ))}
-                </Box>
-              )}
-              {ilmpParticipantWorkspacePath ? (
+              {caseWorkspaceCorrectionPath ? (
                 <Box>
-                  <Link href={ilmpParticipantWorkspacePath}>Open ESDC participant workspace</Link>
+                  <Link href={caseWorkspaceCorrectionPath}>Open Case Workspace</Link>
                 </Box>
               ) : null}
             </SpaceBetween>

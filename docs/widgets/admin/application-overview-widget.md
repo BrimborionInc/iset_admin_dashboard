@@ -40,5 +40,7 @@ Case summary, status context, quick layouts, and quick actions.
 
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
 - The manual status selector in this widget is currently available to `System Administrator` and `NWAC Administrator` users; other roles see the read-only status badge plus any role-gated quick actions.
+- `Withdraw application` and `Reopen application` quick actions are role-neutral within normal Application Workspace file access: assigned ISET Coordinators, scoped Regional Managers, and administrators can use them when the application status is eligible. Withdrawal resolves open escalation rows through the case status-update route so staff do not need separate escalation-owner permission to complete the withdrawal.
+- Quick-action and workflow eligibility must use the raw persisted application status, not only the display status. For example, raw `closure_notice` displays as `Awaiting Applicant`, but it remains eligible for `Withdraw application`; raw `docs_requested` also displays under the awaiting-applicant umbrella but still drives document-response/resume-review behavior.
 - `Put on hold` is an application-level workflow action. It persists raw application status `on_hold`, keeps lifecycle semantics under `awaiting_applicant`, requires a hold reason, creates a review-date reminder, and moves the row into the homepage `On Hold` workflow bucket until `Resume review` returns it to `in_review`.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.

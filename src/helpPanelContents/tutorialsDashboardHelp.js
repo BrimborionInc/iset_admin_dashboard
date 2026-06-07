@@ -5,13 +5,13 @@ const TutorialsDashboardHelp = () => {
   return (
     <SpaceBetween size="m">
       <Box variant="p">
-        Tutorials auto-prompt the first time you visit a page that supports a tour.
+        Training shorts are short Synthesia-hosted videos for PATH onboarding and refresher learning.
       </Box>
       <Box variant="p">
-        Use this page when PATH still feels unfamiliar and you want tours to prompt again for yourself or for staff training.
+        Guided tours are the in-app walkthroughs that can prompt the first time you visit a supported page.
       </Box>
       <Box variant="p">
-        Each tutorial can be marked complete or incomplete, and Reset all clears both completion and dismissal state across all tutorials.
+        Use the guided-tour controls when PATH still feels unfamiliar and you want tours to prompt again for yourself or for staff training.
       </Box>
     </SpaceBetween>
   );
@@ -19,9 +19,10 @@ const TutorialsDashboardHelp = () => {
 
 TutorialsDashboardHelp.aiContext = `
 Tutorials dashboard help:
-- Tutorials are prompted on first visit to supported pages.
-- This page supports per-tutorial completion toggles and a Reset all action (DB-backed).
-- Use it when staff need tours to prompt again during PATH onboarding or refresher training.
+- Training shorts are Synthesia-hosted videos listed from PATH metadata; PATH does not store MP4 files in the React bundle.
+- Guided tours are prompted on first visit to supported pages.
+- This page supports per-guided-tour completion toggles and a Reset all action (DB-backed).
+- Use the guided-tour controls when staff need tours to prompt again during PATH onboarding or refresher training.
 `.trim();
 
 export default TutorialsDashboardHelp;

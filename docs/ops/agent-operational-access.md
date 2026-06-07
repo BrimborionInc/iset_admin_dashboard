@@ -19,6 +19,7 @@ Purpose: keep database, TEST/PROD, and AWS profile command notes out of `docs/AG
 - TEST deploys run from `/home/bill/ISET/admin-dashboard`. The WSL-native `path:deploy` TEST app step builds/packages the WSL admin tree, sibling portal tree, and sibling shared tree, then deploys through AWS CLI + SSM.
 - PROD deploys also run from `/home/bill/ISET/admin-dashboard`. The WSL-native `path:deploy` PROD app step builds/packages the WSL admin tree, sibling portal tree, and sibling shared tree, uploads fixed latest artifacts to `nwac-prod-artifacts`, then starts and waits for the PROD ASG refresh.
 - Do not use stale `X:\ISET` or `/mnt/x/ISET` deploy guidance. Windows `npm.cmd` is not reliable from `\\wsl.localhost\...`, which is why the active app paths are handled by the Node orchestrator instead of the legacy PowerShell component scripts.
+- Current WSL shell-helper rule: repo `.sh` helpers are tracked without the executable bit after the Windows-to-WSL checkout migration. Invoke them through `bash scripts/<helper>.sh ...` in docs and commands unless a helper is deliberately changed to executable mode.
 
 ## DB Interaction From WSL (DEV)
 
@@ -43,7 +44,7 @@ Purpose: keep database, TEST/PROD, and AWS profile command notes out of `docs/AG
 
 - Verified on 2026-03-28: the Codex sandbox can run SQL against TEST indirectly through SSM on a live `nwac-test-app` EC2 instance using AWS profile `nwac-test`.
 - Do not assume direct network access from the sandbox to the Aurora cluster. The TEST DB security group only allows MySQL from the app security group, so the normal Codex path is remote execution on the app host.
-- Preferred helper for future chats: `scripts/run-test-sql-via-ssm.sh`
+- Preferred helper for future chats: `bash scripts/run-test-sql-via-ssm.sh`
 - Preferred config/data promotion entry point: `npm run data:sync:plan -- --dataset <name> ...` followed by `npm run data:sync:apply -- --target-env test ...`
 - Preferred full TEST reset entry points: `npm run test:db:refresh:plan -- --source-env dev` and `npm run test:db:refresh -- --source-env dev --yes`
 - Supporting guide: `docs/guides/test-db-access-from-codex.md`
@@ -60,12 +61,12 @@ Purpose: keep database, TEST/PROD, and AWS profile command notes out of `docs/AG
 
 - Verified on 2026-05-04: the Codex sandbox can run SQL against PROD indirectly through SSM on a live `nwac-prod-asg` EC2 instance using AWS profile `nwac-prod`.
 - Do not assume direct network access from the sandbox to the Aurora cluster. The normal Codex path is remote execution on the PROD app host, where the helper reads `nwac-prod-db-credentials` through the instance role and connects to Aurora inside the VPC.
-- Preferred helper for future chats: `scripts/run-prod-sql-via-ssm.sh`
+- Preferred helper for future chats: `bash scripts/run-prod-sql-via-ssm.sh`
 - The helper auto-discovers an online in-service PROD app instance from ASG `nwac-prod-asg`, uses profile `nwac-prod`, region `ca-central-1`, DB secret `nwac-prod-db-credentials`, host `nwac-prod-db.cluster-c3g4iamg8j38.ca-central-1.rds.amazonaws.com`, database `iset_intake`, and port `3306` by default.
 - Confirm the PROD operator identity before live data work:
   `aws sts get-caller-identity --profile nwac-prod`
 - Read-only connectivity check:
-  `scripts/run-prod-sql-via-ssm.sh --sql "SELECT DATABASE() AS db, @@hostname AS host, @@port AS port, CURRENT_USER() AS mysql_user, (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()) AS table_count;"`
+  `bash scripts/run-prod-sql-via-ssm.sh --sql "SELECT DATABASE() AS db, @@hostname AS host, @@port AS port, CURRENT_USER() AS mysql_user, (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()) AS table_count;"`
 - Use `--sql-file` for reviewed multi-statement repair scripts. The helper stages SQL through `s3://nwac-prod-artifacts/ssm-sql/...` so larger files do not exceed SSM document size limits.
 - For PROD data repair, default to preview SQL first, then a guarded apply script with explicit expected identifiers, transaction boundaries where feasible, before/after verification selects, and an audit/recovery trail. Avoid broad destructive statements and do not rely on chat-only evidence for live mutations.
 - If PROD DB access fails, stop and repair the documented helper/profile path before improvising a new access route.

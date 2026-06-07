@@ -18,7 +18,7 @@ Product, casework operations, and engineering.
 ## Data / DB Findings (runtime mapping)
 - Decision letters are rendered via workflow templates (`workflow.document_type = assessment_approval_letter|assessment_denial_letter`).
 - Both approval and denial use workflow step `step_id = 143`, with a single paragraph template (`component_template.id = 29`).
-- Template HTML uses tokens: `decision_date`, `applicant_name`, `tracking_id`, `letter_title`, `decision_intro`, `decision_reason`, `next_step_1`, `next_step_2`, `coordinator_name`, `organization_name`.
+- Template HTML uses tokens: `decision_date`, `applicant_name`, `applicant_full_name`, `applicant_salutation_name`, `tracking_id`, `letter_title`, `decision_intro`, `decision_reason`, `next_step_1`, `next_step_2`, `coordinator_name`, `organization_name`. Existing templates still use `applicant_name`, which is populated with the resolved salutation name so greetings render as `Dear Claire` instead of `Dear Applicant` when participant data is available.
 - `show_next_steps` is only enabled for approvals; denial letters render `decision_intro` and `decision_reason` only.
 
 ## Requirements (from stakeholders)

@@ -1305,6 +1305,20 @@ For each indexed thread/topic, keep:
 - Status: implemented forward-only in DEV on 2026-05-22; PROD read-only preview found one existing withdrawn application missing withdrawal reporting artifacts, so that record needs a separate guarded backfill if the policy is applied retroactively.
 - Notes: The withdrawal seed runs when an application first moves to raw status `withdrawn`. It creates or updates one closed reporting-only action plan named `Actions leading to withdrawal`, creates/updates completed interventions for codes `1` (`Career Research and Exploration`) and `3` (`Employment Counselling`), sets start/end/closed dates to the withdrawal date, records `reportingSeedSource: withdrawn_reporting`, and flags the case with `reportingOnlyWithdrawal: true`, `reportingCorrectionAllowed: true`, and `excludeFromCaseworkQueues: true`.
 
+### Synthesia training video production
+
+- Codex task title: `Produce Synthesia training videos`
+- Topic: Synthesia API/runbook setup and PATH Support > Tutorials training-shorts dashboard workflow.
+- Keywords: `Synthesia`, `SYNTHESIA_API_KEY`, `training shorts`, `Tutorials dashboard`, `Support > Tutorials`, `PATH training video`, `Withdrawing and reopening an application`, `Withdrawing an application`, `NWAC pronunciation`
+- When to open: the user asks Codex to create or update PATH training shorts, publish Synthesia videos, add tutorial-video metadata, use Synthesia pronunciation controls, or explain the Synthesia API boundary.
+- Primary docs:
+  - `docs/guides/synthesia-training-video-production.md`
+  - `docs/features/tutorial-platform.md`
+  - `src/tutorials/trainingShorts.js`
+  - `src/pages/support/TutorialsDashboardPage.jsx`
+- Status: active runbook and dashboard pattern created on 2026-06-07.
+- Notes: Bill's Synthesia API key lives only in the repo-root `.env` as `SYNTHESIA_API_KEY`; never print or commit it. Script/storyboard approval is mandatory before Synthesia renders unless Bill explicitly waives that checkpoint for the specific draft. Draft/test videos stay private and watermarked, with no Synthesia video ID or embed URL in app metadata until Bill approves a published staff-safe version. The first real in-production dashboard row is `application-withdrawal` / `Withdrawing and reopening an application`; private test-mode withdrawal drafts were rendered for review from disposable DEV fixture screenshots.
+
 ## Future improvements
 
 - Add stable entry IDs if this grows beyond a small manual list.

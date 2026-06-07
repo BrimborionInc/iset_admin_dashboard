@@ -303,10 +303,10 @@ const EsdcParticipantQueueWidget = ({
       setBatchAlert({
         type: participants.length ? 'success' : 'info',
         message: participants.length
-          ? `Generated batch XML for ${participants.length} ready participant${participants.length === 1 ? '' : 's'}.${skipped.length ? ` Excluded ${skipped.length} non-ready record${skipped.length === 1 ? '' : 's'}.` : ''}`
+          ? `Generated batch XML for ${participants.length} exportable participant${participants.length === 1 ? '' : 's'}.${skipped.length ? ` Excluded ${skipped.length} blocked record${skipped.length === 1 ? '' : 's'}.` : ''}`
           : (skipped.length
-              ? `No ready participants were available. ${skipped.length} record${skipped.length === 1 ? '' : 's'} remain excluded until their ILMP issues are resolved.`
-              : 'No ready participants were available for batch generation.')
+              ? `No exportable participants were available. ${skipped.length} blocked record${skipped.length === 1 ? '' : 's'} remain excluded until their ILMP blockers are resolved.`
+              : 'No exportable participants were available for batch generation.')
       });
       setBatchModalVisible(true);
       triggerSharedRefresh();
@@ -366,7 +366,7 @@ const EsdcParticipantQueueWidget = ({
       setBatchSkipped(skipped);
       setBatchAlert({
         type: 'success',
-        message: `Downloaded batch ${body.batchId || ''} for ${participants.length} ready participant${participants.length === 1 ? '' : 's'}.${skipped.length ? ` Excluded ${skipped.length} non-ready record${skipped.length === 1 ? '' : 's'}.` : ''}`
+        message: `Downloaded batch ${body.batchId || ''} for ${participants.length} exportable participant${participants.length === 1 ? '' : 's'}.${skipped.length ? ` Excluded ${skipped.length} blocked record${skipped.length === 1 ? '' : 's'}.` : ''}`
       });
       triggerSharedRefresh();
       if (body.xml) {

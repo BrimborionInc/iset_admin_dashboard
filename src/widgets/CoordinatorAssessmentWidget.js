@@ -2591,7 +2591,12 @@ const CoordinatorAssessmentWidget = forwardRef(
     scrollWidgetAndPageTopOnce(widgetRootRef);
   }, []);
 
-  const rawApplicationStatus = caseData?.applicationStatus ?? caseData?.application_status ?? null;
+  const rawApplicationStatus =
+    caseData?.applicationStatusRaw ??
+    caseData?.application_status_raw ??
+    caseData?.applicationStatus ??
+    caseData?.application_status ??
+    null;
   const rawCaseStatusSnapshot = caseData?.status ?? '';
   const canonicalCaseStatusSnapshot = getCaseStatusContext(rawCaseStatusSnapshot).canonicalStatus;
   const applicationStatusContext = getApplicationStatusContext(rawApplicationStatus);

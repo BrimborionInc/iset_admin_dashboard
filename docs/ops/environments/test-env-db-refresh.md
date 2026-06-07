@@ -17,7 +17,7 @@ Current implementation note (2026-04-04):
 - Current implementation uses the existing bucket `nwac-test-artifacts` with `db-refresh/` keys instead of a dedicated import bucket.
 - The DEV-derived snapshot mode is not a raw full-data clone. It builds full schema for all tables, includes data only for allowlisted safe/reference tables, and includes selected runtime rows from `iset_runtime_config`. Applicant, case, CFA/funding-overview outputs, PTMA contacts, message, budget, payment, and identity-link rows are excluded by design.
 - The DEV-derived snapshot also keeps the finance/payment runtime configuration rows needed for TEST workflow demos: `finance/payment.intervention.payment_type_map`, `finance/payment.evidence.rules`, `finance/payment.payee_type_options`, `finance/email.routing`, and `assessment/coordinator.costing.line_item_defaults`.
-- The restore helper is `scripts/run-test-db-restore-via-ssm.sh`, and the operator CLI is `scripts/path-test-db-refresh.js`.
+- The restore helper is `bash scripts/run-test-db-restore-via-ssm.sh`, and the operator CLI is `scripts/path-test-db-refresh.js`.
 - PATH still has explicit allowlisted config-promotion tooling for non-destructive TEST updates through `scripts/path-data-sync.js`.
 
 ## 1. Source Data Preparation

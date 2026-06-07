@@ -6,6 +6,7 @@ import {
   deriveApplicationDecisionOutcome,
   getApplicationStatusLabel,
   mapWorkflowStatusToPersistenceStatus,
+  resolveApplicationStateFields,
 } from './applicationStatus';
 
 describe('deriveAssessmentReviewStatusSelection', () => {
@@ -55,6 +56,37 @@ describe('deriveApplicationDecisionOutcome', () => {
         caseStatus: 'closed',
       })
     ).toBe('denied');
+  });
+});
+
+describe('resolveApplicationStateFields', () => {
+  it('keeps raw status available when display status collapses to awaiting applicant', () => {
+    expect(
+      resolveApplicationStateFields({
+        applicationStatus: 'closure_notice',
+        applicationLifecycleStatus: 'awaiting_applicant',
+        awaitingReason: 'closure_response',
+      })
+    ).toMatchObject({
+      applicationStatusRaw: 'closure_notice',
+      application_status_raw: 'closure_notice',
+      applicationStatus: 'awaiting_applicant',
+      application_status: 'awaiting_applicant',
+    });
+  });
+
+  it('prefers explicit raw status when an already-normalized display status is also present', () => {
+    expect(
+      resolveApplicationStateFields({
+        applicationStatusRaw: 'docs_requested',
+        applicationStatus: 'awaiting_applicant',
+        applicationLifecycleStatus: 'awaiting_applicant',
+        awaitingReason: 'documents',
+      })
+    ).toMatchObject({
+      applicationStatusRaw: 'docs_requested',
+      applicationStatus: 'awaiting_applicant',
+    });
   });
 });
 

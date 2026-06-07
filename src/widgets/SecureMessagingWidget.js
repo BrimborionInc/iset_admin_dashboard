@@ -168,8 +168,12 @@ const SecureMessagingWidget = ({
   const applicationState = useMemo(() => {
     return resolveApplicationStateFields({
       applicationStatus:
+        caseData?.applicationStatusRaw ??
+        caseData?.application_status_raw ??
         caseData?.applicationStatus ??
         caseData?.application_status ??
+        workspaceCaseData?.applicationStatusRaw ??
+        workspaceCaseData?.application_status_raw ??
         workspaceCaseData?.applicationStatus ??
         workspaceCaseData?.application_status ??
         null,
@@ -234,6 +238,10 @@ const SecureMessagingWidget = ({
     workspaceCaseData?.status,
   ]);
   const canonicalApplicationStatus = applicationState.applicationStatus || null;
+  const rawApplicationStatus =
+    applicationState.applicationStatusRaw ||
+    applicationState.application_status_raw ||
+    canonicalApplicationStatus;
 
   const rawApplicantUserId =
     caseData?.applicant_user_id ??
@@ -307,7 +315,7 @@ const SecureMessagingWidget = ({
 
   const updateStatusToInReview = useCallback(async () => {
     if (!caseId) return;
-    if (!resumeReviewStatuses.has(canonicalApplicationStatus || '')) return;
+    if (!resumeReviewStatuses.has(rawApplicationStatus || '')) return;
     if (reviewResumeInFlight.current) return;
     reviewResumeInFlight.current = true;
     let releaseLock = false;
@@ -353,7 +361,7 @@ const SecureMessagingWidget = ({
   }, [
     caseId,
     applicationId,
-    canonicalApplicationStatus,
+    rawApplicationStatus,
     caseData?.applicationRowVersion,
     caseData?.application_row_version,
     applicationRowVersion,

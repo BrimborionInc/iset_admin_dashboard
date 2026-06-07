@@ -1487,7 +1487,7 @@ const AppRoutes = ({
             <TutorialsDashboardHelp />,
             null,
             TutorialsDashboardHelp.aiContext,
-            'Reset tutorial progress so tours may prompt again when visiting supported pages.'
+            'Training shorts and guided tours.'
           )}
         </Guard>
       </Route>

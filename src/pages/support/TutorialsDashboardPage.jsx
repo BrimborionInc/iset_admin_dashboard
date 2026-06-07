@@ -4,16 +4,26 @@ import { apiFetch } from '../../auth/apiClient';
 import { useAuth } from '../../context/AuthContext.js';
 import { useTutorials } from '../../context/TutorialsContext';
 import { isTutorialRelevantForRole } from '../../tutorials/tutorialPlatform';
+import {
+  TRAINING_SHORTS,
+  getTrainingShortEmbedUrl,
+  isTrainingShortWatchable,
+} from '../../tutorials/trainingShorts';
+
+const compareText = (left, right) => String(left || '').localeCompare(String(right || ''), undefined, { sensitivity: 'base' });
 
 const TutorialsDashboardPage = () => {
   const { role } = useAuth();
   const { tutorials } = useTutorials();
   const [confirmVisible, setConfirmVisible] = useState(false);
+  const [activeTrainingShort, setActiveTrainingShort] = useState(null);
   const [resetting, setResetting] = useState(false);
   const [savingByTutorialId, setSavingByTutorialId] = useState({});
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [lastResetAt, setLastResetAt] = useState(null);
+  const [trainingShortSortingColumnId, setTrainingShortSortingColumnId] = useState('title');
+  const [trainingShortSortingDescending, setTrainingShortSortingDescending] = useState(false);
 
   const visibleTutorials = useMemo(() => (
     (tutorials || []).filter(tutorial => isTutorialRelevantForRole(tutorial, role))
@@ -27,6 +37,65 @@ const TutorialsDashboardPage = () => {
     })),
     [visibleTutorials]
   );
+
+  const trainingShortRows = useMemo(
+    () => TRAINING_SHORTS.map(short => ({
+      ...short,
+      watchable: isTrainingShortWatchable(short),
+      embedUrl: getTrainingShortEmbedUrl(short),
+    })),
+    []
+  );
+
+  const trainingShortColumnDefinitions = useMemo(() => [
+    {
+      id: 'title',
+      header: 'Short',
+      width: 700,
+      minWidth: 300,
+      sortingComparator: (left, right) => compareText(left.title, right.title),
+      cell: item => (
+        <SpaceBetween size="xxs">
+          <Box variant="strong">{item.title}</Box>
+          <Box variant="small" color="text-body-secondary">{item.description}</Box>
+        </SpaceBetween>
+      ),
+    },
+    {
+      id: 'duration',
+      header: 'Length',
+      width: 115,
+      minWidth: 100,
+      sortingComparator: (left, right) => Number(left.durationSeconds || 0) - Number(right.durationSeconds || 0),
+      cell: item => <span style={{ whiteSpace: 'nowrap' }}>{item.duration || '-'}</span>,
+    },
+    {
+      id: 'action',
+      header: 'Action',
+      width: 130,
+      minWidth: 120,
+      cell: item => (
+        <Button
+          disabled={!item.watchable}
+          onClick={() => setActiveTrainingShort(item)}
+        >
+          Watch
+        </Button>
+      ),
+    },
+  ], []);
+
+  const trainingShortSortingColumn = useMemo(
+    () => trainingShortColumnDefinitions.find(column => column.id === trainingShortSortingColumnId) || trainingShortColumnDefinitions[0],
+    [trainingShortColumnDefinitions, trainingShortSortingColumnId]
+  );
+
+  const sortedTrainingShortRows = useMemo(() => {
+    const comparator = trainingShortSortingColumn?.sortingComparator;
+    if (typeof comparator !== 'function') return trainingShortRows;
+    const sorted = [...trainingShortRows].sort(comparator);
+    return trainingShortSortingDescending ? sorted.reverse() : sorted;
+  }, [trainingShortRows, trainingShortSortingColumn, trainingShortSortingDescending]);
 
   const setSaving = useCallback((tutorialId, value) => {
     setSavingByTutorialId(prev => ({ ...(prev || {}), [tutorialId]: Boolean(value) }));
@@ -103,7 +172,34 @@ const TutorialsDashboardPage = () => {
         header={
           <Header
             variant="h2"
-            description="Tutorials can help staff who are still learning PATH. Use toggles to mark tutorials complete or incomplete, or reset them so they will prompt again."
+            description="Short PATH training videos."
+          >
+            Training shorts
+          </Header>
+        }
+      >
+        <Table
+          trackBy="id"
+          items={sortedTrainingShortRows}
+          variant="embedded"
+          wrapLines
+          resizableColumns
+          sortingColumn={trainingShortSortingColumn}
+          sortingDescending={trainingShortSortingDescending}
+          onSortingChange={({ detail }) => {
+            setTrainingShortSortingColumnId(detail?.sortingColumn?.id || 'title');
+            setTrainingShortSortingDescending(Boolean(detail?.isDescending));
+          }}
+          empty={<Box padding="m">No training shorts are configured yet.</Box>}
+          columnDefinitions={trainingShortColumnDefinitions}
+        />
+      </Container>
+
+      <Container
+        header={
+          <Header
+            variant="h2"
+            description="In-app walkthroughs for supported PATH pages."
             actions={
               <Button
                 variant="primary"
@@ -115,7 +211,7 @@ const TutorialsDashboardPage = () => {
               </Button>
             }
           >
-            Tutorials
+            Guided tours
           </Header>
         }
       >
@@ -129,7 +225,7 @@ const TutorialsDashboardPage = () => {
           ) : null}
 
           <Box variant="p">
-            Toggle each tutorial to set completion state. Turning a tutorial off marks it incomplete and allows first-run prompts again, which can be useful for onboarding or refresher training.
+            Toggle each guided tour to set completion state. Turning a tour off marks it incomplete and allows first-run prompts again, which can be useful for onboarding or refresher training.
           </Box>
 
           {tutorialRows.length ? (
@@ -140,7 +236,7 @@ const TutorialsDashboardPage = () => {
               columnDefinitions={[
                 {
                   id: 'title',
-                  header: 'Tutorial',
+                  header: 'Guided tour',
                   cell: item => item.title,
                 },
                 {
@@ -173,10 +269,62 @@ const TutorialsDashboardPage = () => {
               ]}
             />
           ) : (
-            <Alert type="info">No tutorials are available for your role.</Alert>
+            <Alert type="info">No guided tours are available for your role.</Alert>
           )}
         </SpaceBetween>
       </Container>
+
+      <Modal
+        visible={Boolean(activeTrainingShort)}
+        onDismiss={() => setActiveTrainingShort(null)}
+        header={activeTrainingShort?.title || 'Training short'}
+        size="large"
+        closeAriaLabel="Close training short"
+        footer={
+          <SpaceBetween size="xs" direction="horizontal">
+            {activeTrainingShort?.shareUrl ? (
+              <Button
+                iconName="external"
+                onClick={() => window.open(activeTrainingShort.shareUrl, '_blank', 'noopener,noreferrer')}
+              >
+                Open in Synthesia
+              </Button>
+            ) : null}
+            <Button variant="primary" onClick={() => setActiveTrainingShort(null)}>Close</Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="m">
+          {activeTrainingShort?.description ? (
+            <Box variant="p">{activeTrainingShort.description}</Box>
+          ) : null}
+          {activeTrainingShort?.embedUrl ? (
+            <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', overflow: 'hidden' }}>
+              <iframe
+                src={activeTrainingShort.embedUrl}
+                title={`Synthesia video player - ${activeTrainingShort.title}`}
+                allow="encrypted-media; fullscreen"
+                allowFullScreen
+                loading="lazy"
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  width: '100%',
+                  height: '100%',
+                  border: 0,
+                  padding: 0,
+                  margin: 0,
+                  overflow: 'hidden',
+                }}
+              />
+            </div>
+          ) : (
+            <Alert type="info">
+              This short is not published yet.
+            </Alert>
+          )}
+        </SpaceBetween>
+      </Modal>
 
       <Modal
         visible={confirmVisible}

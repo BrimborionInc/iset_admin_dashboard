@@ -89,7 +89,7 @@ ls sql/migrations/20260426_*.sql sql/migrations/20260427_*.sql
 3. If TEST is being refreshed from PROD-like data, stop TEST apps first, restore the dataset, then immediately apply the side-effect guard:
 
 ```bash
-scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/test-prod-like-restore-postload.sql
+bash scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/test-prod-like-restore-postload.sql
 ```
 
 Do not clear restored Cognito subjects yet. Several cleanup migrations use those PROD subjects to backfill typed staff/applicant actor references. TEST app processes must stay stopped until identity neutralisation is complete.
@@ -100,18 +100,18 @@ This PROD-like TEST refresh is database-only. Do not copy PROD upload/supporting
 
 ```bash
 npx env-cmd -f .env.test npm run audit:privacy-erm -- --out docs/data/privacy-erm-audits/test-YYYYMMDD-pre-grand-cleanup.md --max-rows 100
-scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-message-item-cleanup-preview.sql
-scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-document-scope-preview.sql
-scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-staff-shared-user-identity-preview.sql
-scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-client-account-event-orphan-preview.sql
+bash scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-message-item-cleanup-preview.sql
+bash scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-document-scope-preview.sql
+bash scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-staff-shared-user-identity-preview.sql
+bash scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-client-account-event-orphan-preview.sql
 ```
 
 5. Apply only the approved deterministic pre-cleanups:
 
 ```bash
-scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-message-item-cleanup-apply.sql
-scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-document-scope-apply.sql
-scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-client-account-event-orphan-apply.sql
+bash scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-message-item-cleanup-apply.sql
+bash scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-document-scope-apply.sql
+bash scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-client-account-event-orphan-apply.sql
 ```
 
 There is intentionally no generic staff/shared-user identity apply script. Rows flagged by `privacy-erm-staff-shared-user-identity-preview.sql` need explicit staff identity repair or quarantine; do not fix them by email fallback.
@@ -130,8 +130,8 @@ npm run db:migrate:apply -- --target-env test
 9. Preview and apply duplicate-case consolidation for the one-client/one-case target model:
 
 ```bash
-scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-duplicate-case-consolidation-preview.sql
-scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-duplicate-case-consolidation-apply.sql
+bash scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-duplicate-case-consolidation-preview.sql
+bash scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-duplicate-case-consolidation-apply.sql
 ```
 
 The apply script records `iset_case_merge_audit`, repoints case-owned child rows, archives/detaches merged-away case shells by clearing their `client_id`, and fails closed if unique-key blockers or dangling references remain. Do not add a database unique constraint on `iset_case.client_id` until this consolidation step and the case-creation endpoint review have passed in rehearsal.
@@ -139,7 +139,7 @@ The apply script records `iset_case_merge_audit`, repoints case-owned child rows
 10. Neutralize imported identity bindings and rebind approved TEST staff overlays:
 
 ```bash
-scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/test-prod-like-restore-identity-overlay.sql
+bash scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/test-prod-like-restore-identity-overlay.sql
 ```
 
 The current approved TEST staff overlays are `bill@sillery.co.uk` as System Administrator and `program.admin@awentech.ca` as NWAC Administrator. Add further TEST identities only through explicit Cognito-sub overlays, not by email fallback.
@@ -169,10 +169,10 @@ npx env-cmd -f .env.test npm run audit:privacy-erm -- --out docs/data/privacy-er
 5. Run targeted preview/quarantine SQL before applying canonical migrations:
 
 ```bash
-scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-message-item-cleanup-preview.sql
-scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-document-scope-preview.sql
-scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-staff-shared-user-identity-preview.sql
-scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-client-account-event-orphan-preview.sql
+bash scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-message-item-cleanup-preview.sql
+bash scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-document-scope-preview.sql
+bash scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-staff-shared-user-identity-preview.sql
+bash scripts/run-test-sql-via-ssm.sh --sql-file sql/ops/privacy-erm-client-account-event-orphan-preview.sql
 ```
 
 6. Review blocker counts before continuing. Do not apply migrations if any fail-closed migration would drop non-empty legacy experiment rows or force ambiguous identity mappings.
@@ -222,7 +222,7 @@ Before PROD apply:
 
 1. Capture a PROD restore point through the deployment orchestrator or a manually recorded Aurora snapshot.
 2. Run a read-only privacy audit against PROD, preserving the output outside the app artifact.
-3. Run the preview SQL files through `scripts/run-prod-sql-via-ssm.sh`.
+3. Run the preview SQL files through `bash scripts/run-prod-sql-via-ssm.sh`.
 4. Record row counts and blocker decisions in the release notes.
 5. Prepare any quarantine/archive SQL for non-empty legacy experiment tables or ambiguous orphan rows.
 6. Rehearse the exact SQL on TEST first.

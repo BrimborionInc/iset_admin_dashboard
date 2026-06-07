@@ -20,10 +20,10 @@ Captured on 2026-04-16:
 
 Created via:
 
-- `scripts/run-db-dump-via-ssm.sh --env test ...`
-- `scripts/run-db-dump-via-ssm.sh --env prod ...`
+- `bash scripts/run-db-dump-via-ssm.sh --env test ...`
+- `bash scripts/run-db-dump-via-ssm.sh --env prod ...`
 - In the current Codex sandbox, the prod form of this helper works with the reduced role-backed `nwac-prod` profile because the helper now exports temporary credentials from the active AWS profile before copying the dump back to S3.
-- Use `scripts/copy-prod-dump-to-test-artifacts.sh` to stream the PROD dump from `nwac-prod-artifacts` to `nwac-test-artifacts` without writing the live-data dump to local disk. The stream also runs `scripts/sanitize-prod-dump-for-test-restore.js`, which removes the generated `is_active` column from `iset_case_conflict_declaration` inserts so the dump can be restored into TEST.
+- Use `bash scripts/copy-prod-dump-to-test-artifacts.sh` to stream the PROD dump from `nwac-prod-artifacts` to `nwac-test-artifacts` without writing the live-data dump to local disk. The stream also runs `scripts/sanitize-prod-dump-for-test-restore.js`, which removes the generated `is_active` column from `iset_case_conflict_declaration` inserts so the dump can be restored into TEST.
 
 ## Why raw PROD -> TEST is unsafe as-is
 

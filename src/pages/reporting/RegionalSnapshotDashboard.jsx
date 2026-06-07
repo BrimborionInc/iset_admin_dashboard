@@ -486,11 +486,15 @@ const buildDemoRegionalSnapshotReport = ({
     },
     liveMetrics: {
       applicationsReceived,
+      fundedApplications: funded,
       funded,
+      fundedClients: funded,
       deniedIneligibleWithdrawn,
       pendingDecision,
     },
     fundingMetrics: {
+      fundedClientCount: funded,
+      fundedInterventionCount: funded,
       crfFundingAmount,
       eiFundingAmount,
     },
@@ -880,14 +884,15 @@ const RegionalSnapshotDashboard = () => {
   const clientRows = report
     ? [
         { label: "Applications Received", value: formatInteger(report.liveMetrics?.applicationsReceived) },
-        { label: "Funded Clients", value: formatInteger(report.liveMetrics?.funded) },
+        { label: "Approved / Funded Applications", value: formatInteger(report.liveMetrics?.fundedApplications ?? report.liveMetrics?.funded) },
         { label: "Denied / Ineligible / Withdrawn / NC", value: formatInteger(report.liveMetrics?.deniedIneligibleWithdrawn) },
-        { label: "Pending Decision", value: formatInteger(report.liveMetrics?.pendingDecision) },
+        { label: "Pending / No Decision", value: formatInteger(report.liveMetrics?.pendingDecision) },
       ]
     : [];
 
   const fundingRows = report
     ? [
+        { label: "Funded Clients", value: formatInteger(report.fundingMetrics?.fundedClientCount ?? report.liveMetrics?.fundedClients) },
         { label: "CRF Funding ($)", value: formatCurrency(report.fundingMetrics?.crfFundingAmount) },
         { label: "EI Funding ($)", value: formatCurrency(report.fundingMetrics?.eiFundingAmount) },
         { label: "Total Funding ($)", value: formatCurrency(report.derivedMetrics?.totalFunding), emphasis: true },

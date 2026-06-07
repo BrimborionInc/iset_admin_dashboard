@@ -406,7 +406,12 @@ export function buildAssessmentDecisionAlignmentError({
 }
 
 export function resolveApplicationStateFields(record = {}, { fallbackStatus = null } = {}) {
-  const applicationStatus = record?.applicationStatus ?? record?.application_status ?? null;
+  const applicationStatus =
+    record?.applicationStatusRaw ??
+    record?.application_status_raw ??
+    record?.applicationStatus ??
+    record?.application_status ??
+    null;
   const applicationLifecycleStatus =
     record?.applicationLifecycleStatus ?? record?.application_lifecycle_status ?? null;
   const decisionOutcome = record?.decisionOutcome ?? record?.decision_outcome ?? null;
@@ -440,6 +445,8 @@ export function resolveApplicationStateFields(record = {}, { fallbackStatus = nu
   });
 
   return {
+    applicationStatusRaw: applicationStatus || null,
+    application_status_raw: applicationStatus || null,
     applicationStatus: resolvedStatus,
     application_status: resolvedStatus,
     applicationLifecycleStatus: applicationLifecycleStatus || null,

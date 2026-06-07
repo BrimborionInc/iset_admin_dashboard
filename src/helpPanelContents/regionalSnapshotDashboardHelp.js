@@ -11,9 +11,9 @@ const RegionalSnapshotDashboardHelp = () => (
     <h3>What You Can Review</h3>
     <ul>
       <li>Region information and reporting period for the selected snapshot.</li>
-      <li>Applications received, funded clients, and denied or withdrawn applications during the selected period.</li>
+      <li>Application activity for applications submitted during the selected period, including approved or funded applications, denied or withdrawn applications, and applications still pending a decision.</li>
       <li>Approved CRF/EI funding and funded-client totals use the same approved-funding basis as Financial Reports.</li>
-      <li>Funded clients may not add up with application activity rows because they follow the Financial Reports basis.</li>
+      <li>Funded clients are shown with the funding metrics because they are a unique participant count, not an application-status bucket.</li>
       <li>Coordinator salary is pulled from the Salaries dashboard, with saved operating values shown beside it.</li>
       <li>Calculated totals and ratios based on the saved amounts and live funded-client count.</li>
       <li>Compliance flag and comments or recommendations for the selected reporting window.</li>
@@ -39,13 +39,12 @@ RegionalSnapshotDashboardHelp.aiContext = `
 Regional Snapshot dashboard for management and Board-style regional reporting. Keep explanations concise and
 plain-language. Explain that the page combines live PATH counts with saved regional reporting inputs for the
 selected region and reporting period. Cover the region, period type, fiscal year, and period selectors. Explain
-that applications received and denied or withdrawn are live application activity values. Funded clients and
-CRF/EI funding use the same approved-funding and participant-home-province basis as Financial Reports. Coordinator
+that Client Activity is an application workflow breakdown for applications submitted during the selected period.
+Funded clients and CRF/EI funding use the same approved-funding and participant-home-province basis as Financial Reports. Coordinator
 salary is a live value from the Salaries dashboard, while operating, compliance, and comments fields are saved
 report inputs that admins can edit. Note that totals and ratios are calculated automatically from the live and
-saved inputs and funded-client count. Do not describe the Client Activity section as an arithmetic status
-breakdown because funded clients follow the Financial Reports basis while the other rows follow application
-workflow timing.
+saved inputs and funded-client count. Do not describe funded clients as part of the Client Activity status
+breakdown because funded clients follow the Financial Reports approved-funding basis.
 `;
 
 export default RegionalSnapshotDashboardHelp;

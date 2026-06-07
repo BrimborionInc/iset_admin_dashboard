@@ -20,8 +20,8 @@ This guide records the PROD safety sequence. The active app artifact rollout is 
 - The dedicated prod operator profile is `nwac-prod`. In the current Codex sandbox it assumes the reduced role `nwac-prod-codex-operator` from `default`; `default` is only the bootstrap IAM user and direct prod resource calls through it are expected to fail.
 - The reduced `nwac-prod` role covers normal deploys, prod SQL/dumps via SSM, ASG refresh, automatic prod restore-point capture, and the ALB `path:maintenance:fallback` flow. It does not cover broader infra/admin tasks such as WAF changes, SSM env parameter writes, uploads-bucket CORS changes, or Terraform/ACM changes.
 - In the current Codex sandbox, trusted operator AWS profiles live in the bash/WSL-side AWS CLI config. The PATH control-plane scripts already route AWS-backed checks through `bash`; if you write new operator helpers, follow the same pattern.
-- Current prod DB helper assumption: `nwac-prod-db-credentials` currently contains only `username` and `password`, so `scripts/run-prod-sql-via-ssm.sh` defaults the host/database/port to `nwac-prod-db.cluster-c3g4iamg8j38.ca-central-1.rds.amazonaws.com`, `iset_intake`, and `3306`.
-- `scripts/run-db-dump-via-ssm.sh` now exports temporary credentials from the active AWS profile before uploading the dump back to S3, so the role-backed `nwac-prod` profile works for prod dump capture as well.
+- Current prod DB helper assumption: `nwac-prod-db-credentials` currently contains only `username` and `password`, so `bash scripts/run-prod-sql-via-ssm.sh` defaults the host/database/port to `nwac-prod-db.cluster-c3g4iamg8j38.ca-central-1.rds.amazonaws.com`, `iset_intake`, and `3306`.
+- `bash scripts/run-db-dump-via-ssm.sh` now exports temporary credentials from the active AWS profile before uploading the dump back to S3, so the role-backed `nwac-prod` profile works for prod dump capture as well.
 - Do not use `-SkipBuild` unless you have already inspected the current `build/` output and confirmed it was compiled for prod. React bundles bake environment-specific Cognito domains, client IDs, and external links, so a stale test build can be uploaded to prod unchanged.
 - Before a future PROD app deploy, explicitly inspect `git status --short` and the relevant WSL diffs. The app artifact packages the current WSL working trees, not just the Git index.
 
@@ -83,7 +83,7 @@ npm run path:deploy -- --env prod --skip-schema --skip-data --skip-admin --skip-
 
 ```bash
 cd /home/bill/ISET/admin-dashboard
-scripts/run-prod-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('runtime', 'intake.draft_autosave', CAST('{\"enabled\": true}' AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP;"
+bash scripts/run-prod-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('runtime', 'intake.draft_autosave', CAST('{\"enabled\": true}' AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP;"
 ```
 
 Rollback path:
@@ -229,5 +229,5 @@ For any PROD deploy that ships fixes from the in-app bug/change-request queue, t
 
 - Before deploy, identify every included `admin_feedback_report.id` and add or confirm a note/status showing the item is planned or in progress for the release.
 - After normal-routing smoke passes, perform the targeted workflow/artifact recheck for each included report.
-- Update `admin_feedback_report.status`, `admin_feedback_status_history`, and `admin_feedback_note` in PROD after the recheck. Use `scripts/run-prod-sql-via-ssm.sh`; for multi-row or guarded updates, keep a reviewed SQL artifact in `sql/ops/`.
+- Update `admin_feedback_report.status`, `admin_feedback_status_history`, and `admin_feedback_note` in PROD after the recheck. Use `bash scripts/run-prod-sql-via-ssm.sh`; for multi-row or guarded updates, keep a reviewed SQL artifact in `sql/ops/`.
 - Mark a report `resolved` only when the deployed behavior and all relevant generated/sent/client-facing artifacts have been verified. If anything remains unverified or only partially fixed, leave the report open and record exactly what remains.

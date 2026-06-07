@@ -26,6 +26,7 @@ Last Updated: 2026-05-28
 - When the user is talking through bugs, change requests, design choices, priorities, or process questions, answer in natural conversational English by default. Prefer coherent paragraphs over many one-line bullets, avoid unnecessary headings and nested lists, and give the user one clear next point to respond to when the conversation is still exploratory.
 - When Bill asks for workflow/process review, keep chat answers concise, focused on the direct question and any issues or decisions. Do not provide long code summaries unless he explicitly asks for implementation detail.
 - Do not turn exploratory design into a branching checklist in the linear chat. If several concerns or unknowns exist, group them, make a recommendation, and advance one live decision at a time. If one point needs deeper discussion, pause the rest, carry the unresolved context yourself, and reintroduce the next relevant point when it is actually needed.
+- When guiding Bill through a live external UI or tool, use the screen state he provides and give one concrete next action. Do not rely on brittle numbered navigation paths after the UI has diverged; name the visible control to use next and explain any mismatch with prior guidance briefly.
 - The user may be wrong or operating from incomplete context; surface contradictions and risks early.
 - If requested changes could break behavior, conflict with data reality, or create regressions, pause and discuss tradeoffs before coding.
 - Challenge weak assumptions with concrete evidence (code paths, payloads, schema, runtime config), then agree on the target behavior.
@@ -201,6 +202,7 @@ Treat this file as the current project context for this repo. If the user refere
 - Test DB access from Codex/WSL: `docs/guides/test-db-access-from-codex.md`
 - Operational reporting workbook reference: `docs/data/NWAC - data info 2025-26.xlsx`
 - NWAC staff training extract for PATH-aligned help content: `docs/training/TRAINING_MODULES_September_2025_extracted.md`
+- Synthesia tutorial/training video production runbook: `docs/guides/synthesia-training-video-production.md`
 - Admin AI chatbot knowledge-base transformation plan: `docs/planning/admin-ai-chatbot-knowledge-base-transformation.md`
 - Admin AI chatbot coverage register: `docs/planning/admin-ai-chatbot-coverage-register.md`
 - Admin AI source inventory helper: `scripts/admin-ai-inventory.js` / `npm run ai:inventory`
@@ -217,7 +219,7 @@ Treat this file as the current project context for this repo. If the user refere
 - PATH deploy orchestrator guide: `docs/ops/deployments/path-deploy-orchestrator.md`
 - PATH deployment quick guide: `docs/ops/deployments/deployment-quick-guide.md`
 - PATH deploy orchestrator CLI: `scripts/path-deploy.js`
-- Test DB SQL helper for Codex/WSL: `scripts/run-test-sql-via-ssm.sh`
+- Test DB SQL helper for Codex/WSL: `bash scripts/run-test-sql-via-ssm.sh`
 - Staff Cognito legacy attribute cleanup guide: `docs/guides/staff-cognito-legacy-attribute-cleanup.md`
 - Prod deploy guide: `docs/ops/deployments/prod-deployment-guide.md`
 - Prod environment guide: `docs/ops/environments/prod-env-guide.md`
@@ -226,9 +228,9 @@ Treat this file as the current project context for this repo. If the user refere
 - TEST prod-like migration rehearsal: `docs/ops/environments/test-prod-migration-rehearsal.md`
 - Privacy ERM grand cleanup rehearsal: `docs/ops/environments/privacy-erm-grand-cleanup-rehearsal.md`
 - TEST DB refresh CLI: `scripts/path-test-db-refresh.js`
-- TEST DB restore helper: `scripts/run-test-db-restore-via-ssm.sh`
+- TEST DB restore helper: `bash scripts/run-test-db-restore-via-ssm.sh`
 - Legacy reference only: `scripts/deploy-test-db.ps1` (the npm alias `deploy:test-db` now routes to `scripts/path-test-db-refresh.js run`)
-- Prod DB SQL helper for Codex/WSL: `scripts/run-prod-sql-via-ssm.sh`
+- Prod DB SQL helper for Codex/WSL: `bash scripts/run-prod-sql-via-ssm.sh`
 - Prod DB SQL helper for Windows/PowerShell: `scripts/run-prod-sql.ps1`
 - PATH data promotion catalog: `docs/ops/deployments/data-promotion-catalog.md`
 - PATH data sync CLI: `scripts/path-data-sync.js`

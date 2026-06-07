@@ -82,7 +82,12 @@ const SecureMessageComposePanel = ({
 
   const applicationState = useMemo(() => {
     return resolveApplicationStateFields({
-      applicationStatus: caseData?.applicationStatus ?? caseData?.application_status ?? null,
+      applicationStatus:
+        caseData?.applicationStatusRaw ??
+        caseData?.application_status_raw ??
+        caseData?.applicationStatus ??
+        caseData?.application_status ??
+        null,
       applicationLifecycleStatus:
         caseData?.applicationLifecycleStatus ?? caseData?.application_lifecycle_status ?? null,
       decisionOutcome: caseData?.decisionOutcome ?? caseData?.decision_outcome ?? null,
@@ -95,6 +100,10 @@ const SecureMessageComposePanel = ({
     });
   }, [caseData]);
   const canonicalApplicationStatus = applicationState.applicationStatus || null;
+  const rawApplicationStatus =
+    applicationState.applicationStatusRaw ||
+    applicationState.application_status_raw ||
+    canonicalApplicationStatus;
   const decisionOutcome = applicationState.decisionOutcome || null;
   const allowedLetterDocTypes = useMemo(() => {
     if (decisionOutcome === 'approved') return new Set(['assessment_approval_letter']);
@@ -299,7 +308,7 @@ const SecureMessageComposePanel = ({
     const targetCaseId = targetContext.caseId || caseId;
     const targetApplicationId = targetContext.applicationId || applicationId;
     if (!targetCaseId) return;
-    const statusKey = canonicalApplicationStatus || '';
+    const statusKey = rawApplicationStatus || '';
     const shouldUpdateStatus = ['submitted', 'in_review'].includes(statusKey);
     let releaseLock = false;
     try {
@@ -360,7 +369,7 @@ const SecureMessageComposePanel = ({
   }, [
     applicationId,
     applicationRowVersion,
-    canonicalApplicationStatus,
+    rawApplicationStatus,
     caseData,
     caseId,
     onCaseUpdate,

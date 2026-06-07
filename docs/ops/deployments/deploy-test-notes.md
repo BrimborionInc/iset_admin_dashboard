@@ -44,6 +44,10 @@ For a non-destructive preflight first:
 npm run path:deploy:plan -- --env test --dataset intake-release --workflow-id 21
 ```
 
+## Recent deploy evidence
+
+- 2026-06-07: Admin-only TEST release `20260607-test-tutorials-training-shorts` deployed from isolated worktree `/home/bill/ISET/admin-dashboard-test-deploy-tutorials-20260607` so unrelated dirty files in the main checkout were not packaged. Sequence: `warning -> wait -> ALB fallback -> admin-only deploy -> clear fallback -> normal-routing smoke -> clear warning`. Flags: `--skip-schema --skip-data --skip-portal --skip-shared`. Normal-routing smoke after fallback clear reported both `nwac-test-admin-tg` targets healthy on port `5001`. Manifest: `/home/bill/ISET/admin-dashboard/tmp/path-deploy/test/20260607-test-tutorials-training-shorts--2026-06-07T16-54-17-110Z.json`.
+
 If you only need the legacy component rollout primitives:
 
 Do not call the legacy PowerShell component deploy scripts directly from WSL. Windows `npm.cmd` is not reliable from `\\wsl.localhost\...`, and the supported TEST component path is now the Node orchestrator with `--skip-admin` / `--skip-portal` flags as needed.
@@ -78,7 +82,7 @@ Enable the flag after smoke passes:
 
 ```bash
 cd /home/bill/ISET/admin-dashboard
-scripts/run-test-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('runtime', 'intake.draft_autosave', CAST('{\"enabled\": true}' AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP;"
+bash scripts/run-test-sql-via-ssm.sh --sql "INSERT INTO iset_runtime_config (scope, k, v) VALUES ('runtime', 'intake.draft_autosave', CAST('{\"enabled\": true}' AS JSON)) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = CURRENT_TIMESTAMP;"
 ```
 
 Rollback is the same helper with `{\"enabled\": false}`.

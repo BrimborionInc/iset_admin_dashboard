@@ -23,6 +23,7 @@ import { boardItemI18nStrings } from "../../widgets/common";
 import { usePortfolioCases } from "../PortfolioCaseContext.jsx";
 import useCurrentUser from "../../../../hooks/useCurrentUser.js";
 import { apiFetch } from "../../../../auth/apiClient.js";
+import { getCaseStatusBadgeColor, getCaseStatusLabel } from "../../../../utils/caseStatus.js";
 import useCasesData from "../hooks/useCasesData.js";
 const COLUMN_WIDTHS_KEY = "iset-portfolio-cases-table-widths-v2";
 const PREFERENCES_KEY = "iset-portfolio-cases-table-preferences-v2";
@@ -110,8 +111,9 @@ const groupedColumns = [
     id: "status",
     header: "Status",
     cell: item => {
-      const color = item.isChild ? item.statusColor || "grey" : item.primaryStatusColor || "grey";
-      const label = item.isChild ? item.statusLabel || "-" : item.primaryStatusLabel || "-";
+      const rawStatus = item.isChild ? item.status || item.statusLabel : item.primaryStatus || item.primaryStatusLabel;
+      const color = getCaseStatusBadgeColor(rawStatus);
+      const label = getCaseStatusLabel(rawStatus);
       return <Badge color={color}>{label}</Badge>;
     },
     minWidth: 140,

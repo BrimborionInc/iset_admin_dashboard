@@ -144,6 +144,48 @@ const BARRIER_OPTIONS = [
   { value: "12", label: "Other barrier" },
 ];
 
+const EDUCATION_VALUE_TO_ILMP_CODE = {
+  no_formal_education: "1",
+  grade_7_8: "2",
+  grade_9_10: "3",
+  grade_11_12: "4",
+  secondary_school_diploma_or_ged: "5",
+  post_secondary_training: "6",
+  apprenticeship_trades: "7",
+  cegep: "8",
+  college: "8",
+  university_certificate: "9",
+  bachelors_degree: "10",
+  masters_degree: "11",
+  doctorate: "12",
+};
+
+const BARRIER_VALUE_TO_ILMP_CODE = {
+  none: "1",
+  "lack-of-labour-force-attachment": "2",
+  "lack of labour force attachment": "2",
+  "lack-of-work-experience": "3",
+  "lack of work experience": "3",
+  "lack-of-transportation": "4",
+  "lack of transportation": "4",
+  location: "5",
+  remoteness: "5",
+  language: "6",
+  education: "7",
+  economic: "8",
+  funding: "8",
+  "dependent-care": "9",
+  "dependent care": "9",
+  "lack-of-job-opportunities": "10",
+  "lack of job opportunities": "10",
+  "lack of marketable skills": "10",
+  "physical-or-mental-health": "11",
+  "physical or mental health": "11",
+  "physical/emotional/mental health": "11",
+  other: "12",
+  "other barrier": "12",
+};
+
 const SCHEDULE_OPTIONS = [
   { value: "1", label: "Full-time" },
   { value: "2", label: "Part-time" },
@@ -477,16 +519,23 @@ const NewActionPlanModal = ({
       const mapEducation = () => {
         if (!context.educationLevel) return "";
         const target = context.educationLevel.toString().trim().toLowerCase();
+        if (EDUCATION_OPTIONS.some(opt => opt.value === target)) return target;
+        if (EDUCATION_VALUE_TO_ILMP_CODE[target]) return EDUCATION_VALUE_TO_ILMP_CODE[target];
         const foundExact = EDUCATION_OPTIONS.find(opt => opt.label.toLowerCase() === target);
         if (foundExact) return foundExact.value;
+        if (target.includes("bachelor")) return "10";
+        if (target.includes("master")) return "11";
+        if (target.includes("doctor")) return "12";
+        if (target.includes("college") || target.includes("cegep")) return "8";
         if (target.includes("secondary") && (target.includes("ged") || target.includes("diploma"))) return "5";
         return "";
       };
       const mapEmploymentStatus = () => {
         const val = context.labourForceStatus ? context.labourForceStatus.toString().toLowerCase() : "";
-        if (val.includes("employ")) return "2";
         if (val.includes("student")) return "9";
         if (val.includes("unemploy")) return "1";
+        if (val.includes("underemploy")) return "1";
+        if (val.includes("employ") || val.includes("self-employed") || val.includes("self employed")) return "2";
         return "";
       };
       const mapEligibilityToFundingStream = () => {
@@ -511,8 +560,15 @@ const NewActionPlanModal = ({
       };
       const mapBarriers = () => {
         if (!Array.isArray(context.employmentBarriers)) return [];
-        const lower = context.employmentBarriers.map(b => b && b.toString().trim().toLowerCase());
-        return BARRIER_OPTIONS.filter(opt => lower.includes(opt.label.toLowerCase())).map(opt => opt.value);
+        return Array.from(new Set(context.employmentBarriers
+          .map(value => {
+            const normalized = value ? value.toString().trim().toLowerCase() : "";
+            if (!normalized) return "";
+            if (BARRIER_OPTIONS.some(opt => opt.value === normalized)) return normalized;
+            const byLabel = BARRIER_OPTIONS.find(opt => opt.label.toLowerCase() === normalized);
+            return byLabel?.value || BARRIER_VALUE_TO_ILMP_CODE[normalized] || "";
+          })
+          .filter(Boolean)));
       };
       if (!next.educationLevel) next.educationLevel = mapEducation();
       if (!next.prevEmployment) next.prevEmployment = mapEmploymentStatus();
@@ -560,8 +616,11 @@ const NewActionPlanModal = ({
     if (form.childcareNeed === "1" && !form.childcareFunding) {
       errors.childcareFunding = "Childcare funding is required when childcare need is Yes.";
     }
-    if (form.educationLevel && !form.educationProvince) {
-      errors.educationProvince = "Education province is required when education level is set.";
+    if (!form.educationLevel) {
+      errors.educationLevel = "Education level at action plan start is required.";
+    }
+    if (!form.educationProvince) {
+      errors.educationProvince = "Education province is required.";
     }
     if (!form.fundingStream) {
       errors.fundingStream = "Funding stream is required.";
@@ -971,12 +1030,14 @@ const NewActionPlanModal = ({
           <FormField
             label="Education Level"
             description="Highest level of education attained at the time of creation of Action Plan."
+            errorText={fieldErrors.educationLevel}
           >
             <Select
               selectedOption={selectedEducationLevel}
               options={EDUCATION_OPTIONS}
               onChange={({ detail }) => setForm(current => ({ ...current, educationLevel: detail.selectedOption?.value || "" }))}
               placeholder="Select education level"
+              invalid={Boolean(fieldErrors.educationLevel)}
             />
           </FormField>
           <FormField

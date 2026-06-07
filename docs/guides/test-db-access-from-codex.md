@@ -32,19 +32,19 @@ Verified on 2026-03-28 from the Codex Linux sandbox.
 Preferred command for future Codex work:
 
 ```bash
-scripts/run-test-sql-via-ssm.sh --sql "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='iset_intake';"
+bash scripts/run-test-sql-via-ssm.sh --sql "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='iset_intake';"
 ```
 
 From a SQL file:
 
 ```bash
-scripts/run-test-sql-via-ssm.sh --sql-file /path/to/query.sql
+bash scripts/run-test-sql-via-ssm.sh --sql-file /path/to/query.sql
 ```
 
 From stdin:
 
 ```bash
-cat /path/to/query.sql | scripts/run-test-sql-via-ssm.sh
+cat /path/to/query.sql | bash scripts/run-test-sql-via-ssm.sh
 ```
 
 Notes:
@@ -69,7 +69,7 @@ npm run test:db:refresh -- --source-env dev --yes
 Notes:
 
 - `scripts/path-test-db-refresh.js` is the operator entry point.
-- `scripts/run-test-db-restore-via-ssm.sh` is the lower-level restore helper.
+- `bash scripts/run-test-db-restore-via-ssm.sh` is the lower-level restore helper.
 - The current implementation uses `nwac-test-artifacts/db-refresh/...` for uploaded dumps.
 - `--source-env dev` now removes the old manual-dump prerequisite by having Codex generate the TEST baseline snapshot automatically from DEV.
 - That DEV-derived snapshot is schema + allowlisted safe/reference data only, plus the published intake runtime row; applicant, case, message, payment, and identity-link rows are excluded by design.

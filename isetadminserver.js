@@ -29,6 +29,11 @@ const {
   buildDecisionLetterSchemaFromMessageBody,
 } = require('./src/lib/decisionLetterMessageBody');
 const {
+  resolveApplicantDisplayName,
+  resolveApplicantNameFromPayload: resolveApplicantNameFromPayloadShared,
+  resolveApplicantSalutationName,
+} = require('./src/lib/applicantNameResolver');
+const {
   getIlmpActionPlanReadinessWarning,
   getNoReportableInterventionsMessage,
   summariseIlmpActionPlanStatuses,
@@ -36,9 +41,14 @@ const {
 const {
   ILMP_BARRIER_CODE_LOOKUP,
   collectNocLookupPairs,
+  hasIlmpOtherBarrierSupportingNotes,
   mapIlmpBarrierCodes,
   normaliseIlmpBarrierCode,
 } = require('./src/lib/ilmpValidationMappings');
+const {
+  mergeBackloadActionPlanParticipantDetails,
+  mergeBackloadInterventionParticipantDetails,
+} = require('./src/lib/backloadParticipantDetailsSeeding');
 const { normaliseIlmpEducationLevelCode } = require('./src/lib/ilmpEducationMapping');
 const { runStartupSharedSchemaMigrations } = require('./src/lib/sharedSchemaMigrationRunner');
 const {
@@ -6449,6 +6459,15 @@ function normaliseString(value) {
   return null;
 }
 
+function firstNonBlankValue(...values) {
+  for (const value of values) {
+    if (value === null || typeof value === 'undefined') continue;
+    if (typeof value === 'string' && value.trim() === '') continue;
+    return value;
+  }
+  return null;
+}
+
 function cleanSin(raw) {
   const str = normaliseString(raw);
   if (!str) return null;
@@ -7447,8 +7466,10 @@ async function createOrReactivateApplicantWatchlistEntry({
 }
 
 function extractMaritalStatus(context) {
-  const { answers = {} } = context;
+  const { answers = {}, caseContext = {} } = context;
   const raw = normaliseString(
+    caseContext.maritalStatus ||
+    caseContext.marital_status ||
     answers['marital-status'] ||
     answers['marital_status'] ||
     answers['maritalStatus']
@@ -7459,23 +7480,34 @@ function extractMaritalStatus(context) {
 }
 
 function extractDependentChildrenInfo(context) {
-  const { answers = {} } = context;
-  const indicator = answers['dependent-children'] ??
+  const { answers = {}, caseContext = {} } = context;
+  const indicator = caseContext.dependentChildren ??
+    caseContext.dependent_children ??
+    answers['dependent-children'] ??
     answers['dependent_children'] ??
     answers['dependentChildren'] ??
     answers['dependent_children_indicator'];
   const hasDependents = coerceBoolean(indicator);
-  const countRaw = answers['dependent-children-count'] ??
+  const countRaw = caseContext.numberOfDependentChildren ??
+    caseContext.number_of_dependent_children ??
+    caseContext.dependentChildrenCount ??
+    caseContext.dependent_children_count ??
+    caseContext.dependentChildren ??
+    caseContext.dependent_children ??
+    answers['dependent-children-count'] ??
     answers['dependent_children_count'] ??
     answers['number-of-dependent-children'];
   let count = null;
   if (typeof countRaw !== 'undefined' && countRaw !== null) {
-    const numeric = Number(String(countRaw).trim());
+    const countText = String(countRaw).trim();
+    const numeric = countText === '' ? Number.NaN : Number(countText);
     if (Number.isFinite(numeric) && numeric >= 0) {
       count = Math.round(numeric);
     }
   }
   const agesRaw = normaliseString(
+    caseContext.agesOfChildren ||
+    caseContext.ages_of_children ||
     answers['ages-of-children'] ||
     answers['ages_of_children'] ||
     answers['dependent-children-ages']
@@ -7485,16 +7517,16 @@ function extractDependentChildrenInfo(context) {
     ages = agesRaw
       .split(/[^0-9]+/)
       .map(part => part.trim())
-      .filter(part => part.length > 0);
-    if (ages.length && (count === null || count === 0)) {
-      count = ages.length;
+      .filter(part => part.length > 0)
+      .map(part => Number(part))
+      .filter(age => Number.isFinite(age) && age >= 0);
+    const ilmpDependantChildCount = ages.filter(age => age <= 18).length;
+    if (ages.length > 0 && count === null) {
+      count = ilmpDependantChildCount;
     }
   }
   if (count === null && hasDependents === false) {
     count = 0;
-  }
-  if (count === null && hasDependents === true) {
-    count = Math.max(1, ages.length || 1);
   }
   return { count, ages };
 }
@@ -7741,8 +7773,12 @@ function mapPrevEmploymentFromStatus(status) {
 }
 
 function extractEducationDetails(context) {
-  const { answers = {} } = context;
+  const { answers = {}, caseContext = {} } = context;
   const levelRaw = normaliseString(
+    caseContext.educationLevel ||
+    caseContext.education_level ||
+    caseContext.highestEducation ||
+    caseContext.highest_education ||
     answers['education-level'] ||
     answers['education_level'] ||
     answers['highest-education']
@@ -7757,10 +7793,16 @@ function extractEducationDetails(context) {
     }
   }
   const year = normaliseString(
+    caseContext.educationYear ||
+    caseContext.education_year ||
     answers['education-year'] ||
     answers['education_year']
   );
   const location = normaliseString(
+    caseContext.educationProvince ||
+    caseContext.educationLocation ||
+    caseContext.education_province ||
+    caseContext.education_location ||
     answers['education-location'] ||
     answers['education_location'] ||
     answers['edication-location']
@@ -7777,32 +7819,45 @@ function extractSocialAssistanceStatus(context) {
   const { answers = {}, caseContext = {} } = context;
   const raw = (() => {
     if (typeof caseContext.socialAssistance !== 'undefined') return caseContext.socialAssistance;
+    if (typeof caseContext.socialAssistanceRecipient !== 'undefined') return caseContext.socialAssistanceRecipient;
+    if (typeof caseContext.social_assistance_recipient !== 'undefined') return caseContext.social_assistance_recipient;
     if (Object.prototype.hasOwnProperty.call(answers, 'social-assistance')) return answers['social-assistance'];
     if (Object.prototype.hasOwnProperty.call(answers, 'social_assistance')) return answers['social_assistance'];
+    if (Object.prototype.hasOwnProperty.call(answers, 'social-assistance-recipient')) return answers['social-assistance-recipient'];
+    if (Object.prototype.hasOwnProperty.call(answers, 'receives-social-assistance')) return answers['receives-social-assistance'];
     return answers['socialAssistance'];
   })();
   const coerced = coerceBoolean(raw);
   return coerced === null ? null : formatBooleanAsYesNo(coerced);
 }
 
-function extractEiClaimant(context, clientStatus) {
-  const { answers = {} } = context;
+function extractEiClaimant(context) {
+  const { answers = {}, caseContext = {} } = context || {};
   const explicit = normaliseString(
+    caseContext.EIClaimant ||
+    caseContext.eiClaimant ||
+    caseContext.ei_claimant ||
+    caseContext.employmentInsuranceClaimant ||
+    caseContext.employment_insurance_claimant ||
     answers['ei-claimant'] ||
-    answers['ei_claimant']
+    answers['ei_claimant'] ||
+    answers['ei-claimant-status'] ||
+    answers['employment-insurance-claimant']
   );
   if (explicit) {
     return explicit;
   }
-  if (clientStatus?.status === 'Employed') {
-    return 'Employment insurance claimant';
-  }
-  return 'Non-insured client';
+  return null;
 }
 
 function extractEmploymentBarriers(context) {
-  const { answers = {} } = context;
-  const rawBarriers = answers.barriers ||
+  const { answers = {}, caseContext = {} } = context;
+  const contextBarriers =
+    Array.isArray(caseContext.employmentBarriers) || normaliseString(caseContext.employmentBarriers)
+      ? caseContext.employmentBarriers
+      : null;
+  const rawBarriers = contextBarriers ||
+    answers.barriers ||
     answers['barriers'] ||
     answers['barrier-to-employment'] ||
     answers['barrier_to_employment'];
@@ -7820,6 +7875,8 @@ function extractEmploymentBarriers(context) {
     if (label) mapped.push(label);
   });
   const otherDescription = normaliseString(
+    caseContext.otherBarrier ||
+    caseContext.other_barrier ||
     answers['other-barrier'] ||
     answers['other_barrier']
   );
@@ -7827,6 +7884,26 @@ function extractEmploymentBarriers(context) {
     mapped.push(`Other: ${otherDescription}`);
   }
   return mapped;
+}
+
+function extractActionPlanBarrierValues(plan) {
+  if (!plan || typeof plan !== 'object') return [];
+  const metadata = plan.metadata && typeof plan.metadata === 'object' ? plan.metadata : {};
+  const candidates = [
+    plan.barriers,
+    plan.BarrierToEmployment,
+    plan.barrierToEmployment,
+    metadata.barriers,
+    metadata.BarrierToEmployment,
+    metadata.barrierToEmployment,
+  ];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate;
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.split(',').map(item => item.trim()).filter(Boolean);
+    }
+  }
+  return [];
 }
 
 function extractRequestedSupports(context) {
@@ -8155,6 +8232,15 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
         id: plan.id || plan.action_plan_id || null,
         status: normalisePlanStatus(plan.status),
         startDate: planStartDate,
+        barriers: extractActionPlanBarrierValues(plan),
+        socialAssistanceRecipient:
+          plan.socialAssistanceRecipient ??
+          plan.SocialAssistanceRecipient ??
+          plan.social_assistance_recipient ??
+          metadata.socialAssistanceRecipient ??
+          metadata.SocialAssistanceRecipient ??
+          metadata.social_assistance_recipient ??
+          null,
         eiClaimant: plan.eiClaimant || plan.EIClaimant || metadata.eiClaimant || null,
         educationLevel: plan.educationLevel || plan.education_level || metadata.educationLevel || null,
         educationProvince: plan.educationProvince || plan.education_province || metadata.educationProvince || null,
@@ -8512,6 +8598,27 @@ function runIlmpValidation(context) {
   };
   const CODE_LOOKUP = {
     barrier: ILMP_BARRIER_CODE_LOOKUP,
+    socialAssistance: {
+      no: '0',
+      false: '0',
+      '0': '0',
+      yes: '1',
+      true: '1',
+      '1': '1'
+    },
+    eiClaimant: {
+      'ei claimant': '1',
+      'employment insurance claimant': '1',
+      'reach-back / former claimant': '2',
+      'reach-back client/former claimant': '2',
+      'reach-back client': '2',
+      'former claimant': '2',
+      'non-insured client': '3',
+      'non insured client': '3',
+      '1': '1',
+      '2': '2',
+      '3': '3'
+    },
     prevEmployment: {
       unemployed: '1',
       underemployed: '1',
@@ -8568,7 +8675,9 @@ function runIlmpValidation(context) {
   };
   const toCode = (value, lookup) => {
     if (value === null || typeof value === 'undefined') return null;
-    const key = String(value).trim().toLowerCase();
+    const raw = String(value).trim();
+    if (!raw) return null;
+    const key = raw.toLowerCase();
     const map = lookup || {};
     if (map instanceof Set) {
       return map.has(key) ? key : null;
@@ -8628,6 +8737,25 @@ function runIlmpValidation(context) {
   const requestedSupports = extractRequestedSupports(context);
   const derivedPlans = extractActionPlanDetails(context, clientStatus, requestedSupports) || [];
   const barriersRaw = extractEmploymentBarriers(context) || [];
+  const dependentInfo = extractDependentChildrenInfo(context);
+  const primaryDerivedPlan = Array.isArray(derivedPlans) && derivedPlans.length ? derivedPlans[0] : null;
+  const participantSocialAssistanceStatus = extractSocialAssistanceStatus(context);
+  const socialAssistanceStatus = firstNonBlankValue(
+    primaryDerivedPlan?.socialAssistanceRecipient,
+    primaryDerivedPlan?.SocialAssistanceRecipient,
+    primaryDerivedPlan?.social_assistance_recipient,
+    participantSocialAssistanceStatus
+  );
+  const socialAssistanceCode = toCode(socialAssistanceStatus, CODE_LOOKUP.socialAssistance);
+  const eiClaimantStatus =
+    (primaryDerivedPlan && primaryDerivedPlan.eiClaimant) ||
+    extractEiClaimant(context);
+  const eiClaimantCode = toCode(eiClaimantStatus, CODE_LOOKUP.eiClaimant);
+  const isMissingIlmpValue = value =>
+    value === null ||
+    typeof value === 'undefined' ||
+    String(value).trim() === '' ||
+    String(value).trim().toLowerCase() === 'null';
 
   const planStatusCounts = summariseIlmpActionPlanStatuses(context.caseActionPlans);
   const actionPlanReadinessWarning = getIlmpActionPlanReadinessWarning(context.caseActionPlans);
@@ -8646,7 +8774,10 @@ function runIlmpValidation(context) {
   });
   const languageCode = toCode(extracted.languageSpoken, {
     'indigenous language(s) only':'1','indigenous only':'1','english only':'2','french only':'3',
-    'indigenous + english':'4','indigenous + french':'5','english + french':'6','indigenous + english + french':'7',
+    'indigenous + english':'4','indigenous language(s) and english':'4',
+    'indigenous + french':'5','indigenous language(s) and french':'5',
+    'english + french':'6','english and french':'6',
+    'indigenous + english + french':'7','indigenous language(s), english and french':'7',
     'none of the above':'8','none':'8',
     '1':'1','2':'2','3':'3','4':'4','5':'5','6':'6','7':'7','8':'8'
   });
@@ -8710,6 +8841,101 @@ function runIlmpValidation(context) {
     }
   });
 
+  const addMandatoryBlocker = ({ key, id, label, message, detail = null }) => {
+    blockingIssues.push(`[${key}] ${message}`);
+    ruleResults.push({
+      id,
+      label,
+      category: 'mandatory',
+      severity: 'blocking',
+      passed: false,
+      message,
+      detail
+    });
+  };
+
+  if (!extracted.maritalStatus) {
+    addMandatoryBlocker({
+      key: 'maritalStatus',
+      id: 'marital-status-required',
+      label: 'Marital status',
+      message: 'Marital status is required for ILMP reporting.'
+    });
+  } else if (!maritalCode) {
+    addMandatoryBlocker({
+      key: 'maritalStatus',
+      id: 'marital-status-invalid',
+      label: 'Marital status',
+      message: 'Marital status code is invalid.',
+      detail: extracted.maritalStatus
+    });
+  }
+
+  if (!extracted.languageSpoken) {
+    addMandatoryBlocker({
+      key: 'languageSpoken',
+      id: 'language-spoken-required',
+      label: 'Language spoken',
+      message: 'Language spoken is required for ILMP reporting.'
+    });
+  } else if (!languageCode) {
+    addMandatoryBlocker({
+      key: 'languageSpoken',
+      id: 'language-spoken-invalid',
+      label: 'Language spoken',
+      message: 'Language spoken code is invalid.',
+      detail: extracted.languageSpoken
+    });
+  }
+
+  if (
+    !dependentInfo ||
+    typeof dependentInfo.count !== 'number' ||
+    !Number.isFinite(dependentInfo.count) ||
+    dependentInfo.count < 0
+  ) {
+    addMandatoryBlocker({
+      key: 'numberOfDependantChildren',
+      id: 'dependent-children-count-required',
+      label: 'Number of dependant children',
+      message: 'Number of dependant children is required for ILMP reporting.'
+    });
+  }
+
+  if (isMissingIlmpValue(socialAssistanceStatus)) {
+    addMandatoryBlocker({
+      key: 'socialAssistanceRecipient',
+      id: 'social-assistance-recipient-required',
+      label: 'Social assistance recipient',
+      message: 'Social assistance recipient is required for ILMP reporting.'
+    });
+  } else if (!socialAssistanceCode) {
+    addMandatoryBlocker({
+      key: 'socialAssistanceRecipient',
+      id: 'social-assistance-recipient-invalid',
+      label: 'Social assistance recipient',
+      message: 'Social assistance recipient must be Yes or No.',
+      detail: socialAssistanceStatus
+    });
+  }
+
+  if (isMissingIlmpValue(eiClaimantStatus)) {
+    addMandatoryBlocker({
+      key: 'EIClaimant',
+      id: 'ei-claimant-required',
+      label: 'Employment insurance claimant',
+      message: 'EI claimant status is required for ILMP action plan reporting. Select Claimant, Reach-back, or Non-insured.'
+    });
+  } else if (!eiClaimantCode) {
+    addMandatoryBlocker({
+      key: 'EIClaimant',
+      id: 'ei-claimant-invalid',
+      label: 'Employment insurance claimant',
+      message: 'EI claimant status is not valid. Select Claimant, Reach-back, or Non-insured.',
+      detail: eiClaimantStatus
+    });
+  }
+
   const streetLower = typeof extracted.addressStreet === 'string' ? extracted.addressStreet.trim().toLowerCase() : '';
   if (streetLower === 'no address') {
     const msg = 'Client has declared "No Address". Allowed but audit-sensitive.';
@@ -8750,6 +8976,11 @@ function runIlmpValidation(context) {
       invalidBarriers.push(barrier);
     }
   });
+  const actionPlanBarrierCodes = Array.from(new Set(
+    (Array.isArray(derivedPlans) ? derivedPlans : [])
+      .flatMap(plan => mapIlmpBarrierCodes(extractActionPlanBarrierValues(plan)) || [])
+  ));
+  const reportingBarrierCodes = barrierCodes.length ? Array.from(new Set(barrierCodes)) : actionPlanBarrierCodes;
   if (invalidBarriers.length) {
     const msg = 'Barrier codes must be valid enumerations.';
     blockingIssues.push(`[barrier] ${msg}`);
@@ -8763,7 +8994,7 @@ function runIlmpValidation(context) {
       detail: invalidBarriers
     });
   }
-  if (barrierCodes.includes('1') && barrierCodes.some(code => code !== '1')) {
+  if (reportingBarrierCodes.includes('1') && reportingBarrierCodes.some(code => code !== '1')) {
     const msg = '"None" cannot be combined with other barriers.';
     blockingIssues.push(`[barrier] ${msg}`);
     ruleResults.push({
@@ -8773,10 +9004,10 @@ function runIlmpValidation(context) {
       severity: 'blocking',
       passed: false,
       message: msg,
-      detail: barrierCodes
+      detail: reportingBarrierCodes
     });
   }
-  if (barrierCodes.length > 5) {
+  if (reportingBarrierCodes.length > 5) {
     const msg = 'Large number of barriers selected; confirm accuracy.';
     warnings.push(`[barrier] ${msg}`);
     ruleResults.push({
@@ -8786,10 +9017,27 @@ function runIlmpValidation(context) {
       severity: 'warning',
       passed: false,
       message: msg,
-      detail: barrierCodes.length
+      detail: reportingBarrierCodes.length
     });
   }
-  if (barrierCodes.includes('12')) {
+  if (!reportingBarrierCodes.length) {
+    const msg = 'Barrier to employment is required for ILMP action plan reporting.';
+    blockingIssues.push(`[barrier] ${msg}`);
+    ruleResults.push({
+      id: 'barrier-required',
+      label: 'Barrier to employment',
+      category: 'mandatory',
+      severity: 'blocking',
+      passed: false,
+      message: msg,
+      detail: null
+    });
+  }
+  if (reportingBarrierCodes.includes('12') && !hasIlmpOtherBarrierSupportingNotes({
+    barriers: barriersRaw,
+    answers: context?.answers,
+    caseContext: context?.caseContext
+  })) {
     const msg = '"Other barrier" used; ensure supporting notes are present.';
     warnings.push(`[barrier] ${msg}`);
     ruleResults.push({
@@ -8836,6 +9084,19 @@ function runIlmpValidation(context) {
     };
   };
   const activeDerived = eligiblePlans.filter(plan => (plan?.status || '').toLowerCase() === 'active');
+  if (!eligiblePlans.length) {
+    const msg = 'At least one reportable action plan is required for ILMP reporting.';
+    blockingIssues.push(`[actionPlan] ${msg}`);
+    ruleResults.push({
+      id: 'actionplan-required',
+      label: 'Action plan',
+      category: 'mandatory',
+      severity: 'blocking',
+      passed: false,
+      message: msg,
+      detail: null
+    });
+  }
   if (activeDerived.length > 1) {
     const msg = 'More than one active action plan detected for this case.';
     blockingIssues.push(`[actionPlan] ${msg}`);
@@ -8860,7 +9121,7 @@ function runIlmpValidation(context) {
     const planResultStr = plan.resultDate || plan.ActionPlanResultDate || plan.actionPlanResultDate || null;
     const planStart = planStartStr ? parseDate(planStartStr) : null;
     const planResultDate = planResultStr ? parseDate(planResultStr) : null;
-    const planEducationLevelRaw = plan.educationLevel || plan.education_level || plan.resultEducationLevel || null;
+    const planEducationLevelRaw = plan.educationLevel || plan.education_level || null;
     const planEducationLevelCode = planEducationLevelRaw
       ? toCode(planEducationLevelRaw, CODE_MAPS.educationLevel)
       : null;
@@ -9072,6 +9333,19 @@ function runIlmpValidation(context) {
       toCode(clientStatus?.prevEmployment, CODE_LOOKUP.prevEmployment) ||
       toCode(clientStatus?.status, CODE_LOOKUP.prevEmployment) ||
       null;
+    if (!prevEmploymentCode) {
+      const msg = 'Action plan client status at intake is required.';
+      blockingIssues.push(`${planPrefix} ${msg}`);
+      ruleResults.push({
+        id: `${planPrefix}-prev-employment-required`,
+        label: 'Action plan client status at intake',
+        category: 'mandatory',
+        severity: 'blocking',
+        passed: false,
+        message: msg,
+        detail: null
+      });
+    }
     if (prevEmploymentCode === '2') {
       const prevNoc =
         plan.prevEmploymentNoc ||
@@ -9143,6 +9417,106 @@ function runIlmpValidation(context) {
         ruleResults.push({
           id: `${planPrefix}-prev-schedule`,
           label: 'Previous employment schedule type',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: null
+        });
+      }
+    }
+
+    if (!planIsTerminal) {
+      if (planResultStr && !planResultCode) {
+        const msg = 'Action plan result code is required when action plan result date is provided.';
+        blockingIssues.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-result-code-date-conditional`,
+          label: 'Action plan result code',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: { resultDate: planResultStr }
+        });
+      }
+      if (planResultCode && !planResultStr) {
+        const msg = 'Action plan result date is required when action plan result code is provided.';
+        blockingIssues.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-result-date-code-conditional`,
+          label: 'Action plan result date',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: { resultCode: planResultCode }
+        });
+      }
+      if (planResultCode && !planResultEducationCode) {
+        const msg = 'Action plan result education level is required when action plan result code is provided.';
+        blockingIssues.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-result-education-code-conditional`,
+          label: 'Action plan result education level',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: { resultCode: planResultCode }
+        });
+      }
+      if (planResultCode === '2') {
+        const resultNoc = plan.resultNoc || plan.actionPlanResultRelatedNOC || null;
+        const resultNocVersion = plan.resultNocVersion || plan.actionPlanResultRelatedNOCVersion || null;
+        const resultNocDigits = resultNoc ? String(resultNoc).replace(/\D/g, '') : '';
+        const resultNocVersionStr = resultNocVersion ? String(resultNocVersion).trim() : '';
+        if (!resultNoc || !/^\d{4,5}$/.test(String(resultNoc))) {
+          const msg = 'Result NOC is required when employment is the action plan result.';
+          blockingIssues.push(`${planPrefix} ${msg}`);
+          ruleResults.push({
+            id: `${planPrefix}-result-noc-code-conditional`,
+            label: 'Action plan result NOC',
+            category: 'mandatory',
+            severity: 'blocking',
+            passed: false,
+            message: msg,
+            detail: resultNoc
+          });
+        }
+        if (!resultNocVersion || !CODE_MAPS.nocVersion.has(String(resultNocVersion))) {
+          const msg = 'Result NOC version is required when employment is the action plan result.';
+          blockingIssues.push(`${planPrefix} ${msg}`);
+          ruleResults.push({
+            id: `${planPrefix}-result-noc-version-code-conditional`,
+            label: 'Action plan result NOC version',
+            category: 'mandatory',
+            severity: 'blocking',
+            passed: false,
+            message: msg,
+            detail: resultNocVersion
+          });
+        }
+        if (resultNocDigits && resultNocVersionStr && !isKnownNocCode(resultNocDigits, resultNocVersionStr)) {
+          const msg = 'Result NOC must be a valid NOC for the selected version.';
+          blockingIssues.push(`${planPrefix} ${msg}`);
+          ruleResults.push({
+            id: `${planPrefix}-result-noc-validity-code-conditional`,
+            label: 'Action plan result NOC',
+            category: 'mandatory',
+            severity: 'blocking',
+            passed: false,
+            message: msg,
+            detail: resultNocDigits
+          });
+        }
+      }
+      if (planResultCode === '4' && !planFutureEducationCode) {
+        const msg = 'Future education level must be present (codes 5/8/9/10) when result is Returned to School.';
+        blockingIssues.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-future-education-code-conditional`,
+          label: 'Action plan future education level',
           category: 'mandatory',
           severity: 'blocking',
           passed: false,
@@ -9341,6 +9715,7 @@ function runIlmpValidation(context) {
       const startDate = startStr ? parseDate(startStr) : null;
       const endDate = endStr ? parseDate(endStr) : null;
       const interventionIsTerminal = isIlmpTerminalInterventionStatus(intv);
+      const interventionCloseoutRequired = interventionIsTerminal || Boolean(planResultDate);
 
       if (!startStr) {
         const msg = 'Intervention start date is required.';
@@ -9408,8 +9783,10 @@ function runIlmpValidation(context) {
         }
       }
 
-      if (interventionIsTerminal && !endStr) {
-        const msg = 'Intervention end date is required when intervention is completed or cancelled.';
+      if (interventionCloseoutRequired && !endStr) {
+        const msg = planResultDate
+          ? 'Intervention end date is required when action plan result date is provided.'
+          : 'Intervention end date is required when intervention is completed or cancelled.';
         blockingIssues.push(`${prefix} ${msg}`);
         ruleResults.push({
           id: `${prefix}-end-required`,
@@ -9487,8 +9864,10 @@ function runIlmpValidation(context) {
         blockingIssues.push(`${prefix} ${msg}`);
       }
 
-      if (interventionIsTerminal && !intv.outcome) {
-        const msg = 'Intervention outcome code is required when intervention is completed or cancelled.';
+      if (interventionCloseoutRequired && !intv.outcome) {
+        const msg = planResultDate
+          ? 'Intervention outcome code is required when action plan result date is provided.'
+          : 'Intervention outcome code is required when intervention is completed or cancelled.';
         blockingIssues.push(`${prefix} ${msg}`);
         ruleResults.push({
           id: `${prefix}-outcome-required`,
@@ -9637,7 +10016,38 @@ function runIlmpValidation(context) {
         (dynamicRootKey ? parsedXml?.[dynamicRootKey] : null) ||
         null;
       const asList = value => (Array.isArray(value) ? value : value ? [value] : []);
+      const hasNodeValue = value => {
+        if (Array.isArray(value)) return value.some(hasNodeValue);
+        if (value === null || typeof value === 'undefined') return false;
+        if (typeof value === 'object') return Object.keys(value).length > 0;
+        return String(value).trim() !== '';
+      };
+      const nodeText = value => {
+        if (Array.isArray(value)) {
+          const first = value.find(entry => hasNodeValue(entry));
+          return nodeText(first);
+        }
+        if (value === null || typeof value === 'undefined' || typeof value === 'object') return '';
+        return String(value).trim();
+      };
+      const requireNode = ({ id, label, value, message }) => {
+        if (hasNodeValue(value)) return;
+        pushFileBlocking(id, label, message);
+      };
+      requireNode({
+        id: 'file-agreement-holder-name',
+        label: 'Agreement holder name',
+        value: root?.agreementHolderName,
+        message: 'XML is missing mandatory <agreementHolderName>.'
+      });
       const clients = asList(root?.client);
+      if (!clients.length) {
+        pushFileBlocking(
+          'file-client-required',
+          'Client XML structure',
+          'XML is missing mandatory <client>.'
+        );
+      }
 
       clients.forEach((clientNode, clientIndex) => {
         if (
@@ -9651,11 +10061,176 @@ function runIlmpValidation(context) {
             `Client ${clientIndex + 1} contains a disallowed sysComment element under <client>.`
           );
         }
+        [
+          ['socialInsuranceNumber', 'Social Insurance Number'],
+          ['lastName', 'Last name'],
+          ['firstName', 'First name'],
+          ['dateOfBirth', 'Date of birth'],
+          ['gender', 'Gender'],
+          ['aboriginalGroup', 'Aboriginal group'],
+          ['maritalStatus', 'Marital status'],
+          ['numberOfDependantChildren', 'Number of dependant children'],
+          ['languageSpoken', 'Language spoken'],
+          ['disability', 'Disability']
+        ].forEach(([elementName, label]) => {
+          requireNode({
+            id: `file-client-${elementName}-${clientIndex + 1}`,
+            label,
+            value: clientNode?.[elementName],
+            message: `Client ${clientIndex + 1} is missing mandatory <${elementName}>.`
+          });
+        });
+
+        const addressNode = clientNode?.address || null;
+        [
+          ['streetAddress', 'Street address'],
+          ['municipality', 'Municipality'],
+          ['province', 'Province'],
+          ['postalZIPCode', 'Postal code']
+        ].forEach(([elementName, label]) => {
+          requireNode({
+            id: `file-client-address-${elementName}-${clientIndex + 1}`,
+            label,
+            value: addressNode?.[elementName],
+            message: `Client ${clientIndex + 1} is missing mandatory address <${elementName}>.`
+          });
+        });
 
         const plans = asList(clientNode?.actionPlan);
+        if (!plans.length) {
+          pushFileBlocking(
+            `file-actionplan-required-${clientIndex + 1}`,
+            'Action plan XML structure',
+            `Client ${clientIndex + 1} is missing mandatory <actionPlan>.`
+          );
+        }
         plans.forEach((planNode, planIndex) => {
+          [
+            ['agreementNumber', 'Agreement number'],
+            ['educationLevel', 'Action plan education level'],
+            ['socialAssistanceRecipient', 'Social assistance recipient'],
+            ['EIClaimant', 'Employment insurance claimant'],
+            ['barrierToEmployment', 'Barrier to employment'],
+            ['actionPlanPreviousEmployment', 'Action plan client status at intake'],
+            ['actionPlanStartDate', 'Action plan start date']
+          ].forEach(([elementName, label]) => {
+            requireNode({
+              id: `file-actionplan-${elementName}-${clientIndex + 1}-${planIndex + 1}`,
+              label,
+              value: planNode?.[elementName],
+              message: `Action plan ${planIndex + 1} for client ${clientIndex + 1} is missing mandatory <${elementName}>.`
+            });
+          });
+          const previousEmployment = nodeText(planNode?.actionPlanPreviousEmployment);
+          if (previousEmployment === '2') {
+            [
+              ['actionPlanPreviousEmploymentNOC', 'Action plan previous employment NOC'],
+              ['actionPlanPreviousEmploymentNOCVersion', 'Action plan previous employment NOC version'],
+              ['actionPlanPreviousEmploymentScheduleType', 'Action plan previous employment schedule type']
+            ].forEach(([elementName, label]) => {
+              requireNode({
+                id: `file-actionplan-prev-${elementName}-${clientIndex + 1}-${planIndex + 1}`,
+                label,
+                value: planNode?.[elementName],
+                message: `Action plan ${planIndex + 1} for client ${clientIndex + 1} is missing conditional <${elementName}> for employed intake status.`
+              });
+            });
+          }
+          const resultCode = nodeText(planNode?.actionPlanResultCode);
+          const resultDate = nodeText(planNode?.actionPlanResultDate);
+          if (resultDate && !resultCode) {
+            pushFileBlocking(
+              `file-actionplan-result-code-${clientIndex + 1}-${planIndex + 1}`,
+              'Action plan result code',
+              `Action plan ${planIndex + 1} for client ${clientIndex + 1} is missing conditional <actionPlanResultCode> because <actionPlanResultDate> is present.`
+            );
+          }
+          if (resultCode && !resultDate) {
+            pushFileBlocking(
+              `file-actionplan-result-date-${clientIndex + 1}-${planIndex + 1}`,
+              'Action plan result date',
+              `Action plan ${planIndex + 1} for client ${clientIndex + 1} is missing conditional <actionPlanResultDate> because <actionPlanResultCode> is present.`
+            );
+          }
+          if (resultCode) {
+            requireNode({
+              id: `file-actionplan-result-education-${clientIndex + 1}-${planIndex + 1}`,
+              label: 'Action plan result education level',
+              value: planNode?.actionPlanResultEducationLevel,
+              message: `Action plan ${planIndex + 1} for client ${clientIndex + 1} is missing conditional <actionPlanResultEducationLevel> because <actionPlanResultCode> is present.`
+            });
+          }
+          if (resultCode === '2') {
+            [
+              ['actionPlanResultRelatedNOC', 'Action plan result related NOC'],
+              ['actionPlanResultRelatedNOCVersion', 'Action plan result related NOC version']
+            ].forEach(([elementName, label]) => {
+              requireNode({
+                id: `file-actionplan-result-${elementName}-${clientIndex + 1}-${planIndex + 1}`,
+                label,
+                value: planNode?.[elementName],
+                message: `Action plan ${planIndex + 1} for client ${clientIndex + 1} is missing conditional <${elementName}> because the result is employed.`
+              });
+            });
+          }
+          if (resultCode === '4') {
+            requireNode({
+              id: `file-actionplan-future-education-${clientIndex + 1}-${planIndex + 1}`,
+              label: 'Action plan future education level',
+              value: planNode?.actionPlanFutureEducationLevel,
+              message: `Action plan ${planIndex + 1} for client ${clientIndex + 1} is missing conditional <actionPlanFutureEducationLevel> because the result is returned to school.`
+            });
+          }
           const interventions = asList(planNode?.intervention);
+          if (!interventions.length) {
+            pushFileBlocking(
+              `file-intervention-required-${clientIndex + 1}-${planIndex + 1}`,
+              'Intervention XML structure',
+              `Action plan ${planIndex + 1} for client ${clientIndex + 1} is missing mandatory <intervention>.`
+            );
+          }
           interventions.forEach((interventionNode, interventionIndex) => {
+            [
+              ['interventionCode', 'Intervention code'],
+              ['interventionStartDate', 'Intervention start date']
+            ].forEach(([elementName, label]) => {
+              requireNode({
+                id: `file-intervention-${elementName}-${clientIndex + 1}-${planIndex + 1}-${interventionIndex + 1}`,
+                label,
+                value: interventionNode?.[elementName],
+                message: `Intervention ${interventionIndex + 1} in plan ${planIndex + 1} is missing mandatory <${elementName}>.`
+              });
+            });
+            if (resultDate) {
+              [
+                ['interventionEndDate', 'Intervention end date'],
+                ['interventionOutcome', 'Intervention outcome']
+              ].forEach(([elementName, label]) => {
+                requireNode({
+                  id: `file-intervention-closeout-${elementName}-${clientIndex + 1}-${planIndex + 1}-${interventionIndex + 1}`,
+                  label,
+                  value: interventionNode?.[elementName],
+                  message: `Intervention ${interventionIndex + 1} in plan ${planIndex + 1} is missing conditional <${elementName}> because action plan result date is present.`
+                });
+              });
+            }
+            const interventionCode = Number.parseInt(nodeText(interventionNode?.interventionCode), 10);
+            if (Number.isFinite(interventionCode) && interventionCode >= 6 && interventionCode <= 13) {
+              requireNode({
+                id: `file-intervention-related-noc-${clientIndex + 1}-${planIndex + 1}-${interventionIndex + 1}`,
+                label: 'Intervention related NOC',
+                value: interventionNode?.interventionRelatedNOC,
+                message: `Intervention ${interventionIndex + 1} in plan ${planIndex + 1} is missing conditional <interventionRelatedNOC> for intervention code ${interventionCode}.`
+              });
+            }
+            if (hasNodeValue(interventionNode?.interventionRelatedNOC)) {
+              requireNode({
+                id: `file-intervention-related-noc-version-${clientIndex + 1}-${planIndex + 1}-${interventionIndex + 1}`,
+                label: 'Intervention related NOC version',
+                value: interventionNode?.interventionRelatedNOCVersion,
+                message: `Intervention ${interventionIndex + 1} in plan ${planIndex + 1} is missing conditional <interventionRelatedNOCVersion> because <interventionRelatedNOC> is present.`
+              });
+            }
             if (
               interventionNode &&
               typeof interventionNode === 'object' &&
@@ -10210,23 +10785,7 @@ function buildLivingAllowanceRows({ startDate, endDate, amount }) {
 }
 
 function resolveApplicantNameFromPayload(payload, fallback) {
-  if (!payload || typeof payload !== 'object') return fallback || null;
-  const first =
-    payload['first-name'] ||
-    payload['first_name'] ||
-    payload?.personal?.firstName ||
-    payload?.personal?.first_name ||
-    null;
-  const last =
-    payload['last-name'] ||
-    payload['last_name'] ||
-    payload?.personal?.lastName ||
-    payload?.personal?.last_name ||
-    null;
-  const consentName = payload?.consent?.name || payload?.indigenous_declaration?.name || null;
-  const combined = [first, last].filter(Boolean).join(' ').trim();
-  const resolved = (combined || consentName || '').trim();
-  return resolved || fallback || null;
+  return resolveApplicantNameFromPayloadShared(payload, fallback);
 }
 
 const resolveFundingAgreementInterventionLabelBase = (intervention = {}, labelLookup = null) => {
@@ -11091,6 +11650,8 @@ function resolveDecisionLetterTokens({
   draft,
   docType,
   applicantName,
+  applicantFullName = null,
+  applicantSalutationName = null,
   trackingId,
   caseNumber,
   coordinatorName,
@@ -11104,9 +11665,16 @@ function resolveDecisionLetterTokens({
   const nextStep1 = safe(effectiveDraft.next_step_1);
   const nextStep2 = safe(effectiveDraft.next_step_2);
   const showNextSteps = isApproval && (nextStep1 || nextStep2);
+  const fullName = safe(applicantFullName) || safe(applicantName);
+  const salutationName =
+    safe(applicantSalutationName) ||
+    (fullName ? fullName.split(/\s+/)[0] : '') ||
+    'Applicant';
   return {
     decision_date: safe(decisionDate) || safe(effectiveDraft.decision_date) || formatFundingDate(new Date()),
-    applicant_name: safe(applicantName),
+    applicant_name: salutationName,
+    applicant_full_name: fullName || salutationName,
+    applicant_salutation_name: salutationName,
     tracking_id: safe(trackingId),
     case_number: safe(caseNumber),
     letter_title: safe(effectiveDraft.letter_title) || titleFallback,
@@ -11131,12 +11699,15 @@ async function resolveDecisionLetterTokensForSigningRequest({ pool, caseId, appl
   const [[caseRow]] = await pool.query(
     `SELECT c.case_number,
             c.case_context_json,
+            cl.first_name AS client_first_name,
+            cl.last_name AS client_last_name,
             a.id AS application_id,
             s.reference_number,
             s.intake_payload,
             applicant.email AS applicant_email
        FROM iset_case c
        ${applicationJoinSql}
+       LEFT JOIN client cl ON cl.id = c.client_id
        LEFT JOIN iset_application_submission s ON a.submission_id = s.id
        LEFT JOIN user applicant ON s.user_id = applicant.id
       WHERE c.id = ?
@@ -11148,32 +11719,18 @@ async function resolveDecisionLetterTokensForSigningRequest({ pool, caseId, appl
   const decisionDrafts = resolveDecisionLetterDrafts(caseContext, caseRow?.application_id || normalizedApplicationId || null);
   const draft = docType === 'assessment_approval_letter' ? decisionDrafts.approval : decisionDrafts.denial;
   const submissionPayload = safeJsonParse(caseRow?.intake_payload, null);
-  const ctxPersonal = caseContext?.applicationPersonal || {};
-  const ctxAnswers = caseContext?.applicationAnswers || {};
-  const contextNameCandidates = [
-    ctxPersonal.preferred_name,
-    ctxPersonal.preferredName,
-    caseContext.preferredName,
-    ctxAnswers['preferred-name'],
-    ctxAnswers['preferred_name'],
-    ctxPersonal.first_name && ctxPersonal.last_name
-      ? `${ctxPersonal.first_name} ${ctxPersonal.last_name}`
-      : null,
-    ctxPersonal.firstName && ctxPersonal.lastName
-      ? `${ctxPersonal.firstName} ${ctxPersonal.lastName}`
-      : null,
-    caseContext.firstName && caseContext.lastName
-      ? `${caseContext.firstName} ${caseContext.lastName}`
-      : null,
-    caseContext.first_name && caseContext.last_name
-      ? `${caseContext.first_name} ${caseContext.last_name}`
-      : null
-  ];
-  const fallbackName = contextNameCandidates.map(v => normaliseString(v)).find(Boolean) || null;
-  const applicantName =
-    resolveApplicantNameFromPayload(submissionPayload, fallbackName) ||
-    normaliseString(caseRow?.applicant_email) ||
-    null;
+  const applicantFullName = resolveApplicantDisplayName({
+    caseContext,
+    submissionPayload,
+    caseRow,
+    fallback: null,
+  });
+  const applicantSalutationName = resolveApplicantSalutationName({
+    caseContext,
+    submissionPayload,
+    caseRow,
+    fallback: applicantFullName,
+  });
 
   let coordinatorName = null;
   if (createdByUserId) {
@@ -11191,7 +11748,9 @@ async function resolveDecisionLetterTokensForSigningRequest({ pool, caseId, appl
   return resolveDecisionLetterTokens({
     draft,
     docType,
-    applicantName,
+    applicantName: applicantSalutationName || applicantFullName,
+    applicantFullName,
+    applicantSalutationName,
     trackingId: trackingReference,
     caseNumber: caseRow?.case_number,
     coordinatorName
@@ -15906,9 +16465,13 @@ function buildIlmpParticipantPayload(context) {
       'english only': '2',
       'french only': '3',
       'indigenous + english': '4',
+      'indigenous language(s) and english': '4',
       'indigenous + french': '5',
+      'indigenous language(s) and french': '5',
       'english + french': '6',
+      'english and french': '6',
       'indigenous + english + french': '7',
+      'indigenous language(s), english and french': '7',
       'none of the above': '8'
     },
     provinceCode: {
@@ -15930,7 +16493,16 @@ function buildIlmpParticipantPayload(context) {
       "university - doctorate": '12'
     },
     socialAssistance: { no: '0', yes: '1' },
-    eiClaimant: { 'ei claimant': '1', 'reach-back / former claimant': '2', 'non-insured client': '3' },
+    eiClaimant: {
+      'ei claimant': '1',
+      'employment insurance claimant': '1',
+      'reach-back / former claimant': '2',
+      'reach-back client/former claimant': '2',
+      'reach-back client': '2',
+      'former claimant': '2',
+      'non-insured client': '3',
+      'non insured client': '3'
+    },
     barrier: ILMP_BARRIER_CODE_LOOKUP,
     prevEmployment: {
       unemployed: '1',
@@ -15996,15 +16568,21 @@ function buildIlmpParticipantPayload(context) {
   const agreementNumber = extractAgreementNumber(context);
   const clientStatus = extractClientStatusDetails(context);
   const educationDetails = extractEducationDetails(context);
-  const socialAssistanceStatus = extractSocialAssistanceStatus(context);
+  const participantSocialAssistanceStatus = extractSocialAssistanceStatus(context);
   const requestedSupports = extractRequestedSupports(context);
   const actionPlanDetails = extractActionPlanDetails(context, clientStatus, requestedSupports) || [];
   const actionPlans = Array.isArray(actionPlanDetails) ? actionPlanDetails : [];
   const barriers = extractEmploymentBarriers(context);
   const primaryPlan = actionPlans[0] || null;
+  const socialAssistanceStatus = firstNonBlankValue(
+    primaryPlan?.socialAssistanceRecipient,
+    primaryPlan?.SocialAssistanceRecipient,
+    primaryPlan?.social_assistance_recipient,
+    participantSocialAssistanceStatus
+  );
   const eiClaimant =
     (primaryPlan && primaryPlan.eiClaimant) ||
-    extractEiClaimant(context, clientStatus);
+    extractEiClaimant(context);
   const caseIdValue = context?.caseRow?.id || context?.caseId || context?.submissionRow?.case_id || null;
   const formatDate = dateObj => {
     if (!dateObj) return null;
@@ -16014,8 +16592,10 @@ function buildIlmpParticipantPayload(context) {
   };
 
   const toCode = (value, map) => {
-    if (!value) return null;
-    const key = String(value).trim().toLowerCase();
+    if (value === null || typeof value === 'undefined') return null;
+    const raw = String(value).trim();
+    if (!raw) return null;
+    const key = raw.toLowerCase();
     if (map[key]) return map[key];
     // Allow numeric code passthrough when already valid
     if (/^\d+$/.test(key) && Object.values(map).includes(key)) {
@@ -16028,23 +16608,27 @@ function buildIlmpParticipantPayload(context) {
     const coded = toCode(socialAssistanceStatus, CODE_MAPS.socialAssistance);
     if (coded) return coded;
     const coerced = coerceBoolean(socialAssistanceStatus);
-    if (coerced === null) return '0';
+    if (coerced === null) return null;
     return coerced ? '1' : '0';
   })();
   const eiClaimantCode = eiClaimant ? toCode(eiClaimant, CODE_MAPS.eiClaimant) : null;
   const barrierCodes = mapIlmpBarrierCodes(barriers);
+  const actionPlanBarrierCodes = Array.from(new Set(
+    actionPlans.flatMap(plan => mapIlmpBarrierCodes(extractActionPlanBarrierValues(plan)) || [])
+  ));
+  const reportingBarrierCodes = barrierCodes && barrierCodes.length ? barrierCodes : actionPlanBarrierCodes;
 
   const genderCode = toCode(gender, CODE_MAPS.gender);
   const indigenousCode = toCode(indigenousIdentity, CODE_MAPS.aboriginal);
   const maritalCode = toCode(maritalStatus, CODE_MAPS.marital);
   const languageCode = toCode(languageSpoken, CODE_MAPS.language);
   const disabilityCode = (() => {
-    if (!disabilityInfo) return '0';
+    if (!disabilityInfo) return null;
     if (typeof disabilityInfo.declared === 'boolean') {
       return disabilityInfo.declared ? '1' : '0';
     }
     const coerced = coerceBoolean(disabilityInfo.declared);
-    if (coerced === null) return '0';
+    if (coerced === null) return null;
     return coerced ? '1' : '0';
   })();
 
@@ -16060,6 +16644,13 @@ function buildIlmpParticipantPayload(context) {
     const trimmed = String(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
     return trimmed.length ? trimmed : null;
   };
+  const normaliseAgreementNumberForXml = value => {
+    const digits = value ? String(value).replace(/\D/g, '') : '';
+    if (!digits || digits === ILMP_PLACEHOLDER_AGREEMENT_NUMBER) return null;
+    if (digits.length < 7 || digits.length > 9) return null;
+    return digits;
+  };
+  const agreementNumberForXml = normaliseAgreementNumberForXml(agreementNumber);
   const formatSysDate = dateVal => {
     const d = dateVal ? new Date(dateVal) : new Date();
     if (Number.isNaN(d.getTime())) return null;
@@ -16146,8 +16737,8 @@ function buildIlmpParticipantPayload(context) {
     };
   })();
 
-  const barriersNode = barrierCodes && barrierCodes.length
-    ? { Barrier: barrierCodes }
+  const barriersNode = reportingBarrierCodes && reportingBarrierCodes.length
+    ? { Barrier: reportingBarrierCodes }
     : null;
 
   const requestedSupportsNode = (() => {
@@ -16177,6 +16768,7 @@ function buildIlmpParticipantPayload(context) {
           resultNoc,
           resultNocVersion,
           eiClaimant,
+          socialAssistanceRecipient,
           educationLevel,
           educationProvince,
           agreementNumber: planAgreementNumber,
@@ -16242,6 +16834,10 @@ function buildIlmpParticipantPayload(context) {
           ActionPlanResultRelatedNOC: planIsTerminal ? resultNoc || null : null,
           ActionPlanResultRelatedNOCVersion: planIsTerminal ? resultNocVersion || null : null,
           EIClaimant: actionPlanEiClaimantCode || null,
+          socialAssistanceRecipient:
+            socialAssistanceRecipient !== null && typeof socialAssistanceRecipient !== 'undefined'
+              ? socialAssistanceRecipient
+              : null,
           actionPlanPreviousEmployment: toCode(prevEmployment, CODE_MAPS.prevEmployment) || null,
           actionPlanPreviousEmploymentNoc: prevEmploymentNoc || null,
           actionPlanPreviousEmploymentNocVersion: prevEmploymentNocVersion || null,
@@ -16293,7 +16889,7 @@ function buildIlmpParticipantPayload(context) {
       Address: addressNode,
       ContactDetails: contactNode,
       EmergencyContact: emergencyNode,
-      AgreementNumber: agreementNumber || null,
+      AgreementNumber: agreementNumberForXml,
       ClientStatusAtIntake: toCode(clientStatus?.status, CODE_MAPS.prevEmployment) || clientStatus?.status || null,
       EmploymentDetails: employmentDetailsNode,
       Education: educationNode,
@@ -16344,14 +16940,15 @@ function buildIlmpParticipantPayload(context) {
     }
   };
 
-  const appendIntervention = (intervention, indent) => {
+  const appendIntervention = (intervention, indent, options = {}) => {
     if (!intervention) return;
     const pad = '  '.repeat(indent);
     const interventionIsTerminal = isIlmpTerminalInterventionStatus(intervention);
+    const includeCloseout = interventionIsTerminal || options.includeCloseout === true;
     lines.push(`${pad}<intervention>`);
     add(indent + 1, 'interventionCode', intervention.code || null);
     add(indent + 1, 'interventionStartDate', intervention.startDate || null);
-    if (interventionIsTerminal) {
+    if (includeCloseout) {
       add(indent + 1, 'interventionEndDate', intervention.endDate || null);
       add(indent + 1, 'interventionOutcome', intervention.outcome || null);
     }
@@ -16407,13 +17004,22 @@ function buildIlmpParticipantPayload(context) {
       (plan.educationProvince ? String(plan.educationProvince).trim() : null) ||
       null;
 
-    add(indent + 1, 'agreementNumber', plan.agreementNumber || agreementNumber || null);
+    add(indent + 1, 'agreementNumber', normaliseAgreementNumberForXml(plan.agreementNumber) || agreementNumberForXml);
     add(indent + 1, 'educationLevel', planEducationLevelCode);
     add(indent + 1, 'educationProvince', planEducationProvinceCode);
-    add(indent + 1, 'socialAssistanceRecipient', socialAssistanceCode || null);
+    const resolvedSocialAssistanceCode =
+      toCode(plan.socialAssistanceRecipient, CODE_MAPS.socialAssistance) ||
+      toCode(plan.SocialAssistanceRecipient, CODE_MAPS.socialAssistance) ||
+      toCode(plan.social_assistance_recipient, CODE_MAPS.socialAssistance) ||
+      socialAssistanceCode ||
+      null;
+    add(indent + 1, 'socialAssistanceRecipient', resolvedSocialAssistanceCode);
     add(indent + 1, 'EIClaimant', resolvedEiClaimant);
-    if (barrierCodes && barrierCodes.length) {
-      barrierCodes.forEach(code => add(indent + 1, 'barrierToEmployment', code));
+    const planBarrierCodes =
+      mapIlmpBarrierCodes(extractActionPlanBarrierValues(plan)) ||
+      reportingBarrierCodes;
+    if (planBarrierCodes && planBarrierCodes.length) {
+      planBarrierCodes.forEach(code => add(indent + 1, 'barrierToEmployment', code));
     }
     const prevEmploymentCode =
       toCode(plan.prevEmployment, CODE_MAPS.prevEmployment) ||
@@ -16474,7 +17080,7 @@ function buildIlmpParticipantPayload(context) {
       const value = String(raw).trim();
       return ['5', '8', '9', '10'].includes(value) ? value : null;
     })();
-    const resolvedPlanResultEducationCode = planResultEducationCode || planEducationLevelCode || null;
+    const resolvedPlanResultEducationCode = planResultEducationCode || null;
     const planResultNoc = plan.resultNoc || plan.actionPlanResultRelatedNOC || plan.ActionPlanResultRelatedNOC || null;
     const planResultNocVersion =
       plan.resultNocVersion ||
@@ -16482,7 +17088,8 @@ function buildIlmpParticipantPayload(context) {
       plan.ActionPlanResultRelatedNOCVersion ||
       null;
     add(indent + 1, 'actionPlanStartDate', planStart);
-    if (planIsTerminal) {
+    const writePlanResult = planIsTerminal || Boolean(planResultCode || planResultDate);
+    if (writePlanResult) {
       add(indent + 1, 'actionPlanResultCode', planResultCode);
       if (planResultCode === '2') {
         add(indent + 1, 'actionPlanResultRelatedNOC', planResultNoc || plan.interventions?.[0]?.relatedNoc || null);
@@ -16498,7 +17105,9 @@ function buildIlmpParticipantPayload(context) {
     add(indent + 1, 'actionPlanChildCareFundedCode', toCode(plan.childcareFunding, CODE_MAPS.childcareFunding) || null);
     const planInterventions = plan.interventions || plan.Interventions?.Intervention || [];
     const list = Array.isArray(planInterventions) ? planInterventions : [planInterventions];
-    list.filter(Boolean).forEach(intervention => appendIntervention(intervention, indent + 1));
+    list
+      .filter(Boolean)
+      .forEach(intervention => appendIntervention(intervention, indent + 1, { includeCloseout: Boolean(planResultDate) }));
     const planStatus = normaliseStatusShort(plan.status || plan.Status || '');
     const planSysComment = (() => {
       const idPart = plan.id ? `id:${plan.id}` : null;
@@ -16649,6 +17258,15 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
         educationLevel: planRow.education_level || esdc.educationLevel || metadata.educationLevel || null,
         educationProvince: planRow.education_province || esdc.educationProvince || metadata.educationProvince || null,
         eiClaimant: planRow.EIClaimant || planRow.eiClaimant || esdc.EIClaimant || null,
+        socialAssistanceRecipient:
+          firstNonBlankValue(
+            planRow.social_assistance_recipient,
+            esdc.socialAssistanceRecipient,
+            esdc.SocialAssistanceRecipient,
+            metadata.socialAssistanceRecipient,
+            metadata.SocialAssistanceRecipient,
+            metadata.social_assistance_recipient
+          ),
         prevEmployment: planRow.prev_employment || esdc.actionPlanPreviousEmployment || null,
         prevEmploymentNoc: esdc.actionPlanPreviousEmploymentNoc || null,
         prevEmploymentNocVersion: esdc.actionPlanPreviousEmploymentNocVersion || null,
@@ -16667,8 +17285,29 @@ async function loadEsdcParticipantSubmissionContext(connection, submissionId, op
         outcomeSummary: planRow.outcome_summary || null,
         closureNotes: planRow.closure_notes || null,
         summary: metadata.summary || planRow.notes || null,
-        childcareNeed: metadata.childcareNeed ?? metadata.childcare_need ?? esdc.actionPlanChildcareNeed ?? null,
-        childcareFunding: metadata.childcareFunding ?? metadata.childcare_funding ?? esdc.actionPlanChildcareFundedCode ?? null,
+        childcareNeed: firstNonBlankValue(
+          metadata.childcareNeed,
+          metadata.childcare_need,
+          esdc.actionPlanChildcareNeed,
+          esdc.actionPlanChildCareNeed
+        ),
+        childcareFunding: firstNonBlankValue(
+          metadata.childcareFunding,
+          metadata.childcare_funding,
+          esdc.actionPlanChildcareFundedCode,
+          esdc.actionPlanChildCareFundedCode
+        ),
+        barriers: Array.isArray(esdc.BarrierToEmployment)
+          ? esdc.BarrierToEmployment
+          : Array.isArray(esdc.barrierToEmployment)
+          ? esdc.barrierToEmployment
+          : Array.isArray(metadata.BarrierToEmployment)
+          ? metadata.BarrierToEmployment
+          : Array.isArray(metadata.barrierToEmployment)
+          ? metadata.barrierToEmployment
+          : Array.isArray(metadata.barriers)
+          ? metadata.barriers
+          : null,
         goalDescription: metadata.goalDescription ?? metadata.goal ?? metadata.summary ?? null,
         metadata,
         interventions: [],
@@ -18648,6 +19287,17 @@ function firstQueryValue(raw) {
 }
 
 const TERMINAL_APPLICATION_STATUSES = new Set(APPLICATION_TERMINAL_STATUS_KEYS);
+const APPLICATION_REOPEN_TARGET_STATUSES = new Set(['in_review']);
+const REOPENABLE_APPLICATION_STATUS_KEYS = new Set(['closed', 'withdrawn', 'archived']);
+const NON_REOPENABLE_APPLICATION_STATUS_KEYS = new Set([
+  'approved',
+  'completed',
+  'complete',
+  'rejected',
+  'declined',
+  'denied',
+  'cancelled',
+]);
 const APPROVAL_COST_THRESHOLD = 15000;
 const PROGRAM_ADMIN_APPROVAL_THRESHOLD = 25000;
 const PROGRAM_ADMIN_APPROVER_EMAIL = 'sstacey@nwac.ca';
@@ -18958,6 +19608,29 @@ function isTerminalApplicationLifecycleStatus(status) {
 function isTerminalApplicationState(status, lifecycleStatus) {
   return isTerminalApplicationStatus(status) || isTerminalApplicationLifecycleStatus(lifecycleStatus);
 }
+function isReopenableApplicationState(status, lifecycleStatus, closureReason) {
+  const statusKey = normaliseApplicationStatusValue(status);
+  const lifecycleKey = normaliseApplicationLifecycleStatusValue(lifecycleStatus, { preserveUnknown: true });
+  const closureKey = normaliseApplicationStatusValue(closureReason);
+  if (statusKey && NON_REOPENABLE_APPLICATION_STATUS_KEYS.has(statusKey)) return false;
+  if (REOPENABLE_APPLICATION_STATUS_KEYS.has(statusKey)) return true;
+  if (lifecycleKey === 'archived') return true;
+  if (lifecycleKey === 'closed') return !statusKey || closureKey === 'withdrawn';
+  return false;
+}
+function canStaffReopenApplication(req, {
+  beforeStatus,
+  beforeLifecycleStatus,
+  beforeClosureReason,
+  nextStatus,
+} = {}) {
+  const nextStatusKey = normaliseApplicationStatusValue(nextStatus);
+  return Boolean(
+    req?.auth?.subjectType === 'staff' &&
+    APPLICATION_REOPEN_TARGET_STATUSES.has(nextStatusKey) &&
+    isReopenableApplicationState(beforeStatus, beforeLifecycleStatus, beforeClosureReason)
+  );
+}
 function normaliseRoleValue(role) {
   if (!role) return null;
   return String(role).trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -19233,6 +19906,91 @@ function safeJsonParse(value, fallback = null) {
   }
 }
 
+function isParticipantDetailsBackloadSeedMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return false;
+  const source = (normaliseString(metadata.source || '') || '').toLowerCase();
+  const entryMode = (normaliseString(metadata.entryMode || metadata.entry_mode || '') || '').toLowerCase();
+  const backloadMode = metadata.backloadMode === true || metadata.backload_mode === true;
+  return source === 'manual_backload' || entryMode === 'existing' || entryMode === 'backload' || backloadMode;
+}
+
+async function actionPlanHasBackloadIntervention(actionPlanId, connection = pool) {
+  const normalizedActionPlanId = normalisePositiveInteger(actionPlanId);
+  if (!normalizedActionPlanId) return false;
+  try {
+    const [rows] = await (connection || pool).query(
+      'SELECT metadata_json FROM iset_case_intervention WHERE action_plan_id = ?',
+      [normalizedActionPlanId]
+    );
+    return rows.some(row => isParticipantDetailsBackloadSeedMetadata(safeJsonParse(row.metadata_json, {}) || {}));
+  } catch (error) {
+    console.warn('[participant-details] failed to inspect backload interventions', error?.message || error);
+    return false;
+  }
+}
+
+async function shouldSeedParticipantDetailsForActionPlan(planRow, metadata, connection = pool) {
+  if (isParticipantDetailsBackloadSeedMetadata(metadata)) return true;
+  return actionPlanHasBackloadIntervention(planRow?.id, connection);
+}
+
+async function applyParticipantDetailsBackloadSeed({
+  connection = pool,
+  caseId,
+  sourcePayload,
+  merge,
+  logLabel,
+}) {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  if (!normalizedCaseId || typeof merge !== 'function') return [];
+  const executor = connection || pool;
+  const lockClause = executor && typeof executor.release === 'function' ? ' FOR UPDATE' : '';
+  const [contextRows] = await executor.query(
+    `SELECT case_context_json FROM iset_case WHERE id = ?${lockClause}`,
+    [normalizedCaseId]
+  );
+  const currentContext = safeJsonParse(contextRows?.[0]?.case_context_json, {}) || {};
+  const { caseContext, changedFields } = merge(currentContext, sourcePayload || {});
+  if (!changedFields.length) return [];
+  await executor.query(
+    'UPDATE iset_case SET case_context_json = ? WHERE id = ?',
+    [JSON.stringify(caseContext), normalizedCaseId]
+  );
+  console.info(`[participant-details] seeded from ${logLabel || 'backload record'}`, {
+    caseId: normalizedCaseId,
+    fields: changedFields,
+  });
+  return changedFields;
+}
+
+async function seedParticipantDetailsFromBackloadActionPlan({
+  connection = pool,
+  caseId,
+  actionPlan,
+} = {}) {
+  return applyParticipantDetailsBackloadSeed({
+    connection,
+    caseId,
+    sourcePayload: actionPlan,
+    merge: mergeBackloadActionPlanParticipantDetails,
+    logLabel: 'backload action plan',
+  });
+}
+
+async function seedParticipantDetailsFromBackloadIntervention({
+  connection = pool,
+  caseId,
+  intervention,
+} = {}) {
+  return applyParticipantDetailsBackloadSeed({
+    connection,
+    caseId,
+    sourcePayload: intervention,
+    merge: mergeBackloadInterventionParticipantDetails,
+    logLabel: 'backload intervention',
+  });
+}
+
 function mapIlmpComplianceFromSubmission(row) {
   const defaultSummary = {
     status: 'pending',
@@ -19356,17 +20114,17 @@ function mapActionPlanRow(plan) {
     educationLevel: plan.education_level || esdc.educationLevel || null,
     educationProvince: plan.education_province || esdc.educationProvince || null,
     socialAssistanceRecipient:
-      plan.social_assistance_recipient || esdc.socialAssistanceRecipient || null,
-    childcareNeed:
-      plan.childcare_need ||
-      esdc.actionPlanChildcareNeed ||
-      esdc.actionPlanChildCareNeed ||
-      null,
-    childcareFunding:
-      plan.childcare_funding ||
-      esdc.actionPlanChildcareFundedCode ||
-      esdc.actionPlanChildCareFundedCode ||
-      null,
+      firstNonBlankValue(plan.social_assistance_recipient, esdc.socialAssistanceRecipient, esdc.SocialAssistanceRecipient),
+    childcareNeed: firstNonBlankValue(
+      plan.childcare_need,
+      esdc.actionPlanChildcareNeed,
+      esdc.actionPlanChildCareNeed
+    ),
+    childcareFunding: firstNonBlankValue(
+      plan.childcare_funding,
+      esdc.actionPlanChildcareFundedCode,
+      esdc.actionPlanChildCareFundedCode
+    ),
     prevEmploymentNoc:
       plan.prev_employment_noc || esdc.actionPlanPreviousEmploymentNoc || null,
     prevEmploymentNocVersion:
@@ -21177,6 +21935,66 @@ function buildDeniedReportingCaseContext({
       normalizedDenialReason || resolveFundingDecisionReasonCode(existingCaseContext, applicationId) || null;
   }
   return mergeCaseContext(existingCaseContext || {}, nextContextPatch);
+}
+
+function clearWithdrawnReportingCaseContext(existingCaseContext = null, applicationId = null) {
+  const baseContext =
+    existingCaseContext && typeof existingCaseContext === 'object'
+      ? clonePayload(existingCaseContext)
+      : safeJsonParse(existingCaseContext, null) || {};
+  const applicationKey = applicationId ? String(applicationId) : null;
+  const existingArtifacts =
+    baseContext.applicationReportingArtifacts &&
+    typeof baseContext.applicationReportingArtifacts === 'object' &&
+    !Array.isArray(baseContext.applicationReportingArtifacts)
+      ? baseContext.applicationReportingArtifacts
+      : {};
+  let removedSelectedWithdrawalArtifact = false;
+  const nextArtifacts = {};
+  Object.entries(existingArtifacts).forEach(([key, value]) => {
+    const trigger = resolveReportingArtifactTrigger(value?.reportingTrigger, value);
+    const source = (normaliseString(value?.reportingSeedSource) || '').toLowerCase();
+    const isSelectedWithdrawal =
+      applicationKey &&
+      key === applicationKey &&
+      (trigger === 'withdrawal' || source === WITHDRAWN_REPORTING_SOURCE);
+    if (isSelectedWithdrawal) {
+      removedSelectedWithdrawalArtifact = true;
+      return;
+    }
+    nextArtifacts[key] = value;
+  });
+
+  const caseLevelApplicationId = baseContext.applicationId ? String(baseContext.applicationId) : null;
+  const caseLevelSource = (normaliseString(baseContext.reportingSeedSource) || '').toLowerCase();
+  const caseLevelTrigger = resolveReportingArtifactTrigger(baseContext.reportingTrigger, baseContext);
+  const clearCaseLevelWithdrawal =
+    baseContext.reportingOnlyWithdrawal === true &&
+    (!applicationKey || caseLevelApplicationId === applicationKey || removedSelectedWithdrawalArtifact) &&
+    (caseLevelTrigger === 'withdrawal' || caseLevelSource === WITHDRAWN_REPORTING_SOURCE);
+
+  if (Object.keys(nextArtifacts).length) {
+    baseContext.applicationReportingArtifacts = nextArtifacts;
+  } else {
+    delete baseContext.applicationReportingArtifacts;
+  }
+
+  if (clearCaseLevelWithdrawal) {
+    [
+      'reportingOnlyWithdrawal',
+      'reportingCorrectionAllowed',
+      'excludeFromCaseworkQueues',
+      'reportingTrigger',
+      'reportingSeedSource',
+      'reportingLastSyncedAt',
+      'reportingWithdrawnAt',
+      'applicationId',
+    ].forEach(key => {
+      delete baseContext[key];
+    });
+  }
+
+  return baseContext;
 }
 
 async function syncCaseClientFromApplication(connection, {
@@ -27675,7 +28493,9 @@ async function buildGroupedIlmpClientPayload(clientRows, { ignoreWarnings = fals
       blockingIssues,
       warnings,
       snapshot,
-      readinessStatus: evaluation.readinessStatus || 'ready'
+      readinessStatus: ignoreWarnings && warnings.length > 0
+        ? 'ready'
+        : (evaluation.readinessStatus || 'ready')
     };
   } finally {
     connection.release();
@@ -27769,22 +28589,23 @@ async function collectReadyEsdcBatchParticipants() {
     };
 
     try {
-      const aggregated = await buildGroupedIlmpClientPayload(clientRows, { ignoreWarnings: false });
+      const aggregated = await buildGroupedIlmpClientPayload(clientRows, { ignoreWarnings: true });
       const readiness = (aggregated?.readinessStatus || '').toLowerCase() || 'needs_review';
       const blockingIssues = Array.isArray(aggregated?.blockingIssues) ? aggregated.blockingIssues : [];
       const warningList = Array.isArray(aggregated?.warnings) ? aggregated.warnings : [];
-      if (readiness !== 'ready') {
+      if (blockingIssues.length > 0 || readiness === 'blocked') {
         skipped.push({
           ...baseDetail,
-          readiness_status: readiness,
-          detail: blockingIssues.join('; ') || warningList.join('; ') || 'Participant is not ready for ESDC submission.',
+          readiness_status: 'blocked',
+          detail: blockingIssues.join('; ') || 'Participant is blocked from ESDC submission.',
         });
         continue;
       }
 
       participants.push({
         ...baseDetail,
-        readiness_status: 'ready',
+        readiness_status: warningList.length ? 'needs_review' : 'ready',
+        warnings: warningList,
       });
       if (aggregated?.snapshot?.xml) {
         const fragment = extractClientFragment(aggregated.snapshot.xml);
@@ -29059,7 +29880,10 @@ function buildRegionalSnapshotDerivedValues(snapshot, liveMetrics, fundingMetric
     fundingMetrics?.eiFundingAmount
   );
   const totalAdminCost = sumRegionalSnapshotPair(snapshot?.coordinatorSalaryAmount, snapshot?.operatingCostsAmount);
-  const fundedCount = Number(liveMetrics?.funded ?? 0);
+  const fundingClientCount = Number(fundingMetrics?.fundedClientCount);
+  const fundedCount = Number.isFinite(fundingClientCount)
+    ? fundingClientCount
+    : Number(liveMetrics?.funded ?? 0);
   return {
     totalFunding,
     totalAdminCost,
@@ -29222,14 +30046,6 @@ function isRegionalSnapshotDeniedApplication(row) {
   return ['rejected', 'declined', 'denied', 'withdrawn', 'cancelled'].includes(status);
 }
 
-function isRegionalSnapshotPendingApplication(row) {
-  if (isRegionalSnapshotFundedApplication(row) || isRegionalSnapshotDeniedApplication(row)) {
-    return false;
-  }
-  const status = normaliseApplicationStatusValue(row?.status);
-  return !['closed', 'archived'].includes(status);
-}
-
 async function readRegionalSnapshotLiveMetrics({ regionCode, periodStart, periodEnd }, executor = pool) {
   const runner = executor || pool;
   const fallback = {
@@ -29260,8 +30076,6 @@ async function readRegionalSnapshotLiveMetrics({ regionCode, periodStart, period
         s.id AS submission_id,
         s.submitted_at,
         COALESCE(a.updated_at, a.created_at) AS decision_at,
-        (s.submitted_at >= ? AND s.submitted_at < ?) AS submitted_in_period,
-        (COALESCE(a.updated_at, a.created_at) >= ? AND COALESCE(a.updated_at, a.created_at) < ?) AS decision_in_period,
         ${REPORTING_ADDRESS_PROVINCE_EXPR} AS submission_address_province,
         ${clientProvinceExpr} AS client_address_province
       FROM iset_application a
@@ -29269,18 +30083,9 @@ async function readRegionalSnapshotLiveMetrics({ regionCode, periodStart, period
       LEFT JOIN client cl ON cl.id = c.client_id
       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
       LEFT JOIN iset_application_submission ias ON ias.id = a.submission_id
-      WHERE (
-        (s.submitted_at >= ? AND s.submitted_at < ?)
-        OR (COALESCE(a.updated_at, a.created_at) >= ? AND COALESCE(a.updated_at, a.created_at) < ?)
-      )
+      WHERE s.submitted_at >= ? AND s.submitted_at < ?
       `,
       [
-        startDateTime,
-        endExclusive,
-        startDateTime,
-        endExclusive,
-        startDateTime,
-        endExclusive,
         startDateTime,
         endExclusive,
       ]
@@ -29297,18 +30102,17 @@ async function readRegionalSnapshotLiveMetrics({ regionCode, periodStart, period
         const applicationId = normalisePositiveInteger(row?.application_id);
         const submissionId = normalisePositiveInteger(row?.submission_id);
         const applicationKey = applicationId ? `application-${applicationId}` : null;
-        if (Number(row?.submitted_in_period || 0)) {
-          applicationsReceivedSet.add(submissionId ? `submission-${submissionId}` : applicationKey);
-          if (applicationKey && isRegionalSnapshotPendingApplication(row)) {
-            pendingSet.add(applicationKey);
-          }
+        const receivedKey = applicationKey || (submissionId ? `submission-${submissionId}` : null);
+        if (!receivedKey) {
+          return;
         }
-        if (applicationKey && Number(row?.decision_in_period || 0)) {
-          if (isRegionalSnapshotFundedApplication(row)) {
-            fundedApplicationsSet.add(applicationKey);
-          } else if (isRegionalSnapshotDeniedApplication(row)) {
-            deniedSet.add(applicationKey);
-          }
+        applicationsReceivedSet.add(receivedKey);
+        if (isRegionalSnapshotFundedApplication(row)) {
+          fundedApplicationsSet.add(receivedKey);
+        } else if (isRegionalSnapshotDeniedApplication(row)) {
+          deniedSet.add(receivedKey);
+        } else {
+          pendingSet.add(receivedKey);
         }
       });
 
@@ -29439,10 +30243,12 @@ async function buildRegionalSnapshotPayload({
   };
   const mergedLiveMetrics = {
     ...liveMetrics,
-    funded:
+    fundedApplications: Number(liveMetrics?.fundedApplications || liveMetrics?.funded || 0),
+    funded: Number(liveMetrics?.fundedApplications || liveMetrics?.funded || 0),
+    fundedClients:
       Number.isFinite(Number(fundingMetrics?.fundedClientCount))
         ? Number(fundingMetrics.fundedClientCount)
-        : Number(liveMetrics?.funded || 0),
+        : 0,
   };
   return {
     region: {
@@ -40198,6 +41004,59 @@ function escalationRoleAllowedForAction(roleKey, ownerRoleKey) {
   return false;
 }
 
+async function resolveOpenApplicationEscalationsForStatusChange(connection, {
+  applicationId,
+  resolvedByUserId = null,
+  resolvedByRole = null,
+  note = null,
+} = {}) {
+  const numericApplicationId = normalisePositiveInteger(applicationId);
+  if (!numericApplicationId) return [];
+  const [rows] = await connection.query(
+    `SELECT id, state, current_owner_role, target_role
+       FROM iset_application_escalation
+      WHERE application_id = ?
+        AND state <> ?
+      FOR UPDATE`,
+    [numericApplicationId, ESCALATION_STATES.resolved]
+  );
+  if (!Array.isArray(rows) || !rows.length) return [];
+
+  const trimmedNote = normaliseString(note) || 'Resolved automatically when the application was withdrawn.';
+  await connection.query(
+    `UPDATE iset_application_escalation
+        SET state = ?,
+            disposition = ?,
+            last_action_note = ?,
+            updated_at = NOW(),
+            resolved_at = NOW(),
+            resolved_by_user_id = ?,
+            resolved_by_role = ?
+      WHERE application_id = ?
+        AND state <> ?`,
+    [
+      ESCALATION_STATES.resolved,
+      'withdraw_application',
+      trimmedNote,
+      resolvedByUserId || null,
+      resolvedByRole || null,
+      numericApplicationId,
+      ESCALATION_STATES.resolved,
+    ]
+  );
+  await connection.query(
+    'UPDATE iset_application SET has_open_escalation = 0, current_escalation_id = NULL WHERE id = ?',
+    [numericApplicationId]
+  );
+  return rows.map(row => ({
+    id: row.id,
+    previousState: row.state || null,
+    previousOwnerRole: canonicalEscalationRole(row.current_owner_role) || row.current_owner_role || null,
+    targetRole: canonicalEscalationRole(row.target_role) || row.target_role || null,
+    note: trimmedNote,
+  }));
+}
+
 app.post('/api/escalations', async (req, res) => {
   let conn;
   const toNull = v => (v === undefined || v === null || v === '' ? null : v);
@@ -49230,9 +50089,14 @@ async function resolveCaseApplicantMessagingContext(caseId, { applicationId = nu
        a.awaiting_reason AS application_awaiting_reason,
        a.closure_reason AS application_closure_reason,
        s.reference_number AS submission_reference,
+       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"first-name\"')) AS submission_first_name,
+       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"last-name\"')) AS submission_last_name,
+       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
        applicant_submission.id AS applicant_submission_user_id,
        applicant_submission_client.id AS applicant_submission_client_id,
        applicant_client_sub.id AS applicant_client_sub_user_id,
+       cl.first_name AS client_first_name,
+       cl.last_name AS client_last_name,
        NULLIF(CONCAT_WS(' ', NULLIF(TRIM(cl.first_name), ''), NULLIF(TRIM(cl.last_name), '')), '') AS client_name,
        NULLIF(TRIM(cl.applicant_account_email), '') AS client_email,
        COALESCE(
@@ -50748,10 +51612,19 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       return null;
     };
 
-    const employmentBarriers =
-      parseArray(caseContext?.employmentBarriers) ||
-      parseArray(assessmentRow?.employment_barriers) ||
-      parseArray(readAnswer('barriers'));
+    const firstNonEmptyArray = (...values) => {
+      for (const value of values) {
+        const parsed = parseArray(value);
+        if (parsed.length) return parsed;
+      }
+      return [];
+    };
+
+    const employmentBarriers = firstNonEmptyArray(
+      caseContext?.employmentBarriers,
+      assessmentRow?.employment_barriers,
+      readAnswer('barriers')
+    );
     const localAreaPriorities =
       parseArray(caseContext?.localAreaPriorities) ||
       parseArray(assessmentRow?.local_area_priorities) ||
@@ -51430,6 +52303,28 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     ...(isBackloadMode ? { source: 'manual_backload', entryMode: 'existing' } : {}),
   };
   const caseIdentifier = caseRow.case_number || caseRow.tracking_id || `Case #${caseId}`;
+  const ACTION_PLAN_EDUCATION_CODES = new Set(['1','2','3','4','5','6','7','8','9','10','11','12']);
+  const ACTION_PLAN_EDUCATION_PROVINCE_CODES = new Set(['1','2','3','4','5','6','7','8','9','10','11','12','13','14','16']);
+  const normaliseActionPlanCode = (value, set) => {
+    if (value === null || typeof value === 'undefined') return null;
+    const str = String(value).trim();
+    if (!str) return null;
+    return set.has(str) ? str : null;
+  };
+  const educationLevelInput = normaliseActionPlanCode(req.body?.educationLevel, ACTION_PLAN_EDUCATION_CODES);
+  if (!educationLevelInput) {
+    return res.status(422).json({
+      error: 'education_level_required',
+      message: 'Education level at action plan start is required.'
+    });
+  }
+  const educationProvinceInput = normaliseActionPlanCode(req.body?.educationProvince, ACTION_PLAN_EDUCATION_PROVINCE_CODES);
+  if (!educationProvinceInput) {
+    return res.status(422).json({
+      error: 'education_province_required',
+      message: 'Education province is required.'
+    });
+  }
 
   let connection;
   try {
@@ -51504,33 +52399,31 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       return null;
     })();
     if (!fundingStream && !isBackloadMode) {
+      await connection.rollback();
       res.status(422).json({ error: 'funding_stream_required', message: 'Funding stream is required for action plans.' });
       return;
     }
     const derivedAgreementNumber = fundingStream ? deriveAgreementNumberFromFundingStream(fundingStream) : null;
     const agreementNumber = derivedAgreementNumber;
 
-    const educationLevel = normaliseCode(req.body.educationLevel, CODE_SETS.educationLevel);
-    const educationProvince = educationLevel
-      ? normaliseCode(req.body.educationProvince, CODE_SETS.educationProvince)
-      : null;
-    if (educationLevel && !educationProvince) {
-      res.status(422).json({ error: 'education_province_required', message: 'Education province is required when education level is set.' });
+    const educationLevel = educationLevelInput;
+    const educationProvince = educationProvinceInput;
+
+    const socialAssistanceRecipient = requireCode(req.body.socialAssistanceRecipient, CODE_SETS.yesNo, 'social_assistance_recipient', res);
+    if (socialAssistanceRecipient === null) {
+      await connection.rollback();
       return;
     }
-
-    const socialAssistanceRecipient = isBackloadMode
-      ? normaliseCode(req.body.socialAssistanceRecipient, CODE_SETS.yesNo)
-      : requireCode(req.body.socialAssistanceRecipient, CODE_SETS.yesNo, 'social_assistance_recipient', res);
-    if (!isBackloadMode && socialAssistanceRecipient === null) return;
-    const eiClaimantCode = isBackloadMode
-      ? normaliseCode(req.body.eiClaimant, CODE_SETS.eiClaimant)
-      : requireCode(req.body.eiClaimant, CODE_SETS.eiClaimant, 'ei_claimant', res);
-    if (!isBackloadMode && eiClaimantCode === null) return;
-    const prevEmployment = isBackloadMode
-      ? normaliseCode(req.body.prevEmployment, CODE_SETS.prevEmployment)
-      : requireCode(req.body.prevEmployment, CODE_SETS.prevEmployment, 'previous_employment', res);
-    if (!isBackloadMode && prevEmployment === null) return;
+    const eiClaimantCode = requireCode(req.body.eiClaimant, CODE_SETS.eiClaimant, 'ei_claimant', res);
+    if (eiClaimantCode === null) {
+      await connection.rollback();
+      return;
+    }
+    const prevEmployment = requireCode(req.body.prevEmployment, CODE_SETS.prevEmployment, 'previous_employment', res);
+    if (prevEmployment === null) {
+      await connection.rollback();
+      return;
+    }
 
     let prevEmploymentNoc = null;
     let prevEmploymentNocVersion = null;
@@ -51540,12 +52433,14 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       prevEmploymentNocVersion = normaliseCode(req.body.prevEmploymentNocVersion, CODE_SETS.nocVersion);
       prevEmploymentScheduleType = normaliseCode(req.body.prevEmploymentScheduleType, CODE_SETS.prevEmploymentSchedule);
       if (!prevEmploymentNoc || !prevEmploymentNocVersion) {
+        await connection.rollback();
         res.status(422).json({ error: 'previous_employment_noc_required', message: 'NOC code and version are required when employment status is Employed.' });
         return;
       }
       const prevEmploymentNocDigits = String(prevEmploymentNoc).replace(/\D/g, '');
       const prevEmploymentNocLength = prevEmploymentNocVersion === '2021' ? 5 : 4;
       if (prevEmploymentNocDigits.length !== prevEmploymentNocLength) {
+        await connection.rollback();
         res.status(422).json({
           error: 'invalid_previous_employment_noc',
           message: `NOC code must be ${prevEmploymentNocLength} digits for version ${prevEmploymentNocVersion}.`
@@ -51558,6 +52453,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         prevEmploymentNocVersion
       );
       if (!knownPrevEmploymentNoc) {
+        await connection.rollback();
         res.status(422).json({
           error: 'invalid_previous_employment_noc',
           message: `NOC code ${prevEmploymentNocDigits} is not valid for version ${prevEmploymentNocVersion}.`
@@ -51566,6 +52462,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       }
       prevEmploymentNoc = prevEmploymentNocDigits;
       if (!prevEmploymentScheduleType) {
+        await connection.rollback();
         res.status(422).json({ error: 'previous_employment_schedule_required', message: 'Schedule type is required when employment status is Employed.' });
         return;
       }
@@ -51577,7 +52474,10 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       childcareFunding = isBackloadMode
         ? normaliseCode(req.body.childcareFunding, CODE_SETS.childcareFunding)
         : requireCode(req.body.childcareFunding, CODE_SETS.childcareFunding, 'childcare_funding', res);
-      if (!isBackloadMode && childcareFunding === null) return;
+      if (!isBackloadMode && childcareFunding === null) {
+        await connection.rollback();
+        return;
+      }
     }
 
     const barrierCodes = (() => {
@@ -51590,6 +52490,13 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         .map(val => String(val).trim())
         .filter(code => CODE_SETS.barrier.has(code));
     })();
+    if (!barrierCodes.length) {
+      await connection.rollback();
+      return res.status(422).json({
+        error: 'barrier_to_employment_required',
+        message: 'At least one barrier to employment is required for action plans.'
+      });
+    }
 
     let resultCodeValue = null;
     let resultDateValue = null;
@@ -51811,6 +52718,29 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       }
     } catch (seedErr) {
       console.warn('[action-plan] failed to seed case_context_json', seedErr?.message || seedErr);
+    }
+
+    if (isBackloadMode) {
+      try {
+        await seedParticipantDetailsFromBackloadActionPlan({
+          connection,
+          caseId,
+          actionPlan: {
+            ...esdcPayload,
+            summary,
+            employmentGoals: summary,
+            otherBarrier: req.body?.otherBarrier ?? req.body?.other_barrier ?? null,
+            employmentBarriersOtherDetails:
+              req.body?.employmentBarriersOtherDetails ??
+              req.body?.employment_barriers_other_details ??
+              req.body?.barriersOtherDetails ??
+              req.body?.barriers_other_details ??
+              null,
+          },
+        });
+      } catch (seedErr) {
+        console.warn('[action-plan] failed to seed participant details from backload plan', seedErr?.message || seedErr);
+      }
     }
 
     await connection.commit();
@@ -52572,6 +53502,23 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     await pool.query('UPDATE iset_case_action_plan SET updated_at = NOW() WHERE id = ?', [planId]);
 
     const interventionId = result.insertId;
+    if (isBackloadMode) {
+      try {
+        await seedParticipantDetailsFromBackloadIntervention({
+          connection: pool,
+          caseId: planRow.case_id,
+          intervention: {
+            ...esdcPayload,
+            noc: trimmedNoc || null,
+            nocVersion: trimmedNocVersion || null,
+            relatedNoc: trimmedNoc || null,
+            relatedNocVersion: trimmedNocVersion || null,
+          },
+        });
+      } catch (seedErr) {
+        console.warn('[intervention] failed to seed participant details from backload intervention', seedErr?.message || seedErr);
+      }
+    }
     const interventionRow = await fetchInterventionWithCase(interventionId);
     await syncInterventionProposalCompatibility(interventionRow);
     if (
@@ -54980,7 +55927,9 @@ app.patch('/api/action-plans/:id', async (req, res) => {
     }
 
     const socialAssistanceRecipient = (() => {
-      if (typeof req.body.socialAssistanceRecipient === 'undefined') return esdcExisting.socialAssistanceRecipient || null;
+      if (typeof req.body.socialAssistanceRecipient === 'undefined') {
+        return firstNonBlankValue(esdcExisting.socialAssistanceRecipient, esdcExisting.SocialAssistanceRecipient);
+      }
       const code = normaliseCode(req.body.socialAssistanceRecipient, CODE_SETS.yesNo);
       if (!code) return null;
       return code;
@@ -55031,7 +55980,9 @@ app.patch('/api/action-plans/:id', async (req, res) => {
     }
 
     const childcareNeed = (() => {
-      if (typeof req.body.childcareNeed === 'undefined') return esdcExisting.actionPlanChildcareNeed || null;
+      if (typeof req.body.childcareNeed === 'undefined') {
+        return firstNonBlankValue(esdcExisting.actionPlanChildcareNeed, esdcExisting.actionPlanChildCareNeed);
+      }
       return normaliseCode(req.body.childcareNeed, CODE_SETS.yesNo);
     })();
     const childcareFunding = (() => {
@@ -55239,7 +56190,7 @@ app.patch('/api/action-plans/:id', async (req, res) => {
       educationLevel,
       educationProvince,
       socialAssistanceRecipient,
-      EIClaimant: typeof claimantValue !== 'undefined' ? claimantValue : esdcExisting.EIClaimant || null,
+      EIClaimant: typeof claimantValue !== 'undefined' ? claimantValue : firstNonBlankValue(esdcExisting.EIClaimant),
       actionPlanPreviousEmployment: prevEmployment,
       actionPlanPreviousEmploymentNoc: prevEmploymentNoc,
       actionPlanPreviousEmploymentNocVersion: prevEmploymentNocVersion,
@@ -55308,6 +56259,30 @@ app.patch('/api/action-plans/:id', async (req, res) => {
       } catch (migrateErr) {
         console.warn('[action-plan] failed to migrate interventions to new pot', migrateErr?.message || migrateErr);
       }
+    }
+
+    try {
+      const shouldSeedParticipantDetails = await shouldSeedParticipantDetailsForActionPlan(planRow, metadata, pool);
+      if (shouldSeedParticipantDetails) {
+        await seedParticipantDetailsFromBackloadActionPlan({
+          connection: pool,
+          caseId: planRow.case_id,
+          actionPlan: {
+            ...esdcPayload,
+            summary,
+            employmentGoals: summary,
+            otherBarrier: req.body?.otherBarrier ?? req.body?.other_barrier ?? null,
+            employmentBarriersOtherDetails:
+              req.body?.employmentBarriersOtherDetails ??
+              req.body?.employment_barriers_other_details ??
+              req.body?.barriersOtherDetails ??
+              req.body?.barriers_other_details ??
+              null,
+          },
+        });
+      }
+    } catch (seedErr) {
+      console.warn('[action-plan] failed to seed participant details from updated backload plan', seedErr?.message || seedErr);
     }
 
     const updatedRow = await fetchActionPlanWithCase(planId);
@@ -58636,23 +59611,16 @@ const handlePostCaseSecureMessage = async (req, res) => {
 	      caseContext,
 	      caseRow?.application_id || null
 	    );
-	    const ctxPersonal = caseContext.applicationPersonal || {};
-    const ctxAnswers = caseContext.applicationAnswers || {};
-    const contextNameCandidates = [
-      ctxPersonal.preferred_name,
-      ctxPersonal.preferredName,
-      caseContext.preferredName,
-      ctxAnswers['preferred-name'],
-      ctxAnswers['preferred_name'],
-      ctxPersonal.first_name && ctxPersonal.last_name
-        ? `${ctxPersonal.first_name} ${ctxPersonal.last_name}`
-        : null,
-      ctxPersonal.firstName && ctxPersonal.lastName
-        ? `${ctxPersonal.firstName} ${ctxPersonal.lastName}`
-        : null,
-    ];
-    const contextApplicantName =
-      contextNameCandidates.map(v => normaliseString(v)).find(Boolean) || null;
+	    const contextApplicantName = resolveApplicantDisplayName({
+	      caseContext,
+	      caseRow,
+	      fallback: caseRow?.applicant_name || null,
+	    });
+	    const contextApplicantSalutationName = resolveApplicantSalutationName({
+	      caseContext,
+	      caseRow,
+	      fallback: contextApplicantName,
+	    });
     const trackingReference =
       normaliseString(caseRow?.submission_reference) ||
       normaliseString(caseRow?.case_number) ||
@@ -58861,7 +59829,17 @@ const handlePostCaseSecureMessage = async (req, res) => {
           });
         }
         const decisionDrafts = resolveDecisionLetterDrafts(caseContext, caseRow?.application_id || null);
-        const applicantNameToken = normaliseString(toNameValue) || contextApplicantName || normaliseString(caseRow?.applicant_email) || null;
+        const recipientDisplayName = resolveApplicantDisplayName({
+          caseRow: { applicant_name: toNameValue },
+          fallback: null,
+        });
+        const recipientSalutationName = resolveApplicantSalutationName({
+          caseRow: { applicant_name: toNameValue },
+          fallback: recipientDisplayName,
+        });
+        const applicantFullNameToken = contextApplicantName || recipientDisplayName || null;
+        const applicantSalutationNameToken =
+          contextApplicantSalutationName || recipientSalutationName || applicantFullNameToken;
         const coordinatorNameToken = normaliseString(fromNameValue) || null;
         letterAttachments.forEach((letter) => {
           if (requestedInterventionId && letter.document_type === 'assessment_approval_letter') {
@@ -58880,13 +59858,15 @@ const handlePostCaseSecureMessage = async (req, res) => {
             : decisionDrafts.denial;
           decisionLetterTokensByWorkflowId.set(
             letter.id,
-            resolveDecisionLetterTokens({
-              draft,
-              docType: letter.document_type,
-              applicantName: applicantNameToken,
-              trackingId: trackingReference,
-              caseNumber: caseRow?.case_number,
-              coordinatorName: coordinatorNameToken,
+	            resolveDecisionLetterTokens({
+	              draft,
+	              docType: letter.document_type,
+	              applicantName: applicantSalutationNameToken || applicantFullNameToken,
+	              applicantFullName: applicantFullNameToken,
+	              applicantSalutationName: applicantSalutationNameToken,
+	              trackingId: trackingReference,
+	              caseNumber: caseRow?.case_number,
+	              coordinatorName: coordinatorNameToken,
               decisionDate: formatFundingDate(new Date())
             })
           );
@@ -59519,8 +60499,8 @@ const handlePostCaseSecureMessage = async (req, res) => {
     }
 
     const effectiveApplicantName =
-      toNameValue ||
       contextApplicantName ||
+      resolveApplicantDisplayName({ caseRow: { applicant_name: toNameValue }, fallback: null }) ||
       caseRow?.applicant_email ||
       null;
     const effectiveAssessorName = fromNameValue || assessorDisplayName || null;
@@ -82756,6 +83736,12 @@ app.put('/api/cases/:id', async (req, res) => {
     req.query.applicationId ||
     req.query.application_id
   );
+  const resolveOpenEscalationRequested = parseBooleanFlag(
+    body.resolveOpenEscalation ?? body.resolveEscalation,
+    false
+  );
+  const statusActionNote =
+    normaliseString(body.statusActionNote ?? body.escalationResolutionNote ?? body.note) || null;
   const eligibilityUpdateRequested = Object.prototype.hasOwnProperty.call(body, 'assessment_esdc_eligibility');
   const identity = getRequesterIdentity(req);
   const expectedRowVersionRaw = body.expectedApplicationRowVersion ?? body.expectedRowVersion;
@@ -82868,6 +83854,8 @@ app.put('/api/cases/:id', async (req, res) => {
   let incomingDocsRequestedSource = null;
   let bumpApplicationRowVersion = false;
   let newRowVersion = null;
+  let staffApplicationReopenRequested = false;
+  let resolvedWithdrawalEscalations = [];
   let applicationId = null;
   let lockCheck = { ok: true, reason: 'not_checked', lock: null };
   let statusToPersist = null;
@@ -83181,8 +84169,15 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     if (applicationId && isTerminalApplicationState(beforeApplicationStatus, beforeApplicationLifecycleStatus)) {
       const requestedApplicationStatusChange =
         Boolean(applicationStatusToPersist) && applicationStatusToPersist !== beforeApplicationStatus;
+      staffApplicationReopenRequested = canStaffReopenApplication(req, {
+        beforeStatus: beforeApplicationStatus,
+        beforeLifecycleStatus: beforeApplicationLifecycleStatus,
+        beforeClosureReason: beforeApplicationClosureReason,
+        nextStatus: applicationStatusToPersist,
+      });
       const allowedTerminalStatusChange =
-        beforeApplicationStatus === 'approved' && applicationStatusToPersist === 'completed';
+        (beforeApplicationStatus === 'approved' && applicationStatusToPersist === 'completed') ||
+        staffApplicationReopenRequested;
       const requestedDocsRequestedChange =
         docsRequestedFieldPresent && Number(docsRequestedValue || 0) !== (beforeDocsRequestedActive ? 1 : 0);
       if ((requestedApplicationStatusChange && !allowedTerminalStatusChange) || requestedDocsRequestedChange) {
@@ -83808,6 +84803,28 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         ]
       );
       bumpApplicationRowVersion = true;
+      if (staffApplicationReopenRequested) {
+        const reopenedCaseContext = clearWithdrawnReportingCaseContext(existingCaseContext, applicationId);
+        await conn.query(
+          'UPDATE iset_case SET case_context_json = ?, updated_at = NOW() WHERE id = ?',
+          [JSON.stringify(reopenedCaseContext), caseId]
+        );
+        shouldRecomputeCaseStatus = true;
+      }
+    }
+
+    if (
+      applicationStatusToPersist === 'withdrawn' &&
+      resolveOpenEscalationRequested &&
+      applicationId
+    ) {
+      const withdrawalEscalationActorUserId = await resolveOrCreateUserIdFromAuth(req, conn);
+      resolvedWithdrawalEscalations = await resolveOpenApplicationEscalationsForStatusChange(conn, {
+        applicationId,
+        resolvedByUserId: withdrawalEscalationActorUserId || null,
+        resolvedByRole: canonicalEscalationRole(resolveStaffRole(req)) || null,
+        note: statusActionNote,
+      });
     }
 
     const shouldSeedApplicationReportingArtifacts =
@@ -84614,6 +85631,31 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         });
       } catch (notifyErr) {
         console.error('[notifications] decision email failed', notifyErr?.message || notifyErr);
+      }
+    }
+
+    if (resolvedWithdrawalEscalations.length) {
+      for (const escalation of resolvedWithdrawalEscalations) {
+        try {
+          await captureCaseEvent({
+            type: 'escalation_resolved',
+            caseId,
+            payload: {
+              escalationId: escalation.id,
+              applicationId: caseRow?.application_id || applicationId || null,
+              previousState: escalation.previousState || null,
+              state: ESCALATION_STATES.resolved,
+              ownerRole: escalation.previousOwnerRole || null,
+              disposition: 'withdraw_application',
+              note: escalation.note || null,
+            },
+            trackingId,
+            actorId,
+            actorName,
+          });
+        } catch (eventErr) {
+          console.warn('[escalations] failed to emit withdrawal resolution event', eventErr?.message || eventErr);
+        }
       }
     }
 

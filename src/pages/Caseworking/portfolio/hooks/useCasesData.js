@@ -102,6 +102,8 @@ const mapCaseRowToTableItem = row => {
     agreementNumber: trackingId || "-",
     status: statusMeta.normalized,
     caseStatus: statusMeta.normalized,
+    statusLabel: statusMeta.label,
+    statusColor: statusMeta.color,
     caseStatusLabel: statusMeta.label,
     caseStatusColor: statusMeta.color,
     trackingId,

@@ -1,10 +1,28 @@
 # Tutorial Platform (Admin Console)
 
-Purpose: Canonical design + operating notes for the Cloudscape hands-on tutorial system in the admin dashboard.
+Purpose: Canonical design + operating notes for the admin dashboard tutorial surfaces.
 
-Status: Active (refactored to centralized platform on 2026-02-11).
+Status: Active (Cloudscape guided tours refactored to centralized platform on 2026-02-11; Support > Tutorials extended for Synthesia training shorts on 2026-06-07).
 
 ## Architecture (single source of truth)
+
+Support > Tutorials (`/tutorials-dashboard`) is the shared staff training hub:
+
+- Training shorts are Synthesia-hosted video entries listed from `src/tutorials/trainingShorts.js`.
+- Guided tours are Cloudscape in-app walkthroughs with DB-backed progress.
+- The page implementation is `src/pages/support/TutorialsDashboardPage.jsx`.
+
+## Training shorts
+
+- Store only video metadata in PATH: title, internal topic/audience tags when useful, duration, status, review date, and published Synthesia embed/share URLs or video IDs.
+- Do not store generated MP4 files in the React app or commit them to the repo.
+- A short is watchable when metadata includes a Synthesia embed URL or video ID and the Tutorials modal has been smoke-tested to confirm Synthesia plays it. The `available` status is reserved for approved/published staff-ready shorts; draft rows can still be watchable for review when Bill explicitly asks and the Synthesia video is shareable enough for the embed player.
+- Use `inProduction` for shorts that are being drafted but are not approved/published for staff.
+- Training-short table columns are sortable and resizable, but the user-facing list should stay spare: `Short`, `Length`, and `Action`. Review/approval date, topic, audience, and draft/publication status can stay in metadata, but do not expose them as visible columns unless Bill explicitly asks.
+- Current entries include the public Synthesia videos whose titles use the `PATH Training Shorts - ...` naming pattern, plus the current watchable drafts `withdrawing-reopening-application`, `ilmp-submissions-preparing-export`, and `ilmp-validation-repairs`. Exclude long modules, release notes, private videos, and general introductions unless Bill explicitly asks to broaden the table.
+- For production-video workflow, use `docs/guides/synthesia-training-video-production.md`.
+
+## Guided tours
 
 - Tutorial catalog and shared runtime helpers live in `src/tutorials/tutorialPlatform.js`.
 - Legacy files are now thin category wrappers:
@@ -15,7 +33,6 @@ Status: Active (refactored to centralized platform on 2026-02-11).
 - App runtime wiring (prompting/start/end/routing/status) is in `src/AppContent.js`.
 - Home header hotspots are wired in `src/routes/AppRoutes.js`.
 - Role-filtered home tutorial listing in help panel is in `src/helpPanelContents/homeDashboardHelp.js`.
-- Tutorials dashboard status management UI is in `src/pages/support/TutorialsDashboardPage.jsx`.
 
 ## Tutorial IDs (current)
 

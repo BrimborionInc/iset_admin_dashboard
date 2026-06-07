@@ -15,6 +15,7 @@ This directory contains implementation and workflow guides used by agents during
 - For DB access from Codex/WSL, use `test-db-access-from-codex.md`.
 - For Cognito staff recovery, use `test-staff-cognito-recovery.md`.
 - For retiring old staff Cognito custom region/user-id values, use `staff-cognito-legacy-attribute-cleanup.md`.
+- For Synthesia-backed PATH tutorial/training video production, use `synthesia-training-video-production.md`.
 
 ## Cleanup Rule
 
