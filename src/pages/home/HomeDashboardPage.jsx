@@ -40,11 +40,52 @@ import {
     resolvePendingCompletionApplicationStep,
 } from './homeQueueCompletion';
 
-const buildApprovalInterventionBreakdownContent = row => {
+const parseDashboardAmount = value => {
+    if (value === null || typeof value === 'undefined' || value === '') {
+        return null;
+    }
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : null;
+    }
+    const parsed = Number(String(value).replace(/[^0-9.+-]/g, ''));
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+const formatSignedCurrencyDisplay = value => {
+    const amount = parseDashboardAmount(value);
+    if (amount === null) return '';
+    const absoluteDisplay = formatCurrencyDisplay(Math.abs(amount));
+    if (amount > 0) return `+${absoluteDisplay}`;
+    if (amount < 0) return `-${absoluteDisplay}`;
+    return formatCurrencyDisplay(0);
+};
+
+const resolveRevisionAmendmentSummary = row => {
+    const approvalRequestType = row?.approvalRequestType || row?.approval_request_type || null;
+    if (approvalRequestType !== 'revised_intervention') {
+        return null;
+    }
+    const netChange = parseDashboardAmount(row?.revisionNetChange ?? row?.revision_net_change);
+    const revisedTotal = parseDashboardAmount(
+        row?.revisionRevisedCostTotal ??
+        row?.revision_revised_cost_total ??
+        row?.intervention_cost_total
+    );
+    if (netChange === null || revisedTotal === null) {
+        return null;
+    }
+    return `Net change ${formatSignedCurrencyDisplay(netChange)} · Revised total ${formatCurrencyDisplay(revisedTotal)}`;
+};
+
+const buildApprovalInterventionBreakdownContent = (row, options = {}) => {
+    const { showRevisionAmendmentSummary = false } = options;
     const approvalRequestTypeLabel =
         row?.approvalRequestTypeLabel ||
         row?.approval_request_type_label ||
         null;
+    const revisionAmendmentSummary = showRevisionAmendmentSummary
+        ? resolveRevisionAmendmentSummary(row)
+        : null;
     const groups = Array.isArray(row?.interventionGroups)
         ? row.interventionGroups
         : Array.isArray(row?.intervention_groups)
@@ -78,7 +119,7 @@ const buildApprovalInterventionBreakdownContent = row => {
             };
         })
         .filter(Boolean);
-    if (!approvalRequestTypeLabel && !normalizedGroups.length) {
+    if (!approvalRequestTypeLabel && !revisionAmendmentSummary && !normalizedGroups.length) {
         return null;
     }
     return (
@@ -86,6 +127,11 @@ const buildApprovalInterventionBreakdownContent = row => {
             {approvalRequestTypeLabel ? (
                 <Box variant="small" color="text-body-secondary">
                     {approvalRequestTypeLabel}
+                </Box>
+            ) : null}
+            {revisionAmendmentSummary ? (
+                <Box variant="small" color="text-body-secondary">
+                    {revisionAmendmentSummary}
                 </Box>
             ) : null}
             {normalizedGroups.map((group, groupIndex) => (
@@ -3123,7 +3169,9 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         row.submittedAt ||
                         row.submitted_at ||
                         null;
-                    const interventionBreakdownContent = buildApprovalInterventionBreakdownContent(row);
+                    const interventionBreakdownContent = buildApprovalInterventionBreakdownContent(row, {
+                        showRevisionAmendmentSummary: true
+                    });
                     return {
                         id: interventionId ? `INT-${interventionId}` : String(tracking),
                         title: applicantName,
@@ -3151,6 +3199,10 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         intervention_code: row.intervention_code || null,
                         intervention_label: interventionLabel,
                         intervention_cost_total: row.intervention_cost_total || null,
+                        revisionSourceInterventionId: row.revisionSourceInterventionId ?? row.revision_source_intervention_id ?? null,
+                        revisionBaselineCostTotal: row.revisionBaselineCostTotal ?? row.revision_baseline_cost_total ?? null,
+                        revisionRevisedCostTotal: row.revisionRevisedCostTotal ?? row.revision_revised_cost_total ?? null,
+                        revisionNetChange: row.revisionNetChange ?? row.revision_net_change ?? null,
                         interventionGroups: row.interventionGroups || row.intervention_groups || [],
                         interventionSummaries: row.interventionSummaries || row.intervention_summaries || [],
                         intervention_start_date: row.intervention_start_date || null,

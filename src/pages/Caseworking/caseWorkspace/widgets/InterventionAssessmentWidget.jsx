@@ -1067,6 +1067,68 @@ const formatCurrencyDisplay = value => {
   return `$ ${num.toFixed(2)}`;
 };
 
+const parseSignedCurrencyInput = value => {
+  if (value === null || typeof value === "undefined") return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const parsed = parseCurrencyInput(raw);
+  if (parsed === null) return null;
+  return /^-/.test(raw) ? -Math.abs(parsed) : parsed;
+};
+
+const formatCompactCurrencyDisplay = value => {
+  const num = parseSignedCurrencyInput(value);
+  if (num === null) return "";
+  try {
+    return new Intl.NumberFormat("en-CA", {
+      style: "currency",
+      currency: "CAD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(num);
+  } catch (_) {
+    return `$${num.toFixed(2)}`;
+  }
+};
+
+const formatSignedCompactCurrencyDisplay = value => {
+  const num = parseSignedCurrencyInput(value);
+  if (num === null) return "";
+  const absoluteDisplay = formatCompactCurrencyDisplay(Math.abs(num));
+  if (num > 0) return `+${absoluteDisplay}`;
+  if (num < 0) return `-${absoluteDisplay}`;
+  return formatCompactCurrencyDisplay(0);
+};
+
+const resolveInterventionCostTotal = intervention => {
+  if (!intervention || typeof intervention !== "object") return null;
+  const costLines = Array.isArray(intervention.costLines) ? intervention.costLines : [];
+  if (costLines.length) {
+    const total = costLines.reduce((sum, line) => sum + parseCurrencyToNumber(line?.amount), 0);
+    return Number.isFinite(total) ? total : null;
+  }
+  const metadata = intervention.metadata && typeof intervention.metadata === "object" ? intervention.metadata : {};
+  const snapshot = metadata.snapshot && typeof metadata.snapshot === "object" ? metadata.snapshot : {};
+  const candidates = [
+    intervention.plannedCost,
+    intervention.cost,
+    intervention.budgetAmount,
+    intervention.approvedAmount,
+    intervention.interventionCost,
+    intervention.intervention_cost,
+    metadata.cost,
+    snapshot.cost,
+  ];
+  for (const candidate of candidates) {
+    const parsed = parseCurrencyInput(candidate);
+    if (parsed !== null && Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+};
+
 const formatOtherFundingAmountDisplay = value => {
   const amount = parseCurrencyInput(value);
   return amount !== null && Number.isFinite(amount) ? formatCurrencyDisplay(amount) : "";
@@ -3064,9 +3126,10 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     [effectiveCostingDefaults, getAllowedPaymentTypesForIntervention, getRecurrenceModeForType]
   );
 
-  const proposedInterventions = Array.isArray(form.proposedInterventions)
-    ? form.proposedInterventions
-    : [];
+  const proposedInterventions = useMemo(
+    () => (Array.isArray(form.proposedInterventions) ? form.proposedInterventions : []),
+    [form.proposedInterventions]
+  );
   const isFramingStepBlocked = currentStep === "framing" && proposedInterventions.length === 0;
 
   useEffect(() => {
@@ -3112,6 +3175,37 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     });
     return total;
   }, [interventionTotals]);
+
+  const revisionSourceIntervention = useMemo(() => {
+    if (!isRevisionMode || !revisionSourceInterventionId) return null;
+    const plans = Array.isArray(caseData?.actionPlans) ? caseData.actionPlans : [];
+    for (const plan of plans) {
+      const interventions = Array.isArray(plan?.interventions) ? plan.interventions : [];
+      const match = interventions.find(intervention => idsMatch(intervention?.id, revisionSourceInterventionId));
+      if (match) return match;
+    }
+    return null;
+  }, [caseData, isRevisionMode, revisionSourceInterventionId]);
+
+  const reviewAmendmentDeltaSummary = useMemo(() => {
+    if (!isRevisionMode || !isReviewStageStatus || !canDecideSubmittedProposal) {
+      return null;
+    }
+    const baselineTotal = resolveInterventionCostTotal(revisionSourceIntervention);
+    const revisedTotal = proposedInterventions.length ? overallCostTotal : null;
+    if (baselineTotal === null || revisedTotal === null) {
+      return null;
+    }
+    const netChange = revisedTotal - baselineTotal;
+    return `Net change ${formatSignedCompactCurrencyDisplay(netChange)} · Revised total ${formatCompactCurrencyDisplay(revisedTotal)}`;
+  }, [
+    canDecideSubmittedProposal,
+    isReviewStageStatus,
+    isRevisionMode,
+    overallCostTotal,
+    proposedInterventions.length,
+    revisionSourceIntervention,
+  ]);
 
   useEffect(() => {
     if (costingDefaultsLoading || paymentTypeMappingLoading) return;
@@ -6206,6 +6300,11 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   const decisionStepContent = (
     <SpaceBetween size="m">
       {caseManagerRecommendationSummary}
+      {reviewAmendmentDeltaSummary ? (
+        <Box variant="small" color="text-body-secondary">
+          {reviewAmendmentDeltaSummary}
+        </Box>
+      ) : null}
       <FormField
         label={`Decision on ${decisionSubjectWithArticle}`}
         description={`Choose whether to approve ${decisionSubjectWithArticle}, deny it, or request changes from the case manager.`}

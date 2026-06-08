@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-06-07
+Last Updated: 2026-06-08
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -21,6 +21,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-06-08 | Release TBD | UX/Approvals | Intervention amendments | Reviewers now see a compact amendment scale for proposed intervention changes. | Pending Decision rows and Case Workspace `Review intervention change` decision controls show `Net change ... · Revised total ...` when PATH can compare the source intervention total to the proposed revised snapshot; proposer workflow, approval process, and generated PDFs are unchanged.
 - 2026-06-07 | Release 20260607-prod-tutorials-training-shorts | UX/Support | Tutorials | Support > Tutorials now has a lean Training shorts section for Synthesia-hosted videos and keeps the existing guided-tour completion/reset controls under Guided tours. | PATH stores video metadata and embeds Synthesia videos instead of adding MP4 files to the React app. Training-short table columns are sortable/resizable, visible video columns are limited to Short, Length, and Action, the existing public `PATH Training Shorts - ...` videos are listed, and the withdrawing/reopening, ILMP submissions, and ILMP validation-and-repairs shorts are seeded as shareable watchable drafts until approved published versions are available.
 - 2026-06-07 | Release TBD | UX/Application Workspace | Withdraw application guidance | Application Overview withdrawal guidance now says the action can be used when the applicant is no longer pursuing the file or when staff must withdraw after a missed response deadline. | Help text also points staff to Reopen application when review should continue later.
 - 2026-06-05 | Release 20260605-prod-ilmp-casework-batch | Fix/Application Workspace | Raw status workflow actions | Application workflow actions now preserve and prefer the raw persisted status when deciding which correction actions are available. | Restores Withdraw application on closure-notice files, keeps resume-review checks tied to raw `docs_requested`, and leaves display labels unchanged.

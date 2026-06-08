@@ -2,7 +2,7 @@
 
 Purpose: document the live pending-decision-mode behavior of the shared homepage `Work Queue Items` table.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-04-23
+Last Updated: 2026-06-08
 
 ## Scope
 
@@ -46,6 +46,7 @@ Last Updated: 2026-04-23
 - `Item`
   - title line is the applicant name
   - first subtext line shows the approval request type (`New application assessment`, `Additional intervention proposal`, or `Proposed change to intervention`)
+  - revised intervention rows show one compact amendment scale line when the source baseline can be resolved: `Net change +/-$X · Revised total $Y`
   - secondary detail shows only funded proposed payment items
   - payment items are grouped under the intervention type
 - `Province`

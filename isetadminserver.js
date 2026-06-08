@@ -39872,6 +39872,10 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
       ${interventionEffectiveStatusExpr} AS intervention_effective_status,
       ci.start_date AS intervention_start_date,
       COALESCE(ci.intervention_cost, ci.budget_amount, ci.approved_amount) AS intervention_cost_total,
+      NULL AS revision_source_intervention_id,
+      NULL AS revision_baseline_cost_total,
+      NULL AS revision_revised_cost_total,
+      NULL AS revision_net_change,
       COALESCE(ci.updated_at, ci.created_at) AS submitted_at,
       c.case_number,
 c.assigned_staff_profile_id AS assigned_to_user_id,
@@ -39933,6 +39937,25 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           ${proposalReviewStatusExpr} AS intervention_effective_status,
           COALESCE(p.start_date, ci.start_date) AS intervention_start_date,
           COALESCE(p.proposed_cost, ci.intervention_cost, ci.budget_amount, ci.approved_amount) AS intervention_cost_total,
+          p.source_intervention_id AS revision_source_intervention_id,
+          CASE
+            WHEN p.proposal_kind = 'revision' OR p.source_intervention_id IS NOT NULL
+              THEN COALESCE(source_ci.intervention_cost, source_ci.budget_amount, source_ci.approved_amount)
+            ELSE NULL
+          END AS revision_baseline_cost_total,
+          CASE
+            WHEN p.proposal_kind = 'revision' OR p.source_intervention_id IS NOT NULL
+              THEN COALESCE(p.proposed_cost, ci.intervention_cost, ci.budget_amount, ci.approved_amount)
+            ELSE NULL
+          END AS revision_revised_cost_total,
+          CASE
+            WHEN (p.proposal_kind = 'revision' OR p.source_intervention_id IS NOT NULL)
+              AND COALESCE(source_ci.intervention_cost, source_ci.budget_amount, source_ci.approved_amount) IS NOT NULL
+              AND COALESCE(p.proposed_cost, ci.intervention_cost, ci.budget_amount, ci.approved_amount) IS NOT NULL
+              THEN COALESCE(p.proposed_cost, ci.intervention_cost, ci.budget_amount, ci.approved_amount)
+                - COALESCE(source_ci.intervention_cost, source_ci.budget_amount, source_ci.approved_amount)
+            ELSE NULL
+          END AS revision_net_change,
           COALESCE(p.submitted_at, p.created_at, ci.updated_at, ci.created_at) AS submitted_at,
           c.case_number,
 c.assigned_staff_profile_id AS assigned_to_user_id,
@@ -39957,6 +39980,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         FROM iset_intervention_proposal p
         JOIN iset_case c ON c.id = p.case_id
         LEFT JOIN iset_case_intervention ci ON ci.id = p.legacy_intervention_id
+        LEFT JOIN iset_case_intervention source_ci ON source_ci.id = p.source_intervention_id
         LEFT JOIN iset_case_action_plan ap ON ap.id = COALESCE(p.action_plan_id, ci.action_plan_id)
         LEFT JOIN iset_case_assessment ca ON ca.case_id = c.id
         LEFT JOIN client cl ON cl.id = c.client_id
@@ -39988,6 +40012,10 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           ${interventionEffectiveStatusExpr} AS intervention_effective_status,
           ci.start_date AS intervention_start_date,
           COALESCE(ci.intervention_cost, ci.budget_amount, ci.approved_amount) AS intervention_cost_total,
+          NULL AS revision_source_intervention_id,
+          NULL AS revision_baseline_cost_total,
+          NULL AS revision_revised_cost_total,
+          NULL AS revision_net_change,
           COALESCE(ci.updated_at, ci.created_at) AS submitted_at,
           c.case_number,
 c.assigned_staff_profile_id AS assigned_to_user_id,
@@ -40115,6 +40143,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         fallbackCost: r.intervention_cost_total,
       });
       const revisionSourceInterventionId =
+        normalisePositiveInteger(r.revision_source_intervention_id) ||
         normalisePositiveInteger(
           metadata?.revision?.sourceInterventionId ??
           metadata?.revision?.source_intervention_id ??
@@ -40129,6 +40158,25 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         approvalRequestType === 'revised_intervention'
           ? 'Proposed change to intervention'
           : 'Additional intervention proposal';
+      const revisionBaselineCostTotal =
+        approvalRequestType === 'revised_intervention'
+          ? parseCurrencyValue(r.revision_baseline_cost_total)
+          : null;
+      const revisionRevisedCostTotal =
+        approvalRequestType === 'revised_intervention'
+          ? parseCurrencyValue(r.revision_revised_cost_total ?? r.intervention_cost_total)
+          : null;
+      const revisionNetChange =
+        approvalRequestType === 'revised_intervention'
+          ? (
+              parseCurrencyValue(r.revision_net_change) ??
+              (
+                revisionBaselineCostTotal !== null && revisionRevisedCostTotal !== null
+                  ? revisionRevisedCostTotal - revisionBaselineCostTotal
+                  : null
+              )
+            )
+          : null;
       return {
         proposalId: r.proposal_id || null,
         interventionId: r.intervention_id || null,
@@ -40156,6 +40204,14 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         intervention_code: r.intervention_code || null,
         intervention_label: interventionLabel,
         intervention_cost_total: r.intervention_cost_total || null,
+        revisionSourceInterventionId,
+        revision_source_intervention_id: revisionSourceInterventionId,
+        revisionBaselineCostTotal,
+        revision_baseline_cost_total: revisionBaselineCostTotal,
+        revisionRevisedCostTotal,
+        revision_revised_cost_total: revisionRevisedCostTotal,
+        revisionNetChange,
+        revision_net_change: revisionNetChange,
         interventionGroups,
         intervention_groups: interventionGroups,
         interventionSummaries,
