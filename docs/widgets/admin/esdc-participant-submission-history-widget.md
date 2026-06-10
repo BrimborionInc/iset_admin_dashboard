@@ -40,5 +40,6 @@ Optional Recent ILMP exports widget for checking downloaded participant batch XM
 - UI wording must use downloaded/exported/manual-upload language. PATH generates/downloads XML for manual upload; it does not directly submit ILMP data to ESDC from this widget.
 - The primary widget surface is intentionally compact: an embedded history table plus a selected-export area with `Summary`, `Clients exported`, and `XML` tabs. Summary should show recorded file path/name, downloaded time, downloader display name, and clients exported; keep upload status, checksum, and other technical metadata out of the default summary unless a real staff task needs it.
 - The `XML` tab shows the stored XML snapshot from the export history event details at the point the file was downloaded. It is not regenerated from current client/case data.
+- The `/api/esdc/participants/batches` route must select recent batch IDs before applying the display limit and then load all history rows for those batches. Do not limit raw `submitted` history rows before grouping, because a large export can otherwise hide older batches or display partial client counts.
 - Switching selected exports should preserve the active tab so staff can compare the same view, especially XML snapshots, across exports.
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.

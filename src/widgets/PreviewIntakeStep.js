@@ -3,9 +3,8 @@ import { Box, Header, ButtonDropdown, SpaceBetween, Link, Button, Alert, Spinner
 import { BoardItem } from '@cloudscape-design/board-components';
 import PreviewIntakeStepWidgetHelp from '../helpPanelContents/previewIntakeStepWidgetHelp';
 import { apiFetch } from '../auth/apiClient';
+import './PreviewIntakeStep.css';
 
-const DEFAULT_FRAME_HEIGHT = 420;
-const MIN_FRAME_HEIGHT = 260;
 const CACHE_MAX_ENTRIES = 12;
 
 const isLangObject = (val) => val && typeof val === 'object' && (Object.prototype.hasOwnProperty.call(val, 'en') || Object.prototype.hasOwnProperty.call(val, 'fr'));
@@ -32,8 +31,6 @@ const PreviewIntakeStep = ({ selectedBlockStep, actions, toggleHelpPanel }) => {
   const [html, setHtml] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const wrapRef = useRef(null);
-  const [frameH, setFrameH] = useState(DEFAULT_FRAME_HEIGHT);
   const controllerRef = useRef(null);
   const cacheRef = useRef(new Map());
   const [refreshNonce, setRefreshNonce] = useState(0);
@@ -169,7 +166,6 @@ const PreviewIntakeStep = ({ selectedBlockStep, actions, toggleHelpPanel }) => {
         }
         setHtml(previewText);
         setError(null);
-        setFrameH(DEFAULT_FRAME_HEIGHT);
       } catch (err) {
         if (cancelled || controller.signal.aborted) return;
         const header = err.scope === 'load-step' ? 'Unable to load intake step' : 'Preview rendering failed';
@@ -202,25 +198,6 @@ const PreviewIntakeStep = ({ selectedBlockStep, actions, toggleHelpPanel }) => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStepId, lang, refreshNonce]);
-
-  useEffect(() => {
-    const el = wrapRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(entries => {
-      const rect = entries[0].contentRect;
-      setFrameH(Math.max(MIN_FRAME_HEIGHT, Math.floor(rect.height)));
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (typeof ResizeObserver !== 'undefined') return;
-    const el = wrapRef.current;
-    if (!el) return;
-    const nextHeight = Math.max(MIN_FRAME_HEIGHT, el.scrollHeight || el.offsetHeight || DEFAULT_FRAME_HEIGHT);
-    setFrameH(nextHeight);
-  }, [html]);
 
   useEffect(() => () => clearController(), [clearController]);
 
@@ -302,39 +279,22 @@ const PreviewIntakeStep = ({ selectedBlockStep, actions, toggleHelpPanel }) => {
           </SpaceBetween>
         </Alert>
       ) : (
-        <Box
-          ref={wrapRef}
-          style={{
-            position: 'relative',
-            overflow: 'hidden',
-            background: '#fff',
-            height: '100%',
-            minHeight: 320,
-          }}
+        <div
+          className="manage-components-preview-frame"
+          data-manage-components-preview-frame
         >
           <iframe
             title="Preview"
-            style={{ width: '100%', height: `${frameH}px`, border: 0, display: 'block' }}
+            className="manage-components-preview-frame__iframe"
             srcDoc={html}
           />
           {loading && (
-            <Box
-              display="flex"
-              alignItems="center"
-              justifyContent="center"
-              position="absolute"
-              top={0}
-              left={0}
-              width="100%"
-              height="100%"
-              background="rgba(255,255,255,0.65)"
-              style={{ gap: '0.5rem' }}
-            >
+            <div className="manage-components-preview-frame__loading">
               <Spinner />
               <span>Rendering preview…</span>
-            </Box>
+            </div>
           )}
-        </Box>
+        </div>
       )}
     </BoardItem>
   );

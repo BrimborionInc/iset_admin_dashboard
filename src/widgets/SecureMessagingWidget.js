@@ -211,7 +211,9 @@ const SecureMessagingWidget = ({
     });
   }, [
     caseData?.applicationStatus,
+    caseData?.applicationStatusRaw,
     caseData?.application_status,
+    caseData?.application_status_raw,
     caseData?.applicationLifecycleStatus,
     caseData?.application_lifecycle_status,
     caseData?.decisionOutcome,
@@ -224,7 +226,9 @@ const SecureMessagingWidget = ({
     caseData?.review_status,
     caseData?.status,
     workspaceCaseData?.applicationStatus,
+    workspaceCaseData?.applicationStatusRaw,
     workspaceCaseData?.application_status,
+    workspaceCaseData?.application_status_raw,
     workspaceCaseData?.applicationLifecycleStatus,
     workspaceCaseData?.application_lifecycle_status,
     workspaceCaseData?.decisionOutcome,
@@ -297,6 +301,7 @@ const SecureMessagingWidget = ({
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(null);
   const [filteringText, setFilteringText] = useState('');
+  const [messageSorting, setMessageSorting] = useState({ id: 'created_at', descending: true });
   const [activeTabId, setActiveTabId] = useState(TAB_IDS.inbox);
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [viewModalOpen, setViewModalOpen] = useState(false);
@@ -552,6 +557,11 @@ const SecureMessagingWidget = ({
     [filteringTextLower, getSenderName, getRecipientName, applicantUserId]
   );
 
+  const getMessageFormsCount = useCallback(message => {
+    const attachments = Array.isArray(message?.attachments) ? message.attachments : [];
+    return attachments.filter(attachment => attachment && attachment.workflow_id).length;
+  }, []);
+
   const openMessage = useCallback(
     async message => {
       if (!message) return;
@@ -604,6 +614,7 @@ const SecureMessagingWidget = ({
         cell: item => (
           <span style={{ fontWeight: isUnread(item) ? 'bold' : 'normal' }}>{getSenderName(item)}</span>
         ),
+        sortingComparator: (a, b) => getSenderName(a).localeCompare(getSenderName(b)),
         minWidth: 140
       },
       {
@@ -629,6 +640,7 @@ const SecureMessagingWidget = ({
             {item?.subject || '(No subject)'}
           </Link>
         ),
+        sortingComparator: (a, b) => String(a?.subject || '').localeCompare(String(b?.subject || '')),
         minWidth: 200
       },
       {
@@ -639,6 +651,9 @@ const SecureMessagingWidget = ({
             {formatStatusLabel(getDisplayStatusKey(item, applicantUserId))}
           </span>
         ),
+        sortingComparator: (a, b) =>
+          formatStatusLabel(getDisplayStatusKey(a, applicantUserId))
+            .localeCompare(formatStatusLabel(getDisplayStatusKey(b, applicantUserId))),
         minWidth: 180
       },
       {
@@ -660,6 +675,7 @@ const SecureMessagingWidget = ({
           if (cancelled) parts.push(`${cancelled} cancelled`);
           return parts.length ? parts.join(' · ') : `${forms.length} attached`;
         },
+        sortingComparator: (a, b) => getMessageFormsCount(a) - getMessageFormsCount(b),
         minWidth: 180
       },
       {
@@ -670,10 +686,28 @@ const SecureMessagingWidget = ({
             {item?.urgent ? 'Yes' : 'No'}
           </span>
         ),
+        sortingComparator: (a, b) => Number(Boolean(a?.urgent)) - Number(Boolean(b?.urgent)),
         minWidth: 80
       }
     ],
-    [getSenderName, openMessage, applicantUserId]
+    [getSenderName, openMessage, applicantUserId, getMessageFormsCount]
+  );
+
+  const activeSortingColumn = useMemo(
+    () => columnDefinitions.find(column => column.id === messageSorting.id) || columnDefinitions[0],
+    [columnDefinitions, messageSorting.id]
+  );
+
+  const sortMessagesForDisplay = useCallback(
+    items => {
+      const comparator = activeSortingColumn?.sortingComparator;
+      if (typeof comparator !== 'function') return items;
+      return [...items].sort((a, b) => {
+        const result = comparator(a, b);
+        return messageSorting.descending ? -result : result;
+      });
+    },
+    [activeSortingColumn, messageSorting.descending]
   );
 
   useEffect(() => {
@@ -847,6 +881,7 @@ const SecureMessagingWidget = ({
         ? deletedMessages
         : inboxMessages;
     const itemsForTab = filterMessages(baseItems);
+    const sortedItemsForTab = sortMessagesForDisplay(itemsForTab);
     return (
       <SpaceBetween size="s">
         <TextFilter
@@ -861,12 +896,19 @@ const SecureMessagingWidget = ({
         ) : (
           <Table
             columnDefinitions={columnDefinitions}
-            items={itemsForTab}
+            items={sortedItemsForTab}
             trackBy="id"
             variant="embedded"
             stripedRows
             resizableColumns
             stickyHeader
+            sortingColumn={activeSortingColumn}
+            sortingDescending={messageSorting.descending}
+            onSortingChange={({ detail }) => {
+              const columnId = detail?.sortingColumn?.id;
+              if (!columnId) return;
+              setMessageSorting({ id: columnId, descending: detail.isDescending });
+            }}
             empty={<Box>No messages found.</Box>}
             onRowClick={({ detail }) => openMessage(detail.item)}
           />

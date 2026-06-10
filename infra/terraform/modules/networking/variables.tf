@@ -36,6 +36,18 @@ variable "enable_nat_gateway" {
   default     = true
 }
 
+variable "single_nat_gateway" {
+  description = "When true, create one NAT gateway and route all private subnets through it."
+  type        = bool
+  default     = false
+}
+
+variable "single_nat_gateway_subnet_index" {
+  description = "Public subnet index that hosts the shared NAT gateway when single_nat_gateway is true."
+  type        = number
+  default     = 0
+}
+
 variable "log_retention_days" {
   description = "Retention for VPC flow log CloudWatch group."
   type        = number

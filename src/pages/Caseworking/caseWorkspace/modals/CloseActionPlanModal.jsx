@@ -6,7 +6,6 @@ import {
   Button,
   DatePicker,
   FormField,
-  Input,
   Modal,
   Select,
   SpaceBetween,
@@ -88,7 +87,7 @@ const CloseActionPlanModal = ({
     setOutcomeSummary(plan?.outcomeSummary || "");
     setClosureNotes(plan?.closureNotes || "");
     setValidationError(null);
-    setVisibleError(error || null);
+    setVisibleError(null);
     setFieldErrors({});
   }, [visible, plan]);
 

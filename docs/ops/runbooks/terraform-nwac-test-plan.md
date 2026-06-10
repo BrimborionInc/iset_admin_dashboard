@@ -1,7 +1,7 @@
 # Terraform Delivery Plan – NWAC Test Environment
 
 Status: historical TEST Terraform delivery plan. Use live Terraform state/AWS checks and current deployment runbooks before acting.
-Last reviewed: 2026-04-29 during ops documentation cleanup.
+Last reviewed: 2026-06-08 after TEST cost-pruning.
 
 ## 1. Goals
 - Stand up the complete AWS test footprint (networking, identity, data, compute, monitoring) from scratch in the existing company account.
@@ -45,7 +45,9 @@ infra/
   - Outputs AWS account ID, log archive bucket name to downstream modules.
   - ✅ Initial implementation creates Terraform state S3 bucket + DynamoDB lock table (versioned, SSE-KMS, public access blocked).
 - **networking**
-  - Single VPC (`/16`) with three AZs. Private subnets for app tiers, isolated subnets for Aurora. NAT gateway per AZ (or shared pair if cost is critical). Interface VPC endpoints for STS, Logs, KMS, SSM; gateway endpoints for S3/Dynamo.
+  - Historical target: single VPC (`/16`) with three AZs, private subnets for app tiers, isolated subnets for Aurora, and NAT gateway per AZ (or shared pair if cost is critical).
+  - Current TEST default since 2026-06-08: keep the three-AZ subnet layout for placement options, but run one NAT gateway in subnet index `2` / `ca-central-1d`, one ASG app subnet index `[2]`, and ALB public subnet indexes `[0, 2]`.
+  - Interface VPC endpoints for STS, Logs, KMS, SSM; gateway endpoints for S3/Dynamo.
   - Security groups default deny egress except required AWS service ranges; no public inbound rules.
   - ✅ Initial cut provisions VPC, private/isolated/public subnets, NAT, gateway endpoints (S3/DynamoDB), VPC flow logs, and baseline egress SG.
 - **kms**

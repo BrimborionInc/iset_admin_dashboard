@@ -29,13 +29,16 @@ module "kms" {
 module "networking" {
   source = "../../modules/networking"
 
-  name_prefix           = var.name_prefix
-  vpc_cidr              = var.vpc_cidr
-  private_subnet_cidrs  = var.private_subnet_cidrs
-  isolated_subnet_cidrs = var.isolated_subnet_cidrs
-  public_subnet_cidrs   = var.public_subnet_cidrs
-  log_retention_days    = var.log_retention_days
-  tags                  = local.tags
+  name_prefix                     = var.name_prefix
+  vpc_cidr                        = var.vpc_cidr
+  private_subnet_cidrs            = var.private_subnet_cidrs
+  isolated_subnet_cidrs           = var.isolated_subnet_cidrs
+  public_subnet_cidrs             = var.public_subnet_cidrs
+  enable_nat_gateway              = var.enable_nat_gateway
+  single_nat_gateway              = var.single_nat_gateway
+  single_nat_gateway_subnet_index = var.single_nat_gateway_subnet_index
+  log_retention_days              = var.log_retention_days
+  tags                            = local.tags
 }
 
 module "logging" {
@@ -80,22 +83,25 @@ module "acm" {
 module "data" {
   source = "../../modules/data"
 
-  name_prefix                  = var.name_prefix
-  tags                         = local.tags
-  vpc_id                       = module.networking.vpc_id
-  subnet_ids                   = module.networking.isolated_subnet_ids
-  kms_key_arn                  = module.kms.keys.data.key_arn
-  database_name                = var.db_name
-  master_username              = var.db_master_username
-  engine_version               = var.db_engine_version
-  instance_class               = var.db_instance_class
-  backup_retention_days        = var.db_backup_retention_days
-  preferred_backup_window      = var.db_preferred_backup_window
-  preferred_maintenance_window = var.db_preferred_maintenance_window
-  allowed_security_group_ids   = var.db_allowed_security_group_ids
-  apply_immediately            = var.db_apply_immediately
-  deletion_protection          = var.db_deletion_protection
-  skip_final_snapshot          = var.db_skip_final_snapshot
+  name_prefix                           = var.name_prefix
+  tags                                  = local.tags
+  vpc_id                                = module.networking.vpc_id
+  subnet_ids                            = module.networking.isolated_subnet_ids
+  kms_key_arn                           = module.kms.keys.data.key_arn
+  database_name                         = var.db_name
+  master_username                       = var.db_master_username
+  engine_version                        = var.db_engine_version
+  instance_class                        = var.db_instance_class
+  serverlessv2_min_capacity             = var.db_serverlessv2_min_capacity
+  serverlessv2_max_capacity             = var.db_serverlessv2_max_capacity
+  serverlessv2_seconds_until_auto_pause = var.db_serverlessv2_seconds_until_auto_pause
+  backup_retention_days                 = var.db_backup_retention_days
+  preferred_backup_window               = var.db_preferred_backup_window
+  preferred_maintenance_window          = var.db_preferred_maintenance_window
+  allowed_security_group_ids            = var.db_allowed_security_group_ids
+  apply_immediately                     = var.db_apply_immediately
+  deletion_protection                   = var.db_deletion_protection
+  skip_final_snapshot                   = var.db_skip_final_snapshot
 }
 
 # Additional modules (compute, etc.) will be added iteratively.
@@ -123,8 +129,8 @@ module "compute" {
 
   name_prefix           = var.name_prefix
   vpc_id                = module.networking.vpc_id
-  public_subnet_ids     = module.networking.public_subnet_ids
-  private_subnet_ids    = module.networking.private_subnet_ids
+  public_subnet_ids     = [for idx in var.alb_public_subnet_indexes : module.networking.public_subnet_ids[idx]]
+  private_subnet_ids    = [for idx in var.app_private_subnet_indexes : module.networking.private_subnet_ids[idx]]
   db_security_group_id  = module.data.cluster.security_group_id
   app_instance_type     = var.app_instance_type
   app_min_size          = var.app_min_size

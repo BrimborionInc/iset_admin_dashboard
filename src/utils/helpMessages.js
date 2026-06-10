@@ -37,47 +37,32 @@ export const helpMessages = {
   userManagement: (
     <div>
       <p>
-        The User Management Dashboard allows administrators to manage users and roles within the system. 
-        You can view, create, modify, and delete users and roles.
+        User Management is the staff access and participant PATH-account control surface.
       </p>
 
-      <h3>Users</h3>
+      <h3>Staff access</h3>
       <p>
-        The Users section displays a list of all users in the system. You can perform the following actions:
+        Authorized administrators can invite staff users, update profile names, manage role and region access,
+        disable or enable accounts, force password reset, and resend first sign-in invitations.
       </p>
-      <ul>
-        <li><b>View Users:</b> See detailed information about each user, including their ID, name, email, and role.</li>
-        <li><b>Create User:</b> Add a new user to the system by clicking the "Create user" button.</li>
-        <li><b>Modify User:</b> Edit user details by clicking the "Modify" link next to the user.</li>
-        <li><b>Delete User:</b> Remove a user from the system.</li>
-      </ul>
 
-      <h3>Roles</h3>
+      <h3>Participant PATH accounts</h3>
       <p>
-        The Roles section displays a list of all roles in the system. You can perform the following actions:
+        Staff can create missing participant PATH accounts for imported clients and send or resend activation emails
+        when the participant is ready to access the portal.
       </p>
-      <ul>
-        <li><b>View Roles:</b> See detailed information about each role, including its ID, name, and description.</li>
-        <li><b>Create Role:</b> Add a new role to the system by clicking the "Create role" button.</li>
-        <li><b>Modify Role:</b> Edit role details by clicking the "Modify" link next to the role.</li>
-        <li><b>Delete Role:</b> Remove a role from the system.</li>
-      </ul>
 
-      <h3>Filtering and Pagination</h3>
+      <h3>Filtering and table controls</h3>
       <p>
-        Use the filtering options to quickly find specific users or roles. The pagination controls allow you to navigate through the list of users and roles.
+        Use the tab and status filters to focus on accounts needing action. Tables support search, sorting, pagination,
+        column resizing, and visible-column preferences.
       </p>
 
-      <h3>Preferences</h3>
+      <h3>Access guardrails</h3>
       <p>
-        Customize your view by setting preferences for page size, content display, and more.
+        Staff role and region scope comes from Cognito groups plus database-backed staff profile and staff-region
+        assignments. Participant accounts must stay linked to the correct client.
       </p>
-
-      <h3>Learn More</h3>
-      <ul>
-        <li><a href="https://example.com/documentation/user-management">User Management Documentation</a></li>
-        <li><a href="https://example.com/documentation/roles-management">Roles Management Documentation</a></li>
-      </ul>
     </div>
   ),
   users: (

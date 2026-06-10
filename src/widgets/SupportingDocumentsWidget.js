@@ -18,7 +18,8 @@ import {
   StatusIndicator,
   Select,
   Multiselect,
-  Hotspot
+  Hotspot,
+  TextFilter
 } from '@cloudscape-design/components';
 import SupportingDocumentsHelp from '../helpPanelContents/supportingDocumentsHelp';
 import { useCaseWorkspace } from '../pages/Caseworking/caseWorkspace/CaseWorkspaceContext.jsx';
@@ -241,6 +242,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   const [pendingInterventions, setPendingInterventions] = useState([]);
   const [selectedApplicationFilter, setSelectedApplicationFilter] = useState('');
   const [selectedInterventionFilter, setSelectedInterventionFilter] = useState('');
+  const [documentFilteringText, setDocumentFilteringText] = useState('');
   const [interventionSelectionMode, setInterventionSelectionMode] = useState('auto');
   const lastInterventionContextRef = useRef('');
   const [duplicateModalVisible, setDuplicateModalVisible] = useState(false);
@@ -1682,6 +1684,25 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
     [getDocumentSortValue]
   );
 
+  const documentFilteringNeedle = documentFilteringText.trim().toLowerCase();
+  const filteredDocuments = useMemo(() => {
+    if (!documentFilteringNeedle) return Array.isArray(documents) ? documents : [];
+    return (Array.isArray(documents) ? documents : []).filter(item => {
+      const haystack = [
+        item?.label,
+        item?.file_name,
+        item?.document_type_label,
+        formatSourceLabel(item),
+        getDocumentReferenceLabel(item),
+        formatScopeLabel(item?.scope)
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(documentFilteringNeedle);
+    });
+  }, [documents, documentFilteringNeedle, getDocumentReferenceLabel]);
+
   const baseColumnDefinitions = useMemo(
     () => [
       {
@@ -1838,7 +1859,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
   }, [columnDefinitionsForTable, sortingState.columnId]);
 
   const sortedDocuments = useMemo(() => {
-    const next = Array.isArray(documents) ? [...documents] : [];
+    const next = Array.isArray(filteredDocuments) ? [...filteredDocuments] : [];
     const { columnId, isDescending } = sortingState;
     if (!columnId) return next;
     next.sort((a, b) => {
@@ -1846,7 +1867,7 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
       return isDescending ? -result : result;
     });
     return next;
-  }, [documents, sortingState, compareDocuments]);
+  }, [filteredDocuments, sortingState, compareDocuments]);
 
   const activeSortingColumn = useMemo(
     () => columnDefinitionsForTable.find(column => column.id === sortingState.columnId),
@@ -2776,39 +2797,55 @@ const SupportingDocumentsWidget = ({ actions, caseData: propCaseData, toggleHelp
               id: 'documents',
               label: 'Documents',
               content: (
-                <Table
-                  trackBy="id"
-                  loading={loading || refreshing}
-                  loadingText={`Loading ${isCaseDocumentMode ? 'case documents' : 'supporting documents'}`}
-                  variant="embedded"
-                  items={sortedDocuments}
-                  columnDefinitions={columnDefinitionsForTable}
-                  resizableColumns
-                  stickyHeader
-                  enableKeyboardNavigation
-                  sortingColumn={activeSortingColumn || { id: sortingState.columnId }}
-                  sortingDescending={sortingState.isDescending}
-                  onSortingChange={({ detail }) => {
-                    const columnId = detail?.sortingColumn?.id;
-                    if (columnId) {
-                      setSortingState({ columnId, isDescending: detail.isDescending });
+                <SpaceBetween size="s">
+                  <TextFilter
+                    filteringText={documentFilteringText}
+                    onChange={({ detail }) => setDocumentFilteringText(detail.filteringText)}
+                    filteringPlaceholder="Find documents"
+                    countText={
+                      documentFilteringText
+                        ? `${sortedDocuments.length} match${sortedDocuments.length === 1 ? '' : 'es'}`
+                        : undefined
                     }
-                  }}
-                  onColumnWidthsChange={handleColumnWidthsChange}
-                  preferences={preferencesComponent}
-                  submitEdit={handleInlineEdit}
-                  ariaLabels={{
-                    activateEditLabel: (column, item) => `Edit ${item?.label || item?.file_name || 'document'} ${column.header}`,
-                    cancelEditLabel: column => `Cancel editing ${column.header}`,
-                    submitEditLabel: column => `Submit editing ${column.header}`,
-                    tableLabel: isCaseDocumentMode ? 'Case documents' : 'Supporting documents'
-                  }}
-                  empty={
-                    <Box textAlign="center">
-                      {isCaseDocumentMode ? 'No case documents to display.' : 'No supporting documents to display.'}
-                    </Box>
-                  }
-                />
+                  />
+                  <Table
+                    trackBy="id"
+                    loading={loading || refreshing}
+                    loadingText={`Loading ${isCaseDocumentMode ? 'case documents' : 'supporting documents'}`}
+                    variant="embedded"
+                    items={sortedDocuments}
+                    columnDefinitions={columnDefinitionsForTable}
+                    resizableColumns
+                    stickyHeader
+                    enableKeyboardNavigation
+                    sortingColumn={activeSortingColumn || { id: sortingState.columnId }}
+                    sortingDescending={sortingState.isDescending}
+                    onSortingChange={({ detail }) => {
+                      const columnId = detail?.sortingColumn?.id;
+                      if (columnId) {
+                        setSortingState({ columnId, isDescending: detail.isDescending });
+                      }
+                    }}
+                    onColumnWidthsChange={handleColumnWidthsChange}
+                    preferences={preferencesComponent}
+                    submitEdit={handleInlineEdit}
+                    ariaLabels={{
+                      activateEditLabel: (column, item) => `Edit ${item?.label || item?.file_name || 'document'} ${column.header}`,
+                      cancelEditLabel: column => `Cancel editing ${column.header}`,
+                      submitEditLabel: column => `Submit editing ${column.header}`,
+                      tableLabel: isCaseDocumentMode ? 'Case documents' : 'Supporting documents'
+                    }}
+                    empty={
+                      <Box textAlign="center">
+                        {documentFilteringText
+                          ? 'No matching documents.'
+                          : isCaseDocumentMode
+                            ? 'No case documents to display.'
+                            : 'No supporting documents to display.'}
+                      </Box>
+                    }
+                  />
+                </SpaceBetween>
               )
             },
             ...(showChecklistTab

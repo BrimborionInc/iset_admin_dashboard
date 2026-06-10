@@ -52,6 +52,36 @@ variable "log_retention_days" {
   default     = 400
 }
 
+variable "enable_nat_gateway" {
+  description = "Whether TEST private subnets need NAT egress."
+  type        = bool
+  default     = true
+}
+
+variable "single_nat_gateway" {
+  description = "Use one NAT gateway for TEST private subnet egress."
+  type        = bool
+  default     = true
+}
+
+variable "single_nat_gateway_subnet_index" {
+  description = "Public subnet index that hosts the single TEST NAT gateway."
+  type        = number
+  default     = 2
+}
+
+variable "alb_public_subnet_indexes" {
+  description = "Public subnet indexes attached to the TEST ALB. ALB keeps two AZs while runtime capacity is pruned."
+  type        = list(number)
+  default     = [0, 2]
+}
+
+variable "app_private_subnet_indexes" {
+  description = "Private subnet indexes used by the TEST app ASG."
+  type        = list(number)
+  default     = [2]
+}
+
 variable "admin_callback_urls" {
   description = "Hosted UI callback URLs for admin app."
   type        = list(string)
@@ -111,13 +141,31 @@ variable "db_master_username" {
 variable "db_instance_class" {
   description = "Aurora instance class."
   type        = string
-  default     = "db.r6g.large"
+  default     = "db.serverless"
+}
+
+variable "db_serverlessv2_min_capacity" {
+  description = "TEST Aurora Serverless v2 minimum ACU."
+  type        = number
+  default     = 0
+}
+
+variable "db_serverlessv2_max_capacity" {
+  description = "TEST Aurora Serverless v2 maximum ACU."
+  type        = number
+  default     = 256
+}
+
+variable "db_serverlessv2_seconds_until_auto_pause" {
+  description = "TEST Aurora Serverless v2 auto-pause delay."
+  type        = number
+  default     = 3600
 }
 
 variable "db_engine_version" {
   description = "Aurora MySQL engine version."
   type        = string
-  default     = "8.0.mysql_aurora.3.04.0"
+  default     = "8.0.mysql_aurora.3.10.3"
 }
 
 variable "db_backup_retention_days" {
@@ -165,25 +213,25 @@ variable "db_skip_final_snapshot" {
 variable "app_instance_type" {
   description = "EC2 instance type for app tier."
   type        = string
-  default     = "t3.large"
+  default     = "t3.small"
 }
 
 variable "app_min_size" {
   description = "Minimum number of app instances."
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "app_max_size" {
   description = "Maximum number of app instances."
   type        = number
-  default     = 4
+  default     = 1
 }
 
 variable "app_desired_capacity" {
   description = "Desired number of app instances."
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "app_ami_parameter_name" {

@@ -162,9 +162,12 @@ const AllocationPolicyWidget = ({
       </Link>
     ) : undefined;
 
-  const policyItems = Array.isArray(items) ? items : [];
+  const policyItems = useMemo(() => (Array.isArray(items) ? items : []), [items]);
 
-  const selectedCategories = categoryFilter.map(option => option.value);
+  const selectedCategories = useMemo(
+    () => categoryFilter.map(option => option.value),
+    [categoryFilter]
+  );
   const filteredItems = useMemo(() => {
     if (!selectedCategories.length) {
       return policyItems;

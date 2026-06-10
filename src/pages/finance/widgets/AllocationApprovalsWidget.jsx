@@ -8,8 +8,6 @@ import {
   Table,
   Box,
   Select,
-  ColumnLayout,
-  Button,
   StatusIndicator,
   CollectionPreferences,
   Pagination,
@@ -170,7 +168,7 @@ const AllocationApprovalsWidget = ({
       </Link>
     ) : undefined;
 
-  const approvalItems = Array.isArray(items) ? items : [];
+  const approvalItems = useMemo(() => (Array.isArray(items) ? items : []), [items]);
 
   const filteredItems = useMemo(() => {
     return approvalItems.filter(item => {
@@ -302,8 +300,6 @@ const AllocationApprovalsWidget = ({
       actions.removeItem();
     }
   };
-
-  const selected = selectedItems[0];
 
   const applyColumnWidthUpdates = updates => {
     if (!Array.isArray(updates) || !updates.length) {

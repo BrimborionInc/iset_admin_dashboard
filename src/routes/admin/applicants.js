@@ -49,8 +49,26 @@ router.get(
 
       const q = typeof req.query?.q === 'string' ? req.query.q : '';
       const status = typeof req.query?.status === 'string' ? req.query.status : '';
-      const rows = await fetchApplicantAccountRows(pool, { q, status });
-      return res.json({ source: 'client+cases', users: rows });
+      const pageSize = Math.max(1, Math.min(Number(req.query?.pageSize) || 20, 100));
+      const page = Math.max(1, Number(req.query?.page) || 1);
+      const sortField = typeof req.query?.sortField === 'string' ? req.query.sortField : null;
+      const sortDirection = typeof req.query?.sortDirection === 'string' ? req.query.sortDirection : 'asc';
+      const result = await fetchApplicantAccountRows(pool, {
+        q,
+        status,
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+        sortField,
+        sortDirection,
+        includeTotal: true,
+      });
+      return res.json({
+        source: 'client+cases',
+        users: result.rows,
+        total: result.total,
+        page,
+        pageSize,
+      });
     } catch (err) {
       console.warn('[admin-applicants] list failed:', err?.message || err);
       return sendRouteError(res, err, 'admin_applicants_failed');

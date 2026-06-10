@@ -54,6 +54,7 @@ Document requests are recorded on `iset_application` to allow "docs requested" t
 **Sources**
 - Manual toggle in the Application Overview widget (sets `docs_requested_source = 'manual'`).
 - Secure messages with form attachments (sets `docs_requested_source = 'secure_message'` and may still move status to `docs_requested`).
+- Terminal/decision-recorded applications may clear an existing stale document-request flag without reopening the application workflow. Starting a new document request on a terminal application remains blocked.
 
 **Events**
 - `document_request_set` and `document_request_cleared` emitted on toggle/set/clear.

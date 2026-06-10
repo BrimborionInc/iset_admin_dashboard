@@ -95,17 +95,6 @@ const buildRequestHeaders = role => {
   return { Accept: 'application/json' };
 };
 
-const STATUS_FILTERS = {
-  'new-submissions': 'Submitted',
-  'awaiting-ei-validation': 'Awaiting EI Validation',
-  'in-assessment': 'In Review',
-  'on-hold': 'on_hold',
-  'awaiting-decision': 'Pending Approval',
-  'decisions-made': 'Approved', // best-effort; captures approvals even if rejections won't match
-  'awaiting-my-approval': 'Pending Approval',
-  'awaiting-info': 'Docs Requested'
-};
-
 const ApplicationWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
   const [buckets, setBuckets] = useState(() => getBucketTemplate(role));
   const [loading, setLoading] = useState(false);
@@ -162,8 +151,7 @@ const ApplicationWorkQueueWidget = ({ role, refreshKey = 0, actions }) => {
 
   const getBucketLink = (currentRole, bucketId) => {
     const basePath = '/case-assignment-dashboard';
-    const statusFilter = STATUS_FILTERS[bucketId];
-    const query = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
+    const query = `?bucket=${encodeURIComponent(bucketId)}`;
     if (
       currentRole === 'NWAC Administrator' &&
       (bucketId === 'new-submissions' ||

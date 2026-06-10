@@ -11,6 +11,8 @@ locals {
   isolated_subnet_map = { for idx, cidr in var.isolated_subnet_cidrs : tostring(idx) => cidr }
   public_subnet_list  = length(var.public_subnet_cidrs) > 0 ? var.public_subnet_cidrs : [for idx in range(length(var.private_subnet_cidrs)) : cidrsubnet(var.vpc_cidr, 8, idx + 200)]
   public_subnet_map   = { for idx, cidr in local.public_subnet_list : tostring(idx) => cidr }
+  nat_gateway_key     = tostring(var.single_nat_gateway_subnet_index)
+  nat_gateway_map     = var.enable_nat_gateway ? (var.single_nat_gateway ? { (local.nat_gateway_key) = local.public_subnet_map[local.nat_gateway_key] } : local.public_subnet_map) : {}
 }
 
 resource "aws_vpc" "core" {
@@ -75,7 +77,7 @@ resource "aws_subnet" "public" {
 }
 
 resource "aws_eip" "nat" {
-  for_each = var.enable_nat_gateway ? local.public_subnet_map : {}
+  for_each = local.nat_gateway_map
 
   domain = "vpc"
 
@@ -86,7 +88,7 @@ resource "aws_eip" "nat" {
 }
 
 resource "aws_nat_gateway" "this" {
-  for_each = var.enable_nat_gateway ? local.public_subnet_map : {}
+  for_each = local.nat_gateway_map
 
   allocation_id = aws_eip.nat[each.key].id
   subnet_id     = aws_subnet.public[each.key].id
@@ -146,7 +148,7 @@ resource "aws_route" "private_nat" {
 
   route_table_id         = aws_route_table.private[each.key].id
   destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.this[each.key].id
+  nat_gateway_id         = aws_nat_gateway.this[var.single_nat_gateway ? local.nat_gateway_key : each.key].id
 }
 
 resource "aws_route_table" "isolated" {

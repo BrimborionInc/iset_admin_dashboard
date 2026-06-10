@@ -52,6 +52,8 @@ Widget references:
 - ESDC participant submission endpoints.
 - ILMP validation and payload generation.
 - ISET XML validation treats Appendix A of the ESDC Data Exchange Guide as authoritative for gateway-mandatory fields. Do not rely on the main field sections' `Mandatory: No` wording for ISET exports when Appendix A lists the same element as mandatory.
+- ILMP validation messages must be staff-facing. Visible warnings/blockers should state the issue, name the affected ESDC Data Exchange Guide rule or clearly say it is a PATH-only review check, and point to a staff-editable location such as Participant Details, the action-plan label, or the intervention label/date. Do not expose database IDs like `[actionPlan-69]` or `[intervention-123]` in user-facing issue text; keep those only as internal rule/debug identifiers.
+- PATH-only review warnings must not be worded as ESDC gateway failures. The old childcare warning for `No funding received` was removed because ESDC code `5` is valid and there is no guide rule requiring a separate justification field.
 - Participant export history stores the XML snapshot generated at download/export time. The history `XML` view should not be described as live XML based on current client data.
 - Reporting package and notes persistence.
 - Intervention/action-plan close-out rules are status-driven: planned end dates on non-terminal interventions stay out of ILMP close-out XML, while completed/cancelled interventions require end date + outcome.

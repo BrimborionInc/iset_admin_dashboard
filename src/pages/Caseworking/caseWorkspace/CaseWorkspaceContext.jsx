@@ -810,7 +810,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
     } finally {
       setInterventionCodesLoading(false);
     }
-  }, [apiFetch, interventionCodes, interventionCodesLoaded]);
+  }, [interventionCodes, interventionCodesLoaded]);
 
   const loadInterventionOutcomes = useCallback(async () => {
     if (interventionOutcomesLoaded && interventionOutcomes.length > 0) {
@@ -841,7 +841,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
     } finally {
       setInterventionOutcomesLoading(false);
     }
-  }, [apiFetch, interventionOutcomes, interventionOutcomesLoaded]);
+  }, [interventionOutcomes, interventionOutcomesLoaded]);
 
   const loadFundingStreams = useCallback(async () => {
     if (fundingStreamsLoaded && fundingStreams.length > 0) {
@@ -873,7 +873,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
     } finally {
       setFundingStreamsLoading(false);
     }
-  }, [apiFetch, fundingStreams, fundingStreamsLoaded]);
+  }, [fundingStreams, fundingStreamsLoaded]);
 
   const loadNocVersions = useCallback(async () => {
     if (nocVersionsLoaded && nocVersions.length > 0) {
@@ -905,7 +905,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
     } finally {
       setNocVersionsLoading(false);
     }
-  }, [apiFetch, nocVersions, nocVersionsLoaded]);
+  }, [nocVersions, nocVersionsLoaded]);
 
   const searchNocCodes = useCallback(
     async ({ query, version }) => {
@@ -928,7 +928,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
           })).filter(item => item.code && item.version && item.title)
         : [];
     },
-    [apiFetch]
+    []
   );
 
   const updateActionPlan = useCallback(async (actionPlanId, payload) => {
@@ -957,7 +957,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
     const data = await response.json();
     markCompliancePending();
     return data;
-  }, [apiFetch, markCompliancePending]);
+  }, [markCompliancePending]);
 
   const upsertActionPlanReviewReminder = useCallback(
     async (plan, reviewDate) => {
@@ -1029,7 +1029,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
       }
       return null;
     },
-    [apiFetch, caseId, resolveCaseIdentifier, state.caseData]
+    [caseId, resolveCaseIdentifier, state.caseData]
   );
 
   const createIntervention = useCallback(
@@ -1090,7 +1090,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
       });
       return intervention;
     },
-    [apiFetch, markCompliancePending]
+    [markCompliancePending]
   );
 
   const reviseIntervention = useCallback(
@@ -1167,7 +1167,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
       });
       return intervention;
     },
-    [apiFetch, markCompliancePending]
+    [markCompliancePending]
   );
 
   const updateIntervention = useCallback(
@@ -1249,7 +1249,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
       });
       return intervention;
     },
-    [apiFetch, markCompliancePending]
+    [markCompliancePending]
   );
 
   const closeIntervention = useCallback(
@@ -1304,7 +1304,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
       });
       return intervention;
     },
-    [apiFetch, markCompliancePending]
+    [markCompliancePending]
   );
 
   const runComplianceChecks = useCallback(async () => {
@@ -1369,7 +1369,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
     }
 
     return mappedCompliance;
-  }, [caseId, apiFetch, loadCase]);
+  }, [caseId, loadCase]);
 
   const prepareIlmpExport = useCallback(async () => {
     if (!caseId) {
@@ -1432,7 +1432,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
     });
 
     return { compliance: compliancePayload, payload: exportPayload };
-  }, [caseId, apiFetch]);
+  }, [caseId]);
 
   const markReadyToClose = useCallback(async () => {
     if (!caseId) {
@@ -1487,7 +1487,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
       };
     });
     return detail;
-  }, [apiFetch, caseId]);
+  }, [caseId]);
 
   const closeCase = useCallback(async () => {
     if (!caseId) {
@@ -1529,7 +1529,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
       };
     });
     return detail;
-  }, [apiFetch, caseId]);
+  }, [caseId]);
 
   const reopenCase = useCallback(async () => {
     if (!caseId) {
@@ -1571,7 +1571,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
       };
     });
     return detail;
-  }, [apiFetch, caseId]);
+  }, [caseId]);
 
   const archiveCase = useCallback(async () => {
     if (!caseId) {
@@ -1612,7 +1612,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
       };
     });
     return detail;
-  }, [apiFetch, caseId]);
+  }, [caseId]);
 
   const createActionPlan = useCallback(
     async plan => {
@@ -1779,7 +1779,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
       };
     });
     return details || {};
-  }, [apiFetch, markCompliancePending, setState]);
+  }, [markCompliancePending, setState]);
 
   const fetchActionPlanContext = useCallback(async () => {
     const response = await apiFetch(`/api/cases/${caseId}/action-plan/context`, {
@@ -1842,7 +1842,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
       });
       return payload ?? null;
     },
-    [apiFetch, caseId]
+    [caseId]
   );
 
   const contextValue = useMemo(() => ({

@@ -357,7 +357,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
     } finally {
       setPotLoading(false);
     }
-  }, [apiFetch]);
+  }, []);
 
   const fundingStreamSelectOptions = useMemo(() => {
     const formatted = (Array.isArray(fundingStreams) ? fundingStreams : []).map(item => {
@@ -488,7 +488,7 @@ const ActionPlanDetailsModal = ({ visible, plan, onDismiss, onSaved }) => {
     setFundingExpanded(true);
     setApplicantExpanded(true);
     setCloseoutExpanded(false);
-  }, [visible, plan, loadFundingStreams, participantProvince]);
+  }, [visible, plan, loadFundingStreams, loadPots, participantProvince]);
 
   // Reload budget pots when funding stream or participant province changes so filtering stays current.
   useEffect(() => {

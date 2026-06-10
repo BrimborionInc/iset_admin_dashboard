@@ -1,7 +1,7 @@
 # PATH Deployment Quick Guide
 
 Status: current primary operator guide for normal TEST/PROD PATH deploys.
-Last reviewed: 2026-05-25 after adding the PROD bug/CR feedback reconciliation closeout gate; command names checked against current `package.json`.
+Last reviewed: 2026-06-08 after TEST cost-pruning; command names checked against current `package.json`.
 
 This is the shortest operator guide for normal PATH deployments.
 
@@ -31,6 +31,7 @@ Daily coding/Codex work and deployments now happen from the WSL workspace `/home
 - TEST deploys require `--yes` only when you include `--refresh-test-db`.
 - Deploys do not auto-bump `package.json` semver; instead, each frontend build now carries a visible release/build stamp.
 - TEST app deploys package the current WSL working tree and sibling WSL portal/shared trees. If you mean "deploy only the staged subset," isolate unrelated local edits before running `path:deploy`; the deploy artifact is not limited to the Git index.
+- TEST is currently cost-pruned. Expect one healthy `nwac-test-asg` app instance, one NAT gateway, and target-group smokes with one registered admin target plus one registered portal target. Do not treat a one-target TEST smoke as incomplete; the deploy and SQL helpers auto-discover the current ASG/SSM host(s).
 - TEST app rollouts should rehearse PROD user-facing maintenance behavior. Any TEST deploy that can restart app processes, make a surface unavailable, or produce transient `502 Bad Gateway` responses needs a scoped warning first and the affected surface behind the ALB maintenance page before deploy starts. TEST remains less strict than PROD because ordinary app deploys do not require `--yes`, but raw 502s are not an acceptable planned TEST experience. TEST maintenance copy must use the user-facing name `Test and Training environment` and explicitly state that Production is not affected.
 - PROD app rollouts are user-impacting unless the plan proves otherwise. Any PROD deploy that refreshes ASG instances, restarts app processes, rotates target groups, or can produce transient `502 Bad Gateway` responses needs a scoped warning first and the affected surface behind the ALB maintenance page before deploy starts, even if it is admin-only, portal-only, or code-only.
 - Operator checklist rule: before running `path:deploy`, state the exact maintenance sequence. For TEST in-place app rollouts that restart admin or portal, use `warning -> wait -> ALB 503 fallback -> deploy -> clear fallback -> smoke normal routing -> clear warning`. For PROD ASG-refresh rollouts, use the ALB fallback for the cutover risk, but clear it if the instance refresh waits on ELB health with `Target.NotInUse` / `insufficient data`; target groups must be in normal forwarding to become healthy. Do not treat the in-app warning as a substitute for the ALB fallback when target health may drop, but keep the in-app warning active until normal-routing smoke passes.

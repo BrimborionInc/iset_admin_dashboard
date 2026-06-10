@@ -655,7 +655,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         );
       },
     }),
-    [handleCaseAction, canManageAssignments]
+    [canManageAssignments, handleCaseAction]
   );
 
   const columnsToRender = useMemo(() => {
@@ -667,8 +667,12 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         const sortableColumn = { ...column, sortingField: column.id };
         return storedWidth ? { ...sortableColumn, width: storedWidth.width } : sortableColumn;
       });
-    return columns;
-  }, [preferences.visibleColumns, columnWidths]);
+    const storedActionWidth = columnWidths.find(entry => entry.id === actionsColumn.id);
+    return [
+      ...columns,
+      storedActionWidth ? { ...actionsColumn, width: storedActionWidth.width } : actionsColumn,
+    ];
+  }, [actionsColumn, preferences.visibleColumns, columnWidths]);
 
   const activeSortingColumn = useMemo(
     () => columnsToRender.find(column => column.id === sortingState.columnId),

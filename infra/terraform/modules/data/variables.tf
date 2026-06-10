@@ -48,6 +48,24 @@ variable "instance_class" {
   default     = "db.r6g.large"
 }
 
+variable "serverlessv2_min_capacity" {
+  description = "Aurora Serverless v2 minimum ACU. Leave null for provisioned clusters."
+  type        = number
+  default     = null
+}
+
+variable "serverlessv2_max_capacity" {
+  description = "Aurora Serverless v2 maximum ACU. Leave null for provisioned clusters."
+  type        = number
+  default     = null
+}
+
+variable "serverlessv2_seconds_until_auto_pause" {
+  description = "Seconds before Aurora Serverless v2 auto-pauses when min capacity is 0. Leave null to omit."
+  type        = number
+  default     = null
+}
+
 variable "backup_retention_days" {
   description = "Automated backup retention period."
   type        = number

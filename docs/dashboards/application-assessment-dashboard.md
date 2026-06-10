@@ -2,8 +2,8 @@
 
 Author: system assistant
 Created: 2025-09-20
-Last reviewed for stale model references: 2026-04-29
-Status: partially current dashboard reference. Verify against source before relying on entity-model details.
+Last reviewed for stale model references: 2026-06-10
+Status: current for dashboard composition, first-pass shell/widget review, and deterministic browser coverage of the main Application Assessment workflow path. Continue targeted cleanup of the recorded Supporting Documents React key warning before broad refactors.
 
 ## Purpose
 Operational dashboard for reviewing and adjudicating individual ISET applications. The route remains case-keyed (`/application-case/:id`) and resolves application context from the current case/application relationship.
@@ -16,9 +16,9 @@ Operational dashboard for reviewing and adjudicating individual ISET application
 | Application Overview | `src/widgets/ApplicationOverviewWidget.js` | Case header with status badge, manual status selector for `System Administrator` and `NWAC Administrator` users (others see a read-only badge), `Quick layouts` for Review application / Documents and messages / Notes and case calendar / View audit trail, `Quick actions` for mutating workflow actions, and stage-aware timeline status. The timeline badge now routes files through `Assignment -> EI Status Verification -> Assessment -> Program decision` based on assignment state, application status, and `assessment_esdc_eligibility`. |
 | ISET Application Form | `src/widgets/IsetApplicationFormWidget.js` | Read-only or lock-protected edit view of the submitted application; version history and restore; edit disabled when decision final or status=withdrawn. |
 | Application Assessment | `src/widgets/CoordinatorAssessmentWidget.js` | Assessment workflow (declaration, recommendations, NWAC review) with status progression rules and locking; submits to `/api/cases/:id`. |
-| Supporting Documents | `src/widgets/SupportingDocumentsWidget.js` | Unified document list across submissions and secure messages; refresh control. |
-| Secure Messaging | `src/widgets/SecureMessagingWidget.js` | Inbox/Sent/Deleted tabs, thread view, compose/reply with attachment support. |
-| Notes and Tasks | `src/widgets/CaseNotesWidget.js` | Case notes and lightweight tasks (current implementation surface). |
+| Supporting Documents | `src/widgets/SupportingDocumentsWidget.js` | Unified document list across submissions and secure messages; text search over document metadata, sortable/resizable table, preferences, and refresh control. |
+| Secure Messaging | `src/widgets/SecureMessagingWidget.js` | Inbox/Sent/Deleted tabs, sortable/resizable message tables, thread view, compose/reply with attachment support. |
+| Notes and Reminders | `src/widgets/CaseNotesWidget.js` | Case notes, reminders, and refresh control. |
 | Case Calendar | `src/widgets/CaseCalendarWidget.js` | Calendar/list view of reminders and deadlines; supports demo mode when live reminders unavailable. |
 | Application Events | `src/widgets/applicationEvents.js` | Timeline of events such as `status_changed`, submissions, document updates. |
 
@@ -41,6 +41,15 @@ Operational dashboard for reviewing and adjudicating individual ISET application
 - Current milestone model remains submission-based. The stage changes with status/eligibility, but due dates are still measured from the original application submission/creation timestamp until a dedicated stage-timestamp model exists.
 - `Awaiting EI Validation` is not a standalone stored application status. It is a derived qualifier driven by an assigned file with no recorded `assessment_esdc_eligibility`.
 
+## Local Browser Smokes
+
+- `npm run smoke:application-overview:browser` covers the Application Overview Docs Requested toggle and stale selected-application row-version conflict regression.
+- `npm run smoke:application-workspace:browser` covers the default Application Workspace render, idle API settling, Supporting Documents search, Secure Messaging sort toggling, and Notes refresh behavior.
+- `npm run smoke:application-assessment:workflow:browser` covers conflict declaration signing, coordinator assessment submission, NWAC approval decision commit, approval-letter send with application-scoped context, and funding-documents completion.
+
+The 2026-06-10 workspace review found the default widget set is task-appropriate for application assessment, but the default board remains very scroll-heavy and the route-level `Job Search`, `Add widget`, and `Reset layout` controls still make the page feel more like a generic configurable dashboard than a focused casework workspace. Treat changing that chrome/default layout as a product decision rather than a silent cleanup.
+The 2026-06-10 workflow smoke also caught and fixed a React render-phase warning in row-version propagation: `CoordinatorAssessmentWidget` must call the parent row-version updater outside its child state updater.
+
 ## Key Decisions (chronological)
 1. Immutable vs mutable application data: `iset_application_submission` immutable; `iset_application.payload_json` mutable with patch endpoint for answers.
 2. Added `schema_snapshot` to submission to map values to labels historically.
@@ -55,6 +64,8 @@ Operational dashboard for reviewing and adjudicating individual ISET application
 | Decision capture | Data model for decisions, audit trail | dev | Pending |
 | Events/timeline | Source of case/application events for timeline | dev | Pending |
 | Document deletion propagation | Sync portal deletions to admin docs | dev | Pending |
+| Workspace React key warning | `npm run smoke:application-workspace:browser` records a unique-key warning from `SupportingDocumentsWidget` modal/`SpaceBetween` composition during workspace render. Target this widget in a future UI cleanup pass. | dev | Pending |
+| Default workspace layout/chrome | Decide whether Application Workspace should keep global board customization controls and the full vertical default board, or move toward task-focused presets/defaults. | product/dev | Pending |
 
 ## Editing Guidelines
 - Update this document when adding/removing widgets or making structural dashboard decisions.

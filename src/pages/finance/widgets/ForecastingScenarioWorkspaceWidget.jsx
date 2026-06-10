@@ -131,7 +131,7 @@ const ForecastingScenarioWorkspaceWidget = ({ actions = {}, metadata = {}, toggl
     }
   };
 
-  const adjustments = activeScenario?.adjustments ?? [];
+  const adjustments = useMemo(() => activeScenario?.adjustments ?? [], [activeScenario?.adjustments]);
 
   useEffect(() => {
     setCurrentPageIndex(1);

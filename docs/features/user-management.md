@@ -1,12 +1,12 @@
 # User Management Overview
 
-_Last updated: 2 May 2026_
+_Last updated: 10 June 2026_
 
 ## High-level flow
 
-* The Manage Users dashboard (`src/pages/manageUsers.js`) now has two operational areas:
-  - `Administrative Users` for staff/admin Cognito group management
-  - `Applicant Accounts` for imported participant account creation, invitation, and activation tracking
+* The Manage Users dashboard (`src/pages/manageUsers.js`) has two operational areas:
+  - `Staff access` for staff/admin Cognito group management, region access, MFA/pending-sign-in triage, and account state changes
+  - `Participant PATH accounts` for imported participant account creation, activation email sending, and activation tracking
 * Staff/admin CRUD actions call `/api/admin/users…` endpoints implemented in `src/routes/admin/users.js`.
 * Applicant-account actions call `/api/admin/applicants…` endpoints implemented in `src/routes/admin/applicants.js`.
 * Legacy generic `/api/users` shared-table endpoints are retired. Do not use the mixed `user` table as a staff/applicant directory surface.
@@ -16,40 +16,44 @@ _Last updated: 2 May 2026_
 ## Front-end behaviour
 
 ### Data loading
-* On mount the dashboard calls `GET /api/admin/users`.
+* On mount the dashboard calls `GET /api/admin/users` for staff access and `GET /api/admin/applicants` for participant PATH accounts when the current role can access those areas.
 * Results come directly from Cognito groups, but the server now scopes the list to the admin roles the current actor is allowed to manage. For example, Regional Managers see only ISET Coordinators in this dashboard.
-* The UI applies local filtering, searching (debounced), quick filters, and renders a board with metrics/audit log panels.
+* Staff access uses a stable table-first layout, not the configurable dashboard board pattern. Staff rows are locally searched, quick-filtered, sorted, paginated, and resized against the full manageable Cognito result set returned by the API.
+* Participant PATH accounts use visible status filters plus server-side search, sort, and pagination so the backend applies ordering before returning the row-limited page.
 
 ### Actions available from the page
-* **Create user** – opens a modal requiring email + name + role (display name optional), optional region (for regional roles). On submit:
+* **Create user** - opens a modal requiring email + name + role (display name optional), optional region (for regional roles). On submit:
   - POST `/api/admin/users`
   - Creates the Cognito user with `email_verified=true`, adds the user to the requested group, and persists staff-region access in the database-backed staff profile model.
   - Seeds `staff_profiles` with `name`/`display_name` at creation time (keyed by Cognito `sub`) to avoid NULL identity fields before first sign-in.
   - The grid is optimistically updated, and an audit entry is appended.
-* **Disable / Enable** – calls `PATCH /api/admin/users/:username/disable|enable`. The toolbar now enables these buttons only for rows in a matching state (`Enable` for disabled accounts, `Disable` for active/pending ones).
-* **Remove role** – `DELETE /api/admin/users/:username/role`. The backend removes all admin-role groups currently attached to the user so stray multi-group states are cleaned up.
-* **Force password reset** – `PATCH /api/admin/users/:username/force-reset`. This is intended for active accounts; users already in `FORCE_CHANGE_PASSWORD` should use `Resend invite` instead.
-* **Resend invite** – `POST /api/admin/users/:username/resend-invite`. This now performs a real Cognito resend for users still in `FORCE_CHANGE_PASSWORD`, using Cognito `AdminCreateUser` with `MessageAction: RESEND`.
-* **Change role** – opens a modal calling `PATCH /api/admin/users/:username/role`, removing all current admin-role groups and adding the selected new one.
-* **Edit profile name** – when one Administrative Users row is selected, the Profile tab lets staff edit the DB-backed `staff_profiles.name` and `staff_profiles.display_name` values through `PATCH /api/admin/users/:username/profile`.
+* **Disable / Enable** - calls `PATCH /api/admin/users/:username/disable|enable`. The toolbar enables these buttons only for rows in a matching state (`Enable` for disabled accounts, `Disable` for active/pending ones).
+* **Remove role** - `DELETE /api/admin/users/:username/role`. The backend removes all admin-role groups currently attached to the user so stray multi-group states are cleaned up.
+* **Force password reset** - `PATCH /api/admin/users/:username/force-reset`. This is intended for active accounts; users already in `FORCE_CHANGE_PASSWORD` should use `Resend invite` instead.
+* **Resend invite** - `POST /api/admin/users/:username/resend-invite`. This performs a real Cognito resend for users still in `FORCE_CHANGE_PASSWORD`, using Cognito `AdminCreateUser` with `MessageAction: RESEND`.
+* **Change role** - opens a modal calling `PATCH /api/admin/users/:username/role`, removing all current admin-role groups and adding the selected new one.
+* **Edit profile name** - when one Staff access row is selected, the Profile tab lets staff edit the DB-backed `staff_profiles.name` and `staff_profiles.display_name` values through `PATCH /api/admin/users/:username/profile`.
 * Role change and creation forms show only the roles the current actor is allowed to manage, and enforce entering a region for regional roles.
 * Flashbar errors now show the route `detail` message returned by the API instead of generic HTTP-only failures.
 
-### Applicant Accounts tab
+### Participant PATH accounts tab
 * Lists imported or linked applicants by client/case context instead of raw Cognito rows.
 * Visible workflow statuses are:
   - `No account`
   - `Ready to invite`
   - `Invitation sent`
   - `Activated`
-* **Create account** – silently creates or links the applicant Cognito account and local `user` row with no email sent.
-* **Send activation / Resend activation** – PATH sends a branded activation email; the portal then uses the forgot-password APIs behind an activation-specific UI.
-* `Application Assessor` users can access the dashboard for the `Applicant Accounts` tab even though they do not have access to staff-user administration.
+* **Create account** - silently creates or links the applicant Cognito account and local `user` row with no email sent.
+* **Send activation / Resend activation** - PATH sends a branded activation email; the portal then uses the forgot-password APIs behind an activation-specific UI.
+* ISET Coordinators can access this tab even though they do not have access to staff-user administration.
 * The tab is currently the PATH management surface for imported applicant accounts; case-workspace quick actions are still a later extension, not part of the first implementation.
 
 ### UX affordances
-* The table reflects loading/pending states (`pendingRoutes`) while requests are in flight.
-* Flashbar notifications report success/error; an in-memory audit log records recent actions.
+* Both operational tables support search, sortable columns, pagination, column resizing, and visible-column/page-size preferences.
+* Staff access quick filters expose common access-management queues: disabled, pending first sign-in, missing MFA, administrator roles, recently active, and never signed in.
+* Participant PATH accounts expose status filters directly on the page instead of relying only on URL query parameters.
+* Flashbar notifications report success/error; recent changes are shown only for the current browser session after an action occurs.
+* The route uses `src/helpPanelContents/userManagementHelp.js` for dashboard-specific help-panel and AI context.
 
 ## Back-end logic (`src/routes/admin/users.js`)
 
@@ -79,9 +83,9 @@ ISET Coordinator     → cannot manage administrative users
 ## Applicant account lifecycle (`src/routes/admin/applicants.js`)
 
 ### Endpoints
-* **GET /applicants** – lists client-linked applicant accounts with case, region, case manager, and PATH activation status.
-* **POST /applicants/:clientId/create-account** – creates or links the applicant Cognito account silently and seeds/links the local `user` row.
-* **POST /applicants/:clientId/send-activation** – sends PATH’s activation email and moves the linked client to `invitation_sent`.
+* **GET /applicants** - lists client-linked applicant accounts with case, region, case manager, and PATH activation status. Supports `q`, `status`, `page`, `pageSize`, `sortField`, and `sortDirection`; the service applies filtering and safe whitelisted ordering before `LIMIT/OFFSET` and returns `total` metadata.
+* **POST /applicants/:clientId/create-account** - creates or links the applicant Cognito account silently and seeds/links the local `user` row.
+* **POST /applicants/:clientId/send-activation** - sends PATH's activation email and moves the linked client to `invitation_sent`.
 
 ### Import behavior
 * Client-file import now attempts silent applicant account creation only when the row has one clean email value.

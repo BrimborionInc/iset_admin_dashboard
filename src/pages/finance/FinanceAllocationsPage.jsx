@@ -220,7 +220,6 @@ const FinanceAllocationsPageContent = ({
     approveAllocation,
     rejectAllocation,
     applyAllocation,
-    scheduleAllocation,
   } = useAllocationsData();
   const [layout, setLayout] = useState(() => loadLayoutFromStorage() ?? defaultLayout);
   const [prefillRequest, setPrefillRequest] = useState(null);

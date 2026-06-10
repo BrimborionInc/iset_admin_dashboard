@@ -15,7 +15,7 @@ Process a submitted application from triage through assessment, recommendation, 
 - Application Assessment
 - Supporting Documents
 - Secure Messaging
-- Notes and Tasks
+- Notes and Reminders
 - Case Calendar
 - Events Timeline
 

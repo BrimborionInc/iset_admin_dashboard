@@ -297,16 +297,13 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
   const {
     caseData,
     saveCaseContext,
-    nocVersions: contextNocVersions,
-    nocVersionsLoading: contextNocVersionsLoading,
-    loadNocVersions: loadContextNocVersions,
     searchNocCodes,
   } = useCaseWorkspace();
-  const caseContext = caseData?.caseContext || {};
-  const answers =
-    caseContext.applicationAnswers ||
-    caseContext.applicationPayload?.answers ||
-    {};
+  const caseContext = useMemo(() => caseData?.caseContext || {}, [caseData?.caseContext]);
+  const answers = useMemo(
+    () => caseContext.applicationAnswers || caseContext.applicationPayload?.answers || {},
+    [caseContext.applicationAnswers, caseContext.applicationPayload?.answers]
+  );
   const [nocSuggestions, setNocSuggestions] = useState([]);
   const [nocSuggestionsLoading, setNocSuggestionsLoading] = useState(false);
   const [programNocSuggestions, setProgramNocSuggestions] = useState([]);
@@ -814,7 +811,7 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
       expensesParking: caseContext.expensesParking ?? readAnswer("expenses-parking") ?? "",
       expensesOtherTotal: caseContext.expensesOtherTotal ?? readAnswer("expenses-other-total") ?? "",
     };
-  }, [caseContext]);
+  }, [answers, caseContext]);
 
   // Clear employment details if status no longer warrants them
   useEffect(() => {
@@ -923,8 +920,6 @@ const ParticipantDetailsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel
     () => languageSpokenOptions.find(opt => opt.value === (form.languageSpoken || "")) || languageSpokenOptions[0],
     [form.languageSpoken]
   );
-  // Back-compat guard for prior "preferred language" reference
-  const selectedPreferredLanguage = selectedLanguageSpoken;
   const selectedVisibleMinority = useMemo(
     () => yesNoOptions.find(opt => opt.value === (form.visibleMinority || "")) || yesNoOptions[0],
     [form.visibleMinority]

@@ -43,6 +43,8 @@ Last reviewed for documentation cleanup: 2026-04-29.
 - Client Batch Import backend execution paths are `POST /api/imports/client-files/dry-run` and `POST /api/imports/client-files/commit` in `isetadminserver.js`.
 - The importer targets real `client` + application-less `iset_case` records and seeds `case_context_json`; it does not fabricate applications or applicant accounts.
 ### Workflow Studio (authoring)
+- Manage Intake Steps / Manage Components page (`src/pages/manageIntakeSteps.js`) is mounted at `/manage-components` and composes Intake Step Library, Preview, and Step JSON widgets. Its board layout persists in localStorage key `manage-components-board-layout-v2`; local smoke: `npm run smoke:manage-components:browser`.
+- Modify Intake Step editor (`src/pages/modifyIntakeStep.js`) is mounted at `/modify-component/:id`; it owns the searchable component library, GOV.UK working-area preview, properties/translations/validation/conditional-visibility side panel, and step save/copy/delete actions. Local smoke: `npm run smoke:modify-component:browser`.
 - Manage Workflows page (`src/pages/manageWorkflows.js`) composes widgets: Workflow Library (lists `/api/workflows`), Workflow Properties, Workflow Preview, Runtime Schema.
 - Editor (`src/pages/modifyWorkflow.js`) wires IntakeStepLibrary, WorkflowCanvas, StepProperties, WorkflowPropertiesEditor; canvas draft persists in `sessionStorage` (`mw:steps-v1`); save/load via `/api/workflows`.
 - Templates live in `src/component-lib/` (+ schemas); server syncs them on startup; `StepPropertiesWidget` forms are driven by `prop_schema`. See `docs/guides/workflow-studio.md` for details.

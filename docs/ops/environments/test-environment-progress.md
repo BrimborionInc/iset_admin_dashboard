@@ -1,7 +1,7 @@
 # NWAC Test Environment - Current Progress (2025-10-08)
 
 Status: historical TEST environment build/progress log. Do not treat embedded resource state as current without live AWS verification.
-Last reviewed: 2026-04-29 during ops documentation cleanup; literal DB credential redacted.
+Last reviewed: 2026-06-08 after TEST cost-pruning; literal DB credential redacted.
 
 This log captures the state of the infrastructure setup so work can resume quickly if the session is interrupted.
 
@@ -13,6 +13,16 @@ This log captures the state of the infrastructure setup so work can resume quick
   - `nwac-public-test.awentech.ca` -> `0 issue "amazon.com"`
 - ACM certificate issued and in use: `arn:aws:acm:ca-central-1:124355655255:certificate/427d2bf9-5869-47cc-aa90-1f30e66b88a4`
   - Validation method: DNS (CNAMEs already added at registrar).
+
+## Current Cost-Pruned Shape (2026-06-08)
+- TEST is no longer intended to rehearse a two-instance, three-NAT, three-AZ runtime topology. Keep TEST inexpensive unless a specific rehearsal requires temporarily scaling it back up.
+- Live TEST was pruned on 2026-06-08:
+  - ASG `nwac-test-asg`: min/desired/max `1`, constrained to private subnet `subnet-0806c0c17fb286162` (`ca-central-1d`), running instance `i-0a8be782ed8604211` (`t3.small`).
+  - NAT: only `nwac-test-nat-2` / `nat-055caa7ca6e0e0e74` remains in public subnet `subnet-04d8965bc390a8686` (`ca-central-1d`); all private route tables send `0.0.0.0/0` through that NAT.
+  - Removed NAT gateways `nat-0e7985e0a277a4b5f` and `nat-09c8c9d1ec970f602`; released their EIPs plus two previously idle unassociated EIPs.
+  - ALB `nwac-test-alb` is attached to two public subnets (`subnet-0b593d6252c11dc37` in `ca-central-1a`, `subnet-04d8965bc390a8686` in `ca-central-1d`) because keeping an ALB healthy should not be modeled as a one-subnet resource.
+  - Aurora `nwac-test-db` remains Aurora Serverless v2 with instance `nwac-test-db-1` in `ca-central-1d`; the DB subnet group still spans multiple isolated subnets because subnet groups are not a meaningful cost driver.
+- Terraform defaults were updated to preserve this pruned TEST shape: one NAT gateway at subnet index `2`, app subnet index `[2]`, ALB public subnet indexes `[0, 2]`, `t3.small`, and ASG min/desired/max `1`.
 
 ## Terraform Status (2025-10-08 16:35 EDT)
 - Full `terraform apply -auto-approve -var-file=nwac-test.tfvars` completed successfully.
@@ -33,7 +43,7 @@ This log captures the state of the infrastructure setup so work can resume quick
 
 ### Supporting Resources
 - VPC `vpc-0e3ebaa9d1dfb6d9e` with three AZ layout (public/private/isolated).
-- NAT gateways / EIPs provisioned per AZ.
+- Current cost-pruned routing uses one NAT gateway/EIP in `ca-central-1d`; older per-AZ NAT notes are historical only.
 - GuardDuty detector `f65cb6aedb6d4441a765c954d26af189`, Access Analyzer `nwac-test-access-analyzer`.
 - KMS keys created for data, logging, identity, general purposes (aliases `alias/nwac-test/*`).
 
@@ -55,10 +65,14 @@ This log captures the state of the infrastructure setup so work can resume quick
 
 ### Validation
 - ALB target-group health is the reliable operator signal for TEST (`nwac-test-admin-tg` on `5001`, `nwac-test-portal-tg` on `5000`). As re-verified on 2026-04-04, unauthenticated public requests to `nwac-console-test.awentech.ca/healthz` and `nwac-public-test.awentech.ca/healthz` currently return `403`, so Codex/operator smoke checks should use target-group health instead of public curl.
+- Post-prune verification on 2026-06-08: `path:deploy:smoke` reported one healthy admin target (`i-0a8be782ed8604211:5001`) and one healthy portal target (`i-0a8be782ed8604211:5000`); `run-test-sql-via-ssm.sh` selected the same host and returned `SELECT 1` from `iset_intake`.
+- Live AWS readback on 2026-06-08 showed ASG min/desired/max `1`, all private route-table defaults pointing to `nat-055caa7ca6e0e0e74`, ALB subnets and service ENIs limited to `subnet-04d8965bc390a8686` / `ca-central-1d` and `subnet-0b593d6252c11dc37` / `ca-central-1a`, and Aurora `nwac-test-db-1` `db.serverless` available in `ca-central-1d`.
 - pm2 on refreshed nodes shows `nwac-admin` and `nwac-portal` online with no MODULE_NOT_FOUND errors; admin error log down to the AI-key warning only.
 
-### Outstanding Follow-ups
-1. Allow the ASG instance refresh to finish; confirm ALB target groups report all instances `healthy`.
+### Historical Outstanding Follow-ups
+These 2025 bootstrap follow-ups are retained for context. Verify live AWS and current runbooks before acting on them.
+
+1. Allow the ASG instance refresh to finish; confirm ALB target groups report all registered target(s) `healthy`.
 2. Once stable, prune temporary SSM diagnostic outputs in S3 (if any) and ensure `BaselineDump.sql` is versioned/archived as the canonical seed.
 3. Run a Terraform apply to record the new launch-template user data in state (plan currently shows in-place updates for LT/ASG/SG).
 4. Build a scripted deploy (PowerShell/CI) that packages artifacts, uploads to S3, and triggers either SSM bootstrap reruns or an ASG instance-refresh.

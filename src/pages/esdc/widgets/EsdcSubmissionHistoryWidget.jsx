@@ -53,7 +53,7 @@ const EsdcSubmissionHistoryWidget = ({
     );
   }, [metadata?.helpComponent, metadata?.helpTitle, metadata?.aiContext, toggleHelpPanel]);
 
-  const historyItems = Array.isArray(history) ? history : [];
+  const historyItems = useMemo(() => (Array.isArray(history) ? history : []), [history]);
 
   const totalPages = Math.max(1, Math.ceil(historyItems.length / pageSize));
 

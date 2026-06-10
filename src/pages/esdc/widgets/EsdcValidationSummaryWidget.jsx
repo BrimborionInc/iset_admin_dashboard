@@ -10,8 +10,7 @@ import {
   Link,
   ProgressBar,
   Button,
-  Alert,
-  KeyValuePairs
+  Alert
 } from '@cloudscape-design/components';
 import { boardItemI18nStrings } from './common';
 import { apiFetch } from '../../../auth/apiClient';
@@ -57,13 +56,6 @@ const EsdcValidationSummaryWidget = ({
     }
     return rawSummary;
   }, [rawSummary]);
-
-  const formatDateTime = useCallback((value) => {
-    if (!value) return 'Never validated';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleString();
-  }, []);
 
   const handleValidate = useCallback(async () => {
     if (!submission?.id || validating) return;

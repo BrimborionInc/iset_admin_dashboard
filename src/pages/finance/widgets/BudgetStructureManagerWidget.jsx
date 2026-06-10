@@ -16,7 +16,6 @@ import {
   Box,
   Button,
   Container,
-  StatusIndicator,
   ColumnLayout,
   Table,
   Modal,
@@ -128,65 +127,23 @@ const formatCurrencyDisplay = value => {
   return `$${num.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
-const draftColumns = [
-  {
-    id: "summary",
-    header: "Change",
-    cell: item => item.summary,
-  },
-  {
-    id: "type",
-    header: "Type",
-    cell: item => item.type,
-  },
-  {
-    id: "timestamp",
-    header: "Recorded",
-    cell: item => item.timestamp,
-  },
-];
-
-const snapshotColumns = [
-  {
-    id: "label",
-    header: "Snapshot",
-    cell: item => item.label,
-  },
-  {
-    id: "capturedOn",
-    header: "Captured",
-    cell: item => item.capturedOn,
-  },
-  {
-    id: "capturedBy",
-    header: "Captured by",
-    cell: item => item.capturedBy,
-  },
-];
-
 const BudgetStructureManagerWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const {
     selectedPotId,
     selectPot,
     selectedDraftId,
     setSelectedDraftId,
-    selectedDraft,
-    selectedDraftFiscalYear,
     selectedDraftPots,
     selectedPotSource,
     draftCreateOrUpdatePot,
-    draftArchivePot,
     draftDeletePot,
     saveDraftPayload,
-    draftChanges,
     drafts,
     createDraft,
     deleteDraft,
-    publishDraft,
     deleteSnapshot,
     restoreSnapshotAsDraft,
     snapshots,
-    createSnapshot,
     activeVersion,
     reload,
   } = useBudgetsData();
@@ -196,7 +153,6 @@ const [createForm, setCreateForm] = useState(blankCreateForm);
 const [editForm, setEditForm] = useState(null);
 const [createSubmitting, setCreateSubmitting] = useState(false);
 const [editSubmitting, setEditSubmitting] = useState(false);
-const [archiveSubmitting, setArchiveSubmitting] = useState(false);
 const [feedback, setFeedback] = useState(null);
 const [feedbackType, setFeedbackType] = useState(null);
 const [errorText, setErrorText] = useState(null);
@@ -205,7 +161,6 @@ const [snapshotNotes, setSnapshotNotes] = useState("");
   const [draftSubmitting, setDraftSubmitting] = useState(false);
   const [deletePotModalOpen, setDeletePotModalOpen] = useState(false);
   const [deletePotSubmitting, setDeletePotSubmitting] = useState(false);
-  const [publishSubmittingId, setPublishSubmittingId] = useState(null);
   const [draftLabel, setDraftLabel] = useState("");
   const [draftFiscalYear, setDraftFiscalYear] = useState("");
   const [draftNotes, setDraftNotes] = useState("");
@@ -490,24 +445,6 @@ const handleEditSubmit = async event => {
   }
 };
 
-const handleArchive = async () => {
-  if (!selectedPot) {
-    return;
-  }
-  setArchiveSubmitting(true);
-  setErrorText(null);
-  setFeedback(null);
-  try {
-    await draftArchivePot(selectedPot.id);
-    setFeedback("Budget pot archived in draft.");
-    setFeedbackType("success");
-  } catch (err) {
-    setErrorText(err?.message || "Failed to archive pot.");
-  } finally {
-    setArchiveSubmitting(false);
-  }
-};
-
   const handleDeletePot = async () => {
     if (!selectedPot) return;
     setDeletePotSubmitting(true);
@@ -572,31 +509,6 @@ const handleArchive = async () => {
       setDraftSubmitting(false);
     }
   };
-
-  const handlePublishDraft = async draftId => {
-    if (!draftId) return;
-    setPublishSubmittingId(draftId);
-    setErrorText(null);
-    setFeedback(null);
-    try {
-      await publishDraft(draftId, { fiscalYear: selectedDraftFiscalYear || undefined, autoIncrementYear: true });
-      setFeedback("Draft published to live pots.");
-      setFeedbackType("success");
-    } catch (err) {
-      setErrorText(err?.message || "Failed to publish draft.");
-    } finally {
-      setPublishSubmittingId(null);
-    }
-  };
-
-  const draftItems = useMemo(
-    () =>
-      (draftChanges && draftChanges.length ? draftChanges : []).map(change => ({
-        ...change,
-        timestamp: new Date(change.timestamp).toLocaleString(),
-      })),
-    [draftChanges]
-  );
 
   const infoBar = (
     <SpaceBetween size="xs">

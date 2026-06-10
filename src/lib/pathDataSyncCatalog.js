@@ -1,4 +1,4 @@
-'use strict';
+
 
 const crypto = require('crypto');
 const mysql = require('mysql2');

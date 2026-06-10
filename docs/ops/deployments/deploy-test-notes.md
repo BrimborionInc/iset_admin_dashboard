@@ -1,7 +1,7 @@
 # Test Environment Deployment Notes
 
 Status: current TEST deployment notes. Prefer `deployment-quick-guide.md` for the shortest operator commands.
-Last reviewed: 2026-05-07 after WSL TEST deploy runner migration; command names checked against current admin and portal `package.json` files.
+Last reviewed: 2026-06-08 after TEST cost-pruning; command names checked against current admin and portal `package.json` files.
 
 For the shortest operator commands, start with `docs/ops/deployments/deployment-quick-guide.md`.
 
@@ -15,6 +15,8 @@ npm run path:deploy -- --env test --dataset intake-release --workflow-id 21
 ```
 
 The TEST app rollout is WSL-native. It builds/packages `/home/bill/ISET/admin-dashboard`, `/home/bill/ISET/ISET-intake`, and `/home/bill/ISET/shared`, uploads the artifacts with the WSL AWS CLI, then runs the in-place SSM update commands. Do not use stale `X:\ISET` or `/mnt/x/ISET` guidance for TEST.
+
+Current TEST topology: TEST is cost-pruned to one steady-state `nwac-test-asg` app instance in `ca-central-1d` and one NAT gateway. The ALB remains on two public subnets. `path:deploy` discovers the healthy ASG host(s) at runtime, and target-group smoke should be read as "all registered targets are healthy"; today that normally means one admin target and one portal target.
 
 Important: the deploy scripts package the current WSL working tree, not just the Git index. If you only want to release a subset of local edits, isolate unrelated local changes before running `path:deploy`.
 
@@ -46,7 +48,10 @@ npm run path:deploy:plan -- --env test --dataset intake-release --workflow-id 21
 
 ## Recent deploy evidence
 
-- 2026-06-07: Admin-only TEST release `20260607-test-tutorials-training-shorts` deployed from isolated worktree `/home/bill/ISET/admin-dashboard-test-deploy-tutorials-20260607` so unrelated dirty files in the main checkout were not packaged. Sequence: `warning -> wait -> ALB fallback -> admin-only deploy -> clear fallback -> normal-routing smoke -> clear warning`. Flags: `--skip-schema --skip-data --skip-portal --skip-shared`. Normal-routing smoke after fallback clear reported both `nwac-test-admin-tg` targets healthy on port `5001`. Manifest: `/home/bill/ISET/admin-dashboard/tmp/path-deploy/test/20260607-test-tutorials-training-shorts--2026-06-07T16-54-17-110Z.json`.
+- 2026-06-10: Admin-only TEST release `20260610-test-application-workspace-review` used the runbook sequence `warning -> wait -> ALB fallback -> admin-only deploy -> clear fallback -> normal-routing smoke -> clear warning`. Flags: `--skip-schema --skip-data --skip-portal --skip-shared`. Admin artifact `s3://nwac-test-artifacts/admin-dashboard/admin-dashboard-20260610-144955.zip` installed on the cost-pruned single TEST app host `i-0a8be782ed8604211`; final normal-routing smoke reported `nwac-test-admin-tg` healthy on `i-0a8be782ed8604211:5001`. Manifest: `/home/bill/ISET/admin-dashboard/tmp/path-deploy/test/20260610-test-application-workspace-review--2026-06-10T18-49-55-076Z.json`.
+- 2026-06-08 post-prune verification: `npm run path:deploy:smoke -- --env test --json` reported `nwac-test-admin-tg` healthy on `i-0a8be782ed8604211:5001` and `nwac-test-portal-tg` healthy on `i-0a8be782ed8604211:5000`. This is the expected one-host TEST shape.
+- 2026-06-08 topology note: after TEST cost-pruning, current target-group smoke is expected to show one registered admin target and one registered portal target when the ASG is at its normal size.
+- 2026-06-07: Admin-only TEST release `20260607-test-tutorials-training-shorts` deployed from isolated worktree `/home/bill/ISET/admin-dashboard-test-deploy-tutorials-20260607` so unrelated dirty files in the main checkout were not packaged. Sequence: `warning -> wait -> ALB fallback -> admin-only deploy -> clear fallback -> normal-routing smoke -> clear warning`. Flags: `--skip-schema --skip-data --skip-portal --skip-shared`. Normal-routing smoke after fallback clear reported both `nwac-test-admin-tg` targets healthy on port `5001` under the pre-prune two-instance TEST shape. Manifest: `/home/bill/ISET/admin-dashboard/tmp/path-deploy/test/20260607-test-tutorials-training-shorts--2026-06-07T16-54-17-110Z.json`.
 
 If you only need the legacy component rollout primitives:
 
@@ -96,7 +101,7 @@ These steps are kept for reference in case you ever need to perform the deployme
 2. Package the artefact (build/, isetadminserver.js, package.json, package-lock.json, .env.test) using `Compress-Archive`
 3. Upload the zip to `s3://nwac-test-artifacts/admin-dashboard/` (or presign it)
 4. Craft an SSM `AWS-RunShellScript` payload that downloads the zip, copies the files into place, installs dependencies, and restarts PM2
-5. Execute `aws ssm send-command` against each instance in the fleet and poll until the status is `Success`
+5. Execute `aws ssm send-command` against the current healthy ASG/SSM app host(s) and poll until the status is `Success`
 6. Perform a quick smoke test and clean up the temporary zip once verified
 
 > **Reminder:** Avoid the legacy `deploy.ps1` workflow; use `path:deploy` for the supported PATH flow, or the component scripts/manual SSM path only as a lower-level fallback.

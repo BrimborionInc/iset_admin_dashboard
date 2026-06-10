@@ -264,6 +264,11 @@ const toPositiveInteger = value => {
   return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
 };
 
+const toPositiveRowVersion = value => {
+  const numeric = Number(value);
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : 0;
+};
+
 const ApplicationOverviewWidget = ({
   actions,
   application_id,
@@ -299,7 +304,7 @@ const ApplicationOverviewWidget = ({
   const manualStatusRef = useRef(null);
   const [slaTargets, setSlaTargets] = useState(SLA_DEFAULT_DAYS);
   const [escalation, setEscalation] = useState(null);
-  const [escalationLoading, setEscalationLoading] = useState(false);
+  const [, setEscalationLoading] = useState(false);
   const [quickActionNote, setQuickActionNote] = useState('');
   const [quickActionHoldReason, setQuickActionHoldReason] = useState(HOLD_REASON_OPTIONS[0]);
   const [quickActionReviewDate, setQuickActionReviewDate] = useState('');
@@ -435,10 +440,10 @@ const ApplicationOverviewWidget = ({
 
   useEffect(() => {
     const incoming = Number(applicationRowVersion || 0);
-    if (incoming && !application?.row_version && incoming !== rowVersion) {
+    if (caseRowVersionIsForSelectedApplication && incoming > rowVersion) {
       setRowVersion(incoming);
     }
-  }, [application?.row_version, applicationRowVersion, rowVersion]);
+  }, [applicationRowVersion, caseRowVersionIsForSelectedApplication, rowVersion]);
 
   useEffect(() => {
     if (regionLookup || typeof window === 'undefined') return;
@@ -507,7 +512,7 @@ const ApplicationOverviewWidget = ({
     } catch (_) {
       return null;
     }
-  }, [application_id, fetchEscalation, onRowVersionUpdate]);
+  }, [application_id, onRowVersionUpdate]);
 
   const refreshCasePayload = useCallback(async () => {
     if (typeof refreshCaseData === 'function') {
@@ -518,6 +523,26 @@ const ApplicationOverviewWidget = ({
     }
     return null;
   }, [actions, refreshCaseData]);
+
+  const getExpectedApplicationRowVersion = useCallback(() => {
+    const candidates = [
+      toPositiveRowVersion(application?.row_version),
+      toPositiveRowVersion(rowVersion),
+    ];
+    if (caseRowVersionIsForSelectedApplication) {
+      candidates.push(
+        toPositiveRowVersion(applicationRowVersion),
+        toPositiveRowVersion(caseData?.application_row_version)
+      );
+    }
+    return Math.max(0, ...candidates);
+  }, [
+    application?.row_version,
+    applicationRowVersion,
+    caseData?.application_row_version,
+    caseRowVersionIsForSelectedApplication,
+    rowVersion,
+  ]);
 
 
   useEffect(() => {
@@ -583,7 +608,7 @@ const ApplicationOverviewWidget = ({
     return () => {
       cancelled = true;
     };
-  }, [application_id]);
+  }, [application_id, fetchEscalation, onRowVersionUpdate]);
 
   const applicationStatusFromCase = caseData?.applicationStatus ?? caseData?.application_status ?? null;
 
@@ -1577,10 +1602,7 @@ const ApplicationOverviewWidget = ({
         refreshLockHeartbeat().catch(() => {});
       }
 
-      const scopedCaseRowVersion = caseRowVersionIsForSelectedApplication
-        ? Number(caseData?.application_row_version || 0)
-        : 0;
-      const expectedRowVersion = Number(application?.row_version || rowVersion || scopedCaseRowVersion || 0);
+      const expectedRowVersion = getExpectedApplicationRowVersion();
       const payload = {
         applicationId: application?.id || application_id || caseData?.application_id || null,
         applicationStatus: mapWorkflowStatusToPersistenceStatus(nextStatus, {
@@ -1749,10 +1771,7 @@ const ApplicationOverviewWidget = ({
         refreshLockHeartbeat().catch(() => {});
       }
 
-      const scopedCaseRowVersion = caseRowVersionIsForSelectedApplication
-        ? Number(caseData?.application_row_version || 0)
-        : 0;
-      const expectedRowVersion = Number(application?.row_version || rowVersion || scopedCaseRowVersion || 0);
+      const expectedRowVersion = getExpectedApplicationRowVersion();
       const payload = {
         applicationId: application?.id || application_id || caseData?.application_id || null,
         docsRequested: nextActive
@@ -1785,6 +1804,16 @@ const ApplicationOverviewWidget = ({
       }
 
       if (response.status === 409) {
+        if (body?.error && body.error !== 'row_version_conflict') {
+          setStatusFeedback({
+            type: 'warning',
+            content: body?.message || body?.error || 'The document request update is not allowed for this application.',
+          });
+          if (releaseAfter) {
+            releaseLock({ silent: true }).catch(() => {});
+          }
+          return;
+        }
         const currentRowVersion = Number(body?.currentRowVersion ?? body?.application_row_version);
         if (currentRowVersion) {
           setRowVersion(currentRowVersion);

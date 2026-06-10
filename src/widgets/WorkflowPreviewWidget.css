@@ -1,0 +1,125 @@
+.workflow-preview-shell {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.workflow-preview-graph {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid #d5dbdb;
+  border-radius: 8px;
+  background: #f8fafc;
+  position: relative;
+}
+
+.workflow-preview-graph .react-flow {
+  position: absolute !important;
+  inset: 0;
+  width: auto !important;
+  height: auto !important;
+}
+
+.workflow-preview-node {
+  box-sizing: border-box;
+  width: 236px;
+  height: 86px;
+  padding: 10px 12px;
+  border: 1px solid #c5ced9;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+  color: #111827;
+}
+
+.workflow-preview-node--start {
+  border-color: #0972d3;
+  box-shadow: 0 0 0 1px rgba(9, 114, 211, 0.28), 0 6px 18px rgba(9, 114, 211, 0.12);
+}
+
+.workflow-preview-node--selected {
+  outline: 3px solid rgba(9, 114, 211, 0.26);
+}
+
+.workflow-preview-node__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 18px;
+  margin-bottom: 6px;
+  color: #5f6b7a;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.workflow-preview-node__badge {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 1px 7px;
+  background: #e7f3ff;
+  color: #0858a3;
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.workflow-preview-node__title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: #111827;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.workflow-preview-node__handle {
+  width: 8px;
+  height: 8px;
+  border: 0;
+  background: transparent;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.workflow-preview-edge path {
+  stroke-width: 2;
+}
+
+.workflow-preview-edge--linear path {
+  stroke: #7d8998;
+}
+
+.workflow-preview-edge--branch path {
+  stroke: #0972d3;
+}
+
+.workflow-preview-edge--default path {
+  stroke-dasharray: 5 4;
+}
+
+.workflow-preview-minimap {
+  width: 150px;
+  height: 110px;
+  border: 1px solid #d5dbdb;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.workflow-preview-graph .react-flow__controls {
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.14);
+}
+
+.workflow-preview-graph .react-flow__attribution {
+  display: none;
+}

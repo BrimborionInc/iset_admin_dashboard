@@ -15,10 +15,6 @@ import { boardItemI18nStrings } from "./common";
 import { apiFetch } from "../../../auth/apiClient";
 
 const months = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
-const monthIndex = months.reduce((acc, month, index) => {
-  acc[month] = index;
-  return acc;
-}, {});
 const fiscalMonthOrder = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3];
 
 const buildTimeframeOptionsFromYears = fiscalYears => {
@@ -50,33 +46,6 @@ const programOptions = [
 
 const programFactors = {
   iset: 1,
-};
-
-const defaultActuals = {
-  "2024-2025": [
-    { x: "Apr", y: 220000 },
-    { x: "May", y: 410000 },
-    { x: "Jun", y: 640000 },
-    { x: "Jul", y: 910000 },
-    { x: "Aug", y: 1180000 },
-    { x: "Sep", y: 1390000 },
-    { x: "Oct", y: 1600000 },
-    { x: "Nov", y: 1850000 },
-  ],
-  "2023-2024": [
-    { x: "Apr", y: 180000 },
-    { x: "May", y: 360000 },
-    { x: "Jun", y: 540000 },
-    { x: "Jul", y: 750000 },
-    { x: "Aug", y: 960000 },
-    { x: "Sep", y: 1180000 },
-    { x: "Oct", y: 1400000 },
-    { x: "Nov", y: 1625000 },
-    { x: "Dec", y: 1850000 },
-    { x: "Jan", y: 2070000 },
-    { x: "Feb", y: 2290000 },
-    { x: "Mar", y: 2500000 },
-  ],
 };
 
 const formatCurrency = value => {
@@ -214,7 +183,7 @@ const SimpleTrendWidget = ({
       xDomain: months,
       yDomain: [0, Math.ceil(maxY / 100000) * 100000 || 100000],
     };
-  }, [selectedTimeframe, selectedPot, selectedProgram, planSeries, planYMax, actualSeries, forecastSeries, showForecast]);
+  }, [selectedTimeframe, selectedProgram, planSeries, planYMax, actualSeries, forecastSeries, showForecast]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -399,7 +368,7 @@ const SimpleTrendWidget = ({
     };
     loadForecast();
     return () => controller.abort();
-  }, [planSeries]);
+  }, [planSeries, selectedTimeframe]);
 
   const handleSettingsClick = ({ detail }) => {
     if (detail?.id === "remove" && typeof actions.removeItem === "function") {

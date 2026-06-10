@@ -48,7 +48,57 @@ describe("ESDC participant queue pagination", () => {
     expect(widgetSource).toContain("params.set('sortDirection', sorting.isDescending ? 'desc' : 'asc');");
     expect(widgetSource).toContain("onSortingChange={({ detail }) =>");
     expect(widgetSource).toContain("item.children.length > 1");
+    expect(widgetSource).toContain("const exportableQueueCount = (Number(summary.ready) || 0) + (Number(summary.needsReview) || 0);");
+    expect(widgetSource).toContain("disabled={loading || exportableQueueCount === 0}");
+    expect(widgetSource).toContain("Exportable participants");
     expect(widgetSource).not.toContain("sortingDisabled");
+  });
+
+  test("batch XML generation is not capped by participant table pagination", () => {
+    const serverSource = fs.readFileSync(path.join(repoRoot, "isetadminserver.js"), "utf8");
+    const collector = extractBetween(
+      serverSource,
+      "async function collectReadyEsdcBatchParticipants",
+      "esdcRouter.post('/participants/batch-prepare'"
+    );
+    const prepareRoute = extractBetween(
+      serverSource,
+      "esdcRouter.post('/participants/batch-prepare'",
+      "esdcRouter.post('/participants/batch-submit'"
+    );
+    const submitRoute = extractBetween(
+      serverSource,
+      "esdcRouter.post('/participants/batch-submit'",
+      "esdcRouter.get('/participants/batches'"
+    );
+    const widgetSource = fs.readFileSync(
+      path.join(repoRoot, "src/pages/esdc/widgets/EsdcParticipantQueueWidget.jsx"),
+      "utf8"
+    );
+
+    expect(widgetSource).toContain("apiFetch('/api/esdc/participants/batch-prepare'");
+    expect(widgetSource).toContain("body: JSON.stringify({})");
+    expect(widgetSource).toContain("apiFetch('/api/esdc/participants/batch-submit'");
+    expect(collector).not.toMatch(/\bLIMIT\b|\bOFFSET\b|pageLimit|pageSize|req\.query|req\.body/);
+    expect(prepareRoute).toContain("collectReadyEsdcBatchParticipants()");
+    expect(submitRoute).toContain("collectReadyEsdcBatchParticipants()");
+  });
+
+  test("recent ILMP exports route limits complete batch groups instead of history rows", () => {
+    const serverSource = fs.readFileSync(path.join(repoRoot, "isetadminserver.js"), "utf8");
+    const route = extractBetween(
+      serverSource,
+      "esdcRouter.get('/participants/batches'",
+      "esdcRouter.post('/participants/batch-reset'"
+    );
+
+    expect(route).toContain("WITH recent_batches AS (");
+    expect(route).toContain("GROUP BY batch_id");
+    expect(route).toContain("ORDER BY submitted_at DESC, last_history_id DESC");
+    expect(route).toContain("FROM recent_batches rb");
+    expect(route).toContain("JOIN esdc_participant_submission_history h");
+    expect(route).toContain("[limit]");
+    expect(route).not.toContain("[limit * 5]");
   });
 
   test("participant submissions dashboard no longer duplicates the validation summary widget", () => {

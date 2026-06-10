@@ -319,7 +319,7 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
     </Link>
   ) : undefined;
 
-  const plans = caseData?.actionPlans ?? [];
+  const plans = useMemo(() => caseData?.actionPlans ?? [], [caseData?.actionPlans]);
 
   const sortedPlans = useMemo(() => {
     const toTimestamp = value => {
@@ -396,7 +396,7 @@ const ActionPlansWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => 
 
       return haystack.includes(text);
     });
-  }, [plans, searchQuery]);
+  }, [searchQuery, sortedPlans]);
 
   const totalMatches = filteredPlans.length;
   const pagesCount = totalMatches ? Math.ceil(totalMatches / pageSize) : 1;

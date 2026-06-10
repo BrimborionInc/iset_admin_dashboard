@@ -1,15 +1,15 @@
 const buildInfo = {
   "packageVersion": "0.1.0",
-  "releaseId": "20260607-prod-tutorials-training-shorts",
+  "releaseId": "20260610-prod-modify-component-editor",
   "buildTarget": "production",
-  "builtAt": "2026-06-07T20:42:37.416Z",
-  "gitCommit": "1e62b80d2e8cc56d206d8b902e0f588af7f8d9de",
-  "gitShort": "1e62b80d",
+  "builtAt": "2026-06-10T22:02:10.874Z",
+  "gitCommit": "b4cfc753e8ab384ac52495af49877e0f0ec702a7",
+  "gitShort": "b4cfc753",
   "gitDirty": true,
-  "publicReleaseLabel": "Release 20260607-prod-tutorials-training-shorts",
-  "publicReleaseDateEn": "7th June 2026",
-  "publicReleaseDateFr": "7 juin 2026",
-  "displayLabel": "release 20260607-prod-tutorials-training-shorts | 1e62b80d-dirty"
+  "publicReleaseLabel": "Release 20260610-prod-modify-component-editor",
+  "publicReleaseDateEn": "10th June 2026",
+  "publicReleaseDateFr": "10 juin 2026",
+  "displayLabel": "release 20260610-prod-modify-component-editor | b4cfc753-dirty"
 };
 
 export default buildInfo;

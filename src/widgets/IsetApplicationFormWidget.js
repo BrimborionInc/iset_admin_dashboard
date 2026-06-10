@@ -1241,7 +1241,7 @@ const IsetApplicationFormWidget = ({
     isLockedByMe
   } = useApplicationLock(application_id);
   const [locking, setLocking] = useState(false);
-  const { userId: currentUserId, displayName: currentUserName } = useCurrentUser();
+  const { userId: currentUserId } = useCurrentUser();
   const [bandSearchOptions, setBandSearchOptions] = useState({ affiliation: [], home: [] });
   const [bandSearchLoading, setBandSearchLoading] = useState({ affiliation: false, home: false });
 

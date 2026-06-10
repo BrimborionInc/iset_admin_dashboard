@@ -187,7 +187,7 @@ const AllocationHistoryWidget = ({
       </Link>
     ) : undefined;
 
-  const historyItems = Array.isArray(items) ? items : [];
+  const historyItems = useMemo(() => (Array.isArray(items) ? items : []), [items]);
   const appliedHistory = useMemo(
     () => historyItems.filter(item => item.status === "approved" || item.status === "applied"),
     [historyItems]

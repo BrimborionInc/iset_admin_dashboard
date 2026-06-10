@@ -1,6 +1,6 @@
 # Supporting Documents widget
 
-Date: 2026-06-01
+Date: 2026-06-10
 
 ## Workflow
 
@@ -38,6 +38,9 @@ manual uploads, and generated forms, then compares them against the relevant che
 ## Key UI behavior
 
 - Shared widget: the same component is used in both Application Workspace and Case Workspace.
+- Documents tab: includes a `Find documents` text filter over document label, filename, type label, source, reference label, and scope before the sorted/resizable table is rendered.
+- Table behavior: document sorting applies to the full filtered in-memory document list before rows are displayed, and column width/preference changes are persisted through the existing preferences path.
+- Current UI cleanup backlog: the Application Workspace browser smokes record a React unique-key warning from this widget's modal/`SpaceBetween` composition during workspace render. The warning is captured for diagnosis but is not currently treated as a workflow-blocking smoke failure.
 - Application Workspace filter: loads applicant applications and filters documents by `application_id`.
 - Application Workspace `All documents` still sends scoped context for non-admin-safe document reads. When the current case is known, the widget queries applicant documents with `caseId`; the backend treats that as the authorized case document set and includes documents linked directly to the case, action plans, the case's primary application, and narrow historical intake-upload matches proven by the primary application's submission payload.
 - Case Workspace filter: builds intervention options from `caseData.actionPlans[].interventions` and narrows the list to documents relevant to the selected intervention; it is a view filter, not an attachment target.

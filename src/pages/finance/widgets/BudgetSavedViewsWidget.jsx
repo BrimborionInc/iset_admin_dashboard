@@ -99,7 +99,7 @@ const BudgetSavedViewsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }
     }
   };
 
-  const handleViewLoad = view => {
+  const handleViewLoad = useCallback(view => {
     if (!view) return;
     setSelectedItems([view]);
     window.dispatchEvent(
@@ -113,7 +113,7 @@ const BudgetSavedViewsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }
         },
       })
     );
-  };
+  }, [activeVersion?.id]);
 
   const loadViews = useCallback(async () => {
     if (!activeVersion?.id) return;
@@ -139,7 +139,7 @@ const BudgetSavedViewsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }
     } finally {
       setLoading(false);
     }
-  }, [activeVersion]);
+  }, [activeVersion, handleViewLoad]);
 
   useEffect(() => {
     hasDispatchedInitial.current = false;
@@ -289,7 +289,6 @@ const BudgetSavedViewsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }
 
   const handleColumnWidthsChange = ({ detail }) => {
     const next = [];
-    const widthEntries = detail?.columnWidths || detail?.widths || [];
     if (Array.isArray(detail?.columnWidths)) {
       detail.columnWidths.forEach(entry => {
         if (!entry || typeof entry !== "object") return;

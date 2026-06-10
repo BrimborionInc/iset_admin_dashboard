@@ -5,7 +5,6 @@ import { SpaceBetween, Box } from '@cloudscape-design/components';
 import EsdcOverviewKpiWidget from './widgets/EsdcOverviewKpiWidget.jsx';
 import EsdcUpcomingDeadlinesWidget from './widgets/EsdcUpcomingDeadlinesWidget.jsx';
 import EsdcSubmissionActivityWidget from './widgets/EsdcSubmissionActivityWidget.jsx';
-import EsdcOverviewHelp from '../../helpPanelContents/esdcOverviewHelp.js';
 import EsdcOverviewKpiHelp from '../../helpPanelContents/esdcOverviewKpiHelp.js';
 import EsdcUpcomingDeadlinesHelp from '../../helpPanelContents/esdcUpcomingDeadlinesHelp.js';
 import EsdcSubmissionActivityHelp from '../../helpPanelContents/esdcSubmissionActivityHelp.js';

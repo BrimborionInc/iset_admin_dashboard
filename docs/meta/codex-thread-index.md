@@ -2,7 +2,7 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-05-11
+Last Updated: 2026-06-09
 
 ## How to use
 
@@ -10,6 +10,7 @@ Last Updated: 2026-05-11
 - Use the `Codex task title` as the primary bridge back to the user's Task History list. Topic labels and keywords are secondary lookup aids.
 - The Task History label is the reason this index exists. Do not treat the `Topic` line as an acceptable substitute for the recovery key.
 - Search this file using the user's own words first, then open the linked canonical doc instead of relying on the short index summary.
+- Current TEST topology supersession: entries before 2026-06-08 may mention two TEST app instances or both TEST targets as historical evidence. Current TEST is cost-pruned to one steady-state app host and one NAT gateway; open `docs/AGENTS.md`, `docs/ops/deployments/deployment-quick-guide.md`, and `docs/ops/environments/test-environment-progress.md` before acting on old TEST instance-count notes.
 - Keep entries focused on cross-thread recovery value. This is not a changelog and should not duplicate normal release-note logging.
 - When a thread produces durable context that a future chat is likely to need, either update an existing canonical doc and add it here, or create a short handoff note and index it here in the same change.
 - For the current thread, do not finalize a new entry until you have the exact Task History title. If the user supplied it, copy it verbatim even if the thread later drifts into other work.
@@ -31,6 +32,23 @@ For each indexed thread/topic, keep:
 - `Status`: whether the note is current, partial, incomplete-title, or superseded
 
 ## Indexed Topics
+
+### Build billing agent in VS code
+
+- Codex task title: `Build billing agent in VS code`
+- Topic: AwenTech monthly billing invoice generator and Codex custom agent setup.
+- Keywords: `Build billing agent in VS code`, `AwenTech Billing Agent`, `awentech-billing`, `billing:invoice`, `NWAC invoice`, `AWS Cost Explorer`, `awentech-billing-readonly`, `Bank of Canada FX`, `FXMUSDCAD`, `OneDrive invoices`, `invoice audit`, `SES placeholder`
+- When to open: the user asks how to generate the next NWAC invoice, recover the billing-agent setup, understand what the VS Code/Codex Agent does, change billing rules, add another client, troubleshoot AWS/FX lookup, or revisit future email/SES automation.
+- Primary docs:
+  - `docs/guides/awentech-billing-agent.md`
+  - `.codex/agents/awentech-billing.toml`
+  - `scripts/billing-invoice-agent.py`
+  - `config/billing/clients/nwac.json`
+  - `docs/meta/changelog.md`
+- Status: current as of 2026-06-09.
+- Notes: this thread established that a VS Code/Codex custom Agent is a reusable persona/configuration, not a scheduled background task. Monthly invoice generation is invoked on demand, for example: `Use the awentech-billing agent. Prepare the June 2026 invoice for NWAC.`
+- Notes: the implementation generates DOCX/PDF/audit files using the prior Word invoice as template, reads AWS Cost Explorer through the dedicated `awentech-billing-readonly` role assumed via `nwac-prod`, uses AWS `Usage` only while excluding AWS `Tax` from the client passthrough basis, converts USD to CAD using Bank of Canada monthly average `FXMUSDCAD`, applies GST/QST at `14.975%`, and writes outputs under the AwenTech OneDrive invoice archive.
+- Notes: May 2026 was generated as invoice `#7` with hosting passthrough CAD `632.81` and total due CAD `3,601.95`; April 2026 was left as paid historical output. Email sending remains out of scope with SES recorded only as a future placeholder.
 
 ### Overview approval workflows
 
@@ -1309,15 +1327,15 @@ For each indexed thread/topic, keep:
 
 - Codex task title: `Produce Synthesia training videos`
 - Topic: Synthesia API/runbook setup and PATH Support > Tutorials training-shorts dashboard workflow.
-- Keywords: `Synthesia`, `SYNTHESIA_API_KEY`, `training shorts`, `Tutorials dashboard`, `Support > Tutorials`, `PATH training video`, `Withdrawing and reopening an application`, `Withdrawing an application`, `NWAC pronunciation`
+- Keywords: `Synthesia`, `SYNTHESIA_API_KEY`, `training shorts`, `Tutorials dashboard`, `Support > Tutorials`, `PATH training video`, `Withdrawing and reopening an application`, `Withdrawing an application`, `Financial Reports`, `ISET Advances and Active Clients`, `NWAC pronunciation`
 - When to open: the user asks Codex to create or update PATH training shorts, publish Synthesia videos, add tutorial-video metadata, use Synthesia pronunciation controls, or explain the Synthesia API boundary.
 - Primary docs:
   - `docs/guides/synthesia-training-video-production.md`
   - `docs/features/tutorial-platform.md`
   - `src/tutorials/trainingShorts.js`
   - `src/pages/support/TutorialsDashboardPage.jsx`
-- Status: active runbook and dashboard pattern created on 2026-06-07.
-- Notes: Bill's Synthesia API key lives only in the repo-root `.env` as `SYNTHESIA_API_KEY`; never print or commit it. Script/storyboard approval is mandatory before Synthesia renders unless Bill explicitly waives that checkpoint for the specific draft. Draft/test videos stay private and watermarked, with no Synthesia video ID or embed URL in app metadata until Bill approves a published staff-safe version. The first real in-production dashboard row is `application-withdrawal` / `Withdrawing and reopening an application`; private test-mode withdrawal drafts were rendered for review from disposable DEV fixture screenshots.
+- Status: active runbook and dashboard pattern created on 2026-06-07; Financial Reports public review draft added to the runbook notes on 2026-06-09.
+- Notes: Bill's Synthesia API key lives only in the repo-root `.env` as `SYNTHESIA_API_KEY`; never print or commit it. Script/storyboard approval is mandatory before Synthesia renders unless Bill explicitly waives that checkpoint for the specific draft. Draft/test videos stay private and watermarked, with no Synthesia video ID or embed URL in app metadata until Bill approves a published staff-safe version or explicitly asks to make a draft shareable. The first real in-production dashboard row is `application-withdrawal` / `Withdrawing and reopening an application`; private test-mode withdrawal drafts were rendered for review from disposable DEV fixture screenshots. The Financial Reports public review draft uses sanitized smoke visuals and is intentionally not listed in app metadata yet.
 
 ## Future improvements
 

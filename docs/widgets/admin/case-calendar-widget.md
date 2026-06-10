@@ -39,4 +39,5 @@ Calendar/list visibility for reminders and due dates.
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
 - `src/widgets/CaseCalendarWidget.js` is shared by both the case workspace and application workspace.
 - Treat date-only values (`YYYY-MM-DD`) as local calendar dates for Canadian users; do not feed them directly through UTC-based `new Date('YYYY-MM-DD')` parsing or UTC-midnight weekday label anchors.
+- Empty event/reminder fields should render as `Not recorded`, not replacement-character placeholders.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.

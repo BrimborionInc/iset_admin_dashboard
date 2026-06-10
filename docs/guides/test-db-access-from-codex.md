@@ -1,6 +1,6 @@
 # Test DB Access From Codex
 
-Verified on 2026-03-28 from the Codex Linux sandbox.
+Verified on 2026-03-28 from the Codex Linux sandbox. TEST resource shape rechecked on 2026-06-08 after cost-pruning.
 
 ## Current status
 
@@ -20,11 +20,9 @@ Verified on 2026-03-28 from the Codex Linux sandbox.
 
 ## Verified working resources
 
-- Live SSM-managed app instances observed on 2026-03-28:
-  - `i-09fe8c219a4564040`
-  - `i-0a8be782ed8604211`
-- Both were tagged `nwac-test-app`
-- The helper script auto-discovers a running online `nwac-test-app` instance instead of hard-coding one instance ID
+- Current cost-pruned TEST shape, as of 2026-06-08: one steady-state `nwac-test-asg` app host, currently `i-0a8be782ed8604211`, tagged `nwac-test-app`.
+- Previous two-host evidence from 2026-03-28 included `i-09fe8c219a4564040`; that instance was intentionally terminated during the 2026-06-08 TEST prune and must not be hard-coded.
+- The helper script auto-discovers a running online `nwac-test-app` instance instead of hard-coding one instance ID.
 - The local sandbox does not currently have `session-manager-plugin`, so `aws ssm start-session` is not the preferred automation path here
 
 ## Use the helper script
@@ -89,7 +87,13 @@ Notes:
 
 ## Verification performed
 
-End-to-end execution was verified by running read-only SQL through SSM on `i-09fe8c219a4564040` and getting a successful result from the `iset_intake` database.
+End-to-end execution was first verified on 2026-03-28 by running read-only SQL through SSM. Re-verified after the 2026-06-08 prune with:
+
+```bash
+bash scripts/run-test-sql-via-ssm.sh --sql "SELECT 1 AS ok, DATABASE() AS db, @@hostname AS host, @@port AS port;"
+```
+
+The helper selected `i-0a8be782ed8604211` and returned `ok = 1`, database `iset_intake`, host `ip-172-16-0-199`, port `3306`.
 
 ## Guardrails
 

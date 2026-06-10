@@ -38,7 +38,8 @@ Combined queue of participants pending validation/export actions, with bucket-st
 
 ## Current Notes
 
-- `/api/esdc/participants?groupByClient=true` returns the paged grouped rows plus a `summary` object for the full filtered queue.
-- `/api/esdc/participants/batch-prepare` and `/api/esdc/participants/batch-submit` are now launched from this widget rather than a separate Batch export widget.
+- `/api/esdc/participants?groupByClient=true` returns the paged grouped rows plus a `summary` object for the full filtered queue. The table page-size preference is display-only.
+- `/api/esdc/participants/batch-prepare` and `/api/esdc/participants/batch-submit` are now launched from this widget rather than a separate Batch export widget. They call the backend batch collector without table `limit`/`offset` values, so `Generate batch XML` is not capped by the visible table page.
+- `Generate batch XML` should stay enabled when the full-queue summary has either `ready` or `needsReview` clients. Backend generation includes warning-only clients and excludes blocked records automatically.
 - Staff-facing wording should describe this as export/download/manual upload. The backend still has legacy `batch-submit` naming and status fields, but PATH does not directly submit or upload participant XML to ESDC from this widget.
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.

@@ -272,7 +272,7 @@ const NewActionPlanModal = ({
     } else if (form.eiClaimant === "3") {
       setForm(current => ({ ...current, fundingStream: "CRF" }));
     }
-  }, [form.eiClaimant]);
+  }, [form.eiClaimant, form.fundingStream]);
   const participantProvince = (() => {
     const context = caseData?.caseContext || {};
     const clientRegionCode =
@@ -377,7 +377,7 @@ const NewActionPlanModal = ({
         setPotLoading(false);
       }
     },
-    [apiFetch, normalizedProvince]
+    [normalizedProvince]
   );
 
   const fundingStreamSelectOptions = useMemo(() => {

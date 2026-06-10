@@ -1,0 +1,44 @@
+{
+  "id": "nwac",
+  "clientFolderName": "NWAC",
+  "clientDisplayName": "Native Women's Association of Canada",
+  "invoiceIssuer": "Awentech",
+  "invoiceFilePrefix": "Awentech - Invoice",
+  "archiveRoot": "/mnt/c/Users/Wilson/OneDrive/AwenTech/2. Financial/7. Invoices",
+  "aws": {
+    "accountId": "468278742295",
+    "sourceProfile": "nwac-prod",
+    "billingRoleArn": "arn:aws:iam::468278742295:role/awentech-billing-readonly",
+    "metric": "UnblendedCost",
+    "passthroughRecordType": "Usage",
+    "excludeRecordTypes": ["Tax"]
+  },
+  "billing": {
+    "currency": "CAD",
+    "salesTaxLabel": "GST/QST",
+    "salesTaxRate": 0.14975,
+    "licenceSchedule": [
+      {
+        "effectiveFrom": "2025-11",
+        "effectiveTo": "2027-03",
+        "monthlyLicenceCad": 2500,
+        "lineCalculation": "$5,000.00 x 50% = $2,500.00"
+      },
+      {
+        "effectiveFrom": "2027-04",
+        "monthlyLicenceCad": 5000,
+        "lineCalculation": "$5,000.00"
+      }
+    ]
+  },
+  "fx": {
+    "source": "Bank of Canada monthly average exchange rates",
+    "valetUrl": "https://www.bankofcanada.ca/valet/observations/group/FX_RATES_MONTHLY/json",
+    "series": "FXMUSDCAD",
+    "sourcePage": "https://www.bankofcanada.ca/rates/exchange/monthly-exchange-rates/"
+  },
+  "email": {
+    "status": "placeholder",
+    "futureTransport": "SES"
+  }
+}

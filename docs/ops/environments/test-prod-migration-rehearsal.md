@@ -81,8 +81,10 @@ Identity overlay:
 
 PROD-like TEST refresh executed on 2026-04-30 to give TEST a current application/case dataset for experimentation.
 
+Current topology note: since 2026-06-08, TEST is cost-pruned to one steady-state app host. The historical rehearsal evidence below names two hosts because that was the pre-prune shape. A future rehearsal should discover the current ASG/SSM host(s) and treat target-group smoke as healthy when all registered target(s) are healthy.
+
 - TEST was put behind the runtime maintenance warning and ALB fixed-response maintenance page for admin and portal before apps were stopped. The ALB fallback was cleared after final target-group smoke.
-- `nwac-admin` and `nwac-portal` were stopped on both TEST app hosts before the restore and restarted afterward.
+- `nwac-admin` and `nwac-portal` were stopped on both TEST app hosts before the restore and restarted afterward. In the current cost-pruned shape, use the discovered current app host(s) instead of assuming two.
 - TEST pre-restore backup:
   - `s3://nwac-test-artifacts/db-dumps/test/20260430-154754-pre-prod-like-restore.sql.gz`
 - PROD source dump:
@@ -166,7 +168,7 @@ Artifacts:
 
 Sequence and result:
 
-1. Stopped `nwac-admin` and `nwac-portal` on both TEST hosts before restore.
+1. Stopped `nwac-admin` and `nwac-portal` on both TEST hosts before restore under the pre-prune shape. In the current cost-pruned shape, stop the discovered current app host(s).
 2. Restored the sanitized PROD-like dump into TEST.
 3. Applied `test-prod-like-restore-postload.sql`.
 4. Applied deterministic pre-cleanups:
@@ -177,9 +179,11 @@ Sequence and result:
 5. Applied all canonical privacy ERM cleanup migrations through `20260427_0020_allow_casefile_secure_message_document_scope.sql`.
 6. Applied `test-prod-like-restore-identity-overlay.sql`; imported PROD identity bindings were neutralized and TEST staff overlays were rebound for `bill@sillery.co.uk` and `program.admin@awentech.ca`.
 7. Deployed admin and portal code to TEST with release ID `prod-like-privacy-erm-test`.
-8. Both TEST target groups recovered to healthy:
+8. Both TEST target groups recovered to healthy under the pre-prune shape:
    - `nwac-test-admin-tg`: both targets healthy on `:5001`
    - `nwac-test-portal-tg`: both targets healthy on `:5000`
+
+Current expected smoke after 2026-06-08: all registered target(s) healthy, normally one admin target on `:5001` and one portal target on `:5000`.
 
 Observed cleanup decisions:
 

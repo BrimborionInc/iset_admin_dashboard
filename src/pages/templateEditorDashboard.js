@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Button, SpaceBetween } from '@cloudscape-design/components';
+import { Box, SpaceBetween } from '@cloudscape-design/components';
 import Board from '@cloudscape-design/board-components/board';
 import TemplateEditorProvider, {
   TemplateLibraryWidget,

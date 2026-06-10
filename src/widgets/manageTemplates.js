@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, createContext, useContext } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, createContext, useContext } from 'react';
 import {
   Alert,
   Badge,
@@ -653,27 +653,41 @@ const TemplateEditorProvider = ({ children, toggleHelpPanel }) => {
   const storedSelectionRef = useRef(readStoredSelection());
   const hasRestoredSelectionRef = useRef(false);
 
-  useEffect(() => {
-    fetchTemplates();
-  }, []);
-
-  const fetchTemplates = () => {
-    setLoading(true);
-    apiFetch('/api/templates')
+  const handleTemplateSelection = useCallback((templateId, options = {}) => {
+    const draftOverride = options.draftOverride;
+    apiFetch(`/api/templates/${templateId}`)
       .then((response) => response.json())
       .then((data) => {
-        setTemplates(Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []));
-        setLoading(false);
-        attemptRestoreSelection();
+        const nextTemplate = {
+          ...data,
+          name: draftOverride?.name || data.name
+        };
+        setSelectedTemplate(nextTemplate);
+        const localized = defaultLocalizedContent();
+        localized.en.subject = data.localized?.en?.subject || data.subject || '';
+        localized.en.textBody = data.localized?.en?.textBody || data.textBody || data.content || '';
+        localized.fr.subject = data.localized?.fr?.subject || '';
+        localized.fr.textBody = data.localized?.fr?.textBody || '';
+        setLocalizedContent(localized);
+        setActiveLanguage(draftOverride?.activeLanguage || 'en');
+        setPreviewScenarioId(draftOverride?.previewScenarioId || DEFAULT_PREVIEW_SCENARIO_ID);
+        selectionRef.current = {
+          en: { start: 0, end: 0 },
+          fr: { start: 0, end: 0 }
+        };
+        setBaselineTemplate({
+          name: data.name || '',
+          localized: cloneLocalizedContent(localized)
+        });
+        if (draftOverride?.localized) {
+          setLocalizedContent(cloneLocalizedContent(draftOverride.localized));
+        }
+        // status temporarily dropped from UI/payload
       })
-      .catch((error) => {
-        console.error('Error fetching templates:', error);
-        setLoading(false);
-        attemptRestoreSelection();
-      });
-  };
+      .catch((error) => console.error('Error fetching template details:', error));
+  }, []);
 
-  const attemptRestoreSelection = () => {
+  const attemptRestoreSelection = useCallback(() => {
     if (hasRestoredSelectionRef.current) return;
     const stored = storedSelectionRef.current;
     if (!stored) {
@@ -710,41 +724,27 @@ const TemplateEditorProvider = ({ children, toggleHelpPanel }) => {
         localized: cloneLocalizedContent(stored.baseline?.localized || defaultLocalizedContent())
       });
     }
-  };
+  }, [handleTemplateSelection]);
 
-  const handleTemplateSelection = (templateId, options = {}) => {
-    const draftOverride = options.draftOverride;
-    apiFetch(`/api/templates/${templateId}`)
+  const fetchTemplates = useCallback(() => {
+    setLoading(true);
+    apiFetch('/api/templates')
       .then((response) => response.json())
       .then((data) => {
-        const nextTemplate = {
-          ...data,
-          name: draftOverride?.name || data.name
-        };
-        setSelectedTemplate(nextTemplate);
-        const localized = defaultLocalizedContent();
-        localized.en.subject = data.localized?.en?.subject || data.subject || '';
-        localized.en.textBody = data.localized?.en?.textBody || data.textBody || data.content || '';
-        localized.fr.subject = data.localized?.fr?.subject || '';
-        localized.fr.textBody = data.localized?.fr?.textBody || '';
-        setLocalizedContent(localized);
-        setActiveLanguage(draftOverride?.activeLanguage || 'en');
-        setPreviewScenarioId(draftOverride?.previewScenarioId || DEFAULT_PREVIEW_SCENARIO_ID);
-        selectionRef.current = {
-          en: { start: 0, end: 0 },
-          fr: { start: 0, end: 0 }
-        };
-        setBaselineTemplate({
-          name: data.name || '',
-          localized: cloneLocalizedContent(localized)
-        });
-        if (draftOverride?.localized) {
-          setLocalizedContent(cloneLocalizedContent(draftOverride.localized));
-        }
-        // status temporarily dropped from UI/payload
+        setTemplates(Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []));
+        setLoading(false);
+        attemptRestoreSelection();
       })
-      .catch((error) => console.error('Error fetching template details:', error));
-  };
+      .catch((error) => {
+        console.error('Error fetching templates:', error);
+        setLoading(false);
+        attemptRestoreSelection();
+      });
+  }, [attemptRestoreSelection]);
+
+  useEffect(() => {
+    fetchTemplates();
+  }, [fetchTemplates]);
 
   const applyInlineFormat = (formatId) => {
     const definition = inlineFormatTokens[formatId];
@@ -1000,7 +1000,7 @@ const TemplateEditorProvider = ({ children, toggleHelpPanel }) => {
         /* ignore */
       }
     });
-  }, [activeLanguage, templateFocusKey]);
+  }, [activeLanguage, selectedTemplate, templateFocusKey]);
 
   const handleNewTemplate = () => {
     const newTemplate = {

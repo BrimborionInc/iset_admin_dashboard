@@ -58,29 +58,74 @@ const APPLICATION_LIST_VIEW_OPTIONS = [
   { label: 'Show My Flagged Applications', value: 'flagged' },
   { label: 'Show All Applications', value: 'all' },
 ];
-const redactApplicantDisplay = (value) => {
-  if (!value) {
-    return '-';
-  }
-  const tokens = String(value)
-    .split(/\s+/)
-    .map(token => token.trim())
-    .filter(token => token.length);
-  if (!tokens.length) {
-    return '-';
-  }
-  const redactToken = (token) => {
-    if (token.length <= 2) {
-      return token;
-    }
-    const first = token[0];
-    const last = token[token.length - 1];
-    const middle = '*'.repeat(Math.max(0, token.length - 2));
-    return `${first}${middle}${last}`;
-  };
-  return tokens.map(redactToken).join(' ');
+const APPLICATION_LIST_VIEW_BY_VALUE = new Map(APPLICATION_LIST_VIEW_OPTIONS.map(option => [option.value, option]));
+const WORK_QUEUE_BUCKET_OPTIONS = [
+  { label: 'Unassigned Applications', value: 'new-submissions' },
+  { label: 'Awaiting EI Validation', value: 'awaiting-ei-validation' },
+  { label: 'In Assessment', value: 'in-assessment' },
+  { label: 'On Hold', value: 'on-hold' },
+  { label: 'Awaiting Approval', value: 'awaiting-decision' },
+  { label: 'Decisions Made', value: 'decisions-made' },
+  { label: 'Assigned to My Region', value: 'region-queue' },
+  { label: 'Assigned to Me', value: 'needs-reassignment' },
+  { label: 'Assigned to Me', value: 'assigned-to-me' },
+  { label: 'Awaiting Applicant', value: 'awaiting-applicant' },
+  { label: 'Awaiting Applicant Info', value: 'awaiting-info' },
+  { label: 'Due Today', value: 'due-today' },
+  { label: 'Due Soon', value: 'due-soon' },
+  { label: 'Due This Week', value: 'due-this-week' },
+  { label: 'Overdue', value: 'overdue' },
+];
+const WORK_QUEUE_BUCKET_BY_VALUE = new Map(WORK_QUEUE_BUCKET_OPTIONS.map(option => [option.value, option]));
+const LEGACY_STATUS_FILTER_ROUTES = {
+  submitted: { view: 'submitted' },
+  awaiting_ei_validation: { bucket: 'awaiting-ei-validation' },
+  in_review: { view: 'assessment' },
+  on_hold: { bucket: 'on-hold' },
+  pending_approval: { view: 'pending_decision' },
+  pending_decision: { view: 'pending_decision' },
+  approved: { view: 'approved' },
+  approve: { view: 'approved' },
+  rejected: { view: 'denied' },
+  denied: { view: 'denied' },
+  declined: { view: 'denied' },
+  docs_requested: { bucket: 'awaiting-applicant' },
+  awaiting_applicant: { bucket: 'awaiting-applicant' },
+  due_today: { bucket: 'due-today' },
+  due_soon: { bucket: 'due-soon' },
+  due_this_week: { bucket: 'due-this-week' },
+  overdue: { bucket: 'overdue' },
 };
 
+const normalizeBucketRouteValue = value => normalizeStatusKey(value).replace(/_/g, '-');
+
+const resolveRouteFilter = (locationSearch) => {
+  const params = new URLSearchParams(locationSearch || '');
+  const bucketParam = params.get('bucket') || params.get('workQueueBucket');
+  if (bucketParam) {
+    const bucket = normalizeBucketRouteValue(bucketParam);
+    if (WORK_QUEUE_BUCKET_BY_VALUE.has(bucket)) {
+      return { bucket };
+    }
+  }
+
+  const viewParam = params.get('view') || params.get('statusGroup');
+  if (viewParam) {
+    const view = normalizeStatusKey(viewParam);
+    if (APPLICATION_LIST_VIEW_BY_VALUE.has(view)) {
+      return { view };
+    }
+  }
+
+  const statusParam = params.get('status') || params.get('statusFilter');
+  if (statusParam) {
+    const decoded = decodeURIComponent(statusParam.replace(/\+/g, ' '));
+    const route = LEGACY_STATUS_FILTER_ROUTES[normalizeStatusKey(decoded)];
+    return route || { search: decoded };
+  }
+
+  return null;
+};
 const loadStoredColumnWidths = () => {
   if (typeof window === 'undefined') {
     return [];
@@ -220,8 +265,8 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filteringText, setFilteringText] = useState('');
-  const [useServerSearch, setUseServerSearch] = useState(true);
   const [serverSearchText, setServerSearchText] = useState('');
+  const [workQueueBucket, setWorkQueueBucket] = useState(null);
   const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0].value);
   const [currentPageIndex, setCurrentPageIndex] = useState(1);
   const [sortingState, setSortingState] = useState({ columnId: 'submitted_at', isDescending: true });
@@ -263,32 +308,65 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
     return Number.isFinite(parsed) ? [parsed] : [];
   }, [currentUserRegionIds, currentUserRegionId]);
 
-  // Apply incoming query param filter (e.g., status=Awaiting EI Validation)
-  useEffect(() => {
+  const clearRouteFilters = useCallback(() => {
     const params = new URLSearchParams(locationSearch);
-    const statusFilter = params.get('status') || params.get('statusFilter');
-    if (!statusFilter) {
+    let changed = false;
+    ['bucket', 'workQueueBucket', 'status', 'statusFilter', 'statusGroup', 'view'].forEach(key => {
+      if (params.has(key)) {
+        params.delete(key);
+        changed = true;
+      }
+    });
+    if (changed) {
+      const nextSearch = params.toString();
+      history.replace({
+        pathname: location?.pathname || '/case-assignment-dashboard',
+        search: nextSearch ? `?${nextSearch}` : '',
+      });
+    }
+  }, [history, location?.pathname, locationSearch]);
+
+  // Apply incoming query params from homepage work-queue links and legacy status shortcuts.
+  useEffect(() => {
+    const routeFilter = resolveRouteFilter(locationSearch);
+    if (!routeFilter) {
+      setWorkQueueBucket(null);
+      setFilteringText('');
+      setServerSearchText('');
+      setCurrentPageIndex(1);
       return;
     }
-    const decoded = decodeURIComponent(statusFilter.replace(/\+/g, ' '));
-    if (decoded) {
-      setFilteringText(decoded);
-      setUseServerSearch(false);
+
+    if (routeFilter.bucket) {
+      setWorkQueueBucket(routeFilter.bucket);
+      setFilteringText('');
+      setServerSearchText('');
+      setCurrentPageIndex(1);
+      return;
+    }
+
+    setWorkQueueBucket(null);
+    if (routeFilter.view) {
+      setApplicationListView(APPLICATION_LIST_VIEW_BY_VALUE.get(routeFilter.view) || APPLICATION_LIST_VIEW_OPTIONS[0]);
+      setFilteringText('');
+      setServerSearchText('');
+      setCurrentPageIndex(1);
+      return;
+    }
+
+    if (typeof routeFilter.search === 'string') {
+      setFilteringText(routeFilter.search);
       setCurrentPageIndex(1);
     }
   }, [locationSearch]);
 
   useEffect(() => {
-    if (!useServerSearch) {
-      setServerSearchText('');
-      return;
-    }
     const nextSearchText = filteringText.trim();
     const timeoutId = setTimeout(() => {
       setServerSearchText(nextSearchText);
     }, 250);
     return () => clearTimeout(timeoutId);
-  }, [filteringText, useServerSearch]);
+  }, [filteringText]);
 
   const isStaffVisible = useCallback((staff) => {
     if (!staff) return false;
@@ -441,7 +519,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
       },
       {
         id: 'sla_risk',
-        header: 'Overdue',
+        header: 'Target',
         cell: i => {
           const statusInfo = getStatusInfo(i);
           const meta = computeSlaMeta(i, slaTargets, statusInfo.rawStatus, Boolean(resolveAssignedStaffProfileId(i)));
@@ -497,7 +575,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
         minWidth: 200
       },
     ];
-  }, [currentUserId, currentUserName, slaTargets, compareRows]);
+  }, [currentUserId, currentUserName, slaTargets, compareRows, history]);
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -510,36 +588,40 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
     if (serverSearchText) {
       params.set('search', serverSearchText);
     }
-    switch (applicationListView?.value) {
-      case 'active':
-        params.set('excludeTerminal', 'true');
-        break;
-      case 'submitted':
-        params.set('statusGroup', 'submitted');
-        break;
-      case 'assessment':
-        params.set('statusGroup', 'assessment');
-        break;
-      case 'pending_decision':
-        params.set('statusGroup', 'pending_decision');
-        break;
-      case 'decision_recorded':
-        params.set('statusGroup', 'decision_recorded');
-        break;
-      case 'approved':
-        params.set('statusGroup', 'approved');
-        break;
-      case 'denied':
-        params.set('statusGroup', 'denied');
-        break;
-      case 'closed':
-        params.set('statusGroup', 'closed');
-        break;
-      case 'flagged':
-        params.set('watchedOnly', 'true');
-        break;
-      default:
-        break;
+    if (workQueueBucket) {
+      params.set('bucket', workQueueBucket);
+    } else {
+      switch (applicationListView?.value) {
+        case 'active':
+          params.set('excludeTerminal', 'true');
+          break;
+        case 'submitted':
+          params.set('statusGroup', 'submitted');
+          break;
+        case 'assessment':
+          params.set('statusGroup', 'assessment');
+          break;
+        case 'pending_decision':
+          params.set('statusGroup', 'pending_decision');
+          break;
+        case 'decision_recorded':
+          params.set('statusGroup', 'decision_recorded');
+          break;
+        case 'approved':
+          params.set('statusGroup', 'approved');
+          break;
+        case 'denied':
+          params.set('statusGroup', 'denied');
+          break;
+        case 'closed':
+          params.set('statusGroup', 'closed');
+          break;
+        case 'flagged':
+          params.set('watchedOnly', 'true');
+          break;
+        default:
+          break;
+      }
     }
     setLoading(true); setError(null);
     apiFetch(`/api/applications?${params.toString()}`)
@@ -548,7 +630,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
       .catch(() => { if (!cancelled) setError('Failed to load applications'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [pageSize, currentPageIndex, serverSearchText, applicationListView, sortingState]);
+  }, [pageSize, currentPageIndex, serverSearchText, applicationListView, sortingState, workQueueBucket]);
 
   useEffect(() => {
     const c = load();
@@ -681,13 +763,10 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
     setAssignError(null);
 
     const chosen = selectedAssignee.value;
-    const staffObj = assignableStaff.find(s => String(s.id) === String(chosen));
     const payload = {};
 
     payload.assignee_id = chosen;
 
-    const currentApplicationStatus = (assignTargetCase.application_status || assignTargetCase.status || '').toLowerCase();
-    const shouldPromoteStatus = false; // do not auto-change status on assignment
     const isReassign = Boolean(resolveAssignedStaffProfileId(assignTargetCase));
     const trackingLabel = assignTargetCase?.tracking_id || assignTargetCase?.case_id;
     const assigneeLabel = selectedAssignee?.label;
@@ -728,7 +807,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
         });
       }
     }
-  }, [assignTargetCase, selectedAssignee, assignableStaff, load, addAlert]);
+  }, [assignTargetCase, selectedAssignee, load, addAlert]);
 
   const handleToggleWatch = useCallback(async (item) => {
     const caseIdNumeric = Number(item?.case_id ?? item?.__caseIdNumeric);
@@ -824,29 +903,6 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
     });
   }, [items, watchMap]);
 
-  // Keep a local pass so status shortcut links and immediate typing feedback still work.
-  const filteredItems = decoratedItems
-    .filter(i => {
-      const s = filteringText.toLowerCase();
-      if (!s) return true;
-      const statusInfo = getStatusInfo(i);
-      const fields = [
-        i.tracking_id,
-        i.applicant_name,
-        i.application_status,
-        i.case_status,
-        statusInfo?.statusLabel,
-        statusInfo?.rawStatus,
-        i.assigned_user_email,
-        i.ptma_codes,
-        i.lock_owner_name,
-        i.lock_owner_email,
-        i.address_province
-      ];
-      return fields.some(v => v && String(v).toLowerCase().includes(s));
-    })
-    .filter(Boolean);
-
   const watchColumn = useMemo(() => ({
     id: 'watch',
     header: 'Flag',
@@ -877,7 +933,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
     },
   }), [handleToggleWatch, watchPending, compareRows]);
 
-  const actionsColumn = {
+  const actionsColumn = useMemo(() => ({
     id: 'actions', header: 'Actions', minWidth: 160, cell: item => {
       const caseStatusLower = normalizeApplicationStatus(item.application_status || item.status || '');
       const unassigned =
@@ -975,7 +1031,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
         </SpaceBetween>
       );
     }
-  };
+  }), [addAlert, currentUserId, history, isStaffVisible, normalizedUserRole]);
   const widthOverrides = useMemo(() => {
     const map = new Map();
     columnWidths.forEach(({ id, width }) => {
@@ -1106,6 +1162,15 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
     () => columnDefinitionsForTable.find(c => c.id === sortingState.columnId),
     [columnDefinitionsForTable, sortingState.columnId]
   );
+  const activeWorkQueueBucket = workQueueBucket ? WORK_QUEUE_BUCKET_BY_VALUE.get(workQueueBucket) : null;
+  const isAssignModalReassign = Boolean(assignTargetCase && resolveAssignedStaffProfileId(assignTargetCase));
+  const assignModalVerb = isAssignModalReassign ? 'Reassign' : 'Assign';
+
+  const clearWorkQueueBucket = useCallback(() => {
+    setWorkQueueBucket(null);
+    setCurrentPageIndex(1);
+    clearRouteFilters();
+  }, [clearRouteFilters]);
 
   const autoAssignSummary = useMemo(() => {
     if (!autoAssignStatus.rules || autoAssignStatus.rules.length === 0) {
@@ -1179,6 +1244,8 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
             options={APPLICATION_LIST_VIEW_OPTIONS}
             disabled={applicationListView?.value === 'flagged' && watchLoading}
             onChange={({ detail }) => {
+              setWorkQueueBucket(null);
+              clearRouteFilters();
               setApplicationListView(detail.selectedOption || APPLICATION_LIST_VIEW_OPTIONS[0]);
               setCurrentPageIndex(1);
             }}
@@ -1197,17 +1264,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
     </Header>
   );
 
-  return (
-    <BoardItem
-      header={headerContent}
-      i18nStrings={{
-        dragHandleAriaLabel: 'Drag handle',
-        dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',
-        resizeHandleAriaLabel: 'Resize handle',
-        resizeHandleAriaDescription: 'Use Space or Enter to activate resize, arrow keys to resize, Space or Enter to finish.'
-      }}
-      settings={<ButtonDropdown items={[{ id: 'remove', text: 'Remove' }]} ariaLabel="Board item settings" variant="icon" onItemClick={() => actions?.removeItem?.()} />}
-    >
+  const content = (
       <SpaceBetween direction="vertical" size="xs">
         {alerts.map(alert => (
           <Alert
@@ -1220,13 +1277,18 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
             {alert.content}
           </Alert>
         ))}
-        <Box variant="small">This table lists the applications you can work on. NWAC Administrators see all applications, Regional Managers see their assigned and regional files, and ISET Coordinators see only their assigned applications.</Box>
+        {activeWorkQueueBucket ? (
+          <Box variant="small">
+            Work queue filter: <strong>{activeWorkQueueBucket.label}</strong>{' '}
+            <Button variant="inline-link" onClick={clearWorkQueueBucket}>Clear filter</Button>
+          </Box>
+        ) : null}
         <Box>
           <SpaceBetween direction="vertical" size="xs">
             {error ? <Box color="error" textAlign="center">{error}</Box> : null}
             <Table
               columnDefinitions={columnDefinitionsForTable}
-              items={filteredItems}
+              items={decoratedItems}
               loading={loading}
               loadingText="Loading applications"
               variant="embedded"
@@ -1256,7 +1318,8 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
                   filteringPlaceholder="Search"
                   filteringText={filteringText}
                   onChange={({ detail }) => {
-                    setUseServerSearch(true);
+                    setWorkQueueBucket(null);
+                    clearRouteFilters();
                     setFilteringText(detail.filteringText);
                     setCurrentPageIndex(1);
                   }}
@@ -1313,7 +1376,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
           <Modal
             visible={assignModalVisible}
             onDismiss={() => { if(!assignSubmitting){ setAssignModalVisible(false); setAssignTargetCase(null);} }}
-            header={`Assign Application ${assignTargetCase?.tracking_id || ''}`}
+            header={`${assignModalVerb} Application ${assignTargetCase?.tracking_id || ''}`}
             footer={
               <SpaceBetween direction="horizontal" size="xs">
                 <Button onClick={() => { if(!assignSubmitting){ setAssignModalVisible(false); setAssignTargetCase(null);} }} disabled={assignSubmitting}>Cancel</Button>
@@ -1323,7 +1386,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
                   disabled={!selectedAssignee || assignSubmitting}
                   onClick={handleAssignSubmit}
                 >
-                  Assign
+                  {assignModalVerb}
                 </Button>
               </SpaceBetween>
             }
@@ -1347,6 +1410,29 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
           </Modal>
         )}
       </SpaceBetween>
+  );
+
+  if (!actions) {
+    return (
+      <SpaceBetween direction="vertical" size="s">
+        {headerContent}
+        {content}
+      </SpaceBetween>
+    );
+  }
+
+  return (
+    <BoardItem
+      header={headerContent}
+      i18nStrings={{
+        dragHandleAriaLabel: 'Drag handle',
+        dragHandleAriaDescription: 'Use Space or Enter to activate drag, arrow keys to move, Space or Enter to drop.',
+        resizeHandleAriaLabel: 'Resize handle',
+        resizeHandleAriaDescription: 'Use Space or Enter to activate resize, arrow keys to resize, Space or Enter to finish.'
+      }}
+      settings={<ButtonDropdown items={[{ id: 'remove', text: 'Remove' }]} ariaLabel="Board item settings" variant="icon" onItemClick={() => actions?.removeItem?.()} />}
+    >
+      {content}
     </BoardItem>
   );
 };

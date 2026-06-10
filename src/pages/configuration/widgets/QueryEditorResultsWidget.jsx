@@ -58,8 +58,12 @@ const QueryEditorResultsWidget = ({
       />
     ) : undefined;
 
-  const results = Array.isArray(resultSet?.results) ? resultSet.results : [];
-  const statements = Array.isArray(resultSet?.statements) ? resultSet.statements : [];
+  const results = useMemo(() => (
+    Array.isArray(resultSet?.results) ? resultSet.results : []
+  ), [resultSet?.results]);
+  const statements = useMemo(() => (
+    Array.isArray(resultSet?.statements) ? resultSet.statements : []
+  ), [resultSet?.statements]);
   const [activeStatement, setActiveStatement] = useState(0);
 
   useEffect(() => {
@@ -84,8 +88,11 @@ const QueryEditorResultsWidget = ({
 
   const selectedStatement = statementOptions[activeStatement] || statementOptions[0] || null;
 
-  const activeResult = results[activeStatement] || null;
-  const items = activeResult?.type === "select" && Array.isArray(activeResult.rows) ? activeResult.rows : [];
+  const activeResult = useMemo(() => results[activeStatement] || null, [activeStatement, results]);
+  const items = useMemo(
+    () => (activeResult?.type === "select" && Array.isArray(activeResult.rows) ? activeResult.rows : []),
+    [activeResult]
+  );
   const truncated = !!activeResult?.truncated;
   const resultsDescription = (() => {
     if (activeResult?.type !== "select") return metadata?.description;
@@ -152,8 +159,8 @@ const QueryEditorResultsWidget = ({
       const escapeCsv = value => {
         if (value === null || typeof value === "undefined") return "";
         const raw = typeof value === "string" ? value : JSON.stringify(value);
-        const escaped = raw.replace(/\"/g, "\"\"");
-        if (/[\",\n\r]/.test(escaped)) return `"${escaped}"`;
+        const escaped = raw.replace(/"/g, "\"\"");
+        if (/[",\n\r]/.test(escaped)) return `"${escaped}"`;
         return escaped;
       };
       const header = columns.map(escapeCsv).join(",");
@@ -161,7 +168,7 @@ const QueryEditorResultsWidget = ({
       return [header, ...rows].join("\n");
     }
     if (activeResult.type === "write") {
-      return `rowsAffected,message\n${activeResult.rowsAffected ?? 0},\"${(activeResult.message || "OK").replace(/\"/g, "\"\"")}\"`;
+      return `rowsAffected,message\n${activeResult.rowsAffected ?? 0},"${(activeResult.message || "OK").replace(/"/g, "\"\"")}"`;
     }
     return "";
   }, [activeResult, items]);

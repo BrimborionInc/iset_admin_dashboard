@@ -674,7 +674,64 @@ function mapApplicantAccountRow(row) {
   };
 }
 
-async function fetchApplicantAccountRows(dbPool, { q = '', clientId = null, limit = 500, status = null } = {}) {
+function buildApplicantAccountStatusSortExpression() {
+  return `
+    CASE
+      WHEN cl.applicant_account_status = '${APPLICANT_STATUS_INVITATION_SENT}' THEN 0
+      WHEN cl.applicant_account_status = '${APPLICANT_STATUS_CREATED}' THEN 1
+      WHEN cl.applicant_account_status = '${APPLICANT_STATUS_ACTIVATED}' THEN 3
+      ELSE 2
+    END
+  `;
+}
+
+function buildApplicantAccountOrderBy(sortField = null, sortDirection = 'asc') {
+  const direction = String(sortDirection || '').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+  const statusSort = buildApplicantAccountStatusSortExpression();
+  const emailExpression = `
+    LOWER(COALESCE(
+      cl.applicant_account_email,
+      JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.contact.emailNormalized')),
+      JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.contact.email')),
+      ''
+    ))
+  `;
+  const sortable = {
+    applicant: "LOWER(CONCAT_WS(' ', cl.first_name, cl.last_name))",
+    applicantName: "LOWER(CONCAT_WS(' ', cl.first_name, cl.last_name))",
+    email: emailExpression,
+    case: "LOWER(COALESCE(lc.case_number, ''))",
+    caseNumber: "LOWER(COALESCE(lc.case_number, ''))",
+    region: "LOWER(COALESCE(r.code, ''))",
+    regionCode: "LOWER(COALESCE(r.code, ''))",
+    manager: "LOWER(COALESCE(sp.display_name, sp.name, sp.email, ''))",
+    caseManagerName: "LOWER(COALESCE(sp.display_name, sp.name, sp.email, ''))",
+    status: statusSort,
+    accountStatus: statusSort,
+    invited: 'cl.applicant_invited_at',
+    invitedAt: 'cl.applicant_invited_at',
+    activated: 'cl.applicant_activated_at',
+    activatedAt: 'cl.applicant_activated_at',
+  };
+  const expression = sortable[sortField] || statusSort;
+  return `
+    ORDER BY
+      ${expression} ${direction},
+      cl.updated_at DESC,
+      cl.id DESC
+  `;
+}
+
+async function fetchApplicantAccountRows(dbPool, {
+  q = '',
+  clientId = null,
+  limit = 500,
+  offset = 0,
+  status = null,
+  sortField = null,
+  sortDirection = 'asc',
+  includeTotal = false,
+} = {}) {
   const search = normaliseString(q);
   const statusKey = normaliseString(status);
   const params = [];
@@ -736,7 +793,36 @@ async function fetchApplicantAccountRows(dbPool, { q = '', clientId = null, limi
     whereSql += ` AND NOT ${activatedCondition} AND NOT ${invitationCondition} AND NOT ${createdCondition}`;
   }
 
-  params.push(Math.max(1, Math.min(Number(limit) || 500, 1000)));
+  const normalizedLimit = Math.max(1, Math.min(Number(limit) || 500, 1000));
+  const normalizedOffset = Math.max(0, Number(offset) || 0);
+  const orderBySql = buildApplicantAccountOrderBy(sortField, sortDirection);
+  let total = null;
+
+  if (includeTotal) {
+    const [countRows] = await dbPool.query(
+      `
+        WITH latest_case AS (
+          SELECT
+            c.*,
+            ROW_NUMBER() OVER (PARTITION BY c.client_id ORDER BY c.updated_at DESC, c.id DESC) AS rn
+          FROM iset_case c
+          WHERE c.client_id IS NOT NULL
+        )
+        SELECT COUNT(*) AS total
+          FROM client cl
+          LEFT JOIN latest_case lc
+            ON lc.client_id = cl.id
+           AND lc.rn = 1
+          LEFT JOIN canada_region r
+            ON r.region_id = lc.portfolio_region_id
+          LEFT JOIN staff_profiles sp
+            ON sp.id = lc.assigned_staff_profile_id
+          ${whereSql}
+      `,
+      params
+    );
+    total = Number(countRows?.[0]?.total || 0);
+  }
 
   const [rows] = await dbPool.query(
     `
@@ -792,20 +878,13 @@ async function fetchApplicantAccountRows(dbPool, { q = '', clientId = null, limi
       LEFT JOIN staff_profiles sp
         ON sp.id = lc.assigned_staff_profile_id
       ${whereSql}
-      ORDER BY
-        CASE
-          WHEN cl.applicant_account_status = '${APPLICANT_STATUS_INVITATION_SENT}' THEN 0
-          WHEN cl.applicant_account_status = '${APPLICANT_STATUS_CREATED}' THEN 1
-          WHEN cl.applicant_account_status = '${APPLICANT_STATUS_ACTIVATED}' THEN 3
-          ELSE 2
-        END,
-        cl.updated_at DESC,
-        cl.id DESC
-      LIMIT ?
+      ${orderBySql}
+      LIMIT ? OFFSET ?
     `,
-    params
+    [...params, normalizedLimit, normalizedOffset]
   );
-  return (rows || []).map(mapApplicantAccountRow);
+  const mappedRows = (rows || []).map(mapApplicantAccountRow);
+  return includeTotal ? { rows: mappedRows, total: Number.isFinite(total) ? total : mappedRows.length } : mappedRows;
 }
 
 async function fetchPortalApplicantUsers(dbPool, { q = '', limit = 500 } = {}) {

@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, SegmentedControl, Modal } from '@cloudscape-design/components';
+import { Header, ButtonDropdown, Link, SpaceBetween, Button, SegmentedControl, Modal } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
-import ReactFlow from 'reactflow';
+import ReactFlow, { Background, Controls, Handle, MarkerType, MiniMap, Position } from 'reactflow';
 import 'reactflow/dist/style.css';
+import './WorkflowPreviewWidget.css';
 import ELK from 'elkjs/lib/elk.bundled.js';
 import { apiFetch } from '../auth/apiClient';
 import jsonLogic from 'json-logic-js';
@@ -108,11 +109,8 @@ const SummaryListAdapter = ({ comp, answers, lang }) => {
   return <Comp comp={comp} values={answers} lang={lang} />;
 };
 
-// Smaller nodes and tighter default fallback spacing
-const NODE_W = 160;
-const NODE_H = 60;
-const GAP_X = 180;
-const GAP_Y = 96;
+const GRAPH_NODE_W = 236;
+const GRAPH_NODE_H = 86;
 const DISPLAY_ONLY_TYPES = new Set([
   'paragraph',
   'text-block',
@@ -127,7 +125,46 @@ const DISPLAY_ONLY_TYPES = new Set([
 
 const elk = new ELK();
 
-async function buildGraph(selectedWorkflow) {
+const formatOptionLabel = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  return raw
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+const summarizeEdgeLabels = (labels, hasDefault) => {
+  const uniqueLabels = Array.from(new Set((labels || []).filter(Boolean)));
+  let summary = '';
+  if (uniqueLabels.length === 1) {
+    summary = uniqueLabels[0];
+  } else if (uniqueLabels.length === 2) {
+    summary = uniqueLabels.join(', ');
+  } else if (uniqueLabels.length > 2) {
+    summary = `${uniqueLabels.slice(0, 2).join(', ')} +${uniqueLabels.length - 2}`;
+  }
+  if (hasDefault) summary = summary ? `${summary}; default` : 'Default';
+  return summary.length > 56 ? `${summary.slice(0, 53)}...` : summary;
+};
+
+const WorkflowStepNode = ({ data, selected }) => (
+  <div className={`workflow-preview-node${data.isStart ? ' workflow-preview-node--start' : ''}${selected ? ' workflow-preview-node--selected' : ''}`}>
+    <Handle type="target" position={data.targetPosition} className="workflow-preview-node__handle" />
+    <div className="workflow-preview-node__meta">
+      <span>{data.stepLabel}</span>
+      {data.isStart && <span className="workflow-preview-node__badge">Start</span>}
+    </div>
+    <div className="workflow-preview-node__title" title={data.label}>
+      {data.label}
+    </div>
+    <Handle type="source" position={data.sourcePosition} className="workflow-preview-node__handle" />
+  </div>
+);
+
+const workflowNodeTypes = { workflowStep: WorkflowStepNode };
+
+async function buildGraph(selectedWorkflow, direction = 'DOWN') {
   if (!selectedWorkflow) return { nodes: [], edges: [] };
   const steps = Array.isArray(selectedWorkflow.steps) ? selectedWorkflow.steps : [];
   const routes = Array.isArray(selectedWorkflow.routes) ? selectedWorkflow.routes : [];
@@ -135,142 +172,147 @@ async function buildGraph(selectedWorkflow) {
   const idSet = new Set(steps.map(s => s.id));
   const start = steps.find(s => s.is_start) || steps[0] || null;
 
-  // Build adjacency and edges
   const adj = new Map();
   for (const s of steps) adj.set(s.id, []);
-  const edgeLabelMap = new Map(); // key: src->tgt => combined label
+  const edgeMap = new Map();
 
-  const pushEdge = (src, tgt, label) => {
+  const pushEdge = (src, tgt, label, { isDefault = false, isBranch = false } = {}) => {
     if (!src || !tgt || !idSet.has(src) || !idSet.has(tgt)) return;
     const key = `${src}->${tgt}`;
-    adj.get(src)?.push(tgt);
-    if (label) {
-      edgeLabelMap.set(key, edgeLabelMap.has(key) ? `${edgeLabelMap.get(key)}, ${label}` : label);
-    } else {
-      if (!edgeLabelMap.has(key)) edgeLabelMap.set(key, '');
-    }
+    const nexts = adj.get(src) || [];
+    if (!nexts.includes(tgt)) nexts.push(tgt);
+    adj.set(src, nexts);
+    const existing = edgeMap.get(key) || { source: String(src), target: String(tgt), labels: [], hasDefault: false, isBranch: false };
+    if (label) existing.labels.push(label);
+    existing.hasDefault = existing.hasDefault || isDefault;
+    existing.isBranch = existing.isBranch || isBranch;
+    edgeMap.set(key, existing);
   };
+
+  const routeSequence = new Map();
+  const visitedOrder = [];
+  if (start) {
+    const q = [start.id];
+    const seen = new Set([start.id]);
+    while (q.length) {
+      const current = q.shift();
+      visitedOrder.push(current);
+      const route = routes.find((candidate) => candidate.source_step_id === current);
+      if (!route) continue;
+      const nextIds = [];
+      if (route.mode === 'by_option') {
+        (Array.isArray(route.options) ? route.options : []).forEach((option) => {
+          if (option?.next_step_id) nextIds.push(option.next_step_id);
+        });
+      }
+      if (route.default_next_step_id) nextIds.push(route.default_next_step_id);
+      nextIds.forEach((nextId) => {
+        if (!idSet.has(nextId) || seen.has(nextId)) return;
+        seen.add(nextId);
+        q.push(nextId);
+      });
+    }
+  }
+  steps.forEach((step) => {
+    if (!visitedOrder.includes(step.id)) visitedOrder.push(step.id);
+  });
+  visitedOrder.forEach((stepId, index) => routeSequence.set(stepId, index + 1));
 
   for (const r of routes) {
     if (!r || !r.source_step_id) continue;
     if (r.mode === 'linear') {
-      if (r.default_next_step_id) pushEdge(r.source_step_id, r.default_next_step_id, '');
+      if (r.default_next_step_id) pushEdge(r.source_step_id, r.default_next_step_id);
     } else if (r.mode === 'by_option') {
       const opts = Array.isArray(r.options) ? r.options : [];
       for (const o of opts) {
-        pushEdge(r.source_step_id, o.next_step_id, String(o.option_value));
+        pushEdge(r.source_step_id, o.next_step_id, formatOptionLabel(o.option_value), { isBranch: true });
       }
-      if (r.default_next_step_id) pushEdge(r.source_step_id, r.default_next_step_id, '(default)');
+      if (r.default_next_step_id) pushEdge(r.source_step_id, r.default_next_step_id, '', { isDefault: true, isBranch: true });
     }
   }
 
-  // Assign levels using BFS from start (fallback: scattered)
-  const level = new Map();
-  if (start) {
-    const q = [start.id];
-    level.set(start.id, 0);
-    while (q.length) {
-      const u = q.shift();
-      const nexts = adj.get(u) || [];
-      for (const v of nexts) {
-        if (!level.has(v)) {
-          level.set(v, (level.get(u) || 0) + 1);
-          q.push(v);
-        }
-      }
-    }
-  }
-  // Unreached nodes: assign incremental levels after max
-  const maxLevel = Math.max(-1, ...Array.from(level.values()));
-  let extra = 0;
-  for (const s of steps) {
-    if (!level.has(s.id)) level.set(s.id, maxLevel + 1 + (extra++));
-  }
-
-  // Arrange nodes into columns by level
-  const byLevel = new Map();
-  for (const s of steps) {
-    const lv = level.get(s.id) || 0;
-    if (!byLevel.has(lv)) byLevel.set(lv, []);
-    byLevel.get(lv).push(s);
-  }
-  // Sort each column by name for stability
-  for (const arr of byLevel.values()) {
-    arr.sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  }
-
-  const nodes = [];
-  for (const [lv, arr] of Array.from(byLevel.entries()).sort((a, b) => a[0] - b[0])) {
-    arr.forEach((s, idx) => {
-      nodes.push({
-        id: String(s.id),
-        data: { label: s.name + (s.is_start ? ' •' : '') },
-        position: { x: lv * GAP_X, y: idx * GAP_Y },
-  sourcePosition: 'bottom',
-  targetPosition: 'top',
-        style: { width: NODE_W, height: NODE_H, borderRadius: 8, border: s.is_start ? '2px solid #0972d3' : '1px solid #d5dbdb', background: '#fff' }
-      });
+  const rawEdges = [];
+  let i = 0;
+  for (const edge of edgeMap.values()) {
+    rawEdges.push({
+      ...edge,
+      id: `preview-edge-${i++}`,
+      label: summarizeEdgeLabels(edge.labels, edge.hasDefault),
+      fullLabel: [...edge.labels, edge.hasDefault ? 'Default' : null].filter(Boolean).join(', '),
     });
   }
 
-  // Build edges (merge labels) and keep meta for styling
-  const rawEdges = [];
-  let i = 0;
-  for (const [key, label] of edgeLabelMap.entries()) {
-    const [src, tgt] = key.split('->');
-    const isDefault = label === '' || label === '(default)';
-    rawEdges.push({ id: `e${i++}`, source: String(src), target: String(tgt), label: label || undefined, isDefault });
-  }
-
-  // Run ELK layout for better readability
   const elkGraph = {
     id: 'root',
     layoutOptions: {
       'elk.algorithm': 'layered',
-      'elk.direction': 'DOWN',
-      // tighten vertical layers and general spacing to shorten connectors
-      'elk.layered.spacing.nodeNodeBetweenLayers': '80',
-      'elk.spacing.nodeNode': '32',
+      'elk.direction': direction === 'RIGHT' ? 'RIGHT' : 'DOWN',
+      'elk.layered.spacing.nodeNodeBetweenLayers': direction === 'RIGHT' ? '118' : '92',
+      'elk.spacing.nodeNode': direction === 'RIGHT' ? '48' : '44',
       'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
       'elk.edgeRouting': 'ORTHOGONAL'
     },
-    children: steps.map(s => ({ id: String(s.id), width: NODE_W, height: NODE_H })),
+    children: steps.map(s => ({ id: String(s.id), width: GRAPH_NODE_W, height: GRAPH_NODE_H })),
     edges: rawEdges.map(e => ({ id: e.id, sources: [e.source], targets: [e.target] }))
   };
 
+  const nodePosition = {
+    sourcePosition: direction === 'RIGHT' ? Position.Right : Position.Bottom,
+    targetPosition: direction === 'RIGHT' ? Position.Left : Position.Top,
+  };
+
+  const makeNode = (step, position) => ({
+    id: String(step.id),
+    type: 'workflowStep',
+    data: {
+      label: step.name,
+      isStart: Boolean(step.is_start),
+      stepLabel: `Step ${routeSequence.get(step.id) || ''}`.trim(),
+      sourcePosition: nodePosition.sourcePosition,
+      targetPosition: nodePosition.targetPosition,
+    },
+    position,
+    ...nodePosition,
+    style: { width: GRAPH_NODE_W, height: GRAPH_NODE_H },
+  });
+
+  const makeEdge = (edge) => ({
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    type: 'smoothstep',
+    label: edge.label || undefined,
+    markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
+    className: [
+      'workflow-preview-edge',
+      edge.isBranch ? 'workflow-preview-edge--branch' : 'workflow-preview-edge--linear',
+      edge.hasDefault ? 'workflow-preview-edge--default' : '',
+    ].filter(Boolean).join(' '),
+    labelBgPadding: [8, 4],
+    labelBgBorderRadius: 6,
+    labelBgStyle: { fill: '#ffffff', fillOpacity: 0.96 },
+    labelStyle: {
+      fill: edge.isBranch ? '#0f172a' : '#424650',
+      fontSize: 11,
+      fontWeight: edge.isBranch ? 600 : 500,
+    },
+    data: { fullLabel: edge.fullLabel },
+  });
+
   try {
     const laid = await elk.layout(elkGraph);
-    const byId = new Map(laid.children.map(c => [c.id, c]));
-    const rfNodes = steps.map(s => ({
-      id: String(s.id),
-      data: { label: s.name + (s.is_start ? ' •' : '') },
-      position: { x: byId.get(String(s.id))?.x || 0, y: byId.get(String(s.id))?.y || 0 },
-  sourcePosition: 'bottom',
-  targetPosition: 'top',
-      style: { width: NODE_W, height: NODE_H, borderRadius: 8, border: s.is_start ? '2px solid #0972d3' : '1px solid #d5dbdb', background: '#fff' }
+    const byId = new Map((laid.children || []).map(c => [c.id, c]));
+    const rfNodes = steps.map(step => makeNode(step, {
+      x: byId.get(String(step.id))?.x || 0,
+      y: byId.get(String(step.id))?.y || 0,
     }));
-    const rfEdges = rawEdges.map(e => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      type: 'smoothstep',
-      label: e.label,
-      markerEnd: { type: 'arrowclosed' },
-      style: { stroke: e.isDefault ? '#9aa5b1' : '#0972d3' },
-      labelStyle: { fill: e.isDefault ? '#4b5563' : '#0f172a', fontWeight: e.isDefault ? 400 : 600 }
-    }));
-    return { nodes: rfNodes, edges: rfEdges };
+    return { nodes: rfNodes, edges: rawEdges.map(makeEdge) };
   } catch {
-    // Fallback to simple grid if ELK fails
-    const rfNodes = steps.map((s, idx) => ({
-      id: String(s.id),
-      data: { label: s.name + (s.is_start ? ' •' : '') },
-      position: { x: (idx % 4) * GAP_X, y: Math.floor(idx / 4) * GAP_Y },
-  sourcePosition: 'bottom', targetPosition: 'top',
-      style: { width: NODE_W, height: NODE_H, borderRadius: 8, border: s.is_start ? '2px solid #0972d3' : '1px solid #d5dbdb', background: '#fff' }
+    const rfNodes = steps.map((step, idx) => makeNode(step, {
+      x: direction === 'RIGHT' ? idx * (GRAPH_NODE_W + 96) : (idx % 3) * (GRAPH_NODE_W + 72),
+      y: direction === 'RIGHT' ? (idx % 3) * (GRAPH_NODE_H + 54) : Math.floor(idx / 3) * (GRAPH_NODE_H + 68),
     }));
-    const rfEdges = rawEdges.map(e => ({ id: e.id, source: e.source, target: e.target, type: 'smoothstep', label: e.label, markerEnd: { type: 'arrowclosed' } }));
-    return { nodes: rfNodes, edges: rfEdges };
+    return { nodes: rfNodes, edges: rawEdges.map(makeEdge) };
   }
 }
 
@@ -278,7 +320,9 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
   const [{ nodes, edges }, setGraph] = useState({ nodes: [], edges: [] });
   const rfRef = React.useRef(null);
   const containerRef = React.useRef(null);
+  const graphTouchedRef = React.useRef(false);
   const [mode, setMode] = useState('graph'); // graph | interactive | summary | json
+  const [graphDirection, setGraphDirection] = useState('DOWN');
   const [previewLang, setPreviewLang] = useState('en'); // 'en' | 'fr'
   const [runtime, setRuntime] = useState(null); // { steps, meta }
   const [runner, setRunner] = useState({ stepIndex: 0, answers: {}, errors: {}, warnings: {}, history: [] });
@@ -316,29 +360,47 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const g = await buildGraph(selectedWorkflow);
-      if (!cancelled) setGraph(g);
+      const g = await buildGraph(selectedWorkflow, graphDirection);
+      if (!cancelled) {
+        graphTouchedRef.current = false;
+        setGraph(g);
+      }
     })();
     return () => { cancelled = true; };
-  }, [selectedWorkflow]);
+  }, [selectedWorkflow, graphDirection]);
 
-  // Fit view on first init and on container resize
+  const fitGraph = useCallback((padding = 0.18) => {
+    const instance = rfRef.current;
+    if (!instance) return;
+    requestAnimationFrame(() => {
+      try {
+        instance.fitView({ padding, includeHiddenNodes: true, duration: 240 });
+      } catch {
+        // React Flow may not be ready on the first paint.
+      }
+    });
+  }, []);
+
   const onRFInit = React.useCallback((inst) => {
     rfRef.current = inst;
-    try { inst.fitView({ padding: 0.2, includeHiddenNodes: true }); } catch {}
-  }, []);
+    fitGraph();
+  }, [fitGraph]);
+
+  useEffect(() => {
+    if (mode !== 'graph' || !nodes.length) return;
+    graphTouchedRef.current = false;
+    fitGraph();
+  }, [edges.length, fitGraph, mode, nodes.length]);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const ro = new ResizeObserver(() => {
-      if (rfRef.current) {
-        try { rfRef.current.fitView({ padding: 0.2, includeHiddenNodes: true }); } catch {}
-      }
+      if (!graphTouchedRef.current) fitGraph(0.2);
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [fitGraph]);
 
   // Interactive helpers
   const steps = useMemo(() => (Array.isArray(runtime?.steps) ? runtime.steps : []), [runtime]);
@@ -826,6 +888,8 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
           items={[
             { id: 'lang-en', text: 'English' },
             { id: 'lang-fr', text: 'Français' },
+            { id: 'layout-down', text: 'Graph: Vertical layout' },
+            { id: 'layout-right', text: 'Graph: Horizontal layout' },
             { id: 'remove', text: 'Remove' }
           ]}
           ariaLabel="Workflow preview settings"
@@ -839,6 +903,12 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
               case 'lang-fr':
                 setPreviewLang('fr');
                 break;
+              case 'layout-down':
+                setGraphDirection('DOWN');
+                break;
+              case 'layout-right':
+                setGraphDirection('RIGHT');
+                break;
               case 'remove':
                 actions && actions.removeItem && actions.removeItem();
                 break;
@@ -849,24 +919,49 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
         />
       }
   >
-  <Box style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="workflow-preview-shell">
         {!selectedWorkflow && (
           <div style={{ color: '#888' }}>Select a workflow to preview</div>
         )}
         {selectedWorkflow && mode === 'graph' && (
-          <div ref={containerRef} style={{ height: 420, border: '1px solid #e0e0e0', borderRadius: 6, background: '#fff' }}>
+          <div ref={containerRef} className="workflow-preview-graph">
             <ReactFlow
               onInit={onRFInit}
               nodes={nodes}
               edges={edges}
+              nodeTypes={workflowNodeTypes}
               nodesDraggable={false}
               nodesConnectable={false}
-              elementsSelectable={false}
-              panOnDrag
+              elementsSelectable
+              panOnDrag={true}
+              selectionOnDrag={false}
               zoomOnScroll
+              zoomOnPinch
+              zoomOnDoubleClick={false}
+              minZoom={0.08}
+              maxZoom={2.4}
               fitView
+              fitViewOptions={{ padding: 0.18 }}
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+              onMoveStart={() => { graphTouchedRef.current = true; }}
               proOptions={{ hideAttribution: true }}
-            />
+            >
+              <Background color="#d8dee8" gap={22} size={1} />
+              <Controls
+                showInteractive={false}
+                onFitView={() => {
+                  graphTouchedRef.current = false;
+                  fitGraph();
+                }}
+              />
+              <MiniMap
+                className="workflow-preview-minimap"
+                pannable
+                zoomable
+                nodeColor={(node) => (node?.data?.isStart ? '#0972d3' : '#d9e2ec')}
+                maskColor="rgba(15, 23, 42, 0.08)"
+              />
+            </ReactFlow>
           </div>
         )}
         {selectedWorkflow && mode === 'interactive' && (
@@ -1050,7 +1145,7 @@ const WorkflowPreviewWidget = ({ selectedWorkflow, actions, toggleHelpPanel, Hel
             })()}
           </div>
         )}
-      </Box>
+      </div>
     </BoardItem>
   );
 };

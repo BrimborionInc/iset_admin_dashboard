@@ -1,7 +1,7 @@
 # Agent Operational Access Notes
 
 Status: current operational access guidance for Codex/WSL threads. Verify live AWS/DB state before running mutating commands.
-Last reviewed: 2026-05-08 after WSL-native PROD app deployment validation.
+Last reviewed: 2026-06-08 after TEST cost-pruning.
 
 Purpose: keep database, TEST/PROD, and AWS profile command notes out of `docs/AGENTS.md` while preserving the operational details future agents need.
 
@@ -48,6 +48,7 @@ Purpose: keep database, TEST/PROD, and AWS profile command notes out of `docs/AG
 - Preferred config/data promotion entry point: `npm run data:sync:plan -- --dataset <name> ...` followed by `npm run data:sync:apply -- --target-env test ...`
 - Preferred full TEST reset entry points: `npm run test:db:refresh:plan -- --source-env dev` and `npm run test:db:refresh -- --source-env dev --yes`
 - Supporting guide: `docs/guides/test-db-access-from-codex.md`
+- Current TEST topology caveat: after the 2026-06-08 cost prune, the normal TEST shape is one `nwac-test-asg` app host in `ca-central-1d`. Helpers should auto-discover a healthy SSM-online ASG host; do not require old two-host evidence or hard-code retired instance IDs.
 - Current caveat: older scripts such as `scripts/deploy-test-db.ps1` reference retired test instance IDs; re-check live AWS resources before trusting those IDs.
 - Current schema rule: treat `admin-dashboard/sql/migrations/` -> `iset_migration` as the canonical PATH shared-schema path. Treat `admin-dashboard/sql/ops/` as manual-only SQL, `admin-dashboard/db/migrations/` as legacy archive, and the portal-side `__migrations` / `schema_migrations` paths as retired for deployed PATH schema work unless a thread explicitly proves otherwise.
 - Current privacy ERM rule: secure messages are case-scoped typed-actor records, not applicant-to-assigned-staff personal messages. Preserve `messages.case_id`, typed sender/recipient actor fields, exactly-one-applicant semantics, scoped `message_attachment` rows, source-specific `iset_document` lineage constraints, signing-request case/participant FKs, and escalation/task shared-user FKs when changing messaging, document, form-signing, escalation, or task flows.
@@ -63,12 +64,14 @@ Purpose: keep database, TEST/PROD, and AWS profile command notes out of `docs/AG
 - Do not assume direct network access from the sandbox to the Aurora cluster. The normal Codex path is remote execution on the PROD app host, where the helper reads `nwac-prod-db-credentials` through the instance role and connects to Aurora inside the VPC.
 - Preferred helper for future chats: `bash scripts/run-prod-sql-via-ssm.sh`
 - The helper auto-discovers an online in-service PROD app instance from ASG `nwac-prod-asg`, uses profile `nwac-prod`, region `ca-central-1`, DB secret `nwac-prod-db-credentials`, host `nwac-prod-db.cluster-c3g4iamg8j38.ca-central-1.rds.amazonaws.com`, database `iset_intake`, and port `3306` by default.
+- PROD Aurora provisioned downsizing runbook: `docs/ops/runbooks/prod-aurora-provisioned-downsize.md`. Use the temporary-reader/failover pattern; do not modify the only writer in place.
 - Confirm the PROD operator identity before live data work:
   `aws sts get-caller-identity --profile nwac-prod`
 - Read-only connectivity check:
   `bash scripts/run-prod-sql-via-ssm.sh --sql "SELECT DATABASE() AS db, @@hostname AS host, @@port AS port, CURRENT_USER() AS mysql_user, (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()) AS table_count;"`
 - Use `--sql-file` for reviewed multi-statement repair scripts. The helper stages SQL through `s3://nwac-prod-artifacts/ssm-sql/...` so larger files do not exceed SSM document size limits.
 - For PROD data repair, default to preview SQL first, then a guarded apply script with explicit expected identifiers, transaction boundaries where feasible, before/after verification selects, and an audit/recovery trail. Avoid broad destructive statements and do not rely on chat-only evidence for live mutations.
+- For PROD SQL, do not guess table or column names. Before selecting, updating, or writing repair SQL against a table whose live shape is not already verified in the current thread, run `SHOW COLUMNS FROM <table>` or `SHOW CREATE TABLE <table>` through the target environment helper and write SQL only against verified columns. If a query fails because a guessed column/table name was used, stop and correct the workflow before any mutation.
 - If PROD DB access fails, stop and repair the documented helper/profile path before improvising a new access route.
 
 ## PROD Start/Stop Reference

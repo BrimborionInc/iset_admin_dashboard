@@ -39,6 +39,15 @@ const {
   summariseIlmpActionPlanStatuses,
 } = require('./src/lib/ilmpActionPlanReadiness');
 const {
+  APPENDIX_A: ILMP_APPENDIX_A,
+  APPENDIX_B: ILMP_APPENDIX_B,
+  APPENDIX_C: ILMP_APPENDIX_C,
+  PATH_REVIEW: ILMP_PATH_REVIEW,
+  buildIlmpIssueMessage,
+  collectIlmpIssueMessages,
+  getIlmpParticipantFieldContext,
+} = require('./src/lib/ilmpIssueMessages');
+const {
   ILMP_BARRIER_CODE_LOOKUP,
   collectNocLookupPairs,
   hasIlmpOtherBarrierSupportingNotes,
@@ -8230,6 +8239,7 @@ function extractActionPlanDetails(context, clientStatus, requestedSupports) {
 
       return {
         id: plan.id || plan.action_plan_id || null,
+        name: plan.name || metadata.name || metadata.title || null,
         status: normalisePlanStatus(plan.status),
         startDate: planStartDate,
         barriers: extractActionPlanBarrierValues(plan),
@@ -8480,6 +8490,14 @@ function evaluateFieldRule(fieldKey, fieldDef, extractedValue, context) {
   const results = [];
   const warnings = [];
   const blockingIssues = [];
+  const fieldContext = getIlmpParticipantFieldContext(fieldKey) || {};
+  const baseRuleContext = {
+    fieldKey,
+    location: fieldContext.location || 'Participant details',
+    esdcElement: fieldContext.esdcElement || null,
+    esdcRule: fieldContext.esdcRule || `${ILMP_APPENDIX_A}: ${fieldDef.label} is mandatory for ISET submissions.`,
+    fix: fieldContext.fix || `edit Participant details and correct ${fieldDef.label}.`
+  };
 
   const value = typeof fieldDef.normalise === 'function'
     ? fieldDef.normalise(extractedValue)
@@ -8497,7 +8515,8 @@ function evaluateFieldRule(fieldKey, fieldDef, extractedValue, context) {
         severity: 'blocking',
         passed: false,
         message: msg,
-        detail: null
+        detail: null,
+        ...baseRuleContext
       });
       return { value, results, warnings, blockingIssues };
     }
@@ -8516,7 +8535,8 @@ function evaluateFieldRule(fieldKey, fieldDef, extractedValue, context) {
         severity: 'blocking',
         passed: false,
         message: msg,
-        detail: value
+        detail: value,
+        ...baseRuleContext
       });
       return { value, results, warnings, blockingIssues };
     }
@@ -8527,7 +8547,8 @@ function evaluateFieldRule(fieldKey, fieldDef, extractedValue, context) {
       severity: 'info',
       passed: true,
       message: null,
-      detail: value
+      detail: value,
+      ...baseRuleContext
     });
   }
 
@@ -8552,7 +8573,8 @@ function evaluateFieldRule(fieldKey, fieldDef, extractedValue, context) {
         severity: test.severity || 'blocking',
         passed,
         message: message || null,
-        detail
+        detail,
+        ...baseRuleContext
       });
       if (!passed) {
         const formatted = `[${fieldKey}] ${message}`;
@@ -8571,7 +8593,8 @@ function evaluateFieldRule(fieldKey, fieldDef, extractedValue, context) {
       severity: 'info',
       passed: true,
       message: null,
-      detail: value
+      detail: value,
+      ...baseRuleContext
     });
   }
 
@@ -8822,7 +8845,7 @@ function runIlmpValidation(context) {
     { key: 'aboriginalGroup', value: indigenousCode, allowed: CODE_MAPS.aboriginal, label: 'Indigenous identity' },
     { key: 'maritalStatus', value: maritalCode, allowed: CODE_MAPS.marital, label: 'Marital status' },
     { key: 'languageSpoken', value: languageCode, allowed: CODE_MAPS.language, label: 'Language spoken' },
-    { key: 'province', value: provinceNumeric, allowed: CODE_MAPS.province, label: 'Province' }
+    { key: 'province', fieldKey: 'addressProvince', value: provinceNumeric, allowed: CODE_MAPS.province, label: 'Province' }
   ];
   codeChecks.forEach(entry => {
     if (!entry.value) return;
@@ -8836,7 +8859,8 @@ function runIlmpValidation(context) {
         severity: 'blocking',
         passed: false,
         message: msg,
-        detail: entry.value
+        detail: entry.value,
+        fieldKey: entry.fieldKey || entry.key
       });
     }
   });
@@ -8850,7 +8874,8 @@ function runIlmpValidation(context) {
       severity: 'blocking',
       passed: false,
       message,
-      detail
+      detail,
+      fieldKey: key
     });
   };
 
@@ -8897,8 +8922,8 @@ function runIlmpValidation(context) {
     addMandatoryBlocker({
       key: 'numberOfDependantChildren',
       id: 'dependent-children-count-required',
-      label: 'Number of dependant children',
-      message: 'Number of dependant children is required for ILMP reporting.'
+      label: 'Number of dependent children',
+      message: 'Number of dependent children is required for ILMP reporting.'
     });
   }
 
@@ -9055,6 +9080,182 @@ function runIlmpValidation(context) {
   const eligiblePlans = Array.isArray(derivedPlans)
     ? derivedPlans.filter(plan => (plan?.status || '').toLowerCase() !== 'draft')
     : [];
+  const describeActionPlanLocation = (plan, index = 0) => {
+    const name = normaliseString(plan?.name || plan?.title || plan?.description || plan?.goalDescription);
+    if (name) return `Action plan "${name}"`;
+    const start = normaliseString(plan?.startDate || plan?.ActionPlanStartDate || plan?.actionPlanStartDate);
+    if (start) return `Action plan starting ${start}`;
+    return index >= 0 ? `Action plan ${index + 1}` : 'Action plan';
+  };
+  const describeInterventionLocation = (intervention, plan, index = 0) => {
+    const title = normaliseString(intervention?.description || intervention?.title || intervention?.name);
+    const code = normaliseString(intervention?.code || intervention?.interventionCode);
+    const start = normaliseString(intervention?.startDate || intervention?.interventionStartDate);
+    const base = title
+      ? `Intervention "${title}"`
+      : code
+        ? `Intervention code ${code}`
+        : `Intervention ${index + 1}`;
+    const suffix = start ? ` starting ${start}` : '';
+    return `${base}${suffix} in ${describeActionPlanLocation(plan)}`;
+  };
+  const planLocationByKey = new Map();
+  const planLocationByIndex = new Map();
+  const interventionLocationByKey = new Map();
+  const interventionLocationByPlanAndIndex = new Map();
+  eligiblePlans.forEach((plan, planIndex) => {
+    const planLocation = describeActionPlanLocation(plan, planIndex);
+    planLocationByIndex.set(String(planIndex + 1), planLocation);
+    [plan?.id, plan?.action_plan_id].forEach(key => {
+      if (key !== null && typeof key !== 'undefined' && String(key).trim()) {
+        planLocationByKey.set(String(key), planLocation);
+      }
+    });
+    (Array.isArray(plan?.interventions) ? plan.interventions : []).forEach((intervention, interventionIndex) => {
+      const interventionLocation = describeInterventionLocation(intervention, plan, interventionIndex);
+      interventionLocationByPlanAndIndex.set(`${planIndex + 1}:${interventionIndex + 1}`, interventionLocation);
+      [intervention?.id, intervention?.intervention_id].forEach(key => {
+        if (key !== null && typeof key !== 'undefined' && String(key).trim()) {
+          interventionLocationByKey.set(String(key), interventionLocation);
+        }
+      });
+    });
+  });
+  const getDefaultEsdcRuleForRule = rule => {
+    const id = String(rule?.id || '').toLowerCase();
+    const label = String(rule?.label || '').toLowerCase();
+    if (
+      id.includes('barrier-many') ||
+      id.includes('barrier-other') ||
+      id.includes('gap-start') ||
+      id.includes('long-duration') ||
+      id.includes('result-unspecified') ||
+      id.includes('result-ready-for-work') ||
+      id.includes('address-no-address') ||
+      id.includes('address-no-postal') ||
+      id.includes('actionplan-overlap')
+    ) {
+      return ILMP_PATH_REVIEW;
+    }
+    if (id.includes('childcare')) {
+      return `${ILMP_APPENDIX_C}: optional childcare elements <actionPlanChildCareNeed> and <actionPlanChildCareFundedCode> must use valid, consistent codes when reported.`;
+    }
+    if (id.includes('barrier')) {
+      return `${ILMP_APPENDIX_B}: <barrierToEmployment> is mandatory for action plan reporting and must use valid ESDC barrier codes.`;
+    }
+    if (id.includes('ei-claimant') || id.includes('social-assistance')) {
+      return `${ILMP_APPENDIX_B}: action plan applicant-status fields are mandatory and must use valid ESDC codes.`;
+    }
+    if (id.includes('prev-employment') || id.includes('prev-noc') || id.includes('prev-schedule')) {
+      return `${ILMP_APPENDIX_B}: previous employment fields are mandatory; NOC details are conditionally mandatory when the client was employed at intake.`;
+    }
+    if (
+      id.startsWith('file-') &&
+      (id.includes('namespaces') || id.includes('schema') || id.includes('order') || id.includes('duration') || id.includes('cost') || id.includes('syscomment'))
+    ) {
+      return `${ILMP_APPENDIX_B}/${ILMP_APPENDIX_C}: generated XML must match the ILMP 1.4 structure and allowed elements.`;
+    }
+    if (id.startsWith('file-client') || id.startsWith('file-agreement-holder')) {
+      return `${ILMP_APPENDIX_A}: generated XML must include the mandatory client-level element.`;
+    }
+    if (id.startsWith('file-actionplan') || id.includes('actionplan') || label.includes('action plan') || label.includes('agreement number')) {
+      return `${ILMP_APPENDIX_B}: generated XML must include the mandatory or conditionally mandatory action plan element.`;
+    }
+    if (id.startsWith('file-intervention') || id.includes('intervention') || label.includes('intervention')) {
+      return `${ILMP_APPENDIX_C}: generated XML must include the mandatory or conditionally mandatory intervention element.`;
+    }
+    return `${ILMP_APPENDIX_A}: the named XML element is mandatory or conditionally mandatory for ISET submissions.`;
+  };
+  const getDefaultFixForRule = rule => {
+    const id = String(rule?.id || '').toLowerCase();
+    const label = normaliseString(rule?.label);
+    if (rule?.fix) return rule.fix;
+    if (rule?.fieldKey) {
+      const fieldContext = getIlmpParticipantFieldContext(rule.fieldKey);
+      if (fieldContext?.fix) return fieldContext.fix;
+    }
+    if (id.includes('file-')) return 'rerun validation after correcting the source participant, action plan, or intervention field.';
+    if (id.includes('intervention')) return 'edit the named intervention.';
+    if (id.includes('actionplan') || id.includes('actionplan-') || id.includes('[actionplan-')) return 'edit the named action plan.';
+    if (id.includes('barrier')) return 'edit Participant details > Employment goals and barriers, or the named action plan barriers.';
+    if (id.includes('address') || id.includes('postal')) return 'edit Participant details > Contact details.';
+    if (label) return `correct ${label}.`;
+    return 'review and correct the named record.';
+  };
+  const enrichIlmpRuleResult = rule => {
+    if (!rule || typeof rule !== 'object') return rule;
+    const next = { ...rule };
+    if (!next.location) {
+      const fieldContext = next.fieldKey ? getIlmpParticipantFieldContext(next.fieldKey) : null;
+      if (fieldContext?.location) {
+        next.location = fieldContext.location;
+      }
+    }
+    const id = String(next.id || '');
+    if (!next.location) {
+      const actionPlanMatch = id.match(/^\[actionPlan-([^\]]+)\]/);
+      if (actionPlanMatch) {
+        next.location = planLocationByKey.get(actionPlanMatch[1]) || 'Action plan';
+      }
+    }
+    if (!next.location) {
+      const interventionMatch = id.match(/^\[intervention-([^\]]+)\]/);
+      if (interventionMatch) {
+        next.location = interventionLocationByKey.get(interventionMatch[1]) || 'Intervention';
+      }
+    }
+    if (!next.location && id.startsWith('file-actionplan-')) {
+      const parts = id.split('-');
+      const numericParts = parts.filter(part => /^\d+$/.test(part));
+      const possiblePlanIndex = numericParts[numericParts.length - 1];
+      next.location = (possiblePlanIndex && planLocationByIndex.get(possiblePlanIndex)) || 'Generated XML action plan';
+    }
+    if (!next.location && id.startsWith('file-intervention-')) {
+      const parts = id.split('-');
+      const numericParts = parts.filter(part => /^\d+$/.test(part));
+      const interventionIndex = numericParts[numericParts.length - 1];
+      const planIndex = numericParts[numericParts.length - 2];
+      const mappedLocation = planIndex && interventionIndex
+        ? interventionLocationByPlanAndIndex.get(`${planIndex}:${interventionIndex}`)
+        : null;
+      next.location = mappedLocation || 'Generated XML intervention';
+    }
+    if (!next.location && id.startsWith('file-client-address')) {
+      next.location = 'Generated XML address';
+    }
+    if (!next.location && id.startsWith('file-client-')) {
+      next.location = 'Generated XML client record';
+    }
+    if (!next.location && id.includes('barrier')) {
+      next.location = 'Participant details - Employment goals and barriers, or the named action plan barriers';
+    }
+    if (!next.location && (
+      id.includes('social-assistance') ||
+      id.includes('ei-claimant') ||
+      String(next.fieldKey || '').toLowerCase() === 'socialassistancerecipient' ||
+      String(next.fieldKey || '').toLowerCase() === 'eiclaimant'
+    )) {
+      next.location = 'Action plan - About the applicant';
+    }
+    if (!next.location && id.includes('dependent-children')) {
+      next.location = 'Participant details - Demographics and household';
+    }
+    if (!next.location && id.startsWith('file-')) {
+      next.location = 'Generated XML file';
+    }
+    if (!next.location) {
+      next.location = next.label || 'ILMP submission';
+    }
+    if (!next.esdcRule) {
+      const fieldContext = next.fieldKey ? getIlmpParticipantFieldContext(next.fieldKey) : null;
+      next.esdcRule = fieldContext?.esdcRule || getDefaultEsdcRuleForRule(next);
+    }
+    if (!next.fix) {
+      const fieldContext = next.fieldKey ? getIlmpParticipantFieldContext(next.fieldKey) : null;
+      next.fix = fieldContext?.fix || getDefaultFixForRule(next);
+    }
+    return next;
+  };
   const sourceActionPlans = Array.isArray(context.caseActionPlans) ? context.caseActionPlans : [];
   const findSourceActionPlan = plan => {
     const planId = plan?.id || plan?.action_plan_id || null;
@@ -9282,10 +9483,34 @@ function runIlmpValidation(context) {
     if (childcareNeedCode && !CODE_MAPS.childcareNeed.has(childcareNeedCode)) {
       const msg = 'Childcare need code is invalid.';
       warnings.push(`${planPrefix} ${msg}`);
+      ruleResults.push({
+        id: `${planPrefix}-childcare-need-invalid`,
+        label: 'Childcare need',
+        category: 'optional',
+        severity: 'warning',
+        passed: false,
+        message: msg,
+        detail: childcareNeedCode,
+        location: describeActionPlanLocation(plan),
+        esdcRule: `${ILMP_APPENDIX_C}: optional <actionPlanChildCareNeed> must use ESDC code 0 or 1 when reported.`,
+        fix: 'edit the named action plan childcare need field.'
+      });
     }
     if (childcareFundingCode && !CODE_MAPS.childcareFunding.has(childcareFundingCode)) {
       const msg = 'Childcare funding code is invalid.';
       warnings.push(`${planPrefix} ${msg}`);
+      ruleResults.push({
+        id: `${planPrefix}-childcare-funding-invalid`,
+        label: 'Childcare funding',
+        category: 'optional',
+        severity: 'warning',
+        passed: false,
+        message: msg,
+        detail: childcareFundingCode,
+        location: describeActionPlanLocation(plan),
+        esdcRule: `${ILMP_APPENDIX_C}: optional <actionPlanChildCareFundedCode> must use a valid ESDC childcare funding code when reported.`,
+        fix: 'edit the named action plan childcare funding field.'
+      });
     }
     if (childcareNeedCode === '0' && childcareFundingCode && childcareFundingCode !== '1') {
       const msg = 'Childcare funding must be "Not Applicable" when childcare need is No.';
@@ -9297,7 +9522,10 @@ function runIlmpValidation(context) {
         severity: 'blocking',
         passed: false,
         message: msg,
-        detail: childcareFundingCode
+        detail: childcareFundingCode,
+        location: describeActionPlanLocation(plan),
+        esdcRule: `${ILMP_APPENDIX_C}: when <actionPlanChildCareNeed> is 0 (No), <actionPlanChildCareFundedCode> should be 1 (Not applicable).`,
+        fix: 'edit the named action plan and set childcare funding to Not applicable, or change childcare need to Yes if childcare was needed.'
       });
     }
     if (childcareNeedCode === '1' && childcareFundingCode === '1') {
@@ -9310,20 +9538,10 @@ function runIlmpValidation(context) {
         severity: 'blocking',
         passed: false,
         message: msg,
-        detail: childcareFundingCode
-      });
-    }
-    if (childcareFundingCode === '5') {
-      const msg = '"No funding received" selected for childcare; confirm justification.';
-      warnings.push(`${planPrefix} ${msg}`);
-      ruleResults.push({
-        id: `${planPrefix}-childcare-funding-none`,
-        label: 'Childcare funding',
-        category: 'optional',
-        severity: 'warning',
-        passed: false,
-        message: msg,
-        detail: childcareFundingCode
+        detail: childcareFundingCode,
+        location: describeActionPlanLocation(plan),
+        esdcRule: `${ILMP_APPENDIX_C}: when <actionPlanChildCareNeed> is 1 (Yes), <actionPlanChildCareFundedCode> should be a funding/status code other than 1 (Not applicable).`,
+        fix: 'edit the named action plan and select the correct childcare funding status.'
       });
     }
 
@@ -9669,10 +9887,34 @@ function runIlmpValidation(context) {
       if (planResultCode === '5') {
         const msg = 'Result code "Unspecified / could not be reached" should be verified.';
         warnings.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-result-unspecified-review`,
+          label: 'Action plan result code',
+          category: 'optional',
+          severity: 'warning',
+          passed: false,
+          message: msg,
+          detail: planResultCode,
+          location: describeActionPlanLocation(plan),
+          esdcRule: ILMP_PATH_REVIEW,
+          fix: 'review the named action plan result code and leave it only if the client could not be reached or the result is genuinely unspecified.'
+        });
       }
       if (planResultCode === '9' && !prevEmploymentCode) {
         const msg = 'Result "Ready for work" without employment details; verify follow-up plan.';
         warnings.push(`${planPrefix} ${msg}`);
+        ruleResults.push({
+          id: `${planPrefix}-result-ready-for-work-review`,
+          label: 'Action plan result code',
+          category: 'optional',
+          severity: 'warning',
+          passed: false,
+          message: msg,
+          detail: planResultCode,
+          location: describeActionPlanLocation(plan),
+          esdcRule: ILMP_PATH_REVIEW,
+          fix: 'review the named action plan result and client status details.'
+        });
       }
     }
 
@@ -9862,6 +10104,18 @@ function runIlmpValidation(context) {
       if (!intv.code) {
         const msg = 'Intervention code is required.';
         blockingIssues.push(`${prefix} ${msg}`);
+        ruleResults.push({
+          id: `${prefix}-code-required`,
+          label: 'Intervention code',
+          category: 'mandatory',
+          severity: 'blocking',
+          passed: false,
+          message: msg,
+          detail: null,
+      location: describeInterventionLocation(intv, plan),
+          esdcRule: `${ILMP_APPENDIX_C}: <interventionCode> is mandatory for intervention reporting.`,
+          fix: 'edit the named intervention and select the intervention code.'
+        });
       }
 
       if (interventionCloseoutRequired && !intv.outcome) {
@@ -10069,7 +10323,7 @@ function runIlmpValidation(context) {
           ['gender', 'Gender'],
           ['aboriginalGroup', 'Aboriginal group'],
           ['maritalStatus', 'Marital status'],
-          ['numberOfDependantChildren', 'Number of dependant children'],
+          ['numberOfDependantChildren', 'Number of dependent children'],
           ['languageSpoken', 'Language spoken'],
           ['disability', 'Disability']
         ].forEach(([elementName, label]) => {
@@ -10310,8 +10564,11 @@ function runIlmpValidation(context) {
     );
   }
 
-  const mandatoryResults = ruleResults.filter(rule => rule.category === 'mandatory');
-  const optionalResults = ruleResults.filter(rule => rule.category === 'optional');
+  const enrichedRuleResults = ruleResults.map(enrichIlmpRuleResult);
+  const displayBlockingIssues = collectIlmpIssueMessages(enrichedRuleResults, 'blocking');
+  const displayWarnings = collectIlmpIssueMessages(enrichedRuleResults, 'warning');
+  const mandatoryResults = enrichedRuleResults.filter(rule => rule.category === 'mandatory');
+  const optionalResults = enrichedRuleResults.filter(rule => rule.category === 'optional');
 
   const mandatoryTotal = mandatoryResults.length;
   const mandatoryComplete = mandatoryResults.filter(rule => rule.passed).length;
@@ -10321,23 +10578,23 @@ function runIlmpValidation(context) {
   const readinessSummary = {
     mandatory: { total: mandatoryTotal, complete: mandatoryComplete },
     optional: { total: optionalTotal, complete: optionalComplete },
-    warnings: warnings.length,
-    blocking: blockingIssues.length,
-    rules: ruleResults
+    warnings: displayWarnings.length,
+    blocking: displayBlockingIssues.length,
+    rules: enrichedRuleResults
   };
 
   let readinessStatus = 'ready';
-  if (blockingIssues.length > 0) {
+  if (displayBlockingIssues.length > 0) {
     readinessStatus = 'blocked';
-  } else if (warnings.length > 0 || (mandatoryTotal > 0 && mandatoryComplete < mandatoryTotal)) {
+  } else if (displayWarnings.length > 0 || (mandatoryTotal > 0 && mandatoryComplete < mandatoryTotal)) {
     readinessStatus = 'needs_review';
   }
 
   return {
     readinessStatus,
     readinessSummary,
-    warnings,
-    blockingIssues
+    warnings: displayWarnings,
+    blockingIssues: displayBlockingIssues
   };
 }
 
@@ -27087,6 +27344,7 @@ async function fetchApplicationSlaRowsForAssignedStaff(pool, staffIds) {
   const sql = `SELECT
          c.id AS case_id,
 c.assigned_staff_profile_id AS assigned_to_user_id,
+         a.id AS application_id,
          a.status AS application_status,
          COALESCE(s.created_at, a.created_at) AS submitted_at,
          a.created_at,
@@ -27111,6 +27369,7 @@ async function fetchAllAssignedApplicationSlaRows(pool) {
   const sql = `SELECT
          c.id AS case_id,
 c.assigned_staff_profile_id AS assigned_to_user_id,
+         a.id AS application_id,
          a.status AS application_status,
          COALESCE(s.created_at, a.created_at) AS submitted_at,
          a.created_at,
@@ -27153,6 +27412,50 @@ function countRowsBySlaWindow(rows, stageTargets, predicate, nowMs = Date.now())
     }
   }
   return total;
+}
+
+async function fetchApplicationIdsForSlaBucket(pool, bucket) {
+  const [rows, stageTargets] = await Promise.all([
+    fetchAllAssignedApplicationSlaRows(pool),
+    buildActiveSlaTargetHours(pool),
+  ]);
+  if (!Array.isArray(rows) || !rows.length) return [];
+
+  const predicate = (() => {
+    switch (bucket) {
+      case 'awaiting-ei-validation':
+        return timing => timing.stageKey === 'ei_status_verification';
+      case 'in-assessment':
+        return timing => timing.stageKey === 'assessment';
+      case 'due-today':
+        return timing => timing.diffHours !== null && timing.diffHours >= 0 && timing.diffHours < DUE_TODAY_THRESHOLD_HOURS;
+      case 'due-soon':
+      case 'due-this-week':
+        return timing => timing.diffHours !== null && timing.diffHours >= 0 && timing.diffHours < DUE_SOON_THRESHOLD_HOURS;
+      case 'overdue':
+        return timing => timing.diffHours !== null && timing.diffHours < 0;
+      default:
+        return null;
+    }
+  })();
+  if (!predicate) return [];
+
+  const ids = [];
+  const nowMs = Date.now();
+  for (const row of rows) {
+    const timing = computeApplicationSlaTiming({
+      applicationStatus: row?.application_status,
+      assignedToUserId: row?.assigned_to_user_id,
+      assessmentEligibility: row?.assessment_esdc_eligibility,
+      submittedAt: row?.submitted_at,
+      createdAt: row?.created_at,
+    }, stageTargets, nowMs);
+    if (predicate(timing, row)) {
+      const id = Number(row?.application_id);
+      if (Number.isInteger(id) && id > 0) ids.push(id);
+    }
+  }
+  return Array.from(new Set(ids));
 }
 
 async function countRegionalDueThisWeek(pool, staffIds) {
@@ -28468,7 +28771,12 @@ async function buildGroupedIlmpClientPayload(clientRows, { ignoreWarnings = fals
     const evaluation = runIlmpValidation(combinedContext);
     const blockingIssues = [...(evaluation.blockingIssues || [])];
     if (activePlans.length > 1) {
-      blockingIssues.push('Only one active action plan is permitted per client.');
+      blockingIssues.push(buildIlmpIssueMessage({
+        location: 'Case action plans',
+        issue: 'More than one active action plan exists for this client.',
+        esdcRule: ILMP_PATH_REVIEW,
+        fix: 'set all but the current reportable action plan to Planned, Closed, or another non-active status before generating the ILMP XML.'
+      }));
     }
     const warnings = evaluation.warnings || [];
     if (blockingIssues.length > 0) {
@@ -28750,6 +29058,18 @@ esdcRouter.get('/participants/batches', async (req, res, next) => {
   try {
     const [rows] = await pool.query(
       `
+      WITH recent_batches AS (
+        SELECT
+          JSON_UNQUOTE(JSON_EXTRACT(h.event_details, '$.batchId')) AS batch_id,
+          MAX(h.occurred_at) AS submitted_at,
+          MAX(h.id) AS last_history_id
+        FROM esdc_participant_submission_history h
+        WHERE h.event_type = 'submitted'
+          AND JSON_EXTRACT(h.event_details, '$.batchId') IS NOT NULL
+        GROUP BY batch_id
+        ORDER BY submitted_at DESC, last_history_id DESC
+        LIMIT ?
+      )
       SELECT
         h.id AS history_id,
         h.participant_submission_id,
@@ -28773,7 +29093,10 @@ esdcRouter.get('/participants/batches', async (req, res, next) => {
         COALESCE(cl.first_name, '') AS first_name,
         COALESCE(cl.last_name, '') AS last_name,
         COALESCE(ias.reference_number, CONCAT('CASE-', eps.case_id)) AS tracking_id
-      FROM esdc_participant_submission_history h
+      FROM recent_batches rb
+      JOIN esdc_participant_submission_history h
+        ON JSON_UNQUOTE(JSON_EXTRACT(h.event_details, '$.batchId')) = rb.batch_id
+       AND h.event_type = 'submitted'
       JOIN esdc_participant_submission eps ON eps.id = h.participant_submission_id
       LEFT JOIN user actor_user ON actor_user.id = h.actor_user_id
       LEFT JOIN staff_profiles actor_staff_by_sub ON BINARY actor_staff_by_sub.cognito_sub = BINARY actor_user.cognito_sub
@@ -28782,12 +29105,9 @@ esdcRouter.get('/participants/batches', async (req, res, next) => {
       LEFT JOIN client cl ON cl.id = c.client_id
       LEFT JOIN iset_application ia ON ia.id = eps.application_id
       LEFT JOIN iset_application_submission ias ON ias.id = ia.submission_id
-      WHERE h.event_type = 'submitted'
-        AND JSON_EXTRACT(h.event_details, '$.batchId') IS NOT NULL
-      ORDER BY h.occurred_at DESC, h.id DESC
-      LIMIT ?
+      ORDER BY rb.submitted_at DESC, rb.last_history_id DESC, h.occurred_at DESC, h.id DESC
       `,
-      [limit * 5]
+      [limit]
     );
 
     const batchesMap = new Map();
@@ -46419,18 +46739,24 @@ app.put('/api/steps/:id', async (req, res) => {
       }
 
       if (name != null || status != null || typeof ui_meta !== 'undefined') {
+        const updates = [];
+        const updateParams = [];
+        if (name != null) {
+          updates.push('name = ?');
+          updateParams.push(typeof trimmedName === 'string' ? trimmedName : null);
+        }
+        if (status != null) {
+          updates.push('status = ?');
+          updateParams.push(status);
+        }
+        if (typeof ui_meta !== 'undefined') {
+          updates.push('ui_meta = ?');
+          updateParams.push(ui_meta === null ? null : JSON.stringify(ui_meta));
+        }
+        updateParams.push(id);
         await conn.query(
-          `UPDATE iset_intake.step SET
-             name = COALESCE(?, name),
-             status = COALESCE(?, status),
-             ui_meta = ?
-           WHERE id = ?`,
-          [
-            typeof trimmedName === 'string' ? trimmedName : null,
-            status ?? null,
-            typeof ui_meta === 'undefined' ? null : JSON.stringify(ui_meta),
-            id
-          ]
+          `UPDATE iset_intake.step SET ${updates.join(', ')} WHERE id = ?`,
+          updateParams
         );
       }
 
@@ -46746,40 +47072,14 @@ app.post('/api/applications/ingest-from-submission', async (req, res) => {
 /**
  * GET /api/case-assignment/unassigned-applications
  *
- * Updated to source from iset_application_submission (new submission persistence table).
- * Returns submissions that have no corresponding case in iset_case.
- *
- * Response fields expected by frontend widget:
- * - application_id (aliased to submission id for now; will map when case created)
- * - tracking_id (submission reference_number)
- * - applicant_name
- * - email
- * - submitted_at
+ * Retired legacy submission-table queue. Use GET /api/applications?bucket=new-submissions
+ * so role scoping, sorting, pagination, and the application/case model stay consistent.
  */
 app.get('/api/case-assignment/unassigned-applications', async (req, res) => {
-  try {
-    let sql = `
-      SELECT 
-        COALESCE(a.id, s.id) AS application_id,
-        s.reference_number AS tracking_id,
-        s.submitted_at AS submitted_at,
-        u.name AS applicant_name,
-        u.email AS email
-      FROM iset_application_submission s
-      JOIN user u ON s.user_id = u.id
-      LEFT JOIN iset_application a ON a.submission_id = s.id
-      LEFT JOIN iset_case c ON ${buildApplicationCaseJoinPredicate('c', 'a')}
-      WHERE c.id IS NULL\n`;
-    const params = [];
-    // NOTE: Scoping disabled for submissions until region / ownership columns are defined on iset_application_submission.
-    // Previous attempt tried to use scopeApplications and introduced a nonexistent s.region_id reference causing errors.
-    sql += '      ORDER BY s.submitted_at DESC';
-    const [rows] = await pool.query(sql, params);
-    res.status(200).json(rows);
-  } catch (err) {
-    console.error('Error fetching unassigned applications (submission table):', err);
-    res.status(500).json({ error: 'Failed to fetch unassigned applications' });
-  }
+  return res.status(410).json({
+    error: 'retired_endpoint',
+    message: 'Use GET /api/applications with bucket=new-submissions for the scoped applications queue.'
+  });
 });
 
 
@@ -82448,6 +82748,10 @@ app.get('/api/applications', async (req, res) => {
     const searchTerm = searchText ? `%${searchText.toLowerCase()}%` : null;
     const statusGroup = String(firstQueryValue(req.query.statusGroup) || '').trim().toLowerCase();
     const watchedOnly = ['1', 'true', 'yes'].includes(String(firstQueryValue(req.query.watchedOnly) || '').trim().toLowerCase());
+    const workQueueBucket = String(firstQueryValue(req.query.bucket) || firstQueryValue(req.query.workQueueBucket) || '')
+      .trim()
+      .toLowerCase()
+      .replace(/_/g, '-');
     const requestedSortKey = String(firstQueryValue(req.query.sort) || 'submitted_at').trim();
     const sortDirection =
       String(firstQueryValue(req.query.direction) || '').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
@@ -82457,6 +82761,7 @@ app.get('/api/applications', async (req, res) => {
     const regionIds = role === 'Regional Manager' ? resolveRequestRegionIds(req) : [];
     const archivedFilter = buildArchivedApplicationFilter(req, 'a');
     const applicationStatusExpr = `REPLACE(LOWER(TRIM(a.status)), ' ', '_')`;
+    const normalizedApplicationStatusExpr = `REPLACE(REPLACE(LOWER(TRIM(COALESCE(a.status, ''))), '-', '_'), ' ', '_')`;
     const applicationLifecycleStatusExpr = buildApplicationLifecycleStatusExpr('a');
     const applicationAwaitingReasonExpr = buildApplicationAwaitingReasonExpr('a');
     const inactiveLifecycleStatuses = excludeTerminal ? ['closed', 'archived'] : [];
@@ -82550,6 +82855,9 @@ app.get('/api/applications', async (req, res) => {
     const normalizedDecisionOutcomeExpr = `LOWER(REPLACE(TRIM(COALESCE(a.decision_outcome, '')), ' ', '_'))`;
     const normalizedCaseStatusSearchExpr = `LOWER(REPLACE(TRIM(COALESCE(c.status, '')), '_', ' '))`;
     const asSearchableLower = expression => `LOWER(COALESCE(${expression}, ''))`;
+    const slaBucketApplicationIds = ['awaiting-ei-validation', 'in-assessment', 'due-today', 'due-soon', 'due-this-week', 'overdue'].includes(workQueueBucket)
+      ? await fetchApplicationIdsForSlaBucket(pool, workQueueBucket)
+      : null;
     const baseSearchClauses = [
       `${asSearchableLower(trackingIdExpr)} LIKE ?`,
       `${asSearchableLower(preferredNameExpr)} LIKE ?`,
@@ -82617,6 +82925,87 @@ app.get('/api/applications', async (req, res) => {
         case 'closed':
           clauses.push(`${applicationLifecycleStatusExpr} IN (?, ?)`);
           values.push('closed', 'archived');
+          break;
+        default:
+          break;
+      }
+    };
+    const addApplicationIdFilter = (clauses, values, ids) => {
+      if (!Array.isArray(ids) || ids.length === 0) {
+        clauses.push('1 = 0');
+        return;
+      }
+      clauses.push(`a.id IN (${ids.map(() => '?').join(',')})`);
+      values.push(...ids);
+    };
+    const addNormalizedStatusFilter = (clauses, values, statuses) => {
+      const normalized = Array.from(new Set((statuses || []).map(normaliseApplicationStatusValue).filter(Boolean)));
+      if (!normalized.length) {
+        clauses.push('1 = 0');
+        return;
+      }
+      clauses.push(`${normalizedApplicationStatusExpr} IN (${normalized.map(() => '?').join(',')})`);
+      values.push(...normalized);
+    };
+    const addActiveApplicationFilter = (clauses, values) => {
+      clauses.push(`(${applicationLifecycleStatusExpr} NOT IN (?, ?))`);
+      values.push('closed', 'archived');
+    };
+    const addWorkQueueBucketFilter = (clauses, values, { unassigned = false } = {}) => {
+      if (!workQueueBucket) return;
+      switch (workQueueBucket) {
+        case 'awaiting-ei-validation':
+        case 'in-assessment':
+        case 'due-today':
+        case 'due-soon':
+        case 'due-this-week':
+        case 'overdue':
+          if (unassigned) {
+            clauses.push('1 = 0');
+          } else {
+            addApplicationIdFilter(clauses, values, slaBucketApplicationIds);
+          }
+          break;
+        case 'new-submissions':
+          clauses.push(`${applicationLifecycleStatusExpr} = ?`);
+          values.push('submitted');
+          if (!unassigned) {
+            clauses.push('(c.assigned_staff_profile_id IS NULL OR c.assigned_staff_profile_id = 0)');
+          }
+          break;
+        case 'on-hold':
+          addNormalizedStatusFilter(clauses, values, ['on_hold']);
+          break;
+        case 'awaiting-decision':
+        case 'awaiting-my-approval':
+          clauses.push(`${applicationLifecycleStatusExpr} = ?`);
+          values.push('pending_decision');
+          break;
+        case 'decisions-made':
+          clauses.push(`((${normalizedDecisionOutcomeExpr} IN (?, ?) OR ${normalizedApplicationStatusExpr} IN (?, ?, ?, ?)) AND COALESCE(a.updated_at, a.created_at) >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY))`);
+          values.push('approved', 'denied', 'approved', 'completed', 'rejected', 'declined');
+          break;
+        case 'awaiting-applicant':
+        case 'awaiting-info':
+          clauses.push(`(${applicationLifecycleStatusExpr} = ? OR ${normalizedApplicationStatusExpr} IN (${APPLICATION_STATUS_HOLD_VALUES_LOWER.map(() => '?').join(',')}))`);
+          values.push('awaiting_applicant', ...APPLICATION_STATUS_HOLD_VALUES_LOWER.map(normaliseApplicationStatusValue));
+          break;
+        case 'assigned-to-me':
+        case 'needs-reassignment':
+          if (unassigned || !req.staffProfile?.id) {
+            clauses.push('1 = 0');
+          } else {
+            clauses.push('c.assigned_staff_profile_id = ?');
+            values.push(req.staffProfile.id);
+            addActiveApplicationFilter(clauses, values);
+          }
+          break;
+        case 'region-queue':
+          if (unassigned) {
+            clauses.push('1 = 0');
+          } else {
+            addActiveApplicationFilter(clauses, values);
+          }
           break;
         default:
           break;
@@ -82704,6 +83093,7 @@ app.get('/api/applications', async (req, res) => {
       params.push(...baseSearchClauses.map(() => searchTerm));
     }
     addStatusGroupFilter(where, params);
+    addWorkQueueBucketFilter(where, params);
     if (watchedOnly) {
       if (!req.staffProfile?.id) return res.json({ count: 0, rows: [] });
       where.push(`EXISTS (SELECT 1 FROM iset_case_watch cw_filter WHERE cw_filter.case_id = c.id AND cw_filter.${watchColumnName} = ?)`);
@@ -82769,6 +83159,7 @@ app.get('/api/applications', async (req, res) => {
         unassignedParams.push(...unassignedSearchClauses.map(() => searchTerm));
       }
       addStatusGroupFilter(unassignedWhereClauses, unassignedParams);
+      addWorkQueueBucketFilter(unassignedWhereClauses, unassignedParams, { unassigned: true });
       if (watchedOnly) {
         unassignedWhereClauses.push('1 = 0');
       }
@@ -82874,6 +83265,7 @@ app.get('/api/applications', async (req, res) => {
           unassignedParams.push(...unassignedSearchClauses.map(() => searchTerm));
         }
         addStatusGroupFilter(unassignedWhereClauses, unassignedParams);
+        addWorkQueueBucketFilter(unassignedWhereClauses, unassignedParams, { unassigned: true });
         if (watchedOnly) {
           unassignedWhereClauses.push('1 = 0');
         }
@@ -84236,12 +84628,16 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         staffApplicationReopenRequested;
       const requestedDocsRequestedChange =
         docsRequestedFieldPresent && Number(docsRequestedValue || 0) !== (beforeDocsRequestedActive ? 1 : 0);
-      if ((requestedApplicationStatusChange && !allowedTerminalStatusChange) || requestedDocsRequestedChange) {
+      const requestedDocsSetOnTerminal =
+        requestedDocsRequestedChange && Number(docsRequestedValue || 0) === 1;
+      if ((requestedApplicationStatusChange && !allowedTerminalStatusChange) || requestedDocsSetOnTerminal) {
         await conn.rollback();
         return res.status(409).json({
           success: false,
           error: 'terminal_application_not_mutable',
-          message: 'Closed or completed applications cannot be reopened or moved back into application queues from the client file.',
+          message: requestedDocsSetOnTerminal
+            ? 'Closed or completed applications cannot start a new document request.'
+            : 'Closed or completed applications cannot be reopened or moved back into application queues from the client file.',
           lock: lockCheck.lock || null
         });
       }

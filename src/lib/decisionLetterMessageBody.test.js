@@ -21,15 +21,15 @@ describe('decisionLetterMessageBody', () => {
       'NWAC ISET Program',
     ].join('\n');
 
-    const html = renderDecisionLetterMessageBodyHtml(body);
+    const output = String(renderDecisionLetterMessageBodyHtml(body));
 
-    expect(html).toContain('Funding Revision Letter');
-    expect(html).toContain('$3350.00');
-    expect(html).toContain('$8700.00');
-    expect(html).toContain('$112.00');
-    expect(html).not.toContain('$3550.00');
-    expect(html).not.toContain('$200.00/month');
-    expect(html).toContain('<ul class="govuk-list govuk-list--bullet">');
+    expect(output).toContain('Funding Revision Letter');
+    expect(output).toContain('$3350.00');
+    expect(output).toContain('$8700.00');
+    expect(output).toContain('$112.00');
+    expect(output).not.toContain('$3550.00');
+    expect(output).not.toContain('$200.00/month');
+    expect(output).toContain('<ul class="govuk-list govuk-list--bullet">');
   });
 
   test('builds a schema from the message body instead of leaving stale template tokens', () => {

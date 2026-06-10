@@ -49,6 +49,8 @@ const SEVERITY_LABEL = {
   info: 'Info'
 };
 
+const NOT_RECORDED = 'Not recorded';
+
 const deriveReminderSeverity = reminder => {
   if (!reminder || !reminder.dueAt) return 'info';
   const diffDays = getReminderBusinessDayDiffDays(reminder.dueAt, new Date());
@@ -524,13 +526,13 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
       {
         id: 'title',
         header: 'Title',
-        cell: item => item.title || '�',
+        cell: item => item.title || NOT_RECORDED,
         sortingField: 'title'
       },
       {
         id: 'category',
         header: 'Category',
-        cell: item => item.category || '�',
+        cell: item => item.category || NOT_RECORDED,
         sortingField: 'category'
       },
       {
@@ -545,13 +547,13 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
       {
         id: 'source',
         header: 'Source',
-        cell: item => item.source || '�',
+        cell: item => item.source || NOT_RECORDED,
         sortingField: 'source'
       },
       {
         id: 'description',
         header: 'Description',
-        cell: item => item.description || '�'
+        cell: item => item.description || NOT_RECORDED
       }
     ],
     []
@@ -713,7 +715,7 @@ const CaseCalendarWidget = ({ actions = {}, toggleHelpPanel, metadata, caseData:
                       {event.date.toLocaleDateString()}
                     </Box>
                     <Box fontSize='body-s' color='text-body-secondary'>
-                      Source: {event.source || '�'}
+                      Source: {event.source || NOT_RECORDED}
                     </Box>
                     <Box fontSize='body-s' color='text-body-secondary'>
                       {event.description}

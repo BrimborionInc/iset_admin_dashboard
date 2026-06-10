@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-06-08
+Last Updated: 2026-06-10
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -21,7 +21,22 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-06-10 | Release TBD | Fix/Application Workspace | Application Overview document requests | Clearing a stale Docs Requested flag no longer shows a false "another user updated this application first" warning. | Application Overview now uses the freshest selected-application row-version token and allows clearing existing document-request flags on decision-recorded applications without reopening the workflow; starting a new document request on a terminal application remains blocked.
+- 2026-06-10 | Release TBD | UX/Application Workspace | Core workspace widgets | Application Workspace support widgets are easier to use during file review. | Supporting Documents now has document search, Secure Messaging tables can be sorted by their key columns, Notes refresh no longer issues a duplicate reload, Calendar fallbacks say `Not recorded`, and the conflict-of-interest declaration copy now refers to the staff member working the application file.
+- 2026-06-10 | Release TBD | Tooling/Application Workspace | Browser smoke | Added a local browser smoke for the ISET Application Assessment workspace. | `npm run smoke:application-workspace:browser` verifies default widget rendering, idle API settling, Supporting Documents search, Secure Messaging sort toggling, Notes refresh single-call behavior, and captures a workspace screenshot for UI review.
+- 2026-06-10 | Release TBD | Tooling/Application Workspace | Assessment workflow smoke | Added a deeper local browser workflow smoke for Application Assessment. | `npm run smoke:application-assessment:workflow:browser` drives conflict declaration, coordinator submission, NWAC approval, approval-letter send, and funding-documents completion with deterministic API fixtures, and guards against React render-phase parent updates in row-version propagation.
+- 2026-06-10 | Release TBD | UX/Workflow Studio | Manage Intake Steps | Manage Intake Steps now uses the standard dashboard board controls. | Add widget opens the shared split-panel palette for removed widgets, Reset layout restores Intake Step Library, Preview, and Step JSON from the route header, and the empty palette closes after reset.
+- 2026-06-10 | Release TBD | UX/Workflow Studio | Intake step library and preview | Intake step authoring review is easier to scan and verify. | The step-library table now has sortable/resizable columns, sorting applies to the full loaded step list before display, selecting a step no longer reloads the list, and the preview iframe stays within the Preview widget bounds.
+- 2026-06-10 | Release TBD | Tooling/Workflow Studio | Browser smoke | Added a local browser smoke for the Manage Intake Steps dashboard. | `npm run smoke:manage-components:browser` verifies Add widget, Reset layout, palette restore behavior, table sorting/resizing, preview rendering/bounds, screenshot capture, and idle `/api/steps` request settling.
+- 2026-06-10 | Release TBD | UX/Workflow Studio | Modify Intake Step editor | The Modify Intake Step editor is easier and safer to author in. | The editor now shows the current step name, has component search, keeps repeated static text blocks when they do not have Data Keys, starts with Save disabled after a clean load, preserves step metadata during ordinary saves, and shows precise save validation errors.
+- 2026-06-10 | Release TBD | Tooling/Workflow Studio | Editor browser smoke | Added a local browser smoke for the Modify Intake Step editor. | `npm run smoke:modify-component:browser` verifies editor layout, component search/add/render, clean-load save state, repeated static content preservation, save-error handling, payload sanitation, validation, screenshot capture, and idle API settling.
+- 2026-06-10 | Release TBD | UX/User Management | Staff and participant accounts | User Management now has a cleaner table-first layout for staff access and participant PATH accounts. | Tables support sorting, pagination, column resizing, and preferences; participant-account sorting and pagination are handled by the backend before the row-limited page is returned. The old placeholder failed-login metric and stale generic help text were removed.
+- 2026-06-10 | Release TBD | UX/Casework | Manage ISET Applications | Manage ISET Applications now opens as a focused applications table instead of a one-widget configurable board. | Work-queue links now use server-backed bucket filters, so clicked queues load the matching full result set before sorting and pagination. Legacy status links no longer filter only the current visible page.
+- 2026-06-09 | Release TBD | Fix/ILMP | Recent export history | Recent ILMP exports now loads complete export batches before applying the list limit. | Large XML exports no longer hide older export batches or show partial client counts in the history table; the widget still defaults to the most recent batches.
+- 2026-06-09 | Release TBD | Fix/ILMP | Batch XML generation | Generate batch XML is not capped by the visible participant table page size and now remains available for warning-only exportable clients. | The table page-size preference only affects the queue display; backend batch generation collects all pending/rejected reportable clients, includes warning-only clients, and excludes blocked records.
+- 2026-06-09 | Release TBD | UX/Workflow | Workflow Preview graph | Manage Workflows now has a more usable workflow graph preview with pan/zoom, fit view, a minimap, and vertical/horizontal layout options. | Conditional branches use shorter readable labels, and the graph resizes with the board widget instead of collapsing into a cramped fixed-height preview.
 - 2026-06-08 | Release TBD | UX/Approvals | Intervention amendments | Reviewers now see a compact amendment scale for proposed intervention changes. | Pending Decision rows and Case Workspace `Review intervention change` decision controls show `Net change ... · Revised total ...` when PATH can compare the source intervention total to the proposed revised snapshot; proposer workflow, approval process, and generated PDFs are unchanged.
+- 2026-06-08 | Release TBD | UX/ILMP | Validation messages | ILMP blockers and warnings now tell staff what to fix, where to fix it, and which ESDC Data Exchange Guide rule/source is involved. | Staff-facing messages use Participant Details, action-plan labels, or intervention labels/dates instead of raw database IDs. PATH-only review checks are labelled as PATH-only, and the unsupported childcare `No funding received` warning was removed because that is a valid ESDC code.
 - 2026-06-07 | Release 20260607-prod-tutorials-training-shorts | UX/Support | Tutorials | Support > Tutorials now has a lean Training shorts section for Synthesia-hosted videos and keeps the existing guided-tour completion/reset controls under Guided tours. | PATH stores video metadata and embeds Synthesia videos instead of adding MP4 files to the React app. Training-short table columns are sortable/resizable, visible video columns are limited to Short, Length, and Action, the existing public `PATH Training Shorts - ...` videos are listed, and the withdrawing/reopening, ILMP submissions, and ILMP validation-and-repairs shorts are seeded as shareable watchable drafts until approved published versions are available.
 - 2026-06-07 | Release TBD | UX/Application Workspace | Withdraw application guidance | Application Overview withdrawal guidance now says the action can be used when the applicant is no longer pursuing the file or when staff must withdraw after a missed response deadline. | Help text also points staff to Reopen application when review should continue later.
 - 2026-06-05 | Release 20260605-prod-ilmp-casework-batch | Fix/Application Workspace | Raw status workflow actions | Application workflow actions now preserve and prefer the raw persisted status when deciding which correction actions are available. | Restores Withdraw application on closure-notice files, keeps resume-review checks tied to raw `docs_requested`, and leaves display labels unchanged.
@@ -376,16 +391,28 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Support > Tutorials now includes Training shorts: short Synthesia-hosted PATH videos that open inside the dashboard, including new ILMP validation and submissions drafts.
-- Historical action-plan entry now prefills and requires the Appendix A facts PATH needs for ILMP reporting.
-- Existing/backloaded action-plan and intervention saves now fill blank Participant Details from structured ILMP fields without replacing staff-entered details.
-- Decision letters now use the participant's resolved name instead of falling back to `Dear Applicant`.
-- Application correction actions now preserve raw workflow status, save against the selected application, and support eligible withdraw/reopen flows.
-- Denied and closed applications no longer show funding-stage checklist items as missing.
-- Regional Snapshot Client Activity now uses one application basis in tabs and the all-regions Excel export.
-- ISET Clients now displays dormant case lifecycle rows as `No Active Plan`.
+- Clearing a stale Docs Requested flag in Application Workspace no longer shows a false concurrent-update warning.
+- Application Workspace document search, secure-message table sorting, and notes refresh behavior are cleaner for staff reviewing an application file.
+- Manage Intake Steps now has the standard Add widget and Reset layout controls, sortable/resizable step-library columns, and a preview that stays within the widget.
+- Modify Intake Step now shows the step name, has component search, preserves repeated static content blocks, starts clean saves disabled, and shows precise save errors.
+- User Management and Manage ISET Applications now use cleaner table-first layouts with server-backed sorting/filtering where needed.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260610-prod-modify-component-editor
+
+- Clearing a stale Docs Requested flag in Application Workspace no longer shows a false concurrent-update warning.
+- Application Workspace widgets are easier to use during file review, with document search, secure-message table sorting, cleaner notes refresh behavior, clearer calendar fallbacks, and conflict-declaration wording focused on the staff member working the file.
+- Manage Intake Steps now has standard dashboard controls, sortable/resizable step-library columns, full-list sorting before display, fewer unnecessary reloads, and a preview that stays inside the widget.
+- Modify Intake Step now shows the current step name, adds component search, preserves repeated static content blocks, keeps clean saves disabled, preserves step metadata, and shows precise save errors.
+- User Management and Manage ISET Applications now use cleaner table-first layouts with better sorting, resizing, pagination, and server-backed filters where needed.
+
+#### Release 20260608-prod-ilmp-validation-messages
+
+- ILMP blockers and warnings now tell staff what to fix, where to fix it, and which ESDC Data Exchange Guide source is involved.
+- ILMP messages now point to Participant Details, the named action plan, or the named intervention instead of showing raw database IDs.
+- PATH-only review checks are labelled as PATH-only so staff can distinguish them from ESDC gateway blockers.
+- The unsupported childcare `No funding received` warning was removed because that is a valid ESDC childcare funding code.
 
 #### Release 20260607-prod-tutorials-training-shorts
 
@@ -394,40 +421,34 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - The first watchable draft shorts include withdrawing/reopening an application, ILMP submissions, and ILMP validation and repairs.
 - PATH stores Synthesia metadata only; MP4 files are not added to the React app.
 
-#### Release 20260605-prod-ilmp-casework-batch
-
-- Historical action-plan entry now prefills and requires the Appendix A facts PATH needs for ILMP reporting.
-- Existing/backloaded action-plan and intervention saves now fill blank Participant Details from structured ILMP fields without replacing staff-entered details.
-- Decision letters now use the participant's resolved name instead of falling back to `Dear Applicant`.
-- Application correction actions now preserve raw workflow status, save against the selected application, and support eligible withdraw/reopen flows.
-- Denied and closed applications no longer show funding-stage checklist items as missing.
-- Regional Snapshot Client Activity now uses one application basis in tabs and the all-regions Excel export.
-- ISET Clients now displays dormant case lifecycle rows as `No Active Plan`.
-
-#### Release 20260604-prod-ilmp-appendix-a
-
-- ILMP validation now follows the ESDC gateway's Appendix A mandatory-field rules before XML is generated.
-- ILMP batch XML now exports participants with warnings and blocks only records with true blocking issues.
-- Backloaded action plans now use their saved barrier-to-employment codes when Participant Details barriers are blank.
-- Participant Details now pulls application checkbox/list answers through correctly, including barriers and Other barrier notes.
-- New and existing/backloaded action plans now require education level and education province at the start of the plan.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
-- Support > Tutorials inclut maintenant Training shorts : de courtes videos PATH hebergees dans Synthesia qui s'ouvrent dans le tableau de bord, y compris de nouveaux brouillons ILMP pour la validation et les soumissions.
-- La saisie des plans d'action historiques pre-remplit et exige maintenant les faits de l'annexe A necessaires au reporting ILMP.
-- Les enregistrements de plans d'action et d'interventions historiques remplissent maintenant les champs vides de Participant Details a partir des champs ILMP structures, sans remplacer les corrections du personnel.
-- Les lettres de decision utilisent maintenant le nom resolu de la participante au lieu de revenir a `Dear Applicant`.
-- Les actions de correction de demande conservent maintenant le vrai statut de workflow, enregistrent sur la demande selectionnee et prennent en charge les retraits/reouvertures admissibles.
-- Les demandes refusees et fermees n'affichent plus les elements de checklist lies au financement comme manquants.
-- Regional Snapshot Client Activity utilise maintenant une seule base de demandes dans les onglets et l'export Excel toutes regions.
-- ISET Clients affiche maintenant les dossiers dormants comme `No Active Plan`.
+- Effacer un ancien indicateur Docs Requested dans Application Workspace n'affiche plus un faux avertissement de mise a jour concurrente.
+- Dans Application Workspace, la recherche de documents, le tri des messages securises et l'actualisation des notes sont plus propres pendant la revision d'un dossier.
+- Manage Intake Steps a maintenant les controles standard Add widget et Reset layout, des colonnes triables/redimensionnables, et un apercu qui reste dans le widget.
+- Modify Intake Step affiche maintenant le nom de l'etape, ajoute la recherche de composants, preserve les blocs de contenu statique repetes, garde Save desactive quand rien n'a change, et affiche les erreurs d'enregistrement exactes.
+- User Management et Manage ISET Applications utilisent maintenant des mises en page plus simples centrees sur les tableaux avec tri/filtrage cote serveur au besoin.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260610-prod-modify-component-editor
+
+- Effacer un ancien indicateur Docs Requested dans Application Workspace n'affiche plus un faux avertissement de mise a jour concurrente.
+- Les widgets Application Workspace sont plus faciles a utiliser pendant la revision d'un dossier, avec recherche de documents, tri des messages securises, actualisation des notes plus propre, fallbacks calendrier plus clairs et texte de conflit d'interets centre sur la personne qui travaille le dossier.
+- Manage Intake Steps a maintenant les controles standard du tableau de bord, des colonnes triables/redimensionnables, le tri de la liste complete avant affichage, moins de rechargements inutiles et un apercu qui reste dans le widget.
+- Modify Intake Step affiche maintenant le nom de l'etape courante, ajoute la recherche de composants, preserve les blocs de contenu statique repetes, garde Save desactive quand rien n'a change, preserve les metadonnees de l'etape et affiche les erreurs d'enregistrement exactes.
+- User Management et Manage ISET Applications utilisent maintenant des mises en page plus simples centrees sur les tableaux avec meilleur tri, redimensionnement, pagination et filtres cote serveur au besoin.
+
+#### Release 20260608-prod-ilmp-validation-messages
+
+- Les blocages et avertissements ILMP indiquent maintenant quoi corriger, ou le corriger, et quelle source du guide d'echange de donnees EDSC est concernee.
+- Les messages ILMP pointent maintenant vers Participant Details, le plan d'action nomme ou l'intervention nommee au lieu d'afficher des identifiants de base de donnees.
+- Les verifications PATH seulement sont indiquees comme telles pour distinguer les controles internes des blocages de la passerelle EDSC.
+- L'avertissement childcare `No funding received` non justifie a ete retire, car il s'agit d'un code valide de financement childcare EDSC.
 
 #### Release 20260607-prod-tutorials-training-shorts
 
@@ -435,24 +456,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Le tableau Training shorts est triable et redimensionnable, avec seulement les colonnes Short, Length et Action visibles.
 - Les premiers brouillons regardables couvrent le retrait/reouverture d'une demande, les soumissions ILMP et les validations/reparations ILMP.
 - PATH stocke seulement les metadonnees Synthesia; les fichiers MP4 ne sont pas ajoutes a l'application React.
-
-#### Release 20260605-prod-ilmp-casework-batch
-
-- La saisie des plans d'action historiques pre-remplit et exige maintenant les faits de l'annexe A necessaires au reporting ILMP.
-- Les enregistrements de plans d'action et d'interventions historiques remplissent maintenant les champs vides de Participant Details a partir des champs ILMP structures, sans remplacer les corrections du personnel.
-- Les lettres de decision utilisent maintenant le nom resolu de la participante au lieu de revenir a `Dear Applicant`.
-- Les actions de correction de demande conservent maintenant le vrai statut de workflow, enregistrent sur la demande selectionnee et prennent en charge les retraits/reouvertures admissibles.
-- Les demandes refusees et fermees n'affichent plus les elements de checklist lies au financement comme manquants.
-- Regional Snapshot Client Activity utilise maintenant une seule base de demandes dans les onglets et l'export Excel toutes regions.
-- ISET Clients affiche maintenant les dossiers dormants comme `No Active Plan`.
-
-#### Release 20260604-prod-ilmp-appendix-a
-
-- La validation ILMP suit maintenant les champs obligatoires de l'annexe A de la passerelle EDSC avant la generation du XML.
-- Le XML ILMP inclut maintenant les participantes avec avertissements et bloque seulement les dossiers avec de vrais problemes bloquants.
-- Les plans d'action historiques utilisent maintenant leurs codes sauvegardes de barrieres a l'emploi lorsque Participant Details est vide.
-- Participant Details reprend correctement les reponses de type liste/checkbox de la demande, y compris les barrieres et les notes Other barrier.
-- Les nouveaux plans d'action et les plans historiques exigent maintenant le niveau d'etudes et la province d'etudes au debut du plan.
 
 ### Problemes connus (brouillon - FR)
 

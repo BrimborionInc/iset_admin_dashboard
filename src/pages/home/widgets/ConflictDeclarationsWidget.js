@@ -207,7 +207,7 @@ const ConflictDeclarationsWidget = ({ role, refreshKey, actions }) => {
     } finally {
       setAssignSubmitting(false);
     }
-  }, [assignTarget, selectedAssignee, assignableStaff, load]);
+  }, [assignTarget, selectedAssignee, load]);
 
   const handleResolveConfirm = useCallback(async () => {
     if (!resolveTarget?.caseId || !resolveTarget?.staffProfileId) return;

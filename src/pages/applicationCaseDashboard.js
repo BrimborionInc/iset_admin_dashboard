@@ -335,6 +335,10 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
     setAppRowVersion(prev => (numeric > prev ? numeric : prev));
   }, []);
 
+  useEffect(() => {
+    setAppRowVersion(0);
+  }, [id, selectedApplicationId]);
+
   const resetLayout = useCallback(() => {
     const baselineLayout = isApprovalEntry ? approvalReviewLayout : defaultLayout;
     setLayout(current => {
@@ -456,9 +460,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
     while (true) {
       try {
         const query = selectedApplicationId ? `?applicationId=${encodeURIComponent(selectedApplicationId)}` : '';
-        console.info('[case:ui] requesting case', { caseId, selectedApplicationId, attempt: attempt + 1, retries: retries + 1 });
         const res = await apiFetch(`/api/cases/${caseId}${query}`);
-        console.info('[case:ui] response received', { caseId, status: res.status, ok: res.ok, attempt: attempt + 1 });
         if (res.ok) {
           const data = await res.json().catch(() => null);
           return { status: res.status, headers: res.headers, data };
@@ -582,7 +584,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
           const body = resErr?.body || null;
           const statusSuffix = resErr?.status ? ` (${resErr.status})` : '';
           const fallbackMessage =
-            'Failed to load application. Probably a glitch. Please refresh the page to try again. If the problem persists please contact support.';
+            'The application could not be loaded. Refresh the page to try again. If the problem persists, contact support.';
           const rawMessage = body?.error || body?.message || resErr?.message || fallbackMessage;
           const userMessage = rawMessage === 'Failed to load case' ? fallbackMessage : rawMessage;
           const traceFromBody = body?.trace_id ? ` [trace ${body.trace_id}]` : '';
@@ -601,7 +603,7 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
           const networkMessage = typeof resErr?.message === 'string' ? resErr.message : '';
           const composed = networkMessage
             ? `Failed to load application. ${networkMessage}${statusSuffix}`
-            : `Failed to load application. Probably a glitch. Please refresh the page to try again. If the problem persists please contact support.${statusSuffix}`;
+            : `The application could not be loaded. Refresh the page to try again. If the problem persists, contact support.${statusSuffix}`;
           setLoadError(composed);
           console.error('[case:ui] failed to load case (non-response error)', {
             caseId: id,
@@ -619,10 +621,6 @@ const ApplicationCaseDashboard = ({ toggleHelpPanel, updateBreadcrumbs, setSplit
       isMounted = false;
     };
   }, [id, selectedApplicationId, location?.state?.assessorEmail, applyCaseDataIfNewer, loadCaseResponse, updateBreadcrumbs]);
-
-  useEffect(() => {
-    setLayout(current => current); // ensure board rerenders when caseData changes
-  }, [caseData]);
 
   const lockApplicationId = caseData?.application_id ?? caseData?.applicationId ?? null;
 

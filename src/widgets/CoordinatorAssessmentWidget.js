@@ -3,7 +3,7 @@ import { useHistory } from 'react-router-dom';
 import { apiFetch } from '../auth/apiClient';
 import useApplicationLock, { buildLockConflictMessage } from '../hooks/useApplicationLock';
 import useCurrentUser from '../hooks/useCurrentUser';
-import { canCompleteOutcomeReview, getCaseStatusContext, getApplicationStatusContext, getRoleGroups } from '../utils/rbac';
+import { canCompleteOutcomeReview, getApplicationStatusContext } from '../utils/rbac';
 import { Box, Header, ButtonDropdown, Link, SpaceBetween, Button, Alert, Modal, FormField, Input, Textarea, Checkbox, DatePicker, Select, Grid, ColumnLayout, Table, RadioGroup, Autosuggest, StatusIndicator, Wizard, Hotspot, Tabs } from '@cloudscape-design/components';
 import ApplicationAssessmentHelp, { NwacAssessmentHelp } from '../helpPanelContents/applicationAssessmentHelp';
 import { BoardItem } from '@cloudscape-design/board-components';
@@ -2354,11 +2354,11 @@ const CoordinatorAssessmentWidget = forwardRef(
       if (!numeric) return;
       setApplicationRowVersion(prev => {
         const target = numeric > (prev || 0) ? numeric : prev || numeric;
-        if (target !== prev && typeof onRowVersionUpdate === 'function') {
-          onRowVersionUpdate(target);
-        }
         return target;
       });
+      if (typeof onRowVersionUpdate === 'function') {
+        onRowVersionUpdate(numeric);
+      }
     },
     [onRowVersionUpdate]
   );
@@ -2458,7 +2458,6 @@ const CoordinatorAssessmentWidget = forwardRef(
   const normalizedRole = (userRole || '').toString().trim().toLowerCase();
   const canonicalRole = normalizedRole === 'regional manager' ? 'regional manager' : normalizedRole;
   const isAssessor = canonicalRole === 'iset coordinator';
-  const { isOutcomeReviewerRole } = getRoleGroups(userRole);
   const groupKeys = Array.isArray(currentUserGroups)
     ? currentUserGroups.map(group => String(group || '').trim().toLowerCase().replace(/[\s-]+/g, '_'))
     : [];
@@ -2480,7 +2479,6 @@ const CoordinatorAssessmentWidget = forwardRef(
     () => (Array.isArray(assessment.proposedInterventions) ? assessment.proposedInterventions : []),
     [assessment.proposedInterventions]
   );
-  const primaryIntervention = proposedInterventions[0] || buildEmptyIntervention();
   const interventionTotals = useMemo(() => {
     const totals = new Map();
     proposedInterventions.forEach(intervention => {
@@ -2560,7 +2558,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [endDateAdjustModal, setEndDateAdjustModal] = useState(null);
   const [occurrenceConfirmModal, setOccurrenceConfirmModal] = useState(null);
   const [conflictDeclarationSigned, setConflictDeclarationSigned] = useState(Boolean(caseData?.assessment_conflict_declaration_signed));
-  const [conflictDeclarationSignedAt, setConflictDeclarationSignedAt] = useState(caseData?.assessment_conflict_declaration_signed_at || null);
+  const [, setConflictDeclarationSignedAt] = useState(caseData?.assessment_conflict_declaration_signed_at || null);
   const [persistedConflictDeclarationChoice, setPersistedConflictDeclarationChoice] = useState(
     normalizeConflictDeclarationChoice(
       caseData?.assessment_conflict_declaration_choice ||
@@ -2580,7 +2578,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [isSigningDeclaration, setIsSigningDeclaration] = useState(false);
   const [declarationError, setDeclarationError] = useState(null);
   const [conflictHoldModalVisible, setConflictHoldModalVisible] = useState(false);
-  const [showConflictAlert, setShowConflictAlert] = useState(true);
+  const [, setShowConflictAlert] = useState(true);
   const scrollWidgetAndPageTop = useCallback(() => {
     debugScroll('scrollWidgetAndPageTop');
     scrollWidgetAndPageTopOnce(widgetRootRef);
@@ -2598,7 +2596,6 @@ const CoordinatorAssessmentWidget = forwardRef(
     caseData?.application_status ??
     null;
   const rawCaseStatusSnapshot = caseData?.status ?? '';
-  const canonicalCaseStatusSnapshot = getCaseStatusContext(rawCaseStatusSnapshot).canonicalStatus;
   const applicationStatusContext = getApplicationStatusContext(rawApplicationStatus);
   const legacyApplicationFallbackContext = getApplicationStatusContext(rawCaseStatusSnapshot);
   const caseDerivedApplicationStatus = LEGACY_APPLICATION_FALLBACK_STATUSES.has(
@@ -2824,7 +2821,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       statusLabel,
       managerLabel
     };
-  }, [caseData, currentUserName]);
+  }, [caseData]);
   const wizardStepKey = useMemo(() => {
     const baseId = caseData?.id ?? applicationId ?? application_id ?? null;
     if (!baseId) return null;
@@ -2838,7 +2835,6 @@ const CoordinatorAssessmentWidget = forwardRef(
   const showOutcomeByStatus = isPendingApprovalStatus;
   const isOutcomeNoticeDisabled = isDecisionFinal;
   const canManageOutcomeReview = canCompleteOutcomeReview({ role: userRole, status: rawApplicationStatus });
-  const lacksOutcomePermission = Boolean(userRole) && isPendingApprovalStatus && !canManageOutcomeReview;
   const interventionCodeLookup = useMemo(() => {
     const map = new Map();
     interventionCodes.forEach(option => {
@@ -3598,9 +3594,6 @@ const CoordinatorAssessmentWidget = forwardRef(
   useEffect(() => {
     setShowConflictAlert(true);
   }, [conflictDeclarationSigned, hasPersistedDeclaredConflict]);
-  const conflictDeclarationSignedDisplayDate = conflictDeclarationSignedAt
-    ? formatDate(conflictDeclarationSignedAt)
-    : null;
   const selectedBudgetPotOption = useMemo(() => {
     const match = budgetPotOptions.find(
       option => String(option.value) === String(assessment.interventionPotId)
@@ -4070,7 +4063,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         setNocSuggestionsLoading(false);
       }
     },
-    [apiFetch]
+    []
   );
   const activeLock = useMemo(() => {
     if (lockState.owned && lockState.lock) {
@@ -4559,7 +4552,14 @@ const CoordinatorAssessmentWidget = forwardRef(
     };
     setLetterDrafts(mergedDrafts);
     setInitialLetterDrafts(mergedDrafts);
-  }, [applicationId, caseData, currentUserName]);
+  }, [
+    applicationId,
+    applicationRowVersionState,
+    canonicalApplicationStatus,
+    caseData,
+    currentUserName,
+    rawApplicationStatus
+  ]);
 
   // Show NWAC section after submission, review completion, or outcome-ready status
   useEffect(() => {
@@ -4938,7 +4938,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         if (!silent) setEiVerificationDocsLoading(false);
       }
     },
-    [apiFetch, applicantUserId, applicationId]
+    [applicantUserId, applicationId]
   );
 
   const uploadEiVerificationIfSelected = useCallback(async (selectedFile = null) => {
@@ -5017,7 +5017,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     } finally {
       setEiVerificationUploading(false);
     }
-  }, [apiFetch, applicantUserId, applicationId, assessment.esdcEligibility, canUploadEiVerification, caseId, eiVerificationFile, eiVerificationUploading, isAssessmentDisabled, loadEiVerificationDocuments]);
+  }, [applicantUserId, applicationId, assessment.esdcEligibility, canUploadEiVerification, caseId, eiVerificationFile, eiVerificationUploading, isAssessmentDisabled, loadEiVerificationDocuments]);
 
   const handleEiVerificationFileChange = useCallback(async event => {
     const input = event?.target;
@@ -5270,7 +5270,172 @@ const CoordinatorAssessmentWidget = forwardRef(
     ) {
       updateRowVersion(nextVersion);
     }
-  }, [caseData?.application_row_version, applicationRowVersionState, onRowVersionUpdate]);
+  }, [caseData?.application_row_version, applicationRowVersionState, updateRowVersion]);
+
+  const validateAssessment = useCallback(
+    assessment => {
+      const errors = {};
+      // 1. Overview
+      if (!assessment.overview || !assessment.overview.trim()) {
+        errors.overview = 'Client application overview is required.';
+      }
+      // 2. Employment Goals
+      if (!assessment.employmentGoals || !assessment.employmentGoals.trim()) {
+        errors.employmentGoals = 'Employment goals are required.';
+      }
+      // 3. Barriers
+      if (!Array.isArray(assessment.barriers) || assessment.barriers.length === 0) {
+        errors.barriers = 'Select at least one barrier to employment.';
+      } else if (assessment.barriers.includes('Other') && !assessment.barriersOther?.trim()) {
+        errors.barriersOther = 'Provide details for the "Other" barrier.';
+      }
+      // 4. ESDC Eligibility
+      if (!assessment.esdcEligibility) {
+        errors.esdcEligibility = 'Employment Insurance status is required.';
+      }
+      if (canUploadEiVerification && !eiVerificationFile && !eiVerificationDocuments.length) {
+        errors.eiVerification = 'An EI verification document is required before continuing.';
+      }
+      // 5. Proposed interventions + dates
+      const proposed = Array.isArray(assessment.proposedInterventions) ? assessment.proposedInterventions : [];
+      const interventionErrors = {};
+      const costLineErrors = {};
+      if (!proposed.length) {
+        interventionErrors._global = 'Add at least one proposed intervention.';
+      }
+      proposed.forEach((intervention, interventionIndex) => {
+        const entryErrors = {};
+        const interventionKey = intervention.id || String(interventionIndex);
+        if (!intervention.code) {
+          entryErrors.code = 'Select an intervention code.';
+        }
+        if (!intervention.startDate) {
+          entryErrors.startDate = 'Start date is required.';
+        }
+        const startUtc = parseIsoDateToUtc(intervention.startDate);
+        const endUtc = parseIsoDateToUtc(intervention.endDate);
+        if (startUtc !== null && endUtc !== null && endUtc < startUtc) {
+          entryErrors.endDate = 'End date cannot be before start date.';
+        }
+        const requiresNocCode = requiresNocForCode(intervention.code);
+        if (requiresNocCode) {
+          if (!intervention.interventionNocVersion) {
+            entryErrors.interventionNocVersion = 'Select a NOC version for this intervention.';
+          }
+          if (!intervention.interventionNoc) {
+            entryErrors.interventionNoc = 'Select a NOC code for this intervention.';
+          }
+        }
+        const educationCode = isEducationCode(intervention.code);
+        const employerCode = isEmployerCode(intervention.code);
+        const wageSubsidyCode = isWageSubsidyCode(intervention.code);
+        if (educationCode) {
+          if (!intervention.institution || !intervention.institution.trim()) {
+            entryErrors.institution = 'Training institution is required for this intervention code.';
+          }
+          if (!intervention.itpDetails || !intervention.itpDetails.trim()) {
+            entryErrors.itpDetails = 'ITP details are required for this intervention code.';
+          }
+        }
+        if (employerCode) {
+          if (!intervention.institution || !intervention.institution.trim()) {
+            entryErrors.institution = 'Employer / delivery partner is required for this intervention code.';
+          }
+          if (wageSubsidyCode && (!intervention.wageSubsidyDetails || !intervention.wageSubsidyDetails.trim())) {
+            entryErrors.wageSubsidyDetails = 'Wage subsidy details are required for this intervention code.';
+          }
+        }
+        if (!educationCode && !employerCode && intervention.deliveryMode !== 'in_house') {
+          if (!intervention.institution || !intervention.institution.trim()) {
+            entryErrors.institution = 'Delivery partner / provider is required when using external delivery.';
+          }
+        }
+        if (Object.keys(entryErrors).length) {
+          interventionErrors[interventionKey] = entryErrors;
+        }
+        const lines = Array.isArray(intervention.costLines) ? intervention.costLines : [];
+        const lineErrors = {};
+        lines.forEach((line, lineIndex) => {
+          const detailErrors = {};
+          const lineKey = line.id || `${interventionKey}-line-${lineIndex}`;
+          if (!line.type) {
+            detailErrors.type = 'Select a cost item.';
+          }
+          if (line.amount === null || typeof line.amount === 'undefined' || String(line.amount).trim() === '') {
+            detailErrors.amount = 'Enter an amount for this cost item.';
+          } else {
+            const parsedAmount = parseCurrencyInput(line.amount);
+            if (parsedAmount === null || !Number.isFinite(parsedAmount) || parsedAmount < 0) {
+              detailErrors.amount = 'Enter a valid amount in dollars.';
+            }
+          }
+          const recurrenceMode = getRecurrenceModeForType(line.type);
+          const recurrenceRequired = recurrenceMode === 'required';
+          const recurrenceEnabled = Boolean(line.recurrence?.enabled);
+          if ((recurrenceRequired || recurrenceEnabled) && !isRecurrenceScheduleComplete(line)) {
+            detailErrors.recurrence = 'Complete the installments schedule.';
+          }
+          if (Object.keys(detailErrors).length) {
+            lineErrors[lineKey] = detailErrors;
+          }
+        });
+        if (Object.keys(lineErrors).length) {
+          costLineErrors[interventionKey] = lineErrors;
+        }
+      });
+      if (Object.keys(interventionErrors).length) {
+        errors.interventions = interventionErrors;
+      }
+      if (Object.keys(costLineErrors).length) {
+        errors.costLines = costLineErrors;
+      }
+      // 10. Recommendation
+      if (!assessment.recommendation) {
+        errors.recommendation = 'Recommendation is required.';
+      }
+      // 11. Justification
+      if (!assessment.justification || !assessment.justification.trim()) {
+        errors.justification = 'Justification is required.';
+      }
+      // 12. Conditional: Previous ISET Details
+      if (assessment.previousISET === 'yes' && (!assessment.previousISETDetails || !assessment.previousISETDetails.trim())) {
+        errors.previousISETDetails = 'Details for previous ISET funding are required.';
+      }
+      // 13. Conditional: NWAC fields
+      if (assessment.recommendation === 'no_recommend' && assessment.nwacReview && !assessment.nwacReason) {
+        errors.nwacReason = 'Reason for denial is required.';
+      }
+      // 14. Budget pot validation (only if set)
+      if (assessment.interventionPotId) {
+        const potExists = budgetPotOptions.some(opt => opt?.value === assessment.interventionPotId);
+        if (!potExists) {
+          errors.interventionPotId = 'Select a valid budget pot.';
+        }
+        if (!assessment.postingContext) {
+          errors.postingContext = 'Select how this pot is paid from.';
+        }
+      }
+      return errors;
+    },
+    [
+      budgetPotOptions,
+      canUploadEiVerification,
+      eiVerificationDocuments.length,
+      eiVerificationFile,
+      getRecurrenceModeForType
+    ]
+  );
+
+  const validateAssessmentForDeny = useCallback(assessment => {
+    const errors = {};
+    if (!assessment.recommendation) {
+      errors.recommendation = 'Recommendation is required.';
+    }
+    if (!assessment.justification || !assessment.justification.trim()) {
+      errors.justification = 'Justification is required.';
+    }
+    return errors;
+  }, []);
 
   // Handlers
   const updateAssessmentWithValidation = useCallback(
@@ -5693,31 +5858,6 @@ const CoordinatorAssessmentWidget = forwardRef(
       recurrence: { ...(line.recurrence || {}) }
     };
   }, []);
-  const handleInterventionStartDateChange = useCallback(
-    (interventionId, nextStartDate) => {
-      const endDateUpdate = nextStartDate ? undefined : '';
-      applyInterventionDateChange(interventionId, { startDate: nextStartDate, endDate: endDateUpdate }, 'total');
-    },
-    [applyInterventionDateChange]
-  );
-  const handleInterventionEndDateChange = useCallback(
-    (interventionId, nextEndDate) => {
-      const intervention = proposedInterventions.find(item => item.id === interventionId);
-      if (!intervention) return;
-      if (nextEndDate === intervention.endDate) return;
-      if (hasRecurringLineWithAmount(intervention)) {
-        setEndDateAdjustModal({
-          interventionId,
-          previousEndDate: intervention.endDate || '',
-          nextEndDate: nextEndDate || '',
-          mode: 'total'
-        });
-        return;
-      }
-      applyInterventionDateChange(interventionId, { endDate: nextEndDate }, 'total');
-    },
-    [applyInterventionDateChange, hasRecurringLineWithAmount, proposedInterventions]
-  );
   const resetCostLineModal = useCallback(() => {
     setCostLineModal({
       visible: false,
@@ -6406,7 +6546,6 @@ const CoordinatorAssessmentWidget = forwardRef(
   }, [
     actions,
     applicationId,
-    applicationRowVersion,
     caseData?.application_row_version,
     caseData?.id,
     conflictDeclarationSigned,
@@ -6519,7 +6658,6 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
   }, [
     actions,
-    apiFetch,
     applicationId,
     applicationRowVersionState,
     assessment.esdcEligibility,
@@ -6577,162 +6715,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         return next;
       });
     }
-  }, [apiFetch]);
-  function validateAssessment(assessment) {
-    const errors = {};
-    // 1. Overview
-    if (!assessment.overview || !assessment.overview.trim()) {
-      errors.overview = 'Client application overview is required.';
-    }
-    // 2. Employment Goals
-    if (!assessment.employmentGoals || !assessment.employmentGoals.trim()) {
-      errors.employmentGoals = 'Employment goals are required.';
-    }
-    // 3. Barriers
-    if (!Array.isArray(assessment.barriers) || assessment.barriers.length === 0) {
-      errors.barriers = 'Select at least one barrier to employment.';
-    } else if (assessment.barriers.includes('Other') && !assessment.barriersOther?.trim()) {
-      errors.barriersOther = 'Provide details for the "Other" barrier.';
-    }
-    // 4. ESDC Eligibility
-    if (!assessment.esdcEligibility) {
-      errors.esdcEligibility = 'Employment Insurance status is required.';
-    }
-    if (canUploadEiVerification && !eiVerificationFile && !eiVerificationDocuments.length) {
-      errors.eiVerification = 'An EI verification document is required before continuing.';
-    }
-    // 5. Proposed interventions + dates
-    const proposed = Array.isArray(assessment.proposedInterventions) ? assessment.proposedInterventions : [];
-    const interventionErrors = {};
-    const costLineErrors = {};
-    if (!proposed.length) {
-      interventionErrors._global = 'Add at least one proposed intervention.';
-    }
-    proposed.forEach((intervention, interventionIndex) => {
-      const entryErrors = {};
-      const interventionKey = intervention.id || String(interventionIndex);
-      if (!intervention.code) {
-        entryErrors.code = 'Select an intervention code.';
-      }
-      if (!intervention.startDate) {
-        entryErrors.startDate = 'Start date is required.';
-      }
-      const startUtc = parseIsoDateToUtc(intervention.startDate);
-      const endUtc = parseIsoDateToUtc(intervention.endDate);
-      if (startUtc !== null && endUtc !== null && endUtc < startUtc) {
-        entryErrors.endDate = 'End date cannot be before start date.';
-      }
-      const requiresNocCode = requiresNocForCode(intervention.code);
-      if (requiresNocCode) {
-        if (!intervention.interventionNocVersion) {
-          entryErrors.interventionNocVersion = 'Select a NOC version for this intervention.';
-        }
-        if (!intervention.interventionNoc) {
-          entryErrors.interventionNoc = 'Select a NOC code for this intervention.';
-        }
-      }
-      const educationCode = isEducationCode(intervention.code);
-      const employerCode = isEmployerCode(intervention.code);
-      const wageSubsidyCode = isWageSubsidyCode(intervention.code);
-      if (educationCode) {
-        if (!intervention.institution || !intervention.institution.trim()) {
-          entryErrors.institution = 'Training institution is required for this intervention code.';
-        }
-        if (!intervention.itpDetails || !intervention.itpDetails.trim()) {
-          entryErrors.itpDetails = 'ITP details are required for this intervention code.';
-        }
-      }
-      if (employerCode) {
-        if (!intervention.institution || !intervention.institution.trim()) {
-          entryErrors.institution = 'Employer / delivery partner is required for this intervention code.';
-        }
-        if (wageSubsidyCode && (!intervention.wageSubsidyDetails || !intervention.wageSubsidyDetails.trim())) {
-          entryErrors.wageSubsidyDetails = 'Wage subsidy details are required for this intervention code.';
-        }
-      }
-      if (!educationCode && !employerCode && intervention.deliveryMode !== 'in_house') {
-        if (!intervention.institution || !intervention.institution.trim()) {
-          entryErrors.institution = 'Delivery partner / provider is required when using external delivery.';
-        }
-      }
-      if (Object.keys(entryErrors).length) {
-        interventionErrors[interventionKey] = entryErrors;
-      }
-      const lines = Array.isArray(intervention.costLines) ? intervention.costLines : [];
-      const lineErrors = {};
-      lines.forEach((line, lineIndex) => {
-        const detailErrors = {};
-        const lineKey = line.id || `${interventionKey}-line-${lineIndex}`;
-        if (!line.type) {
-          detailErrors.type = 'Select a cost item.';
-        }
-        if (line.amount === null || typeof line.amount === 'undefined' || String(line.amount).trim() === '') {
-          detailErrors.amount = 'Enter an amount for this cost item.';
-        } else {
-          const parsedAmount = parseCurrencyInput(line.amount);
-          if (parsedAmount === null || !Number.isFinite(parsedAmount) || parsedAmount < 0) {
-            detailErrors.amount = 'Enter a valid amount in dollars.';
-          }
-        }
-        const recurrenceMode = getRecurrenceModeForType(line.type);
-        const recurrenceRequired = recurrenceMode === 'required';
-        const recurrenceEnabled = Boolean(line.recurrence?.enabled);
-        if ((recurrenceRequired || recurrenceEnabled) && !isRecurrenceScheduleComplete(line)) {
-          detailErrors.recurrence = 'Complete the installments schedule.';
-        }
-        if (Object.keys(detailErrors).length) {
-          lineErrors[lineKey] = detailErrors;
-        }
-      });
-      if (Object.keys(lineErrors).length) {
-        costLineErrors[interventionKey] = lineErrors;
-      }
-    });
-    if (Object.keys(interventionErrors).length) {
-      errors.interventions = interventionErrors;
-    }
-    if (Object.keys(costLineErrors).length) {
-      errors.costLines = costLineErrors;
-    }
-    // 10. Recommendation
-    if (!assessment.recommendation) {
-      errors.recommendation = 'Recommendation is required.';
-    }
-    // 11. Justification
-    if (!assessment.justification || !assessment.justification.trim()) {
-      errors.justification = 'Justification is required.';
-    }
-    // 12. Conditional: Previous ISET Details
-    if (assessment.previousISET === 'yes' && (!assessment.previousISETDetails || !assessment.previousISETDetails.trim())) {
-      errors.previousISETDetails = 'Details for previous ISET funding are required.';
-    }
-    // 13. Conditional: NWAC fields
-    if (assessment.recommendation === 'no_recommend' && assessment.nwacReview && !assessment.nwacReason) {
-      errors.nwacReason = 'Reason for denial is required.';
-    }
-    // 14. Budget pot validation (only if set)
-    if (assessment.interventionPotId) {
-      const potExists = budgetPotOptions.some(opt => opt?.value === assessment.interventionPotId);
-      if (!potExists) {
-        errors.interventionPotId = 'Select a valid budget pot.';
-      }
-      if (!assessment.postingContext) {
-        errors.postingContext = 'Select how this pot is paid from.';
-      }
-    }
-    return errors;
-  }
-
-  function validateAssessmentForDeny(assessment) {
-    const errors = {};
-    if (!assessment.recommendation) {
-      errors.recommendation = 'Recommendation is required.';
-    }
-    if (!assessment.justification || !assessment.justification.trim()) {
-      errors.justification = 'Justification is required.';
-    }
-    return errors;
-  }
+  }, []);
   const buildValidationMessages = (errors) => {
     const messages = [];
     const seen = new Set();
@@ -8164,7 +8147,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
   }, [isDecisionFinal, isLockedStatus, lockedByAnotherUser, releaseLock]);
 
   // For NWAC review validation
-  const validateNWACReview = (assessment) => {
+  const validateNWACReview = useCallback(assessment => {
     const errors = {};
     const decision = assessment.nwacReviewStatus;
     const alignmentError = buildAssessmentDecisionAlignmentError({
@@ -8187,7 +8170,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
         : 'Reason for denial is required.';
     }
     return errors;
-  };
+  }, []);
   const shouldShowStepErrors = useCallback(
     (stepId) => hasSubmitted || attemptedSteps[stepId],
     [hasSubmitted, attemptedSteps]
@@ -10294,7 +10277,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
             Funding forms checklist
           </Header>
           <Box variant="small" color="text-body-secondary" margin={{ bottom: 's' }}>
-            Once the client signs and submits the following forms you should mark the application complete. At this point the the client witll become active in the Case Management workspace, if they are not aleady.
+            Once the client signs and submits the required forms, mark the application complete. The client will then be active in the Case Management workspace if they are not already active.
           </Box>
           <Table
             stripedRows
@@ -11703,8 +11686,8 @@ ${JSON.stringify(contextPayload, null, 2)}`;
               <Box>
                 <Box fontWeight="bold">Conflict of Interest Declaration</Box>
                 <Box margin={{ top: 'xs' }}>
-                  As the Client Case Manager, declare whether you have any actual, potential, or perceived conflict of interest or bias related to this
-                  client's application or assessment. If a conflict exists, describe it so the file can be triaged appropriately.
+                  As the staff member working this application, declare whether you have any actual, potential, or perceived conflict of interest or bias related to this
+                  applicant's file or assessment. If a conflict exists, describe it so the file can be triaged appropriately.
                 </Box>
                 <Box color="text-status-inactive">
                   This declaration is recorded per staff member. Even if a previous owner signed, you must complete it before continuing your
@@ -11723,7 +11706,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
               )}
               <FormField
                 label="Select your declaration"
-                description="Choose the option that applies for this case."
+                description="Choose the option that applies for this application file."
                 errorText={!hasDeclarationChoice && declarationError ? declarationError : undefined}
               >
                 <RadioGroup
@@ -11731,11 +11714,11 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                   items={[
                     {
                       value: 'no_conflict',
-                      label: 'I do not have any actual, potential, or perceived conflict of interest or bias for this case.'
+                      label: 'I do not have any actual, potential, or perceived conflict of interest or bias for this application file.'
                     },
                     {
                       value: 'conflict',
-                      label: 'I may have an actual, potential, or perceived conflict or bias for this case.',
+                      label: 'I may have an actual, potential, or perceived conflict or bias for this application file.',
                       description: 'Describe the relationship or circumstance below so the assessment can be routed appropriately.'
                     }
                   ]}

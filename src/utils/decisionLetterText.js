@@ -29,7 +29,7 @@ export const normalizeApplicantFacingNote = value => {
   if (!normalized) return "";
 
   normalized = normalized
-    .replace(/^(reason|notes?)\s*[:\-]\s*/i, "")
+    .replace(/^(reason|notes?)\s*[:-]\s*/i, "")
     .replace(
       /^(person|client|applicant)\s+is\s+(ineligible|not eligible)\s+(?:on\s+the\s+grounds\s+that|because)\s+/i,
       ""

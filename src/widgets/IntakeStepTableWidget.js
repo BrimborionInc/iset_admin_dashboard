@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Header, Button, SpaceBetween, Table, TextFilter, ButtonDropdown, Link, Modal, Alert } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { useHistory } from 'react-router-dom';
@@ -9,12 +9,18 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
   const [steps, setSteps] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filteringText, setFilteringText] = useState('');
+  const [sortingState, setSortingState] = useState({ columnId: 'name', isDescending: false });
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [banner, setBanner] = useState(null); // { type: 'info'|'error'|'success', header, message }
   const [selectedId, setSelectedId] = useState(null);
+  const selectedIdRef = useRef(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const history = useHistory();
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
 
   const parseJsonBody = useCallback(async (resp) => {
     try {
@@ -46,7 +52,8 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
             : [];
       setSteps(list);
       setBanner(prev => (prev?.type === 'error' ? null : prev));
-      if (selectedId && !list.some(item => item?.id === selectedId)) {
+      const activeSelectedId = selectedIdRef.current;
+      if (activeSelectedId && !list.some(item => item?.id === activeSelectedId)) {
         setSelectedId(null);
         setSelectedBlockStep?.(null);
       }
@@ -58,7 +65,7 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
     } finally {
       if (!silent && !signal?.aborted) setLoading(false);
     }
-  }, [parseJsonBody, selectedId, setSelectedBlockStep]);
+  }, [parseJsonBody, setSelectedBlockStep]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -75,14 +82,14 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
     return unlisten;
   }, [history, fetchSteps]);
 
-  const handleModify = (step) => {
+  const handleModify = useCallback((step) => {
     history.push(`/modify-component/${step.id}`);
-  };
+  }, [history]);
 
-  const openDeleteModal = (step) => {
+  const openDeleteModal = useCallback((step) => {
     setPendingDelete(step);
     setShowDeleteModal(true);
-  };
+  }, []);
 
   const confirmDelete = async () => {
     const step = pendingDelete;
@@ -122,24 +129,102 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
     setPendingDelete(null);
   };
 
-  const handleSelect = (step) => {
+  const handleSelect = useCallback((step) => {
     if (!step) return;
     setSelectedId(step.id);
     setSelectedBlockStep?.(step);
-  };
+  }, [setSelectedBlockStep]);
 
   const handleCreateNew = () => {
     history.push('/modify-component/new');
   };
+
+  const compareSteps = useCallback((columnId, left, right) => {
+    if (columnId === 'updated_at') {
+      const leftTime = left?.updated_at ? new Date(left.updated_at).getTime() : 0;
+      const rightTime = right?.updated_at ? new Date(right.updated_at).getTime() : 0;
+      return leftTime - rightTime;
+    }
+    if (columnId === 'id') {
+      const leftNumber = Number(left?.id);
+      const rightNumber = Number(right?.id);
+      if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+        return leftNumber - rightNumber;
+      }
+    }
+    const leftValue = String(left?.[columnId] ?? '').toLowerCase();
+    const rightValue = String(right?.[columnId] ?? '').toLowerCase();
+    return leftValue.localeCompare(rightValue, undefined, { numeric: true, sensitivity: 'base' });
+  }, []);
 
   const filteredSteps = useMemo(() => {
     const search = filteringText.trim().toLowerCase();
     if (!search) return steps;
     return steps.filter(item => {
       const name = (item?.name || '').toString().toLowerCase();
-      return name.includes(search);
+      const id = (item?.id || '').toString().toLowerCase();
+      const updated = (item?.updated_at || '').toString().toLowerCase();
+      return name.includes(search) || id.includes(search) || updated.includes(search);
     });
   }, [steps, filteringText]);
+
+  const sortedSteps = useMemo(() => {
+    const next = [...filteredSteps];
+    if (!sortingState.columnId) return next;
+    next.sort((left, right) => {
+      const result = compareSteps(sortingState.columnId, left, right);
+      return sortingState.isDescending ? -result : result;
+    });
+    return next;
+  }, [compareSteps, filteredSteps, sortingState]);
+
+  const columnDefinitions = useMemo(() => [
+    {
+      id: 'name',
+      header: 'Intake Step',
+      cell: item => (
+        <Link onFollow={(event) => { event.preventDefault(); handleSelect(item); }}>
+          {item?.name || 'Untitled'}
+        </Link>
+      ),
+      sortingField: 'name',
+      sortingComparator: (left, right) => compareSteps('name', left, right),
+      minWidth: 220,
+      isRowHeader: true
+    },
+    {
+      id: 'id',
+      header: 'ID',
+      cell: item => item?.id ?? 'Not recorded',
+      sortingField: 'id',
+      sortingComparator: (left, right) => compareSteps('id', left, right),
+      minWidth: 90
+    },
+    {
+      id: 'updated_at',
+      header: 'Updated',
+      cell: item => item?.updated_at ? new Date(item.updated_at).toLocaleString() : 'Not recorded',
+      sortingField: 'updated_at',
+      sortingComparator: (left, right) => compareSteps('updated_at', left, right),
+      minWidth: 180
+    },
+    {
+      id: 'actions',
+      header: 'Actions',
+      cell: item => (
+        <SpaceBetween direction="horizontal" size="xs">
+          <Button variant="inline-link" onClick={() => handleModify(item)} ariaLabel={`Modify ${item?.name || `intake step #${item?.id ?? ''}`}`}>Modify</Button>
+          <Button variant="inline-link" onClick={() => openDeleteModal(item)} ariaLabel={`Delete ${item?.name || `intake step #${item?.id ?? ''}`}`}>Delete</Button>
+        </SpaceBetween>
+      ),
+      minWidth: 150
+    }
+  ], [compareSteps, handleModify, handleSelect, openDeleteModal]);
+
+  const activeSortingColumn = useMemo(
+    () => columnDefinitions.find(column => column.id === sortingState.columnId),
+    [columnDefinitions, sortingState.columnId]
+  );
 
   const selectedItems = useMemo(() => {
     if (!selectedId) return [];
@@ -166,6 +251,7 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
                 Refresh
               </Button>
               <Button
+                iconName="add-plus"
                 iconAlign="right"
                 onClick={handleCreateNew}
                 ariaLabel="Create a new intake step"
@@ -189,7 +275,7 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
           items={[{ id: 'remove', text: 'Remove' }]}
           ariaLabel="Board item settings"
           variant="icon"
-          onItemClick={() => actions.removeItem()}
+          onItemClick={() => actions?.removeItem?.()}
         />
       }
     >
@@ -216,36 +302,18 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
           renderAriaLive={({ firstIndex, lastIndex, totalItemsCount }) =>
             `Displaying items ${firstIndex} to ${lastIndex} of ${totalItemsCount}`
           }
-          columnDefinitions={[
-            {
-              id: 'name',
-              header: 'Intake Step',
-              cell: item => (
-                <Link onFollow={(event) => { event.preventDefault(); handleSelect(item); }}>
-                  {item?.name || 'Untitled'}
-                </Link>
-              ),
-              sortingField: 'name',
-              isRowHeader: true
-            },
-            {
-              id: 'updated_at',
-              header: 'Updated',
-              cell: item => item?.updated_at ? new Date(item.updated_at).toLocaleString() : '—',
-              sortingField: 'updated_at'
-            },
-            {
-              id: 'actions',
-              header: 'Actions',
-              cell: item => (
-                <SpaceBetween direction="horizontal" size="xs">
-                  <Button variant="inline-link" onClick={() => handleModify(item)} ariaLabel={`Modify ${item?.name || `intake step #${item?.id ?? ''}`}`}>Modify</Button>
-                  <Button variant="inline-link" onClick={() => openDeleteModal(item)} ariaLabel={`Delete ${item?.name || `intake step #${item?.id ?? ''}`}`}>Delete</Button>
-                </SpaceBetween>
-              )
+          columnDefinitions={columnDefinitions}
+          items={sortedSteps}
+          resizableColumns
+          stickyHeader
+          sortingColumn={activeSortingColumn}
+          sortingDescending={sortingState.isDescending}
+          onSortingChange={({ detail }) => {
+            const columnId = detail?.sortingColumn?.id;
+            if (columnId) {
+              setSortingState({ columnId, isDescending: detail.isDescending });
             }
-          ]}
-          items={filteredSteps}
+          }}
           loading={loading}
           loadingText="Loading resources"
           empty={

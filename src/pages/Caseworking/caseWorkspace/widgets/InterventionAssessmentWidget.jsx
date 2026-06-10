@@ -2366,7 +2366,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         setActionPlanBudgetPotLoading(false);
       }
     },
-    [actionPlanFundingDraft.budgetPot, actionPlanFundingDraft.fundingStream, apiFetch, participantProvince]
+    [actionPlanFundingDraft.budgetPot, actionPlanFundingDraft.fundingStream, participantProvince]
   );
 
   useEffect(() => {
@@ -2755,7 +2755,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         setNocSuggestionsLoading(false);
       }
     },
-    [apiFetch]
+    []
   );
 
   const [paymentTypeMapping, setPaymentTypeMapping] = useState(null);
@@ -2782,7 +2782,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     return () => {
       cancelled = true;
     };
-  }, [apiFetch]);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -2803,7 +2803,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     return () => {
       cancelled = true;
     };
-  }, [apiFetch]);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -2856,7 +2856,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     return () => {
       cancelled = true;
     };
-  }, [apiFetch]);
+  }, []);
 
   const paymentTypeMappingLookup = useMemo(
     () => buildPaymentTypeMappingLookup(paymentTypeMapping),
@@ -3485,7 +3485,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     setCostLineAmountPerPeriodFocused(false);
   };
 
-  const updateCostLineDraft = updater => {
+  const updateCostLineDraft = useCallback(updater => {
     setCostLineModal(prev => {
       const current = prev.draft || {};
       const nextDraft =
@@ -3497,7 +3497,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         draft: nextDraft,
       };
     });
-  };
+  }, []);
   const updateCostLinePayeeType = useCallback(
     nextPayeeType => {
       setCostLineModal(prev => {
@@ -3652,7 +3652,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       });
       setCostLineModalErrors({});
     },
-    [getRecurrenceModeForType, proposedInterventions]
+    [buildRecurrenceFromIntervention, getRecurrenceModeForType, proposedInterventions]
   );
 
   const updateCostLineAmount = useCallback(
@@ -4747,7 +4747,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         setEiVerificationUploading(false);
       }
     },
-    [apiFetch, applicantUserId, caseId, eiVerificationFile, form.eiVerificationDocumentId, form.eiVerificationStatus, isFormLocked]
+    [applicantUserId, caseId, eiVerificationFile, form.eiVerificationDocumentId, form.eiVerificationStatus, isFormLocked]
   );
 
   const addCaseNote = useCallback(
@@ -4763,7 +4763,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         window.dispatchEvent(new CustomEvent("case-notes-refresh", { detail: { caseId } }));
       }
     },
-    [apiFetch, caseId]
+    [caseId]
   );
 
   const linkEiDocumentToInterventions = useCallback(
@@ -4775,7 +4775,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         body: JSON.stringify({ interventionIds }),
       });
     },
-    [apiFetch]
+    []
   );
 
   const buildApprovedInterventionPayload = useCallback(
@@ -5502,7 +5502,6 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   }, [
     activeLetterWorkflowId,
     applicantSalutationName,
-    apiFetch,
     applicationId,
     caseId,
     clientLetterBody,

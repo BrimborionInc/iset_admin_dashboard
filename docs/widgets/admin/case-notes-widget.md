@@ -38,3 +38,4 @@ Internal notes, reminders, and operational context.
 
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.
+- The manual `Refresh notes` control should call `GET /api/cases/:id/notes` once. Do not dispatch a self-targeted `case-notes-refresh` event from the refresh handler, because the widget already listens for that event from other workflow surfaces.

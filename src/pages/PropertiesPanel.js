@@ -311,7 +311,9 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
           errs['name'] = 'Use lowercase letters, digits, hyphen or underscore.';
         } else {
           try {
-            const siblings = (pageProperties?.components || []).filter(c => c !== selectedComponent);
+            const siblings = Array.isArray(allComponents)
+              ? allComponents.filter((_, index) => index !== selectedComponent?.index)
+              : [];
             if (siblings.some(c => (c.props?.name || '') === dataKey)) {
               errs['name'] = 'Data Key must be unique on page';
             }

@@ -131,7 +131,7 @@ export const BudgetsDataProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  }, [normalizePot, selectedPotId]);
+  }, [normalizePot, selectedPotId, selectedPotSource]);
 
   const loadSnapshots = useCallback(async () => {
     try {
@@ -606,6 +606,7 @@ export const BudgetsDataProvider = ({ children }) => {
       deleteDraft,
       publishDraft,
       ensureDraftSelected,
+      snapshots,
       createSnapshot,
       deleteSnapshot,
       restoreSnapshotAsDraft,

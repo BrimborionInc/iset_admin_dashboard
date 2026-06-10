@@ -95,6 +95,7 @@ Technical details
 - Database name: `iset_intake`  
 - Access is restricted to the VPC; use SSM on the instance to run SQL or load dumps.  
 - Data was loaded from `Dump20260126.sql` on January 26, 2026.
+- Provisioned downsizing guidance: use `docs/ops/runbooks/prod-aurora-provisioned-downsize.md`; do not modify the only writer in place.
 
 ## 8) Identity and Access (Cognito)
 

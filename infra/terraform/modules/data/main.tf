@@ -85,6 +85,16 @@ resource "aws_rds_cluster" "this" {
   vpc_security_group_ids       = [aws_security_group.db.id]
   copy_tags_to_snapshot        = true
   skip_final_snapshot          = var.skip_final_snapshot
+
+  dynamic "serverlessv2_scaling_configuration" {
+    for_each = var.serverlessv2_max_capacity != null ? [1] : []
+
+    content {
+      min_capacity             = var.serverlessv2_min_capacity
+      max_capacity             = var.serverlessv2_max_capacity
+      seconds_until_auto_pause = var.serverlessv2_seconds_until_auto_pause
+    }
+  }
 }
 
 resource "aws_rds_cluster_instance" "writer" {

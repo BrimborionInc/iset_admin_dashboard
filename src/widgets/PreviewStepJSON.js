@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Box, Header, Link } from '@cloudscape-design/components';
+import { Box, ButtonDropdown, Header, Link } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import CodeView from '@cloudscape-design/code-view/code-view';
 import CopyToClipboard from '@cloudscape-design/components/copy-to-clipboard';
 import PreviewNunjucksWidgetHelp from '../helpPanelContents/previewNunjucksWidgetHelp';
 import { apiFetch } from '../auth/apiClient';
 
-const PreviewStepJson = ({ selectedBlockStep, toggleHelpPanel }) => {
+const PreviewStepJson = ({ actions, selectedBlockStep, toggleHelpPanel }) => {
   const [json, setJson] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -16,7 +16,7 @@ const PreviewStepJson = ({ selectedBlockStep, toggleHelpPanel }) => {
       if (!selectedBlockStep?.id) { setJson(''); return; }
       setLoading(true);
       try {
-  const res = await apiFetch(`/api/steps/${selectedBlockStep.id}`);
+        const res = await apiFetch(`/api/steps/${selectedBlockStep.id}`);
         const data = await res.json();
         if (!cancelled) setJson(JSON.stringify(data, null, 2));
       } catch (e) {
@@ -52,6 +52,14 @@ const PreviewStepJson = ({ selectedBlockStep, toggleHelpPanel }) => {
         resizeHandleAriaLabel: 'Resize handle',
         resizeHandleAriaDescription: 'Use Space or Enter to activate resize, arrow keys to resize, Space or Enter to finish.',
       }}
+      settings={
+        <ButtonDropdown
+          items={[{ id: 'remove', text: 'Remove' }]}
+          ariaLabel="Step JSON settings"
+          variant="icon"
+          onItemClick={() => actions?.removeItem?.()}
+        />
+      }
     >
       {!selectedBlockStep ? (
         <Box>Select a step to inspect its JSON</Box>

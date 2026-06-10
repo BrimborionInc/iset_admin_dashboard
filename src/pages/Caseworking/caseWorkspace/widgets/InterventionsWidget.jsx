@@ -501,7 +501,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     return map;
   }, [caseData]);
 
-  const interventions = activePlan?.interventions ?? [];
+  const interventions = useMemo(() => activePlan?.interventions ?? [], [activePlan?.interventions]);
   const selectedIntervention = useMemo(
     () => interventions.find(item => item.id === selectedInterventionId) || null,
     [interventions, selectedInterventionId]
@@ -1095,7 +1095,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     return result;
   };
 
-  const handleActivate = async interventionToActivate => {
+  const handleActivate = useCallback(async interventionToActivate => {
     if (!activePlan?.id) {
       setErrorMessage("Select an action plan before activating interventions.");
       return;
@@ -1123,7 +1123,7 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
     } catch (err) {
       setErrorMessage(err?.message || "Unable to activate intervention.");
     }
-  };
+  }, [activePlan?.id, refresh, selectedIntervention, setSelectedInterventionId, updateIntervention]);
 
   const handleReviseIntervention = useCallback(
     async interventionToRevise => {
@@ -1316,7 +1316,6 @@ const InterventionsWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) =
         : column
     );
   }, [
-    codeLabelMap,
     columnWidthsMap,
     getTypeLabel,
     getInterventionActionItems,

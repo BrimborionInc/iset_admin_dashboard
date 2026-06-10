@@ -399,6 +399,7 @@ const EsdcParticipantQueueWidget = ({
     if (totalItems === 0) return 1;
     return Math.max(1, Math.ceil(totalItems / preferences.pageSize));
   }, [totalItems, preferences.pageSize]);
+  const exportableQueueCount = (Number(summary.ready) || 0) + (Number(summary.needsReview) || 0);
 
   const renderEmptyState = () => {
     if (error) {
@@ -469,7 +470,7 @@ const EsdcParticipantQueueWidget = ({
                   iconName="download"
                   loading={batchLoading}
                   onClick={prepareBatch}
-                  disabled={loading || summary.ready === 0}
+                  disabled={loading || exportableQueueCount === 0}
                 >
                   Generate batch XML
                 </Button>
@@ -629,7 +630,7 @@ const EsdcParticipantQueueWidget = ({
           <div className="esdc-batch-modal-summary" aria-label="Batch XML summary">
             <div>
               <div className="esdc-batch-modal-summary__value">{batchParticipants.length}</div>
-              <div className="esdc-batch-modal-summary__label">Ready participants</div>
+              <div className="esdc-batch-modal-summary__label">Exportable participants</div>
             </div>
             <div>
               <div className="esdc-batch-modal-summary__value">{batchSkipped.length}</div>

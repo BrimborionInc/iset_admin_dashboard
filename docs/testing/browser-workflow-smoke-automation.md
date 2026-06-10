@@ -1,10 +1,10 @@
 # Browser Workflow Smoke Automation
 
-Status: current guidance from the 2026-05-08/09 application-assessment containment release, updated with the 2026-05-28 dashboard request-loop regression rule.
+Status: current guidance from the 2026-05-08/09 application-assessment containment release, updated with the 2026-06-10 application-workspace and application-assessment browser-smoke coverage.
 
 Audience: Codex threads and developers building or rehearsing browser-level workflow smokes for PATH.
 
-Last Updated: 2026-05-28
+Last Updated: 2026-06-10
 
 ## Purpose
 
@@ -93,6 +93,76 @@ This smoke loads the real local React bundle at `http://localhost:3001/esdc/part
 
 The script automatically prepends the current WSL local Chrome dependency path (`/home/bill/.local/chrome-deps/extract/usr/lib/x86_64-linux-gnu`) to `LD_LIBRARY_PATH` when present, so the npm alias works from a normal shell without manually exporting the Puppeteer NSS/NSPR workaround.
 
+## Case Assignment Dashboard Reference
+
+The Manage ISET Applications / Case Assignment dashboard has a local browser smoke:
+
+- Script: `scripts/case-assignment-dashboard-browser-smoke.js`
+- NPM alias: `npm run smoke:case-assignment:browser`
+
+This smoke loads the real local React bundle at `http://localhost:3001/case-assignment-dashboard`, injects a synthetic System Administrator browser session, stubs the supporting API responses, and verifies the focused applications table renders without configurable-board controls or retired instructional filler. It checks the `/api/applications` request contract for initial load, Applicant sorting, server-backed search, legacy `?status=Pending Approval` routing to `statusGroup=pending_decision`, and `?bucket=awaiting-decision` routing to a server-backed work-queue filter. It also keeps network capture open after initial render and fails if `/api/applications` keeps firing after the dashboard should be idle.
+
+Use this smoke for local UI regressions when no reusable Cognito staff token is available in the shell. Pair it with authenticated DEV/TEST API checks when validating the real database semantics of `/api/applications` bucket filtering.
+
+## Manage Components Dashboard Reference
+
+The Manage Intake Steps / Manage Components dashboard has a local browser smoke:
+
+- Script: `scripts/manage-components-dashboard-browser-smoke.js`
+- NPM alias: `npm run smoke:manage-components:browser`
+
+This smoke loads the real local React bundle at `http://localhost:3001/manage-components`, injects a synthetic System Administrator browser session, stubs `/api/steps`, `/api/steps/:id`, and `/api/preview/step`, and seeds a saved layout with only the Intake Step Library widget. It verifies the page-level Add widget and Reset layout controls are in the route header, the split-panel palette exposes missing widgets, reset restores Intake Step Library, Preview, and Step JSON, the intake-step table has sortable/resizable columns, selecting a step renders the preview iframe within and across the available board-item body, and `/api/steps` does not keep refiring after idle or row selection. It captures `tmp/manage-components-smoke/manage-components-dashboard.png` for visual review.
+
+Use this smoke for Workflow Studio / intake-authoring dashboard regressions when no reusable Cognito staff token is available. Pair it with live DEV/TEST endpoint checks when changing `/api/steps` or the preview-rendering backend contract.
+
+## Modify Intake Step Editor Reference
+
+The Modify Intake Step editor has a local browser smoke:
+
+- Script: `scripts/modify-component-editor-browser-smoke.js`
+- NPM alias: `npm run smoke:modify-component:browser`
+
+This smoke loads the real local React bundle at `http://localhost:3001/modify-component/132`, injects a synthetic System Administrator browser session, and stubs `/api/steps/:id`, `/api/component-templates`, `/api/render/component`, `/api/option-data-sources`, and workflow-context APIs. It verifies the editor route/header regions, searchable component library, repeated static text-block preservation, clean-load disabled Save state, component selection, library add, working-area render of the added component, precise backend save-error alerting, successful save payload shape, validation panel, screenshot capture, and idle API settling after initial render and component selection. It also asserts ordinary save payloads do not include `ui_meta` or editor-only `__workflowFields`.
+
+Use this smoke when changing `src/pages/modifyIntakeStep.js`, `src/pages/PropertiesPanel.js`, step save routes, component-template shapes, or server-side component rendering. Pair it with a live authenticated DEV/TEST check when validating real DB component templates or publish parity.
+
+## Application Overview Reference
+
+The Application Overview widget has a local browser smoke for the Docs Requested toggle:
+
+- Script: `scripts/application-overview-docs-requested-browser-smoke.js`
+- NPM alias: `npm run smoke:application-overview:browser`
+
+This smoke loads the real local React bundle at `http://localhost:3001/application-case/1?applicationId=2`, injects a synthetic System Administrator browser session, restricts the workspace layout to Application Overview, and stubs the supporting API responses. It intentionally makes `/api/applications/2` return an older `row_version` than `/api/cases/1?applicationId=2` returns as `application_row_version`, then clears the `Documents requested` toggle. The smoke fails if the UI sends the stale row version, shows the false "another user updated" warning, or fails to show the cleared document-request state.
+
+## Application Workspace Reference
+
+The ISET Application Assessment / Application Workspace dashboard has a local browser smoke:
+
+- Script: `scripts/application-workspace-dashboard-browser-smoke.js`
+- NPM alias: `npm run smoke:application-workspace:browser`
+
+This smoke loads the real local React bundle at `http://localhost:3001/application-case/1?applicationId=2`, injects a synthetic System Administrator browser session, clears the saved workspace layout, and stubs the supporting API responses for a deterministic application file. It verifies the default widget set renders, the page stops calling APIs after initial load, Supporting Documents search narrows the displayed document table, Secure Messaging Date/Time sorting toggles the full visible inbox list, and the Notes and Reminders refresh control calls `/api/cases/:id/notes` exactly once. It captures `tmp/application-workspace-smoke/application-workspace-default-layout.png` for visual review.
+
+The smoke currently records, but does not fail on, a React unique-key warning from `SupportingDocumentsWidget` modal/`SpaceBetween` composition during workspace render. Treat that warning as targeted UI cleanup backlog.
+
+## Application Assessment Workflow Reference
+
+The Application Assessment widget has a deeper local browser workflow smoke:
+
+- Script: `scripts/application-assessment-workflow-browser-smoke.js`
+- NPM alias: `npm run smoke:application-assessment:workflow:browser`
+
+This smoke loads the real local React bundle at `http://localhost:3001/application-case/1?applicationId=2`, injects deterministic staff sessions, stubs the required case/application/document/message APIs, and drives the risky workflow branches instead of only checking route health. It covers:
+
+- conflict declaration signing by an ISET Coordinator, including promotion to in review and the selected application's row-version token;
+- coordinator assessment submission from draft to Pending Approval with recommendation, justification, date, proposed intervention payload, and selected-application row-version token;
+- NWAC approval decision commit from the approval deep link, including the review status, approved outcome, initiated case status, and selected-application row-version token;
+- approval-letter send with a workflow-generated attachment and application-scoped `caseContext.applicationDecisionLetters[application_id]` sent marker, without leaking the decision-letter state to root context;
+- funding-documents completion for an approved application after the scoped approval-letter sent marker is present.
+
+The smoke captures screenshots under `tmp/application-assessment-workflow-smoke/`. It fails on failed API responses, serious browser console errors, unhandled exceptions, and the React warning class where a child render path updates the route parent. It currently records, but does not fail on, the same `SupportingDocumentsWidget` React unique-key warning tracked in the Application Workspace smoke.
+
 ## Automation Backlog
 
 Future high-risk workflow releases should prefer adding a small, owned smoke script with the same shape:
@@ -104,9 +174,8 @@ Future high-risk workflow releases should prefer adding a small, owned smoke scr
 - strict post-run cleanup checks;
 - environment-specific notes for DEV, TEST, and PROD.
 
-Good candidates are the three approval families:
+Good candidates are the remaining approval families:
 
-- application assessment approval;
 - case-manager new intervention proposal approval;
 - intervention revision/change approval.
 

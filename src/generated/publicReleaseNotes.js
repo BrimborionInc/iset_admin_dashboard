@@ -1,24 +1,40 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-06-07T20:42:37.416Z",
-  "releaseId": "20260607-prod-tutorials-training-shorts",
-  "releaseLabel": "Release 20260607-prod-tutorials-training-shorts",
-  "releaseDateEn": "7th June 2026",
-  "releaseDateFr": "7 juin 2026",
+  "generatedAt": "2026-06-10T22:02:10.874Z",
+  "releaseId": "20260610-prod-modify-component-editor",
+  "releaseLabel": "Release 20260610-prod-modify-component-editor",
+  "releaseDateEn": "10th June 2026",
+  "releaseDateFr": "10 juin 2026",
   "en": {
     "sectionEyebrow": "Optional reading",
     "description": "",
     "featuresHeading": "What changed",
     "features": [
-      "Support > Tutorials now includes Training shorts: short Synthesia-hosted PATH videos that open inside the dashboard, including new ILMP validation and submissions drafts.",
-      "Historical action-plan entry now prefills and requires the Appendix A facts PATH needs for ILMP reporting.",
-      "Existing/backloaded action-plan and intervention saves now fill blank Participant Details from structured ILMP fields without replacing staff-entered details.",
-      "Decision letters now use the participant's resolved name instead of falling back to `Dear Applicant`.",
-      "Application correction actions now preserve raw workflow status, save against the selected application, and support eligible withdraw/reopen flows.",
-      "Denied and closed applications no longer show funding-stage checklist items as missing.",
-      "Regional Snapshot Client Activity now uses one application basis in tabs and the all-regions Excel export.",
-      "ISET Clients now displays dormant case lifecycle rows as `No Active Plan`."
+      "Clearing a stale Docs Requested flag in Application Workspace no longer shows a false concurrent-update warning.",
+      "Application Workspace document search, secure-message table sorting, and notes refresh behavior are cleaner for staff reviewing an application file.",
+      "Manage Intake Steps now has the standard Add widget and Reset layout controls, sortable/resizable step-library columns, and a preview that stays within the widget.",
+      "Modify Intake Step now shows the step name, has component search, preserves repeated static content blocks, starts clean saves disabled, and shows precise save errors.",
+      "User Management and Manage ISET Applications now use cleaner table-first layouts with server-backed sorting/filtering where needed."
     ],
     "featurePackages": [
+      {
+        "title": "Release 20260610-prod-modify-component-editor",
+        "items": [
+          "Clearing a stale Docs Requested flag in Application Workspace no longer shows a false concurrent-update warning.",
+          "Application Workspace widgets are easier to use during file review, with document search, secure-message table sorting, cleaner notes refresh behavior, clearer calendar fallbacks, and conflict-declaration wording focused on the staff member working the file.",
+          "Manage Intake Steps now has standard dashboard controls, sortable/resizable step-library columns, full-list sorting before display, fewer unnecessary reloads, and a preview that stays inside the widget.",
+          "Modify Intake Step now shows the current step name, adds component search, preserves repeated static content blocks, keeps clean saves disabled, preserves step metadata, and shows precise save errors.",
+          "User Management and Manage ISET Applications now use cleaner table-first layouts with better sorting, resizing, pagination, and server-backed filters where needed."
+        ]
+      },
+      {
+        "title": "Release 20260608-prod-ilmp-validation-messages",
+        "items": [
+          "ILMP blockers and warnings now tell staff what to fix, where to fix it, and which ESDC Data Exchange Guide source is involved.",
+          "ILMP messages now point to Participant Details, the named action plan, or the named intervention instead of showing raw database IDs.",
+          "PATH-only review checks are labelled as PATH-only so staff can distinguish them from ESDC gateway blockers.",
+          "The unsupported childcare `No funding received` warning was removed because that is a valid ESDC childcare funding code."
+        ]
+      },
       {
         "title": "Release 20260607-prod-tutorials-training-shorts",
         "items": [
@@ -26,28 +42,6 @@ const publicReleaseNotes = {
           "The Training shorts table is sortable and resizable, with visible columns limited to Short, Length, and Action.",
           "The first watchable draft shorts include withdrawing/reopening an application, ILMP submissions, and ILMP validation and repairs.",
           "PATH stores Synthesia metadata only; MP4 files are not added to the React app."
-        ]
-      },
-      {
-        "title": "Release 20260605-prod-ilmp-casework-batch",
-        "items": [
-          "Historical action-plan entry now prefills and requires the Appendix A facts PATH needs for ILMP reporting.",
-          "Existing/backloaded action-plan and intervention saves now fill blank Participant Details from structured ILMP fields without replacing staff-entered details.",
-          "Decision letters now use the participant's resolved name instead of falling back to `Dear Applicant`.",
-          "Application correction actions now preserve raw workflow status, save against the selected application, and support eligible withdraw/reopen flows.",
-          "Denied and closed applications no longer show funding-stage checklist items as missing.",
-          "Regional Snapshot Client Activity now uses one application basis in tabs and the all-regions Excel export.",
-          "ISET Clients now displays dormant case lifecycle rows as `No Active Plan`."
-        ]
-      },
-      {
-        "title": "Release 20260604-prod-ilmp-appendix-a",
-        "items": [
-          "ILMP validation now follows the ESDC gateway's Appendix A mandatory-field rules before XML is generated.",
-          "ILMP batch XML now exports participants with warnings and blocks only records with true blocking issues.",
-          "Backloaded action plans now use their saved barrier-to-employment codes when Participant Details barriers are blank.",
-          "Participant Details now pulls application checkbox/list answers through correctly, including barriers and Other barrier notes.",
-          "New and existing/backloaded action plans now require education level and education province at the start of the plan."
         ]
       }
     ],
@@ -61,16 +55,32 @@ const publicReleaseNotes = {
     "description": "",
     "featuresHeading": "Ce qui a change",
     "features": [
-      "Support > Tutorials inclut maintenant Training shorts : de courtes videos PATH hebergees dans Synthesia qui s'ouvrent dans le tableau de bord, y compris de nouveaux brouillons ILMP pour la validation et les soumissions.",
-      "La saisie des plans d'action historiques pre-remplit et exige maintenant les faits de l'annexe A necessaires au reporting ILMP.",
-      "Les enregistrements de plans d'action et d'interventions historiques remplissent maintenant les champs vides de Participant Details a partir des champs ILMP structures, sans remplacer les corrections du personnel.",
-      "Les lettres de decision utilisent maintenant le nom resolu de la participante au lieu de revenir a `Dear Applicant`.",
-      "Les actions de correction de demande conservent maintenant le vrai statut de workflow, enregistrent sur la demande selectionnee et prennent en charge les retraits/reouvertures admissibles.",
-      "Les demandes refusees et fermees n'affichent plus les elements de checklist lies au financement comme manquants.",
-      "Regional Snapshot Client Activity utilise maintenant une seule base de demandes dans les onglets et l'export Excel toutes regions.",
-      "ISET Clients affiche maintenant les dossiers dormants comme `No Active Plan`."
+      "Effacer un ancien indicateur Docs Requested dans Application Workspace n'affiche plus un faux avertissement de mise a jour concurrente.",
+      "Dans Application Workspace, la recherche de documents, le tri des messages securises et l'actualisation des notes sont plus propres pendant la revision d'un dossier.",
+      "Manage Intake Steps a maintenant les controles standard Add widget et Reset layout, des colonnes triables/redimensionnables, et un apercu qui reste dans le widget.",
+      "Modify Intake Step affiche maintenant le nom de l'etape, ajoute la recherche de composants, preserve les blocs de contenu statique repetes, garde Save desactive quand rien n'a change, et affiche les erreurs d'enregistrement exactes.",
+      "User Management et Manage ISET Applications utilisent maintenant des mises en page plus simples centrees sur les tableaux avec tri/filtrage cote serveur au besoin."
     ],
     "featurePackages": [
+      {
+        "title": "Release 20260610-prod-modify-component-editor",
+        "items": [
+          "Effacer un ancien indicateur Docs Requested dans Application Workspace n'affiche plus un faux avertissement de mise a jour concurrente.",
+          "Les widgets Application Workspace sont plus faciles a utiliser pendant la revision d'un dossier, avec recherche de documents, tri des messages securises, actualisation des notes plus propre, fallbacks calendrier plus clairs et texte de conflit d'interets centre sur la personne qui travaille le dossier.",
+          "Manage Intake Steps a maintenant les controles standard du tableau de bord, des colonnes triables/redimensionnables, le tri de la liste complete avant affichage, moins de rechargements inutiles et un apercu qui reste dans le widget.",
+          "Modify Intake Step affiche maintenant le nom de l'etape courante, ajoute la recherche de composants, preserve les blocs de contenu statique repetes, garde Save desactive quand rien n'a change, preserve les metadonnees de l'etape et affiche les erreurs d'enregistrement exactes.",
+          "User Management et Manage ISET Applications utilisent maintenant des mises en page plus simples centrees sur les tableaux avec meilleur tri, redimensionnement, pagination et filtres cote serveur au besoin."
+        ]
+      },
+      {
+        "title": "Release 20260608-prod-ilmp-validation-messages",
+        "items": [
+          "Les blocages et avertissements ILMP indiquent maintenant quoi corriger, ou le corriger, et quelle source du guide d'echange de donnees EDSC est concernee.",
+          "Les messages ILMP pointent maintenant vers Participant Details, le plan d'action nomme ou l'intervention nommee au lieu d'afficher des identifiants de base de donnees.",
+          "Les verifications PATH seulement sont indiquees comme telles pour distinguer les controles internes des blocages de la passerelle EDSC.",
+          "L'avertissement childcare `No funding received` non justifie a ete retire, car il s'agit d'un code valide de financement childcare EDSC."
+        ]
+      },
       {
         "title": "Release 20260607-prod-tutorials-training-shorts",
         "items": [
@@ -78,28 +88,6 @@ const publicReleaseNotes = {
           "Le tableau Training shorts est triable et redimensionnable, avec seulement les colonnes Short, Length et Action visibles.",
           "Les premiers brouillons regardables couvrent le retrait/reouverture d'une demande, les soumissions ILMP et les validations/reparations ILMP.",
           "PATH stocke seulement les metadonnees Synthesia; les fichiers MP4 ne sont pas ajoutes a l'application React."
-        ]
-      },
-      {
-        "title": "Release 20260605-prod-ilmp-casework-batch",
-        "items": [
-          "La saisie des plans d'action historiques pre-remplit et exige maintenant les faits de l'annexe A necessaires au reporting ILMP.",
-          "Les enregistrements de plans d'action et d'interventions historiques remplissent maintenant les champs vides de Participant Details a partir des champs ILMP structures, sans remplacer les corrections du personnel.",
-          "Les lettres de decision utilisent maintenant le nom resolu de la participante au lieu de revenir a `Dear Applicant`.",
-          "Les actions de correction de demande conservent maintenant le vrai statut de workflow, enregistrent sur la demande selectionnee et prennent en charge les retraits/reouvertures admissibles.",
-          "Les demandes refusees et fermees n'affichent plus les elements de checklist lies au financement comme manquants.",
-          "Regional Snapshot Client Activity utilise maintenant une seule base de demandes dans les onglets et l'export Excel toutes regions.",
-          "ISET Clients affiche maintenant les dossiers dormants comme `No Active Plan`."
-        ]
-      },
-      {
-        "title": "Release 20260604-prod-ilmp-appendix-a",
-        "items": [
-          "La validation ILMP suit maintenant les champs obligatoires de l'annexe A de la passerelle EDSC avant la generation du XML.",
-          "Le XML ILMP inclut maintenant les participantes avec avertissements et bloque seulement les dossiers avec de vrais problemes bloquants.",
-          "Les plans d'action historiques utilisent maintenant leurs codes sauvegardes de barrieres a l'emploi lorsque Participant Details est vide.",
-          "Participant Details reprend correctement les reponses de type liste/checkbox de la demande, y compris les barrieres et les notes Other barrier.",
-          "Les nouveaux plans d'action et les plans historiques exigent maintenant le niveau d'etudes et la province d'etudes au debut du plan."
         ]
       }
     ],

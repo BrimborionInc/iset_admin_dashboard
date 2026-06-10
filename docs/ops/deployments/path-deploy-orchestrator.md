@@ -1,7 +1,7 @@
 # PATH Deploy Orchestrator
 
 Status: current deployment control-plane reference.
-Last reviewed: 2026-05-25 after adding the PROD bug/CR feedback reconciliation closeout gate; command names checked against current `package.json`.
+Last reviewed: 2026-06-08 after TEST cost-pruning; command names checked against current `package.json`.
 
 Start with the short operator runbook in `docs/ops/deployments/deployment-quick-guide.md` if you just need the normal commands.
 
@@ -11,6 +11,7 @@ Deployed admin environments now force `DISABLE_AUTO_MIGRATIONS=true`, so this ex
 
 Operator runtime caveat: in the current Codex sandbox, the trusted operator AWS profiles live in the bash/WSL-side AWS CLI config. The control-plane scripts intentionally shell AWS-backed checks through `bash` so `nwac-test` / `nwac-prod` resolve consistently. `nwac-prod` is now a reduced assumed-role profile and `default` is only a bootstrap IAM user, so direct prod resource calls through `default` are expected to fail.
 TEST app rollout is WSL-native in `scripts/path-deploy.js`: it builds/packages the WSL admin repo, sibling portal repo, and sibling shared tree, uploads artifacts with WSL AWS CLI, and runs the in-place SSM update commands directly. Do not route TEST deploys through stale Windows checkout instructions.
+Since 2026-06-08, TEST is cost-pruned to one steady-state app instance and one NAT gateway. The orchestrator already discovers healthy `nwac-test-asg` instances dynamically, so a current TEST deploy normally updates one host. Do not hard-code old TEST instance IDs or require two target-group targets when reading smoke output.
 PROD app rollout is also WSL-native in `scripts/path-deploy.js`: it uploads `shared/shared-latest.zip`, `admin/admin-dashboard-latest.zip`, and `portal/portal-latest.zip` to `nwac-prod-artifacts`, then starts and waits for the PROD ASG refresh.
 
 Use this from the WSL admin repo:
@@ -178,6 +179,7 @@ Current autosave rollout note:
   - Runs canonical schema work remotely through SSM on a TEST app host.
   - Optional config/data promotion uses `scripts/path-data-sync.js`.
   - App rollout uses WSL-native build/package/upload/SSM steps in `scripts/path-deploy.js` for admin and portal instead of the legacy PowerShell component scripts.
+  - Current TEST topology is intentionally small: one ASG app host in `ca-central-1d`, one NAT gateway, and ALB on two public subnets. Target-group smoke passes when all registered targets are healthy; after the 2026-06-08 prune that usually means one admin target on `:5001` and one portal target on `:5000`.
   - Current runtime-install safeguard: the TEST admin/portal deploy scripts now remove the deployed `node_modules` tree before remote `npm ci/install`, matching the existing PROD bootstrap rule, so stale instance filesystems do not break a rerun with `ENOTEMPTY`.
   - The frontend bundles now carry a visible build stamp derived from package version + release ID + git SHA. Check the admin landing-page footer or the public portal Help page after deploy.
   - Smoke uses ALB target-group health (`nwac-test-admin-tg`, `nwac-test-portal-tg`) instead of public `/healthz`, because the public TEST hosts are fronted by ALB/Nginx auth and currently return `403` to unauthenticated requests from Codex.

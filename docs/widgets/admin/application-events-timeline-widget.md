@@ -40,3 +40,4 @@ Chronological event history for case/application actions.
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.
 - The same underlying timeline/feed is now also exposed in Case Workspace.
+- The timeline renders as a filterable Cloudscape table with resizable columns and local sorting, defaulting to newest events first. This is appropriate because it is an audit/history surface rather than a staff-entered ordered list.

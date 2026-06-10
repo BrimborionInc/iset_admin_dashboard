@@ -216,7 +216,7 @@ const AllocationTransferWizardWidget = ({
       issues,
       evidenceReady,
     };
-  }, [formState.amount, formState.destinationPot, formState.sourcePot, evidenceItems.length]);
+  }, [formState.amount, formState.destinationPot, formState.sourcePot, evidenceItems.length, potMetrics]);
 
   const infoLink =
     metadata.helpComponent && toggleHelpPanel ? (

@@ -157,6 +157,8 @@ ILMP validation-and-repairs draft production notes:
 - Dismiss guided-tour overlays before screenshot capture. The Case Workspace route can show `Case workspace quick start`, which will otherwise obscure annotated frames.
 - Exact text matching can hit repeated Case header summary text instead of the lower data widget. For repair scenes, target the Action plans or Interventions widget area specifically.
 
+On 2026-06-09, a watermarked Financial Reports draft was created as Synthesia test video `110d0bf9-03b0-430a-bc23-e093768ba497`, titled `PATH training short - Financial Reports: ISET Advances and Active Clients`, with duration `0:01:02.774`. Bill approved making this draft public/shareable for review, but it is not listed in `src/tutorials/trainingShorts.js` yet. The short uses six annotated 1920x1080 frames generated from the sanitized local smoke screenshot `tmp/finance-reports-smoke-release-20260528/finance-reports-path-follow-up.png`; the account area is covered and the visible participant/payment data is synthetic. Source frames, capture summary, API result JSON, review thumbnails, and the local review MP4 are under `tmp/synthesia-financial-reports-demo/`; the review MP4 is `tmp/synthesia-financial-reports-demo/path-financial-reports-draft.mp4`.
+
 ## Working Pattern With Bill
 
 Treat tutorial-video production as a content workflow first and an API workflow second. Keep chat conversational, avoid branching lists unless the list itself is the artifact, and guide Bill one decision at a time.

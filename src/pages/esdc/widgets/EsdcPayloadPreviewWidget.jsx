@@ -98,7 +98,7 @@ const formatXml = value => {
           const indent = indentUnit.repeat(depth);
           formatted.push(`${indent}${line}`);
           if (
-            /^<[^!?\/][^>]*>$/.test(line) &&
+            /^<[^!?/][^>]*>$/.test(line) &&
             !line.endsWith('/>')
           ) {
             depth += 1;

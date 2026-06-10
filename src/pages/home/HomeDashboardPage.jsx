@@ -1090,7 +1090,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadProgramAdminCounts();
         return () => { ignore = true; };
-    }, [role, programAdminRefresh, isWorkQueueRole]);
+    }, [role, programAdminRefresh, isWorkQueueRole, isNwacAdminRole]);
 
     useEffect(() => {
         if (!isNwacAdminRole) {
@@ -2707,7 +2707,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadSubmittedApplicationsPipeline();
         return () => { ignore = true; };
-    }, [role, programAdminRefresh, isWorkQueueRole]);
+    }, [role, programAdminRefresh, isWorkQueueRole, isNwacAdminRole]);
 
     useEffect(() => {
         if (!isWorkQueueRole && !isIsetCoordinatorRole) {

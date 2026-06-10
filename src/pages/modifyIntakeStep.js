@@ -31,6 +31,11 @@ const debugDragLog = (...args) => {
 const RENDER_CACHE = new Map();
 const RENDER_CACHE_TTL = 5_000;
 
+const getEditorErrorMessage = (error, fallback) => {
+  const message = String(error?.message || '').trim();
+  return message || fallback;
+};
+
 const setComponentConfigValue = (path, value, selectedComponent) => {
   if (!selectedComponent || !selectedComponent.props) return;
   const keys = path.split('.');
@@ -132,11 +137,15 @@ function buildSeedMapFromTemplate(props = {}) {
 }
 
 const ComponentItem = ({ component, onAdd, currentLang }) => (
-  <div
-    style={{ padding: "8px", border: "1px solid #ccc", cursor: "pointer" }}
-    onClick={() => onAdd(component, currentLang)}
-  >
-    {component.label}
+  <div className="component-library-item">
+    <Button iconName="add-plus" onClick={() => onAdd(component, currentLang)}>
+      {component.label}
+    </Button>
+    {component.description ? (
+      <Box fontSize="body-s" color="text-body-secondary">
+        {component.description}
+      </Box>
+    ) : null}
   </div>
 );
 
@@ -698,8 +707,7 @@ function useNunjucksHTML({ templateKey, templateId, version = 1, props, suspende
             // Additional heuristic: character-count macro sometimes uses label.text but editing failed; log and try alternatives.
             const debug = !!window.__ISET_DEBUG_INLINE_EDIT;
             if (debug) {
-              // eslint-disable-next-line no-console
-              console.log('[InlineEdit] attach attempt', { componentType: type, chosenPath: labelPath, hasLabelObj: !!comp?.props?.label, labelIsString: typeof comp?.props?.label === 'string', labelHTML: label.innerHTML });
+              console.log('[InlineEdit] attach attempt', { componentType: type, chosenPath: labelPath, hasLabelObj: !!comp?.props?.label, labelIsString: typeof comp?.props?.label === 'string', labelHTML: label.innerHTML }); // eslint-disable-line no-console
             }
             attach(label, labelPath);
             // Fallbacks: if after first attach the attribute isn't set (edge template), try alternate common paths.
@@ -716,8 +724,7 @@ function useNunjucksHTML({ templateKey, templateId, version = 1, props, suspende
                 }
               }
             } else if (debug) {
-              // eslint-disable-next-line no-console
-              console.log('[InlineEdit] attached ok', label.getAttribute('data-inline-edit'));
+              console.log('[InlineEdit] attached ok', label.getAttribute('data-inline-edit')); // eslint-disable-line no-console
             }
           }
           const hint = root.querySelector('.govuk-hint:not(.govuk-radios__hint):not(.govuk-checkboxes__hint)');
@@ -1454,7 +1461,10 @@ const ModifyComponent = () => {
           // Dedupe by name/id to avoid accidental duplicates from prior saves
           const seen = new Set();
           const deduped = comps.filter(c => {
-            const key = `${c?.props?.name || ''}::${c?.props?.id || ''}`;
+            const nameKey = c?.props?.name || '';
+            const idKey = c?.props?.id || '';
+            if (!nameKey && !idKey) return true;
+            const key = `${nameKey}::${idKey}`;
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
@@ -1559,8 +1569,7 @@ const ModifyComponent = () => {
   // Enrich components (loaded from DB) with template metadata once templates are known.
   useEffect(() => {
     if (!componentCount || !availableComponents.length) return;
-    setComponents(prev =>
-      prev.map(c => {
+    const enriched = components.map(c => {
         const tpl =
           tplById.get(c.templateId ?? c.template_id ?? c.id) ||
           availableComponents.find(t => t.template_key === c.template_key || t.type === c.type);
@@ -1588,9 +1597,17 @@ const ModifyComponent = () => {
           option_schema: c.option_schema || tpl.option_schema || null,
           __i18nSeeds: seeds
         };
-      })
-    );
-  }, [componentCount, availableComponents, tplById, setComponents]);
+    });
+    if (JSON.stringify(enriched) === JSON.stringify(components)) return;
+    const wasPristineBeforeEnrichment =
+      name === initialName &&
+      status === initialStatus &&
+      JSON.stringify(components) === JSON.stringify(initialComponents);
+    setComponents(enriched, { skipHistory: true });
+    if (wasPristineBeforeEnrichment) {
+      setInitialComponents(enriched);
+    }
+  }, [componentCount, availableComponents, tplById, setComponents, components, name, status, initialName, initialStatus, initialComponents]);
 
   const handleSelectComponent = useCallback(index => {
   if (index == null) { setSelectedComponent(null); return; }
@@ -1720,7 +1737,7 @@ const ModifyComponent = () => {
       setManualDirty(false);
     } catch (e) {
       console.error('Save step failed', e);
-      setAlert({ type: 'error', message: 'Failed to save step.' });
+      setAlert({ type: 'error', message: getEditorErrorMessage(e, 'Failed to save step.') });
     }
   };
 
@@ -1738,7 +1755,7 @@ const ModifyComponent = () => {
       history.push(`/modify-component/${out.id}`);
     } catch (e) {
       console.error('Save-as-new failed', e);
-      setAlert({ type: 'error', message: 'Failed to create copy.' });
+      setAlert({ type: 'error', message: getEditorErrorMessage(e, 'Failed to create copy.') });
     }
   };
 
@@ -1760,7 +1777,7 @@ const ModifyComponent = () => {
       history.push('/modify-component/new');
     } catch (e) {
       console.error('Delete step failed', e);
-      setAlert({ type: 'error', message: 'Failed to delete step.' });
+      setAlert({ type: 'error', message: getEditorErrorMessage(e, 'Failed to delete step.') });
     }
   };
 
@@ -1768,6 +1785,20 @@ const ModifyComponent = () => {
 
   // Language toggle for Working Area preview
   const [previewLang, setPreviewLang] = useState('en');
+  const [libraryFilter, setLibraryFilter] = useState('');
+  const filteredAvailableComponents = useMemo(() => {
+    const query = libraryFilter.trim().toLowerCase();
+    if (!query) return availableComponents;
+    return availableComponents.filter((component) => {
+      const haystack = [
+        component.label,
+        component.description,
+        component.template_key,
+        component.type,
+      ].filter(Boolean).join(' ').toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [availableComponents, libraryFilter]);
   // Step-level validation state (deterministic advisory)
   const [validationIssues, setValidationIssues] = useState([]);
   const [showValidationPanel, setShowValidationPanel] = useState(false);
@@ -1845,12 +1876,13 @@ const ModifyComponent = () => {
   .stage-card .conditional-badge__tooltip { display:none; position:absolute; top:110%; right:0; background:#1d1d29; color:#fff; padding:6px 8px; border-radius:6px; width:220px; z-index:10; box-shadow:0 2px 6px rgba(0,0,0,0.35); text-transform:none; letter-spacing:normal; }
   .stage-card .conditional-badge__tooltip:before { content:""; position:absolute; top:-5px; right:12px; width:8px; height:8px; background:#1d1d29; transform:rotate(45deg); }
   .stage-card .conditional-badge[data-has-detail]:hover .conditional-badge__tooltip { display:block; }
+  .component-library-item { display:flex; flex-direction:column; gap:6px; padding:8px; border:1px solid #d5dbdb; border-radius:8px; background:#fff; }
       `}</style>
   <Container
         header={
           <Header
             variant="h2"
-            description="Modify the intake step components"
+            description={id === 'new' ? 'Create a new intake step' : `Step ${id}`}
             actions={
               <SpaceBetween direction="horizontal" size="xs">
                 {fromWorkflow && <Button onClick={() => history.push(`/modify-workflow?id=${fromWorkflow}`)}>Back to Workflow</Button>}
@@ -1864,14 +1896,14 @@ const ModifyComponent = () => {
               </SpaceBetween>
             }
           >
-            Modify Intake Step
+            {name || 'Untitled intake step'}
           </Header>
         }
       >
         {alert && (
           <Alert
             dismissible
-            statusIconAriaLabel={alert.type === 'success' ? 'Success' : 'Error'}
+            statusIconAriaLabel={alert.type === 'success' ? 'Success' : alert.type === 'warning' ? 'Warning' : 'Error'}
             type={alert.type}
             onDismiss={() => setAlert(null)}
           >
@@ -1880,15 +1912,31 @@ const ModifyComponent = () => {
         )}
         <Grid gridDefinition={[{ colspan: 2 }, { colspan: 6 }, { colspan: 4 }]}>
           <Box padding="m">
-            <Header variant="h3">Library</Header>
-            {availableComponents.map((comp) => (
-              <ComponentItem
-                key={comp.id}
-                component={comp}
-                currentLang={previewLang}
-                onAdd={(c) => addComponent(c, previewLang)}
-              />
-            ))}
+            <SpaceBetween size="s">
+              <Header variant="h3">Library</Header>
+              <FormField label="Find component">
+                <Input
+                  type="search"
+                  value={libraryFilter}
+                  onChange={({ detail }) => setLibraryFilter(detail.value)}
+                  placeholder="Search components"
+                  spellcheck={false}
+                />
+              </FormField>
+              <SpaceBetween size="xs">
+                {filteredAvailableComponents.map((comp) => (
+                  <ComponentItem
+                    key={comp.id}
+                    component={comp}
+                    currentLang={previewLang}
+                    onAdd={(c) => addComponent(c, previewLang)}
+                  />
+                ))}
+                {!filteredAvailableComponents.length && (
+                  <Box color="text-body-secondary">No matching components.</Box>
+                )}
+              </SpaceBetween>
+            </SpaceBetween>
           </Box>
 
           <Box padding="m">

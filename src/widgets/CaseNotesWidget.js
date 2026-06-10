@@ -244,9 +244,6 @@ const CaseNotesWidget = ({ actions, caseData: propCaseData, toggleHelpPanel }) =
   const handleRefresh = () => {
     if (!caseId || isLoading) return;
     loadNotes({ silent: true });
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('case-notes-refresh', { detail: { caseId } }));
-    }
   };
 
   const toggleExpanded = (noteId) => {

@@ -38,3 +38,5 @@ Displays intake submission data with controlled edit/version behavior.
 
 - Keep this document aligned whenever this widget is refactored, renamed, moved, or given new actions.
 - Add endpoint-level detail and UAT script rows in the next documentation pass.
+- The widget is primarily a read/edit rendering of the submitted application payload, not an operational data grid. Its embedded tables are used for fixed-format application answers and should not be treated like sortable queue tables unless the authored intake component semantics call for it.
+- Community/band fields use search-style inputs, and editable financial-style fields use constrained currency inputs where rendered by the application form component.

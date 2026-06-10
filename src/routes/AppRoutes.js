@@ -82,6 +82,7 @@ import ContactCommunicationsDashboard from '../pages/contact/ContactCommunicatio
 import ContactCommunicationsHelp from '../helpPanelContents/contactCommunicationsHelp.js';
 import ApplicantWatchlistHelp from '../helpPanelContents/applicantWatchlistHelp.js';
 import QueryEditorHelp from '../helpPanelContents/queryEditorHelp.js';
+import UserManagementHelp from '../helpPanelContents/userManagementHelp.js';
 import MessagesDashboardPage from '../pages/messages/MessagesDashboardPage.jsx';
 import PortfolioDashboardPage from '../pages/Caseworking/PortfolioDashboardPage.jsx';
 import PortfolioDashboardHelp from '../helpPanelContents/portfolioDashboardHelp.js';
@@ -308,7 +309,9 @@ const AppRoutes = ({
             UserManagementDashboard,
             [{ text: 'Home', href: '/' }, { text: 'User Management', href: '/user-management-dashboard' }],
             'User Management',
-            'userManagement'
+            <UserManagementHelp />,
+            null,
+            UserManagementHelp.aiContext
           )}
         </Guard>
       </Route>
@@ -662,7 +665,23 @@ const AppRoutes = ({
             ManageIntakeSteps,
             [{ text: 'Home', href: '/' }, { text: 'Manage Intake Steps', href: '/manage-components' }],
             'Manage Intake Steps',
-            <ManageIntakeStepsHelpPanel />
+            <ManageIntakeStepsHelpPanel />,
+            (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="add-plus"
+                  onClick={() => window.dispatchEvent(new CustomEvent('manageComponents:openPalette'))}
+                >
+                  Add widget
+                </Button>
+                <Button
+                  iconName="refresh"
+                  onClick={() => window.dispatchEvent(new CustomEvent('manageComponents:resetLayout'))}
+                >
+                  Reset layout
+                </Button>
+              </SpaceBetween>
+            )
           )}
         </Guard>
       </Route>
@@ -676,22 +695,7 @@ const AppRoutes = ({
           ],
           'Manage ISET Applications',
           <CaseAssignmentDashboardHelp />,
-          (
-            <SpaceBetween size="xs" direction="horizontal">
-              <Button
-                iconName="add-plus"
-                onClick={() => window.dispatchEvent(new CustomEvent('caseAssignment:openPalette'))}
-              >
-                Add widget
-              </Button>
-              <Button
-                iconName="refresh"
-                onClick={() => window.dispatchEvent(new CustomEvent('caseAssignment:resetLayout'))}
-              >
-                Reset layout
-              </Button>
-            </SpaceBetween>
-          ),
+          null,
           CaseAssignmentDashboardHelp.aiContext
         )}
       </Route>

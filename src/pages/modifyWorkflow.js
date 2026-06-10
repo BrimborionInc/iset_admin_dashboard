@@ -191,7 +191,7 @@ export default function ModifyWorkflowEditorWidget() {
       }
     })();
     return () => { cancelled = true; };
-  }, [wfId]);
+  }, [wfId, wfType]);
 
   const recomputeDirty = useCallback(() => {
     if (!baselineReadyRef.current || !baselineRef.current) return; // no baseline yet
@@ -345,7 +345,7 @@ export default function ModifyWorkflowEditorWidget() {
       }
     } catch (e) { setSaveMsg('Publish failed'); }
     finally { setSaving(false); setTimeout(() => setSaveMsg(''), 3000); }
-  }, [wfId]);
+  }, [wfId, wfType]);
 
   const saveWorkflow = useCallback(async () => {
     setSaveMsg('');
