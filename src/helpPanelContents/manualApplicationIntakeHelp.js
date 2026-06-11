@@ -13,9 +13,18 @@ const ManualApplicationIntakeHelp = () => (
     <Box>
       <strong>Before you start</strong>
       <p>
-        Work from the source document or notes in front of you. Enter the applicant&apos;s information as
-        accurately as possible, choose the correct intake source, and use source notes when the origin
-        needs explanation.
+        Use the flow widget at the top as the working order: confirm the applicant&apos;s identity, check for
+        an existing PATH client or applicant account, choose the account handling plan, complete the
+        application details, then submit and follow up from the workspace.
+      </p>
+    </Box>
+    <Box>
+      <strong>Wizard steps</strong>
+      <p>
+        The wizard walks through identity, existing-account search, account handling, application details,
+        and review. Select an existing client/account when the applicant is already known to PATH, prepare
+        a PATH account for later activation when the applicant is ready for portal access, or record why
+        portal access is not planned yet.
       </p>
     </Box>
     <Box>
@@ -38,8 +47,8 @@ const ManualApplicationIntakeHelp = () => (
       <strong>After creating the application</strong>
       <p>
         PATH creates the application record and opens the Application Workspace for that file. Upload any
-        supporting documents that were received separately, and record any applicant follow-up in notes or
-        secure messaging once the file is open.
+        supporting documents that were received separately, send or defer PATH account activation as
+        appropriate, and record any applicant follow-up in notes or secure messaging once the file is open.
       </p>
     </Box>
     <Box>
@@ -58,10 +67,11 @@ ManualApplicationIntakeHelp.aiContext =
 
 Explain the page as a staff data-entry workflow, not a technical feature:
 - Use it for applications received outside the public portal.
-- Tell the user to work from the paper/PDF/phone/in-person source and enter the information accurately.
+- Tell the user to follow the top flow widget and wizard steps: confirm identity, check existing account/client records, choose account handling, enter the application information accurately, then submit and follow up from the workspace.
+- Explain that the wizard helps staff avoid duplicate clients, reuse an existing account/case when selected, prepare an account for later activation, or record why portal access is not planned yet.
 - Explain that each step validates before Next, drafts can be restored in the same browser session, conditional visibility can hide and skip irrelevant steps, and Reset clears the local draft.
 - Mention that upload-only or portal-signature-only steps are not completed in Manual Intake and may be skipped in this admin path.
-- After Create Application, PATH opens the new Application Workspace where documents, notes, and applicant follow-up continue.
+- After Create Application, PATH opens the Application Workspace where documents, PATH account activation, notes, and applicant follow-up continue.
 
 Training-aligned reminders to mention when relevant:
 - Enter new applications promptly.

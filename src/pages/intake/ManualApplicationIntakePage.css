@@ -1,0 +1,3 @@
+.manual-intake-wizard [class*="awsui_cancel-button_"] {
+  display: none !important;
+}

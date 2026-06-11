@@ -1,7 +1,7 @@
 # Admin Manual "New Application" Design (MVP Spec)
 
-Status: In Progress (backend semantics refactor underway)  
-Last updated: 2026-03-06
+Status: In Progress (staff-assisted intake/account triage first pass implemented)
+Last updated: 2026-06-11
 
 ## Context
 
@@ -54,13 +54,52 @@ Manual intake route is available to:
 
 ## Core Flow (MVP Settled)
 
-1. Staff opens `Application Intake` and starts `Create Application`.
-2. Staff completes required fields in a dedicated manual intake form.
-3. Form working state remains frontend/session only while incomplete.
-4. Backend create is blocked until required validation passes.
-5. On success, PATH creates `user`, `iset_application_submission`, `iset_application`, `client`, and `iset_case`.
-6. PATH emits `application_submitted` through the existing shared events pipeline with manual-origin metadata.
-7. User is redirected immediately to `/application-case/:id` with success confirmation.
+1. Staff opens `Application Intake` and reviews the `Staff-Assisted Intake Flow` widget.
+2. Staff works the process in order: confirm identity, check existing PATH client/applicant-account records, choose account handling, complete application details, then submit/follow up.
+3. Staff records the intake source and searches existing client/applicant-account rows when enough identity information is available.
+4. Staff selects an existing client/account match when the application belongs to a known PATH client, or chooses an account handling plan for a new file.
+5. Staff completes required fields in the dedicated manual intake form.
+6. Form working state remains frontend/session only while incomplete.
+7. Backend create is blocked until required validation passes and the selected account strategy is internally consistent.
+8. On success, PATH creates or reuses the appropriate `client`/case context, writes `user`, `iset_application_submission`, `iset_application`, and `iset_case` records as needed, and can silently prepare the applicant account as `Ready to invite` when that strategy is explicitly selected.
+9. PATH emits `application_submitted` through the existing shared events pipeline with manual-origin and account-decision metadata.
+10. User is redirected immediately to `/application-case/:id` with success confirmation.
+
+## Staff-Assisted Intake Flow Widget (2026-06-11)
+
+Manual Intake now has a full-width `Staff-Assisted Intake Flow` board widget above the `Staff-Assisted Intake Wizard`. The flow cards are status-aware and clickable; they mirror the wizard steps while still showing the process at a glance before staff begin.
+
+The widget shows five live checkpoints:
+
+- `Identity` - derives its status from name/email/contact information entered in the manual form;
+- `Check Existing Account` - reflects search readiness, active search, selected match, no-match result, or search errors;
+- `Account Handling` - reflects the selected account strategy and validation requirements such as selected-client linkage, email for ready-to-invite accounts, or required no-portal notes;
+- `Application Details` - reflects whether the published intake schema is loading, not started, in progress, or on the final visible step;
+- `Submit & Follow Up` - reminds staff that application creation and account activation/follow-up are separate operational actions.
+
+This keeps the process visible before staff begin data entry while the wizard provides the actual step-by-step working surface. The dashboard layout storage key moved to `manual-intake-dashboard-layout-v12` so the wizard-led layout appears by default even for browsers with older Manual Intake layouts saved.
+
+## Staff-Assisted Intake Wizard (2026-06-11 First Pass)
+
+Manual Intake is now treated as staff-assisted intake rather than only an embedded public form. The dashboard uses a single `Staff-Assisted Intake Wizard` beneath the top flow widget instead of a dense separate account-triage panel.
+
+The wizard supports:
+
+- identity and source capture for paper, PDF, phone, in-person, or other intake;
+- manual search against `/api/admin/applicants` for existing clients/applicant accounts, after staff confirm identity;
+- selecting an existing client/account match so the backend reuses that client and their preferred case instead of creating a duplicate client file;
+- choosing an account handling plan in its own step:
+  - `review_later` - create the application and review PATH account/activation from the workspace;
+  - `create_ready_to_invite` - call `ensureApplicantAccountForClient` during manual intake so the participant account is ready for staff to send activation later;
+  - `link_selected_client` - attach to the selected existing client/account;
+  - `no_portal_planned` - record that portal access is not planned yet, with a required account-decision note in the UI;
+- completing the published manual-intake form as the `Application details` step, with internal form-step next/back labels when the published schema has multiple visible steps;
+- reviewing identity, selected account context, and account plan before creating the application;
+- persisting the chosen plan in `intake_payload.manual_intake`, `iset_application.payload_json.manual_intake`, and the `application_submitted` event payload.
+
+The first pass intentionally does not send activation email during manual application creation. Activation email remains an explicit workspace/User Management action so staff do not accidentally notify applicants while still reviewing a paper/PDF/phone/in-person intake.
+
+Current limitation: the published public-intake schema still drives required fields for Manual Intake, so the existing email/name requirements still apply. A true no-email/no-portal manual-only path would need a separate backend/schema decision rather than a UI-only option.
 
 ## Portal Canonical Write Sequence (`POST /api/intake/complete`)
 
@@ -137,6 +176,13 @@ Manual-origin additive metadata:
 - `origin_mode = staff_entered`
 - `intake_source`
 - `intake_source_notes`
+- `account_decision`
+- `account_selected_client_id`
+- `account_selected_applicant_name`
+- `account_selected_applicant_email`
+- `account_selected_status`
+- `account_search_query`
+- `account_decision_notes`
 - `created_by_staff_id`
 - `created_by_staff_role`
 - `created_by_staff_email`

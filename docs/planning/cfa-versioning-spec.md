@@ -93,6 +93,8 @@ No new panel is added in Secure Messaging. CFA files are generated into Supporti
 
 For approved intervention proposals and approved intervention revisions, the client approval/funding revision letter signing request is rendered from the reviewed secure-message letter body. Do not reuse the application assessment decision-letter draft for these intervention-level sends, because that draft can describe the original application approval while the intervention revision/CFA packet contains changed amounts.
 
+When the secure-message send path needs a funding-agreement signing request and no draft CFA exists, intervention-scoped sends must first create the missing draft from the selected intervention's action plan. This covers reopened/current amendments on records originally entered through historical/manual backload, while preserving the rule that ordinary manual-backload edit/close operations stay silent and do not create CFA side effects.
+
 ## Trigger Points
 - Approval of new intervention(s) for an existing client.
 - Edits to approved/planned interventions that change agreed terms (dates, costs, scope).

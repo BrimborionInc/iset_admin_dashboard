@@ -14,6 +14,7 @@ const { getInternalNotifications, dismissInternalNotification } = require('./src
 const {
   deleteApplicantCognitoUser,
   ensureApplicantAccountForClient,
+  fetchApplicantAccountRows,
   fetchApplicantAccountSummary,
   resolveApplicantPoolId,
 } = require('./src/lib/applicantAccountService');
@@ -60004,6 +60005,7 @@ const handlePostCaseSecureMessage = async (req, res) => {
     let denialLetterCompletionResult = null;
     const letterDocTypes = new Set(['assessment_approval_letter', 'assessment_denial_letter']);
     const requestedInterventionId = normalisePositiveInteger(interventionId);
+    let requestedInterventionLetterEligibility = null;
     if (attachmentSpecs.length) {
       const wfIds = attachmentSpecs
         .map(a => a.workflow_id)
@@ -60151,12 +60153,12 @@ const handlePostCaseSecureMessage = async (req, res) => {
       if (letterAttachments.length) {
         let allowedDocTypes = new Set();
         if (requestedInterventionId) {
-          const interventionLetterEligibility = await resolveApprovedInterventionProposalLetterEligibility({
+          requestedInterventionLetterEligibility = await resolveApprovedInterventionProposalLetterEligibility({
             connection: pool,
             caseId,
             interventionId: requestedInterventionId,
           });
-          if (!interventionLetterEligibility.eligible) {
+          if (!requestedInterventionLetterEligibility.eligible) {
             return res.status(422).json({
               error: 'invalid_letter_attachment',
               message: 'Intervention approval letters can only be sent for an approved intervention proposal or approved revision on this case.'
@@ -60265,22 +60267,98 @@ const handlePostCaseSecureMessage = async (req, res) => {
             preferredName: requesterDisplayName,
             createdByUserId: senderId,
           });
-	          const created = await createCfaVersionFromAssessment({
-	            caseId,
-	            applicationId: caseRow?.application_id || null,
-	            changeReason: 'NEW_INTERVENTION_APPROVED',
-            changeSummary: 'Initial funding agreement',
-            actorUserId: senderId,
-            staffProfileId,
-            caseManagerName: caseManager.name || requesterDisplayName || ''
-          });
+          let created = null;
+          let createdSource = null;
+          if (requestedInterventionId) {
+            try {
+              const [[interventionDraftSourceRow]] = await pool.query(
+                `SELECT i.id,
+                        i.action_plan_id,
+                        i.intervention_code,
+                        i.metadata_json,
+                        p.title AS proposal_title
+                   FROM iset_case_intervention i
+                   LEFT JOIN iset_intervention_proposal p ON p.legacy_intervention_id = i.id
+                  WHERE i.id = ?
+                    AND i.case_id = ?
+                  LIMIT 1`,
+                [requestedInterventionId, caseId]
+              );
+              const actionPlanId = normalisePositiveInteger(interventionDraftSourceRow?.action_plan_id);
+              if (actionPlanId) {
+                const sourceMetadata = safeJsonParse(interventionDraftSourceRow?.metadata_json, {}) || {};
+                const isInterventionRevisionCfaDraft =
+                  requestedInterventionLetterEligibility?.proposalKind === 'revision' ||
+                  hasAppliedInterventionRevisionMetadata(sourceMetadata);
+                const interventionTitle =
+                  normaliseString(sourceMetadata?.lastAppliedRevision?.sourceTitle) ||
+                  normaliseString(sourceMetadata?.title) ||
+                  normaliseString(interventionDraftSourceRow?.proposal_title) ||
+                  (interventionDraftSourceRow?.intervention_code
+                    ? `Intervention ${interventionDraftSourceRow.intervention_code}`
+                    : 'intervention');
+                const changeSummary = (
+                  isInterventionRevisionCfaDraft
+                    ? `Approved intervention revision: ${interventionTitle}`
+                    : `New intervention approved: ${interventionTitle}`
+                ).slice(0, 255);
+                created = await createCfaVersionForPlan({
+                  caseId,
+                  actionPlanId,
+                  changeReason: isInterventionRevisionCfaDraft ? 'INTERVENTION_CHANGED' : 'NEW_INTERVENTION_APPROVED',
+                  changeSummary,
+                  actorUserId: senderId,
+                  staffProfileId,
+                  caseManagerName: caseManager.name || requesterDisplayName || ''
+                });
+                if (!created || created.skipped) {
+                  console.warn(
+                    '[cfa] plan draft skipped for case %s action plan %s (reason=%s)',
+                    caseId,
+                    actionPlanId,
+                    created?.reason || 'unknown'
+                  );
+                } else {
+                  console.info(
+                    '[cfa] plan draft created for case %s action plan %s (version=%s)',
+                    caseId,
+                    actionPlanId,
+                    created.versionNumber ?? 'n/a'
+                  );
+                  createdSource = 'plan';
+                }
+              }
+            } catch (err) {
+              console.warn(
+                '[cfa] plan draft failed for case %s intervention %s (code=%s, message=%s)',
+                caseId,
+                requestedInterventionId,
+                err?.code || 'n/a',
+                err?.message || err
+              );
+            }
+          }
+          if (!created || created.skipped) {
+            created = await createCfaVersionFromAssessment({
+              caseId,
+              applicationId: caseRow?.application_id || null,
+              changeReason: 'NEW_INTERVENTION_APPROVED',
+              changeSummary: 'Initial funding agreement',
+              actorUserId: senderId,
+              staffProfileId,
+              caseManagerName: caseManager.name || requesterDisplayName || ''
+            });
+            if (created && !created.skipped) {
+              createdSource = 'assessment';
+            }
+          }
           if (!created || created.skipped) {
             console.warn(
-              '[cfa] assessment draft skipped for case %s (reason=%s)',
+              '[cfa] draft skipped for case %s (reason=%s)',
               caseId,
               created?.reason || 'unknown'
             );
-          } else {
+          } else if (createdSource === 'assessment') {
             console.info(
               '[cfa] assessment draft created for case %s (version=%s)',
               caseId,
@@ -80786,7 +80864,35 @@ function resolveManualIntakeRequest(body = {}) {
   const history = historyInput.filter((entry) => typeof entry === 'string');
   const docRefs = body.docRefs && typeof body.docRefs === 'object' ? body.docRefs : null;
   const workflowId = normalizeStringValue(body.workflowId) || MANUAL_INTAKE_WORKFLOW_ID;
-  return { intakePayload, history, docRefs, workflowId };
+  const accountDecision = normalizeManualAccountDecision(body.accountDecision || body.account_decision || {});
+  return { intakePayload, history, docRefs, workflowId, accountDecision };
+}
+
+function normalizeManualAccountDecision(raw = {}) {
+  const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const allowedStrategies = new Set([
+    'review_later',
+    'create_ready_to_invite',
+    'link_selected_client',
+    'no_portal_planned',
+  ]);
+  const requestedStrategy = toLowerStringValue(source.strategy || source.accountStrategy || source.account_action);
+  const strategy = allowedStrategies.has(requestedStrategy) ? requestedStrategy : 'review_later';
+  const selectedClientId = normalisePositiveInteger(
+    source.selectedClientId ||
+    source.selected_client_id ||
+    source.clientId ||
+    source.client_id
+  );
+  return {
+    strategy,
+    selectedClientId: selectedClientId || null,
+    selectedApplicantName: normalizeStringValue(source.selectedApplicantName || source.selected_applicant_name) || null,
+    selectedApplicantEmail: toLowerStringValue(source.selectedApplicantEmail || source.selected_applicant_email) || null,
+    selectedAccountStatus: toLowerStringValue(source.selectedAccountStatus || source.selected_account_status) || null,
+    searchQuery: normalizeStringValue(source.searchQuery || source.search_query) || null,
+    notes: normalizeStringValue(source.notes || source.accountNotes || source.account_notes) || null,
+  };
 }
 
 function normalizePayloadLanguage(payload = {}) {
@@ -80988,12 +81094,19 @@ function validateManualApplicantSeed(seed) {
   return errors;
 }
 
-function buildManualMetadata({ req, actor, actorRole, actorEmail, body, nowIso }) {
+function buildManualMetadata({ req, actor, actorRole, actorEmail, body, accountDecision, nowIso }) {
   return {
     origin_channel: 'admin_manual',
     origin_mode: 'staff_entered',
     intake_source: toLowerStringValue(body.intakeSource || body.intake_source || 'manual_entry'),
     intake_source_notes: normalizeStringValue(body.intakeSourceNotes || body.intake_source_notes) || null,
+    account_decision: accountDecision?.strategy || 'review_later',
+    account_selected_client_id: accountDecision?.selectedClientId || null,
+    account_selected_applicant_name: accountDecision?.selectedApplicantName || null,
+    account_selected_applicant_email: accountDecision?.selectedApplicantEmail || null,
+    account_selected_status: accountDecision?.selectedAccountStatus || null,
+    account_search_query: accountDecision?.searchQuery || null,
+    account_decision_notes: accountDecision?.notes || null,
     created_by_staff_id: actor.actorId || null,
     created_by_staff_role: actorRole,
     created_by_staff_email: actorEmail,
@@ -81003,9 +81116,70 @@ function buildManualMetadata({ req, actor, actorRole, actorEmail, body, nowIso }
   };
 }
 
-async function resolveOrCreateManualApplicantUser(connection, input) {
+async function fetchManualSelectedClient(connection, selectedClientId) {
+  const normalizedClientId = normalisePositiveInteger(selectedClientId);
+  if (!normalizedClientId) return null;
+  const [[row]] = await connection.query(
+    `SELECT id, first_name, last_name, address_json, applicant_cognito_sub,
+            applicant_cognito_username, applicant_account_status,
+            applicant_account_email, applicant_invited_at, applicant_activated_at
+       FROM client
+      WHERE id = ?
+      LIMIT 1
+      FOR UPDATE`,
+    [normalizedClientId]
+  );
+  if (!row?.id) {
+    const error = new Error('Selected applicant/client record was not found.');
+    error.code = 'manual_selected_client_not_found';
+    error.statusCode = 404;
+    throw error;
+  }
+  return row;
+}
+
+async function resolveOrCreateManualApplicantUser(connection, input, selectedClient = null) {
   const fullName = `${input.firstName} ${input.lastName}`.trim();
   const preferredLanguage = input.preferredLanguage === 'fr' ? 'fr' : 'en';
+  const selectedSub = normalizeStringValue(selectedClient?.applicant_cognito_sub);
+  if (selectedSub) {
+    const [[selectedUser]] = await connection.query(
+      'SELECT id, cognito_sub FROM user WHERE cognito_sub = ? LIMIT 1',
+      [selectedSub]
+    );
+    if (selectedUser?.id) {
+      await connection.query(
+        `UPDATE user
+            SET name = COALESCE(NULLIF(?, ''), name),
+                phone_number = COALESCE(NULLIF(?, ''), phone_number),
+                preferred_language = ?,
+                date_of_birth = COALESCE(?, date_of_birth),
+                gender = COALESCE(NULLIF(?, ''), gender),
+                street = COALESCE(NULLIF(?, ''), street),
+                city = COALESCE(NULLIF(?, ''), city),
+                state = COALESCE(NULLIF(?, ''), state),
+                postal_code = COALESCE(NULLIF(?, ''), postal_code),
+                country = COALESCE(NULLIF(?, ''), country),
+                updated_at = NOW()
+          WHERE id = ?`,
+        [
+          fullName || '',
+          input.phone || '',
+          preferredLanguage,
+          input.dateOfBirth || null,
+          input.gender || '',
+          input.street || '',
+          input.city || '',
+          input.province || '',
+          input.postalCode || '',
+          input.country || 'CA',
+          selectedUser.id,
+        ]
+      );
+      return { id: Number(selectedUser.id), cognitoSub: selectedUser.cognito_sub || null };
+    }
+  }
+
   const [[existing]] = await connection.query(
     'SELECT id, cognito_sub FROM user WHERE email = ? LIMIT 1',
     [input.email]
@@ -81065,7 +81239,7 @@ async function resolveOrCreateManualApplicantUser(connection, input) {
   return { id: Number(insertUser.insertId), cognitoSub: null };
 }
 
-async function resolveOrCreateManualClient(connection, { applicantUser, applicantSeed, addressPayload }) {
+async function resolveOrCreateManualClient(connection, { applicantUser, applicantSeed, addressPayload, selectedClient = null }) {
   const cognitoSub = normalizeStringValue(applicantUser?.cognitoSub) || null;
   const initials = `${applicantSeed.firstName.charAt(0) || ''}${applicantSeed.lastName.charAt(0) || ''}`.toUpperCase();
   const addressJson = JSON.stringify(addressPayload || {});
@@ -81093,6 +81267,10 @@ async function resolveOrCreateManualClient(connection, { applicantUser, applican
     );
     return Number(clientId);
   };
+
+  if (selectedClient?.id) {
+    return updateClientById(selectedClient.id);
+  }
 
   if (cognitoSub) {
     const [[existingBySub]] = await connection.query(
@@ -81137,7 +81315,7 @@ async function resolveOrCreateManualClient(connection, { applicantUser, applican
 // Create manual-origin application intake record from admin dashboard.
 app.post('/api/applications/manual-intake', async (req, res) => {
   const body = req.body || {};
-  const { intakePayload: requestedPayload, history, docRefs, workflowId } = resolveManualIntakeRequest(body);
+  const { intakePayload: requestedPayload, history, docRefs, workflowId, accountDecision } = resolveManualIntakeRequest(body);
   const actor = resolveRequestActor(req);
   const actorRole = inferUserRole(req) || null;
   const actorEmail = req?.auth?.email || null;
@@ -81183,6 +81361,7 @@ app.post('/api/applications/manual-intake', async (req, res) => {
       actorRole,
       actorEmail,
       body,
+      accountDecision,
       nowIso
     });
     manualMetadata.signature_capture = 'deferred_to_applicant';
@@ -81201,7 +81380,8 @@ app.post('/api/applications/manual-intake', async (req, res) => {
 
     await connection.beginTransaction();
 
-    const applicantUser = await resolveOrCreateManualApplicantUser(connection, applicantSeed);
+    const selectedClient = await fetchManualSelectedClient(connection, accountDecision.selectedClientId);
+    const applicantUser = await resolveOrCreateManualApplicantUser(connection, applicantSeed, selectedClient);
 
     let referenceNumber = buildManualSubmissionReference();
     for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -81253,8 +81433,21 @@ app.post('/api/applications/manual-intake', async (req, res) => {
     const clientId = await resolveOrCreateManualClient(connection, {
       applicantUser,
       applicantSeed,
-      addressPayload
+      addressPayload,
+      selectedClient
     });
+
+    let applicantAccountResult = null;
+    if (accountDecision.strategy === 'create_ready_to_invite') {
+      applicantAccountResult = await ensureApplicantAccountForClient(connection, {
+        clientId,
+        actorStaffProfileId: createdByStaffProfileId,
+        source: 'manual_intake',
+      });
+    }
+    const applicantAccountSnapshot = applicantAccountResult
+      || (await fetchApplicantAccountRows(connection, { clientId, limit: 1 }))[0]
+      || null;
 
     const portfolioRegionId = await resolveRegionIdFromProvinceValue(
       applicantSeed.province || null,
@@ -81311,6 +81504,12 @@ app.post('/api/applications/manual-intake', async (req, res) => {
         origin_mode: 'staff_entered',
         intake_source: manualMetadata.intake_source || null,
         intake_source_notes: manualMetadata.intake_source_notes || null,
+        account_decision: manualMetadata.account_decision || null,
+        account_selected_client_id: manualMetadata.account_selected_client_id || null,
+        account_selected_status: manualMetadata.account_selected_status || null,
+        account_decision_notes: manualMetadata.account_decision_notes || null,
+        applicant_account_status: applicantAccountResult?.accountStatus || null,
+        applicant_account_label: applicantAccountResult?.accountStatusLabel || null,
         created_by_staff_id: manualMetadata.created_by_staff_id,
         created_by_staff_role: manualMetadata.created_by_staff_role,
         created_by_staff_email: manualMetadata.created_by_staff_email,
@@ -81341,11 +81540,15 @@ app.post('/api/applications/manual-intake', async (req, res) => {
       submission_id: submissionId,
       tracking_id: referenceNumber,
       reused_case: !caseResolution.created,
+      selected_client_id: selectedClient?.id ? Number(selectedClient.id) : null,
+      account_decision: accountDecision.strategy,
+      applicant_account: applicantAccountSnapshot,
     });
   } catch (error) {
     await connection.rollback();
     console.error('POST /api/applications/manual-intake failed:', error);
-    return res.status(500).json({
+    const statusCode = Number(error?.statusCode || error?.status || 500);
+    return res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 500).json({
       error: 'manual_intake_create_failed',
       message: error.message || 'Failed to create manual intake application.',
     });

@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-06-10
+Last Updated: 2026-06-11
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -21,6 +21,11 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-06-11 | Release TBD | Fix/App Shell | Side navigation | The left chevron in the staff side navigation now reliably collapses the navigation panel. | The control was present and wired, but the `Homepage` navigation header could sit above it as the pointer hit target; PATH now keeps the Cloudscape AppLayout close control above the header and has a local browser smoke for the close/reopen behavior.
+- 2026-06-11 | Release TBD | Fix/Casework | Funding revision letters | Sending an approved intervention funding revision letter now creates the missing Client Funding Agreement draft from the selected action plan when one is not already present. | This prevents the `No draft funding agreement is available for this case` blocker on approved current amendments for files that were originally entered as historical/manual backload records, while ordinary historical backload edits remain silent.
+- 2026-06-11 | Release TBD | Tooling/App Shell | Browser smoke | Added a local browser smoke for global side-navigation collapse and reopen. | `npm run smoke:app-shell-navigation:browser` checks representative routes with real pointer clicks and `elementFromPoint` assertions so visual shell controls cannot be hidden under another hit target unnoticed.
+- 2026-06-11 | Release TBD | UX/Manual Intake | Staff-assisted intake | Manual Application Intake now helps staff visualize and complete the staff-assisted intake process before submitting a paper/PDF/phone/in-person application. | A top flow widget shows live checkpoints for identity, existing-account check, account handling, application details, and submit/follow-up; a Cloudscape wizard guides the matching working steps, including client/account search, account plan selection, application details, and review before create.
+- 2026-06-11 | Release TBD | Tooling/Manual Intake | Browser smoke | Added a local browser smoke for Manual Application Intake. | `npm run smoke:manual-intake:browser` checks the flow widget, wizard navigation, applicant search/select flow, application-details/review steps, and submitted account-decision payload.
 - 2026-06-10 | Release TBD | Fix/Application Workspace | Application Overview document requests | Clearing a stale Docs Requested flag no longer shows a false "another user updated this application first" warning. | Application Overview now uses the freshest selected-application row-version token and allows clearing existing document-request flags on decision-recorded applications without reopening the workflow; starting a new document request on a terminal application remains blocked.
 - 2026-06-10 | Release TBD | UX/Application Workspace | Core workspace widgets | Application Workspace support widgets are easier to use during file review. | Supporting Documents now has document search, Secure Messaging tables can be sorted by their key columns, Notes refresh no longer issues a duplicate reload, Calendar fallbacks say `Not recorded`, and the conflict-of-interest declaration copy now refers to the staff member working the application file.
 - 2026-06-10 | Release TBD | Tooling/Application Workspace | Browser smoke | Added a local browser smoke for the ISET Application Assessment workspace. | `npm run smoke:application-workspace:browser` verifies default widget rendering, idle API settling, Supporting Documents search, Secure Messaging sort toggling, Notes refresh single-call behavior, and captures a workspace screenshot for UI review.

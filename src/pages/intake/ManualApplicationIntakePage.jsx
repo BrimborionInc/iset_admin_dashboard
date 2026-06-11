@@ -4,16 +4,23 @@ import Board from '@cloudscape-design/board-components/board';
 import { BoardItem } from '@cloudscape-design/board-components';
 import {
   Alert,
+  Badge,
   Box,
   Button,
   ButtonDropdown,
+  ColumnLayout,
   FormField,
   Header,
+  Input,
   Link,
+  RadioGroup,
   Select,
   SpaceBetween,
   Spinner,
+  StatusIndicator,
+  Table,
   Textarea,
+  Wizard,
 } from '@cloudscape-design/components';
 import jsonLogic from 'json-logic-js';
 import { apiFetch } from '../../auth/apiClient';
@@ -30,9 +37,11 @@ import {
   findStepIndexByField,
   stepHasRenderableManualContent,
 } from '../../utils/manualIntakeRuntime';
+import './ManualApplicationIntakePage.css';
 
 const STORAGE_KEY = 'manual-application-intake-runtime.v2';
-const DASHBOARD_STORAGE_KEY = 'manual-intake-dashboard-layout-v1';
+const DASHBOARD_STORAGE_KEY = 'manual-intake-dashboard-layout-v12';
+const ACCOUNT_SEARCH_NO_RESULTS_MESSAGE = 'No matching clients or applicant accounts found.';
 
 const INTAKE_SOURCE_OPTIONS = [
   { label: 'Paper application', value: 'paper' },
@@ -43,20 +52,52 @@ const INTAKE_SOURCE_OPTIONS = [
 ];
 
 const nonInputTypes = new Set(['paragraph', 'text-block', 'summary-list', 'panel', 'inset-text', 'warning-text']);
+const FLOW_WIDGET_ID = 'staff-assisted-intake-flow';
 const INTAKE_WIDGET_ID = 'manual-intake-flow';
 
+const ACCOUNT_STRATEGY_OPTIONS = [
+  {
+    value: 'review_later',
+    label: 'Create application, review PATH account after submission',
+    description: 'Use when identity, email, or activation timing still needs staff review in the Application Workspace.',
+  },
+  {
+    value: 'create_ready_to_invite',
+    label: 'Prepare PATH account, invite later',
+    description: 'Create or reuse the applicant account silently so staff can send activation from the workspace or User Management.',
+  },
+  {
+    value: 'link_selected_client',
+    label: 'Use selected existing client or account',
+    description: 'Attach this application to the selected PATH client and reuse their existing case/account posture.',
+  },
+  {
+    value: 'no_portal_planned',
+    label: 'No portal access planned for now',
+    description: 'Use for staff-assisted service where portal activation is not appropriate yet. Record the reason.',
+  },
+];
+
 const widgetRegistry = {
+  [FLOW_WIDGET_ID]: {
+    id: FLOW_WIDGET_ID,
+    defaultRowSpan: 3,
+    defaultColumnSpan: 4,
+    title: 'Staff-Assisted Intake Flow',
+    description: 'Shows the recommended order and current state of the intake process.',
+  },
   [INTAKE_WIDGET_ID]: {
     id: INTAKE_WIDGET_ID,
-    defaultRowSpan: 12,
+    defaultRowSpan: 4,
     defaultColumnSpan: 4,
-    title: 'Manual Application Intake',
-    description: 'Enter and submit applications received outside the public portal.',
+    title: 'Staff-Assisted Intake Wizard',
+    description: 'Complete identity, account handling, application details, and submission.',
   },
 };
 
 const defaultLayout = [
-  { id: INTAKE_WIDGET_ID, rowSpan: 12, columnSpan: 4 },
+  { id: FLOW_WIDGET_ID, rowSpan: 3, columnSpan: 4 },
+  { id: INTAKE_WIDGET_ID, rowSpan: 4, columnSpan: 4 },
 ];
 
 const boardI18nStrings = {
@@ -238,6 +279,332 @@ function normalizeSinValue(value) {
   const digits = String(value || '').replace(/\D+/g, '').slice(0, 9);
   if (!digits) return '';
   return digits.replace(/(\d{3})(?=\d)/g, '$1 ').trim();
+}
+
+function normalizeEmailValue(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function readFirstAnswer(answers = {}, keys = []) {
+  for (const key of keys) {
+    const value = answers[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (value !== null && typeof value !== 'undefined' && typeof value !== 'object') return String(value).trim();
+  }
+  return '';
+}
+
+function buildApplicantIdentityPreview(answers = {}) {
+  const firstName = readFirstAnswer(answers, ['first-name', 'first_name']);
+  const lastName = readFirstAnswer(answers, ['last-name', 'last_name']);
+  const preferredName = readFirstAnswer(answers, ['preferred-name', 'preferred_name']);
+  const email = normalizeEmailValue(readFirstAnswer(answers, ['contact-email-address', 'contact_email_address', 'email']));
+  const phone = readFirstAnswer(answers, ['telephone-day', 'telephone_day', 'phone']);
+  const province = readFirstAnswer(answers, ['address-province', 'address_province', 'province']);
+  const fullName = [preferredName || firstName, lastName].filter(Boolean).join(' ').trim()
+    || [firstName, lastName].filter(Boolean).join(' ').trim();
+  const searchText = email || [firstName, lastName].filter(Boolean).join(' ').trim() || phone;
+  return {
+    firstName,
+    lastName,
+    preferredName,
+    fullName,
+    email,
+    phone,
+    province,
+    searchText,
+  };
+}
+
+function buildAccountDecisionPayload({ accountDecision, selectedApplicantMatch }) {
+  return {
+    strategy: accountDecision.strategy,
+    selectedClientId: selectedApplicantMatch?.clientId || null,
+    selectedApplicantName: selectedApplicantMatch?.applicantName || null,
+    selectedApplicantEmail: selectedApplicantMatch?.email || selectedApplicantMatch?.accountEmail || null,
+    selectedAccountStatus: selectedApplicantMatch?.accountStatus || null,
+    searchQuery: accountDecision.searchQuery || null,
+    notes: accountDecision.notes || null,
+  };
+}
+
+function getAccountDecisionError({ accountDecision, selectedApplicantMatch, applicantIdentityPreview }) {
+  if (accountDecision.strategy === 'link_selected_client' && !selectedApplicantMatch?.clientId) {
+    return 'Select an existing client/account match before choosing this option.';
+  }
+  if (accountDecision.strategy === 'create_ready_to_invite' && !applicantIdentityPreview.email) {
+    return 'Enter the applicant email before preparing a PATH account.';
+  }
+  if (accountDecision.strategy === 'no_portal_planned' && !String(accountDecision.notes || '').trim()) {
+    return 'Record why portal access is not planned before creating the application.';
+  }
+  return '';
+}
+
+function accountStatusBadge(status, label) {
+  const map = {
+    no_account: { color: 'grey', text: label || 'No account' },
+    created: { color: 'blue', text: label || 'Ready to invite' },
+    invitation_sent: { color: 'green', text: label || 'Invitation sent' },
+    activated: { color: 'green', text: label || 'Activated' },
+  };
+  const cfg = map[status] || { color: 'grey', text: label || status || 'Unknown' };
+  return <Badge color={cfg.color}>{cfg.text}</Badge>;
+}
+
+function getAccountStrategyShortLabel(strategy) {
+  const map = {
+    review_later: 'Review later',
+    create_ready_to_invite: 'Prepare for invite',
+    link_selected_client: 'Use existing client',
+    no_portal_planned: 'No portal planned',
+  };
+  return map[strategy] || 'Review later';
+}
+
+function buildManualIntakeFlowSteps({
+  applicantIdentityPreview,
+  selectedApplicantMatch,
+  accountDecision,
+  accountSearchLoading,
+  accountSearchResults,
+  accountSearchError,
+  accountValidationError,
+  started,
+  loading,
+  schemaError,
+  currentVisibleStepNumber,
+  totalVisibleSteps,
+  isFinalStep,
+  submitting,
+}) {
+  const identityComplete = Boolean(applicantIdentityPreview.fullName && applicantIdentityPreview.email);
+  const identityStarted = Boolean(
+    applicantIdentityPreview.fullName ||
+    applicantIdentityPreview.email ||
+    applicantIdentityPreview.phone ||
+    applicantIdentityPreview.province
+  );
+  const noSearchResults = accountSearchError === ACCOUNT_SEARCH_NO_RESULTS_MESSAGE;
+  const possibleMatches = Array.isArray(accountSearchResults) ? accountSearchResults.length : 0;
+  const searchReady = Boolean(accountDecision.searchQuery || applicantIdentityPreview.searchText);
+  const strategy = accountDecision.strategy || 'review_later';
+  const hasDecisionNote = Boolean(String(accountDecision.notes || '').trim());
+  const selectedName = selectedApplicantMatch?.applicantName || 'Selected client';
+
+  const flowSteps = [
+    {
+      id: 'identity',
+      title: 'Identity',
+      status: identityComplete ? 'Captured' : identityStarted ? 'In progress' : 'Not started',
+      type: identityComplete ? 'success' : identityStarted ? 'in-progress' : 'pending',
+      detail: identityComplete
+        ? 'Name and email are ready.'
+        : identityStarted
+          ? 'Finish key identity fields.'
+          : 'Start with the applicant name and contact details.',
+      complete: identityComplete,
+    },
+  ];
+
+  if (selectedApplicantMatch) {
+    flowSteps.push({
+      id: 'account-check',
+      title: 'Check Existing Account',
+      status: 'Match selected',
+      type: 'success',
+      detail: selectedName,
+      complete: true,
+    });
+  } else if (accountSearchLoading) {
+    flowSteps.push({
+      id: 'account-check',
+      title: 'Check Existing Account',
+      status: 'Searching',
+      type: 'loading',
+      detail: 'Searching PATH records.',
+      complete: false,
+    });
+  } else if (noSearchResults) {
+    flowSteps.push({
+      id: 'account-check',
+      title: 'Check Existing Account',
+      status: 'No match found',
+      type: 'success',
+      detail: 'Proceed with account handling.',
+      complete: true,
+    });
+  } else if (accountSearchError) {
+    flowSteps.push({
+      id: 'account-check',
+      title: 'Check Existing Account',
+      status: 'Needs review',
+      type: 'warning',
+      detail: accountSearchError,
+      complete: false,
+    });
+  } else if (possibleMatches > 0) {
+    flowSteps.push({
+      id: 'account-check',
+      title: 'Check Existing Account',
+      status: 'Select a match',
+      type: 'in-progress',
+      detail: `${possibleMatches} possible match${possibleMatches === 1 ? '' : 'es'} found.`,
+      complete: false,
+    });
+  } else {
+    flowSteps.push({
+      id: 'account-check',
+      title: 'Check Existing Account',
+      status: searchReady ? 'Ready to search' : 'Waiting',
+      type: searchReady ? 'in-progress' : 'pending',
+      detail: searchReady
+        ? 'Search before submitting.'
+        : 'Use name, email, case, or region.',
+      complete: false,
+    });
+  }
+
+  const handlingBase = {
+    id: 'account-handling',
+    title: 'Account Handling',
+    detail: getAccountStrategyShortLabel(strategy),
+  };
+  if (accountValidationError) {
+    flowSteps.push({
+      ...handlingBase,
+      status: 'Needs decision',
+      type: 'warning',
+      detail: accountValidationError,
+      complete: false,
+    });
+  } else if (strategy === 'link_selected_client') {
+    flowSteps.push({
+      ...handlingBase,
+      status: selectedApplicantMatch ? 'Linked' : 'Select match',
+      type: selectedApplicantMatch ? 'success' : 'warning',
+      detail: selectedApplicantMatch ? selectedName : 'Choose a search result.',
+      complete: Boolean(selectedApplicantMatch),
+    });
+  } else if (strategy === 'create_ready_to_invite') {
+    flowSteps.push({
+      ...handlingBase,
+      status: applicantIdentityPreview.email ? 'Ready' : 'Email needed',
+      type: applicantIdentityPreview.email ? 'success' : 'warning',
+      detail: applicantIdentityPreview.email
+        ? 'Prepare silently for later activation.'
+        : 'Enter email before preparing.',
+      complete: Boolean(applicantIdentityPreview.email),
+    });
+  } else if (strategy === 'no_portal_planned') {
+    flowSteps.push({
+      ...handlingBase,
+      status: hasDecisionNote ? 'Recorded' : 'Reason needed',
+      type: hasDecisionNote ? 'success' : 'warning',
+      detail: hasDecisionNote
+        ? 'Staff-assisted context will be saved.'
+        : 'Add a no-portal note.',
+      complete: hasDecisionNote,
+    });
+  } else {
+    flowSteps.push({
+      ...handlingBase,
+      status: 'Review after submit',
+      type: 'info',
+      detail: 'Activation stays as explicit follow-up.',
+      complete: true,
+    });
+  }
+
+  if (schemaError) {
+    flowSteps.push({
+      id: 'application-details',
+      title: 'Application Details',
+      status: 'Schema error',
+      type: 'error',
+      detail: 'The intake form could not load.',
+      complete: false,
+    });
+  } else if (loading) {
+    flowSteps.push({
+      id: 'application-details',
+      title: 'Application Details',
+      status: 'Loading',
+      type: 'loading',
+      detail: 'Loading the intake form.',
+      complete: false,
+    });
+  } else if (started) {
+    flowSteps.push({
+      id: 'application-details',
+      title: 'Application Details',
+      status: isFinalStep ? 'Final step' : `Step ${currentVisibleStepNumber} of ${totalVisibleSteps}`,
+      type: isFinalStep ? 'info' : 'in-progress',
+      detail: 'Complete visible intake fields.',
+      complete: false,
+    });
+  } else {
+    flowSteps.push({
+      id: 'application-details',
+      title: 'Application Details',
+      status: 'Not started',
+      type: 'pending',
+      detail: 'Start after identity/account triage.',
+      complete: false,
+    });
+  }
+
+  flowSteps.push({
+    id: 'submit-follow-up',
+    title: 'Submit & Follow Up',
+    status: submitting ? 'Submitting' : started && isFinalStep ? 'Ready' : 'Not ready',
+    type: submitting ? 'loading' : started && isFinalStep ? 'in-progress' : 'pending',
+    detail: 'Create the application; activation remains follow-up.',
+    complete: false,
+  });
+
+  return flowSteps;
+}
+
+function getFlowCardTone(type) {
+  const tones = {
+    success: {
+      border: '#037f0c',
+      background: '#f1faf2',
+      marker: '#037f0c',
+    },
+    'in-progress': {
+      border: '#0972d3',
+      background: '#f1f7ff',
+      marker: '#0972d3',
+    },
+    info: {
+      border: '#0972d3',
+      background: '#f1f7ff',
+      marker: '#0972d3',
+    },
+    loading: {
+      border: '#0972d3',
+      background: '#f1f7ff',
+      marker: '#0972d3',
+    },
+    warning: {
+      border: '#a65d03',
+      background: '#fff7ed',
+      marker: '#a65d03',
+    },
+    error: {
+      border: '#d13212',
+      background: '#fff3f0',
+      marker: '#d13212',
+    },
+    pending: {
+      border: '#7d8998',
+      background: '#f6f7f7',
+      marker: '#7d8998',
+    },
+  };
+  return tones[type] || tones.pending;
 }
 
 const REGISTRATION_KEYS = [
@@ -453,6 +820,9 @@ function buildDraftPayload({
   history,
   intakeSource,
   intakeSourceNotes,
+  accountDecision,
+  selectedApplicantMatch,
+  noExistingMatchConfirmed,
   lang,
 }) {
   return {
@@ -463,6 +833,9 @@ function buildDraftPayload({
     history,
     intakeSource,
     intakeSourceNotes,
+    accountDecision,
+    selectedApplicantMatch,
+    noExistingMatchConfirmed,
     lang,
   };
 }
@@ -484,6 +857,7 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
   const boardItems = useMemo(() => toBoardItems(layout), [layout]);
   const paletteItems = useMemo(() => computePaletteItems(boardItems), [boardItems]);
   const paletteSignatureRef = useRef(JSON.stringify(paletteItems.map((item) => item.id)));
+  const [activeWizardStepIndex, setActiveWizardStepIndex] = useState(0);
   const [started, setStarted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [schemaError, setSchemaError] = useState('');
@@ -494,10 +868,26 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
   const [lang, setLang] = useState('en');
   const [intakeSource, setIntakeSource] = useState('paper');
   const [intakeSourceNotes, setIntakeSourceNotes] = useState('');
+  const [accountDecision, setAccountDecision] = useState({
+    strategy: 'review_later',
+    searchQuery: '',
+    notes: '',
+  });
+  const [selectedApplicantMatch, setSelectedApplicantMatch] = useState(null);
+  const [noExistingMatchConfirmed, setNoExistingMatchConfirmed] = useState(false);
+  const [accountSearchResults, setAccountSearchResults] = useState([]);
+  const [accountSearchLoading, setAccountSearchLoading] = useState(false);
+  const [accountSearchError, setAccountSearchError] = useState('');
+  const [accountValidationError, setAccountValidationError] = useState('');
+  const [wizardNavigationError, setWizardNavigationError] = useState('');
   const [submitError, setSubmitError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const componentLookup = useMemo(() => buildConditionComponentLookup(steps), [steps]);
+  const applicantIdentityPreview = useMemo(
+    () => buildApplicantIdentityPreview(runner.answers),
+    [runner.answers]
+  );
   const currentStep = steps[runner.stepIndex] || null;
   const currentStepId = currentStep ? getStepId(currentStep, runner.stepIndex) : null;
   const hiddenConditionalKeys = useMemo(
@@ -519,6 +909,73 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
   const currentVisibleStepNumber = currentVisibleStepIndex >= 0 ? currentVisibleStepIndex + 1 : 1;
   const totalVisibleSteps = visibleStepIndices.length || 1;
   const isFinalStep = Boolean(currentStep) && nextRenderableStepIndex < 0;
+  const currentIntakeStepErrors = useMemo(
+    () => (currentStep ? validateStep(currentStep, runner.answers, lang, componentLookup) : {}),
+    [componentLookup, currentStep, lang, runner.answers]
+  );
+  const currentIntakeStepValid = Object.keys(currentIntakeStepErrors).length === 0;
+  const identityStepComplete = Boolean(applicantIdentityPreview.fullName && applicantIdentityPreview.email && intakeSource);
+  const accountSearchStepComplete = Boolean(selectedApplicantMatch?.clientId || noExistingMatchConfirmed);
+  const accountDecisionErrorText = useMemo(
+    () => getAccountDecisionError({ accountDecision, selectedApplicantMatch, applicantIdentityPreview }),
+    [accountDecision, applicantIdentityPreview, selectedApplicantMatch]
+  );
+  const accountHandlingStepComplete = accountSearchStepComplete && !accountDecisionErrorText;
+  const applicationDetailsStepComplete = Boolean(started && currentStep && isFinalStep && currentIntakeStepValid);
+  const wizardI18nStrings = useMemo(() => ({
+    stepNumberLabel: stepNumber => `Step ${stepNumber}`,
+    collapsedStepsLabel: (stepNumber, stepsCount) => `Step ${stepNumber} of ${stepsCount}`,
+    navigationAriaLabel: 'Staff-assisted intake steps',
+    cancelButton: '',
+    previousButton: activeWizardStepIndex === 3 && runner.history.length > 0 ? 'Previous form step' : 'Previous',
+    nextButton: activeWizardStepIndex === 3 && !isFinalStep ? 'Next form step' : 'Next',
+    optional: 'Optional',
+    nextButtonLoadingAnnouncement: 'Loading next intake step',
+    submitButtonLoadingAnnouncement: 'Creating application',
+  }), [activeWizardStepIndex, isFinalStep, runner.history.length]);
+  const wizardStepAccess = useMemo(() => ([
+    true,
+    identityStepComplete,
+    accountSearchStepComplete,
+    accountHandlingStepComplete,
+    applicationDetailsStepComplete,
+  ]), [
+    accountHandlingStepComplete,
+    accountSearchStepComplete,
+    applicationDetailsStepComplete,
+    identityStepComplete,
+  ]);
+  const flowSteps = useMemo(() => buildManualIntakeFlowSteps({
+    applicantIdentityPreview,
+    selectedApplicantMatch,
+    accountDecision,
+    accountSearchLoading,
+    accountSearchResults,
+    accountSearchError,
+    accountValidationError,
+    started,
+    loading,
+    schemaError,
+    currentVisibleStepNumber,
+    totalVisibleSteps,
+    isFinalStep,
+    submitting,
+  }), [
+    accountDecision,
+    accountSearchError,
+    accountSearchLoading,
+    accountSearchResults,
+    accountValidationError,
+    applicantIdentityPreview,
+    currentVisibleStepNumber,
+    isFinalStep,
+    loading,
+    schemaError,
+    selectedApplicantMatch,
+    started,
+    submitting,
+    totalVisibleSteps,
+  ]);
 
   useEffect(() => {
     const signature = JSON.stringify(paletteItems.map((item) => item.id));
@@ -628,12 +1085,17 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
           });
           setIntakeSource(draft.intakeSource || 'paper');
           setIntakeSourceNotes(draft.intakeSourceNotes || '');
+          setAccountDecision({
+            strategy: draft.accountDecision?.strategy || 'review_later',
+            searchQuery: draft.accountDecision?.searchQuery || '',
+            notes: draft.accountDecision?.notes || '',
+          });
+          setSelectedApplicantMatch(draft.selectedApplicantMatch || null);
+          setNoExistingMatchConfirmed(Boolean(draft.noExistingMatchConfirmed));
           setLang(draft.lang === 'fr' ? 'fr' : 'en');
         } else {
           const firstRenderable = findFirstRenderableManualStepIndex(nextSteps, {}, nextComponentLookup);
-          setRunner({ stepIndex: firstRenderable, answers: {}, errors: {}, history: [] });
-          setIntakeSource('paper');
-          setIntakeSourceNotes('');
+          setRunner(previous => ({ stepIndex: firstRenderable, answers: previous.answers || {}, errors: {}, history: [] }));
           setLang('en');
         }
       } catch (error) {
@@ -662,6 +1124,9 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
         history: runner.history,
         intakeSource,
         intakeSourceNotes,
+        accountDecision,
+        selectedApplicantMatch,
+        noExistingMatchConfirmed,
         lang,
       });
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -677,6 +1142,9 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
     runner.history,
     intakeSource,
     intakeSourceNotes,
+    accountDecision,
+    selectedApplicantMatch,
+    noExistingMatchConfirmed,
     lang,
   ]);
 
@@ -757,6 +1225,47 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
     }));
   };
 
+  const runAccountSearch = useCallback(async (queryOverride = null) => {
+    const query = String(queryOverride ?? accountDecision.searchQuery ?? '').trim();
+    if (!query) {
+      setAccountSearchError('Enter an email, name, case number, or region to search.');
+      setAccountSearchResults([]);
+      return;
+    }
+    setAccountSearchLoading(true);
+    setAccountSearchError('');
+    setNoExistingMatchConfirmed(false);
+    try {
+      const params = new URLSearchParams({
+        q: query,
+        pageSize: '8',
+        page: '1',
+        sortField: 'status',
+        sortDirection: 'asc',
+      });
+      const response = await apiFetch(`/api/admin/applicants?${params.toString()}`);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.message || data?.error || 'Failed to search applicant accounts');
+      }
+      const users = Array.isArray(data.users) ? data.users : [];
+      setAccountSearchResults(users);
+      if (!users.length) {
+        setAccountSearchError(ACCOUNT_SEARCH_NO_RESULTS_MESSAGE);
+        setNoExistingMatchConfirmed(true);
+      }
+    } catch (error) {
+      setAccountSearchResults([]);
+      setAccountSearchError(error?.message || 'Failed to search applicant accounts');
+    } finally {
+      setAccountSearchLoading(false);
+    }
+  }, [accountDecision.searchQuery]);
+
+  const validateAccountDecision = () => {
+    return getAccountDecisionError({ accountDecision, selectedApplicantMatch, applicantIdentityPreview });
+  };
+
   const handleSubmit = async () => {
     if (!currentStep) return;
     const errors = validateStep(currentStep, runner.answers, lang, componentLookup);
@@ -765,7 +1274,14 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
       return;
     }
 
+    const nextAccountError = validateAccountDecision();
+    if (nextAccountError) {
+      setAccountValidationError(nextAccountError);
+      return;
+    }
+
     setSubmitError('');
+    setAccountValidationError('');
     setSubmitting(true);
     try {
       const response = await apiFetch('/api/applications/manual-intake', {
@@ -780,6 +1296,7 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
             .map((entry) => getStepId(entry.step, entry.stepIndex)),
           intakeSource,
           intakeSourceNotes,
+          accountDecision: buildAccountDecisionPayload({ accountDecision, selectedApplicantMatch }),
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -812,107 +1329,547 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
     setLayout((current) => (areLayoutsEqual(current, next) ? current : next));
   };
 
-  const renderManualIntakeContent = () => (
-    <SpaceBetween size="l">
-      {!started ? (
-        <>
-          <FormField label="Intake source">
-            <Select
-              selectedOption={INTAKE_SOURCE_OPTIONS.find((opt) => opt.value === intakeSource) || null}
-              options={INTAKE_SOURCE_OPTIONS}
-              onChange={({ detail }) => setIntakeSource(detail.selectedOption?.value || 'paper')}
-            />
-          </FormField>
+  const getWizardStepBlockedMessage = (stepIndex) => {
+    if (stepIndex <= 0) return '';
+    if (stepIndex === 1 && !identityStepComplete) {
+      return 'Enter the applicant name, email, and intake source first.';
+    }
+    if (stepIndex === 2 && !accountSearchStepComplete) {
+      return 'Search for an existing client/account or continue without a match.';
+    }
+    if (stepIndex === 3 && !accountHandlingStepComplete) {
+      return accountDecisionErrorText || 'Choose an account handling plan.';
+    }
+    if (stepIndex === 4 && !applicationDetailsStepComplete) {
+      return 'Complete the visible application form step before review.';
+    }
+    return '';
+  };
 
-          <FormField label="Source details (optional)">
+  const activateWizardStep = (stepIndex) => {
+    const blockedMessage = getWizardStepBlockedMessage(stepIndex);
+    if (blockedMessage) {
+      setWizardNavigationError(blockedMessage);
+      if (stepIndex === 1) setActiveWizardStepIndex(0);
+      if (stepIndex === 2) setActiveWizardStepIndex(identityStepComplete ? 1 : 0);
+      if (stepIndex === 3) setActiveWizardStepIndex(accountSearchStepComplete ? 2 : (identityStepComplete ? 1 : 0));
+      if (stepIndex === 4) setActiveWizardStepIndex(accountHandlingStepComplete ? 3 : (accountSearchStepComplete ? 2 : 0));
+      return false;
+    }
+    if (stepIndex === 3 && !started) setStarted(true);
+    setWizardNavigationError('');
+    setAccountValidationError('');
+    setActiveWizardStepIndex(stepIndex);
+    return true;
+  };
+
+  const handleWizardNavigate = ({ detail }) => {
+    const requestedStepIndex = detail?.requestedStepIndex;
+    const reason = detail?.reason;
+    if (!Number.isInteger(requestedStepIndex) || requestedStepIndex < 0 || requestedStepIndex > 4) return;
+    if (requestedStepIndex === activeWizardStepIndex) return;
+
+    if (reason === 'previous' && activeWizardStepIndex === 3 && runner.history.length > 0) {
+      goBack();
+      return;
+    }
+
+    if (requestedStepIndex > activeWizardStepIndex) {
+      if (activeWizardStepIndex === 0 && !identityStepComplete) {
+        setWizardNavigationError('Enter the applicant name, email, and intake source first.');
+        return;
+      }
+      if (activeWizardStepIndex === 1 && !accountSearchStepComplete) {
+        setWizardNavigationError('Search for an existing client/account or continue without a match.');
+        return;
+      }
+      if (activeWizardStepIndex === 2) {
+        const nextAccountError = validateAccountDecision();
+        if (nextAccountError) {
+          setAccountValidationError(nextAccountError);
+          setWizardNavigationError(nextAccountError);
+          return;
+        }
+      }
+      if (activeWizardStepIndex === 3) {
+        if (!started) {
+          setStarted(true);
+          return;
+        }
+        if (!currentStep) return;
+        const errors = validateStep(currentStep, runner.answers, lang, componentLookup);
+        if (Object.keys(errors).length > 0) {
+          setRunner((prev) => ({ ...prev, errors }));
+          setWizardNavigationError('Complete required fields before continuing.');
+          return;
+        }
+        if (!isFinalStep) {
+          goNext();
+          return;
+        }
+      }
+    }
+
+    activateWizardStep(requestedStepIndex);
+  };
+
+  const renderProcessFlowContent = () => (
+    <SpaceBetween size="s">
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+          gap: '16px',
+          alignItems: 'stretch',
+        }}
+      >
+        {flowSteps.map((step, index) => {
+          const tone = getFlowCardTone(step.type);
+          const locked = !wizardStepAccess[index];
+          const active = activeWizardStepIndex === index;
+          return (
+            <button
+              type="button"
+              key={step.id}
+              onClick={() => activateWizardStep(index)}
+              aria-current={active ? 'step' : undefined}
+              disabled={locked && !active}
+              style={{
+                position: 'relative',
+                minWidth: 0,
+                minHeight: '132px',
+                height: '100%',
+                padding: '14px 16px',
+                border: `2px solid ${active ? '#0972d3' : tone.border}`,
+                borderRadius: '8px',
+                background: tone.background,
+                boxSizing: 'border-box',
+                textAlign: 'left',
+                cursor: locked && !active ? 'not-allowed' : 'pointer',
+                font: 'inherit',
+                color: '#000716',
+                boxShadow: active ? '0 0 0 2px rgba(9, 114, 211, 0.2)' : 'none',
+                opacity: locked && !active ? 0.75 : 1,
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  top: '18px',
+                  right: '18px',
+                  width: '14px',
+                  height: '14px',
+                  border: `4px solid ${tone.marker}`,
+                  borderRadius: '999px',
+                  background: '#ffffff',
+                  boxSizing: 'border-box',
+                }}
+              />
+              <SpaceBetween size="xxs">
+                <div
+                  style={{
+                    fontSize: '30px',
+                    lineHeight: '32px',
+                    fontWeight: 700,
+                    paddingRight: '24px',
+                  }}
+                >
+                  {index + 1}
+                </div>
+                <Box variant="strong">{step.title}</Box>
+                <StatusIndicator type={locked && !active ? 'pending' : step.type}>
+                  {locked && !active ? 'Locked' : step.status}
+                </StatusIndicator>
+                <div style={{ overflowWrap: 'anywhere' }}>
+                  <Box color="text-body-secondary">{step.detail}</Box>
+                </div>
+              </SpaceBetween>
+            </button>
+          );
+        })}
+      </div>
+    </SpaceBetween>
+  );
+
+  const renderIdentityWizardStep = () => (
+    <SpaceBetween size="l">
+      <ColumnLayout columns={2}>
+        <FormField label="First name" controlId="first-name">
+          <Input
+            value={runner.answers['first-name'] || ''}
+            onChange={({ detail }) => setAnswer('first-name', detail.value)}
+            spellcheck={false}
+          />
+        </FormField>
+        <FormField label="Last name" controlId="last-name">
+          <Input
+            value={runner.answers['last-name'] || ''}
+            onChange={({ detail }) => setAnswer('last-name', detail.value)}
+            spellcheck={false}
+          />
+        </FormField>
+      </ColumnLayout>
+      <ColumnLayout columns={2}>
+        <FormField label="Email address" controlId="contact-email-address">
+          <Input
+            value={runner.answers['contact-email-address'] || ''}
+            onChange={({ detail }) => setAnswer('contact-email-address', detail.value)}
+            spellcheck={false}
+          />
+        </FormField>
+        <FormField label="Intake source">
+          <Select
+            selectedOption={INTAKE_SOURCE_OPTIONS.find((opt) => opt.value === intakeSource) || null}
+            options={INTAKE_SOURCE_OPTIONS}
+            onChange={({ detail }) => setIntakeSource(detail.selectedOption?.value || 'paper')}
+          />
+        </FormField>
+      </ColumnLayout>
+      <FormField label="Source note" stretch>
+        <Textarea
+          rows={2}
+          value={intakeSourceNotes}
+          onChange={({ detail }) => setIntakeSourceNotes(detail.value)}
+          spellcheck={true}
+          placeholder="Mail date, PDF sender, phone or walk-in context"
+        />
+      </FormField>
+    </SpaceBetween>
+  );
+
+  const renderAccountSearchWizardStep = () => (
+    <SpaceBetween size="m">
+      {selectedApplicantMatch ? (
+        <Alert type="success" header="Existing client selected">
+          {selectedApplicantMatch.applicantName || 'Selected client'} will be used for this application.
+        </Alert>
+      ) : noExistingMatchConfirmed ? (
+        <Alert type="info" header="No existing match selected">
+          Continue with a new or later-reviewed account plan.
+        </Alert>
+      ) : null}
+
+      <FormField label="Search PATH records" stretch>
+        <SpaceBetween direction="horizontal" size="xs">
+          <Input
+            value={accountDecision.searchQuery}
+            onChange={({ detail }) => {
+              setAccountDecision(current => ({ ...current, searchQuery: detail.value }));
+              setAccountSearchError('');
+              setNoExistingMatchConfirmed(false);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') runAccountSearch();
+            }}
+            placeholder="Email, name, case number, or region"
+            spellcheck={false}
+          />
+          <Button
+            iconName="search"
+            onClick={() => runAccountSearch()}
+            loading={accountSearchLoading}
+          >
+            Search
+          </Button>
+          <Button
+            onClick={() => {
+              const query = applicantIdentityPreview.searchText;
+              setAccountDecision(current => ({ ...current, searchQuery: query }));
+              setNoExistingMatchConfirmed(false);
+              if (query) runAccountSearch(query);
+            }}
+            disabled={!applicantIdentityPreview.searchText || accountSearchLoading}
+          >
+            Use identity
+          </Button>
+        </SpaceBetween>
+      </FormField>
+
+      {accountSearchError ? (
+        <Alert type={accountSearchResults.length ? 'info' : 'warning'}>
+          {accountSearchError}
+        </Alert>
+      ) : null}
+
+      {accountSearchResults.length || accountSearchLoading ? (
+        <Table
+          items={accountSearchResults}
+          loading={accountSearchLoading}
+          loadingText="Searching applicant accounts"
+          selectionType="single"
+          selectedItems={selectedApplicantMatch ? [selectedApplicantMatch] : []}
+          onSelectionChange={({ detail }) => {
+            const selected = detail.selectedItems?.[0] || null;
+            setSelectedApplicantMatch(selected);
+            setNoExistingMatchConfirmed(false);
+            if (selected) {
+              setAccountDecision(current => ({ ...current, strategy: 'link_selected_client' }));
+              setAccountValidationError('');
+              setWizardNavigationError('');
+            }
+          }}
+          trackBy="clientId"
+          columnDefinitions={[
+            {
+              id: 'applicant',
+              header: 'Applicant',
+              cell: item => (
+                <SpaceBetween size="xxs">
+                  {item.caseId ? (
+                    <Link href={`/cases/${item.caseId}`}>{item.applicantName || 'Client'}</Link>
+                  ) : (
+                    <Box>{item.applicantName || 'Client'}</Box>
+                  )}
+                  <Box variant="small" color="text-body-secondary">{item.email || item.accountEmail || 'No email on account'}</Box>
+                </SpaceBetween>
+              ),
+              minWidth: 180,
+            },
+            {
+              id: 'account',
+              header: 'PATH account',
+              cell: item => accountStatusBadge(item.accountStatus, item.accountStatusLabel),
+              minWidth: 130,
+            },
+            {
+              id: 'case',
+              header: 'Case',
+              cell: item => item.caseNumber || 'No case',
+              minWidth: 120,
+            },
+            {
+              id: 'owner',
+              header: 'Region / owner',
+              cell: item => [item.regionCode, item.caseManagerName].filter(Boolean).join(' · ') || 'Unassigned',
+              minWidth: 160,
+            },
+          ]}
+          empty={
+            <Box textAlign="center" color="text-body-secondary">
+              No matching client or applicant account found.
+            </Box>
+          }
+        />
+      ) : null}
+
+      {!selectedApplicantMatch ? (
+        <Button
+          onClick={() => {
+            setNoExistingMatchConfirmed(true);
+            setAccountValidationError('');
+            setWizardNavigationError('');
+          }}
+        >
+          Continue without match
+        </Button>
+      ) : (
+        <Button
+          variant="link"
+          onClick={() => {
+            setSelectedApplicantMatch(null);
+            setAccountDecision(current => (
+              current.strategy === 'link_selected_client'
+                ? { ...current, strategy: 'review_later' }
+                : current
+            ));
+          }}
+        >
+          Clear selected match
+        </Button>
+      )}
+    </SpaceBetween>
+  );
+
+  const renderAccountHandlingWizardStep = () => {
+    const selectedStrategy = ACCOUNT_STRATEGY_OPTIONS.find(option => option.value === accountDecision.strategy) || ACCOUNT_STRATEGY_OPTIONS[0];
+    return (
+      <SpaceBetween size="m">
+        {accountValidationError ? (
+          <Alert type="error" header="Review applicant account handling">
+            {accountValidationError}
+          </Alert>
+        ) : null}
+
+        <FormField label="Account handling plan" description={selectedStrategy.description}>
+          <RadioGroup
+            value={accountDecision.strategy}
+            onChange={({ detail }) => {
+              setAccountDecision(current => ({ ...current, strategy: detail.value }));
+              setAccountValidationError('');
+            }}
+            items={ACCOUNT_STRATEGY_OPTIONS}
+          />
+        </FormField>
+
+        {accountDecision.strategy === 'no_portal_planned' ? (
+          <FormField label="Reason portal access is not planned" stretch>
             <Textarea
               rows={3}
-              value={intakeSourceNotes}
-              onChange={({ detail }) => setIntakeSourceNotes(detail.value)}
+              value={accountDecision.notes}
+              onChange={({ detail }) => setAccountDecision(current => ({ ...current, notes: detail.value }))}
+              placeholder="Reason for staff-assisted service"
               spellcheck={true}
             />
           </FormField>
+        ) : null}
+      </SpaceBetween>
+    );
+  };
 
-          <Button variant="primary" onClick={() => setStarted(true)}>Create Application</Button>
-        </>
+  const renderApplicationDetailsWizardStep = () => (
+    <SpaceBetween size="l">
+      <SpaceBetween direction="horizontal" size="xs">
+        <Box color="text-body-secondary">{`Form step ${currentVisibleStepNumber} of ${totalVisibleSteps}`}</Box>
+        <Button onClick={() => setLang((prev) => (prev === 'en' ? 'fr' : 'en'))}>
+          {lang === 'en' ? 'Francais' : 'English'}
+        </Button>
+      </SpaceBetween>
+
+      {loading ? (
+        <Box textAlign="center"><Spinner size="large" /> Loading published intake schema...</Box>
       ) : null}
 
-      {started ? (
-        <SpaceBetween size="l">
-          <SpaceBetween direction="horizontal" size="xs">
-            <Box color="text-body-secondary">{`Step ${currentVisibleStepNumber} of ${totalVisibleSteps}`}</Box>
-            <Button onClick={() => setLang((prev) => (prev === 'en' ? 'fr' : 'en'))}>
-              {lang === 'en' ? 'Francais' : 'English'}
-            </Button>
-          </SpaceBetween>
+      {schemaError ? (
+        <Alert type="error" header="Unable to load intake schema">{schemaError}</Alert>
+      ) : null}
 
-          {loading ? (
-            <Box textAlign="center"><Spinner size="large" /> Loading published intake schema…</Box>
-          ) : null}
-
-          {schemaError ? (
-            <Alert type="error" header="Unable to load intake schema">{schemaError}</Alert>
-          ) : null}
-
-          {!loading && !schemaError && currentStep ? (
-            <>
-              {submitError ? (
-                <Alert type="error" header="Unable to create application">{submitError}</Alert>
-              ) : null}
-
-              <Header variant="h3">{t(lang, currentStep.title, currentStep.name || currentStepId || 'Intake Step')}</Header>
-
-              <StepRenderer
-                step={currentStep}
-                answers={runner.answers}
-                errors={runner.errors}
-                setAnswer={setAnswer}
-                lang={lang}
-                componentLookup={componentLookup}
-                stepTitle={t(lang, currentStep.title, currentStep.name || currentStepId || 'Intake Step')}
-              />
-
-              <SpaceBetween direction="horizontal" size="xs">
-                <Button onClick={goBack} disabled={runner.history.length === 0 || submitting}>Back</Button>
-                {!isFinalStep ? (
-                  <Button variant="primary" onClick={goNext} disabled={submitting}>Next</Button>
-                ) : (
-                  <Button
-                    variant="primary"
-                    onClick={handleSubmit}
-                    loading={submitting}
-                    disabled={submitting}
-                  >
-                    Create Application
-                  </Button>
-                )}
-                <Button
-                  disabled={submitting}
-                  onClick={() => {
-                    setRunner({
-                      stepIndex: findFirstRenderableManualStepIndex(steps, {}, componentLookup),
-                      answers: {},
-                      errors: {},
-                      history: [],
-                    });
-                    setIntakeSource('paper');
-                    setIntakeSourceNotes('');
-                    setSubmitError('');
-                    try { sessionStorage.removeItem(STORAGE_KEY); } catch (_) {}
-                  }}
-                >
-                  Reset
-                </Button>
-              </SpaceBetween>
-            </>
-          ) : null}
-        </SpaceBetween>
+      {!loading && !schemaError && currentStep ? (
+        <>
+          <Header variant="h3">{t(lang, currentStep.title, currentStep.name || currentStepId || 'Intake Step')}</Header>
+          <StepRenderer
+            step={currentStep}
+            answers={runner.answers}
+            errors={runner.errors}
+            setAnswer={setAnswer}
+            lang={lang}
+            componentLookup={componentLookup}
+            stepTitle={t(lang, currentStep.title, currentStep.name || currentStepId || 'Intake Step')}
+          />
+        </>
       ) : null}
     </SpaceBetween>
   );
 
+  const renderReviewWizardStep = () => (
+    <SpaceBetween size="m">
+      {submitError ? (
+        <Alert type="error" header="Unable to create application">{submitError}</Alert>
+      ) : null}
+      <ColumnLayout columns={3} variant="text-grid">
+        <div>
+          <Box variant="awsui-key-label">Applicant</Box>
+          <Box variant="strong">{applicantIdentityPreview.fullName || 'Not entered'}</Box>
+          <Box color="text-body-secondary">{applicantIdentityPreview.email || 'No email'}</Box>
+        </div>
+        <div>
+          <Box variant="awsui-key-label">Existing client/account</Box>
+          <Box variant="strong">{selectedApplicantMatch?.applicantName || (noExistingMatchConfirmed ? 'No match selected' : 'Not checked')}</Box>
+          <Box margin={{ top: 'xxs' }}>
+            {selectedApplicantMatch
+              ? accountStatusBadge(selectedApplicantMatch.accountStatus, selectedApplicantMatch.accountStatusLabel)
+              : <Badge color="grey">New or later review</Badge>}
+          </Box>
+        </div>
+        <div>
+          <Box variant="awsui-key-label">Account plan</Box>
+          <Box variant="strong">{getAccountStrategyShortLabel(accountDecision.strategy)}</Box>
+          <Box color="text-body-secondary">{INTAKE_SOURCE_OPTIONS.find(option => option.value === intakeSource)?.label || 'Intake source not set'}</Box>
+        </div>
+      </ColumnLayout>
+    </SpaceBetween>
+  );
+
+  const renderManualIntakeWizardContent = () => (
+    <SpaceBetween size="m">
+      {wizardNavigationError ? (
+        <Alert type="warning" onDismiss={() => setWizardNavigationError('')}>
+          {wizardNavigationError}
+        </Alert>
+      ) : null}
+      <Wizard
+        className="manual-intake-wizard"
+        activeStepIndex={activeWizardStepIndex}
+        i18nStrings={wizardI18nStrings}
+        onNavigate={handleWizardNavigate}
+        onSubmit={handleSubmit}
+        isLoadingNextStep={loading || accountSearchLoading || submitting}
+        submitButtonText="Create application"
+        secondaryActions={[]}
+        steps={[
+          {
+            title: 'Identity & source',
+            content: renderIdentityWizardStep(),
+            errorText: !identityStepComplete && activeWizardStepIndex > 0 ? 'Identity is incomplete.' : undefined,
+          },
+          {
+            title: 'Find existing account',
+            content: renderAccountSearchWizardStep(),
+            errorText: !accountSearchStepComplete && activeWizardStepIndex > 1 ? 'Account check is incomplete.' : undefined,
+          },
+          {
+            title: 'Account handling',
+            content: renderAccountHandlingWizardStep(),
+            errorText: accountDecisionErrorText || undefined,
+          },
+          {
+            title: 'Application details',
+            content: renderApplicationDetailsWizardStep(),
+            errorText: Object.keys(runner.errors).length > 0 ? 'Complete required fields before continuing.' : undefined,
+          },
+          {
+            title: 'Review & submit',
+            content: renderReviewWizardStep(),
+          },
+        ]}
+      />
+    </SpaceBetween>
+  );
+
   const renderBoardItem = (item, actions) => {
-    if (!item?.id || item.id !== INTAKE_WIDGET_ID) return null;
+    if (!item?.id) return null;
+    if (item.id === FLOW_WIDGET_ID) {
+      return (
+        <BoardItem
+          header={
+            <Header
+              variant="h2"
+              info={
+                <Link
+                  variant="info"
+                  onFollow={() =>
+                    toggleHelpPanel &&
+                    toggleHelpPanel(
+                      <ManualApplicationIntakeHelp />,
+                      'Staff-Assisted Intake Flow',
+                      ManualApplicationIntakeHelp.aiContext || ''
+                    )
+                  }
+                >
+                  Info
+                </Link>
+              }
+            >
+              Staff-Assisted Intake Flow
+            </Header>
+          }
+          settings={
+            actions?.removeItem ? (
+              <ButtonDropdown
+                items={[{ id: 'remove', text: 'Remove widget' }]}
+                ariaLabel="Staff-assisted intake flow widget settings"
+                variant="icon"
+                onItemClick={() => actions.removeItem()}
+              />
+            ) : null
+          }
+          i18nStrings={boardItemI18nStrings}
+        >
+          {renderProcessFlowContent()}
+        </BoardItem>
+      );
+    }
+    if (item.id !== INTAKE_WIDGET_ID) return null;
     return (
       <BoardItem
         header={
@@ -925,7 +1882,7 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
                   toggleHelpPanel &&
                   toggleHelpPanel(
                     <ManualApplicationIntakeHelp />,
-                    'Manual Intake Form',
+                    'Staff-Assisted Intake Wizard',
                     ManualApplicationIntakeHelp.aiContext || ''
                   )
                 }
@@ -934,7 +1891,7 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
               </Link>
             }
           >
-            Intake Form
+            Staff-Assisted Intake Wizard
           </Header>
         }
         settings={
@@ -949,7 +1906,7 @@ const ManualApplicationIntakePage = ({ setAvailableItems, setSplitPanelOpen, tog
         }
         i18nStrings={boardItemI18nStrings}
       >
-        {renderManualIntakeContent()}
+        {renderManualIntakeWizardContent()}
       </BoardItem>
     );
   };

@@ -1,10 +1,10 @@
 # Browser Workflow Smoke Automation
 
-Status: current guidance from the 2026-05-08/09 application-assessment containment release, updated with the 2026-06-10 application-workspace and application-assessment browser-smoke coverage.
+Status: current guidance from the 2026-05-08/09 application-assessment containment release, updated with the 2026-06-11 manual-intake and app-shell browser-smoke coverage.
 
 Audience: Codex threads and developers building or rehearsing browser-level workflow smokes for PATH.
 
-Last Updated: 2026-06-10
+Last Updated: 2026-06-11
 
 ## Purpose
 
@@ -92,6 +92,24 @@ The ILMP Submissions & Exports dashboard has a local browser smoke:
 This smoke loads the real local React bundle at `http://localhost:3001/esdc/participants`, injects a synthetic System Administrator browser session, stubs the required API responses, and verifies the combined participant queue renders with bucket-style validation counters, sortable table headers, participant rows, the queue-header `Generate batch XML` action, and no standalone duplicate Validation Summary or Batch submission widget. It clicks `Generate batch XML`, confirms the UI calls `/api/esdc/participants/batch-prepare`, and checks that the batch modal has a filename field without the retired XML preview or fake download-path field. It is useful for visual/layout regressions when no reusable Cognito staff token is available in the shell. Pair it with a live local endpoint smoke for `/api/esdc/participants` when backend route shape or returned data semantics changed.
 
 The script automatically prepends the current WSL local Chrome dependency path (`/home/bill/.local/chrome-deps/extract/usr/lib/x86_64-linux-gnu`) to `LD_LIBRARY_PATH` when present, so the npm alias works from a normal shell without manually exporting the Puppeteer NSS/NSPR workaround.
+
+## App Shell Navigation Reference
+
+The global Cloudscape AppLayout side navigation has a local browser smoke:
+
+- Script: `scripts/app-shell-navigation-browser-smoke.js`
+- NPM alias: `npm run smoke:app-shell-navigation:browser`
+
+This smoke loads the real local React bundle on `/`, `/manage-components`, and `/application-case/1?applicationId=2`, injects a synthetic System Administrator browser session, and stubs common shell API calls. It verifies the side-navigation close and open controls with real pointer clicks and `elementFromPoint`, so it catches the regression where the visible close chevron existed but the `Homepage` SideNavigation header was the top hit target. Use it after global shell, Cloudscape AppLayout, SideNavigation, tutorial-hotspot, or top-level CSS changes.
+
+## Manual Application Intake Reference
+
+The Manual Application Intake dashboard has a local browser smoke:
+
+- Script: `scripts/manual-application-intake-browser-smoke.js`
+- NPM alias: `npm run smoke:manual-intake:browser`
+
+This smoke loads the real local React bundle at `/iset/applications/intake`, injects a synthetic System Administrator browser session, stubs the published intake schema to a minimal identity step, and verifies the staff-assisted intake wrapper. It checks the `Staff-Assisted Intake Flow` widget, the `Staff-Assisted Intake Wizard`, account search through `/api/admin/applicants`, selecting an existing client/account match, wizard navigation through account handling, application details, and review, posting `/api/applications/manual-intake`, and carrying the selected-client account decision in the request payload. It captures `tmp/manual-intake-smoke/manual-application-intake.png` for visual review.
 
 ## Case Assignment Dashboard Reference
 

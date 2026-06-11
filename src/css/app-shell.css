@@ -1,0 +1,4 @@
+/* Keep AppLayout navigation controls above the SideNavigation header hit box. */
+[class*="awsui_navigation-container_"] [class*="awsui_hide-navigation_"] {
+  z-index: 2;
+}
