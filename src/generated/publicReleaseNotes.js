@@ -1,9 +1,9 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-06-10T22:02:10.874Z",
-  "releaseId": "20260610-prod-modify-component-editor",
-  "releaseLabel": "Release 20260610-prod-modify-component-editor",
-  "releaseDateEn": "10th June 2026",
-  "releaseDateFr": "10 juin 2026",
+  "generatedAt": "2026-06-12T15:54:14.920Z",
+  "releaseId": "",
+  "releaseLabel": "Current build",
+  "releaseDateEn": "12th June 2026",
+  "releaseDateFr": "12 juin 2026",
   "en": {
     "sectionEyebrow": "Optional reading",
     "description": "",

@@ -2,6 +2,10 @@
 
 Format: YYYY-MM-DD - Category: Short description
 
+## 2026-06-12
+- UX/Workflow Studio/DEV: Added configuration-based intake step grouping without a schema migration. Manage Intake Steps now exposes group filtering, group badges, workflow usage, and a group catalogue editor; Modify Intake Step can assign a step group through the step properties panel; group membership is stored in existing `step.ui_meta` and the catalogue in `iset_runtime_config`.
+- UX/Casework/DEV: Added a System Administrator-only Case Workspace quick action to reopen a closed action plan for legitimate post-closeout recovery. The new guarded endpoint requires a reason, blocks archived cases/plans, existing active plans, and open intervention proposals, resets ILMP validation/submission to needs review, writes an internal note and `case_reopen_recovery` event, and supports either proposing a new intervention while leaving completed interventions untouched or reopening one completed/cancelled intervention for amendment.
+
 ## 2026-06-11
 - Fix/Casework/DEV: Funding revision letter sends now recover when the selected intervention needs a Client Funding Agreement but no draft CFA exists yet. Intervention-scoped secure-message sends create the missing draft from the selected action plan before falling back to the application-assessment path, covering approved current amendments on records that were originally manually backloaded while keeping ordinary manual-backload edit/close operations silent.
 - Fix/App Shell/DEV: Restored the Cloudscape side-navigation chevron hit target. The visible close control was wired correctly but sat below the SideNavigation `Homepage` header in the pointer stack, so real mouse clicks hit the header instead of collapsing the nav; the app shell now raises the AppLayout hide-navigation control above the header.

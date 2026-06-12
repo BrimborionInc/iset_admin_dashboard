@@ -137,6 +137,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     markReadyToClose,
     closeCase,
     reopenCase,
+    reopenCaseRecovery,
     archiveCase,
     refresh,
     selectedActionPlanId,
@@ -174,6 +175,12 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
   const [accountEmailValue, setAccountEmailValue] = useState("");
   const [accountEmailSaving, setAccountEmailSaving] = useState(false);
   const [accountEmailError, setAccountEmailError] = useState(null);
+  const [recoveryModalOpen, setRecoveryModalOpen] = useState(false);
+  const [recoveryMode, setRecoveryMode] = useState("new_intervention");
+  const [recoveryActionPlanId, setRecoveryActionPlanId] = useState("");
+  const [recoveryInterventionId, setRecoveryInterventionId] = useState("");
+  const [recoveryReason, setRecoveryReason] = useState("");
+  const [recoveryError, setRecoveryError] = useState(null);
   const canonicalRole = toCanonicalRole(currentUser?.role || null);
   const isSystemAdmin = canonicalRole === "System Administrator";
   const isProgramAdmin = canonicalRole === "NWAC Administrator";
@@ -630,6 +637,79 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     () => getInterventionProposalActionLabel(openInterventionProposalAction),
     [openInterventionProposalAction]
   );
+  const recoveryModeOptions = useMemo(
+    () => [
+      {
+        value: "new_intervention",
+        label: "New intervention",
+        description: "Reopen the closed plan and leave completed interventions unchanged.",
+      },
+      {
+        value: "amend_intervention",
+        label: "Amend completed intervention",
+        description: "Reopen the closed plan and move one completed intervention back to in progress.",
+      },
+    ],
+    []
+  );
+  const closedActionPlanOptions = useMemo(() => {
+    const plans = Array.isArray(caseData?.actionPlans) ? caseData.actionPlans : [];
+    return plans
+      .filter(plan => String(plan?.status || "").trim().toLowerCase() === "closed" && !plan?.archivedAt)
+      .map(plan => ({
+        value: String(plan.id),
+        label: plan.name || plan.title || `Action plan ${plan.id}`,
+        description: plan.closedAt ? `Closed ${formatDate(plan.closedAt)}` : "Closed action plan",
+        plan,
+      }));
+  }, [caseData?.actionPlans]);
+  const hasActiveActionPlan = useMemo(() => {
+    const plans = Array.isArray(caseData?.actionPlans) ? caseData.actionPlans : [];
+    return plans.some(plan => (
+      String(plan?.status || "").trim().toLowerCase() === "active" && !plan?.archivedAt
+    ));
+  }, [caseData?.actionPlans]);
+  const selectedRecoveryPlan = useMemo(
+    () => closedActionPlanOptions.find(option => option.value === String(recoveryActionPlanId))?.plan || null,
+    [closedActionPlanOptions, recoveryActionPlanId]
+  );
+  const completedRecoveryInterventionOptions = useMemo(() => {
+    const interventions = Array.isArray(selectedRecoveryPlan?.interventions) ? selectedRecoveryPlan.interventions : [];
+    return interventions
+      .filter(intervention => {
+        const state = resolveInterventionStateFields(intervention);
+        return state.deliveryStatus === "completed" || state.deliveryStatus === "cancelled";
+      })
+      .map(intervention => ({
+        value: String(intervention.id),
+        label: intervention.title || intervention.code || `Intervention ${intervention.id}`,
+        description: intervention.endDate ? `Ended ${formatDate(intervention.endDate)}` : "Completed intervention",
+      }));
+  }, [selectedRecoveryPlan]);
+  useEffect(() => {
+    if (!recoveryModalOpen) return;
+    if (!closedActionPlanOptions.length) {
+      setRecoveryActionPlanId("");
+      return;
+    }
+    if (!closedActionPlanOptions.some(option => option.value === String(recoveryActionPlanId))) {
+      setRecoveryActionPlanId(closedActionPlanOptions[0].value);
+    }
+  }, [closedActionPlanOptions, recoveryActionPlanId, recoveryModalOpen]);
+  useEffect(() => {
+    if (!recoveryModalOpen) return;
+    if (recoveryMode !== "amend_intervention") {
+      setRecoveryInterventionId("");
+      return;
+    }
+    if (!completedRecoveryInterventionOptions.length) {
+      setRecoveryInterventionId("");
+      return;
+    }
+    if (!completedRecoveryInterventionOptions.some(option => option.value === String(recoveryInterventionId))) {
+      setRecoveryInterventionId(completedRecoveryInterventionOptions[0].value);
+    }
+  }, [completedRecoveryInterventionOptions, recoveryInterventionId, recoveryModalOpen, recoveryMode]);
   const quickLayoutItems = useMemo(
     () => [
       { id: "manage-plans-interventions", text: "View plans and interventions" },
@@ -660,6 +740,8 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     const canReopenClosed = hasCase && (isReadyToClose || isClosed) && (isSystemAdmin || isProgramAdmin);
     const canReopenArchived = hasCase && isArchived && isSystemAdmin;
     const canReopen = canReopenClosed || canReopenArchived;
+    const canReopenPlanRecovery =
+      hasCase && isSystemAdmin && !isArchived && !hasActiveActionPlan && closedActionPlanOptions.length > 0;
     const canUseHistoricalEntry = hasCase && !isArchived && (isSystemAdmin || isProgramAdmin || isRegionalManager);
     const canManagePathAccount = hasCase && Boolean(caseData?.client?.id) && !isArchived;
     const hasPathAccountEmail = Boolean(pathAccount?.email);
@@ -699,6 +781,9 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     if (canReopen) {
       items.push({ id: "reopen-case", text: "Reopen case" });
     }
+    if (canReopenPlanRecovery) {
+      items.push({ id: "reopen-plan-recovery", text: "Reopen closed plan" });
+    }
     if (lockApplicationId) {
       items.push({ id: "release-lock", text: "Release lock" });
     }
@@ -713,6 +798,8 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     isProgramAdmin,
     isRegionalManager,
     canAddToWatchlist,
+    closedActionPlanOptions.length,
+    hasActiveActionPlan,
     interventionProposalActionLabel,
     caseData?.client?.id,
     pathAccount?.email,
@@ -1228,6 +1315,56 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     }
   }, [accountEmailValue, caseData?.client?.id, refresh]);
 
+  const handleRecoverySubmit = useCallback(async () => {
+    if (actionLoading) return;
+    const trimmedReason = recoveryReason.trim();
+    if (!recoveryActionPlanId) {
+      setRecoveryError("Select the closed action plan to reopen.");
+      return;
+    }
+    if (recoveryMode === "amend_intervention" && !recoveryInterventionId) {
+      setRecoveryError("Select the completed intervention to reopen.");
+      return;
+    }
+    if (!trimmedReason) {
+      setRecoveryError("Enter the reason this closeout is being reopened.");
+      return;
+    }
+    setActionError(null);
+    setActionNotice(null);
+    setRecoveryError(null);
+    setActionLoading(true);
+    try {
+      await reopenCaseRecovery({
+        mode: recoveryMode,
+        actionPlanId: Number(recoveryActionPlanId),
+        interventionId: recoveryMode === "amend_intervention" ? Number(recoveryInterventionId) : null,
+        reason: trimmedReason,
+      });
+      await refresh();
+      setRecoveryModalOpen(false);
+      setActionNotice({
+        type: "success",
+        text:
+          recoveryMode === "amend_intervention"
+            ? "Closed plan and intervention reopened for amendment."
+            : "Closed plan reopened for a new intervention.",
+      });
+    } catch (err) {
+      setRecoveryError(err?.message || "Unable to reopen the closed plan.");
+    } finally {
+      setActionLoading(false);
+    }
+  }, [
+    actionLoading,
+    recoveryActionPlanId,
+    recoveryInterventionId,
+    recoveryMode,
+    recoveryReason,
+    refresh,
+    reopenCaseRecovery,
+  ]);
+
   const handleQuickAction = useCallback(
     async ({ detail }) => {
       if (!detail?.id) return;
@@ -1274,6 +1411,15 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
         }
       } else if (detail.id === "reopen-case") {
         setReopenModalOpen(true);
+      } else if (detail.id === "reopen-plan-recovery") {
+        setRecoveryMode("new_intervention");
+        setRecoveryActionPlanId(closedActionPlanOptions[0]?.value || "");
+        setRecoveryInterventionId("");
+        setRecoveryReason("");
+        setRecoveryError(null);
+        setActionError(null);
+        setActionNotice(null);
+        setRecoveryModalOpen(true);
       } else if (detail.id === "archive-case") {
         setArchiveModalOpen(true);
       } else if (detail.id === "propose-intervention") {
@@ -1428,6 +1574,7 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       openInterventionProposalAction,
       selectedActionPlanId,
       caseData,
+      closedActionPlanOptions,
       pathAccount?.email,
       pathAccountStatusKey,
       requestLayoutSwitch,
@@ -1722,6 +1869,100 @@ const CaseHeaderWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
                 spellcheck={false}
                 disabled={accountEmailSaving}
                 onChange={({ detail }) => setAccountEmailValue(detail.value)}
+              />
+            </FormField>
+          </SpaceBetween>
+        </Modal>
+        <Modal
+          visible={recoveryModalOpen}
+          onDismiss={() => {
+            if (actionLoading) return;
+            setRecoveryModalOpen(false);
+          }}
+          header="Reopen closed plan"
+          closeAriaLabel="Dismiss reopen closed plan"
+          footer={
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button onClick={() => setRecoveryModalOpen(false)} disabled={actionLoading}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                loading={actionLoading}
+                disabled={
+                  !recoveryActionPlanId ||
+                  !recoveryReason.trim() ||
+                  (recoveryMode === "amend_intervention" && !recoveryInterventionId)
+                }
+                onClick={handleRecoverySubmit}
+              >
+                Reopen closed plan
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="m">
+            <Alert type="warning">
+              This clears the action plan closeout result and resets ILMP validation to needs review. Amendment mode
+              also clears the selected intervention outcome and actual amount, then returns it to in progress.
+            </Alert>
+            {recoveryError ? <Alert type="error">{recoveryError}</Alert> : null}
+            <FormField label="Recovery type">
+              <Select
+                selectedOption={
+                  recoveryModeOptions.find(option => option.value === recoveryMode) || recoveryModeOptions[0]
+                }
+                options={recoveryModeOptions}
+                disabled={actionLoading}
+                onChange={({ detail }) => {
+                  setRecoveryMode(detail.selectedOption?.value || "new_intervention");
+                  setRecoveryError(null);
+                }}
+              />
+            </FormField>
+            <FormField label="Closed action plan">
+              <Select
+                selectedOption={
+                  closedActionPlanOptions.find(option => option.value === String(recoveryActionPlanId)) || null
+                }
+                options={closedActionPlanOptions}
+                disabled={actionLoading || !closedActionPlanOptions.length}
+                placeholder="Select a closed action plan"
+                onChange={({ detail }) => {
+                  setRecoveryActionPlanId(detail.selectedOption?.value || "");
+                  setRecoveryInterventionId("");
+                  setRecoveryError(null);
+                }}
+              />
+            </FormField>
+            {recoveryMode === "amend_intervention" ? (
+              <FormField label="Completed intervention">
+                <Select
+                  selectedOption={
+                    completedRecoveryInterventionOptions.find(
+                      option => option.value === String(recoveryInterventionId)
+                    ) || null
+                  }
+                  options={completedRecoveryInterventionOptions}
+                  disabled={actionLoading || !completedRecoveryInterventionOptions.length}
+                  placeholder="Select a completed intervention"
+                  onChange={({ detail }) => {
+                    setRecoveryInterventionId(detail.selectedOption?.value || "");
+                    setRecoveryError(null);
+                  }}
+                />
+              </FormField>
+            ) : null}
+            <FormField label="Reason">
+              <Textarea
+                value={recoveryReason}
+                spellcheck={true}
+                disabled={actionLoading}
+                placeholder="Describe why the closed plan needs to be reopened."
+                onChange={({ detail }) => {
+                  setRecoveryReason(detail.value);
+                  setRecoveryError(null);
+                }}
               />
             </FormField>
           </SpaceBetween>

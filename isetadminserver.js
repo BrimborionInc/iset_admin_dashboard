@@ -45705,18 +45705,194 @@ function ensureStepEditor(req, res) {
   return false;
 }
 
+const STEP_GROUPS_SCOPE = 'admin';
+const STEP_GROUPS_KEY = 'workflow.stepGroups';
+const DEFAULT_STEP_GROUPS = [
+  { id: 'iset', label: 'ISET Intake', description: 'Core ISET application and related reusable steps.', status: 'active' },
+  { id: 'passport-demo', label: 'Passport Demo', description: 'Demo steps used for passport workflow experiments.', status: 'active' },
+  { id: 'nunavut-legal-aid', label: 'Nunavut Legal Aid Demo', description: 'Demo steps generated from Nunavut Legal Aid application drafts.', status: 'active' },
+];
+
+function normaliseStepGroupId(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return '';
+  return raw
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+}
+
+function labelFromGroupId(groupId) {
+  return String(groupId || '')
+    .split('-')
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ') || 'Group';
+}
+
+function normaliseStepGroupEntry(entry) {
+  const source = entry && typeof entry === 'object' ? entry : { id: entry };
+  const id = normaliseStepGroupId(source.id || source.value || source.key || source.label);
+  if (!id) return null;
+  const label = String(source.label || source.name || labelFromGroupId(id)).trim().slice(0, 120);
+  const description = typeof source.description === 'string' ? source.description.trim().slice(0, 500) : '';
+  const statusRaw = String(source.status || 'active').trim().toLowerCase();
+  const status = statusRaw === 'archived' || statusRaw === 'inactive' ? statusRaw : 'active';
+  return {
+    id,
+    label: label || labelFromGroupId(id),
+    description,
+    status,
+  };
+}
+
+function normaliseStepGroupsConfig(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  const rawGroups = Array.isArray(source.groups) ? source.groups : (Array.isArray(value) ? value : []);
+  const byId = new Map();
+  DEFAULT_STEP_GROUPS.forEach(entry => {
+    const normalised = normaliseStepGroupEntry(entry);
+    if (normalised) byId.set(normalised.id, normalised);
+  });
+  rawGroups.forEach(entry => {
+    const normalised = normaliseStepGroupEntry(entry);
+    if (normalised) byId.set(normalised.id, normalised);
+  });
+  return { groups: Array.from(byId.values()).sort((a, b) => a.label.localeCompare(b.label)) };
+}
+
+function normaliseStepUiMeta(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const meta = { ...value };
+  const rawGroups = [];
+  if (Array.isArray(meta.groups)) rawGroups.push(...meta.groups);
+  if (meta.primaryGroup) rawGroups.push(meta.primaryGroup);
+  if (meta.stepGroup) rawGroups.push(meta.stepGroup);
+  if (meta.group) rawGroups.push(meta.group);
+  if (meta.demoScope) rawGroups.push(meta.demoScope);
+  const groups = Array.from(new Set(rawGroups.map(normaliseStepGroupId).filter(Boolean)));
+  if (groups.length) {
+    meta.groups = groups;
+    meta.primaryGroup = normaliseStepGroupId(meta.primaryGroup) || groups[0];
+  } else {
+    delete meta.groups;
+    delete meta.primaryGroup;
+  }
+  delete meta.stepGroup;
+  delete meta.group;
+  return Object.keys(meta).length ? meta : null;
+}
+
+function enrichStepRowWithGroup(row, groupLookup = new Map()) {
+  const uiMeta = normaliseStepUiMeta(normaliseJson(row?.ui_meta));
+  const groupIds = Array.isArray(uiMeta?.groups) ? uiMeta.groups : [];
+  const groupLabels = groupIds.map(id => groupLookup.get(id)?.label || labelFromGroupId(id));
+  return {
+    ...row,
+    ui_meta: uiMeta,
+    groups: groupIds,
+    primaryGroup: uiMeta?.primaryGroup || groupIds[0] || null,
+    groupLabels,
+    groupLabel: groupLabels[0] || 'Ungrouped',
+  };
+}
+
+async function readStepGroupsConfig() {
+  try {
+    await ensureRuntimeConfigTable();
+    const [[row]] = await pool.query(
+      'SELECT v, updated_at FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
+      [STEP_GROUPS_SCOPE, STEP_GROUPS_KEY]
+    );
+    const config = normaliseStepGroupsConfig(row ? parseJsonValue(row.v) : null);
+    return {
+      ...config,
+      source: row ? 'stored' : 'default',
+      updatedAt: row?.updated_at ? new Date(row.updated_at).toISOString() : null,
+    };
+  } catch (err) {
+    console.warn('[step-groups] read config failed:', err.message);
+    return { ...normaliseStepGroupsConfig(null), source: 'error', updatedAt: null };
+  }
+}
+
+async function writeStepGroupsConfig(payload) {
+  const config = normaliseStepGroupsConfig(payload);
+  await ensureRuntimeConfigTable();
+  await pool.query(
+    'INSERT INTO iset_runtime_config (scope,k,v) VALUES (?,?,CAST(? AS JSON)) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=CURRENT_TIMESTAMP',
+    [STEP_GROUPS_SCOPE, STEP_GROUPS_KEY, JSON.stringify(config)]
+  );
+  return readStepGroupsConfig();
+}
+
+async function loadStepGroupsWithDiscovered() {
+  const config = await readStepGroupsConfig();
+  const byId = new Map(config.groups.map(group => [group.id, { ...group }]));
+  try {
+    const [rows] = await pool.query(`
+      SELECT DISTINCT
+        COALESCE(
+          JSON_UNQUOTE(JSON_EXTRACT(ui_meta, '$.primaryGroup')),
+          JSON_UNQUOTE(JSON_EXTRACT(ui_meta, '$.groups[0]')),
+          JSON_UNQUOTE(JSON_EXTRACT(ui_meta, '$.stepGroup')),
+          JSON_UNQUOTE(JSON_EXTRACT(ui_meta, '$.group')),
+          JSON_UNQUOTE(JSON_EXTRACT(ui_meta, '$.demoScope'))
+        ) AS group_id
+      FROM iset_intake.step
+      WHERE ui_meta IS NOT NULL
+    `);
+    rows.forEach(row => {
+      const id = normaliseStepGroupId(row?.group_id);
+      if (!id || byId.has(id)) return;
+      byId.set(id, { id, label: labelFromGroupId(id), description: '', status: 'active', discovered: true });
+    });
+  } catch (err) {
+    console.warn('[step-groups] failed to discover step metadata groups:', err.message);
+  }
+  return {
+    ...config,
+    groups: Array.from(byId.values()).sort((a, b) => a.label.localeCompare(b.label)),
+  };
+}
+
+app.get('/api/step-groups', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
+  try {
+    res.status(200).json(await loadStepGroupsWithDiscovered());
+  } catch (err) {
+    console.error('GET /api/step-groups failed:', err);
+    res.status(500).json({ error: 'Failed to fetch step groups' });
+  }
+});
+
+app.patch('/api/step-groups', async (req, res) => {
+  if (!ensureStepEditor(req, res)) return;
+  try {
+    res.status(200).json(await writeStepGroupsConfig(req.body || {}));
+  } catch (err) {
+    console.error('PATCH /api/step-groups failed:', err);
+    res.status(500).json({ error: 'Failed to save step groups' });
+  }
+});
+
 // --- Steps API (DB-only, versioned component templates) --------------------
 // List steps for the Workflow Editor's library
 app.get('/api/steps', async (req, res) => {
   if (!ensureStepEditor(req, res)) return;
   try {
-    const { q, limit, offset, status } = req.query;
+    const { q, limit, offset, status, group } = req.query;
     const filters = [];
     const params = [];
     if (typeof q === 'string' && q.trim()) {
       const search = `%${q.trim().toLowerCase().replace(/\s+/g, '%')}%`;
-      filters.push('LOWER(s.name) LIKE ?');
-      params.push(search);
+      filters.push(`(
+        LOWER(s.name) LIKE ?
+        OR LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.ui_meta, '$.primaryGroup')), '')) LIKE ?
+        OR LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.ui_meta, '$.groups[0]')), '')) LIKE ?
+        OR LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.ui_meta, '$.demoScope')), '')) LIKE ?
+      )`);
+      params.push(search, search, search, search);
     }
     if (typeof status === 'string' && status.trim()) {
       const allowedStatuses = ['draft', 'active', 'inactive'];
@@ -45726,24 +45902,53 @@ app.get('/api/steps', async (req, res) => {
         params.push(...statuses);
       }
     }
+    if (typeof group === 'string' && group.trim()) {
+      const groupId = normaliseStepGroupId(group);
+      if (groupId === 'ungrouped') {
+        filters.push(`(
+          s.ui_meta IS NULL
+          OR COALESCE(JSON_LENGTH(JSON_EXTRACT(s.ui_meta, '$.groups')), 0) = 0
+            AND JSON_EXTRACT(s.ui_meta, '$.primaryGroup') IS NULL
+            AND JSON_EXTRACT(s.ui_meta, '$.stepGroup') IS NULL
+            AND JSON_EXTRACT(s.ui_meta, '$.group') IS NULL
+            AND JSON_EXTRACT(s.ui_meta, '$.demoScope') IS NULL
+        )`);
+      } else if (groupId) {
+        filters.push(`(
+          JSON_CONTAINS(JSON_EXTRACT(s.ui_meta, '$.groups'), JSON_QUOTE(?))
+          OR JSON_UNQUOTE(JSON_EXTRACT(s.ui_meta, '$.primaryGroup')) = ?
+          OR JSON_UNQUOTE(JSON_EXTRACT(s.ui_meta, '$.stepGroup')) = ?
+          OR JSON_UNQUOTE(JSON_EXTRACT(s.ui_meta, '$.group')) = ?
+          OR JSON_UNQUOTE(JSON_EXTRACT(s.ui_meta, '$.demoScope')) = ?
+        )`);
+        params.push(groupId, groupId, groupId, groupId, groupId);
+      }
+    }
     const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
     const pageSizeRaw = Number.parseInt(limit, 10);
     const offsetRaw = Number.parseInt(offset, 10);
     const pageSize = Number.isFinite(pageSizeRaw) ? Math.min(Math.max(pageSizeRaw, 1), 500) : 200;
     const offsetValue = Number.isFinite(offsetRaw) ? Math.max(offsetRaw, 0) : 0;
+    const groupsConfig = await loadStepGroupsWithDiscovered();
+    const groupLookup = new Map(groupsConfig.groups.map(item => [item.id, item]));
 
     const selectSql = `
       SELECT
         s.id,
         s.name,
         s.status,
+        s.ui_meta,
         s.created_at,
         s.updated_at,
-        COUNT(sc.id) AS component_count
+        COUNT(sc.id) AS component_count,
+        COUNT(DISTINCT ws.workflow_id) AS workflow_count,
+        GROUP_CONCAT(DISTINCT w.name ORDER BY w.name SEPARATOR ', ') AS workflow_names
       FROM iset_intake.step s
       LEFT JOIN iset_intake.step_component sc ON sc.step_id = s.id
+      LEFT JOIN iset_intake.workflow_step ws ON ws.step_id = s.id
+      LEFT JOIN iset_intake.workflow w ON w.id = ws.workflow_id
       ${whereClause}
-      GROUP BY s.id, s.name, s.status, s.created_at, s.updated_at
+      GROUP BY s.id, s.name, s.status, s.ui_meta, s.created_at, s.updated_at
       ORDER BY s.name
       LIMIT ? OFFSET ?
     `;
@@ -45758,11 +45963,12 @@ app.get('/api/steps', async (req, res) => {
     const [[countRow]] = await pool.query(countSql, params);
 
     res.status(200).json({
-      items: rows,
+      items: rows.map(row => enrichStepRowWithGroup(row, groupLookup)),
       total: countRow.total,
       limit: pageSize,
       offset: offsetValue,
-      query: typeof q === 'string' ? q : null
+      query: typeof q === 'string' ? q : null,
+      groups: groupsConfig.groups
     });
   } catch (err) {
     console.error('GET /api/steps failed:', err);
@@ -46417,6 +46623,8 @@ app.get('/api/component-templates', async (req, res) => {
 app.get('/api/steps/:id', async (req, res) => {
   const { id } = req.params;
   try {
+    const groupsConfig = await loadStepGroupsWithDiscovered();
+    const groupLookup = new Map(groupsConfig.groups.map(item => [item.id, item]));
     const [[step]] = await pool.query(
       `SELECT id, name, status, ui_meta FROM iset_intake.step WHERE id = ?`,
       [id]
@@ -46447,11 +46655,16 @@ app.get('/api/steps/:id', async (req, res) => {
       props: normaliseJson(c.props_overrides)
     }));
 
+    const enriched = enrichStepRowWithGroup(step, groupLookup);
     res.status(200).json({
-      id: step.id,
-      name: step.name,
-      status: step.status,
-      ui_meta: normaliseJson(step.ui_meta),
+      id: enriched.id,
+      name: enriched.name,
+      status: enriched.status,
+      ui_meta: enriched.ui_meta,
+      groups: enriched.groups,
+      primaryGroup: enriched.primaryGroup,
+      groupLabel: enriched.groupLabel,
+      groupLabels: enriched.groupLabels,
       components: mapped
     });
   } catch (err) {
@@ -46526,6 +46739,7 @@ app.post('/api/steps', async (req, res) => {
   if (!ensureStepEditor(req, res)) return;
   const { name, status = 'active', components = [], ui_meta = null } = req.body || {};
   const trimmedName = typeof name === 'string' ? name.trim() : '';
+  const normalisedUiMeta = normaliseStepUiMeta(ui_meta);
   // Defensive sanitation: strip placeholder summary-list rows if dynamic config present
   if (Array.isArray(components)) {
     components.forEach(c => {
@@ -46612,7 +46826,7 @@ app.post('/api/steps', async (req, res) => {
       }
       const [r] = await conn.query(
         `INSERT INTO iset_intake.step (name, status, ui_meta) VALUES (?,?,?)`,
-        [trimmedName, status, ui_meta ? JSON.stringify(ui_meta) : null]
+        [trimmedName, status, normalisedUiMeta ? JSON.stringify(normalisedUiMeta) : null]
       );
       const newId = r.insertId;
       if (components.length) {
@@ -46648,6 +46862,7 @@ app.put('/api/steps/:id', async (req, res) => {
   if (!ensureStepEditor(req, res)) return;
   const { id } = req.params;
   const { name, status, components, ui_meta } = req.body || {};
+  const normalisedUiMeta = typeof ui_meta === 'undefined' ? undefined : normaliseStepUiMeta(ui_meta);
   if (typeof name === 'string' && !name.trim()) {
     return res.status(400).json({ error: 'name cannot be empty' });
   }
@@ -46752,7 +46967,7 @@ app.put('/api/steps/:id', async (req, res) => {
         }
         if (typeof ui_meta !== 'undefined') {
           updates.push('ui_meta = ?');
-          updateParams.push(ui_meta === null ? null : JSON.stringify(ui_meta));
+          updateParams.push(normalisedUiMeta === null ? null : JSON.stringify(normalisedUiMeta));
         }
         updateParams.push(id);
         await conn.query(
@@ -55682,6 +55897,406 @@ app.post('/api/interventions/:id/delete', async (req, res) => {
   } catch (error) {
     console.error('POST /api/interventions/:id/delete failed:', error);
     res.status(500).json({ error: 'delete_intervention_failed', detail: error?.message || String(error) });
+  }
+});
+
+app.post('/api/cases/:id/reopen-recovery', async (req, res) => {
+  const caseId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(caseId) || caseId <= 0) {
+    return res.status(400).json({ error: 'invalid_case_id' });
+  }
+
+  const role = canonicaliseAccessRole(inferUserRole(req));
+  if (role !== 'System Administrator') {
+    return res.status(403).json({
+      error: 'forbidden',
+      message: 'Only System Administrators can reopen a closed case plan for recovery.'
+    });
+  }
+
+  const modeInput = (normaliseString(req.body?.mode) || 'new_intervention')
+    .toLowerCase()
+    .replace(/[-\s]+/g, '_');
+  const mode =
+    modeInput === 'new' || modeInput === 'new_intervention'
+      ? 'new_intervention'
+      : modeInput === 'amend' || modeInput === 'amend_intervention'
+        ? 'amend_intervention'
+        : null;
+  if (!mode) {
+    return res.status(422).json({
+      error: 'invalid_recovery_mode',
+      message: 'Choose whether the plan is being reopened for a new intervention or to amend a completed intervention.'
+    });
+  }
+
+  const actionPlanId = normalisePositiveInteger(
+    req.body?.actionPlanId ?? req.body?.action_plan_id ?? req.body?.planId ?? req.body?.plan_id
+  );
+  if (!actionPlanId) {
+    return res.status(422).json({
+      error: 'action_plan_required',
+      message: 'Select the closed action plan to reopen.'
+    });
+  }
+
+  const interventionId = normalisePositiveInteger(
+    req.body?.interventionId ?? req.body?.intervention_id
+  );
+  if (mode === 'amend_intervention' && !interventionId) {
+    return res.status(422).json({
+      error: 'intervention_required',
+      message: 'Select the completed intervention to reopen for amendment.'
+    });
+  }
+
+  const reason = normaliseString(req.body?.reason ?? req.body?.note ?? req.body?.notes);
+  if (!reason) {
+    return res.status(422).json({
+      error: 'reason_required',
+      message: 'Enter the reason this closeout is being reopened.'
+    });
+  }
+
+  const modeLabel = mode === 'amend_intervention'
+    ? 'amend a completed intervention'
+    : 'propose a new intervention';
+  const actorStaffProfileId = resolveActiveStaffProfileId(req) || null;
+  let connection;
+
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const actorUserId = await resolveExistingUserIdFromAuth(req, connection);
+
+    const [[caseRow]] = await connection.query(
+      `SELECT id, case_number, status, lifecycle_status, closed_at, closure_reason
+         FROM iset_case
+        WHERE id = ?
+        LIMIT 1
+        FOR UPDATE`,
+      [caseId]
+    );
+    if (!caseRow) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'case_not_found' });
+    }
+
+    const caseStatus = String(caseRow.status || '').trim().toLowerCase();
+    if (caseStatus === 'archived') {
+      await connection.rollback();
+      return res.status(409).json({
+        error: 'case_archived',
+        message: 'Archived cases must be restored before a plan closeout can be reopened.'
+      });
+    }
+
+    const [[planRow]] = await connection.query(
+      `SELECT id, case_id, application_id, status, archived_at, metadata_json, esdc_action_plan_json
+         FROM iset_case_action_plan
+        WHERE id = ?
+          AND case_id = ?
+        LIMIT 1
+        FOR UPDATE`,
+      [actionPlanId, caseId]
+    );
+    if (!planRow) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'action_plan_not_found' });
+    }
+
+    const planStatus = String(planRow.status || '').trim().toLowerCase();
+    if (planStatus !== 'closed') {
+      await connection.rollback();
+      return res.status(409).json({
+        error: 'plan_not_closed',
+        message: 'Only closed action plans can be reopened through this recovery action.'
+      });
+    }
+    if (planRow.archived_at) {
+      await connection.rollback();
+      return res.status(409).json({
+        error: 'plan_archived',
+        message: 'Archived action plans cannot be reopened through this recovery action.'
+      });
+    }
+
+    const [[existingActivePlan]] = await connection.query(
+      `SELECT id
+         FROM iset_case_action_plan
+        WHERE case_id = ?
+          AND id <> ?
+          AND status = 'active'
+          AND archived_at IS NULL
+        LIMIT 1
+        FOR UPDATE`,
+      [caseId, actionPlanId]
+    );
+    if (existingActivePlan) {
+      await connection.rollback();
+      return res.status(409).json({
+        error: 'active_plan_exists',
+        message: 'This case already has an active action plan.'
+      });
+    }
+
+    const [openProposalRows] = await connection.query(
+      `SELECT id, status
+         FROM iset_case_intervention
+        WHERE case_id = ?
+          AND status IN ('draft', 'submitted', 'in_review', 'changes_requested')
+        ORDER BY updated_at DESC, created_at DESC, id DESC
+        LIMIT 5
+        FOR UPDATE`,
+      [caseId]
+    );
+    if (openProposalRows.length) {
+      await connection.rollback();
+      return res.status(409).json({
+        error: 'open_intervention_proposal_exists',
+        message: 'Resolve the existing intervention proposal before reopening a closed plan.',
+        interventions: openProposalRows.map(row => ({ id: row.id, status: row.status }))
+      });
+    }
+
+    let interventionRow = null;
+    if (mode === 'amend_intervention') {
+      const [[selectedInterventionRow]] = await connection.query(
+        `SELECT id, case_id, action_plan_id, status, delivery_status, metadata_json, esdc_intervention_json
+           FROM iset_case_intervention
+          WHERE id = ?
+            AND case_id = ?
+            AND action_plan_id = ?
+          LIMIT 1
+          FOR UPDATE`,
+        [interventionId, caseId, actionPlanId]
+      );
+      if (!selectedInterventionRow) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'intervention_not_found' });
+      }
+      if (!isInterventionClosedStatus(selectedInterventionRow)) {
+        await connection.rollback();
+        return res.status(409).json({
+          error: 'intervention_not_completed',
+          message: 'Only completed or cancelled interventions can be reopened for amendment.'
+        });
+      }
+
+      const selectedMetadata = safeJsonParse(selectedInterventionRow.metadata_json, {}) || {};
+      const revisionMetadata =
+        selectedMetadata.revision && typeof selectedMetadata.revision === 'object'
+          ? selectedMetadata.revision
+          : null;
+      if (revisionMetadata?.sourceInterventionId || revisionMetadata?.source_intervention_id) {
+        await connection.rollback();
+        return res.status(409).json({
+          error: 'invalid_revision_source',
+          message: 'A revision draft cannot be reopened as the source intervention.'
+        });
+      }
+
+      const [[openRevisionProposal]] = await connection.query(
+        `SELECT id
+           FROM iset_intervention_proposal
+          WHERE case_id = ?
+            AND source_intervention_id = ?
+            AND review_status IN ('draft', 'submitted', 'in_review', 'changes_requested')
+            AND archived_at IS NULL
+          LIMIT 1
+          FOR UPDATE`,
+        [caseId, interventionId]
+      );
+      if (openRevisionProposal) {
+        await connection.rollback();
+        return res.status(409).json({
+          error: 'open_revision_proposal_exists',
+          message: 'Resolve the existing amendment proposal before reopening this intervention.'
+        });
+      }
+      interventionRow = selectedInterventionRow;
+    }
+
+    const recoveryMetadata = {
+      source: 'system_admin_case_reopen_recovery',
+      mode,
+      reason,
+      reopenedAt: new Date().toISOString(),
+      actorStaffProfileId,
+      actorUserId: actorUserId || null,
+      actionPlanId,
+      interventionId: mode === 'amend_intervention' ? interventionId : null,
+    };
+
+    const planMetadata = safeJsonParse(planRow.metadata_json, {}) || {};
+    if (!planMetadata.compliance || typeof planMetadata.compliance !== 'object') {
+      planMetadata.compliance = {};
+    }
+    planMetadata.compliance.ilmp = 'pending';
+    planMetadata.reopenRecovery = recoveryMetadata;
+
+    const planEsdc = safeJsonParse(planRow.esdc_action_plan_json, {}) || {};
+    [
+      'actionPlanResultCode',
+      'actionPlanResultDate',
+      'actionPlanResultEducationLevel',
+      'actionPlanFutureEducationLevel',
+      'actionPlanResultRelatedNOC',
+      'actionPlanResultRelatedNOCVersion',
+    ].forEach(key => {
+      planEsdc[key] = null;
+    });
+
+    await connection.query(
+      `UPDATE iset_case_action_plan
+          SET status = 'active',
+              activated_at = COALESCE(activated_at, NOW()),
+              closed_at = NULL,
+              archived_at = NULL,
+              result_code = NULL,
+              result_date = NULL,
+              outcome_summary = NULL,
+              closure_notes = NULL,
+              metadata_json = ?,
+              esdc_action_plan_json = ?,
+              updated_at = NOW()
+        WHERE id = ?`,
+      [JSON.stringify(planMetadata), JSON.stringify(planEsdc), actionPlanId]
+    );
+
+    if (interventionRow) {
+      const interventionMetadata = safeJsonParse(interventionRow.metadata_json, {}) || {};
+      delete interventionMetadata.outcome;
+      delete interventionMetadata.outcomeCode;
+      delete interventionMetadata.outcomeLabel;
+      delete interventionMetadata.actualAmount;
+      if (!interventionMetadata.compliance || typeof interventionMetadata.compliance !== 'object') {
+        interventionMetadata.compliance = {};
+      }
+      interventionMetadata.compliance.ilmp = 'pending';
+      interventionMetadata.compliance.finance = 'pending';
+      interventionMetadata.reopenRecovery = recoveryMetadata;
+
+      const interventionEsdc = safeJsonParse(interventionRow.esdc_intervention_json, {}) || {};
+      interventionEsdc.interventionOutcome = null;
+
+      await connection.query(
+        `UPDATE iset_case_intervention
+            SET status = 'in_progress',
+                delivery_status = 'in_progress',
+                outcome_code = NULL,
+                actual_amount = NULL,
+                closed_at = NULL,
+                metadata_json = ?,
+                esdc_intervention_json = ?,
+                updated_at = NOW()
+          WHERE id = ?`,
+        [JSON.stringify(interventionMetadata), JSON.stringify(interventionEsdc), interventionId]
+      );
+    }
+
+    await connection.query(
+      `UPDATE iset_case c
+          SET status = 'active',
+              lifecycle_status = 'active',
+              closure_reason = NULL,
+              closed_at = NULL,
+              open_intervention_count = (
+                SELECT COUNT(*)
+                  FROM iset_case_intervention ci
+                 WHERE ci.case_id = c.id
+                   AND (
+                     LOWER(TRIM(COALESCE(ci.delivery_status, ''))) IN ('planned', 'in_progress', 'suspended')
+                     OR (
+                       LOWER(TRIM(COALESCE(ci.delivery_status, ''))) = ''
+                       AND LOWER(TRIM(COALESCE(ci.status, ''))) IN ('approved', 'in_progress', 'suspended')
+                     )
+                   )
+              ),
+              total_intervention_count = (
+                SELECT COUNT(*)
+                  FROM iset_case_intervention ci
+                 WHERE ci.case_id = c.id
+                   AND (
+                     LOWER(TRIM(COALESCE(ci.delivery_status, ''))) IN ('planned', 'in_progress', 'suspended', 'completed', 'cancelled')
+                     OR (
+                       LOWER(TRIM(COALESCE(ci.delivery_status, ''))) = ''
+                       AND LOWER(TRIM(COALESCE(ci.status, ''))) IN ('approved', 'in_progress', 'suspended', 'completed', 'cancelled')
+                     )
+                   )
+              ),
+              updated_at = NOW()
+        WHERE c.id = ?`,
+      [caseId]
+    );
+
+    await ensureEsdcParticipantSubmissionRecord(
+      connection,
+      caseId,
+      planRow.application_id || null,
+      actionPlanId
+    );
+    await markEsdcParticipantSubmissionNeedsReview(connection, caseId, {
+      resetSnapshot: true,
+      resetSubmissionStatus: true,
+    });
+
+    const eventSummary = `System Administrator reopened closed action plan ${actionPlanId} to ${modeLabel}.`;
+    await connection.query(
+      `INSERT INTO iset_case_event (
+         case_id, event_type, summary, payload_json, occurred_at,
+         actor_staff_profile_id, actor_user_id, source_system
+       ) VALUES (?, 'case_reopen_recovery', ?, CAST(? AS JSON), NOW(3), ?, ?, 'admin_ui')`,
+      [
+        caseId,
+        eventSummary,
+        JSON.stringify(recoveryMetadata),
+        actorStaffProfileId,
+        actorUserId || null,
+      ]
+    );
+
+    const noteBody = [
+      eventSummary,
+      '',
+      `Reason: ${reason}`,
+      '',
+      'ILMP validation/submission state was reset to needs review.',
+    ].join('\n').slice(0, CASE_NOTE_MAX_LENGTH);
+    await connection.query(
+      'INSERT INTO iset_case_note (case_id, author_staff_profile_id, author_user_id, body, is_internal, is_pinned, follow_up_at) VALUES (?,?,?,?,1,0,NULL)',
+      [caseId, actorStaffProfileId, actorUserId || null, noteBody]
+    );
+
+    await connection.commit();
+    const updatedPlan = await fetchActionPlanWithCase(actionPlanId);
+    return res.status(200).json({
+      success: true,
+      caseId,
+      caseStatus: 'active',
+      mode,
+      actionPlan: mapActionPlanRow(updatedPlan),
+      reopenedInterventionId: interventionRow ? interventionId : null,
+    });
+  } catch (error) {
+    if (connection) {
+      try { await connection.rollback(); } catch (_) {}
+    }
+    console.error('POST /api/cases/:id/reopen-recovery failed:', error);
+    if (error && error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({
+        error: 'active_plan_exists',
+        message: 'This case already has an active action plan.'
+      });
+    }
+    return res.status(500).json({
+      error: 'case_reopen_recovery_failed',
+      detail: error?.message || String(error)
+    });
+  } finally {
+    if (connection) {
+      connection.release();
+    }
   }
 });
 

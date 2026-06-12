@@ -32,7 +32,7 @@ _Last updated: 10 June 2026_
 * **Force password reset** - `PATCH /api/admin/users/:username/force-reset`. This is intended for active accounts; users already in `FORCE_CHANGE_PASSWORD` should use `Resend invite` instead.
 * **Resend invite** - `POST /api/admin/users/:username/resend-invite`. This performs a real Cognito resend for users still in `FORCE_CHANGE_PASSWORD`, using Cognito `AdminCreateUser` with `MessageAction: RESEND`.
 * **Change role** - opens a modal calling `PATCH /api/admin/users/:username/role`, removing all current admin-role groups and adding the selected new one.
-* **Edit profile name** - when one Staff access row is selected, the Profile tab lets staff edit the DB-backed `staff_profiles.name` and `staff_profiles.display_name` values through `PATCH /api/admin/users/:username/profile`.
+* **Edit profile name** - when one Staff access row is selected, the Profile tab lets staff edit the DB-backed `staff_profiles.name` and `staff_profiles.display_name` values through `PATCH /api/admin/users/:username/profile`. If the display name was still mirroring the old name, changing the Name field now updates Display name in the form as well; intentional separate display names are preserved after staff edit the Display name field directly.
 * Role change and creation forms show only the roles the current actor is allowed to manage, and enforce entering a region for regional roles.
 * Flashbar errors now show the route `detail` message returned by the API instead of generic HTTP-only failures.
 

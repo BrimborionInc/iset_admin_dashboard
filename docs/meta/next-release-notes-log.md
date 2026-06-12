@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-06-11
+Last Updated: 2026-06-12
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -21,6 +21,9 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-06-12 | Release TBD | Fix/User Management | Staff profile editing | Changing a staff user's Name now also updates Display name when the display name was still mirroring the old name. | This prevents a successful staff-profile save from appearing unchanged in the User Management table because the table displays `display_name`; staff can still keep an intentional separate display name by editing Display name directly.
+- 2026-06-12 | Release TBD | UX/Casework | Case Workspace recovery actions | System Administrators can reopen a closed action plan from the case header when circumstances change after closeout. | The action records a reason, resets ILMP validation/submission to needs review, and supports either adding a new intervention or reopening one completed intervention for amendment while writing an internal note and audit event.
+- 2026-06-12 | Release TBD | UX/Workflow Studio | Intake step grouping | Intake steps can now be organized by configurable groups without a database schema migration. | Manage Intake Steps adds group filtering, group badges, workflow usage, and a group catalogue editor; Modify Intake Step can assign a group from the step properties panel. Group membership uses existing step metadata and the catalogue uses runtime config.
 - 2026-06-11 | Release TBD | Fix/App Shell | Side navigation | The left chevron in the staff side navigation now reliably collapses the navigation panel. | The control was present and wired, but the `Homepage` navigation header could sit above it as the pointer hit target; PATH now keeps the Cloudscape AppLayout close control above the header and has a local browser smoke for the close/reopen behavior.
 - 2026-06-11 | Release TBD | Fix/Casework | Funding revision letters | Sending an approved intervention funding revision letter now creates the missing Client Funding Agreement draft from the selected action plan when one is not already present. | This prevents the `No draft funding agreement is available for this case` blocker on approved current amendments for files that were originally entered as historical/manual backload records, while ordinary historical backload edits remain silent.
 - 2026-06-11 | Release TBD | Tooling/App Shell | Browser smoke | Added a local browser smoke for global side-navigation collapse and reopen. | `npm run smoke:app-shell-navigation:browser` checks representative routes with real pointer clicks and `elementFromPoint` assertions so visual shell controls cannot be hidden under another hit target unnoticed.

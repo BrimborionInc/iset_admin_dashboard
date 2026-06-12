@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Header, Button, SpaceBetween, Table, TextFilter, ButtonDropdown, Link, Modal, Alert } from '@cloudscape-design/components';
+import { Box, Header, Button, SpaceBetween, Table, TextFilter, ButtonDropdown, Link, Modal, Alert, Select, FormField, Input, Textarea, Badge } from '@cloudscape-design/components';
 import { BoardItem } from '@cloudscape-design/board-components';
 import { useHistory } from 'react-router-dom';
 import IntakeStepLibraryWidgetHelp from '../helpPanelContents/intakeStepLibraryWidgetHelp';
@@ -7,10 +7,15 @@ import { apiFetch } from '../auth/apiClient'; // use authenticated fetch wrapper
 
 const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel }) => {
   const [steps, setSteps] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [groupFilter, setGroupFilter] = useState({ label: 'All groups', value: '__all__' });
   const [loading, setLoading] = useState(true);
   const [filteringText, setFilteringText] = useState('');
   const [sortingState, setSortingState] = useState({ columnId: 'name', isDescending: false });
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showGroupsModal, setShowGroupsModal] = useState(false);
+  const [editableGroups, setEditableGroups] = useState([]);
+  const [savingGroups, setSavingGroups] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [banner, setBanner] = useState(null); // { type: 'info'|'error'|'success', header, message }
   const [selectedId, setSelectedId] = useState(null);
@@ -51,6 +56,7 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
             ? payload.rows
             : [];
       setSteps(list);
+      setGroups(Array.isArray(payload?.groups) ? payload.groups : []);
       setBanner(prev => (prev?.type === 'error' ? null : prev));
       const activeSelectedId = selectedIdRef.current;
       if (activeSelectedId && !list.some(item => item?.id === activeSelectedId)) {
@@ -90,6 +96,55 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
     setPendingDelete(step);
     setShowDeleteModal(true);
   }, []);
+
+  const openGroupsModal = useCallback(() => {
+    setEditableGroups((groups || []).map(group => ({
+      localId: group.id || `group-${Math.random().toString(36).slice(2)}`,
+      id: group.id || '',
+      label: group.label || '',
+      description: group.description || '',
+      status: group.status || 'active'
+    })));
+    setShowGroupsModal(true);
+  }, [groups]);
+
+  const addEditableGroup = useCallback(() => {
+    setEditableGroups(prev => [
+      ...prev,
+      { localId: `new-${Date.now()}-${Math.random().toString(36).slice(2)}`, id: '', label: '', description: '', status: 'active' }
+    ]);
+  }, []);
+
+  const updateEditableGroup = useCallback((localId, patch) => {
+    setEditableGroups(prev => prev.map((group, groupIndex) => (
+      group.localId === localId || (!group.localId && groupIndex === localId) ? { ...group, ...patch } : group
+    )));
+  }, []);
+
+  const saveGroups = useCallback(async () => {
+    setSavingGroups(true);
+    try {
+      const response = await apiFetch('/api/step-groups', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          groups: editableGroups.map(({ localId, ...group }) => group)
+        })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || payload?.message || `HTTP ${response.status}`);
+      }
+      setGroups(Array.isArray(payload?.groups) ? payload.groups : []);
+      setShowGroupsModal(false);
+      setBanner({ type: 'success', header: 'Groups saved', message: 'Intake step groups were updated.' });
+      fetchSteps({ silent: true });
+    } catch (error) {
+      setBanner({ type: 'error', header: 'Unable to save groups', message: error?.message || 'Group changes were not saved.' });
+    } finally {
+      setSavingGroups(false);
+    }
+  }, [editableGroups, fetchSteps]);
 
   const confirmDelete = async () => {
     const step = pendingDelete;
@@ -152,21 +207,40 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
         return leftNumber - rightNumber;
       }
     }
+    if (columnId === 'groupLabel') {
+      const leftValue = String(left?.groupLabel || 'Ungrouped').toLowerCase();
+      const rightValue = String(right?.groupLabel || 'Ungrouped').toLowerCase();
+      return leftValue.localeCompare(rightValue, undefined, { numeric: true, sensitivity: 'base' });
+    }
     const leftValue = String(left?.[columnId] ?? '').toLowerCase();
     const rightValue = String(right?.[columnId] ?? '').toLowerCase();
     return leftValue.localeCompare(rightValue, undefined, { numeric: true, sensitivity: 'base' });
   }, []);
 
+  const groupOptions = useMemo(() => [
+    { label: 'All groups', value: '__all__' },
+    { label: 'Ungrouped', value: '__ungrouped__' },
+    ...groups
+      .filter(group => (group.status || 'active') === 'active')
+      .map(group => ({ label: group.label || group.id, value: group.id }))
+  ], [groups]);
+
   const filteredSteps = useMemo(() => {
     const search = filteringText.trim().toLowerCase();
-    if (!search) return steps;
+    const selectedGroup = groupFilter?.value || '__all__';
     return steps.filter(item => {
+      const itemGroups = Array.isArray(item?.groups) ? item.groups : [];
+      if (selectedGroup === '__ungrouped__' && itemGroups.length > 0) return false;
+      if (selectedGroup !== '__all__' && selectedGroup !== '__ungrouped__' && !itemGroups.includes(selectedGroup)) return false;
+      if (!search) return true;
       const name = (item?.name || '').toString().toLowerCase();
       const id = (item?.id || '').toString().toLowerCase();
       const updated = (item?.updated_at || '').toString().toLowerCase();
-      return name.includes(search) || id.includes(search) || updated.includes(search);
+      const groupLabel = (Array.isArray(item?.groupLabels) ? item.groupLabels.join(' ') : item?.groupLabel || '').toString().toLowerCase();
+      const workflows = (item?.workflow_names || '').toString().toLowerCase();
+      return name.includes(search) || id.includes(search) || updated.includes(search) || groupLabel.includes(search) || workflows.includes(search);
     });
-  }, [steps, filteringText]);
+  }, [steps, filteringText, groupFilter]);
 
   const sortedSteps = useMemo(() => {
     const next = [...filteredSteps];
@@ -199,6 +273,29 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
       sortingField: 'id',
       sortingComparator: (left, right) => compareSteps('id', left, right),
       minWidth: 90
+    },
+    {
+      id: 'groupLabel',
+      header: 'Group',
+      cell: item => {
+        const labels = Array.isArray(item?.groupLabels) && item.groupLabels.length ? item.groupLabels : [item?.groupLabel || 'Ungrouped'];
+        return (
+          <SpaceBetween direction="horizontal" size="xxs">
+            {labels.map(label => (
+              <Badge key={`${item?.id}-${label}`} color={label === 'Ungrouped' ? 'grey' : 'blue'}>{label}</Badge>
+            ))}
+          </SpaceBetween>
+        );
+      },
+      sortingField: 'groupLabel',
+      sortingComparator: (left, right) => compareSteps('groupLabel', left, right),
+      minWidth: 180
+    },
+    {
+      id: 'workflow_names',
+      header: 'Used by',
+      cell: item => item?.workflow_names || 'Not used',
+      minWidth: 220
     },
     {
       id: 'updated_at',
@@ -249,6 +346,9 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
             <SpaceBetween direction="horizontal" size="xs">
               <Button iconName="refresh" onClick={() => fetchSteps()} ariaLabel="Refresh intake steps" loading={loading}>
                 Refresh
+              </Button>
+              <Button onClick={openGroupsModal}>
+                Manage groups
               </Button>
               <Button
                 iconName="add-plus"
@@ -325,13 +425,23 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
             </Box>
           }
           filter={
-            <TextFilter
-              filteringPlaceholder="Find intake step"
-              filteringText={filteringText}
-              filteringAriaLabel="Filter intake steps"
-              onChange={({ detail }) => setFilteringText(detail.filteringText)}
-              countText={filteredSteps.length === 1 ? '1 match' : `${filteredSteps.length} matches`}
-            />
+            <SpaceBetween direction="horizontal" size="s">
+              <TextFilter
+                filteringPlaceholder="Find intake step"
+                filteringText={filteringText}
+                filteringAriaLabel="Filter intake steps"
+                onChange={({ detail }) => setFilteringText(detail.filteringText)}
+                countText={filteredSteps.length === 1 ? '1 match' : `${filteredSteps.length} matches`}
+              />
+              <FormField label="Group">
+                <Select
+                  selectedOption={groupFilter}
+                  onChange={({ detail }) => setGroupFilter(detail.selectedOption)}
+                  options={groupOptions}
+                  selectedAriaLabel="Selected"
+                />
+              </FormField>
+            </SpaceBetween>
           }
         />
 
@@ -352,6 +462,89 @@ const IntakeStepTableWidget = ({ actions, setSelectedBlockStep, toggleHelpPanel 
               Are you sure you want to delete "{pendingDelete.name}"? This cannot be undone.
             </Box>
           ) : null}
+        </Modal>
+
+        <Modal
+          visible={showGroupsModal}
+          onDismiss={() => setShowGroupsModal(false)}
+          closeAriaLabel="Close group manager"
+          size="large"
+          header="Manage intake step groups"
+          footer={
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button onClick={() => setShowGroupsModal(false)} disabled={savingGroups}>Cancel</Button>
+              <Button variant="primary" onClick={saveGroups} loading={savingGroups}>Save groups</Button>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="m">
+            <Alert type="info">
+              Groups organize the intake step library only. Workflow membership still controls which steps are used at runtime.
+            </Alert>
+            <Table
+              variant="embedded"
+              trackBy="localId"
+              items={editableGroups}
+              columnDefinitions={[
+                {
+                  id: 'label',
+                  header: 'Label',
+                  cell: item => (
+                    <Input
+                      value={item.label || ''}
+                      onChange={({ detail }) => updateEditableGroup(item.localId, { label: detail.value })}
+                      placeholder="Group label"
+                      spellcheck={false}
+                    />
+                  ),
+                  minWidth: 180
+                },
+                {
+                  id: 'id',
+                  header: 'ID',
+                  cell: item => (
+                    <Input
+                      value={item.id || ''}
+                      onChange={({ detail }) => updateEditableGroup(item.localId, { id: detail.value })}
+                      placeholder="auto-from-label"
+                      spellcheck={false}
+                    />
+                  ),
+                  minWidth: 160
+                },
+                {
+                  id: 'description',
+                  header: 'Description',
+                  cell: item => (
+                    <Textarea
+                      value={item.description || ''}
+                      onChange={({ detail }) => updateEditableGroup(item.localId, { description: detail.value })}
+                      rows={2}
+                      spellcheck={true}
+                    />
+                  ),
+                  minWidth: 260
+                },
+                {
+                  id: 'status',
+                  header: 'Status',
+                  cell: item => (
+                    <Select
+                      selectedOption={{ value: item.status || 'active', label: item.status === 'archived' ? 'Archived' : 'Active' }}
+                      onChange={({ detail }) => updateEditableGroup(item.localId, { status: detail.selectedOption.value })}
+                      options={[
+                        { value: 'active', label: 'Active' },
+                        { value: 'archived', label: 'Archived' }
+                      ]}
+                    />
+                  ),
+                  minWidth: 150
+                }
+              ]}
+              empty={<Box>No groups configured.</Box>}
+            />
+            <Button iconName="add-plus" onClick={addEditableGroup}>Add group</Button>
+          </SpaceBetween>
         </Modal>
       </Box>
     </BoardItem>

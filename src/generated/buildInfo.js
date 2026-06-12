@@ -1,15 +1,15 @@
 const buildInfo = {
   "packageVersion": "0.1.0",
-  "releaseId": "20260610-prod-modify-component-editor",
-  "buildTarget": "production",
-  "builtAt": "2026-06-10T22:02:10.874Z",
-  "gitCommit": "b4cfc753e8ab384ac52495af49877e0f0ec702a7",
-  "gitShort": "b4cfc753",
+  "releaseId": "",
+  "buildTarget": "local-start",
+  "builtAt": "2026-06-12T15:54:14.920Z",
+  "gitCommit": "b26f25a0443fe488a94775fe21513d1f15d57a90",
+  "gitShort": "b26f25a0",
   "gitDirty": true,
-  "publicReleaseLabel": "Release 20260610-prod-modify-component-editor",
-  "publicReleaseDateEn": "10th June 2026",
-  "publicReleaseDateFr": "10 juin 2026",
-  "displayLabel": "release 20260610-prod-modify-component-editor | b4cfc753-dirty"
+  "publicReleaseLabel": "Current build",
+  "publicReleaseDateEn": "12th June 2026",
+  "publicReleaseDateFr": "12 juin 2026",
+  "displayLabel": "build local-start | b26f25a0-dirty | local-start"
 };
 
 export default buildInfo;

@@ -36,6 +36,24 @@ const getEditorErrorMessage = (error, fallback) => {
   return message || fallback;
 };
 
+const normaliseStepGroupId = (value) => String(value ?? '').trim().toLowerCase();
+
+const normaliseStepUiMeta = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const next = { ...value };
+  const groups = Array.isArray(next.groups)
+    ? next.groups.map(normaliseStepGroupId).filter(Boolean)
+    : [];
+  if (groups.length) {
+    next.groups = Array.from(new Set(groups));
+    next.primaryGroup = normaliseStepGroupId(next.primaryGroup) || next.groups[0];
+  } else {
+    delete next.groups;
+    delete next.primaryGroup;
+  }
+  return next;
+};
+
 const setComponentConfigValue = (path, value, selectedComponent) => {
   if (!selectedComponent || !selectedComponent.props) return;
   const keys = path.split('.');
@@ -1024,16 +1042,20 @@ const ModifyComponent = () => {
   const [alert, setAlert] = useState(null);
   const [name, setName] = useState('');
   const [status, setStatus] = useState('');
+  const [uiMeta, setUiMeta] = useState({});
   const [initialName, setInitialName] = useState('');
   const [initialStatus, setInitialStatus] = useState('');
+  const [initialUiMeta, setInitialUiMeta] = useState({});
+  const [stepGroups, setStepGroups] = useState([]);
+  const [stepGroupsLoading, setStepGroupsLoading] = useState(false);
   // (Removed) Step-level validation (stop conditions) – simplified editor now only manages component-level validation.
   const [manualDirty, setManualDirty] = useState(false);
   // compute hasChanges (deep) to gate buttons
   const hasChanges = useMemo(() => {
-    const a = { name, status, components };
-    const b = { name: initialName, status: initialStatus, components: initialComponents };
+    const a = { name, status, uiMeta: normaliseStepUiMeta(uiMeta), components };
+    const b = { name: initialName, status: initialStatus, uiMeta: normaliseStepUiMeta(initialUiMeta), components: initialComponents };
     return JSON.stringify(a) !== JSON.stringify(b);
-  }, [name, status, components, initialName, initialStatus, initialComponents]);
+  }, [name, status, uiMeta, components, initialName, initialStatus, initialUiMeta, initialComponents]);
 
   useEffect(() => {
     historyIndexRef.current = historyIndex;
@@ -1066,6 +1088,31 @@ const ModifyComponent = () => {
       return base;
     });
   }, [setHistoryIndex]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchStepGroups = async () => {
+      setStepGroupsLoading(true);
+      try {
+        const res = await apiFetch('/api/step-groups');
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+        if (!cancelled) {
+          setStepGroups(Array.isArray(data?.groups) ? data.groups : []);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Failed to load intake step groups', error);
+          setStepGroups([]);
+        }
+      } finally {
+        if (!cancelled) setStepGroupsLoading(false);
+      }
+    };
+    fetchStepGroups();
+    return () => { cancelled = true; };
+  }, []);
+
   // Remove dangling conditionalChildId links on radio options whose target component was deleted
   function cleanupOrphanConditionalLinks(list) {
     if (!Array.isArray(list) || !list.length) return list;
@@ -1429,9 +1476,11 @@ const ModifyComponent = () => {
   setComponents([]);
       setName('Untitled BlockStep');
       setStatus('active');
+      setUiMeta({});
       setInitialComponents([]);
       setInitialName('Untitled BlockStep');
       setInitialStatus('active');
+      setInitialUiMeta({});
   /* stopConditions removed */
       setLoading(false);
     } else if (id) {
@@ -1444,18 +1493,23 @@ const ModifyComponent = () => {
             setAlert({ type: 'warning', message: `Step ${id} not found. Starting a new draft.` });
             setName('Untitled BlockStep');
             setStatus('active');
+            setUiMeta({});
             setComponents([]);
             setInitialComponents([]);
             setInitialName('Untitled BlockStep');
             setInitialStatus('active');
+            setInitialUiMeta({});
             return; // finally still runs (loading -> false)
           }
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = await res.json();
           setName(data.name || 'Untitled BlockStep');
           setStatus(data.status || 'active');
+          const nextMeta = normaliseStepUiMeta(data.ui_meta || {});
+          setUiMeta(nextMeta);
           setInitialName(data.name || 'Untitled BlockStep');
           setInitialStatus(data.status || 'active');
+          setInitialUiMeta(nextMeta);
           const comps = Array.isArray(data.components) ? data.components : [];
           // stopConditions removed from this version; ignore any legacy data.stopConditions
           // Dedupe by name/id to avoid accidental duplicates from prior saves
@@ -1706,10 +1760,57 @@ const ModifyComponent = () => {
     });
   };
 
+  const selectedStepGroupId = useMemo(() => {
+    const meta = normaliseStepUiMeta(uiMeta);
+    if (meta.primaryGroup) return meta.primaryGroup;
+    if (Array.isArray(meta.groups) && meta.groups.length) return meta.groups[0];
+    return '';
+  }, [uiMeta]);
+
+  const stepGroupOptions = useMemo(() => {
+    const options = [{ label: 'Ungrouped', value: '' }];
+    const seen = new Set(['']);
+    (stepGroups || []).forEach(group => {
+      const value = normaliseStepGroupId(group?.id);
+      if (!value || seen.has(value)) return;
+      if ((group?.status || 'active') !== 'active' && value !== selectedStepGroupId) return;
+      seen.add(value);
+      options.push({
+        label: group?.label || value,
+        value
+      });
+    });
+    if (selectedStepGroupId && !seen.has(selectedStepGroupId)) {
+      options.push({ label: selectedStepGroupId, value: selectedStepGroupId });
+    }
+    return options;
+  }, [selectedStepGroupId, stepGroups]);
+
+  const handleStepPropertiesChange = useCallback((next = {}) => {
+    if (Object.prototype.hasOwnProperty.call(next, 'name')) {
+      setName(next.name);
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'status')) {
+      setStatus(next.status);
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'groupId')) {
+      const nextGroupId = normaliseStepGroupId(next.groupId);
+      setUiMeta(prev => {
+        const meta = normaliseStepUiMeta(prev);
+        if (nextGroupId) {
+          return { ...meta, groups: [nextGroupId], primaryGroup: nextGroupId };
+        }
+        const { groups, primaryGroup, ...rest } = meta; // eslint-disable-line no-unused-vars
+        return rest;
+      });
+    }
+    setInitialComponents([]);
+  }, []);
+
   const handleSaveTemplate = async () => {
     // DB-only save of step JSON
     try {
-  const payload = { name, status, components: toApiComponents(components) };
+  const payload = { name, status, ui_meta: normaliseStepUiMeta(uiMeta), components: toApiComponents(components) };
       if (id === 'new') {
         const res = await apiFetch(`/api/steps`, {
           method: 'POST',
@@ -1733,6 +1834,7 @@ const ModifyComponent = () => {
       setInitialComponents(components);
       setInitialName(name);
       setInitialStatus(status);
+      setInitialUiMeta(normaliseStepUiMeta(uiMeta));
   /* stopConditions removed */
       setManualDirty(false);
     } catch (e) {
@@ -1743,7 +1845,7 @@ const ModifyComponent = () => {
 
   const handleSaveAsNew = async () => {
     try {
-  const payload = { name: `${name} (copy)`, status, components: toApiComponents(components) };
+  const payload = { name: `${name} (copy)`, status, ui_meta: normaliseStepUiMeta(uiMeta), components: toApiComponents(components) };
       const res = await apiFetch(`/api/steps`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2034,12 +2136,10 @@ const ModifyComponent = () => {
               <PropertiesPanel
                 selectedComponent={selectedComponent}
                 updateComponentProperty={updateComponentProperty}
-                pageProperties={{ name, status }}
-                setPageProperties={({ name, status }) => {
-                  setName(name);
-                  setStatus(status);
-                  setInitialComponents([]);
-                }}
+                pageProperties={{ name, status, groupId: selectedStepGroupId }}
+                setPageProperties={handleStepPropertiesChange}
+                stepGroupOptions={stepGroupOptions}
+                stepGroupsLoading={stepGroupsLoading}
                 allComponents={components}
                 availableTemplates={availableComponents}
                 addExternalComponent={(comp) => {

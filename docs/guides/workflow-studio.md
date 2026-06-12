@@ -1,11 +1,11 @@
 # Workflow Studio (Intake Authoring)
 **Purpose:** How the admin console builds and edits intake workflows (step library, canvas, props, preview, runtime schema).  
 **Audience:** Engineers extending workflow authoring or adding component props.  
-**Last Updated:** 2026-06-10
+**Last Updated:** 2026-06-12
 
 ## High-level flow
 - **Manage Intake Steps page** (`src/pages/manageIntakeSteps.js`, route `/manage-components`): Cloudscape board with three widgets:
-  - **Intake Step Library** (`IntakeStepTableWidget`): lists `/api/steps`, supports filter, row selection, sortable/resizable columns, create/modify/delete, and preview selection.
+  - **Intake Step Library** (`IntakeStepTableWidget`): lists `/api/steps`, supports text/group filtering, row selection, sortable/resizable columns, create/modify/delete, group catalogue management, workflow-usage visibility, and preview selection.
   - **Preview** (`PreviewIntakeStep`): loads `/api/steps/:id`, posts the normalized component payload to `/api/preview/step`, and renders the returned portal-style HTML in an iframe that flex-fills the board item without overflowing it.
   - **Step JSON** (`PreviewStepJSON`): shows the selected step payload for inspection and copy.
   - Board controls follow the standard route-header `Add widget` / `Reset layout` pattern through the shared split-panel palette. Reset restores all three widgets and closes the palette if nothing remains available.
@@ -18,7 +18,7 @@
   - Three-column authoring workspace: searchable component library, server-rendered GOV.UK working area with drag/reorder/delete/inline label editing, and the properties/translation/validation/conditional-visibility side panel.
   - The inner editor header shows the current step name while the route header remains `Modify Intake Step`; Save starts disabled after a clean load and only enables for real edits.
   - Loading keeps repeated content-only components that do not have `props.name`/`props.id`; dedupe applies only to components with an actual authored data key/id.
-  - Template metadata enrichment is editor-only and must not mark a freshly loaded step dirty. Ordinary PUT saves omit `ui_meta`, and the backend preserves existing `step.ui_meta` unless the request explicitly sends a replacement.
+  - Template metadata enrichment is editor-only and must not mark a freshly loaded step dirty. The step properties panel includes the intake-step group selector and saves that membership through `step.ui_meta`; the backend still preserves existing `step.ui_meta` on API callers that omit `ui_meta`.
   - Save alerts surface precise backend validation errors such as duplicate Data Keys or invalid file-upload settings instead of collapsing them to a generic failure.
 - **Editor (modify workflow)** (`src/pages/modifyWorkflow.js`):
   - Widgets: `IntakeStepLibraryWidget` (fetches `/api/steps`), `WorkflowCanvasWidget` (drag/drop steps and routing), `StepPropertiesWidget` (per-step props), `WorkflowPropertiesEditorWidget` (name/status/start).
@@ -41,6 +41,7 @@
 - **Workflow Preview graph**: the graph tab uses React Flow with ELK layout, custom fixed-size workflow-step nodes, summarized conditional edge labels, fit-view controls, a minimap, and vertical/horizontal layout options from the widget settings menu. The graph viewport flex-fills the Cloudscape board item content area so board resizing changes the available pan/zoom surface. Custom nodes must keep invisible React Flow handles so edges can resolve correctly.
 - **File-upload preview rule**: the real applicant runtime now uses one `Upload` button that conditionally opens `Take photo` plus `Choose file` on likely mobile camera-capable devices; admin previews show a static explanation of that chooser instead of trying to invoke camera/file pickers from the editor surface.
 - **Runtime schema widget** shows the server-generated schema for the selected workflow for sanity checks.
+- **Intake step grouping** is configuration-first and does not require a schema migration. The group catalogue is stored in `iset_runtime_config(scope='admin', k='workflow.stepGroups')`; each step's membership is stored in existing `iset_intake.step.ui_meta` as `groups` and `primaryGroup`. `/api/steps` and `/api/steps/:id` normalize legacy `ui_meta.demoScope`/`stepGroup`/`group` values into the same response shape for filtering and display.
 - **DEV publish parity**: verified on 2026-04-14 that workflow `21` authoring rows rebuild the same `iset_runtime_config(scope='publish', k='workflow.schema.intake')` payload through `buildWorkflowSchema` / `scripts/publish-workflow.js` once timestamp/checksum fields are ignored, so the step library, workflow library, and published runtime row are back in sync for that intake.
 
 ## Access Guardrails
@@ -56,9 +57,9 @@
 
 ## Browser smokes
 - Manage Intake Steps has a local Puppeteer smoke: `npm run smoke:manage-components:browser`.
-  - The smoke loads `/manage-components` with deterministic API stubs, seeds a one-widget saved layout, verifies the route-header Add widget/Reset layout controls, confirms the palette exposes missing widgets, resets to the full board, checks the Intake Step Library sortable/resizable table, selects a step, verifies the preview endpoint and iframe sizing, captures `tmp/manage-components-smoke/manage-components-dashboard.png`, and fails if `/api/steps` keeps refiring after idle.
+  - The smoke loads `/manage-components` with deterministic API stubs, seeds a one-widget saved layout, verifies the route-header Add widget/Reset layout controls, confirms the palette exposes missing widgets, resets to the full board, checks the Intake Step Library sortable/resizable table, selects a step, verifies the preview endpoint and iframe sizing, captures `tmp/manage-components-smoke/manage-components-dashboard.png`, and fails if `/api/steps` keeps refiring after idle. Step-group controls are part of the same library surface and should be covered when the smoke stubs are next expanded.
 - Modify Intake Step has a local Puppeteer smoke: `npm run smoke:modify-component:browser`.
-  - The smoke loads `/modify-component/132` with deterministic step/template/render stubs, verifies the route/header/editor regions, checks the component-library search, confirms repeated static text blocks survive load, verifies initial Save is disabled, selects a working-area component, adds a Text Input, asserts the added component renders before saving, checks precise backend save-error surfacing, confirms a later successful save payload omits editor-only fields and `ui_meta`, runs Validate, captures `tmp/modify-component-smoke/modify-component-132-editor.png`, and fails if API calls keep refiring after initial render or component selection.
+  - The smoke loads `/modify-component/132` with deterministic step/template/render stubs, verifies the route/header/editor regions, checks the component-library search, confirms repeated static text blocks survive load, verifies initial Save is disabled, selects a working-area component, adds a Text Input, asserts the added component renders before saving, checks precise backend save-error surfacing, confirms a later successful save payload omits editor-only fields while preserving step metadata, runs Validate, captures `tmp/modify-component-smoke/modify-component-132-editor.png`, and fails if API calls keep refiring after initial render or component selection.
 
 ## When adding new fields (example: document label)
 - Add prop to template + schema (`src/component-lib/file-upload.template.json`, `schemas/file-upload.schema.json`).

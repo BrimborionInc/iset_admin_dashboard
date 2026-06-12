@@ -577,6 +577,7 @@ const CaseWorkspaceContext = createContext({
   markReadyToClose: () => Promise.resolve({}),
   closeCase: () => Promise.resolve({}),
   reopenCase: () => Promise.resolve({}),
+  reopenCaseRecovery: () => Promise.resolve({}),
   archiveCase: () => Promise.resolve({}),
   fetchActionPlanContext: () => Promise.resolve({}),
   upsertActionPlanReviewReminder: () => Promise.resolve(),
@@ -1573,6 +1574,58 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
     return detail;
   }, [caseId]);
 
+  const reopenCaseRecovery = useCallback(async payload => {
+    if (!caseId) {
+      const error = new Error("Case not loaded.");
+      error.status = 400;
+      throw error;
+    }
+    const response = await apiFetch(`/api/cases/${caseId}/reopen-recovery`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {}),
+    });
+    let detail = null;
+    try {
+      detail = await response.json();
+    } catch (_) {
+      detail = null;
+    }
+    if (!response.ok) {
+      const message =
+        detail?.message ||
+        detail?.detail ||
+        detail?.error ||
+        `Failed to reopen the case plan (${response.status})`;
+      const error = new Error(message);
+      error.status = response.status;
+      error.details = detail;
+      throw error;
+    }
+    markCompliancePending();
+    setState(prev => {
+      if (!prev.caseData) return prev;
+      const reopenedPlan = detail?.actionPlan || null;
+      const nextPlans = reopenedPlan
+        ? (prev.caseData.actionPlans || []).map(plan => (
+            String(plan.id) === String(reopenedPlan.id)
+              ? { ...plan, ...reopenedPlan, interventions: plan.interventions || reopenedPlan.interventions || [] }
+              : plan
+          ))
+        : prev.caseData.actionPlans;
+      return {
+        ...prev,
+        caseData: {
+          ...prev.caseData,
+          status: detail?.caseStatus || "active",
+          closedAt: null,
+          actionPlans: nextPlans,
+        },
+      };
+    });
+    return detail;
+  }, [caseId, markCompliancePending]);
+
   const archiveCase = useCallback(async () => {
     if (!caseId) {
       const error = new Error("Case not loaded.");
@@ -1862,6 +1915,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
     markReadyToClose,
     closeCase,
     reopenCase,
+    reopenCaseRecovery,
     archiveCase,
     fetchActionPlanContext,
     upsertActionPlanReviewReminder,
@@ -1894,7 +1948,7 @@ export const CaseWorkspaceProvider = ({ caseId, applicationId = null, children }
     setInterventionWizardDraft,
     clearInterventionWizardStep,
     clearInterventionWizardDraft,
-  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, createIntervention, reviseIntervention, updateIntervention, closeIntervention, runComplianceChecks, prepareIlmpExport, markReadyToClose, closeCase, reopenCase, archiveCase, fetchActionPlanContext, upsertActionPlanReviewReminder, saveCaseContext, deleteActionPlan, deleteIntervention, interventionCodes, interventionCodesLoading, loadInterventionCodes, interventionOutcomes, interventionOutcomesLoading, loadInterventionOutcomes, fundingStreams, fundingStreamsLoading, loadFundingStreams, nocVersions, nocVersionsLoading, loadNocVersions, searchNocCodes, activateActionPlan, closeActionPlan, selectedActionPlanId, selectedInterventionId, getInterventionWizardStep, getInterventionWizardKeyForCase, getInterventionWizardDraft, setInterventionWizardStep, setInterventionWizardDraft, clearInterventionWizardStep, clearInterventionWizardDraft]);
+  }), [caseId, state, loadCase, createActionPlan, updateActionPlan, createIntervention, reviseIntervention, updateIntervention, closeIntervention, runComplianceChecks, prepareIlmpExport, markReadyToClose, closeCase, reopenCase, reopenCaseRecovery, archiveCase, fetchActionPlanContext, upsertActionPlanReviewReminder, saveCaseContext, deleteActionPlan, deleteIntervention, interventionCodes, interventionCodesLoading, loadInterventionCodes, interventionOutcomes, interventionOutcomesLoading, loadInterventionOutcomes, fundingStreams, fundingStreamsLoading, loadFundingStreams, nocVersions, nocVersionsLoading, loadNocVersions, searchNocCodes, activateActionPlan, closeActionPlan, selectedActionPlanId, selectedInterventionId, getInterventionWizardStep, getInterventionWizardKeyForCase, getInterventionWizardDraft, setInterventionWizardStep, setInterventionWizardDraft, clearInterventionWizardStep, clearInterventionWizardDraft]);
 
   return (
     <CaseWorkspaceContext.Provider value={contextValue}>

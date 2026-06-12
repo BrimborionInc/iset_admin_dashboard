@@ -7,7 +7,7 @@ import Avatar from '@cloudscape-design/chat-components/avatar';
 import get from 'lodash/get';
 import Ajv from 'ajv';
 
-const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pageProperties, setPageProperties, currentLang = 'en', latestTemplateVersionByKey, onUpgradeTemplate, allComponents, addExternalComponent, availableTemplates = [] }) => {
+const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pageProperties, setPageProperties, currentLang = 'en', latestTemplateVersionByKey, onUpgradeTemplate, allComponents, addExternalComponent, availableTemplates = [], stepGroupOptions = [], stepGroupsLoading = false }) => {
   const [availableDataSources, setAvailableDataSources] = useState([]);
   const [selectedEndpoint, setSelectedEndpoint] = useState(null);
   const [optionSourceMode, setOptionSourceMode] = useState('static');
@@ -20,6 +20,11 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
   const [aiStatus, setAiStatus] = useState(null); // { type:'error'|'success'|'info', text }
   const [showAiOptionsModal, setShowAiOptionsModal] = useState(false);
   const [aiPreview, setAiPreview] = useState(null); // { options: [...] } pending approval
+  const groupOptions = useMemo(() => (
+    Array.isArray(stepGroupOptions) && stepGroupOptions.length
+      ? stepGroupOptions
+      : [{ label: 'Ungrouped', value: '' }]
+  ), [stepGroupOptions]);
 
 
   const ajv = useMemo(() => new Ajv({ allErrors: true, strict: false }), []);
@@ -722,21 +727,34 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
           }, {
             id: 'value',
             header: 'Value',
-            cell: item => item.value,
+            cell: item => item.displayValue ?? item.value,
             editConfig: {
               editingCell: (item, { currentValue, setValue }) => {
                 const handleChange = (value) => {
                   setValue(value);
-                  if (item.id === 'name') setPageProperties({ name: value, status: pageProperties.status });
-                  if (item.id === 'status') setPageProperties({ name: pageProperties.name, status: value });
+                  if (item.id === 'name') setPageProperties({ name: value, status: pageProperties.status, groupId: pageProperties.groupId || '' });
+                  if (item.id === 'status') setPageProperties({ name: pageProperties.name, status: value, groupId: pageProperties.groupId || '' });
+                  if (item.id === 'group') setPageProperties({ name: pageProperties.name, status: pageProperties.status, groupId: value });
                 };
                 if (item.id === 'status') {
                   return (
                     <Select
                       expandToViewport
-                      selectedOption={{ label: currentValue, value: currentValue }}
+                      selectedOption={{ label: item.value, value: item.value }}
                       onChange={({ detail }) => handleChange(detail.selectedOption.value)}
                       options={[{ label: 'Active', value: 'Active' }, { label: 'Inactive', value: 'Inactive' }]}
+                    />
+                  );
+                }
+                if (item.id === 'group') {
+                  const selectedGroup = groupOptions.find(option => option.value === item.value) || groupOptions[0];
+                  return (
+                    <Select
+                      expandToViewport
+                      statusType={stepGroupsLoading ? 'loading' : 'finished'}
+                      selectedOption={selectedGroup}
+                      onChange={({ detail }) => handleChange(detail.selectedOption?.value || '')}
+                      options={groupOptions}
                     />
                   );
                 }
@@ -744,7 +762,16 @@ const PropertiesPanel = ({ selectedComponent, updateComponentProperty, pagePrope
               },
             },
           }]}
-          items={[{ id: 'name', label: 'Name', value: pageProperties.name }, { id: 'status', label: 'Status', value: pageProperties.status }]}
+          items={[
+            { id: 'name', label: 'Name', value: pageProperties.name },
+            { id: 'status', label: 'Status', value: pageProperties.status },
+            {
+              id: 'group',
+              label: 'Group',
+              value: pageProperties.groupId || '',
+              displayValue: groupOptions.find(option => option.value === (pageProperties.groupId || ''))?.label || 'Ungrouped'
+            }
+          ]}
         />
       </ExpandableSection>
 

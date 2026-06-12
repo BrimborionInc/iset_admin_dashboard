@@ -4,8 +4,8 @@
  *
  * This loads the real local React bundle with deterministic mocked API data so
  * the complex editor chrome, server-rendered working area, property side panel,
- * save error handling, and request settling can be tested without requiring a
- * reusable Cognito smoke token.
+ * save error handling, step metadata preservation, and request settling can be
+ * tested without requiring a reusable Cognito smoke token.
  */
 
 const fs = require('fs');
@@ -510,6 +510,7 @@ function countCalls(apiCalls, pathPattern, method = null) {
 function endpointSnapshot(apiCalls) {
   return {
     stepDetail: countCalls(apiCalls, `/api/steps/${STEP_ID}`, 'GET'),
+    stepGroups: countCalls(apiCalls, '/api/step-groups', 'GET'),
     templates: countCalls(apiCalls, '/api/component-templates', 'GET'),
     optionDataSources: countCalls(apiCalls, '/api/option-data-sources', 'GET'),
     renderComponent: countCalls(apiCalls, '/api/render/component', 'POST'),
@@ -627,6 +628,16 @@ async function installApiStubs(page, apiCalls, saveState) {
 
     if (pathname === `/api/steps/${STEP_ID}` && request.method() === 'GET') {
       request.respond(jsonResponse(stepDetail));
+      return;
+    }
+
+    if (pathname === '/api/step-groups' && request.method() === 'GET') {
+      request.respond(jsonResponse({
+        groups: [
+          { id: 'iset', label: 'ISET Intake', status: 'active' },
+          { id: 'nunavut-legal-aid', label: 'Nunavut Legal Aid Demo', status: 'active' },
+        ],
+      }));
       return;
     }
 
@@ -943,8 +954,11 @@ async function main() {
   if (!lastSave || !Array.isArray(lastSave.components) || lastSave.components.length < 6) {
     failures.push({ type: 'assertion', message: 'Save payload did not include the expected component list', parsedSaveBodies });
   }
-  if (lastSave && Object.prototype.hasOwnProperty.call(lastSave, 'ui_meta')) {
-    failures.push({ type: 'assertion', message: 'Frontend save unexpectedly sent ui_meta during ordinary component save', lastSave });
+  if (lastSave && !Object.prototype.hasOwnProperty.call(lastSave, 'ui_meta')) {
+    failures.push({ type: 'assertion', message: 'Save payload should preserve step metadata for group assignment support', lastSave });
+  }
+  if (lastSave && JSON.stringify(lastSave.ui_meta || null) !== JSON.stringify(stepDetail.ui_meta)) {
+    failures.push({ type: 'assertion', message: 'Save payload changed existing step metadata during ordinary component save', expected: stepDetail.ui_meta, actual: lastSave.ui_meta });
   }
   if (lastSave && JSON.stringify(lastSave).includes('__workflowFields')) {
     failures.push({ type: 'assertion', message: 'Editor-only workflow field snapshots leaked into save payload', lastSave });

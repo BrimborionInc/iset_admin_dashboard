@@ -1474,11 +1474,13 @@ function UserInspector({ user, onClose, onChangeRole, resolveRegionLabel, onEdit
     displayName: user.displayName || user.name || '',
   }), [user.displayName, user.name]);
   const [profileForm, setProfileForm] = useState(initialProfileForm);
+  const [displayNameTouched, setDisplayNameTouched] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState('');
 
   useEffect(() => {
     setProfileForm(initialProfileForm);
+    setDisplayNameTouched(false);
     setProfileError('');
   }, [initialProfileForm]);
 
@@ -1544,14 +1546,28 @@ function UserInspector({ user, onClose, onChangeRole, resolveRegionLabel, onEdit
         <FormField label="Name" errorText={profileError}>
           <Input
             value={profileForm.name}
-            onChange={event => setProfileForm(current => ({ ...current, name: event.detail.value }))}
+            onChange={event => {
+              const nextName = event.detail.value;
+              setProfileForm(current => {
+                const displayNameWasMirroringName = !displayNameTouched
+                  && (!current.displayName || current.displayName === current.name);
+                return {
+                  ...current,
+                  name: nextName,
+                  displayName: displayNameWasMirroringName ? nextName : current.displayName,
+                };
+              });
+            }}
             spellcheck={false}
           />
         </FormField>
         <FormField label="Display name">
           <Input
             value={profileForm.displayName}
-            onChange={event => setProfileForm(current => ({ ...current, displayName: event.detail.value }))}
+            onChange={event => {
+              setDisplayNameTouched(true);
+              setProfileForm(current => ({ ...current, displayName: event.detail.value }));
+            }}
             spellcheck={false}
           />
         </FormField>
@@ -1560,7 +1576,7 @@ function UserInspector({ user, onClose, onChangeRole, resolveRegionLabel, onEdit
         <Button variant="primary" onClick={handleProfileSave} disabled={!profileDirty || profileSaving}>
           {profileSaving ? <Spinner size="normal" /> : 'Save profile'}
         </Button>
-        <Button onClick={() => { setProfileForm(initialProfileForm); setProfileError(''); }} disabled={!profileDirty || profileSaving}>
+        <Button onClick={() => { setProfileForm(initialProfileForm); setDisplayNameTouched(false); setProfileError(''); }} disabled={!profileDirty || profileSaving}>
           Reset
         </Button>
       </SpaceBetween>
