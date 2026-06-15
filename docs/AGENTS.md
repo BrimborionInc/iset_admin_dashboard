@@ -79,7 +79,7 @@ Treat this file as the current project context for this repo. If the user refere
 - Standing operational rule for PROD bug/change triage: if a thread investigates, fixes, deploys, or otherwise materially resolves a PROD item that came through the in-app feedback system, update the live PROD feedback log before closing the thread. That means keeping `admin_feedback_report.status`, `admin_feedback_status_history`, and `admin_feedback_note` in sync with the real outcome instead of leaving the resolution only in chat, code comments, or repo docs.
 - Current user-requested bug/CR triage workflow (2026-04-17): when Bill asks Codex to triage bugs or change requests, the expected outcome is not just queue cleanup. Codex should review the live queue, inspect each item's available context, add internal notes, change statuses where warranted, and then present Bill with a prioritized analysis so implementation planning can happen against the real queue state.
 - Current user-requested bug/CR validation standard (2026-05-25): take a holistic workflow view before telling staff a report is fixed or marking it `resolved`. For workflow or client-facing-output issues, verify the complete affected flow and every generated/sent artifact in the packet, not only the specific symptom named in the report. If adjacent artifacts or downstream states are not verified, keep the item open and record the remaining verification work in the feedback notes.
-- Current user-requested bug/CR release-planning standard (2026-05-25): do not assume each fixed report should be deployed to PROD immediately. Unless Bill explicitly approves an emergency hotfix, keep prepared fixes open as planned/in progress, continue triage and implementation, and batch suitable fixes into the next planned PROD maintenance release. Only after that release and targeted live recheck should affected reports move to `resolved`.
+- Current user-requested bug/CR release-planning standard (updated 2026-06-14): do not assume each fixed report should be deployed to PROD immediately. Unless Bill explicitly approves an emergency hotfix, keep prepared fixes batched into the next planned PROD maintenance release. Use `planned` only when a fix/change is complete and tested but not yet deployed to PROD. Use `in_progress` when work is underway but incomplete, including items awaiting user/staff feedback or targeted live artifact/workflow recheck. Only after PROD delivery and targeted live recheck should affected reports move to `resolved`.
 
 ## Core conventions
 
@@ -202,6 +202,8 @@ Treat this file as the current project context for this repo. If the user refere
 - Query Editor dashboard reference: `docs/dashboards/query-editor-dashboard.md`
 - Environment DB access from Codex/WSL: `docs/ops/agent-operational-access.md`
 - PROD Aurora provisioned downsize runbook: `docs/ops/runbooks/prod-aurora-provisioned-downsize.md`
+- PROD app instance right-size runbook: `docs/ops/runbooks/prod-app-instance-rightsize.md`
+- PROD NAT gateway consolidation runbook: `docs/ops/runbooks/prod-nat-gateway-consolidation.md`
 - Test DB access from Codex/WSL: `docs/guides/test-db-access-from-codex.md`
 - Operational reporting workbook reference: `docs/data/NWAC - data info 2025-26.xlsx`
 - NWAC staff training extract for PATH-aligned help content: `docs/training/TRAINING_MODULES_September_2025_extracted.md`

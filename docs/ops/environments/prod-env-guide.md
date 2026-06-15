@@ -3,7 +3,7 @@
 Status: production environment snapshot with newer deployment/hostname notes folded in. Verify live AWS state before operations.
 Last reviewed: 2026-04-29 during ops documentation cleanup; prefer `docs/ops/deployments/deployment-quick-guide.md` for current deploy commands.
 
-Last updated: May 27, 2026
+Last updated: June 14, 2026
 
 This guide summarizes what is currently deployed in the production environment, how it fits together, and where to look when you need to operate or change it. Each section starts with a non-technical overview, followed by technical details.
 
@@ -45,6 +45,12 @@ The apps run on a production server managed by AWS. A load balancer routes web t
 
 Technical details  
 - Auto Scaling Group: `nwac-prod-asg` (desired capacity 1).  
+- Current app instance size: `t3.medium` since the 2026-06-14 right-size. Launch template `lt-056df7f45608b95ae` latest/default version `2` is `t3.medium`; the ASG uses `$Latest` and steady state is one healthy instance. Use `docs/ops/runbooks/prod-app-instance-rightsize.md` for execution evidence and rollback.
+- Current live app instance after the 2026-06-14 right-size is `i-034c7daa416ec6865` in private subnet `subnet-0e60c0de4248ccdeb` / `ca-central-1d`.
+- The ASG still allows all three private app subnets (`nwac-prod-private-0`, `nwac-prod-private-1`, `nwac-prod-private-2`), but steady state is one app instance.
+- PROD NAT egress was consolidated on 2026-06-14. Current live NAT state is one NAT gateway: `nat-061b3328c8a74487e` / `nwac-prod-nat-2`, public IP `15.222.143.60`, in public subnet `subnet-06232beff7d56afc0` / `ca-central-1d`.
+- Private route tables `nwac-prod-rt-private-0`, `nwac-prod-rt-private-1`, and `nwac-prod-rt-private-2` all route `0.0.0.0/0` to `nat-061b3328c8a74487e`. Use `docs/ops/runbooks/prod-nat-gateway-consolidation.md` for execution evidence and rollback.
+- PROD Terraform desired state now passes `single_nat_gateway = true` and `single_nat_gateway_subnet_index = 2` into the networking module; run `terraform plan` before any future PROD apply to confirm NAT gateways `0` and `1` are not recreated.
 - Load balancer: Application Load Balancer (ALB) fronting both apps.  
 - ALB access logs are enabled to `s3://nwac-prod-alb-logs-468278742295-ca-central-1/prod/alb/AWSLogs/468278742295/` with 90-day lifecycle expiry. AWS created `ELBAccessLogTestFile` at `2026-05-27T17:30:44Z`, confirming log-delivery permissions.
 - AWS WAF Web ACL `nwac-prod-alb-rate-guard` is associated with the PROD ALB. Rule `AdminHostRateLimitPerIp` blocks an IP after more than 2,000 requests in 5 minutes to host `nwac-console.awentech.ca`; rule `AdminCasesApiRateLimitPerIp` blocks an IP after more than 300 requests in 5 minutes to host `nwac-console.awentech.ca` when the URI path starts with `/api/cases`; default action is allow.
@@ -95,7 +101,7 @@ Technical details
 - Database name: `iset_intake`  
 - Access is restricted to the VPC; use SSM on the instance to run SQL or load dumps.  
 - Data was loaded from `Dump20260126.sql` on January 26, 2026.
-- Provisioned downsizing guidance: use `docs/ops/runbooks/prod-aurora-provisioned-downsize.md`; do not modify the only writer in place.
+- Provisioned downsizing guidance: use `docs/ops/runbooks/prod-aurora-provisioned-downsize.md`; do not modify the only writer in place. The 2026-06-14 revalidation found low CPU/I/O but memory risk, and AWS Compute Optimizer recommended staying on `db.r6g.large`; treat any `db.t4g.large` attempt as an explicit-risk temporary-reader/failover trial, not an automatic next step.
 
 ## 8) Identity and Access (Cognito)
 

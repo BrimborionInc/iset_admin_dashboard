@@ -29,13 +29,16 @@ module "kms" {
 module "networking" {
   source = "../../modules/networking"
 
-  name_prefix           = var.name_prefix
-  vpc_cidr              = var.vpc_cidr
-  private_subnet_cidrs  = var.private_subnet_cidrs
-  isolated_subnet_cidrs = var.isolated_subnet_cidrs
-  public_subnet_cidrs   = var.public_subnet_cidrs
-  log_retention_days    = var.log_retention_days
-  tags                  = local.tags
+  name_prefix                     = var.name_prefix
+  vpc_cidr                        = var.vpc_cidr
+  private_subnet_cidrs            = var.private_subnet_cidrs
+  isolated_subnet_cidrs           = var.isolated_subnet_cidrs
+  public_subnet_cidrs             = var.public_subnet_cidrs
+  enable_nat_gateway              = var.enable_nat_gateway
+  single_nat_gateway              = var.single_nat_gateway
+  single_nat_gateway_subnet_index = var.single_nat_gateway_subnet_index
+  log_retention_days              = var.log_retention_days
+  tags                            = local.tags
 }
 
 module "logging" {

@@ -53,8 +53,8 @@ Provide an in-app way for signed-in PATH staff to report admin-console bugs and 
   - return a prioritized analysis for planning, not just a cleaned-up queue
 - Current status intent for Codex triage:
   - `triaging`: acknowledged and under validation, design review, or information gathering
-  - `planned`: confirmed and ready for implementation planning
-  - `in_progress`: active execution is underway
+  - `planned`: fix/change is complete and tested, but has not yet been deployed to PROD
+  - `in_progress`: fix/change is underway but not complete; use this for work blocked on a user/staff answer, targeted recheck, or other feedback needed before completion
   - `closed`: duplicate, by-design/support-only, withdrawn, or otherwise non-actionable
   - `resolved`: requested outcome is actually delivered in the target environment
 - If evidence is insufficient, keep the item open and note what additional information is needed from the reporter instead of guessing.

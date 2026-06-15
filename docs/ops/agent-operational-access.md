@@ -1,7 +1,7 @@
 # Agent Operational Access Notes
 
 Status: current operational access guidance for Codex/WSL threads. Verify live AWS/DB state before running mutating commands.
-Last reviewed: 2026-06-08 after TEST cost-pruning.
+Last reviewed: 2026-06-14 after PROD NAT consolidation execution.
 
 Purpose: keep database, TEST/PROD, and AWS profile command notes out of `docs/AGENTS.md` while preserving the operational details future agents need.
 
@@ -64,7 +64,9 @@ Purpose: keep database, TEST/PROD, and AWS profile command notes out of `docs/AG
 - Do not assume direct network access from the sandbox to the Aurora cluster. The normal Codex path is remote execution on the PROD app host, where the helper reads `nwac-prod-db-credentials` through the instance role and connects to Aurora inside the VPC.
 - Preferred helper for future chats: `bash scripts/run-prod-sql-via-ssm.sh`
 - The helper auto-discovers an online in-service PROD app instance from ASG `nwac-prod-asg`, uses profile `nwac-prod`, region `ca-central-1`, DB secret `nwac-prod-db-credentials`, host `nwac-prod-db.cluster-c3g4iamg8j38.ca-central-1.rds.amazonaws.com`, database `iset_intake`, and port `3306` by default.
-- PROD Aurora provisioned downsizing runbook: `docs/ops/runbooks/prod-aurora-provisioned-downsize.md`. Use the temporary-reader/failover pattern; do not modify the only writer in place.
+- PROD Aurora provisioned downsizing runbook: `docs/ops/runbooks/prod-aurora-provisioned-downsize.md`. Use the temporary-reader/failover pattern; do not modify the only writer in place. The 2026-06-14 revalidation found low CPU/I/O but memory risk, and AWS Compute Optimizer recommended staying on `db.r6g.large`; treat `db.t4g.large` as an explicit-risk trial only. Future execution needs temporary policy `NWACProdAuroraDownsizeTemporaryOperator` from that runbook.
+- PROD app EC2 right-size runbook: `docs/ops/runbooks/prod-app-instance-rightsize.md`. The 2026-06-14 `t3.large` -> `t3.medium` change executed successfully on instance `i-034c7daa416ec6865` via launch-template version `2`. Temporary policy `NWACProdAppRightSizeTemporaryOperator` was required for `ec2:CreateLaunchTemplateVersion`; remove it after the rollback watch window, and reattach it only if a later rollback or launch-template change is needed.
+- PROD NAT gateway consolidation runbook: `docs/ops/runbooks/prod-nat-gateway-consolidation.md`. The 2026-06-14 execution reduced PROD from three NAT gateways to one keeper NAT, `nat-061b3328c8a74487e` in `ca-central-1d`; all three private route tables now route `0.0.0.0/0` through that NAT. Temporary policy `NWACProdNatConsolidationTemporaryOperator` was required for `ec2:ReplaceRoute`, `ec2:DeleteNatGateway`, and `ec2:ReleaseAddress`; remove it after the rollback watch window.
 - Confirm the PROD operator identity before live data work:
   `aws sts get-caller-identity --profile nwac-prod`
 - Read-only connectivity check:

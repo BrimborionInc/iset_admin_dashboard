@@ -52,6 +52,24 @@ variable "log_retention_days" {
   default     = 400
 }
 
+variable "enable_nat_gateway" {
+  description = "Whether PROD private subnets need NAT egress."
+  type        = bool
+  default     = true
+}
+
+variable "single_nat_gateway" {
+  description = "Use one NAT gateway for PROD private subnet egress."
+  type        = bool
+  default     = true
+}
+
+variable "single_nat_gateway_subnet_index" {
+  description = "Public subnet index that hosts the single PROD NAT gateway."
+  type        = number
+  default     = 2
+}
+
 variable "admin_callback_urls" {
   description = "Hosted UI callback URLs for admin app."
   type        = list(string)
@@ -171,13 +189,13 @@ variable "db_skip_final_snapshot" {
 variable "app_instance_type" {
   description = "EC2 instance type for app tier."
   type        = string
-  default     = "t3.large"
+  default     = "t3.medium"
 }
 
 variable "app_min_size" {
   description = "Minimum number of app instances."
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "app_max_size" {
@@ -189,7 +207,7 @@ variable "app_max_size" {
 variable "app_desired_capacity" {
   description = "Desired number of app instances."
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "app_ami_parameter_name" {

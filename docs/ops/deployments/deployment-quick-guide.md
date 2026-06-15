@@ -18,12 +18,13 @@ Daily coding/Codex work and deployments now happen from the WSL workspace `/home
 - Do not dump the DEV database manually before asking Codex to deploy.
 - Use `path:deploy` for normal releases.
 - Use `test:db:refresh` only when you want to reset TEST.
-- Before every TEST or PROD app deploy, update `docs/meta/next-release-notes-log.md` for user-visible changes. The public landing-page panel must keep the standard sections `What changed`, `Known Bugs`, and `What's Coming`; do not publish `Earlier changes`.
+- Before every TEST or PROD app deploy, choose or confirm the release ID, then update `docs/meta/next-release-notes-log.md` for user-visible changes. The public landing-page panel must keep the standard sections `What changed`, `Known Bugs`, and `What's Coming`; do not publish `Earlier changes`.
 - For any PROD deploy that includes in-app feedback bug/CR fixes, report reconciliation is part of the deploy. Before the deploy, identify the affected `admin_feedback_report` IDs and make sure each report has a current note/status reflecting the planned release. After normal-routing smoke and the targeted workflow recheck pass, update `admin_feedback_report.status`, `admin_feedback_status_history`, and `admin_feedback_note` in PROD before calling the deployment complete. Only mark a report `resolved` after the deployed behavior and relevant client-facing/generated artifacts have been verified; otherwise leave it open with the remaining verification work noted.
 - Do not turn every prepared bug/CR fix into its own PROD deploy. Batch suitable fixes into the next planned PROD maintenance release unless Bill explicitly approves an emergency hotfix.
 - Under `What changed`, maintain three expandable release-package groups for the three most recent release packages. Add the new release as the first `#### Release ...` group in `What Changed Packages (draft - EN)` and `Lots de changements (brouillon - FR)`, keep only the two next-most-recent groups below it, and remove the oldest fourth group.
 - Keep the flat `What's New (draft bullets - EN)` and `Nouveautes (brouillon - FR)` fallback sections focused on the newest release package. `Known Bugs` and `What's Coming` can be empty only when there is nothing accurate to publish.
-- Before deploy, run or inspect the generated `src/generated/publicReleaseNotes.js` and confirm it contains `featurePackages` for the three current release packages and does not expose `Earlier changes`.
+- Release-note preflight is not satisfied by raw dated entries near the top of `next-release-notes-log.md`. The visible landing-page content comes from the draft sections at the bottom. Before deploy, the first English and French package groups must represent the release being deployed, preferably with the exact heading `#### Release <release-id>`, the flat `What's New` / `Nouveautes` fallback bullets must describe that same newest package, and every user-visible `Release TBD` or otherwise unreleased item intended for the deploy must be either represented in that package or deliberately deferred.
+- Before deploy, generate or inspect `src/generated/publicReleaseNotes.js` and confirm that it contains `featurePackages` for the three current release packages, does not expose `Earlier changes`, and has today's/current release package as the first `featurePackages[0]` entry in both languages. A generated file stamped with the new release ID but showing an older package title first is a failed preflight; stop and fix the draft release notes before running `path:deploy`.
 - For fixes that affect audit, auth, support diagnostics, retention, messaging scope, document scope, payment scope, or any other schema-backed operational evidence, verify the deployed DB schema and the writer code before relying on the table. A table existing is not enough; run a focused preflight that proves the writer uses real columns, does not silently swallow failures, and creates/updates at least one safe TEST row or has an equivalent automated test. For PROD investigations, state any evidence gaps plainly instead of implying a broken/empty audit table proves no activity happened.
 - In the current Codex sandbox, `nwac-prod` is the standard role-backed prod operator profile. `default` is only the bootstrap IAM user and direct prod resource calls through it are expected to fail.
 - The reduced `nwac-prod` role covers normal deploys, prod SQL/dumps via SSM, ASG refresh, automatic prod restore-point snapshots, and the ALB maintenance fallback. It does not cover broader infra/admin work such as WAF changes, SSM env parameter writes, uploads-bucket CORS changes, or Terraform/ACM changes.
@@ -120,7 +121,7 @@ npm run path:deploy:smoke -- --env prod
 npm run path:maintenance -- clear --env prod --surfaces all --yes
 ```
 
-If the ASG refresh reports `Target.NotInUse` or insufficient ELB health data while fallback is active, clear the fallback in another shell and let the refresh continue.
+If the ASG refresh reports `Target.NotInUse` or insufficient ELB health data while fallback is active, first verify the replacement instance is actually serving local `/healthz` on the admin/portal ports through SSM. If the host is still bootstrapping (`npm ci`, pm2 not started, or local health failing), keep fallback active and recheck shortly. Once local health passes, clear the fallback in another shell so ELB can evaluate real target health, then let the refresh continue.
 
 Use this when:
 - the change has already been validated in TEST
@@ -209,6 +210,15 @@ npm run path:deploy:smoke -- --env prod --skip-admin --skip-shared
 ```
 
 ## Safe Preflight Commands
+
+Release-note generation check before a TEST deploy:
+
+```bash
+PATH_RELEASE_ID=<release-id> node scripts/write-build-info.js --build-target test
+node -e "const fs=require('fs'); const s=fs.readFileSync('src/generated/publicReleaseNotes.js','utf8'); console.log((s.match(/\"releaseId\": \"([^\"]*)\"/)||[])[1]); console.log([...s.matchAll(/\"title\": \"([^\"]+)\"/g)].map(m=>m[1]).slice(0,2).join('\\n')); console.log(/Earlier changes/i.test(s) ? 'ERROR: Earlier changes exposed' : 'OK: no Earlier changes');"
+```
+
+The first printed package title must be the release being deployed, not an older release. Repeat with `--build-target production` for PROD release-note preflight.
 
 Plan TEST:
 
@@ -345,6 +355,7 @@ tmp/path-deploy/<env>/
 - Admin console: check the subtle version line at the bottom of the landing page.
 - Public portal: open the Help page and check the version line near the bottom.
 - The admin landing page now also generates its public release-notes panel from `docs/meta/next-release-notes-log.md` during build, so the visible landing-page notes heading should carry the same deployed release ID/date as the footer build line.
+- Open the admin landing-page release-notes panel after deploy and confirm the first `What changed` package is the release just deployed and includes the headline user-visible changes. Do not treat a matching release ID/date alone as proof; stale package content with a fresh stamp is a failed release-note verification.
 - If the release contains bug/CR fixes, verify the affected live workflow or artifact, then update the corresponding PROD feedback reports before ending the deploy thread. Use `bash scripts/run-prod-sql-via-ssm.sh` for live updates and keep multi-row/guarded updates as SQL artifacts under `sql/ops/`.
 
 ## How To Ask Codex

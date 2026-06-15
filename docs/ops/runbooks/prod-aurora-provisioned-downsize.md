@@ -1,7 +1,7 @@
 # PROD Aurora Provisioned Downsize Runbook
 
-Status: planned runbook only; not yet executed in PROD.
-Last reviewed: 2026-06-08 after live PROD sizing preflight.
+Status: planned/revalidation runbook only; not yet executed in PROD.
+Last reviewed: 2026-06-14 after live PROD revalidation.
 
 Purpose: safely trial a smaller provisioned Aurora MySQL instance class for PROD without moving to Aurora Serverless and without modifying the only writer in place.
 
@@ -30,10 +30,60 @@ CloudWatch 15-minute datapoints for 2026-05-25 through 2026-06-08:
 - Read IOPS `0`; write IOPS average `4.55`, maximum `196.33`.
 - Read latency `0`; write latency average `0.00155s`, maximum `0.00558s`.
 
-Sizing decision:
+Original sizing decision from 2026-06-08:
 
 - Do not trial `db.t4g.medium` first. It has only 4 GiB memory, which is too aggressive for the current free-memory profile.
-- First trial target: `db.t4g.large`. It keeps a provisioned instance model, is supported for Aurora MySQL 3.x, and gives an 8 GiB memory step-down while remaining easy to roll back.
+- Conditional trial target: `db.t4g.large`. It keeps a provisioned instance model, is supported for Aurora MySQL 3.x, and gives an 8 GiB memory step-down while remaining easy to roll back. The 2026-06-14 revalidation below changes this from a recommended next action into an explicit-risk trial only.
+
+## 2026-06-14 Revalidation Result
+
+Bill approved prep/revalidation only on 2026-06-14. No RDS resources were mutated.
+
+Live state:
+
+- PROD operator identity: `arn:aws:sts::468278742295:assumed-role/nwac-prod-codex-operator/codex-prod-operator`.
+- Cluster `nwac-prod-db` was `available`, Aurora MySQL `8.0.mysql_aurora.3.10.3`, backup retention `30` days, latest restorable time current within a few minutes.
+- Topology remained one writer and no reader: `nwac-prod-db-1`.
+- Writer `nwac-prod-db-1` was `available`, `db.r6g.large`, private, encrypted, in `ca-central-1d`.
+- PROD public smoke returned `200` for admin and both portal hostnames.
+- PROD ALB maintenance fallback was off.
+- SQL through the app-host SSM path succeeded from replacement app host `i-034c7daa416ec6865`; live DB had `143` tables.
+- `db.t4g.large` is orderable for Aurora MySQL `8.0.mysql_aurora.3.10.3` in `ca-central-1d`. `db.t4g.xlarge` is not listed as an orderable Aurora MySQL class in this engine/region; the orderable T-class options are `db.t3.medium`, `db.t3.large`, `db.t4g.medium`, and `db.t4g.large`.
+
+CloudWatch 15-minute datapoints for 2026-05-31T16:02:57Z through 2026-06-14T16:02:57Z:
+
+- CPU average `8.963%`, p95 average `9.188%`, maximum `12.425%`.
+- Freeable memory average `5.958 GiB`, p95 average `5.972 GiB`, minimum `5.904 GiB`.
+- Database connections average `16.33`, p95 `20`, maximum `31`.
+- Swap usage `0`.
+- Read IOPS `0`.
+- Write IOPS average `4.042`, p95 `5.567`, maximum `36.361`.
+- Read latency `0`.
+- Write latency average `1.514 ms`, p95 `1.589 ms`, maximum `2.745 ms`.
+
+Cost and pricing evidence:
+
+- Cost Explorer for May 2026 showed `CAN1-InstanceUsage:db.r6g.large` at `744` hours and `$212.784` USD before tax.
+- Cost Explorer for June 1-14, 2026 showed `312` hours and `$89.232` USD before tax, matching the same `$0.286/hr` run rate.
+- Official AWS public price list for Aurora MySQL in `ca-central-1` showed:
+  - `db.r6g.large`: `16 GiB`, `$0.286/hr`, about `$212.78/month` at 744 hours.
+  - `db.t4g.large`: `8 GiB`, `$0.158/hr`, about `$117.55/month` at 744 hours.
+  - Compute-only theoretical saving from `db.r6g.large` to `db.t4g.large`: about `$95.23/month` USD before tax.
+  - Temporary overlap cost for adding the `db.t4g.large` reader before failover: about `$0.158/hr` while both instances run.
+
+AWS Compute Optimizer evidence:
+
+- `get-rds-database-recommendations` returned `instanceFinding: Optimized` for `nwac-prod-db-1`.
+- It recommended staying on `db.r6g.large` with `0.0%` savings opportunity and `0.0` performance risk.
+- Its utilization metrics included maximum CPU `12.425%`, maximum memory utilization `63.1007%`, maximum connections `31`, and no Aurora memory health/declined-SQL/kill-query events.
+
+Prep conclusion:
+
+- Do not execute the `db.t4g.large` trial as the next automatic cost-saving step.
+- CPU, connections, I/O, and latency are low enough to support exploration, but memory is the limiting resource. Current maximum memory utilization is about `63.1%` on a `16 GiB` class, and CloudWatch freeable memory is only about `5.9 GiB`; dropping to an `8 GiB` class is a real trial, not a routine right-size.
+- Keep `db.t4g.medium` out of scope.
+- If Bill accepts the risk for about `$95/month` possible compute savings, execute only through the temporary-reader/failover path below and keep the old `db.r6g.large` instance until the trial is accepted or rolled back.
+- If Bill does not want that risk, the better next cost topic is billing commitment review, such as a Reserved DB Instance/Savings-style commitment, not shrinking the database class.
 
 ## Safety Model
 
@@ -70,6 +120,58 @@ Do not leave the temporary reader running after the acceptance/rollback decision
 ## Required Permissions
 
 The reduced `nwac-prod` operator role may not currently include every mutation below. If permission expansion is needed, request a temporary policy for this runbook only.
+
+2026-06-14 permission check:
+
+- Read-only RDS, CloudWatch, Cost Explorer, Compute Optimizer, SSM SQL, fallback status, and public smoke checks worked.
+- `pricing:GetProducts` was denied, so the official public AWS price-list feed was used for current hourly rates instead.
+- `iam:SimulatePrincipalPolicy` was denied, so mutation permissions could not be conclusively simulated without calling mutating RDS APIs. Do not discover mutation permissions by trial-and-error against live PROD. Attach an explicit temporary execution policy before any scheduled run, then remove it after the rollback window.
+
+Suggested temporary policy name: `NWACProdAuroraDownsizeTemporaryOperator`
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadProdAuroraDownsizeState",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:GetMetricData",
+        "cloudwatch:GetMetricStatistics",
+        "compute-optimizer:GetRDSDatabaseRecommendations",
+        "ce:GetCostAndUsage",
+        "rds:DescribeDBClusterSnapshots",
+        "rds:DescribeDBClusters",
+        "rds:DescribeDBInstances",
+        "rds:DescribeEvents",
+        "rds:DescribeOrderableDBInstanceOptions",
+        "rds:ListTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "MutateProdAuroraDownsizeOnly",
+      "Effect": "Allow",
+      "Action": [
+        "rds:AddTagsToResource",
+        "rds:CreateDBClusterSnapshot",
+        "rds:CreateDBInstance",
+        "rds:DeleteDBInstance",
+        "rds:FailoverDBCluster",
+        "rds:ModifyDBInstance"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ca-central-1"
+        }
+      }
+    }
+  ]
+}
+```
 
 Expected RDS actions:
 
@@ -549,3 +651,4 @@ Record these in `docs/meta/changelog.md` and the maintenance thread:
 - AWS documents Aurora DB instance class modification as causing an outage for the modified instance: <https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Modifying.html>
 - Aurora hardware specifications list memory for `db.r6g.large`, `db.t4g.large`, and related classes: <https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Concepts.DBInstanceClass.Summary.html>
 - Aurora MySQL support matrix includes `db.t4g.large` and `db.t4g.medium` for currently available Aurora MySQL versions: <https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Concepts.DBInstanceClass.SupportAurora.html>
+- Official AWS public price-list feed used for 2026-06-14 hourly pricing: <https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonRDS/current/ca-central-1/index.json>

@@ -12,6 +12,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Include enough context that a future thread can convert entries into polished `What changed`, `Known Bugs`, and `What's Coming` sections.
 - Keep entries concise and factual; avoid speculative language.
 - Keep the draft bullet sections at the bottom of this file current in both English and French. The normal build/deploy path generates `src/generated/publicReleaseNotes.js` from those sections. The `What's New` / `Nouveautes` flat lists must not be empty because they provide compatibility/fallback content.
+- The dated working-log entries above are not enough for a deploy. Before shipping TEST or PROD, promote the user-visible entries in scope for that release into the bottom draft sections, make the newest English and French package groups the first groups, and verify the generated `publicReleaseNotes.js` shows that package first.
 - The visible landing-page release notes must use the standard three-section shape: `What changed`, `Known Bugs`, and `What's Coming`. Do not reintroduce `Earlier changes`.
 - Under `What changed`, maintain `What Changed Packages (draft - EN)` and `Lots de changements (brouillon - FR)` as exactly the three most recent release packages, newest first. Each package uses a `#### Release ...` heading with concise user-facing bullets. When a new release ships, add it as the first package and retire the oldest fourth package.
 - If Bill asks for a bullet summary of the last week's user-interesting fixes/changes, use this log as the primary source but also review `docs/meta/codex-thread-index.md` for recent user-visible work that may not have originated from a bug report or change request.
@@ -399,13 +400,23 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Clearing a stale Docs Requested flag in Application Workspace no longer shows a false concurrent-update warning.
-- Application Workspace document search, secure-message table sorting, and notes refresh behavior are cleaner for staff reviewing an application file.
-- Manage Intake Steps now has the standard Add widget and Reset layout controls, sortable/resizable step-library columns, and a preview that stays within the widget.
-- Modify Intake Step now shows the step name, has component search, preserves repeated static content blocks, starts clean saves disabled, and shows precise save errors.
-- User Management and Manage ISET Applications now use cleaner table-first layouts with server-backed sorting/filtering where needed.
+- System Administrators can reopen a closed action plan from Case Workspace when circumstances change after closeout.
+- User Management name edits now also update Display name when it was still mirroring the old staff name.
+- Intake steps can be organized with configurable groups, group filters, group badges, and a group catalogue editor.
+- Manual Application Intake now guides staff through client/account search, account handling, application details, and review before create.
+- Funding revision letters now recover when a current approved amendment needs a Client Funding Agreement draft that does not exist yet.
+- The staff side-navigation collapse control now works reliably.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260612-212548
+
+- System Administrators can reopen a closed action plan from the Case Workspace header when circumstances change after closeout. The recovery action records a reason, resets ILMP validation/submission to needs review, and supports either adding a new intervention or reopening one completed intervention for amendment.
+- User Management name edits now also update Display name when the display name was still mirroring the old staff name, so a saved profile change no longer appears unchanged in the staff table.
+- Intake steps can now be organized by configurable groups without a database migration. Manage Intake Steps adds group filtering, group badges, workflow usage, and a group catalogue editor; Modify Intake Step can assign a group from the step properties panel.
+- Manual Application Intake now has a staff-assisted flow widget and wizard for identity/source details, existing client/applicant-account search, account handling, application details, and review before create.
+- Funding revision letters now create the missing Client Funding Agreement draft from the selected action plan when an approved current amendment needs one and no draft already exists.
+- The staff side-navigation collapse control now works reliably, and a browser smoke checks close/reopen behavior with real pointer clicks.
 
 #### Release 20260610-prod-modify-component-editor
 
@@ -422,26 +433,29 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - PATH-only review checks are labelled as PATH-only so staff can distinguish them from ESDC gateway blockers.
 - The unsupported childcare `No funding received` warning was removed because that is a valid ESDC childcare funding code.
 
-#### Release 20260607-prod-tutorials-training-shorts
-
-- Support > Tutorials now includes Training shorts: short Synthesia-hosted PATH videos that open inside the dashboard.
-- The Training shorts table is sortable and resizable, with visible columns limited to Short, Length, and Action.
-- The first watchable draft shorts include withdrawing/reopening an application, ILMP submissions, and ILMP validation and repairs.
-- PATH stores Synthesia metadata only; MP4 files are not added to the React app.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
-- Effacer un ancien indicateur Docs Requested dans Application Workspace n'affiche plus un faux avertissement de mise a jour concurrente.
-- Dans Application Workspace, la recherche de documents, le tri des messages securises et l'actualisation des notes sont plus propres pendant la revision d'un dossier.
-- Manage Intake Steps a maintenant les controles standard Add widget et Reset layout, des colonnes triables/redimensionnables, et un apercu qui reste dans le widget.
-- Modify Intake Step affiche maintenant le nom de l'etape, ajoute la recherche de composants, preserve les blocs de contenu statique repetes, garde Save desactive quand rien n'a change, et affiche les erreurs d'enregistrement exactes.
-- User Management et Manage ISET Applications utilisent maintenant des mises en page plus simples centrees sur les tableaux avec tri/filtrage cote serveur au besoin.
+- Les administrateurs systeme peuvent rouvrir un plan d'action ferme depuis Case Workspace quand la situation change apres la fermeture.
+- Dans User Management, changer le nom met aussi a jour Display name quand il reprenait encore l'ancien nom du membre du personnel.
+- Les etapes d'admission peuvent etre organisees avec des groupes configurables, des filtres, des badges et un editeur de catalogue.
+- Manual Application Intake guide maintenant le personnel dans la recherche client/compte, le choix de gestion de compte, les details de la demande et la revision avant creation.
+- Les lettres de revision de financement recuperent maintenant les dossiers ou un brouillon Client Funding Agreement manque pour un amendement courant approuve.
+- Le controle de fermeture de la navigation laterale du personnel fonctionne maintenant de facon fiable.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260612-212548
+
+- Les administrateurs systeme peuvent rouvrir un plan d'action ferme depuis l'en-tete Case Workspace quand la situation change apres la fermeture. L'action enregistre une raison, remet la validation/soumission ILMP a Needs review, et permet soit d'ajouter une nouvelle intervention, soit de rouvrir une intervention terminee pour modification.
+- Dans User Management, changer le nom met aussi a jour Display name quand le display name reprenait encore l'ancien nom du membre du personnel, afin qu'un profil enregistre ne paraisse plus inchange dans le tableau.
+- Les etapes d'admission peuvent maintenant etre organisees par groupes configurables sans migration de base de donnees. Manage Intake Steps ajoute les filtres de groupe, les badges, l'utilisation dans les workflows et un editeur de catalogue; Modify Intake Step peut assigner un groupe depuis le panneau des proprietes.
+- Manual Application Intake a maintenant un widget de progression et un assistant pour les details d'identite/source, la recherche de client/compte participant, le choix de gestion de compte, les details de la demande et la revision avant creation.
+- Les lettres de revision de financement creent maintenant le brouillon Client Funding Agreement manquant a partir du plan d'action selectionne quand un amendement courant approuve en a besoin et qu'aucun brouillon n'existe deja.
+- Le controle de fermeture de la navigation laterale du personnel fonctionne maintenant de facon fiable, avec un test navigateur qui verifie la fermeture/reouverture par de vrais clics.
 
 #### Release 20260610-prod-modify-component-editor
 
@@ -457,13 +471,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les messages ILMP pointent maintenant vers Participant Details, le plan d'action nomme ou l'intervention nommee au lieu d'afficher des identifiants de base de donnees.
 - Les verifications PATH seulement sont indiquees comme telles pour distinguer les controles internes des blocages de la passerelle EDSC.
 - L'avertissement childcare `No funding received` non justifie a ete retire, car il s'agit d'un code valide de financement childcare EDSC.
-
-#### Release 20260607-prod-tutorials-training-shorts
-
-- Support > Tutorials inclut maintenant Training shorts : de courtes videos PATH hebergees dans Synthesia qui s'ouvrent dans le tableau de bord.
-- Le tableau Training shorts est triable et redimensionnable, avec seulement les colonnes Short, Length et Action visibles.
-- Les premiers brouillons regardables couvrent le retrait/reouverture d'une demande, les soumissions ILMP et les validations/reparations ILMP.
-- PATH stocke seulement les metadonnees Synthesia; les fichiers MP4 ne sont pas ajoutes a l'application React.
 
 ### Problemes connus (brouillon - FR)
 

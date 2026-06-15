@@ -46,7 +46,7 @@ npm run path:deploy:smoke -- --env prod
 npm run path:maintenance -- clear --env prod --surfaces all --yes
 ```
 
-If `path:deploy` reports `Target.NotInUse` or insufficient ELB health data during the ASG refresh while the ALB fallback is enabled, clear the fallback immediately in another shell and let the refresh continue. Target groups must be in normal forwarding before ELB health can become healthy. Keep the in-app warning active until normal-routing smoke passes.
+If `path:deploy` reports `Target.NotInUse` or insufficient ELB health data during the ASG refresh while the ALB fallback is enabled, verify the replacement instance is serving local `/healthz` on the admin/portal ports through SSM before clearing fallback. If the host is still bootstrapping (`npm ci`, pm2 not started, or local health failing), keep fallback active and recheck shortly. Once local health passes, clear fallback in another shell and let the refresh continue. Target groups must be in normal forwarding before ELB health can become healthy. Keep the in-app warning active until normal-routing smoke passes.
 
 The orchestrator performs:
 

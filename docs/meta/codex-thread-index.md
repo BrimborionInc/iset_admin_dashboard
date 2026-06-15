@@ -2,7 +2,7 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-06-09
+Last Updated: 2026-06-14
 
 ## How to use
 
@@ -32,6 +32,51 @@ For each indexed thread/topic, keep:
 - `Status`: whether the note is current, partial, incomplete-title, or superseded
 
 ## Indexed Topics
+
+### PROD NAT gateway consolidation
+
+- Codex task title: exact original task title not preserved
+- Topic: PROD NAT gateway consolidation from three NAT gateways to one.
+- Keywords: `PROD cost savings`, `NAT gateway`, `single NAT`, `nat-061b3328c8a74487e`, `nat-009f7f0add87674f4`, `nat-039421458cb225a44`, `rtb-0448f405001135392`, `rtb-0507d2829075a05d3`, `NWACProdNatConsolidationTemporaryOperator`, `prod-nat-gateway-consolidation`
+- When to open: the user asks about the completed PROD NAT consolidation, asks what IAM policy was needed, asks what NAT was kept, asks for rollback details, asks whether Terraform matches the one-NAT state, or asks about the next large PROD cost-saving target after EC2/database review.
+- Primary docs:
+  - `docs/ops/runbooks/prod-nat-gateway-consolidation.md`
+  - `docs/ops/environments/prod-env-guide.md`
+  - `docs/ops/agent-operational-access.md`
+  - `docs/meta/changelog.md`
+- Status: current as of 2026-06-14; executed; incomplete-title.
+- Notes: live prep found current PROD app instance `i-034c7daa416ec6865` and DB writer `nwac-prod-db-1` both in `ca-central-1d`, so the keeper NAT is `nat-061b3328c8a74487e` / `nwac-prod-nat-2`. Route tables `rtb-0448f405001135392`, `rtb-0507d2829075a05d3`, and `rtb-02e4f1d20adc69f0c` now all route `0.0.0.0/0` to the keeper NAT. Removed NATs were `nat-009f7f0add87674f4` and `nat-039421458cb225a44`; released EIPs were `eipalloc-0b52e577cc52e143c` and `eipalloc-0c1f5bfe99e1029bd`. Final public smoke, SQL-over-SSM, SSM online state, ALB target health, and app-host outbound egress through `15.222.143.60` were green. Temporary policy `NWACProdNatConsolidationTemporaryOperator` was required for `ec2:ReplaceRoute`, `ec2:DeleteNatGateway`, and `ec2:ReleaseAddress`; remove it after the rollback watch window. Expected saving is about `$82/month` USD before tax.
+
+### PROD Aurora downsize revalidation
+
+- Codex task title: exact original task title not preserved
+- Topic: PROD Aurora provisioned downsize prep/revalidation after the app EC2 right-size.
+- Keywords: `PROD cost savings`, `Aurora downsize`, `db.r6g.large`, `db.t4g.large`, `nwac-prod-db`, `nwac-prod-db-1`, `Compute Optimizer`, `freeable memory`, `NWACProdAuroraDownsizeTemporaryOperator`, `prod-aurora-provisioned-downsize`, `prod-aurora-downsize-prep-summary`
+- When to open: the user asks about the next PROD cost-saving scope after the EC2 app right-size, asks whether to shrink the PROD database, asks why the DB downsize was not executed, asks what the DB downsize savings/risk would be, or asks what IAM policy is needed for a future Aurora downsize maintenance window.
+- Primary docs:
+  - `docs/ops/runbooks/prod-aurora-provisioned-downsize.md`
+  - `docs/ops/runbooks/prod-aurora-downsize-prep-summary-20260614.md`
+  - `docs/ops/environments/prod-env-guide.md`
+  - `docs/ops/agent-operational-access.md`
+  - `docs/meta/changelog.md`
+- Status: current as of 2026-06-14; prep/revalidation only; incomplete-title.
+- Notes: no RDS resources were mutated. Live checks found one healthy `db.r6g.large` writer, current backups, green public smoke, and working SQL-over-SSM. Refreshed metrics showed low CPU, low I/O, and no swap, but memory is the blocker: freeable memory averaged about `5.958 GiB` with minimum `5.904 GiB` on the current 16 GiB class, and AWS Compute Optimizer marked the instance `Optimized` with a recommendation to stay on `db.r6g.large`. `db.t4g.large` would save about `$95.23/month` USD before tax at 744 hours, but it halves memory to 8 GiB and should only be attempted as an explicit-risk temporary-reader/failover trial. Future execution needs temporary policy `NWACProdAuroraDownsizeTemporaryOperator`.
+
+### PROD app EC2 right-size
+
+- Codex task title: exact original task title not preserved
+- Topic: PROD app-tier EC2 right-size from `t3.large` to `t3.medium`.
+- Keywords: `PROD cost savings`, `right-size`, `t3.large`, `t3.medium`, `nwac-prod-asg`, `lt-056df7f45608b95ae`, `CreateLaunchTemplateVersion`, `NWACProdAppRightSizeTemporaryOperator`, `prod-app-instance-rightsize`, `instance refresh`, `EC2 compute savings`
+- When to open: the user asks to revisit the first PROD cost-saving step after the AWS cost audit, asks why `t3.medium` was chosen, asks what IAM permissions were needed, asks how to roll back the app instance right-size, asks about the current PROD app instance shape, or asks why Terraform should not be applied blindly for this change.
+- Primary docs:
+  - `docs/ops/runbooks/prod-app-instance-rightsize.md`
+  - `docs/ops/environments/prod-env-guide.md`
+  - `docs/ops/agent-operational-access.md`
+  - `infra/terraform/environments/prod/variables.tf`
+  - `infra/terraform/environments/prod/nwac-prod.tfvars.example`
+  - `docs/meta/changelog.md`
+- Status: current as of 2026-06-14; executed; incomplete-title.
+- Notes: the change was a targeted launch-template version plus ASG instance refresh, not a normal app deploy and not a database/NAT change. Live evidence on 2026-06-14 showed one healthy `t3.large` PROD app instance, green public smoke, low CPU, and ample memory, supporting `t3.medium` as the first step. Bill attached temporary policy `NWACProdAppRightSizeTemporaryOperator`; launch-template version `2` changed only `InstanceType` to `t3.medium`; ASG refresh `24c2eb5f-6843-4685-9df1-35d41eb193ec` completed successfully on instance `i-034c7daa416ec6865`, and launch-template default was then aligned to version `2`. Final public smoke was green, fallback was off, and maintenance announcement count was `0`. Remove the temporary policy after the rollback watch window; reattach it only if rollback/new launch-template work is needed.
 
 ### Build billing agent in VS code
 
