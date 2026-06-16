@@ -100,6 +100,37 @@ const {
 // Increase default listener cap to avoid noisy warnings when wiring shared buses.
 events.EventEmitter.defaultMaxListeners = 20;
 
+const resolveServerFetch = async () => {
+  if (typeof globalThis.fetch === 'function') {
+    return globalThis.fetch.bind(globalThis);
+  }
+  const { default: fetchImpl } = await import('node-fetch');
+  return fetchImpl;
+};
+
+const fetchServer = async (url, options = {}) => {
+  const fetchImpl = await resolveServerFetch();
+  const { timeout, signal, ...fetchOptions } = options || {};
+  const timeoutMs = Number(timeout || 0);
+  if (!timeoutMs || signal || typeof AbortController === 'undefined') {
+    return fetchImpl(url, signal ? { ...fetchOptions, signal } : fetchOptions);
+  }
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetchImpl(url, { ...fetchOptions, signal: controller.signal });
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      const timeoutError = new Error(`Request timed out after ${timeoutMs}ms`);
+      timeoutError.name = 'TimeoutError';
+      throw timeoutError;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+};
+
 const ENSURED_HISTORY_EVENT_TYPE_ENUM = { prepared: false };
 
 const INTAKE_ROOT = path.resolve(__dirname, '..', 'ISET-intake');
@@ -24070,11 +24101,9 @@ app.get('/api/admin/linkage-stats', authenticatedStaffRouteMiddleware, requireSy
       return res.json({ ...(__linkageStatsCache.data || {}), _cache: true, _source: 'cache' });
     }
 
-    const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
-
     let resp, text;
     try {
-      resp = await fetch(url, { headers: { 'Content-Type': 'application/json' }, timeout: 5000 });
+      resp = await fetchServer(url, { headers: { 'Content-Type': 'application/json' }, timeout: 5000 });
       text = await resp.text();
     } catch (netErr) {
       return res.status(502).json({ error: 'linkage_stats_failed', category: 'network', message: netErr.message, upstreamBase: base });
@@ -24280,7 +24309,6 @@ app.all(['/api/admin/upload-config'], authenticatedStaffRouteMiddleware, require
     const baseRaw = process.env.INTAKE_BASE_URL || 'http://localhost:5000';
     const base = /^https?:\/\//i.test(baseRaw) ? baseRaw : `http://${baseRaw}`;
     const targetUrl = base.replace(/\/$/, '') + '/api/admin/upload-config';
-    const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
     const method = req.method.toUpperCase();
     if (!['GET','PATCH'].includes(method)) {
       return res.status(405).json({ error: 'method_not_allowed' });
@@ -24324,7 +24352,7 @@ app.all(['/api/admin/upload-config'], authenticatedStaffRouteMiddleware, require
     }
     let upstream;
     try {
-      upstream = await fetch(targetUrl, { method, headers, body, timeout: 8000 });
+      upstream = await fetchServer(targetUrl, { method, headers, body, timeout: 8000 });
     } catch (netErr) {
       return res.status(502).json({ error: 'upstream_unreachable', message: netErr.message, upstream: targetUrl });
     }
@@ -71668,6 +71696,40 @@ const resolveIntacctRestBaseUrl = () => {
   return /^https?:\/\//i.test(baseRaw) ? baseRaw : `http://${baseRaw}`;
 };
 
+const INTACCT_REST_PATHS = Object.freeze({
+  vendors: '/ia/api/v1/objects/accounts-payable/vendor',
+  legacyVendors: '/ia/api/v1/objects/vendors',
+  apBills: '/ia/api/v1/objects/accounts-payable/bill',
+  legacyApBills: '/ia/api/v1/objects/apbills',
+  apBillAttachments: (billId) =>
+    `/ia/api/v1/objects/accounts-payable/bill/${encodeURIComponent(billId)}/attachments`,
+  legacyApBillAttachments: (billId) =>
+    `/ia/api/v1/objects/apbills/${encodeURIComponent(billId)}/attachments`,
+});
+
+const isLocalIntacctBaseUrl = (baseUrl) => {
+  try {
+    const host = new URL(baseUrl).hostname;
+    return ['localhost', '127.0.0.1', '::1'].includes(host);
+  } catch (_) {
+    return false;
+  }
+};
+
+const allowIntacctLegacyPathFallback = (baseUrl) => {
+  const raw = normalizeIntacctString(process.env.INTACCT_REST_LEGACY_PATH_FALLBACK).toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
+  if (['0', 'false', 'no', 'off'].includes(raw)) return false;
+  return isLocalIntacctBaseUrl(baseUrl);
+};
+
+const shouldRetryLegacyIntacctPath = (resp, baseUrl) =>
+  allowIntacctLegacyPathFallback(baseUrl) &&
+  resp &&
+  [404, 405].includes(Number(resp.status));
+
+const buildIntacctRestUrl = (baseUrl, routePath) => `${baseUrl}${routePath}`;
+
 const normalizeIntacctVendorKey = (value) => normalizeIntacctString(value).toLowerCase();
 
 const buildIntacctVendorIdFromName = (name) => {
@@ -71693,9 +71755,8 @@ const resolveVendorFromList = (vendors, payeeName) => {
 };
 
 const fetchIntacctRestAccessToken = async (baseUrl) => {
-  const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
   try {
-    const resp = await fetch(`${baseUrl}/oauth2/token`, {
+    const resp = await fetchServer(`${baseUrl}/oauth2/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       timeout: 5000,
@@ -71709,15 +71770,18 @@ const fetchIntacctRestAccessToken = async (baseUrl) => {
 };
 
 const fetchIntacctVendors = async ({ baseUrl, accessToken }) => {
-  const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
   try {
-    const resp = await fetch(`${baseUrl}/ia/api/v1/objects/vendors`, {
+    const requestOptions = {
       headers: {
         Accept: 'application/json',
         Authorization: `Bearer ${accessToken}`,
       },
       timeout: 5000,
-    });
+    };
+    let resp = await fetchServer(buildIntacctRestUrl(baseUrl, INTACCT_REST_PATHS.vendors), requestOptions);
+    if (shouldRetryLegacyIntacctPath(resp, baseUrl)) {
+      resp = await fetchServer(buildIntacctRestUrl(baseUrl, INTACCT_REST_PATHS.legacyVendors), requestOptions);
+    }
     if (!resp.ok) return [];
     const payload = await resp.json().catch(() => null);
     return Array.isArray(payload?.data) ? payload.data : [];
@@ -71728,9 +71792,8 @@ const fetchIntacctVendors = async ({ baseUrl, accessToken }) => {
 
 const createIntacctVendor = async ({ baseUrl, accessToken, vendorId, name }) => {
   if (!vendorId || !name) return null;
-  const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
   try {
-    const resp = await fetch(`${baseUrl}/ia/api/v1/objects/vendors`, {
+    const requestOptions = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -71742,7 +71805,11 @@ const createIntacctVendor = async ({ baseUrl, accessToken, vendorId, name }) => 
         name,
       }),
       timeout: 5000,
-    });
+    };
+    let resp = await fetchServer(buildIntacctRestUrl(baseUrl, INTACCT_REST_PATHS.vendors), requestOptions);
+    if (shouldRetryLegacyIntacctPath(resp, baseUrl)) {
+      resp = await fetchServer(buildIntacctRestUrl(baseUrl, INTACCT_REST_PATHS.legacyVendors), requestOptions);
+    }
     if (!resp.ok) return null;
     const payload = await resp.json().catch(() => null);
     const data = payload?.data || null;
@@ -71893,6 +71960,19 @@ const resolveIntacctDueDate = ({ packet, lines, billDate }) => {
   return toDateOnlyString(candidate);
 };
 
+const resolveIntacctBillCurrency = ({ packet, lines }) => {
+  const direct = normalizeIntacctString(packet?.currency || packet?.currency_code);
+  if (direct) return direct.toUpperCase();
+  const currencies = Array.from(new Set(
+    (Array.isArray(lines) ? lines : [])
+      .map(line => normalizeIntacctString(line?.currency || line?.currency_code))
+      .filter(Boolean)
+      .map(value => value.toUpperCase())
+  ));
+  if (currencies.length === 1) return currencies[0];
+  return 'CAD';
+};
+
 const validateIntacctRestRequirements = ({ packetRow, lineRows, config }) => {
   const details = [];
   const lines = Array.isArray(lineRows) ? lineRows : [];
@@ -71991,9 +72071,15 @@ const buildIntacctRestBillPayload = ({ packet, note, config }) => {
   }));
   const total = payloadLines.reduce((sum, line) => sum + (Number(line.amount) || 0), 0);
   return {
+    packet_id: packet?.id || packet?.packetId || null,
+    case_id: packet?.caseId || packet?.case_id || null,
+    case_number: packet?.caseNumber || packet?.case_number || null,
+    client_id: packet?.clientId || packet?.client_id || null,
+    intervention_id: packet?.interventionId || packet?.intervention_id || null,
+    source_system: 'PATH',
     vendor_id: vendorId,
     memo,
-    currency: packet?.currency || packet?.currency_code || 'USD',
+    currency: resolveIntacctBillCurrency({ packet, lines }),
     total,
     bill_date: billDate,
     due_date: dueDate,
@@ -72097,12 +72183,11 @@ async function sendIntacctRestForPacket({
   };
   const baseUrl = resolveIntacctRestBaseUrl().replace(/\/$/, '');
   const tokenUrl = `${baseUrl}/oauth2/token`;
-  const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
   let tokenResp;
   let tokenText = '';
   try {
-    tokenResp = await fetch(tokenUrl, {
+    tokenResp = await fetchServer(tokenUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       timeout: 5000,
@@ -72142,8 +72227,9 @@ async function sendIntacctRestForPacket({
     });
     return {
       error: 'intacct_rest_token_failed',
-      message: tokenText?.slice(0, 500) || `Token request failed (${tokenResp.status})`,
+      message: tokenMessage,
       status: tokenResp.status,
+      details: tokenPayload?.error?.details || tokenPayload?.details || null,
       baseUrl,
     };
   }
@@ -72160,11 +72246,12 @@ async function sendIntacctRestForPacket({
     note,
     config: resolvedConfig,
   });
-  const submitUrl = `${baseUrl}/ia/api/v1/objects/apbills`;
+  const submitUrl = buildIntacctRestUrl(baseUrl, INTACCT_REST_PATHS.apBills);
+  const legacySubmitUrl = buildIntacctRestUrl(baseUrl, INTACCT_REST_PATHS.legacyApBills);
   let submitResp;
   let submitText = '';
   try {
-    submitResp = await fetch(submitUrl, {
+    const submitOptions = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -72173,7 +72260,11 @@ async function sendIntacctRestForPacket({
       },
       body: JSON.stringify(payload),
       timeout: 8000,
-    });
+    };
+    submitResp = await fetchServer(submitUrl, submitOptions);
+    if (shouldRetryLegacyIntacctPath(submitResp, baseUrl)) {
+      submitResp = await fetchServer(legacySubmitUrl, submitOptions);
+    }
     submitText = await submitResp.text();
   } catch (err) {
     const message = err?.message || 'Intacct REST submit failed.';
@@ -72214,8 +72305,9 @@ async function sendIntacctRestForPacket({
     });
     return {
       error: 'intacct_rest_submit_failed',
-      message: submitText?.slice(0, 500) || `Submit failed (${submitResp.status})`,
+      message: submitMessage,
       status: submitResp.status,
+      details: submitDetails,
       baseUrl,
     };
   }
@@ -72232,23 +72324,30 @@ async function sendIntacctRestForPacket({
   if (billId && attachments.length) {
     for (const attachment of attachments) {
       try {
-        const attachResp = await fetch(
-          `${baseUrl}/ia/api/v1/objects/apbills/${billId}/attachments`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Accept: 'application/json',
-              Authorization: `Bearer ${accessToken}`,
-            },
-            body: JSON.stringify({
-              document_id: attachment.documentId || null,
-              name: attachment.name || null,
-              type: attachment.type || null,
-            }),
-            timeout: 8000,
-          }
+        const attachmentOptions = {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            document_id: attachment.documentId || null,
+            name: attachment.name || null,
+            type: attachment.type || null,
+          }),
+          timeout: 8000,
+        };
+        let attachResp = await fetchServer(
+          buildIntacctRestUrl(baseUrl, INTACCT_REST_PATHS.apBillAttachments(billId)),
+          attachmentOptions
         );
+        if (shouldRetryLegacyIntacctPath(attachResp, baseUrl)) {
+          attachResp = await fetchServer(
+            buildIntacctRestUrl(baseUrl, INTACCT_REST_PATHS.legacyApBillAttachments(billId)),
+            attachmentOptions
+          );
+        }
         if (!attachResp.ok) {
           attachmentErrors.push({
             documentId: attachment.documentId || null,
@@ -78839,6 +78938,7 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
                 error: submissionResult.error,
                 message: submissionResult.message || null,
                 httpStatus: submissionResult.status || null,
+                details: submissionResult.details || null,
                 baseUrl: submissionResult.baseUrl || null,
               },
               connection: pool,
@@ -78850,6 +78950,7 @@ app.post('/api/finance/payment-packets/:id/status', async (req, res) => {
         return res.status(500).json({
           error: submissionResult.error,
           message: submissionResult.message,
+          details: submissionResult.details || null,
           communication: submissionResult.communication,
           mode: submissionResult.mode,
         });

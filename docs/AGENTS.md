@@ -64,6 +64,7 @@ Last Updated: 2026-06-10
 - For coordinator-facing PATH help-panel or AI-context work, use `docs/training/TRAINING_MODULES_September_2025_extracted.md` as the baseline for staff workflow expectations and write guidance as a job aid, not a product tour.
 - For dashboard help-panel, inline guidance, or AI-support updates, design top-down from the user's job, decision points, and likely failure modes. Write job aids for staff, not transcripts of development conversations: do not carry screenshots, debugging paths, internal rationale, or Bill/Codex design discussion into help text unless it represents a durable user question and is rewritten in user-facing workflow language.
 - For PATH finance/reporting wording, distinguish PATH-side program/staff review, export, handoff, and operational follow-up from external Finance/Sage work. Do not frame PATH as the day-to-day system used by NWAC Finance staff unless Bill explicitly confirms that operating model has changed.
+- For Sage Intacct or Intacct mock-service work, read `docs/planning/intacct-interface-fidelity-audit.md` and `docs/planning/intacct-mock-dashboard-design.md` before changing sender routes, payloads, response parsing, dashboard reconciliation simulation, or mock-service endpoints. `npm run audit:intacct-contract` is a local PATH/mock drift guard only; Sage-fidelity claims still require current official Sage docs or approved sandbox evidence.
 - For admin `Ask the AI` chatbot quality, retrieval, or knowledge-base work, read `docs/planning/admin-ai-chatbot-knowledge-base-transformation.md`, `docs/planning/admin-ai-chatbot-coverage-register.md`, `docs/testing/admin-ai-chatbot-evals.md`, and `docs/features/admin-ai-guidance.md` before changing prompts, guidance rows, evals, or model/runtime behavior.
 - For browser-level workflow smokes, especially approval/assessment/letter workflows, read `docs/testing/browser-workflow-smoke-automation.md` before inventing one-off manual browser testing. Prefer DB/API fixture automation plus authenticated browser assertions and cleanup evidence.
 - For dashboard/widget spot checks, always include a runaway request/render-loop check. Open the changed dashboard with DevTools or browser automation network capture and verify that steady-state API calls settle after initial load and intentional polling only. This is a recurring PATH failure mode, especially when inline objects/arrays/functions such as sort descriptors, filters, payloads, or palette items are passed into hook dependencies and cause `useEffect`/`useCallback` refetch loops with aborted requests.
@@ -196,6 +197,9 @@ Treat this file as the current project context for this repo. If the user refere
 - Client Batch Import dashboard reference: `docs/dashboards/client-file-import-dashboard.md`
 - Data and Results dashboard reference: `docs/dashboards/data-and-results-dashboard.md`
 - Financial Reports dashboard reference: `docs/dashboards/financial-reports-dashboard.md`
+- Sage Intacct interface fidelity audit: `docs/planning/intacct-interface-fidelity-audit.md`
+- Sage Intacct mock dashboard design: `docs/planning/intacct-mock-dashboard-design.md`
+- Sage Intacct local contract audit manifest: `docs/data/integrations/intacct-interface-fidelity-manifest.json`
 - Applicant Watchlist dashboard reference: `docs/dashboards/applicant-watchlist-dashboard.md`
 - Admin feedback reporting reference: `docs/features/admin-feedback-reporting.md`
 - Homepage Metrics dashboard reference: `docs/dashboards/admin-home-metrics-widget.md`

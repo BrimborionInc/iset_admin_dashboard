@@ -2,7 +2,7 @@
 
 Purpose: durable local-development handoff for the Linux filesystem checkout used by Codex/VS Code.
 
-Last updated: 2026-05-07
+Last updated: 2026-06-15
 
 ## Current Local Checkout
 
@@ -106,6 +106,8 @@ DB_HOST=172.26.176.1 ENABLE_UNSAFE_ADMIN_DEBUG_ROUTES=true nodemon isetadminserv
 cd /home/bill/ISET/intacct-mock-service
 DB_HOST=172.26.176.1 npm start
 ```
+
+The Sage Intacct mock fills any missing `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`, and `DB_NAME` values from `INTACCT_MOCK_ENV_FILE` or, by default, the sibling admin-dashboard `.env`. In the normal WSL checkout, `DB_HOST=172.26.176.1 npm start` is enough to make its DEV vendor store persistent and seed PATH payment vendor references. If the repos are moved out of the sibling layout, set `INTACCT_MOCK_ENV_FILE=/path/to/admin-dashboard/.env` or provide the DB variables explicitly.
 
 ## Common Pitfall
 

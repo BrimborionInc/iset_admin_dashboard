@@ -14,6 +14,7 @@ This directory is not a single source of truth. It contains current domain docs,
 - For the current PROD document checklist gate and document-type configuration snapshot, use `document-checklist-current-configuration.md`.
 - For applicant accounts, use `applicant-account-activation.md`.
 - For secure messaging data integration, use `integrations/secure-messaging.md`.
+- For Sage Intacct mock/PATH contract drift checks, use `integrations/intacct-interface-fidelity-manifest.json` with `docs/planning/intacct-interface-fidelity-audit.md`.
 - For privacy ERM evidence, use `privacy-erm-audits/` plus the controlling planning docs linked from `docs/AGENTS.md`.
 - For ESDC, NOC, training, spreadsheet, PDF, XML, XSD, and SCH files, treat the files as reference/source artifacts unless a current implementation doc says otherwise.
 

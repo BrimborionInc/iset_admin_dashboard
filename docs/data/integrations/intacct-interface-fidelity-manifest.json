@@ -1,0 +1,232 @@
+{
+  "schemaVersion": 1,
+  "lastUpdated": "2026-06-15",
+  "purpose": "Static drift guard for the PATH Intacct sender and local Intacct mock contract. This manifest does not certify Sage fidelity; it records the local contract and known gaps that must be resolved with official Sage documentation or sandbox evidence.",
+  "auditDoc": "docs/planning/intacct-interface-fidelity-audit.md",
+  "externalReferences": [
+    {
+      "id": "sage-rest-openapi",
+      "title": "Sage Intacct REST API reference",
+      "url": "https://developer.sage.com/intacct/apis/intacct/1/intacct-openapi",
+      "status": "authoritative-reference"
+    },
+    {
+      "id": "sage-rest-oauth2",
+      "title": "Sage Intacct REST OAuth 2.0 authorization",
+      "url": "https://developer.sage.com/intacct/docs/1/sage-intacct-rest-api/authorization-and-security/oauth2",
+      "status": "authoritative-reference"
+    },
+    {
+      "id": "sage-xml-rest-object-map",
+      "title": "Sage Intacct XML-to-REST object map",
+      "url": "https://developer.sage.com/intacct/docs/1/sage-intacct-rest-api/get-started/xml-rest-object-map",
+      "status": "authoritative-reference"
+    },
+    {
+      "id": "sage-xml-ap-bills",
+      "title": "Sage Intacct XML Accounts Payable bills",
+      "url": "https://developer.intacct.com/api/accounts-payable/bills/",
+      "status": "authoritative-reference"
+    },
+    {
+      "id": "sage-xml-ap-vendors",
+      "title": "Sage Intacct XML Accounts Payable vendors",
+      "url": "https://developer.intacct.com/api/accounts-payable/vendors/",
+      "status": "authoritative-reference"
+    }
+  ],
+  "localContractChecks": [
+    {
+      "id": "path-base-url-resolution",
+      "file": "isetadminserver.js",
+      "mustContain": "INTACCT_REST_BASE_URL",
+      "severity": "pass-fail",
+      "description": "PATH has a configurable Intacct REST base URL before falling back to the mock."
+    },
+    {
+      "id": "path-token-endpoint",
+      "file": "isetadminserver.js",
+      "mustContain": "/oauth2/token",
+      "severity": "pass-fail",
+      "description": "PATH obtains a bearer token from the configured Intacct base URL."
+    },
+    {
+      "id": "path-vendor-endpoint-canonical",
+      "file": "isetadminserver.js",
+      "mustContain": "/ia/api/v1/objects/accounts-payable/vendor",
+      "severity": "pass-fail",
+      "description": "PATH uses the Sage-style REST vendor object path as the primary endpoint."
+    },
+    {
+      "id": "path-apbill-endpoint-canonical",
+      "file": "isetadminserver.js",
+      "mustContain": "/ia/api/v1/objects/accounts-payable/bill",
+      "severity": "pass-fail",
+      "description": "PATH uses the Sage-style REST AP bill object path as the primary endpoint."
+    },
+    {
+      "id": "path-attachment-endpoint-canonical",
+      "file": "isetadminserver.js",
+      "mustContain": "/ia/api/v1/objects/accounts-payable/bill/${encodeURIComponent(billId)}/attachments",
+      "severity": "pass-fail",
+      "description": "PATH uses the Sage-style REST AP bill attachment path as the primary endpoint."
+    },
+    {
+      "id": "path-local-legacy-fallback",
+      "file": "isetadminserver.js",
+      "mustContain": [
+        "INTACCT_REST_LEGACY_PATH_FALLBACK",
+        "/ia/api/v1/objects/vendors",
+        "/ia/api/v1/objects/apbills"
+      ],
+      "severity": "pass-fail",
+      "description": "PATH keeps old local mock paths only as localhost/default compatibility fallback."
+    },
+    {
+      "id": "path-current-success-envelope",
+      "file": "isetadminserver.js",
+      "mustContain": "submitPayload?.data?.id",
+      "severity": "pass-fail",
+      "description": "PATH currently expects the mock success envelope to contain data.id."
+    },
+    {
+      "id": "path-current-payload-fields",
+      "file": "isetadminserver.js",
+      "mustContain": [
+        "packet_id: packet?.id",
+        "case_id: packet?.caseId",
+        "case_number: packet?.caseNumber",
+        "source_system: 'PATH'",
+        "vendor_id: vendorId",
+        "currency: resolveIntacctBillCurrency",
+        "bill_date: billDate",
+        "due_date: dueDate",
+        "gl_account: resolveIntacctLineGlAccount"
+      ],
+      "severity": "pass-fail",
+      "description": "PATH currently builds the simplified local AP bill payload fields and PATH trace metadata recorded in this audit."
+    },
+    {
+      "id": "mock-db-backed-vendor-seed",
+      "file": "../intacct-mock-service/src/server.js",
+      "mustContain": [
+        "intacct_mock_vendor",
+        "seedVendorStoreFromPaymentLines",
+        "INTACCT_MOCK_SEED_PAYMENT_VENDORS"
+      ],
+      "severity": "pass-fail",
+      "description": "The mock can persist DEV vendors and seed PATH payment vendor references for local integration tests."
+    },
+    {
+      "id": "mock-packet-metadata-surfaced",
+      "file": "../intacct-mock-service/src/server.js",
+      "mustContain": [
+        "extractPacketMetadataFromPayload",
+        "packet_metadata_available: true",
+        "source_system"
+      ],
+      "severity": "pass-fail",
+      "description": "The mock dashboard API surfaces PATH packet/case/client/intervention metadata received in AP bill payloads."
+    },
+    {
+      "id": "mock-token-route",
+      "file": "../intacct-mock-service/src/server.js",
+      "mustContain": "app.post(\"/oauth2/token\"",
+      "severity": "pass-fail",
+      "description": "The mock exposes the token endpoint PATH calls."
+    },
+    {
+      "id": "mock-apbill-route-canonical",
+      "file": "../intacct-mock-service/src/server.js",
+      "mustContain": "CANONICAL_BILL_OBJECT_PATH = \"/ia/api/v1/objects/accounts-payable/bill\"",
+      "severity": "pass-fail",
+      "description": "The mock exposes the Sage-style REST AP bill object path."
+    },
+    {
+      "id": "mock-apbill-get-canonical",
+      "file": "../intacct-mock-service/src/server.js",
+      "mustContain": "app.get(`${CANONICAL_BILL_OBJECT_PATH}/:id`",
+      "severity": "pass-fail",
+      "description": "The mock exposes the Sage-style REST AP bill get endpoint."
+    },
+    {
+      "id": "mock-attachment-route-canonical",
+      "file": "../intacct-mock-service/src/server.js",
+      "mustContain": "`${CANONICAL_BILL_OBJECT_PATH}/:id/attachments`",
+      "severity": "pass-fail",
+      "description": "The mock exposes the Sage-style REST AP bill attachment endpoint."
+    },
+    {
+      "id": "mock-vendor-route-canonical",
+      "file": "../intacct-mock-service/src/server.js",
+      "mustContain": [
+        "CANONICAL_VENDOR_OBJECT_PATH = \"/ia/api/v1/objects/accounts-payable/vendor\"",
+        "app.get(CANONICAL_VENDOR_OBJECT_PATH",
+        "app.post(CANONICAL_VENDOR_OBJECT_PATH"
+      ],
+      "severity": "pass-fail",
+      "description": "The mock exposes the Sage-style REST vendor list/create endpoints."
+    },
+    {
+      "id": "mock-legacy-local-aliases",
+      "file": "../intacct-mock-service/src/server.js",
+      "mustContain": [
+        "app.post(\"/ia/api/v1/objects/apbills\"",
+        "app.get(\"/ia/api/v1/objects/vendors\""
+      ],
+      "severity": "pass-fail",
+      "description": "The mock still exposes legacy local aliases during the transition to canonical paths."
+    },
+    {
+      "id": "mock-dashboard-separation",
+      "file": "../intacct-mock-service/src/server.js",
+      "mustContain": "/mock/api/dashboard-state",
+      "severity": "pass-fail",
+      "description": "The mock dashboard endpoints remain visibly separated from the simulated Sage-facing routes."
+    }
+  ],
+  "knownGaps": [
+    {
+      "id": "legacy-local-route-aliases",
+      "status": "accepted-mock-only",
+      "severity": "low",
+      "summary": "The mock still accepts legacy local aliases under /objects/vendors and /objects/apbills while PATH and local tools transition to canonical Sage-style object paths."
+    },
+    {
+      "id": "real-oauth-token-validation",
+      "status": "needs-sage-evidence",
+      "severity": "medium",
+      "summary": "The mock returns a fixed bearer token and accepts any Authorization header beginning with Bearer."
+    },
+    {
+      "id": "sage-rest-response-envelope",
+      "status": "target-fidelity",
+      "severity": "high",
+      "summary": "The mock returns data/error envelopes while current Sage REST examples use ia::result, ia::meta, and ia::error."
+    },
+    {
+      "id": "bill-payload-field-shape",
+      "status": "needs-sage-evidence",
+      "severity": "high",
+      "summary": "PATH sends simplified snake_case bill fields; exact Sage REST create fields need confirmation or XML APBILL mapping needs to be selected."
+    },
+    {
+      "id": "packet-to-bill-grouping",
+      "status": "target-fidelity",
+      "severity": "high",
+      "summary": "PATH currently creates one external bill per packet from the first vendor, but packets can contain multiple vendors/payees."
+    },
+    {
+      "id": "attachments-supporting-documents",
+      "status": "needs-sage-evidence",
+      "severity": "medium",
+      "summary": "The attachment endpoint is a no-op stub and has not been verified against Sage supporting-document behavior."
+    },
+    {
+      "id": "dashboard-lifecycle-states",
+      "status": "accepted-mock-only",
+      "severity": "medium",
+      "summary": "Dashboard actions such as approved_for_payment and mark paid are useful reconciliation simulations but are not yet mapped to Sage AP state fields."
+    }
+  ]
+}

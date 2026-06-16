@@ -85,6 +85,7 @@
     "lint": "eslint --ext .js,.jsx src",
     "audit:parity": "node scripts/parity-audit.js",
     "audit:privacy-erm": "node scripts/privacy-erm-audit.js",
+    "audit:intacct-contract": "node scripts/intacct-contract-audit.js",
     "smoke:privacy-erm": "node scripts/privacy-erm-smoke.js",
     "smoke:privacy-routes": "node scripts/privacy-route-scope-smoke.js",
     "smoke:app-shell-navigation:browser": "node scripts/app-shell-navigation-browser-smoke.js",

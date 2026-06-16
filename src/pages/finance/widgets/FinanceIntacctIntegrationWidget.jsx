@@ -28,6 +28,7 @@ const INTACCT_TENANT_ID =
   process.env.REACT_APP_INTACCT_TENANT_ID ||
   process.env.REACT_APP_INTACCT_MOCK_TENANT_ID ||
   "T-0001";
+const INTACCT_VENDOR_OBJECT_PATH = "/ia/api/v1/objects/accounts-payable/vendor";
 
 const DEFAULT_CONFIG = {
   enabled: false,
@@ -168,7 +169,7 @@ const FinanceIntacctIntegrationWidget = ({ actions = {}, metadata = {}, toggleHe
       if (!token) {
         throw new Error("Token response missing access token");
       }
-      const vendorResp = await fetch(`${INTACCT_REST_BASE_URL}/ia/api/v1/objects/vendors`, {
+      const vendorResp = await fetch(`${INTACCT_REST_BASE_URL}${INTACCT_VENDOR_OBJECT_PATH}`, {
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: "application/json",

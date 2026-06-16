@@ -2,7 +2,7 @@
 
 Purpose: searchable index of durable notes, handoff docs, and thread-born findings that future chats may need to recover quickly when prior chat history is unavailable.
 
-Last Updated: 2026-06-14
+Last Updated: 2026-06-15
 
 ## How to use
 
@@ -984,12 +984,17 @@ For each indexed thread/topic, keep:
 
 ### Sage Intacct mock dashboard handoff
 
-- Topic: durable handoff for the separate Intacct mock-dashboard and AP-bills design work
-- Keywords: `intacct`, `sage`, `mock dashboard`, `AP bills`, `bill splitting`, `reconciliation`
-- When to open: the user references the prior Intacct design thread or asks for the saved mock-dashboard direction
+- Codex task title: exact original task title not preserved
+- Topic: durable handoff for the separate Intacct mock-dashboard, AP-bills design work, and Sage interface fidelity audit
+- Keywords: `intacct`, `sage`, `mock dashboard`, `AP bills`, `bill splitting`, `reconciliation`, `fidelity audit`, `audit:intacct-contract`, `accounts-payable/vendor`, `accounts-payable/bill`, `canonical Intacct paths`, `Sage REST`, `ia::result`
+- When to open: the user references the prior Intacct design thread, asks for the saved mock-dashboard direction, asks whether the mock is faithful to Sage Intacct, asks why PATH uses `accounts-payable/vendor` or `accounts-payable/bill`, or wants to resume contract-fidelity work against the mock service
 - Primary docs:
+  - `docs/planning/intacct-interface-fidelity-audit.md`
   - `docs/planning/intacct-mock-dashboard-design.md`
-- Status: current durable handoff baseline
+  - `docs/data/integrations/intacct-interface-fidelity-manifest.json`
+  - `scripts/intacct-contract-audit.js`
+- Status: current as of 2026-06-15; incomplete-title
+- Notes: the 2026-06-15 fidelity pass made canonical Sage-style REST object paths primary for PATH and the mock: `/ia/api/v1/objects/accounts-payable/vendor` and `/ia/api/v1/objects/accounts-payable/bill`. The older local aliases under `/objects/vendors` and `/objects/apbills` remain accepted by the mock and are available as local-only PATH fallback when the Intacct base URL is localhost or `INTACCT_REST_LEGACY_PATH_FALLBACK=true`. The audit script is a local PATH/mock drift guard only; claims about real Sage behavior still need official Sage docs or sandbox evidence. Current major remaining gaps are Sage response envelopes, exact REST create payload shape, attachment/supporting-document behavior, real OAuth/token validation, packet-to-bill grouping, and dashboard lifecycle state mapping.
 
 ### Step 19 checkbox-conditionality follow-up
 

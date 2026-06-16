@@ -1,9 +1,9 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-06-13T01:26:11.954Z",
-  "releaseId": "20260612-212548",
-  "releaseLabel": "Release 20260612-212548",
-  "releaseDateEn": "13th June 2026",
-  "releaseDateFr": "13 juin 2026",
+  "generatedAt": "2026-06-15T12:41:15.922Z",
+  "releaseId": "",
+  "releaseLabel": "Current build",
+  "releaseDateEn": "15th June 2026",
+  "releaseDateFr": "15 juin 2026",
   "en": {
     "sectionEyebrow": "Optional reading",
     "description": "",
