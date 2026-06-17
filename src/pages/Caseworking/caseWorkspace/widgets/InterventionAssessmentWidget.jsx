@@ -74,13 +74,6 @@ const EI_ELIGIBILITY_ROLE_KEYS = new Set([
   "regionalmanager",
 ]);
 
-const SUBMITTED_PROPOSAL_EDITOR_ROLE_KEYS = new Set([
-  "systemadministrator",
-  "nwacadministrator",
-  "regionalmanager",
-  "isetcoordinator",
-]);
-
 const SUBMITTED_PROPOSAL_DECIDER_ROLE_KEYS = new Set([
   "systemadministrator",
   "nwacadministrator",
@@ -1675,6 +1668,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showRecallConfirmModal, setShowRecallConfirmModal] = useState(false);
+  const [isRecallingSubmission, setIsRecallingSubmission] = useState(false);
   const [selectedDraftId, setSelectedDraftId] = useState(null);
   const [hydratedDraftId, setHydratedDraftId] = useState(null);
   const [hydratedDraftUpdatedAt, setHydratedDraftUpdatedAt] = useState(null);
@@ -2044,17 +2039,21 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   const canonicalRole = role === "Regional Manager" ? "Regional Manager" : role;
   const canManageEiEligibility = EI_ELIGIBILITY_ROLE_KEYS.has(roleKey);
   const isAssessor = canonicalRole === "ISET Coordinator";
-  const canEditSubmittedProposal = SUBMITTED_PROPOSAL_EDITOR_ROLE_KEYS.has(roleKey);
   const canDecideSubmittedProposal = SUBMITTED_PROPOSAL_DECIDER_ROLE_KEYS.has(roleKey);
 
-  const isEditable =
+  const isProposalBodyEditable =
     isDraftStatus ||
     isChangesRequestedStatus ||
-    (isSubmittedStatus && canEditSubmittedProposal) ||
-    (isInReviewStatus && canDecideSubmittedProposal) ||
     (!statusValue && !hasBlockingProposal);
-  const isFormLocked = !isEditable || isSubmitting;
-  const isDecisionReadOnly = isFormLocked || !canDecideSubmittedProposal;
+  const isDecisionEditable = isReviewStageStatus && canDecideSubmittedProposal;
+  const isEditable = isProposalBodyEditable || isDecisionEditable;
+  const isFormLocked = !isProposalBodyEditable || isSubmitting;
+  const isDecisionReadOnly = !isDecisionEditable || isSubmitting;
+  const canRecallSubmittedProposal =
+    isReviewStageStatus &&
+    !completionNote &&
+    !canDecideSubmittedProposal &&
+    Boolean(activeInterventionIdValue);
   const statusLabel = completionNote
     ? (isApprovedDecisionOutcome ? "Approved" : (isRejectedDecisionOutcome ? "Denied" : "Completed"))
     : statusValue
@@ -4669,9 +4668,54 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     ]
   );
 
+  const handleRecallSubmission = useCallback(async () => {
+    if (!activeInterventionIdValue) {
+      setError("Select a submitted proposal before recalling it.");
+      return;
+    }
+    setError(null);
+    setSuccessMessage("");
+    setIsRecallingSubmission(true);
+    try {
+      const response = await apiFetch(`/api/interventions/${activeInterventionIdValue}/assessment/recall`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || payload?.success === false) {
+        throw new Error(payload?.message || payload?.error || "Failed to recall submission.");
+      }
+      const recalledIntervention = payload?.intervention || {};
+      const recalledId = recalledIntervention.id || activeInterventionIdValue;
+      setSelectedDraftId(recalledId);
+      setHydratedDraftId(recalledId);
+      setHydratedDraftUpdatedAt(recalledIntervention.updatedAt || recalledIntervention.createdAt || null);
+      setCurrentInterventionStatus(recalledIntervention.status || "draft");
+      setCompletionNote(null);
+      setCurrentStep("review");
+      setShowRecallConfirmModal(false);
+      if (typeof setSelectedInterventionId === "function") {
+        setSelectedInterventionId(recalledId);
+      }
+      if (typeof refresh === "function") {
+        await refresh().catch(() => {});
+      }
+      setSuccessMessage("Submission recalled. You can make corrections and submit it again when ready.");
+    } catch (err) {
+      setError(err?.message || "Failed to recall submission.");
+    } finally {
+      setIsRecallingSubmission(false);
+    }
+  }, [
+    activeInterventionIdValue,
+    refresh,
+    setSelectedInterventionId,
+  ]);
+
   const uploadEiVerificationIfSelected = useCallback(
     async ({ interventionId } = {}) => {
-      if (isFormLocked) return { ok: true, documentId: form.eiVerificationDocumentId || null };
+      if (isFormLocked && !isDecisionEditable) return { ok: true, documentId: form.eiVerificationDocumentId || null };
       if (!eiVerificationFile) return { ok: true, documentId: form.eiVerificationDocumentId || null };
       if (!form.eiVerificationStatus) {
         setEiVerificationUploadError("Select an eligibility value to upload the document.");
@@ -4747,7 +4791,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         setEiVerificationUploading(false);
       }
     },
-    [applicantUserId, caseId, eiVerificationFile, form.eiVerificationDocumentId, form.eiVerificationStatus, isFormLocked]
+    [applicantUserId, caseId, eiVerificationFile, form.eiVerificationDocumentId, form.eiVerificationStatus, isDecisionEditable, isFormLocked]
   );
 
   const addCaseNote = useCallback(
@@ -6395,7 +6439,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                     placeholder={fundingStreamsLoading ? "Loading funding streams" : "Select funding stream"}
                     statusType={fundingStreamsLoading ? "loading" : "finished"}
                     empty={fundingStreamsLoading ? undefined : "No funding streams available"}
-                    disabled={isFormLocked || actionPlanFundingSaving}
+                    disabled={isDecisionReadOnly || actionPlanFundingSaving}
                   />
                 </FormField>
                 <FormField
@@ -6435,7 +6479,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                     }
                     statusType={actionPlanBudgetPotLoading ? "loading" : "finished"}
                     empty={actionPlanBudgetPotLoading ? undefined : "No budget pots found"}
-                    disabled={isFormLocked || actionPlanFundingSaving || !actionPlanFundingDraft.fundingStream}
+                    disabled={isDecisionReadOnly || actionPlanFundingSaving || !actionPlanFundingDraft.fundingStream}
                   />
                 </FormField>
                 <FormField
@@ -6461,7 +6505,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                         }));
                       }}
                       placeholder="Select"
-                      disabled={isFormLocked || actionPlanFundingSaving || !actionPlanFundingDraft.budgetPot}
+                      disabled={isDecisionReadOnly || actionPlanFundingSaving || !actionPlanFundingDraft.budgetPot}
                     />
                   )}
                 </FormField>
@@ -7560,6 +7604,16 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
           <SpaceBetween direction="horizontal" size="s">
             {isRevisionMode && <Badge color="blue">Revision</Badge>}
             <Badge color={statusBadgeColor}>{statusLabel}</Badge>
+            {canRecallSubmittedProposal && (
+              <Button
+                variant="normal"
+                onClick={() => setShowRecallConfirmModal(true)}
+                loading={isRecallingSubmission}
+                disabled={isRecallingSubmission}
+              >
+                Recall submission
+              </Button>
+            )}
             {isEditable && !completionNote && (!isReviewStageStatus || !canDecideSubmittedProposal) && (
               <Button
                 variant="primary"
@@ -7666,6 +7720,39 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
             steps={steps}
           />
         )}
+        <Modal
+          visible={showRecallConfirmModal}
+          onDismiss={() => {
+            if (!isRecallingSubmission) {
+              setShowRecallConfirmModal(false);
+            }
+          }}
+          header="Recall submission?"
+          footer={
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button
+                variant="primary"
+                onClick={handleRecallSubmission}
+                loading={isRecallingSubmission}
+                disabled={isRecallingSubmission}
+              >
+                Recall submission
+              </Button>
+              <Button
+                variant="normal"
+                onClick={() => setShowRecallConfirmModal(false)}
+                disabled={isRecallingSubmission}
+              >
+                Cancel
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <Box>
+            This will move the proposal back to Draft, remove the submitted assessment PDFs from the active document
+            list, and let you make corrections before submitting again.
+          </Box>
+        </Modal>
         {sendApprovalLetterConfirmModal}
         {decisionBlockerModal}
         {otherFundingSourceModalContent}

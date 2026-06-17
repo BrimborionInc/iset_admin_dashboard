@@ -175,11 +175,19 @@ This smoke loads the real local React bundle at `http://localhost:3001/applicati
 
 - conflict declaration signing by an ISET Coordinator, including promotion to in review and the selected application's row-version token;
 - coordinator assessment submission from draft to Pending Approval with recommendation, justification, date, proposed intervention payload, and selected-application row-version token;
+- coordinator recall of a pending assessment, including the read-only pending state, recall confirmation, `/api/cases/:id/assessment/recall` request body, and return to an editable resubmission state;
 - NWAC approval decision commit from the approval deep link, including the review status, approved outcome, initiated case status, and selected-application row-version token;
 - approval-letter send with a workflow-generated attachment and application-scoped `caseContext.applicationDecisionLetters[application_id]` sent marker, without leaking the decision-letter state to root context;
 - funding-documents completion for an approved application after the scoped approval-letter sent marker is present.
 
 The smoke captures screenshots under `tmp/application-assessment-workflow-smoke/`. It fails on failed API responses, serious browser console errors, unhandled exceptions, and the React warning class where a child render path updates the route parent. It currently records, but does not fail on, the same `SupportingDocumentsWidget` React unique-key warning tracked in the Application Workspace smoke.
+
+The Case Workspace Intervention Assessment recall path has a focused local browser smoke:
+
+- Script: `scripts/intervention-assessment-recall-browser-smoke.js`
+- NPM alias: `npm run smoke:intervention-assessment:recall:browser`
+
+This smoke loads the real local React bundle at `http://localhost:3001/cases/1?entry=approval&approvalType=intervention&step=decision&interventionId=101&planId=10`, injects a deterministic ISET Coordinator session, stubs a submitted intervention proposal, verifies the proposal body is read-only while awaiting decision, clicks `Recall submission`, confirms the `/api/interventions/:id/assessment/recall` call, and verifies the widget returns to a draft/resubmission state.
 
 ## Automation Backlog
 

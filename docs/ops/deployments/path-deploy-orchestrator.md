@@ -1,7 +1,7 @@
 # PATH Deploy Orchestrator
 
 Status: current deployment control-plane reference.
-Last reviewed: 2026-06-08 after TEST cost-pruning; command names checked against current `package.json`.
+Last reviewed: 2026-06-16 after the intake runtime incident; command names checked against current `package.json`.
 
 Start with the short operator runbook in `docs/ops/deployments/deployment-quick-guide.md` if you just need the normal commands.
 
@@ -27,10 +27,16 @@ The admin artifact also stages selected operational support scripts used by depl
 1. AWS/profile preflight
 2. prod restore point capture when DB mutation is planned
 3. canonical shared-schema migration preflight/apply
-4. optional allowlisted data/config promotion
+4. optional allowlisted data/config promotion only when a dataset is explicitly included
 5. app deployment primitives
 6. environment-appropriate smoke checks
 7. release-manifest capture under `tmp/path-deploy/`
+
+Deployment scope boundary: app deploys mean the current app build plus planned schema migrations. They do not include runtime configuration, allowlisted data promotion, arbitrary SQL data fixes, or full database restores unless that exact data scope is explicitly approved. Do not include `--dataset intake-release` as boilerplate. Do not mirror DEV runtime config into PROD as routine deployment hygiene; PROD runtime setting changes must name specific keys/rows. For ordinary app/schema releases, use `--skip-data` or omit `--dataset`; for TEST/PROD, data/runtime mutation requires Bill to explicitly confirm the exact dataset or SQL scope in the current thread.
+
+Before any PROD data/runtime mutation, state the exact dataset or SQL, target tables/keys, source environment, reason an app/schema-only deploy is insufficient, restore/rollback path, and verification plan. Then get Bill's explicit approval for that exact data scope before apply.
+
+Intake data promotion has a workflow-id guardrail. `intake-release` and standalone `intake-runtime-publish` both require `--workflow-id`; the source runtime payload in `iset_runtime_config(scope='publish', k='workflow.schema.intake')` is parsed during plan/bundle/apply and the command aborts if its declared workflow id does not match. Treat `summary.runtimePublish.runtime.workflowId` in the plan/manifest as required evidence before applying an intake runtime promotion to TEST or PROD. The published intake runtime row is global, not per workflow, so promoting the wrong row changes the live applicant intake. For the current ISET intake, `workflowId=21` is expected; any mismatch, missing workflow id, unexpected source row, or unexplained runtime diff is a hard stop.
 
 For schema-backed operational evidence, `path:deploy` smoke is not enough. If a release changes or relies on audit/security/support telemetry such as `user_session_audit`, password-reset audit, event rows, notifications, secure-message scope, document scope, or payment evidence, add a focused preflight/smoke that compares the writer SQL to the live schema and proves the expected row is written or updated in TEST. Do not let "best effort" audit writes catch and hide schema errors without at least a non-PII warning and a test that exercises the deployed table shape.
 
@@ -39,31 +45,31 @@ For schema-backed operational evidence, `path:deploy` smoke is not enough. If a 
 Plan a TEST deployment:
 
 ```bash
-npm run path:deploy:plan -- --env test --dataset intake-release --workflow-id 21
+npm run path:deploy:plan -- --env test --skip-data
 ```
 
 Run a TEST deployment:
 
 ```bash
-npm run path:deploy -- --env test --dataset intake-release --workflow-id 21
+npm run path:deploy -- --env test --skip-data --release-id <release-id>
 ```
 
 Run a TEST deployment that also rebuilds TEST from the current DEV baseline first:
 
 ```bash
-npm run path:deploy -- --env test --refresh-test-db --dataset intake-release --workflow-id 21 --yes
+npm run path:deploy -- --env test --refresh-test-db --skip-data --release-id <release-id> --yes
 ```
 
 Plan a PROD deployment:
 
 ```bash
-npm run path:deploy:plan -- --env prod --dataset intake-release --workflow-id 21
+npm run path:deploy:plan -- --env prod --skip-data
 ```
 
 Run a PROD deployment:
 
 ```bash
-npm run path:deploy -- --env prod --dataset intake-release --workflow-id 21 --yes
+npm run path:deploy -- --env prod --skip-data --release-id <release-id> --yes
 ```
 
 Do not run the PROD command until Bill has explicitly approved the PROD deployment in the current thread. `--yes` is the command-line safety gate; it is not a substitute for that approval.
@@ -178,6 +184,7 @@ Current autosave rollout note:
   - Optional `--refresh-test-db` now makes TEST reset a first-class deploy step instead of a separate manual prerequisite.
   - Runs canonical schema work remotely through SSM on a TEST app host.
   - Optional config/data promotion uses `scripts/path-data-sync.js`.
+  - Data/config promotion is skipped unless `--dataset` is deliberately provided. `--dataset intake-release` promotes workflow authoring plus the global published intake runtime row; do not add it to an app deploy unless that runtime/config scope has been explicitly approved.
   - App rollout uses WSL-native build/package/upload/SSM steps in `scripts/path-deploy.js` for admin and portal instead of the legacy PowerShell component scripts.
   - Current TEST topology is intentionally small: one ASG app host in `ca-central-1d`, one NAT gateway, and ALB on two public subnets. Target-group smoke passes when all registered targets are healthy; after the 2026-06-08 prune that usually means one admin target on `:5001` and one portal target on `:5000`.
   - Current runtime-install safeguard: the TEST admin/portal deploy scripts now remove the deployed `node_modules` tree before remote `npm ci/install`, matching the existing PROD bootstrap rule, so stale instance filesystems do not break a rerun with `ENOTEMPTY`.
@@ -193,6 +200,7 @@ Current autosave rollout note:
   - If that restore-point step ever fails again, only rerun with `--skip-schema --skip-data` when you have direct proof that no schema/data delta remains. Example from 2026-04-24: DEV and PROD checksums for workflow `21` plus `publish/workflow.schema.intake` were identical, so an app-only rerun was safe. Follow-up validation from 2026-04-25: after the IAM policy update, release `20260425-100201` captured restore point `path-prod-20260425-100201-20260425100220` successfully under the normal full prod path.
   - Runs canonical schema work remotely through SSM on a PROD app host.
   - Optional config/data promotion uses `scripts/path-data-sync.js`.
+  - Data/config promotion is skipped unless `--dataset` is deliberately provided. `--dataset intake-release` promotes workflow authoring plus the global published intake runtime row; do not add it to a PROD app deploy unless that runtime/config scope has been explicitly approved.
   - App rollout uses WSL-native build/package/upload steps in `scripts/path-deploy.js`: `shared/shared-latest.zip`, `admin/admin-dashboard-latest.zip`, and `portal/portal-latest.zip` are uploaded to `nwac-prod-artifacts`, then `nwac-prod-asg` is refreshed with `MinHealthyPercentage=100,InstanceWarmup=180,SkipMatching=false`.
   - WSL-native PROD validation: release `20260507-prod-contact-retirement` captured restore point `path-prod-20260507-prod-contact-retirement-20260508000234`, uploaded all three artifacts, completed ASG refresh `f323cb21-bc0c-4063-b0e8-017b40f31544` on replacement instance `i-00b00ebdff3f55dc5`, and passed final public smoke.
   - The boot-time app bootstrap already removes deployed `node_modules` before reinstalling runtime dependencies; keep any future prod in-place helper aligned with that rule.

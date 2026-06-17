@@ -2380,6 +2380,8 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [submitDocumentRetention, setSubmitDocumentRetention] = useState({});
   const [isEditingAssessment, setIsEditingAssessment] = useState(false);
   const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
+  const [showRecallConfirmModal, setShowRecallConfirmModal] = useState(false);
+  const [isRecallingAssessment, setIsRecallingAssessment] = useState(false);
   const [showApproveConfirmModal, setShowApproveConfirmModal] = useState(false);
   const [showSendApprovalLetterConfirmModal, setShowSendApprovalLetterConfirmModal] = useState(false);
   const [showDecisionPendingAlert, setShowDecisionPendingAlert] = useState(true);
@@ -4583,7 +4585,11 @@ const CoordinatorAssessmentWidget = forwardRef(
     lockedByAnotherUser;
   // Disable all fields (including NWAC) if review is complete, a final decision exists, status is locked, conflict not signed, or eligibility not set
   const baseAssessmentLocked = lockedByAnotherUser || isLockedStatus || isReviewComplete || isDecisionFinal || isPostDecisionStatus;
-  const isAssessmentDisabled = baseAssessmentLocked || isEligibilityGateActive || (assessmentSubmitted && !isEditingAssessment);
+  const isAssessmentDisabled =
+    baseAssessmentLocked ||
+    isEligibilityGateActive ||
+    isPendingApprovalStatus ||
+    (assessmentSubmitted && !isEditingAssessment);
   const checklistUploadsLocked = isAssessmentDisabled && !isCommunicationStep && !isFundingDocsStep;
   const isNWACFieldsDisabled = baseAssessmentLocked || isEligibilityGateActive || !showNWACSection || !isPendingApprovalStatus || !canManageOutcomeReview;
   const isEligibilityDisabled = baseAssessmentLocked || isDeclarationGateActive || !isEligibilityAdmin;
@@ -6379,6 +6385,94 @@ const CoordinatorAssessmentWidget = forwardRef(
     setShowCancelModal(false);
     setAlert(null);
   }, [acquireLock, activeLock, isDecisionFinal, isLockedStatus, lockedByAnotherUser, lockingAssessment, showLockAlert]);
+  const handleRecallAssessmentSubmission = useCallback(async () => {
+    if (!caseData?.id) return;
+    setIsRecallingAssessment(true);
+    setAlert(null);
+    try {
+      const requestBody = {};
+      if (applicationId) {
+        requestBody.applicationId = applicationId;
+      }
+      const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || caseData?.applicationRowVersion || 0);
+      if (versionToken > 0) {
+        requestBody.expectedRowVersion = versionToken;
+      }
+      const res = await apiFetch(`/api/cases/${caseData.id}/assessment/recall`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      });
+      const result = await res.json().catch(() => null);
+      if (res.status === 409 && result?.error === 'row_version_conflict') {
+        const latestVersion = Number(result?.currentRowVersion || 0);
+        if (latestVersion) updateRowVersion(latestVersion);
+        if (typeof actions?.refreshCaseData === 'function') {
+          await actions.refreshCaseData().catch(() => {});
+        }
+        setAlert({
+          type: 'warning',
+          content: 'This assessment changed while you were working. The latest data has been reloaded; review it and try again.',
+          dismissible: true,
+          statusIconAriaLabel: 'Warning'
+        });
+        scrollAfterAction();
+        return;
+      }
+      if (!res.ok || !result?.success) {
+        throw new Error(result?.message || result?.error || 'Failed to recall assessment submission.');
+      }
+      const updatedRowVersion = Number(result?.application_row_version || result?.applicationRowVersion || 0);
+      if (updatedRowVersion) {
+        updateRowVersion(updatedRowVersion);
+      }
+      if (typeof onCaseUpdate === 'function') {
+        onCaseUpdate({
+          applicationStatus: result?.applicationStatus || 'in_review',
+          application_status: result?.applicationStatus || 'in_review',
+          applicationStatusRaw: result?.applicationStatus || 'in_review',
+          application_row_version: updatedRowVersion || undefined,
+        });
+      }
+      if (typeof actions?.refreshCaseData === 'function') {
+        await actions.refreshCaseData().catch(() => {});
+      }
+      dispatchSupportingDocsRefresh();
+      setLocalAssessmentSubmitted(false);
+      setShowNWACSection(false);
+      setIsEditingAssessment(false);
+      setShowRecallConfirmModal(false);
+      setCurrentStep('review');
+      setAlert({
+        type: 'success',
+        content: 'Assessment submission recalled. You can make corrections and submit it again when ready.',
+        dismissible: true,
+        statusIconAriaLabel: 'Success'
+      });
+      scrollAfterAction();
+    } catch (err) {
+      setAlert({
+        type: 'error',
+        content: err?.message || 'Failed to recall assessment submission.',
+        dismissible: true,
+        statusIconAriaLabel: 'Error'
+      });
+      scrollAfterAction();
+    } finally {
+      setIsRecallingAssessment(false);
+    }
+  }, [
+    actions,
+    applicationId,
+    applicationRowVersionState,
+    caseData?.applicationRowVersion,
+    caseData?.application_row_version,
+    caseData?.id,
+    dispatchSupportingDocsRefresh,
+    onCaseUpdate,
+    scrollAfterAction,
+    updateRowVersion
+  ]);
   const ensureLockForOperation = useCallback(async () => {
     if (!application_id) {
       showLockAlert({ reason: 'invalid_application_id' }, 'error');
@@ -8726,6 +8820,17 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     setCurrentStep(requestedStepId);
   };
 
+  const canRecallAssessmentSubmission =
+    !isEligibilityGateActive &&
+    !lockedByAnotherUser &&
+    !isLockedStatus &&
+    !isDecisionFinal &&
+    !isReviewComplete &&
+    !isPostDecisionStatus &&
+    isPendingApprovalStatus &&
+    assessmentSubmitted &&
+    !isEditingAssessment;
+
   const headerElement = (
     <Header
       variant="h2"
@@ -8734,7 +8839,17 @@ ${JSON.stringify(contextPayload, null, 2)}`;
           {!isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && isReviewComplete && (
             <Button variant="normal" onClick={() => setShowEditConfirmModal(true)}>Edit</Button>
           )}
-          {!isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && assessmentSubmitted && !isEditingAssessment && (
+          {canRecallAssessmentSubmission && (
+            <Button
+              variant="normal"
+              onClick={() => setShowRecallConfirmModal(true)}
+              loading={isRecallingAssessment}
+              disabled={isRecallingAssessment}
+            >
+              Recall submission
+            </Button>
+          )}
+          {!isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && !isPendingApprovalStatus && assessmentSubmitted && !isEditingAssessment && (
             <Button variant="normal" onClick={() => setShowEditConfirmModal(true)}>Edit</Button>
           )}
           {!isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
@@ -11989,6 +12104,39 @@ ${JSON.stringify(contextPayload, null, 2)}`;
               </Box>
             )}
           </SpaceBetween>
+        </Modal>
+        <Modal
+          visible={showRecallConfirmModal}
+          onDismiss={() => {
+            if (!isRecallingAssessment) {
+              setShowRecallConfirmModal(false);
+            }
+          }}
+          header="Recall assessment submission?"
+          footer={
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button
+                variant="primary"
+                onClick={handleRecallAssessmentSubmission}
+                loading={isRecallingAssessment}
+                disabled={isRecallingAssessment}
+              >
+                Recall submission
+              </Button>
+              <Button
+                variant="normal"
+                onClick={() => setShowRecallConfirmModal(false)}
+                disabled={isRecallingAssessment}
+              >
+                Cancel
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          <Box>
+            This will move the assessment back to In Review, remove the submitted PDFs from the active document list,
+            and let you make corrections before submitting again.
+          </Box>
         </Modal>
         <Modal
           visible={showEditConfirmModal}

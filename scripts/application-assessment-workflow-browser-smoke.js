@@ -3,8 +3,9 @@
  * DEV browser smoke for high-risk Application Assessment workflow paths.
  *
  * This loads the real local React bundle with deterministic mocked API data and
- * verifies conflict declaration, coordinator submit, NWAC approval, approval
- * letter send persistence, and funding-form completion payloads.
+ * verifies conflict declaration, coordinator submit, pending-assessment recall,
+ * NWAC approval, approval letter send persistence, and funding-form completion
+ * payloads.
  */
 
 const fs = require('fs');
@@ -469,6 +470,36 @@ function applyCaseMutation(state, body) {
   };
 }
 
+function applyAssessmentRecall(state) {
+  const currentVersion = Number(state.casePayload.application_row_version || 0) || 0;
+  const nextVersion = currentVersion + 1;
+  const next = {
+    ...state.casePayload,
+    applicationStatus: 'in_review',
+    application_status: 'in_review',
+    applicationStatusRaw: 'in_review',
+    application_status_raw: 'in_review',
+    application_lifecycle_status: 'assessment',
+    applicationLifecycleStatus: 'assessment',
+    decision_outcome: null,
+    decisionOutcome: null,
+    application_row_version: nextVersion,
+    applicationRowVersion: nextVersion,
+  };
+  state.casePayload = next;
+  state.applicationPayload = buildApplicationPayload(next);
+  return {
+    success: true,
+    applicationId: APPLICATION_ID,
+    applicationStatus: 'in_review',
+    application_status: 'in_review',
+    application_row_version: nextVersion,
+    applicationRowVersion: nextVersion,
+    archivedDocumentIds: [701],
+    eventType: 'assessment_recalled',
+  };
+}
+
 async function installApiStubs(page, state) {
   await page.setRequestInterception(true);
   page.on('request', request => {
@@ -531,6 +562,12 @@ async function installApiStubs(page, state) {
       const body = parseJsonSafely(request.postData()) || {};
       state.mutations.casePuts.push({ path: `${pathname}${url.search}`, body });
       request.respond(jsonResponse(applyCaseMutation(state, body)));
+      return;
+    }
+    if (pathname === '/api/cases/1/assessment/recall' && method === 'POST') {
+      const body = parseJsonSafely(request.postData()) || {};
+      state.mutations.assessmentRecalls.push({ path: `${pathname}${url.search}`, body });
+      request.respond(jsonResponse(applyAssessmentRecall(state)));
       return;
     }
     if (pathname === '/api/applications/2' && method === 'GET') {
@@ -973,6 +1010,44 @@ function buildScenarios() {
       },
     },
     {
+      name: 'coordinator-recall-pending-assessment',
+      role: 'ISET Coordinator',
+      path: FRONTEND_CASE_PATH,
+      forceCoordinatorOnlyLayout: true,
+      casePayload: buildCasePayload({
+        status: 'intake',
+        applicationStatus: 'pending_approval',
+        completeAssessment: true,
+        conflictSigned: true,
+      }),
+      run: async ({ page, state }) => {
+        await waitForWorkspaceReady(page, 'Recall submission');
+        const editableButtons = [
+          ...(await visibleEnabledButtons(page, 'Save Progress')),
+          ...(await visibleEnabledButtons(page, 'Edit')),
+        ];
+        if (editableButtons.length) {
+          throw new Error(`Pending assessment exposed edit controls: ${JSON.stringify(editableButtons)}`);
+        }
+        await waitForButtonEnabled(page, 'Recall submission');
+        await clickButtonByText(page, 'Recall submission');
+        await waitForText(page, 'Recall assessment submission?');
+        await clickButtonByText(page, 'Recall submission', { preferLast: true });
+        const recallPost = await waitUntil(
+          () => state.mutations.assessmentRecalls[0],
+          'assessment recall POST'
+        );
+        if (recallPost.body.applicationId !== APPLICATION_ID) {
+          throw new Error(`Recall used wrong applicationId: ${recallPost.body.applicationId}`);
+        }
+        if (recallPost.body.expectedRowVersion !== 7) {
+          throw new Error(`Recall sent wrong expectedRowVersion: ${recallPost.body.expectedRowVersion}`);
+        }
+        await waitForText(page, 'Assessment submission recalled. You can make corrections and submit it again when ready.');
+        await waitForText(page, 'Submit assessment');
+      },
+    },
+    {
       name: 'nwac-approval-decision',
       role: 'System Administrator',
       path: approvalEntryPath('decision'),
@@ -1120,6 +1195,7 @@ async function runScenario(browser, args, scenario) {
     apiCalls: [],
     mutations: {
       casePuts: [],
+      assessmentRecalls: [],
       messagePosts: [],
     },
     consoleLines: [],
@@ -1160,6 +1236,11 @@ async function runScenario(browser, args, scenario) {
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
     await scenario.run({ page, state });
     await delay(800);
+    await page.evaluate(() => {
+      if (document.activeElement && typeof document.activeElement.blur === 'function') {
+        document.activeElement.blur();
+      }
+    });
     await page.screenshot({ path: screenshotPath, fullPage: true });
   } catch (error) {
     await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
@@ -1174,10 +1255,12 @@ async function runScenario(browser, args, scenario) {
     screenshot: screenshotPath,
     apiCallCount: state.apiCalls.length,
     casePutCount: state.mutations.casePuts.length,
+    assessmentRecallCount: state.mutations.assessmentRecalls.length,
     messagePostCount: state.mutations.messagePosts.length,
     failures: state.failures,
     apiCalls: state.apiCalls.map(call => `${call.method} ${call.path}${call.search}`),
     casePuts: state.mutations.casePuts.map(entry => entry.body),
+    assessmentRecalls: state.mutations.assessmentRecalls.map(entry => entry.body),
     messagePosts: state.mutations.messagePosts.map(entry => entry.body),
     consoleWarnings: state.consoleLines.filter(line => line.type === 'warning' || line.type === 'error').slice(-10),
   };

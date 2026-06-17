@@ -1,7 +1,7 @@
 # PATH Deployment Quick Guide
 
 Status: current primary operator guide for normal TEST/PROD PATH deploys.
-Last reviewed: 2026-06-08 after TEST cost-pruning; command names checked against current `package.json`.
+Last reviewed: 2026-06-16 after the intake runtime incident; command names checked against current `package.json`.
 
 This is the shortest operator guide for normal PATH deployments.
 
@@ -12,6 +12,19 @@ cd /home/bill/ISET/admin-dashboard
 ```
 
 Daily coding/Codex work and deployments now happen from the WSL workspace `/home/bill/ISET/path-dev-wsl.code-workspace`. `path:deploy` packages the WSL admin repo plus sibling `ISET-intake` and `shared` trees. TEST rolls out through WSL AWS CLI + SSM; PROD uploads fixed latest artifacts and waits for the PROD ASG refresh. Do not use stale `X:\ISET` or `/mnt/x/ISET` checkout instructions for deploys.
+
+## Fresh Thread Deploy Preflight
+
+When Bill starts a new Codex thread for deploy work, the agent must first:
+
+- Read `docs/AGENTS.md`, this quick guide, `docs/ops/deployments/prod-deployment-guide.md`, `docs/ops/deployments/path-deploy-orchestrator.md`, and `docs/ops/deployments/data-promotion-catalog.md`.
+- Run `git status --short` from `/home/bill/ISET/admin-dashboard` and state that the deploy artifact packages the current WSL working tree, not only staged files.
+- State the intended deploy scope before planning. Ordinary TEST/PROD deploys mean the current app build plus planned schema migrations, and use `--skip-data`; runtime/config/data promotion is a separate scope and is not included by default.
+- Do not copy DEV runtime config to PROD as routine deployment hygiene. A PROD runtime setting change must be a named, reviewed operation for specific keys/rows.
+- Before any PROD command that mutates runtime config, allowlisted data, or arbitrary DB rows, state the exact dataset or SQL, the target tables/keys, the source environment, why app/schema-only deploy is insufficient, the restore/rollback path, and the verification that will prove the right thing changed.
+- Treat `--dataset intake-release`, `--dataset intake-runtime-publish`, and any direct `iset_runtime_config` SQL as deliberate runtime operations, never boilerplate. They require Bill to explicitly approve that exact scope in the current thread.
+- For intake runtime promotion, require `--workflow-id` and prove the plan or manifest names the intended workflow before apply. For the current ISET intake, a promotion is only safe when it is explicitly in scope and `summary.runtimePublish.runtime.workflowId` is `21`.
+- PROD deploys still require Bill's explicit approval in the current thread before any mutating `path:deploy`, `data:sync:apply`, maintenance fallback, runtime SQL command, or other DB-impacting command.
 
 ## Rules
 
@@ -29,9 +42,11 @@ Daily coding/Codex work and deployments now happen from the WSL workspace `/home
 - In the current Codex sandbox, `nwac-prod` is the standard role-backed prod operator profile. `default` is only the bootstrap IAM user and direct prod resource calls through it are expected to fail.
 - The reduced `nwac-prod` role covers normal deploys, prod SQL/dumps via SSM, ASG refresh, automatic prod restore-point snapshots, and the ALB maintenance fallback. It does not cover broader infra/admin work such as WAF changes, SSM env parameter writes, uploads-bucket CORS changes, or Terraform/ACM changes.
 - PROD deploys require explicit Bill approval in the current thread plus `--yes`. A prepared fix, passing TEST result, or urgent support issue is not approval to deploy to PROD.
+- Deployment scope boundary: app deploys do not include runtime configuration, allowlisted data promotion, arbitrary SQL data fixes, or full database restores unless Bill explicitly confirms that exact scope in the current thread. For ordinary app/schema releases, use `--skip-data` or omit `--dataset`. Do not include `--dataset intake-release` as boilerplate, and do not treat DEV runtime config as something to mirror into PROD.
 - TEST deploys require `--yes` only when you include `--refresh-test-db`.
 - Deploys do not auto-bump `package.json` semver; instead, each frontend build now carries a visible release/build stamp.
 - TEST app deploys package the current WSL working tree and sibling WSL portal/shared trees. If you mean "deploy only the staged subset," isolate unrelated local edits before running `path:deploy`; the deploy artifact is not limited to the Git index.
+- Intake data promotions must prove runtime/authoring alignment before any TEST or PROD bundle is generated. `intake-release` and standalone `intake-runtime-publish` both require `--workflow-id`; the plan output must show `summary.runtimePublish.runtime.workflowId` matching that id before the promotion is safe to apply.
 - TEST is currently cost-pruned. Expect one healthy `nwac-test-asg` app instance, one NAT gateway, and target-group smokes with one registered admin target plus one registered portal target. Do not treat a one-target TEST smoke as incomplete; the deploy and SQL helpers auto-discover the current ASG/SSM host(s).
 - TEST app rollouts should rehearse PROD user-facing maintenance behavior. Any TEST deploy that can restart app processes, make a surface unavailable, or produce transient `502 Bad Gateway` responses needs a scoped warning first and the affected surface behind the ALB maintenance page before deploy starts. TEST remains less strict than PROD because ordinary app deploys do not require `--yes`, but raw 502s are not an acceptable planned TEST experience. TEST maintenance copy must use the user-facing name `Test and Training environment` and explicitly state that Production is not affected.
 - PROD app rollouts are user-impacting unless the plan proves otherwise. Any PROD deploy that refreshes ASG instances, restarts app processes, rotates target groups, or can produce transient `502 Bad Gateway` responses needs a scoped warning first and the affected surface behind the ALB maintenance page before deploy starts, even if it is admin-only, portal-only, or code-only.
@@ -43,12 +58,13 @@ Daily coding/Codex work and deployments now happen from the WSL workspace `/home
 ### 1. Deploy current code to TEST
 
 ```bash
-npm run path:deploy -- --env test --dataset intake-release --workflow-id 21
+npm run path:deploy -- --env test --skip-data --release-id <release-id>
 ```
 
 Use this when:
-- you want to deploy app/config/schema changes to TEST
+- you want to deploy app/schema changes to TEST
 - you do not want to wipe TEST data first
+- you are not intentionally promoting runtime config or workflow authoring rows
 
 For an admin-only TEST rollout with no schema/data/portal work:
 
@@ -85,19 +101,20 @@ Use that admin-only shortcut only when the change is truly confined to the admin
 ### 2. Reset TEST from the current DEV baseline, then deploy
 
 ```bash
-npm run path:deploy -- --env test --refresh-test-db --dataset intake-release --workflow-id 21 --yes
+npm run path:deploy -- --env test --refresh-test-db --skip-data --release-id <release-id> --yes
 ```
 
 Use this when:
 - TEST data can be thrown away
 - you want a clean TEST environment
 - you want Codex to handle the snapshot generation automatically
+- you are not intentionally applying an extra runtime/config promotion after the reset
 
 What this does:
 - builds a DEV-derived TEST baseline snapshot automatically
 - restores TEST
 - applies canonical schema work
-- applies the allowlisted intake release dataset
+- skips additional allowlisted data promotion; the DEV-derived TEST baseline itself includes the current published intake runtime row as part of the reset dataset
 - deploys admin + portal
 - runs TEST smoke checks
 
@@ -106,7 +123,7 @@ What this does:
 First plan:
 
 ```bash
-npm run path:deploy:plan -- --env prod --dataset intake-release --workflow-id 21
+npm run path:deploy:plan -- --env prod --skip-data
 ```
 
 For a normal app rollout, use the maintenance sequence so smoke runs after normal routing is restored:
@@ -115,7 +132,7 @@ For a normal app rollout, use the maintenance sequence so smoke runs after norma
 npm run path:maintenance -- set --env prod --surfaces all --start-in 5m --expected-duration 15m --yes
 # wait through the warning window
 npm run path:maintenance:fallback -- set --env prod --surfaces all --yes
-npm run path:deploy -- --env prod --dataset intake-release --workflow-id 21 --release-id <release-id> --skip-smoke --yes
+npm run path:deploy -- --env prod --skip-data --release-id <release-id> --skip-smoke --yes
 npm run path:maintenance:fallback -- clear --env prod --surfaces all --yes
 npm run path:deploy:smoke -- --env prod
 npm run path:maintenance -- clear --env prod --surfaces all --yes
@@ -131,7 +148,7 @@ What this does:
 - verifies AWS prod identity
 - captures a prod DB restore point if DB mutation is planned
 - applies canonical schema work
-- applies allowlisted config/data only
+- does not apply runtime config or allowlisted data when `--skip-data` is used
 - deploys artifacts
 - waits for prod refresh
 - runs prod smoke checks, or records the release before a manual normal-routing smoke when `--skip-smoke` is used during ALB fallback
@@ -209,6 +226,33 @@ npm run path:deploy:smoke -- --env test --skip-admin
 npm run path:deploy:smoke -- --env prod --skip-admin --skip-shared
 ```
 
+## Runtime/Config Promotion
+
+Runtime configuration is a separate deployment scope, not part of a normal app deploy. Promote it only when Bill explicitly confirms the release includes runtime config or workflow authoring changes.
+
+For intake workflow promotion, first prove the plan names the intended workflow:
+
+```bash
+npm run data:sync:plan -- --dataset intake-release --workflow-id 21 --target-env test
+npm run data:sync:plan -- --dataset intake-release --workflow-id 21 --target-env prod
+```
+
+The plan or manifest must show `summary.runtimePublish.runtime.workflowId` equal to the workflow being promoted before any TEST or PROD apply. Remember that `iset_runtime_config(scope='publish', k='workflow.schema.intake')` is global, not per workflow; applying the wrong runtime row changes the live applicant intake.
+
+When runtime promotion is approved as part of a deploy, include the dataset intentionally:
+
+```bash
+npm run path:deploy -- --env test --dataset intake-release --workflow-id 21 --release-id <release-id>
+npm run path:deploy -- --env prod --dataset intake-release --workflow-id 21 --release-id <release-id> --yes
+```
+
+When only runtime/config promotion is approved, use `data:sync:apply` instead of hiding it inside an app rollout:
+
+```bash
+npm run data:sync:apply -- --dataset intake-release --workflow-id 21 --target-env test
+npm run data:sync:apply -- --dataset intake-release --workflow-id 21 --target-env prod --yes
+```
+
 ## Safe Preflight Commands
 
 Release-note generation check before a TEST deploy:
@@ -223,19 +267,19 @@ The first printed package title must be the release being deployed, not an older
 Plan TEST:
 
 ```bash
-npm run path:deploy:plan -- --env test --dataset intake-release --workflow-id 21
+npm run path:deploy:plan -- --env test --skip-data
 ```
 
 Plan TEST reset + deploy:
 
 ```bash
-npm run path:deploy:plan -- --env test --refresh-test-db --dataset intake-release --workflow-id 21
+npm run path:deploy:plan -- --env test --refresh-test-db --skip-data
 ```
 
 Plan PROD:
 
 ```bash
-npm run path:deploy:plan -- --env prod --dataset intake-release --workflow-id 21
+npm run path:deploy:plan -- --env prod --skip-data
 ```
 
 Smoke only:

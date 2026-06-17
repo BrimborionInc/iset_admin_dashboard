@@ -20,6 +20,7 @@
 - Event taxonomy and metadata are sourced from `shared/events/catalog.js`, providing category, severity, source, draft, and lock flags consumed by the capture-rule tooling.
 - Frontend widgets (`src/widgets/ApplicationEvents.js`, `src/widgets/caseUpdates.js`) consume the new endpoints, rendering severity badges, read-state indicators, and filter/sort controls against the normalized event payloads.
 - The unfinished `iset_event_outbox` async-delivery scaffold was retired on 2026-05-10. `emitEvent` no longer writes it, and migration `20260510_0001_retire_event_outbox.sql` drops the table.
+- Assessment recall now emits `assessment_recalled` from the application-assessment and intervention-proposal recall endpoints. The event records the case/application/proposal scope, recalled assessment version, archived document ids, and status transition so withdrawn submissions remain auditable without staying in the active approver document stream.
 
 ## Progress Log
 
@@ -179,9 +180,9 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
 
 ## Current Event Type Inventory
 
-### Catalogue vs emitters (2025-09-30)
+### Catalogue vs emitters (2025-09-30; updated 2026-06-16)
 - **Case Lifecycle**: all types shown in the admin Event Types UI (`status_changed`, `case_assigned`, `case_reassigned`, `case_unassigned`, `case_watch_added`, `case_watch_removed`) are in the catalog and have emitters wired via `captureCaseEvent`/`publishAssignmentEvent`.
-- **Assessment**: `assessment_submitted`, `nwac_review_submitted`, and `conflict_declaration_signed` emit during the assessment update flow; catalog is up to date.
+- **Assessment**: `assessment_submitted`, `assessment_recalled`, NWAC review decision events, intervention proposal/revision decision events, and conflict-declaration events are catalogued. `assessment_recalled` is emitted when a pending application assessment, new intervention proposal, or intervention revision submission is recalled before decision.
 - **Application Submission**: portal currently emits `application_submitted`; other portal types (`application_started`, `draft_saved`, `draft_deleted`, `submission_acknowledged`) are catalogued but still need portal emitters migrated to the shared service.
 - **Documents/Notes/Messaging/System**: document uploads are now emitted from admin flows; messaging types remain draft-only, with `message_received` renamed to `message_received` (label “Secure message posted”) and `message_sent` removed until emitters are added.
 
@@ -315,7 +316,6 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
 - Finalise scope for Step 2 (legacy code removal) and create tracking tasks.
 - Draft schema migration scripts and event service interface skeletons.
 - Define API contracts (OpenAPI/TypeScript types) for frontend and portal teams.
-
 
 
 

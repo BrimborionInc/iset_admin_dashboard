@@ -51,6 +51,9 @@ Provide an in-app way for signed-in PATH staff to report admin-console bugs and 
   - add internal notes for substantive triage judgments
   - change statuses where appropriate
   - return a prioritized analysis for planning, not just a cleaned-up queue
+- Treat submitted reports as evidence to validate, not as automatic product defects or change requests.
+  Before calling something a bug, compare it against the agreed product behavior in current docs/code/live data.
+  If the system is behaving as designed and the issue is staff understanding, training, wording, or support, close it as by-design/support-only with a note instead of expanding scope into a new CR.
 - Current status intent for Codex triage:
   - `triaging`: acknowledged and under validation, design review, or information gathering
   - `planned`: fix/change is complete and tested, but has not yet been deployed to PROD

@@ -11,8 +11,10 @@ Run the PATH orchestrator from the WSL admin repo:
 
 ```bash
 cd /home/bill/ISET/admin-dashboard
-npm run path:deploy -- --env test --dataset intake-release --workflow-id 21
+npm run path:deploy -- --env test --skip-data --release-id <release-id>
 ```
+
+This recommended command is app/schema-only. Runtime configuration and allowlisted data promotion are separate scope; include `--dataset intake-release --workflow-id 21` only when Bill explicitly confirms that the TEST run should promote workflow authoring plus the global published intake runtime row.
 
 The TEST app rollout is WSL-native. It builds/packages `/home/bill/ISET/admin-dashboard`, `/home/bill/ISET/ISET-intake`, and `/home/bill/ISET/shared`, uploads the artifacts with the WSL AWS CLI, then runs the in-place SSM update commands. Do not use stale `X:\ISET` or `/mnt/x/ISET` guidance for TEST.
 
@@ -29,7 +31,7 @@ Important release-note rule: before any TEST app deploy with user-visible change
 What it does:
 - Verifies the TEST AWS identity/profile before doing anything
 - Plans/applies canonical shared-schema migrations through SSM on a TEST app host
-- Optionally promotes an allowlisted config dataset from DEV (`intake-release` shown above)
+- Optionally promotes an allowlisted config dataset from DEV only when `--dataset` is explicitly included
 - Runs WSL-native admin and portal TEST app deploy steps from `scripts/path-deploy.js`
 - Verifies TEST health through the ALB target groups (`nwac-test-admin-tg`, `nwac-test-portal-tg`)
 - Writes a release manifest under `tmp/path-deploy/test/`
@@ -45,7 +47,7 @@ Current SES safety guard:
 For a non-destructive preflight first:
 
 ```bash
-npm run path:deploy:plan -- --env test --dataset intake-release --workflow-id 21
+npm run path:deploy:plan -- --env test --skip-data
 ```
 
 ## Recent deploy evidence

@@ -2329,7 +2329,8 @@ function buildAssessmentDocumentMetadata({
   versionNumber = null,
   variant = 'submitted',
   previousVersionNumber = null,
-  snapshot = null
+  snapshot = null,
+  extraMetadata = null
 } = {}) {
   const metadata = {
     label,
@@ -2339,6 +2340,12 @@ function buildAssessmentDocumentMetadata({
     assessment_previous_version_number: normalisePositiveInteger(previousVersionNumber) || null,
     assessment_snapshot: snapshot && typeof snapshot === 'object' ? snapshot : null
   };
+  if (extraMetadata && typeof extraMetadata === 'object' && !Array.isArray(extraMetadata)) {
+    Object.entries(extraMetadata).forEach(([key, value]) => {
+      if (!key || typeof value === 'undefined') return;
+      metadata[key] = value;
+    });
+  }
   return JSON.stringify(metadata);
 }
 
@@ -2371,6 +2378,7 @@ async function fetchLatestAssessmentDocumentInfo({
   applicationId,
   caseId = null,
   documentTypes = ['case_assessment'],
+  interventionId = null,
   connection = pool
 } = {}) {
   const categories = Array.isArray(documentTypes)
@@ -2391,10 +2399,16 @@ async function fetchLatestAssessmentDocumentInfo({
     whereClauses.push('case_id = ?');
     params.push(normalizedCaseId);
   }
+  const normalizedInterventionId = normalisePositiveInteger(interventionId);
+  if (normalizedInterventionId) {
+    whereClauses.push(`CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.intervention_id')) AS UNSIGNED) = ?`);
+    params.push(normalizedInterventionId);
+  }
   const [rows] = await connection.query(
     `SELECT id, document_category, label, metadata, status, created_at
        FROM iset_document
       WHERE ${whereClauses.join(' AND ')}
+        AND status = 'active'
       ORDER BY created_at DESC, id DESC`,
     params
   );
@@ -2402,6 +2416,225 @@ async function fetchLatestAssessmentDocumentInfo({
     ? rows.map(parseAssessmentDocumentInfo).filter(Boolean)
     : [];
   return items[0] || null;
+}
+
+const ASSESSMENT_RECALL_VERSIONED_DOCUMENT_TYPES = Object.freeze([
+  'case_assessment',
+  'case_assessment_redline',
+]);
+
+const APPLICATION_ASSESSMENT_RECALL_COMPANION_DOCUMENT_TYPES = Object.freeze([
+  'application_form',
+  'financial_overview',
+]);
+
+function isAssessmentRecallAdmin(req) {
+  return hasSystemOrNwacAdminAccess(req);
+}
+
+async function fetchLatestAssessmentSubmitterActor(connection, { caseId, eventType = 'assessment_submitted' } = {}) {
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  if (!connection || !normalizedCaseId || !eventType) return null;
+  try {
+    const [[row]] = await connection.query(
+      `SELECT
+          e.actor_staff_profile_id,
+          e.actor_applicant_user_id,
+          e.actor_id,
+          e.captured_by
+         FROM iset_event_entry e
+        WHERE e.subject_type = 'case'
+          AND e.subject_id = ?
+          AND e.event_type = ?
+        ORDER BY e.captured_at DESC, e.ingested_at DESC, e.id DESC
+        LIMIT 1`,
+      [String(normalizedCaseId), eventType]
+    );
+    if (row) {
+      return {
+        staffProfileId: normalisePositiveInteger(row.actor_staff_profile_id),
+        applicantUserId: normalisePositiveInteger(row.actor_applicant_user_id),
+        actorId: normaliseString(row.actor_id || row.captured_by) || null,
+      };
+    }
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err) && err?.code !== 'ER_BAD_FIELD_ERROR') {
+      console.warn('[assessment-recall] event submitter lookup failed', err?.message || err);
+    }
+  }
+
+  try {
+    const [[row]] = await connection.query(
+      `SELECT actor_staff_profile_id, actor_user_id
+         FROM iset_case_event
+        WHERE case_id = ?
+          AND event_type = ?
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT 1`,
+      [normalizedCaseId, eventType]
+    );
+    if (row) {
+      return {
+        staffProfileId: normalisePositiveInteger(row.actor_staff_profile_id),
+        applicantUserId: normalisePositiveInteger(row.actor_user_id),
+        actorId: null,
+      };
+    }
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err) && err?.code !== 'ER_BAD_FIELD_ERROR') {
+      console.warn('[assessment-recall] legacy event submitter lookup failed', err?.message || err);
+    }
+  }
+
+  return null;
+}
+
+async function fetchLatestAssessmentDocumentActorUserId(connection, { applicationId, caseId } = {}) {
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  if (!connection || (!normalizedApplicationId && !normalizedCaseId)) return null;
+  const scopeClause = normalizedApplicationId
+    ? 'application_id = ?'
+    : 'case_id = ? AND application_id IS NULL';
+  const scopeParam = normalizedApplicationId || normalizedCaseId;
+  const [[row]] = await connection.query(
+    `SELECT user_id
+       FROM iset_document
+      WHERE ${scopeClause}
+        AND document_category = 'case_assessment'
+        AND status = 'active'
+        AND source = 'system_generated'
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1`,
+    [scopeParam]
+  );
+  return normalisePositiveInteger(row?.user_id);
+}
+
+async function assertAssessmentRecallActorAllowed(connection, req, {
+  caseId,
+  applicationId = null,
+  fallbackStaffProfileId = null,
+  fallbackUserId = null,
+} = {}) {
+  if (isAssessmentRecallAdmin(req)) return { ok: true, reason: 'admin' };
+  const requesterStaffProfileId = resolveActiveStaffProfileId(req);
+  const requesterUserId = await resolveExistingUserIdFromAuth(req, connection);
+  const latestSubmitter = await fetchLatestAssessmentSubmitterActor(connection, { caseId });
+  const latestDocumentActorUserId = await fetchLatestAssessmentDocumentActorUserId(connection, {
+    applicationId,
+    caseId,
+  });
+  const allowedStaffProfileId =
+    normalisePositiveInteger(latestSubmitter?.staffProfileId) ||
+    normalisePositiveInteger(fallbackStaffProfileId);
+  const allowedUserId =
+    normalisePositiveInteger(latestSubmitter?.applicantUserId) ||
+    normalisePositiveInteger(latestDocumentActorUserId) ||
+    normalisePositiveInteger(fallbackUserId);
+  if (allowedStaffProfileId && requesterStaffProfileId && allowedStaffProfileId === requesterStaffProfileId) {
+    return { ok: true, reason: 'submitter_staff_profile' };
+  }
+  if (allowedUserId && requesterUserId && allowedUserId === requesterUserId) {
+    return { ok: true, reason: 'submitter_user' };
+  }
+  return { ok: false, reason: 'not_submitter' };
+}
+
+async function archiveRecalledAssessmentDocuments(connection, {
+  applicationId,
+  caseId,
+  interventionId = null,
+  versionNumber,
+  includeApplicationCompanionDocuments = false,
+  actorStaffProfileId = null,
+  actorUserId = null,
+  reason = null,
+} = {}) {
+  const normalizedApplicationId = normalisePositiveInteger(applicationId);
+  const normalizedCaseId = normalisePositiveInteger(caseId);
+  const normalizedInterventionId = normalisePositiveInteger(interventionId);
+  const normalizedVersionNumber = normalisePositiveInteger(versionNumber);
+  if (!connection || (!normalizedApplicationId && !normalizedCaseId)) return [];
+
+  const documentIds = new Set();
+  if (normalizedVersionNumber) {
+    const scopeClause = normalizedApplicationId
+      ? 'application_id = ?'
+      : 'case_id = ? AND application_id IS NULL';
+    const scopeParam = normalizedApplicationId || normalizedCaseId;
+    const typePlaceholders = ASSESSMENT_RECALL_VERSIONED_DOCUMENT_TYPES.map(() => '?').join(',');
+    const metadataClauses = [
+      `CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.assessment_version_number')) AS UNSIGNED) = ?`,
+    ];
+    const metadataParams = [normalizedVersionNumber];
+    if (normalizedInterventionId) {
+      metadataClauses.push(`CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.intervention_id')) AS UNSIGNED) = ?`);
+      metadataParams.push(normalizedInterventionId);
+    }
+    const [rows] = await connection.query(
+      `SELECT id
+         FROM iset_document
+        WHERE ${scopeClause}
+          AND document_category IN (${typePlaceholders})
+          AND status = 'active'
+          AND source = 'system_generated'
+          AND ${metadataClauses.join(' AND ')}`,
+      [
+        scopeParam,
+        ...ASSESSMENT_RECALL_VERSIONED_DOCUMENT_TYPES,
+        ...metadataParams,
+      ]
+    );
+    (Array.isArray(rows) ? rows : []).forEach(row => {
+      const id = normalisePositiveInteger(row?.id);
+      if (id) documentIds.add(id);
+    });
+  }
+
+  if (includeApplicationCompanionDocuments && normalizedApplicationId) {
+    const companionPlaceholders = APPLICATION_ASSESSMENT_RECALL_COMPANION_DOCUMENT_TYPES.map(() => '?').join(',');
+    const [rows] = await connection.query(
+      `SELECT id
+         FROM iset_document
+        WHERE application_id = ?
+          AND document_category IN (${companionPlaceholders})
+          AND status = 'active'
+          AND source = 'system_generated'`,
+      [normalizedApplicationId, ...APPLICATION_ASSESSMENT_RECALL_COMPANION_DOCUMENT_TYPES]
+    );
+    (Array.isArray(rows) ? rows : []).forEach(row => {
+      const id = normalisePositiveInteger(row?.id);
+      if (id) documentIds.add(id);
+    });
+  }
+
+  const ids = Array.from(documentIds);
+  if (!ids.length) return [];
+
+  const placeholders = ids.map(() => '?').join(',');
+  await connection.query(
+    `UPDATE iset_document
+        SET status = 'archived',
+            metadata = JSON_SET(
+              COALESCE(metadata, JSON_OBJECT()),
+              '$.recalled', true,
+              '$.recalled_at', ?,
+              '$.recalled_by_staff_profile_id', ?,
+              '$.recalled_by_user_id', ?,
+              '$.recall_reason', ?
+            ),
+            updated_at = NOW()
+      WHERE id IN (${placeholders})`,
+    [
+      new Date().toISOString(),
+      normalisePositiveInteger(actorStaffProfileId) || null,
+      normalisePositiveInteger(actorUserId) || null,
+      normaliseString(reason) || null,
+      ...ids,
+    ]
+  );
+  return ids;
 }
 
 async function storeAssessmentPdfDocument({
@@ -2419,6 +2652,7 @@ async function storeAssessmentPdfDocument({
   variant = 'submitted',
   previousVersionNumber = null,
   snapshot = null,
+  extraMetadata = null,
   archivePreviousActive = true,
   replaceExistingVersion = false,
   connection = pool
@@ -2500,7 +2734,8 @@ async function storeAssessmentPdfDocument({
     versionNumber: normalizedVersionNumber,
     variant,
     previousVersionNumber,
-    snapshot
+    snapshot,
+    extraMetadata
   });
   const insertPayload = [
     normalizedCaseId || null,
@@ -15352,6 +15587,13 @@ async function generateAndStoreInterventionAssessmentPdf({
     : `Case manager assessment v${assessmentVersionNumber}`;
   const fileNamePrefix = approved ? 'approved-case-manager-assessment' : 'case-manager-assessment';
   const variant = approved ? 'approved' : 'submitted';
+  const interventionDocumentMetadata = pruneNullish({
+    assessment_source: approved
+      ? 'intervention_approval'
+      : (sourceInterventionRow ? 'intervention_revision_submission' : 'intervention_proposal_submission'),
+    intervention_id: normalisePositiveInteger(interventionRow?.id) || null,
+    source_intervention_id: normalisePositiveInteger(sourceInterventionRow?.id) || null,
+  });
 
   const pdfBuffer = await generateAssessmentPdfBuffer({
     caseRow: interventionRow,
@@ -15378,6 +15620,7 @@ async function generateAndStoreInterventionAssessmentPdf({
     versionNumber: assessmentVersionNumber,
     variant,
     snapshot: currentSnapshot,
+    extraMetadata: interventionDocumentMetadata,
     archivePreviousActive: false,
     replaceExistingVersion: true,
     connection
@@ -15412,6 +15655,7 @@ async function generateAndStoreInterventionAssessmentPdf({
       variant: 'redline',
       previousVersionNumber: latestSubmittedDoc.versionNumber,
       snapshot: currentSnapshot,
+      extraMetadata: interventionDocumentMetadata,
       archivePreviousActive: false,
       replaceExistingVersion: true,
       connection
@@ -54450,6 +54694,207 @@ app.get('/api/interventions/:id/payment-lines', async (req, res) => {
   }
 });
 
+app.post('/api/interventions/:id/assessment/recall', async (req, res) => {
+  const interventionId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(interventionId) || interventionId <= 0) {
+    return res.status(400).json({ error: 'invalid_intervention_id' });
+  }
+
+  let conn;
+  try {
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const [[interventionRow]] = await conn.query(
+      `SELECT
+         ci.*,
+         ci.esdc_intervention_json AS esdcInterventionJson,
+         ap.status AS action_plan_status,
+         ap.case_id AS action_plan_case_id,
+         ap.id AS action_plan_id,
+         ap.funding_stream AS plan_funding_stream,
+         c.tracking_id,
+         c.client_id,
+         c.assigned_staff_profile_id AS assigned_staff_profile_id,
+         c.assigned_staff_profile_id AS assigned_to_user_id,
+         c.portfolio_region_id,
+         sp.region_id AS owner_region_id
+       FROM iset_case_intervention ci
+       LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
+       LEFT JOIN iset_case c ON c.id = ci.case_id
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
+       WHERE ci.id = ?
+       LIMIT 1 FOR UPDATE`,
+      [interventionId]
+    );
+    if (!interventionRow) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'intervention_not_found' });
+    }
+
+    const accessError = validateCaseAccessForIntervention(req, interventionRow);
+    if (accessError) {
+      await conn.rollback();
+      return res.status(accessError.status).json(accessError.body);
+    }
+
+    const currentState = resolveInterventionStateFields({
+      status: interventionRow.status,
+      delivery_status: interventionRow.delivery_status || null,
+    });
+    const currentReviewStatus = currentState.reviewStatus || null;
+    if (!INTERVENTION_REVIEW_DECISION_SOURCE_STATUSES.has(currentReviewStatus)) {
+      await conn.rollback();
+      return res.status(409).json({
+        error: 'intervention_submission_not_pending_decision',
+        message: 'Only submitted intervention proposals awaiting a decision can be recalled.',
+      });
+    }
+
+    const requesterStaffProfileId = resolveActiveStaffProfileId(req);
+    const submitterStaffProfileId = normalisePositiveInteger(interventionRow.created_by_staff_profile_id);
+    if (!isAssessmentRecallAdmin(req) && (!requesterStaffProfileId || requesterStaffProfileId !== submitterStaffProfileId)) {
+      await conn.rollback();
+      return res.status(403).json({
+        error: 'intervention_recall_forbidden',
+        message: 'Only the submitting user can recall this proposal before a decision is recorded.',
+      });
+    }
+
+    const actorStaffProfileId = requesterStaffProfileId || null;
+    const actorUserId = await resolveExistingUserIdFromAuth(req, conn);
+    const applicationId = await resolveApplicationIdForCaseId(interventionRow.case_id, conn);
+    const latestSubmittedDoc = await fetchLatestAssessmentDocumentInfo({
+      applicationId,
+      caseId: interventionRow.case_id,
+      documentTypes: ['case_assessment'],
+      interventionId,
+      connection: conn,
+    });
+    const recalledVersionNumber = latestSubmittedDoc?.versionNumber || null;
+    const archivedDocumentIds = await archiveRecalledAssessmentDocuments(conn, {
+      applicationId,
+      caseId: interventionRow.case_id,
+      interventionId,
+      versionNumber: recalledVersionNumber,
+      includeApplicationCompanionDocuments: false,
+      actorStaffProfileId,
+      actorUserId,
+      reason: 'intervention_submission_recalled',
+    });
+
+    const metadata = safeJsonParse(interventionRow.metadata_json, {}) || {};
+    const revisionInfo =
+      metadata.revision && typeof metadata.revision === 'object'
+        ? metadata.revision
+        : null;
+    const proposalKind = revisionInfo?.sourceInterventionId || revisionInfo?.source_intervention_id
+      ? 'revision'
+      : 'new';
+    const recallEntry = pruneNullish({
+      recalledAt: new Date().toISOString(),
+      recalledByStaffProfileId: actorStaffProfileId || null,
+      recalledByUserId: actorUserId || null,
+      fromStatus: currentReviewStatus,
+      recalledVersionNumber,
+      archivedDocumentIds,
+    });
+    metadata.recallHistory = Array.isArray(metadata.recallHistory)
+      ? [...metadata.recallHistory, recallEntry]
+      : [recallEntry];
+    if (metadata.review && typeof metadata.review === 'object') {
+      metadata.review = {
+        ...metadata.review,
+        decision: '',
+        decisionNotes: '',
+      };
+    }
+
+    await conn.query(
+      `UPDATE iset_case_intervention
+          SET status = 'draft',
+              delivery_status = NULL,
+              reviewed_by_staff_profile_id = NULL,
+              reviewed_at = NULL,
+              review_notes = NULL,
+              metadata_json = ?,
+              updated_at = NOW()
+        WHERE id = ?`,
+      [Object.keys(metadata).length ? JSON.stringify(metadata) : null, interventionId]
+    );
+    if (interventionRow.action_plan_id) {
+      await conn.query('UPDATE iset_case_action_plan SET updated_at = NOW() WHERE id = ?', [interventionRow.action_plan_id]);
+    }
+
+    const [[updatedRow]] = await conn.query(
+      `SELECT
+         ci.*,
+         ci.esdc_intervention_json AS esdcInterventionJson,
+         ap.status AS action_plan_status,
+         ap.case_id AS action_plan_case_id,
+         ap.id AS action_plan_id,
+         ap.funding_stream AS plan_funding_stream,
+         c.assigned_staff_profile_id AS assigned_staff_profile_id,
+         c.assigned_staff_profile_id AS assigned_to_user_id,
+         c.portfolio_region_id,
+         sp.region_id AS owner_region_id
+       FROM iset_case_intervention ci
+       LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
+       LEFT JOIN iset_case c ON c.id = ci.case_id
+       LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
+       WHERE ci.id = ?
+       LIMIT 1`,
+      [interventionId]
+    );
+    await syncInterventionProposalCompatibility(updatedRow, conn);
+
+    await conn.commit();
+
+    const { actorId, actorName } = resolveRequestActor(req);
+    const actorDisplayName = await resolveStaffDisplayName(pool, req) || actorName || null;
+    await captureCaseEvent({
+      type: 'assessment_recalled',
+      caseId: interventionRow.case_id,
+      payload: {
+        case_id: interventionRow.case_id,
+        application_id: applicationId || null,
+        action_plan_id: interventionRow.action_plan_id || null,
+        intervention_id: interventionId,
+        source_intervention_id: normalisePositiveInteger(revisionInfo?.sourceInterventionId || revisionInfo?.source_intervention_id || null),
+        scope: proposalKind === 'revision' ? 'intervention_revision' : 'intervention_proposal',
+        proposal_kind: proposalKind,
+        from_status: currentReviewStatus,
+        to_status: 'draft',
+        recalled_version_number: recalledVersionNumber,
+        archived_document_ids: archivedDocumentIds,
+        message: proposalKind === 'revision'
+          ? 'Intervention revision submission recalled before decision.'
+          : 'Intervention proposal submission recalled before decision.',
+        tracking_id: interventionRow.tracking_id || null,
+      },
+      trackingId: interventionRow.tracking_id || null,
+      actorId,
+      actorName: actorDisplayName || actorName,
+      actorStaffProfileId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      intervention: mapInterventionRow(updatedRow),
+      recalledVersionNumber,
+      archivedDocumentIds,
+    });
+  } catch (error) {
+    if (conn) {
+      try { await conn.rollback(); } catch (_) {}
+    }
+    console.error('POST /api/interventions/:id/assessment/recall failed:', error);
+    return res.status(500).json({ error: 'intervention_recall_failed', detail: error?.message || String(error) });
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
 app.patch('/api/interventions/:id', async (req, res) => {
   const interventionId = Number.parseInt(req.params.id, 10);
   if (!Number.isInteger(interventionId) || interventionId <= 0) {
@@ -54777,6 +55222,16 @@ app.patch('/api/interventions/:id', async (req, res) => {
           return res.status(403).json({ error: 'forbidden' });
         }
       }
+    }
+
+    if (
+      INTERVENTION_REVIEW_DECISION_SOURCE_STATUSES.has(previousReviewStatusForDecision) &&
+      !isRecordingProposalDecision
+    ) {
+      return res.status(409).json({
+        error: 'intervention_submission_locked',
+        message: 'This intervention proposal is waiting for a decision. Recall the submission before making corrections.',
+      });
     }
 
     const previousPlanFundingStream =
@@ -85089,6 +85544,251 @@ app.delete('/api/admin/messages/:id/hard-delete', async (req, res) => {
   }
 });
 
+app.post('/api/cases/:id/assessment/recall', async (req, res) => {
+  const caseId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(caseId) || caseId <= 0) {
+    return res.status(400).json({ success: false, error: 'invalid_case_id' });
+  }
+
+  const body = req.body || {};
+  const requestedApplicationId = normalisePositiveInteger(
+    body.applicationId ||
+    body.application_id ||
+    req.query.applicationId ||
+    req.query.application_id
+  );
+  const expectedRowVersionRaw = body.expectedApplicationRowVersion ?? body.expectedRowVersion;
+  let expectedRowVersionNumber = null;
+  if (expectedRowVersionRaw !== undefined) {
+    expectedRowVersionNumber = Number(expectedRowVersionRaw);
+    if (!Number.isInteger(expectedRowVersionNumber) || expectedRowVersionNumber <= 0) {
+      return res.status(400).json({ success: false, error: 'invalid_expected_row_version' });
+    }
+  }
+
+  const applicationJoinSql = requestedApplicationId
+    ? 'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
+    : buildCasePrimaryApplicationJoinSql('c', 'a');
+  let conn;
+  let eventPayload = null;
+  try {
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) {
+      return res.status(accessError.status).json({ success: false, ...accessError.body });
+    }
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const [[row]] = await conn.query(
+      `SELECT c.id AS case_id,
+              c.tracking_id,
+              c.client_id,
+              c.case_context_json,
+              a.id AS application_id,
+              a.status AS application_status,
+              a.lifecycle_status AS application_lifecycle_status,
+              a.decision_outcome AS application_decision_outcome,
+              a.awaiting_reason AS application_awaiting_reason,
+              a.closure_reason AS application_closure_reason,
+              a.row_version
+         FROM iset_case c
+         ${applicationJoinSql}
+        WHERE c.id = ?
+        LIMIT 1 FOR UPDATE`,
+      requestedApplicationId ? [requestedApplicationId, caseId] : [caseId]
+    );
+    if (!row) {
+      await conn.rollback();
+      return res.status(404).json({ success: false, error: 'case_not_found' });
+    }
+
+    const applicationId = normalisePositiveInteger(row.application_id);
+    if (!applicationId) {
+      await conn.rollback();
+      return res.status(422).json({
+        success: false,
+        error: 'application_required',
+        message: 'Only application-backed assessment submissions can be recalled.',
+      });
+    }
+
+    const currentRowVersion = Number(row.row_version || 1);
+    if (expectedRowVersionNumber !== null && expectedRowVersionNumber !== currentRowVersion) {
+      await conn.rollback();
+      return res.status(409).json({
+        success: false,
+        error: 'row_version_conflict',
+        currentRowVersion,
+      });
+    }
+
+    const applicationStatus =
+      normaliseApplicationStatusValue(row.application_status) || normaliseString(row.application_status) || null;
+    const applicationLifecycleStatus =
+      normaliseApplicationLifecycleStatusValue(row.application_lifecycle_status || row.application_status, {
+        preserveUnknown: true,
+      }) || null;
+    const decisionOutcome = normaliseApplicationDecisionOutcomeValue(row.application_decision_outcome);
+    if (applicationStatus !== 'pending_approval' && applicationLifecycleStatus !== 'pending_decision') {
+      await conn.rollback();
+      return res.status(409).json({
+        success: false,
+        error: 'assessment_not_pending_decision',
+        message: 'Only assessments waiting for a decision can be recalled.',
+      });
+    }
+    if (decisionOutcome) {
+      await conn.rollback();
+      return res.status(409).json({
+        success: false,
+        error: 'decision_already_recorded',
+        message: 'This assessment already has a recorded decision and cannot be recalled.',
+      });
+    }
+
+    const actorAllowed = await assertAssessmentRecallActorAllowed(conn, req, { caseId, applicationId });
+    if (!actorAllowed.ok) {
+      await conn.rollback();
+      return res.status(403).json({
+        success: false,
+        error: 'assessment_recall_forbidden',
+        message: 'Only the submitting user can recall this assessment before a decision is recorded.',
+      });
+    }
+
+    const actorStaffProfileId = resolveActiveStaffProfileId(req) || null;
+    const actorUserId = await resolveExistingUserIdFromAuth(req, conn);
+    const latestSubmittedDoc = await fetchLatestAssessmentDocumentInfo({
+      applicationId,
+      caseId,
+      documentTypes: ['case_assessment'],
+      connection: conn,
+    });
+    const recalledVersionNumber = latestSubmittedDoc?.versionNumber || null;
+    const archivedDocumentIds = await archiveRecalledAssessmentDocuments(conn, {
+      applicationId,
+      caseId,
+      versionNumber: recalledVersionNumber,
+      includeApplicationCompanionDocuments: true,
+      actorStaffProfileId,
+      actorUserId,
+      reason: 'assessment_submission_recalled',
+    });
+
+    const statusPersistence = buildApplicationStatusPersistence('in_review', {
+      lifecycleStatus: applicationLifecycleStatus,
+      decisionOutcome: null,
+      awaitingReason: row.application_awaiting_reason || null,
+      closureReason: row.application_closure_reason || null,
+    });
+    await conn.query(
+      `UPDATE iset_application
+          SET status = ?,
+              lifecycle_status = ?,
+              decision_outcome = NULL,
+              awaiting_reason = ?,
+              closure_reason = ?,
+              row_version = row_version + 1
+        WHERE id = ?`,
+      [
+        statusPersistence.legacyStatus,
+        statusPersistence.lifecycleStatus,
+        statusPersistence.awaitingReason,
+        statusPersistence.closureReason,
+        applicationId,
+      ]
+    );
+
+    const clearDecisionKeys = [
+      'assessment_nwac_review_status',
+      'decisionLetterDrafts',
+      'decision_letter_drafts',
+      'decisionLetter',
+      'decision_letter',
+      'decisionLetterPackDrafts',
+      'decision_letter_pack_drafts',
+      'decisionLetterSent',
+      'decision_letter_sent',
+      'decisionLetterSentType',
+      'decision_letter_sent_type',
+      'decisionLetterSentAt',
+      'decision_letter_sent_at',
+      'fundingDecisionReasonCode',
+      'fundingDecisionReasonLabel',
+      'fundingDecisionReasonExplanation',
+    ];
+    const existingContext = safeJsonParse(row.case_context_json, null) || {};
+    const nextContext = stripApplicationAssessmentRootContext(existingContext);
+    const applicationKey = normalizeApplicationContextKey(applicationId);
+    if (
+      applicationKey &&
+      isPlainObject(nextContext[APPLICATION_ASSESSMENT_CONTEXT_KEY]) &&
+      isPlainObject(nextContext[APPLICATION_ASSESSMENT_CONTEXT_KEY][applicationKey])
+    ) {
+      const scopedContext = { ...nextContext[APPLICATION_ASSESSMENT_CONTEXT_KEY][applicationKey] };
+      clearDecisionKeys.forEach(key => {
+        delete scopedContext[key];
+      });
+      nextContext[APPLICATION_ASSESSMENT_CONTEXT_KEY] = {
+        ...nextContext[APPLICATION_ASSESSMENT_CONTEXT_KEY],
+        [applicationKey]: scopedContext,
+      };
+    }
+    await conn.query(
+      'UPDATE iset_case SET case_context_json = ?, updated_at = NOW() WHERE id = ?',
+      [JSON.stringify(nextContext), caseId]
+    );
+
+    const [[updatedApplication]] = await conn.query(
+      'SELECT row_version FROM iset_application WHERE id = ? LIMIT 1',
+      [applicationId]
+    );
+
+    await conn.commit();
+    const { actorId, actorName } = resolveRequestActor(req);
+    const actorDisplayName = await resolveStaffDisplayName(pool, req) || actorName || null;
+    eventPayload = {
+      case_id: caseId,
+      application_id: applicationId,
+      scope: 'application_assessment',
+      from_status: applicationStatus,
+      to_status: statusPersistence.legacyStatus,
+      recalled_version_number: recalledVersionNumber,
+      archived_document_ids: archivedDocumentIds,
+      message: 'Assessment submission recalled before decision.',
+      tracking_id: row.tracking_id || null,
+    };
+    await captureCaseEvent({
+      type: 'assessment_recalled',
+      caseId,
+      payload: eventPayload,
+      trackingId: row.tracking_id || null,
+      actorId,
+      actorName: actorDisplayName || actorName,
+      actorStaffProfileId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      applicationId,
+      applicationStatus: statusPersistence.legacyStatus,
+      applicationLifecycleStatus: statusPersistence.lifecycleStatus,
+      application_row_version: Number(updatedApplication?.row_version || currentRowVersion + 1),
+      recalledVersionNumber,
+      archivedDocumentIds,
+    });
+  } catch (error) {
+    if (conn) {
+      try { await conn.rollback(); } catch (_) {}
+    }
+    console.error('POST /api/cases/:id/assessment/recall failed:', error);
+    return res.status(500).json({ success: false, error: 'assessment_recall_failed', detail: error?.message || String(error) });
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
 // Update assessment fields for a case
 app.put('/api/cases/:id', async (req, res) => {
   const caseId = Number(req.params.id);
@@ -85735,6 +86435,19 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       applicationDecisionOutcomeToPersist = null;
       applicationAwaitingReasonToPersist = null;
       applicationClosureReasonToPersist = null;
+    }
+
+    const beforeApplicationPendingDecision =
+      beforeApplicationStatus === 'pending_approval' ||
+      beforeApplicationLifecycleStatus === 'pending_decision';
+    if (hasAssessmentPayload && beforeApplicationPendingDecision && !assessmentReviewStatusProvided) {
+      await conn.rollback();
+      return res.status(409).json({
+        success: false,
+        error: 'assessment_submission_locked',
+        message: 'This assessment is waiting for a decision. Recall the submission before making corrections.',
+        lock: lockCheck.lock || null
+      });
     }
 
     const assessmentAlignmentRelevant =
@@ -87497,6 +88210,7 @@ const SYSTEM_ADMIN_ACTIVITY_EVENT_TYPES = Object.freeze([
   'case_assigned',
   'case_unassigned',
   'assessment_submitted',
+  'assessment_recalled',
   'nwac_review_approved',
   'nwac_review_denied',
   'nwac_review_changes_requested',

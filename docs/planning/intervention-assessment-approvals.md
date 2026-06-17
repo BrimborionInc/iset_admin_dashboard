@@ -1,7 +1,7 @@
 # Intervention Assessment & Approvals Plan (Draft)
 Status: Draft (design in progress)  
 Owners: Casework / Admin Dashboard  
-Last updated: 2026-03-18
+Last updated: 2026-06-16
 
 ## Purpose
 Document the target workflow for proposing, reviewing, approving, and running interventions within the existing Case Workspace. Keep queues aligned to current widgets (Action Plans + Interventions) instead of inventing parallel queue UIs.
@@ -27,6 +27,7 @@ Document the target workflow for proposing, reviewing, approving, and running in
 - Interventions widget CTA relabeled to “Propose intervention”.
 - Case header quick actions now include “Propose intervention” (dispatches the proposal wizard when a plan is selected).
 - Proposal start now reflows the case workspace board to show Case Header (4x2), Participant details (2x7), and Intervention assessment (2x7), with other widgets moved to the palette.
+- Submitted proposals/revisions are now read-only for the submitter and approver except for decision-only controls. The submitter can use `Recall submission` before a decision is recorded; recall archives the active generated assessment/redline PDFs, writes `assessment_recalled`, moves the proposal/revision back to `draft`, and allows correction/resubmission.
 - Fixed a Step 7 runtime error by moving `uploadEiVerificationIfSelected` above its first use in the intervention assessment widget.
 - Supporting Documents and Secure Messaging quick links in the intervention wizard now add their widgets to the board with span 2x5.
 - Intervention assessment wizard now persists the active step outside the widget and restores it on remount; the stored step is cleared when the widget is removed from the board, and step changes no longer trigger a restore loop.
@@ -118,7 +119,7 @@ Document the target workflow for proposing, reviewing, approving, and running in
 - Save behavior: board-level “Save” is a save-and-finish-later action with no validation; incomplete steps are allowed for both draft and submitted review saves.
 
 ## Open Decisions
-- Should CM be allowed to edit core fields post-submission while in review? (lean: no, unless reviewer requests changes).
+- Resolved 2026-06-16: CM cannot edit core fields post-submission while in review. Corrections require `Recall submission` before decision or a reviewer `changes_requested` outcome after review.
 - Exact gating rules for “Ready to Activate” when multiple draft/active plans exist.
 - Do we auto-create reminders for review follow-ups / ready-to-close checks? If so, reuse existing reminders API.
 - How to surface review state in dashboards beyond the Case Workspace (badges vs filter chips).

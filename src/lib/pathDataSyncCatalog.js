@@ -16,7 +16,7 @@ function requireWorkflowId(options) {
   const raw = options.workflowId;
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw datasetError('workflow-authoring and intake-release require --workflow-id <positive integer>');
+    throw datasetError('workflow promotion datasets require --workflow-id <positive integer>');
   }
   return parsed;
 }
@@ -51,6 +51,66 @@ function checksumForString(value) {
   return crypto.createHash('sha256').update(String(value || ''), 'utf8').digest('hex');
 }
 
+function toPositiveInteger(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parseRuntimePayload(valueJson) {
+  try {
+    return JSON.parse(valueJson);
+  } catch (error) {
+    throw datasetError(`Source DEV row publish/workflow.schema.intake does not contain valid JSON: ${error.message}`);
+  }
+}
+
+function firstDefined(...values) {
+  return values.find(value => value !== undefined && value !== null && value !== '');
+}
+
+function describeRuntimePayload(payload) {
+  const meta = payload && typeof payload === 'object' ? payload.meta || {} : {};
+  const schemaMeta = meta && typeof meta === 'object' ? meta.schemaMeta || {} : {};
+  const envelopeMeta = payload && typeof payload === 'object' && payload.schemaEnvelope
+    ? payload.schemaEnvelope.meta || {}
+    : {};
+  const workflow = schemaMeta.workflow || envelopeMeta.workflow || payload?.workflow || {};
+  const rawWorkflowId = firstDefined(
+    meta.workflowId,
+    workflow.id,
+    payload?.workflowId,
+    payload?.version && String(payload.version).includes('#') ? String(payload.version).split('#').pop() : null
+  );
+
+  return {
+    workflowId: toPositiveInteger(rawWorkflowId),
+    workflowName: firstDefined(workflow.name, payload?.workflowName, null),
+    workflowStatus: firstDefined(workflow.status, null),
+    workflowType: firstDefined(workflow.type, workflow.workflow_type, null),
+    version: firstDefined(payload?.version, null),
+    publishedAt: firstDefined(payload?.publishedAt, null),
+    generatedAt: firstDefined(meta.generatedAt, schemaMeta.generatedAt, envelopeMeta.generatedAt, null),
+    checksum: firstDefined(payload?.checksum, meta.checksum, null),
+  };
+}
+
+function validateRuntimeWorkflowMatch(runtimeMeta, expectedWorkflowId) {
+  const expected = requireWorkflowId({ workflowId: expectedWorkflowId });
+  if (!runtimeMeta.workflowId) {
+    throw datasetError(
+      `Source DEV publish/workflow.schema.intake does not declare a workflow id; refusing to promote it with --workflow-id ${expected}. Republish workflow ${expected} before promoting.`
+    );
+  }
+  if (runtimeMeta.workflowId !== expected) {
+    const runtimeLabel = runtimeMeta.workflowName
+      ? `${runtimeMeta.workflowId} (${runtimeMeta.workflowName})`
+      : String(runtimeMeta.workflowId);
+    throw datasetError(
+      `Source DEV publish/workflow.schema.intake belongs to workflow ${runtimeLabel}, not requested workflow ${expected}; refusing to build promotion bundle. Republish workflow ${expected} before promoting.`
+    );
+  }
+}
+
 async function loadRuntimeConfigRow(pool, { scope, key }) {
   const [rows] = await pool.query(
     `SELECT id,
@@ -66,7 +126,7 @@ async function loadRuntimeConfigRow(pool, { scope, key }) {
   return rows[0] || null;
 }
 
-async function buildIntakeRuntimePublishDataset(pool) {
+async function buildIntakeRuntimePublishDataset(pool, options = {}) {
   const row = await loadRuntimeConfigRow(pool, {
     scope: 'publish',
     key: 'workflow.schema.intake',
@@ -75,6 +135,9 @@ async function buildIntakeRuntimePublishDataset(pool) {
   if (!row) {
     throw datasetError("Source DEV row publish/workflow.schema.intake was not found in iset_runtime_config");
   }
+  const runtimePayload = parseRuntimePayload(row.value_json);
+  const runtimeMeta = describeRuntimePayload(runtimePayload);
+  validateRuntimeWorkflowMatch(runtimeMeta, options.workflowId);
 
   return {
     summary: {
@@ -86,6 +149,7 @@ async function buildIntakeRuntimePublishDataset(pool) {
         jsonLength: row.value_json ? row.value_json.length : 0,
         checksum: checksumForString(row.value_json),
       },
+      runtime: runtimeMeta,
     },
     warnings: [],
     statements: [
@@ -354,10 +418,11 @@ const DATASETS = {
   'intake-runtime-publish': {
     name: 'intake-runtime-publish',
     classification: 'config',
-    description: 'Upsert the published intake runtime-config row (`publish/workflow.schema.intake`).',
+    description: 'Upsert the published intake runtime-config row (`publish/workflow.schema.intake`) only when it matches --workflow-id.',
     sourceEnvironments: SOURCE_ENVIRONMENTS,
     targetEnvironments: TARGET_ENVIRONMENTS,
-    prodRule: 'Allowed. This is an explicit config promotion and does not copy participant/case data.',
+    requiredOptions: ['workflowId'],
+    prodRule: 'Allowed only when the published runtime row declares the same workflow id as --workflow-id.',
     build: buildIntakeRuntimePublishDataset,
   },
   'workflow-authoring': {
@@ -373,11 +438,11 @@ const DATASETS = {
   'intake-release': {
     name: 'intake-release',
     classification: 'config',
-    description: 'Promote both the workflow authoring graph for one workflow ID and the published intake runtime-config row.',
+    description: 'Promote both the workflow authoring graph for one workflow ID and the matching published intake runtime-config row.',
     sourceEnvironments: SOURCE_ENVIRONMENTS,
     targetEnvironments: TARGET_ENVIRONMENTS,
     requiredOptions: ['workflowId'],
-    prodRule: 'Allowed. This is the safe allowlisted intake promotion unit: admin authoring graph plus the published intake runtime row only.',
+    prodRule: 'Allowed only when the published runtime row declares the same workflow id as --workflow-id.',
     build: buildIntakeReleaseDataset,
   },
 };
@@ -408,6 +473,12 @@ async function buildDataset(pool, datasetName, options = {}) {
   }
   if (options.targetEnv && !dataset.targetEnvironments.includes(options.targetEnv)) {
     throw datasetError(`Dataset ${datasetName} does not support target environment ${options.targetEnv}`);
+  }
+  const missingOptions = (dataset.requiredOptions || [])
+    .filter(option => options[option] === undefined || options[option] === null || options[option] === '');
+  if (missingOptions.length) {
+    const flags = missingOptions.map(option => `--${option.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}`);
+    throw datasetError(`Dataset ${datasetName} requires ${flags.join(', ')}`);
   }
   const built = await dataset.build(pool, options);
   return {

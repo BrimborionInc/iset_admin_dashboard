@@ -1,7 +1,7 @@
 # Prod Deployment Guide
 
 Status: current WSL-native PROD deployment guide. Verify live AWS state before any mutating command.
-Last reviewed: 2026-05-25 after adding the mandatory bug/CR feedback reconciliation closeout gate.
+Last reviewed: 2026-06-16 after the intake runtime incident and new-thread deploy preflight update.
 
 For the shortest operator commands, start with `docs/ops/deployments/deployment-quick-guide.md`.
 
@@ -24,6 +24,8 @@ This guide records the PROD safety sequence. The active app artifact rollout is 
 - `bash scripts/run-db-dump-via-ssm.sh` now exports temporary credentials from the active AWS profile before uploading the dump back to S3, so the role-backed `nwac-prod` profile works for prod dump capture as well.
 - Do not use `-SkipBuild` unless you have already inspected the current `build/` output and confirmed it was compiled for prod. React bundles bake environment-specific Cognito domains, client IDs, and external links, so a stale test build can be uploaded to prod unchanged.
 - Before a future PROD app deploy, explicitly inspect `git status --short` and the relevant WSL diffs. The app artifact packages the current WSL working trees, not just the Git index.
+- Deployment scope boundary: a PROD app deploy means the current app build plus planned schema migrations. It does not include runtime configuration, allowlisted data promotion, arbitrary SQL data fixes, or full database restores unless Bill explicitly confirms that exact data scope in the current thread. Use `--skip-data` or omit `--dataset` for app/schema-only releases. Do not include `--dataset intake-release` as boilerplate; it promotes workflow authoring plus the global published intake runtime row. Do not mirror DEV runtime config into PROD as routine deployment hygiene; PROD runtime setting changes must name specific keys/rows and have their own review.
+- Fresh-thread deploy rule: start by reading `docs/AGENTS.md`, `docs/ops/deployments/deployment-quick-guide.md`, this guide, `docs/ops/deployments/path-deploy-orchestrator.md`, and `docs/ops/deployments/data-promotion-catalog.md`; then state the deploy scope and plan command before asking Bill for approval. If any PROD data/runtime mutation is proposed, state the exact dataset or SQL, target tables/keys, source environment, reason an app/schema-only deploy is insufficient, restore/rollback path, and verification plan before any mutating command.
 
 ## Full Prod Deploy
 
@@ -31,7 +33,7 @@ Preflight from WSL:
 
 ```bash
 cd /home/bill/ISET/admin-dashboard
-npm run path:deploy:plan -- --env prod --dataset intake-release --workflow-id 21
+npm run path:deploy:plan -- --env prod --skip-data
 ```
 
 Planned maintenance sequence:
@@ -40,7 +42,7 @@ Planned maintenance sequence:
 npm run path:maintenance -- set --env prod --surfaces all --start-in 5m --expected-duration 15m --yes
 # wait through the warning window
 npm run path:maintenance:fallback -- set --env prod --surfaces all --yes
-npm run path:deploy -- --env prod --dataset intake-release --workflow-id 21 --release-id <release-id> --skip-smoke --yes
+npm run path:deploy -- --env prod --skip-data --release-id <release-id> --skip-smoke --yes
 npm run path:maintenance:fallback -- clear --env prod --surfaces all --yes
 npm run path:deploy:smoke -- --env prod
 npm run path:maintenance -- clear --env prod --surfaces all --yes
@@ -54,7 +56,7 @@ The orchestrator performs:
 - automatic Aurora cluster snapshot restore point when schema or allowlisted data will change
 - if that restore-point step ever fails under the reduced role, do not force through a DB-affecting deploy; either fix IAM first or prove the schema/data payload is already identical and rerun app-only with `--skip-schema --skip-data`
 - canonical shared-schema plan/apply through SSM
-- optional allowlisted data/config promotion
+- optional allowlisted data/config promotion only when `--dataset` is explicitly included and approved as part of the PROD scope
 - WSL-native `shared` + `admin` + `portal` artifact upload
 - waited prod ASG instance refresh
 - post-refresh smoke checks
@@ -92,6 +94,31 @@ Rollback path:
 
 Current autosave safety note:
 - The portal uses a separate endpoint, `POST /api/draft/autosave`, so code-first / flag-later rollout avoids changing behavior for in-flight applicants until the fleet is fully updated.
+
+## Intake Runtime Promotion
+
+Only promote intake runtime/config when Bill explicitly confirms that the release includes runtime configuration or workflow authoring changes.
+
+Preflight must prove the source runtime row belongs to the intended workflow:
+
+```bash
+cd /home/bill/ISET/admin-dashboard
+npm run data:sync:plan -- --dataset intake-release --workflow-id 21 --target-env prod
+```
+
+The plan or deploy manifest must show `summary.runtimePublish.runtime.workflowId` equal to the intended workflow before apply. The row `iset_runtime_config(scope='publish', k='workflow.schema.intake')` is global, not per workflow, so this check is mandatory before changing PROD applicant intake behavior. For the current ISET intake, `workflowId=21` is expected; any mismatch, missing workflow id, unexpected source row, or unexplained runtime diff is a hard stop.
+
+If runtime promotion is explicitly in scope, either include the dataset deliberately in the PROD deploy:
+
+```bash
+npm run path:deploy -- --env prod --dataset intake-release --workflow-id 21 --release-id <release-id> --yes
+```
+
+or apply only the data/config bundle:
+
+```bash
+npm run data:sync:apply -- --dataset intake-release --workflow-id 21 --target-env prod --yes
+```
 
 ## Low-Level Component Flow
 

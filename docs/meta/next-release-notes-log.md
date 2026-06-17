@@ -22,6 +22,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-06-16 | Release TBD | UX/Assessment | Assessment corrections | Submitted assessments and intervention proposals are read-only while awaiting approval, with a new Recall submission action for the submitter before a decision is recorded. | Recall removes the withdrawn generated PDFs from the active document list, records an audit event, returns the assessment/proposal to an editable state, and lets staff resubmit corrections instead of editing a submitted version in place.
 - 2026-06-12 | Release TBD | Fix/User Management | Staff profile editing | Changing a staff user's Name now also updates Display name when the display name was still mirroring the old name. | This prevents a successful staff-profile save from appearing unchanged in the User Management table because the table displays `display_name`; staff can still keep an intentional separate display name by editing Display name directly.
 - 2026-06-12 | Release TBD | UX/Casework | Case Workspace recovery actions | System Administrators can reopen a closed action plan from the case header when circumstances change after closeout. | The action records a reason, resets ILMP validation/submission to needs review, and supports either adding a new intervention or reopening one completed intervention for amendment while writing an internal note and audit event.
 - 2026-06-12 | Release TBD | UX/Workflow Studio | Intake step grouping | Intake steps can now be organized by configurable groups without a database schema migration. | Manage Intake Steps adds group filtering, group badges, workflow usage, and a group catalogue editor; Modify Intake Step can assign a group from the step properties panel. Group membership uses existing step metadata and the catalogue uses runtime config.
@@ -400,14 +401,17 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- System Administrators can reopen a closed action plan from Case Workspace when circumstances change after closeout.
-- User Management name edits now also update Display name when it was still mirroring the old staff name.
-- Intake steps can be organized with configurable groups, group filters, group badges, and a group catalogue editor.
-- Manual Application Intake now guides staff through client/account search, account handling, application details, and review before create.
-- Funding revision letters now recover when a current approved amendment needs a Client Funding Agreement draft that does not exist yet.
-- The staff side-navigation collapse control now works reliably.
+- Submitted assessments and intervention proposals are read-only while awaiting approval.
+- Submitters can recall a pending assessment or intervention proposal before a decision is recorded.
+- Recalled submissions archive the withdrawn generated assessment PDFs, record an audit event, and return the work to an editable state for correction and resubmission.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260617-prod-assessment-recall-guardrails
+
+- Submitted application assessments, new intervention proposals, and intervention revision/amendment proposals are now read-only while awaiting approval.
+- The submitter can recall a pending submission before a decision is recorded, returning it to an editable state for correction and resubmission.
+- Recalled submissions archive the withdrawn generated assessment PDFs, record an audit event, and keep future redlines based on the last active non-recalled submission.
 
 #### Release 20260612-212548
 
@@ -426,27 +430,23 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Modify Intake Step now shows the current step name, adds component search, preserves repeated static content blocks, keeps clean saves disabled, preserves step metadata, and shows precise save errors.
 - User Management and Manage ISET Applications now use cleaner table-first layouts with better sorting, resizing, pagination, and server-backed filters where needed.
 
-#### Release 20260608-prod-ilmp-validation-messages
-
-- ILMP blockers and warnings now tell staff what to fix, where to fix it, and which ESDC Data Exchange Guide source is involved.
-- ILMP messages now point to Participant Details, the named action plan, or the named intervention instead of showing raw database IDs.
-- PATH-only review checks are labelled as PATH-only so staff can distinguish them from ESDC gateway blockers.
-- The unsupported childcare `No funding received` warning was removed because that is a valid ESDC childcare funding code.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
-- Les administrateurs systeme peuvent rouvrir un plan d'action ferme depuis Case Workspace quand la situation change apres la fermeture.
-- Dans User Management, changer le nom met aussi a jour Display name quand il reprenait encore l'ancien nom du membre du personnel.
-- Les etapes d'admission peuvent etre organisees avec des groupes configurables, des filtres, des badges et un editeur de catalogue.
-- Manual Application Intake guide maintenant le personnel dans la recherche client/compte, le choix de gestion de compte, les details de la demande et la revision avant creation.
-- Les lettres de revision de financement recuperent maintenant les dossiers ou un brouillon Client Funding Agreement manque pour un amendement courant approuve.
-- Le controle de fermeture de la navigation laterale du personnel fonctionne maintenant de facon fiable.
+- Les evaluations et propositions envoyees sont maintenant en lecture seule pendant l'attente d'approbation.
+- La personne qui a envoye une evaluation ou proposition peut la rappeler avant qu'une decision soit enregistree.
+- Les rappels archivent les PDF d'evaluation retires, enregistrent un evenement d'audit et remettent le travail en mode modifiable pour correction et nouvel envoi.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260617-prod-assessment-recall-guardrails
+
+- Les evaluations de demande, les nouvelles propositions d'intervention et les revisions/amendements d'intervention envoyes sont maintenant en lecture seule pendant l'attente d'approbation.
+- La personne qui a envoye une demande peut la rappeler avant qu'une decision soit enregistree, afin de la corriger et de la soumettre de nouveau.
+- Les rappels archivent les PDF d'evaluation retires, enregistrent un evenement d'audit et gardent les futurs redlines bases sur le dernier envoi actif non rappele.
 
 #### Release 20260612-212548
 
@@ -464,13 +464,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Manage Intake Steps a maintenant les controles standard du tableau de bord, des colonnes triables/redimensionnables, le tri de la liste complete avant affichage, moins de rechargements inutiles et un apercu qui reste dans le widget.
 - Modify Intake Step affiche maintenant le nom de l'etape courante, ajoute la recherche de composants, preserve les blocs de contenu statique repetes, garde Save desactive quand rien n'a change, preserve les metadonnees de l'etape et affiche les erreurs d'enregistrement exactes.
 - User Management et Manage ISET Applications utilisent maintenant des mises en page plus simples centrees sur les tableaux avec meilleur tri, redimensionnement, pagination et filtres cote serveur au besoin.
-
-#### Release 20260608-prod-ilmp-validation-messages
-
-- Les blocages et avertissements ILMP indiquent maintenant quoi corriger, ou le corriger, et quelle source du guide d'echange de donnees EDSC est concernee.
-- Les messages ILMP pointent maintenant vers Participant Details, le plan d'action nomme ou l'intervention nommee au lieu d'afficher des identifiants de base de donnees.
-- Les verifications PATH seulement sont indiquees comme telles pour distinguer les controles internes des blocages de la passerelle EDSC.
-- L'avertissement childcare `No funding received` non justifie a ete retire, car il s'agit d'un code valide de financement childcare EDSC.
 
 ### Problemes connus (brouillon - FR)
 

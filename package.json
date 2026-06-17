@@ -99,6 +99,7 @@
     "smoke:application-overview:browser": "node scripts/application-overview-docs-requested-browser-smoke.js",
     "smoke:application-workspace:browser": "node scripts/application-workspace-dashboard-browser-smoke.js",
     "smoke:application-assessment:workflow:browser": "node scripts/application-assessment-workflow-browser-smoke.js",
+    "smoke:intervention-assessment:recall:browser": "node scripts/intervention-assessment-recall-browser-smoke.js",
     "workflow:apply-upload-camera-chooser": "node scripts/apply-intake-upload-camera-chooser.js",
     "workflow:set-file-upload-max-size-floor": "node scripts/set-file-upload-max-size-floor.js",
     "fixtures:workflows": "node scripts/generate-workflow-fixtures.js",

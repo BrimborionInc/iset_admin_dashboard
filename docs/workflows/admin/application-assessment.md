@@ -37,11 +37,13 @@ Widget references:
 4. Complete assessment sections in Application Assessment widget.
 5. Validate documents and communicate with applicant as needed.
 6. Save/submit assessment and progress to NWAC decision where applicable.
-7. Use timeline and notes for operational traceability.
+7. While pending decision, the submitted assessment is read-only. The submitter can use `Recall submission` before a decision is recorded to return it to editable review, archive the active generated submission PDFs, and resubmit corrections.
+8. Use timeline and notes for operational traceability.
 
 ## Data & Integration Touchpoints
 
 - Case read/write: `/api/cases/:id`
+- Assessment recall: `POST /api/cases/:id/assessment/recall`
 - Messaging: `/api/cases/:id/messages`
 - Supporting documents and checklist APIs (case-linked)
 - Event/audit timelines (case/application events)

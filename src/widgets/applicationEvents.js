@@ -194,6 +194,10 @@ const formatEventMessage = (event, actorDisplay) => {
       const base = 'Assessment submitted';
       return ensureSentence(name ? `${base} by ${name}` : base);
     }
+    case 'assessment_recalled': {
+      const base = trimValue(payload.message) || 'Assessment submission recalled before decision';
+      return ensureSentence(actorSuffix ? `${base}${actorSuffix}` : base);
+    }
     case 'nwac_review_submitted': {
       const reviewer = actorDisplay;
       const outcomeRaw = trimValue(payload.outcome);

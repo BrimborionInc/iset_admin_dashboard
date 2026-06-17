@@ -5,7 +5,7 @@ Last reviewed: 2026-04-29 during ops documentation cleanup; commands checked aga
 
 Purpose: define which database data can move across environments, which data must never be promoted into prod, and which explicit commands are approved for Codex-operated promotion work.
 
-Last updated: 2026-04-04
+Last updated: 2026-06-16
 
 ## Core rules
 
@@ -15,6 +15,10 @@ Last updated: 2026-04-04
 - `PROD` receives:
   - schema changes through canonical migrations in `sql/migrations/`
   - allowlisted config/reference promotions only
+- Ordinary app deployments mean the current app build plus planned schema migrations. They do not include runtime config, allowlisted data promotion, arbitrary SQL data fixes, or full database restores. TEST/PROD runtime/config/data mutation requires explicit scope confirmation in the current thread and a command that deliberately includes the named `--dataset ...` or reviewed SQL artifact.
+- Do not mirror DEV runtime config into PROD as routine deployment hygiene. A PROD runtime setting change must name specific keys/rows and explain why code/schema deployment is insufficient.
+- Do not include `--dataset intake-release` as deployment boilerplate; it promotes both workflow authoring rows and the global published intake runtime row.
+- Before any PROD data/runtime mutation, state the exact dataset or SQL, target tables/keys, source environment, reason an app/schema-only deploy is insufficient, restore/rollback path, and verification plan. Bill must approve that exact data scope in the current thread before apply.
 - `PROD` never receives:
   - applicant, client, case, action-plan, intervention, document, message, payment, audit, or identity-link data copied from another environment
 
@@ -57,8 +61,10 @@ Additional datasets should be added here before new sync code is introduced.
 - Class: `config`
 - Source envs: `dev`
 - Target envs: `dev`, `test`, `prod`
+- Required option: `--workflow-id`
 - Effect: upserts only the published intake runtime row in `iset_runtime_config`
-- Prod rule: allowed
+- Guardrail: parses the runtime JSON and aborts unless the row declares the same workflow id as `--workflow-id`
+- Prod rule: allowed only when the published runtime row belongs to the workflow id being promoted
 
 ### `workflow-authoring`
 
@@ -76,7 +82,8 @@ Additional datasets should be added here before new sync code is introduced.
 - Target envs: `dev`, `test`, `prod`
 - Required option: `--workflow-id`
 - Effect: applies both `workflow-authoring` and `intake-runtime-publish`
-- Prod rule: allowed
+- Guardrail: the workflow authoring id and the published runtime JSON workflow id must match
+- Prod rule: allowed only when the published runtime row belongs to the workflow id being promoted
 
 ## Commands
 
@@ -98,6 +105,12 @@ Write a bundle without applying:
 npm run data:sync:bundle -- --dataset intake-release --workflow-id 21 --output /tmp/intake-release.sql
 ```
 
+Standalone runtime promotion also requires the expected workflow id:
+
+```bash
+npm run data:sync:plan -- --dataset intake-runtime-publish --workflow-id 21
+```
+
 Apply to test:
 
 ```bash
@@ -116,3 +129,4 @@ npm run data:sync:apply -- --dataset intake-release --workflow-id 21 --target-en
 - Test/prod apply uses SSM on the application hosts because the Aurora clusters are not directly reachable from the sandbox.
 - Workflow sync intentionally does not try to clean up orphaned `step` rows; it only replaces workflow membership/routing and aligns referenced step definitions/components.
 - Shared step IDs across workflows are allowed. The plan output warns when syncing a shared step because aligning that step definition also affects the other workflows that reference the same step ID.
+- The published intake runtime row is global, not per workflow. Promotion tooling now reads the runtime payload metadata and refuses to build a bundle when it is missing or belongs to a different workflow than `--workflow-id`; republish the intended workflow before retrying.
