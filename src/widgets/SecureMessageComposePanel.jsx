@@ -9,6 +9,7 @@ import {
   Header,
   Input,
   Multiselect,
+  RadioGroup,
   SpaceBetween,
   Spinner,
   Textarea
@@ -125,6 +126,7 @@ const SecureMessageComposePanel = ({
   const [workflowsLoading, setWorkflowsLoading] = useState(false);
   const [workflowsError, setWorkflowsError] = useState(null);
   const [selectedWorkflowIds, setSelectedWorkflowIds] = useState([]);
+  const [financialOverviewMode, setFinancialOverviewMode] = useState('prefill');
 
   const buildComposeContext = useCallback(
     (detail = {}) => {
@@ -172,6 +174,7 @@ const SecureMessageComposePanel = ({
         composeToName.trim() !== defaultToName.trim() ||
         composeFromName.trim() !== defaultFromName.trim() ||
         selectedWorkflowIds.length > 0 ||
+        financialOverviewMode !== 'prefill' ||
         composeUrgent
     );
   }, [
@@ -184,6 +187,7 @@ const SecureMessageComposePanel = ({
     composeToName,
     composeUrgent,
     currentStaffName,
+    financialOverviewMode,
     selectedWorkflowIds.length
   ]);
 
@@ -197,6 +201,7 @@ const SecureMessageComposePanel = ({
     setComposeUrgent(false);
     setComposeError(null);
     setSelectedWorkflowIds([]);
+    setFinancialOverviewMode('prefill');
   }, [applicantName, currentStaffName]);
 
   const confirmReplaceComposeDraft = useCallback(
@@ -268,6 +273,7 @@ const SecureMessageComposePanel = ({
       setComposeToName(nextContext.toName);
       setComposeFromName(nextContext.fromName);
       setSelectedWorkflowIds([]);
+      setFinancialOverviewMode('prefill');
       setComposeError(null);
       setComposeCloseNotice(null);
       loadWorkflows();
@@ -403,7 +409,15 @@ const SecureMessageComposePanel = ({
     setComposeSending(true);
     setComposeError(null);
     try {
-      const attachmentsPayload = selectedWorkflowIds.map(id => ({ workflow_id: id }));
+      const workflowById = new Map(workflowOptions.map(wf => [Number(wf.id), wf]));
+      const attachmentsPayload = selectedWorkflowIds.map(id => {
+        const workflow = workflowById.get(Number(id));
+        const payload = { workflow_id: id };
+        if (workflow?.documentType === 'financial_overview') {
+          payload.financial_overview_mode = financialOverviewMode === 'blank' ? 'blank' : 'prefill';
+        }
+        return payload;
+      });
       const payload = {
         subject,
         body,
@@ -449,6 +463,10 @@ const SecureMessageComposePanel = ({
     composeContext?.applicantName,
     composeContext?.caseReference
   ].filter(Boolean).join(' - ');
+  const selectedFinancialOverview = useMemo(() => {
+    const selected = new Set(selectedWorkflowIds.map(id => Number(id)));
+    return filteredWorkflowOptions.some(wf => selected.has(Number(wf.id)) && wf.documentType === 'financial_overview');
+  }, [filteredWorkflowOptions, selectedWorkflowIds]);
 
   return (
     <>
@@ -618,6 +636,27 @@ const SecureMessageComposePanel = ({
                   </Box>
                 )}
               </FormField>
+              {selectedFinancialOverview ? (
+                <FormField label="Financial Overview form mode">
+                  <RadioGroup
+                    value={financialOverviewMode}
+                    onChange={({ detail }) => setFinancialOverviewMode(detail.value)}
+                    items={[
+                      {
+                        value: 'prefill',
+                        label: 'Pre-fill with PATH data',
+                        description: 'Send the current participant details as editable starting values.'
+                      },
+                      {
+                        value: 'blank',
+                        label: 'Send blank form',
+                        description: 'Ask the participant to complete the Financial Overview from scratch.'
+                      }
+                    ]}
+                    disabled={composeSending}
+                  />
+                </FormField>
+              ) : null}
               <Checkbox
                 checked={!!composeUrgent}
                 onChange={({ detail }) => setComposeUrgent(detail.checked)}

@@ -1,12 +1,12 @@
 Purpose: Capture requirements and examples for forms sent to applicants for completion/signature (EFT/Wire, consent, funding agreement) to inform the intake-workflow-based document signing design.
 Audience: Product, engineering.
-Last Updated: 2026-05-12
+Last Updated: 2026-06-18
 
 ## Example forms (current state: PDFs sent to participants)
 - EFT & Wire Transfer Direct Payment: branched flow (EFT vs Wire); collects payee details, banking/wire details; requires a void cheque upload when EFT is selected; ends with a signature.
 - Client Acknowledgement of Funding Source: single-step consent with static text and one signature (timestamped).
 - Client Funding Agreement: case manager fills program details, dates, funding table (tuition/materials/fees + total), living allowance table, and then participant signs; includes case manager signature on the PDF.
-- Financial Overview: case manager sends the current read-only financial overview for client signature. The attestation is "I confirm these income/expense figures are accurate as of today." Figures come from original application answers plus current Case Workspace Participant Details updates; the participant does not edit figures inside the signing flow.
+- Financial Overview: case manager sends either a blank editable form or an editable form pre-filled from current PATH data. The participant-facing form is limited to monthly household income fields, monthly household expense fields, the "other income/source" and "other expenses/list" text fields, and signature; staff/program context such as supports requested, top-up amount, childcare funding status, transportation category/mileage, and student loan/grant details is not collected from the participant in this form. The attestation is "I confirm these income/expense figures are accurate as of today." Pre-filled figures come from original application answers plus current Case Workspace Participant Details updates. On signature, submitted participant-entered income/expense values update the case's Participant Details layer (`iset_case.case_context_json.applicationAnswers` plus convenience fields), not the original application payload.
 
 ## Desired approach
 - Author in intake workflow studio: model each form as an intake workflow (single-step or mini-workflow) using existing components (paragraphs, inputs, radios, branching, file-upload, `signature-ack`).
@@ -17,8 +17,8 @@ Last Updated: 2026-05-12
 - Output: immutable signed snapshot (PDF) with audit metadata and checksum; downloadable by admin and participant after completion.
 - Sending UX: case manager composes a secure message and selects one or more workflows flagged as `consent-no-prefill` or `consent-cm-prefill` to attach; subject/body remain editable. Each selection creates a signing request linked to the message thread.
 - Checklist tie-in: each consent workflow maps to a supporting-documents checklist item; on submission, the signed PDF is stored in the supporting documents library with the mapped doc type and the checklist item is auto-completed (signing status is the source of truth).
-- Data contract (initial): message POST accepts `attachments: [{ workflow_id, due_at?, checklist_doc_type? }]` for consent workflows; backend creates signing_request rows and returns them on message GET as attachments metadata.
-- Current Financial Overview implementation: DEV workflow `52` is a `consent-cm-prefill` workflow with `document_type='financial_overview'`. Sending it creates a case-scoped `funding_overview_version`, withdraws any unsigned prior Financial Overview signing requests for the same case, renders a complete clean or redline overview for participant review, and regenerates a PDF with `signed` in the document name after the client signs. For post-application changes, staff should edit the financial fields in Case Workspace > Participant Details first; those case-context values override the original application answers in the next Financial Overview snapshot.
+- Data contract (initial): message POST accepts `attachments: [{ workflow_id, due_at?, checklist_doc_type?, financial_overview_mode? }]` for consent workflows; `financial_overview_mode` is `prefill` or `blank` and defaults to `prefill`. Backend creates signing_request rows and returns them on message GET as attachments metadata.
+- Current Financial Overview implementation: workflow `52` is a `consent-cm-prefill` workflow with `document_type='financial_overview'`, but the secure-message send path replaces the stored read-only authoring schema with a narrowed editable runtime schema. Sending creates a case-scoped `funding_overview_version`, withdraws unsigned prior Financial Overview signing requests for the same case, stores only participant-editable income/expense initial values in the resolved signing schema, ignores non-participant support/program fields if submitted by an old or tampered payload, and regenerates an official Financial Overview PDF with `signed` in the document name after the client submits/signs.
 
 ## Open points to decide
 - Exact signer order/roles for post-MVP multi-signer agreements (client + case manager).

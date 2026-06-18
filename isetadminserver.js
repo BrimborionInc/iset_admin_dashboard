@@ -96,6 +96,12 @@ const {
   parseJsonValue,
   normaliseServiceAnnouncement,
 } = require('../shared/serviceAnnouncement');
+const {
+  buildFinancialOverviewEditableSchema,
+  buildFinancialOverviewInitialValues,
+  mergeFinancialOverviewCaseContext,
+  sanitizeFinancialOverviewSubmissionPayload,
+} = require('../shared/financialOverview');
 
 // Increase default listener cap to avoid noisy warnings when wiring shared buses.
 events.EventEmitter.defaultMaxListeners = 20;
@@ -138,7 +144,10 @@ const INTAKE_UPLOADS_ROOT = path.join(INTAKE_ROOT, 'uploads');
 const ADMIN_MANUAL_UPLOAD_DIR = path.join(INTAKE_UPLOADS_ROOT, 'manual');
 const ASSESSMENT_PDF_TEMPLATE_PATH = path.join(__dirname, 'src', 'server', 'templates', 'pdf', 'assessment.html');
 const APPLICATION_FORM_PDF_TEMPLATE_PATH = path.join(__dirname, 'src', 'server', 'templates', 'pdf', 'application-form.html');
-const FINANCIAL_OVERVIEW_PDF_TEMPLATE_PATH = path.join(__dirname, 'src', 'server', 'templates', 'pdf', 'financial-overview.html');
+const SHARED_FINANCIAL_OVERVIEW_PDF_TEMPLATE_PATH = path.join(__dirname, '..', 'shared', 'templates', 'pdf', 'financial-overview.html');
+const FINANCIAL_OVERVIEW_PDF_TEMPLATE_PATH = fs.existsSync(SHARED_FINANCIAL_OVERVIEW_PDF_TEMPLATE_PATH)
+  ? SHARED_FINANCIAL_OVERVIEW_PDF_TEMPLATE_PATH
+  : path.join(__dirname, 'src', 'server', 'templates', 'pdf', 'financial-overview.html');
 const FUNDING_AGREEMENT_PDF_TEMPLATE_PATH = path.join(__dirname, 'src', 'server', 'templates', 'pdf', 'funding-agreement.html');
 const CFA_TEMPLATE_KEY = 'ISET_CFA_STANDARD';
 const CFA_SNAPSHOT_SCHEMA_VERSION = '1';
@@ -13947,7 +13956,8 @@ async function buildFundingOverviewSnapshot({
   applicationId = null,
   actorUserId = null,
   staffProfileId = null,
-  preparedByName = ''
+  preparedByName = '',
+  sourceAnswersOverride = null
 }) {
   const normalizedCaseId = normalisePositiveInteger(caseId);
   if (!normalizedCaseId) throw new Error('invalid_case_id');
@@ -13993,10 +14003,13 @@ async function buildFundingOverviewSnapshot({
     caseContext.applicationAnswers && typeof caseContext.applicationAnswers === 'object'
       ? sanitiseAnswersPayload(caseContext.applicationAnswers)
       : {};
-  const answers = {
+  let answers = {
     ...baseAnswers,
     ...contextAnswers,
   };
+  if (sourceAnswersOverride && typeof sourceAnswersOverride === 'object') {
+    answers = sanitiseAnswersPayload(sourceAnswersOverride);
+  }
   const applicantName = resolveFundingOverviewApplicantName({
     caseRow,
     payload,
@@ -14133,6 +14146,7 @@ async function createFundingOverviewVersion({
   actorUserId,
   staffProfileId,
   preparedByName,
+  sourceAnswersOverride = null,
   connection = null
 }) {
   let runner = connection;
@@ -14196,7 +14210,8 @@ async function createFundingOverviewVersion({
       applicationId,
       actorUserId,
       staffProfileId,
-      preparedByName
+      preparedByName,
+      sourceAnswersOverride
     });
     const { canonicalJson, hash } = computeFundingOverviewSnapshotSignature(snapshot);
     const [insert] = await runner.query(
@@ -14381,6 +14396,76 @@ async function regenerateSignedFundingOverviewDocument({
     [fundingOverviewVersionId, targetDocumentType, signedDocId]
   );
   return signedDocId;
+}
+
+async function finalizeSignedFundingOverviewSubmission({
+  connection,
+  fundingOverviewVersionId,
+  signedPayload,
+  signingRequestRow,
+  participantUserId,
+}) {
+  const runner = connection || pool;
+  const normalizedVersionId = normalisePositiveInteger(fundingOverviewVersionId);
+  if (!normalizedVersionId) return null;
+  const [[versionRow]] = await runner.query(
+    `SELECT v.id,
+            v.version_number,
+            v.metadata_json,
+            s.case_id
+       FROM funding_overview_version v
+       JOIN funding_overview_series s ON s.id = v.series_id
+      WHERE v.id = ?
+      LIMIT 1`,
+    [normalizedVersionId]
+  );
+  if (!versionRow) return null;
+  const caseId = normalisePositiveInteger(versionRow.case_id || signingRequestRow?.case_id);
+  if (!caseId) return null;
+  const submittedAnswers = sanitizeFinancialOverviewSubmissionPayload(signedPayload || {});
+  const [[caseRow]] = await runner.query(
+    `SELECT case_context_json
+       FROM iset_case
+      WHERE id = ?
+      LIMIT 1`,
+    [caseId]
+  );
+  const currentContext = safeJsonParse(caseRow?.case_context_json, {}) || {};
+  const nextContext = mergeFinancialOverviewCaseContext(currentContext, submittedAnswers);
+  await runner.query(
+    `UPDATE iset_case
+        SET case_context_json = ?,
+            updated_at = NOW()
+      WHERE id = ?`,
+    [JSON.stringify(nextContext), caseId]
+  );
+  const existingSnapshot = safeJsonParse(versionRow.metadata_json, null) || {};
+  const snapshot = await buildFundingOverviewSnapshot({
+    connection: runner,
+    caseId,
+    applicationId: existingSnapshot?.case?.applicationId || null,
+    actorUserId: signingRequestRow?.created_by_user_id || participantUserId || null,
+    staffProfileId: existingSnapshot?.preparedBy?.staffProfileId || null,
+    preparedByName: existingSnapshot?.preparedBy?.name || '',
+    sourceAnswersOverride: submittedAnswers
+  });
+  const { canonicalJson, hash } = computeFundingOverviewSnapshotSignature(snapshot);
+  await runner.query(
+    `UPDATE funding_overview_version
+        SET metadata_json = ?,
+            snapshot_hash = ?,
+            snapshot_schema_version = ?,
+            rendered_template_version = ?
+      WHERE id = ?`,
+    [
+      canonicalJson,
+      hash,
+      FUNDING_OVERVIEW_SNAPSHOT_SCHEMA_VERSION,
+      FUNDING_OVERVIEW_TEMPLATE_VERSION,
+      normalizedVersionId
+    ]
+  );
+  return snapshot;
 }
 
 function extractParticipantSignatureNameFromPayload(payload) {
@@ -61054,7 +61139,12 @@ app.get('/api/cases/:id/messages', async (req, res) => {
 });
 
 // Secure messaging: send message to applicant for case
-// POST /api/cases/:id/messages  { subject, body, urgent, attachments?: [{ workflow_id, due_at?, checklist_doc_type? }] }
+function normalizeFinancialOverviewSendMode(value) {
+  const normalized = normaliseString(value);
+  return normalized && normalized.toLowerCase() === 'blank' ? 'blank' : 'prefill';
+}
+
+// POST /api/cases/:id/messages  { subject, body, urgent, attachments?: [{ workflow_id, due_at?, checklist_doc_type?, financial_overview_mode? }] }
 const handlePostCaseSecureMessage = async (req, res) => {
   const caseId = parseInt(req.params.id, 10);
   const {
@@ -61081,7 +61171,13 @@ const handlePostCaseSecureMessage = async (req, res) => {
           return {
             workflow_id: workflowId,
             due_at: item?.due_at || null,
-            checklist_doc_type: item?.checklist_doc_type || null
+            checklist_doc_type: item?.checklist_doc_type || null,
+            financial_overview_mode: normalizeFinancialOverviewSendMode(
+              item?.financial_overview_mode ??
+              item?.financialOverviewMode ??
+              item?.financialOverviewPrefillMode ??
+              null
+            )
           };
         })
         .filter(Boolean)
@@ -61384,6 +61480,13 @@ const handlePostCaseSecureMessage = async (req, res) => {
     );
     const needsFundingOverviewPrefill = attachmentRows.some(
       row => row.workflow_type === 'consent-cm-prefill' && row.document_type === 'financial_overview'
+    );
+    const fundingOverviewAttachmentSpec = attachmentSpecs.find(spec => {
+      const row = attachmentRows.find(candidate => Number(candidate.id) === Number(spec?.workflow_id));
+      return row?.workflow_type === 'consent-cm-prefill' && row?.document_type === 'financial_overview';
+    }) || null;
+    const fundingOverviewSendMode = normalizeFinancialOverviewSendMode(
+      fundingOverviewAttachmentSpec?.financial_overview_mode
     );
     const resolvedSenderStaffProfileIdForForms =
       resolveActiveStaffProfileId(req) ||
@@ -61737,7 +61840,8 @@ const handlePostCaseSecureMessage = async (req, res) => {
           changeSummary: 'Financial overview sent for client signature',
           actorUserId: senderId,
           staffProfileId: resolvedSenderStaffProfileIdForForms || null,
-          preparedByName: requesterDisplayName || fromNameValue || ''
+          preparedByName: requesterDisplayName || fromNameValue || '',
+          sourceAnswersOverride: fundingOverviewSendMode === 'blank' ? {} : null
         });
         if (!created?.fundingOverviewVersionId) {
           return res.status(409).json({
@@ -61759,6 +61863,11 @@ const handlePostCaseSecureMessage = async (req, res) => {
           seriesId: Number(created.seriesId),
           supersedesVersionId: normalisePositiveInteger(created.supersedesVersionId) || null,
           changedFields: Array.isArray(renderSet.changedFields) ? renderSet.changedFields : [],
+          mode: fundingOverviewSendMode,
+          initialValues: buildFinancialOverviewInitialValues(
+            created.snapshot?.sourceAnswers || {},
+            fundingOverviewSendMode
+          ),
         };
         fundingOverviewTokens = {
           funding_overview_html: buildFinancialOverviewPdfHtmlFromFields(renderSet.participantFields)
@@ -61885,6 +61994,21 @@ const handlePostCaseSecureMessage = async (req, res) => {
         ) {
           resolvedSchema = applyPrefillTokensToSchema(resolvedSchema, fundingOverviewTokens, { preserveMissingTokens: true });
         }
+        if (resolvedSchema && fundingOverviewDraft && wf.document_type === 'financial_overview') {
+          const editableFinancialOverviewSchema = buildFinancialOverviewEditableSchema({
+            mode: fundingOverviewDraft.mode,
+            initialValues: fundingOverviewDraft.initialValues || {}
+          });
+          resolvedSchema = {
+            ...resolvedSchema,
+            steps: editableFinancialOverviewSchema.steps,
+            meta: {
+              ...(resolvedSchema?.meta || {}),
+              ...(editableFinancialOverviewSchema.meta || {}),
+              initialValues: editableFinancialOverviewSchema.initialValues || {}
+            }
+          };
+        }
         if (resolvedSchema && cfaDraft && wf.document_type === 'funding_agreement') {
           resolvedSchema = {
             ...resolvedSchema,
@@ -61909,6 +62033,9 @@ const handlePostCaseSecureMessage = async (req, res) => {
               fundingOverviewSupersedesVersionId: fundingOverviewDraft.supersedesVersionId,
               fundingOverviewChangedFields: fundingOverviewDraft.changedFields,
               fundingOverviewAttestation: FUNDING_OVERVIEW_ATTESTATION_TEXT,
+              fundingOverviewEditable: true,
+              fundingOverviewMode: fundingOverviewDraft.mode || 'prefill',
+              initialValues: fundingOverviewDraft.initialValues || {},
             }
           };
         }
@@ -85310,11 +85437,13 @@ app.get('/api/signing-requests/:id', async (req, res) => {
 
     let steps = null;
     let meta = null;
+    let initialValues = null;
     if (row.resolved_schema_json) {
       try {
         const parsed = typeof row.resolved_schema_json === 'object' ? row.resolved_schema_json : JSON.parse(row.resolved_schema_json);
         steps = parsed?.steps || null;
         meta = parsed?.meta || null;
+        initialValues = parsed?.initial_values || parsed?.initialValues || parsed?.meta?.initialValues || null;
       } catch (_) {}
     }
     const hasSteps = Array.isArray(steps) && steps.length > 0;
@@ -85389,7 +85518,8 @@ app.get('/api/signing-requests/:id', async (req, res) => {
       created_at: row.created_at,
       updated_at: row.updated_at,
       steps,
-      meta
+      meta,
+      initial_values: initialValues && typeof initialValues === 'object' ? initialValues : {}
     });
   } catch (err) {
     console.error('GET /api/signing-requests/:id failed', err);
@@ -85451,6 +85581,13 @@ app.post('/api/signing-requests/:id/sign', async (req, res) => {
       resolvedSchema?.meta?.fundingOverviewVersionId ?? resolvedSchema?.meta?.funding_overview_version_id ?? null
     );
     if (fundingOverviewVersionId) {
+      await finalizeSignedFundingOverviewSubmission({
+        connection: pool,
+        fundingOverviewVersionId,
+        signedPayload: payload,
+        signingRequestRow: row,
+        participantUserId: userId
+      });
       await pool.query(
         `UPDATE funding_overview_version
             SET status = 'signed',

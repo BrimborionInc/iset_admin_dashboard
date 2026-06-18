@@ -22,8 +22,11 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
-- 2026-06-18 | Release TBD | UX/Casework | Application and client lists | Standardized Manage ISET Applications and ISET Clients as widget-based dashboards. | Both lists now use the shared Cloudscape board/widget treatment with Add widget and Reset layout controls, compact embedded tables, matching name-link treatment, striped rows, sticky headers, wrapping, and matching explanatory-copy placement. The ISET Clients list now uses reminder-backed Follow ups and Next follow-up columns instead of stale task wording.
-- 2026-06-18 | Release TBD | Ops/System Admin | AWS Environment Status | Added read-only platform health metrics to the System Administrator homepage widget. | The widget now includes app capacity/EC2 CPU, Aurora/RDS stress, and database query-pressure checks alongside Cognito and SES, with manual refresh only and server-side caching to avoid dashboard polling loops.
+- 2026-06-18 | Release 20260618-test-financial-overview-editable | UX/Casework | Financial Overview forms | Staff can now send the Financial Overview as a blank or pre-filled editable form instead of a read-only signature-only document. | Participant submissions update the case Participant Details data used by PATH, refresh the Financial Overview version snapshot, and store the official signed Financial Overview PDF.
+- 2026-06-18 | Release TBD | UX/Casework | Financial Overview forms | Tightened the editable Financial Overview participant form to income, expenses, other-income/other-expense notes, and signature only. | New signing requests no longer ask participants for supports requested, top-up amount, childcare funding status, transportation category/mileage, or student loan/grant details, and those values are not carried as hidden initial values.
+- 2026-06-18 | Release TBD | UX/Casework | Financial Overview forms | Updated editable Financial Overview income and expense fields to match the original intake financial steps more closely. | Monthly amount inputs now use explanatory hint text, stronger GOV.UK labels, `$` prefixes, and `per month` suffixes.
+- 2026-06-18 | Release 20260618-test-financial-overview-editable | UX/Casework | Application and client lists | Standardized Manage ISET Applications and ISET Clients as widget-based dashboards. | Both lists now use the shared Cloudscape board/widget treatment with Add widget and Reset layout controls, compact embedded tables, matching name-link treatment, striped rows, sticky headers, wrapping, and matching explanatory-copy placement. The ISET Clients list now uses reminder-backed Follow ups and Next follow-up columns instead of stale task wording.
+- 2026-06-18 | Release 20260618-test-financial-overview-editable | Ops/System Admin | AWS Environment Status | Added read-only platform health metrics to the System Administrator homepage widget. | The widget now includes app capacity/EC2 CPU, Aurora/RDS stress, and database query-pressure checks alongside Cognito and SES, with manual refresh only and server-side caching to avoid dashboard polling loops.
 - 2026-06-16 | Release TBD | UX/Assessment | Assessment corrections | Submitted assessments and intervention proposals are read-only while awaiting approval, with a new Recall submission action for the submitter before a decision is recorded. | Recall removes the withdrawn generated PDFs from the active document list, records an audit event, returns the assessment/proposal to an editable state, and lets staff resubmit corrections instead of editing a submitted version in place.
 - 2026-06-12 | Release TBD | Fix/User Management | Staff profile editing | Changing a staff user's Name now also updates Display name when the display name was still mirroring the old name. | This prevents a successful staff-profile save from appearing unchanged in the User Management table because the table displays `display_name`; staff can still keep an intentional separate display name by editing Display name directly.
 - 2026-06-12 | Release TBD | UX/Casework | Case Workspace recovery actions | System Administrators can reopen a closed action plan from the case header when circumstances change after closeout. | The action records a reason, resets ILMP validation/submission to needs review, and supports either adding a new intervention or reopening one completed intervention for amendment while writing an internal note and audit event.
@@ -403,6 +406,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
+- Financial Overview forms sent by secure message can now be blank or pre-filled editable forms focused on income and expenses, with clearer monthly hints and `per month` inputs; participant submissions update PATH Participant Details.
 - System Administrators can now see app capacity, database stress, and database query-pressure checks in AWS Environment Status.
 - Submitted assessments and intervention proposals are read-only while awaiting approval.
 - Manage ISET Applications and ISET Clients now share the same widget-based dashboard treatment.
@@ -410,6 +414,12 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Recalled submissions archive the withdrawn generated assessment PDFs, record an audit event, and return the work to an editable state for correction and resubmission.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260618-test-financial-overview-editable
+
+- Financial Overview forms sent by secure message can now be sent blank or pre-filled, and participants can complete or edit clearer monthly income and expense fields before signing.
+- Participant submissions update the case Participant Details data used by PATH, refresh the Financial Overview version snapshot, and store the signed PDF.
+- Manage ISET Applications and ISET Clients now share the same widget-based dashboard treatment, and AWS Environment Status includes app capacity, database stress, and query-pressure checks.
 
 #### Release 20260617-prod-assessment-recall-guardrails
 
@@ -426,20 +436,13 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Funding revision letters now create the missing Client Funding Agreement draft from the selected action plan when an approved current amendment needs one and no draft already exists.
 - The staff side-navigation collapse control now works reliably, and a browser smoke checks close/reopen behavior with real pointer clicks.
 
-#### Release 20260610-prod-modify-component-editor
-
-- Clearing a stale Docs Requested flag in Application Workspace no longer shows a false concurrent-update warning.
-- Application Workspace widgets are easier to use during file review, with document search, secure-message table sorting, cleaner notes refresh behavior, clearer calendar fallbacks, and conflict-declaration wording focused on the staff member working the file.
-- Manage Intake Steps now has standard dashboard controls, sortable/resizable step-library columns, full-list sorting before display, fewer unnecessary reloads, and a preview that stays inside the widget.
-- Modify Intake Step now shows the current step name, adds component search, preserves repeated static content blocks, keeps clean saves disabled, preserves step metadata, and shows precise save errors.
-- User Management has cleaner account tables, and Manage ISET Applications has better sorting, resizing, pagination, and server-backed filters within the standard dashboard widget layout.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
+- Les formulaires Financial Overview envoyes par message securise peuvent maintenant etre vierges ou pre-remplis et modifiables, centres sur les revenus et depenses mensuels plus clairs, et les reponses du participant mettent a jour Participant Details dans PATH.
 - Les administrateurs systeme peuvent maintenant voir la capacite applicative, la charge de la base de donnees et la pression des requetes dans AWS Environment Status.
 - Les evaluations et propositions envoyees sont maintenant en lecture seule pendant l'attente d'approbation.
 - Les tableaux Demandes ISET et Clients ISET utilisent maintenant la meme presentation de tableau de bord a widgets.
@@ -447,6 +450,12 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les rappels archivent les PDF d'evaluation retires, enregistrent un evenement d'audit et remettent le travail en mode modifiable pour correction et nouvel envoi.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260618-test-financial-overview-editable
+
+- Les formulaires Financial Overview envoyes par message securise peuvent maintenant etre envoyes vierges ou pre-remplis, et les participants peuvent completer ou modifier des champs de revenus et depenses mensuels plus clairs avant de signer.
+- Les reponses du participant mettent a jour les donnees Participant Details du dossier utilisees par PATH, actualisent l'instantane de version Financial Overview et enregistrent le PDF signe.
+- Les tableaux Demandes ISET et Clients ISET utilisent maintenant la meme presentation de tableau de bord a widgets, et AWS Environment Status inclut la capacite applicative, la charge de la base de donnees et la pression des requetes.
 
 #### Release 20260617-prod-assessment-recall-guardrails
 
@@ -462,14 +471,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Manual Application Intake a maintenant un widget de progression et un assistant pour les details d'identite/source, la recherche de client/compte participant, le choix de gestion de compte, les details de la demande et la revision avant creation.
 - Les lettres de revision de financement creent maintenant le brouillon Client Funding Agreement manquant a partir du plan d'action selectionne quand un amendement courant approuve en a besoin et qu'aucun brouillon n'existe deja.
 - Le controle de fermeture de la navigation laterale du personnel fonctionne maintenant de facon fiable, avec un test navigateur qui verifie la fermeture/reouverture par de vrais clics.
-
-#### Release 20260610-prod-modify-component-editor
-
-- Effacer un ancien indicateur Docs Requested dans Application Workspace n'affiche plus un faux avertissement de mise a jour concurrente.
-- Les widgets Application Workspace sont plus faciles a utiliser pendant la revision d'un dossier, avec recherche de documents, tri des messages securises, actualisation des notes plus propre, fallbacks calendrier plus clairs et texte de conflit d'interets centre sur la personne qui travaille le dossier.
-- Manage Intake Steps a maintenant les controles standard du tableau de bord, des colonnes triables/redimensionnables, le tri de la liste complete avant affichage, moins de rechargements inutiles et un apercu qui reste dans le widget.
-- Modify Intake Step affiche maintenant le nom de l'etape courante, ajoute la recherche de composants, preserve les blocs de contenu statique repetes, garde Save desactive quand rien n'a change, preserve les metadonnees de l'etape et affiche les erreurs d'enregistrement exactes.
-- User Management a des tableaux de comptes plus simples, et Manage ISET Applications a un meilleur tri, redimensionnement, pagination et filtres cote serveur dans la presentation standard de tableau de bord a widgets.
 
 ### Problemes connus (brouillon - FR)
 

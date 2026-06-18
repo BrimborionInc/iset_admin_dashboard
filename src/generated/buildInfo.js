@@ -1,15 +1,15 @@
 const buildInfo = {
   "packageVersion": "0.1.0",
-  "releaseId": "20260617-prod-assessment-recall-guardrails",
-  "buildTarget": "production",
-  "builtAt": "2026-06-17T00:15:04.639Z",
-  "gitCommit": "be8f3f38e56049abc25503a47fdabd6d4affdf16",
-  "gitShort": "be8f3f38",
+  "releaseId": "20260618-test-financial-overview-editable",
+  "buildTarget": "test",
+  "builtAt": "2026-06-18T20:47:19.422Z",
+  "gitCommit": "3f21ae2174d5734adaf46b39c49eb58bd8536393",
+  "gitShort": "3f21ae21",
   "gitDirty": true,
-  "publicReleaseLabel": "Release 20260617-prod-assessment-recall-guardrails",
-  "publicReleaseDateEn": "17th June 2026",
-  "publicReleaseDateFr": "17 juin 2026",
-  "displayLabel": "release 20260617-prod-assessment-recall-guardrails | be8f3f38-dirty"
+  "publicReleaseLabel": "Release 20260618-test-financial-overview-editable",
+  "publicReleaseDateEn": "18th June 2026",
+  "publicReleaseDateFr": "18 juin 2026",
+  "displayLabel": "release 20260618-test-financial-overview-editable | 3f21ae21-dirty"
 };
 
 export default buildInfo;

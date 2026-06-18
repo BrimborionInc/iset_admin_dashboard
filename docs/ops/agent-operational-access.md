@@ -110,12 +110,20 @@ Notes:
 
 ## AWS CLI Profile/Account Mapping
 
+- DEV and TEST use a separate AWS account from PROD. Do not infer environment from an IAM user name, a stale shell default, or a previous thread's credentials.
+- Before running AWS commands for local DEV app testing, source the relevant app `.env` in the same shell command and then run `aws sts get-caller-identity`. The admin and portal local configs can use different IAM users even when they target the same DEV account. Use the sourced identity for the resource under test, not the unsourced shell default.
+- Before running AWS commands for TEST or PROD, use the explicit documented profile (`nwac-test`, `nwac-prod`, or the exact runbook profile) and confirm `aws sts get-caller-identity --profile <profile>` plus the target account/resource ARNs before any mutation.
+- If a Cognito, SES, S3, SSM, RDS, or IAM command fails under one identity, re-check the environment/profile mapping before asking for permissions. Permission requests must name the verified account, IAM principal, target environment, and exact resource ARNs.
 - Keep PROD and TEST identities as separate AWS CLI profiles; never rely on implicit defaults.
 - Current known mappings in this Codex environment, re-verified 2026-04-20 after the PROD-role cutover:
   - `default` -> `arn:aws:iam::468278742295:user/nwac-prod-automation` (bootstrap identity only; direct PROD resource access is intentionally denied)
   - `nwac-prod` -> `arn:aws:sts::468278742295:assumed-role/nwac-prod-codex-operator/codex-prod-operator` when assumed from `default`
   - `nwac-prod-codex-operator` -> `arn:aws:sts::468278742295:assumed-role/nwac-prod-codex-operator/codex-prod-operator` when assumed from `default`
   - `nwac-test` -> `arn:aws:iam::124355655255:user/CODEX_CLI_Admin` (test account `124355655255`)
+- Current local DEV dotenv identities, verified 2026-06-18:
+  - Admin `.env` -> `arn:aws:iam::124355655255:user/SES_backend_dev`
+  - Portal `.env` -> `arn:aws:iam::124355655255:user/SES_backend`
+  These are DEV/testing-account identities, not PROD, despite names that may mention SES rather than PATH.
 - Reduced PROD operator role added 2026-04-20 and widened 2026-04-20 for the full repo-driven deploy/migration path: `nwac-prod-codex-operator` / `nwac-prod` cover artifact uploads in `nwac-prod-artifacts` (`admin/*`, `portal/*`, `shared/*`, `ssm-sql/*`, `db-dumps/*`), PROD SSM SQL/dump execution, ASG refresh, PROD DB restore-point snapshots, and the ALB `path-maintenance-fallback` flow. They still do not allow direct `secretsmanager:GetSecretValue` on `nwac-prod-db-credentials`.
 - Legacy Windows/npm deploy processes do not share the same AWS config home as bash/WSL. TEST no longer uses that path; if PROD app deploy is ported by adapting the old PowerShell helpers, credentials must still come from the WSL role-backed profile rather than an implicit Windows default.
 - Always pass `--profile` for AWS commands in threads that touch infra or storage:
