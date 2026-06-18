@@ -90,20 +90,9 @@ const groupedColumns = [
   {
     id: "client",
     header: "Client",
-    cell: item => {
-      if (item.isChild) {
-        return (
-          <Link href={item.caseHref || "#"} onFollow={event => event.preventDefault()}>
-            {item.trackingId ? `Case ${item.trackingId}` : `Case ${item.id || ""}`}
-          </Link>
-        );
-      }
-      return (
-        <Link href={item.caseHref || "#"} onFollow={event => event.preventDefault()}>
-          {item.clientName || item.trackingId || item.id}
-        </Link>
-      );
-    },
+    cell: item => (item.isChild
+      ? item.trackingId ? `Case ${item.trackingId}` : `Case ${item.id || ""}`
+      : item.clientName || item.trackingId || item.id),
     minWidth: 220,
     isRowHeader: true,
   },
@@ -129,11 +118,11 @@ const groupedColumns = [
     minWidth: 160,
   },
   {
-    id: "openTasks",
-    header: "Open tasks",
+    id: "followUps",
+    header: "Follow ups",
     cell: item => {
-      const open = Number.isFinite(item.openTasks) ? item.openTasks : 0;
-      const overdue = Number.isFinite(item.overdueTasks) ? item.overdueTasks : 0;
+      const open = Number.isFinite(item.followUps) ? item.followUps : 0;
+      const overdue = Number.isFinite(item.overdueFollowUps) ? item.overdueFollowUps : 0;
       const badgeColor = overdue > 0 ? "red" : open > 0 ? "blue" : "grey";
       const content =
         overdue > 0 ? (
@@ -147,6 +136,20 @@ const groupedColumns = [
           <Badge color={badgeColor}>{open}</Badge>
         );
       if (item.isChild || item.caseCount === 1) return content;
+      return "-";
+    },
+    minWidth: 160,
+  },
+  {
+    id: "nextFollowUp",
+    header: "Next follow-up",
+    cell: item => {
+      const value = item.nextFollowUpAt || item.nextActionDueAt;
+      if (item.isChild || item.caseCount === 1) {
+        const badgeColor = getNextActionBadgeColor(value);
+        if (!badgeColor) return "-";
+        return <Badge color={badgeColor}>{formatDate(value)}</Badge>;
+      }
       return "-";
     },
     minWidth: 160,
@@ -176,20 +179,6 @@ const groupedColumns = [
     minWidth: 160,
   },
   {
-    id: "nextActionDue",
-    header: "Next action due",
-    cell: item => {
-      const value = item.nextActionDueAt;
-      if (item.isChild || item.caseCount === 1) {
-        const badgeColor = getNextActionBadgeColor(value);
-        if (!badgeColor) return "-";
-        return <Badge color={badgeColor}>{formatDate(value)}</Badge>;
-      }
-      return "-";
-    },
-    minWidth: 160,
-  },
-  {
     id: "lastTouch",
     header: "Last touch",
     cell: item => {
@@ -202,6 +191,12 @@ const groupedColumns = [
 ];
 
 const groupedColumnIds = groupedColumns.map(column => column.id);
+const LEGACY_COLUMN_ID_MAP = {
+  openTasks: "followUps",
+  nextActionDue: "nextFollowUp",
+};
+
+const normalizeColumnId = id => LEGACY_COLUMN_ID_MAP[id] || id;
 
 const loadColumnWidths = () => {
   if (typeof window === "undefined") return [];
@@ -214,9 +209,10 @@ const loadColumnWidths = () => {
       .map(entry => {
         if (!entry || typeof entry !== "object") return null;
         const { id, width } = entry;
+        const normalizedId = normalizeColumnId(id);
         const numeric = Number(width);
-        return typeof id === "string" && Number.isFinite(numeric)
-          ? { id, width: numeric }
+        return typeof normalizedId === "string" && groupedColumnIds.includes(normalizedId) && Number.isFinite(numeric)
+          ? { id: normalizedId, width: numeric }
           : null;
       })
       .filter(Boolean);
@@ -248,7 +244,9 @@ const loadPreferences = () => {
       };
     }
     const visibleColumns = Array.isArray(parsed.visibleColumns)
-      ? parsed.visibleColumns.filter(id => groupedColumnIds.includes(id))
+      ? parsed.visibleColumns
+          .map(normalizeColumnId)
+          .filter((id, index, columns) => groupedColumnIds.includes(id) && columns.indexOf(id) === index)
       : [...groupedColumnIds];
     const pageSize = PAGE_SIZE_OPTIONS.some(option => option.value === parsed.pageSize)
       ? parsed.pageSize
@@ -287,7 +285,7 @@ const persistPreferences = preferences => {
   }
 };
 
-const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
+const CasesTableWidget = ({ actions = null, metadata = {}, toggleHelpPanel }) => {
   const history = useHistory();
   const { role: currentRole } = useCurrentUser();
   const isApplicationAssessor = currentRole === "ISET Coordinator";
@@ -665,6 +663,29 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       .map(column => {
         const storedWidth = columnWidths.find(entry => entry.id === column.id);
         const sortableColumn = { ...column, sortingField: column.id };
+        if (column.id === "client") {
+          sortableColumn.cell = item => {
+            const label = column.cell(item);
+            const caseId = item?.isChild
+              ? item.id
+              : item?.caseCount === 1
+                ? item.singleCase?.id
+                : null;
+            if (!caseId) return label;
+            return (
+              <Button
+                variant="inline-link"
+                onClick={event => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  history.push(`/cases/${caseId}`);
+                }}
+              >
+                {label}
+              </Button>
+            );
+          };
+        }
         return storedWidth ? { ...sortableColumn, width: storedWidth.width } : sortableColumn;
       });
     const storedActionWidth = columnWidths.find(entry => entry.id === actionsColumn.id);
@@ -672,7 +693,7 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       ...columns,
       storedActionWidth ? { ...actionsColumn, width: storedActionWidth.width } : actionsColumn,
     ];
-  }, [actionsColumn, preferences.visibleColumns, columnWidths]);
+  }, [actionsColumn, preferences.visibleColumns, columnWidths, history]);
 
   const activeSortingColumn = useMemo(
     () => columnsToRender.find(column => column.id === sortingState.columnId),
@@ -705,24 +726,165 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
     );
   }
 
+  const headerContent = (
+    <Header
+      variant="h2"
+      info={infoLink}
+      actions={
+        headerActionItems.length ? (
+          <SpaceBetween direction="horizontal" size="xs">
+            {headerActionItems}
+          </SpaceBetween>
+        ) : undefined
+      }
+    >
+      {metadata.title ?? "ISET Clients"}
+    </Header>
+  );
+
+  const tableContent = (
+    <SpaceBetween size="xs">
+      {assignSuccess && (
+        <Alert
+          type="success"
+          onDismiss={() => setAssignSuccess(null)}
+          statusIconAriaLabel="Success"
+        >
+          {assignSuccess}
+        </Alert>
+      )}
+      <Box variant="small">
+        {metadata.description ?? "Review and open ISET cases that match your filters."}
+      </Box>
+      <Table
+        trackBy="id"
+        columnDefinitions={columnsToRender}
+        items={itemsToRender}
+        resizableColumns
+        variant="embedded"
+        wrapLines
+        stickyHeader
+        stripedRows
+        loading={liveLoading}
+        ariaLabels={{
+          tableLabel: "ISET Clients table",
+          header: "ISET Clients",
+          rowHeader: "Client",
+        }}
+        sortingColumn={activeSortingColumn || { id: sortingState.columnId }}
+        sortingDescending={sortingState.isDescending}
+        onSortingChange={({ detail }) => {
+          const columnId = detail?.sortingColumn?.id;
+          if (!columnId) return;
+          setSortingState({ columnId, isDescending: detail.isDescending });
+          setCurrentPageIndex(1);
+          setExpandedItems([]);
+        }}
+        empty={emptyState}
+        filter={
+          <TextFilter
+            filteringText={searchText}
+            filteringPlaceholder="Search by client or owner"
+            onChange={({ detail }) => {
+              setSearchText(detail.filteringText);
+              setCurrentPageIndex(1);
+            }}
+            countText={totalMatchesText}
+          />
+        }
+        pagination={pagination}
+        preferences={preferencesComponent}
+        onColumnWidthsChange={handleColumnWidthsChange}
+        expandableRows={{
+          getItemChildren: item => (Array.isArray(item.cases) && item.cases.length > 1 ? item.cases : []),
+          isItemExpandable: item => Array.isArray(item.cases) && item.cases.length > 1,
+          expandedItems,
+          onExpandableItemToggle: ({ detail }) => {
+            const itemId = detail.item?.id;
+            if (!itemId) return;
+            setExpandedItems(prev => {
+              const set = new Set(prev.map(entry => entry.id));
+              if (detail.expanded) {
+                set.add(itemId);
+              } else {
+                set.delete(itemId);
+              }
+              return Array.from(set).map(id => ({ id }));
+            });
+          },
+        }}
+        onRowClick={({ detail }) => {
+          const caseId = detail?.item?.isChild
+            ? detail.item.id
+            : detail?.item?.caseCount === 1
+              ? detail.item.singleCase?.id
+              : null;
+          if (caseId) {
+            history.push(`/cases/${caseId}`);
+          }
+        }}
+      />
+    </SpaceBetween>
+  );
+
+  const assignModal = assignModalVisible ? (
+    <Modal
+      visible
+      header={assignModalMode === "reassign" ? "Reassign Case" : "Assign Case"}
+      closeAriaLabel="Close assignment modal"
+      onDismiss={closeAssignModal}
+      footer={
+        <SpaceBetween size="xs" direction="horizontal">
+          <Button onClick={closeAssignModal}>Cancel</Button>
+          <Button
+            variant="primary"
+            loading={assignSubmitting}
+            disabled={assignableLoading || assignSubmitting || !selectedAssignee}
+            onClick={handleAssignSubmit}
+          >
+            {assignModalMode === "reassign" ? "Reassign" : "Assign"}
+          </Button>
+        </SpaceBetween>
+      }
+    >
+      <SpaceBetween size="m">
+        {assignError && (
+          <Alert type="error" statusIconAriaLabel="Error">
+            {assignError}
+          </Alert>
+        )}
+        <FormField
+          label="Staff member"
+          description="Choose who should own this case."
+        >
+          <Select
+            disabled={assignableLoading}
+            loadingText="Loading staff..."
+            placeholder={assignableLoading ? "Loading staff..." : "Select staff"}
+            options={assignableOptions}
+            selectedOption={selectedAssignee}
+            onChange={({ detail }) => setSelectedAssignee(detail.selectedOption)}
+          />
+        </FormField>
+      </SpaceBetween>
+    </Modal>
+  ) : null;
+
+  if (!actions) {
+    return (
+      <>
+        <SpaceBetween direction="vertical" size="xs">
+          {headerContent}
+          {tableContent}
+        </SpaceBetween>
+        {assignModal}
+      </>
+    );
+  }
+
   return (
     <BoardItem
-      header={
-        <Header
-          variant="h2"
-          info={infoLink}
-          description={metadata.description ?? "Review and open ISET cases that match your filters."}
-          actions={
-            headerActionItems.length ? (
-              <SpaceBetween direction="horizontal" size="xs">
-                {headerActionItems}
-              </SpaceBetween>
-            ) : undefined
-          }
-        >
-          {metadata.title ?? "Clients"}
-        </Header>
-      }
+      header={headerContent}
       settings={
         typeof actions.removeItem === "function" ? (
           <ButtonDropdown
@@ -735,120 +897,8 @@ const CasesTableWidget = ({ actions = {}, metadata = {}, toggleHelpPanel }) => {
       }
       i18nStrings={boardItemI18nStrings}
     >
-      <SpaceBetween size="m">
-        {assignSuccess && (
-          <Alert
-            type="success"
-            onDismiss={() => setAssignSuccess(null)}
-            statusIconAriaLabel="Success"
-          >
-            {assignSuccess}
-          </Alert>
-        )}
-        <Table
-          trackBy="id"
-          columnDefinitions={columnsToRender}
-          items={itemsToRender}
-          resizableColumns
-          variant="embedded"
-          loading={liveLoading}
-          sortingColumn={activeSortingColumn || { id: sortingState.columnId }}
-          sortingDescending={sortingState.isDescending}
-          onSortingChange={({ detail }) => {
-            const columnId = detail?.sortingColumn?.id;
-            if (!columnId) return;
-            setSortingState({ columnId, isDescending: detail.isDescending });
-            setCurrentPageIndex(1);
-            setExpandedItems([]);
-          }}
-          header={<Header variant="h3" counter={`(${totalCount})`}>ISET Clients</Header>}
-          empty={emptyState}
-          filter={
-            <TextFilter
-              filteringText={searchText}
-              filteringPlaceholder="Search by client or owner"
-              onChange={({ detail }) => {
-                setSearchText(detail.filteringText);
-                setCurrentPageIndex(1);
-              }}
-              countText={totalMatchesText}
-            />
-          }
-          pagination={pagination}
-          preferences={preferencesComponent}
-          onColumnWidthsChange={handleColumnWidthsChange}
-          expandableRows={{
-            getItemChildren: item => (Array.isArray(item.cases) && item.cases.length > 1 ? item.cases : []),
-            isItemExpandable: item => Array.isArray(item.cases) && item.cases.length > 1,
-            expandedItems,
-            onExpandableItemToggle: ({ detail }) => {
-              const itemId = detail.item?.id;
-              if (!itemId) return;
-              setExpandedItems(prev => {
-                const set = new Set(prev.map(entry => entry.id));
-                if (detail.expanded) {
-                  set.add(itemId);
-                } else {
-                  set.delete(itemId);
-                }
-                return Array.from(set).map(id => ({ id }));
-              });
-            },
-          }}
-          onRowClick={({ detail }) => {
-            const caseId = detail?.item?.isChild
-              ? detail.item.id
-              : detail?.item?.caseCount === 1
-                ? detail.item.singleCase?.id
-                : null;
-            if (caseId) {
-              history.push(`/cases/${caseId}`);
-            }
-          }}
-        />
-      </SpaceBetween>
-      {assignModalVisible && (
-        <Modal
-          visible
-          header={assignModalMode === "reassign" ? "Reassign Case" : "Assign Case"}
-          closeAriaLabel="Close assignment modal"
-          onDismiss={closeAssignModal}
-          footer={
-            <SpaceBetween size="xs" direction="horizontal">
-              <Button onClick={closeAssignModal}>Cancel</Button>
-              <Button
-                variant="primary"
-                loading={assignSubmitting}
-                disabled={assignableLoading || assignSubmitting || !selectedAssignee}
-                onClick={handleAssignSubmit}
-              >
-                {assignModalMode === "reassign" ? "Reassign" : "Assign"}
-              </Button>
-            </SpaceBetween>
-          }
-        >
-          <SpaceBetween size="m">
-            {assignError && (
-              <Alert type="error" statusIconAriaLabel="Error">
-                {assignError}
-              </Alert>
-            )}
-            <FormField
-              label="Staff member"
-              description="Choose who should own this case."
-            >
-              <Select
-                disabled={assignableLoading}
-                loadingText="Loading staff..."
-                placeholder={assignableLoading ? "Loading staff..." : "Select staff"}
-                options={assignableOptions}
-                selectedOption={selectedAssignee}
-                onChange={({ detail }) => setSelectedAssignee(detail.selectedOption)}
-              />
-            </FormField>
-          </SpaceBetween>
-        </Modal>
-      )}
+      {tableContent}
+      {assignModal}
     </BoardItem>
   );
 };

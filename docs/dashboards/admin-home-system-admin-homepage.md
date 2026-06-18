@@ -2,7 +2,7 @@
 
 Purpose: document the live System Administrator homepage board and the operational widgets that replaced the old development-tracker direction.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-04-30
+Last Updated: 2026-06-18
 
 ## Scope
 
@@ -31,10 +31,27 @@ Last Updated: 2026-04-30
   - links directly to filtered `ILMP Submissions & Exports` and `User Management` views
   - current data sources are `GET /api/admin/users/summary`, `GET /api/admin/applicants/summary`, and `GET /api/esdc/participants?...`
 - `AWS Environment Status`
-  - shows read-only live checks for staff Cognito, applicant Cognito, and SES mail in the active environment
+  - shows read-only live checks for app capacity, database stress, database query pressure, staff Cognito, applicant Cognito, and SES mail in the active environment
   - backed by `GET /api/dashboard/system-admin-aws-environment-status`
-  - this is intentionally not a full infrastructure monitor
+  - still intentionally not a full infrastructure monitor or load test surface
   - current implementation is cached server-side for 60 seconds and must stay read-only
+  - app capacity reads the active environment's Auto Scaling group, EC2 CPU over the last 15 minutes, desired/in-service/healthy instance counts, and instance ids
+  - database stress reads the Aurora/RDS cluster state plus CloudWatch CPU, connection, and Aurora Serverless ACU utilization metrics over the last 15 minutes
+  - database query pressure reads MySQL global status counters from the app's existing DB connection; it compares current and previous widget samples to surface sudden query-rate spikes that can indicate runaway frontend/API polling
+  - default resource discovery:
+    - ASG: `SYSTEM_ADMIN_AWS_ASG_NAME`, `APP_ASG_NAME`, `AUTO_SCALING_GROUP_NAME`, or inferred `nwac-prod-asg` / `nwac-test-asg`
+    - DB cluster: `SYSTEM_ADMIN_AWS_DB_CLUSTER_IDENTIFIER`, `RDS_CLUSTER_IDENTIFIER`, `DB_CLUSTER_IDENTIFIER`, `AURORA_CLUSTER_IDENTIFIER`, or inferred from an Aurora `DB_HOST`
+    - AWS metrics region: `SYSTEM_ADMIN_AWS_METRICS_REGION` or `AWS_REGION`
+  - read-only IAM actions needed by the deployed admin runtime for the new infrastructure checks:
+    - `autoscaling:DescribeAutoScalingGroups`
+    - `cloudwatch:GetMetricData`
+    - `rds:DescribeDBClusters`
+  - optional threshold env vars:
+    - `SYSTEM_ADMIN_APP_CPU_WARNING_PERCENT` / `SYSTEM_ADMIN_APP_CPU_ERROR_PERCENT` (defaults `75` / `90`)
+    - `SYSTEM_ADMIN_DB_CPU_WARNING_PERCENT` / `SYSTEM_ADMIN_DB_CPU_ERROR_PERCENT` (defaults `75` / `90`)
+    - `SYSTEM_ADMIN_DB_ACU_WARNING_PERCENT` / `SYSTEM_ADMIN_DB_ACU_ERROR_PERCENT` (defaults `80` / `95`)
+    - `SYSTEM_ADMIN_DB_QPS_WARNING` / `SYSTEM_ADMIN_DB_QPS_ERROR` (defaults `150` / `500`)
+    - `SYSTEM_ADMIN_DB_THREADS_RUNNING_WARNING` / `SYSTEM_ADMIN_DB_THREADS_RUNNING_ERROR` (defaults `8` / `20`)
 - `Users & Access Alerts`
   - shows staff MFA gaps, pending first sign-in/reset state, disabled accounts, never-signed-in accounts, and applicant activation backlog
   - backed by `GET /api/dashboard/system-admin-users-access-alerts`
@@ -55,7 +72,7 @@ Last Updated: 2026-04-30
 
 ## Current layout and storage rule
 
-- The current System Administrator homepage storage key is `admin-home-layout-v10`.
+- The current System Administrator homepage storage key is `admin-home-layout-v11`.
 - Bump the System Administrator storage key whenever the default System Administrator widget set changes, so new operational widgets appear by default without resetting other roles.
 
 ## Current implementation guardrails
@@ -64,4 +81,5 @@ Last Updated: 2026-04-30
 - The feedback queue is the current exception: interactive triage required persistent status history and internal notes, so it uses dedicated feedback-management tables instead of a schema-free aggregate-only model.
 - Keep the AWS widget read-only. Do not send test mail, mutate Cognito state, or run expensive/destructive probes on normal homepage refresh.
 - `AWS Environment Status` should answer whether PATH's AWS-backed services are usable in the current environment, not expose a generic dump of environment data.
+- Do not add automatic frontend polling to `AWS Environment Status`; use the manual refresh button and server-side cache unless Bill explicitly approves bounded polling.
 - Keep drill-ins actionable. Every System Administrator homepage count or status should open an existing admin surface that can actually be used for follow-up.

@@ -78,7 +78,7 @@ const HomeDashboardHelp = () => {
           <li><strong>Operations Snapshot</strong> - current System Administrator counts for ILMP submission blockers, applicant activation backlog, and staff access follow-up.</li>
         ) : null}
         {isSystemAdmin ? (
-          <li><strong>AWS Environment Status</strong> - live read-only checks for staff/applicant Cognito and SES mail in the active environment.</li>
+          <li><strong>AWS Environment Status</strong> - live read-only checks for app capacity, database stress, database query pressure, staff/applicant Cognito, and SES mail in the active environment.</li>
         ) : null}
         {isSystemAdmin ? (
           <li><strong>Users &amp; Access Alerts</strong> - staff MFA/reset/disabled-account follow-up plus applicant activation queue visibility.</li>

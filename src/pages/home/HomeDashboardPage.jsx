@@ -217,7 +217,7 @@ const WIDGET_REGISTRY = {
         component: SystemAdminAwsEnvironmentStatusWidget,
         title: 'AWS Environment Status',
         description: 'System Administrator live AWS service checks for the active environment.',
-        defaultRowSpan: 5,
+        defaultRowSpan: 8,
         defaultColumnSpan: 4
     },
     'system-admin-users-access-alerts': {
@@ -247,7 +247,7 @@ const WIDGET_REGISTRY = {
 };
 
 const STORAGE_PREFIX = 'admin-home-layout-v7';
-const SYSTEM_ADMIN_STORAGE_PREFIX = 'admin-home-layout-v10';
+const SYSTEM_ADMIN_STORAGE_PREFIX = 'admin-home-layout-v11';
 const ISET_COORDINATOR_STATUS_FILTER = ['submitted', 'in_review', 'docs_requested', 'closure_notice', 'pending_approval', 'decision_ready'].join(',');
 const ISET_COORDINATOR_EI_ELIGIBILITY_FILTER = ['submitted', 'in_review', 'docs_requested', 'closure_notice'].join(',');
 const ISET_COORDINATOR_READY_TO_ASSESS_FILTER = ['submitted', 'in_review'].join(',');
@@ -559,7 +559,7 @@ const buildDefaultLayout = (role) => {
         return [
             { id: 'system-admin-operations-snapshot', rowSpan: 5, columnSpan: 4 },
             { id: 'system-admin-feedback-queue', rowSpan: 8, columnSpan: 4 },
-            { id: 'system-admin-aws-environment-status', rowSpan: 5, columnSpan: 4 },
+            { id: 'system-admin-aws-environment-status', rowSpan: 8, columnSpan: 4 },
             { id: 'system-admin-users-access-alerts', rowSpan: 6, columnSpan: 4 },
             { id: 'recent-activity', rowSpan: 4, columnSpan: 2 },
             { id: 'my-watchlist', rowSpan: 4, columnSpan: 2 }

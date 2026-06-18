@@ -4,6 +4,7 @@ This project embeds Cloudscape board components (Board, BoardItem, ItemsPalette)
 
 ## Non-negotiable checklist (use before coding any dashboard)
 
+- Product direction clarified 2026-06-18: admin-console dashboard routes should keep the shared widget-based Cloudscape `Board` / `BoardItem` look and feel. Do not flatten a dashboard into a bare table page as a visual cleanup. If a historical note says a dashboard was made "table-first" or had board chrome removed, treat that as stale/conflicting with the current standard unless Bill explicitly re-approves that exception in the current thread.
 - Start from a known-good example (`src/pages/configurationSettings.js`, `src/pages/contact/ContactCommunicationsDashboard.jsx`) instead of hand-rolling Boards/BoardItems.
 - Wire header actions in `AppRoutes` to dispatch `<route>:openPalette` and `<route>:resetLayout`; the page must listen, call `setAvailableItems`, call `setSplitPanelOpen(true)`, and reset the default layout on reset.
 - Use the canonical `boardI18nStrings` and `boardItemI18nStrings` objects (drag/resize announcements) on every Board and BoardItem.

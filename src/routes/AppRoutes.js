@@ -695,7 +695,22 @@ const AppRoutes = ({
           ],
           'Manage ISET Applications',
           <CaseAssignmentDashboardHelp />,
-          null,
+          (
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button
+                iconName="add-plus"
+                onClick={() => window.dispatchEvent(new CustomEvent('caseAssignment:openPalette'))}
+              >
+                Add widget
+              </Button>
+              <Button
+                iconName="refresh"
+                onClick={() => window.dispatchEvent(new CustomEvent('caseAssignment:resetLayout'))}
+              >
+                Reset layout
+              </Button>
+            </SpaceBetween>
+          ),
           CaseAssignmentDashboardHelp.aiContext
         )}
       </Route>

@@ -9,18 +9,18 @@ const HomeAwsEnvironmentStatusHelp = () => (
       the services PATH depends on are actually reachable right now.
     </Box>
     <Box>
-      The first version checks staff Cognito, applicant Cognito, and SES mail. It is not a full infrastructure monitor
-      and it does not send test email or mutate AWS resources.
+      It checks app capacity, database stress, database query pressure, staff Cognito, applicant Cognito, and SES mail.
+      It does not send test email, run load tests, or mutate AWS resources.
     </Box>
     <Box>
-      Open the linked User Management or Manage Notifications pages when a service shows a warning or error and you need
-      to investigate configuration or access follow-up.
+      Use warning and error summaries as early indicators for unhealthy app instances, high EC2 or Aurora load,
+      unusual database query pressure, broken sign-in services, or notification-mail configuration issues.
     </Box>
   </SpaceBetween>
 );
 
 HomeAwsEnvironmentStatusHelp.aiContext = `
-You are assisting with the AWS Environment Status widget on the PATH homepage. Explain that it is a System Administrator-only, read-only operational widget that checks whether staff Cognito, applicant Cognito, and SES mail are reachable in the active environment and highlights configuration or access issues without changing AWS state.
+You are assisting with the AWS Environment Status widget on the PATH homepage. Explain that it is a System Administrator-only, read-only operational widget that checks app capacity, database stress, database query pressure, staff Cognito, applicant Cognito, and SES mail in the active environment. It highlights platform health and configuration issues without changing AWS state, sending test email, or introducing background polling.
 `;
 
 export default HomeAwsEnvironmentStatusHelp;

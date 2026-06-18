@@ -9,7 +9,9 @@ const publicReleaseNotes = {
     "description": "",
     "featuresHeading": "What changed",
     "features": [
+      "System Administrators can now see app capacity, database stress, and database query-pressure checks in AWS Environment Status.",
       "Submitted assessments and intervention proposals are read-only while awaiting approval.",
+      "Manage ISET Applications and ISET Clients now share the same widget-based dashboard treatment.",
       "Submitters can recall a pending assessment or intervention proposal before a decision is recorded.",
       "Recalled submissions archive the withdrawn generated assessment PDFs, record an audit event, and return the work to an editable state for correction and resubmission."
     ],
@@ -40,7 +42,7 @@ const publicReleaseNotes = {
           "Application Workspace widgets are easier to use during file review, with document search, secure-message table sorting, cleaner notes refresh behavior, clearer calendar fallbacks, and conflict-declaration wording focused on the staff member working the file.",
           "Manage Intake Steps now has standard dashboard controls, sortable/resizable step-library columns, full-list sorting before display, fewer unnecessary reloads, and a preview that stays inside the widget.",
           "Modify Intake Step now shows the current step name, adds component search, preserves repeated static content blocks, keeps clean saves disabled, preserves step metadata, and shows precise save errors.",
-          "User Management and Manage ISET Applications now use cleaner table-first layouts with better sorting, resizing, pagination, and server-backed filters where needed."
+          "User Management has cleaner account tables, and Manage ISET Applications has better sorting, resizing, pagination, and server-backed filters within the standard dashboard widget layout."
         ]
       }
     ],
@@ -54,7 +56,9 @@ const publicReleaseNotes = {
     "description": "",
     "featuresHeading": "Ce qui a change",
     "features": [
+      "Les administrateurs systeme peuvent maintenant voir la capacite applicative, la charge de la base de donnees et la pression des requetes dans AWS Environment Status.",
       "Les evaluations et propositions envoyees sont maintenant en lecture seule pendant l'attente d'approbation.",
+      "Les tableaux Demandes ISET et Clients ISET utilisent maintenant la meme presentation de tableau de bord a widgets.",
       "La personne qui a envoye une evaluation ou proposition peut la rappeler avant qu'une decision soit enregistree.",
       "Les rappels archivent les PDF d'evaluation retires, enregistrent un evenement d'audit et remettent le travail en mode modifiable pour correction et nouvel envoi."
     ],
@@ -85,7 +89,7 @@ const publicReleaseNotes = {
           "Les widgets Application Workspace sont plus faciles a utiliser pendant la revision d'un dossier, avec recherche de documents, tri des messages securises, actualisation des notes plus propre, fallbacks calendrier plus clairs et texte de conflit d'interets centre sur la personne qui travaille le dossier.",
           "Manage Intake Steps a maintenant les controles standard du tableau de bord, des colonnes triables/redimensionnables, le tri de la liste complete avant affichage, moins de rechargements inutiles et un apercu qui reste dans le widget.",
           "Modify Intake Step affiche maintenant le nom de l'etape courante, ajoute la recherche de composants, preserve les blocs de contenu statique repetes, garde Save desactive quand rien n'a change, preserve les metadonnees de l'etape et affiche les erreurs d'enregistrement exactes.",
-          "User Management et Manage ISET Applications utilisent maintenant des mises en page plus simples centrees sur les tableaux avec meilleur tri, redimensionnement, pagination et filtres cote serveur au besoin."
+          "User Management a des tableaux de comptes plus simples, et Manage ISET Applications a un meilleur tri, redimensionnement, pagination et filtres cote serveur dans la presentation standard de tableau de bord a widgets."
         ]
       }
     ],

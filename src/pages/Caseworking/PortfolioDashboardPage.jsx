@@ -39,7 +39,7 @@ const widgetRegistry = {
     defaultRowSpan: 6,
     defaultColumnSpan: 4,
     component: CasesTableWidget,
-    title: "Clients",
+    title: "ISET Clients",
     description: "Monitor all cases you can access and open the case workspace for detailed management.",
     helpComponent: PortfolioCasesTableHelp,
     helpTitle: "Portfolio clients table",
@@ -154,8 +154,8 @@ const boardI18nStrings = {
   liveAnnouncementDndDiscarded: operation => `${operation} discarded`,
   liveAnnouncementItemRemoved: op =>
     op?.item?.data?.title ? `Removed item ${op.item.data.title}.` : "Removed item.",
-  navigationAriaLabel: "ISET portfolio dashboard navigation",
-  navigationAriaDescription: "Use arrow keys to move between widgets on the portfolio dashboard.",
+  navigationAriaLabel: "ISET Clients dashboard navigation",
+  navigationAriaDescription: "Use arrow keys to move between widgets on the ISET Clients dashboard.",
   navigationItemAriaLabel: item => (item ? item.data.title : "Empty"),
 };
 
@@ -174,7 +174,6 @@ const PortfolioDashboardPage = ({
     if (typeof updateBreadcrumbs === "function") {
       updateBreadcrumbs([
         { text: "Home", href: "/" },
-        { text: "ISET Assessment", href: "/case-assignment-dashboard" },
         { text: "ISET Clients", href: "/iset/cases" },
       ]);
     }
@@ -198,6 +197,19 @@ const PortfolioDashboardPage = ({
       // ignore storage errors in scaffold
     }
   }, [boardItems, paletteItems, setAvailableItems]);
+
+  useEffect(() => {
+    const handlePaletteAdd = event => {
+      const id = event?.detail?.id;
+      if (!id || !widgetRegistry[id]) return;
+      setLayout(current => {
+        if (current.some(item => item.id === id)) return current;
+        return [...current, { id }];
+      });
+    };
+    window.addEventListener("palette:add", handlePaletteAdd);
+    return () => window.removeEventListener("palette:add", handlePaletteAdd);
+  }, []);
 
   const handleItemsChange = useCallback(({ detail }) => {
     if (!detail || !Array.isArray(detail.items)) return;
@@ -233,12 +245,15 @@ const PortfolioDashboardPage = ({
         // ignore
       }
     }
+    if (typeof setSplitPanelOpen === "function") {
+      setSplitPanelOpen(false);
+    }
     try {
       window.localStorage.removeItem(STORAGE_KEY);
     } catch {
       // ignore
     }
-  }, [setAvailableItems]);
+  }, [setAvailableItems, setSplitPanelOpen]);
 
   const openPalette = useCallback(() => {
     if (typeof setAvailableItems === "function") {

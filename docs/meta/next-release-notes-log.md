@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-06-12
+Last Updated: 2026-06-18
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,8 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-06-18 | Release TBD | UX/Casework | Application and client lists | Standardized Manage ISET Applications and ISET Clients as widget-based dashboards. | Both lists now use the shared Cloudscape board/widget treatment with Add widget and Reset layout controls, compact embedded tables, matching name-link treatment, striped rows, sticky headers, wrapping, and matching explanatory-copy placement. The ISET Clients list now uses reminder-backed Follow ups and Next follow-up columns instead of stale task wording.
+- 2026-06-18 | Release TBD | Ops/System Admin | AWS Environment Status | Added read-only platform health metrics to the System Administrator homepage widget. | The widget now includes app capacity/EC2 CPU, Aurora/RDS stress, and database query-pressure checks alongside Cognito and SES, with manual refresh only and server-side caching to avoid dashboard polling loops.
 - 2026-06-16 | Release TBD | UX/Assessment | Assessment corrections | Submitted assessments and intervention proposals are read-only while awaiting approval, with a new Recall submission action for the submitter before a decision is recorded. | Recall removes the withdrawn generated PDFs from the active document list, records an audit event, returns the assessment/proposal to an editable state, and lets staff resubmit corrections instead of editing a submitted version in place.
 - 2026-06-12 | Release TBD | Fix/User Management | Staff profile editing | Changing a staff user's Name now also updates Display name when the display name was still mirroring the old name. | This prevents a successful staff-profile save from appearing unchanged in the User Management table because the table displays `display_name`; staff can still keep an intentional separate display name by editing Display name directly.
 - 2026-06-12 | Release TBD | UX/Casework | Case Workspace recovery actions | System Administrators can reopen a closed action plan from the case header when circumstances change after closeout. | The action records a reason, resets ILMP validation/submission to needs review, and supports either adding a new intervention or reopening one completed intervention for amendment while writing an internal note and audit event.
@@ -41,7 +43,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - 2026-06-10 | Release TBD | UX/Workflow Studio | Modify Intake Step editor | The Modify Intake Step editor is easier and safer to author in. | The editor now shows the current step name, has component search, keeps repeated static text blocks when they do not have Data Keys, starts with Save disabled after a clean load, preserves step metadata during ordinary saves, and shows precise save validation errors.
 - 2026-06-10 | Release TBD | Tooling/Workflow Studio | Editor browser smoke | Added a local browser smoke for the Modify Intake Step editor. | `npm run smoke:modify-component:browser` verifies editor layout, component search/add/render, clean-load save state, repeated static content preservation, save-error handling, payload sanitation, validation, screenshot capture, and idle API settling.
 - 2026-06-10 | Release TBD | UX/User Management | Staff and participant accounts | User Management now has a cleaner table-first layout for staff access and participant PATH accounts. | Tables support sorting, pagination, column resizing, and preferences; participant-account sorting and pagination are handled by the backend before the row-limited page is returned. The old placeholder failed-login metric and stale generic help text were removed.
-- 2026-06-10 | Release TBD | UX/Casework | Manage ISET Applications | Manage ISET Applications now opens as a focused applications table instead of a one-widget configurable board. | Work-queue links now use server-backed bucket filters, so clicked queues load the matching full result set before sorting and pagination. Legacy status links no longer filter only the current visible page.
+- 2026-06-10 | Release TBD | UX/Casework | Manage ISET Applications | Manage ISET Applications work-queue navigation now uses server-backed filters. | Work-queue links load the matching full result set before sorting and pagination. Legacy status links no longer filter only the current visible page.
 - 2026-06-09 | Release TBD | Fix/ILMP | Recent export history | Recent ILMP exports now loads complete export batches before applying the list limit. | Large XML exports no longer hide older export batches or show partial client counts in the history table; the widget still defaults to the most recent batches.
 - 2026-06-09 | Release TBD | Fix/ILMP | Batch XML generation | Generate batch XML is not capped by the visible participant table page size and now remains available for warning-only exportable clients. | The table page-size preference only affects the queue display; backend batch generation collects all pending/rejected reportable clients, includes warning-only clients, and excludes blocked records.
 - 2026-06-09 | Release TBD | UX/Workflow | Workflow Preview graph | Manage Workflows now has a more usable workflow graph preview with pan/zoom, fit view, a minimap, and vertical/horizontal layout options. | Conditional branches use shorter readable labels, and the graph resizes with the board widget instead of collapsing into a cramped fixed-height preview.
@@ -401,7 +403,9 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
+- System Administrators can now see app capacity, database stress, and database query-pressure checks in AWS Environment Status.
 - Submitted assessments and intervention proposals are read-only while awaiting approval.
+- Manage ISET Applications and ISET Clients now share the same widget-based dashboard treatment.
 - Submitters can recall a pending assessment or intervention proposal before a decision is recorded.
 - Recalled submissions archive the withdrawn generated assessment PDFs, record an audit event, and return the work to an editable state for correction and resubmission.
 
@@ -428,7 +432,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Application Workspace widgets are easier to use during file review, with document search, secure-message table sorting, cleaner notes refresh behavior, clearer calendar fallbacks, and conflict-declaration wording focused on the staff member working the file.
 - Manage Intake Steps now has standard dashboard controls, sortable/resizable step-library columns, full-list sorting before display, fewer unnecessary reloads, and a preview that stays inside the widget.
 - Modify Intake Step now shows the current step name, adds component search, preserves repeated static content blocks, keeps clean saves disabled, preserves step metadata, and shows precise save errors.
-- User Management and Manage ISET Applications now use cleaner table-first layouts with better sorting, resizing, pagination, and server-backed filters where needed.
+- User Management has cleaner account tables, and Manage ISET Applications has better sorting, resizing, pagination, and server-backed filters within the standard dashboard widget layout.
 
 ### Known Bugs (draft bullets - EN)
 
@@ -436,7 +440,9 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### Nouveautes (brouillon - FR)
 
+- Les administrateurs systeme peuvent maintenant voir la capacite applicative, la charge de la base de donnees et la pression des requetes dans AWS Environment Status.
 - Les evaluations et propositions envoyees sont maintenant en lecture seule pendant l'attente d'approbation.
+- Les tableaux Demandes ISET et Clients ISET utilisent maintenant la meme presentation de tableau de bord a widgets.
 - La personne qui a envoye une evaluation ou proposition peut la rappeler avant qu'une decision soit enregistree.
 - Les rappels archivent les PDF d'evaluation retires, enregistrent un evenement d'audit et remettent le travail en mode modifiable pour correction et nouvel envoi.
 
@@ -463,7 +469,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les widgets Application Workspace sont plus faciles a utiliser pendant la revision d'un dossier, avec recherche de documents, tri des messages securises, actualisation des notes plus propre, fallbacks calendrier plus clairs et texte de conflit d'interets centre sur la personne qui travaille le dossier.
 - Manage Intake Steps a maintenant les controles standard du tableau de bord, des colonnes triables/redimensionnables, le tri de la liste complete avant affichage, moins de rechargements inutiles et un apercu qui reste dans le widget.
 - Modify Intake Step affiche maintenant le nom de l'etape courante, ajoute la recherche de composants, preserve les blocs de contenu statique repetes, garde Save desactive quand rien n'a change, preserve les metadonnees de l'etape et affiche les erreurs d'enregistrement exactes.
-- User Management et Manage ISET Applications utilisent maintenant des mises en page plus simples centrees sur les tableaux avec meilleur tri, redimensionnement, pagination et filtres cote serveur au besoin.
+- User Management a des tableaux de comptes plus simples, et Manage ISET Applications a un meilleur tri, redimensionnement, pagination et filtres cote serveur dans la presentation standard de tableau de bord a widgets.
 
 ### Problemes connus (brouillon - FR)
 

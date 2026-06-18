@@ -258,7 +258,7 @@ const computeSlaMeta = (row, slaTargets, rawStatus, isAssigned) => {
   });
 };
 
-const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
+const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel, metadata = {} }) => {
   const history = useHistory();
   const location = useLocation();
   const [items, setItems] = useState([]);
@@ -1260,7 +1260,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
         </SpaceBetween>
       }
     >
-      ISET Applications
+      {metadata.title || 'ISET Applications'}
     </Header>
   );
 
@@ -1282,6 +1282,9 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
             Work queue filter: <strong>{activeWorkQueueBucket.label}</strong>{' '}
             <Button variant="inline-link" onClick={clearWorkQueueBucket}>Clear filter</Button>
           </Box>
+        ) : null}
+        {metadata.description ? (
+          <Box variant="small">{metadata.description}</Box>
         ) : null}
         <Box>
           <SpaceBetween direction="vertical" size="xs">
@@ -1308,9 +1311,9 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
               stripedRows
               empty={<Box textAlign="center">No applications</Box>}
               ariaLabels={{
-                tableLabel: 'Cases table',
-                header: 'Cases',
-                rowHeader: 'Case ID'
+                tableLabel: 'ISET Applications table',
+                header: 'ISET Applications',
+                rowHeader: 'Application'
               }}
               renderAriaLive={({ firstIndex, lastIndex }) => `Displaying items ${firstIndex} to ${lastIndex}`}
               filter={
@@ -1430,7 +1433,7 @@ const ApplicationsWidget = ({ actions, refreshKey, toggleHelpPanel }) => {
         resizeHandleAriaLabel: 'Resize handle',
         resizeHandleAriaDescription: 'Use Space or Enter to activate resize, arrow keys to resize, Space or Enter to finish.'
       }}
-      settings={<ButtonDropdown items={[{ id: 'remove', text: 'Remove' }]} ariaLabel="Board item settings" variant="icon" onItemClick={() => actions?.removeItem?.()} />}
+      settings={<ButtonDropdown items={[{ id: 'remove', text: 'Remove widget' }]} ariaLabel="Board item settings" variant="icon" onItemClick={() => actions?.removeItem?.()} />}
     >
       {content}
     </BoardItem>

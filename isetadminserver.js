@@ -24051,7 +24051,10 @@ if (process.env.NODE_ENV !== 'production' && !process.env.ALLOWED_ORIGIN) {
 }
 
 const express = require('express');
+const { AutoScalingClient, DescribeAutoScalingGroupsCommand } = require('@aws-sdk/client-auto-scaling');
+const { CloudWatchClient, GetMetricDataCommand } = require('@aws-sdk/client-cloudwatch');
 const { CognitoIdentityProviderClient, ListUsersInGroupCommand, DescribeUserPoolClientCommand, DescribeUserPoolCommand } = require('@aws-sdk/client-cognito-identity-provider');
+const { RDSClient, DescribeDBClustersCommand } = require('@aws-sdk/client-rds');
 const { SESClient, GetAccountSendingEnabledCommand, GetSendQuotaCommand, GetIdentityVerificationAttributesCommand } = require('@aws-sdk/client-ses');
 const bodyParser = require('body-parser');
 const cors = require('cors');
@@ -24778,6 +24781,9 @@ const COGNITO_REGION = process.env.AWS_REGION || process.env.COGNITO_REGION || n
 const SES_REGION = process.env.AWS_SES_REGION || process.env.AWS_REGION || process.env.COGNITO_REGION || null;
 const cognitoIdpClientsByRegion = new Map();
 const sesClientsByRegion = new Map();
+const cloudWatchClientsByRegion = new Map();
+const rdsClientsByRegion = new Map();
+const autoScalingClientsByRegion = new Map();
 
 function getAwsSdkConfig(region) {
   return { region };
@@ -24797,6 +24803,30 @@ function getSesClient(region = SES_REGION) {
     sesClientsByRegion.set(region, new SESClient(getAwsSdkConfig(region)));
   }
   return sesClientsByRegion.get(region);
+}
+
+function getCloudWatchClient(region = process.env.AWS_REGION || COGNITO_REGION || SES_REGION) {
+  if (!region) throw new Error('Missing AWS region for CloudWatch');
+  if (!cloudWatchClientsByRegion.has(region)) {
+    cloudWatchClientsByRegion.set(region, new CloudWatchClient(getAwsSdkConfig(region)));
+  }
+  return cloudWatchClientsByRegion.get(region);
+}
+
+function getRdsClient(region = process.env.AWS_REGION || COGNITO_REGION || SES_REGION) {
+  if (!region) throw new Error('Missing AWS region for RDS');
+  if (!rdsClientsByRegion.has(region)) {
+    rdsClientsByRegion.set(region, new RDSClient(getAwsSdkConfig(region)));
+  }
+  return rdsClientsByRegion.get(region);
+}
+
+function getAutoScalingClient(region = process.env.AWS_REGION || COGNITO_REGION || SES_REGION) {
+  if (!region) throw new Error('Missing AWS region for Auto Scaling');
+  if (!autoScalingClientsByRegion.has(region)) {
+    autoScalingClientsByRegion.set(region, new AutoScalingClient(getAwsSdkConfig(region)));
+  }
+  return autoScalingClientsByRegion.get(region);
 }
 
 const TOKEN_UNIT_MULTIPLIERS = {
@@ -50476,8 +50506,10 @@ app.get('/api/cases', async (req, res) => {
       status: caseLifecycleStatusExpr,
       owner: 'owner_name',
       openTasks: 'open_task_count',
+      followUps: 'open_follow_up_count',
       openInterventions: 'open_intervention_count',
       nextActionDue: 'next_action_due_at',
+      nextFollowUp: 'next_action_due_at',
       lastTouch: 'c.updated_at',
       createdAt: 'c.created_at',
       updatedAt: 'c.updated_at',
@@ -50549,13 +50581,14 @@ app.get('/api/cases', async (req, res) => {
       LEFT JOIN (
         SELECT
           case_id,
+          COUNT(*) AS open_follow_up_count,
+          SUM(CASE WHEN due_at IS NOT NULL AND due_at < NOW() THEN 1 ELSE 0 END) AS overdue_follow_up_count,
           MIN(due_at) AS next_reminder_due_at
         FROM iset_case_reminder
         WHERE deleted_at IS NULL
           AND status = 'open'
-          AND due_at IS NOT NULL
         GROUP BY case_id
-      ) reminder_next ON reminder_next.case_id = c.id
+      ) reminder_counts ON reminder_counts.case_id = c.id
     `;
 
   const selectSql = `
@@ -50567,7 +50600,9 @@ app.get('/api/cases', async (req, res) => {
         c.case_number,
 	        c.priority,
 	        c.risk_rating,
-	        reminder_next.next_reminder_due_at AS next_action_due_at,
+	        reminder_counts.next_reminder_due_at AS next_action_due_at,
+	        COALESCE(reminder_counts.open_follow_up_count, 0) AS open_follow_up_count,
+	        COALESCE(reminder_counts.overdue_follow_up_count, 0) AS overdue_follow_up_count,
 	        COALESCE(task_counts.open_task_count, 0) AS open_task_count,
 	        COALESCE(task_counts.overdue_task_count, 0) AS overdue_task_count,
 	        task_counts.next_overdue_task_due_at AS next_overdue_task_due_at,
@@ -50686,6 +50721,12 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       const overdueTasks = Number.isFinite(Number(row.overdue_task_count))
         ? Number(row.overdue_task_count)
         : 0;
+      const followUps = Number.isFinite(Number(row.open_follow_up_count))
+        ? Number(row.open_follow_up_count)
+        : 0;
+      const overdueFollowUps = Number.isFinite(Number(row.overdue_follow_up_count))
+        ? Number(row.overdue_follow_up_count)
+        : 0;
       const openInterventions = Number.isFinite(Number(row.open_intervention_count))
         ? Number(row.open_intervention_count)
         : 0;
@@ -50697,6 +50738,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       const counts = {
         openTasks,
         overdueTasks,
+        followUps,
+        overdueFollowUps,
         openInterventions,
         totalInterventions,
       };
@@ -50712,6 +50755,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
 	        closedAt: null,
 	        lastActivityAt: toIsoString(row.updated_at),
 	        nextActionDueAt: toIsoString(row.next_action_due_at),
+	        nextFollowUpAt: toIsoString(row.next_action_due_at),
 	        nextOverdueTaskDueAt: toIsoString(row.next_overdue_task_due_at),
         applicationId: row.application_id || null,
         ...assignmentFields,
@@ -50725,6 +50769,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         client,
         openTasks,
         overdueTasks,
+        followUps,
+        overdueFollowUps,
         openInterventions,
         totalInterventions,
         regionId: owner?.regionId ?? null,
@@ -50774,9 +50820,12 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         caseHref: caseItem.id ? `/cases/${caseItem.id}` : null,
         openTasks: Number.isFinite(caseItem.openTasks) ? caseItem.openTasks : 0,
         overdueTasks: Number.isFinite(caseItem.overdueTasks) ? caseItem.overdueTasks : 0,
+        followUps: Number.isFinite(caseItem.followUps) ? caseItem.followUps : 0,
+        overdueFollowUps: Number.isFinite(caseItem.overdueFollowUps) ? caseItem.overdueFollowUps : 0,
         openInterventions: Number.isFinite(caseItem.openInterventions) ? caseItem.openInterventions : 0,
         totalInterventions: Number.isFinite(caseItem.totalInterventions) ? caseItem.totalInterventions : 0,
         nextActionDueAt: caseItem.nextActionDueAt || null,
+        nextFollowUpAt: caseItem.nextFollowUpAt || caseItem.nextActionDueAt || null,
       });
       if (caseItem.lastActivityAt && (!group.latestUpdatedAt || new Date(caseItem.lastActivityAt) > new Date(group.latestUpdatedAt))) {
         group.latestUpdatedAt = caseItem.lastActivityAt;
@@ -88555,6 +88604,456 @@ function buildSystemAdminUsersAccessAlerts({ userMetrics, applicantMetrics, poli
 
 const SYSTEM_ADMIN_AWS_STATUS_CACHE_TTL_MS = 60 * 1000;
 let systemAdminAwsStatusCache = { value: null, expiresAt: 0 };
+let systemAdminDbPressurePreviousSample = null;
+
+function parseSystemAdminNumber(value, fallback = null) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function getSystemAdminThreshold(envName, fallback) {
+  return parseSystemAdminNumber(process.env[envName], fallback);
+}
+
+function formatSystemAdminPercent(value, digits = 0) {
+  const parsed = parseSystemAdminNumber(value);
+  if (parsed === null) return 'n/a';
+  return `${parsed.toFixed(digits)}%`;
+}
+
+function formatSystemAdminNumber(value, digits = 0) {
+  const parsed = parseSystemAdminNumber(value);
+  if (parsed === null) return 'n/a';
+  return parsed.toLocaleString(undefined, {
+    maximumFractionDigits: digits,
+    minimumFractionDigits: digits,
+  });
+}
+
+function normalizeSystemAdminIdentifier(value) {
+  const text = String(value || '').trim();
+  return text || null;
+}
+
+function isSystemAdminAwsInfraRequired(environmentLabel) {
+  const label = String(environmentLabel || '').trim().toLowerCase();
+  return label === 'production' || label === 'test';
+}
+
+function resolveSystemAdminAwsRegion() {
+  return process.env.SYSTEM_ADMIN_AWS_METRICS_REGION || process.env.AWS_REGION || COGNITO_REGION || SES_REGION || null;
+}
+
+function resolveSystemAdminAsgName(environmentLabel) {
+  const explicit = normalizeSystemAdminIdentifier(
+    process.env.SYSTEM_ADMIN_AWS_ASG_NAME ||
+    process.env.APP_ASG_NAME ||
+    process.env.AUTO_SCALING_GROUP_NAME ||
+    process.env.ASG_NAME
+  );
+  if (explicit) return explicit;
+
+  const label = String(environmentLabel || '').trim().toLowerCase();
+  if (label === 'production') return 'nwac-prod-asg';
+  if (label === 'test') return 'nwac-test-asg';
+  return null;
+}
+
+function resolveSystemAdminDbClusterIdentifier() {
+  const explicit = normalizeSystemAdminIdentifier(
+    process.env.SYSTEM_ADMIN_AWS_DB_CLUSTER_IDENTIFIER ||
+    process.env.RDS_CLUSTER_IDENTIFIER ||
+    process.env.DB_CLUSTER_IDENTIFIER ||
+    process.env.AURORA_CLUSTER_IDENTIFIER
+  );
+  if (explicit) return explicit;
+
+  const host = String(process.env.DB_HOST || '').trim();
+  const match = host.match(/^([a-z0-9-]+)\.cluster(?:-ro)?-[a-z0-9]+[.]/i);
+  return match?.[1] || null;
+}
+
+function getMetricMax(values = []) {
+  const numericValues = values.map(value => Number(value)).filter(Number.isFinite);
+  return numericValues.length ? Math.max(...numericValues) : null;
+}
+
+function getMetricAverage(values = []) {
+  const numericValues = values.map(value => Number(value)).filter(Number.isFinite);
+  if (!numericValues.length) return null;
+  return numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length;
+}
+
+function buildCloudWatchMetricQuery({ id, namespace, metricName, dimensions, stat = 'Average', periodSeconds = 300 }) {
+  return {
+    Id: id,
+    MetricStat: {
+      Metric: {
+        Namespace: namespace,
+        MetricName: metricName,
+        Dimensions: Object.entries(dimensions || {})
+          .filter(([, value]) => value !== null && typeof value !== 'undefined' && String(value).trim())
+          .map(([Name, Value]) => ({ Name, Value: String(Value) })),
+      },
+      Period: periodSeconds,
+      Stat: stat,
+    },
+    ReturnData: true,
+  };
+}
+
+async function readCloudWatchMetricData(region, queries, lookbackMinutes = 15) {
+  const filteredQueries = (queries || []).filter(Boolean);
+  if (!filteredQueries.length) return new Map();
+
+  const client = getCloudWatchClient(region);
+  const endTime = new Date();
+  const startTime = new Date(endTime.getTime() - lookbackMinutes * 60 * 1000);
+  const response = await client.send(
+    new GetMetricDataCommand({
+      StartTime: startTime,
+      EndTime: endTime,
+      MetricDataQueries: filteredQueries,
+      ScanBy: 'TimestampDescending',
+    })
+  );
+
+  return new Map((response.MetricDataResults || []).map(result => [result.Id, result.Values || []]));
+}
+
+async function loadSystemAdminAppCapacityStatus(environmentLabel) {
+  const region = resolveSystemAdminAwsRegion();
+  const asgName = resolveSystemAdminAsgName(environmentLabel);
+  const href = null;
+  const infraRequired = isSystemAdminAwsInfraRequired(environmentLabel);
+
+  if (!region || !asgName) {
+    return {
+      id: 'appCapacity',
+      label: 'App Capacity',
+      tone: infraRequired ? 'warning' : 'info',
+      summary: infraRequired
+        ? 'App capacity monitoring is not configured.'
+        : 'App capacity monitoring is not configured for local development.',
+      details: [
+        !region ? 'AWS region is missing.' : `Region: ${region}`,
+        !asgName ? 'ASG name is missing.' : `ASG: ${asgName}`,
+        'Set SYSTEM_ADMIN_AWS_ASG_NAME to enable this check.',
+      ],
+      href,
+    };
+  }
+
+  try {
+    const client = getAutoScalingClient(region);
+    const response = await client.send(
+      new DescribeAutoScalingGroupsCommand({ AutoScalingGroupNames: [asgName] })
+    );
+    const group = response.AutoScalingGroups?.[0];
+    if (!group) {
+      return {
+        id: 'appCapacity',
+        label: 'App Capacity',
+        tone: 'error',
+        summary: 'Configured Auto Scaling group was not found.',
+        details: [`ASG: ${asgName}`, `Region: ${region}`],
+        href,
+      };
+    }
+
+    const instances = group.Instances || [];
+    const desired = Number(group.DesiredCapacity || 0);
+    const inService = instances.filter(instance => instance.LifecycleState === 'InService').length;
+    const healthy = instances.filter(instance => instance.LifecycleState === 'InService' && instance.HealthStatus === 'Healthy').length;
+    const instanceIds = instances.map(instance => instance.InstanceId).filter(Boolean);
+
+    let cpuAverage = null;
+    let cpuMaximum = null;
+    if (instanceIds.length) {
+      const metricQueries = instanceIds.flatMap((instanceId, index) => [
+        buildCloudWatchMetricQuery({
+          id: `ec2cpuavg${index}`,
+          namespace: 'AWS/EC2',
+          metricName: 'CPUUtilization',
+          dimensions: { InstanceId: instanceId },
+          stat: 'Average',
+        }),
+        buildCloudWatchMetricQuery({
+          id: `ec2cpumax${index}`,
+          namespace: 'AWS/EC2',
+          metricName: 'CPUUtilization',
+          dimensions: { InstanceId: instanceId },
+          stat: 'Maximum',
+        }),
+      ]);
+      const metricValues = await readCloudWatchMetricData(region, metricQueries, 15);
+      cpuAverage = getMetricAverage(
+        instanceIds.flatMap((_, index) => metricValues.get(`ec2cpuavg${index}`) || [])
+      );
+      cpuMaximum = getMetricMax(
+        instanceIds.flatMap((_, index) => metricValues.get(`ec2cpumax${index}`) || [])
+      );
+    }
+
+    const cpuWarning = getSystemAdminThreshold('SYSTEM_ADMIN_APP_CPU_WARNING_PERCENT', 75);
+    const cpuError = getSystemAdminThreshold('SYSTEM_ADMIN_APP_CPU_ERROR_PERCENT', 90);
+    const details = [
+      `ASG: ${asgName}`,
+      `Region: ${region}`,
+      `Capacity: desired ${desired}, in service ${inService}, healthy ${healthy}`,
+      `EC2 CPU: avg ${formatSystemAdminPercent(cpuAverage, 1)}, max ${formatSystemAdminPercent(cpuMaximum, 1)} over 15 min`,
+    ];
+    if (instanceIds.length) {
+      details.push(`Instances: ${instanceIds.join(', ')}`);
+    }
+
+    let tone = 'success';
+    let summary = 'App instances are healthy and CPU is within expected range.';
+    if (desired < 1 || healthy < desired) {
+      tone = 'error';
+      summary = 'App capacity is below desired healthy count.';
+    } else if (cpuMaximum !== null && cpuMaximum >= cpuError) {
+      tone = 'error';
+      summary = 'App instance CPU is critically high.';
+    } else if (cpuMaximum !== null && cpuMaximum >= cpuWarning) {
+      tone = 'warning';
+      summary = 'App instance CPU is elevated.';
+    }
+
+    return {
+      id: 'appCapacity',
+      label: 'App Capacity',
+      tone,
+      summary,
+      details,
+      href,
+    };
+  } catch (error) {
+    return {
+      id: 'appCapacity',
+      label: 'App Capacity',
+      tone: 'error',
+      summary: 'App capacity check failed.',
+      details: [`ASG: ${asgName}`, `Region: ${region}`, formatSystemAdminAwsError(error)],
+      href,
+    };
+  }
+}
+
+async function loadSystemAdminDatabaseAwsStatus(environmentLabel) {
+  const region = resolveSystemAdminAwsRegion();
+  const clusterIdentifier = resolveSystemAdminDbClusterIdentifier();
+  const infraRequired = isSystemAdminAwsInfraRequired(environmentLabel);
+
+  if (!region || !clusterIdentifier) {
+    return {
+      id: 'databaseAws',
+      label: 'Database Stress',
+      tone: infraRequired ? 'warning' : 'info',
+      summary: infraRequired
+        ? 'RDS/Aurora monitoring is not configured.'
+        : 'RDS/Aurora monitoring is not configured for local development.',
+      details: [
+        !region ? 'AWS region is missing.' : `Region: ${region}`,
+        !clusterIdentifier ? 'DB cluster identifier could not be resolved from DB_HOST.' : `Cluster: ${clusterIdentifier}`,
+        'Set SYSTEM_ADMIN_AWS_DB_CLUSTER_IDENTIFIER if DB_HOST is not an Aurora cluster endpoint.',
+      ],
+      href: null,
+    };
+  }
+
+  try {
+    const rdsClient = getRdsClient(region);
+    const response = await rdsClient.send(
+      new DescribeDBClustersCommand({ DBClusterIdentifier: clusterIdentifier })
+    );
+    const cluster = response.DBClusters?.[0];
+    if (!cluster) {
+      return {
+        id: 'databaseAws',
+        label: 'Database Stress',
+        tone: 'error',
+        summary: 'Configured DB cluster was not found.',
+        details: [`Cluster: ${clusterIdentifier}`, `Region: ${region}`],
+        href: null,
+      };
+    }
+
+    const metricValues = await readCloudWatchMetricData(region, [
+      buildCloudWatchMetricQuery({
+        id: 'rdsCpuAvg',
+        namespace: 'AWS/RDS',
+        metricName: 'CPUUtilization',
+        dimensions: { DBClusterIdentifier: clusterIdentifier },
+        stat: 'Average',
+      }),
+      buildCloudWatchMetricQuery({
+        id: 'rdsCpuMax',
+        namespace: 'AWS/RDS',
+        metricName: 'CPUUtilization',
+        dimensions: { DBClusterIdentifier: clusterIdentifier },
+        stat: 'Maximum',
+      }),
+      buildCloudWatchMetricQuery({
+        id: 'rdsConnectionsMax',
+        namespace: 'AWS/RDS',
+        metricName: 'DatabaseConnections',
+        dimensions: { DBClusterIdentifier: clusterIdentifier },
+        stat: 'Maximum',
+      }),
+      buildCloudWatchMetricQuery({
+        id: 'rdsAcuMax',
+        namespace: 'AWS/RDS',
+        metricName: 'ACUUtilization',
+        dimensions: { DBClusterIdentifier: clusterIdentifier },
+        stat: 'Maximum',
+      }),
+    ], 15);
+
+    const cpuAverage = getMetricAverage(metricValues.get('rdsCpuAvg') || []);
+    const cpuMaximum = getMetricMax(metricValues.get('rdsCpuMax') || []);
+    const connectionMaximum = getMetricMax(metricValues.get('rdsConnectionsMax') || []);
+    const acuMaximum = getMetricMax(metricValues.get('rdsAcuMax') || []);
+    const cpuWarning = getSystemAdminThreshold('SYSTEM_ADMIN_DB_CPU_WARNING_PERCENT', 75);
+    const cpuError = getSystemAdminThreshold('SYSTEM_ADMIN_DB_CPU_ERROR_PERCENT', 90);
+    const acuWarning = getSystemAdminThreshold('SYSTEM_ADMIN_DB_ACU_WARNING_PERCENT', 80);
+    const acuError = getSystemAdminThreshold('SYSTEM_ADMIN_DB_ACU_ERROR_PERCENT', 95);
+    const status = String(cluster.Status || 'unknown').toLowerCase();
+
+    const details = [
+      `Cluster: ${clusterIdentifier}`,
+      `Region: ${region}`,
+      `Status: ${cluster.Status || 'unknown'}`,
+      `Engine: ${cluster.Engine || 'unknown'}`,
+      `CPU: avg ${formatSystemAdminPercent(cpuAverage, 1)}, max ${formatSystemAdminPercent(cpuMaximum, 1)} over 15 min`,
+      `Connections: max ${formatSystemAdminNumber(connectionMaximum)}`,
+    ];
+    if (acuMaximum !== null) {
+      details.push(`Aurora Serverless ACU utilization: max ${formatSystemAdminPercent(acuMaximum, 1)}`);
+    }
+
+    let tone = 'success';
+    let summary = 'Database cluster is available and CloudWatch stress metrics are within range.';
+    if (status !== 'available') {
+      tone = 'error';
+      summary = 'Database cluster is not available.';
+    } else if (
+      (cpuMaximum !== null && cpuMaximum >= cpuError) ||
+      (acuMaximum !== null && acuMaximum >= acuError)
+    ) {
+      tone = 'error';
+      summary = 'Database stress is critically high.';
+    } else if (
+      (cpuMaximum !== null && cpuMaximum >= cpuWarning) ||
+      (acuMaximum !== null && acuMaximum >= acuWarning)
+    ) {
+      tone = 'warning';
+      summary = 'Database stress is elevated.';
+    }
+
+    return {
+      id: 'databaseAws',
+      label: 'Database Stress',
+      tone,
+      summary,
+      details,
+      href: null,
+    };
+  } catch (error) {
+    return {
+      id: 'databaseAws',
+      label: 'Database Stress',
+      tone: 'error',
+      summary: 'Database stress check failed.',
+      details: [`Cluster: ${clusterIdentifier}`, `Region: ${region}`, formatSystemAdminAwsError(error)],
+      href: null,
+    };
+  }
+}
+
+async function loadSystemAdminDatabaseQueryPressureStatus() {
+  const statusNames = ['Threads_connected', 'Threads_running', 'Queries', 'Questions', 'Slow_queries', 'Uptime'];
+  try {
+    const [rows] = await pool.query(
+      `SHOW GLOBAL STATUS WHERE Variable_name IN (${statusNames.map(() => '?').join(',')})`,
+      statusNames
+    );
+    const values = new Map((rows || []).map(row => [row.Variable_name, parseSystemAdminNumber(row.Value, 0)]));
+    const now = Date.now();
+    const sample = {
+      at: now,
+      queries: values.get('Queries') || 0,
+      slowQueries: values.get('Slow_queries') || 0,
+    };
+    const previous = systemAdminDbPressurePreviousSample;
+    systemAdminDbPressurePreviousSample = sample;
+
+    const secondsSincePrevious = previous ? Math.max((now - previous.at) / 1000, 1) : null;
+    const queryRate = previous && sample.queries >= previous.queries
+      ? (sample.queries - previous.queries) / secondsSincePrevious
+      : null;
+    const slowQueryDelta = previous && sample.slowQueries >= previous.slowQueries
+      ? sample.slowQueries - previous.slowQueries
+      : null;
+    const threadsRunning = values.get('Threads_running') || 0;
+    const threadsConnected = values.get('Threads_connected') || 0;
+    const uptime = values.get('Uptime') || 0;
+    const lifetimeQueryRate = uptime > 0 ? (values.get('Queries') || 0) / uptime : null;
+    const warningQps = getSystemAdminThreshold('SYSTEM_ADMIN_DB_QPS_WARNING', 150);
+    const errorQps = getSystemAdminThreshold('SYSTEM_ADMIN_DB_QPS_ERROR', 500);
+    const warningThreads = getSystemAdminThreshold('SYSTEM_ADMIN_DB_THREADS_RUNNING_WARNING', 8);
+    const errorThreads = getSystemAdminThreshold('SYSTEM_ADMIN_DB_THREADS_RUNNING_ERROR', 20);
+
+    const details = [
+      `Running threads: ${formatSystemAdminNumber(threadsRunning)}`,
+      `Connected sessions: ${formatSystemAdminNumber(threadsConnected)}`,
+      queryRate !== null
+        ? `Query rate: ${formatSystemAdminNumber(queryRate, 1)}/sec since last widget sample`
+        : `Query rate: baseline captured; lifetime avg ${formatSystemAdminNumber(lifetimeQueryRate, 1)}/sec`,
+    ];
+    if (slowQueryDelta !== null) {
+      details.push(`Slow queries since last sample: ${formatSystemAdminNumber(slowQueryDelta)}`);
+    }
+
+    let tone = 'success';
+    let summary = 'Database query pressure is within expected range.';
+    if (
+      threadsRunning >= errorThreads ||
+      (queryRate !== null && queryRate >= errorQps)
+    ) {
+      tone = 'error';
+      summary = 'Database query pressure is critically high.';
+    } else if (
+      threadsRunning >= warningThreads ||
+      (queryRate !== null && queryRate >= warningQps) ||
+      (slowQueryDelta !== null && slowQueryDelta > 0)
+    ) {
+      tone = 'warning';
+      summary = 'Database query pressure is elevated.';
+    } else if (queryRate === null) {
+      tone = 'info';
+      summary = 'Database query-pressure baseline captured.';
+    }
+
+    return {
+      id: 'databaseQueryPressure',
+      label: 'DB Query Pressure',
+      tone,
+      summary,
+      details,
+      href: null,
+    };
+  } catch (error) {
+    return {
+      id: 'databaseQueryPressure',
+      label: 'DB Query Pressure',
+      tone: 'error',
+      summary: 'Database query-pressure check failed.',
+      details: [error?.message || 'Unable to read MySQL status counters.'],
+      href: null,
+    };
+  }
+}
 
 function detectSystemAdminEnvironmentLabelFromValue(value) {
   const text = String(value || '').trim().toLowerCase();
@@ -88947,8 +89446,12 @@ async function loadSystemAdminAwsEnvironmentStatus() {
   const staffPoolId = process.env.COGNITO_STAFF_USER_POOL_ID || COGNITO_POOL_ID || null;
   const staffClientId = process.env.COGNITO_STAFF_CLIENT_ID || process.env.COGNITO_CLIENT_ID || process.env.COGNITO_PORTAL_CLIENT_ID || null;
   const applicantPoolId = resolveApplicantPoolId();
+  const environmentLabel = resolveSystemAdminEnvironmentLabel();
 
   const services = await Promise.all([
+    loadSystemAdminAppCapacityStatus(environmentLabel),
+    loadSystemAdminDatabaseAwsStatus(environmentLabel),
+    loadSystemAdminDatabaseQueryPressureStatus(),
     loadSystemAdminCognitoServiceStatus({
       id: 'staffCognito',
       label: 'Staff Cognito',
@@ -88969,9 +89472,10 @@ async function loadSystemAdminAwsEnvironmentStatus() {
 
   return {
     environment: {
-      label: resolveSystemAdminEnvironmentLabel(),
+      label: environmentLabel,
       cognitoRegion: COGNITO_REGION || process.env.AWS_REGION || null,
       sesRegion: SES_REGION || null,
+      metricsRegion: resolveSystemAdminAwsRegion(),
       nodeEnv: process.env.NODE_ENV || null,
     },
     statusCounts: countSystemAdminAwsStatusTones(services),

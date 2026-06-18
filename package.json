@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@aws-sdk/client-auto-scaling": "3.645.0",
+    "@aws-sdk/client-cloudwatch": "3.645.0",
     "@aws-sdk/client-cognito-identity-provider": "^3.645.0",
+    "@aws-sdk/client-rds": "3.645.0",
     "@aws-sdk/client-ses": "^3.645.0",
     "@cloudscape-design/board-components": "3.0.89",
     "@cloudscape-design/chat-components": "1.0.28",

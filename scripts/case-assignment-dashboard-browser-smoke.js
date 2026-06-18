@@ -513,7 +513,9 @@ async function main() {
       hasDashboardHeading: text.includes('ISET Applications'),
       hasInitialRows: ['Anika Submitted', 'Bruno Review', 'Jasper Active'].every(value => text.includes(value)),
       initialPageOmitsZara: !text.includes('Zara Pending'),
-      hasBoardControls: /Add widget|Reset layout|No widgets on this dashboard/.test(text),
+      hasAddWidget: text.includes('Add widget'),
+      hasResetLayout: text.includes('Reset layout'),
+      hasBoardHandles: text.includes('Drag handle') && text.includes('Resize handle'),
       hasInstructionalSlop: text.includes('This table lists the applications you can work on'),
       hasTargetHeader: headers.some(header => header.includes('Target')),
       hasOverdueHeader: headers.some(header => header === 'Overdue'),
@@ -528,8 +530,8 @@ async function main() {
   if (!initialAssertions.initialPageOmitsZara) {
     failures.push({ type: 'assertion', message: 'Smoke fixture expected Zara to be off the first page before search', initialAssertions });
   }
-  if (initialAssertions.hasBoardControls) {
-    failures.push({ type: 'assertion', message: 'Configurable board controls still render on Case Assignment dashboard', initialAssertions });
+  if (!initialAssertions.hasAddWidget || !initialAssertions.hasResetLayout || !initialAssertions.hasBoardHandles) {
+    failures.push({ type: 'assertion', message: 'Case Assignment dashboard is missing standard widget board controls', initialAssertions });
   }
   if (initialAssertions.hasInstructionalSlop) {
     failures.push({ type: 'assertion', message: 'Retired instructional table filler text still renders', initialAssertions });

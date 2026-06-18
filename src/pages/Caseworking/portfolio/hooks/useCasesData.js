@@ -86,9 +86,10 @@ const mapCaseRowToTableItem = row => {
   const ownerName =
     row?.owner?.name || row?.owner?.email || (row?.owner ? "Assigned" : "Unassigned");
   const trackingId = row?.trackingId || null;
-  const nextActionDueAt = row?.nextActionDueAt || null;
+  const nextFollowUpAt = row?.nextFollowUpAt || row?.nextActionDueAt || null;
   const lastTouchAt = row?.lastActivityAt || row?.updatedAt || null;
   const openTasks = Number.isFinite(row?.openTasks) ? row.openTasks : 0;
+  const followUps = Number.isFinite(row?.followUps) ? row.followUps : 0;
   const openInterventions = Number.isFinite(row?.openInterventions) ? row.openInterventions : 0;
   const financeStatus =
     typeof row?.financeStatus === "string" && row.financeStatus.trim()
@@ -108,11 +109,14 @@ const mapCaseRowToTableItem = row => {
     caseStatusColor: statusMeta.color,
     trackingId,
     openTasks,
+    followUps,
     openInterventions,
     totalInterventions: Number.isFinite(row?.totalInterventions) ? row.totalInterventions : 0,
-    nextActionDueAt,
+    nextFollowUpAt,
+    nextActionDueAt: nextFollowUpAt,
     lastTouchAt,
     overdueTasks: Number.isFinite(row?.overdueTasks) ? row.overdueTasks : 0,
+    overdueFollowUps: Number.isFinite(row?.overdueFollowUps) ? row.overdueFollowUps : 0,
     financeStatus,
     fyActuals: Number.isFinite(row?.fyActuals) ? row.fyActuals : 0,
     fyVariance: Number.isFinite(row?.fyVariance) ? row.fyVariance : 0,
@@ -154,9 +158,12 @@ const mapClientGroupToTableItem = group => {
     lastActivityAt: singleCase?.lastActivityAt || null,
     openTasks: Number.isFinite(singleCase?.openTasks) ? singleCase.openTasks : 0,
     overdueTasks: Number.isFinite(singleCase?.overdueTasks) ? singleCase.overdueTasks : 0,
+    followUps: Number.isFinite(singleCase?.followUps) ? singleCase.followUps : 0,
+    overdueFollowUps: Number.isFinite(singleCase?.overdueFollowUps) ? singleCase.overdueFollowUps : 0,
     openInterventions: Number.isFinite(singleCase?.openInterventions) ? singleCase.openInterventions : 0,
     totalInterventions: Number.isFinite(singleCase?.totalInterventions) ? singleCase.totalInterventions : 0,
-    nextActionDueAt: singleCase?.nextActionDueAt || null,
+    nextFollowUpAt: singleCase?.nextFollowUpAt || singleCase?.nextActionDueAt || null,
+    nextActionDueAt: singleCase?.nextFollowUpAt || singleCase?.nextActionDueAt || null,
   };
 };
 

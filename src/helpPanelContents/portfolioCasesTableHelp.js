@@ -25,9 +25,9 @@ const PortfolioCasesTableHelp = () => (
       <li><strong>Client</strong>: client name. Expand grouped rows to see multiple cases for the same client.</li>
       <li><strong>Status</strong>: current case lifecycle status for the single case, or the primary case in a grouped row.</li>
       <li><strong>Owner</strong>: assigned case manager, or Unassigned.</li>
-      <li><strong>Open tasks</strong>: open case tasks, with an overdue count when any are past due.</li>
+      <li><strong>Follow ups</strong>: open case reminders, with an overdue count when any are past due.</li>
+      <li><strong>Next follow-up</strong>: next open reminder due date for the case.</li>
       <li><strong>Open interventions</strong>: open intervention count over total intervention count.</li>
-      <li><strong>Next action due</strong>: next open reminder due date for the case.</li>
       <li><strong>Last touch</strong>: the case's latest updated timestamp.</li>
     </ul>
 
@@ -40,6 +40,6 @@ const PortfolioCasesTableHelp = () => (
   </div>
 );
 
-PortfolioCasesTableHelp.aiContext = `You are helping an NWAC staff user with the ISET Clients table on /iset/cases. The widget groups accessible case-management files by client where possible and opens the case workspace from the client or case row. The search matches client name, preferred name, case/application reference, and owner. The Show selector sends clientCategory to /api/cases: Show Open Clients means case lifecycle initiated, active, or ready_to_close and excludes reporting-only denied/ineligible/withdrawn files; Show Funded Clients means at least one intervention with a positive approved/budget/intervention amount and effective status approved, in_progress, suspended, completed, or cancelled, excluding reporting-only files; Show No Active Plan Clients means dormant, closed, or archived, excluding reporting-only files; Show Denied / Ineligible Clients means case_context_json.reportingOnlyDenied, reportingOnlyDeniedIneligible, or reportingOnlyWithdrawal is true; Show All Clients means accessible initiated, active, dormant, ready_to_close, closed, and archived files including reporting-only files. The persisted value remains dormant, but staff-facing labels say No Active Plan. The default status set does not include intake-only application assessment files. Columns are Client, Status, Owner, Open tasks, Open interventions, Next action due, and Last touch.`;
+PortfolioCasesTableHelp.aiContext = `You are helping an NWAC staff user with the ISET Clients table on /iset/cases. The widget groups accessible case-management files by client where possible and opens the case workspace from the client or case row. The search matches client name, preferred name, case/application reference, and owner. The Show selector sends clientCategory to /api/cases: Show Open Clients means case lifecycle initiated, active, or ready_to_close and excludes reporting-only denied/ineligible/withdrawn files; Show Funded Clients means at least one intervention with a positive approved/budget/intervention amount and effective status approved, in_progress, suspended, completed, or cancelled, excluding reporting-only files; Show No Active Plan Clients means dormant, closed, or archived, excluding reporting-only files; Show Denied / Ineligible Clients means case_context_json.reportingOnlyDenied, reportingOnlyDeniedIneligible, or reportingOnlyWithdrawal is true; Show All Clients means accessible initiated, active, dormant, ready_to_close, closed, and archived files including reporting-only files. The persisted value remains dormant, but staff-facing labels say No Active Plan. The default status set does not include intake-only application assessment files. Columns are Client, Status, Owner, Follow ups, Next follow-up, Open interventions, and Last touch. Follow ups and Next follow-up are backed by open case reminders.`;
 
 export default PortfolioCasesTableHelp;

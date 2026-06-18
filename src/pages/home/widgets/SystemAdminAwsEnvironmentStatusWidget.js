@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { BoardItem } from '@cloudscape-design/board-components';
 import {
   Alert,
   Badge,
   Box,
+  Button,
   ButtonDropdown,
   ColumnLayout,
   Header,
@@ -23,6 +24,7 @@ const boardItemI18nStrings = {
 };
 
 const toneLabels = {
+  info: 'Informational',
   success: 'Healthy',
   warning: 'Needs attention',
   error: 'Action required',
@@ -58,11 +60,17 @@ const SystemAdminAwsEnvironmentStatusWidget = ({ actions, toggleHelpPanel }) => 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  const loadStatus = useCallback(async ({ force = false, signal } = {}) => {
+    const suffix = force ? '?refresh=1' : '';
+    const payload = await readJson(`/api/dashboard/system-admin-aws-environment-status${suffix}`, signal);
+    setData(payload);
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
     let cancelled = false;
 
-    async function loadStatus() {
+    async function runInitialLoad() {
       setLoading(true);
       setError('');
       try {
@@ -81,12 +89,25 @@ const SystemAdminAwsEnvironmentStatusWidget = ({ actions, toggleHelpPanel }) => 
       }
     }
 
-    loadStatus();
+    runInitialLoad();
     return () => {
       cancelled = true;
       controller.abort();
     };
   }, []);
+
+  const handleRefresh = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      await loadStatus({ force: true });
+    } catch (err) {
+      setData(null);
+      setError(err?.message || 'Failed to refresh AWS environment status.');
+    } finally {
+      setLoading(false);
+    }
+  }, [loadStatus]);
 
   const infoLink = toggleHelpPanel ? (
     <Link
@@ -107,6 +128,14 @@ const SystemAdminAwsEnvironmentStatusWidget = ({ actions, toggleHelpPanel }) => 
   const services = useMemo(() => (Array.isArray(data?.services) ? data.services : []), [data]);
   const statusCounts = data?.statusCounts || { success: 0, warning: 0, error: 0 };
   const environment = data?.environment || {};
+  const criticalServices = useMemo(
+    () => services.filter(service => service?.tone === 'error'),
+    [services]
+  );
+  const warningServices = useMemo(
+    () => services.filter(service => service?.tone === 'warning'),
+    [services]
+  );
 
   const handleFollow = (event, href) => {
     event.preventDefault();
@@ -116,7 +145,23 @@ const SystemAdminAwsEnvironmentStatusWidget = ({ actions, toggleHelpPanel }) => 
 
   return (
     <BoardItem
-      header={<Header variant="h2" info={infoLink}>AWS Environment Status</Header>}
+      header={
+        <Header
+          variant="h2"
+          info={infoLink}
+          actions={
+            <Button
+              iconName="refresh"
+              loading={loading && Boolean(data)}
+              onClick={handleRefresh}
+            >
+              Refresh
+            </Button>
+          }
+        >
+          AWS Environment Status
+        </Header>
+      }
       settings={
         actions?.removeItem ? (
           <ButtonDropdown
@@ -163,6 +208,14 @@ const SystemAdminAwsEnvironmentStatusWidget = ({ actions, toggleHelpPanel }) => 
             <Box variant="small" color="text-status-inactive">
               {statusCounts.success} healthy, {statusCounts.warning} needs attention, {statusCounts.error} errors.
             </Box>
+
+            {criticalServices.length || warningServices.length ? (
+              <Alert type={criticalServices.length ? 'error' : 'warning'}>
+                {criticalServices.length
+                  ? `${criticalServices.length} platform check${criticalServices.length === 1 ? '' : 's'} require action: ${criticalServices.map(service => service.label).join(', ')}.`
+                  : `${warningServices.length} platform check${warningServices.length === 1 ? '' : 's'} need attention: ${warningServices.map(service => service.label).join(', ')}.`}
+              </Alert>
+            ) : null}
 
             <ColumnLayout columns={3} variant="text-grid">
               {services.map(service => (
