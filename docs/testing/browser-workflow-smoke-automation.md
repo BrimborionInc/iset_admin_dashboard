@@ -176,11 +176,14 @@ This smoke loads the real local React bundle at `http://localhost:3001/applicati
 - conflict declaration signing by an ISET Coordinator, including promotion to in review and the selected application's row-version token;
 - coordinator assessment submission from draft to Pending Approval with recommendation, justification, date, proposed intervention payload, and selected-application row-version token;
 - coordinator recall of a pending assessment, including the read-only pending state, recall confirmation, `/api/cases/:id/assessment/recall` request body, and return to an editable resubmission state;
+- two-step Regional Manager review, including RM return to Coordinator with required notes, RM submit to NWAC approval, the Decision Maker's request-changes action returning to RM first, RM forwarding requested changes to the Coordinator, and no direct RM resubmission to NWAC from the returned-to-RM state;
 - NWAC approval decision commit from the approval deep link, including the review status, approved outcome, initiated case status, and selected-application row-version token;
 - approval-letter send with a workflow-generated attachment and application-scoped `caseContext.applicationDecisionLetters[application_id]` sent marker, without leaking the decision-letter state to root context;
 - funding-documents completion for an approved application after the scoped approval-letter sent marker is present.
 
 The smoke captures screenshots under `tmp/application-assessment-workflow-smoke/`. It fails on failed API responses, serious browser console errors, unhandled exceptions, and the React warning class where a child render path updates the route parent. It currently records, but does not fail on, the same `SupportingDocumentsWidget` React unique-key warning tracked in the Application Workspace smoke.
+
+Live DEV role-based walkthrough evidence for the Regional Manager two-step application-assessment slice was captured on 2026-06-19 under `tmp/rm-review-live-ui/2026-06-19T17-22-44-405Z/`. That walkthrough used real applicant/coordinator/RM/NWAC test role logins and covered RM EI status/report upload, coordinator submit/resubmit, RM return, RM submit to NWAC, the Decision Maker's request-changes action returning to RM, RM forward to coordinator, and final NWAC approval. It complements the deterministic smoke; keep the smoke as the repeatable regression guard and use live walkthroughs for deployment/UAT evidence.
 
 The Case Workspace Intervention Assessment recall path has a focused local browser smoke:
 
@@ -188,6 +191,13 @@ The Case Workspace Intervention Assessment recall path has a focused local brows
 - NPM alias: `npm run smoke:intervention-assessment:recall:browser`
 
 This smoke loads the real local React bundle at `http://localhost:3001/cases/1?entry=approval&approvalType=intervention&step=decision&interventionId=101&planId=10`, injects a deterministic ISET Coordinator session, stubs a submitted intervention proposal, verifies the proposal body is read-only while awaiting decision, clicks `Recall submission`, confirms the `/api/interventions/:id/assessment/recall` call, and verifies the widget returns to a draft/resubmission state.
+
+The Case Workspace Intervention Assessment two-step workflow has a deeper local browser smoke:
+
+- Script: `scripts/intervention-assessment-workflow-browser-smoke.js`
+- NPM alias: `npm run smoke:intervention-assessment:workflow:browser`
+
+This smoke loads the real local React bundle at `http://localhost:3001/cases/1?entry=approval&approvalType=intervention&interventionId=101&planId=10`, injects deterministic Coordinator, Regional Manager, and NWAC Administrator sessions, and stubs proposal/revision API responses. It covers RM return to submitter, RM submit to final decision, Decision Maker review with the RM note visible and Shelley-threshold warning present for high-value requests, Decision Maker-requested changes returning to RM, RM forwarding notes to the submitter, submitter-visible Decision Maker/RM notes, revision final-decision review, and approved proposal/revision communication deep links that expose the approval/funding-revision letter follow-up controls.
 
 ## Automation Backlog
 
@@ -202,7 +212,6 @@ Future high-risk workflow releases should prefer adding a small, owned smoke scr
 
 Good candidates are the remaining approval families:
 
-- case-manager new intervention proposal approval;
-- intervention revision/change approval.
+- remaining PDF artifact assertions for intervention proposal/revision final packets.
 
 Those workflows share enough shape that a small library of auth, fixture, cleanup, network-capture, and deep-link helpers would reduce repeated manual walkthroughs without hiding workflow-specific assertions.

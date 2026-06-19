@@ -20,7 +20,7 @@ const HomeCoordinatorWorkQueueHelp = () => (
         <li><strong>EI Verification Pending:</strong> cases waiting for EI consent or verification before the assessment can move forward.</li>
         <li><strong>Ready to assess:</strong> files that appear ready for the assessment and recommendation work.</li>
         <li><strong>Missing Docs / Follow-ups Needed:</strong> applications waiting on the applicant.</li>
-        <li><strong>Awaiting Approval:</strong> application assessments and new/revised intervention proposals you submitted to NWAC.</li>
+        <li><strong>Submitted for Review:</strong> application assessments and new/revised intervention proposals you submitted for Regional Manager or final decision review.</li>
         <li><strong>Pending Completion:</strong> approved application assessments that still need approval-letter, document, signature, or final completion work; denied applications stay here only until the denial letter is sent.</li>
         <li><strong>Active Clients</strong>, <strong>Payments &amp; Proof Due</strong>, and <strong>Follow-ups &amp; File Closure Due:</strong> active case-management work after approval.</li>
       </ul>
@@ -40,7 +40,7 @@ Explain the coordinator queue cards in staff language and connect them to the ne
 - EI Verification Pending -> check consent/verification requirements before assessment.
 - Ready to assess -> complete the assessment and recommendation.
 - Missing Docs / Follow-ups Needed -> contact the applicant, request missing items, and document the attempt.
-- Awaiting Approval -> monitor application assessments and intervention proposals/revisions submitted to NWAC.
+- Submitted for Review -> monitor application assessments and intervention proposals/revisions submitted for Regional Manager or final decision review.
 - Pending Completion / Active Clients / Payments / Follow-ups -> continue post-decision and active case-management work after approval or denial, including approved intervention proposal/revision approval-letter follow-up.
 
 Always mention that the selected card drives the Work Queue Items table, and that Work queue preferences lets the user show or hide queue cards in this browser.

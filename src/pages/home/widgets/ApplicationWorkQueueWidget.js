@@ -19,14 +19,14 @@ const getBucketTemplate = role => {
         { id: 'awaiting-ei-validation', label: 'Awaiting EI Validation', count: '-', description: 'Applications missing EI eligibility confirmation.' },
         { id: 'in-assessment', label: 'In Assessment', count: '-', description: 'Applications in active review by their owners.' },
         { id: 'on-hold', label: 'On Hold', count: '-', description: 'Applications intentionally parked for follow-up.' },
-        { id: 'awaiting-decision', label: 'Assessed, awaiting approval', count: '-', description: 'Application assessments complete, but need program approval.' },
+        { id: 'awaiting-decision', label: 'Pending decision', count: '-', description: 'Application assessments complete, but need a final decision.' },
         { id: 'decisions-made', label: 'Decisions Made', count: '-', description: 'Applications approved or denied this week.' }
       ];
     case 'Regional Manager':
       return [
         { id: 'region-queue', label: 'Assigned to my region', count: '-', description: 'Applications owned by me or assessors in my region.' },
         { id: 'needs-reassignment', label: 'Assigned to me', count: '-', description: 'Applications waiting for me to re-route or pick up.' },
-        { id: 'awaiting-my-approval', label: 'Awaiting approval', count: '-', description: 'Applications awaiting approval.' },
+        { id: 'awaiting-my-approval', label: 'Pending review', count: '-', description: 'Applications waiting for Regional Manager review.' },
         { id: 'awaiting-info', label: 'Awaiting info', count: '-', description: 'Applications awaiting applicant action.' },
         { id: 'due-this-week', label: 'Due this week', count: '-', description: 'Applications approaching their target date within 7 days.' },
         { id: 'overdue', label: 'Overdue', count: '-', description: 'Applications past target date within my region.' }

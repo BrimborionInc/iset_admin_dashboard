@@ -1,14 +1,14 @@
-# Admin Home - Pending Decision Items Widget
+# Admin Home - Pending Decision / Pending Review Items Widget
 
-Purpose: document the live pending-decision-mode behavior of the shared homepage `Work Queue Items` table.
+Purpose: document the live pending-decision/review-mode behavior of the shared homepage `Work Queue Items` table.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-06-08
+Last Updated: 2026-06-19
 
 ## Scope
 
 - Route: `/`
-- Queue trigger: `Pending Decision` in the homepage `Work Queue`
-- Widget title in this mode: `Pending Decision Items`
+- Queue triggers: `Pending Decision` for NWAC Administrator; `Pending Review` for Regional Manager
+- Widget title in this mode: `Pending Decision Items` or review-focused item wording
 - Visible to: `NWAC Administrator`, `Regional Manager`
 - Frontend implementation:
   - `src/pages/home/HomeDashboardPage.jsx`
@@ -18,17 +18,21 @@ Last Updated: 2026-06-08
 
 ## Current queue contents
 
-- Submitted application assessments waiting for program decision
+- Submitted application assessments waiting for program decision or RM review
   - sourced from `GET /api/dashboard/awaiting-approval-items`
   - current application status filter is `pending_approval`
+  - Regional Managers receive rows only when the review workflow is `rm_review` or `returned_to_rm`
+  - NWAC Administrators receive rows when the review workflow is `nwac_review`, plus legacy/off-toggle pending decisions with no review-workflow row
 - New and revised intervention proposals waiting for review
   - sourced from `GET /api/dashboard/intervention-approval-items`
   - current intervention status filter is `submitted` or `in_review`
+  - Regional Managers receive rows only when the review workflow is `rm_review` or `returned_to_rm`
+  - NWAC Administrators receive rows when the review workflow is `nwac_review`, plus legacy/off-toggle submitted proposals with no review-workflow row
 - Operationally this bucket is "all decision work waiting on approvers", even though only the application side maps cleanly to a single application lifecycle stage.
 
 ## Current table behavior
 
-- The shared `Work Queue Items` table switches into a decision-focused column set when the selected bucket is `pending-decision`.
+- The shared `Work Queue Items` table switches into a decision/review-focused column set when the selected bucket is `pending-decision` or `pending-review`.
 - The current columns are:
   - `Tag`
   - `Item`
@@ -39,7 +43,7 @@ Last Updated: 2026-06-08
   - `Actions`
 - `Actions` is intentionally limited to `Open workspace`.
 - Do not expose inline `Make Decision` or `Assign` actions in this mode. Decisions are completed inside the workspace.
-- Regional Managers may still monitor this queue, but current business rules restrict the actual decision commit to NWAC Administrators and System Administrators.
+- Regional Managers use `Pending Review` for application-assessment, new-intervention, and intervention-amendment review/sign-off work. They do not record final decisions.
 
 ## Current column rules
 

@@ -152,6 +152,16 @@ const buildInterventionFromApi = (planId, payload = {}) => {
     payload.sourceInterventionId ??
     payload.source_intervention_id
   );
+  const reviewWorkflow =
+    payload.reviewWorkflow ||
+    payload.review_workflow ||
+    null;
+  const twoStepReviewEnabled =
+    payload.twoStepReviewEnabled === true ||
+    payload.two_step_review_enabled === true ||
+    payload.twoStepReviewEnabled === 1 ||
+    payload.two_step_review_enabled === 1 ||
+    Boolean(reviewWorkflow);
   const snapshot =
     resolvedMetadata?.snapshot && typeof resolvedMetadata.snapshot === "object"
       ? resolvedMetadata.snapshot
@@ -215,6 +225,10 @@ const buildInterventionFromApi = (planId, payload = {}) => {
     proposal_reviewed_at: proposalReviewedAt,
     proposalSourceInterventionId,
     proposal_source_intervention_id: proposalSourceInterventionId,
+    twoStepReviewEnabled,
+    two_step_review_enabled: twoStepReviewEnabled,
+    reviewWorkflow,
+    review_workflow: reviewWorkflow,
     deliveryStatus: interventionState.deliveryStatus || null,
     delivery_status: interventionState.deliveryStatus || null,
     startDate: payload.startDate || null,

@@ -79,6 +79,24 @@ const SUBMITTED_PROPOSAL_DECIDER_ROLE_KEYS = new Set([
   "nwacadministrator",
 ]);
 
+const HIGH_VALUE_FUNDING_APPROVAL_THRESHOLD = 20000;
+const HIGH_VALUE_FUNDING_APPROVER_EMAIL = "sstacey@nwac.ca";
+
+const INTERVENTION_REVIEW_STAGES = {
+  rmReview: "rm_review",
+  nwacReview: "nwac_review",
+  returnedToRm: "returned_to_rm",
+  returnedToSubmitter: "returned_to_submitter",
+  finalDecisionRecorded: "final_decision_recorded",
+  withdrawn: "withdrawn",
+};
+
+const INTERVENTION_REVIEW_ACTIONS = {
+  rmReturnToSubmitter: "rm_return_to_submitter",
+  rmSubmitToNwac: "rm_submit_to_nwac",
+  rmForwardChangesToSubmitter: "rm_forward_changes_to_submitter",
+};
+
 const normalizeRoleKey = value =>
   String(value || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
 
@@ -119,6 +137,13 @@ const BASE_STEP_IDS = [
 ];
 const SUBMITTED_STEP_IDS = ["decision"];
 const ALL_STEP_IDS = [...BASE_STEP_IDS, ...SUBMITTED_STEP_IDS];
+const resolveRequestedWizardStep = (requestedStep, stepIds = ALL_STEP_IDS) => {
+  const normalized = String(requestedStep || "").trim();
+  if (!normalized) return null;
+  if (stepIds.includes(normalized)) return normalized;
+  if (normalized === "decision" && stepIds.includes("review")) return "review";
+  return null;
+};
 const STEP_LABELS = {
   plan: "Action plan",
   framing: "What is being proposed?",
@@ -1670,6 +1695,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showRecallConfirmModal, setShowRecallConfirmModal] = useState(false);
   const [isRecallingSubmission, setIsRecallingSubmission] = useState(false);
+  const [reviewWorkflowNote, setReviewWorkflowNote] = useState("");
+  const [reviewWorkflowActionLoading, setReviewWorkflowActionLoading] = useState(null);
+  const [dismissedReviewNoticeKey, setDismissedReviewNoticeKey] = useState(null);
   const [selectedDraftId, setSelectedDraftId] = useState(null);
   const [hydratedDraftId, setHydratedDraftId] = useState(null);
   const [hydratedDraftUpdatedAt, setHydratedDraftUpdatedAt] = useState(null);
@@ -1962,6 +1990,17 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     [activeInterventionId]
   );
 
+  const activeInterventionRecord = useMemo(() => {
+    if (!activeInterventionIdValue) return null;
+    const plans = Array.isArray(caseData?.actionPlans) ? caseData.actionPlans : [];
+    for (const plan of plans) {
+      const interventions = Array.isArray(plan?.interventions) ? plan.interventions : [];
+      const match = interventions.find(item => String(item?.id) === activeInterventionIdValue);
+      if (match) return match;
+    }
+    return null;
+  }, [activeInterventionIdValue, caseData]);
+
   const wizardStepKey = useMemo(() => {
     if (!caseId) return null;
     const keyId = selectedInterventionId ? String(selectedInterventionId) : null;
@@ -2040,12 +2079,38 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   const canManageEiEligibility = EI_ELIGIBILITY_ROLE_KEYS.has(roleKey);
   const isAssessor = canonicalRole === "ISET Coordinator";
   const canDecideSubmittedProposal = SUBMITTED_PROPOSAL_DECIDER_ROLE_KEYS.has(roleKey);
+  const reviewWorkflow =
+    activeInterventionRecord?.reviewWorkflow ||
+    activeInterventionRecord?.review_workflow ||
+    null;
+  const reviewStage = reviewWorkflow?.currentStage || reviewWorkflow?.current_stage || null;
+  const twoStepReviewEnabled = Boolean(
+    activeInterventionRecord?.twoStepReviewEnabled ||
+    activeInterventionRecord?.two_step_review_enabled ||
+    reviewWorkflow
+  );
+  const hasReviewWorkflow = Boolean(reviewWorkflow?.id || reviewWorkflow?.subjectKey || reviewWorkflow?.subject_key);
+  const isReviewWithRegionalManager =
+    twoStepReviewEnabled &&
+    (
+      reviewStage === INTERVENTION_REVIEW_STAGES.rmReview ||
+      reviewStage === INTERVENTION_REVIEW_STAGES.returnedToRm
+    );
+  const isReviewWithNwac =
+    twoStepReviewEnabled &&
+    reviewStage === INTERVENTION_REVIEW_STAGES.nwacReview;
+  const canRegionalManagerReview = roleKey === "regionalmanager" && isReviewWithRegionalManager;
+  const rmReviewNote = String(reviewWorkflow?.rmReviewNote || reviewWorkflow?.rm_review_note || "").trim();
+  const nwacDecisionNote = String(reviewWorkflow?.nwacDecisionNote || reviewWorkflow?.nwac_decision_note || "").trim();
 
   const isProposalBodyEditable =
     isDraftStatus ||
     isChangesRequestedStatus ||
     (!statusValue && !hasBlockingProposal);
-  const isDecisionEditable = isReviewStageStatus && canDecideSubmittedProposal;
+  const isDecisionEditable =
+    isReviewStageStatus &&
+    canDecideSubmittedProposal &&
+    (!twoStepReviewEnabled || isReviewWithNwac);
   const isEditable = isProposalBodyEditable || isDecisionEditable;
   const isFormLocked = !isProposalBodyEditable || isSubmitting;
   const isDecisionReadOnly = !isDecisionEditable || isSubmitting;
@@ -2053,6 +2118,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     isReviewStageStatus &&
     !completionNote &&
     !canDecideSubmittedProposal &&
+    isAssessor &&
+    (!twoStepReviewEnabled || reviewStage === INTERVENTION_REVIEW_STAGES.rmReview || reviewStage === INTERVENTION_REVIEW_STAGES.returnedToSubmitter) &&
     Boolean(activeInterventionIdValue);
   const statusLabel = completionNote
     ? (isApprovedDecisionOutcome ? "Approved" : (isRejectedDecisionOutcome ? "Denied" : "Completed"))
@@ -2060,7 +2127,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       ? statusValue === "rejected"
         ? "Denied"
         : statusValue === "changes_requested"
-          ? "Changes Requested"
+      ? "Changes requested"
           : statusValue.replace(/_/g, " ").replace(/\b\w/g, char => char.toUpperCase())
       : hasBlockingProposal
         ? "Read only"
@@ -2073,9 +2140,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         : "blue";
 
   const activeStepIds = useMemo(() => {
-    if (!isReviewStageStatus || !canDecideSubmittedProposal) return BASE_STEP_IDS;
+    if (!isReviewStageStatus || !canDecideSubmittedProposal || (twoStepReviewEnabled && !isReviewWithNwac)) return BASE_STEP_IDS;
     return [...BASE_STEP_IDS, ...SUBMITTED_STEP_IDS];
-  }, [canDecideSubmittedProposal, isReviewStageStatus]);
+  }, [canDecideSubmittedProposal, isReviewStageStatus, isReviewWithNwac, twoStepReviewEnabled]);
 
   const codeOptions = useMemo(() => {
     if (!Array.isArray(interventionCodes) || interventionCodes.length === 0) return [];
@@ -2461,8 +2528,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     if (!keyChanged && !stepsChanged) return;
     wizardStepRestoreKeyRef.current = wizardStepKey;
     wizardStepRestoreStepsRef.current = stepSignature;
-    const requestedStep = pendingApprovalStepRef.current || null;
-    if (requestedStep && activeStepIds.includes(requestedStep)) {
+    const requestedStep = resolveRequestedWizardStep(pendingApprovalStepRef.current, activeStepIds);
+    if (requestedStep) {
       if (requestedStep !== currentStep) {
         setCurrentStep(requestedStep);
       }
@@ -2479,9 +2546,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   }, [wizardStepKey, activeStepIds, currentStep, resolveStoredStep]);
 
   useEffect(() => {
-    const requestedStep = pendingApprovalStepRef.current || null;
+    const requestedStep = resolveRequestedWizardStep(pendingApprovalStepRef.current, activeStepIds);
     if (!wizardStepKey || !requestedStep) return;
-    if (!activeStepIds.includes(requestedStep)) return;
     const requestedInterventionId = approvalWorkspaceEntry?.interventionId
       ? String(approvalWorkspaceEntry.interventionId)
       : null;
@@ -3174,6 +3240,26 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     });
     return total;
   }, [interventionTotals]);
+  const canApproveHighValueFunding =
+    String(currentUserEmail || "").trim().toLowerCase() === HIGH_VALUE_FUNDING_APPROVER_EMAIL;
+  const isHighValueFundingApprovalBlocked =
+    Number.isFinite(overallCostTotal) &&
+    overallCostTotal >= HIGH_VALUE_FUNDING_APPROVAL_THRESHOLD &&
+    !canApproveHighValueFunding;
+  const highValueFundingApprovalMessage = isHighValueFundingApprovalBlocked
+    ? `Only Shelley Stacey (${HIGH_VALUE_FUNDING_APPROVER_EMAIL}) can approve funding of $${HIGH_VALUE_FUNDING_APPROVAL_THRESHOLD.toLocaleString()} or above.`
+    : "";
+  const decisionOptionsForApproval = useMemo(
+    () =>
+      highValueFundingApprovalMessage
+        ? decisionOptions.map(option =>
+            option.value === "approved"
+              ? { ...option, disabled: true, description: "Requires Shelley approval at this funding level." }
+              : option
+          )
+        : decisionOptions,
+    [decisionOptions, highValueFundingApprovalMessage]
+  );
 
   const revisionSourceIntervention = useMemo(() => {
     if (!isRevisionMode || !revisionSourceInterventionId) return null;
@@ -3877,6 +3963,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         pendingApprovalStepRef.current ||
         null;
       pendingApprovalStepRef.current = requestedStep;
+      const resolvedRequestedStep = resolveRequestedWizardStep(requestedStep, activeStepIds);
       const selectionKey = caseId ? `${caseId}:${interventionId}` : null;
       const storedStep = resolveStoredStep(selectionKey);
       if (typeof setSelectedInterventionId === "function") {
@@ -3894,8 +3981,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       setCompletionNote(null);
       setAttemptedSteps({});
       setCurrentStep(
-        requestedStep && activeStepIds.includes(requestedStep)
-          ? requestedStep
+        resolvedRequestedStep
+          ? resolvedRequestedStep
           : storedStep || BASE_STEP_IDS[0]
       );
       if (planId) {
@@ -4141,15 +4228,29 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         setSelectedInterventionId(draft.id);
       }
       const draftStatus = String(draft.status || "").toLowerCase();
-      const stepIds = ["submitted", "in_review"].includes(draftStatus)
+      const draftReviewWorkflow = draft.reviewWorkflow || draft.review_workflow || null;
+      const draftReviewStage = draftReviewWorkflow?.currentStage || draftReviewWorkflow?.current_stage || null;
+      const draftTwoStepReviewEnabled = Boolean(
+        draft.twoStepReviewEnabled ||
+          draft.two_step_review_enabled ||
+          draftReviewWorkflow
+      );
+      const draftCanShowDecisionStep =
+        ["submitted", "in_review"].includes(draftStatus) &&
+        canDecideSubmittedProposal &&
+        (!draftTwoStepReviewEnabled || draftReviewStage === INTERVENTION_REVIEW_STAGES.nwacReview);
+      const stepIds = draftCanShowDecisionStep
         ? [...BASE_STEP_IDS, ...SUBMITTED_STEP_IDS]
         : BASE_STEP_IDS;
       const storedStep = resolveStoredStep(storedStepKey, stepIds);
-      const requestedStep = pendingApprovalStepRef.current || null;
+      const requestedStep = resolveRequestedWizardStep(pendingApprovalStepRef.current, stepIds);
+      const defaultStep = ["submitted", "in_review"].includes(draftStatus)
+        ? (stepIds.includes("decision") ? "decision" : "review")
+        : BASE_STEP_IDS[0];
       const nextStep =
-        (requestedStep && stepIds.includes(requestedStep) ? requestedStep : null) ||
+        requestedStep ||
         storedStep ||
-        BASE_STEP_IDS[0];
+        defaultStep;
       setHydratedDraftId(draft.id || null);
       setHydratedDraftUpdatedAt(draft.updatedAt || draft.createdAt || null);
       setCurrentInterventionStatus(draftStatus || null);
@@ -4207,6 +4308,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     approvalRequestedStep,
     caseData,
     caseId,
+    canDecideSubmittedProposal,
     form.actionPlanId,
     hasMeaningfulDraft,
     hydratedDraftId,
@@ -4648,7 +4750,19 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
           }
         }
         setCurrentInterventionStatus("submitted");
-        setSuccessMessage("Proposal submitted for approval.");
+        const submittedToRegionalReview = Boolean(
+          saved?.twoStepReviewEnabled ||
+            saved?.two_step_review_enabled ||
+            saved?.reviewWorkflow ||
+            saved?.review_workflow ||
+            twoStepReviewEnabled
+        );
+        const submittedSubject = isRevisionMode ? "Intervention change" : "Intervention proposal";
+        setSuccessMessage(
+          submittedToRegionalReview
+            ? `${submittedSubject} submitted to Regional Manager review.`
+            : `${submittedSubject} submitted for review.`
+        );
       } catch (err) {
         setError(err?.message || "Failed to submit proposal.");
       } finally {
@@ -4661,8 +4775,10 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       findEditableDraft,
       activeInterventionIdValue,
       form.actionPlanId,
+      isRevisionMode,
       isEditable,
       setSelectedInterventionId,
+      twoStepReviewEnabled,
       updateInterventionRecord,
       validateStep,
     ]
@@ -4712,6 +4828,68 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     refresh,
     setSelectedInterventionId,
   ]);
+
+  const handleReviewWorkflowAction = useCallback(
+    async action => {
+      if (!activeInterventionIdValue) {
+        setError("Select an intervention request before reviewing it.");
+        return;
+      }
+      const note = String(reviewWorkflowNote || "").trim();
+      const requiresNote =
+        action === INTERVENTION_REVIEW_ACTIONS.rmReturnToSubmitter ||
+        action === INTERVENTION_REVIEW_ACTIONS.rmForwardChangesToSubmitter;
+      if (requiresNote && !note) {
+        setError("A note is required before returning this request.");
+        return;
+      }
+      setError(null);
+      setSuccessMessage("");
+      setReviewWorkflowActionLoading(action);
+      try {
+        const response = await apiFetch(`/api/interventions/${activeInterventionIdValue}/review-workflow/action`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, note }),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || payload?.success === false) {
+          throw new Error(payload?.message || payload?.error || "Failed to update Regional Manager review.");
+        }
+        const intervention = payload?.intervention || null;
+        if (intervention?.id) {
+          setSelectedDraftId(intervention.id);
+          setHydratedDraftId(intervention.id);
+          setHydratedDraftUpdatedAt(intervention.updatedAt || intervention.createdAt || null);
+          setCurrentInterventionStatus(intervention.status || intervention.reviewStatus || "submitted");
+          if (typeof setSelectedInterventionId === "function") {
+            setSelectedInterventionId(intervention.id);
+          }
+        }
+        setReviewWorkflowNote("");
+        if (typeof refresh === "function") {
+          await refresh().catch(() => {});
+        }
+        setSuccessMessage(
+          action === INTERVENTION_REVIEW_ACTIONS.rmSubmitToNwac
+            ? "Intervention request submitted for final decision."
+            : action === INTERVENTION_REVIEW_ACTIONS.rmForwardChangesToSubmitter
+              ? "Requested changes forwarded to the submitter."
+              : "Intervention request returned to the submitter."
+        );
+      } catch (err) {
+        setError(err?.message || "Failed to update Regional Manager review.");
+      } finally {
+        setReviewWorkflowActionLoading(null);
+      }
+    },
+    [
+      activeInterventionIdValue,
+      refresh,
+      reviewWorkflowNote,
+      setSelectedInterventionId,
+    ]
+  );
 
   const uploadEiVerificationIfSelected = useCallback(
     async ({ interventionId } = {}) => {
@@ -4995,6 +5173,10 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         targetStep = "decision";
       }
       if (outcome === "approved") {
+        if (highValueFundingApprovalMessage) {
+          reasons.push(highValueFundingApprovalMessage);
+          targetStep = targetStep || "decision";
+        }
         if (!form.eiVerificationStatus) {
           reasons.push(`Set EI eligibility before approving ${decisionSubjectThis}.`);
           targetStep = targetStep || "decision";
@@ -5046,6 +5228,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       form.eiVerificationStatus,
       actionPlanFundingDraft,
       hasPlanFundingMismatch,
+      highValueFundingApprovalMessage,
       needsActionPlanFundingSetup,
       requiredFundingStream,
       validateActionPlanFundingDraft,
@@ -5061,7 +5244,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       setSuccessMessage("");
       setAttemptedSteps(prev => ({ ...prev, decision: true }));
       if (!canDecideSubmittedProposal) {
-        setError("Only NWAC Administrators and System Administrators can record a decision on a proposal in review.");
+        setError("Only Decision Makers and System Administrators can record a decision on a proposal in review.");
         return { ok: false };
       }
       if (!isEditable) {
@@ -5197,14 +5380,21 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         } else {
           const payload = buildProposalPayload(outcome);
           const updated = await updateInterventionRecord(actionPlanId, Number(activeInterventionIdValue), payload);
-          setCurrentInterventionStatus(outcome);
+          const updatedReviewWorkflow = updated?.reviewWorkflow || updated?.review_workflow || null;
+          const updatedReviewStage = updatedReviewWorkflow?.currentStage || updatedReviewWorkflow?.current_stage || null;
+          const returnedToRm = updatedReviewStage === INTERVENTION_REVIEW_STAGES.returnedToRm;
+          setCurrentInterventionStatus(updated?.status || updated?.reviewStatus || outcome);
           if (outcome === "changes_requested") {
             await addCaseNote("Intervention proposal — Request changes", form.decisionNotes.trim());
           }
           if (outcome === "rejected") {
             await addCaseNote("Intervention proposal — Denied", form.decisionNotes.trim());
           }
-          setSuccessMessage(updated ? "Decision submitted." : "Decision submitted.");
+          setSuccessMessage(
+            returnedToRm
+              ? "Changes requested. The request is back with the Regional Manager."
+              : "Decision submitted."
+          );
           if (outcome === "rejected") {
             setApprovalLetterPackGenerated(false);
             setApprovalLetterPackTabId("client");
@@ -5693,10 +5883,14 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         ? "The decision is recorded. Prepare or send the approval letters and related funding documents from here if needed."
         : "The decision is recorded."
       : null
+    : canRegionalManagerReview
+      ? reviewStage === INTERVENTION_REVIEW_STAGES.returnedToRm
+        ? "Review the Decision Maker's note, then forward the requested changes to the submitter."
+        : "Review the submitted request, then return it to the submitter or submit it for final decision."
     : isReviewStageStatus && isEditable && isRevisionMode && !canDecideSubmittedProposal
-      ? `Update the proposed change to ${revisionSourceTitle}. Record of decision is limited to NWAC Administrators.`
+      ? `Update the proposed change to ${revisionSourceTitle}. Final decision is completed by a Decision Maker.`
       : isReviewStageStatus && isEditable && !canDecideSubmittedProposal
-        ? "Update the submitted proposal. Record of decision is limited to NWAC Administrators."
+        ? "Update the submitted proposal. Final decision is completed by a Decision Maker."
     : isReviewStageStatus && isEditable && isRevisionMode
       ? `Review the proposed change to ${revisionSourceTitle}, verify EI status, and record whether the change is approved, denied, or returned for changes.`
       : isReviewStageStatus && isEditable
@@ -6246,9 +6440,126 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
   const reviewOtherFundingSources = normalizeOtherFundingSources(form.otherFundingSources);
   const reviewOtherFundingNotes = String(form.otherFundingNotes || "").trim();
   const reviewOtherFundingNwacCoverage = String(form.otherFundingNwacCoverage || "").trim();
+  const reviewWorkflowNotice = (() => {
+    if (!twoStepReviewEnabled || !hasReviewWorkflow) return null;
+    if (reviewStage === INTERVENTION_REVIEW_STAGES.nwacReview) {
+      return {
+        key: `intervention-${reviewStage}`,
+        type: "info",
+        header: "Ready for Decision Maker",
+        content: "The Regional Manager has reviewed this request and submitted it for final decision.",
+        dismissible: true,
+      };
+    }
+    if (reviewStage === INTERVENTION_REVIEW_STAGES.rmReview && !canRegionalManagerReview) {
+      return {
+        key: `intervention-${reviewStage}`,
+        type: "info",
+        header: "Waiting for Regional Manager review",
+        content: "The Regional Manager reviews this request before the Decision Maker records the final decision.",
+        dismissible: true,
+      };
+    }
+    if (reviewStage === INTERVENTION_REVIEW_STAGES.returnedToRm && !canRegionalManagerReview) {
+      return {
+        key: `intervention-${reviewStage}`,
+        type: "warning",
+        header: "Decision Maker requested changes",
+        content: "The request is back with the Regional Manager before it returns to the submitter.",
+        dismissible: false,
+      };
+    }
+    return null;
+  })();
+  const reviewWorkflowStageAlert =
+    reviewWorkflowNotice && dismissedReviewNoticeKey !== reviewWorkflowNotice.key ? (
+      <Alert
+        type={reviewWorkflowNotice.type}
+        header={reviewWorkflowNotice.header}
+        dismissible={reviewWorkflowNotice.dismissible}
+        onDismiss={
+          reviewWorkflowNotice.dismissible
+            ? () => setDismissedReviewNoticeKey(reviewWorkflowNotice.key)
+            : undefined
+        }
+      >
+        {reviewWorkflowNotice.content}
+      </Alert>
+    ) : null;
+  const regionalManagerReviewContent = canRegionalManagerReview ? (
+    <SpaceBetween size="s">
+      {reviewStage === INTERVENTION_REVIEW_STAGES.returnedToRm && nwacDecisionNote ? (
+        <Alert type="warning" header="Decision Maker requested changes">
+          <Box whiteSpace="pre-wrap">{nwacDecisionNote}</Box>
+        </Alert>
+      ) : null}
+      {rmReviewNote ? (
+        <Box variant="small" color="text-body-secondary">
+          Latest Regional Manager note: {rmReviewNote}
+        </Box>
+      ) : null}
+      <FormField
+        label={
+          reviewStage === INTERVENTION_REVIEW_STAGES.returnedToRm
+            ? "Note to submitter"
+            : "Review note"
+        }
+        description={
+          reviewStage === INTERVENTION_REVIEW_STAGES.returnedToRm
+            ? "Required when forwarding the Decision Maker's requested changes."
+            : "Required when returning this request to the submitter."
+        }
+      >
+        <Textarea
+          value={reviewWorkflowNote}
+          onChange={({ detail }) => setReviewWorkflowNote(detail.value)}
+          rows={3}
+          placeholder={
+            reviewStage === INTERVENTION_REVIEW_STAGES.returnedToRm
+              ? "Add any Regional Manager context before forwarding the requested changes."
+              : "Explain what the submitter needs to change, if returning the request."
+          }
+          spellcheck={true}
+          disabled={Boolean(reviewWorkflowActionLoading)}
+        />
+      </FormField>
+      <SpaceBetween size="s" direction="horizontal">
+        {reviewStage === INTERVENTION_REVIEW_STAGES.returnedToRm ? (
+          <Button
+            variant="primary"
+            onClick={() => handleReviewWorkflowAction(INTERVENTION_REVIEW_ACTIONS.rmForwardChangesToSubmitter)}
+            loading={reviewWorkflowActionLoading === INTERVENTION_REVIEW_ACTIONS.rmForwardChangesToSubmitter}
+            disabled={Boolean(reviewWorkflowActionLoading)}
+          >
+            Forward changes to submitter
+          </Button>
+        ) : (
+          <>
+            <Button
+              onClick={() => handleReviewWorkflowAction(INTERVENTION_REVIEW_ACTIONS.rmReturnToSubmitter)}
+              loading={reviewWorkflowActionLoading === INTERVENTION_REVIEW_ACTIONS.rmReturnToSubmitter}
+              disabled={Boolean(reviewWorkflowActionLoading)}
+            >
+              Return to submitter
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => handleReviewWorkflowAction(INTERVENTION_REVIEW_ACTIONS.rmSubmitToNwac)}
+              loading={reviewWorkflowActionLoading === INTERVENTION_REVIEW_ACTIONS.rmSubmitToNwac}
+              disabled={Boolean(reviewWorkflowActionLoading)}
+            >
+              Submit for final decision
+            </Button>
+          </>
+        )}
+      </SpaceBetween>
+    </SpaceBetween>
+  ) : null;
 
   const reviewStepContent = (
     <SpaceBetween size="m">
+      {reviewWorkflowStageAlert}
+      {regionalManagerReviewContent}
       <ColumnLayout columns={2} variant="text-grid">
         <Box>
           <Header variant="h4">Rationale</Header>
@@ -6339,14 +6650,52 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       </ColumnLayout>
     </SpaceBetween>
   );
+  const regionalManagerDecisionSummary =
+    twoStepReviewEnabled && hasReviewWorkflow && !isReviewWithRegionalManager ? (
+      <SpaceBetween size="xs">
+        <Box fontWeight="bold">Regional Manager review note</Box>
+        <Box whiteSpace="pre-wrap">{rmReviewNote || "No Regional Manager note recorded."}</Box>
+      </SpaceBetween>
+    ) : null;
+  const submitterChangeInstructionsAlert =
+    twoStepReviewEnabled && reviewStage === INTERVENTION_REVIEW_STAGES.returnedToSubmitter ? (
+      <Alert type="warning" header="Changes requested" statusIconAriaLabel="Warning">
+        <SpaceBetween size="s">
+          <Box>
+            Review the notes below, update the {isRevisionMode ? "change request" : "proposal"}, then resubmit it for review when ready.
+          </Box>
+          {nwacDecisionNote ? (
+            <Box>
+              <Box fontWeight="bold">Decision Maker note</Box>
+              <Box whiteSpace="pre-wrap">{nwacDecisionNote}</Box>
+            </Box>
+          ) : null}
+          {rmReviewNote ? (
+            <Box>
+              <Box fontWeight="bold">Regional Manager note</Box>
+              <Box whiteSpace="pre-wrap">{rmReviewNote}</Box>
+            </Box>
+          ) : null}
+          {!nwacDecisionNote && !rmReviewNote ? (
+            <Box>No detailed change note was recorded. Contact the Regional Manager before resubmitting.</Box>
+          ) : null}
+        </SpaceBetween>
+      </Alert>
+    ) : null;
 
   const decisionStepContent = (
     <SpaceBetween size="m">
       {caseManagerRecommendationSummary}
+      {regionalManagerDecisionSummary}
       {reviewAmendmentDeltaSummary ? (
         <Box variant="small" color="text-body-secondary">
           {reviewAmendmentDeltaSummary}
         </Box>
+      ) : null}
+      {highValueFundingApprovalMessage ? (
+        <Alert type="warning" header="Shelley approval required">
+          {highValueFundingApprovalMessage}
+        </Alert>
       ) : null}
       <FormField
         label={`Decision on ${decisionSubjectWithArticle}`}
@@ -6354,9 +6703,16 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         errorText={showDecisionErrors && !form.decisionOutcome ? `Decision on ${decisionSubjectWithArticle} is required.` : undefined}
       >
         <Select
-          selectedOption={decisionOptions.find(option => option.value === form.decisionOutcome) || null}
-          onChange={({ detail }) => handleChange("decisionOutcome", detail.selectedOption?.value || "")}
-          options={decisionOptions}
+          selectedOption={decisionOptionsForApproval.find(option => option.value === form.decisionOutcome) || null}
+          onChange={({ detail }) => {
+            const nextOutcome = detail.selectedOption?.value || "";
+            if (nextOutcome === "approved" && highValueFundingApprovalMessage) {
+              setError(highValueFundingApprovalMessage);
+              return;
+            }
+            handleChange("decisionOutcome", nextOutcome);
+          }}
+          options={decisionOptionsForApproval}
           placeholder="Select decision outcome"
           readOnly={isDecisionReadOnly}
         />
@@ -7581,15 +7937,13 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     .filter(Boolean);
 
   const activeStepIndex = Math.max(activeStepIds.indexOf(currentStep), 0);
+  const submitterSubmitLabel = isChangesRequestedStatus ? "Resubmit for review" : "Submit for review";
+  const submittedReviewLabel = isRevisionMode ? "Submit change for review" : "Submit proposal for review";
   const wizardSubmitLabel = isReviewStageStatus
     ? canDecideSubmittedProposal
-      ? "Submit Decision"
-      : isRevisionMode
-        ? "Submit change for approval"
-        : "Submit proposal for approval"
-    : isChangesRequestedStatus
-      ? "Resubmit for approval"
-      : "Submit for approval";
+      ? "Submit decision"
+      : submittedReviewLabel
+    : submitterSubmitLabel;
   const wizardSubmitHandler = isReviewStageStatus && canDecideSubmittedProposal
     ? handleSubmitDecision
     : handleSubmitProposal;
@@ -7624,7 +7978,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
                   ? isRevisionMode
                     ? "Submit change"
                     : "Submit proposal"
-                  : "Save Progress"}
+                  : "Save progress"}
               </Button>
             )}
           </SpaceBetween>
@@ -7646,16 +8000,23 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
             {headerDescription}
           </Box>
         ) : null}
-        {error && (
-          <Alert type="error" dismissible onDismiss={() => setError(null)} statusIconAriaLabel="Error">
-            {error}
-          </Alert>
-        )}
-        {successMessage && !completionNote && (
-          <Alert type="success" dismissible onDismiss={() => setSuccessMessage("")} statusIconAriaLabel="Success">
-            {successMessage}
-          </Alert>
-        )}
+        {error || (successMessage && !completionNote) || submitterChangeInstructionsAlert ? (
+          <Box margin={{ bottom: "m" }}>
+            <SpaceBetween size="s">
+              {error && (
+                <Alert type="error" dismissible onDismiss={() => setError(null)} statusIconAriaLabel="Error">
+                  {error}
+                </Alert>
+              )}
+              {successMessage && !completionNote && (
+                <Alert type="success" dismissible onDismiss={() => setSuccessMessage("")} statusIconAriaLabel="Success">
+                  {successMessage}
+                </Alert>
+              )}
+              {submitterChangeInstructionsAlert}
+            </SpaceBetween>
+          </Box>
+        ) : null}
         {completionNote ? (
           <SpaceBetween size="m">
             <Alert

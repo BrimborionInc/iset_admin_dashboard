@@ -244,6 +244,8 @@ const sanitizeVisibleContent = (candidate, allowedIds) => {
       rawId === 'interventions-awaiting-approval' ||
       rawId === 'approvals'
         ? 'pending-decision'
+        : rawId === 'pending-decision' && allowed.has('pending-review') && !allowed.has('pending-decision')
+          ? 'pending-review'
         : rawId;
     if (!id || !allowed.has(id) || seen.has(id)) return;
     seen.add(id);

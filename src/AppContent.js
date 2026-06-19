@@ -7,6 +7,7 @@ import {
   Button,
   Modal,
   Header,
+  SegmentedControl,
   SpaceBetween,
   Container,
   AnnotationContext
@@ -59,6 +60,20 @@ const TUTORIAL_COMPLETION_STORAGE_KEY = 'iset-tutorials.completed.v1';
 const TUTORIAL_APP_LAYOUT_RESET_FLAG = 'iset.tutorial.resetApplicationLayout';
 const TUTORIAL_CASE_LAYOUT_RESET_FLAG = 'iset.tutorial.resetCaseWorkspaceLayout';
 const NOTIFICATION_TIMEZONE_FALLBACK = 'America/Toronto';
+const NOTIFICATION_SORT_STORAGE_KEY = 'iset.notifications.sortMode.v1';
+const NOTIFICATION_SORT_MODES = Object.freeze({
+  CHRONOLOGICAL: 'chronological',
+  URGENCY: 'urgency',
+});
+const NOTIFICATION_SEVERITY_RANK = Object.freeze({
+  critical: 5,
+  error: 5,
+  warning: 4,
+  warn: 4,
+  success: 3,
+  info: 2,
+  'in-progress': 1,
+});
 const normalizeRoleKey = value => String(value ?? '').trim().toLowerCase();
 const APPLICATION_WORKSPACE_PROMPT_ROLE_KEYS = new Set([
   'iset coordinator',
@@ -251,6 +266,66 @@ const formatNotificationTimestamp = (value, timeZone = NOTIFICATION_TIMEZONE_FAL
       return date.toLocaleString('en-CA');
     }
   }
+};
+
+const normalizeNotificationSortMode = (value) =>
+  value === NOTIFICATION_SORT_MODES.URGENCY
+    ? NOTIFICATION_SORT_MODES.URGENCY
+    : NOTIFICATION_SORT_MODES.CHRONOLOGICAL;
+
+const getStoredNotificationSortMode = () => {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return NOTIFICATION_SORT_MODES.CHRONOLOGICAL;
+  }
+  try {
+    return normalizeNotificationSortMode(window.localStorage.getItem(NOTIFICATION_SORT_STORAGE_KEY));
+  } catch (_) {
+    return NOTIFICATION_SORT_MODES.CHRONOLOGICAL;
+  }
+};
+
+const persistNotificationSortMode = (value) => {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(NOTIFICATION_SORT_STORAGE_KEY, normalizeNotificationSortMode(value));
+  } catch (_) {}
+};
+
+const getNotificationSortTimestampMs = (notification) => {
+  const rawValue = notification?.delivered_at || notification?.created_at || notification?.updated_at || null;
+  if (!rawValue) return 0;
+  const timestamp = rawValue instanceof Date ? rawValue.getTime() : Date.parse(rawValue);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const getNotificationSortId = (notification) => {
+  const numeric = Number(notification?.id);
+  return Number.isFinite(numeric) ? numeric : 0;
+};
+
+const getNotificationSeverityRank = (notification) => {
+  const key = String(notification?.severity || 'info').trim().toLowerCase();
+  return NOTIFICATION_SEVERITY_RANK[key] || 1;
+};
+
+const compareNotificationsChronologically = (left, right) => {
+  const timestampDelta = getNotificationSortTimestampMs(right) - getNotificationSortTimestampMs(left);
+  if (timestampDelta !== 0) return timestampDelta;
+  return getNotificationSortId(right) - getNotificationSortId(left);
+};
+
+const compareNotificationsByUrgency = (left, right) => {
+  const severityDelta = getNotificationSeverityRank(right) - getNotificationSeverityRank(left);
+  if (severityDelta !== 0) return severityDelta;
+  return compareNotificationsChronologically(left, right);
+};
+
+const sortNotificationsForDisplay = (items, sortMode) => {
+  if (!Array.isArray(items) || items.length === 0) return [];
+  const sorter = normalizeNotificationSortMode(sortMode) === NOTIFICATION_SORT_MODES.URGENCY
+    ? compareNotificationsByUrgency
+    : compareNotificationsChronologically;
+  return [...items].sort(sorter);
 };
 
 const loadTutorialCompletionMapFromLocalStorage = () => {
@@ -1001,6 +1076,7 @@ const AppContent = () => {
   // Notifications state (moved inside component)
   const [notifications, setNotifications] = useState([]);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [notificationSortMode, setNotificationSortMode] = useState(getStoredNotificationSortMode);
   const [serviceAnnouncement, setServiceAnnouncement] = useState(null);
   const [announcementNow, setAnnouncementNow] = useState(() => new Date());
   const flashbarRef = useRef(null);
@@ -1021,12 +1097,14 @@ const AppContent = () => {
 
   const scopedNotifications = useMemo(() => {
     if (!Array.isArray(notifications) || notifications.length === 0) return [];
-    if (!notificationScope || notificationScope.type === 'all' || !notificationScope.id) return notifications;
+    if (!notificationScope || notificationScope.type === 'all' || !notificationScope.id) {
+      return sortNotificationsForDisplay(notifications, notificationSortMode);
+    }
 
     const id = String(notificationScope.id);
     const isNumericId = /^\d+$/.test(id);
 
-    return notifications.filter((n) => {
+    const filteredNotifications = notifications.filter((n) => {
       if (!n) return false;
       const metadata = parseNotificationMetadata(n.metadata);
       const metaCaseId = metadata.caseId != null ? String(metadata.caseId) : null;
@@ -1045,12 +1123,14 @@ const AppContent = () => {
       }
       return metaTrackingId === id || metaAppRef === id;
     });
-  }, [notifications, notificationScope]);
+    return sortNotificationsForDisplay(filteredNotifications, notificationSortMode);
+  }, [notifications, notificationScope, notificationSortMode]);
 
   const loadNotifications = useCallback(async ({ scrollIntoView = false } = {}) => {
     setNotificationsLoading(true);
     try {
-      const response = await apiFetch('/api/me/notifications');
+      const sortMode = normalizeNotificationSortMode(notificationSortMode);
+      const response = await apiFetch(`/api/me/notifications?sort=${encodeURIComponent(sortMode)}`);
       let data = [];
       try { data = await response.json(); } catch { data = []; }
       if (!response.ok) {
@@ -1075,7 +1155,7 @@ const AppContent = () => {
     } finally {
       setNotificationsLoading(false);
     }
-  }, []);
+  }, [notificationSortMode]);
 
   useEffect(() => {
     loadNotifications();
@@ -1140,6 +1220,12 @@ const AppContent = () => {
     } catch (error) {
       console.error('[notifications] dismiss failed', error);
     }
+  }, []);
+
+  const handleNotificationSortModeChange = useCallback(({ detail }) => {
+    const nextSortMode = normalizeNotificationSortMode(detail?.selectedId);
+    setNotificationSortMode(nextSortMode);
+    persistNotificationSortMode(nextSortMode);
   }, []);
 
   const mapSeverityToType = useCallback((severity = 'info') => {
@@ -1241,6 +1327,23 @@ const AppContent = () => {
       dismissible: false,
     };
   }, [serviceAnnouncement, announcementNow]);
+
+  const notificationSortControl = useMemo(() => {
+    if (notificationFlashbarItems.length < 2) return null;
+    return (
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
+        <SegmentedControl
+          label="Notification sort order"
+          selectedId={notificationSortMode}
+          onChange={handleNotificationSortModeChange}
+          options={[
+            { id: NOTIFICATION_SORT_MODES.CHRONOLOGICAL, text: 'Newest' },
+            { id: NOTIFICATION_SORT_MODES.URGENCY, text: 'Urgency' },
+          ]}
+        />
+      </div>
+    );
+  }, [handleNotificationSortModeChange, notificationFlashbarItems.length, notificationSortMode]);
 
   const refreshNotifications = useCallback(() => loadNotifications({ scrollIntoView: true }), [loadNotifications]);
 
@@ -1886,6 +1989,7 @@ const AppContent = () => {
               }
               notifications={
                 <div ref={flashbarRef}>
+                  {notificationSortControl}
                   <Flashbar
                     stackItems
                     items={serviceAnnouncementFlashbarItem ? [serviceAnnouncementFlashbarItem, ...notificationFlashbarItems] : notificationFlashbarItems}

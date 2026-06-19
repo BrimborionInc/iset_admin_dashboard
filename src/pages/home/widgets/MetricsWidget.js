@@ -41,8 +41,8 @@ const METRIC_DEFINITIONS = [
   },
   {
     id: 'awaitingApproval',
-    label: 'Awaiting approval',
-    description: 'Applications currently pending approval and updated in the selected period.',
+    label: 'Pending decision',
+    description: 'Applications currently pending final decision and updated in the selected period.',
     format: 'count'
   },
   {

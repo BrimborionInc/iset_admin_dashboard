@@ -34,10 +34,38 @@ function getApplicantUserIdFromAuth(auth) {
   );
 }
 
-async function getInternalNotifications(pool, auth) {
+function normalizeNotificationSortMode(value) {
+  return String(value || '').trim().toLowerCase() === 'urgency'
+    ? 'urgency'
+    : 'chronological';
+}
+
+function getNotificationOrderBy(sortMode) {
+  if (normalizeNotificationSortMode(sortMode) === 'urgency') {
+    return `ORDER BY
+      CASE LOWER(COALESCE(n.severity, 'info'))
+        WHEN 'critical' THEN 5
+        WHEN 'error' THEN 5
+        WHEN 'warning' THEN 4
+        WHEN 'warn' THEN 4
+        WHEN 'success' THEN 3
+        WHEN 'info' THEN 2
+        ELSE 1
+      END DESC,
+      COALESCE(n.delivered_at, n.created_at) DESC,
+      n.id DESC`;
+  }
+
+  return `ORDER BY
+      COALESCE(n.delivered_at, n.created_at) DESC,
+      n.id DESC`;
+}
+
+async function getInternalNotifications(pool, auth, options = {}) {
   const role = getRoleFromAuth(auth);
   const staffProfileId = getStaffProfileIdFromAuth(auth);
   const applicantUserId = getApplicantUserIdFromAuth(auth);
+  const sortMode = normalizeNotificationSortMode(options.sortMode || options.sort);
 
   if (!role && !staffProfileId && !applicantUserId) {
     return [];
@@ -91,7 +119,7 @@ async function getInternalNotifications(pool, auth) {
     params.push(...dismissalParams);
   }
 
-  sql += ' ORDER BY n.severity DESC, n.created_at DESC';
+  sql += ` ${getNotificationOrderBy(sortMode)}`;
 
   const [rows] = await pool.query(sql, params);
   return rows || [];

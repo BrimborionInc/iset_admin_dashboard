@@ -268,18 +268,42 @@ export const resolveInterventionApprovalLetterFollowUp = intervention => {
   const metadata = parseMetadataObject(intervention.metadata ?? intervention.metadata_json);
   const appliedRevision = hasAppliedRevisionMetadata(metadata);
   const letterFollowUp = resolveApprovalLetterFollowUpMetadata(metadata);
+  const applied = metadata.lastAppliedRevision && typeof metadata.lastAppliedRevision === "object"
+    ? metadata.lastAppliedRevision
+    : {};
+  const appliedRevisionDraftId = normalizePositiveInteger(
+    applied.draftInterventionId ?? applied.draft_intervention_id
+  );
+  const followUpRevisionDraftId = normalizePositiveInteger(
+    letterFollowUp.revisionDraftInterventionId ??
+      letterFollowUp.revision_draft_intervention_id ??
+      letterFollowUp.draftInterventionId ??
+      letterFollowUp.draft_intervention_id
+  );
+  const followUpKind = normalizeWorkflowKey(
+    letterFollowUp.kind ?? letterFollowUp.type ?? letterFollowUp.followUpType ?? letterFollowUp.follow_up_type
+  );
+  const followUpMatchesAppliedRevision =
+    !appliedRevision ||
+    followUpKind === "revision" ||
+    Boolean(appliedRevisionDraftId && followUpRevisionDraftId === appliedRevisionDraftId);
   const letterSentAt =
-    letterFollowUp.approvalLetterSentAt ||
-    letterFollowUp.approval_letter_sent_at ||
-    letterFollowUp.sentAt ||
-    letterFollowUp.sent_at ||
-    letterFollowUp.completedAt ||
-    letterFollowUp.completed_at ||
-    null;
-  const letterSent =
+    followUpMatchesAppliedRevision
+      ? (
+          letterFollowUp.approvalLetterSentAt ||
+          letterFollowUp.approval_letter_sent_at ||
+          letterFollowUp.sentAt ||
+          letterFollowUp.sent_at ||
+          letterFollowUp.completedAt ||
+          letterFollowUp.completed_at ||
+          null
+        )
+      : null;
+  const letterSent = followUpMatchesAppliedRevision && (
     Boolean(letterSentAt) ||
     normalizeWorkflowKey(letterFollowUp.status) === "sent" ||
-    letterFollowUp.completed === true;
+    letterFollowUp.completed === true
+  );
   const proposalId = normalizePositiveInteger(intervention.proposalId ?? intervention.proposal_id);
   const proposalReviewStatus = normalizeInterventionReviewStatus(
     intervention.proposalReviewStatus ?? intervention.proposal_review_status,
@@ -296,9 +320,6 @@ export const resolveInterventionApprovalLetterFollowUp = intervention => {
   }
 
   const isRevision = appliedRevision || proposalKind === "revision";
-  const applied = metadata.lastAppliedRevision && typeof metadata.lastAppliedRevision === "object"
-    ? metadata.lastAppliedRevision
-    : {};
   const title =
     applied.sourceTitle ||
     metadata.title ||

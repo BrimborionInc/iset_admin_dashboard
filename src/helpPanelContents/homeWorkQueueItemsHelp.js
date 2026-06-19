@@ -22,8 +22,9 @@ const HomeWorkQueueItemsHelp = () => (
       proposal or revision rows open the Case Workspace approval-letter follow-up.
     </Box>
     <Box>
-      In the <strong>Pending Decision</strong> queue, select the applicant or item name to complete the
-      review. Approval decisions are handled inside the workspace rather than as inline table actions.
+      In the <strong>Pending Review</strong> or <strong>Pending Decision</strong> queue, select the
+      applicant or item name to complete the review or final decision. These actions are handled
+      inside the workspace rather than as inline table actions.
     </Box>
     <Box>
       Use the Tag column to add or remove items from <strong>My Tagged Applications</strong> when you
@@ -44,7 +45,7 @@ Keep answers operational:
 - Help the user identify which row to open next.
 - Mention search, sort, column resizing, item-name workspace links, and tagging.
 - In coordinator-focused answers, emphasize that this table is a launching point into the detailed application or case workspace where notes, messaging, documents, and assessment are actually handled.
-- Clarify that the Pending Decision queue opens through the applicant/item name and that approval decisions happen inside the workspace.
+- Clarify that Pending Review and Pending Decision queues open through the applicant/item name and that review/final-decision actions happen inside the workspace.
 - Clarify that Pending Completion application rows open the active post-decision wizard step: approval letters first, then funding forms and signatures after the approval letter has been sent.
 - Clarify that Pending Completion can also include approved intervention proposal/revision letter follow-up rows, which open Case Workspace for the intervention-scoped approval/funding revision letter.
 - Clarify that assignable rows can use Assign/Reassign inline actions, while the applicant or item name opens the workspace.

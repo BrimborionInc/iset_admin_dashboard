@@ -45,8 +45,8 @@ export const ISET_COORDINATOR_BUCKETS = [
   },
   {
     id: 'approvals-pipeline',
-    label: 'Awaiting Approval',
-    description: 'Assessments submitted for review and approval.'
+    label: 'Submitted for Review',
+    description: 'Submitted assessments and intervention requests waiting for Regional Manager or final decision review.'
   },
   {
     id: 'funding-agreements',
@@ -223,10 +223,10 @@ export const ISET_COORDINATOR_SAMPLE_ITEMS = [
     applicant: 'L. Stonechild',
     region: 'Central',
     owner: 'You',
-    status: 'Pending approval',
+    status: 'Submitted for review',
     dueDate: '2025-03-21',
     submittedAt: '2025-02-24',
-    summary: 'Assessment submitted and awaiting approval decision.',
+    summary: 'Assessment submitted and waiting for review.',
     workspacePath: '/case-assignment-dashboard'
   },
   {

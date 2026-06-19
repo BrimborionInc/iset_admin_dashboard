@@ -102,6 +102,14 @@ const {
   mergeFinancialOverviewCaseContext,
   sanitizeFinancialOverviewSubmissionPayload,
 } = require('../shared/financialOverview');
+const {
+  REVIEW_ACTIONS,
+  REVIEW_STAGES,
+  REVIEW_WORKFLOW_TYPES,
+  buildReviewSubjectKey,
+  getReviewTransition,
+  isTwoStepReviewEnabled,
+} = require('./src/lib/reviewWorkflow');
 
 // Increase default listener cap to avoid noisy warnings when wiring shared buses.
 events.EventEmitter.defaultMaxListeners = 20;
@@ -3821,6 +3829,7 @@ function buildPdfSignaturePanelHtml({
 function buildAssessmentAgreementSectionHtml({
   agreeWithCoordinator,
   denialReason,
+  reviewSignatureHtml,
   approvalSignatureHtml
 } = {}) {
   const normalizedDecision = normaliseString(agreeWithCoordinator);
@@ -3839,6 +3848,10 @@ function buildAssessmentAgreementSectionHtml({
         </td>
         <td class="label">Reason for denial by NWAC (if applicable)</td>
         <td><div class="text-field large">${escapeHtml(denialReason || '')}</div></td>
+      </tr>
+      <tr>
+        <td class="label">Regional Manager review/sign-off</td>
+        <td colspan="3">${reviewSignatureHtml || buildPdfSignaturePanelHtml({})}</td>
       </tr>
       <tr>
         <td class="label">Approver eSignature</td>
@@ -5144,6 +5157,7 @@ async function buildAssessmentPdfFields({
   caseContext,
   snapshotOverride = null,
   recommendationSignature = null,
+  reviewSignature = null,
   approvalSignature = null,
   includeAgreementSection = false,
   versionNumber = null,
@@ -5191,6 +5205,10 @@ async function buildAssessmentPdfFields({
     signerName: recommendationSignature?.signerName,
     signedAt: recommendationSignature?.signedAt
   });
+  const reviewSignatureHtml = buildPdfSignaturePanelHtml({
+    signerName: reviewSignature?.signerName,
+    signedAt: reviewSignature?.signedAt
+  });
   const approvalSignatureHtml = buildPdfSignaturePanelHtml({
     signerName: approvalSignature?.signerName,
     signedAt: approvalSignature?.signedAt
@@ -5199,6 +5217,7 @@ async function buildAssessmentPdfFields({
     ? buildAssessmentAgreementSectionHtml({
         agreeWithCoordinator: snapshot?.agree_with_coordinator || '',
         denialReason: snapshot?.denial_reason || '',
+        reviewSignatureHtml,
         approvalSignatureHtml
       })
     : '';
@@ -5824,6 +5843,7 @@ async function generateAssessmentPdfBuffer({
   caseContext = null,
   snapshotOverride = null,
   recommendationSignature = null,
+  reviewSignature = null,
   approvalSignature = null,
   includeAgreementSection = false,
   versionNumber = null,
@@ -5842,6 +5862,7 @@ async function generateAssessmentPdfBuffer({
     caseContext,
     snapshotOverride,
     recommendationSignature,
+    reviewSignature,
     approvalSignature,
     includeAgreementSection,
     versionNumber,
@@ -6193,6 +6214,8 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'staff_message_thread',
   'staff_tutorial_progress',
   'iset_case_action_item',
+  'iset_review_workflow_event',
+  'iset_review_workflow',
   'iset_case_action_plan',
   'iset_application_assessment',
   'iset_case_assessment',
@@ -6236,6 +6259,7 @@ const ISET_TEST_DATA_TABLE_ORDER = [
   'iset_event_entry',
   'message_signing_request',
   'signing_request',
+  'message_item',
   'cfa_version_documents',
   'cfa_version',
   'cfa_series',
@@ -12080,6 +12104,557 @@ function stripApplicationAssessmentRootContext(context = {}) {
   return nextContext;
 }
 
+const APPLICATION_ASSESSMENT_DECISION_CONTEXT_KEYS = [
+  'assessment_nwac_review_status',
+  'decisionLetterDrafts',
+  'decision_letter_drafts',
+  'decisionLetter',
+  'decision_letter',
+  'decisionLetterPackDrafts',
+  'decision_letter_pack_drafts',
+  'decisionLetterSent',
+  'decision_letter_sent',
+  'decisionLetterSentType',
+  'decision_letter_sent_type',
+  'decisionLetterSentAt',
+  'decision_letter_sent_at',
+  'fundingDecisionReasonCode',
+  'fundingDecisionReasonLabel',
+  'fundingDecisionReasonExplanation'
+];
+
+function clearApplicationAssessmentDecisionContext(context = {}, applicationId = null) {
+  if (!isPlainObject(context)) return {};
+  const nextContext = stripApplicationAssessmentRootContext(context) || {};
+  const applicationKey = normalizeApplicationContextKey(applicationId);
+  if (
+    applicationKey &&
+    isPlainObject(nextContext[APPLICATION_ASSESSMENT_CONTEXT_KEY]) &&
+    isPlainObject(nextContext[APPLICATION_ASSESSMENT_CONTEXT_KEY][applicationKey])
+  ) {
+    const scopedContext = { ...nextContext[APPLICATION_ASSESSMENT_CONTEXT_KEY][applicationKey] };
+    APPLICATION_ASSESSMENT_DECISION_CONTEXT_KEYS.forEach(key => {
+      delete scopedContext[key];
+    });
+    nextContext[APPLICATION_ASSESSMENT_CONTEXT_KEY] = {
+      ...nextContext[APPLICATION_ASSESSMENT_CONTEXT_KEY],
+      [applicationKey]: scopedContext,
+    };
+  }
+  return nextContext;
+}
+
+const REVIEW_WORKFLOW_FEATURE_SCOPE = 'feature_flags';
+const REVIEW_WORKFLOW_FEATURE_KEY = 'workflow.two_step_rm_review.enabled';
+
+function parseRuntimeJsonConfigValue(value) {
+  if (!value) return null;
+  if (typeof value === 'object') return value;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch (_) {
+      return null;
+    }
+  }
+  return null;
+}
+
+async function readTwoStepReviewFeatureConfig(connection = null) {
+  const runner = connection || pool;
+  try {
+    const [[row]] = await runner.query(
+      'SELECT v FROM iset_runtime_config WHERE scope = ? AND k = ? LIMIT 1',
+      [REVIEW_WORKFLOW_FEATURE_SCOPE, REVIEW_WORKFLOW_FEATURE_KEY]
+    );
+    return parseRuntimeJsonConfigValue(row?.v) || { enabled: false };
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err)) {
+      console.warn('[review-workflow] failed to read feature flag:', err?.message || err);
+    }
+    return { enabled: false };
+  }
+}
+
+async function isReviewWorkflowEnabledForType(workflowType, connection = null) {
+  const config = await readTwoStepReviewFeatureConfig(connection);
+  return isTwoStepReviewEnabled(config, workflowType);
+}
+
+function serializeReviewWorkflowRow(row) {
+  if (!row) return null;
+  const parseMetadata = parseRuntimeJsonConfigValue(row.metadata_json) || null;
+  return {
+    id: row.id ? Number(row.id) : null,
+    workflowType: row.workflow_type || null,
+    workflow_type: row.workflow_type || null,
+    subjectKey: row.subject_key || null,
+    subject_key: row.subject_key || null,
+    caseId: row.case_id ? Number(row.case_id) : null,
+    case_id: row.case_id ? Number(row.case_id) : null,
+    applicationId: row.application_id ? Number(row.application_id) : null,
+    application_id: row.application_id ? Number(row.application_id) : null,
+    actionPlanId: row.action_plan_id ? Number(row.action_plan_id) : null,
+    action_plan_id: row.action_plan_id ? Number(row.action_plan_id) : null,
+    interventionId: row.intervention_id ? Number(row.intervention_id) : null,
+    intervention_id: row.intervention_id ? Number(row.intervention_id) : null,
+    proposalId: row.proposal_id ? Number(row.proposal_id) : null,
+    proposal_id: row.proposal_id ? Number(row.proposal_id) : null,
+    currentStage: row.current_stage || null,
+    current_stage: row.current_stage || null,
+    currentOwnerRole: row.current_owner_role || null,
+    current_owner_role: row.current_owner_role || null,
+    currentOwnerStaffProfileId: row.current_owner_staff_profile_id ? Number(row.current_owner_staff_profile_id) : null,
+    current_owner_staff_profile_id: row.current_owner_staff_profile_id ? Number(row.current_owner_staff_profile_id) : null,
+    submittedByStaffProfileId: row.submitted_by_staff_profile_id ? Number(row.submitted_by_staff_profile_id) : null,
+    submitted_by_staff_profile_id: row.submitted_by_staff_profile_id ? Number(row.submitted_by_staff_profile_id) : null,
+    submittedAt: toIsoDateTime(row.submitted_at),
+    submitted_at: toIsoDateTime(row.submitted_at),
+    rmReviewedByStaffProfileId: row.rm_reviewed_by_staff_profile_id ? Number(row.rm_reviewed_by_staff_profile_id) : null,
+    rm_reviewed_by_staff_profile_id: row.rm_reviewed_by_staff_profile_id ? Number(row.rm_reviewed_by_staff_profile_id) : null,
+    rmReviewedAt: toIsoDateTime(row.rm_reviewed_at),
+    rm_reviewed_at: toIsoDateTime(row.rm_reviewed_at),
+    rmReviewNote: row.rm_review_note || null,
+    rm_review_note: row.rm_review_note || null,
+    nwacDecidedByStaffProfileId: row.nwac_decided_by_staff_profile_id ? Number(row.nwac_decided_by_staff_profile_id) : null,
+    nwac_decided_by_staff_profile_id: row.nwac_decided_by_staff_profile_id ? Number(row.nwac_decided_by_staff_profile_id) : null,
+    nwacDecidedAt: toIsoDateTime(row.nwac_decided_at),
+    nwac_decided_at: toIsoDateTime(row.nwac_decided_at),
+    nwacDecision: row.nwac_decision || null,
+    nwac_decision: row.nwac_decision || null,
+    nwacDecisionNote: row.nwac_decision_note || null,
+    nwac_decision_note: row.nwac_decision_note || null,
+    metadata: parseMetadata,
+    metadata_json: parseMetadata,
+    createdAt: toIsoDateTime(row.created_at),
+    created_at: toIsoDateTime(row.created_at),
+    updatedAt: toIsoDateTime(row.updated_at),
+    updated_at: toIsoDateTime(row.updated_at),
+  };
+}
+
+function serializePrefixedReviewWorkflowRow(row, prefix = 'review_workflow_') {
+  if (!row || !row[`${prefix}id`]) return null;
+  return serializeReviewWorkflowRow({
+    id: row[`${prefix}id`],
+    workflow_type: row[`${prefix}type`],
+    subject_key: row[`${prefix}subject_key`],
+    case_id: row[`${prefix}case_id`],
+    application_id: row[`${prefix}application_id`],
+    action_plan_id: row[`${prefix}action_plan_id`],
+    intervention_id: row[`${prefix}intervention_id`],
+    proposal_id: row[`${prefix}proposal_id`],
+    current_stage: row[`${prefix}current_stage`],
+    current_owner_role: row[`${prefix}current_owner_role`],
+    current_owner_staff_profile_id: row[`${prefix}current_owner_staff_profile_id`],
+    submitted_by_staff_profile_id: row[`${prefix}submitted_by_staff_profile_id`],
+    submitted_at: row[`${prefix}submitted_at`],
+    rm_reviewed_by_staff_profile_id: row[`${prefix}rm_reviewed_by_staff_profile_id`],
+    rm_reviewed_at: row[`${prefix}rm_reviewed_at`],
+    rm_review_note: row[`${prefix}rm_review_note`],
+    nwac_decided_by_staff_profile_id: row[`${prefix}nwac_decided_by_staff_profile_id`],
+    nwac_decided_at: row[`${prefix}nwac_decided_at`],
+    nwac_decision: row[`${prefix}nwac_decision`],
+    nwac_decision_note: row[`${prefix}nwac_decision_note`],
+    metadata_json: row[`${prefix}metadata_json`],
+    created_at: row[`${prefix}created_at`],
+    updated_at: row[`${prefix}updated_at`],
+  });
+}
+
+function resolveInterventionReviewWorkflowType(row = {}) {
+  const proposalKind = normaliseInterventionProposalKind(
+    row.proposal_kind ??
+    row.intervention_proposal_kind ??
+    null,
+    'new'
+  );
+  const metadata = safeJsonParse(row.metadata_json ?? row.metadataJson ?? row.metadata, null) || {};
+  const revisionInfo =
+    metadata.revision && typeof metadata.revision === 'object'
+      ? metadata.revision
+      : null;
+  const sourceInterventionId =
+    normalisePositiveInteger(row.proposal_source_intervention_id ?? row.source_intervention_id) ||
+    normalisePositiveInteger(revisionInfo?.sourceInterventionId ?? revisionInfo?.source_intervention_id);
+  return proposalKind === 'revision' || sourceInterventionId
+    ? REVIEW_WORKFLOW_TYPES.InterventionRevision
+    : REVIEW_WORKFLOW_TYPES.InterventionProposal;
+}
+
+function buildInterventionReviewWorkflowSubject(row = {}) {
+  const workflowType = resolveInterventionReviewWorkflowType(row);
+  const proposalId = normalisePositiveInteger(row.proposal_id ?? row.intervention_proposal_id);
+  const interventionId = normalisePositiveInteger(row.id ?? row.intervention_id);
+  return {
+    workflowType,
+    caseId: normalisePositiveInteger(row.case_id ?? row.caseId) || null,
+    applicationId: normalisePositiveInteger(row.application_id ?? row.applicationId) || null,
+    actionPlanId: normalisePositiveInteger(row.action_plan_id ?? row.actionPlanId) || null,
+    interventionId,
+    proposalId,
+  };
+}
+
+function buildReviewWorkflowSelectColumns(alias = 'rw', prefix = 'review_workflow') {
+  const qualified = String(alias || 'rw').trim() || 'rw';
+  const p = String(prefix || 'review_workflow').trim() || 'review_workflow';
+  return [
+    `${qualified}.id AS ${p}_id`,
+    `${qualified}.workflow_type AS ${p}_type`,
+    `${qualified}.subject_key AS ${p}_subject_key`,
+    `${qualified}.case_id AS ${p}_case_id`,
+    `${qualified}.application_id AS ${p}_application_id`,
+    `${qualified}.action_plan_id AS ${p}_action_plan_id`,
+    `${qualified}.intervention_id AS ${p}_intervention_id`,
+    `${qualified}.proposal_id AS ${p}_proposal_id`,
+    `${qualified}.current_stage AS ${p}_current_stage`,
+    `${qualified}.current_owner_role AS ${p}_current_owner_role`,
+    `${qualified}.current_owner_staff_profile_id AS ${p}_current_owner_staff_profile_id`,
+    `${qualified}.submitted_by_staff_profile_id AS ${p}_submitted_by_staff_profile_id`,
+    `${qualified}.submitted_at AS ${p}_submitted_at`,
+    `${qualified}.rm_reviewed_by_staff_profile_id AS ${p}_rm_reviewed_by_staff_profile_id`,
+    `${qualified}.rm_reviewed_at AS ${p}_rm_reviewed_at`,
+    `${qualified}.rm_review_note AS ${p}_rm_review_note`,
+    `${qualified}.nwac_decided_by_staff_profile_id AS ${p}_nwac_decided_by_staff_profile_id`,
+    `${qualified}.nwac_decided_at AS ${p}_nwac_decided_at`,
+    `${qualified}.nwac_decision AS ${p}_nwac_decision`,
+    `${qualified}.nwac_decision_note AS ${p}_nwac_decision_note`,
+    `${qualified}.metadata_json AS ${p}_metadata_json`,
+    `${qualified}.created_at AS ${p}_created_at`,
+    `${qualified}.updated_at AS ${p}_updated_at`,
+  ].join(',\n       ');
+}
+
+async function fetchReviewWorkflowBySubjectKey(connection, subjectKey, { forUpdate = false } = {}) {
+  if (!subjectKey) return null;
+  const runner = connection || pool;
+  const [[row]] = await runner.query(
+    `SELECT *
+       FROM iset_review_workflow
+      WHERE subject_key = ?
+        AND archived_at IS NULL
+      LIMIT 1${forUpdate ? ' FOR UPDATE' : ''}`,
+    [subjectKey]
+  );
+  return row || null;
+}
+
+async function fetchApplicationAssessmentReviewWorkflow(connection, { applicationId } = {}, options = {}) {
+  return fetchReviewWorkflowBySubject(connection, {
+    workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+    applicationId,
+  }, options);
+}
+
+async function fetchInterventionReviewWorkflow(connection, { workflowType, interventionId, proposalId } = {}, options = {}) {
+  return fetchReviewWorkflowBySubject(connection, {
+    workflowType,
+    interventionId,
+    proposalId,
+  }, options);
+}
+
+async function fetchReviewWorkflowBySubject(connection, {
+  workflowType,
+  applicationId,
+  interventionId,
+  proposalId,
+} = {}, options = {}) {
+  const subjectKey = buildReviewSubjectKey({
+    workflowType,
+    applicationId,
+    interventionId,
+    proposalId,
+  });
+  if (!subjectKey) return null;
+  return fetchReviewWorkflowBySubjectKey(connection, subjectKey, options);
+}
+
+async function insertReviewWorkflowEvent(connection, workflowRow, {
+  action,
+  fromStage = null,
+  toStage = null,
+  actorStaffProfileId = null,
+  actorRole = null,
+  note = null,
+  payload = null,
+} = {}) {
+  if (!workflowRow?.id) return;
+  const payloadJson = payload && typeof payload === 'object' ? JSON.stringify(payload) : null;
+  await connection.query(
+    `INSERT INTO iset_review_workflow_event
+       (review_workflow_id, workflow_type, subject_key, action, from_stage, to_stage,
+        actor_staff_profile_id, actor_role, note, payload_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      workflowRow.id,
+      workflowRow.workflow_type,
+      workflowRow.subject_key,
+      action,
+      fromStage || null,
+      toStage || null,
+      actorStaffProfileId || null,
+      actorRole || null,
+      note || null,
+      payloadJson
+    ]
+  );
+}
+
+async function refreshReviewWorkflowById(connection, workflowId) {
+  const [[row]] = await connection.query(
+    'SELECT * FROM iset_review_workflow WHERE id = ? LIMIT 1',
+    [workflowId]
+  );
+  return row || null;
+}
+
+async function startReviewWorkflow(connection, {
+  workflowType,
+  caseId,
+  applicationId,
+  actionPlanId = null,
+  interventionId = null,
+  proposalId = null,
+  actorStaffProfileId = null,
+  actorRole = null,
+  metadata = null,
+} = {}) {
+  const subjectKey = buildReviewSubjectKey({
+    workflowType,
+    applicationId,
+    interventionId,
+    proposalId,
+  });
+  if (!subjectKey) return null;
+  const normalizedWorkflowType = REVIEW_WORKFLOW_TYPES[workflowType]
+    ? REVIEW_WORKFLOW_TYPES[workflowType]
+    : String(workflowType || '').trim().toLowerCase();
+
+  const existing = await fetchReviewWorkflowBySubjectKey(connection, subjectKey, { forUpdate: true });
+  const fromStage = existing?.current_stage || null;
+  const transition = getReviewTransition({
+    action: REVIEW_ACTIONS.SubmitForRmReview,
+    currentStage: fromStage,
+    role: actorRole,
+  });
+  if (!transition.allowed) {
+    const err = new Error('review_workflow_transition_forbidden');
+    err.status = 403;
+    throw err;
+  }
+
+  const metadataJson = metadata && typeof metadata === 'object' ? JSON.stringify(metadata) : null;
+  let workflowId = existing?.id || null;
+  if (existing) {
+    await connection.query(
+      `UPDATE iset_review_workflow
+          SET case_id = ?,
+              application_id = ?,
+              action_plan_id = ?,
+              intervention_id = ?,
+              proposal_id = ?,
+              current_stage = ?,
+              current_owner_role = ?,
+              current_owner_staff_profile_id = NULL,
+              submitted_by_staff_profile_id = ?,
+              submitted_at = NOW(),
+              rm_reviewed_by_staff_profile_id = NULL,
+              rm_reviewed_at = NULL,
+              rm_review_note = NULL,
+              nwac_decided_by_staff_profile_id = NULL,
+              nwac_decided_at = NULL,
+              nwac_decision = NULL,
+              nwac_decision_note = NULL,
+              metadata_json = ?,
+              archived_at = NULL
+        WHERE id = ?`,
+      [
+        caseId || null,
+        applicationId || null,
+        actionPlanId || null,
+        interventionId || null,
+        proposalId || null,
+        transition.nextStage,
+        transition.nextOwnerRole,
+        actorStaffProfileId || null,
+        metadataJson,
+        existing.id
+      ]
+    );
+  } else {
+    const [result] = await connection.query(
+      `INSERT INTO iset_review_workflow
+         (workflow_type, subject_key, case_id, application_id, action_plan_id, intervention_id, proposal_id, current_stage, current_owner_role,
+          submitted_by_staff_profile_id, submitted_at, metadata_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
+      [
+        normalizedWorkflowType,
+        subjectKey,
+        caseId || null,
+        applicationId || null,
+        actionPlanId || null,
+        interventionId || null,
+        proposalId || null,
+        transition.nextStage,
+        transition.nextOwnerRole,
+        actorStaffProfileId || null,
+        metadataJson
+      ]
+    );
+    workflowId = result?.insertId || null;
+  }
+
+  const updated = workflowId ? await refreshReviewWorkflowById(connection, workflowId) : null;
+  if (updated) {
+    await insertReviewWorkflowEvent(connection, updated, {
+      action: REVIEW_ACTIONS.SubmitForRmReview,
+      fromStage,
+      toStage: updated.current_stage,
+      actorStaffProfileId,
+      actorRole,
+      payload: metadata,
+    });
+  }
+  return updated;
+}
+
+async function startApplicationAssessmentReviewWorkflow(connection, options = {}) {
+  return startReviewWorkflow(connection, {
+    ...options,
+    workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+  });
+}
+
+async function startInterventionReviewWorkflow(connection, options = {}) {
+  return startReviewWorkflow(connection, options);
+}
+
+async function applyReviewWorkflowAction(connection, {
+  workflowType,
+  caseId,
+  applicationId,
+  actionPlanId = null,
+  interventionId = null,
+  proposalId = null,
+  action,
+  actorStaffProfileId = null,
+  actorRole = null,
+  note = null,
+  payload = null,
+} = {}) {
+  const subjectKey = buildReviewSubjectKey({
+    workflowType,
+    applicationId,
+    interventionId,
+    proposalId,
+  });
+  if (!subjectKey) {
+    const err = new Error('review_workflow_subject_required');
+    err.status = 400;
+    throw err;
+  }
+  const existing = await fetchReviewWorkflowBySubjectKey(connection, subjectKey, { forUpdate: true });
+  if (!existing) {
+    const err = new Error('review_workflow_not_found');
+    err.status = 404;
+    throw err;
+  }
+  const transition = getReviewTransition({
+    action,
+    currentStage: existing.current_stage,
+    role: actorRole,
+  });
+  if (!transition.allowed) {
+    const err = new Error('review_workflow_transition_forbidden');
+    err.status = 403;
+    throw err;
+  }
+  const cleanNote = normaliseString(note) || null;
+  if (transition.requiresNote && !cleanNote) {
+    const err = new Error('review_workflow_note_required');
+    err.status = 422;
+    throw err;
+  }
+
+  const updates = [
+    'case_id = ?',
+    'application_id = ?',
+    'action_plan_id = ?',
+    'intervention_id = ?',
+    'proposal_id = ?',
+    'current_stage = ?',
+    'current_owner_role = ?',
+    'current_owner_staff_profile_id = NULL',
+    'updated_at = CURRENT_TIMESTAMP',
+  ];
+  const params = [
+    caseId || existing.case_id || null,
+    applicationId || existing.application_id || null,
+    actionPlanId || existing.action_plan_id || null,
+    interventionId || existing.intervention_id || null,
+    proposalId || existing.proposal_id || null,
+    transition.nextStage,
+    transition.nextOwnerRole || null
+  ];
+
+  if (action === REVIEW_ACTIONS.RmReturnToSubmitter || action === REVIEW_ACTIONS.RmForwardChangesToSubmitter || transition.recordsRmSignoff) {
+    updates.push('rm_reviewed_by_staff_profile_id = ?', 'rm_reviewed_at = NOW()');
+    params.push(actorStaffProfileId || null);
+    if (cleanNote || action === REVIEW_ACTIONS.RmReturnToSubmitter || action === REVIEW_ACTIONS.RmForwardChangesToSubmitter) {
+      updates.push('rm_review_note = ?');
+      params.push(cleanNote);
+    }
+  }
+
+  if (transition.nwacDecision) {
+    updates.push(
+      'nwac_decided_by_staff_profile_id = ?',
+      'nwac_decided_at = NOW()',
+      'nwac_decision = ?'
+    );
+    params.push(actorStaffProfileId || null, transition.nwacDecision);
+    if (cleanNote || transition.nwacDecision === 'changes_requested') {
+      updates.push('nwac_decision_note = ?');
+      params.push(cleanNote);
+    }
+  }
+
+  updates.push('metadata_json = ?');
+  params.push(payload && typeof payload === 'object' ? JSON.stringify(payload) : existing.metadata_json || null);
+  params.push(existing.id);
+
+  await connection.query(
+    `UPDATE iset_review_workflow
+        SET ${updates.join(', ')}
+      WHERE id = ?`,
+    params
+  );
+  const updated = await refreshReviewWorkflowById(connection, existing.id);
+  await insertReviewWorkflowEvent(connection, updated, {
+    action,
+    fromStage: existing.current_stage || null,
+    toStage: updated?.current_stage || transition.nextStage,
+    actorStaffProfileId,
+    actorRole,
+    note: cleanNote,
+    payload,
+  });
+  return updated;
+}
+
+async function applyApplicationAssessmentReviewWorkflowAction(connection, options = {}) {
+  return applyReviewWorkflowAction(connection, {
+    ...options,
+    workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+  });
+}
+
+async function applyInterventionReviewWorkflowAction(connection, options = {}) {
+  return applyReviewWorkflowAction(connection, options);
+}
+
 function resolveDecisionLetterDrafts(caseContext = {}, applicationId = null) {
   const assessmentContext = resolveApplicationAssessmentCaseContext(caseContext, applicationId);
   const raw =
@@ -15467,6 +16042,36 @@ async function fetchInterventionSubmittedSignatureFallback({
   }
 }
 
+async function fetchReviewWorkflowRmSignature(connection = pool, subject = {}) {
+  const subjectKey = buildReviewSubjectKey(subject);
+  if (!subjectKey) return null;
+  try {
+    const [[row]] = await connection.query(
+      `SELECT rw.rm_reviewed_at,
+              COALESCE(
+                NULLIF(TRIM(sp.display_name), ''),
+                NULLIF(TRIM(sp.name), ''),
+                NULLIF(TRIM(sp.email), '')
+              ) AS signer_name
+         FROM iset_review_workflow rw
+         LEFT JOIN staff_profiles sp ON sp.id = rw.rm_reviewed_by_staff_profile_id
+        WHERE rw.subject_key = ?
+          AND rw.archived_at IS NULL
+        LIMIT 1`,
+      [subjectKey]
+    );
+    const signerName = normaliseString(row?.signer_name) || null;
+    const signedAt = toIsoDateTime(row?.rm_reviewed_at);
+    if (!signerName && !signedAt) return null;
+    return { signerName, signedAt };
+  } catch (err) {
+    if (!isMissingTableErrorLocal(err)) {
+      console.warn('[assessment-pdf] RM review signature lookup failed', err?.message || err);
+    }
+    return null;
+  }
+}
+
 async function buildInterventionAssessmentSnapshot({
   interventionRow,
   baselineSnapshot = null,
@@ -15661,6 +16266,15 @@ async function generateAndStoreInterventionAssessmentPdf({
     null;
   const signatureContext = {
     submittedSignature: submittedSignatureResolved,
+    reviewSignature: approved
+      ? (
+          await fetchReviewWorkflowRmSignature(connection, buildInterventionReviewWorkflowSubject(interventionRow)) ||
+          (sourceInterventionRow
+            ? await fetchReviewWorkflowRmSignature(connection, buildInterventionReviewWorkflowSubject(sourceInterventionRow))
+            : null) ||
+          null
+        )
+      : null,
     approvedSignature: approved ? (approvedSignature || null) : null
   };
   const assessmentVersionNumber = approved
@@ -15686,6 +16300,7 @@ async function generateAndStoreInterventionAssessmentPdf({
     referenceNumber: context.referenceNumber,
     snapshotOverride: currentSnapshot,
     recommendationSignature: signatureContext.submittedSignature,
+    reviewSignature: signatureContext.reviewSignature,
     approvalSignature: signatureContext.approvedSignature,
     includeAgreementSection: approved,
     versionNumber: assessmentVersionNumber,
@@ -15718,6 +16333,7 @@ async function generateAndStoreInterventionAssessmentPdf({
       referenceNumber: context.referenceNumber,
       snapshotOverride: currentSnapshot,
       recommendationSignature: signatureContext.submittedSignature,
+      reviewSignature: null,
       approvalSignature: null,
       includeAgreementSection: false,
       versionNumber: assessmentVersionNumber,
@@ -16057,6 +16673,7 @@ async function fetchLatestCaseEventSignature(connection, options = {}) {
 
 async function fetchAssessmentPdfSignatureContext({
   caseId,
+  applicationId = null,
   connection = pool,
   submittedFallback = null,
   approvedFallback = null
@@ -16070,8 +16687,15 @@ async function fetchAssessmentPdfSignatureContext({
     await fetchLatestCaseEventSignature(connection, { caseId, eventType: 'nwac_review_submitted', outcome: 'approve' }) ||
     approvedFallback ||
     null;
+  const reviewSignature = applicationId
+    ? await fetchReviewWorkflowRmSignature(connection, {
+        workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+        applicationId,
+      })
+    : null;
   return {
     submittedSignature,
+    reviewSignature,
     approvedSignature
   };
 }
@@ -18964,8 +19588,9 @@ async function fetchActionPlanWithCase(planId) {
   return row || null;
 }
 
-async function fetchInterventionWithCase(interventionId) {
-  const [[row]] = await pool.query(
+async function fetchInterventionWithCase(interventionId, connection = pool, { forUpdate = false } = {}) {
+  const runner = connection || pool;
+  const [[row]] = await runner.query(
     `SELECT
        ci.*,
        ci.esdc_intervention_json AS esdcInterventionJson,
@@ -18973,6 +19598,13 @@ async function fetchInterventionWithCase(interventionId) {
        ap.case_id AS action_plan_case_id,
        ap.id AS action_plan_id,
        ap.funding_stream AS plan_funding_stream,
+       p.id AS proposal_id,
+       p.proposal_kind AS proposal_kind,
+       p.review_status AS proposal_review_status,
+       p.reviewed_at AS proposal_reviewed_at,
+       p.source_intervention_id AS proposal_source_intervention_id,
+       COALESCE(p.application_id, a.id) AS application_id,
+       ${buildReviewWorkflowSelectColumns('rw')},
        c.assigned_staff_profile_id AS assigned_staff_profile_id,
        c.assigned_staff_profile_id AS assigned_to_user_id,
        c.portfolio_region_id,
@@ -18980,9 +19612,25 @@ async function fetchInterventionWithCase(interventionId) {
      FROM iset_case_intervention ci
      LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
      LEFT JOIN iset_case c ON c.id = ci.case_id
+     LEFT JOIN iset_intervention_proposal p ON p.legacy_intervention_id = ci.id
+     LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ${buildCasePrimaryApplicationIdSql('c')})
+     LEFT JOIN iset_review_workflow rw
+       ON rw.archived_at IS NULL
+      AND rw.workflow_type = CASE
+        WHEN p.proposal_kind = 'revision'
+          OR p.source_intervention_id IS NOT NULL
+          OR JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.revision.sourceInterventionId')) IS NOT NULL
+          OR JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.revision.source_intervention_id')) IS NOT NULL
+          THEN 'intervention_revision'
+        ELSE 'intervention_proposal'
+      END
+      AND (
+        (p.id IS NOT NULL AND rw.proposal_id = p.id)
+        OR (p.id IS NULL AND rw.intervention_id = ci.id)
+      )
      LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
      WHERE ci.id = ?
-     LIMIT 1`,
+     LIMIT 1${forUpdate ? ' FOR UPDATE' : ''}`,
     [interventionId]
   );
   return row || null;
@@ -19916,9 +20564,108 @@ const NON_REOPENABLE_APPLICATION_STATUS_KEYS = new Set([
   'denied',
   'cancelled',
 ]);
-const APPROVAL_COST_THRESHOLD = 15000;
-const PROGRAM_ADMIN_APPROVAL_THRESHOLD = 25000;
-const PROGRAM_ADMIN_APPROVER_EMAIL = 'sstacey@nwac.ca';
+const HIGH_VALUE_FUNDING_APPROVAL_THRESHOLD = 20000;
+const HIGH_VALUE_FUNDING_APPROVER_EMAIL = 'sstacey@nwac.ca';
+
+function getFundingApprovalRequesterEmail(req) {
+  return normaliseString(
+    req?.auth?.email ||
+      req?.staffProfile?.email ||
+      req?.user?.email ||
+      req?.cognitoUser?.email ||
+      null
+  )?.toLowerCase() || '';
+}
+
+function formatFundingApprovalThreshold(value = HIGH_VALUE_FUNDING_APPROVAL_THRESHOLD) {
+  return `$${Number(value).toLocaleString('en-CA', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  })}`;
+}
+
+function buildHighValueFundingApprovalMessage() {
+  return `Only Shelley Stacey (${HIGH_VALUE_FUNDING_APPROVER_EMAIL}) can approve funding of ${formatFundingApprovalThreshold()} or above.`;
+}
+
+function resolveHighValueFundingApprovalBlock(req, approvalAmount) {
+  const amount = Number(approvalAmount);
+  if (!Number.isFinite(amount) || amount < HIGH_VALUE_FUNDING_APPROVAL_THRESHOLD) {
+    return null;
+  }
+  if (getFundingApprovalRequesterEmail(req) === HIGH_VALUE_FUNDING_APPROVER_EMAIL) {
+    return null;
+  }
+  return {
+    success: false,
+    error: 'high_value_funding_approval_required',
+    message: buildHighValueFundingApprovalMessage(),
+  };
+}
+
+function resolveApplicationAssessmentFundingApprovalAmount(assessment) {
+  if (!assessment || typeof assessment !== 'object') return null;
+  const directCandidates = [
+    assessment.assessment_intervention_cost_total,
+    assessment.intervention_cost_total,
+    assessment.interventionCost,
+    assessment.intervention_cost,
+  ];
+  for (const candidate of directCandidates) {
+    const parsed = parseCurrencyValue(candidate);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+
+  const proposedInterventions = normalizeAssessmentProposedInterventions(
+    assessment.assessment_proposed_interventions ??
+      assessment.proposed_interventions ??
+      assessment.proposedInterventions ??
+      null
+  );
+  const proposedTotal = computeProposedInterventionsTotal(proposedInterventions);
+  return Number.isFinite(proposedTotal) ? proposedTotal : null;
+}
+
+function resolveInterventionFundingApprovalAmount(interventionRow, metadataOverride = null) {
+  if (!interventionRow && !metadataOverride) return null;
+  const metadata = metadataOverride || safeJsonParse(interventionRow?.metadata_json, {}) || {};
+  const snapshot = metadata?.snapshot && typeof metadata.snapshot === 'object' ? metadata.snapshot : {};
+  const proposedInterventions = normalizeAssessmentProposedInterventions(
+    metadata.proposedInterventions ?? metadata.proposed_interventions ?? null
+  );
+  const proposedTotal = computeProposedInterventionsTotal(proposedInterventions);
+  if (Number.isFinite(proposedTotal)) return proposedTotal;
+
+  const costLineSources = [
+    metadata.costLines,
+    metadata.cost_lines,
+    snapshot.costLines,
+    snapshot.cost_lines,
+  ];
+  for (const source of costLineSources) {
+    if (!Array.isArray(source)) continue;
+    const costLines = source.map(normalizeProposedCostLine).filter(Boolean);
+    const total = computeCostLinesTotal(costLines);
+    if (Number.isFinite(total)) return total;
+  }
+
+  const directCandidates = [
+    metadata.costTotal,
+    metadata.cost_total,
+    snapshot.costTotal,
+    snapshot.cost_total,
+    metadata.cost,
+    snapshot.cost,
+    interventionRow?.intervention_cost,
+    interventionRow?.budget_amount,
+    interventionRow?.approved_amount,
+  ];
+  for (const candidate of directCandidates) {
+    const parsed = parseCurrencyValue(candidate);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
 function normaliseApplicationStatusValue(status) {
   if (status === undefined || status === null) return null;
   return String(status).trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -21310,11 +22057,23 @@ function mergeApprovalLetterFollowUpSent(metadata, details = {}) {
     base.approvalLetterFollowUp && typeof base.approvalLetterFollowUp === 'object'
       ? base.approvalLetterFollowUp
       : {};
+  const appliedRevision =
+    base.lastAppliedRevision && typeof base.lastAppliedRevision === 'object'
+      ? base.lastAppliedRevision
+      : null;
   const sentAt = details.sentAt || new Date().toISOString();
   const next = pruneNullish({
     ...existing,
     status: 'sent',
     completed: true,
+    kind: existing.kind || (appliedRevision ? 'revision' : 'new'),
+    revisionDraftInterventionId:
+      existing.revisionDraftInterventionId ||
+      existing.revision_draft_intervention_id ||
+      appliedRevision?.draftInterventionId ||
+      appliedRevision?.draft_intervention_id ||
+      null,
+    appliedAt: existing.appliedAt || existing.applied_at || appliedRevision?.appliedAt || appliedRevision?.applied_at || null,
     firstSentAt: existing.firstSentAt || existing.sentAt || existing.approvalLetterSentAt || sentAt,
     sentAt,
     approvalLetterSentAt: sentAt,
@@ -21615,6 +22374,7 @@ function mapInterventionRow(row) {
       row.intervention_proposal_kind ??
       null
     ) || null;
+  const reviewWorkflow = serializePrefixedReviewWorkflowRow(row);
 
   const compliance = {
     ilmp:
@@ -21662,6 +22422,18 @@ function mapInterventionRow(row) {
     proposal_reviewed_at: toIsoDateTime(row.proposal_reviewed_at ?? row.intervention_proposal_reviewed_at ?? null),
     proposalSourceInterventionId: normalisePositiveInteger(row.proposal_source_intervention_id ?? row.source_intervention_id ?? null),
     proposal_source_intervention_id: normalisePositiveInteger(row.proposal_source_intervention_id ?? row.source_intervention_id ?? null),
+    twoStepReviewEnabled:
+      row.two_step_review_enabled === true ||
+      row.twoStepReviewEnabled === true ||
+      row.two_step_review_enabled === 1 ||
+      Boolean(reviewWorkflow),
+    two_step_review_enabled:
+      row.two_step_review_enabled === true ||
+      row.twoStepReviewEnabled === true ||
+      row.two_step_review_enabled === 1 ||
+      Boolean(reviewWorkflow),
+    reviewWorkflow: reviewWorkflow || null,
+    review_workflow: reviewWorkflow || null,
     deliveryStatus: interventionState.deliveryStatus,
     delivery_status: interventionState.deliveryStatus,
     startDate,
@@ -40122,10 +40894,16 @@ app.get('/api/dashboard/awaiting-approval-items', async (req, res) => {
   const applicationLifecycleStatusExpr = buildApplicationLifecycleStatusExpr('a');
   const filters = [`${applicationLifecycleStatusExpr} = ?`];
   const params = ['pending_decision'];
+  if (role === 'NWAC Administrator') {
+    filters.push('(rw.id IS NULL OR rw.current_stage = ?)');
+    params.push(REVIEW_STAGES.NwacReview);
+  }
   if (role === 'Regional Manager') {
     if (!regionIds.length) {
       return res.json({ role, items: [] });
     }
+    filters.push('rw.current_stage IN (?, ?)');
+    params.push(REVIEW_STAGES.RmReview, REVIEW_STAGES.ReturnedToRm);
     if (regionIds.length === 1) {
       filters.push('sp.region_id = ?');
       params.push(regionIds[0]);
@@ -40161,6 +40939,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       ca.intervention_budget_pot_id,
       ca.proposed_interventions,
       bp.code AS budget_pot_code,
+      rw.current_stage AS review_workflow_stage,
+      rw.current_owner_role AS review_workflow_owner_role,
+      rw.nwac_decision AS review_workflow_nwac_decision,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"first-name\"')) AS submission_first_name,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"last-name\"')) AS submission_last_name,
       JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
@@ -40173,6 +40954,10 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     LEFT JOIN staff_profiles sp ON sp.id = c.assigned_staff_profile_id
     LEFT JOIN esdc_intervention_code ic ON ic.code = ca.intervention_code
     LEFT JOIN budget_pot bp ON bp.id = ca.intervention_budget_pot_id
+    LEFT JOIN iset_review_workflow rw
+      ON rw.workflow_type = 'application_assessment'
+     AND rw.application_id = a.id
+     AND rw.archived_at IS NULL
     ${where}
     ORDER BY a.updated_at DESC, a.created_at DESC
     LIMIT 200
@@ -40247,6 +41032,12 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         budgetPotCode: normaliseString(r.budget_pot_code) || null,
         budget_pot_code: normaliseString(r.budget_pot_code) || null,
         assessment_esdc_eligibility: r.assessment_esdc_eligibility || null,
+        review_workflow_stage: normaliseString(r.review_workflow_stage) || null,
+        reviewWorkflowStage: normaliseString(r.review_workflow_stage) || null,
+        review_workflow_owner_role: normaliseString(r.review_workflow_owner_role) || null,
+        reviewWorkflowOwnerRole: normaliseString(r.review_workflow_owner_role) || null,
+        review_workflow_nwac_decision: normaliseString(r.review_workflow_nwac_decision) || null,
+        reviewWorkflowNwacDecision: normaliseString(r.review_workflow_nwac_decision) || null,
         approval_request_type: 'new_application',
         approval_request_type_label: 'New application assessment',
       };
@@ -40536,10 +41327,16 @@ app.get('/api/dashboard/intervention-approval-items', async (req, res) => {
   const legacyParams = ['submitted', 'in_review'];
   const proposalOuterFilters = [];
   const proposalParams = ['submitted', 'in_review', 'submitted', 'in_review'];
+  if (role === 'NWAC Administrator') {
+    proposalOuterFilters.push('(q.review_workflow_id IS NULL OR q.review_workflow_stage = ?)');
+    proposalParams.push(REVIEW_STAGES.NwacReview);
+  }
   if (role === 'Regional Manager') {
     if (!regionIds.length) {
       return res.json({ role, items: [] });
     }
+    proposalOuterFilters.push('q.review_workflow_stage IN (?, ?)');
+    proposalParams.push(REVIEW_STAGES.RmReview, REVIEW_STAGES.ReturnedToRm);
     if (regionIds.length === 1) {
       legacyFilters.push('sp.region_id = ?');
       legacyParams.push(regionIds[0]);
@@ -40684,7 +41481,11 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
           JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"address-province\"')) AS submission_address_province,
           JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.address.province')) AS client_address_province,
-          ic.label AS intervention_label
+          ic.label AS intervention_label,
+          rw.id AS review_workflow_id,
+          rw.current_stage AS review_workflow_stage,
+          rw.current_owner_role AS review_workflow_owner_role,
+          rw.nwac_decision AS review_workflow_nwac_decision
         FROM iset_intervention_proposal p
         JOIN iset_case c ON c.id = p.case_id
         LEFT JOIN iset_case_intervention ci ON ci.id = p.legacy_intervention_id
@@ -40701,6 +41502,17 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
             (ap.budget_pot REGEXP '^[0-9]+$' AND bp.id = CAST(ap.budget_pot AS UNSIGNED))
             OR bp.code = ap.budget_pot
           )
+        LEFT JOIN iset_review_workflow rw
+          ON rw.archived_at IS NULL
+         AND rw.workflow_type = CASE
+           WHEN p.proposal_kind = 'revision' OR p.source_intervention_id IS NOT NULL
+             THEN 'intervention_revision'
+           ELSE 'intervention_proposal'
+         END
+         AND (
+           rw.proposal_id = p.id
+           OR (p.id IS NULL AND rw.intervention_id = COALESCE(p.legacy_intervention_id, p.source_intervention_id))
+         )
         WHERE ${proposalReviewStatusExpr} IN (?, ?)
 
         UNION ALL
@@ -40744,7 +41556,11 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"preferred-name\"')) AS submission_preferred_name,
           JSON_UNQUOTE(JSON_EXTRACT(s.intake_payload, '$.\"address-province\"')) AS submission_address_province,
           JSON_UNQUOTE(JSON_EXTRACT(cl.address_json, '$.address.province')) AS client_address_province,
-          ic.label AS intervention_label
+          ic.label AS intervention_label,
+          rw.id AS review_workflow_id,
+          rw.current_stage AS review_workflow_stage,
+          rw.current_owner_role AS review_workflow_owner_role,
+          rw.nwac_decision AS review_workflow_nwac_decision
         FROM iset_case_intervention ci
         LEFT JOIN iset_intervention_proposal p_existing ON p_existing.legacy_intervention_id = ci.id
         JOIN iset_case c ON c.id = ci.case_id
@@ -40760,6 +41576,15 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
             (ap.budget_pot REGEXP '^[0-9]+$' AND bp.id = CAST(ap.budget_pot AS UNSIGNED))
             OR bp.code = ap.budget_pot
           )
+        LEFT JOIN iset_review_workflow rw
+          ON rw.archived_at IS NULL
+         AND rw.workflow_type = CASE
+           WHEN JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.revision.sourceInterventionId')) IS NOT NULL
+             OR JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.revision.source_intervention_id')) IS NOT NULL
+             THEN 'intervention_revision'
+           ELSE 'intervention_proposal'
+         END
+         AND rw.intervention_id = ci.id
         WHERE p_existing.id IS NULL
           AND ${interventionReviewStatusExpr} IN (?, ?)
       ) q
@@ -40928,6 +41753,12 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         assessment_esdc_eligibility: r.assessment_esdc_eligibility || null,
         budgetPotCode: normaliseString(r.budget_pot_code) || null,
         budget_pot_code: normaliseString(r.budget_pot_code) || null,
+        review_workflow_stage: normaliseString(r.review_workflow_stage) || null,
+        reviewWorkflowStage: normaliseString(r.review_workflow_stage) || null,
+        review_workflow_owner_role: normaliseString(r.review_workflow_owner_role) || null,
+        reviewWorkflowOwnerRole: normaliseString(r.review_workflow_owner_role) || null,
+        review_workflow_nwac_decision: normaliseString(r.review_workflow_nwac_decision) || null,
+        reviewWorkflowNwacDecision: normaliseString(r.review_workflow_nwac_decision) || null,
         approval_request_type: approvalRequestType,
         approval_request_type_label: approvalRequestTypeLabel,
       };
@@ -40977,11 +41808,26 @@ app.get('/api/dashboard/intervention-completion-items', async (req, res) => {
   const interventionDeliveryStatusExpr = buildInterventionDeliveryStatusSql('ci');
   const interventionEffectiveStatusExpr = buildInterventionEffectiveStatusSql('ci');
   const jsonStringExpr = path => `NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '${path}')), ''), 'null')`;
+  const appliedRevisionCondition = `(
+    JSON_TYPE(JSON_EXTRACT(ci.metadata_json, '$.lastAppliedRevision')) = 'OBJECT'
+    OR COALESCE(JSON_LENGTH(JSON_EXTRACT(ci.metadata_json, '$.revisionHistory')), 0) > 0
+  )`;
   const followUpStatusExpr = `LOWER(COALESCE(
     ${jsonStringExpr('$.approvalLetterFollowUp.status')},
     ${jsonStringExpr('$.approval_letter_follow_up.status')},
     ''
   ))`;
+  const followUpKindExpr = `LOWER(COALESCE(
+    ${jsonStringExpr('$.approvalLetterFollowUp.kind')},
+    ${jsonStringExpr('$.approval_letter_follow_up.kind')},
+    ''
+  ))`;
+  const followUpRevisionDraftExpr = `COALESCE(
+    ${jsonStringExpr('$.approvalLetterFollowUp.revisionDraftInterventionId')},
+    ${jsonStringExpr('$.approvalLetterFollowUp.revision_draft_intervention_id')},
+    ${jsonStringExpr('$.approval_letter_follow_up.revisionDraftInterventionId')},
+    ${jsonStringExpr('$.approval_letter_follow_up.revision_draft_intervention_id')}
+  )`;
   const followUpSentAtExpr = `COALESCE(
     ${jsonStringExpr('$.approvalLetterFollowUp.sentAt')},
     ${jsonStringExpr('$.approvalLetterFollowUp.approvalLetterSentAt')},
@@ -40995,14 +41841,18 @@ app.get('/api/dashboard/intervention-completion-items', async (req, res) => {
     ${jsonStringExpr('$.approval_letter_follow_up.completed')},
     ''
   ))`;
-  const followUpSentCondition = `(
+  const rawFollowUpSentCondition = `(
     ${followUpStatusExpr} IN ('sent', 'complete', 'completed')
     OR ${followUpSentAtExpr} IS NOT NULL
     OR ${followUpCompletedExpr} IN ('true', '1', 'yes')
   )`;
-  const appliedRevisionCondition = `(
-    JSON_TYPE(JSON_EXTRACT(ci.metadata_json, '$.lastAppliedRevision')) = 'OBJECT'
-    OR COALESCE(JSON_LENGTH(JSON_EXTRACT(ci.metadata_json, '$.revisionHistory')), 0) > 0
+  const followUpSentCondition = `(
+    ${rawFollowUpSentCondition}
+    AND (
+      NOT ${appliedRevisionCondition}
+      OR ${followUpKindExpr} = 'revision'
+      OR ${followUpRevisionDraftExpr} IS NOT NULL
+    )
   )`;
   const manualBackloadCondition = `(
     LOWER(COALESCE(${jsonStringExpr('$.source')}, '')) IN ('manual_backload', '${AUTO_PLAN_METADATA_SOURCE}')
@@ -47837,6 +48687,15 @@ function handleAdminDocumentUpload({ requireApplicant = false, applicantIdHint =
     const docTypeRaw = typeof req.body?.documentType === 'string' ? req.body.documentType.trim() : '';
     const docType = docTypeRaw || null;
     const isEiVerificationDocument = docType && docType.toLowerCase() === 'ei_verification';
+    const eiEligibilityStatusRaw =
+      typeof req.body?.eligibilityStatus === 'string'
+        ? req.body.eligibilityStatus.trim()
+        : (typeof req.body?.esdcEligibility === 'string'
+          ? req.body.esdcEligibility.trim()
+          : (typeof req.body?.assessment_esdc_eligibility === 'string'
+            ? req.body.assessment_esdc_eligibility.trim()
+            : ''));
+    const eiEligibilityStatus = eiEligibilityStatusRaw ? eiEligibilityStatusRaw.slice(0, 100) : null;
     if (isEiVerificationDocument) {
       const eligibilityRoleAllowlist = new Set([
         'systemadministrator',
@@ -48061,6 +48920,18 @@ function handleAdminDocumentUpload({ requireApplicant = false, applicantIdHint =
         insertPayload
       );
       insertId = result.insertId || null;
+      if (isEiVerificationDocument && eiEligibilityStatus && (applicationId || applicationIdRaw) && (caseId || caseIdRaw)) {
+        await pool.query(
+          `INSERT INTO iset_application_assessment
+             (case_id, application_id, esdc_eligibility)
+           VALUES (?, ?, ?)
+           ON DUPLICATE KEY UPDATE
+             case_id = VALUES(case_id),
+             esdc_eligibility = VALUES(esdc_eligibility),
+             updated_at = NOW()`,
+          [caseId || caseIdRaw, applicationId || applicationIdRaw, eiEligibilityStatus]
+        );
+      }
     } catch (dbErr) {
       console.error('[admin:documents:upload] insert failed', dbErr);
       cleanupUploadedFile();
@@ -51417,10 +52288,28 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
            p.proposal_kind AS proposal_kind,
            p.review_status AS proposal_review_status,
            p.reviewed_at AS proposal_reviewed_at,
-           p.source_intervention_id AS proposal_source_intervention_id
+           p.source_intervention_id AS proposal_source_intervention_id,
+           COALESCE(p.application_id, a.id) AS application_id,
+           ${buildReviewWorkflowSelectColumns('rw')}
          FROM iset_case_intervention ci
          LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
          LEFT JOIN iset_intervention_proposal p ON p.legacy_intervention_id = ci.id
+         LEFT JOIN iset_case c_for_app ON c_for_app.id = ci.case_id
+         LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ${buildCasePrimaryApplicationIdSql('c_for_app')})
+         LEFT JOIN iset_review_workflow rw
+           ON rw.archived_at IS NULL
+          AND rw.workflow_type = CASE
+            WHEN p.proposal_kind = 'revision'
+              OR p.source_intervention_id IS NOT NULL
+              OR JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.revision.sourceInterventionId')) IS NOT NULL
+              OR JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.revision.source_intervention_id')) IS NOT NULL
+              THEN 'intervention_revision'
+            ELSE 'intervention_proposal'
+          END
+          AND (
+            (p.id IS NOT NULL AND rw.proposal_id = p.id)
+            OR (p.id IS NULL AND rw.intervention_id = ci.id)
+          )
          WHERE ci.action_plan_id IN (?)
          ORDER BY ci.start_date IS NULL, ci.start_date ASC, ci.id ASC`,
         [planIds]
@@ -51466,7 +52355,12 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           }
         });
       }
+      const twoStepReviewConfig = await readTwoStepReviewFeatureConfig(pool);
       interventionRows.forEach(row => {
+        row.two_step_review_enabled = isTwoStepReviewEnabled(
+          twoStepReviewConfig,
+          resolveInterventionReviewWorkflowType(row)
+        );
         const mapped = mapInterventionRow(row);
         if (!mapped) return;
         const interventionId = normalisePositiveInteger(row?.id);
@@ -52268,6 +53162,27 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
 
     response.eligibility = response.assessment_esdc_eligibility;
     response.finance = financeSummary;
+    try {
+      const reviewWorkflowEnabled = row.application_id
+        ? await isReviewWorkflowEnabledForType(REVIEW_WORKFLOW_TYPES.ApplicationAssessment, pool)
+        : false;
+      const reviewWorkflowRow = reviewWorkflowEnabled
+        ? await fetchApplicationAssessmentReviewWorkflow(pool, { applicationId: row.application_id || null })
+        : null;
+      const reviewWorkflow = serializeReviewWorkflowRow(reviewWorkflowRow);
+      response.twoStepReviewEnabled = reviewWorkflowEnabled;
+      response.two_step_review_enabled = reviewWorkflowEnabled;
+      response.reviewWorkflow = reviewWorkflow;
+      response.review_workflow = reviewWorkflow;
+    } catch (err) {
+      if (!isMissingTableErrorLocal(err)) {
+        console.warn('[workspace] failed to load review workflow for case', caseId, err?.message || err);
+      }
+      response.twoStepReviewEnabled = false;
+      response.two_step_review_enabled = false;
+      response.reviewWorkflow = null;
+      response.review_workflow = null;
+    }
 
     const submissionIdForCase = await findEsdcSubmissionIdForCase(pool, caseId);
     const [[ilmpComplianceRow]] = submissionIdForCase
@@ -53955,14 +54870,45 @@ app.get('/api/action-plans/:id/interventions', async (req, res) => {
     const [rows] = await pool.query(
       `SELECT
          ci.*,
-         ap.funding_stream AS plan_funding_stream
+         ap.funding_stream AS plan_funding_stream,
+         p.id AS proposal_id,
+         p.proposal_kind AS proposal_kind,
+         p.review_status AS proposal_review_status,
+         p.reviewed_at AS proposal_reviewed_at,
+         p.source_intervention_id AS proposal_source_intervention_id,
+         COALESCE(p.application_id, a.id) AS application_id,
+         ${buildReviewWorkflowSelectColumns('rw')}
        FROM iset_case_intervention ci
        LEFT JOIN iset_case_action_plan ap ON ap.id = ci.action_plan_id
+       LEFT JOIN iset_intervention_proposal p ON p.legacy_intervention_id = ci.id
+       LEFT JOIN iset_case c_for_app ON c_for_app.id = ci.case_id
+       LEFT JOIN iset_application a ON a.id = COALESCE(p.application_id, ${buildCasePrimaryApplicationIdSql('c_for_app')})
+       LEFT JOIN iset_review_workflow rw
+         ON rw.archived_at IS NULL
+        AND rw.workflow_type = CASE
+          WHEN p.proposal_kind = 'revision'
+            OR p.source_intervention_id IS NOT NULL
+            OR JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.revision.sourceInterventionId')) IS NOT NULL
+            OR JSON_UNQUOTE(JSON_EXTRACT(ci.metadata_json, '$.revision.source_intervention_id')) IS NOT NULL
+            THEN 'intervention_revision'
+          ELSE 'intervention_proposal'
+        END
+        AND (
+          (p.id IS NOT NULL AND rw.proposal_id = p.id)
+          OR (p.id IS NULL AND rw.intervention_id = ci.id)
+        )
        WHERE ci.action_plan_id = ?
        ORDER BY ci.start_date IS NULL, ci.start_date ASC, ci.id ASC`,
       [planId]
     );
-    const interventions = rows.map(mapInterventionRow).filter(Boolean);
+    const twoStepReviewConfig = await readTwoStepReviewFeatureConfig(pool);
+    const interventions = rows.map(row => {
+      row.two_step_review_enabled = isTwoStepReviewEnabled(
+        twoStepReviewConfig,
+        resolveInterventionReviewWorkflowType(row)
+      );
+      return mapInterventionRow(row);
+    }).filter(Boolean);
     res.status(200).json({ actionPlanId: planId, interventions });
   } catch (error) {
     console.error('GET /api/action-plans/:id/interventions failed:', error);
@@ -54406,6 +55352,18 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
     }
 
     const metadataClean = stripInterventionRecurringMetadata(metadata);
+    if (!isBackloadMode && createInterventionState.reviewStatus === 'approved') {
+      const approvalAmount = resolveInterventionFundingApprovalAmount({
+        intervention_cost: plannedCostAmount,
+        budget_amount: plannedCostAmount,
+        approved_amount: approvedAmountValue,
+        metadata_json: metadataClean,
+      }, metadataClean);
+      const approvalBlock = resolveHighValueFundingApprovalBlock(req, approvalAmount);
+      if (approvalBlock) {
+        return res.status(403).json(approvalBlock);
+      }
+    }
 
     const esdcPayload = pruneNullish({
       interventionCode: trimmedCode,
@@ -54497,12 +55455,30 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
         console.warn('[intervention] failed to seed participant details from backload intervention', seedErr?.message || seedErr);
       }
     }
-    const interventionRow = await fetchInterventionWithCase(interventionId);
+    let interventionRow = await fetchInterventionWithCase(interventionId);
     await syncInterventionProposalCompatibility(interventionRow);
+    interventionRow = await fetchInterventionWithCase(interventionId);
+    let interventionReviewWorkflowUpdated = null;
     if (
       !isBackloadMode &&
       createInterventionState.reviewStatus === 'submitted'
     ) {
+      const reviewWorkflowSubject = buildInterventionReviewWorkflowSubject(interventionRow);
+      const reviewWorkflowEnabled = await isReviewWorkflowEnabledForType(
+        reviewWorkflowSubject.workflowType,
+        pool
+      );
+      if (reviewWorkflowEnabled) {
+        interventionReviewWorkflowUpdated = await startInterventionReviewWorkflow(pool, {
+          ...reviewWorkflowSubject,
+          actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+          actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
+          metadata: {
+            source: 'intervention_proposal_submit',
+            reviewStatus: createInterventionState.reviewStatus,
+          },
+        });
+      }
       try {
         const { actorName } = resolveRequestActor(req);
         const actorDisplayName = await resolveStaffDisplayName(pool, req) || actorName || null;
@@ -54522,6 +55498,9 @@ app.post('/api/action-plans/:id/interventions', async (req, res) => {
       } catch (err) {
         console.error('[assessment-pdf] intervention assessment generation failed:', err?.message || err);
       }
+    }
+    if (interventionReviewWorkflowUpdated) {
+      interventionRow = await fetchInterventionWithCase(interventionId);
     }
     const payload = mapInterventionRow(interventionRow);
     if (isBackloadMode) {
@@ -54898,6 +55877,34 @@ app.post('/api/interventions/:id/assessment/recall', async (req, res) => {
     const actorStaffProfileId = requesterStaffProfileId || null;
     const actorUserId = await resolveExistingUserIdFromAuth(req, conn);
     const applicationId = await resolveApplicationIdForCaseId(interventionRow.case_id, conn);
+    const workflowSourceRow = await fetchInterventionWithCase(interventionId, conn, { forUpdate: true });
+    const workflowSubject = buildInterventionReviewWorkflowSubject(workflowSourceRow || interventionRow);
+    const workflowEnabled = await isReviewWorkflowEnabledForType(workflowSubject.workflowType, conn);
+    if (workflowEnabled) {
+      const workflowRow = await fetchInterventionReviewWorkflow(conn, workflowSubject, { forUpdate: true });
+      if (workflowRow && workflowRow.current_stage !== REVIEW_STAGES.Withdrawn) {
+        if (
+          workflowRow.current_stage !== REVIEW_STAGES.RmReview &&
+          workflowRow.current_stage !== REVIEW_STAGES.ReturnedToSubmitter
+        ) {
+          await conn.rollback();
+          return res.status(409).json({
+            error: 'intervention_recall_after_rm_signoff_forbidden',
+            message: 'This proposal has already been signed off by the Regional Manager and cannot be recalled by the submitter.',
+          });
+        }
+        await applyInterventionReviewWorkflowAction(conn, {
+          ...workflowSubject,
+          action: REVIEW_ACTIONS.Withdraw,
+          actorStaffProfileId,
+          actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
+          note: 'Intervention proposal submission recalled before decision.',
+          payload: {
+            source: 'intervention_proposal_recall',
+          },
+        });
+      }
+    }
     const latestSubmittedDoc = await fetchLatestAssessmentDocumentInfo({
       applicationId,
       caseId: interventionRow.case_id,
@@ -55024,6 +56031,184 @@ app.post('/api/interventions/:id/assessment/recall', async (req, res) => {
     }
     console.error('POST /api/interventions/:id/assessment/recall failed:', error);
     return res.status(500).json({ error: 'intervention_recall_failed', detail: error?.message || String(error) });
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.post('/api/interventions/:id/review-workflow/action', async (req, res) => {
+  const interventionId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(interventionId) || interventionId <= 0) {
+    return res.status(400).json({ success: false, error: 'invalid_intervention_id' });
+  }
+
+  const body = req.body || {};
+  const requestedAction = normaliseString(body.action || body.reviewAction || body.review_action);
+  const allowedActions = new Set([
+    REVIEW_ACTIONS.RmReturnToSubmitter,
+    REVIEW_ACTIONS.RmSubmitToNwac,
+    REVIEW_ACTIONS.RmForwardChangesToSubmitter,
+  ]);
+  if (!allowedActions.has(requestedAction)) {
+    return res.status(400).json({
+      success: false,
+      error: 'invalid_review_workflow_action',
+      message: 'Choose a Regional Manager review action.',
+    });
+  }
+
+  let conn;
+  let eventPayload = null;
+  let eventType = null;
+  try {
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const interventionRow = await fetchInterventionWithCase(interventionId, conn, { forUpdate: true });
+    if (!interventionRow) {
+      await conn.rollback();
+      return res.status(404).json({ success: false, error: 'intervention_not_found' });
+    }
+
+    const accessError = validateCaseAccessForIntervention(req, interventionRow);
+    if (accessError) {
+      await conn.rollback();
+      return res.status(accessError.status).json({ success: false, ...accessError.body });
+    }
+
+    const workflowSubject = buildInterventionReviewWorkflowSubject(interventionRow);
+    const workflowEnabled = await isReviewWorkflowEnabledForType(workflowSubject.workflowType, conn);
+    if (!workflowEnabled) {
+      await conn.rollback();
+      return res.status(409).json({
+        success: false,
+        error: 'review_workflow_disabled',
+        message: 'Regional Manager review is not enabled for this intervention request.',
+      });
+    }
+
+    const actorStaffProfileId = resolveActiveStaffProfileId(req) || null;
+    const actorRole = inferUserRole(req) || resolveStaffRole(req) || null;
+    const note = normaliseString(body.note || body.reviewNote || body.review_note) || null;
+    const updatedWorkflow = await applyInterventionReviewWorkflowAction(conn, {
+      ...workflowSubject,
+      action: requestedAction,
+      actorStaffProfileId,
+      actorRole,
+      note,
+      payload: {
+        source: 'intervention_review_action',
+      },
+    });
+
+    const shouldReturnToSubmitter =
+      requestedAction === REVIEW_ACTIONS.RmReturnToSubmitter ||
+      requestedAction === REVIEW_ACTIONS.RmForwardChangesToSubmitter;
+    if (shouldReturnToSubmitter) {
+      const metadata = safeJsonParse(interventionRow.metadata_json, {}) || {};
+      const reviewMetadata =
+        metadata.review && typeof metadata.review === 'object'
+          ? metadata.review
+          : {};
+      metadata.review = {
+        ...reviewMetadata,
+        decision: '',
+        decisionNotes: '',
+        rmReviewNote: note,
+        rmReviewAction: requestedAction,
+      };
+      await conn.query(
+        `UPDATE iset_case_intervention
+            SET status = 'changes_requested',
+                delivery_status = NULL,
+                reviewed_by_staff_profile_id = NULL,
+                reviewed_at = NULL,
+                review_notes = NULL,
+                metadata_json = ?,
+                updated_at = NOW()
+          WHERE id = ?`,
+        [JSON.stringify(metadata), interventionId]
+      );
+      if (interventionRow.action_plan_id) {
+        await conn.query('UPDATE iset_case_action_plan SET updated_at = NOW() WHERE id = ?', [interventionRow.action_plan_id]);
+      }
+    }
+
+    let updatedRow = await fetchInterventionWithCase(interventionId, conn);
+    await syncInterventionProposalCompatibility(updatedRow, conn);
+    updatedRow = await fetchInterventionWithCase(interventionId, conn);
+	    const intervention = mapInterventionRow(updatedRow);
+
+	    await conn.commit();
+	    conn.release();
+	    conn = null;
+
+    if (requestedAction === REVIEW_ACTIONS.RmSubmitToNwac) {
+      eventType = 'rm_review_submitted_to_nwac';
+    } else if (requestedAction === REVIEW_ACTIONS.RmForwardChangesToSubmitter) {
+      eventType = 'rm_review_changes_forwarded';
+    } else {
+      eventType = 'rm_review_returned_to_submitter';
+    }
+
+	    const { actorId, actorName } = resolveRequestActor(req);
+	    const actorDisplayName = await resolveStaffDisplayName(pool, req) || actorName || null;
+	    const submitterStaffProfileId =
+	      normalisePositiveInteger(updatedWorkflow?.submitted_by_staff_profile_id) ||
+	      normalisePositiveInteger(interventionRow.assigned_staff_profile_id ?? interventionRow.assigned_to_user_id) ||
+	      null;
+	    const recipientStaffProfileId = shouldReturnToSubmitter ? submitterStaffProfileId : null;
+	    eventPayload = {
+	      case_id: interventionRow.case_id || null,
+	      application_id: workflowSubject.applicationId || null,
+	      action_plan_id: interventionRow.action_plan_id || null,
+	      intervention_id: interventionId,
+	      proposal_id: workflowSubject.proposalId || null,
+	      scope: workflowSubject.workflowType,
+	      workflow_type: workflowSubject.workflowType,
+	      action: requestedAction,
+	      review_stage: updatedWorkflow?.current_stage || null,
+	      submitted_by_staff_profile_id: submitterStaffProfileId,
+	      assigned_staff_profile_id: normalisePositiveInteger(interventionRow.assigned_staff_profile_id ?? interventionRow.assigned_to_user_id) || null,
+	      recipient_staff_profile_id: recipientStaffProfileId,
+	      note,
+	      message:
+	        requestedAction === REVIEW_ACTIONS.RmSubmitToNwac
+	          ? 'Regional Manager submitted the intervention request for final decision.'
+	          : requestedAction === REVIEW_ACTIONS.RmForwardChangesToSubmitter
+	            ? 'Regional Manager forwarded requested intervention changes to the submitter.'
+	            : 'Regional Manager returned the intervention request to the submitter.',
+    };
+    await captureCaseEvent({
+      type: eventType,
+      caseId: interventionRow.case_id || null,
+      payload: eventPayload,
+      actorId,
+      actorName: actorDisplayName || actorName,
+      actorStaffProfileId,
+    });
+
+    const reviewWorkflow = serializeReviewWorkflowRow(updatedWorkflow);
+    return res.status(200).json({
+      success: true,
+      intervention,
+      reviewWorkflow,
+      review_workflow: reviewWorkflow,
+    });
+  } catch (error) {
+    if (conn) {
+      try { await conn.rollback(); } catch (_) {}
+    }
+    const status = Number.isInteger(error?.status) ? error.status : 500;
+    console.error('POST /api/interventions/:id/review-workflow/action failed:', error);
+    return res.status(status).json({
+      success: false,
+      error: error?.message || 'intervention_review_action_failed',
+      message:
+        error?.message === 'review_workflow_note_required'
+          ? 'A note is required for this Regional Manager review action.'
+          : undefined,
+    });
   } finally {
     if (conn) conn.release();
   }
@@ -55241,6 +56426,44 @@ app.patch('/api/interventions/:id', async (req, res) => {
         message: 'Only System Administrators and NWAC Administrators can record proposal decisions.',
       });
     }
+    let interventionReviewWorkflowEnabled = false;
+    let interventionReviewWorkflow = null;
+    let interventionReviewWorkflowAction = null;
+    let holdNwacChangesAtRegionalManager = false;
+    let approvedRevisionReviewWorkflowEnabled = false;
+    let approvedRevisionReviewWorkflowAction = null;
+    let approvedRevisionReviewWorkflowSubject = null;
+    const interventionReviewWorkflowSubject = buildInterventionReviewWorkflowSubject(interventionRow);
+    if (isRecordingProposalDecision && interventionReviewWorkflowSubject.workflowType) {
+      interventionReviewWorkflowEnabled = await isReviewWorkflowEnabledForType(
+        interventionReviewWorkflowSubject.workflowType,
+        pool
+      );
+      if (interventionReviewWorkflowEnabled) {
+        interventionReviewWorkflow = await fetchInterventionReviewWorkflow(pool, interventionReviewWorkflowSubject);
+        if (!interventionReviewWorkflow || interventionReviewWorkflow.current_stage !== REVIEW_STAGES.NwacReview) {
+          return res.status(409).json({
+            error: 'review_workflow_not_ready_for_nwac',
+            message: 'The Regional Manager must submit this intervention request for NWAC approval before a final decision can be recorded.',
+          });
+        }
+        interventionReviewWorkflowAction =
+          nextReviewStatusForDecision === 'approved'
+            ? REVIEW_ACTIONS.NwacApprove
+            : nextReviewStatusForDecision === 'rejected'
+              ? REVIEW_ACTIONS.NwacDeny
+              : REVIEW_ACTIONS.NwacRequestChanges;
+        holdNwacChangesAtRegionalManager =
+          interventionReviewWorkflowAction === REVIEW_ACTIONS.NwacRequestChanges;
+      }
+    }
+    if (isRecordingProposalDecision && nextReviewStatusForDecision === 'approved') {
+      const approvalAmount = resolveInterventionFundingApprovalAmount(interventionRow);
+      const approvalBlock = resolveHighValueFundingApprovalBlock(req, approvalAmount);
+      if (approvalBlock) {
+        return res.status(403).json(approvalBlock);
+      }
+    }
     const isApplyingApprovedRevision = Number.isInteger(revisionAppliedFromInterventionId);
     let revisionDraftRow = null;
     let revisionDraftMetadata = null;
@@ -55286,6 +56509,29 @@ app.patch('/api/interventions/:id', async (req, res) => {
           error: 'revision_source_mismatch',
           message: 'Revision draft is not linked to this intervention.',
         });
+      }
+      const revisionApprovalAmount = resolveInterventionFundingApprovalAmount(revisionDraftRow, revisionDraftMetadata);
+      const revisionApprovalBlock = resolveHighValueFundingApprovalBlock(req, revisionApprovalAmount);
+      if (revisionApprovalBlock) {
+        return res.status(403).json(revisionApprovalBlock);
+      }
+      approvedRevisionReviewWorkflowSubject = buildInterventionReviewWorkflowSubject(revisionDraftRow);
+      approvedRevisionReviewWorkflowEnabled = await isReviewWorkflowEnabledForType(
+        approvedRevisionReviewWorkflowSubject.workflowType,
+        pool
+      );
+      if (approvedRevisionReviewWorkflowEnabled) {
+        const revisionReviewWorkflow = await fetchInterventionReviewWorkflow(
+          pool,
+          approvedRevisionReviewWorkflowSubject
+        );
+        if (!revisionReviewWorkflow || revisionReviewWorkflow.current_stage !== REVIEW_STAGES.NwacReview) {
+          return res.status(409).json({
+            error: 'review_workflow_not_ready_for_nwac',
+            message: 'The Regional Manager must submit this intervention revision for NWAC approval before it can be applied.',
+          });
+        }
+        approvedRevisionReviewWorkflowAction = REVIEW_ACTIONS.NwacApprove;
       }
     }
 
@@ -55569,9 +56815,23 @@ app.patch('/api/interventions/:id', async (req, res) => {
         metadata.budgetPotId = resolvedPotId;
         metadataChanged = true;
       }
+      metadata.approvalLetterFollowUp = pruneNullish({
+        status: 'pending',
+        completed: false,
+        kind: normaliseInterventionProposalKind(interventionRow?.proposal_kind, 'new'),
+        approvedAt: new Date().toISOString(),
+        sourceInterventionId: interventionId ? String(interventionId) : null,
+      });
+      metadataChanged = true;
     }
 
-    const statusPersistence = statusChangeRequested ? nextStatusPersistence : null;
+    let statusPersistence = statusChangeRequested ? nextStatusPersistence : null;
+    if (holdNwacChangesAtRegionalManager) {
+      statusPersistence = buildInterventionStatusPersistence(
+        previousInterventionState.reviewStatus || previousInterventionState.effectiveStatus || previousStatus || 'submitted',
+        { deliveryStatus: previousInterventionState.deliveryStatus || null }
+      );
+    }
 
     // Mark ILMP compliance as pending on intervention change
     if (true) {
@@ -55603,6 +56863,32 @@ app.patch('/api/interventions/:id', async (req, res) => {
         : [revisionEntry];
       metadata.revisionHistory = revisionHistory;
       metadata.lastAppliedRevision = revisionEntry;
+      const existingApprovalLetterFollowUp =
+        metadata.approvalLetterFollowUp && typeof metadata.approvalLetterFollowUp === 'object'
+          ? metadata.approvalLetterFollowUp
+          : null;
+      if (existingApprovalLetterFollowUp && Object.keys(existingApprovalLetterFollowUp).length) {
+        const followUpHistory = Array.isArray(metadata.approvalLetterFollowUpHistory)
+          ? metadata.approvalLetterFollowUpHistory
+          : [];
+        metadata.approvalLetterFollowUpHistory = [
+          ...followUpHistory,
+          pruneNullish({
+            ...existingApprovalLetterFollowUp,
+            archivedAt: revisionEntry.appliedAt || new Date().toISOString(),
+            archivedReason: 'revision_applied',
+          }),
+        ].filter(Boolean);
+      }
+      metadata.approvalLetterFollowUp = pruneNullish({
+        status: 'pending',
+        completed: false,
+        kind: 'revision',
+        revisionDraftInterventionId: revisionDraftRow?.id ? String(revisionDraftRow.id) : null,
+        appliedAt: revisionEntry.appliedAt || null,
+        sourceInterventionId: interventionId ? String(interventionId) : null,
+        sourceTitle: revisionEntry.sourceTitle || null,
+      });
       metadataChanged = true;
     }
 
@@ -55880,8 +57166,81 @@ app.patch('/api/interventions/:id', async (req, res) => {
       await pool.query('UPDATE iset_case_action_plan SET updated_at = NOW() WHERE id = ?', [originalPlanId]);
     }
 
-    const updatedRow = await fetchInterventionWithCase(interventionId);
+    let updatedRow = await fetchInterventionWithCase(interventionId);
     await syncInterventionProposalCompatibility(updatedRow);
+    updatedRow = await fetchInterventionWithCase(interventionId);
+    let interventionReviewWorkflowUpdated = null;
+    if (
+      statusChangeRequested &&
+      nextStatusPersistence?.reviewStatus === 'submitted' &&
+      previousInterventionState.reviewStatus !== 'submitted'
+    ) {
+      const reviewWorkflowSubject = buildInterventionReviewWorkflowSubject(updatedRow);
+      const reviewWorkflowEnabled = await isReviewWorkflowEnabledForType(
+        reviewWorkflowSubject.workflowType,
+        pool
+      );
+      if (reviewWorkflowEnabled) {
+        interventionReviewWorkflowUpdated = await startInterventionReviewWorkflow(pool, {
+          ...reviewWorkflowSubject,
+          actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+          actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
+          metadata: {
+            source: 'intervention_proposal_submit',
+            reviewStatus: nextStatusPersistence.reviewStatus,
+          },
+        });
+      }
+    }
+    if (
+      isRecordingProposalDecision &&
+      interventionReviewWorkflowEnabled &&
+      interventionReviewWorkflowAction
+    ) {
+      const workflowSubject = buildInterventionReviewWorkflowSubject(updatedRow);
+      interventionReviewWorkflowUpdated = await applyInterventionReviewWorkflowAction(pool, {
+        ...workflowSubject,
+        action: interventionReviewWorkflowAction,
+        actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+        actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
+        note: normaliseString(
+          metadata?.review?.decisionNotes ??
+          metadata?.review?.decision_notes ??
+          updatedRow?.review_notes ??
+          null
+        ) || null,
+        payload: {
+          source: 'intervention_proposal_nwac_decision',
+          reviewStatus: nextReviewStatusForDecision,
+        },
+      });
+    }
+    if (
+      isApplyingApprovedRevision &&
+      approvedRevisionReviewWorkflowEnabled &&
+      approvedRevisionReviewWorkflowAction &&
+      approvedRevisionReviewWorkflowSubject
+    ) {
+      interventionReviewWorkflowUpdated = await applyInterventionReviewWorkflowAction(pool, {
+        ...approvedRevisionReviewWorkflowSubject,
+        action: approvedRevisionReviewWorkflowAction,
+        actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+        actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
+        note: normaliseString(
+          revisionDraftMetadata?.review?.decisionNotes ??
+          revisionDraftMetadata?.review?.decision_notes ??
+          null
+        ) || null,
+        payload: {
+          source: 'intervention_revision_nwac_decision',
+          reviewStatus: 'approved',
+          appliedToInterventionId: interventionId,
+        },
+      });
+    }
+    if (interventionReviewWorkflowUpdated) {
+      updatedRow = await fetchInterventionWithCase(interventionId);
+    }
     const payload = mapInterventionRow(updatedRow);
     const nextInterventionState = statusChangeRequested
       ? resolveInterventionStateFields({
@@ -55949,19 +57308,32 @@ app.patch('/api/interventions/:id', async (req, res) => {
         await captureCaseEvent({
           type: interventionDecisionEventType,
           caseId: updatedRow.case_id,
-          payload: {
-            case_id: updatedRow.case_id,
-            action_plan_id: updatedRow.action_plan_id || planId || null,
-            intervention_id: updatedRow.id || interventionId,
-            revision_intervention_id: isApplyingApprovedRevision ? revisionAppliedFromInterventionId : null,
+	          payload: {
+	            case_id: updatedRow.case_id,
+	            action_plan_id: updatedRow.action_plan_id || planId || null,
+	            intervention_id: updatedRow.id || interventionId,
+	            revision_intervention_id: isApplyingApprovedRevision ? revisionAppliedFromInterventionId : null,
             source_intervention_id: isApplyingApprovedRevision
               ? (updatedRow.id || interventionId)
               : (revisionSourceInterventionId || null),
             proposal_kind: proposalKindForDecision,
-            approval_request_type: proposalKindForDecision === 'revision'
-              ? 'revised_intervention'
-              : 'new_intervention',
-            outcome: resolveInterventionDecisionOutcome(nextReviewStatus),
+	            approval_request_type: proposalKindForDecision === 'revision'
+	              ? 'revised_intervention'
+	              : 'new_intervention',
+	            workflow_type:
+	              interventionReviewWorkflowUpdated?.workflow_type ||
+	              interventionReviewWorkflow?.workflow_type ||
+	              interventionReviewWorkflowSubject?.workflowType ||
+	              null,
+	            review_stage: interventionReviewWorkflowUpdated?.current_stage || null,
+	            recipient_staff_profile_id: nextReviewStatus === 'changes_requested'
+	              ? (
+	                  normalisePositiveInteger(interventionReviewWorkflowUpdated?.rm_reviewed_by_staff_profile_id) ||
+	                  normalisePositiveInteger(interventionReviewWorkflow?.rm_reviewed_by_staff_profile_id) ||
+	                  null
+	                )
+	              : null,
+	            outcome: resolveInterventionDecisionOutcome(nextReviewStatus),
             outcome_label: resolveInterventionDecisionOutcomeLabel(nextReviewStatus),
             status: nextReviewStatus,
             reason: decisionReason,
@@ -58178,6 +59550,27 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       row.assessment_intervention_pot_code = null;
       row.assessment_intervention_pot_name = null;
       row.assessment_intervention_label = null;
+    }
+    try {
+      const reviewWorkflowEnabled = row.application_id
+        ? await isReviewWorkflowEnabledForType(REVIEW_WORKFLOW_TYPES.ApplicationAssessment, pool)
+        : false;
+      const reviewWorkflowRow = reviewWorkflowEnabled
+        ? await fetchApplicationAssessmentReviewWorkflow(pool, { applicationId: row.application_id || null })
+        : null;
+      const reviewWorkflow = serializeReviewWorkflowRow(reviewWorkflowRow);
+      row.twoStepReviewEnabled = reviewWorkflowEnabled;
+      row.two_step_review_enabled = reviewWorkflowEnabled;
+      row.reviewWorkflow = reviewWorkflow;
+      row.review_workflow = reviewWorkflow;
+    } catch (workflowErr) {
+      if (!isMissingTableErrorLocal(workflowErr)) {
+        console.warn('[case:detail] failed to load review workflow for case', caseId, workflowErr?.message || workflowErr);
+      }
+      row.twoStepReviewEnabled = false;
+      row.two_step_review_enabled = false;
+      row.reviewWorkflow = null;
+      row.review_workflow = null;
     }
 
     try {
@@ -85768,7 +87161,7 @@ app.post('/api/cases/:id/assessment/recall', async (req, res) => {
 
     const [[row]] = await conn.query(
       `SELECT c.id AS case_id,
-              c.tracking_id,
+              COALESCE(s.reference_number, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) AS tracking_id,
               c.client_id,
               c.case_context_json,
               a.id AS application_id,
@@ -85780,6 +87173,7 @@ app.post('/api/cases/:id/assessment/recall', async (req, res) => {
               a.row_version
          FROM iset_case c
          ${applicationJoinSql}
+         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
         WHERE c.id = ?
         LIMIT 1 FOR UPDATE`,
       requestedApplicationId ? [requestedApplicationId, caseId] : [caseId]
@@ -85845,6 +87239,37 @@ app.post('/api/cases/:id/assessment/recall', async (req, res) => {
 
     const actorStaffProfileId = resolveActiveStaffProfileId(req) || null;
     const actorUserId = await resolveExistingUserIdFromAuth(req, conn);
+    const workflowEnabled = await isReviewWorkflowEnabledForType(
+      REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+      conn
+    );
+    if (workflowEnabled) {
+      const workflowRow = await fetchApplicationAssessmentReviewWorkflow(conn, { applicationId }, { forUpdate: true });
+      if (workflowRow && workflowRow.current_stage !== REVIEW_STAGES.Withdrawn) {
+        if (
+          workflowRow.current_stage !== REVIEW_STAGES.RmReview &&
+          workflowRow.current_stage !== REVIEW_STAGES.ReturnedToSubmitter
+        ) {
+          await conn.rollback();
+          return res.status(409).json({
+            success: false,
+            error: 'assessment_recall_after_rm_signoff_forbidden',
+            message: 'This assessment has already been signed off by the Regional Manager and cannot be recalled by the Coordinator.',
+          });
+        }
+        await applyApplicationAssessmentReviewWorkflowAction(conn, {
+          caseId,
+          applicationId,
+          action: REVIEW_ACTIONS.Withdraw,
+          actorStaffProfileId,
+          actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
+          note: 'Assessment submission recalled before decision.',
+          payload: {
+            source: 'application_assessment_recall',
+          },
+        });
+      }
+    }
     const latestSubmittedDoc = await fetchLatestAssessmentDocumentInfo({
       applicationId,
       caseId,
@@ -85970,6 +87395,278 @@ app.post('/api/cases/:id/assessment/recall', async (req, res) => {
     }
     console.error('POST /api/cases/:id/assessment/recall failed:', error);
     return res.status(500).json({ success: false, error: 'assessment_recall_failed', detail: error?.message || String(error) });
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.post('/api/cases/:id/assessment/review-workflow/action', async (req, res) => {
+  const caseId = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(caseId) || caseId <= 0) {
+    return res.status(400).json({ success: false, error: 'invalid_case_id' });
+  }
+
+  const body = req.body || {};
+  const requestedApplicationId = normalisePositiveInteger(
+    body.applicationId ||
+    body.application_id ||
+    req.query.applicationId ||
+    req.query.application_id
+  );
+  const requestedAction = normaliseString(body.action || body.reviewAction || body.review_action);
+  const allowedActions = new Set([
+    REVIEW_ACTIONS.RmReturnToSubmitter,
+    REVIEW_ACTIONS.RmSubmitToNwac,
+    REVIEW_ACTIONS.RmForwardChangesToSubmitter,
+  ]);
+  if (!allowedActions.has(requestedAction)) {
+    return res.status(400).json({
+      success: false,
+      error: 'invalid_review_workflow_action',
+      message: 'Choose a Regional Manager review action.',
+    });
+  }
+
+  const expectedRowVersionRaw = body.expectedApplicationRowVersion ?? body.expectedRowVersion;
+  let expectedRowVersionNumber = null;
+  if (expectedRowVersionRaw !== undefined) {
+    expectedRowVersionNumber = Number(expectedRowVersionRaw);
+    if (!Number.isInteger(expectedRowVersionNumber) || expectedRowVersionNumber <= 0) {
+      return res.status(400).json({ success: false, error: 'invalid_expected_row_version' });
+    }
+  }
+
+  const applicationJoinSql = requestedApplicationId
+    ? 'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
+    : buildCasePrimaryApplicationJoinSql('c', 'a');
+  let conn;
+  let eventPayload = null;
+  let eventType = null;
+  try {
+    const accessError = await validateCaseAccessByCaseId(req, caseId);
+    if (accessError) {
+      return res.status(accessError.status).json({ success: false, ...accessError.body });
+    }
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const workflowEnabled = await isReviewWorkflowEnabledForType(
+      REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+      conn
+    );
+    if (!workflowEnabled) {
+      await conn.rollback();
+      return res.status(409).json({
+        success: false,
+        error: 'review_workflow_disabled',
+        message: 'Regional Manager review is not enabled for application assessments.',
+      });
+    }
+
+    const [[row]] = await conn.query(
+	      `SELECT c.id AS case_id,
+	              COALESCE(s.reference_number, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) AS tracking_id,
+	              c.case_context_json,
+	              c.assigned_staff_profile_id,
+	              a.id AS application_id,
+	              a.status AS application_status,
+	              a.lifecycle_status AS application_lifecycle_status,
+              a.decision_outcome AS application_decision_outcome,
+              a.awaiting_reason AS application_awaiting_reason,
+              a.closure_reason AS application_closure_reason,
+              a.row_version
+         FROM iset_case c
+         ${applicationJoinSql}
+         LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+        WHERE c.id = ?
+        LIMIT 1 FOR UPDATE`,
+      requestedApplicationId ? [requestedApplicationId, caseId] : [caseId]
+    );
+    if (!row) {
+      await conn.rollback();
+      return res.status(404).json({ success: false, error: 'case_not_found' });
+    }
+
+    const applicationId = normalisePositiveInteger(row.application_id);
+    if (!applicationId) {
+      await conn.rollback();
+      return res.status(422).json({
+        success: false,
+        error: 'application_required',
+        message: 'Regional Manager review requires an application-backed assessment.',
+      });
+    }
+
+    const currentRowVersion = Number(row.row_version || 1);
+    if (expectedRowVersionNumber !== null && expectedRowVersionNumber !== currentRowVersion) {
+      await conn.rollback();
+      return res.status(409).json({
+        success: false,
+        error: 'row_version_conflict',
+        currentRowVersion,
+      });
+    }
+
+    const actorStaffProfileId = resolveActiveStaffProfileId(req) || null;
+    const actorRole = inferUserRole(req) || resolveStaffRole(req) || null;
+    const note = normaliseString(body.note || body.reviewNote || body.review_note) || null;
+    const updatedWorkflow = await applyApplicationAssessmentReviewWorkflowAction(conn, {
+      caseId,
+      applicationId,
+      action: requestedAction,
+      actorStaffProfileId,
+      actorRole,
+      note,
+      payload: {
+        source: 'application_assessment_review_action',
+      },
+    });
+
+    const shouldReturnToSubmitter =
+      requestedAction === REVIEW_ACTIONS.RmReturnToSubmitter ||
+      requestedAction === REVIEW_ACTIONS.RmForwardChangesToSubmitter;
+    let statusPersistence = null;
+    if (shouldReturnToSubmitter) {
+      statusPersistence = buildApplicationStatusPersistence('in_review', {
+        lifecycleStatus: row.application_lifecycle_status,
+        decisionOutcome: null,
+        awaitingReason: row.application_awaiting_reason || null,
+        closureReason: row.application_closure_reason || null,
+      });
+      await conn.query(
+        `UPDATE iset_application
+            SET status = ?,
+                lifecycle_status = ?,
+                decision_outcome = NULL,
+                awaiting_reason = ?,
+                closure_reason = ?
+          WHERE id = ?`,
+        [
+          statusPersistence.legacyStatus,
+          statusPersistence.lifecycleStatus,
+          statusPersistence.awaitingReason,
+          statusPersistence.closureReason,
+          applicationId,
+        ]
+      );
+      const existingContext = safeJsonParse(row.case_context_json, null) || {};
+      const nextContext = clearApplicationAssessmentDecisionContext(existingContext, applicationId);
+      await conn.query(
+        'UPDATE iset_case SET case_context_json = ?, updated_at = NOW() WHERE id = ?',
+        [JSON.stringify(nextContext), caseId]
+      );
+    }
+
+    await conn.query(
+      'UPDATE iset_application SET row_version = row_version + 1 WHERE id = ?',
+      [applicationId]
+    );
+    const [[updatedApplication]] = await conn.query(
+      `SELECT status,
+              lifecycle_status,
+              decision_outcome,
+              awaiting_reason,
+              closure_reason,
+              row_version
+         FROM iset_application
+        WHERE id = ?
+        LIMIT 1`,
+      [applicationId]
+    );
+
+    await conn.commit();
+    conn.release();
+    conn = null;
+
+    if (requestedAction === REVIEW_ACTIONS.RmSubmitToNwac) {
+      eventType = 'rm_review_submitted_to_nwac';
+    } else if (requestedAction === REVIEW_ACTIONS.RmForwardChangesToSubmitter) {
+      eventType = 'rm_review_changes_forwarded';
+    } else {
+      eventType = 'rm_review_returned_to_submitter';
+    }
+
+	    const { actorId, actorName } = resolveRequestActor(req);
+	    const actorDisplayName = await resolveStaffDisplayName(pool, req) || actorName || null;
+	    const submitterStaffProfileId =
+	      normalisePositiveInteger(updatedWorkflow?.submitted_by_staff_profile_id) ||
+	      normalisePositiveInteger(row.assigned_staff_profile_id) ||
+	      null;
+	    const recipientStaffProfileId = shouldReturnToSubmitter ? submitterStaffProfileId : null;
+	    eventPayload = {
+	      case_id: caseId,
+	      application_id: applicationId,
+	      scope: 'application_assessment',
+	      workflow_type: 'application_assessment',
+	      action: requestedAction,
+	      review_stage: updatedWorkflow?.current_stage || null,
+	      submitted_by_staff_profile_id: submitterStaffProfileId,
+	      assigned_staff_profile_id: normalisePositiveInteger(row.assigned_staff_profile_id) || null,
+	      recipient_staff_profile_id: recipientStaffProfileId,
+	      note,
+	      message:
+	        requestedAction === REVIEW_ACTIONS.RmSubmitToNwac
+	          ? 'Regional Manager submitted the assessment for final decision.'
+	          : requestedAction === REVIEW_ACTIONS.RmForwardChangesToSubmitter
+	            ? 'Regional Manager forwarded requested changes to the Coordinator.'
+            : 'Regional Manager returned the assessment to the Coordinator.',
+      tracking_id: row.tracking_id || null,
+    };
+    await captureCaseEvent({
+      type: eventType,
+      caseId,
+      payload: eventPayload,
+      trackingId: row.tracking_id || null,
+      actorId,
+      actorName: actorDisplayName || actorName,
+      actorStaffProfileId,
+    });
+
+    const applicationStatus =
+      normaliseApplicationStatusValue(updatedApplication?.status) ||
+      updatedApplication?.status ||
+      statusPersistence?.legacyStatus ||
+      row.application_status ||
+      null;
+    const applicationLifecycleStatus =
+      normaliseApplicationLifecycleStatusValue(updatedApplication?.lifecycle_status || updatedApplication?.status, {
+        preserveUnknown: true,
+      }) ||
+      statusPersistence?.lifecycleStatus ||
+      row.application_lifecycle_status ||
+      null;
+    const reviewWorkflow = serializeReviewWorkflowRow(updatedWorkflow);
+    return res.status(200).json({
+      success: true,
+      applicationId,
+      applicationStatus,
+      application_status: applicationStatus,
+      applicationLifecycleStatus,
+      application_lifecycle_status: applicationLifecycleStatus,
+      decisionOutcome: normaliseApplicationDecisionOutcomeValue(updatedApplication?.decision_outcome) || null,
+      decision_outcome: normaliseApplicationDecisionOutcomeValue(updatedApplication?.decision_outcome) || null,
+      applicationAwaitingReason: updatedApplication?.awaiting_reason || null,
+      application_awaiting_reason: updatedApplication?.awaiting_reason || null,
+      applicationClosureReason: updatedApplication?.closure_reason || null,
+      application_closure_reason: updatedApplication?.closure_reason || null,
+      application_row_version: Number(updatedApplication?.row_version || currentRowVersion + 1),
+      reviewWorkflow,
+      review_workflow: reviewWorkflow,
+    });
+  } catch (error) {
+    if (conn) {
+      try { await conn.rollback(); } catch (_) {}
+    }
+    const status = Number(error?.status || error?.statusCode) || 500;
+    const message = error?.message || String(error);
+    if (status >= 500) {
+      console.error('POST /api/cases/:id/assessment/review-workflow/action failed:', error);
+    }
+    return res.status(status).json({
+      success: false,
+      error: message || 'review_workflow_action_failed',
+    });
   } finally {
     if (conn) conn.release();
   }
@@ -86136,6 +87833,10 @@ app.put('/api/cases/:id', async (req, res) => {
   let beforeAssessmentReviewStatus = null;
   let assessmentReviewStatus = null;
   let assessmentReviewStatusProvided = false;
+  let applicationAssessmentReviewWorkflowEnabled = false;
+  let applicationAssessmentReviewWorkflow = null;
+  let applicationAssessmentReviewWorkflowUpdated = null;
+  let assessmentSubmittedForWorkflow = false;
   let previousConflictDeclarationSigned = null;
   let conflictDeclarationJustSigned = false;
   let conflictDeclarationSignedAt = null;
@@ -86590,6 +88291,35 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     assessmentReviewStatus = normalizedDecision;
   }
 
+    const submitActionRawForWorkflow = body.assessment_submit_action;
+    const submitActionForWorkflow =
+      submitActionRawForWorkflow === true ||
+      submitActionRawForWorkflow === 1 ||
+      submitActionRawForWorkflow === '1' ||
+      (typeof submitActionRawForWorkflow === 'string' && submitActionRawForWorkflow.toLowerCase() === 'true');
+    assessmentSubmittedForWorkflow =
+      !assessmentReviewStatusProvided &&
+      Boolean(body.assessment_recommendation) &&
+      Boolean(body.assessment_justification) &&
+      (
+        submitActionForWorkflow ||
+        (typeof body.status !== 'undefined' && body.status !== null && body.status !== '')
+      );
+
+    if (applicationId) {
+      applicationAssessmentReviewWorkflowEnabled = await isReviewWorkflowEnabledForType(
+        REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+        conn
+      );
+      if (applicationAssessmentReviewWorkflowEnabled) {
+        applicationAssessmentReviewWorkflow = await fetchApplicationAssessmentReviewWorkflow(
+          conn,
+          { applicationId },
+          { forUpdate: assessmentReviewStatusProvided }
+        );
+      }
+    }
+
     const requestedApplicationDecisionStatus = Object.prototype.hasOwnProperty.call(body, 'applicationStatus')
       ? (normaliseApplicationStatusValue(toNull(body.applicationStatus)) || null)
       : null;
@@ -86612,6 +88342,20 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         success: false,
         error: 'application_decision_forbidden',
         message: 'Only System Administrators and NWAC Administrators can record application decisions.',
+        lock: lockCheck.lock || null
+      });
+    }
+    if (
+      applicationAssessmentReviewWorkflowEnabled &&
+      assessmentReviewStatusProvided &&
+      applicationAssessmentReviewWorkflow &&
+      applicationAssessmentReviewWorkflow.current_stage !== REVIEW_STAGES.NwacReview
+    ) {
+      await conn.rollback();
+      return res.status(409).json({
+        success: false,
+        error: 'review_workflow_not_ready_for_nwac',
+        message: 'The Regional Manager must submit this assessment for NWAC approval before a final decision can be recorded.',
         lock: lockCheck.lock || null
       });
     }
@@ -86680,7 +88424,6 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       }
     }
 
-    const canonicalRoleForApproval = canonicaliseAccessRole(identity.role);
     const approvalRequested = (() => {
       const statusNorm = normaliseCaseStatusValue(body.status);
       const appStatusNorm = normaliseCaseStatusValue(body.applicationStatus);
@@ -86689,40 +88432,19 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         : null;
       return statusNorm === 'approved' || appStatusNorm === 'approved' || reviewStatusNorm === 'approve';
     })();
-    if (approvalRequested && (canonicalRoleForApproval === 'Regional Manager' || canonicalRoleForApproval === 'NWAC Administrator')) {
-      let approvalCost = parseCostValue(
-        body.assessment_intervention_cost_total ??
-        body.intervention_cost_total ??
-        body.interventionCost ??
-        null
-      );
+    if (approvalRequested) {
+      let approvalCost = resolveApplicationAssessmentFundingApprovalAmount(body);
       if (approvalCost === null) {
         const costRow = await fetchApplicationAssessmentRow(conn, { caseId, applicationId });
-        approvalCost = parseCostValue(costRow?.intervention_cost_total);
+        approvalCost = resolveApplicationAssessmentFundingApprovalAmount(costRow);
       }
-      if (approvalCost !== null) {
-        if (canonicalRoleForApproval === 'Regional Manager' && approvalCost >= APPROVAL_COST_THRESHOLD) {
-          await conn.rollback();
-          return res.status(403).json({
-            success: false,
-            error: 'approval_threshold_exceeded',
-            message: `Regional Managers cannot approve applications with total cost >= ${APPROVAL_COST_THRESHOLD}. Escalate to NWAC Administrators.`,
-            lock: lockCheck.lock || null
-          });
-        }
-        if (canonicalRoleForApproval === 'NWAC Administrator' && approvalCost >= PROGRAM_ADMIN_APPROVAL_THRESHOLD) {
-          const approvalEmail = req?.auth?.email || req?.staffProfile?.email || null;
-          const normalizedApprovalEmail = (approvalEmail || '').trim().toLowerCase();
-          if (normalizedApprovalEmail !== PROGRAM_ADMIN_APPROVER_EMAIL) {
-            await conn.rollback();
-            return res.status(403).json({
-              success: false,
-              error: 'approval_threshold_exceeded',
-              message: `NWAC Administrators cannot approve applications with total cost >= ${PROGRAM_ADMIN_APPROVAL_THRESHOLD}. Only ${PROGRAM_ADMIN_APPROVER_EMAIL} can approve above this limit.`,
-              lock: lockCheck.lock || null
-            });
-          }
-        }
+      const approvalBlock = resolveHighValueFundingApprovalBlock(req, approvalCost);
+      if (approvalBlock) {
+        await conn.rollback();
+        return res.status(403).json({
+          ...approvalBlock,
+          lock: lockCheck.lock || null
+        });
       }
     }
 
@@ -86868,6 +88590,19 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       shouldMarkSubmissionNeedsReview = true;
     }
 
+    if (applicationAssessmentReviewWorkflowEnabled && assessmentSubmittedForWorkflow) {
+      const [[contextRow]] = await conn.query(
+        'SELECT case_context_json FROM iset_case WHERE id = ? LIMIT 1 FOR UPDATE',
+        [caseId]
+      );
+      const currentContext = safeJsonParse(contextRow?.case_context_json, null) || {};
+      const nextContext = clearApplicationAssessmentDecisionContext(currentContext, applicationId);
+      await conn.query(
+        'UPDATE iset_case SET case_context_json = ?, updated_at = NOW() WHERE id = ?',
+        [JSON.stringify(nextContext), caseId]
+      );
+    }
+
     if (assessmentReviewStatusProvided) {
       const [[contextRow]] = await conn.query(
         'SELECT case_context_json FROM iset_case WHERE id = ? LIMIT 1 FOR UPDATE',
@@ -86883,6 +88618,38 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
 	      const nextContext = mergeCaseContext(baseContext, scopedReviewContext);
 	      await conn.query('UPDATE iset_case SET case_context_json = ? WHERE id = ?', [JSON.stringify(nextContext), caseId]);
 	    }
+
+    if (
+      applicationAssessmentReviewWorkflowEnabled &&
+      assessmentReviewStatusProvided &&
+      applicationAssessmentReviewWorkflow
+    ) {
+      const workflowAction =
+        assessmentReviewStatus === 'approve'
+          ? REVIEW_ACTIONS.NwacApprove
+          : assessmentReviewStatus === 'reject'
+            ? REVIEW_ACTIONS.NwacDeny
+            : REVIEW_ACTIONS.NwacRequestChanges;
+      applicationAssessmentReviewWorkflowUpdated = await applyApplicationAssessmentReviewWorkflowAction(conn, {
+        caseId,
+        applicationId,
+        action: workflowAction,
+        actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+        actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
+        note: normaliseString(body.assessment_nwac_reason) || null,
+        payload: {
+          source: 'application_assessment_nwac_decision',
+          assessmentReviewStatus,
+        },
+      });
+      if (assessmentReviewStatus === 'push_back') {
+        applicationStatusToPersist = null;
+        applicationLifecycleStatusToPersist = null;
+        applicationDecisionOutcomeToPersist = null;
+        applicationAwaitingReasonToPersist = null;
+        applicationClosureReasonToPersist = null;
+      }
+    }
 
     if (conflictSignatureRequested) {
       const conflictSigned = toTinyInt(body.assessment_conflict_declaration_signed);
@@ -87541,6 +89308,20 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       requiredAssessmentDocsGenerated = true;
     }
 
+    if (applicationAssessmentReviewWorkflowEnabled && assessmentSubmittedForWorkflow) {
+      applicationAssessmentReviewWorkflowUpdated = await startApplicationAssessmentReviewWorkflow(conn, {
+        caseId,
+        applicationId,
+        actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+        actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
+        metadata: {
+          source: 'application_assessment_submit',
+          applicationStatus: applicationStatusToPersist || submittedApplicationStatusForRequiredDocs || null,
+          caseStatus: statusToPersist || submittedCaseLifecycleStatusForRequiredDocs || null,
+        },
+      });
+    }
+
     await conn.commit();
   } catch (error) {
     if (conn) {
@@ -88090,11 +89871,13 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       const signatureContext = approved
         ? await fetchAssessmentPdfSignatureContext({
             caseId,
+            applicationId: caseRow.application_id,
             submittedFallback: submittedSignature,
             approvedFallback: approvedSignature
           })
         : {
             submittedSignature: submittedSignature || null,
+            reviewSignature: null,
             approvedSignature: null
           };
       const latestSubmittedDoc = await fetchLatestAssessmentDocumentInfo({
@@ -88130,6 +89913,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
         referenceNumber,
         caseContext: afterCaseContext,
         recommendationSignature: signatureContext.submittedSignature,
+        reviewSignature: approved ? signatureContext.reviewSignature : null,
         approvalSignature: approved ? signatureContext.approvedSignature : null,
         includeAgreementSection: approved,
         versionNumber: assessmentVersionNumber,
@@ -88308,14 +90092,26 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
 	          : outcome === 'reject'
 	            ? 'nwac_review_denied'
 	            : 'nwac_review_changes_requested';
-	      await captureCaseEvent({
-        type: nwacReviewEventType,
-        caseId,
-        payload: {
-          tracking_id: trackingId,
-          outcome,
-	          outcome_label: outcomeLabel,
-	          reason,
+		      await captureCaseEvent({
+	        type: nwacReviewEventType,
+	        caseId,
+	        payload: {
+	          tracking_id: trackingId,
+	          application_id: applicationId || null,
+	          workflow_type: applicationAssessmentReviewWorkflowEnabled
+	            ? REVIEW_WORKFLOW_TYPES.ApplicationAssessment
+	            : null,
+	          review_stage: applicationAssessmentReviewWorkflowUpdated?.current_stage || null,
+	          recipient_staff_profile_id: nwacReviewEventType === 'nwac_review_changes_requested'
+	            ? (
+	                normalisePositiveInteger(applicationAssessmentReviewWorkflowUpdated?.rm_reviewed_by_staff_profile_id) ||
+	                normalisePositiveInteger(applicationAssessmentReviewWorkflow?.rm_reviewed_by_staff_profile_id) ||
+	                null
+	              )
+	            : null,
+	          outcome,
+		          outcome_label: outcomeLabel,
+		          reason,
 	          approval_cost_total: approvalCost,
 	          budget_pot_id: budgetPotId ?? null,
 	          budget_pot_code: budgetPotCode,
@@ -88367,6 +90163,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     }
 
     const responseRowVersion = caseRow?.application_row_version ?? newRowVersion ?? null;
+    const responseReviewWorkflow = serializeReviewWorkflowRow(
+      applicationAssessmentReviewWorkflowUpdated || applicationAssessmentReviewWorkflow
+    );
     res.json({
       success: true,
       status: afterStatus,
@@ -88380,6 +90179,8 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       application_awaiting_reason: caseRow?.application_awaiting_reason || null,
       application_closure_reason: caseRow?.application_closure_reason || null,
       application_row_version: responseRowVersion,
+      reviewWorkflow: responseReviewWorkflow,
+      review_workflow: responseReviewWorkflow,
       lock: lockCheck.lock || null
     });
   } catch (error) {
@@ -88397,6 +90198,9 @@ const SYSTEM_ADMIN_ACTIVITY_EVENT_TYPES = Object.freeze([
   'case_unassigned',
   'assessment_submitted',
   'assessment_recalled',
+  'rm_review_returned_to_submitter',
+  'rm_review_changes_forwarded',
+  'rm_review_submitted_to_nwac',
   'nwac_review_approved',
   'nwac_review_denied',
   'nwac_review_changes_requested',
@@ -90060,7 +91864,9 @@ function buildInternalNotificationAuthContext(req) {
 app.get('/api/me/notifications', async (req, res) => {
   try {
     const authContext = buildInternalNotificationAuthContext(req);
-    const notifications = await getInternalNotifications(pool, authContext);
+    const sortParam = String(req.query?.sort || req.query?.sortMode || '').trim().toLowerCase();
+    const sortMode = sortParam === 'urgency' ? 'urgency' : 'chronological';
+    const notifications = await getInternalNotifications(pool, authContext, { sortMode });
     res.status(200).json(notifications);
   } catch (error) {
     console.error('[notifications] fetch failed', error);

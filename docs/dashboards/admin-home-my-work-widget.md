@@ -2,7 +2,7 @@
 
 Purpose: document the live homepage Work Queue widget and the queues that drive the shared `Work Queue Items` table.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-05-20
+Last Updated: 2026-06-19
 
 ## Scope
 
@@ -34,7 +34,7 @@ Last Updated: 2026-05-20
 - `Regional Manager`
   - sees `Applications in My Region` first
   - then sees `My Applications`
-  - then sees the shared application-pipeline queues (`New Applications`, `EI Check Needed`, `In Assessment`, `On Hold`, `Pending Decision`, `Pending Completion`)
+  - then sees the shared application-pipeline queues (`New Applications`, `EI Check Needed`, `In Assessment`, `On Hold`, `Pending Review`, `Pending Completion`)
   - then sees `Clients in My Region`
   - then sees the remaining shared admin/manager exception queues
 - `ISET Coordinator`
@@ -44,7 +44,7 @@ Last Updated: 2026-05-20
 
 ## Current shared application pipeline
 
-- The shared pipeline is visible to `NWAC Administrator` and `Regional Manager`.
+- The shared pipeline is visible to `NWAC Administrator` and `Regional Manager`, with role-specific review/decision naming for the approval stage.
 - `New Applications`
   - contains non-terminal applications whose normalized lifecycle status is still `submitted` and that are not yet in active assessment
   - this now includes both unassigned files and assigned files whose EI status has already been verified but that have not yet moved into `in_review`
@@ -66,12 +66,16 @@ Last Updated: 2026-05-20
   - common hold reasons include external funding pending, future program/school start, applicant-requested pause, internal follow-up, and other hold reason
   - rows leave active assessment and decision queues until staff use `Resume review`
 - `Pending Decision`
-  - is the final decision-stage queue in this pipeline
-  - combines submitted application assessments plus new and revised intervention proposals waiting for decision
+  - is the final decision-stage queue for NWAC Administrators
+  - combines submitted application assessments plus new and revised intervention proposals at NWAC review
   - selecting it drives the shared items table into `Pending Decision Items` mode rather than opening a separate widget
   - detailed behavior for that table is documented in `docs/dashboards/admin-home-approvals-items-widget.md`
   - decision actions are completed from the workspace after opening the selected row from the `Item` column
   - the selected row still passes explicit decision-entry context so the target workspace opens in a review-focused board layout and the relevant decision step instead of restoring a stale personal board or wizard position
+- `Pending Review`
+  - is the Regional Manager review-stage queue for the two-step review workflow
+  - contains application assessments, new intervention proposals, and intervention amendments in `rm_review` or `returned_to_rm`
+  - when the Decision Maker requests changes, rows return here for RM review and forwarding to the submitter
 - `Pending Completion`
   - contains decision-recorded application files that still need post-decision follow-through before the application workflow is complete
   - includes approved application assessment outcomes until the application is actually completed/closed

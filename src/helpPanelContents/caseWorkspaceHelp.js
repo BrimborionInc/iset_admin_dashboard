@@ -39,13 +39,13 @@ const CaseWorkspaceHelp = ({ tutorial, onRestartTutorial, onEndTutorial }) => {
         documents, communicate with the client, and track follow-up through completion and closure.
       </p>
       <p>
-        When this workspace is opened from the homepage <strong>Pending Decision</strong> queue for a new
-        intervention proposal, PATH now opens a focused four-widget approval layout with
+        When this workspace is opened from the homepage <strong>Pending Review</strong> or
+        <strong> Pending Decision</strong> queue for an intervention proposal or change, PATH opens a
+        focused four-widget review layout with
         <strong> Case header</strong>, <strong>Proposed new intervention</strong>,
         <strong> Participant details</strong>, and <strong>Supporting documents</strong>, and loads
-        the selected proposal in <strong>Intervention assessment &gt; Record of decision</strong>.
-        The approval itself is committed there; any decision-letter work happens separately after
-        the decision is recorded.
+        the selected proposal in the active review or final-decision step. Any decision-letter work
+        happens separately after the final decision is recorded.
       </p>
       <p>
         This workspace is also where authorized staff record historical casework that already existed outside PATH.
@@ -122,7 +122,7 @@ CaseWorkspaceHelp.aiContext = `You are guiding a case manager through the Case W
 Focus on the staff workflow:
 - confirm the right case and current participant details;
 - manage action plans and interventions against the client's goals;
-- if the file was opened from the Pending Decision queue, explain that the workspace is intentionally focused on the selected proposal, the approver should use Intervention assessment > Record of decision, and any decision-letter follow-up happens separately after the decision is committed;
+- if the file was opened from Pending Review or Pending Decision, explain that the workspace is intentionally focused on the selected proposal and the active review step; any decision-letter follow-up happens separately after the final decision is committed;
 - record notes, documents, and client contact;
 - explain that authorized users can use the Case Header quick actions \`Add existing action plan\`, \`Add existing intervention\`, and \`Upload existing documents\` to backload historical casework without inventing intake or approval records;
 - when backload questions come up, mention the key guardrails: archived plans cannot receive existing interventions, closed plans only accept completed/cancelled interventions, in-progress or suspended interventions require an active plan, and historic documents stay case-based when there is no linked application;

@@ -17,7 +17,7 @@ const CaseAssignmentDashboardHelp = () => (
       </li>
       <li>
         <strong>Status:</strong> shows where the file is in the process, for example submitted, in
-        review, docs requested, or pending approval.
+        review, docs requested, pending review, or pending decision.
       </li>
       <li>
         <strong>Docs Requested age:</strong> helps you see how long the file has been waiting on a
@@ -50,7 +50,7 @@ const CaseAssignmentDashboardHelp = () => (
 
     <h3>Role-based visibility</h3>
     <ul>
-      <li><strong>NWAC Administrators</strong> can browse every application.</li>
+      <li><strong>Decision Makers</strong> can browse every application.</li>
       <li><strong>Regional Managers</strong> see cases in their hub or region, plus any files assigned directly to them.</li>
       <li><strong>ISET Coordinators</strong> only see applications assigned to them.</li>
     </ul>
@@ -58,7 +58,7 @@ const CaseAssignmentDashboardHelp = () => (
     <h3>Training-aligned reminders</h3>
     <ul>
       <li>Contact applicants promptly and document follow-up attempts for missing information.</li>
-      <li>Applications remain pending until documents, assessment, NWAC approval, and the signed Funding Agreement are complete.</li>
+      <li>Applications remain pending until documents, assessment, final decision, and the signed Funding Agreement are complete.</li>
       <li>Every application must stay tracked, even when it will not be funded or is later closed.</li>
       <li>Use the table to find the file; use the workspace to record the actual work and audit trail.</li>
     </ul>
@@ -73,13 +73,13 @@ How to guide users:
 - Explain that the header selector narrows the server-paginated list by application status group, matching the Case Management dashboard's header-selector pattern.
 - Explain that Active includes pending-completion files and excludes only closed or archived application lifecycle rows. All Applications returns every matching application record, including historical applications for the same client/case.
 - Use View to send the user to /application-case/{case_id} when they need to review the form, documents, messages, notes, or assessment.
-- If the user cannot find a case, explain role visibility: coordinators only see assigned applications; regional managers and NWAC admins have broader scope.
+- If the user cannot find a case, explain role visibility: coordinators only see assigned applications; regional managers and final-decision users have broader scope.
 - Mention Assign/Reassign only when relevant to the user’s role. Reassign is not the normal coordinator path here.
 
 Training-aligned guidance:
 - Prompt acknowledgement and documented follow-up matter more than board mechanics.
 - Missing information should be followed up and recorded.
-- Pending means the file is still moving through documents, assessment, NWAC approval, and signed agreement steps.
+- Pending means the file is still moving through documents, assessment, final decision, and signed agreement steps.
 - All applications must remain tracked for audit, whether funded or not.
 - Keep answers oriented to staff workflow and program expectations, not frontend implementation details.`;
 

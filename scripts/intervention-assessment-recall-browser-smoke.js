@@ -601,6 +601,7 @@ async function main() {
     await waitForButtonEnabled(page, 'Recall submission');
     const editableButtons = [
       ...(await visibleEnabledButtons(page, 'Save Progress')),
+      ...(await visibleEnabledButtons(page, 'Save progress')),
       ...(await visibleEnabledButtons(page, 'Submit proposal')),
     ];
     if (editableButtons.length) {
@@ -618,7 +619,7 @@ async function main() {
     }
     await waitForText(page, 'Submission recalled. You can make corrections and submit it again when ready.');
     await waitForText(page, 'Draft');
-    await waitForText(page, 'Save Progress');
+    await waitForText(page, 'Save progress');
     await delay(800);
     await page.screenshot({ path: screenshotPath, fullPage: true });
   } catch (error) {

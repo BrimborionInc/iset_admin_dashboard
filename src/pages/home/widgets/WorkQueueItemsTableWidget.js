@@ -78,7 +78,8 @@ const NO_ASSIGNMENT_BUCKET_IDS = new Set([
   'payments-issues',
   'payments-proof-due',
   'pending-completion',
-  'pending-decision'
+  'pending-decision',
+  'pending-review'
 ]);
 const NO_ASSIGNMENT_ITEM_TYPES = new Set([
   'Agreement',
@@ -801,11 +802,16 @@ const WorkQueueItemsTableWidget = ({
       () => (isMetricMode ? null : bucketDefinitions.find(bucket => bucket.id === selectedBucketId) || bucketDefinitions[0] || null),
       [bucketDefinitions, isMetricMode, selectedBucketId]
     );
-  const isApprovalQueue = !isMetricMode && (selectedBucketId === 'pending-decision' || selectedBucketId === 'approvals-pipeline');
+  const isApprovalQueue = !isMetricMode && (
+    selectedBucketId === 'pending-decision' ||
+    selectedBucketId === 'pending-review' ||
+    selectedBucketId === 'approvals-pipeline'
+  );
+  const isPendingReviewQueue = !isMetricMode && selectedBucketId === 'pending-review';
   const helpContent = isApprovalQueue
     ? <HomeApprovalsItemsHelp />
     : <HomeWorkQueueItemsHelp />;
-  const helpTitle = isApprovalQueue ? 'Approval Items' : 'Work Queue Items';
+  const helpTitle = isPendingReviewQueue ? 'Review Items' : (isApprovalQueue ? 'Approval Items' : 'Work Queue Items');
   const helpAiContext = isApprovalQueue
     ? HomeApprovalsItemsHelp.aiContext
     : HomeWorkQueueItemsHelp.aiContext;
@@ -823,7 +829,11 @@ const WorkQueueItemsTableWidget = ({
   const shouldWrapLines = !isMetricMode && selectedBucket && ['exceptions-escalations', 'unresolved-conflicts'].includes(selectedBucket.id);
   const sourceItems = isMetricMode ? metricItems : items;
   const queueDescription = isApprovalQueue
-    ? 'Application assessments, new intervention proposals, and proposed intervention changes waiting for a decision. Select an item to open the review layout.'
+    ? (
+        isPendingReviewQueue
+          ? 'Submitted assessments waiting for Regional Manager review. Select an item to open the review layout.'
+          : 'Application assessments, new intervention proposals, and proposed intervention changes waiting for a decision. Select an item to open the review layout.'
+      )
     : selectedBucket?.description || selectedBucket?.label;
 
   const decoratedItems = useMemo(() => {

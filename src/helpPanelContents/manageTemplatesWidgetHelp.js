@@ -12,12 +12,12 @@ const ManageTemplatesWidgetHelp = () => (
     <p>
       The subject and body each have a searchable field picker for supported
       placeholders. The collapsed field reference groups the available fields by
-      context: case/applicant, staff/event, NWAC review, decision, and
+      context: case/applicant, staff/event, review workflow, decision, and
       links/support.
     </p>
     <p>
       Use the Preview scenario menu to test the same template against common
-      event families such as NWAC approved, NWAC denied, NWAC changes requested,
+      event families such as approved, denied, changes requested,
       secure message, applicant submission, and generic staff alert. The preview
       shows sample values only; the real email still uses the event context sent
       by the dispatcher.

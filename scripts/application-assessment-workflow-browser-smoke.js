@@ -34,6 +34,25 @@ const roleProfiles = {
     name: 'Quebec Coordinator',
     groups: ['ISET_Coordinator'],
   },
+  'Regional Manager': {
+    email: 'regional.manager@awentech.ca',
+    name: 'Regional Manager',
+    groups: ['Regional_Manager'],
+  },
+};
+
+const REVIEW_STAGES = {
+  rmReview: 'rm_review',
+  nwacReview: 'nwac_review',
+  returnedToRm: 'returned_to_rm',
+  returnedToSubmitter: 'returned_to_submitter',
+  finalDecisionRecorded: 'final_decision_recorded',
+};
+
+const REVIEW_ACTIONS = {
+  rmReturnToSubmitter: 'rm_return_to_submitter',
+  rmSubmitToNwac: 'rm_submit_to_nwac',
+  rmForwardChangesToSubmitter: 'rm_forward_changes_to_submitter',
 };
 
 const applicationAnswers = {
@@ -249,6 +268,53 @@ function buildApplicationScopedContext(updates = {}) {
   };
 }
 
+function buildReviewWorkflow(stage = REVIEW_STAGES.rmReview, overrides = {}) {
+  return {
+    id: 301,
+    workflowType: 'application_assessment',
+    workflow_type: 'application_assessment',
+    subjectKey: `application_assessment:application:${APPLICATION_ID}`,
+    subject_key: `application_assessment:application:${APPLICATION_ID}`,
+    caseId: CASE_ID,
+    case_id: CASE_ID,
+    applicationId: APPLICATION_ID,
+    application_id: APPLICATION_ID,
+    currentStage: stage,
+    current_stage: stage,
+    currentOwnerRole:
+      stage === REVIEW_STAGES.nwacReview
+        ? 'NWAC Administrator'
+        : stage === REVIEW_STAGES.returnedToSubmitter
+          ? 'Submitter'
+          : 'Regional Manager',
+    current_owner_role:
+      stage === REVIEW_STAGES.nwacReview
+        ? 'NWAC Administrator'
+        : stage === REVIEW_STAGES.returnedToSubmitter
+          ? 'Submitter'
+          : 'Regional Manager',
+    submittedByStaffProfileId: 1,
+    submitted_by_staff_profile_id: 1,
+    submittedAt: '2026-06-19T13:00:00.000Z',
+    submitted_at: '2026-06-19T13:00:00.000Z',
+    rmReviewedByStaffProfileId: null,
+    rm_reviewed_by_staff_profile_id: null,
+    rmReviewedAt: null,
+    rm_reviewed_at: null,
+    rmReviewNote: null,
+    rm_review_note: null,
+    nwacDecidedByStaffProfileId: null,
+    nwac_decided_by_staff_profile_id: null,
+    nwacDecidedAt: null,
+    nwac_decided_at: null,
+    nwacDecision: null,
+    nwac_decision: null,
+    nwacDecisionNote: null,
+    nwac_decision_note: null,
+    ...overrides,
+  };
+}
+
 function buildCasePayload({
   status = 'in_review',
   applicationStatus = 'in_review',
@@ -257,13 +323,17 @@ function buildCasePayload({
   conflictSigned = true,
   nwacReviewStatus = '',
   nwacReview = '',
+  nwacReason = '',
   decisionOutcome = null,
   caseContext = buildApplicationScopedContext(),
+  twoStepReviewEnabled = false,
+  reviewWorkflow = null,
 } = {}) {
   const assessmentFields = completeAssessment
     ? buildCompleteAssessmentFields({
         assessment_nwac_review_status: nwacReviewStatus,
         assessment_nwac_review: nwacReview,
+        assessment_nwac_reason: nwacReason,
       })
     : {
         assessment_esdc_eligibility: 'eligible',
@@ -298,6 +368,10 @@ function buildCasePayload({
     application_status_raw: applicationStatus,
     application_lifecycle_status: applicationStatus === 'completed' ? 'completed' : 'assessment',
     applicationLifecycleStatus: applicationStatus === 'completed' ? 'completed' : 'assessment',
+    twoStepReviewEnabled,
+    two_step_review_enabled: twoStepReviewEnabled,
+    reviewWorkflow,
+    review_workflow: reviewWorkflow,
     decision_outcome: decisionOutcome,
     decisionOutcome,
     assigned_staff_profile_id: 1,
@@ -438,13 +512,62 @@ function buildDocuments() {
 function applyCaseMutation(state, body) {
   const currentVersion = Number(state.casePayload.application_row_version || 0) || 0;
   const nextVersion = currentVersion + 1;
+  const twoStepEnabled = state.casePayload.twoStepReviewEnabled || state.casePayload.two_step_review_enabled;
+  const preservePendingForTwoStepPushback =
+    twoStepEnabled &&
+    body.assessment_nwac_review_status === 'push_back' &&
+    state.casePayload.reviewWorkflow;
   const next = {
     ...state.casePayload,
     ...body,
     application_row_version: nextVersion,
     applicationRowVersion: nextVersion,
   };
-  if (body.applicationStatus) {
+  if (twoStepEnabled) {
+    next.twoStepReviewEnabled = true;
+    next.two_step_review_enabled = true;
+    if (body.applicationStatus === 'pending_approval' && body.assessment_recommendation && body.assessment_justification) {
+      const workflow = buildReviewWorkflow(REVIEW_STAGES.rmReview);
+      next.reviewWorkflow = workflow;
+      next.review_workflow = workflow;
+    } else if (body.assessment_nwac_review_status && state.casePayload.reviewWorkflow) {
+      const currentWorkflow = state.casePayload.reviewWorkflow;
+      if (body.assessment_nwac_review_status === 'push_back') {
+        const workflow = {
+          ...currentWorkflow,
+          currentStage: REVIEW_STAGES.returnedToRm,
+          current_stage: REVIEW_STAGES.returnedToRm,
+          currentOwnerRole: 'Regional Manager',
+          current_owner_role: 'Regional Manager',
+          nwacDecision: 'changes_requested',
+          nwac_decision: 'changes_requested',
+          nwacDecisionNote: body.assessment_nwac_reason || '',
+          nwac_decision_note: body.assessment_nwac_reason || '',
+        };
+        next.reviewWorkflow = workflow;
+        next.review_workflow = workflow;
+        next.applicationStatus = 'pending_approval';
+        next.application_status = 'pending_approval';
+        next.applicationStatusRaw = 'pending_approval';
+        next.application_status_raw = 'pending_approval';
+      } else {
+        const workflow = {
+          ...currentWorkflow,
+          currentStage: REVIEW_STAGES.finalDecisionRecorded,
+          current_stage: REVIEW_STAGES.finalDecisionRecorded,
+          currentOwnerRole: null,
+          current_owner_role: null,
+          nwacDecision: body.assessment_nwac_review_status === 'approve' ? 'approved' : 'denied',
+          nwac_decision: body.assessment_nwac_review_status === 'approve' ? 'approved' : 'denied',
+          nwacDecisionNote: body.assessment_nwac_reason || null,
+          nwac_decision_note: body.assessment_nwac_reason || null,
+        };
+        next.reviewWorkflow = workflow;
+        next.review_workflow = workflow;
+      }
+    }
+  }
+  if (body.applicationStatus && !preservePendingForTwoStepPushback) {
     next.application_status = body.applicationStatus;
     next.applicationStatusRaw = body.applicationStatus;
     next.application_status_raw = body.applicationStatus;
@@ -467,6 +590,73 @@ function applyCaseMutation(state, body) {
     success: true,
     application_row_version: nextVersion,
     applicationRowVersion: nextVersion,
+    reviewWorkflow: next.reviewWorkflow || null,
+    review_workflow: next.review_workflow || null,
+  };
+}
+
+function applyReviewWorkflowAction(state, body) {
+  const currentVersion = Number(state.casePayload.application_row_version || 0) || 0;
+  const nextVersion = currentVersion + 1;
+  const currentWorkflow = state.casePayload.reviewWorkflow || buildReviewWorkflow(REVIEW_STAGES.rmReview);
+  const note = typeof body.note === 'string' ? body.note : '';
+  let applicationStatus = state.casePayload.applicationStatus || state.casePayload.application_status || 'pending_approval';
+  let workflow = currentWorkflow;
+  if (body.action === REVIEW_ACTIONS.rmSubmitToNwac) {
+    workflow = {
+      ...currentWorkflow,
+      currentStage: REVIEW_STAGES.nwacReview,
+      current_stage: REVIEW_STAGES.nwacReview,
+      currentOwnerRole: 'NWAC Administrator',
+      current_owner_role: 'NWAC Administrator',
+      rmReviewedByStaffProfileId: 1,
+      rm_reviewed_by_staff_profile_id: 1,
+      rmReviewedAt: '2026-06-19T13:10:00.000Z',
+      rm_reviewed_at: '2026-06-19T13:10:00.000Z',
+      rmReviewNote: note || currentWorkflow.rmReviewNote || null,
+      rm_review_note: note || currentWorkflow.rm_review_note || null,
+    };
+    applicationStatus = 'pending_approval';
+  } else {
+    workflow = {
+      ...currentWorkflow,
+      currentStage: REVIEW_STAGES.returnedToSubmitter,
+      current_stage: REVIEW_STAGES.returnedToSubmitter,
+      currentOwnerRole: 'Submitter',
+      current_owner_role: 'Submitter',
+      rmReviewedByStaffProfileId: 1,
+      rm_reviewed_by_staff_profile_id: 1,
+      rmReviewedAt: '2026-06-19T13:10:00.000Z',
+      rm_reviewed_at: '2026-06-19T13:10:00.000Z',
+      rmReviewNote: note,
+      rm_review_note: note,
+    };
+    applicationStatus = 'in_review';
+  }
+  const next = {
+    ...state.casePayload,
+    applicationStatus,
+    application_status: applicationStatus,
+    applicationStatusRaw: applicationStatus,
+    application_status_raw: applicationStatus,
+    twoStepReviewEnabled: true,
+    two_step_review_enabled: true,
+    reviewWorkflow: workflow,
+    review_workflow: workflow,
+    application_row_version: nextVersion,
+    applicationRowVersion: nextVersion,
+  };
+  state.casePayload = next;
+  state.applicationPayload = buildApplicationPayload(next);
+  return {
+    success: true,
+    applicationId: APPLICATION_ID,
+    applicationStatus,
+    application_status: applicationStatus,
+    application_row_version: nextVersion,
+    applicationRowVersion: nextVersion,
+    reviewWorkflow: workflow,
+    review_workflow: workflow,
   };
 }
 
@@ -568,6 +758,12 @@ async function installApiStubs(page, state) {
       const body = parseJsonSafely(request.postData()) || {};
       state.mutations.assessmentRecalls.push({ path: `${pathname}${url.search}`, body });
       request.respond(jsonResponse(applyAssessmentRecall(state)));
+      return;
+    }
+    if (pathname === '/api/cases/1/assessment/review-workflow/action' && method === 'POST') {
+      const body = parseJsonSafely(request.postData()) || {};
+      state.mutations.reviewActions.push({ path: `${pathname}${url.search}`, body });
+      request.respond(jsonResponse(applyReviewWorkflowAction(state, body)));
       return;
     }
     if (pathname === '/api/applications/2' && method === 'GET') {
@@ -906,6 +1102,36 @@ async function clickRadioByLabel(page, text) {
   }
 }
 
+async function fillFirstVisibleTextarea(page, value) {
+  const filled = await page.evaluate(text => {
+    const isVisible = element => {
+      if (!element) return false;
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.visibility !== 'hidden' &&
+        style.display !== 'none';
+    };
+    const textarea = Array.from(document.querySelectorAll('textarea')).find(isVisible);
+    if (!textarea) return false;
+    textarea.scrollIntoView({ block: 'center', inline: 'center' });
+    textarea.focus();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+    if (setter) {
+      setter.call(textarea, text);
+    } else {
+      textarea.value = text;
+    }
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    textarea.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }, value);
+  if (!filled) {
+    throw new Error('Could not find a visible textarea to fill.');
+  }
+}
+
 async function waitForText(page, text, timeout = 45_000) {
   await page.waitForFunction(
     targetText => Boolean(document.body && document.body.innerText.includes(targetText)),
@@ -1045,6 +1271,181 @@ function buildScenarios() {
         }
         await waitForText(page, 'Assessment submission recalled. You can make corrections and submit it again when ready.');
         await waitForText(page, 'Submit assessment');
+      },
+    },
+    {
+      name: 'regional-manager-return-to-coordinator',
+      role: 'Regional Manager',
+      path: approvalEntryPath('decision'),
+      casePayload: buildCasePayload({
+        status: 'intake',
+        applicationStatus: 'pending_approval',
+        completeAssessment: true,
+        conflictSigned: true,
+        twoStepReviewEnabled: true,
+        reviewWorkflow: buildReviewWorkflow(REVIEW_STAGES.rmReview),
+      }),
+      run: async ({ page, state }) => {
+        await waitForWorkspaceReady(page, 'Regional Manager review');
+        const commitButtons = await visibleEnabledButtons(page, 'Commit');
+        if (commitButtons.length) {
+          throw new Error(`RM review exposed final Commit control: ${JSON.stringify(commitButtons)}`);
+        }
+        await waitForText(page, 'Return to Coordinator');
+        await fillFirstVisibleTextarea(page, 'Please clarify the training rationale before approval.');
+        await clickButtonByText(page, 'Return to Coordinator');
+        const reviewAction = await waitUntil(
+          () => state.mutations.reviewActions.find(entry => entry.body.action === REVIEW_ACTIONS.rmReturnToSubmitter),
+          'RM return review action POST'
+        );
+        if (reviewAction.body.applicationId !== APPLICATION_ID) {
+          throw new Error(`RM return used wrong applicationId: ${reviewAction.body.applicationId}`);
+        }
+        if (reviewAction.body.expectedRowVersion !== 7) {
+          throw new Error(`RM return sent wrong expectedRowVersion: ${reviewAction.body.expectedRowVersion}`);
+        }
+        if (!String(reviewAction.body.note || '').includes('training rationale')) {
+          throw new Error('RM return did not send review notes.');
+        }
+        await waitForText(page, 'Assessment returned to the Coordinator with notes.');
+      },
+    },
+    {
+      name: 'regional-manager-submit-to-nwac',
+      role: 'Regional Manager',
+      path: approvalEntryPath('decision'),
+      casePayload: buildCasePayload({
+        status: 'intake',
+        applicationStatus: 'pending_approval',
+        completeAssessment: true,
+        conflictSigned: true,
+        twoStepReviewEnabled: true,
+        reviewWorkflow: buildReviewWorkflow(REVIEW_STAGES.rmReview),
+      }),
+      run: async ({ page, state }) => {
+        await waitForWorkspaceReady(page, 'Regional Manager review');
+        await waitForText(page, 'Submit for final decision');
+        await fillFirstVisibleTextarea(page, 'I agree with this recommendation - signed the Regional Manager.');
+        await clickButtonByText(page, 'Submit for final decision');
+        const reviewAction = await waitUntil(
+          () => state.mutations.reviewActions.find(entry => entry.body.action === REVIEW_ACTIONS.rmSubmitToNwac),
+          'RM submit-to-NWAC review action POST'
+        );
+        if (reviewAction.body.applicationId !== APPLICATION_ID) {
+          throw new Error(`RM submit used wrong applicationId: ${reviewAction.body.applicationId}`);
+        }
+        if (reviewAction.body.expectedRowVersion !== 7) {
+          throw new Error(`RM submit sent wrong expectedRowVersion: ${reviewAction.body.expectedRowVersion}`);
+        }
+        if (!String(reviewAction.body.note || '').includes('signed the Regional Manager')) {
+          throw new Error('RM submit did not send review notes.');
+        }
+        await waitForText(page, 'Assessment submitted for final decision.');
+        await waitForText(page, 'Regional Manager review note');
+        await waitForText(page, 'I agree with this recommendation - signed the Regional Manager.');
+      },
+    },
+    {
+      name: 'nwac-request-changes-to-rm',
+      role: 'System Administrator',
+      path: approvalEntryPath('decision'),
+      casePayload: buildCasePayload({
+        status: 'intake',
+        applicationStatus: 'pending_approval',
+        completeAssessment: true,
+        conflictSigned: true,
+        nwacReviewStatus: 'push_back',
+        nwacReview: '',
+        nwacReason: 'Please add the missing funding-source explanation.',
+        twoStepReviewEnabled: true,
+        reviewWorkflow: buildReviewWorkflow(REVIEW_STAGES.nwacReview, {
+          rmReviewedByStaffProfileId: 1,
+          rm_reviewed_by_staff_profile_id: 1,
+          rmReviewedAt: '2026-06-19T13:10:00.000Z',
+          rm_reviewed_at: '2026-06-19T13:10:00.000Z',
+        }),
+      }),
+      run: async ({ page, state }) => {
+        await waitForWorkspaceReady(page, 'Ready for Decision Maker');
+        await waitForButtonEnabled(page, 'Commit');
+        await clickButtonByText(page, 'Commit');
+        const decisionPut = await waitUntil(
+          () => state.mutations.casePuts.find(entry => entry.body.assessment_nwac_review_status === 'push_back'),
+          'NWAC request-changes PUT'
+        );
+        if (decisionPut.body.applicationStatus !== 'in_review') {
+          throw new Error(`NWAC request-changes UI sent unexpected applicationStatus: ${decisionPut.body.applicationStatus}`);
+        }
+        if (!String(decisionPut.body.assessment_nwac_reason || '').includes('funding-source')) {
+          throw new Error('NWAC request-changes did not send the change note.');
+        }
+        await waitForText(page, 'Changes requested by the Decision Maker and returned to Regional Manager review.');
+        if (state.casePayload.applicationStatus !== 'pending_approval') {
+          throw new Error(`Two-step pushback should stay pending with RM, got ${state.casePayload.applicationStatus}`);
+        }
+        if (state.casePayload.reviewWorkflow?.currentStage !== REVIEW_STAGES.returnedToRm) {
+          throw new Error(`Two-step pushback did not move workflow to returned_to_rm: ${state.casePayload.reviewWorkflow?.currentStage}`);
+        }
+      },
+    },
+    {
+      name: 'regional-manager-forward-nwac-changes',
+      role: 'Regional Manager',
+      path: approvalEntryPath('decision'),
+      casePayload: buildCasePayload({
+        status: 'intake',
+        applicationStatus: 'pending_approval',
+        completeAssessment: true,
+        conflictSigned: true,
+        twoStepReviewEnabled: true,
+        reviewWorkflow: buildReviewWorkflow(REVIEW_STAGES.returnedToRm, {
+          nwacDecision: 'changes_requested',
+          nwac_decision: 'changes_requested',
+          nwacDecisionNote: 'Please add the missing funding-source explanation.',
+          nwac_decision_note: 'Please add the missing funding-source explanation.',
+        }),
+      }),
+      run: async ({ page, state }) => {
+        await waitForWorkspaceReady(page, 'Decision Maker requested changes');
+        await waitForText(page, 'Decision Maker requested changes');
+        const submitToNwacVisible = await page.evaluate(() => {
+          const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+          const isVisible = element => {
+            if (!element) return false;
+            const rect = element.getBoundingClientRect();
+            const style = window.getComputedStyle(element);
+            return rect.width > 0 &&
+              rect.height > 0 &&
+              style.visibility !== 'hidden' &&
+              style.display !== 'none';
+          };
+          return Array.from(document.querySelectorAll('button, [role="button"]')).some(button => (
+            isVisible(button) &&
+            normalize(button.innerText || button.textContent || '') === 'Submit for final decision'
+          ));
+        });
+        if (submitToNwacVisible) {
+          throw new Error('Returned-to-RM review should not offer Submit for final decision.');
+        }
+        await fillFirstVisibleTextarea(page, 'Coordinator, please address the funding-source explanation.');
+        await clickButtonByText(page, 'Forward changes to Coordinator');
+        const reviewAction = await waitUntil(
+          () => state.mutations.reviewActions.find(entry => entry.body.action === REVIEW_ACTIONS.rmForwardChangesToSubmitter),
+          'RM forward-changes review action POST'
+        );
+        if (reviewAction.body.applicationId !== APPLICATION_ID) {
+          throw new Error(`RM forward used wrong applicationId: ${reviewAction.body.applicationId}`);
+        }
+        if (reviewAction.body.expectedRowVersion !== 7) {
+          throw new Error(`RM forward sent wrong expectedRowVersion: ${reviewAction.body.expectedRowVersion}`);
+        }
+        if (!String(reviewAction.body.note || '').includes('funding-source')) {
+          throw new Error('RM forward did not send review notes.');
+        }
+        await waitForText(page, 'Requested changes forwarded to the Coordinator.');
+        if (state.casePayload.applicationStatus !== 'in_review') {
+          throw new Error(`RM forward should reopen coordinator editing, got ${state.casePayload.applicationStatus}`);
+        }
       },
     },
     {
@@ -1196,6 +1597,7 @@ async function runScenario(browser, args, scenario) {
     mutations: {
       casePuts: [],
       assessmentRecalls: [],
+      reviewActions: [],
       messagePosts: [],
     },
     consoleLines: [],
@@ -1256,11 +1658,13 @@ async function runScenario(browser, args, scenario) {
     apiCallCount: state.apiCalls.length,
     casePutCount: state.mutations.casePuts.length,
     assessmentRecallCount: state.mutations.assessmentRecalls.length,
+    reviewActionCount: state.mutations.reviewActions.length,
     messagePostCount: state.mutations.messagePosts.length,
     failures: state.failures,
     apiCalls: state.apiCalls.map(call => `${call.method} ${call.path}${call.search}`),
     casePuts: state.mutations.casePuts.map(entry => entry.body),
     assessmentRecalls: state.mutations.assessmentRecalls.map(entry => entry.body),
+    reviewActions: state.mutations.reviewActions.map(entry => entry.body),
     messagePosts: state.mutations.messagePosts.map(entry => entry.body),
     consoleWarnings: state.consoleLines.filter(line => line.type === 'warning' || line.type === 'error').slice(-10),
   };

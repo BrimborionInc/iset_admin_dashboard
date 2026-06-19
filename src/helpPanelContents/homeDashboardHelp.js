@@ -41,8 +41,11 @@ const HomeDashboardHelp = () => {
         <li>Track recent updates across applications and active cases.</li>
         <li>Use metrics as a workload snapshot, then drill into the matching record list from any count.</li>
         <li>Keep a personal list of tagged files that need follow-up.</li>
-        {(isRegionalManager || isNwacAdmin) ? (
-          <li>Use the Pending Decision queue to review submitted application assessments, new intervention proposals, and proposed intervention changes, then complete the decision inside the workspace.</li>
+        {isRegionalManager ? (
+          <li>Use the Pending Review queue to review submitted application assessments, new intervention proposals, and proposed intervention changes before they move to final decision.</li>
+        ) : null}
+        {isNwacAdmin ? (
+          <li>Use the Pending Decision queue to review submitted application assessments, new intervention proposals, and proposed intervention changes, then complete the final decision inside the workspace.</li>
         ) : null}
         {(isRegionalManager || isNwacAdmin || isCoordinator) ? (
           <li>Use Pending Completion to catch post-decision applications and approved intervention proposal/revision follow-ups that still need letters, documents, signatures, or final completion.</li>
@@ -65,8 +68,11 @@ const HomeDashboardHelp = () => {
       <ul>
         <li><strong>{isCoordinator ? 'Work Queue (ISET Coordinator)' : 'Work Queue'}</strong> - the role-based list of things that need action first.</li>
         <li><strong>Work Queue Items</strong> - the detailed table for the selected queue, with direct links into the correct workspace.</li>
-        {(isRegionalManager || isNwacAdmin) ? (
-          <li><strong>Pending Decision Items</strong> - the decision-focused view of Work Queue Items, showing applicant province, EI status, timeline target, and workspace access for approval decisions.</li>
+        {isRegionalManager ? (
+          <li><strong>Pending Review Items</strong> - the review-focused view of Work Queue Items, showing applicant province, EI status, timeline target, and workspace access for Regional Manager review.</li>
+        ) : null}
+        {isNwacAdmin ? (
+          <li><strong>Pending Decision Items</strong> - the decision-focused view of Work Queue Items, showing applicant province, EI status, timeline target, and workspace access for final decisions.</li>
         ) : null}
         {(isRegionalManager || isNwacAdmin || isCoordinator) ? (
           <li><strong>Pending Completion</strong> - the post-decision queue for decided applications and approved intervention proposal/revision letter follow-ups that are not yet fully completed.</li>
@@ -110,8 +116,11 @@ const HomeDashboardHelp = () => {
         <li>Drag and resize widgets to fit your workflow. The layout saves per browser.</li>
         <li>Use Work queue preferences to choose which queue cards are visible for your role.</li>
         <li>Use the tag icon in Work Queue Items to add or remove tagged items from your list.</li>
-        {(isRegionalManager || isNwacAdmin) ? (
-          <li>Queue actions vary by role. In the Pending Decision queue, open the row from the item name and complete the decision inside the workspace rather than from the table.</li>
+        {isRegionalManager ? (
+          <li>Queue actions vary by role. In the Pending Review queue, open the row from the item name and complete the Regional Manager review inside the workspace rather than from the table.</li>
+        ) : null}
+        {isNwacAdmin ? (
+          <li>Queue actions vary by role. In the Pending Decision queue, open the row from the item name and complete the final decision inside the workspace rather than from the table.</li>
         ) : null}
       </ul>
 
@@ -146,15 +155,15 @@ HomeDashboardHelp.aiContext = `You are assisting a user on the NWAC ISET homepag
 
 Role-aware guidance:
 - ISET Coordinators use the coordinator work queue, queue items table, metrics, recent activity, and tagged applications.
-- Regional Managers and NWAC Administrators use the consolidated work queue plus queue items and metrics.
+- Regional Managers and final-decision users use the consolidated work queue plus queue items and metrics.
 - System Administrators see an operations snapshot, AWS environment status, and users/access alerts instead of the standard metrics widget.
 
 How to answer:
 - Start from the staff task: identify today’s priority, select the right queue, open the matching workspace, then do the real work in the application or case record.
 - When helping coordinators, connect queue names to training expectations such as prompt acknowledgement of new applications, documented follow-up attempts for missing information, keeping all files tracked, and following active cases through check-ins and closure.
 - Explain that metrics can drill into the same Work Queue Items table, while tagging is a personal follow-up tool.
-- For NWAC Administrators and Regional Managers, mention that the Pending Decision queue opens a decision-focused table. Clarify that approval decisions are completed inside the workspace by NWAC Administrators.
-- For coordinators, NWAC Administrators, and Regional Managers, explain that Pending Completion is the post-decision stage for application completion and approved intervention proposal/revision approval-letter follow-up.
+- For final-decision users, mention that Pending Decision opens a decision-focused table. For Regional Managers, mention that Pending Review opens submitted application assessments, new intervention proposals, and proposed intervention changes waiting for RM review or returned to RM after the Decision Maker requested changes. Clarify that final decisions are completed inside the workspace by Decision Makers.
+- For coordinators, final-decision users, and Regional Managers, explain that Pending Completion is the post-decision stage for application completion and approved intervention proposal/revision approval-letter follow-up.
 - Mention Add widget and Reset layout only as secondary page controls, not the main purpose of the page.
 - Avoid product-tour language unless the user specifically asks about layout or mechanics.`;
 

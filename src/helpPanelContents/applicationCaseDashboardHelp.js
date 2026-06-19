@@ -42,9 +42,10 @@ const ApplicationCaseDashboardHelp = ({ onRestartTutorial, onEndTutorial }) => {
         and keep the audit trail together in one place.
       </p>
       <p>
-        When this workspace is opened from the homepage <strong>Pending Decision</strong> queue, PATH now
-        switches to an approval review layout so the approver can move directly from the application
-        form and supporting documents into <strong>Application Assessment &gt; Approval and decision</strong>.
+        When this workspace is opened from the homepage <strong>Pending Review</strong> or
+        <strong> Pending Decision</strong> queue, PATH switches to a review layout so the reviewer can
+        move directly from the application form and supporting documents into the active review or
+        decision step.
       </p>
       <SpaceBetween direction="horizontal" size="xs">
         <Button onClick={handleRestart}>Restart tour</Button>
@@ -69,7 +70,7 @@ const ApplicationCaseDashboardHelp = ({ onRestartTutorial, onEndTutorial }) => {
         <li>Review the <em>ISET Application Form</em> and <em>Supporting Documents</em> together so you understand the applicant&apos;s request, background, and missing evidence.</li>
         <li>Check whether EI consent and EI verification requirements are satisfied before moving the assessment forward.</li>
         <li>If documents or clarification are missing, contact the applicant through <em>Secure Messaging</em> and record the contact in <em>Notes and Tasks</em>.</li>
-        <li>Complete the <em>Application Assessment</em> with a clear recommendation and justification, then submit it to NWAC for decision.</li>
+        <li>Complete the <em>Application Assessment</em> with a clear recommendation and justification, then submit it for review.</li>
         <li>After the decision, use the communication and funding-agreement steps to finish the file properly instead of treating the decision alone as the end of the work.</li>
       </ol>
 
@@ -77,7 +78,7 @@ const ApplicationCaseDashboardHelp = ({ onRestartTutorial, onEndTutorial }) => {
       <ul>
         <li>Contact new applicants promptly and document requests for missing information.</li>
         <li>All documents received and all meaningful staff interactions should be captured in the file.</li>
-        <li>A file is still pending until documents, coordinator assessment, NWAC approval, and the signed Funding Agreement are complete.</li>
+        <li>A file is still pending until documents, coordinator assessment, final decision, and the signed Funding Agreement are complete.</li>
         <li>If a living allowance is being considered, the financial overview and verification need to support the recommendation.</li>
       </ul>
 
@@ -109,11 +110,11 @@ ApplicationCaseDashboardHelp.aiContext = `You are assisting a coordinator in the
 Guide the user like a trained coordinator working a file, not like a product demo:
 - Start from what they need to do next in the assessment process.
 - Use Application Overview to orient, Application Form plus Supporting Documents to review evidence, Secure Messaging plus Notes for follow-up, and Application Assessment for the recommendation.
-- If the file was opened from the Pending Decision queue, explain that the workspace is intentionally focused on review and the decision belongs in Application Assessment > Approval and decision.
+- If the file was opened from Pending Review or Pending Decision, explain that the workspace is intentionally focused on the active review step and the next action belongs in Application Assessment.
 - Remind them that missing information requests and significant staff contact should be documented.
 
 When the coordinator needs to correct applicant data, direct them to the ISET Application Form widget: press Edit, confirm the modal, adjust the fields, then Save. Saving creates a new version visible under View versions. Editing is disabled once a final decision is recorded or another user holds the lock.
 
-Use program guidance: contact new applicants within five days; make up to three attempts for missing information before closure. Required evidence includes Status/Treaty card or two Nation letters plus self-declaration, two IDs, acceptance letter and fee statement, band funding denial where applicable, and income or expense proofs for living allowance. An application remains pending until documents are complete, the coordinator recommendation is recorded, the NWAC decision is set, and the Funding Agreement is signed.`;
+Use program guidance: contact new applicants within five days; make up to three attempts for missing information before closure. Required evidence includes Status/Treaty card or two Nation letters plus self-declaration, two IDs, acceptance letter and fee statement, band funding denial where applicable, and income or expense proofs for living allowance. An application remains pending until documents are complete, the coordinator recommendation is recorded, the final decision is set, and the Funding Agreement is signed.`;
 
 export default ApplicationCaseDashboardHelp;

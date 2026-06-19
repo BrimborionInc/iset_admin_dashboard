@@ -1,0 +1,91 @@
+CREATE TABLE IF NOT EXISTS iset_review_workflow (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  workflow_type VARCHAR(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  subject_key VARCHAR(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  case_id BIGINT UNSIGNED DEFAULT NULL,
+  application_id BIGINT UNSIGNED DEFAULT NULL,
+  action_plan_id BIGINT UNSIGNED DEFAULT NULL,
+  intervention_id BIGINT UNSIGNED DEFAULT NULL,
+  proposal_id BIGINT UNSIGNED DEFAULT NULL,
+  current_stage VARCHAR(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'rm_review',
+  current_owner_role VARCHAR(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  current_owner_staff_profile_id BIGINT UNSIGNED DEFAULT NULL,
+  submitted_by_staff_profile_id BIGINT UNSIGNED DEFAULT NULL,
+  submitted_at DATETIME DEFAULT NULL,
+  rm_reviewed_by_staff_profile_id BIGINT UNSIGNED DEFAULT NULL,
+  rm_reviewed_at DATETIME DEFAULT NULL,
+  rm_review_note TEXT COLLATE utf8mb4_unicode_ci,
+  nwac_decided_by_staff_profile_id BIGINT UNSIGNED DEFAULT NULL,
+  nwac_decided_at DATETIME DEFAULT NULL,
+  nwac_decision VARCHAR(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  nwac_decision_note TEXT COLLATE utf8mb4_unicode_ci,
+  metadata_json JSON DEFAULT NULL,
+  archived_at DATETIME DEFAULT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_iset_review_workflow_subject (subject_key),
+  KEY idx_iset_review_workflow_stage (current_stage, workflow_type),
+  KEY idx_iset_review_workflow_case (case_id),
+  KEY idx_iset_review_workflow_application (application_id),
+  KEY idx_iset_review_workflow_intervention (intervention_id),
+  KEY idx_iset_review_workflow_proposal (proposal_id),
+  KEY idx_iset_review_workflow_owner (current_owner_staff_profile_id, current_stage),
+  KEY idx_iset_review_workflow_submitter (submitted_by_staff_profile_id, submitted_at),
+  KEY idx_iset_review_workflow_rm_reviewer (rm_reviewed_by_staff_profile_id, rm_reviewed_at),
+  KEY idx_iset_review_workflow_nwac_decider (nwac_decided_by_staff_profile_id, nwac_decided_at),
+  CONSTRAINT fk_iset_review_workflow_case FOREIGN KEY (case_id) REFERENCES iset_case (id) ON DELETE CASCADE,
+  CONSTRAINT fk_iset_review_workflow_application FOREIGN KEY (application_id) REFERENCES iset_application (id) ON DELETE CASCADE,
+  CONSTRAINT fk_iset_review_workflow_action_plan FOREIGN KEY (action_plan_id) REFERENCES iset_case_action_plan (id) ON DELETE SET NULL,
+  CONSTRAINT fk_iset_review_workflow_intervention FOREIGN KEY (intervention_id) REFERENCES iset_case_intervention (id) ON DELETE SET NULL,
+  CONSTRAINT fk_iset_review_workflow_proposal FOREIGN KEY (proposal_id) REFERENCES iset_intervention_proposal (id) ON DELETE SET NULL,
+  CONSTRAINT fk_iset_review_workflow_owner FOREIGN KEY (current_owner_staff_profile_id) REFERENCES staff_profiles (id) ON DELETE SET NULL,
+  CONSTRAINT fk_iset_review_workflow_submitter FOREIGN KEY (submitted_by_staff_profile_id) REFERENCES staff_profiles (id) ON DELETE SET NULL,
+  CONSTRAINT fk_iset_review_workflow_rm_reviewer FOREIGN KEY (rm_reviewed_by_staff_profile_id) REFERENCES staff_profiles (id) ON DELETE SET NULL,
+  CONSTRAINT fk_iset_review_workflow_nwac_decider FOREIGN KEY (nwac_decided_by_staff_profile_id) REFERENCES staff_profiles (id) ON DELETE SET NULL,
+  CONSTRAINT chk_iset_review_workflow_type CHECK (workflow_type IN ('application_assessment', 'intervention_proposal', 'intervention_revision')),
+  CONSTRAINT chk_iset_review_workflow_stage CHECK (current_stage IN ('rm_review', 'nwac_review', 'returned_to_rm', 'returned_to_submitter', 'final_decision_recorded', 'withdrawn')),
+  CONSTRAINT chk_iset_review_workflow_nwac_decision CHECK (nwac_decision IS NULL OR nwac_decision IN ('approved', 'denied', 'rejected', 'changes_requested'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS iset_review_workflow_event (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  review_workflow_id BIGINT UNSIGNED NOT NULL,
+  workflow_type VARCHAR(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  subject_key VARCHAR(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  action VARCHAR(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  from_stage VARCHAR(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  to_stage VARCHAR(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  actor_staff_profile_id BIGINT UNSIGNED DEFAULT NULL,
+  actor_role VARCHAR(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  note TEXT COLLATE utf8mb4_unicode_ci,
+  payload_json JSON DEFAULT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_iset_review_workflow_event_workflow (review_workflow_id, created_at),
+  KEY idx_iset_review_workflow_event_subject (subject_key, created_at),
+  KEY idx_iset_review_workflow_event_action (action, created_at),
+  KEY idx_iset_review_workflow_event_actor (actor_staff_profile_id, created_at),
+  CONSTRAINT fk_iset_review_workflow_event_workflow FOREIGN KEY (review_workflow_id) REFERENCES iset_review_workflow (id) ON DELETE CASCADE,
+  CONSTRAINT fk_iset_review_workflow_event_actor FOREIGN KEY (actor_staff_profile_id) REFERENCES staff_profiles (id) ON DELETE SET NULL,
+  CONSTRAINT chk_iset_review_workflow_event_type CHECK (workflow_type IN ('application_assessment', 'intervention_proposal', 'intervention_revision')),
+  CONSTRAINT chk_iset_review_workflow_event_from_stage CHECK (from_stage IS NULL OR from_stage IN ('rm_review', 'nwac_review', 'returned_to_rm', 'returned_to_submitter', 'final_decision_recorded', 'withdrawn')),
+  CONSTRAINT chk_iset_review_workflow_event_to_stage CHECK (to_stage IS NULL OR to_stage IN ('rm_review', 'nwac_review', 'returned_to_rm', 'returned_to_submitter', 'final_decision_recorded', 'withdrawn'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS iset_runtime_config (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  scope VARCHAR(32) NOT NULL,
+  k VARCHAR(128) NOT NULL,
+  v JSON NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_scope_key (scope, k)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO iset_runtime_config (scope, k, v)
+VALUES (
+  'feature_flags',
+  'workflow.two_step_rm_review.enabled',
+  CAST('{"enabled": false, "workflows": {"application_assessment": false, "intervention_proposal": false, "intervention_revision": false}}' AS JSON)
+)
+ON DUPLICATE KEY UPDATE v = v;

@@ -42,18 +42,21 @@ const ApplicationAssessmentHelp = () => {
         <li>Select <em>Edit</em> and confirm to acquire the lock.</li>
         <li>Record EI eligibility and upload verification if required.</li>
         <li>Complete the overview so it explains the client, their background, prior education or work, and why the proposed direction fits.</li>
-        <li>Record other funding carefully so the file shows which funders are confirmed, pending, denied, or unknown, and what NWAC is covering.</li>
+        <li>Record other funding carefully so the file shows which funders are confirmed, pending, denied, or unknown, and what program funding is covering.</li>
         <li>Capture the intervention details, provider, timing, and cost information clearly enough for review and later follow-through.</li>
         <li>Use the checklist step to confirm the evidence is complete or to identify what still needs follow-up.</li>
         <li>Write the recommendation and justification in plain language. The recommendation should explain why you are recommending support, a different intervention, a referral, or no funding.</li>
-        <li>Use <em>Save</em> for a draft, or <em>Submit assessment</em> when the file is ready for NWAC review.</li>
+        <li>Use <em>Save</em> for a draft, or <em>Submit for review</em> when the file is ready for Regional Manager review.</li>
       </ol>
 
       <h3>After submission</h3>
       <p>
-        All coordinator recommendations go to NWAC for decision. Once NWAC records the outcome, PATH
-        unlocks the communication step so the approval or denial can be sent properly. Approved files
-        may still need Funding Agreement completion and signatures before the file is truly complete.
+        Submitted recommendations go to Regional Manager review before the Decision Maker records the
+        final outcome. If the Regional Manager or Decision Maker requests changes, PATH returns the
+        assessment with notes so the coordinator can update and resubmit it. Once the final outcome is
+        recorded, PATH unlocks the communication step so the approval or denial can be sent properly.
+        Approved files may still need Funding Agreement completion and signatures before the file is
+        truly complete.
       </p>
 
       <h3>Good assessment practice</h3>
@@ -96,7 +99,7 @@ You are assisting a coordinator filling out the Application Assessment widget. A
 Key behaviors and constraints:
 - Edit requires acquiring an assessment lock; editing is blocked after a final decision or when another user holds the lock.
 - Sections include EI eligibility, assessment overview, barriers/priorities, previous ISET, other funding, intervention details, costs, recommendation, justification, and the document checklist.
-- Save keeps a draft without changing status; Submit assessment moves the application to pending approval and unlocks NWAC review.
+- Save keeps a draft without changing status; Submit for review sends the assessment into the active review workflow.
 - Use related widgets for context: Application Overview, ISET Application Form, Supporting Documents, Notes and Tasks, and Secure Messaging.
 
 Training-aligned guidance to surface:
@@ -106,7 +109,7 @@ Training-aligned guidance to surface:
 - EI consent and verification matter before EI-related decisions can proceed.
 - Living allowance recommendations should be supported by financial overview and verification. If those are missing and living allowance is still being considered, tell the user not to submit yet: save a draft, document what is outstanding, and follow up for the missing evidence.
 - A coordinator does not have to recommend funding; alternate interventions, referrals, job-search support, or no funding may be the correct outcome.
-- All coordinator recommendations go to NWAC for approval, and approved files may still require Funding Agreement follow-through before completion.
+- Coordinator recommendations go through the Regional Manager review and final-decision workflow, and approved files may still require Funding Agreement follow-through before completion.
 `;
 
 export const NwacAssessmentHelp = ({ onRestartTutorial, onEndTutorial }) => {
@@ -140,9 +143,10 @@ export const NwacAssessmentHelp = ({ onRestartTutorial, onEndTutorial }) => {
 
   return (
     <div>
-      <h2>NWAC outcome notice</h2>
+      <h2>Decision review</h2>
       <p>
-        This panel appears once the assessment is submitted. Use it to record the NWAC decision and assurance outcome
+        This panel appears once the assessment is ready for final decision. Use it to review the
+        coordinator recommendation, Regional Manager sign-off, decision outcome, and assurance outcome
         before moving to communication.
       </p>
       <SpaceBetween direction="horizontal" size="xs">
@@ -154,23 +158,24 @@ export const NwacAssessmentHelp = ({ onRestartTutorial, onEndTutorial }) => {
         <li>Select <strong>Approved</strong>, <strong>Denied</strong>, or <strong>Request Changes</strong>.</li>
         <li>Choose the <strong>Assessment Assurance</strong> outcome when approving or denying.</li>
         <li>Provide the <strong>Reason for denial</strong> or <strong>Request Changes note</strong> when required.</li>
-        <li>Click <em>Commit</em> to save the outcome. Approved or denied outcomes stay on the decision screen and unlock the Communication step as a separate follow-up; Request Changes sends the assessment back for updates.</li>
+        <li>Click <em>Commit</em> to save the outcome. Approved or denied outcomes stay on the decision screen and unlock the Communication step as a separate follow-up; Request Changes sends the assessment back to the Regional Manager first.</li>
       </ol>
       <p>
-        <strong>Request Changes</strong> sends the assessment back to the coordinator or case manager for updates.
-        PATH records the Request Changes note in Case Notes / Notes and Reminders for audit visibility; it is not the
-        same as denying the application.
+        <strong>Request Changes</strong> sends the assessment back to the Regional Manager first. The
+        Regional Manager reviews the Decision Maker note and forwards changes to the coordinator with
+        their own note. PATH records the notes for audit visibility; requesting changes is not the same
+        as denying the application.
       </p>
 
       <h3>Quick start walkthrough</h3>
-      <p>Use the guided walkthrough if you want a focused pass through recording the NWAC decision, checking consistency, and moving the outcome into communication.</p>
+      <p>Use the guided walkthrough if you want a focused pass through recording the final decision, checking consistency, and moving the outcome into communication.</p>
       {nwacTutorials.length ? (
         <TutorialPanel
           tutorials={nwacTutorials}
           i18nStrings={tutorialPanelI18nStrings}
         />
       ) : (
-        <p>No hands-on tutorials are available for NWAC yet.</p>
+        <p>No hands-on tutorials are available for decision review yet.</p>
       )}
 
       <p>
@@ -182,14 +187,14 @@ export const NwacAssessmentHelp = ({ onRestartTutorial, onEndTutorial }) => {
 };
 
 NwacAssessmentHelp.aiContext = `
-You are assisting an NWAC reviewer who is completing the outcome notice at the end of the Application Assessment widget.
-Explain that the outcome notice shows the case manager's recommendation and rationale inline, then explain how to
+You are assisting a Decision Maker who is completing the decision review at the end of the Application Assessment widget.
+Explain that the decision step shows the case manager's recommendation/rationale and the Regional Manager review note inline, then explain how to
 record the funding decision, assurance outcome, and required reasons, and what happens when Commit is selected.
 Approved or Denied records the decision, keeps the reviewer on the decision screen, and unlocks the Communication step as a separate follow-up; approvals with funded
 cost lines then require completing Funding forms and signatures after the letter is sent, while zero-funding approvals
 send an intervention-focused approval letter without a funding package. Complete the application only when all required
 items are Complete, while denials complete after the letter is sent. Request Changes returns the assessment to the
-coordinator for updates. Editing is disabled after a final decision unless reopening is permitted. Status and audit logs
+Regional Manager first; the Regional Manager forwards the requested changes to the coordinator with notes. Editing is disabled after a final decision unless reopening is permitted. Status and audit logs
 update automatically.
 `;
 

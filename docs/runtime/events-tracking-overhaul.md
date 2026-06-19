@@ -180,9 +180,9 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
 
 ## Current Event Type Inventory
 
-### Catalogue vs emitters (2025-09-30; updated 2026-06-16)
+### Catalogue vs emitters (2025-09-30; updated 2026-06-19)
 - **Case Lifecycle**: all types shown in the admin Event Types UI (`status_changed`, `case_assigned`, `case_reassigned`, `case_unassigned`, `case_watch_added`, `case_watch_removed`) are in the catalog and have emitters wired via `captureCaseEvent`/`publishAssignmentEvent`.
-- **Assessment**: `assessment_submitted`, `assessment_recalled`, NWAC review decision events, intervention proposal/revision decision events, and conflict-declaration events are catalogued. `assessment_recalled` is emitted when a pending application assessment, new intervention proposal, or intervention revision submission is recalled before decision.
+- **Assessment**: `assessment_submitted`, `assessment_recalled`, RM review handoff events, NWAC review decision events, intervention proposal/revision decision events, and conflict-declaration events are catalogued. `assessment_recalled` is emitted when a pending application assessment, new intervention proposal, or intervention revision submission is recalled before decision. In the two-step RM workflow, Decision Maker request-changes events target the RM reviewer first; RM return/forward events target the submitter/case owner and include the RM note.
 - **Application Submission**: portal currently emits `application_submitted`; other portal types (`application_started`, `draft_saved`, `draft_deleted`, `submission_acknowledged`) are catalogued but still need portal emitters migrated to the shared service.
 - **Documents/Notes/Messaging/System**: document uploads are now emitted from admin flows; messaging types remain draft-only, with `message_received` renamed to `message_received` (label “Secure message posted”) and `message_sent` removed until emitters are added.
 
@@ -316,7 +316,6 @@ Initial migration (sql/migrations/20250926_create_event_store.sql) seeds these t
 - Finalise scope for Step 2 (legacy code removal) and create tracking tasks.
 - Draft schema migration scripts and event service interface skeletons.
 - Define API contracts (OpenAPI/TypeScript types) for frontend and portal teams.
-
 
 
 

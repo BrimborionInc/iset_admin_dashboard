@@ -38,14 +38,15 @@ const CaseWorkspaceProposedInterventionsHelp = () => (
       <li>Capture payee details while adding/editing cost lines when known; missing payee can be completed later in payment review.</li>
       <li>For Student Loan Repayment lines, enter the loan provider/servicer name and loan account number so the approval-letter pack can generate the lender letter.</li>
       <li>Keep dates, costs, and program details consistent across documents and the case file.</li>
-      <li>EI verification is required for approvals; attach the required document before submitting.</li>
+      <li>EI verification is required before final approval; attach the required document before submitting for review.</li>
     </ul>
 
     <h3>After final decision</h3>
     <ul>
-      <li>Submitted proposals and submitted revisions can still be updated by casework roles if supporting details or cost lines need correction before final approval.</li>
-      <li>Only NWAC Administrators record the final decision on a submitted proposal or revision.</li>
-      <li>The Record of decision step shows the case manager recommendation and rationale before the decision fields.</li>
+      <li>Submitted proposals and submitted revisions are read-only while they are with the Regional Manager or Decision Maker.</li>
+      <li>If changes are requested, the submitter updates the proposal or revision from the returned item and resubmits it for review.</li>
+      <li>Regional Managers review and sign off before the Decision Maker records the final decision.</li>
+      <li>The decision step shows the case manager recommendation, rationale, and Regional Manager note before the decision fields.</li>
       <li>When a proposal is approved or denied, the widget shows a completion note instead of jumping back to Step 1.</li>
       <li>Decision-letter preparation is now separate from the approval stepper. If needed, prepare letters only after the decision has already been recorded.</li>
       <li>Use the Interventions table or the "Start new proposal" action to begin a new proposal when ready.</li>
@@ -53,6 +54,6 @@ const CaseWorkspaceProposedInterventionsHelp = () => (
   </div>
 );
 
-CaseWorkspaceProposedInterventionsHelp.aiContext = `You are assisting PATH case managers using the Proposed Interventions widget in the Case Workspace. Focus on user guidance: define what a good intervention looks like (goal, timeframe, supports, employment outcome), stress that multiple interventions each need their own rationale and expected impact, and reference the PATH training content for funding streams (ITP, TWS, JCP, SEB, group training). Remind users to document research, use the Other funding step to capture involved yes/no/unknown plus each non-NWAC funder, funding status, optional amount, confirmed coverage when known, and NWAC coverage, capture payee details in cost-line modals when known, enter loan provider plus loan account number for Student Loan Repayment lines, keep dates/costs consistent in the file, and attach EI verification before approval. Explain that submitted proposals and revisions can still be updated by casework roles when content needs correction, but only NWAC Administrators record the final decision. Explain that the Record of decision step shows the case manager recommendation and rationale inline before the decision fields. Explain that after a final approval/denial decision the widget shows a completion note (rather than restarting at Step 1), and any decision-letter preparation is a separate follow-up after the decision is committed. Users can then start again from the Interventions table or the "Start new proposal" action. Keep language practical and user-facing, not implementation details.`;
+CaseWorkspaceProposedInterventionsHelp.aiContext = `You are assisting PATH case managers using the Proposed Interventions widget in the Case Workspace. Focus on user guidance: define what a good intervention looks like (goal, timeframe, supports, employment outcome), stress that multiple interventions each need their own rationale and expected impact, and reference the PATH training content for funding streams (ITP, TWS, JCP, SEB, group training). Remind users to document research, use the Other funding step to capture involved yes/no/unknown plus each non-NWAC funder, funding status, optional amount, confirmed coverage when known, and NWAC coverage, capture payee details in cost-line modals when known, enter loan provider plus loan account number for Student Loan Repayment lines, keep dates/costs consistent in the file, and attach EI verification before submitting for review. Explain that submitted proposals and revisions are read-only while they are with the Regional Manager or Decision Maker, and that returned items can be updated and resubmitted for review. Explain that Regional Managers review and sign off before the Decision Maker records the final decision. Explain that the decision step shows the case manager recommendation, rationale, and Regional Manager note inline before the decision fields. Explain that after a final approval/denial decision the widget shows a completion note (rather than restarting at Step 1), and any decision-letter preparation is a separate follow-up after the decision is committed. Users can then start again from the Interventions table or the "Start new proposal" action. Keep language practical and user-facing, not implementation details.`;
 
 export default CaseWorkspaceProposedInterventionsHelp;

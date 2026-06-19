@@ -64,7 +64,7 @@ Last reviewed for documentation cleanup: 2026-04-29.
 
 ### Shell notifications
 - `src/AppContent.js` owns the global admin shell (`AppLayout`) and renders the page-top notifications rail through `AppLayout.notifications`.
-- Staff bell alerts load from `/api/me/notifications` and are rendered as a stacked Cloudscape `Flashbar` from `src/AppContent.js`.
+- Staff bell alerts load from `/api/me/notifications` and are rendered as a stacked Cloudscape `Flashbar` from `src/AppContent.js`. The default ordering is newest-first chronological order; when multiple bell alerts are visible, the shell shows a Cloudscape segmented sort control so the viewer can switch between `Newest` and `Urgency`.
 - `src/internalNotifications.js` reads `iset_internal_notification` plus `iset_internal_notification_dismissal`; current filtering supports `global`, `role`, and typed direct staff/applicant audiences plus scheduled windows via `starts_at` / `expires_at`.
 - `src/layouts/SideNavigation.js` footer item `Notifications` is a shell refresh affordance only, not a routed notification center.
 - Service-wide maintenance warnings now use the separate runtime-config key `iset_runtime_config(scope='runtime', k='service.announcement')` instead of the bell-notification tables.

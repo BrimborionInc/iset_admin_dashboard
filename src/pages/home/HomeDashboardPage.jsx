@@ -286,12 +286,17 @@ const REGIONAL_MANAGER_CLIENT_CASES_BUCKET = {
     label: 'Clients in My Region',
     description: 'Open client cases in your regional portfolio, including files with no active plan.'
 };
+const REGIONAL_MANAGER_PENDING_REVIEW_BUCKET = {
+    id: 'pending-review',
+    label: 'Pending Review',
+    description: 'Submitted assessments waiting for Regional Manager review or follow-up after the Decision Maker requested changes.'
+};
 const SHARED_PROGRAM_ADMIN_PIPELINE_BUCKET_IDS = Object.freeze([
     'new-applications',
     'pending-assessment',
     'in-assessment',
     'on-hold',
-    'pending-decision',
+    'pending-review',
     'pending-completion',
 ]);
 const NWAC_ADMIN_PIPELINE_BUCKET_IDS = Object.freeze([
@@ -706,7 +711,9 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
 
     const workQueueBuckets = useMemo(() => {
         if (!isWorkQueueRole) return [];
-        const bucketLookup = new Map(PROGRAM_ADMIN_BUCKETS.map(bucket => [bucket.id, bucket]));
+        const bucketLookup = new Map(
+            [...PROGRAM_ADMIN_BUCKETS, REGIONAL_MANAGER_PENDING_REVIEW_BUCKET].map(bucket => [bucket.id, bucket])
+        );
         const pipelineBucketIds = isNwacAdminRole
             ? NWAC_ADMIN_PIPELINE_BUCKET_IDS
             : SHARED_PROGRAM_ADMIN_PIPELINE_BUCKET_IDS;
@@ -1921,7 +1928,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         dueDate: null,
                         submittedAt: submitted,
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
-                        summary: 'Assessment submitted for approval.',
+                        summary: 'Assessment submitted for review.',
                         assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
                         workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
                     };
@@ -1991,12 +1998,12 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         approvalQueuedAt,
                         dueDate: null,
                         submittedAt: row.submittedAt || row.submitted_at || null,
-                        summary: 'Intervention proposal submitted for approval.',
+                        summary: 'Intervention request submitted for review.',
                         workspacePath: caseId
                             ? buildApprovalWorkspacePath({
                                 basePath: `/cases/${caseId}`,
                                 approvalType: 'intervention',
-                                step: 'decision',
+                                step: 'review',
                                 interventionId,
                                 planId: actionPlanId
                             })
@@ -3055,6 +3062,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                 const items = Array.isArray(payload?.items) ? payload.items : [];
                 const mapped = items.map((row, idx) => {
                     const tracking = row.trackingId || row.tracking_id || row.caseId || `await-${idx}`;
+                    const reviewStage = String(row.reviewWorkflowStage || row.review_workflow_stage || '').trim();
                     const applicantName =
                         row.applicant_name ||
                         row.applicantName ||
@@ -3077,7 +3085,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         titleSecondaryContent: interventionBreakdownContent,
                         case_id: caseId,
                         application_id: row.applicationId || row.application_id || null,
-                        bucketId: 'pending-decision',
+                        bucketId: isRegionalCoordinatorRole ? 'pending-review' : 'pending-decision',
                         type: 'AwaitingApproval',
                         applicant: applicantName,
                         applicant_name: applicantName,
@@ -3085,7 +3093,11 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         address_province: row.address_province || null,
                         owner: row.owner || row.assigned_user_email || 'Unassigned',
                         ...buildAssignedStaffProfileAliases(row),
-                        status: row.status || 'Pending approval',
+                        status: isRegionalCoordinatorRole
+                            ? (reviewStage === 'returned_to_rm' ? 'Returned to RM' : 'Pending Review')
+                            : (row.status || 'Pending decision'),
+                        review_workflow_stage: reviewStage || null,
+                        reviewWorkflowStage: reviewStage || null,
                         approvalRequestType: row.approval_request_type || row.approvalRequestType || 'new_application',
                         approvalRequestTypeLabel: row.approval_request_type_label || row.approvalRequestTypeLabel || 'New application assessment',
                         recommendation: row.recommendation || null,
@@ -3102,7 +3114,13 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         approvalQueuedAt,
                         dueDate: null,
                         submittedAt: submitted,
-                        summary: 'Application decision is waiting on approver review.',
+                        summary: isRegionalCoordinatorRole
+                            ? (
+                                reviewStage === 'returned_to_rm'
+                                    ? 'The Decision Maker requested changes; review the note and forward it to the Coordinator.'
+                                    : 'Submitted assessment is waiting for Regional Manager review.'
+                            )
+                            : 'Application decision is waiting for final decision.',
                         workspacePath: caseId
                             ? buildApprovalWorkspacePath({
                                 basePath: `/application-case/${caseId}`,
@@ -3122,7 +3140,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadAwaitingApproval();
         return () => { ignore = true; };
-    }, [role, programAdminRefresh, isWorkQueueRole]);
+    }, [role, programAdminRefresh, isWorkQueueRole, isRegionalCoordinatorRole]);
 
     useEffect(() => {
         if (!isWorkQueueRole) {
@@ -3169,6 +3187,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         row.submittedAt ||
                         row.submitted_at ||
                         null;
+                    const reviewStage = String(row.reviewWorkflowStage || row.review_workflow_stage || '').trim();
                     const interventionBreakdownContent = buildApprovalInterventionBreakdownContent(row, {
                         showRevisionAmendmentSummary: true
                     });
@@ -3182,7 +3201,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         application_id: row.applicationId || row.application_id || null,
                         interventionId,
                         actionPlanId,
-                        bucketId: 'pending-decision',
+                        bucketId: isRegionalCoordinatorRole ? 'pending-review' : 'pending-decision',
                         type: 'InterventionApproval',
                         applicant: applicantName,
                         applicant_name: applicantName,
@@ -3190,7 +3209,11 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         address_province: row.address_province || null,
                         owner: row.owner || row.assigned_user_email || 'Unassigned',
                         ...buildAssignedStaffProfileAliases(row),
-                        status: row.review_status || row.status || 'Submitted',
+                        status: isRegionalCoordinatorRole
+                            ? (reviewStage === 'returned_to_rm' ? 'Returned to RM' : 'Pending Review')
+                            : (row.review_status || row.status || 'Submitted'),
+                        review_workflow_stage: reviewStage || null,
+                        reviewWorkflowStage: reviewStage || null,
                         approvalRequestType: row.approval_request_type || row.approvalRequestType || 'new_intervention',
                         approvalRequestTypeLabel: row.approval_request_type_label || row.approvalRequestTypeLabel || 'Additional intervention proposal',
                         review_status: row.review_status || null,
@@ -3212,12 +3235,18 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         approvalQueuedAt,
                         dueDate: null,
                         submittedAt: row.submittedAt || row.submitted_at || null,
-                        summary: 'Intervention decision is waiting on approver review.',
+                        summary: isRegionalCoordinatorRole
+                            ? (
+                                reviewStage === 'returned_to_rm'
+                                    ? 'The Decision Maker requested changes; review the note and forward it to the submitter.'
+                                    : 'Submitted intervention request is waiting for Regional Manager review.'
+                            )
+                            : 'Intervention decision is waiting for final decision.',
                         workspacePath: caseId
                             ? buildApprovalWorkspacePath({
                                 basePath: `/cases/${caseId}`,
                                 approvalType: 'intervention',
-                                step: 'decision',
+                                step: isRegionalCoordinatorRole ? 'review' : 'decision',
                                 interventionId,
                                 planId: actionPlanId
                             })
@@ -3234,7 +3263,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadInterventionApprovals();
         return () => { ignore = true; };
-    }, [role, programAdminRefresh, isWorkQueueRole]);
+    }, [role, programAdminRefresh, isWorkQueueRole, isRegionalCoordinatorRole]);
 
     useEffect(() => {
         if (!isWorkQueueRole) {

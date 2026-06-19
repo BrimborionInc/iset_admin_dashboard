@@ -48,6 +48,19 @@ const FUNDING_DECISION_OPTIONS = [
   { value: 'reject', label: 'Deny funding' },
   { value: 'push_back', label: 'Request changes' }
 ];
+const ASSESSMENT_REVIEW_STAGES = {
+  rmReview: 'rm_review',
+  nwacReview: 'nwac_review',
+  returnedToRm: 'returned_to_rm',
+  returnedToSubmitter: 'returned_to_submitter',
+  finalDecisionRecorded: 'final_decision_recorded',
+  withdrawn: 'withdrawn'
+};
+const ASSESSMENT_REVIEW_ACTIONS = {
+  rmReturnToSubmitter: 'rm_return_to_submitter',
+  rmSubmitToNwac: 'rm_submit_to_nwac',
+  rmForwardChangesToSubmitter: 'rm_forward_changes_to_submitter'
+};
 const resolveRecommendationLabel = (value, fallback = 'No recommendation recorded') => {
   const normalized = String(value || '').trim().toLowerCase();
   const directOption = RECOMMEND_OPTIONS.find(option => option.value === normalized);
@@ -244,9 +257,8 @@ const requiresNocForCode = (value) => {
 
 const OVERVIEW_WORD_LIMIT = 400;
 const EMPLOYMENT_GOALS_WORD_LIMIT = 400;
-const APPROVAL_COST_THRESHOLD = 15000;
-const PROGRAM_ADMIN_APPROVAL_THRESHOLD = 25000;
-const PROGRAM_ADMIN_APPROVER_EMAIL = 'sstacey@nwac.ca';
+const HIGH_VALUE_FUNDING_APPROVAL_THRESHOLD = 20000;
+const HIGH_VALUE_FUNDING_APPROVER_EMAIL = 'sstacey@nwac.ca';
 const PROGRAM_ADMIN_ROLE_KEYS = new Set(['nwacadministrator']);
 const LEGACY_APPLICATION_FALLBACK_STATUSES = new Set([
   'submitted',
@@ -2371,6 +2383,8 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [letterWorkflowsLoading, setLetterWorkflowsLoading] = useState(false);
   const [letterWorkflowsError, setLetterWorkflowsError] = useState(null);
   const [showNWACSection, setShowNWACSection] = useState(false);
+  const [reviewWorkflowNote, setReviewWorkflowNote] = useState('');
+  const [reviewWorkflowActionLoading, setReviewWorkflowActionLoading] = useState(null);
   const [fieldErrors, setFieldErrors] = useState({});
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [validationAlert, setValidationAlert] = useState(null);
@@ -2385,6 +2399,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const [showApproveConfirmModal, setShowApproveConfirmModal] = useState(false);
   const [showSendApprovalLetterConfirmModal, setShowSendApprovalLetterConfirmModal] = useState(false);
   const [showDecisionPendingAlert, setShowDecisionPendingAlert] = useState(true);
+  const [dismissedReviewNoticeKey, setDismissedReviewNoticeKey] = useState(null);
   const [showFundingDocsIncompleteModal, setShowFundingDocsIncompleteModal] = useState(false);
   const [localAssessmentSubmitted, setLocalAssessmentSubmitted] = useState(false);
   const [checklistWarningVisible, setChecklistWarningVisible] = useState(false);
@@ -2468,7 +2483,7 @@ const CoordinatorAssessmentWidget = forwardRef(
   const normalizedUserEmail = (currentUserEmail || '').trim().toLowerCase();
   const isProgramAdminRole = PROGRAM_ADMIN_ROLE_KEYS.has(roleKey);
   const isNwacAdministrator = isProgramAdminRole || groupKeys.includes('nwac_administrator');
-  const canOverrideProgramAdminLimit = normalizedUserEmail === PROGRAM_ADMIN_APPROVER_EMAIL;
+  const canApproveHighValueFunding = normalizedUserEmail === HIGH_VALUE_FUNDING_APPROVER_EMAIL;
   const eligibilityRoleAllowlist = new Set([
     'systemadministrator',
     'nwacadministrator',
@@ -2506,20 +2521,13 @@ const CoordinatorAssessmentWidget = forwardRef(
     }
     return Number.isFinite(overallCostTotal) && overallCostTotal > 0;
   }, [overallCostTotal, proposedInterventions]);
-  const isRegionalHighCostBlocked =
-    canonicalRole === 'regional manager' &&
+  const isHighValueFundingApprovalBlocked =
     Number.isFinite(overallCostTotal) &&
-    overallCostTotal >= APPROVAL_COST_THRESHOLD;
-  const isProgramAdminHighCostBlocked =
-    isProgramAdminRole &&
-    Number.isFinite(overallCostTotal) &&
-    overallCostTotal >= PROGRAM_ADMIN_APPROVAL_THRESHOLD &&
-    !canOverrideProgramAdminLimit;
-  const approvalBlockMessage = isRegionalHighCostBlocked
-    ? `Regional Managers cannot approve applications with total cost \u2265 $${APPROVAL_COST_THRESHOLD.toLocaleString()}. Escalate to NWAC Administrators.`
-    : isProgramAdminHighCostBlocked
-      ? `NWAC Administrators cannot approve applications with total cost \u2265 $${PROGRAM_ADMIN_APPROVAL_THRESHOLD.toLocaleString()}. Only ${PROGRAM_ADMIN_APPROVER_EMAIL} can approve above this limit.`
-      : null;
+    overallCostTotal >= HIGH_VALUE_FUNDING_APPROVAL_THRESHOLD &&
+    !canApproveHighValueFunding;
+  const approvalBlockMessage = isHighValueFundingApprovalBlocked
+    ? `Only Shelley Stacey (${HIGH_VALUE_FUNDING_APPROVER_EMAIL}) can approve funding of $${HIGH_VALUE_FUNDING_APPROVAL_THRESHOLD.toLocaleString()} or above.`
+    : null;
 
   const [interventionCodes, setInterventionCodes] = useState([]);
   const [interventionCodesLoading, setInterventionCodesLoading] = useState(false);
@@ -2637,6 +2645,25 @@ const CoordinatorAssessmentWidget = forwardRef(
   const applicantUserId = caseData?.applicant_user_id ?? caseData?.applicantUserId ?? null;
   const applicationId = caseData?.application_id ?? caseData?.applicationId ?? application_id ?? null;
   const caseId = caseData?.id ?? caseData?.case_id ?? null;
+  const reviewWorkflow = caseData?.reviewWorkflow || caseData?.review_workflow || null;
+  const reviewStage = reviewWorkflow?.currentStage || reviewWorkflow?.current_stage || null;
+  const hasReviewWorkflow = Boolean(reviewStage);
+  const twoStepReviewEnabled = Boolean(
+    caseData?.twoStepReviewEnabled ||
+    caseData?.two_step_review_enabled ||
+    hasReviewWorkflow
+  );
+  const isRegionalManager = roleKey === 'regionalmanager';
+  const isReviewWithRegionalManager =
+    twoStepReviewEnabled &&
+    (
+      reviewStage === ASSESSMENT_REVIEW_STAGES.rmReview ||
+      reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToRm
+    );
+  const isReviewWithNwac =
+    twoStepReviewEnabled &&
+    reviewStage === ASSESSMENT_REVIEW_STAGES.nwacReview;
+  const canRegionalManagerReview = isRegionalManager && isReviewWithRegionalManager;
   useEffect(() => {
     if (!caseId) {
       setDecisionLetterSent({});
@@ -2837,6 +2864,13 @@ const CoordinatorAssessmentWidget = forwardRef(
   const showOutcomeByStatus = isPendingApprovalStatus;
   const isOutcomeNoticeDisabled = isDecisionFinal;
   const canManageOutcomeReview = canCompleteOutcomeReview({ role: userRole, status: rawApplicationStatus });
+  const canNwacReview =
+    canManageOutcomeReview &&
+    (
+      !twoStepReviewEnabled ||
+      !hasReviewWorkflow ||
+      isReviewWithNwac
+    );
   const interventionCodeLookup = useMemo(() => {
     const map = new Map();
     interventionCodes.forEach(option => {
@@ -4571,7 +4605,11 @@ const CoordinatorAssessmentWidget = forwardRef(
     setLocalAssessmentSubmitted(pendingApproval || isDecisionFinal || isPostDecisionStatus);
   }, [isDecisionFinal, isPendingApprovalStatus, isPostDecisionStatus]);
 
-  // UI logic: once status reaches pending decision or a final decision, lock assessment fields and surface NWAC review
+  useEffect(() => {
+    setReviewWorkflowNote('');
+  }, [reviewStage, reviewWorkflow?.id]);
+
+  // UI logic: once status reaches pending decision or a final decision, lock assessment fields and surface decision review
   const isAssessmentSubmitted = isPendingApprovalStatus;
   const isReviewComplete = APPLICATION_FINAL_STATUSES.has(normalizedApplicationStatus);
   const shouldUnlockWizardNavigation = !isEditingAssessment && (isPendingApprovalStatus || isPostDecisionStatus || isReviewComplete);
@@ -4585,33 +4623,55 @@ const CoordinatorAssessmentWidget = forwardRef(
     lockedByAnotherUser;
   // Disable all fields (including NWAC) if review is complete, a final decision exists, status is locked, conflict not signed, or eligibility not set
   const baseAssessmentLocked = lockedByAnotherUser || isLockedStatus || isReviewComplete || isDecisionFinal || isPostDecisionStatus;
+  const canEditAssessmentBody = isAssessor || roleKey === 'systemadministrator';
+  const canManageEligibilityDuringAssessment =
+    canManageEiEligibility &&
+    !baseAssessmentLocked &&
+    !isDeclarationGateActive &&
+    !isPendingApprovalStatus &&
+    !hasReviewWorkflow;
   const isAssessmentDisabled =
     baseAssessmentLocked ||
+    !canEditAssessmentBody ||
     isEligibilityGateActive ||
     isPendingApprovalStatus ||
     (assessmentSubmitted && !isEditingAssessment);
   const checklistUploadsLocked = isAssessmentDisabled && !isCommunicationStep && !isFundingDocsStep;
-  const isNWACFieldsDisabled = baseAssessmentLocked || isEligibilityGateActive || !showNWACSection || !isPendingApprovalStatus || !canManageOutcomeReview;
-  const isEligibilityDisabled = baseAssessmentLocked || isDeclarationGateActive || !isEligibilityAdmin;
+  const isNWACFieldsDisabled = baseAssessmentLocked || isEligibilityGateActive || !showNWACSection || !isPendingApprovalStatus || !canNwacReview;
+  const isEligibilityDisabled = !canManageEligibilityDuringAssessment || !isEligibilityAdmin;
+  const isEiVerificationUploadDisabled =
+    !canManageEligibilityDuringAssessment ||
+    !canUploadEiVerification ||
+    eiVerificationUploading ||
+    !applicationId ||
+    !applicantUserId;
   const applicationWidgetTitle =
     currentStep === FUNDING_DOCS_STEP_ID
       ? 'Application approval follow-up'
       : isCommunicationStep
         ? 'Application decision follow-up'
         : showNWACSection
-          ? 'Application approval'
+          ? 'Application decision'
           : 'Application assessment';
-  const applicationWidgetHelpTitle = showNWACSection ? 'Application Approval Help' : 'Application Assessment Help';
+  const applicationWidgetHelpTitle = showNWACSection ? 'Application Decision Help' : 'Application Assessment Help';
   const applicationPhaseDescription =
     currentStep === FUNDING_DOCS_STEP_ID
       ? 'The program decision is recorded. Complete the required funding forms and signatures before marking this workflow complete.'
       : isCommunicationStep
         ? 'The program decision is recorded. Prepare or send the applicant communication and complete any remaining approval follow-up from here.'
         : currentStep === 'decision'
-          ? 'Review the submitted assessment, confirm the program decision, and capture any required approval notes.'
+          ? isReviewWithRegionalManager
+            ? 'Review the submitted assessment and either return it with notes or submit it for final decision.'
+            : isReviewWithNwac
+              ? 'Review the Regional Manager sign-off, confirm the program decision, and capture any required approval notes.'
+              : 'Review the submitted assessment, confirm the program decision, and capture any required decision notes.'
           : showNWACSection
-            ? 'Review the submitted assessment and move it through the NWAC approval decision.'
-            : "Assess the applicant's needs, eligibility, and funding recommendation. Complete all required sections before submitting for approval.";
+            ? isReviewWithRegionalManager
+              ? 'Regional Manager review is in progress before the final decision.'
+              : isReviewWithNwac
+                ? 'Review the submitted assessment and record the final decision.'
+                : 'Review the submitted assessment and move it through the final decision.'
+            : "Assess the applicant's needs, eligibility, and funding recommendation. Complete all required sections before submitting for review.";
   const showDenyFundingShortcut = !isDecisionFinal && !isPostDecisionStatus;
   const denyFundingBlockedReason = (() => {
     if (!showDenyFundingShortcut) return '';
@@ -4786,7 +4846,7 @@ const CoordinatorAssessmentWidget = forwardRef(
         : rawDocTypes.filter(type => type !== 'ei_verification');
       if (!docTypes.length) {
         if (!canUploadEiVerification && rawDocTypes.includes('ei_verification')) {
-          setChecklistUploadError('EI verification uploads are restricted to NWAC Administrators, Regional Managers, and System Administrators.');
+          setChecklistUploadError('EI verification uploads are restricted to Decision Makers, Regional Managers, and System Administrators.');
           return;
         }
         setChecklistUploadError('No document type is configured for this checklist item.');
@@ -4949,7 +5009,7 @@ const CoordinatorAssessmentWidget = forwardRef(
 
   const uploadEiVerificationIfSelected = useCallback(async (selectedFile = null) => {
     const fileToUpload = selectedFile || eiVerificationFile;
-    if (isAssessmentDisabled || !canUploadEiVerification) return true;
+    if (!canManageEligibilityDuringAssessment || !canUploadEiVerification) return true;
     if (!fileToUpload) {
       return true;
     }
@@ -4977,6 +5037,7 @@ const CoordinatorAssessmentWidget = forwardRef(
       formData.append('file', fileToUpload);
       formData.append('label', 'EI Verification');
       formData.append('documentType', 'ei_verification');
+      formData.append('eligibilityStatus', assessment.esdcEligibility);
       if (caseId) formData.append('caseId', caseId);
       formData.append('applicationId', applicationId);
       const response = await apiFetch(`/api/applicants/${applicantUserId}/documents/upload`, {
@@ -5023,7 +5084,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     } finally {
       setEiVerificationUploading(false);
     }
-  }, [applicantUserId, applicationId, assessment.esdcEligibility, canUploadEiVerification, caseId, eiVerificationFile, eiVerificationUploading, isAssessmentDisabled, loadEiVerificationDocuments]);
+  }, [applicantUserId, applicationId, assessment.esdcEligibility, canManageEligibilityDuringAssessment, canUploadEiVerification, caseId, eiVerificationFile, eiVerificationUploading, loadEiVerificationDocuments]);
 
   const handleEiVerificationFileChange = useCallback(async event => {
     const input = event?.target;
@@ -6889,6 +6950,16 @@ const CoordinatorAssessmentWidget = forwardRef(
       showLockAlert({ reason: 'owned_by_other', lock: activeLock }, 'warning');
       return;
     }
+    if (!canEditAssessmentBody) {
+      setAlert({
+        type: 'warning',
+        content: 'This role can review the submitted assessment but cannot edit or submit assessment changes.',
+        dismissible: true,
+        statusIconAriaLabel: 'Warning'
+      });
+      scrollAfterAction();
+      return;
+    }
     setHasSubmitted(true);
     setValidationAlert(null);
     const errors = denyFundingFlowActive
@@ -7016,6 +7087,13 @@ const CoordinatorAssessmentWidget = forwardRef(
             statusRaw: payload.status ?? caseData?.status ?? null,
             applicationStatus: payload.applicationStatus ?? nextApplicationStatus ?? caseData?.applicationStatus ?? null,
           };
+          const nextReviewWorkflow = result?.reviewWorkflow || result?.review_workflow || null;
+          if (nextReviewWorkflow) {
+            fallbackUpdates.reviewWorkflow = nextReviewWorkflow;
+            fallbackUpdates.review_workflow = nextReviewWorkflow;
+            fallbackUpdates.twoStepReviewEnabled = true;
+            fallbackUpdates.two_step_review_enabled = true;
+          }
           if (updatedRowVersion) {
             fallbackUpdates.application_row_version = updatedRowVersion;
           }
@@ -7038,7 +7116,9 @@ const CoordinatorAssessmentWidget = forwardRef(
           scrollAfterAction();
           setAlert({
             type: 'success',
-            content: 'Assessment submitted successfully. Application status moved to Pending Decision. Assessments must be approved by an authorised NWAC representative. Your assessment has been flagged for their attention.',
+            content: nextReviewWorkflow || twoStepReviewEnabled
+              ? 'Assessment submitted to Regional Manager review.'
+              : 'Assessment submitted successfully. Application status moved to Pending Decision. A Decision Maker must record the final outcome.',
             dismissible: true,
             statusIconAriaLabel: 'Success'
           });
@@ -8113,6 +8193,18 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       }
       return { ok: false, reason: 'locked' };
     }
+    if (!canEditAssessmentBody) {
+      if (!silent) {
+        setAlert({
+          type: 'warning',
+          content: 'This role can review the submitted assessment but cannot edit assessment fields.',
+          dismissible: true,
+          statusIconAriaLabel: 'Warning'
+        });
+        scrollAfterAction();
+      }
+      return { ok: false, reason: 'forbidden' };
+    }
     if (!silent) {
       setAlert(null);
     }
@@ -8240,7 +8332,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     }
   }, [isDecisionFinal, isLockedStatus, lockedByAnotherUser, releaseLock]);
 
-  // For NWAC review validation
+  // For decision review validation
   const validateNWACReview = useCallback(assessment => {
     const errors = {};
     const decision = assessment.nwacReviewStatus;
@@ -8327,7 +8419,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
         return requiredStepsValid && !errors.recommendation && !errors.justification;
       }
       if (stepId === 'decision') {
-        if (isNWACFieldsDisabled || !canManageOutcomeReview) return true;
+        if (isNWACFieldsDisabled || !canNwacReview) return true;
         const outcomeErrors = validateNWACReview(assessment);
         return Object.keys(outcomeErrors).length === 0;
       }
@@ -8342,7 +8434,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     [
       assessment,
       assessmentSubmitted,
-      canManageOutcomeReview,
+      canNwacReview,
       docsChecklistComplete,
       denyFundingFlowActive,
       fundingDocsChecklistComplete,
@@ -8383,12 +8475,123 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     return true;
   };
 
+  const handleReviewWorkflowAction = async (action) => {
+    if (!canRegionalManagerReview) {
+      setValidationAlert(['Only the Regional Manager can complete this review action at the current stage.']);
+      return;
+    }
+    const note = String(reviewWorkflowNote || '').trim();
+    const noteRequired =
+      action === ASSESSMENT_REVIEW_ACTIONS.rmReturnToSubmitter ||
+      action === ASSESSMENT_REVIEW_ACTIONS.rmForwardChangesToSubmitter;
+    if (noteRequired && !note) {
+      setValidationAlert(['Enter review notes before returning the assessment.']);
+      return;
+    }
+    if (!caseId || !applicationId) {
+      setValidationAlert(['Application context is missing. Refresh the case and try again.']);
+      return;
+    }
+
+    setReviewWorkflowActionLoading(action);
+    setValidationAlert(null);
+    try {
+      const versionToken = Number(applicationRowVersionState || caseData?.application_row_version || caseData?.applicationRowVersion || 0);
+      const requestBody = {
+        action,
+        applicationId,
+        note: note || null,
+      };
+      if (versionToken > 0) {
+        requestBody.expectedRowVersion = versionToken;
+      }
+      const res = await apiFetch(`/api/cases/${caseId}/assessment/review-workflow/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      });
+      const result = await res.json().catch(() => ({}));
+      if (res.status === 409 && result?.error === 'row_version_conflict') {
+        const latestVersion = Number(result?.currentRowVersion || result?.application_row_version || 0);
+        if (latestVersion) updateRowVersion(latestVersion);
+        if (typeof actions?.refreshCaseData === 'function') {
+          await actions.refreshCaseData().catch(() => {});
+        }
+        setAlert({
+          type: 'warning',
+          content: 'This assessment changed while you were reviewing it. The latest data has been reloaded; review it and try again.',
+          dismissible: true,
+          statusIconAriaLabel: 'Warning'
+        });
+        scrollAfterAction();
+        return;
+      }
+      if (!res.ok || !result?.success) {
+        throw new Error(result?.message || result?.error || 'Failed to update the review workflow.');
+      }
+      const updatedRowVersion = Number(result?.application_row_version || result?.applicationRowVersion || 0);
+      if (updatedRowVersion) updateRowVersion(updatedRowVersion);
+      const nextReviewWorkflow = result?.reviewWorkflow || result?.review_workflow || null;
+      const nextApplicationStatus = result?.applicationStatus || result?.application_status || caseData?.applicationStatus || null;
+      if (typeof onCaseUpdate === 'function') {
+        onCaseUpdate({
+          applicationStatus: nextApplicationStatus,
+          application_status: nextApplicationStatus,
+          applicationStatusRaw: nextApplicationStatus,
+          application_row_version: updatedRowVersion || undefined,
+          reviewWorkflow: nextReviewWorkflow,
+          review_workflow: nextReviewWorkflow,
+          twoStepReviewEnabled: true,
+          two_step_review_enabled: true,
+        });
+      }
+      if (typeof actions?.refreshCaseData === 'function') {
+        await actions.refreshCaseData().catch(() => {});
+      }
+      setReviewWorkflowNote('');
+      const returnedToSubmitter =
+        action === ASSESSMENT_REVIEW_ACTIONS.rmReturnToSubmitter ||
+        action === ASSESSMENT_REVIEW_ACTIONS.rmForwardChangesToSubmitter;
+      setShowNWACSection(!returnedToSubmitter);
+      setLocalAssessmentSubmitted(!returnedToSubmitter);
+      setCurrentStep(returnedToSubmitter ? 'review' : 'decision');
+      setFieldErrors({});
+      setHasSubmitted(false);
+      setAlert({
+        type: 'success',
+        content:
+          action === ASSESSMENT_REVIEW_ACTIONS.rmSubmitToNwac
+            ? 'Assessment submitted for final decision.'
+            : action === ASSESSMENT_REVIEW_ACTIONS.rmForwardChangesToSubmitter
+              ? 'Requested changes forwarded to the Coordinator.'
+              : 'Assessment returned to the Coordinator with notes.',
+        dismissible: true,
+        statusIconAriaLabel: 'Success'
+      });
+      scrollAfterAction();
+    } catch (err) {
+      setAlert({
+        type: 'error',
+        content: err?.message || 'Failed to update the review workflow.',
+        dismissible: true,
+        statusIconAriaLabel: 'Error'
+      });
+      scrollAfterAction();
+    } finally {
+      setReviewWorkflowActionLoading(null);
+    }
+  };
+
   const handleComplete = async () => {
     if (!isPendingApprovalStatus) {
       return;
     }
-    if (!canManageOutcomeReview) {
-      setValidationAlert(['Only NWAC Administrators and System Administrators can record the application decision for this case.']);
+    if (!canNwacReview) {
+      setValidationAlert([
+        isReviewWithRegionalManager
+          ? 'The Regional Manager must submit this assessment for final decision before a decision can be recorded.'
+          : 'Only Decision Makers and System Administrators can record the application decision for this case.'
+      ]);
       return;
     }
     setHasSubmitted(true);
@@ -8436,7 +8639,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       if (versionToken > 0) {
         requestBody.expectedRowVersion = versionToken;
       }
-      // 1. Update case with NWAC review and status
+      // 1. Update case with decision review and status
       const res = await apiFetch(`/api/cases/${caseData.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -8464,7 +8667,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
         scrollAfterAction();
         return;
       }
-      if (!res.ok || !result?.success) throw new Error(result?.error || 'Failed to save NWAC review.');
+      if (!res.ok || !result?.success) throw new Error(result?.error || 'Failed to save the decision review.');
       if (!isOutcomePushBack) {
         suppressPostDecisionStepAutoPrimeRef.current = true;
       }
@@ -8474,13 +8677,20 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       }
       // Events emitted server-side; refresh caseData to reflect new status
       const fallbackUpdates = {
-        status: payload.status,
-        statusRaw: payload.status,
-        applicationStatus: payload.applicationStatus || caseData?.applicationStatus || null,
+        status: result?.status || payload.status,
+        statusRaw: result?.status || payload.status,
+        applicationStatus: result?.applicationStatus || result?.application_status || payload.applicationStatus || caseData?.applicationStatus || null,
         assessment_nwac_review_status: payload.assessment_nwac_review_status,
         assessment_nwac_review: payload.assessment_nwac_review,
         assessment_nwac_reason: payload.assessment_nwac_reason
       };
+      const nextReviewWorkflow = result?.reviewWorkflow || result?.review_workflow || null;
+      if (nextReviewWorkflow) {
+        fallbackUpdates.reviewWorkflow = nextReviewWorkflow;
+        fallbackUpdates.review_workflow = nextReviewWorkflow;
+        fallbackUpdates.twoStepReviewEnabled = true;
+        fallbackUpdates.two_step_review_enabled = true;
+      }
       if (updatedRowVersion) {
         fallbackUpdates.application_row_version = updatedRowVersion;
       }
@@ -8514,7 +8724,11 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       }
       scrollAfterAction();
       const decisionMessage = (() => {
-        if (isOutcomePushBack) return 'Decision pushed back. Application returned to In review.';
+        if (isOutcomePushBack) {
+          return nextReviewWorkflow || twoStepReviewEnabled
+            ? 'Changes requested by the Decision Maker and returned to Regional Manager review.'
+            : 'Decision pushed back. Application returned to In review.';
+        }
         if (isOutcomeApproved) {
           return approvalHasFundingPackage
             ? 'Application marked as approved. Prepare the approval letter and funding agreement.'
@@ -8790,7 +9004,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
         if (!valid) {
           return;
         }
-        if (!isAssessmentDisabled && currentStep === 'eligibility') {
+        if (canManageEligibilityDuringAssessment && currentStep === 'eligibility') {
           if (!autoSaveOk) {
             const eligibilitySaved = await persistEligibilitySelection();
             if (!eligibilitySaved.ok) {
@@ -8828,6 +9042,11 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     !isReviewComplete &&
     !isPostDecisionStatus &&
     isPendingApprovalStatus &&
+    (
+      !twoStepReviewEnabled ||
+      !hasReviewWorkflow ||
+      reviewStage === ASSESSMENT_REVIEW_STAGES.rmReview
+    ) &&
     assessmentSubmitted &&
     !isEditingAssessment;
 
@@ -8836,7 +9055,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       variant="h2"
       actions={
         <SpaceBetween direction="horizontal" size="s">
-          {!isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && isReviewComplete && (
+          {canEditAssessmentBody && !isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && isReviewComplete && (
             <Button variant="normal" onClick={() => setShowEditConfirmModal(true)}>Edit</Button>
           )}
           {canRecallAssessmentSubmission && (
@@ -8849,10 +9068,10 @@ ${JSON.stringify(contextPayload, null, 2)}`;
               Recall submission
             </Button>
           )}
-          {!isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && !isPendingApprovalStatus && assessmentSubmitted && !isEditingAssessment && (
+          {canEditAssessmentBody && !isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && !isPendingApprovalStatus && assessmentSubmitted && !isEditingAssessment && (
             <Button variant="normal" onClick={() => setShowEditConfirmModal(true)}>Edit</Button>
           )}
-          {!isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
+          {canEditAssessmentBody && !isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && (
             <Button variant="primary" disabled={!isChanged} onClick={() => handleSave()}>Save Progress</Button>
           )}
         </SpaceBetween>
@@ -9106,7 +9325,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Button
               onClick={() => eiVerificationFileInputRef.current && eiVerificationFileInputRef.current.click()}
-              disabled={isAssessmentDisabled || eiVerificationUploading || !applicationId || !applicantUserId}
+              disabled={isEiVerificationUploadDisabled}
             >
               Choose file
             </Button>
@@ -11379,10 +11598,162 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       </ColumnLayout>
     </SpaceBetween>
   );
+  const rmReviewNote = String(reviewWorkflow?.rmReviewNote || reviewWorkflow?.rm_review_note || '').trim();
+  const nwacDecisionNote = String(reviewWorkflow?.nwacDecisionNote || reviewWorkflow?.nwac_decision_note || '').trim();
+  const reviewWorkflowNotice = (() => {
+    if (!twoStepReviewEnabled || !hasReviewWorkflow || !isPendingApprovalStatus) return null;
+    if (isReviewWithNwac) {
+      return {
+        key: `assessment-${reviewStage}`,
+        type: 'info',
+        header: 'Ready for Decision Maker',
+        content: 'The Regional Manager has reviewed this assessment and submitted it for final decision.',
+        dismissible: true,
+      };
+    }
+    if (reviewStage === ASSESSMENT_REVIEW_STAGES.rmReview && !canRegionalManagerReview) {
+      return {
+        key: `assessment-${reviewStage}`,
+        type: 'info',
+        header: 'Waiting for Regional Manager review',
+        content: 'The Regional Manager reviews this assessment before the Decision Maker records the final decision.',
+        dismissible: true,
+      };
+    }
+    if (reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToRm && !canRegionalManagerReview) {
+      return {
+        key: `assessment-${reviewStage}`,
+        type: 'warning',
+        header: 'Decision Maker requested changes',
+        content: 'The assessment is back with the Regional Manager before it returns to the Coordinator.',
+        dismissible: false,
+      };
+    }
+    return null;
+  })();
+  const reviewWorkflowStageAlert =
+    reviewWorkflowNotice && dismissedReviewNoticeKey !== reviewWorkflowNotice.key ? (
+      <Alert
+        type={reviewWorkflowNotice.type}
+        header={reviewWorkflowNotice.header}
+        dismissible={reviewWorkflowNotice.dismissible}
+        onDismiss={
+          reviewWorkflowNotice.dismissible
+            ? () => setDismissedReviewNoticeKey(reviewWorkflowNotice.key)
+            : undefined
+        }
+      >
+        {reviewWorkflowNotice.content}
+      </Alert>
+    ) : null;
+  const regionalManagerReviewContent = isReviewWithRegionalManager ? (
+    <SpaceBetween size="m">
+      {reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToRm && (
+        <Alert type="warning" header="Decision Maker requested changes">
+          <Box whiteSpace="pre-wrap">
+            {String(nwacDecisionNote || '').trim() || 'No change note was recorded.'}
+          </Box>
+        </Alert>
+      )}
+      {rmReviewNote && (
+        <Alert type="info" header="Latest Regional Manager note">
+          <Box whiteSpace="pre-wrap">{rmReviewNote}</Box>
+        </Alert>
+      )}
+      <FormField
+        label={
+          reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToRm
+            ? 'Regional Manager forwarding note'
+            : 'Regional Manager review note'
+        }
+        description={
+          reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToRm
+            ? "Required when forwarding the Decision Maker's requested changes to the Coordinator."
+            : 'Required when returning the assessment to the Coordinator.'
+        }
+      >
+        <Textarea
+          value={reviewWorkflowNote}
+          onChange={({ detail }) => setReviewWorkflowNote(detail.value || '')}
+          readOnly={!canRegionalManagerReview || Boolean(reviewWorkflowActionLoading)}
+          spellcheck={true}
+          rows={4}
+        />
+      </FormField>
+      <SpaceBetween direction="horizontal" size="xs">
+        {reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToRm ? (
+          <Button
+            variant="primary"
+            onClick={() => handleReviewWorkflowAction(ASSESSMENT_REVIEW_ACTIONS.rmForwardChangesToSubmitter)}
+            loading={reviewWorkflowActionLoading === ASSESSMENT_REVIEW_ACTIONS.rmForwardChangesToSubmitter}
+            disabled={!canRegionalManagerReview || Boolean(reviewWorkflowActionLoading)}
+          >
+            Forward changes to Coordinator
+          </Button>
+        ) : (
+          <Button
+            variant="normal"
+            onClick={() => handleReviewWorkflowAction(ASSESSMENT_REVIEW_ACTIONS.rmReturnToSubmitter)}
+            loading={reviewWorkflowActionLoading === ASSESSMENT_REVIEW_ACTIONS.rmReturnToSubmitter}
+            disabled={!canRegionalManagerReview || Boolean(reviewWorkflowActionLoading)}
+          >
+            Return to Coordinator
+          </Button>
+        )}
+        {reviewStage !== ASSESSMENT_REVIEW_STAGES.returnedToRm && (
+          <Button
+            variant="primary"
+            onClick={() => handleReviewWorkflowAction(ASSESSMENT_REVIEW_ACTIONS.rmSubmitToNwac)}
+            loading={reviewWorkflowActionLoading === ASSESSMENT_REVIEW_ACTIONS.rmSubmitToNwac}
+            disabled={!canRegionalManagerReview || Boolean(reviewWorkflowActionLoading)}
+          >
+            Submit for final decision
+          </Button>
+        )}
+      </SpaceBetween>
+    </SpaceBetween>
+  ) : null;
+  const regionalManagerDecisionSummary =
+    twoStepReviewEnabled && hasReviewWorkflow && !isReviewWithRegionalManager ? (
+      <SpaceBetween size="xs">
+        <Box fontWeight="bold">Regional Manager review note</Box>
+        <Box whiteSpace="pre-wrap">{rmReviewNote || 'No Regional Manager note recorded.'}</Box>
+      </SpaceBetween>
+    ) : null;
+  const submitterChangeInstructionsAlert =
+    twoStepReviewEnabled && reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToSubmitter ? (
+      <Alert type="warning" header="Changes requested" statusIconAriaLabel="Warning">
+        <SpaceBetween size="s">
+          <Box>Review the notes below, update the assessment, then resubmit it for review when ready.</Box>
+          {nwacDecisionNote ? (
+            <Box>
+              <Box fontWeight="bold">Decision Maker note</Box>
+              <Box whiteSpace="pre-wrap">{nwacDecisionNote}</Box>
+            </Box>
+          ) : null}
+          {rmReviewNote ? (
+            <Box>
+              <Box fontWeight="bold">Regional Manager note</Box>
+              <Box whiteSpace="pre-wrap">{rmReviewNote}</Box>
+            </Box>
+          ) : null}
+          {!nwacDecisionNote && !rmReviewNote ? (
+            <Box>No detailed change note was recorded. Contact the Regional Manager before resubmitting.</Box>
+          ) : null}
+        </SpaceBetween>
+      </Alert>
+    ) : null;
   const assessmentAssuranceOptions = [
     { label: 'Yes - follow this recommendation', value: 'agree' },
     { label: 'No - record a different outcome', value: 'disagree' }
   ];
+  const fundingDecisionOptions = approvalBlockMessage
+    ? FUNDING_DECISION_OPTIONS.map(option =>
+        option.value === 'approve'
+          ? { ...option, disabled: true, description: 'Requires Shelley approval at this funding level.' }
+          : option
+      )
+    : FUNDING_DECISION_OPTIONS;
   const isApprovalDecisionRecorded = decisionOutcome === 'approved';
   const isDenialDecisionRecorded = decisionOutcome === 'denied';
   const shouldShowRecordedDecisionAlert =
@@ -11458,136 +11829,147 @@ ${JSON.stringify(contextPayload, null, 2)}`;
             A funding decision has not been recorded for this application yet. You will be notified as soon as one is made.
           </Alert>
         )}
+        {reviewWorkflowStageAlert}
         {caseManagerRecommendationSummary}
-        {decisionAlignmentWarning && (
-          <Alert type="warning" header="Outcome does not match the agreement answer">
-            {decisionAlignmentWarning}
-          </Alert>
-        )}
-        <Box
-          style={
-            isNWACFieldsDisabled || isOutcomeNoticeDisabled
-              ? { opacity: 0.6, pointerEvents: 'none' }
-              : undefined
-          }
-          aria-disabled={isNWACFieldsDisabled || isOutcomeNoticeDisabled}
-        >
-        <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-          <FormField
-            label="Do you agree with this assessment recommendation?"
-            description="Your answer sets the default funding outcome below."
-            errorText={showDecisionErrors && fieldErrors.nwacReview ? fieldErrors.nwacReview : undefined}
-          >
-            <Hotspot hotspotId="nwac-assessment-assurance" direction="right">
-              <Select
-                selectedOption={assessmentAssuranceOptions.find(option => option.value === assessment.nwacReview) || null}
-                onChange={({ detail }) => {
-                  applyAssessmentAssurance(detail.selectedOption?.value || '');
-                }}
-                options={assessmentAssuranceOptions}
-                placeholder="Select agreement"
-                data-error-focus={showDecisionErrors && fieldErrors.nwacReview ? 'true' : undefined}
-                readOnly={isNWACFieldsDisabled || assessment.nwacReviewStatus === 'push_back'}
-              />
-            </Hotspot>
-          </FormField>
-          <FormField
-            label="Funding outcome to record"
-            description="Review the outcome before committing the decision."
-            errorText={showDecisionErrors && fieldErrors.nwacReviewStatus ? fieldErrors.nwacReviewStatus : undefined}
-          >
-            <SpaceBetween direction="horizontal" size="xs">
-              <Hotspot hotspotId="nwac-decision-status" direction="right">
-                <RadioGroup
-                  value={assessment.nwacReviewStatus || ''}
-                  onChange={({ detail }) => applyFundingDecision(detail.value)}
-                  items={FUNDING_DECISION_OPTIONS}
-                  ariaLabel="NWAC funding outcome"
-                  data-error-focus={showDecisionErrors && fieldErrors.nwacReviewStatus ? 'true' : undefined}
-                  readOnly={isNWACFieldsDisabled}
-                />
-              </Hotspot>
-            </SpaceBetween>
-          </FormField>
-        </Grid>
-        {['reject', 'push_back'].includes(assessment.nwacReviewStatus) && (
-          <Grid gridDefinition={[{ colspan: 12 }]}>
-            <FormField
-              label={assessment.nwacReviewStatus === 'push_back' ? 'Request Changes note' : 'Reason for denial'}
-              stretch={true}
+        {regionalManagerDecisionSummary}
+        {regionalManagerReviewContent || (
+          <>
+            {approvalBlockMessage && (
+              <Alert type="warning" header="Shelley approval required">
+                {approvalBlockMessage}
+              </Alert>
+            )}
+            {decisionAlignmentWarning && (
+              <Alert type="warning" header="Outcome does not match the agreement answer">
+                {decisionAlignmentWarning}
+              </Alert>
+            )}
+            <Box
+              style={
+                isNWACFieldsDisabled || isOutcomeNoticeDisabled
+                  ? { opacity: 0.6, pointerEvents: 'none' }
+                  : undefined
+              }
+              aria-disabled={isNWACFieldsDisabled || isOutcomeNoticeDisabled}
             >
-              <Box width="100%">
-                <Hotspot hotspotId="nwac-decision-reason" direction="right">
-                  <Textarea value={assessment.nwacReason} onChange={({ detail }) => {
-                    if (isNWACFieldsDisabled) return;
-                    handleField('nwacReason', detail.value);
-                  }} spellcheck={true} data-error-focus={showDecisionErrors && fieldErrors.nwacReason ? 'true' : undefined} readOnly={isNWACFieldsDisabled} />
+            <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+              <FormField
+                label="Do you agree with this assessment recommendation?"
+                description="Your answer sets the default funding outcome below."
+                errorText={showDecisionErrors && fieldErrors.nwacReview ? fieldErrors.nwacReview : undefined}
+              >
+                <Hotspot hotspotId="nwac-assessment-assurance" direction="right">
+                  <Select
+                    selectedOption={assessmentAssuranceOptions.find(option => option.value === assessment.nwacReview) || null}
+                    onChange={({ detail }) => {
+                      applyAssessmentAssurance(detail.selectedOption?.value || '');
+                    }}
+                    options={assessmentAssuranceOptions}
+                    placeholder="Select agreement"
+                    data-error-focus={showDecisionErrors && fieldErrors.nwacReview ? 'true' : undefined}
+                    readOnly={isNWACFieldsDisabled || assessment.nwacReviewStatus === 'push_back'}
+                  />
                 </Hotspot>
-              </Box>
-            </FormField>
-          </Grid>
+              </FormField>
+              <FormField
+                label="Funding outcome to record"
+                description="Review the outcome before committing the decision."
+                errorText={showDecisionErrors && fieldErrors.nwacReviewStatus ? fieldErrors.nwacReviewStatus : undefined}
+              >
+                <SpaceBetween direction="horizontal" size="xs">
+                  <Hotspot hotspotId="nwac-decision-status" direction="right">
+                    <RadioGroup
+                      value={assessment.nwacReviewStatus || ''}
+                      onChange={({ detail }) => applyFundingDecision(detail.value)}
+                      items={fundingDecisionOptions}
+                      ariaLabel="Funding outcome"
+                      data-error-focus={showDecisionErrors && fieldErrors.nwacReviewStatus ? 'true' : undefined}
+                      readOnly={isNWACFieldsDisabled}
+                    />
+                  </Hotspot>
+                </SpaceBetween>
+              </FormField>
+            </Grid>
+            {['reject', 'push_back'].includes(assessment.nwacReviewStatus) && (
+              <Grid gridDefinition={[{ colspan: 12 }]}>
+                <FormField
+                  label={assessment.nwacReviewStatus === 'push_back' ? 'Request Changes note' : 'Reason for denial'}
+                  stretch={true}
+                >
+                  <Box width="100%">
+                    <Hotspot hotspotId="nwac-decision-reason" direction="right">
+                      <Textarea value={assessment.nwacReason} onChange={({ detail }) => {
+                        if (isNWACFieldsDisabled) return;
+                        handleField('nwacReason', detail.value);
+                      }} spellcheck={true} data-error-focus={showDecisionErrors && fieldErrors.nwacReason ? 'true' : undefined} readOnly={isNWACFieldsDisabled} />
+                    </Hotspot>
+                  </Box>
+                </FormField>
+              </Grid>
+            )}
+            {showDecisionBudgetPot && (
+              <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
+                <FormField
+                  label="Budget Pot"
+                  description="Assign the pot that will fund this intervention."
+                  errorText={showDecisionErrors && fieldErrors.interventionPotId ? fieldErrors.interventionPotId : undefined}
+                >
+                  <Hotspot hotspotId="nwac-budget-pot" direction="right">
+                    <Select
+                      placeholder={
+                        !decisionHasCost
+                          ? 'Not assigned for zero-cost interventions'
+                          : budgetPotLoading
+                            ? 'Loading budget pots'
+                            : 'Select budget pot'
+                      }
+                      selectedOption={selectedBudgetPotOption}
+                      options={budgetPotOptions}
+                      statusType={budgetPotLoading ? 'loading' : 'finished'}
+                      loadingText="Loading budget pots"
+                      onChange={({ detail }) => handleField('interventionPotId', detail.selectedOption?.value || '')}
+                      data-error-focus={showDecisionErrors && fieldErrors.interventionPotId ? 'true' : undefined}
+                      readOnly={
+                        baseAssessmentLocked ||
+                        isEligibilityGateActive ||
+                        (!canManageBudgetPotPending && isAssessmentDisabled)
+                      }
+                      disabled={!decisionHasCost}
+                    />
+                  </Hotspot>
+                </FormField>
+                <FormField
+                  label="Paid from"
+                  description="Select whether this pot is charged externally or internally."
+                  errorText={showDecisionErrors && fieldErrors.postingContext ? fieldErrors.postingContext : undefined}
+                >
+                  {isAssessor ? (
+                    <Input value="External (region/PTMA)" readOnly />
+                  ) : (
+                    <Select
+                      selectedOption={selectedPostingContext}
+                      options={POSTING_OPTIONS}
+                      onChange={({ detail }) => handleField('postingContext', detail.selectedOption?.value || '')}
+                      placeholder="Select"
+                      data-error-focus={showDecisionErrors && fieldErrors.postingContext ? 'true' : undefined}
+                      readOnly={
+                        lockedByAnotherUser ||
+                        isLockedStatus ||
+                        isDecisionFinal ||
+                        (isAssessmentDisabled && !canManageBudgetPotPending)
+                      }
+                      disabled={
+                        !assessment.interventionPotId ||
+                        !decisionHasCost
+                      }
+                    />
+                  )}
+                </FormField>
+              </Grid>
+            )}
+          </Box>
+          </>
         )}
-        {showDecisionBudgetPot && (
-          <Grid gridDefinition={[{ colspan: 6 }, { colspan: 6 }]}>
-            <FormField
-              label="Budget Pot"
-              description="Assign the pot that will fund this intervention."
-              errorText={showDecisionErrors && fieldErrors.interventionPotId ? fieldErrors.interventionPotId : undefined}
-            >
-              <Hotspot hotspotId="nwac-budget-pot" direction="right">
-                <Select
-                  placeholder={
-                    !decisionHasCost
-                      ? 'Not assigned for zero-cost interventions'
-                      : budgetPotLoading
-                        ? 'Loading budget pots'
-                        : 'Select budget pot'
-                  }
-                  selectedOption={selectedBudgetPotOption}
-                  options={budgetPotOptions}
-                  statusType={budgetPotLoading ? 'loading' : 'finished'}
-                  loadingText="Loading budget pots"
-                  onChange={({ detail }) => handleField('interventionPotId', detail.selectedOption?.value || '')}
-                  data-error-focus={showDecisionErrors && fieldErrors.interventionPotId ? 'true' : undefined}
-                  readOnly={
-                    baseAssessmentLocked ||
-                    isEligibilityGateActive ||
-                    (!canManageBudgetPotPending && isAssessmentDisabled)
-                  }
-                  disabled={!decisionHasCost}
-                />
-              </Hotspot>
-            </FormField>
-            <FormField
-              label="Paid from"
-              description="Select whether this pot is charged externally or internally."
-              errorText={showDecisionErrors && fieldErrors.postingContext ? fieldErrors.postingContext : undefined}
-            >
-              {isAssessor ? (
-                <Input value="External (region/PTMA)" readOnly />
-              ) : (
-                <Select
-                  selectedOption={selectedPostingContext}
-                  options={POSTING_OPTIONS}
-                  onChange={({ detail }) => handleField('postingContext', detail.selectedOption?.value || '')}
-                  placeholder="Select"
-                  data-error-focus={showDecisionErrors && fieldErrors.postingContext ? 'true' : undefined}
-                  readOnly={
-                    lockedByAnotherUser ||
-                    isLockedStatus ||
-                    isDecisionFinal ||
-                    (isAssessmentDisabled && !canManageBudgetPotPending)
-                  }
-                  disabled={
-                    !assessment.interventionPotId ||
-                    !decisionHasCost
-                  }
-                />
-              )}
-            </FormField>
-          </Grid>
-        )}
-      </Box>
       </SpaceBetween>
       <Modal
         visible={showApproveConfirmModal}
@@ -11627,6 +12009,10 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     : decisionOutcome === 'denied'
       ? 'Denial letter'
       : STEP_LABELS.communication;
+  const decisionStepTitle = isReviewWithRegionalManager ? 'Regional Manager review' : STEP_LABELS.decision;
+  const assessmentSubmitLabel = twoStepReviewEnabled
+    ? (reviewStage === ASSESSMENT_REVIEW_STAGES.returnedToSubmitter ? 'Resubmit for review' : 'Submit for review')
+    : 'Submit assessment';
   const stepDefinitionById = {
     eligibility: { title: STEP_LABELS.eligibility, content: eligibilityStepContent, isOptional: false },
     framing: { title: STEP_LABELS.framing, content: framingStepContent, isOptional: false },
@@ -11640,7 +12026,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     cost: { title: STEP_LABELS.cost, content: costStepContent, isOptional: false },
     docs: { title: STEP_LABELS.docs, content: docsStepContent, isOptional: false },
     review: { title: STEP_LABELS.review, content: reviewStepContent, isOptional: false },
-    decision: { title: STEP_LABELS.decision, content: decisionStepContent, isOptional: false },
+    decision: { title: decisionStepTitle, content: decisionStepContent, isOptional: false },
     communication: { title: communicationStepTitle, content: communicationStepContent, isOptional: false },
     fundingDocs: { title: STEP_LABELS.fundingDocs, content: fundingDocsStepContent, isOptional: false }
   };
@@ -11654,8 +12040,8 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     .filter(Boolean);
 
   const activeStepIndex = Math.max(activeStepIds.indexOf(currentStep), 0);
-  const canSubmitAssessment = !isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && !isSubmittingAssessment;
-  const canSubmitOutcome = !isEligibilityGateActive && !lockedByAnotherUser && showOutcomeByStatus && showNWACSection && !isEditingAssessment && !isOutcomeNoticeDisabled && canManageOutcomeReview && !checkingChecklist && !isSubmittingAssessment;
+  const canSubmitAssessment = canEditAssessmentBody && !isEligibilityGateActive && !lockedByAnotherUser && !isLockedStatus && !isDecisionFinal && !isReviewComplete && (!assessmentSubmitted || isEditingAssessment) && !isSubmittingAssessment;
+  const canSubmitOutcome = !isEligibilityGateActive && !lockedByAnotherUser && showOutcomeByStatus && showNWACSection && !isEditingAssessment && !isOutcomeNoticeDisabled && canNwacReview && !checkingChecklist && !isSubmittingAssessment;
   const canSubmitCommunication =
     isCommunicationStep &&
     showCommunicationStep &&
@@ -11679,9 +12065,9 @@ ${JSON.stringify(contextPayload, null, 2)}`;
     ? (isCompletedStatus ? 'Application completed' : 'Mark application complete')
     : isCommunicationStep
       ? (decisionOutcome === 'approved' ? 'Send Client Approval letter' : 'Send Letter')
-      : (showNWACSection ? 'Commit' : 'Submit assessment');
+      : (showNWACSection ? 'Commit' : assessmentSubmitLabel);
   const wizardReadOnlyLabel = 'Read only';
-  const hideWizardActions = !wizardSubmitHandler && (isDecisionFinal || isLockedStatus) && !isFundingDocsStep;
+  const hideWizardActions = !wizardSubmitHandler && (isDecisionFinal || isLockedStatus || isReviewWithRegionalManager) && !isFundingDocsStep;
   const wizardSubmitText =
     isCommunicationSending || isSubmittingAssessment || checkingChecklist
       ? 'Working'
@@ -11702,7 +12088,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
             Cancel
           </Button>
           <Button variant="primary" onClick={handleSubmitDocumentConflictConfirm}>
-            Submit assessment
+            {assessmentSubmitLabel}
           </Button>
         </SpaceBetween>
       }
@@ -11782,7 +12168,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
             {hasPersistedDeclaredConflict
               ? ' A conflict of interest was declared; assessment is locked until the conflict is resolved or the case is reassigned.'
               : showNWACSection
-                ? ' Complete the conflict of interest declaration below to unlock the approval review.'
+                ? ' Complete the conflict of interest declaration below to unlock the decision review.'
                 : ' Complete the conflict of interest declaration below to unlock the assessment.'}
           </Box>
           {alert && (
@@ -11806,7 +12192,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
                 </Box>
                 <Box color="text-status-inactive">
                   This declaration is recorded per staff member. Even if a previous owner signed, you must complete it before continuing your
-                  {showNWACSection ? ' approval review.' : ' assessment work.'}
+                  {showNWACSection ? ' decision review.' : ' assessment work.'}
                 </Box>
               </Box>
               {declarationError && (
@@ -11898,33 +12284,40 @@ ${JSON.stringify(contextPayload, null, 2)}`;
         <Box variant="small" margin={{ bottom: 's' }}>
           {applicationPhaseDescription}
         </Box>
-        {validationAlert && (
-          <Alert
-            type="warning"
-            dismissible
-            onDismiss={() => setValidationAlert(null)}
-            statusIconAriaLabel="Warning"
-            header="Please review the fields below."
-          >
-            <Box margin={{ bottom: 'xxs' }}>One or more fields still require attention:</Box>
-            <ul style={{ margin: 0, paddingLeft: '1.5rem' }}>
-              {validationAlert.map((message, index) => (
-                <li key={index}>{message}</li>
-              ))}
-            </ul>
-          </Alert>
-        )}
-        {alert && (
-          <Alert
-            type={alert.type}
-            dismissible={alert.dismissible}
-            onDismiss={() => setAlert(null)}
-            statusIconAriaLabel={alert.statusIconAriaLabel}
-            header={alert.header}
-          >
-            {alert.content}
-          </Alert>
-        )}
+        {validationAlert || alert || submitterChangeInstructionsAlert ? (
+          <Box margin={{ bottom: 'm' }}>
+            <SpaceBetween size="s">
+              {validationAlert && (
+                <Alert
+                  type="warning"
+                  dismissible
+                  onDismiss={() => setValidationAlert(null)}
+                  statusIconAriaLabel="Warning"
+                  header="Please review the fields below."
+                >
+                  <Box margin={{ bottom: 'xxs' }}>One or more fields still require attention:</Box>
+                  <ul style={{ margin: 0, paddingLeft: '1.5rem' }}>
+                    {validationAlert.map((message, index) => (
+                      <li key={index}>{message}</li>
+                    ))}
+                  </ul>
+                </Alert>
+              )}
+              {alert && (
+                <Alert
+                  type={alert.type}
+                  dismissible={alert.dismissible}
+                  onDismiss={() => setAlert(null)}
+                  statusIconAriaLabel={alert.statusIconAriaLabel}
+                  header={alert.header}
+                >
+                  {alert.content}
+                </Alert>
+              )}
+              {submitterChangeInstructionsAlert}
+            </SpaceBetween>
+          </Box>
+        ) : null}
         {submitDocumentConflictModal}
         {isEligibilityGateActive && (
           <>
