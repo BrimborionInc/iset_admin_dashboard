@@ -4829,6 +4829,13 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     setSelectedInterventionId,
   ]);
 
+  const dispatchCaseNotesRefresh = useCallback(() => {
+    if (!caseId || typeof window === "undefined") return;
+    const detail = { caseId };
+    window.dispatchEvent(new CustomEvent("case-notes-refresh", { detail }));
+    window.dispatchEvent(new CustomEvent("case-events-refresh", { detail }));
+  }, [caseId]);
+
   const handleReviewWorkflowAction = useCallback(
     async action => {
       if (!activeInterventionIdValue) {
@@ -4870,6 +4877,9 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
         if (typeof refresh === "function") {
           await refresh().catch(() => {});
         }
+        if (note) {
+          dispatchCaseNotesRefresh();
+        }
         setSuccessMessage(
           action === INTERVENTION_REVIEW_ACTIONS.rmSubmitToNwac
             ? "Intervention request submitted for final decision."
@@ -4885,6 +4895,7 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     },
     [
       activeInterventionIdValue,
+      dispatchCaseNotesRefresh,
       refresh,
       reviewWorkflowNote,
       setSelectedInterventionId,
@@ -4970,22 +4981,6 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
       }
     },
     [applicantUserId, caseId, eiVerificationFile, form.eiVerificationDocumentId, form.eiVerificationStatus, isDecisionEditable, isFormLocked]
-  );
-
-  const addCaseNote = useCallback(
-    async (title, body) => {
-      if (!caseId) return;
-      const noteBody = `${title}\n${body}`.trim();
-      await apiFetch(`/api/cases/${caseId}/notes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: noteBody }),
-      });
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("case-notes-refresh", { detail: { caseId } }));
-      }
-    },
-    [caseId]
   );
 
   const linkEiDocumentToInterventions = useCallback(
@@ -5384,11 +5379,8 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
           const updatedReviewStage = updatedReviewWorkflow?.currentStage || updatedReviewWorkflow?.current_stage || null;
           const returnedToRm = updatedReviewStage === INTERVENTION_REVIEW_STAGES.returnedToRm;
           setCurrentInterventionStatus(updated?.status || updated?.reviewStatus || outcome);
-          if (outcome === "changes_requested") {
-            await addCaseNote("Intervention proposal — Request changes", form.decisionNotes.trim());
-          }
-          if (outcome === "rejected") {
-            await addCaseNote("Intervention proposal — Denied", form.decisionNotes.trim());
+          if (form.decisionNotes.trim()) {
+            dispatchCaseNotesRefresh();
           }
           setSuccessMessage(
             returnedToRm
@@ -5420,12 +5412,12 @@ const InterventionAssessmentWidget = ({ actions, metadata = {}, toggleHelpPanel,
     },
     [
       activeInterventionIdValue,
-      addCaseNote,
       buildApprovedInterventionPayload,
       buildProposalPayload,
       canDecideSubmittedProposal,
       createIntervention,
       deleteInterventionRecord,
+      dispatchCaseNotesRefresh,
       ensureActionPlanFundingReadyForApproval,
       form,
       isEditable,

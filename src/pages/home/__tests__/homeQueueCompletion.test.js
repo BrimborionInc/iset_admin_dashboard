@@ -1,4 +1,5 @@
 import {
+  buildPendingCompletionApplicationWorkspacePath,
   buildPendingCompletionApplicationSummary,
   isPendingCompletionApplicationRow,
   resolvePendingCompletionApplicationStep,
@@ -19,6 +20,22 @@ describe('homeQueueCompletion', () => {
         approval_decision_letter_sent: 1,
       })
     ).toBe('fundingDocs');
+  });
+
+  it('builds approval-entry workspace links for pending completion applications', () => {
+    expect(
+      buildPendingCompletionApplicationWorkspacePath('/application-case/1', {
+        decision_outcome: 'approved',
+        approval_decision_letter_sent: 0,
+      })
+    ).toBe('/application-case/1?entry=approval&approvalType=application&step=communication');
+
+    expect(
+      buildPendingCompletionApplicationWorkspacePath('/application-case/1', {
+        decision_outcome: 'approved',
+        approval_decision_letter_sent: 1,
+      })
+    ).toBe('/application-case/1?entry=approval&approvalType=application&step=fundingDocs');
   });
 
   it('keeps denied applications pending completion only until the denial letter is sent', () => {

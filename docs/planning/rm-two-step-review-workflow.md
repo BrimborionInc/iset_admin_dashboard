@@ -2,13 +2,15 @@
 
 Purpose: plan the new Regional Manager review stage for assessment and intervention approval workflows.
 Audience: product, engineering, operations, training, and future AI-assisted development threads.
-Last Updated: 2026-06-19
+Last Updated: 2026-06-20
 
 ## Status
 
-Design accepted for a low-risk first pass. The DEV implementation now covers application assessments, new intervention proposals, and intervention amendments/revisions behind the runtime toggle. Schema, shared transition helper, backend submission/final-decision integration, Regional Manager action endpoints, workspace payloads, stage-aware homepage queues, final-PDF RM sign-off support, `CoordinatorAssessmentWidget`, and the Case Workspace intervention proposal widget are wired. Application-assessment browser smoke coverage and a live DEV UI walkthrough with real role logins are in place; intervention proposal/revision workflow browser smoke coverage is now in place for the deterministic UI paths. Live role-based UAT across the two intervention workflows remains the next validation step.
+Design accepted for a low-risk first pass. The implementation now covers application assessments, new intervention proposals, and intervention amendments/revisions behind the runtime toggle. Schema, shared transition helper, backend submission/final-decision integration, Regional Manager action endpoints, workspace payloads, stage-aware homepage queues, final-PDF RM sign-off support, `CoordinatorAssessmentWidget`, and the Case Workspace intervention proposal widget are wired. Application-assessment browser smoke coverage and a live DEV UI walkthrough with real role logins are in place; intervention proposal/revision workflow browser smoke coverage is now in place for the deterministic UI paths. Live role-based UAT across the two intervention workflows remains the next validation step.
 
-The migration/runtime default is off. Local DEV currently has the flag enabled for `application_assessment`, `intervention_proposal`, and `intervention_revision` so Bill can test the whole workflow. TEST UAT and PROD activation are still outstanding and require explicit rollout steps.
+The migration/runtime default is off, but DEV, TEST, and PROD now have the flag enabled for `application_assessment`, `intervention_proposal`, and `intervention_revision`.
+
+Deployment note: release `20260620-rm-two-step-review-rollout` deployed the feature to TEST and PROD on 2026-06-20 with the one-off notification configuration operation applied in both environments. Do not assume future app/schema deployment alone is enough if these rows drift; explicitly verify and normalize the notification rows listed under **TEST/PROD Notification Configuration** below.
 
 Target launch date: **Monday, July 13, 2026**, pending stakeholder UAT readiness, remaining scope completion, and Bill's explicit PROD release approval.
 
@@ -67,6 +69,7 @@ Relevant current files:
 - Use professional, role-based workflow labels in staff-facing copy. Say `Decision Maker` for the final-decision role. Do not use `NWAC` as shorthand for an approval actor because coordinators and Regional Managers are also NWAC staff. Reserve `NWAC` for the organization, the program/funding source, or exact system role names. Do not name individual approvers except where the Shelley Stacey high-value funding threshold rule genuinely requires it.
 - Submitter-facing copy should say `Submit for review`, `Resubmit for review`, `submitted to Regional Manager review`, or `submitted for review` while the two-step workflow is active. Regional Manager escalation should say `Submit for final decision`. Reserve `approval` wording for the final decision and post-approval letter/funding-document surfaces.
 - Every stage transition must have audit evidence: actor, role, timestamp, note where applicable, and workflow subject.
+- Review and decision notes must also be easy to find from the case file: when an RM or Decision Maker enters a transition note, PATH mirrors it into `Notes and Tasks` as an internal case note and carries the note plus the case-note reference in event payload data.
 - Feature should ship behind a runtime config toggle so PROD can be deployed safely before activation.
 
 ## Recommended Data Model
@@ -105,11 +108,12 @@ Current DEV foundation:
 - `src/lib/reviewWorkflow.js` defines the workflow types, stages, actions, role checks, subject keys, feature-flag interpretation, and allowed stage transitions.
 - `src/lib/reviewWorkflow.test.js` covers the first-pass transition rules, including RM no-final-decision authority, Decision Maker request-changes returning to RM, and submitter edit locks during review.
 - `isetadminserver.js` wires the workflow behind the per-workflow runtime flag for application assessments, new intervention proposals, and intervention revisions. Submitter submission starts or restarts review at `rm_review`; RM return/forward actions write workflow events and reopen the item to the submitter; RM submit sends the item to the final-decision stage (`nwac_review`); Decision Maker request-changes returns the item to RM before the submitter; approve/deny records final workflow decision.
+- `src/lib/reviewWorkflowCaseNotes.js` and the review-action backend routes mirror RM/Decision Maker transition notes into `iset_case_note` and include `note`, `review_note`, `decision_notes`, `case_note_id`, and `case_note_body` in review event payloads. `src/widgets/applicationEvents.js` displays those notes in the Events Timeline event data text.
 - `src/widgets/CoordinatorAssessmentWidget.js` reads `reviewWorkflow`/`twoStepReviewEnabled`, locks submitted assessment body edits for reviewers, shows RM return/submit controls at RM stages, gates Decision Maker final decision controls to `nwac_review`, and blocks coordinator recall after RM sign-off.
 - `src/pages/Caseworking/caseWorkspace/widgets/InterventionAssessmentWidget.jsx` reads `reviewWorkflow`/`twoStepReviewEnabled`, locks submitted proposal/revision body edits, shows RM return/submit/forward controls at RM stages, gates Decision Maker final decision controls to `nwac_review`, and blocks submitter recall after RM sign-off.
 - Application assessment, new intervention proposal, and intervention revision final approval paths all enforce the single high-value funding policy: non-Shelley users cannot approve funding of `$20,000` or above. Decision pages show a Shelley-required warning and disable the approve option; backend guards reject the same approval if called directly.
 - Approved intervention revisions reset the current client funding revision letter follow-up to `pending` when the revision is applied. Older original approval-letter sent markers are archived in `approvalLetterFollowUpHistory` and must not make a later revision appear complete; the widget and completion queue require revision-specific send evidence before saying the revision letter was sent.
-- `sql/migrations/20260619_0002_seed_rm_review_notification_settings.sql` seeds default bell-alert rows for RM review handoffs. Decision Maker request-changes events in the two-step workflow target the RM reviewer first; RM return/forward events target the submitter/case owner and include the RM note in the bell notification. Email delivery for these new RM handoff events remains off until workflow-specific templates are configured.
+- `sql/migrations/20260619_0002_seed_rm_review_notification_settings.sql` seeds default bell-alert rows for RM review handoffs, and `sql/migrations/20260620_0001_seed_rm_review_requested_notification.sql` seeds the initial `rm_review_requested` bell alert for Regional Managers. When an application assessment, new intervention proposal, or intervention amendment enters `rm_review`, PATH emits `rm_review_requested` and resolves Regional Manager recipients from the case portfolio region, falling back to the assigned case owner's region when the portfolio region is empty. Decision Maker request-changes events in the two-step workflow target the RM reviewer first; RM return/forward events target the submitter/case owner and include the RM note in the bell notification. Email delivery for these new RM handoff events remains off until workflow-specific templates are configured.
 - Approved assessment PDFs now resolve RM sign-off from `iset_review_workflow.rm_reviewed_*` and show it in the final agreement section between submitter evidence and Decision Maker approval evidence.
 - The Regional Manager/Decision Maker/System Administrator EI verification control is intentionally separate from submitted-packet body edit permission, so reviewers can set EI status and upload an EI verification report without editing the assessment narrative/recommendation body.
 - `scripts/application-assessment-workflow-browser-smoke.js` covers the application-assessment RM and Decision Maker branches with deterministic browser-driven fixtures.
@@ -174,6 +178,51 @@ Add a runtime feature flag, default disabled outside DEV until activation:
 
 If implementation cost is high, use one global toggle for the first pass and keep the schema flexible.
 
+## TEST/PROD Notification Configuration
+
+When Bill explicitly asks for TEST or PROD rollout/activation, apply a one-off notification configuration check after the relevant migrations are deployed and before/with feature activation. The required bell-alert rows are:
+
+| event | role | language | enabled | email_alert | bell_alert | purpose |
+| --- | --- | --- | --- | --- | --- | --- |
+| `rm_review_requested` | `Regional Manager` | `en` | `1` | `0` | `1` | Alerts Regional Managers when an application assessment, new intervention proposal, or intervention amendment first enters `Pending Review` / `rm_review`. |
+| `rm_review_returned_to_submitter` | `ISET Coordinator` | `en` | `1` | `0` | `1` | Alerts the submitter/case owner when RM returns work for changes. |
+| `rm_review_changes_forwarded` | `ISET Coordinator` | `en` | `1` | `0` | `1` | Alerts the submitter/case owner when RM forwards Decision Maker-requested changes. |
+| `rm_review_submitted_to_nwac` | `NWAC Administrator` | `en` | `1` | `0` | `1` | Alerts Decision Makers when RM submits work for final decision. |
+| `rm_review_submitted_to_nwac` | `System Administrator` | `en` | `1` | `0` | `1` | Alerts System Administrator users acting as Decision Makers when RM submits work for final decision. |
+| `nwac_review_changes_requested` | `Regional Manager` | `en` | `1` | `0` | `1` | Alerts the RM reviewer when the Decision Maker requests changes. |
+
+Disable the legacy admin submit-for-review rows when the two-step workflow is active:
+
+| event | role | language | enabled | email_alert | bell_alert | reason |
+| --- | --- | --- | --- | --- | --- | --- |
+| `assessment_submitted` | `NWAC Administrator` | any | `0` | `0` | `0` | Admin users should not receive the initial Coordinator/Case Manager submission into RM review. |
+| `assessment_submitted` | `System Administrator` | any | `0` | `0` | `0` | System Administrator users should not receive the initial Coordinator/Case Manager submission into RM review. |
+| `assessment_submitted` | `Regional Manager` | any | `0` | `0` | `0` | Regional Manager queue-arrival alerts must use the region-scoped `rm_review_requested` event, not the broad legacy submit event. |
+
+Use migrations `sql/migrations/20260619_0002_seed_rm_review_notification_settings.sql`, `sql/migrations/20260620_0001_seed_rm_review_requested_notification.sql`, and `sql/migrations/20260620_0002_normalize_two_step_review_notification_settings.sql` as the source for seeded defaults and normalization, but do not rely only on `INSERT ... WHERE NOT EXISTS` when applying the one-off. If TEST/PROD already has disabled, stale, duplicate, or email-enabled rows for these exact event/role/language keys, normalize those rows to the table above unless Bill explicitly asks to configure workflow emails and templates.
+
+Do not leave a broad `assessment_submitted` / `Regional Manager` row enabled as a substitute for RM queue-arrival alerts. The new two-step feature uses `rm_review_requested` because it is region-scoped to the case review region; broad legacy rows can over-notify or target the wrong staff.
+
+Do not leave broad `assessment_submitted` rows enabled for admin roles as a substitute for final-decision alerts. Admin users should only receive the RM escalation event, `rm_review_submitted_to_nwac`, when the work is actually in the Decision Maker `Pending Decision` stage.
+
+Recommended one-off verification query:
+
+```sql
+SELECT event, role, language, enabled, email_alert, bell_alert, template_id
+  FROM notification_setting
+ WHERE event IN (
+   'assessment_submitted',
+   'rm_review_requested',
+   'rm_review_returned_to_submitter',
+   'rm_review_changes_forwarded',
+   'rm_review_submitted_to_nwac',
+   'nwac_review_changes_requested'
+ )
+ ORDER BY event, role, language;
+```
+
+Activation check after configuration: submit one application assessment or proposal into RM review in the target environment and verify a `Pending Review` `iset_internal_notification` row exists for the expected Regional Manager staff profile(s), with `event_key='rm_review_requested'`; then have the RM submit it for final decision and verify Decision Maker users see a `Ready for final decision` bell notification with `event_key='rm_review_submitted_to_nwac'`, while no admin-role `Assessment submitted` bell is created for the RM-review submission.
+
 ## Testing Plan
 
 Backend tests:
@@ -189,14 +238,15 @@ Backend tests:
 - RM cannot resubmit directly for final decision from `returned_to_rm`.
 - Submitter cannot edit while stage is `rm_review`, `nwac_review`, or `returned_to_rm`.
 - Stage transitions are rejected when actor role/stage is invalid.
-- Notification routing sends Decision Maker request-changes alerts to the RM while the workflow is `returned_to_rm`, then sends the later RM-forwarded change alert to the submitter/case owner with the RM forwarding note.
+- RM and Decision Maker transition notes are recorded once in `Notes and Tasks` with actor/context wording and are included in the corresponding Events Timeline payload/message data.
+- Notification routing sends a `Pending Review` bell alert to Regional Managers in the case review region when work first enters `rm_review`; sends Decision Maker request-changes alerts to the RM while the workflow is `returned_to_rm`; then sends the later RM-forwarded change alert to the submitter/case owner with the RM forwarding note.
 
 Browser smokes:
 
 - `npm run smoke:application-assessment:workflow:browser` covers the application-assessment first pass, including RM return to submitter, RM submit for final decision, Decision Maker request-changes returning to RM, and RM forwarding requested changes to the submitter. Passing local run: 2026-06-19.
 - `npm run smoke:intervention-assessment:workflow:browser` covers intervention proposal/revision RM return, RM submit upward, Decision Maker review with RM notes, high-value Shelley warning, Decision Maker request-changes returning through RM, submitter-visible Decision Maker/RM notes, revision decision review, and approved communication/funding-revision letter follow-up entry points. Passing local run: 2026-06-19.
 - Live DEV UI walkthrough evidence on 2026-06-19 used real role logins and left application `1` approved with review workflow `15` at `final_decision_recorded`; screenshots are under `tmp/rm-review-live-ui/2026-06-19T17-22-44-405Z/`.
-- A local dispatcher smoke on 2026-06-19 verified that `nwac_review_changes_requested` with an RM recipient creates a Regional Manager bell notification, while `rm_review_changes_forwarded` creates an ISET Coordinator bell notification containing the RM note.
+- A local dispatcher smoke on 2026-06-19 verified that `nwac_review_changes_requested` with an RM recipient creates a Regional Manager bell notification, while `rm_review_changes_forwarded` creates an ISET Coordinator bell notification containing the RM note. On 2026-06-20, focused dispatcher tests added coverage for `rm_review_requested` region-scoped Regional Manager bell alerts when work enters the RM `Pending Review` queue.
 - `npm run smoke:intervention-assessment:recall:browser` continues to cover the submitted proposal recall branch. Passing local run: 2026-06-19.
 
 PDF checks:
@@ -218,16 +268,16 @@ Queue checks:
 2. Enable toggle in local DEV for all three workflow types. Done on 2026-06-19; keep TEST/PROD disabled until explicit rollout steps.
 3. Run source checks, backend tests, browser smokes, and live DEV role walkthroughs. Application-assessment checks passed locally on 2026-06-19; intervention proposal/revision walkthroughs are next.
 4. Create user guide/training material in repo docs. Draft guide exists at `docs/guides/rm-two-step-review-user-guide.md`; revise before TEST UAT.
-5. Deploy to TEST with toggle disabled.
-6. Enable toggle in TEST for UAT.
+5. Deploy to TEST with toggle disabled. Done in release `20260620-rm-two-step-review-rollout`; the toggle was enabled after smoke.
+6. Enable toggle in TEST for UAT. Done on 2026-06-20.
 7. UAT with Regional Managers and Decision Makers on all three request types.
 8. Fix UAT findings.
 9. Pick final PROD activation window; current target is Monday, July 13, 2026.
-10. Deploy app/schema to PROD with toggle disabled.
-11. Enable the toggle in PROD during the approved launch window.
+10. Deploy app/schema to PROD with toggle disabled. Done in release `20260620-rm-two-step-review-rollout`.
+11. Enable the toggle in PROD during the approved launch window. Done on 2026-06-20 after normal-routing smoke.
 12. Verify queues, one application assessment flow, one intervention proposal flow, one intervention revision flow, and final PDFs.
 
-PROD deployment still requires explicit Bill approval in the launch thread.
+Future PROD changes to this workflow still require explicit Bill approval in the launch thread.
 
 ## User Guide Requirements
 

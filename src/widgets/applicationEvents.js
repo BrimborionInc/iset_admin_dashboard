@@ -72,6 +72,34 @@ const truncate = (text, limit = 160) => {
   return `${value.slice(0, limit).trim()}…`;
 };
 
+const REVIEW_NOTE_EVENT_PREFIXES = [
+  'rm_review_',
+  'nwac_review_',
+  'intervention_proposal_',
+  'intervention_revision_'
+];
+
+const getReviewEventNote = (payload = {}, eventType = '') => {
+  const explicit = selectFirst([
+    payload.review_note,
+    payload.decision_notes,
+    payload.decision_note,
+    payload.note
+  ]);
+  if (explicit) return explicit;
+  const normalizedEventType = trimValue(eventType);
+  const isReviewEvent = REVIEW_NOTE_EVENT_PREFIXES.some(prefix => normalizedEventType.startsWith(prefix));
+  return isReviewEvent ? selectFirst([payload.reason]) : '';
+};
+
+const appendReviewEventNote = (base, payload = {}, eventType = '') => {
+  const baseText = trimValue(base);
+  const note = truncate(getReviewEventNote(payload, eventType), 240);
+  if (!baseText || !note) return baseText;
+  if (baseText.toLowerCase().includes(note.toLowerCase())) return baseText;
+  return `${ensureSentence(baseText)} Note: ${note}`;
+};
+
 const EVENT_TIMEZONE = 'America/Toronto';
 const formatDateTime = (value) => {
   const date = value instanceof Date ? value : new Date(value);
@@ -207,7 +235,8 @@ const formatEventMessage = (event, actorDisplay) => {
       if (outcome) parts.push(`(${outcome})`);
       let base = parts.join(' ');
       if (reason) base += `: ${reason}`;
-      return ensureSentence(reviewer ? `${base} by ${reviewer}` : base);
+      if (reviewer) base = `${base} by ${reviewer}`;
+      return ensureSentence(appendReviewEventNote(base, payload, event.event_type));
     }
     case 'reminder_created': {
       const title = trimValue(payload.title) || 'Reminder';
@@ -272,8 +301,8 @@ const formatEventMessage = (event, actorDisplay) => {
       return ensureSentence(parts.join(' • '));
     }
     default:
-      if (payload.message) return ensureSentence(payload.message);
-      if (payload.summary) return ensureSentence(payload.summary);
+      if (payload.message) return ensureSentence(appendReviewEventNote(payload.message, payload, event.event_type));
+      if (payload.summary) return ensureSentence(appendReviewEventNote(payload.summary, payload, event.event_type));
       return '';
   }
 };

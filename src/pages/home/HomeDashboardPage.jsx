@@ -35,9 +35,9 @@ import SystemAdminUsersAccessAlertsWidget from './widgets/SystemAdminUsersAccess
 import SystemAdminFeedbackQueueWidget from './widgets/SystemAdminFeedbackQueueWidget.jsx';
 import buildInfo from '../../generated/buildInfo';
 import {
+    buildPendingCompletionApplicationWorkspacePath,
     buildPendingCompletionApplicationSummary,
     isPendingCompletionApplicationRow,
-    resolvePendingCompletionApplicationStep,
 } from './homeQueueCompletion';
 
 const parseDashboardAmount = value => {
@@ -248,10 +248,10 @@ const WIDGET_REGISTRY = {
 
 const STORAGE_PREFIX = 'admin-home-layout-v7';
 const SYSTEM_ADMIN_STORAGE_PREFIX = 'admin-home-layout-v11';
-const ISET_COORDINATOR_STATUS_FILTER = ['submitted', 'in_review', 'docs_requested', 'closure_notice', 'pending_approval', 'decision_ready'].join(',');
 const ISET_COORDINATOR_EI_ELIGIBILITY_FILTER = ['submitted', 'in_review', 'docs_requested', 'closure_notice'].join(',');
 const ISET_COORDINATOR_READY_TO_ASSESS_FILTER = ['submitted', 'in_review'].join(',');
 const ISET_COORDINATOR_APPROVALS_FILTER = ['pending_approval'].join(',');
+const ACTIVE_APPLICATION_QUERY = 'excludeTerminal=1&limit=200&offset=0';
 const PENDING_COMPLETION_APPLICATION_QUERY = 'statusGroup=decision_recorded&limit=200&offset=0';
 const ISET_COORDINATOR_MILESTONE_WINDOW_DAYS = 14;
 const ISET_COORDINATOR_MISSING_DOCS_FILTER = [
@@ -501,6 +501,18 @@ const buildApplicationQueueStatusFields = (row, fallbackStatus = 'submitted') =>
         application_awaiting_reason: row?.application_awaiting_reason ?? row?.applicationAwaitingReason ?? null,
         application_closure_reason: row?.application_closure_reason ?? row?.applicationClosureReason ?? null,
     };
+};
+
+const resolveApplicationWorkspacePath = (row, fallbackPath = '/case-assignment-dashboard') => {
+    const caseId = row?.case_id || row?.caseId || null;
+    if (!caseId) {
+        return fallbackPath;
+    }
+    const basePath = `/application-case/${caseId}`;
+    if (isPendingCompletionApplicationRow(row)) {
+        return buildPendingCompletionApplicationWorkspacePath(basePath, row);
+    }
+    return basePath;
 };
 
 const getApplicationQueueRawStatus = (row, fallbackStatus = 'submitted') =>
@@ -946,10 +958,6 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         }
     }, [allowedWidgets, cancelMetricDrilldownRequest]);
 
-    const coordinatorStatusesParam = useMemo(
-        () => encodeURIComponent(ISET_COORDINATOR_STATUS_FILTER),
-        []
-    );
     const coordinatorMissingDocsParam = useMemo(
         () => encodeURIComponent(ISET_COORDINATOR_MISSING_DOCS_FILTER),
         []
@@ -1038,7 +1046,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                     summary: notes || row.reason || row.details || row.last_action_note || 'Escalation pending review',
                     notes,
                     notes_list: noteParts,
-                    workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
+                    workspacePath: resolveApplicationWorkspacePath(row)
                 };
             });
             setProgramAdminItems(current => {
@@ -1236,7 +1244,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
                         summary: 'Non-terminal application in your regional portfolio.',
                         assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
-                        workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
+                        workspacePath: resolveApplicationWorkspacePath(row)
                     };
                 });
                 const totalCount = Number(payload.count);
@@ -1355,7 +1363,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         let ignore = false;
         const loadRegionalManagerAssignedApplications = async () => {
             try {
-                const response = await apiFetch(`/api/applications?status=${coordinatorStatusesParam}&limit=200&offset=0`, {
+                const response = await apiFetch(`/api/applications?${ACTIVE_APPLICATION_QUERY}`, {
                     headers: buildDevHeaders(role)
                 });
                 if (!response.ok) {
@@ -1393,6 +1401,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         row.tracking_id ||
                         'Applicant';
                     const submitted = row.submitted_at || row.created_at || null;
+                    const isPendingCompletion = isPendingCompletionApplicationRow(row);
                     return {
                         id,
                         title: applicantName,
@@ -1415,9 +1424,11 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         dueDate: null,
                         submittedAt: submitted,
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
-                        summary: submitted ? `Submitted ${submitted}` : 'Assigned application',
+                        summary: isPendingCompletion
+                            ? buildPendingCompletionApplicationSummary(row)
+                            : submitted ? `Submitted ${submitted}` : 'Assigned application',
                         assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
-                        workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
+                        workspacePath: resolveApplicationWorkspacePath(row)
                     };
                 });
                 setProgramAdminItems(current => {
@@ -1443,7 +1454,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadRegionalManagerAssignedApplications();
         return () => { ignore = true; };
-    }, [role, programAdminRefresh, isRegionalCoordinatorRole, coordinatorStatusesParam, currentStaffProfileId, currentUserEmail]);
+    }, [role, programAdminRefresh, isRegionalCoordinatorRole, currentStaffProfileId, currentUserEmail]);
 
     useEffect(() => {
         if (!isIsetCoordinatorRole) {
@@ -1452,7 +1463,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         let ignore = false;
         const loadAssignedApplications = async () => {
             try {
-                const response = await apiFetch(`/api/applications?status=${coordinatorStatusesParam}&limit=200&offset=0`, {
+                const response = await apiFetch(`/api/applications?${ACTIVE_APPLICATION_QUERY}`, {
                     headers: buildDevHeaders(role)
                 });
                 if (!response.ok) {
@@ -1479,6 +1490,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         row.tracking_id ||
                         'Applicant';
                     const submitted = row.submitted_at || row.created_at || null;
+                    const isPendingCompletion = isPendingCompletionApplicationRow(row);
                     return {
                         id,
                         title: applicantName,
@@ -1501,9 +1513,11 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         dueDate: null,
                         submittedAt: submitted,
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
-                        summary: submitted ? `Submitted ${submitted}` : 'Assigned application',
+                        summary: isPendingCompletion
+                            ? buildPendingCompletionApplicationSummary(row)
+                            : submitted ? `Submitted ${submitted}` : 'Assigned application',
                         assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
-                        workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
+                        workspacePath: resolveApplicationWorkspacePath(row)
                     };
                 });
                 setProgramAdminItems(current => {
@@ -1529,7 +1543,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
         };
         loadAssignedApplications();
         return () => { ignore = true; };
-    }, [role, programAdminRefresh, isIsetCoordinatorRole, coordinatorStatusesParam]);
+    }, [role, programAdminRefresh, isIsetCoordinatorRole]);
 
     useEffect(() => {
         if (!isIsetCoordinatorRole) {
@@ -1665,7 +1679,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
                         summary: 'Awaiting documents or response',
                         assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
-                        workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
+                        workspacePath: resolveApplicationWorkspacePath(row)
                     };
                 });
                 setProgramAdminItems(current => {
@@ -1751,7 +1765,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
                         summary: 'EI consent or verification pending.',
                         assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
-                        workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
+                        workspacePath: resolveApplicationWorkspacePath(row)
                     };
                 });
                 setProgramAdminItems(current => {
@@ -1833,7 +1847,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
                         summary: 'EI verification complete; ready for assessment.',
                         assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
-                        workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
+                        workspacePath: resolveApplicationWorkspacePath(row)
                     };
                 });
                 setProgramAdminItems(current => {
@@ -1930,7 +1944,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
                         summary: 'Assessment submitted for review.',
                         assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
-                        workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
+                        workspacePath: resolveApplicationWorkspacePath(row)
                     };
                 });
                 const interventionItems = interventionRows.map((row, idx) => {
@@ -2112,13 +2126,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         funding_agreement_count: row.funding_agreement_count ?? 0,
                         approval_decision_letter_sent: row.approval_decision_letter_sent ?? false,
                         decisionLetterSentApproval: row.decisionLetterSentApproval ?? false,
-                        workspacePath: row.case_id
-                            ? buildApprovalWorkspacePath({
-                                basePath: `/application-case/${row.case_id}`,
-                                approvalType: 'application',
-                                step: resolvePendingCompletionApplicationStep(row)
-                            })
-                            : '/case-assignment-dashboard'
+                        workspacePath: resolveApplicationWorkspacePath(row)
                     };
                 });
                 const interventionItems = mapPendingCompletionInterventionItems(
@@ -2572,7 +2580,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                             submittedAt: row.submitted_at || row.created_at || null,
                             updatedAt: row.application_updated_at || row.last_activity_at || row.submitted_at || row.created_at || null,
                             summary: meta.status ? `Application timeline ${meta.status}` : 'Overdue',
-                            workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
+                            workspacePath: resolveApplicationWorkspacePath(row)
                         };
                     })
                     .filter(Boolean);
@@ -2669,7 +2677,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                                         ? 'Assigned and ready for assessment start.'
                                         : 'Submitted and awaiting assignment.')
                                     : 'Assigned and waiting for EI verification before assessment can begin.',
-                            workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
+                            workspacePath: resolveApplicationWorkspacePath(row)
                         };
                     })
                     .filter(Boolean);
@@ -3020,7 +3028,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         summary: buildPendingCompletionApplicationSummary(row),
                         assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
                         funding_agreement_count: row.funding_agreement_count ?? 0,
-                        workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
+                        workspacePath: resolveApplicationWorkspacePath(row)
                     };
                 });
                 const interventionItems = mapPendingCompletionInterventionItems(
@@ -3426,7 +3434,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                             dueDate: meta.due ? meta.due.toISOString() : null,
                             submittedAt: row.submitted_at || row.created_at || null,
                             summary: meta.status ? `Timeline ${meta.status}` : 'Overdue',
-                            workspacePath: row.case_id ? `/application-case/${row.case_id}` : '/case-assignment-dashboard'
+                            workspacePath: resolveApplicationWorkspacePath(row)
                         };
                     })
                     .filter(Boolean);

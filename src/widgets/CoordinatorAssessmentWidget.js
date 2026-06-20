@@ -2528,6 +2528,8 @@ const CoordinatorAssessmentWidget = forwardRef(
   const approvalBlockMessage = isHighValueFundingApprovalBlocked
     ? `Only Shelley Stacey (${HIGH_VALUE_FUNDING_APPROVER_EMAIL}) can approve funding of $${HIGH_VALUE_FUNDING_APPROVAL_THRESHOLD.toLocaleString()} or above.`
     : null;
+  const selectedDecisionRequiresHighValueApprover =
+    assessment.nwacReviewStatus === 'approve' && Boolean(approvalBlockMessage);
 
   const [interventionCodes, setInterventionCodes] = useState([]);
   const [interventionCodesLoading, setInterventionCodesLoading] = useState(false);
@@ -8548,6 +8550,9 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       if (typeof actions?.refreshCaseData === 'function') {
         await actions.refreshCaseData().catch(() => {});
       }
+      if (note) {
+        dispatchCaseNotesRefresh();
+      }
       setReviewWorkflowNote('');
       const returnedToSubmitter =
         action === ASSESSMENT_REVIEW_ACTIONS.rmReturnToSubmitter ||
@@ -8705,7 +8710,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
         }
       }
       dispatchSupportingDocsRefresh();
-      if (isOutcomePushBack) {
+      if (payload.assessment_nwac_reason) {
         dispatchCaseNotesRefresh();
       }
       setIsEditingAssessment(false);
@@ -8758,7 +8763,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
   };
 
   const handleApproveClick = async () => {
-    if (approvalBlockMessage) {
+    if (selectedDecisionRequiresHighValueApprover) {
       setValidationAlert([approvalBlockMessage]);
       return;
     }
@@ -11837,6 +11842,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
             {approvalBlockMessage && (
               <Alert type="warning" header="Shelley approval required">
                 {approvalBlockMessage}
+                {' '}Other Decision Maker outcomes can still be recorded.
               </Alert>
             )}
             {decisionAlignmentWarning && (

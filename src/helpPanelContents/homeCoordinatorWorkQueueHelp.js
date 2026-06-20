@@ -15,7 +15,7 @@ const HomeCoordinatorWorkQueueHelp = () => (
     <Box>
       Common coordinator queues include:
       <ul>
-        <li><strong>My Applications:</strong> assigned application files that need review.</li>
+        <li><strong>My Applications:</strong> assigned application files that remain in your queue until the application is fully complete.</li>
         <li><strong>My Clients:</strong> assigned client case files, including files that no longer have an active application task.</li>
         <li><strong>EI Verification Pending:</strong> cases waiting for EI consent or verification before the assessment can move forward.</li>
         <li><strong>Ready to assess:</strong> files that appear ready for the assessment and recommendation work.</li>
@@ -35,7 +35,7 @@ const HomeCoordinatorWorkQueueHelp = () => (
 HomeCoordinatorWorkQueueHelp.aiContext = `
 You are assisting with the ISET Coordinator Work Queue widget on the NWAC ISET homepage.
 Explain the coordinator queue cards in staff language and connect them to the next job step, not just the UI:
-- My Applications -> open the assigned file and review it.
+- My Applications -> open the assigned file; keep decision-recorded applications here until completion follow-through is done.
 - My Clients -> open an assigned client case file in Case Workspace.
 - EI Verification Pending -> check consent/verification requirements before assessment.
 - Ready to assess -> complete the assessment and recommendation.

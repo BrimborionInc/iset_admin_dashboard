@@ -689,7 +689,7 @@ const metricColumnKeysByPreset = {
 };
 
 const buildColumns = (types = [], selectedBucketId = null) => {
-  if (selectedBucketId === 'pending-decision' || selectedBucketId === 'approvals-pipeline') {
+  if (selectedBucketId === 'pending-decision' || selectedBucketId === 'pending-review' || selectedBucketId === 'approvals-pipeline') {
     return approvalColumnKeys;
   }
   if (!types || types.length === 0) {

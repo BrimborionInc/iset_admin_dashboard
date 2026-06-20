@@ -1331,7 +1331,7 @@ const AppContent = () => {
   const notificationSortControl = useMemo(() => {
     if (notificationFlashbarItems.length < 2) return null;
     return (
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
+      <div className="path-notifications-sort-control" style={{ justifyContent: 'flex-end', marginBottom: '8px' }}>
         <SegmentedControl
           label="Notification sort order"
           selectedId={notificationSortMode}
@@ -1988,7 +1988,7 @@ const AppContent = () => {
                 />
               }
               notifications={
-                <div ref={flashbarRef}>
+                <div ref={flashbarRef} className="path-notifications-region">
                   {notificationSortControl}
                   <Flashbar
                     stackItems

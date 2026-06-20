@@ -2,3 +2,12 @@
 [class*="awsui_navigation-container_"] [class*="awsui_hide-navigation_"] {
   z-index: 2;
 }
+
+/* Hide the notification sort switch until Cloudscape's stacked Flashbar is expanded. */
+.path-notifications-region .path-notifications-sort-control {
+  display: none !important;
+}
+
+.path-notifications-region:has(button[aria-expanded="true"]) .path-notifications-sort-control {
+  display: flex !important;
+}

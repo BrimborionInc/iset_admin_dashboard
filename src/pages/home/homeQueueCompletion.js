@@ -2,6 +2,7 @@ import {
   normalizeApplicationStatus,
   normalizeDecisionOutcome,
 } from '../../utils/applicationStatus';
+import { buildApprovalWorkspacePath } from '../../utils/approvalWorkspaceEntry';
 
 export const isDeniedCompletionRow = (row = {}) => {
   const decisionOutcome = normalizeDecisionOutcome(row.decision_outcome ?? row.decisionOutcome);
@@ -76,3 +77,10 @@ export const resolvePendingCompletionApplicationStep = (row = {}) => {
   }
   return 'communication';
 };
+
+export const buildPendingCompletionApplicationWorkspacePath = (basePath, row = {}) =>
+  buildApprovalWorkspacePath({
+    basePath,
+    approvalType: 'application',
+    step: resolvePendingCompletionApplicationStep(row),
+  });

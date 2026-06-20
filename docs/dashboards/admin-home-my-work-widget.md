@@ -2,7 +2,7 @@
 
 Purpose: document the live homepage Work Queue widget and the queues that drive the shared `Work Queue Items` table.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-06-19
+Last Updated: 2026-06-20
 
 ## Scope
 
@@ -111,6 +111,7 @@ Last Updated: 2026-06-19
 ## Regional Manager scope rule
 
 - `Applications in My Region` includes all non-terminal applications visible to the Regional Manager through `/api/applications?excludeTerminal=1`.
+- `My Applications` filters that same active application result set down to rows assigned directly to the signed-in Regional Manager, so post-decision files remain in the personal queue until completion follow-through is finished.
 - `Clients in My Region` includes non-terminal client cases visible through `/api/dashboard/regional-client-cases`.
 - Region scope is resolved from all assigned `regionIds`, including `staff_region` mappings when present.
 - For Regional Managers, `/api/applications` includes:
@@ -127,7 +128,8 @@ Last Updated: 2026-06-19
 
 ## ISET Coordinator scope rule
 
-- `My Applications` includes assigned application rows loaded through `/api/applications` for the coordinator's application workflow statuses.
+- `My Applications` includes assigned application rows loaded through `/api/applications?excludeTerminal=1` so application files stay visible to the assigned coordinator until they are fully completed, closed, or archived.
+- Decision-recorded rows in `My Applications` use the same post-decision deep link as `Pending Completion`: application approval-letter follow-up opens the `Approval letters` step, and approved rows move to `Funding forms and signatures` once the approval letter has been recorded as sent.
 - `My Clients` includes open client case files assigned directly to the signed-in coordinator through `/api/dashboard/my-client-cases`.
 - `My Clients` uses `iset_case.assigned_staff_profile_id` as the assignment source and is case-based, not deduped by client.
 - The client-case queue excludes only `closed` and `archived` statuses. `Dormant` and `ready_to_close` remain in scope.

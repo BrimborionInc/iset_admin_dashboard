@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-06-19
+Last Updated: 2026-06-20
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,14 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-06-20 | Release TBD | Fix/Notifications | Document upload alerts | Staff document-upload bell alerts now name the staff uploader instead of saying the applicant uploaded the document. | Applicant-originated uploads keep the existing applicant wording. Jacqueline Sillery's DEV EI verification upload alert was repaired to show the Regional Manager uploader.
+- 2026-06-20 | Release TBD | Notifications/Approvals | Regional Manager review | Regional Managers now receive a `Pending Review` bell alert when work enters their RM review queue. | Alerts are scoped to Regional Managers in the case review region and currently cover application assessments, new intervention proposals, and intervention amendments/revisions. Email remains off until workflow-specific templates are configured.
+- 2026-06-20 | Release TBD | Fix/Notifications | Decision Maker review | Admin users no longer receive submit-for-review bell alerts for work that has only entered Regional Manager review; they receive final-decision alerts when the Regional Manager submits the work to the Decision Maker stage. | DEV notification settings now disable admin `assessment_submitted` rows and enable `rm_review_submitted_to_nwac` for both NWAC Administrator and System Administrator roles. Email remains off until workflow-specific templates are configured.
+- 2026-06-20 | Release TBD | Workflow/Approvals | Review notes | Regional Manager and Decision Maker review notes are now captured in Notes and Tasks and shown in the Events Timeline for the related review action. | The event payload also carries the note and case-note reference so review notes remain visible in exports/audit data.
+- 2026-06-20 | Release TBD | Fix/Approvals | High-value funding decisions | Non-Shelley Decision Makers can now deny or request changes on high-value application assessments while the approve option remains blocked. | The `$20,000` Shelley-only rule still prevents approval by other users and shows the warning in the decision step.
+- 2026-06-20 | Release TBD | UX/Notifications | Bell-alert sort control | The `Newest` / `Urgency` notification sort switch now appears only when staff expand the notification stack. | The collapsed page-top notification rail stays cleaner while preserving the sort option for expanded notification review.
+- 2026-06-20 | Release TBD | Fix/Home | Coordinator My Applications | Assigned application files now remain in the ISET Coordinator and Regional Manager `My Applications` queue until the application is completed, closed, or archived. | Post-decision rows open the application assessment at the correct follow-up step: approval-letter communication first, then funding forms/signatures once the approval letter is sent.
+- 2026-06-20 | Release TBD | Fix/Home | Regional Manager Pending Review | The `Pending Review` items table now uses the same review-focused columns as `Pending Decision`. | Regional Managers see province, EI status, timeline target, and workspace access for submitted application assessments and intervention requests awaiting RM action.
 - 2026-06-19 | Release TBD | Workflow/Approvals | Regional Manager review | Prepared the foundation for a new two-step Regional Manager review before the Decision Maker's final decisions. | Application assessments, new intervention proposals, and intervention amendments are wired behind the runtime flag and enabled in local DEV. Application assessment has local browser workflow smoke tests plus a live DEV role-based UI walkthrough; intervention proposal/amendment workflow browser smokes now cover deterministic RM, Decision Maker, returned-change, and approved follow-up paths. Live intervention UAT, TEST UAT, and PROD activation are still pending. Launch is targeted for Monday, July 13, 2026 after user guidance and explicit PROD approval.
 - 2026-06-19 | Release TBD | Fix/Assessment | Regional Manager EI verification | Regional Managers can complete application-assessment EI verification while the submitted assessment body remains read-only. | The EI status/report upload control now uses its own review-stage permission, and uploaded EI reports persist the selected EI status for the application.
 - 2026-06-19 | Release TBD | UX/Approvals | Regional Manager review queue | Regional Managers now see assessments and intervention proposals/amendments awaiting RM action under `Pending Review` instead of `Pending Decision`. | `Pending Review` includes rows at RM review and rows returned to RM after the Decision Maker requested changes. Final-decision users keep `Pending Decision` for final-decision work.
@@ -419,14 +427,24 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Financial Overview forms sent by secure message can now be blank or pre-filled editable forms focused on income and expenses, with clearer monthly hints and `per month` inputs; participant submissions update PATH Participant Details.
-- System Administrators can now see app capacity, database stress, and database query-pressure checks in AWS Environment Status.
-- Submitted assessments and intervention proposals are read-only while awaiting review or final decision.
-- Manage ISET Applications and ISET Clients now share the same widget-based dashboard treatment.
-- Submitters can recall a pending assessment or intervention proposal before a decision is recorded.
-- Recalled submissions archive the withdrawn generated assessment PDFs, record an audit event, and return the work to an editable state for correction and resubmission.
+- Application assessments, new intervention proposals, and intervention amendments now move through Regional Manager review before the final Decision Maker step.
+- Regional Managers get `Pending Review` queue items and bell alerts when work arrives for review; Decision Makers receive alerts only when the Regional Manager submits work for final decision.
+- Regional Manager and Decision Maker notes are recorded in Notes and Tasks and appear in the Events Timeline for the related review action.
+- Staff document-upload notifications now name the staff uploader instead of saying the applicant uploaded the document.
+- Coordinator and Regional Manager `My Applications` queues keep assigned files visible until application completion and open post-decision files at the right follow-up step.
+- The notification sort switch now appears only when the notification stack is expanded, reducing page-top clutter.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260620-rm-two-step-review-rollout
+
+- Application assessments, new intervention proposals, and intervention amendments now move through Regional Manager review before the final Decision Maker step, with Regional Manager sign-off included in approved assessment PDFs.
+- Regional Managers get `Pending Review` queue items and bell alerts when work arrives for review; Decision Makers receive final-decision alerts only after Regional Manager sign-off.
+- Regional Manager and Decision Maker notes are recorded in Notes and Tasks, included in event data, and shown in the Events Timeline for the related review action.
+- Staff document-upload notifications now name the staff uploader instead of saying the applicant uploaded the document.
+- Coordinator and Regional Manager `My Applications` queues keep assigned files visible until completion and open post-decision files at the right follow-up step; the `Pending Review` table now shows review-focused columns.
+- High-value funding decisions still require Shelley Stacey for approvals of `$20,000` or above, while other Decision Makers can still deny or request changes.
+- The notification sort switch now appears only when the notification stack is expanded, reducing page-top clutter.
 
 #### Release 20260618-prod-financial-overview-editable
 
@@ -440,29 +458,30 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - The submitter can recall a pending submission before a decision is recorded, returning it to an editable state for correction and resubmission.
 - Recalled submissions archive the withdrawn generated assessment PDFs, record an audit event, and keep future redlines based on the last active non-recalled submission.
 
-#### Release 20260612-212548
-
-- System Administrators can reopen a closed action plan from the Case Workspace header when circumstances change after closeout. The recovery action records a reason, resets ILMP validation/submission to needs review, and supports either adding a new intervention or reopening one completed intervention for amendment.
-- User Management name edits now also update Display name when the display name was still mirroring the old staff name, so a saved profile change no longer appears unchanged in the staff table.
-- Intake steps can now be organized by configurable groups without a database migration. Manage Intake Steps adds group filtering, group badges, workflow usage, and a group catalogue editor; Modify Intake Step can assign a group from the step properties panel.
-- Manual Application Intake now has a staff-assisted flow widget and wizard for identity/source details, existing client/applicant-account search, account handling, application details, and review before create.
-- Funding revision letters now create the missing Client Funding Agreement draft from the selected action plan when an approved current amendment needs one and no draft already exists.
-- The staff side-navigation collapse control now works reliably, and a browser smoke checks close/reopen behavior with real pointer clicks.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
-- Les formulaires Financial Overview envoyes par message securise peuvent maintenant etre vierges ou pre-remplis et modifiables, centres sur les revenus et depenses mensuels plus clairs, et les reponses du participant mettent a jour Participant Details dans PATH.
-- Les administrateurs systeme peuvent maintenant voir la capacite applicative, la charge de la base de donnees et la pression des requetes dans AWS Environment Status.
-- Les evaluations et propositions envoyees sont maintenant en lecture seule pendant l'attente d'approbation.
-- Les tableaux Demandes ISET et Clients ISET utilisent maintenant la meme presentation de tableau de bord a widgets.
-- La personne qui a envoye une evaluation ou proposition peut la rappeler avant qu'une decision soit enregistree.
-- Les rappels archivent les PDF d'evaluation retires, enregistrent un evenement d'audit et remettent le travail en mode modifiable pour correction et nouvel envoi.
+- Les evaluations de demande, nouvelles propositions d'intervention et amendements d'intervention passent maintenant par une revision du gestionnaire regional avant l'etape finale du Decision Maker.
+- Les gestionnaires regionaux recoivent les elements `Pending Review` et les alertes lorsque du travail arrive pour revision; les Decision Makers recoivent les alertes seulement quand le gestionnaire regional soumet pour decision finale.
+- Les notes du gestionnaire regional et du Decision Maker sont enregistrees dans Notes and Tasks et visibles dans Events Timeline pour l'action de revision.
+- Les notifications de televersement de documents par le personnel nomment maintenant le membre du personnel qui a televerse le document, au lieu d'indiquer que le participant l'a fait.
+- Les files `My Applications` des coordonnateurs et gestionnaires regionaux gardent les demandes assignees visibles jusqu'a la fin du dossier et ouvrent les dossiers apres decision a la bonne etape de suivi.
+- Le controle de tri des notifications apparait maintenant seulement quand la pile de notifications est ouverte, ce qui reduit l'encombrement en haut de page.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260620-rm-two-step-review-rollout
+
+- Les evaluations de demande, nouvelles propositions d'intervention et amendements d'intervention passent maintenant par une revision du gestionnaire regional avant l'etape finale du Decision Maker, avec la signature du gestionnaire regional dans les PDF d'evaluation approuves.
+- Les gestionnaires regionaux recoivent les elements `Pending Review` et les alertes lorsque du travail arrive pour revision; les Decision Makers recoivent les alertes de decision finale seulement apres la signature du gestionnaire regional.
+- Les notes du gestionnaire regional et du Decision Maker sont enregistrees dans Notes and Tasks, incluses dans les donnees d'evenement et visibles dans Events Timeline pour l'action de revision.
+- Les notifications de televersement de documents par le personnel nomment maintenant le membre du personnel qui a televerse le document, au lieu d'indiquer que le participant l'a fait.
+- Les files `My Applications` des coordonnateurs et gestionnaires regionaux gardent les demandes assignees visibles jusqu'a la fin du dossier et ouvrent les dossiers apres decision a la bonne etape de suivi; le tableau `Pending Review` montre maintenant les colonnes utiles a la revision.
+- Les approbations de financement de `$20,000` ou plus restent reservees a Shelley Stacey, tandis que les autres Decision Makers peuvent quand meme refuser ou demander des changements.
+- Le controle de tri des notifications apparait maintenant seulement quand la pile de notifications est ouverte, ce qui reduit l'encombrement en haut de page.
 
 #### Release 20260618-prod-financial-overview-editable
 
@@ -475,15 +494,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les evaluations de demande, les nouvelles propositions d'intervention et les revisions/amendements d'intervention envoyes sont maintenant en lecture seule pendant l'attente d'approbation.
 - La personne qui a envoye une demande peut la rappeler avant qu'une decision soit enregistree, afin de la corriger et de la soumettre de nouveau.
 - Les rappels archivent les PDF d'evaluation retires, enregistrent un evenement d'audit et gardent les futurs redlines bases sur le dernier envoi actif non rappele.
-
-#### Release 20260612-212548
-
-- Les administrateurs systeme peuvent rouvrir un plan d'action ferme depuis l'en-tete Case Workspace quand la situation change apres la fermeture. L'action enregistre une raison, remet la validation/soumission ILMP a Needs review, et permet soit d'ajouter une nouvelle intervention, soit de rouvrir une intervention terminee pour modification.
-- Dans User Management, changer le nom met aussi a jour Display name quand le display name reprenait encore l'ancien nom du membre du personnel, afin qu'un profil enregistre ne paraisse plus inchange dans le tableau.
-- Les etapes d'admission peuvent maintenant etre organisees par groupes configurables sans migration de base de donnees. Manage Intake Steps ajoute les filtres de groupe, les badges, l'utilisation dans les workflows et un editeur de catalogue; Modify Intake Step peut assigner un groupe depuis le panneau des proprietes.
-- Manual Application Intake a maintenant un widget de progression et un assistant pour les details d'identite/source, la recherche de client/compte participant, le choix de gestion de compte, les details de la demande et la revision avant creation.
-- Les lettres de revision de financement creent maintenant le brouillon Client Funding Agreement manquant a partir du plan d'action selectionne quand un amendement courant approuve en a besoin et qu'aucun brouillon n'existe deja.
-- Le controle de fermeture de la navigation laterale du personnel fonctionne maintenant de facon fiable, avec un test navigateur qui verifie la fermeture/reouverture par de vrais clics.
 
 ### Problemes connus (brouillon - FR)
 

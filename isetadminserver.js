@@ -110,13 +110,16 @@ const {
   getReviewTransition,
   isTwoStepReviewEnabled,
 } = require('./src/lib/reviewWorkflow');
+const {
+  buildReviewWorkflowCaseNoteBody,
+} = require('./src/lib/reviewWorkflowCaseNotes');
 
 // Increase default listener cap to avoid noisy warnings when wiring shared buses.
 events.EventEmitter.defaultMaxListeners = 20;
 
 const resolveServerFetch = async () => {
-  if (typeof globalThis.fetch === 'function') {
-    return globalThis.fetch.bind(globalThis);
+  if (typeof global !== 'undefined' && typeof global.fetch === 'function') {
+    return global.fetch.bind(global);
   }
   const { default: fetchImpl } = await import('node-fetch');
   return fetchImpl;
@@ -43467,6 +43470,52 @@ const resolveExistingUserIdFromAuth = async (req, runner = pool) => {
 
 const CASE_NOTE_MAX_LENGTH = 5000;
 
+const insertReviewWorkflowCaseNote = async (runner, req, {
+  caseId,
+  workflowType,
+  action,
+  actorStaffProfileId = null,
+  actorDisplayName = null,
+  note = null,
+} = {}) => {
+  const db = runner || pool;
+  const numericCaseId = normalisePositiveInteger(caseId);
+  if (!numericCaseId) return null;
+  const body = buildReviewWorkflowCaseNoteBody({
+    workflowType,
+    action,
+    actorName: actorDisplayName,
+    note,
+  });
+  if (!body) return null;
+  const trimmedBody =
+    body.length > CASE_NOTE_MAX_LENGTH
+      ? body.slice(0, CASE_NOTE_MAX_LENGTH)
+      : body;
+  const authorUserId = await resolveExistingUserIdFromAuth(req, db);
+  const [result] = await db.query(
+    'INSERT INTO iset_case_note (case_id, author_staff_profile_id, author_user_id, body, is_internal, is_pinned, follow_up_at) VALUES (?,?,?,?,1,0,NULL)',
+    [numericCaseId, actorStaffProfileId || null, authorUserId || null, trimmedBody]
+  );
+  return {
+    id: result?.insertId || null,
+    body: trimmedBody,
+  };
+};
+
+const appendReviewNotePayloadFields = (payload = {}, note = null, caseNote = null) => {
+  const cleanNote = normaliseString(note) || null;
+  if (!cleanNote && !caseNote?.body) return payload;
+  return {
+    ...payload,
+    note: cleanNote,
+    review_note: cleanNote,
+    decision_notes: cleanNote,
+    case_note_id: caseNote?.id || null,
+    case_note_body: caseNote?.body || null,
+  };
+};
+
 const CASE_NOTE_SELECT = `
   SELECT
     n.id,
@@ -56060,6 +56109,10 @@ app.post('/api/interventions/:id/review-workflow/action', async (req, res) => {
   let conn;
   let eventPayload = null;
   let eventType = null;
+  let reviewTransitionCaseNote = null;
+  let reviewActorId = null;
+  let reviewActorName = null;
+  let reviewActorDisplayName = null;
   try {
     conn = await pool.getConnection();
     await conn.beginTransaction();
@@ -56090,6 +56143,10 @@ app.post('/api/interventions/:id/review-workflow/action', async (req, res) => {
     const actorStaffProfileId = resolveActiveStaffProfileId(req) || null;
     const actorRole = inferUserRole(req) || resolveStaffRole(req) || null;
     const note = normaliseString(body.note || body.reviewNote || body.review_note) || null;
+    const requestActor = resolveRequestActor(req);
+    reviewActorId = requestActor.actorId;
+    reviewActorName = requestActor.actorName;
+    reviewActorDisplayName = await resolveStaffDisplayName(conn, req) || reviewActorName || null;
     const updatedWorkflow = await applyInterventionReviewWorkflowAction(conn, {
       ...workflowSubject,
       action: requestedAction,
@@ -56099,6 +56156,14 @@ app.post('/api/interventions/:id/review-workflow/action', async (req, res) => {
       payload: {
         source: 'intervention_review_action',
       },
+    });
+    reviewTransitionCaseNote = await insertReviewWorkflowCaseNote(conn, req, {
+      caseId: interventionRow.case_id || null,
+      workflowType: workflowSubject.workflowType,
+      action: requestedAction,
+      actorStaffProfileId,
+      actorDisplayName: reviewActorDisplayName || reviewActorName,
+      note,
     });
 
     const shouldReturnToSubmitter =
@@ -56151,14 +56216,12 @@ app.post('/api/interventions/:id/review-workflow/action', async (req, res) => {
       eventType = 'rm_review_returned_to_submitter';
     }
 
-	    const { actorId, actorName } = resolveRequestActor(req);
-	    const actorDisplayName = await resolveStaffDisplayName(pool, req) || actorName || null;
 	    const submitterStaffProfileId =
 	      normalisePositiveInteger(updatedWorkflow?.submitted_by_staff_profile_id) ||
 	      normalisePositiveInteger(interventionRow.assigned_staff_profile_id ?? interventionRow.assigned_to_user_id) ||
 	      null;
 	    const recipientStaffProfileId = shouldReturnToSubmitter ? submitterStaffProfileId : null;
-	    eventPayload = {
+	    eventPayload = appendReviewNotePayloadFields({
 	      case_id: interventionRow.case_id || null,
 	      application_id: workflowSubject.applicationId || null,
 	      action_plan_id: interventionRow.action_plan_id || null,
@@ -56178,13 +56241,13 @@ app.post('/api/interventions/:id/review-workflow/action', async (req, res) => {
 	          : requestedAction === REVIEW_ACTIONS.RmForwardChangesToSubmitter
 	            ? 'Regional Manager forwarded requested intervention changes to the submitter.'
 	            : 'Regional Manager returned the intervention request to the submitter.',
-    };
+    }, note, reviewTransitionCaseNote);
     await captureCaseEvent({
       type: eventType,
       caseId: interventionRow.case_id || null,
       payload: eventPayload,
-      actorId,
-      actorName: actorDisplayName || actorName,
+      actorId: reviewActorId,
+      actorName: reviewActorDisplayName || reviewActorName,
       actorStaffProfileId,
     });
 
@@ -56194,6 +56257,8 @@ app.post('/api/interventions/:id/review-workflow/action', async (req, res) => {
       intervention,
       reviewWorkflow,
       review_workflow: reviewWorkflow,
+      caseNote: reviewTransitionCaseNote,
+      case_note: reviewTransitionCaseNote,
     });
   } catch (error) {
     if (conn) {
@@ -57170,6 +57235,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
     await syncInterventionProposalCompatibility(updatedRow);
     updatedRow = await fetchInterventionWithCase(interventionId);
     let interventionReviewWorkflowUpdated = null;
+    let interventionDecisionCaseNote = null;
     if (
       statusChangeRequested &&
       nextStatusPersistence?.reviewStatus === 'submitted' &&
@@ -57198,21 +57264,32 @@ app.patch('/api/interventions/:id', async (req, res) => {
       interventionReviewWorkflowAction
     ) {
       const workflowSubject = buildInterventionReviewWorkflowSubject(updatedRow);
+      const decisionWorkflowNote = normaliseString(
+        metadata?.review?.decisionNotes ??
+        metadata?.review?.decision_notes ??
+        updatedRow?.review_notes ??
+        null
+      ) || null;
       interventionReviewWorkflowUpdated = await applyInterventionReviewWorkflowAction(pool, {
         ...workflowSubject,
         action: interventionReviewWorkflowAction,
         actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
         actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
-        note: normaliseString(
-          metadata?.review?.decisionNotes ??
-          metadata?.review?.decision_notes ??
-          updatedRow?.review_notes ??
-          null
-        ) || null,
+        note: decisionWorkflowNote,
         payload: {
           source: 'intervention_proposal_nwac_decision',
           reviewStatus: nextReviewStatusForDecision,
         },
+      });
+      const { actorName: decisionActorName } = resolveRequestActor(req) || {};
+      const decisionActorDisplayName = await resolveStaffDisplayName(pool, req) || decisionActorName || null;
+      interventionDecisionCaseNote = await insertReviewWorkflowCaseNote(pool, req, {
+        caseId: updatedRow?.case_id || interventionRow?.case_id || null,
+        workflowType: workflowSubject.workflowType,
+        action: interventionReviewWorkflowAction,
+        actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+        actorDisplayName: decisionActorDisplayName || decisionActorName,
+        note: decisionWorkflowNote,
       });
     }
     if (
@@ -57221,21 +57298,32 @@ app.patch('/api/interventions/:id', async (req, res) => {
       approvedRevisionReviewWorkflowAction &&
       approvedRevisionReviewWorkflowSubject
     ) {
+      const revisionDecisionWorkflowNote = normaliseString(
+        revisionDraftMetadata?.review?.decisionNotes ??
+        revisionDraftMetadata?.review?.decision_notes ??
+        null
+      ) || null;
       interventionReviewWorkflowUpdated = await applyInterventionReviewWorkflowAction(pool, {
         ...approvedRevisionReviewWorkflowSubject,
         action: approvedRevisionReviewWorkflowAction,
         actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
         actorRole: inferUserRole(req) || resolveStaffRole(req) || null,
-        note: normaliseString(
-          revisionDraftMetadata?.review?.decisionNotes ??
-          revisionDraftMetadata?.review?.decision_notes ??
-          null
-        ) || null,
+        note: revisionDecisionWorkflowNote,
         payload: {
           source: 'intervention_revision_nwac_decision',
           reviewStatus: 'approved',
           appliedToInterventionId: interventionId,
         },
+      });
+      const { actorName: revisionDecisionActorName } = resolveRequestActor(req) || {};
+      const revisionDecisionActorDisplayName = await resolveStaffDisplayName(pool, req) || revisionDecisionActorName || null;
+      interventionDecisionCaseNote = await insertReviewWorkflowCaseNote(pool, req, {
+        caseId: revisionDraftRow?.case_id || updatedRow?.case_id || interventionRow?.case_id || null,
+        workflowType: approvedRevisionReviewWorkflowSubject.workflowType,
+        action: approvedRevisionReviewWorkflowAction,
+        actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+        actorDisplayName: revisionDecisionActorDisplayName || revisionDecisionActorName,
+        note: revisionDecisionWorkflowNote,
       });
     }
     if (interventionReviewWorkflowUpdated) {
@@ -57270,14 +57358,66 @@ app.patch('/api/interventions/:id', async (req, res) => {
     const shouldEmitInterventionDecisionEvent =
       (isApplyingApprovedRevision && nextReviewStatus === 'approved') ||
       transitionedToDecisionStatus;
-    const interventionDecisionEventType = shouldEmitInterventionDecisionEvent
-      ? resolveInterventionDecisionEventType({
-          proposalKind: proposalKindForDecision,
-          reviewStatus: nextReviewStatus,
-        })
-      : null;
-    if (interventionDecisionEventType && updatedRow?.case_id) {
+	    const interventionDecisionEventType = shouldEmitInterventionDecisionEvent
+	      ? resolveInterventionDecisionEventType({
+	          proposalKind: proposalKindForDecision,
+	          reviewStatus: nextReviewStatus,
+	        })
+	      : null;
+    if (
+      interventionReviewWorkflowUpdated?.current_stage === REVIEW_STAGES.RmReview &&
+      statusChangeRequested &&
+      nextReviewStatus === 'submitted' &&
+      previousReviewStatus !== 'submitted' &&
+      updatedRow?.case_id
+    ) {
       try {
+        const { actorId, actorName } = resolveRequestActor(req);
+        const actorDisplayName = await resolveStaffDisplayName(pool, req) || actorName || null;
+        const proposalKindForReview = revisionSourceInterventionId ? 'revision' : 'new';
+        const workflowType =
+          interventionReviewWorkflowUpdated?.workflow_type ||
+          interventionReviewWorkflowSubject?.workflowType ||
+          (proposalKindForReview === 'revision'
+            ? REVIEW_WORKFLOW_TYPES.InterventionRevision
+            : REVIEW_WORKFLOW_TYPES.InterventionProposal);
+        await captureCaseEvent({
+          type: 'rm_review_requested',
+          caseId: updatedRow.case_id,
+          payload: {
+            case_id: updatedRow.case_id,
+            action_plan_id: updatedRow.action_plan_id || planId || null,
+            intervention_id: updatedRow.id || interventionId,
+            proposal_id: interventionReviewWorkflowUpdated?.proposal_id || interventionReviewWorkflowSubject?.proposalId || null,
+            source_intervention_id: revisionSourceInterventionId || null,
+            proposal_kind: proposalKindForReview,
+            approval_request_type: proposalKindForReview === 'revision'
+              ? 'revised_intervention'
+              : 'new_intervention',
+            workflow_type: workflowType,
+            review_stage: interventionReviewWorkflowUpdated.current_stage,
+            submitted_by_staff_profile_id:
+              normalisePositiveInteger(interventionReviewWorkflowUpdated?.submitted_by_staff_profile_id) ||
+              normalisePositiveInteger(updatedRow.created_by_staff_profile_id) ||
+              null,
+            assigned_staff_profile_id:
+              normalisePositiveInteger(updatedRow.assigned_to_user_id) ||
+              normalisePositiveInteger(updatedRow.assigned_staff_profile_id) ||
+              null,
+            message: proposalKindForReview === 'revision'
+              ? 'Intervention amendment submitted for Regional Manager review.'
+              : 'Intervention proposal submitted for Regional Manager review.',
+          },
+          actorId,
+          actorName: actorDisplayName || actorName,
+          actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+        });
+      } catch (eventErr) {
+        console.warn('[events] RM review requested event failed', eventErr?.message || eventErr);
+      }
+    }
+	    if (interventionDecisionEventType && updatedRow?.case_id) {
+	      try {
         const { actorId, actorName } = resolveRequestActor(req);
         const actorDisplayName = await resolveStaffDisplayName(pool, req) || actorName || null;
         const decisionReason =
@@ -57308,7 +57448,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
         await captureCaseEvent({
           type: interventionDecisionEventType,
           caseId: updatedRow.case_id,
-	          payload: {
+	          payload: appendReviewNotePayloadFields({
 	            case_id: updatedRow.case_id,
 	            action_plan_id: updatedRow.action_plan_id || planId || null,
 	            intervention_id: updatedRow.id || interventionId,
@@ -57354,7 +57494,7 @@ app.patch('/api/interventions/:id', async (req, res) => {
               proposalKindForDecision === 'revision'
                 ? `Intervention revision ${resolveInterventionDecisionOutcomeLabel(nextReviewStatus)}.`
                 : `Intervention proposal ${resolveInterventionDecisionOutcomeLabel(nextReviewStatus)}.`,
-          },
+          }, decisionReason, interventionDecisionCaseNote),
           actorId,
           actorName: actorDisplayName || actorName,
         });
@@ -87442,6 +87582,10 @@ app.post('/api/cases/:id/assessment/review-workflow/action', async (req, res) =>
   let conn;
   let eventPayload = null;
   let eventType = null;
+  let reviewTransitionCaseNote = null;
+  let reviewActorId = null;
+  let reviewActorName = null;
+  let reviewActorDisplayName = null;
   try {
     const accessError = await validateCaseAccessByCaseId(req, caseId);
     if (accessError) {
@@ -87511,6 +87655,10 @@ app.post('/api/cases/:id/assessment/review-workflow/action', async (req, res) =>
     const actorStaffProfileId = resolveActiveStaffProfileId(req) || null;
     const actorRole = inferUserRole(req) || resolveStaffRole(req) || null;
     const note = normaliseString(body.note || body.reviewNote || body.review_note) || null;
+    const requestActor = resolveRequestActor(req);
+    reviewActorId = requestActor.actorId;
+    reviewActorName = requestActor.actorName;
+    reviewActorDisplayName = await resolveStaffDisplayName(conn, req) || reviewActorName || null;
     const updatedWorkflow = await applyApplicationAssessmentReviewWorkflowAction(conn, {
       caseId,
       applicationId,
@@ -87521,6 +87669,14 @@ app.post('/api/cases/:id/assessment/review-workflow/action', async (req, res) =>
       payload: {
         source: 'application_assessment_review_action',
       },
+    });
+    reviewTransitionCaseNote = await insertReviewWorkflowCaseNote(conn, req, {
+      caseId,
+      workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+      action: requestedAction,
+      actorStaffProfileId,
+      actorDisplayName: reviewActorDisplayName || reviewActorName,
+      note,
     });
 
     const shouldReturnToSubmitter =
@@ -87587,14 +87743,12 @@ app.post('/api/cases/:id/assessment/review-workflow/action', async (req, res) =>
       eventType = 'rm_review_returned_to_submitter';
     }
 
-	    const { actorId, actorName } = resolveRequestActor(req);
-	    const actorDisplayName = await resolveStaffDisplayName(pool, req) || actorName || null;
 	    const submitterStaffProfileId =
 	      normalisePositiveInteger(updatedWorkflow?.submitted_by_staff_profile_id) ||
 	      normalisePositiveInteger(row.assigned_staff_profile_id) ||
 	      null;
 	    const recipientStaffProfileId = shouldReturnToSubmitter ? submitterStaffProfileId : null;
-	    eventPayload = {
+	    eventPayload = appendReviewNotePayloadFields({
 	      case_id: caseId,
 	      application_id: applicationId,
 	      scope: 'application_assessment',
@@ -87612,14 +87766,14 @@ app.post('/api/cases/:id/assessment/review-workflow/action', async (req, res) =>
 	            ? 'Regional Manager forwarded requested changes to the Coordinator.'
             : 'Regional Manager returned the assessment to the Coordinator.',
       tracking_id: row.tracking_id || null,
-    };
+    }, note, reviewTransitionCaseNote);
     await captureCaseEvent({
       type: eventType,
       caseId,
       payload: eventPayload,
       trackingId: row.tracking_id || null,
-      actorId,
-      actorName: actorDisplayName || actorName,
+      actorId: reviewActorId,
+      actorName: reviewActorDisplayName || reviewActorName,
       actorStaffProfileId,
     });
 
@@ -87653,6 +87807,8 @@ app.post('/api/cases/:id/assessment/review-workflow/action', async (req, res) =>
       application_row_version: Number(updatedApplication?.row_version || currentRowVersion + 1),
       reviewWorkflow,
       review_workflow: reviewWorkflow,
+      caseNote: reviewTransitionCaseNote,
+      case_note: reviewTransitionCaseNote,
     });
   } catch (error) {
     if (conn) {
@@ -87842,8 +87998,7 @@ app.put('/api/cases/:id', async (req, res) => {
   let conflictDeclarationSignedAt = null;
   let conflictDeclarationChoice = null;
   let conflictDeclarationDetails = null;
-  let pushBackCaseNoteId = null;
-  let pushBackCaseNoteBody = null;
+  let reviewTransitionCaseNote = null;
   let requiredAssessmentDocsGenerated = false;
   const applicationJoinSql = requestedApplicationId
     ? 'JOIN iset_application a ON a.case_id = c.id AND a.id = ?'
@@ -88651,6 +88806,25 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       }
     }
 
+    if (assessmentReviewStatusProvided) {
+      const reviewCaseNoteAction =
+        assessmentReviewStatus === 'approve'
+          ? REVIEW_ACTIONS.NwacApprove
+          : assessmentReviewStatus === 'reject'
+            ? REVIEW_ACTIONS.NwacDeny
+            : REVIEW_ACTIONS.NwacRequestChanges;
+      const { actorName: decisionActorName } = resolveRequestActor(req) || {};
+      const decisionActorDisplayName = await resolveStaffDisplayName(conn, req) || decisionActorName || null;
+      reviewTransitionCaseNote = await insertReviewWorkflowCaseNote(conn, req, {
+        caseId,
+        workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+        action: reviewCaseNoteAction,
+        actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+        actorDisplayName: decisionActorDisplayName || decisionActorName,
+        note: normaliseString(body.assessment_nwac_reason) || null,
+      });
+    }
+
     if (conflictSignatureRequested) {
       const conflictSigned = toTinyInt(body.assessment_conflict_declaration_signed);
       if (typeof conflictSigned !== 'undefined' && conflictSigned !== null) {
@@ -88893,28 +89067,6 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
 
     if (shouldRecomputeCaseStatus) {
       await recomputeCaseStatus(caseId, conn);
-    }
-
-    if (assessmentReviewStatusProvided && assessmentReviewStatus === 'push_back') {
-      const pushBackReason =
-        typeof body.assessment_nwac_reason === 'string'
-          ? body.assessment_nwac_reason.trim()
-          : '';
-      if (pushBackReason) {
-        const staffProfileId = resolveActiveStaffProfileId(req) || null;
-        const authorUserId = await resolveExistingUserIdFromAuth(req, conn);
-        const noteBody = `Push back to ISET Coordinator/Case Manager: ${pushBackReason}`;
-        const trimmedNote =
-          noteBody.length > CASE_NOTE_MAX_LENGTH
-            ? noteBody.slice(0, CASE_NOTE_MAX_LENGTH)
-            : noteBody;
-        const [noteResult] = await conn.query(
-          'INSERT INTO iset_case_note (case_id, author_staff_profile_id, author_user_id, body, is_internal, is_pinned, follow_up_at) VALUES (?,?,?,?,1,0,NULL)',
-          [caseId, staffProfileId, authorUserId, trimmedNote]
-        );
-        pushBackCaseNoteId = noteResult?.insertId || null;
-        pushBackCaseNoteBody = trimmedNote;
-      }
     }
 
     const submitActionRawForRequiredDocs = body.assessment_submit_action;
@@ -89384,6 +89536,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
               a.docs_requested_at AS docs_requested_at,
               a.docs_requested_cleared_at AS docs_requested_cleared_at,
               a.docs_requested_source AS docs_requested_source,
+              c.assigned_staff_profile_id AS assigned_staff_profile_id,
               COALESCE(s.user_id, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.user_id'))) AS applicant_user_id,
               COALESCE(s.reference_number, JSON_UNQUOTE(JSON_EXTRACT(a.payload_json, '$.submission_snapshot.reference_number'))) AS tracking_id,
               a.row_version AS application_row_version,
@@ -89632,28 +89785,34 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
     caseRow.application_closure_reason =
       caseRow.application_closure_reason || applicationClosureReasonToPersist || null;
     caseRow.applicationClosureReason = caseRow.application_closure_reason;
-    const { actorId, actorName } = resolveRequestActor(req);
-    const actorDisplayName = await resolveStaffDisplayName(pool, req) || actorName || null;
-    const trackingId = caseRow?.tracking_id || null;
+	    const { actorId, actorName } = resolveRequestActor(req);
+	    const actorDisplayName = await resolveStaffDisplayName(pool, req) || actorName || null;
+	    const trackingId = caseRow?.tracking_id || null;
 
-    if (pushBackCaseNoteId && pushBackCaseNoteBody) {
-      try {
-        await captureCaseEvent({
-          type: 'note_added',
-          caseId,
-          payload: {
-            note_id: pushBackCaseNoteId,
-            body: pushBackCaseNoteBody,
-            is_pinned: false,
-            follow_up_at: null,
-          },
-          trackingId,
-          actorId,
-          actorName,
-        });
-      } catch (eventErr) {
-        console.warn('[case-notes] failed to emit note_added event for push back note', eventErr?.message || eventErr);
-      }
+    if (
+      applicationAssessmentReviewWorkflowUpdated?.current_stage === REVIEW_STAGES.RmReview &&
+      assessmentSubmittedForWorkflow
+    ) {
+      await captureCaseEvent({
+        type: 'rm_review_requested',
+        caseId,
+        payload: {
+          tracking_id: trackingId,
+          case_id: caseId,
+          application_id: applicationId || null,
+          workflow_type: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+          approval_request_type: 'application_assessment',
+          request_type: 'application assessment',
+          review_stage: applicationAssessmentReviewWorkflowUpdated.current_stage,
+          submitted_by_staff_profile_id: resolveActiveStaffProfileId(req) || null,
+          assigned_staff_profile_id: normalisePositiveInteger(caseRow?.assigned_staff_profile_id) || null,
+          message: 'Application assessment submitted for Regional Manager review.',
+        },
+        trackingId,
+        actorId,
+        actorName: actorDisplayName || actorName,
+        actorStaffProfileId: resolveActiveStaffProfileId(req) || null,
+      });
     }
 
     const shouldEmitStatusEvent = applicationStatusChanged || statusChanged;
@@ -90095,7 +90254,7 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
 		      await captureCaseEvent({
 	        type: nwacReviewEventType,
 	        caseId,
-	        payload: {
+	        payload: appendReviewNotePayloadFields({
 	          tracking_id: trackingId,
 	          application_id: applicationId || null,
 	          workflow_type: applicationAssessmentReviewWorkflowEnabled
@@ -90124,9 +90283,9 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
 	              : outcome === 'push_back'
 	                ? 'Changes requested for the application.'
 	                : outcome
-	                  ? `NWAC review recorded as ${outcomeLabel}.`
-	                  : 'NWAC review submitted.',
-	        },
+	                ? `NWAC review recorded as ${outcomeLabel}.`
+	                : 'NWAC review submitted.',
+	        }, reason, reviewTransitionCaseNote),
 
         trackingId,
         actorId,
