@@ -2,7 +2,7 @@
 
 Purpose: document the live homepage Work Queue widget and the queues that drive the shared `Work Queue Items` table.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-06-20
+Last Updated: 2026-06-22
 
 ## Scope
 
@@ -100,6 +100,11 @@ Last Updated: 2026-06-20
   - keeps assignment available so staff can route a matched file for manual review
 - `Overdue`
   - has no inline action by default; staff open the workspace through the item link and handle the overdue work in context
+  - for admin/manager application rows, this is derived from the shared application SLA helper rather than a stored status: a row enters `Overdue` when the active stage due date has passed
+  - the active stage comes from assignment, application status, and `assessment_esdc_eligibility`; an assigned file with blank `assessment_esdc_eligibility` is labelled EI validation/pending assessment until that structured value is saved, even if an EI-related document exists
+  - support classification for PROD feedback #145: confirmed UI badge bug, not staff fault; the Overdue row builder dropped the structured EI result after the queue had already computed the correct overdue rows
+  - status/timeline rendering paths must use the shared EI eligibility resolver so snake_case/camelCase row shapes preserve the structured EI result; otherwise badges can falsely add `Awaiting EI Validation` to rows whose overdue reason is assessment timing, applicant/document wait, or pending decision
+  - server-side application bucket filtering for `bucket=overdue` must use all application SLA rows, not only already-assigned rows, so assignment-stage overdue records are counted/listed consistently with the homepage queue
 
 ## NWAC Administrator scope rule
 

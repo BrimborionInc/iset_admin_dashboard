@@ -497,7 +497,21 @@ function assertFinancialOverviewSchema(row, expectedMode, expectedInitialValues)
   const schema = asJson(row.resolved_schema_json, {});
   assert(schema?.meta?.fundingOverviewEditable === true, 'schema meta did not mark Financial Overview editable');
   assert(schema?.meta?.fundingOverviewMode === expectedMode, `schema mode expected ${expectedMode}, got ${schema?.meta?.fundingOverviewMode}`);
-  assert(Array.isArray(schema?.steps) && schema.steps.length >= 4, 'editable schema did not include the expected steps');
+  const stepIds = Array.isArray(schema?.steps) ? schema.steps.map(step => step?.stepId).filter(Boolean) : [];
+  assert(
+    ['financial-overview-income', 'financial-overview-expenses', 'financial-overview-signature']
+      .every(stepId => stepIds.includes(stepId)),
+    `editable schema did not include the expected steps: ${stepIds.join(', ')}`
+  );
+  const componentIds = (schema.steps || [])
+    .flatMap(step => step?.components || [])
+    .map(component => component?.storageKey || component?.id)
+    .filter(Boolean);
+  ['income-employment', 'income-spousal', 'income-social-assist', 'expenses-rent', 'expenses-electricity', 'client-sig']
+    .forEach(componentId => {
+      assert(componentIds.includes(componentId), `editable schema missing ${componentId}`);
+    });
+  assert(!componentIds.includes('requested-supports'), 'editable Financial Overview should not include requested-supports');
   const initial = schema.initial_values || schema.initialValues || schema.meta?.initialValues || {};
   for (const [key, expected] of Object.entries(expectedInitialValues)) {
     const actual = initial[key];
@@ -608,13 +622,6 @@ async function driveParticipantForm({ page, portalFrontendBase, signingRequestId
   await screenshot(page, path.join(emailDir, '02-participant-expenses-edited.png'));
   await clickByText(page, 'button', 'Next');
 
-  await waitForText(page, 'Other financial details');
-  await chooseRadioOrCheckbox(page, '#social-assistance-0');
-  await chooseRadioOrCheckbox(page, '#requested-supports-2');
-  await chooseRadioOrCheckbox(page, '#loan-grant-0');
-  await screenshot(page, path.join(emailDir, '03-participant-details-supports.png'));
-  await clickByText(page, 'button', 'Next');
-
   await page.waitForSelector('#client-sig', { visible: true, timeout: 15000 });
   await typeInto(page, '#client-sig', 'Fiona Overview');
   await clickByText(page, 'button', 'Sign Now');
@@ -670,7 +677,87 @@ async function assertSignedState({ db, signingRequestId, fixture }) {
   );
   assert(docs.length === 1, `expected one signed Financial Overview document link, got ${docs.length}`);
   assert(docs[0].file_path, 'signed document did not store object key');
-  return { row, document: docs[0] };
+  return { row, document: docs[0], fundingOverviewVersionId };
+}
+
+function serializeDbValue(value) {
+  if (value instanceof Date) return value.toISOString();
+  if (Buffer.isBuffer(value)) return value.toString('utf8');
+  if (value && typeof value === 'object') return JSON.stringify(value);
+  return value == null ? null : String(value);
+}
+
+async function assertRepeatSignIsIdempotent({ db, portalApiBase, cookies, signingRequestId, fundingOverviewVersionId }) {
+  const cookieHeader = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
+  const [[beforeRequest]] = await db.query(
+    'SELECT signed_payload_json, artifact_url FROM signing_request WHERE id = ? LIMIT 1',
+    [signingRequestId]
+  );
+  const [[beforeVersion]] = await db.query(
+    'SELECT metadata_json, snapshot_hash, signed_at FROM funding_overview_version WHERE id = ? LIMIT 1',
+    [fundingOverviewVersionId]
+  );
+  const [[beforeDocs]] = await db.query(
+    `SELECT COUNT(*) AS document_count, MAX(id) AS max_document_id
+       FROM iset_document
+      WHERE CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.funding_overview_version_id')) AS UNSIGNED) = ?`,
+    [fundingOverviewVersionId]
+  );
+
+  const response = await fetch(`${portalApiBase}/api/signing-requests/${signingRequestId}/sign`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Cookie: cookieHeader,
+    },
+    body: JSON.stringify({
+      'income-employment': '9999.99',
+      'expenses-rent': '111.11',
+      signature: {
+        signed: true,
+        name: 'Should Not Replace Signed Snapshot',
+      },
+    }),
+  });
+  const body = await response.json().catch(() => null);
+  assert(response.ok, `repeat sign returned ${response.status}: ${JSON.stringify(body)}`);
+  assert(body?.alreadySigned === true, `repeat sign expected alreadySigned response, got ${JSON.stringify(body)}`);
+
+  const [[afterRequest]] = await db.query(
+    'SELECT signed_payload_json, artifact_url FROM signing_request WHERE id = ? LIMIT 1',
+    [signingRequestId]
+  );
+  const [[afterVersion]] = await db.query(
+    'SELECT metadata_json, snapshot_hash, signed_at FROM funding_overview_version WHERE id = ? LIMIT 1',
+    [fundingOverviewVersionId]
+  );
+  const [[afterDocs]] = await db.query(
+    `SELECT COUNT(*) AS document_count, MAX(id) AS max_document_id
+       FROM iset_document
+      WHERE CAST(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.funding_overview_version_id')) AS UNSIGNED) = ?`,
+    [fundingOverviewVersionId]
+  );
+
+  assert(
+    Number(afterDocs.document_count) === Number(beforeDocs.document_count) &&
+      Number(afterDocs.max_document_id) === Number(beforeDocs.max_document_id),
+    'repeat sign created or replaced a Financial Overview document'
+  );
+  assert(
+    serializeDbValue(afterRequest.signed_payload_json) === serializeDbValue(beforeRequest.signed_payload_json),
+    'repeat sign changed the signed request payload'
+  );
+  assert(
+    serializeDbValue(afterRequest.artifact_url) === serializeDbValue(beforeRequest.artifact_url),
+    'repeat sign changed the signed request artifact'
+  );
+  assert(
+    serializeDbValue(afterVersion.metadata_json) === serializeDbValue(beforeVersion.metadata_json) &&
+      serializeDbValue(afterVersion.snapshot_hash) === serializeDbValue(beforeVersion.snapshot_hash) &&
+      serializeDbValue(afterVersion.signed_at) === serializeDbValue(beforeVersion.signed_at),
+    'repeat sign changed the Financial Overview version snapshot'
+  );
+  console.log(`[assert] repeat signing request=${signingRequestId} was idempotent`);
 }
 
 async function deleteObjectQuietly(env, key) {
@@ -752,6 +839,7 @@ async function cleanupFixture({ db, adminCognito, portalCognito, adminEnv, porta
       await db.query('DELETE FROM iset_application WHERE id = ?', [applicationId]);
       await db.query('DELETE FROM iset_case WHERE id = ?', [caseId]);
       await db.query('DELETE FROM iset_application_submission WHERE id = ?', [submissionId]);
+      await db.query('DELETE FROM client_applicant_account_event WHERE client_id = ?', [clientId]).catch(() => null);
       await db.query('DELETE FROM client WHERE id = ?', [clientId]);
       await db.query('DELETE FROM user_session_audit WHERE user_id IN (?, ?)', [userId || 0, staff?.userId || 0]).catch(() => null);
       await db.query('DELETE FROM user WHERE id IN (?, ?)', [userId || 0, staff?.userId || 0]);
@@ -891,7 +979,6 @@ async function main() {
     const prefill = assertFinancialOverviewSchema(prefillRequest, 'prefill', {
       'income-employment': '1200.00',
       'expenses-rent': '875.00',
-      'requested-supports': ['tuition', 'books'],
     });
     assert(prefillRequest.funding_overview_status === 'sent', `prefill funding overview expected sent, got ${prefillRequest.funding_overview_status}`);
     const [[oldBlank]] = await db.query('SELECT status FROM signing_request WHERE id = ? LIMIT 1', [blankRequest.id]);
@@ -923,6 +1010,13 @@ async function main() {
     });
     console.log(`[assert] signed request=${prefillRequest.id} artifact=${signed.row.artifact_url}`);
     console.log(`[assert] signed document=${signed.document.id} key=${signed.document.file_path}`);
+    await assertRepeatSignIsIdempotent({
+      db,
+      portalApiBase: args.portalApiBase,
+      cookies,
+      signingRequestId: prefillRequest.id,
+      fundingOverviewVersionId: signed.fundingOverviewVersionId,
+    });
 
     const report = {
       ok: true,

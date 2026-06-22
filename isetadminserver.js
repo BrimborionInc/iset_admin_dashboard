@@ -20735,6 +20735,23 @@ function normaliseApplicationDecisionOutcomeValue(value) {
   if (['rejected', 'declined', 'denied'].includes(key)) return 'denied';
   return null;
 }
+function deriveDecisionOutcomeFromAssessmentRow(row = {}) {
+  const recommendation = normaliseApplicationStatusValue(row?.recommendation);
+  const review = normaliseApplicationStatusValue(row?.nwac_review);
+  if (
+    ['agree', 'approved', 'approve', 'accepted', 'accept'].includes(review) &&
+    ['recommend', 'recommended', 'approve', 'approved'].includes(recommendation)
+  ) {
+    return 'approved';
+  }
+  if (
+    ['disagree', 'reject', 'rejected', 'deny', 'denied', 'decline', 'declined'].includes(review) ||
+    ['not_recommend', 'not_recommended', 'reject', 'rejected', 'deny', 'denied', 'decline', 'declined'].includes(recommendation)
+  ) {
+    return 'denied';
+  }
+  return null;
+}
 function deriveApplicationAwaitingReason(status) {
   const key = normaliseApplicationStatusValue(status);
   if (!key) return null;
@@ -22833,6 +22850,33 @@ function buildCaseLifecycleStatusExpr(caseAlias = 'c') {
   `.replace(/\s+/g, ' ').trim();
 }
 
+function buildCaseOpenReminderEligibleSql(caseAlias = 'c') {
+  return `${buildCaseLifecycleStatusExpr(caseAlias)} NOT IN ('closed', 'archived')`;
+}
+
+function buildReminderActiveCaseScopeSql(reminderAlias = 'r', caseAlias = 'c') {
+  return `(${reminderAlias}.case_id IS NULL OR (${caseAlias}.id IS NOT NULL AND ${buildCaseOpenReminderEligibleSql(caseAlias)}))`;
+}
+
+async function cancelOpenRemindersForTerminalCase(connection, caseId, actorStaffProfileId = null) {
+  const numericCaseId = normalisePositiveInteger(caseId);
+  if (!numericCaseId) return { affectedRows: 0 };
+  const actorId = normalisePositiveInteger(actorStaffProfileId);
+  const runner = connection || pool;
+  const [result] = await runner.query(
+    `UPDATE iset_case_reminder
+        SET status = 'cancelled',
+            deleted_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP,
+            updated_by_staff_profile_id = COALESCE(?, updated_by_staff_profile_id)
+      WHERE case_id = ?
+        AND deleted_at IS NULL
+        AND status = 'open'`,
+    [actorId || null, numericCaseId]
+  );
+  return { affectedRows: Number(result?.affectedRows || 0) };
+}
+
 async function recomputeCaseStatus(caseId, connection = null, options = {}) {
   const allowReopenFinal = options.allowReopenFinal === true;
   const numericCaseId = Number(caseId);
@@ -22976,6 +23020,13 @@ async function recomputeCaseStatus(caseId, connection = null, options = {}) {
         WHERE id = ?`,
       [nextStatus, nextStatus, closureReasonToPersist, nextStatus, numericCaseId]
     );
+
+    if (
+      nextStatus === CASE_STATUS_DERIVED_VALUES.closed ||
+      nextStatus === CASE_STATUS_DERIVED_VALUES.archived
+    ) {
+      await cancelOpenRemindersForTerminalCase(conn, numericCaseId);
+    }
 
     return { status: nextStatus, previousStatus: currentStatus, changed: true };
   } finally {
@@ -26006,21 +26057,11 @@ async function countProgramAdminAwaitingDecision(pool) {
 
 
 async function countProgramAdminOverdue(pool) {
-  try {
-    const monday = `DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)`;
-    const sql = `SELECT COUNT(*) AS total
-         FROM iset_application a
-        WHERE a.status IS NOT NULL
-          AND LOWER(a.status) IN ('approved','rejected')
-          AND COALESCE(a.updated_at, a.created_at) >= ${monday}`;
-    const [[row]] = await pool.query(sql);
-    return Number(row?.total ?? 0);
-  } catch (err) {
-    if (isMissingTableErrorLocal(err)) {
-      return 0;
-    }
-    throw err;
-  }
+  const [rows, stageTargets] = await Promise.all([
+    fetchAllApplicationSlaRows(pool),
+    buildActiveSlaTargetHours(pool),
+  ]);
+  return countRowsBySlaWindow(rows, stageTargets, timing => timing.diffHours !== null && timing.diffHours < 0);
 }
 
 
@@ -26613,9 +26654,8 @@ async function countNewIntakesByOwner(pool, ownerId) {
 }
 
 async function countFollowUpsDueWithScope(pool, { regionId = null, regionIds = null, ownerId = null } = {}) {
-  const statusExpr = 'LOWER(TRIM(COALESCE(c.status, "")))';
-  const filters = [`${statusExpr} NOT IN (${CASE_STATUS_TERMINAL_VALUES_LOWER.map(() => '?').join(',')})`];
-  const params = [...CASE_STATUS_TERMINAL_VALUES_LOWER];
+  const filters = [buildCaseOpenReminderEligibleSql('c')];
+  const params = [];
 
   if (Number.isInteger(ownerId) && ownerId > 0) {
     filters.push('c.assigned_staff_profile_id = ?');
@@ -28554,6 +28594,30 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
   }
 }
 
+async function fetchAllApplicationSlaRows(pool) {
+  const sql = `SELECT
+         c.id AS case_id,
+         c.assigned_staff_profile_id AS assigned_to_user_id,
+         a.id AS application_id,
+         a.status AS application_status,
+         COALESCE(s.created_at, a.created_at) AS submitted_at,
+         a.created_at,
+         ca.esdc_eligibility AS assessment_esdc_eligibility
+       FROM iset_application a
+       LEFT JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
+       LEFT JOIN iset_application_submission s ON s.id = a.submission_id
+       LEFT JOIN iset_application_assessment ca ON ca.application_id = a.id`;
+  try {
+    const [rows] = await pool.query(sql);
+    return Array.isArray(rows) ? rows : [];
+  } catch (err) {
+    if (isMissingTableErrorLocal(err) || (err && err.code === 'ER_BAD_FIELD_ERROR')) {
+      return [];
+    }
+    throw err;
+  }
+}
+
 async function buildActiveSlaTargetHours(pool) {
   const targets = await fetchActiveSlaTargets(pool);
   return buildSlaStageTargetHoursMap(targets);
@@ -28579,7 +28643,7 @@ function countRowsBySlaWindow(rows, stageTargets, predicate, nowMs = Date.now())
 
 async function fetchApplicationIdsForSlaBucket(pool, bucket) {
   const [rows, stageTargets] = await Promise.all([
-    fetchAllAssignedApplicationSlaRows(pool),
+    bucket === 'overdue' ? fetchAllApplicationSlaRows(pool) : fetchAllAssignedApplicationSlaRows(pool),
     buildActiveSlaTargetHours(pool),
   ]);
   if (!Array.isArray(rows) || !rows.length) return [];
@@ -40226,13 +40290,15 @@ async function fetchDashboardOpenClientCases({ regionIds = [], assignedStaffProf
     LEFT JOIN iset_application_submission s ON s.id = a.submission_id
     LEFT JOIN (
       SELECT
-        case_id,
-        MIN(due_at) AS next_reminder_due_at
-      FROM iset_case_reminder
-      WHERE deleted_at IS NULL
-        AND status = 'open'
-        AND due_at IS NOT NULL
-      GROUP BY case_id
+        r.case_id,
+        MIN(r.due_at) AS next_reminder_due_at
+      FROM iset_case_reminder r
+      JOIN iset_case reminder_case ON reminder_case.id = r.case_id
+      WHERE r.deleted_at IS NULL
+        AND r.status = 'open'
+        AND r.due_at IS NOT NULL
+        AND ${buildCaseOpenReminderEligibleSql('reminder_case')}
+      GROUP BY r.case_id
     ) reminder_next ON reminder_next.case_id = c.id
   `;
 
@@ -43931,11 +43997,13 @@ function pollRemindersForDue() {
   let rows = [];
   try {
     const [result] = await pool.query(
-      `SELECT id, case_id, application_id, title, description, category, status, due_at, metadata_json
-         FROM iset_case_reminder
-        WHERE deleted_at IS NULL
-          AND status = 'open'
-          AND due_at IS NOT NULL
+      `SELECT r.id, r.case_id, r.application_id, r.title, r.description, r.category, r.status, r.due_at, r.metadata_json
+         FROM iset_case_reminder r
+         LEFT JOIN iset_case c ON c.id = r.case_id
+        WHERE r.deleted_at IS NULL
+          AND r.status = 'open'
+          AND r.due_at IS NOT NULL
+          AND ${buildReminderActiveCaseScopeSql('r', 'c')}
         LIMIT 500`
     );
     rows = result || [];
@@ -44109,6 +44177,7 @@ function pollDocsRequestedThresholds() {
           JOIN iset_case c ON ${APPLICATION_CASE_JOIN_PREDICATE}
          WHERE a.docs_requested_active = 1
            AND a.docs_requested_at IS NOT NULL
+           AND ${buildApplicationTerminalRankSql('a')} = 0
          LIMIT 500`,
         [
           DOC_REQUEST_EVENT_TYPES.reminder,
@@ -44264,8 +44333,19 @@ const upsertDocRequestReminders = async ({
   const numericCaseId = Number(caseId);
   if (!Number.isFinite(numericCaseId) || numericCaseId <= 0) return [];
   if (!docsRequestedAt) return [];
+  const applicationIdValue = Number.isFinite(Number(applicationId)) ? Number(applicationId) : null;
   const baseDate = docsRequestedAt instanceof Date ? docsRequestedAt : new Date(docsRequestedAt);
   if (Number.isNaN(baseDate.getTime())) return [];
+  if (applicationIdValue) {
+    const [[applicationRow]] = await pool.query(
+      `SELECT ${buildApplicationTerminalRankSql('a')} AS terminal_rank
+         FROM iset_application a
+        WHERE a.id = ?
+        LIMIT 1`,
+      [applicationIdValue]
+    );
+    if (Number(applicationRow?.terminal_rank || 0) === 1) return [];
+  }
 
   let existingRows = [];
   try {
@@ -44286,7 +44366,6 @@ const upsertDocRequestReminders = async ({
   ];
   const createdIds = [];
   const actorId = Number.isInteger(actorStaffProfileId) && actorStaffProfileId > 0 ? actorStaffProfileId : null;
-  const applicationIdValue = Number.isFinite(Number(applicationId)) ? Number(applicationId) : null;
 
   for (const threshold of thresholds) {
     if (!Number.isFinite(threshold.hours)) continue;
@@ -51585,14 +51664,16 @@ app.get('/api/cases', async (req, res) => {
       ) intervention_counts ON intervention_counts.case_id = c.id
       LEFT JOIN (
         SELECT
-          case_id,
+          r.case_id,
           COUNT(*) AS open_follow_up_count,
-          SUM(CASE WHEN due_at IS NOT NULL AND due_at < NOW() THEN 1 ELSE 0 END) AS overdue_follow_up_count,
-          MIN(due_at) AS next_reminder_due_at
-        FROM iset_case_reminder
-        WHERE deleted_at IS NULL
-          AND status = 'open'
-        GROUP BY case_id
+          SUM(CASE WHEN r.due_at IS NOT NULL AND r.due_at < NOW() THEN 1 ELSE 0 END) AS overdue_follow_up_count,
+          MIN(r.due_at) AS next_reminder_due_at
+        FROM iset_case_reminder r
+        JOIN iset_case reminder_case ON reminder_case.id = r.case_id
+        WHERE r.deleted_at IS NULL
+          AND r.status = 'open'
+          AND ${buildCaseOpenReminderEligibleSql('reminder_case')}
+        GROUP BY r.case_id
       ) reminder_counts ON reminder_counts.case_id = c.id
     `;
 
@@ -86037,12 +86118,14 @@ app.get('/api/applications', async (req, res) => {
     const addWorkQueueBucketFilter = (clauses, values, { unassigned = false } = {}) => {
       if (!workQueueBucket) return;
       switch (workQueueBucket) {
+        case 'overdue':
+          addApplicationIdFilter(clauses, values, slaBucketApplicationIds);
+          break;
         case 'awaiting-ei-validation':
         case 'in-assessment':
         case 'due-today':
         case 'due-soon':
         case 'due-this-week':
-        case 'overdue':
           if (unassigned) {
             clauses.push('1 = 0');
           } else {
@@ -87071,6 +87154,9 @@ app.post('/api/signing-requests/:id/sign', async (req, res) => {
     const [[row]] = await pool.query(`SELECT * FROM signing_request WHERE id = ? LIMIT 1`, [id]);
     if (!row) return res.status(404).json({ error: 'not_found' });
     if (row.participant_user_id !== userId) return res.status(403).json({ error: 'forbidden' });
+    if (row.status === 'signed') {
+      return res.json({ id, status: 'signed', alreadySigned: true });
+    }
     if (row.status === 'cancelled' || row.status === 'expired') {
       return res.status(409).json({ error: 'not_signable' });
     }
@@ -88201,6 +88287,12 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
           'UPDATE iset_case SET status = ?, lifecycle_status = ?, closure_reason = ? WHERE id = ?',
           [statusToPersist, caseLifecycleStatusToPersist, caseClosureReasonToPersist, caseId]
         );
+        if (
+          caseLifecycleStatusToPersist === CASE_STATUS_DERIVED_VALUES.closed ||
+          caseLifecycleStatusToPersist === CASE_STATUS_DERIVED_VALUES.archived
+        ) {
+          await cancelOpenRemindersForTerminalCase(conn, caseId, resolveActiveStaffProfileId(req));
+        }
         statusChanged = caseLifecycleChanged;
         if (applicationId) {
           bumpApplicationRowVersion = true;
@@ -88347,6 +88439,33 @@ c.assigned_staff_profile_id AS assigned_to_user_id,
       applicationDecisionOutcomeToPersist = applicationStatusPersistence.decisionOutcome;
       applicationAwaitingReasonToPersist = applicationStatusPersistence.awaitingReason;
       applicationClosureReasonToPersist = applicationStatusPersistence.closureReason;
+      if (
+        !applicationDecisionOutcomeToPersist &&
+        isTerminalApplicationState(applicationStatusToPersist, applicationLifecycleStatusToPersist)
+      ) {
+        const assessmentRowForDecision =
+          existingAssessmentRow ||
+          await fetchApplicationAssessmentRow(conn, { caseId, applicationId });
+        applicationDecisionOutcomeToPersist =
+          deriveDecisionOutcomeFromAssessmentRow(assessmentRowForDecision) || null;
+      }
+      if (
+        beforeDocsRequestedActive &&
+        !docsRequestedChanged &&
+        isTerminalApplicationState(applicationStatusToPersist, applicationLifecycleStatusToPersist)
+      ) {
+        await conn.query(
+          `UPDATE iset_application
+              SET docs_requested_active = 0,
+                  docs_requested_cleared_at = NOW()
+            WHERE id = ?`,
+          [applicationId]
+        );
+        docsRequestedChanged = true;
+        docsRequestedChangeType = 'cleared';
+        docsRequestedSource = beforeDocsRequestedSource || null;
+        bumpApplicationRowVersion = true;
+      }
       if (
         applicationLifecycleStatusToPersist === 'closed' ||
         applicationLifecycleStatusToPersist === 'archived'

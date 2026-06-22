@@ -35,6 +35,7 @@ import {
   normalizeApplicationStatus,
   normalizeStatusKey,
 } from '../utils/applicationStatus';
+import { resolveApplicationAssessmentEligibility } from '../utils/applicationAssessmentEligibility';
 import { resolveAssignedStaffProfileId } from '../utils/assignmentIdentity';
 import ApplicationsWidgetHelp from '../helpPanelContents/applicationsWidgetHelp';
 
@@ -239,7 +240,7 @@ const getStatusInfo = (row) => {
     caseStatus: row.case_status || null,
     caseId: row.case_id,
     assignedUserId: resolveAssignedStaffProfileId(row),
-    assessmentEligibility: row.assessment_esdc_eligibility,
+    assessmentEligibility: resolveApplicationAssessmentEligibility(row),
     decisionOutcome: row.decision_outcome ?? row.decisionOutcome ?? null,
     awaitingReason: row.application_awaiting_reason ?? row.applicationAwaitingReason ?? null,
     closureReason: row.application_closure_reason ?? row.applicationClosureReason ?? null,
@@ -254,7 +255,7 @@ const computeSlaMeta = (row, slaTargets, rawStatus, isAssigned) => {
     slaTargets,
     rawStatus,
     isAssigned,
-    assessmentEligibility: row.assessment_esdc_eligibility,
+    assessmentEligibility: resolveApplicationAssessmentEligibility(row),
   });
 };
 

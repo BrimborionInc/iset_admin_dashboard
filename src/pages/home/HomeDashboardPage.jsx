@@ -15,9 +15,9 @@ import {
     isEligibilityPending,
 } from '../../utils/applicationSla';
 import {
-    buildApplicationStatusInfo,
     getApplicationAwaitingReasonLabel,
 } from '../../utils/applicationStatus';
+import { resolveApplicationAssessmentEligibility } from '../../utils/applicationAssessmentEligibility';
 import {
     buildAssignedStaffProfileAliases,
     resolveAssignedStaffProfileId,
@@ -39,6 +39,10 @@ import {
     buildPendingCompletionApplicationSummary,
     isPendingCompletionApplicationRow,
 } from './homeQueueCompletion';
+import {
+    buildApplicationQueueStatusFields,
+    getApplicationQueueRawStatus,
+} from './homeApplicationQueueFields';
 
 const parseDashboardAmount = value => {
     if (value === null || typeof value === 'undefined' || value === '') {
@@ -392,7 +396,7 @@ const mapPendingCompletionInterventionItems = (items = [], bucketId = 'pending-c
             intervention_label: interventionLabel,
             intervention_cost_total: row.intervention_cost_total || null,
             intervention_start_date: row.intervention_start_date || null,
-            assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+            assessment_esdc_eligibility: resolveApplicationAssessmentEligibility(row),
             budgetPotCode: row.budgetPotCode || row.budget_pot_code || null,
             budget_pot_code: row.budgetPotCode || row.budget_pot_code || null,
             approvalQueuedAt: row.approvedAt || row.approved_at || row.submittedAt || row.submitted_at || null,
@@ -473,36 +477,6 @@ const resolveInterventionMilestone = (startValue, endValue) => {
     };
 };
 
-const buildApplicationQueueStatusFields = (row, fallbackStatus = 'submitted') => {
-    const statusInfo = buildApplicationStatusInfo({
-        applicationStatus:
-            row?.application_status ||
-            row?.applicationStatus ||
-            row?.status ||
-            fallbackStatus,
-        applicationLifecycleStatus: row?.application_lifecycle_status ?? row?.applicationLifecycleStatus ?? null,
-        caseStatus: row?.case_status || row?.caseStatus || null,
-        caseId: row?.case_id ?? row?.caseId ?? null,
-        assignedUserId: resolveAssignedStaffProfileId(row),
-        assessmentEligibility: row?.assessment_esdc_eligibility ?? row?.assessmentEsdcEligibility ?? null,
-        decisionOutcome: row?.decision_outcome ?? row?.decisionOutcome ?? null,
-        awaitingReason: row?.application_awaiting_reason ?? row?.applicationAwaitingReason ?? null,
-        closureReason: row?.application_closure_reason ?? row?.applicationClosureReason ?? null,
-        reviewStatus: row?.review_status ?? row?.reviewStatus ?? null,
-        type: row?.type,
-    });
-
-    const rawStatus = statusInfo.rawStatus || fallbackStatus;
-    return {
-        status: rawStatus,
-        application_status: rawStatus,
-        application_lifecycle_status: row?.application_lifecycle_status ?? row?.applicationLifecycleStatus ?? null,
-        decision_outcome: row?.decision_outcome ?? row?.decisionOutcome ?? statusInfo.decisionOutcome ?? null,
-        application_awaiting_reason: row?.application_awaiting_reason ?? row?.applicationAwaitingReason ?? null,
-        application_closure_reason: row?.application_closure_reason ?? row?.applicationClosureReason ?? null,
-    };
-};
-
 const resolveApplicationWorkspacePath = (row, fallbackPath = '/case-assignment-dashboard') => {
     const caseId = row?.case_id || row?.caseId || null;
     if (!caseId) {
@@ -514,9 +488,6 @@ const resolveApplicationWorkspacePath = (row, fallbackPath = '/case-assignment-d
     }
     return basePath;
 };
-
-const getApplicationQueueRawStatus = (row, fallbackStatus = 'submitted') =>
-    buildApplicationQueueStatusFields(row, fallbackStatus).status;
 
 const isAssignedApplicationRow = row => {
     const assignedId = resolveAssignedStaffProfileId(row);
@@ -1243,7 +1214,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         submittedAt: submitted,
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
                         summary: 'Non-terminal application in your regional portfolio.',
-                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                        assessment_esdc_eligibility: resolveApplicationAssessmentEligibility(row),
                         workspacePath: resolveApplicationWorkspacePath(row)
                     };
                 });
@@ -1427,7 +1398,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         summary: isPendingCompletion
                             ? buildPendingCompletionApplicationSummary(row)
                             : submitted ? `Submitted ${submitted}` : 'Assigned application',
-                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                        assessment_esdc_eligibility: resolveApplicationAssessmentEligibility(row),
                         workspacePath: resolveApplicationWorkspacePath(row)
                     };
                 });
@@ -1516,7 +1487,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         summary: isPendingCompletion
                             ? buildPendingCompletionApplicationSummary(row)
                             : submitted ? `Submitted ${submitted}` : 'Assigned application',
-                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                        assessment_esdc_eligibility: resolveApplicationAssessmentEligibility(row),
                         workspacePath: resolveApplicationWorkspacePath(row)
                     };
                 });
@@ -1678,7 +1649,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         submittedAt: submitted,
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
                         summary: 'Awaiting documents or response',
-                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                        assessment_esdc_eligibility: resolveApplicationAssessmentEligibility(row),
                         workspacePath: resolveApplicationWorkspacePath(row)
                     };
                 });
@@ -1724,7 +1695,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                 if (!payload || !Array.isArray(payload.rows)) {
                     throw new Error('Unexpected response format while loading EI eligibility items.');
                 }
-                const rows = payload.rows.filter(row => isEligibilityPending(row.assessment_esdc_eligibility));
+                const rows = payload.rows.filter(row => isEligibilityPending(resolveApplicationAssessmentEligibility(row)));
                 const mapped = rows.map((row, idx) => {
                     const id = row.tracking_id || row.case_id || row.application_id || `ei-${idx}`;
                     const applicantName =
@@ -1764,7 +1735,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         submittedAt: submitted,
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
                         summary: 'EI consent or verification pending.',
-                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                        assessment_esdc_eligibility: resolveApplicationAssessmentEligibility(row),
                         workspacePath: resolveApplicationWorkspacePath(row)
                     };
                 });
@@ -1810,7 +1781,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                 if (!payload || !Array.isArray(payload.rows)) {
                     throw new Error('Unexpected response format while loading ready-to-assess items.');
                 }
-                const rows = payload.rows.filter(row => isEligibilityComplete(row.assessment_esdc_eligibility));
+                const rows = payload.rows.filter(row => isEligibilityComplete(resolveApplicationAssessmentEligibility(row)));
                 const mapped = rows.map((row, idx) => {
                     const id = row.tracking_id || row.case_id || row.application_id || `ready-${idx}`;
                     const applicantName =
@@ -1846,7 +1817,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         submittedAt: submitted,
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
                         summary: 'EI verification complete; ready for assessment.',
-                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                        assessment_esdc_eligibility: resolveApplicationAssessmentEligibility(row),
                         workspacePath: resolveApplicationWorkspacePath(row)
                     };
                 });
@@ -1943,7 +1914,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         submittedAt: submitted,
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
                         summary: 'Assessment submitted for review.',
-                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                        assessment_esdc_eligibility: resolveApplicationAssessmentEligibility(row),
                         workspacePath: resolveApplicationWorkspacePath(row)
                     };
                 });
@@ -2006,7 +1977,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         interventionGroups: row.interventionGroups || row.intervention_groups || [],
                         interventionSummaries: row.interventionSummaries || row.intervention_summaries || [],
                         intervention_start_date: row.intervention_start_date || null,
-                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                        assessment_esdc_eligibility: resolveApplicationAssessmentEligibility(row),
                         budgetPotCode: row.budgetPotCode || row.budget_pot_code || null,
                         budget_pot_code: row.budgetPotCode || row.budget_pot_code || null,
                         approvalQueuedAt,
@@ -2770,7 +2741,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                             applicant_name: applicantName,
                             region: row.address_province || '—',
                             address_province: row.address_province || null,
-                            assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                            assessment_esdc_eligibility: resolveApplicationAssessmentEligibility(row),
                             owner: row.owner || row.assigned_user_email || 'Unassigned',
                             ...buildAssignedStaffProfileAliases(row),
                             ...buildApplicationQueueStatusFields(row, 'on_hold'),
@@ -2919,7 +2890,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         applicant_name: applicantName,
                         region: row.address_province || '—',
                         address_province: row.address_province || null,
-                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                        assessment_esdc_eligibility: resolveApplicationAssessmentEligibility(row),
                         owner: row.owner || row.assigned_user_email || 'Unassigned',
                         ...buildAssignedStaffProfileAliases(row),
                         ...buildApplicationQueueStatusFields(row, rawStatus),
@@ -3026,7 +2997,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         submittedAt: submitted,
                         updatedAt: row.application_updated_at || row.last_activity_at || submitted || null,
                         summary: buildPendingCompletionApplicationSummary(row),
-                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                        assessment_esdc_eligibility: resolveApplicationAssessmentEligibility(row),
                         funding_agreement_count: row.funding_agreement_count ?? 0,
                         workspacePath: resolveApplicationWorkspacePath(row)
                     };
@@ -3118,7 +3089,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         intervention_pot_id: row.intervention_pot_id || null,
                         budgetPotCode: row.budgetPotCode || row.budget_pot_code || null,
                         budget_pot_code: row.budgetPotCode || row.budget_pot_code || null,
-                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                        assessment_esdc_eligibility: resolveApplicationAssessmentEligibility(row),
                         approvalQueuedAt,
                         dueDate: null,
                         submittedAt: submitted,
@@ -3237,7 +3208,7 @@ const AdminDashboard = ({ setSplitPanelOpen, setAvailableItems, toggleHelpPanel 
                         interventionGroups: row.interventionGroups || row.intervention_groups || [],
                         interventionSummaries: row.interventionSummaries || row.intervention_summaries || [],
                         intervention_start_date: row.intervention_start_date || null,
-                        assessment_esdc_eligibility: row.assessment_esdc_eligibility || null,
+                        assessment_esdc_eligibility: resolveApplicationAssessmentEligibility(row),
                         budgetPotCode: row.budgetPotCode || row.budget_pot_code || null,
                         budget_pot_code: row.budgetPotCode || row.budget_pot_code || null,
                         approvalQueuedAt,
@@ -3635,7 +3606,7 @@ const computeSlaMeta = (row, slaTargets, rawStatus, isAssigned) => {
         slaTargets,
         rawStatus,
         isAssigned,
-        assessmentEligibility: row.assessment_esdc_eligibility,
+        assessmentEligibility: resolveApplicationAssessmentEligibility(row),
     });
 };
 

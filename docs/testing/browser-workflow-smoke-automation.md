@@ -122,6 +122,17 @@ This smoke loads the real local React bundle at `http://localhost:3001/case-assi
 
 Use this smoke for local UI regressions when no reusable Cognito staff token is available in the shell. Pair it with authenticated DEV/TEST API checks when validating the real database semantics of `/api/applications` bucket filtering.
 
+## Home Overdue Queue Reference
+
+The homepage `Work Queue` / `Work Queue Items` Overdue path has a focused local browser smoke:
+
+- Script: `scripts/home-overdue-queue-browser-smoke.js`
+- NPM alias: `npm run smoke:home-overdue:browser`
+
+This smoke loads the real local React bundle at `http://localhost:3001/`, injects a deterministic `NWAC Administrator` session, stubs the homepage queue APIs, dismisses the quick-start tutorial prompt, selects the `Overdue` queue card, and verifies two rendered application rows. One row has `assessment_esdc_eligibility` saved and must render as `In Review` without a false `Awaiting EI Validation` badge; the other deliberately lacks EI eligibility and must still show the legitimate `Submitted` / `Awaiting EI Validation` status. It also checks that `/api/applications` settles after the initial dashboard loads.
+
+Use this smoke after changing Home dashboard queue mapping, application SLA/overdue logic, application status labels, EI eligibility row-shape handling, or `WorkQueueItemsTableWidget` status rendering.
+
 ## Manage Components Dashboard Reference
 
 The Manage Intake Steps / Manage Components dashboard has a local browser smoke:

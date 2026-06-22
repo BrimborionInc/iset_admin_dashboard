@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-06-20
+Last Updated: 2026-06-22
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,11 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-06-22 | Release TBD | Fix/Home | Overdue queue | Overdue application rows now keep the saved EI eligibility result when PATH builds the Home work queue. | This prevents rows that are actually overdue for assessment or follow-up timing from being labelled `Awaiting EI Validation`; rows with no saved EI result still show the pending EI status.
+- 2026-06-22 | Release TBD | Fix/Casework | Financial Overview signing | Re-submitting an already signed Financial Overview no longer creates another active signed PDF or overwrites the signed version snapshot. | The signing APIs now return the existing signed result when the same request is posted again.
+- 2026-06-22 | Release TBD | Fix/Casework | Closed/completed file cleanup | Closed cases and completed applications no longer keep generating or displaying active document-request/reminder work. | Terminal application transitions clear active document-request flags, terminal case transitions cancel open reminders, and reminder/document-request jobs skip terminal files.
+- 2026-06-22 | Release TBD | Fix/Assessment | Completed approvals | Completed approved applications now retain an approved decision outcome when the assessment recommendation and final review agree. | This keeps approved/completed files out of queues that depend on a missing decision outcome.
+- 2026-06-22 | Release TBD | Tooling/Home | Browser smoke | Added a local browser smoke for the Home Overdue queue. | `npm run smoke:home-overdue:browser` checks the rendered badge labels and that `/api/applications` settles after the dashboard loads.
 - 2026-06-20 | Release TBD | Fix/Notifications | Document upload alerts | Staff document-upload bell alerts now name the staff uploader instead of saying the applicant uploaded the document. | Applicant-originated uploads keep the existing applicant wording. Jacqueline Sillery's DEV EI verification upload alert was repaired to show the Regional Manager uploader.
 - 2026-06-20 | Release TBD | Notifications/Approvals | Regional Manager review | Regional Managers now receive a `Pending Review` bell alert when work enters their RM review queue. | Alerts are scoped to Regional Managers in the case review region and currently cover application assessments, new intervention proposals, and intervention amendments/revisions. Email remains off until workflow-specific templates are configured.
 - 2026-06-20 | Release TBD | Fix/Notifications | Decision Maker review | Admin users no longer receive submit-for-review bell alerts for work that has only entered Regional Manager review; they receive final-decision alerts when the Regional Manager submits the work to the Decision Maker stage. | DEV notification settings now disable admin `assessment_submitted` rows and enable `rm_review_submitted_to_nwac` for both NWAC Administrator and System Administrator roles. Email remains off until workflow-specific templates are configured.
@@ -436,6 +441,13 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What Changed Packages (draft - EN)
 
+#### Release 20260622-path-bugfix-patch
+
+- Overdue application rows now keep the saved EI eligibility result, so files that are overdue for assessment or follow-up timing are no longer labelled `Awaiting EI Validation` unless EI is actually still missing.
+- Re-submitting an already signed Financial Overview no longer creates another active signed PDF or overwrites the signed version snapshot.
+- Closed cases and completed applications no longer keep active document-request/reminder work alive after the file has reached a terminal state.
+- Completed approved applications now retain the approved decision outcome when the assessment recommendation and final review agree.
+
 #### Release 20260620-rm-two-step-review-rollout
 
 - Application assessments, new intervention proposals, and intervention amendments now move through Regional Manager review before the final Decision Maker step, with Regional Manager sign-off included in approved assessment PDFs.
@@ -452,12 +464,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Participant submissions update the case Participant Details data used by PATH, refresh the Financial Overview version snapshot, and store the signed PDF.
 - Manage ISET Applications and ISET Clients now share the same widget-based dashboard treatment, and AWS Environment Status includes app capacity, database stress, and query-pressure checks.
 
-#### Release 20260617-prod-assessment-recall-guardrails
-
-- Submitted application assessments, new intervention proposals, and intervention revision/amendment proposals are now read-only while awaiting review or final decision.
-- The submitter can recall a pending submission before a decision is recorded, returning it to an editable state for correction and resubmission.
-- Recalled submissions archive the withdrawn generated assessment PDFs, record an audit event, and keep future redlines based on the last active non-recalled submission.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
@@ -472,6 +478,13 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Le controle de tri des notifications apparait maintenant seulement quand la pile de notifications est ouverte, ce qui reduit l'encombrement en haut de page.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260622-path-bugfix-patch
+
+- Les lignes en retard conservent maintenant le resultat EI enregistre; les dossiers en retard pour l'evaluation ou le suivi ne sont plus marques `Awaiting EI Validation` sauf si le statut EI manque vraiment.
+- Soumettre de nouveau un Financial Overview deja signe ne cree plus un autre PDF signe actif et ne remplace plus l'instantane de version signe.
+- Les dossiers fermes et les demandes terminees ne gardent plus de demandes de documents ou rappels actifs apres leur etat final.
+- Les demandes approuvees et terminees conservent maintenant le resultat de decision approuve lorsque la recommandation d'evaluation et la revision finale concordent.
 
 #### Release 20260620-rm-two-step-review-rollout
 
@@ -488,12 +501,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les formulaires Financial Overview envoyes par message securise peuvent maintenant etre envoyes vierges ou pre-remplis, et les participants peuvent completer ou modifier des champs de revenus et depenses mensuels plus clairs avant de signer.
 - Les reponses du participant mettent a jour les donnees Participant Details du dossier utilisees par PATH, actualisent l'instantane de version Financial Overview et enregistrent le PDF signe.
 - Les tableaux Demandes ISET et Clients ISET utilisent maintenant la meme presentation de tableau de bord a widgets, et AWS Environment Status inclut la capacite applicative, la charge de la base de donnees et la pression des requetes.
-
-#### Release 20260617-prod-assessment-recall-guardrails
-
-- Les evaluations de demande, les nouvelles propositions d'intervention et les revisions/amendements d'intervention envoyes sont maintenant en lecture seule pendant l'attente d'approbation.
-- La personne qui a envoye une demande peut la rappeler avant qu'une decision soit enregistree, afin de la corriger et de la soumettre de nouveau.
-- Les rappels archivent les PDF d'evaluation retires, enregistrent un evenement d'audit et gardent les futurs redlines bases sur le dernier envoi actif non rappele.
 
 ### Problemes connus (brouillon - FR)
 

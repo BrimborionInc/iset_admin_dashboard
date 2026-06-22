@@ -37,6 +37,7 @@ import {
   normalizeApplicationStatus,
   normalizeStatusKey,
 } from '../../../utils/applicationStatus';
+import { resolveApplicationAssessmentEligibility } from '../../../utils/applicationAssessmentEligibility';
 import { resolveAssignedStaffProfileId } from '../../../utils/assignmentIdentity';
 import {
   getCaseStatusBadgeColor,
@@ -247,7 +248,7 @@ const computeSlaMeta = (row, slaTargets, rawStatus, isAssigned) => {
     slaTargets,
     rawStatus: rawStatus || row.status || 'submitted',
     isAssigned,
-    assessmentEligibility: row.assessment_esdc_eligibility,
+    assessmentEligibility: resolveApplicationAssessmentEligibility(row),
   });
 };
 
@@ -259,7 +260,7 @@ const computeApprovalSlaMeta = (row, slaTargets) => {
     slaTargets,
     rawStatus: 'pending_approval',
     isAssigned: true,
-    assessmentEligibility: row.assessment_esdc_eligibility || 'complete',
+    assessmentEligibility: resolveApplicationAssessmentEligibility(row) || 'complete',
   });
 };
 
@@ -433,7 +434,7 @@ const getStatusInfo = (row) => {
     caseStatus: row.case_status || null,
     caseId: row.case_id ?? row.caseId ?? null,
     assignedUserId: resolveAssignedStaffProfileId(row),
-    assessmentEligibility: row.assessment_esdc_eligibility,
+    assessmentEligibility: resolveApplicationAssessmentEligibility(row),
     decisionOutcome: row.decision_outcome ?? row.decisionOutcome ?? null,
     awaitingReason: row.application_awaiting_reason ?? row.applicationAwaitingReason ?? null,
     closureReason: row.application_closure_reason ?? row.applicationClosureReason ?? null,

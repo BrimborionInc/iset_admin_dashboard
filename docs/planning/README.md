@@ -32,6 +32,10 @@ As of the 2026-04-29 documentation cleanup, these are the main planning docs int
 
 `client-case-application-cutover-dependency-inventory.md` is useful for dependency history, but `docs/AGENTS.md` currently says to use `client-case-application-target-model.md` for the live target model where they differ.
 
+## Current Product/Content Source Briefs
+
+- `path-promo-website-source-brief.md` - source material for drafting a PATH promotional website; useful for product messaging, feature inventory, migration/onboarding positioning, versioned-artifact positioning, and claims to verify before publication.
+
 ## Cleanup Rule
 
 When continuing documentation cleanup, add a short status block to any planning file you touch:

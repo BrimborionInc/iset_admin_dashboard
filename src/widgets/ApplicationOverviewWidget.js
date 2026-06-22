@@ -55,6 +55,7 @@ import {
   normalizeApplicationStatus,
   normalizeStatusKey,
 } from '../utils/applicationStatus';
+import { resolveApplicationAssessmentEligibility } from '../utils/applicationAssessmentEligibility';
 import { resolveAssignedStaffProfileId } from '../utils/assignmentIdentity';
 
 function formatDateTime(value) {
@@ -159,7 +160,7 @@ const getStatusInfo = (row) => {
     caseStatus: row.case_status || null,
     caseId: row.case_id,
     assignedUserId: resolveAssignedStaffProfileId(row),
-    assessmentEligibility: row.assessment_esdc_eligibility,
+    assessmentEligibility: resolveApplicationAssessmentEligibility(row),
     decisionOutcome: row.decision_outcome ?? row.decisionOutcome ?? null,
     awaitingReason: row.application_awaiting_reason ?? row.applicationAwaitingReason ?? null,
     closureReason: row.application_closure_reason ?? row.applicationClosureReason ?? null,
@@ -203,7 +204,7 @@ const computeSlaMeta = (application, caseData, slaTargets, rawStatus, isAssigned
     slaTargets,
     rawStatus,
     isAssigned,
-    assessmentEligibility: application?.assessment_esdc_eligibility || caseData?.assessment_esdc_eligibility,
+    assessmentEligibility: resolveApplicationAssessmentEligibility(application, caseData),
   });
   if (!meta || meta.status === 'unknown') {
     return { label: 'Unknown', color: 'grey' };
@@ -2093,10 +2094,7 @@ const ApplicationOverviewWidget = ({
       case_status: caseData?.status || null,
       case_id: caseData?.id ?? application?.case_id ?? null,
       assigned_user_id: assignedStaffProfileId,
-      assessment_esdc_eligibility:
-        application?.assessment_esdc_eligibility ??
-        caseData?.assessment_esdc_eligibility ??
-        null,
+      assessment_esdc_eligibility: resolveApplicationAssessmentEligibility(application, caseData),
     });
     const slaMeta = computeSlaMeta(application, caseData, slaTargets, statusInfo.rawStatus, assigned);
     slaValue = <Badge color={slaMeta.color}>{slaMeta.label}</Badge>;

@@ -96,6 +96,7 @@
     "smoke:privacy-denials": "node scripts/privacy-route-denial-smoke.js",
     "smoke:esdc-participants:browser": "node scripts/esdc-participant-queue-browser-smoke.js",
     "smoke:case-assignment:browser": "node scripts/case-assignment-dashboard-browser-smoke.js",
+    "smoke:home-overdue:browser": "node scripts/home-overdue-queue-browser-smoke.js",
     "smoke:manual-intake:browser": "node scripts/manual-application-intake-browser-smoke.js",
     "smoke:manage-components:browser": "node scripts/manage-components-dashboard-browser-smoke.js",
     "smoke:modify-component:browser": "node scripts/modify-component-editor-browser-smoke.js",
