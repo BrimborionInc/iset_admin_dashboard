@@ -1,7 +1,7 @@
 # Agent Operational Access Notes
 
 Status: current operational access guidance for Codex/WSL threads. Verify live AWS/DB state before running mutating commands.
-Last reviewed: 2026-06-14 after PROD NAT consolidation execution.
+Last reviewed: 2026-06-23 after AWS Environment Status IAM triage.
 
 Purpose: keep database, TEST/PROD, and AWS profile command notes out of `docs/AGENTS.md` while preserving the operational details future agents need.
 
@@ -73,7 +73,7 @@ Purpose: keep database, TEST/PROD, and AWS profile command notes out of `docs/AG
   `bash scripts/run-prod-sql-via-ssm.sh --sql "SELECT DATABASE() AS db, @@hostname AS host, @@port AS port, CURRENT_USER() AS mysql_user, (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()) AS table_count;"`
 - Use `--sql-file` for reviewed multi-statement repair scripts. The helper stages SQL through `s3://nwac-prod-artifacts/ssm-sql/...` so larger files do not exceed SSM document size limits.
 - For PROD data repair, default to preview SQL first, then a guarded apply script with explicit expected identifiers, transaction boundaries where feasible, before/after verification selects, and an audit/recovery trail. Avoid broad destructive statements and do not rely on chat-only evidence for live mutations.
-- For PROD SQL, do not guess table or column names. Before selecting, updating, or writing repair SQL against a table whose live shape is not already verified in the current thread, run `SHOW COLUMNS FROM <table>` or `SHOW CREATE TABLE <table>` through the target environment helper and write SQL only against verified columns. If a query fails because a guessed column/table name was used, stop and correct the workflow before any mutation.
+- For PROD SQL, do not guess table or column names. Before selecting, updating, or writing repair SQL against a table whose live shape is not already verified in the current thread, run `SHOW COLUMNS FROM <table>` or `SHOW CREATE TABLE <table>` through the target environment helper and write SQL only against verified columns. For joins, verify every selected column for every table alias before running the query; do not rely on memory of common column names like `name`, `role`, or `original_filename`. If a query fails because a guessed column/table name was used, stop ordinary investigation immediately, acknowledge the process miss, and resume only with schema-discovery commands or code-path inspection until the exact schema proof exists.
 - If PROD DB access fails, stop and repair the documented helper/profile path before improvising a new access route.
 
 ## PROD Start/Stop Reference
@@ -110,6 +110,7 @@ Notes:
 
 ## AWS CLI Profile/Account Mapping
 
+- Infrastructure adjustment preference from Bill, recorded 2026-06-23: for live AWS infrastructure or IAM adjustments, prefer an explicit AWS CLI change under the verified target profile/account/resource, and keep Terraform desired state aligned in the same repo change. Do not use Terraform apply as the default execution path unless Bill explicitly asks for it in the current thread. Before any live PROD infrastructure/IAM mutation, present the exact AWS CLI command(s), target principal/resource ARNs, rollback/removal command(s), and verification steps, then wait for Bill's explicit approval.
 - DEV and TEST use a separate AWS account from PROD. Do not infer environment from an IAM user name, a stale shell default, or a previous thread's credentials.
 - Before running AWS commands for local DEV app testing, source the relevant app `.env` in the same shell command and then run `aws sts get-caller-identity`. The admin and portal local configs can use different IAM users even when they target the same DEV account. Use the sourced identity for the resource under test, not the unsourced shell default.
 - Before running AWS commands for TEST or PROD, use the explicit documented profile (`nwac-test`, `nwac-prod`, or the exact runbook profile) and confirm `aws sts get-caller-identity --profile <profile>` plus the target account/resource ARNs before any mutation.

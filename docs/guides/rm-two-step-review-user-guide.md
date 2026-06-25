@@ -1,7 +1,7 @@
 # Regional Manager Review Job Aid
 
 Status: Draft for DEV/UAT. Application assessments, new intervention proposals, and intervention amendments now use the same two-step operating model in local DEV. Application assessments passed a live DEV UI walkthrough on 2026-06-19; intervention proposal and amendment walkthroughs are the next validation step.
-Last Updated: 2026-06-19
+Last Updated: 2026-06-24
 
 ## What Is Changing
 
@@ -15,6 +15,8 @@ The basic flow is:
 4. The Decision Maker approves, denies, or requests changes.
 5. If the Decision Maker requests changes, the request returns to the Regional Manager first.
 6. The Regional Manager reviews the request and forwards changes to the submitter.
+
+Regional Managers may edit application-assessment drafts while the application is still `In Review` and has not been submitted into the review workflow.
 
 Regional Managers do not edit submitted assessment/proposal details directly and do not record the final approval or denial.
 

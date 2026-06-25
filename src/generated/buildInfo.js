@@ -1,15 +1,15 @@
 const buildInfo = {
   "packageVersion": "0.1.0",
-  "releaseId": "20260622-path-bugfix-patch",
-  "buildTarget": "production",
-  "builtAt": "2026-06-22T13:48:23.298Z",
-  "gitCommit": "cdf62788ed4fad33aa89b57b9c1f570f7d16cab4",
-  "gitShort": "cdf62788",
+  "releaseId": "",
+  "buildTarget": "local-start",
+  "builtAt": "2026-06-25T13:22:02.945Z",
+  "gitCommit": "982cfec71f00ec6bd2f0cf42ed79cf8b23450dab",
+  "gitShort": "982cfec7",
   "gitDirty": true,
-  "publicReleaseLabel": "Release 20260622-path-bugfix-patch",
-  "publicReleaseDateEn": "22nd June 2026",
-  "publicReleaseDateFr": "22 juin 2026",
-  "displayLabel": "release 20260622-path-bugfix-patch | cdf62788-dirty"
+  "publicReleaseLabel": "Current build",
+  "publicReleaseDateEn": "25th June 2026",
+  "publicReleaseDateFr": "25 juin 2026",
+  "displayLabel": "build local-start | 982cfec7-dirty | local-start"
 };
 
 export default buildInfo;

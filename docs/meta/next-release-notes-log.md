@@ -22,6 +22,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-06-24 | Release TBD | Fix/Assessment | Regional Manager draft edits | Regional Managers can again edit application assessments while the application is still In Review and has not been submitted into the two-step review workflow. | Submitted assessments remain read-only for Regional Managers and must move through RM review actions.
 - 2026-06-22 | Release TBD | Fix/Home | Overdue queue | Overdue application rows now keep the saved EI eligibility result when PATH builds the Home work queue. | This prevents rows that are actually overdue for assessment or follow-up timing from being labelled `Awaiting EI Validation`; rows with no saved EI result still show the pending EI status.
 - 2026-06-22 | Release TBD | Fix/Casework | Financial Overview signing | Re-submitting an already signed Financial Overview no longer creates another active signed PDF or overwrites the signed version snapshot. | The signing APIs now return the existing signed result when the same request is posted again.
 - 2026-06-22 | Release TBD | Fix/Casework | Closed/completed file cleanup | Closed cases and completed applications no longer keep generating or displaying active document-request/reminder work. | Terminal application transitions clear active document-request flags, terminal case transitions cancel open reminders, and reminder/document-request jobs skip terminal files.
@@ -432,14 +433,14 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 ### What's New (draft bullets - EN)
 
-- Application assessments, new intervention proposals, and intervention amendments now move through Regional Manager review before the final Decision Maker step.
-- Regional Managers get `Pending Review` queue items and bell alerts when work arrives for review; Decision Makers receive alerts only when the Regional Manager submits work for final decision.
-- Regional Manager and Decision Maker notes are recorded in Notes and Tasks and appear in the Events Timeline for the related review action.
-- Staff document-upload notifications now name the staff uploader instead of saying the applicant uploaded the document.
-- Coordinator and Regional Manager `My Applications` queues keep assigned files visible until application completion and open post-decision files at the right follow-up step.
-- The notification sort switch now appears only when the notification stack is expanded, reducing page-top clutter.
+- Regional Managers can again edit application assessments while the application is still In Review and has not been submitted into the two-step review workflow.
 
 ### What Changed Packages (draft - EN)
+
+#### Release 20260624-rm-draft-edit-hotfix
+
+- Regional Managers can again edit application assessments while the application is still In Review and has not been submitted into the two-step review workflow.
+- Submitted assessments remain read-only for Regional Managers and continue to move through the Regional Manager review actions.
 
 #### Release 20260622-path-bugfix-patch
 
@@ -458,26 +459,20 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - High-value funding decisions still require Shelley Stacey for approvals of `$20,000` or above, while other Decision Makers can still deny or request changes.
 - The notification sort switch now appears only when the notification stack is expanded, reducing page-top clutter.
 
-#### Release 20260618-prod-financial-overview-editable
-
-- Financial Overview forms sent by secure message can now be sent blank or pre-filled, and participants can complete or edit clearer monthly income and expense fields before signing.
-- Participant submissions update the case Participant Details data used by PATH, refresh the Financial Overview version snapshot, and store the signed PDF.
-- Manage ISET Applications and ISET Clients now share the same widget-based dashboard treatment, and AWS Environment Status includes app capacity, database stress, and query-pressure checks.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
 
 ### Nouveautes (brouillon - FR)
 
-- Les evaluations de demande, nouvelles propositions d'intervention et amendements d'intervention passent maintenant par une revision du gestionnaire regional avant l'etape finale du Decision Maker.
-- Les gestionnaires regionaux recoivent les elements `Pending Review` et les alertes lorsque du travail arrive pour revision; les Decision Makers recoivent les alertes seulement quand le gestionnaire regional soumet pour decision finale.
-- Les notes du gestionnaire regional et du Decision Maker sont enregistrees dans Notes and Tasks et visibles dans Events Timeline pour l'action de revision.
-- Les notifications de televersement de documents par le personnel nomment maintenant le membre du personnel qui a televerse le document, au lieu d'indiquer que le participant l'a fait.
-- Les files `My Applications` des coordonnateurs et gestionnaires regionaux gardent les demandes assignees visibles jusqu'a la fin du dossier et ouvrent les dossiers apres decision a la bonne etape de suivi.
-- Le controle de tri des notifications apparait maintenant seulement quand la pile de notifications est ouverte, ce qui reduit l'encombrement en haut de page.
+- Les gestionnaires regionaux peuvent de nouveau modifier une evaluation de demande tant que la demande est encore In Review et n'a pas ete soumise dans le processus de revision en deux etapes.
 
 ### Lots de changements (brouillon - FR)
+
+#### Release 20260624-rm-draft-edit-hotfix
+
+- Les gestionnaires regionaux peuvent de nouveau modifier une evaluation de demande tant que la demande est encore In Review et n'a pas ete soumise dans le processus de revision en deux etapes.
+- Les evaluations soumises restent en lecture seule pour les gestionnaires regionaux et continuent de passer par les actions de revision du gestionnaire regional.
 
 #### Release 20260622-path-bugfix-patch
 
@@ -495,12 +490,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Les files `My Applications` des coordonnateurs et gestionnaires regionaux gardent les demandes assignees visibles jusqu'a la fin du dossier et ouvrent les dossiers apres decision a la bonne etape de suivi; le tableau `Pending Review` montre maintenant les colonnes utiles a la revision.
 - Les approbations de financement de `$20,000` ou plus restent reservees a Shelley Stacey, tandis que les autres Decision Makers peuvent quand meme refuser ou demander des changements.
 - Le controle de tri des notifications apparait maintenant seulement quand la pile de notifications est ouverte, ce qui reduit l'encombrement en haut de page.
-
-#### Release 20260618-prod-financial-overview-editable
-
-- Les formulaires Financial Overview envoyes par message securise peuvent maintenant etre envoyes vierges ou pre-remplis, et les participants peuvent completer ou modifier des champs de revenus et depenses mensuels plus clairs avant de signer.
-- Les reponses du participant mettent a jour les donnees Participant Details du dossier utilisees par PATH, actualisent l'instantane de version Financial Overview et enregistrent le PDF signe.
-- Les tableaux Demandes ISET et Clients ISET utilisent maintenant la meme presentation de tableau de bord a widgets, et AWS Environment Status inclut la capacite applicative, la charge de la base de donnees et la pression des requetes.
 
 ### Problemes connus (brouillon - FR)
 

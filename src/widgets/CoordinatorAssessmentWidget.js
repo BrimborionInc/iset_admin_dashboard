@@ -4625,7 +4625,14 @@ const CoordinatorAssessmentWidget = forwardRef(
     lockedByAnotherUser;
   // Disable all fields (including NWAC) if review is complete, a final decision exists, status is locked, conflict not signed, or eligibility not set
   const baseAssessmentLocked = lockedByAnotherUser || isLockedStatus || isReviewComplete || isDecisionFinal || isPostDecisionStatus;
-  const canEditAssessmentBody = isAssessor || roleKey === 'systemadministrator';
+  const canEditDraftAssessmentAsRegionalManager =
+    isRegionalManager &&
+    normalizedApplicationStatus === 'in_review' &&
+    !hasReviewWorkflow;
+  const canEditAssessmentBody = isAssessor || roleKey === 'systemadministrator' || canEditDraftAssessmentAsRegionalManager;
+  const assessmentEditBlockedMessage = isRegionalManager
+    ? 'Regional Managers can edit in-review draft assessments before submission. Submitted assessments must move through the review actions instead.'
+    : 'This role cannot edit assessment fields in the current stage.';
   const canManageEligibilityDuringAssessment =
     canManageEiEligibility &&
     !baseAssessmentLocked &&
@@ -6955,7 +6962,7 @@ const CoordinatorAssessmentWidget = forwardRef(
     if (!canEditAssessmentBody) {
       setAlert({
         type: 'warning',
-        content: 'This role can review the submitted assessment but cannot edit or submit assessment changes.',
+        content: assessmentEditBlockedMessage,
         dismissible: true,
         statusIconAriaLabel: 'Warning'
       });
@@ -8199,7 +8206,7 @@ ${JSON.stringify(contextPayload, null, 2)}`;
       if (!silent) {
         setAlert({
           type: 'warning',
-          content: 'This role can review the submitted assessment but cannot edit assessment fields.',
+          content: assessmentEditBlockedMessage,
           dismissible: true,
           statusIconAriaLabel: 'Warning'
         });

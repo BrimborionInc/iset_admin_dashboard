@@ -326,6 +326,27 @@ resource "aws_iam_role_policy" "app_runtime" {
   })
 }
 
+resource "aws_iam_role_policy" "app_aws_status_readonly" {
+  name = "${var.name_prefix}-app-aws-status-readonly"
+  role = aws_iam_role.app.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowAwsEnvironmentStatusReadChecks"
+        Effect = "Allow"
+        Action = [
+          "autoscaling:DescribeAutoScalingGroups",
+          "cloudwatch:GetMetricData",
+          "rds:DescribeDBClusters"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_instance_profile" "app" {
   name = "${var.name_prefix}-app"
   role = aws_iam_role.app.name

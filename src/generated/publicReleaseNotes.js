@@ -1,22 +1,24 @@
 const publicReleaseNotes = {
-  "generatedAt": "2026-06-22T13:48:23.298Z",
-  "releaseId": "20260622-path-bugfix-patch",
-  "releaseLabel": "Release 20260622-path-bugfix-patch",
-  "releaseDateEn": "22nd June 2026",
-  "releaseDateFr": "22 juin 2026",
+  "generatedAt": "2026-06-25T13:22:02.945Z",
+  "releaseId": "",
+  "releaseLabel": "Current build",
+  "releaseDateEn": "25th June 2026",
+  "releaseDateFr": "25 juin 2026",
   "en": {
     "sectionEyebrow": "Optional reading",
     "description": "",
     "featuresHeading": "What changed",
     "features": [
-      "Application assessments, new intervention proposals, and intervention amendments now move through Regional Manager review before the final Decision Maker step.",
-      "Regional Managers get `Pending Review` queue items and bell alerts when work arrives for review; Decision Makers receive alerts only when the Regional Manager submits work for final decision.",
-      "Regional Manager and Decision Maker notes are recorded in Notes and Tasks and appear in the Events Timeline for the related review action.",
-      "Staff document-upload notifications now name the staff uploader instead of saying the applicant uploaded the document.",
-      "Coordinator and Regional Manager `My Applications` queues keep assigned files visible until application completion and open post-decision files at the right follow-up step.",
-      "The notification sort switch now appears only when the notification stack is expanded, reducing page-top clutter."
+      "Regional Managers can again edit application assessments while the application is still In Review and has not been submitted into the two-step review workflow."
     ],
     "featurePackages": [
+      {
+        "title": "Release 20260624-rm-draft-edit-hotfix",
+        "items": [
+          "Regional Managers can again edit application assessments while the application is still In Review and has not been submitted into the two-step review workflow.",
+          "Submitted assessments remain read-only for Regional Managers and continue to move through the Regional Manager review actions."
+        ]
+      },
       {
         "title": "Release 20260622-path-bugfix-patch",
         "items": [
@@ -37,14 +39,6 @@ const publicReleaseNotes = {
           "High-value funding decisions still require Shelley Stacey for approvals of `$20,000` or above, while other Decision Makers can still deny or request changes.",
           "The notification sort switch now appears only when the notification stack is expanded, reducing page-top clutter."
         ]
-      },
-      {
-        "title": "Release 20260618-prod-financial-overview-editable",
-        "items": [
-          "Financial Overview forms sent by secure message can now be sent blank or pre-filled, and participants can complete or edit clearer monthly income and expense fields before signing.",
-          "Participant submissions update the case Participant Details data used by PATH, refresh the Financial Overview version snapshot, and store the signed PDF.",
-          "Manage ISET Applications and ISET Clients now share the same widget-based dashboard treatment, and AWS Environment Status includes app capacity, database stress, and query-pressure checks."
-        ]
       }
     ],
     "knownIssuesHeading": "Known Bugs",
@@ -57,14 +51,16 @@ const publicReleaseNotes = {
     "description": "",
     "featuresHeading": "Ce qui a change",
     "features": [
-      "Les evaluations de demande, nouvelles propositions d'intervention et amendements d'intervention passent maintenant par une revision du gestionnaire regional avant l'etape finale du Decision Maker.",
-      "Les gestionnaires regionaux recoivent les elements `Pending Review` et les alertes lorsque du travail arrive pour revision; les Decision Makers recoivent les alertes seulement quand le gestionnaire regional soumet pour decision finale.",
-      "Les notes du gestionnaire regional et du Decision Maker sont enregistrees dans Notes and Tasks et visibles dans Events Timeline pour l'action de revision.",
-      "Les notifications de televersement de documents par le personnel nomment maintenant le membre du personnel qui a televerse le document, au lieu d'indiquer que le participant l'a fait.",
-      "Les files `My Applications` des coordonnateurs et gestionnaires regionaux gardent les demandes assignees visibles jusqu'a la fin du dossier et ouvrent les dossiers apres decision a la bonne etape de suivi.",
-      "Le controle de tri des notifications apparait maintenant seulement quand la pile de notifications est ouverte, ce qui reduit l'encombrement en haut de page."
+      "Les gestionnaires regionaux peuvent de nouveau modifier une evaluation de demande tant que la demande est encore In Review et n'a pas ete soumise dans le processus de revision en deux etapes."
     ],
     "featurePackages": [
+      {
+        "title": "Release 20260624-rm-draft-edit-hotfix",
+        "items": [
+          "Les gestionnaires regionaux peuvent de nouveau modifier une evaluation de demande tant que la demande est encore In Review et n'a pas ete soumise dans le processus de revision en deux etapes.",
+          "Les evaluations soumises restent en lecture seule pour les gestionnaires regionaux et continuent de passer par les actions de revision du gestionnaire regional."
+        ]
+      },
       {
         "title": "Release 20260622-path-bugfix-patch",
         "items": [
@@ -84,14 +80,6 @@ const publicReleaseNotes = {
           "Les files `My Applications` des coordonnateurs et gestionnaires regionaux gardent les demandes assignees visibles jusqu'a la fin du dossier et ouvrent les dossiers apres decision a la bonne etape de suivi; le tableau `Pending Review` montre maintenant les colonnes utiles a la revision.",
           "Les approbations de financement de `$20,000` ou plus restent reservees a Shelley Stacey, tandis que les autres Decision Makers peuvent quand meme refuser ou demander des changements.",
           "Le controle de tri des notifications apparait maintenant seulement quand la pile de notifications est ouverte, ce qui reduit l'encombrement en haut de page."
-        ]
-      },
-      {
-        "title": "Release 20260618-prod-financial-overview-editable",
-        "items": [
-          "Les formulaires Financial Overview envoyes par message securise peuvent maintenant etre envoyes vierges ou pre-remplis, et les participants peuvent completer ou modifier des champs de revenus et depenses mensuels plus clairs avant de signer.",
-          "Les reponses du participant mettent a jour les donnees Participant Details du dossier utilisees par PATH, actualisent l'instantane de version Financial Overview et enregistrent le PDF signe.",
-          "Les tableaux Demandes ISET et Clients ISET utilisent maintenant la meme presentation de tableau de bord a widgets, et AWS Environment Status inclut la capacite applicative, la charge de la base de donnees et la pression des requetes."
         ]
       }
     ],

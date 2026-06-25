@@ -32,4 +32,15 @@ describe('application assessment high-value decision guard', () => {
   test('high-value warning tells non-Shelley users other outcomes remain available', () => {
     expect(source).toContain('Other Decision Maker outcomes can still be recorded.');
   });
+
+  test('regional managers can edit only in-review draft assessments', () => {
+    expect(source).toContain('const canEditDraftAssessmentAsRegionalManager =');
+    expect(source).toContain('isRegionalManager &&');
+    expect(source).toContain("normalizedApplicationStatus === 'in_review'");
+    expect(source).toContain('!hasReviewWorkflow');
+    expect(source).toContain(
+      "const canEditAssessmentBody = isAssessor || roleKey === 'systemadministrator' || canEditDraftAssessmentAsRegionalManager;"
+    );
+    expect(source).toContain('Submitted assessments must move through the review actions instead.');
+  });
 });

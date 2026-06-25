@@ -2,7 +2,7 @@
 
 Purpose: document the live System Administrator homepage board and the operational widgets that replaced the old development-tracker direction.
 Audience: admin dashboard engineers, product owners, and operators.
-Last Updated: 2026-06-18
+Last Updated: 2026-06-23
 
 ## Scope
 
@@ -46,6 +46,13 @@ Last Updated: 2026-06-18
     - `autoscaling:DescribeAutoScalingGroups`
     - `cloudwatch:GetMetricData`
     - `rds:DescribeDBClusters`
+  - PROD IAM diagnostic/resolution note from 2026-06-23:
+    - PROD admin runtime `/opt/nwac/admin-dashboard/.env` does not contain static AWS keys, so the widget uses `arn:aws:sts::468278742295:assumed-role/nwac-prod-app-role/<instance-id>`.
+    - On live PROD instance `i-0362df79d25a76d15`, that role was denied `autoscaling:DescribeAutoScalingGroups`, `cloudwatch:GetMetricData`, and `rds:DescribeDBClusters`, which explains red `App Capacity` and `Database Stress` cards that say AWS read permission was denied.
+    - TEST appeared healthy because its deployed admin `.env` contained static AWS keys resolving to `arn:aws:iam::124355655255:user/SES_backend`; direct probes from the TEST EC2 instance role `nwac-test-app-role` were denied for the same three actions.
+    - Bill added inline policy `nwac-prod-app-aws-status-readonly` to role `nwac-prod-app-role` with those three read-only actions, then refreshed the widget and confirmed the PROD cards were working.
+    - Terraform desired state is aligned in `infra/terraform/modules/compute/main.tf` as `aws_iam_role_policy.app_aws_status_readonly`.
+    - Remaining cleanup: apply the same app-role fix to TEST before retiring static AWS runtime keys from TEST admin.
   - optional threshold env vars:
     - `SYSTEM_ADMIN_APP_CPU_WARNING_PERCENT` / `SYSTEM_ADMIN_APP_CPU_ERROR_PERCENT` (defaults `75` / `90`)
     - `SYSTEM_ADMIN_DB_CPU_WARNING_PERCENT` / `SYSTEM_ADMIN_DB_CPU_ERROR_PERCENT` (defaults `75` / `90`)
