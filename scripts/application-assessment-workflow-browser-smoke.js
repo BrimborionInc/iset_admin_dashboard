@@ -11,6 +11,11 @@
 const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer');
+const {
+  REVIEW_ACTIONS: REVIEW_WORKFLOW_ACTIONS,
+  REVIEW_WORKFLOW_TYPES,
+  getReviewTransition,
+} = require('../src/lib/reviewWorkflow');
 
 const DEFAULT_FRONTEND_BASE = 'http://localhost:3001';
 const DEFAULT_SCREENSHOT_DIR = path.join(process.cwd(), 'tmp', 'application-assessment-workflow-smoke');
@@ -506,6 +511,18 @@ function buildDocuments() {
       case_id: CASE_ID,
       uploaded_at: '2026-05-10T10:00:00Z',
     },
+    {
+      id: 504,
+      label: 'EI Verification',
+      file_name: 'ei-verification.pdf',
+      document_type: 'ei_verification',
+      document_type_label: 'EI Verification',
+      source: 'staff_upload',
+      scope: 'application',
+      application_id: APPLICATION_ID,
+      case_id: CASE_ID,
+      uploaded_at: '2026-05-11T10:00:00Z',
+    },
   ];
 }
 
@@ -527,6 +544,18 @@ function applyCaseMutation(state, body) {
     next.twoStepReviewEnabled = true;
     next.two_step_review_enabled = true;
     if (body.applicationStatus === 'pending_approval' && body.assessment_recommendation && body.assessment_justification) {
+      const transition = getReviewTransition({
+        action: REVIEW_WORKFLOW_ACTIONS.SubmitForRmReview,
+        workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+        role: state.role,
+      });
+      if (!transition.allowed) {
+        return {
+          success: false,
+          error: 'review_workflow_transition_forbidden',
+          _status: 500,
+        };
+      }
       const workflow = buildReviewWorkflow(REVIEW_STAGES.rmReview);
       next.reviewWorkflow = workflow;
       next.review_workflow = workflow;
@@ -751,7 +780,8 @@ async function installApiStubs(page, state) {
     if (pathname === '/api/cases/1' && method === 'PUT') {
       const body = parseJsonSafely(request.postData()) || {};
       state.mutations.casePuts.push({ path: `${pathname}${url.search}`, body });
-      request.respond(jsonResponse(applyCaseMutation(state, body)));
+      const result = applyCaseMutation(state, body);
+      request.respond(jsonResponse(result, result?._status || 200));
       return;
     }
     if (pathname === '/api/cases/1/assessment/recall' && method === 'POST') {
@@ -1148,7 +1178,7 @@ async function waitForWorkspaceReady(page, expectedText) {
   await delay(1000);
 }
 
-async function advanceCoordinatorWizardToReview(page) {
+async function advanceCoordinatorWizardToReview(page, submitButtonText = 'Submit assessment') {
   await waitForText(page, 'Assess Eligibility');
   for (let index = 0; index < 11; index += 1) {
     await waitForButtonEnabled(page, 'Next');
@@ -1158,7 +1188,7 @@ async function advanceCoordinatorWizardToReview(page) {
       await waitForText(page, 'All required checklist items are complete.');
     }
   }
-  await waitForButtonEnabled(page, 'Submit assessment');
+  await waitForButtonEnabled(page, submitButtonText);
 }
 
 function approvalEntryPath(step) {
@@ -1233,6 +1263,45 @@ function buildScenarios() {
           throw new Error('Coordinator submit did not include the proposed intervention payload.');
         }
         await waitForText(page, 'Assessment submitted successfully');
+      },
+    },
+    {
+      name: 'regional-manager-submit-draft-assessment',
+      role: 'Regional Manager',
+      path: FRONTEND_CASE_PATH,
+      forceCoordinatorOnlyLayout: true,
+      casePayload: buildCasePayload({
+        status: 'intake',
+        applicationStatus: 'in_review',
+        completeAssessment: true,
+        conflictSigned: true,
+        twoStepReviewEnabled: true,
+        reviewWorkflow: null,
+      }),
+      run: async ({ page, state }) => {
+        await waitForWorkspaceReady(page, 'Assess Eligibility');
+        await advanceCoordinatorWizardToReview(page, 'Submit for review');
+        await clickButtonByText(page, 'Submit for review');
+        const submitPut = await waitUntil(
+          () => state.mutations.casePuts.find(entry => entry.body.applicationStatus === 'pending_approval'),
+          'Regional Manager draft assessment submit PUT'
+        );
+        if (submitPut.body.status !== 'intake') {
+          throw new Error(`RM draft submit sent wrong case status: ${submitPut.body.status}`);
+        }
+        if (!submitPut.body.assessment_recommendation || !submitPut.body.assessment_justification) {
+          throw new Error('RM draft submit did not include recommendation and justification.');
+        }
+        if (!submitPut.body.assessment_date_of_assessment) {
+          throw new Error('RM draft submit did not stamp the date of assessment.');
+        }
+        if (submitPut.body.expectedRowVersion !== 7) {
+          throw new Error(`RM draft submit sent wrong expectedRowVersion: ${submitPut.body.expectedRowVersion}`);
+        }
+        if (state.casePayload.reviewWorkflow?.currentStage !== REVIEW_STAGES.rmReview) {
+          throw new Error(`RM draft submit did not create an RM review workflow: ${state.casePayload.reviewWorkflow?.currentStage}`);
+        }
+        await waitForText(page, 'Assessment submitted to Regional Manager review.');
       },
     },
     {

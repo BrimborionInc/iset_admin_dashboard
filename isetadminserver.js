@@ -12440,6 +12440,7 @@ async function startReviewWorkflow(connection, {
   const transition = getReviewTransition({
     action: REVIEW_ACTIONS.SubmitForRmReview,
     currentStage: fromStage,
+    workflowType: normalizedWorkflowType,
     role: actorRole,
   });
   if (!transition.allowed) {
@@ -12567,6 +12568,7 @@ async function applyReviewWorkflowAction(connection, {
   const transition = getReviewTransition({
     action,
     currentStage: existing.current_stage,
+    workflowType,
     role: actorRole,
   });
   if (!transition.allowed) {

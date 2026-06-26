@@ -86,6 +86,23 @@ describe('reviewWorkflow', () => {
     expect(finalDecision.allowed).toBe(false);
   });
 
+  test('allows Regional Manager to start application assessment review only', () => {
+    const applicationAssessmentStart = getReviewTransition({
+      action: REVIEW_ACTIONS.SubmitForRmReview,
+      workflowType: REVIEW_WORKFLOW_TYPES.ApplicationAssessment,
+      role: 'Regional Manager',
+    });
+    expect(applicationAssessmentStart.allowed).toBe(true);
+    expect(applicationAssessmentStart.nextStage).toBe(REVIEW_STAGES.RmReview);
+
+    const interventionStart = getReviewTransition({
+      action: REVIEW_ACTIONS.SubmitForRmReview,
+      workflowType: REVIEW_WORKFLOW_TYPES.InterventionProposal,
+      role: 'Regional Manager',
+    });
+    expect(interventionStart.allowed).toBe(false);
+  });
+
   test('allows RM return and upward submission but not final approval', () => {
     const returnToSubmitter = getReviewTransition({
       action: REVIEW_ACTIONS.RmReturnToSubmitter,

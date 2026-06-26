@@ -104,13 +104,20 @@ function getInitialReviewStage({ workflowType } = {}) {
   return normalizeReviewWorkflowType(workflowType) ? REVIEW_STAGES.RmReview : null;
 }
 
-function getReviewTransition({ action, currentStage, role } = {}) {
+function getReviewTransition({ action, currentStage, role, workflowType } = {}) {
   const normalizedStage = normalizeReviewStage(currentStage);
   const actionKey = String(action || '').trim().toLowerCase();
+  const normalizedWorkflowType = normalizeReviewWorkflowType(workflowType);
 
   if (actionKey === REVIEW_ACTIONS.SubmitForRmReview) {
     return {
-      allowed: isSubmitterRole(role) || isNwacDecisionRole(role),
+      allowed:
+        isSubmitterRole(role) ||
+        isNwacDecisionRole(role) ||
+        (
+          normalizedWorkflowType === REVIEW_WORKFLOW_TYPES.ApplicationAssessment &&
+          isRegionalManagerRole(role)
+        ),
       nextStage: REVIEW_STAGES.RmReview,
       nextOwnerRole: REVIEW_OWNER_ROLES.RegionalManager,
       requiresNote: false,

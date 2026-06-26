@@ -2,11 +2,13 @@
 
 Purpose: plan the new Regional Manager review stage for assessment and intervention approval workflows.
 Audience: product, engineering, operations, training, and future AI-assisted development threads.
-Last Updated: 2026-06-20
+Last Updated: 2026-06-26
 
 ## Status
 
 Design accepted for a low-risk first pass. The implementation now covers application assessments, new intervention proposals, and intervention amendments/revisions behind the runtime toggle. Schema, shared transition helper, backend submission/final-decision integration, Regional Manager action endpoints, workspace payloads, stage-aware homepage queues, final-PDF RM sign-off support, `CoordinatorAssessmentWidget`, and the Case Workspace intervention proposal widget are wired. Application-assessment browser smoke coverage and a live DEV UI walkthrough with real role logins are in place; intervention proposal/revision workflow browser smoke coverage is now in place for the deterministic UI paths. Live role-based UAT across the two intervention workflows remains the next validation step.
+
+2026-06-26 update: after PROD feedback `#147`, the transition helper now permits a Regional Manager to start the two-step workflow for an application assessment only. This matches the 2026-06-24 hotfix that restored RM edit access to in-review draft application assessments before a workflow row exists. The exception is deliberately not applied to intervention proposal/revision workflow starts.
 
 The migration/runtime default is off, but DEV, TEST, and PROD now have the flag enabled for `application_assessment`, `intervention_proposal`, and `intervention_revision`.
 
@@ -110,6 +112,7 @@ Current DEV foundation:
 - `isetadminserver.js` wires the workflow behind the per-workflow runtime flag for application assessments, new intervention proposals, and intervention revisions. Submitter submission starts or restarts review at `rm_review`; RM return/forward actions write workflow events and reopen the item to the submitter; RM submit sends the item to the final-decision stage (`nwac_review`); Decision Maker request-changes returns the item to RM before the submitter; approve/deny records final workflow decision.
 - `src/lib/reviewWorkflowCaseNotes.js` and the review-action backend routes mirror RM/Decision Maker transition notes into `iset_case_note` and include `note`, `review_note`, `decision_notes`, `case_note_id`, and `case_note_body` in review event payloads. `src/widgets/applicationEvents.js` displays those notes in the Events Timeline event data text.
 - `src/widgets/CoordinatorAssessmentWidget.js` reads `reviewWorkflow`/`twoStepReviewEnabled`, allows Regional Managers to edit application-assessment drafts only while the application is still `in_review` and no review workflow row exists, locks submitted assessment body edits for reviewers, shows RM return/submit controls at RM stages, gates Decision Maker final decision controls to `nwac_review`, and blocks coordinator recall after RM sign-off.
+- Regional Managers can submit those editable in-review draft application assessments into the two-step review workflow. The first submit creates the `application_assessment` review workflow at `rm_review`; Regional Managers still cannot make the final Decision Maker decision.
 - `src/pages/Caseworking/caseWorkspace/widgets/InterventionAssessmentWidget.jsx` reads `reviewWorkflow`/`twoStepReviewEnabled`, locks submitted proposal/revision body edits, shows RM return/submit/forward controls at RM stages, gates Decision Maker final decision controls to `nwac_review`, and blocks submitter recall after RM sign-off.
 - Application assessment, new intervention proposal, and intervention revision final approval paths all enforce the single high-value funding policy: non-Shelley users cannot approve funding of `$20,000` or above. Decision pages show a Shelley-required warning and disable the approve option; backend guards reject the same approval if called directly.
 - Approved intervention revisions reset the current client funding revision letter follow-up to `pending` when the revision is applied. Older original approval-letter sent markers are archived in `approvalLetterFollowUpHistory` and must not make a later revision appear complete; the widget and completion queue require revision-specific send evidence before saying the revision letter was sent.

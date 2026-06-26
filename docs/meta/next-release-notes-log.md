@@ -2,7 +2,7 @@
 
 Purpose: running capture of user-facing fixes/changes for the next landing-page release notes update on `src/pages/LandingPage.jsx`.
 
-Last Updated: 2026-06-22
+Last Updated: 2026-06-26
 
 Landing-page release-notes model: the build now generates the landing-page notes from the draft sections at the bottom of this file and stamps them with the current deployed release ID/date.
 
@@ -22,6 +22,7 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 `YYYY-MM-DD | Release vX.Y.Z | Category | Area | Summary | Notes`
 
+- 2026-06-26 | Release 20260626-rm-draft-submit-hotfix | Fix/Assessment | Regional Manager draft submission | Regional Managers who are completing an in-review draft application assessment can submit it into the two-step review workflow. | This follows the draft-edit hotfix and is limited to application assessments; intervention review starts and final decisions keep the existing role guards.
 - 2026-06-24 | Release TBD | Fix/Assessment | Regional Manager draft edits | Regional Managers can again edit application assessments while the application is still In Review and has not been submitted into the two-step review workflow. | Submitted assessments remain read-only for Regional Managers and must move through RM review actions.
 - 2026-06-22 | Release TBD | Fix/Home | Overdue queue | Overdue application rows now keep the saved EI eligibility result when PATH builds the Home work queue. | This prevents rows that are actually overdue for assessment or follow-up timing from being labelled `Awaiting EI Validation`; rows with no saved EI result still show the pending EI status.
 - 2026-06-22 | Release TBD | Fix/Casework | Financial Overview signing | Re-submitting an already signed Financial Overview no longer creates another active signed PDF or overwrites the signed version snapshot. | The signing APIs now return the existing signed result when the same request is posted again.
