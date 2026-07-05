@@ -442,11 +442,11 @@ Landing-page release-notes model: the build now generates the landing-page notes
 ### What's New (draft bullets - EN)
 
 - Staff secure messages now distinguish moving a message out of your own mailbox from withdrawing a sent message for everyone.
-- Regional Managers who submit their own draft assessments, intervention proposals, or intervention amendments now enter the same Regional Manager review workflow as ISET Coordinator submissions.
+- Secure-message email alerts for staff now use the applicant name from the file record when the portal account name is an email address.
 
 ### What Changed Packages (draft - EN)
 
-#### Release TBD secure-message batch
+#### Release 20260705-secure-message-batch
 
 - Staff compose now asks staff to confirm the case participant before sending a secure message.
 - Plain staff-to-applicant messages can be withdrawn with audit-preserving redaction; messages with linked files or forms stay blocked from withdrawal until that artifact-aware workflow is reviewed.
@@ -464,13 +464,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 - Regional Managers can again edit application assessments while the application is still In Review and has not been submitted into the two-step review workflow.
 - Submitted assessments remain read-only for Regional Managers and continue to move through the Regional Manager review actions.
 
-#### Release 20260622-path-bugfix-patch
-
-- Overdue application rows now keep the saved EI eligibility result, so files that are overdue for assessment or follow-up timing are no longer labelled `Awaiting EI Validation` unless EI is actually still missing.
-- Re-submitting an already signed Financial Overview no longer creates another active signed PDF or overwrites the signed version snapshot.
-- Closed cases and completed applications no longer keep active document-request/reminder work alive after the file has reached a terminal state.
-- Completed approved applications now retain the approved decision outcome when the assessment recommendation and final review agree.
-
 ### Known Bugs (draft bullets - EN)
 
 ### Coming Soon (draft bullets - EN)
@@ -478,11 +471,11 @@ Landing-page release-notes model: the build now generates the landing-page notes
 ### Nouveautes (brouillon - FR)
 
 - Les messages securises du personnel distinguent maintenant le nettoyage de sa propre boite aux lettres du retrait d'un message envoye pour tout le monde.
-- Les gestionnaires regionaux qui soumettent leurs propres brouillons d'evaluation, de proposition d'intervention ou d'amendement passent maintenant par le meme processus de revision du gestionnaire regional que les soumissions des coordonnateurs ISET.
+- Les alertes courriel de messages securises pour le personnel utilisent maintenant le nom du participant dans le dossier lorsque le nom du compte portail est une adresse courriel.
 
 ### Lots de changements (brouillon - FR)
 
-#### Release TBD secure-message batch
+#### Release 20260705-secure-message-batch
 
 - La redaction d'un message securise demande maintenant au personnel de confirmer le participant du dossier avant l'envoi.
 - Les messages simples envoyes par le personnel aux participants peuvent etre retires avec une redaction qui preserve l'audit; les messages avec fichiers ou formulaires lies restent bloques jusqu'a la revision de ce processus.
@@ -499,13 +492,6 @@ Landing-page release-notes model: the build now generates the landing-page notes
 
 - Les gestionnaires regionaux peuvent de nouveau modifier une evaluation de demande tant que la demande est encore In Review et n'a pas ete soumise dans le processus de revision en deux etapes.
 - Les evaluations soumises restent en lecture seule pour les gestionnaires regionaux et continuent de passer par les actions de revision du gestionnaire regional.
-
-#### Release 20260622-path-bugfix-patch
-
-- Les lignes en retard conservent maintenant le resultat EI enregistre; les dossiers en retard pour l'evaluation ou le suivi ne sont plus marques `Awaiting EI Validation` sauf si le statut EI manque vraiment.
-- Soumettre de nouveau un Financial Overview deja signe ne cree plus un autre PDF signe actif et ne remplace plus l'instantane de version signe.
-- Les dossiers fermes et les demandes terminees ne gardent plus de demandes de documents ou rappels actifs apres leur etat final.
-- Les demandes approuvees et terminees conservent maintenant le resultat de decision approuve lorsque la recommandation d'evaluation et la revision finale concordent.
 
 ### Problemes connus (brouillon - FR)
 
